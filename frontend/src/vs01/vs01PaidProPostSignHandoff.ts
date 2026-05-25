@@ -32,6 +32,10 @@ export type PaidProVs01PostSignHandoffV1 = {
   senderMustSignFirst?: boolean;
   /** Owner/sender deep link for packet-prepare-only flows. */
   ownerSigningUrl?: string;
+  /** Revision token for stored canonical portable packet (initials toggle / rebuild). */
+  packetRevision?: string;
+  /** Whether body-page initials were enabled when the packet was prepared. */
+  initialsEnabled?: boolean;
 };
 
 export function writePaidProVs01PostSignHandoff(payload: PaidProVs01PostSignHandoffV1): void {

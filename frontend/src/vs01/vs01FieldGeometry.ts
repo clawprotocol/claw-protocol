@@ -144,13 +144,14 @@ export function byLinePlacementToSignatureRect(placement: Vs01ByLinePlacement): 
   width: number;
   height: number;
 } {
-  const height = Math.min(SIGNATURE_BY_LINE_HEIGHT, Math.max(0.03, placement.height * 1.5));
-  const y = placement.y;
+  const height = Math.min(SIGNATURE_BY_LINE_HEIGHT, Math.max(0.017, placement.height * 0.96));
+  const x = placement.x + 0.034;
+  const y = placement.y + Math.max(0, (placement.height - height) / 2) + 0.002;
   return clampPrepareFieldRectToSafeBounds(
     {
-      x: placement.x,
+      x,
       y,
-      width: placement.width,
+      width: Math.max(0.16, (placement.width - 0.034) * 0.86),
       height,
     },
     { kind: "signature" },

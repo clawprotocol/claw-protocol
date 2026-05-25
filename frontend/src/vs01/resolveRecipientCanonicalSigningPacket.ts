@@ -27,6 +27,8 @@ export function resolveRecipientCanonicalSigningPacket(args: {
   agreementId: string | null;
   roles: readonly Vs01PrepareSigningRole[];
   freeBaselinePlain?: string | null;
+  /** When set (e.g. from portable packet), overrides default initials placement. */
+  initialsEnabled?: boolean | null;
 }): ResolvedRecipientCanonicalPacket | null {
   const documentId = args.documentId.trim();
   const agreementId = (args.agreementId ?? "").trim();
@@ -52,6 +54,7 @@ export function resolveRecipientCanonicalSigningPacket(args: {
       mode: "guided_pro",
       authoritativeCorpusPlain: corpus,
       roles: args.roles,
+      initialsEnabled: args.initialsEnabled !== false,
       corpusGateArgs: { freeBaselinePlain: args.freeBaselinePlain ?? null },
     });
     if (!model.allowed) return null;

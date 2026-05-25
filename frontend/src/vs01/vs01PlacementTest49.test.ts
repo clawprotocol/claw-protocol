@@ -102,8 +102,8 @@ describe("VS01 placement test49 — normalized corpus + initials policy", () => 
     expect(sigs.every((f) => f.page === witnessPage)).toBe(true);
     const by = findByLinePlacementsFromPageLayout(pageLayoutForIndex(layouts, witnessPage));
     expect(by.length).toBe(2);
-    expect(sigs[0]?.x).toBeCloseTo(by[0]!.x, 2);
-    expect(sigs[1]?.x).toBeCloseTo(by[1]!.x, 2);
+    expect(sigs[0]!.x).toBeGreaterThan(by[0]!.x);
+    expect(sigs[1]!.x).toBeGreaterThan(by[1]!.x);
   });
 
   it("applies deterministic initials policy without alternating page pattern", () => {

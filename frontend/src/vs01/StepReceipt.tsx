@@ -4,7 +4,11 @@
  */
 import type { Vs01RecipientPlacedField } from "./types";
 import { encodeRecipientManifestForUrl, VS01_RECIPIENT_MANIFEST_QUERY } from "./recipientManifestUrl";
-import { VS01_CANONICAL_PACKET_QUERY } from "./vs01CanonicalPacketSeed";
+import {
+  VS01_CANONICAL_PACKET_QUERY,
+  VS01_CANONICAL_PACKET_STORED_QUERY,
+  VS01_PACKET_REVISION_QUERY,
+} from "./vs01CanonicalPacketSeed";
 
 export const VS01_RECIPIENT_SIGN_QUERY = "vs01_recipient_sign";
 
@@ -71,8 +75,12 @@ export function buildVs01RecipientSigningUrl(opts: {
   agreementId?: string | null;
   /** Stable role id from prepare flow; recipient UI hides other signers’ fields. */
   signerRoleId?: string | null;
-  /** Portable canonical packet payload for cross-device signers. */
+  /** Portable canonical packet payload for cross-device signers (inline only when short). */
   canonicalPacketPayload?: string | null;
+  /** When true, portable packet was stored locally; URL carries vs01_cpacket_stored=1. */
+  canonicalPacketStored?: boolean;
+  /** Revision token matching stored portable packet (initials toggle / field rebuild). */
+  packetRevision?: string | null;
 }): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
@@ -102,6 +110,7 @@ export function buildVs01RecipientSigningUrl(opts: {
   if (aid) params.set("agreement_id", aid);
   const srid = opts.signerRoleId?.trim() ?? "";
   if (srid) params.set("signer_role_id", srid);
+  params.set("assigned_party_index", String(opts.recipientIndex));
 
   if (forSigner.length > 0) {
     const encoded = encodeRecipientManifestForUrl(forSigner);
@@ -113,7 +122,11 @@ export function buildVs01RecipientSigningUrl(opts: {
   }
 
   const canonicalPacketPayload = (opts.canonicalPacketPayload ?? "").trim();
-  if (canonicalPacketPayload) {
+  const packetRevision = (opts.packetRevision ?? "").trim();
+  if (packetRevision) params.set(VS01_PACKET_REVISION_QUERY, packetRevision);
+  if (opts.canonicalPacketStored) {
+    params.set(VS01_CANONICAL_PACKET_STORED_QUERY, "1");
+  } else if (canonicalPacketPayload) {
     params.set(VS01_CANONICAL_PACKET_QUERY, canonicalPacketPayload);
   }
 
@@ -129,6 +142,8 @@ export function buildVs01RecipientSigningUrl(opts: {
       usesToken: !params.has(VS01_RECIPIENT_MANIFEST_QUERY),
       hasAgreementId: Boolean(aid),
       signerRoleIdShort: srid ? srid.slice(0, 16) : null,
+      canonicalStored: Boolean(opts.canonicalPacketStored),
+      hasPacketRevision: Boolean(packetRevision),
     });
   }
 

@@ -21,6 +21,7 @@ import {
   buildVs01CanonicalPacketSeed,
   encodeVs01CanonicalPacketPortable,
 } from "../src/vs01/vs01CanonicalPacketSeed";
+import { buildFullPacketManifestFromCanonicalModel } from "../src/vs01/vs01SigningPacketManifest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ARTIFACT_DIR = join(__dirname, "artifacts", "vs01-canonical-visual");
@@ -34,6 +35,20 @@ function roles() {
     ownerSignerName: "Anthem H Blanchard",
     ownerSignerTitle: "Manager",
     counterparties: [{ id: "cp1", name: "Joe Smith", email: "joe@example.test", signerName: "Joe Smith" }],
+  });
+}
+
+/** Final-grade repaired corpus uses Joe Brown (test77 / QA parity). */
+function test77Roles() {
+  return buildVs01PrepareSigningRoles({
+    agreementId: "ag_visual_qa",
+    creatorName: "Acme LLC",
+    creatorEmail: "anthemhayek@gmail.com",
+    ownerSignerName: "Anthem H Blanchard",
+    ownerSignerTitle: "Manager",
+    counterparties: [
+      { id: "cp_joe", name: "Joe Brown", email: "jb34@me.com", signerName: "Joe Brown" },
+    ],
   });
 }
 
@@ -151,6 +166,14 @@ async function screenshotCanonicalSurface(page: Page, surface: Locator, path: st
   });
 }
 
+async function screenshotAppViewport(page: Page, root: Locator, path: string): Promise<void> {
+  await expect(root).toBeVisible();
+  await expect(root.locator(".vs01-sign-doc-surface--bridge")).toBeVisible();
+  await expect(root.locator(".vs01-sign-rail")).toBeVisible();
+  await expect(root.locator(".vs01-sign-page-surface--canonical")).toBeVisible();
+  await page.screenshot({ path, fullPage: false, timeout: 15_000 });
+}
+
 function renderSignatureLineHtml(line: string): string {
   const m = line.match(/^((?:By|Signature)\s*:\s*)(_+)?(.*)$/i);
   if (!m) return escapeHtml(line);
@@ -169,10 +192,42 @@ function completedInitialsText(field: PlacedSigningField): string {
   return field.assignedPartyIndex === 1 ? "JS" : "AHB";
 }
 
+function renderPreparePlacementFieldHtml(
+  field: PlacedSigningField,
+  opts: { highlightPartyIndex?: number | null } = {},
+): string {
+  const css = normalizedPdfRectToCssPercent(field);
+  const autoClass = field.autoInitials ? " vs01-sign-placement-box--auto-initials" : "";
+  const partyIdx = field.assignedPartyIndex ?? 0;
+  const highlight = opts.highlightPartyIndex;
+  const otherRole =
+    highlight != null && highlight !== partyIdx ? " vs01-sign-placement-box--other-role" : "";
+  const cornerLabel =
+    field.type === "initials"
+      ? "Initials"
+      : field.type === "signature"
+        ? "Signature"
+        : field.type;
+  const body =
+    field.type === "initials"
+      ? `<span class="vs01-sign-placement-initials">${escapeHtml(field.value?.trim() || completedInitialsText(field) || "Initials")}</span>`
+      : field.type === "signature"
+        ? ""
+        : "";
+  return `<div class="vs01-sign-placement-box vs01-sign-placement-box--${field.type}${autoClass}${otherRole}" data-vs01-visual-field-type="${field.type}" data-vs01-visual-party-index="${partyIdx}" style="position:absolute;left:${css.left};top:${css.top};width:${css.width};height:${css.height};z-index:3;"><span class="vs01-sign-placement-label">${escapeHtml(cornerLabel)}</span>${body}</div>`;
+}
+
 function renderCanonicalPageHtml(
   page: Vs01SigningPacketPage,
   fields: readonly PlacedSigningField[],
-  opts: { signed?: boolean; showInitials?: boolean; renderFields?: boolean } = {},
+  opts: {
+    signed?: boolean;
+    showInitials?: boolean;
+    renderFields?: boolean;
+    /** Prepare/recipient overlay chrome (visible field boxes), not tiny completed-text chips. */
+    preparePlacementChrome?: boolean;
+    highlightPartyIndex?: number | null;
+  } = {},
 ): string {
   const { contentRect, initialsBandRect } = page;
   const { lineHeightPx, fontSizePx } = canonicalPageTypographyPx(VS01_PACKET_PAGE_WIDTH_PT);
@@ -191,9 +246,18 @@ function renderCanonicalPageHtml(
     })
     .join("");
 
-  const fieldBoxesHtml = (opts.renderFields === false ? [] : fields)
-    .filter((f) => f.page === page.pageIndex)
-    .map((field) => {
+  const pageFields = fields.filter((f) => {
+    if (f.page !== page.pageIndex) return false;
+    if (opts.showInitials === false && f.type === "initials") return false;
+    return true;
+  });
+
+  const fieldBoxesHtml = (opts.renderFields === false ? [] : pageFields).map((field) => {
+      if (opts.preparePlacementChrome) {
+        return renderPreparePlacementFieldHtml(field, {
+          highlightPartyIndex: opts.highlightPartyIndex,
+        });
+      }
       const css = normalizedPdfRectToCssPercent(field);
       const autoClass = field.autoInitials ? " vs01-sign-placement-box--auto-initials" : "";
       const signedValue = opts.signed ? completedSignatureText(field) : "";
@@ -611,6 +675,434 @@ function buildInitialsWorkspaceHtml(pageKind: InitialsPageKind): string {
   });
 }
 
+const TEST77_REALISTIC_FINAL_CORPUS = `AI AUTOMATION SERVICES AGREEMENT
+
+This AI Automation Services Agreement (the "Agreement") is entered into by and between Acme LLC ("Client") and Joe Brown ("Service Provider"). Client and Service Provider may be referred to individually as a "Party" and collectively as the "Parties."
+
+1. Purpose and Scope
+1.1 Client engages Service Provider to design, configure, and support workflow automation services for intake routing, document preparation, operational reporting, and related integrations.
+1.2 Service Provider will perform the services in a professional manner and will coordinate with Client on priorities, milestones, acceptance criteria, and dependencies.
+1.3 Any material change in scope, timeline, or fees must be approved in writing by both Parties before the changed work begins.
+
+2. Fees and Payment
+2.1 Client will pay the fees stated in the applicable statement of work or order form.
+2.2 Unless a statement of work provides otherwise, undisputed invoices are due thirty (30) days after receipt.
+2.3 Client may withhold disputed amounts in good faith if Client provides reasonable detail about the dispute and pays all undisputed amounts when due.
+
+3. Confidentiality
+3.1 Each Party may receive confidential or non-public information from the other Party. The receiving Party will use that information only to perform or receive services under this Agreement.
+3.2 The receiving Party will protect confidential information using at least reasonable care and will not disclose it except to personnel and advisors who need access and are bound by confidentiality duties.
+3.3 Confidentiality obligations do not apply to information that becomes public without breach, is independently developed, or is lawfully received from a third party without a duty of confidentiality.
+
+4. Ownership and Work Product
+4.1 Client retains ownership of Client materials, data, trademarks, and business content provided to Service Provider.
+4.2 Subject to full payment, Client owns final deliverables specifically prepared for Client under this Agreement.
+4.3 Service Provider retains ownership of pre-existing tools, templates, know-how, background technology, and general skills, and grants Client a perpetual internal-use license to any such materials embedded in the deliverables.
+
+5. Support and Service Levels
+5.1 Service Provider will provide commercially reasonable implementation support during normal business hours unless the applicable statement of work states a different support schedule.
+5.2 Service Provider will promptly notify Client of material blockers, production-impacting issues, or dependencies that may affect delivery.
+5.3 Service Provider will use reasonable efforts to maintain reliable production automation components and to remediate confirmed defects within a commercially reasonable time.
+
+6. Term and Termination
+6.1 This Agreement begins on the effective date and continues until terminated in accordance with this section.
+6.2 Either Party may terminate this Agreement for material breach if the breaching Party does not cure the breach within thirty (30) days after written notice.
+6.3 Upon termination, Client will pay for services performed and approved expenses incurred before the termination effective date.
+
+7. Notices
+7.1 Notices under this Agreement must be delivered in writing to the contact information maintained by the receiving Party for contract notices.
+7.2 Email notice is effective when sent unless the sender receives an automated delivery failure message.
+
+8. General Terms
+8.1 The Parties are independent contractors, and this Agreement does not create a partnership, joint venture, fiduciary relationship, or employment relationship.
+8.2 Neither Party may assign this Agreement without the other Party's prior written consent, except to an affiliate or successor in connection with a merger, reorganization, or sale of substantially all assets.
+8.3 This Agreement is governed by the laws stated in the applicable order form, without regard to conflicts-of-law rules.
+8.4 This Agreement, together with any applicable statement of work, is the entire agreement between the Parties regarding its subject matter and supersedes prior or contemporaneous understandings.
+
+9. Electronic Signatures and Counterparts
+9.1 The Parties may execute this Agreement electronically and in counterparts, each of which is deemed an original and all of which together constitute one instrument.
+9.2 Electronic signatures have the same legal effect as manually signed originals.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+Acme LLC
+By: ______________________
+Name: Anthem H Blanchard
+Title: Manager
+Date: ____________________
+
+SERVICE PROVIDER:
+Joe Brown
+By: ______________________
+Name: Joe Brown
+Date: ____________________`;
+
+function assertRealisticFinalCorpus(corpus: string): void {
+  expect(corpus).toMatch(/Acme LLC\s*\("Client"\)/i);
+  expect(corpus).toMatch(/Joe Brown\s*\("Service Provider"\)/i);
+  expect(corpus).not.toMatch(/Client,\s+the\s+Client|Service Provider,\s+the\s+Service Provider/i);
+  expect(corpus).not.toMatch(/^\s*\d+\.\d+\.?\s+(?:Assignment|Insurance|Indemnification|Notices?|Force Majeure|Equitable Relief)\.\s*$/im);
+  expect(corpus).not.toMatch(/\bParty\s+A\b|\bParty\s+B\b|\bCompany\b|\bContractor\b/i);
+  const sentences = corpus
+    .replace(/\r\n/g, "\n")
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.replace(/\s+/g, " ").trim().toLowerCase())
+    .filter((s) => s.length > 42);
+  const counts = new Map<string, number>();
+  for (const sentence of sentences) counts.set(sentence, (counts.get(sentence) ?? 0) + 1);
+  expect([...counts.entries()].filter(([, count]) => count > 2)).toEqual([]);
+}
+
+function buildTest77VisualModel(initialsEnabled: boolean) {
+  assertRealisticFinalCorpus(TEST77_REALISTIC_FINAL_CORPUS);
+  const model = buildVs01SigningPacketModel({
+    mode: "guided_pro",
+    authoritativeCorpusPlain: TEST77_REALISTIC_FINAL_CORPUS,
+    roles: test77Roles(),
+    corpusGateArgs: { freeBaselinePlain: STARTER_749 },
+    initialsEnabled,
+  });
+  if (!model.allowed) {
+    throw new Error(`Test77 model not allowed: ${model.diagnostics.validationErrors.join(", ")}`);
+  }
+  expect(model.corpus).toMatch(/Acme LLC/i);
+  expect(model.corpus).toMatch(/Joe Brown/i);
+  expect(model.corpus).toMatch(/IN WITNESS WHEREOF/i);
+  expect(model.corpus).not.toMatch(/Draft Agreement \(non-binding template\)/i);
+  return model;
+}
+
+function buildTest77WorkspaceHtml(opts: {
+  initialsEnabled: boolean;
+  pageIndex?: number;
+  witness?: boolean;
+  fieldPartyIndex?: number | null;
+  showInitials?: boolean;
+  renderFields?: boolean;
+  preparePlacementChrome?: boolean;
+  highlightPartyIndex?: number | null;
+  fieldsForPage?: readonly PlacedSigningField[];
+  testId?: string;
+  workspaceLead?: string;
+}): string {
+  const model = buildTest77VisualModel(opts.initialsEnabled);
+  const witnessIdx = witnessPageIndex(model);
+  const pageIndex = opts.witness ? witnessIdx : (opts.pageIndex ?? 0);
+  const packetPage = model.pages[pageIndex] ?? model.pages[model.pages.length - 1]!;
+  let pageFields =
+    opts.fieldsForPage ??
+    model.fields.filter((f) => {
+      if (f.page !== pageIndex) return false;
+      if (opts.showInitials === false && f.type === "initials") return false;
+      return true;
+    });
+  if (opts.fieldPartyIndex != null) {
+    pageFields = pageFields.filter((f) => (f.assignedPartyIndex ?? 0) === opts.fieldPartyIndex);
+  }
+  const pageMarkup = renderCanonicalPageHtml(packetPage, pageFields, {
+    showInitials: opts.showInitials ?? opts.initialsEnabled,
+    renderFields: opts.renderFields ?? true,
+    preparePlacementChrome: opts.preparePlacementChrome ?? true,
+    highlightPartyIndex: opts.highlightPartyIndex,
+    signed: opts.witness ? false : undefined,
+  });
+  const css = readFileSync(join(__dirname, "../src/vs01/vs01.css"), "utf8");
+  const tokens = readFileSync(join(__dirname, "../src/vs01/vs01-tokens.css"), "utf8");
+  const testIdAttr = opts.testId ? ` data-testid="${opts.testId}"` : "";
+  const lead =
+    opts.workspaceLead ??
+    (opts.initialsEnabled
+      ? "Prepare — initials on every body page"
+      : "Prepare — initials suppressed");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <style>${tokens}\n${css}</style>
+</head>
+<body style="margin:0;background:#0f172a;color:#0f172a;">
+  <main class="vs01-test77-app-shell"${testIdAttr} style="min-height:100vh;background:#0f172a;padding:18px 20px 28px;box-sizing:border-box;">
+    <header class="vs01-test77-app-header" style="display:flex;align-items:center;justify-content:space-between;margin:0 auto 16px;max-width:1180px;color:#e5e7eb;">
+      <div style="font-weight:700;letter-spacing:0.02em;">LawDog</div>
+      <nav aria-label="Visual fixture navigation" style="display:flex;gap:8px;">
+        <button type="button" class="vs01-btn vs01-btn--secondary vs01-btn--auto">My agreements</button>
+        <button type="button" class="vs01-btn vs01-btn--secondary vs01-btn--auto">Dashboard</button>
+      </nav>
+    </header>
+  <div class="vs01-sign-workspace vs01-sign-workspace--prepare" style="max-width:1180px;margin:0 auto;padding:1rem;box-sizing:border-box;">
+    <div class="vs01-sign-doc-col">
+      <div class="vs01-sign-scroll">
+        <div class="vs01-sign-doc-pages-wrap vs01-sign-doc-surface vs01-sign-doc-surface--bridge">
+          <div class="vs01-sign-pages-inner">${pageMarkup}</div>
+        </div>
+      </div>
+    </div>
+    <aside class="vs01-sign-rail">
+      <p class="vs01-sign-rail-line"><span class="vs01-sign-rail-k">Signers</span> <span class="vs01-sign-rail-v">Acme LLC · Joe Brown</span></p>
+      <p class="vs01-card-help">${escapeHtml(lead)}</p>
+    </aside>
+  </div>
+</main>
+</body>
+</html>`;
+}
+
+async function expectVisualFieldsInsidePage(surface: Locator, selector = "[data-vs01-visual-field-type]"): Promise<void> {
+  const result = await surface.evaluate((pageEl, fieldSelector) => {
+    const page = pageEl as HTMLElement;
+    const pageRect = page.getBoundingClientRect();
+    return [...page.querySelectorAll(String(fieldSelector))].map((node) => {
+      const rect = (node as HTMLElement).getBoundingClientRect();
+      return {
+        leftOk: rect.left >= pageRect.left - 1,
+        topOk: rect.top >= pageRect.top - 1,
+        rightOk: rect.right <= pageRect.right + 1,
+        bottomOk: rect.bottom <= pageRect.bottom + 1,
+        width: rect.width,
+        height: rect.height,
+      };
+    });
+  }, selector);
+  expect(result.length).toBeGreaterThan(0);
+  for (const item of result) {
+    expect(item.leftOk && item.topOk && item.rightOk && item.bottomOk).toBe(true);
+  }
+}
+
+async function expectWitnessSignatureOverlayGeometry(surface: Locator, expectedCount: number): Promise<void> {
+  const metrics = await surface.evaluate(() => {
+    const page = document.querySelector(".vs01-sign-page-surface--canonical") as HTMLElement | null;
+    if (!page) return [];
+    const pageRect = page.getBoundingClientRect();
+    const pxRect = (el: Element) => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return {
+        left: r.left - pageRect.left,
+        top: r.top - pageRect.top,
+        right: r.right - pageRect.left,
+        bottom: r.bottom - pageRect.top,
+        width: r.width,
+        height: r.height,
+        centerY: r.top - pageRect.top + r.height / 2,
+      };
+    };
+    const intersects = (
+      a: { left: number; top: number; right: number; bottom: number },
+      b: { left: number; top: number; right: number; bottom: number },
+      tolerancePx = 0,
+    ) =>
+      a.left < b.right - tolerancePx &&
+      a.right > b.left + tolerancePx &&
+      a.top < b.bottom - tolerancePx &&
+      a.bottom > b.top + tolerancePx;
+    const signatures = [...page.querySelectorAll("[data-vs01-visual-field-type='signature']")] as HTMLElement[];
+    return signatures.map((sig) => {
+      const party = sig.getAttribute("data-vs01-visual-party-index") ?? "";
+      const line = page.querySelector(`[data-vs01-signature-execution-line][data-vs01-signature-party="${party}"]`);
+      const underline = line?.querySelector(".vs01-canonical-signature-underline");
+      const field = pxRect(sig);
+      const label = sig.querySelector(".vs01-sign-placement-label");
+      const labelRect = label ? pxRect(label) : null;
+      const labelEl = label as HTMLElement | null;
+      const underlineRect = underline ? pxRect(underline) : null;
+      const protectedText = [...page.querySelectorAll("[data-vs01-canonical-text]")]
+        .filter((node) => node !== line)
+        .filter((node) => /^(CLIENT|SERVICE PROVIDER|Name|Title|Date)\b|^(Acme LLC|Joe Brown)\b/i.test((node.textContent ?? "").trim()))
+        .map(pxRect);
+      return {
+        party,
+        field,
+        label: labelRect,
+        labelText: labelEl?.textContent?.trim() ?? "",
+        labelClipped: labelEl ? labelEl.scrollWidth > labelEl.clientWidth + 1 : true,
+        underline: underlineRect,
+        centerDelta: underlineRect ? field.centerY - underlineRect.centerY : null,
+        pageWidth: pageRect.width,
+        pageHeight: pageRect.height,
+        fieldIntersections: protectedText.filter((text) => intersects(field, text, 1.25)).length,
+        labelIntersections: labelRect ? protectedText.filter((text) => intersects(labelRect, text)).length : 0,
+      };
+    });
+  });
+  expect(metrics).toHaveLength(expectedCount);
+  for (const item of metrics) {
+    expect(item.underline).not.toBeNull();
+    expect(item.field.left).toBeGreaterThanOrEqual(0);
+    expect(item.field.top).toBeGreaterThanOrEqual(0);
+    expect(item.field.height).toBeGreaterThanOrEqual(18);
+    expect(item.field.right).toBeLessThanOrEqual(item.pageWidth + 1);
+    expect(item.field.bottom).toBeLessThanOrEqual(item.pageHeight + 1);
+    expect(item.field.left).toBeGreaterThanOrEqual(item.underline!.left - 1);
+    expect(Math.abs(item.field.centerY - item.underline!.centerY), `party ${item.party} centerDelta=${item.centerDelta}`).toBeLessThanOrEqual(3);
+    expect(item.labelText).toBe("Signature");
+    expect(item.labelClipped).toBe(false);
+    expect(item.fieldIntersections).toBe(0);
+    expect(item.labelIntersections).toBe(0);
+  }
+}
+
+async function expectInitialsReadable(surface: Locator, expectedCount: number): Promise<void> {
+  const boxes = surface.locator(".vs01-sign-placement-box--auto-initials");
+  await expect(boxes).toHaveCount(expectedCount);
+  const metrics = await boxes.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const el = node as HTMLElement;
+      const label = el.querySelector(".vs01-sign-placement-label") as HTMLElement | null;
+      const value = el.querySelector(".vs01-sign-placement-initials") as HTMLElement | null;
+      const labelRect = label?.getBoundingClientRect();
+      const labelStyle = label ? getComputedStyle(label) : null;
+      const lineHeight = labelStyle ? parseFloat(labelStyle.lineHeight) : 0;
+      const rect = el.getBoundingClientRect();
+      return {
+        width: rect.width,
+        height: rect.height,
+        labelText: label?.textContent?.trim() ?? "",
+        valueText: value?.textContent?.trim() ?? "",
+        labelLines: labelRect && lineHeight > 0 ? Math.ceil(labelRect.height / lineHeight) : 0,
+      };
+    }),
+  );
+  for (const item of metrics) {
+    expect(item.width).toBeGreaterThanOrEqual(44);
+    expect(item.height).toBeGreaterThanOrEqual(18);
+    expect(item.labelText).toBe("Initials");
+    expect(item.valueText).toMatch(/^(AHB|JB)$/);
+    expect(item.labelLines).toBeLessThanOrEqual(2);
+  }
+}
+
+async function assertTest77CanonicalSurface(
+  page: Page,
+  surface: Locator,
+  opts: {
+    pageKind:
+      | "body-initials-on"
+      | "body-initials-off"
+      | "witness"
+      | "sender-review"
+      | "counterparty-review"
+      | "prepare-witness"
+      | "sender-witness"
+      | "counterparty-witness";
+    initialsEnabled: boolean;
+  },
+): Promise<void> {
+  await expect(surface).toBeVisible();
+  await expect(surface).toHaveCSS("width", `${VS01_PACKET_PAGE_WIDTH_PT}px`);
+  await expect(surface).toHaveCSS("height", `${VS01_PACKET_PAGE_HEIGHT_PT}px`);
+  const bg = await surface.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bg).toMatch(/rgb\(255,\s*255,\s*255\)|#fff/i);
+
+  await expect(surface.locator(".vs01-canonical-page-content")).toBeVisible();
+  await expect(surface.locator(".vs01-canonical-flow-body")).toBeVisible();
+  await expect(surface.locator(".vs01-canonical-initials-band")).toBeVisible();
+
+  const fontSize = await surface.locator(".vs01-canonical-flow-body").evaluate((el) =>
+    getComputedStyle(el).fontSize,
+  );
+  expect(fontSize).toBe("13px");
+
+  await expect(
+    surface.locator(".vs01-canonical-flow-line").filter({ hasText: /Acme LLC/i }).first(),
+  ).toBeVisible();
+
+  if (opts.pageKind === "witness") {
+    await expect(
+      surface.locator("[data-vs01-signature-execution-line], .vs01-canonical-flow-line").filter({
+        hasText: /IN WITNESS WHEREOF/i,
+      }).first(),
+    ).toBeVisible();
+    await expect(
+      surface.locator(".vs01-canonical-flow-line--signature, .vs01-canonical-flow-line").filter({
+        hasText: /Joe Brown/i,
+      }).first(),
+    ).toBeVisible();
+    await expect(surface.locator("[data-vs01-signature-execution-line]")).toHaveCount(2);
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(0);
+    await expect(surface.locator("[data-vs01-visual-completed-initials]")).toHaveCount(0);
+    return;
+  }
+
+  if (
+    opts.pageKind === "prepare-witness" ||
+    opts.pageKind === "sender-witness" ||
+    opts.pageKind === "counterparty-witness"
+  ) {
+    await expect(surface.locator("[data-vs01-signature-execution-line]")).toHaveCount(2);
+    const expectedSignatures = opts.pageKind === "prepare-witness" ? 2 : 1;
+    await expect(surface.locator("[data-vs01-visual-field-type='signature']")).toHaveCount(expectedSignatures);
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(0);
+    await expectVisualFieldsInsidePage(surface, "[data-vs01-visual-field-type='signature']");
+    await expectWitnessSignatureOverlayGeometry(surface, expectedSignatures);
+    return;
+  }
+
+  if (opts.pageKind === "body-initials-off") {
+    expect(opts.initialsEnabled).toBe(false);
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(0);
+    await expect(surface.locator(".vs01-sign-placement-box--auto-initials")).toHaveCount(0);
+    await expect(surface.locator("[data-vs01-visual-completed-initials]")).toHaveCount(0);
+    await expect(surface.locator(".vs01-sign-placement-ph.vs01-sign-placement-initials")).toHaveCount(0);
+    return;
+  }
+
+  const expectedInitials = opts.pageKind === "body-initials-on" ? 2 : 1;
+  await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(expectedInitials);
+  await expectInitialsReadable(surface, expectedInitials);
+  await expect(surface.locator(".vs01-sign-placement-ph.vs01-sign-placement-initials")).toHaveCount(
+    0,
+  );
+  await expect(surface.locator("[data-vs01-visual-completed-initials]")).toHaveCount(0);
+  await expectVisualFieldsInsidePage(surface, "[data-vs01-visual-field-type='initials']");
+
+  if (opts.pageKind === "sender-review") {
+    await expect(surface.locator(".vs01-sign-placement-box--other-role")).toHaveCount(0);
+    await expect(surface.locator('[data-vs01-visual-party-index="0"]')).toHaveCount(1);
+  }
+  if (opts.pageKind === "counterparty-review") {
+    await expect(surface.locator('[data-vs01-visual-party-index="1"]')).toHaveCount(1);
+  }
+}
+
+async function renderTest77WitnessSignatureArtifact(
+  page: Page,
+  args: {
+    viewport: { width: number; height: number };
+    fileLabel: "desktop-1440" | "laptop-1280";
+    pageKind: "prepare-witness" | "sender-witness" | "counterparty-witness";
+    testId: string;
+    workspaceLead: string;
+    fieldPartyIndex?: number;
+    highlightPartyIndex?: number;
+    filename: string;
+  },
+): Promise<void> {
+  await page.setViewportSize(args.viewport);
+  await page.setContent(
+    buildTest77WorkspaceHtml({
+      initialsEnabled: true,
+      witness: true,
+      fieldPartyIndex: args.fieldPartyIndex,
+      showInitials: false,
+      renderFields: true,
+      preparePlacementChrome: true,
+      highlightPartyIndex: args.highlightPartyIndex,
+      testId: `${args.testId}-${args.fileLabel}`,
+      workspaceLead: args.workspaceLead,
+    }),
+    { waitUntil: "domcontentloaded" },
+  );
+  const surface = page.locator(".vs01-sign-page-surface--canonical");
+  const root = page.locator(".vs01-test77-app-shell");
+  await assertTest77CanonicalSurface(page, surface, {
+    pageKind: args.pageKind,
+    initialsEnabled: true,
+  });
+  await screenshotAppViewport(page, root, join(ARTIFACT_DIR, args.filename));
+}
+
 test.describe("VS01 canonical visual regression", () => {
   test.beforeAll(() => {
     mkdirSync(ARTIFACT_DIR, { recursive: true });
@@ -966,6 +1458,254 @@ test.describe("VS01 test76 cross-device signer canonical payload", () => {
       surface,
       join(ARTIFACT_DIR, "vs01-test76-cross-device-signer-witness-signature-desktop-1440.png"),
     );
+  });
+});
+
+test.describe("VS01 test77 prepare links and initials toggle", () => {
+  test.beforeAll(() => {
+    mkdirSync(ARTIFACT_DIR, { recursive: true });
+  });
+
+  test("test77 initials on prepare body (desktop-1440)", async ({ page }) => {
+    const model = buildTest77VisualModel(true);
+    expect(model.fields.some((f) => f.type === "initials")).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      buildTest77WorkspaceHtml({
+        initialsEnabled: true,
+        pageIndex: 0,
+        showInitials: true,
+        testId: "vs01-test77-prepare",
+      }),
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    const root = page.locator(".vs01-test77-app-shell");
+    await assertTest77CanonicalSurface(page, surface, {
+      pageKind: "body-initials-on",
+      initialsEnabled: true,
+    });
+    await screenshotAppViewport(
+      page,
+      root,
+      join(ARTIFACT_DIR, "vs01-test77-initials-on-prepare-body-desktop-1440.png"),
+    );
+  });
+
+  test("test77 initials off prepare body (desktop-1440)", async ({ page }) => {
+    const model = buildTest77VisualModel(false);
+    expect(model.fields.some((f) => f.type === "initials")).toBe(false);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      buildTest77WorkspaceHtml({
+        initialsEnabled: false,
+        pageIndex: 0,
+        showInitials: false,
+        testId: "vs01-test77-prepare-off",
+        workspaceLead: "Prepare — initials off (no initials in model)",
+      }),
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    const root = page.locator(".vs01-test77-app-shell");
+    await assertTest77CanonicalSurface(page, surface, {
+      pageKind: "body-initials-off",
+      initialsEnabled: false,
+    });
+    await screenshotAppViewport(
+      page,
+      root,
+      join(ARTIFACT_DIR, "vs01-test77-initials-off-prepare-body-desktop-1440.png"),
+    );
+  });
+
+  test("test77 sender review body initials on (desktop-1440)", async ({ page }) => {
+    const model = buildTest77VisualModel(true);
+    const ownerFields = model.fields.filter(
+      (f) => f.page === 0 && (f.assignedPartyIndex ?? 0) === 0,
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      buildTest77WorkspaceHtml({
+        initialsEnabled: true,
+        pageIndex: 0,
+        fieldsForPage: ownerFields,
+        highlightPartyIndex: 0,
+        testId: "vs01-test77-sender-review",
+        workspaceLead: "Sender review — owner initials only",
+      }),
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    const root = page.locator(".vs01-test77-app-shell");
+    await assertTest77CanonicalSurface(page, surface, {
+      pageKind: "sender-review",
+      initialsEnabled: true,
+    });
+    await screenshotAppViewport(
+      page,
+      root,
+      join(ARTIFACT_DIR, "vs01-test77-sender-review-body-initials-on-desktop-1440.png"),
+    );
+  });
+
+  test("test77 counterparty review body initials on (desktop-1440)", async ({ page }) => {
+    const model = buildTest77VisualModel(true);
+    const cpFields = model.fields.filter(
+      (f) => f.page === 0 && (f.assignedPartyIndex ?? 0) === 1,
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      buildTest77WorkspaceHtml({
+        initialsEnabled: true,
+        pageIndex: 0,
+        fieldsForPage: cpFields,
+        highlightPartyIndex: 1,
+        testId: "vs01-test77-counterparty-review",
+        workspaceLead: "Counterparty review — counterparty initials only",
+      }),
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    const root = page.locator(".vs01-test77-app-shell");
+    await assertTest77CanonicalSurface(page, surface, {
+      pageKind: "counterparty-review",
+      initialsEnabled: true,
+    });
+    await screenshotAppViewport(
+      page,
+      root,
+      join(ARTIFACT_DIR, "vs01-test77-counterparty-review-body-initials-on-desktop-1440.png"),
+    );
+  });
+
+  test("test77 witness signature block (desktop-1440)", async ({ page }) => {
+    buildTest77VisualModel(true);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      buildTest77WorkspaceHtml({
+        initialsEnabled: true,
+        witness: true,
+        showInitials: false,
+        renderFields: true,
+        preparePlacementChrome: true,
+        testId: "vs01-test77-witness",
+        workspaceLead: "Prepare witness — signature fields aligned to By lines",
+      }),
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    const root = page.locator(".vs01-test77-app-shell");
+    await assertTest77CanonicalSurface(page, surface, {
+      pageKind: "prepare-witness",
+      initialsEnabled: true,
+    });
+    await screenshotAppViewport(
+      page,
+      root,
+      join(ARTIFACT_DIR, "vs01-test77-witness-signature-desktop-1440.png"),
+    );
+  });
+
+  test("test77 prepare witness signature field overlays (desktop-1440)", async ({ page }) => {
+    await renderTest77WitnessSignatureArtifact(page, {
+      viewport: { width: 1440, height: 900 },
+      fileLabel: "desktop-1440",
+      pageKind: "prepare-witness",
+      testId: "vs01-test77-prepare-witness-fields",
+      workspaceLead: "Prepare witness — both signer signature fields",
+      filename: "vs01-test77-prepare-witness-signature-fields-desktop-1440.png",
+    });
+  });
+
+  test("test77 sender review witness signature field (desktop-1440)", async ({ page }) => {
+    await renderTest77WitnessSignatureArtifact(page, {
+      viewport: { width: 1440, height: 900 },
+      fileLabel: "desktop-1440",
+      pageKind: "sender-witness",
+      fieldPartyIndex: 0,
+      highlightPartyIndex: 0,
+      testId: "vs01-test77-sender-witness-field",
+      workspaceLead: "Sender review — owner signature field",
+      filename: "vs01-test77-sender-review-witness-signature-field-desktop-1440.png",
+    });
+  });
+
+  test("test77 counterparty review witness signature field (desktop-1440)", async ({ page }) => {
+    await renderTest77WitnessSignatureArtifact(page, {
+      viewport: { width: 1440, height: 900 },
+      fileLabel: "desktop-1440",
+      pageKind: "counterparty-witness",
+      fieldPartyIndex: 1,
+      highlightPartyIndex: 1,
+      testId: "vs01-test77-counterparty-witness-field",
+      workspaceLead: "Counterparty review — counterparty signature field",
+      filename: "vs01-test77-counterparty-review-witness-signature-field-desktop-1440.png",
+    });
+  });
+
+  test("test77 prepare witness signature field overlays (laptop-1280)", async ({ page }) => {
+    await renderTest77WitnessSignatureArtifact(page, {
+      viewport: { width: 1280, height: 800 },
+      fileLabel: "laptop-1280",
+      pageKind: "prepare-witness",
+      testId: "vs01-test77-prepare-witness-fields",
+      workspaceLead: "Prepare witness — both signer signature fields",
+      filename: "vs01-test77-prepare-witness-signature-fields-laptop-1280.png",
+    });
+  });
+
+  test("test77 sender review witness signature field (laptop-1280)", async ({ page }) => {
+    await renderTest77WitnessSignatureArtifact(page, {
+      viewport: { width: 1280, height: 800 },
+      fileLabel: "laptop-1280",
+      pageKind: "sender-witness",
+      fieldPartyIndex: 0,
+      highlightPartyIndex: 0,
+      testId: "vs01-test77-sender-witness-field",
+      workspaceLead: "Sender review — owner signature field",
+      filename: "vs01-test77-sender-review-witness-signature-field-laptop-1280.png",
+    });
+  });
+
+  test("test77 counterparty review witness signature field (laptop-1280)", async ({ page }) => {
+    await renderTest77WitnessSignatureArtifact(page, {
+      viewport: { width: 1280, height: 800 },
+      fileLabel: "laptop-1280",
+      pageKind: "counterparty-witness",
+      fieldPartyIndex: 1,
+      highlightPartyIndex: 1,
+      testId: "vs01-test77-counterparty-witness-field",
+      workspaceLead: "Counterparty review — counterparty signature field",
+      filename: "vs01-test77-counterparty-review-witness-signature-field-laptop-1280.png",
+    });
+  });
+
+  test("test77 initials off portable packet omits initials fields", () => {
+    const r = test77Roles();
+    const onModel = buildTest77VisualModel(true);
+    const offModel = buildTest77VisualModel(false);
+    const manifestOn = buildFullPacketManifestFromCanonicalModel({ model: onModel, roles: r });
+    const manifestOff = buildFullPacketManifestFromCanonicalModel({ model: offModel, roles: r });
+    expect(manifestOn.some((f) => f.type === "initials")).toBe(true);
+    expect(manifestOff.some((f) => f.type === "initials")).toBe(false);
+    const seed = buildVs01CanonicalPacketSeed({
+      documentId: "doc_test77_visual",
+      agreementId: "ag_visual_qa",
+      corpusPlain: offModel.corpus,
+    })!;
+    const portable = buildVs01CanonicalPacketPortable({
+      seed,
+      fields: manifestOff,
+      roles: r,
+      pageCount: offModel.pages.length,
+      witnessPageIndex: witnessPageIndex(offModel),
+      initialsEnabled: false,
+    });
+    expect(portable.initialsPolicy.enabled).toBe(false);
+    expect(portable.fields.some((f) => f.type === "initials")).toBe(false);
+    const encoded = encodeVs01CanonicalPacketPortable(portable);
+    expect(encoded).not.toMatch(/"type":"initials"/);
   });
 });
 

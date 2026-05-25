@@ -15,11 +15,15 @@ import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
 
 export type FinalGradeCorpusDefect =
   | "empty_numbered_section"
+  | "empty_subsection_heading"
   | "weak_purpose_section"
   | "subsection_number_mismatch"
   | "misplaced_subsection_content"
+  | "section_topic_contamination"
   | "fees_section_contamination"
   | "duplicate_conflicting_fees"
+  | "duplicate_notice_section"
+  | "party_defined_terms_missing"
   | "orphan_signer_metadata"
   | "duplicate_witness_block"
   | "instruction_leak"
@@ -86,6 +90,12 @@ function isStructurallyEmptyBody(bodyLines: string[]): boolean {
   );
 }
 
+function isLikelyEmptySubsectionHeading(line: string): boolean {
+  const body = line.trim().replace(SUBCLAUSE_RE, "").trim();
+  if (!body) return true;
+  return /^(?:Assignment|Insurance|Indemnification|Confidentiality|Notices?|Governing Law|Force Majeure|Equitable Relief|Severability)\.?$/i.test(body);
+}
+
 function subsectionContentKey(line: string): CanonicalSectionKey | null {
   const t = line.toLowerCase();
   if (/\b(?:confidential|non-public|proprietary information|nda)\b/.test(t)) return "confidentiality";
@@ -100,7 +110,21 @@ function subsectionContentKey(line: string): CanonicalSectionKey | null {
   if (/\b(?:purpose|scope of services|services provider will)\b/.test(t)) return "purpose";
   if (/\b(?:notices|notice address)\b/.test(t)) return "notices";
   if (/\b(?:electronic signature|counterpart)\b/.test(t)) return "electronic_signatures";
+  if (/\b(?:force majeure|equitable relief|injunctive relief|attorney fees?|prevailing party)\b/.test(t)) {
+    return "miscellaneous";
+  }
   return null;
+}
+
+function isWrongTopicClause(hostKey: CanonicalSectionKey, hint: CanonicalSectionKey, line: string): boolean {
+  if (hostKey === "unknown" || hint === hostKey) return false;
+  const t = line.toLowerCase();
+  if (hostKey === "fees" && (hint === "confidentiality" || hint === "miscellaneous")) return true;
+  if (hostKey === "support" && hint === "confidentiality") return true;
+  if (hostKey === "fees" && /\b(?:force majeure|equitable relief|injunctive relief|attorney fees?)\b/.test(t)) {
+    return true;
+  }
+  return false;
 }
 
 export function detectFinalGradeCorpusDefects(
@@ -126,12 +150,18 @@ export function detectFinalGradeCorpusDefects(
     if (!hasAnyLine) defects.add("empty_numbered_section");
     for (const raw of section.bodyLines) {
       const sub = raw.trim().match(SUBCLAUSE_RE);
+      if (SUBCLAUSE_RE.test(raw.trim()) && isLikelyEmptySubsectionHeading(raw)) {
+        defects.add("empty_subsection_heading");
+      }
       if (!sub) continue;
       const subSection = Number(sub[1]);
+      const hint = subsectionContentKey(raw);
+      const hostKey = resolveSectionKeyFromHeading(section.heading);
+      if (hint && isWrongTopicClause(hostKey, hint, raw)) {
+        defects.add("section_topic_contamination");
+      }
       if (subSection !== section.number) {
         defects.add("subsection_number_mismatch");
-        const hint = subsectionContentKey(raw);
-        const hostKey = resolveSectionKeyFromHeading(section.heading);
         if (hint && hostKey !== "unknown" && hint !== hostKey) {
           defects.add("misplaced_subsection_content");
         }
@@ -182,9 +212,27 @@ export function detectFinalGradeCorpusDefects(
     ) {
       defects.add("orphan_signer_metadata");
     }
+
+    const [clientName, providerName] = opts.authoritativePartyNames.map((n) => n.trim());
+    const intro = corpus.slice(0, Math.min(witnessIdx, 1800));
+    if (
+      clientName &&
+      providerName &&
+      (!new RegExp(`\\b${escapeRe(clientName)}\\b[\\s\\S]{0,120}\\(\\s*["“']Client["”']\\s*\\)`, "i").test(intro) ||
+        !new RegExp(`\\b${escapeRe(providerName)}\\b[\\s\\S]{0,140}\\(\\s*["“']Service Provider["”']\\s*\\)`, "i").test(intro))
+    ) {
+      defects.add("party_defined_terms_missing");
+    }
   }
 
+  const noticeHeadings = sections.filter((s) => /notices?/i.test(s.heading));
+  if (noticeHeadings.length > 1) defects.add("duplicate_notice_section");
+
   return [...defects];
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function resolveSectionKeyFromHeading(heading: string): CanonicalSectionKey {
@@ -358,6 +406,136 @@ function replaceContractorCompanyPartyLabels(
   return { text: out, repairs };
 }
 
+function normalizeDefinedTermPartyCopy(
+  text: string,
+  opts?: { authoritativePartyNames?: readonly string[] },
+): { text: string; repairs: string[] } {
+  const [clientName, providerName] = opts?.authoritativePartyNames?.map((n) => n.trim()) ?? [];
+  if (!clientName || !providerName) return { text, repairs: [] };
+
+  const repairs: string[] = [];
+  const witnessIdx = witnessIndex(text);
+  const before = text.slice(0, witnessIdx);
+  const after = text.slice(witnessIdx);
+  const lines = normLines(before);
+  const firstSectionIdx = lines.findIndex((l) => /^\s*1\.\s+/.test(l));
+  const introEndLine = firstSectionIdx >= 0 ? firstSectionIdx : Math.min(lines.length, 6);
+  let introLines = lines.slice(0, introEndLine);
+  let bodyLines = lines.slice(introEndLine);
+
+  const definedOpening = `This Agreement is between ${clientName} ("Client") and ${providerName} ("Service Provider").`;
+  const hasDefinedClient = introLines.some((l) =>
+    new RegExp(`\\b${escapeRe(clientName)}\\b[\\s\\S]{0,120}\\(\\s*["“']Client["”']\\s*\\)`, "i").test(l),
+  );
+  const hasDefinedProvider = introLines.some((l) =>
+    new RegExp(`\\b${escapeRe(providerName)}\\b[\\s\\S]{0,140}\\(\\s*["“']Service Provider["”']\\s*\\)`, "i").test(l),
+  );
+
+  let replacedOpening = false;
+  introLines = introLines.map((line) => {
+    if (
+      /(?:this\s+agreement\s+is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b/i.test(line) &&
+      (/\bClient\b/i.test(line) || new RegExp(escapeRe(clientName), "i").test(line)) &&
+      (/\b(?:Provider|Service Provider)\b/i.test(line) || new RegExp(escapeRe(providerName), "i").test(line))
+    ) {
+      replacedOpening = true;
+      return definedOpening;
+    }
+    return line;
+  });
+  if (!replacedOpening && (!hasDefinedClient || !hasDefinedProvider)) {
+    const titleIdx = introLines.findIndex((l) => /AGREEMENT\s*$/i.test(l.trim()));
+    introLines =
+      titleIdx >= 0
+        ? [
+            ...introLines.slice(0, titleIdx + 1),
+            "",
+            definedOpening,
+            ...introLines.slice(titleIdx + 1),
+          ]
+        : [definedOpening, "", ...introLines];
+  }
+  if (replacedOpening || !hasDefinedClient || !hasDefinedProvider) {
+    repairs.push("party_defined_terms:opening");
+  }
+
+  const normalizeLine = (line: string): string => {
+    let out = line;
+    out = out.replace(/\bProvider\b/g, "Service Provider");
+    out = out.replace(/\bprovider\b/g, "Service Provider");
+    out = out.replace(/\bService\s+Service Provider\b/g, "Service Provider");
+    out = out.replace(/\bservices\s+Service Provider\b/gi, "services provider");
+    out = out.replace(/\bClient,\s+the\s+Client\b/gi, "the Client");
+    out = out.replace(/\bService Provider,\s+the\s+Service Provider\b/gi, "the Service Provider");
+    return out;
+  };
+
+  const duplicateOpeningRe = new RegExp(
+    `\\b${escapeRe(clientName)}\\b[\\s\\S]{0,120}\\(\\s*["“']Client["”']\\s*\\)[\\s\\S]{0,160}\\b${escapeRe(providerName)}\\b[\\s\\S]{0,140}\\(\\s*["“']Service Provider["”']\\s*\\)`,
+    "i",
+  );
+  let seenOpening = false;
+  const normalizedIntro = introLines.map(normalizeLine).filter((line) => {
+    if (!duplicateOpeningRe.test(line)) return true;
+    if (!seenOpening) {
+      seenOpening = true;
+      return true;
+    }
+    repairs.push("party_defined_terms:drop_duplicate_opening");
+    return false;
+  });
+  const normalizedBody = bodyLines.map(normalizeLine).filter((line) => {
+    if (!duplicateOpeningRe.test(line)) return true;
+    if (!seenOpening) {
+      seenOpening = true;
+      return true;
+    }
+    repairs.push("party_defined_terms:drop_duplicate_opening");
+    return false;
+  });
+  const rebuilt = [...normalizedIntro, ...normalizedBody].join("\n");
+  if (rebuilt !== before) repairs.push("party_defined_terms:body_terms");
+  return { text: `${rebuilt.trimEnd()}\n\n${after.trimStart()}`.trim(), repairs: [...new Set(repairs)] };
+}
+
+function stripEmptySubsectionHeadings(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const lines = normLines(text);
+  const kept = lines.filter((line) => {
+    const t = line.trim();
+    if (/^\d+\.\d+\.?\s+/.test(t) && isLikelyEmptySubsectionHeading(t)) {
+      repairs.push(`strip_empty_subsection:${t.slice(0, 32)}`);
+      return false;
+    }
+    return true;
+  });
+  return { text: kept.join("\n").replace(/\n{3,}/g, "\n\n").trim(), repairs };
+}
+
+function collapseDuplicateDefinedTermOpenings(
+  text: string,
+  opts?: { authoritativePartyNames?: readonly string[] },
+): { text: string; repairs: string[] } {
+  const [clientName, providerName] = opts?.authoritativePartyNames?.map((n) => n.trim()) ?? [];
+  if (!clientName || !providerName) return { text, repairs: [] };
+  const openingRe = new RegExp(
+    `\\b${escapeRe(clientName)}\\b[\\s\\S]{0,120}\\(\\s*["“']Client["”']\\s*\\)[\\s\\S]{0,160}\\b${escapeRe(providerName)}\\b[\\s\\S]{0,140}\\(\\s*["“']Service Provider["”']\\s*\\)`,
+    "i",
+  );
+  const repairs: string[] = [];
+  let seen = false;
+  const lines = normLines(text).filter((line) => {
+    if (!openingRe.test(line)) return true;
+    if (!seen) {
+      seen = true;
+      return true;
+    }
+    repairs.push("party_defined_terms:drop_duplicate_opening");
+    return false;
+  });
+  return { text: lines.join("\n").replace(/\n{3,}/g, "\n\n").trim(), repairs: [...new Set(repairs)] };
+}
+
 export function repairFinalGradeGuidedCorpus(
   text: string,
   opts?: {
@@ -387,6 +565,16 @@ export function repairFinalGradeGuidedCorpus(
   out = partyLabels.text;
   repairs.push(...partyLabels.repairs);
 
+  const definedTerms = normalizeDefinedTermPartyCopy(out, {
+    authoritativePartyNames: opts?.authoritativePartyNames,
+  });
+  out = definedTerms.text;
+  repairs.push(...definedTerms.repairs);
+
+  const emptySubsections = stripEmptySubsectionHeadings(out);
+  out = emptySubsections.text;
+  repairs.push(...emptySubsections.repairs);
+
   if (opts?.signerIdentities?.length) {
     const preWitness = stripAllPreWitnessSignerFragments(out, opts.signerIdentities);
     out = preWitness.text;
@@ -409,6 +597,12 @@ export function repairFinalGradeGuidedCorpus(
   out = emptySections.text;
   repairs.push(...emptySections.repairs);
 
+  const duplicateOpenings = collapseDuplicateDefinedTermOpenings(out, {
+    authoritativePartyNames: opts?.authoritativePartyNames,
+  });
+  out = duplicateOpenings.text;
+  repairs.push(...duplicateOpenings.repairs);
+
   const validation = validateNormalizedCorpusStructure(out);
   if (!validation.ok) {
     const retry = normalizeGuidedProCorpusStructure(out);
@@ -423,10 +617,15 @@ export function repairFinalGradeGuidedCorpus(
     (d) => d !== "party_letter_fallback" || !opts?.authoritativePartyNames?.length,
   );
   const rebuildTriggers: FinalGradeCorpusDefect[] = [
+    "weak_purpose_section",
     "fees_section_contamination",
+    "duplicate_conflicting_fees",
     "misplaced_subsection_content",
+    "section_topic_contamination",
+    "empty_subsection_heading",
     "orphan_signer_metadata",
     "duplicate_witness_block",
+    "duplicate_notice_section",
     "subsection_number_mismatch",
   ];
   if (blocking.some((d) => rebuildTriggers.includes(d))) {
@@ -440,6 +639,19 @@ export function repairFinalGradeGuidedCorpus(
     });
     out = postRebuildParty.text;
     repairs.push(...postRebuildParty.repairs);
+    const postRebuildDefinedTerms = normalizeDefinedTermPartyCopy(out, {
+      authoritativePartyNames: opts?.authoritativePartyNames,
+    });
+    out = postRebuildDefinedTerms.text;
+    repairs.push(...postRebuildDefinedTerms.repairs);
+    const postRebuildEmptySubsections = stripEmptySubsectionHeadings(out);
+    out = postRebuildEmptySubsections.text;
+    repairs.push(...postRebuildEmptySubsections.repairs);
+    const postRebuildDuplicateOpenings = collapseDuplicateDefinedTermOpenings(out, {
+      authoritativePartyNames: opts?.authoritativePartyNames,
+    });
+    out = postRebuildDuplicateOpenings.text;
+    repairs.push(...postRebuildDuplicateOpenings.repairs);
     if (opts?.signerIdentities?.length) {
       const preWitness = stripAllPreWitnessSignerFragments(out, opts.signerIdentities);
       out = preWitness.text;

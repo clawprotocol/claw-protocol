@@ -5,7 +5,7 @@ import { vs01DevMarkSignedEnabled } from "./vs01PreparePacketChecklist";
 import type { PlacedSigningField } from "./signingFields";
 import { writePaidProVs01PostSignHandoff, type PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
 import type { Vs01RecipientPlacedField } from "./types";
-import { buildSigningUrlForPrepareRole } from "./vs01SigningPacketManifest";
+import { rebuildPrepareSigningUrlsFromStored } from "./vs01PreparePacketContinue";
 import {
   buildPacketStatusCards,
   countSignedSigners,
@@ -133,42 +133,33 @@ export function StepSigningPacketStatus({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const showDevMark = vs01DevMarkSignedEnabled();
 
-  const ownerRole = prepareSignerRoles[0] ?? null;
-  const ownerSigningUrl = useMemo(() => {
-    const fromHandoff = (handoff.ownerSigningUrl ?? "").trim();
-    if (fromHandoff) return fromHandoff;
-    if (!ownerRole) return "";
-    return buildSigningUrlForPrepareRole({
-      role: ownerRole,
-      ownerRole,
+  const effectiveHandoff = useMemo(() => {
+    const rebuilt = rebuildPrepareSigningUrlsFromStored({
+      handoff,
       roles: prepareSignerRoles,
       senderPlacedFields,
       recipientPlacedFields,
-      documentId: handoff.vs01DocumentId,
-      agreementId: handoff.agreementId,
-      receiptId: handoff.receiptId || null,
-      recipientIndex: 0,
     });
-  }, [
-    handoff.ownerSigningUrl,
-    handoff.vs01DocumentId,
-    handoff.agreementId,
-    handoff.receiptId,
-    ownerRole,
-    prepareSignerRoles,
-    senderPlacedFields,
-    recipientPlacedFields,
-  ]);
+    if (!rebuilt) return handoff;
+    return {
+      ...handoff,
+      ownerSigningUrl: rebuilt.ownerSigningUrl,
+      signers: rebuilt.signers,
+      packetRevision: rebuilt.packetRevision ?? handoff.packetRevision,
+    };
+  }, [handoff, prepareSignerRoles, senderPlacedFields, recipientPlacedFields]);
+
+  const ownerSigningUrl = (effectiveHandoff.ownerSigningUrl ?? "").trim();
 
   const cards = useMemo(() => {
     if (!prepareSignerRoles.length) return [];
     return buildPacketStatusCards({
-      handoff,
+      handoff: effectiveHandoff,
       roles: prepareSignerRoles,
       statusByKey: statusSnap?.bySignerKey ?? {},
       ownerSigningUrl,
     });
-  }, [handoff, prepareSignerRoles, statusSnap, ownerSigningUrl]);
+  }, [effectiveHandoff, prepareSignerRoles, statusSnap, ownerSigningUrl]);
 
   const { signed, total } = useMemo(
     () => countSignedSigners(statusSnap?.bySignerKey ?? {}, cards.map((c) => c.key)),
@@ -181,9 +172,9 @@ export function StepSigningPacketStatus({
   }, [handoff.agreementId, onRefresh]);
 
   useEffect(() => {
-    writePaidProVs01PostSignHandoff(handoff);
+    writePaidProVs01PostSignHandoff(effectiveHandoff);
     refreshStatus();
-  }, [handoff, refreshStatus]);
+  }, [effectiveHandoff, refreshStatus]);
 
   useEffect(() => {
     const onStorage = (ev: StorageEvent) => {

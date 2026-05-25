@@ -186,6 +186,7 @@ export function Vs01Wizard({
   const [prepareCorpusText, setPrepareCorpusText] = useState<string | null>(null);
   const bridgeHydratedSeedSid = useRef<string | null>(null);
   const bridgeHandoffSnapshotRef = useRef<AgreementVs01BridgeSession | null>(null);
+  const prepareInitialsEnabledRef = useRef(true);
   const [step, setStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.step ?? initialStep);
   /** Furthest step visited — gates Receipt until assign step satisfied. */
   const [furthestStep, setFurthestStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.furthestStep ?? initialStep);
@@ -472,6 +473,7 @@ export function Vs01Wizard({
       senderPlacedFields,
       recipientPlacedFields,
       prepareCorpusPlain: prepareCorpusText,
+      initialsEnabled: prepareInitialsEnabledRef.current,
       receiptId,
       receiptHashSha256,
     });
@@ -1157,6 +1159,9 @@ export function Vs01Wizard({
                 prepareSignerRoles={prepareSignerRoles}
                 prepareRecipientPlacedFields={recipientPlacedFields}
                 onPrepareSignerMetadataChange={handlePrepareSignerMetadataChange}
+                onPrepareInitialsEnabledChange={(enabled) => {
+                  prepareInitialsEnabledRef.current = enabled;
+                }}
                 fields={senderPlacedFields}
                 onFieldsChange={setSenderPlacedFields}
                 onBack={() => goToStep(0)}

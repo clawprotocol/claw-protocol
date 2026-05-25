@@ -54,7 +54,11 @@ import {
   VS01_PACKET_PAGE_WIDTH_PT,
 } from "./buildVs01SigningPacketModel";
 import { resolveRecipientCanonicalSigningPacket } from "./resolveRecipientCanonicalSigningPacket";
-import { logVs01CanonicalPacketSeedUse } from "./vs01CanonicalPacketSeed";
+import {
+  loadVs01CanonicalPacketPortable,
+  logVs01CanonicalPacketSeedUse,
+  type Vs01CanonicalPacketPortableRole,
+} from "./vs01CanonicalPacketSeed";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -176,10 +180,63 @@ export function RecipientSigningView({
   const prepareRoles = useMemo(() => {
     const aid = (recipientAgreementId ?? "").trim();
     if (!aid) return null;
+    const did = documentId?.trim() ?? "";
+    const portable = did ? loadVs01CanonicalPacketPortable(did) : null;
+    if (portable && portable.roles.length >= 2) {
+      return portable.roles.map((r: Vs01CanonicalPacketPortableRole) => ({
+        roleId: r.roleId,
+        partyIndex: r.partyIndex,
+        partyId: r.partyId,
+        entityName: r.entityName,
+        partyName: r.partyName,
+        roleLabel: r.roleLabel,
+        signerName: r.signerName,
+        signerTitle: r.signerTitle,
+        signerEmail: r.signerEmail,
+        reviewEmail: r.reviewEmail,
+        isEntityParty: r.isEntityParty,
+        requiresSignature: r.requiresSignature,
+        vs01CounterpartyId: r.vs01CounterpartyId,
+        kind: r.kind,
+      }));
+    }
+    const lockRoleId = (lockedSignerRoleId ?? "").trim();
+    if (lockRoleId) {
+      const ownerCp = counterparties.find((c) => c.id === "owner") ?? null;
+      const ownerFromFields =
+        recipientFields.find((f) => f.assignedPartyIndex === 0 && f.type === "signature")?.counterpartyId.trim() ||
+        "owner";
+      const ownerId = ownerCp?.id ?? ownerFromFields;
+      const ownerRow =
+        cpById.get(ownerId) ??
+        counterparties.find((c) => c.id === ownerId) ??
+        (lockRoleId.includes(":i0:") ? counterparties[0] : null);
+      const activeRow = cpById.get(lockedCp) ?? counterparties.find((c) => c.id === lockedCp);
+      const isOwnerSession = lockRoleId.includes(":i0:") || lockedCp === ownerId;
+      if (isOwnerSession && ownerRow) {
+        return buildVs01PrepareSigningRoles({
+          agreementId: aid,
+          creatorName: ownerRow.name?.trim() || "Owner",
+          creatorEmail: ownerRow.email?.trim() || ownerRow.signerEmail?.trim() || "",
+          ownerSignerName: ownerRow.signerName ?? undefined,
+          ownerSignerTitle: ownerRow.signerTitle ?? undefined,
+          counterparties: counterparties.filter((c) => c.id !== ownerRow.id),
+        });
+      }
+      if (activeRow && ownerRow) {
+        return buildVs01PrepareSigningRoles({
+          agreementId: aid,
+          creatorName: ownerRow.name?.trim() || "Owner",
+          creatorEmail: ownerRow.email?.trim() || ownerRow.signerEmail?.trim() || "",
+          ownerSignerName: ownerRow.signerName ?? undefined,
+          ownerSignerTitle: ownerRow.signerTitle ?? undefined,
+          counterparties: [activeRow],
+        });
+      }
+    }
     const ownerCpId =
-      recipientFields.find((f) => (f.assignedPartyIndex ?? 0) === 0)?.counterpartyId.trim() ||
-      counterparties[0]?.id?.trim() ||
-      lockedCp;
+      recipientFields.find((f) => f.assignedPartyIndex === 0 && f.type === "signature")?.counterpartyId.trim() ||
+      "owner";
     const ownerRow =
       cpById.get(ownerCpId) ?? counterparties.find((c) => c.id === ownerCpId) ?? counterparties[0];
     const otherCps = counterparties.filter((c) => c.id !== ownerRow?.id);
@@ -191,7 +248,15 @@ export function RecipientSigningView({
       ownerSignerTitle: ownerRow?.signerTitle ?? undefined,
       counterparties: otherCps,
     });
-  }, [recipientAgreementId, recipientFields, counterparties, cpById, lockedCp]);
+  }, [
+    recipientAgreementId,
+    documentId,
+    recipientFields,
+    counterparties,
+    cpById,
+    lockedCp,
+    lockedSignerRoleId,
+  ]);
 
   const documentFields = useMemo(() => {
     if (!prepareRoles?.length) return recipientFields;
@@ -206,6 +271,11 @@ export function RecipientSigningView({
     });
   }, [recipientFields, senderPlacedFields, prepareRoles]);
 
+  const portablePacket = useMemo(() => {
+    const did = documentId?.trim() ?? "";
+    return did ? loadVs01CanonicalPacketPortable(did) : null;
+  }, [documentId]);
+
   const canonicalPacket = useMemo(() => {
     const did = documentId?.trim() ?? "";
     const aid = (recipientAgreementId ?? "").trim();
@@ -214,8 +284,9 @@ export function RecipientSigningView({
       documentId: did,
       agreementId: aid,
       roles: prepareRoles,
+      initialsEnabled: portablePacket?.initialsPolicy.enabled ?? true,
     });
-  }, [documentId, recipientAgreementId, prepareRoles]);
+  }, [documentId, recipientAgreementId, prepareRoles, portablePacket?.initialsPolicy.enabled]);
 
   const useCanonicalDocument = Boolean(canonicalPacket?.model.allowed);
 

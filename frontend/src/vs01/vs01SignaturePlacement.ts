@@ -26,6 +26,9 @@ import {
 
 const SIGNATURE_TEXT_PAD = 0.014;
 const SIGNATURE_FIELD_PAD = 0.012;
+const SIGNATURE_BY_LINE_X_NUDGE = 0.034;
+const SIGNATURE_BY_LINE_Y_NUDGE = 0.002;
+const SIGNATURE_BY_LINE_COMPACT_HEIGHT = 0.017;
 const DISCLOSURE_LINE_RE =
   /(?:LawDog|electronic signing step|Draft for Review|Execution and signature placement|Generated with LawDog)/i;
 
@@ -149,12 +152,14 @@ export function byLinePlacementToFieldRect(
   fieldType: "signature" | "printed_name" | "text" | "date",
 ): { x: number; y: number; width: number; height: number } {
   if (fieldType === "signature") {
-    const height = Math.min(SIGNATURE_BY_LINE_HEIGHT, Math.max(0.03, placement.height * 1.5));
+    const height = Math.min(SIGNATURE_BY_LINE_HEIGHT, Math.max(SIGNATURE_BY_LINE_COMPACT_HEIGHT, placement.height * 0.96));
+    const x = placement.x + SIGNATURE_BY_LINE_X_NUDGE;
+    const y = placement.y + Math.max(0, (placement.height - height) / 2) + SIGNATURE_BY_LINE_Y_NUDGE;
     return clampPrepareFieldRectToSafeBounds(
       {
-        x: placement.x,
-        y: placement.y,
-        width: Math.max(placement.width, SIGNATURE_BY_LINE_WIDTH * 0.85),
+        x,
+        y,
+        width: Math.max(0.16, Math.max((placement.width - SIGNATURE_BY_LINE_X_NUDGE) * 0.86, SIGNATURE_BY_LINE_WIDTH * 0.62)),
         height,
       },
       { kind: "signature" },

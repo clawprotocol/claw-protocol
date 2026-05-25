@@ -204,6 +204,13 @@ const TOTAL_ONLY = /^\s*\d+\.\d+\s+.*(?:\$120[,\s]?000|total\s+project\s+fee)/i;
 
 /** Minimal bodies so rebuilt corpora keep consecutive top-level numbering through section 8+. */
 const CANONICAL_SECTION_DEFAULT_LINES: Partial<Record<CanonicalSectionKey, string[]>> = {
+  confidentiality: [
+    "Each Party shall protect confidential and non-public information received from the other Party and use it only to perform or receive services under this Agreement.",
+    "Confidentiality obligations survive termination of this Agreement as required to protect the disclosing Party's information.",
+  ],
+  ownership: [
+    "Upon full payment, Client owns deliverables created specifically for Client under this Agreement, subject to Service Provider's retained rights in pre-existing tools, templates, know-how, and background technology.",
+  ],
   term: [
     "Either Party may terminate this Agreement with thirty (30) days written notice to the other Party.",
   ],

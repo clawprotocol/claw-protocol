@@ -1,10 +1,23 @@
 import type { Vs01Counterparty, Vs01Step, Vs01RecipientPlacedField } from "./types";
 import { VS01_PACKET_MANIFEST_SCOPE, VS01_RECIPIENT_SIGN_QUERY, loadRecipientManifest } from "./StepReceipt";
 import {
+  computeVs01PacketRevision,
   decodeVs01CanonicalPacketPortable,
+  loadVs01CanonicalPacketPortable,
   storeVs01CanonicalPacketSeed,
+  type Vs01CanonicalPacketPortableV1,
   VS01_CANONICAL_PACKET_QUERY,
+  VS01_CANONICAL_PACKET_STORED_QUERY,
+  VS01_PACKET_REVISION_QUERY,
 } from "./vs01CanonicalPacketSeed";
+
+function packetRevisionForPortable(packet: Vs01CanonicalPacketPortableV1): string {
+  return computeVs01PacketRevision({
+    corpusHash: packet.seed.corpusHash,
+    initialsEnabled: packet.initialsPolicy.enabled,
+    fieldCount: packet.fieldCount,
+  });
+}
 import {
   counterpartiesFromRecipientManifestFields,
   decodeRecipientManifestParam,
@@ -89,12 +102,26 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
 
   const manifestRaw = params.get(VS01_RECIPIENT_MANIFEST_QUERY);
   const manifestStored = params.get("vs01_rmanifest_stored") === "1";
+  const canonicalPacketStored = params.get(VS01_CANONICAL_PACKET_STORED_QUERY) === "1";
+  const packetRevisionFromUrl = (params.get(VS01_PACKET_REVISION_QUERY) ?? "").trim();
   const canonicalPacketRaw = params.get(VS01_CANONICAL_PACKET_QUERY);
-  const canonicalPacket = decodeVs01CanonicalPacketPortable(canonicalPacketRaw);
+  let canonicalPacket = decodeVs01CanonicalPacketPortable(canonicalPacketRaw);
+  if (!canonicalPacket && canonicalPacketStored && documentId) {
+    const storedPortable = loadVs01CanonicalPacketPortable(documentId);
+    if (storedPortable) {
+      if (!packetRevisionFromUrl || packetRevisionFromUrl === packetRevisionForPortable(storedPortable)) {
+        canonicalPacket = storedPortable;
+      }
+    }
+  }
   if (canonicalPacket) {
     storeVs01CanonicalPacketSeed(canonicalPacket.seed);
   }
-  const recipientManifestParamPresent = manifestRaw !== null || manifestStored || canonicalPacketRaw !== null;
+  const recipientManifestParamPresent =
+    manifestRaw !== null ||
+    manifestStored ||
+    canonicalPacketRaw !== null ||
+    canonicalPacketStored;
 
   let recipientHydratedFields: Vs01RecipientPlacedField[] = [];
   let recipientManifestDecodeError: string | null = null;
@@ -125,7 +152,10 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
       recipientManifestDecodeError = decoded.error;
     }
   } else if (canonicalPacket?.fields.length) {
-    const normalized = normalizeRecipientManifestCounterparties(canonicalPacket.fields, lockedId);
+    const manifestFields = canonicalPacket.initialsPolicy.enabled
+      ? canonicalPacket.fields
+      : canonicalPacket.fields.filter((f) => f.type !== "initials");
+    const normalized = normalizeRecipientManifestCounterparties(manifestFields, lockedId);
     const cps = counterpartiesFromRecipientManifestFields(
       normalized,
       lockedId,

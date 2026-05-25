@@ -424,7 +424,7 @@ function fieldBase(role: Vs01PrepareSigningRole, page: number): Pick<
   };
 }
 
-export const VS01_SIGNATURE_FIELD_HEIGHT_NORM = 0.038;
+export const VS01_SIGNATURE_FIELD_HEIGHT_NORM = 0.0228;
 
 /** Underline band on the By line (for intersection checks; matches flow baseline geometry). */
 export function signatureUnderlineBandFromAnchor(
@@ -443,16 +443,15 @@ export function signatureFieldRectOnUnderlineAnchor(
   anchor: Pick<Vs01ByLinePlacement, "x" | "y" | "width" | "height">,
   fieldHeight = VS01_SIGNATURE_FIELD_HEIGHT_NORM,
 ): Pick<PlacedSigningField, "x" | "y" | "width" | "height"> {
-  const leftInset = Math.min(0.014, Math.max(0.006, anchor.width * 0.03));
-  const usableWidth = Math.max(0.2, anchor.width - leftInset);
-  const fieldWidth = Math.min(usableWidth, Math.max(anchor.width * 0.82, 0.24));
-  const byLineTop = anchor.y - LINE_HEIGHT * SIGNATURE_UNDERLINE_BASELINE_FRAC;
-  const nameLineTop = byLineTop + LINE_HEIGHT;
-  const maxY = nameLineTop - fieldHeight - 0.0025;
-  const preferredY = anchor.y - fieldHeight * 0.48;
+  const leftInset = Math.min(0.038, Math.max(0.032, anchor.width * 0.11));
+  const usableWidth = Math.max(0.18, anchor.width - leftInset);
+  const fieldWidth = Math.min(usableWidth, Math.max(anchor.width * 0.7, 0.21));
+  const underlineBand = signatureUnderlineBandFromAnchor(anchor);
+  const underlineCenter = underlineBand.y + underlineBand.height / 2;
+  const preferredY = underlineCenter - fieldHeight / 2 - 0.0037;
   return {
     x: anchor.x + leftInset,
-    y: Math.max(0, Math.min(preferredY, maxY)),
+    y: Math.max(0, preferredY),
     width: fieldWidth,
     height: fieldHeight,
   };
@@ -559,6 +558,8 @@ export function buildVs01SigningPacketModel(args: {
   mode: Vs01SigningPacketMode;
   authoritativeCorpusPlain?: string | null;
   roles: readonly Vs01PrepareSigningRole[];
+  /** When false, body-page initials fields are omitted from the canonical model. */
+  initialsEnabled?: boolean;
   corpusGateArgs?: Omit<ResolveFinalVs01CorpusOrBlockArgs, "agreementCorpusText" | "guidedPro">;
   bridge?: AgreementVs01BridgeSession | null;
   draft?: AgreementDraft | null;
@@ -633,11 +634,14 @@ export function buildVs01SigningPacketModel(args: {
   const witnessPageIndex =
     pages.find((p) => p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)))?.pageIndex ??
     (pages.length ? pages.length - 1 : 0);
-  for (const page of pages) {
-    if (page.pageIndex === witnessPageIndex) continue;
-    roles.forEach((role, roleIndex) => {
-      fields.push(initialsFieldForRole(role, page.pageIndex, roleIndex, roles.length));
-    });
+  const initialsEnabled = args.initialsEnabled !== false;
+  if (initialsEnabled) {
+    for (const page of pages) {
+      if (page.pageIndex === witnessPageIndex) continue;
+      roles.forEach((role, roleIndex) => {
+        fields.push(initialsFieldForRole(role, page.pageIndex, roleIndex, roles.length));
+      });
+    }
   }
 
   const totalVisibleChars = pages.reduce(

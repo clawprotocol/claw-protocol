@@ -10,6 +10,13 @@ import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 
 export const VS01_CANONICAL_PACKET_SEED_SCOPE = "__canonical_packet__";
 export const VS01_CANONICAL_PACKET_QUERY = "vs01_cpacket";
+/** When set, full portable packet is read from browser storage (see storeVs01CanonicalPacketPortable). */
+export const VS01_CANONICAL_PACKET_STORED_QUERY = "vs01_cpacket_stored";
+/** Short revision token so recipient links match the latest prepare toggle/build. */
+export const VS01_PACKET_REVISION_QUERY = "vs01_pkt_rev";
+
+/** Max encoded portable payload length safe to embed in a public signing URL. */
+export const VS01_CANONICAL_PACKET_MAX_URL_LEN = 512;
 
 export type Vs01CanonicalPacketSeedV1 = {
   v: 1;
@@ -54,6 +61,8 @@ export type Vs01CanonicalPacketPortableV1 = {
 
 const SS_PREFIX = "claw_vs01_canonical_seed_ss_";
 const LS_PREFIX = "claw_vs01_canonical_seed_ls_";
+const PORTABLE_SS_PREFIX = "claw_vs01_canonical_portable_ss_";
+const PORTABLE_LS_PREFIX = "claw_vs01_canonical_portable_ls_";
 
 function storageKey(documentId: string): string {
   return `${documentId.trim()}_${VS01_CANONICAL_PACKET_SEED_SCOPE}`;
@@ -126,12 +135,24 @@ export function storeVs01CanonicalPacketSeed(seed: Vs01CanonicalPacketSeedV1): v
   }
 }
 
+export function computeVs01PacketRevision(args: {
+  corpusHash: string;
+  initialsEnabled: boolean;
+  fieldCount: number;
+}): string {
+  const hash = (args.corpusHash || "").trim().slice(0, 16);
+  const flag = args.initialsEnabled ? "1" : "0";
+  const count = String(Math.max(0, args.fieldCount));
+  return `${hash}_${flag}_${count}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48);
+}
+
 export function buildVs01CanonicalPacketPortable(args: {
   seed: Vs01CanonicalPacketSeedV1;
   fields: readonly Vs01RecipientPlacedField[];
   roles: readonly Vs01PrepareSigningRole[];
   pageCount: number;
   witnessPageIndex: number;
+  initialsEnabled?: boolean;
 }): Vs01CanonicalPacketPortableV1 {
   const roles = args.roles.map((r) => ({
     roleId: r.roleId,
@@ -158,7 +179,9 @@ export function buildVs01CanonicalPacketPortable(args: {
     pageCount: args.pageCount,
     witnessPageIndex: args.witnessPageIndex,
     initialsPolicy: {
-      enabled: fields.some((f) => f.type === "initials" && f.autoInitials === true),
+      enabled:
+        args.initialsEnabled !== false &&
+        fields.some((f) => f.type === "initials" && f.autoInitials === true),
       bodyPagesOnly: fields.every((f) => f.type !== "initials" || f.page !== args.witnessPageIndex),
     },
     fieldCount: fields.length,
@@ -167,6 +190,77 @@ export function buildVs01CanonicalPacketPortable(args: {
 
 export function encodeVs01CanonicalPacketPortable(packet: Vs01CanonicalPacketPortableV1): string {
   return utf8ToBase64Url(JSON.stringify(packet));
+}
+
+export function shouldEmbedCanonicalPacketInUrl(encoded: string): boolean {
+  return encoded.trim().length > 0 && encoded.length <= VS01_CANONICAL_PACKET_MAX_URL_LEN;
+}
+
+export function storeVs01CanonicalPacketPortable(
+  documentId: string,
+  packet: Vs01CanonicalPacketPortableV1,
+): void {
+  if (typeof window === "undefined") return;
+  const key = storageKey(documentId);
+  const json = JSON.stringify(packet);
+  try {
+    sessionStorage.setItem(`${PORTABLE_SS_PREFIX}${key}`, json);
+  } catch {
+    /* quota */
+  }
+  try {
+    localStorage.setItem(`${PORTABLE_LS_PREFIX}${key}`, json);
+  } catch {
+    /* quota */
+  }
+}
+
+export function loadVs01CanonicalPacketPortable(documentId: string): Vs01CanonicalPacketPortableV1 | null {
+  if (typeof window === "undefined") return null;
+  const key = storageKey(documentId);
+  let raw: string | null = null;
+  try {
+    raw = sessionStorage.getItem(`${PORTABLE_SS_PREFIX}${key}`);
+  } catch {
+    /* ignore */
+  }
+  if (!raw) {
+    try {
+      raw = localStorage.getItem(`${PORTABLE_LS_PREFIX}${key}`);
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const packet = parsed as Vs01CanonicalPacketPortableV1;
+    if (packet.v !== 1 || !isValidSeed(packet.seed)) return null;
+    if (!Array.isArray(packet.fields) || !Array.isArray(packet.roles)) return null;
+    return packet;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist portable packet and return URL-safe reference params (never embed huge corpus in URL). */
+export function resolveCanonicalPacketUrlRefs(args: {
+  documentId: string;
+  packet: Vs01CanonicalPacketPortableV1;
+  initialsEnabled: boolean;
+}): { encodedInline: string | null; storedOnly: boolean; packetRevision: string } {
+  storeVs01CanonicalPacketPortable(args.documentId, args.packet);
+  const encoded = encodeVs01CanonicalPacketPortable(args.packet);
+  const packetRevision = computeVs01PacketRevision({
+    corpusHash: args.packet.seed.corpusHash,
+    initialsEnabled: args.initialsEnabled,
+    fieldCount: args.packet.fieldCount,
+  });
+  if (shouldEmbedCanonicalPacketInUrl(encoded)) {
+    return { encodedInline: encoded, storedOnly: false, packetRevision };
+  }
+  return { encodedInline: null, storedOnly: true, packetRevision };
 }
 
 export function decodeVs01CanonicalPacketPortable(raw: string | null): Vs01CanonicalPacketPortableV1 | null {

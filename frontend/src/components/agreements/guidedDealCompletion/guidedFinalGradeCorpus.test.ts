@@ -73,6 +73,8 @@ describe("guidedFinalGradeCorpus (test73 regression)", () => {
 
     expect(text).toMatch(/99\.9%|uptime/i);
     expect(defects.filter((d) => d !== "party_letter_fallback")).toEqual([]);
+    expectDefinedTermPartyStyle(text);
+    expectCleanSectionTopics(text);
   });
 
   it("assertFinalGradeCorpusReady accepts signing-cleanup output for test73", () => {
@@ -105,6 +107,47 @@ describe("guidedFinalGradeCorpus (test73 regression)", () => {
 
 const MONTHLY_AND_TOTAL = /\$6,000[\s\S]*\$120,000|\$120,000[\s\S]*\$6,000/;
 
+function section(text: string, headingRe: RegExp): string {
+  const start = text.search(headingRe);
+  if (start < 0) return "";
+  const tail = text.slice(start);
+  const next = tail.slice(1).search(/\n\s*\d+\.\s+[A-Z]/);
+  return next >= 0 ? tail.slice(0, next + 1) : tail;
+}
+
+function expectDefinedTermPartyStyle(text: string): void {
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const intro = text.slice(0, Math.min(witnessIdx, 1600));
+  expect(intro).toMatch(/Acme LLC\s*\("Client"\)/i);
+  expect(intro).toMatch(/Joe Brown\s*\("Service Provider"\)/i);
+  expect((text.match(/\("Client"\)/g) ?? []).length).toBe(1);
+  expect((text.match(/\("Service Provider"\)/g) ?? []).length).toBe(1);
+  expect(text).not.toMatch(/\bParty\s+A\b|\bParty\s+B\b/i);
+  expect(text).not.toMatch(/\b(?:Company|Contractor)\b/i);
+  expect(text).not.toMatch(/\bClient,\s+the\s+Client\b/i);
+  expect(text).not.toMatch(/\bService Provider,\s+the\s+Service Provider\b/i);
+  const witness = text.slice(witnessIdx);
+  expect(witness).toMatch(/CLIENT:\s*\nAcme LLC\s*\nBy:/i);
+  expect(witness).toMatch(/Name:\s*Anthem H Blanchard/i);
+  expect(witness).toMatch(/SERVICE PROVIDER:\s*\nJoe Brown\s*\nBy:/i);
+  expect(witness).toMatch(/Name:\s*Joe Brown/i);
+}
+
+function expectCleanSectionTopics(text: string): void {
+  const fees = section(text, /\n?2\.\s+Fees/i);
+  const confidentiality = section(text, /\n?3\.\s+Confidentiality/i);
+  const support = section(text, /\n?5\.\s+Support/i);
+  const misc = section(text, /\n?8\.\s+Miscellaneous/i);
+  expect(fees).not.toMatch(/confidential|non-public|proprietary information|force majeure|equitable relief|attorney fees/i);
+  expect(support).not.toMatch(/confidential|non-public|proprietary information/i);
+  expect(confidentiality).toMatch(/confidential|non-public|proprietary information/i);
+  if (/force majeure|equitable relief|attorney fees/i.test(text)) {
+    expect(misc).toMatch(/force majeure|equitable relief|attorney fees/i);
+  }
+  expect(text).not.toMatch(/^\s*\d+\.\d+\.?\s+(?:Assignment|Insurance|Indemnification|Notices?|Force Majeure|Equitable Relief)\.\s*$/im);
+  expect((text.match(/^\s*\d+\.\s+Notices\b/gim) ?? []).length).toBeLessThanOrEqual(1);
+}
+
 describe("guidedFinalGradeCorpus (test74 regression)", () => {
   it("detects test74 mixed-section and orphan signer defects", () => {
     const defects = detectFinalGradeCorpusDefects(TEST74_BAD_GUIDED_CORPUS, {
@@ -134,5 +177,30 @@ describe("guidedFinalGradeCorpus (test74 regression)", () => {
     const sectionNumbers = [...text.matchAll(/^\s*(\d+)\.\s+[A-Z]/gm)].map((m) => Number(m[1]));
     expect(sectionNumbers.length).toBeGreaterThanOrEqual(8);
     expect(sectionNumbers).toEqual(sectionNumbers.map((_, index) => index + 1));
+    expectDefinedTermPartyStyle(text);
+    expectCleanSectionTopics(text);
+  });
+
+  it("detects and repairs wrong-topic clauses, duplicate notices, and empty subsection headings", () => {
+    const bad = TEST74_BAD_GUIDED_CORPUS.replace(
+      /\nIN WITNESS WHEREOF/i,
+      "\n\n7. Notices\n7.1 Notices may be delivered electronically.\n\n8. Miscellaneous\n8.1 Assignment.\n\n7. Notices\n7.2 Duplicate notices must go to the same addresses.\n\nIN WITNESS WHEREOF",
+    );
+    const initial = detectFinalGradeCorpusDefects(bad, {
+      authoritativePartyNames: ["Acme LLC", "Joe Brown"],
+    });
+    expect(initial).toEqual(expect.arrayContaining([
+      "fees_section_contamination",
+      "section_topic_contamination",
+      "empty_subsection_heading",
+      "duplicate_notice_section",
+    ]));
+    const { text, defects } = repairFinalGradeGuidedCorpus(bad, {
+      signerIdentities: TEST73_SIGNERS,
+      authoritativePartyNames: ["Acme LLC", "Joe Brown"],
+    });
+    expect(defects.filter((d) => d !== "party_letter_fallback")).toEqual([]);
+    expectCleanSectionTopics(text);
+    expectDefinedTermPartyStyle(text);
   });
 });

@@ -191,7 +191,7 @@ describe("VS01 signing field visibility test45", () => {
       const by = byLines.find((b) => b.partyIndex === f.assignedPartyIndex);
       if (by) {
         expect(f.y).toBeCloseTo(by.y, 2);
-        expect(f.x).toBeCloseTo(by.x, 2);
+        expect(f.x).toBeGreaterThan(by.x);
       }
       expect(f.y + f.height).toBeLessThanOrEqual(SIGNATURE_BLOCK_REGION_BOTTOM + 0.35);
       expect(f.x + f.width).toBeLessThanOrEqual(1.01);

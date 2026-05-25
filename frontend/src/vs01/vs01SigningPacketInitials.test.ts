@@ -67,6 +67,25 @@ describe("summarizeCanonicalSigningPacketInitials", () => {
     expect(readiness.reason).toBeNull();
   });
 
+  it("omits initials fields when initialsEnabled is false on canonical model", () => {
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: premiumCorpus(),
+      roles: roles(),
+      corpusGateArgs: { freeBaselinePlain: STARTER_749 },
+      initialsEnabled: false,
+    });
+    expect(model.allowed).toBe(true);
+    expect(model.fields.some((f) => f.type === "initials")).toBe(false);
+    const summary = summarizeCanonicalSigningPacketInitials({
+      fields: model.fields,
+      pageCount: model.pages.length,
+      roleCount: roles().length,
+      pages: model.pages,
+    });
+    expect(summary.initialsFieldCount).toBe(0);
+  });
+
   it("packet readiness stays true across repeated canonical summaries (no flicker)", () => {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",

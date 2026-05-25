@@ -10,6 +10,20 @@ import {
   type Vs01PrepareSigningRole,
 } from "./vs01SignerFieldAssignment";
 
+/** Scope manifest fields to one signer role (never pass full packet to every URL). */
+export function filterPacketManifestFieldsForRole(
+  fields: readonly Vs01RecipientPlacedField[],
+  role: Vs01PrepareSigningRole,
+): Vs01RecipientPlacedField[] {
+  const roleId = role.roleId;
+  const cpId = recipientCounterpartyIdForPrepareRole(role);
+  return fields.filter((f) => {
+    const assigned = (f.assignedSignerRoleId ?? "").trim();
+    if (assigned) return assigned === roleId;
+    return f.counterpartyId.trim() === cpId;
+  });
+}
+
 /** Manifest fields for a signer role (owner merges sender-layer owner fields). */
 export function buildSignerManifestForRole(args: {
   role: Vs01PrepareSigningRole;
@@ -110,26 +124,30 @@ export function buildSigningUrlForPrepareRole(args: {
   recipientPlacedFields: Vs01RecipientPlacedField[];
   packetManifestFields?: readonly Vs01RecipientPlacedField[] | null;
   canonicalPacketPayload?: string | null;
+  canonicalPacketStored?: boolean;
+  packetRevision?: string | null;
   documentId: string;
   agreementId: string;
   receiptId?: string | null;
+  /** Use {@link Vs01PrepareSigningRole.partyIndex} — not counterparties array index. */
   recipientIndex: number;
 }): string {
-  const cpId = args.role.vs01CounterpartyId ?? args.role.partyId;
+  const cpId = recipientCounterpartyIdForPrepareRole(args.role);
   const email =
     (args.role.signerEmail ?? args.role.reviewEmail ?? "").trim() ||
     (args.role.kind === "owner" ? "" : "");
   const fields =
     args.packetManifestFields && args.packetManifestFields.length > 0
-      ? [...args.packetManifestFields]
-      : buildFullPacketSigningManifestFields({
+      ? filterPacketManifestFieldsForRole(args.packetManifestFields, args.role)
+      : buildSignerManifestForRole({
+          role: args.role,
           ownerRole: args.ownerRole,
           roles: args.roles,
           senderPlacedFields: args.senderPlacedFields,
           recipientPlacedFields: args.recipientPlacedFields,
         });
   return buildVs01RecipientSigningUrl({
-    recipientIndex: args.recipientIndex,
+    recipientIndex: args.role.partyIndex,
     recipientName: args.role.entityName?.trim() || args.role.partyName,
     recipientEmail: email,
     counterpartyId: cpId,
@@ -139,5 +157,7 @@ export function buildSigningUrlForPrepareRole(args: {
     agreementId: args.agreementId,
     signerRoleId: args.role.roleId,
     canonicalPacketPayload: args.canonicalPacketPayload ?? null,
+    canonicalPacketStored: args.canonicalPacketStored,
+    packetRevision: args.packetRevision ?? null,
   });
 }

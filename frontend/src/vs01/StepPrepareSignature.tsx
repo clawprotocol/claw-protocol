@@ -178,6 +178,8 @@ export type StepPrepareSignatureProps = {
   onFieldsChange: (fields: PlacedSigningField[]) => void;
   /** Agreement plain text for signature-block line anchor placement. */
   prepareCorpusText?: string | null;
+  /** Fired when “Initials on each page” toggles so continue can rebuild canonical packet + links. */
+  onPrepareInitialsEnabledChange?: (enabled: boolean) => void;
   onBack?: () => void;
   onContinue?: () => void;
 };
@@ -276,6 +278,7 @@ export function StepPrepareSignature({
   fields,
   onFieldsChange,
   prepareCorpusText = null,
+  onPrepareInitialsEnabledChange,
   onBack,
   onContinue,
 }: StepPrepareSignatureProps) {
@@ -641,8 +644,9 @@ export function StepPrepareSignature({
       mode: "guided_pro",
       authoritativeCorpusPlain: prepareCorpusText,
       roles: prepareSignerRoles,
+      initialsEnabled: autoInitialsEveryPage,
     });
-  }, [agreementBridgePlacementCopy, prepareCorpusText, prepareSignerRoles]);
+  }, [agreementBridgePlacementCopy, prepareCorpusText, prepareSignerRoles, autoInitialsEveryPage]);
 
   const canonicalPageLayouts = useMemo(
     () => (signingPacketModel?.allowed ? signingPacketLayoutsFromModel(signingPacketModel) : null),
@@ -905,6 +909,10 @@ export function StepPrepareSignature({
     if (!agreementBridgePlacementCopy || numPages <= 0) return;
     setAutoInitialsEveryPage(true);
   }, [agreementBridgePlacementCopy, documentId, numPages]);
+
+  useEffect(() => {
+    onPrepareInitialsEnabledChange?.(autoInitialsEveryPage);
+  }, [autoInitialsEveryPage, onPrepareInitialsEnabledChange]);
 
   const canonicalFieldsForGate =
     agreementBridgePlacementCopy && signingPacketModel?.allowed ? signingPacketModel.fields : fields;
@@ -1887,7 +1895,9 @@ export function StepPrepareSignature({
                               {fieldsHere.map((field) => {
                                 const cssRect = normalizedPdfRectToCssPercent(field);
                                 const fieldRole = findPrepareSigningRole(prepareSignerRoles, field.assignedSignerRoleId);
-                                const label = prepareTemplateCornerLabel(field.type, fieldRole, field.textPurpose);
+                                const label = field.autoInitials
+                                  ? "Initials"
+                                  : prepareTemplateCornerLabel(field.type, fieldRole, field.textPurpose);
                                 return (
                                   <div
                                     key={field.id}

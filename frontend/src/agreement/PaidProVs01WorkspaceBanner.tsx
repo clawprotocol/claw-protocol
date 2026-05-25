@@ -101,8 +101,10 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
   const title = handoff.agreementTitle.trim() || "Agreement";
   const signers = handoff.signers;
   const primaryForLink = signers.find((s) => s.signingUrl?.trim()) ?? signers[0];
-  const firstSigningUrl = primaryForLink?.signingUrl?.trim() ?? "";
   const packetPrepare = Boolean(handoff.packetPrepareOnly) || !handoff.receiptId?.trim();
+  const firstSigningUrl = packetPrepare
+    ? (handoff.ownerSigningUrl?.trim() || primaryForLink?.signingUrl?.trim() || "")
+    : (primaryForLink?.signingUrl?.trim() ?? "");
 
   const namedPending = signers.filter((s) => s.displayName?.trim().length);
   const firstNamed = namedPending[0];

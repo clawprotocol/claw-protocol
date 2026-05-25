@@ -2719,19 +2719,35 @@ button.vs01-upload-btn:disabled {
 }
 
 .vs01-sign-workspace--prepare .vs01-sign-placement-box--signature {
-  padding: 0.12rem 0.2rem 0.16rem;
+  padding: 0.07rem 0.16rem 0.1rem;
   background: rgba(212, 165, 116, 0.06);
   border-color: color-mix(in srgb, var(--vs01-color-accent) 72%, #111827 8%);
+  justify-content: center;
+  gap: 0.02rem;
 }
 
 .vs01-sign-workspace--prepare .vs01-sign-placement-box--signature .vs01-sign-placement-label {
-  position: absolute;
-  left: 0.2rem;
-  top: -0.86rem;
-  padding: 0.05rem 0.22rem;
+  position: static;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0 0.14rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+  font-size: 0.46rem;
+  line-height: 1.08;
+  letter-spacing: 0.045em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.vs01-sign-workspace--prepare .vs01-sign-placement-box--signature .vs01-sign-placement-meta {
+  font-size: 0.48rem;
+  line-height: 1.05;
+  max-width: 100%;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .vs01-sign-workspace--prepare .vs01-sign-placement-box--auto-initials {
@@ -2755,6 +2771,20 @@ button.vs01-upload-btn:disabled {
 .vs01-sign-page-surface--canonical .vs01-sign-placement-box--auto-initials .vs01-sign-placement-label {
   opacity: 1;
   color: #0f172a;
+}
+
+.vs01-sign-page-surface--canonical .vs01-sign-placement-box--auto-initials .vs01-sign-placement-label {
+  max-width: calc(100% - 0.28rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.045em;
+}
+
+.vs01-sign-page-surface--canonical .vs01-sign-placement-box--auto-initials .vs01-sign-placement-initials {
+  font-size: 0.58rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
 }
 
 .vs01-sign-page-surface--canonical .vs01-sign-placement-box--auto-initials .vs01-sign-placement-ph {

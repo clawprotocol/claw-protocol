@@ -8,7 +8,8 @@ import { buildVs01SigningPacketModel } from "./buildVs01SigningPacketModel";
 import {
   buildVs01CanonicalPacketPortable,
   buildVs01CanonicalPacketSeed,
-  encodeVs01CanonicalPacketPortable,
+  loadVs01CanonicalPacketPortable,
+  resolveCanonicalPacketUrlRefs,
   storeVs01CanonicalPacketSeed,
 } from "./vs01CanonicalPacketSeed";
 import { VS01_PACKET_MANIFEST_SCOPE, storeRecipientManifest } from "./StepReceipt";
@@ -43,6 +44,8 @@ export type PreparePacketContinueInput = {
   recipientPlacedFields: Vs01RecipientPlacedField[];
   /** Authoritative guided Pro corpus used on Prepare canonical pages. */
   prepareCorpusPlain?: string | null;
+  /** Prepare UI “Initials on each page” toggle — drives canonical model + links. */
+  initialsEnabled?: boolean;
   receiptId?: string | null;
   receiptHashSha256?: string | null;
 };
@@ -85,14 +88,18 @@ export function handlePreparePacketContinue(
   }
 
   const ownerRole = roles[0]!;
+  const initialsEnabled = input.initialsEnabled !== false;
   const corpusPlain = (input.prepareCorpusPlain ?? "").trim();
   let canonicalManifestFields: Vs01RecipientPlacedField[] | null = null;
   let canonicalPacketPayload: string | null = null;
+  let canonicalPacketStored = false;
+  let packetRevision: string | null = null;
   if (corpusPlain.length >= 1500) {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
       authoritativeCorpusPlain: corpusPlain,
       roles,
+      initialsEnabled,
     });
     if (model.allowed) {
       const seed = buildVs01CanonicalPacketSeed({
@@ -110,32 +117,37 @@ export function handlePreparePacketContinue(
         const witnessPageIndex = model.pages.findIndex((p) =>
           p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)),
         );
-        canonicalPacketPayload = encodeVs01CanonicalPacketPortable(
-          buildVs01CanonicalPacketPortable({
-            seed,
-            fields: manifestFields,
-            roles,
-            pageCount: model.pages.length,
-            witnessPageIndex,
-          }),
-        );
+        const portable = buildVs01CanonicalPacketPortable({
+          seed,
+          fields: manifestFields,
+          roles,
+          pageCount: model.pages.length,
+          witnessPageIndex,
+          initialsEnabled,
+        });
+        const urlRefs = resolveCanonicalPacketUrlRefs({
+          documentId: input.documentId,
+          packet: portable,
+          initialsEnabled,
+        });
+        canonicalPacketPayload = urlRefs.encodedInline;
+        canonicalPacketStored = urlRefs.storedOnly;
+        packetRevision = urlRefs.packetRevision;
       }
     }
   }
 
   const rid = (input.receiptId ?? "").trim();
-  const named = input.counterparties
-    .map((c, recipientIndex) => ({ c, recipientIndex }))
-    .filter(({ c }) => c.name.trim().length > 0);
+  const named = input.counterparties.filter((c) => c.name.trim().length > 0);
 
-  const signers = named.flatMap(({ c, recipientIndex }) => {
+  const signers = named.flatMap((c) => {
     const role = roles.find((r) => r.vs01CounterpartyId === c.id);
     if (!role) return [];
     const signerRoleId = role.roleId;
     return [{
       counterpartyId: c.id,
       displayName: c.name.trim(),
-      email: c.email.trim(),
+      email: (role.signerEmail ?? c.email).trim(),
       signingUrl: buildSigningUrlForPrepareRole({
         role,
         ownerRole,
@@ -144,10 +156,12 @@ export function handlePreparePacketContinue(
         recipientPlacedFields: input.recipientPlacedFields,
         packetManifestFields: canonicalManifestFields,
         canonicalPacketPayload,
+        canonicalPacketStored,
+        packetRevision,
         documentId: input.documentId,
         agreementId: input.agreementId,
         receiptId: rid || null,
-        recipientIndex,
+        recipientIndex: role.partyIndex,
       }),
       signerRoleId,
     }];
@@ -161,10 +175,12 @@ export function handlePreparePacketContinue(
     recipientPlacedFields: input.recipientPlacedFields,
     packetManifestFields: canonicalManifestFields,
     canonicalPacketPayload,
+    canonicalPacketStored,
+    packetRevision,
     documentId: input.documentId,
     agreementId: input.agreementId,
     receiptId: rid || null,
-    recipientIndex: 0,
+    recipientIndex: ownerRole.partyIndex,
   });
 
   const handoff: PaidProVs01PostSignHandoffV1 = {
@@ -180,6 +196,8 @@ export function handlePreparePacketContinue(
     ownerSignerRoleId: ownerRole.roleId,
     senderMustSignFirst: !rid,
     ownerSigningUrl,
+    packetRevision: packetRevision ?? undefined,
+    initialsEnabled,
   };
 
   ensureSigningPacketStatusFromHandoff(handoff, ownerRole.roleId);
@@ -200,4 +218,68 @@ export function handlePreparePacketContinue(
   });
 
   return { ok: true, handoff, gate };
+}
+
+/** Rebuild signing URLs from the latest stored canonical portable packet (avoids stale handoff links). */
+export function rebuildPrepareSigningUrlsFromStored(input: {
+  handoff: PaidProVs01PostSignHandoffV1;
+  roles: Vs01PrepareSigningRole[];
+  senderPlacedFields: PlacedSigningField[];
+  recipientPlacedFields: Vs01RecipientPlacedField[];
+}): Pick<PaidProVs01PostSignHandoffV1, "ownerSigningUrl" | "signers" | "packetRevision"> | null {
+  const portable = loadVs01CanonicalPacketPortable(input.handoff.vs01DocumentId);
+  if (!portable) return null;
+  const ownerRole = input.roles[0];
+  if (!ownerRole || ownerRole.kind !== "owner") return null;
+  const initialsEnabled = portable.initialsPolicy.enabled;
+  const urlRefs = resolveCanonicalPacketUrlRefs({
+    documentId: input.handoff.vs01DocumentId,
+    packet: portable,
+    initialsEnabled,
+  });
+  const manifestFields = [...portable.fields];
+  const rid = (input.handoff.receiptId ?? "").trim();
+  const ownerSigningUrl = buildSigningUrlForPrepareRole({
+    role: ownerRole,
+    ownerRole,
+    roles: input.roles,
+    senderPlacedFields: input.senderPlacedFields,
+    recipientPlacedFields: input.recipientPlacedFields,
+    packetManifestFields: manifestFields,
+    canonicalPacketPayload: urlRefs.encodedInline,
+    canonicalPacketStored: urlRefs.storedOnly,
+    packetRevision: urlRefs.packetRevision,
+    documentId: input.handoff.vs01DocumentId,
+    agreementId: input.handoff.agreementId,
+    receiptId: rid || null,
+    recipientIndex: ownerRole.partyIndex,
+  });
+  const signers = input.handoff.signers.map((row) => {
+    const role = input.roles.find(
+      (r) => r.vs01CounterpartyId === row.counterpartyId || r.roleId === row.signerRoleId,
+    );
+    if (!role) return row;
+    return {
+      ...row,
+      signingUrl: buildSigningUrlForPrepareRole({
+        role,
+        ownerRole,
+        roles: input.roles,
+        senderPlacedFields: input.senderPlacedFields,
+        recipientPlacedFields: input.recipientPlacedFields,
+        packetManifestFields: manifestFields,
+        canonicalPacketPayload: urlRefs.encodedInline,
+        canonicalPacketStored: urlRefs.storedOnly,
+        packetRevision: urlRefs.packetRevision,
+        documentId: input.handoff.vs01DocumentId,
+        agreementId: input.handoff.agreementId,
+        receiptId: rid || null,
+        recipientIndex: role.partyIndex,
+      }),
+      email: (role.signerEmail ?? row.email).trim(),
+      displayName: role.entityName?.trim() || row.displayName,
+      signerRoleId: role.roleId,
+    };
+  });
+  return { ownerSigningUrl, signers, packetRevision: urlRefs.packetRevision };
 }

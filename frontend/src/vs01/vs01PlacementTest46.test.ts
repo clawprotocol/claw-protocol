@@ -95,8 +95,8 @@ describe("VS01 placement test46 — layout-anchored geometry", () => {
     const cpSig = sigs.find((f) => f.assignedPartyIndex === 1)!;
     expect(signatureRectsFollowBlockOrder(ownerSig, cpSig)).toBe(true);
     const byLines = findByLinePlacementsFromPageLayout(pageLayoutForIndex(layouts, 2));
-    expect(ownerSig.x).toBeCloseTo(byLines[0]!.x, 2);
-    expect(cpSig.x).toBeCloseTo(byLines[1]!.x, 2);
+    expect(ownerSig.x).toBeGreaterThan(byLines[0]!.x);
+    expect(cpSig.x).toBeGreaterThan(byLines[1]!.x);
     expect(ownerSig.y + ownerSig.height).toBeLessThan(PREPARE_PAGE_FOOTER_BAND_Y);
     expect(cpSig.y + cpSig.height).toBeLessThan(PREPARE_PAGE_FOOTER_BAND_Y);
   });
