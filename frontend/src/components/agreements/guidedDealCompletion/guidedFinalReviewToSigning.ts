@@ -548,6 +548,12 @@ export function logReviewFirstPersistComplete(payload: Record<string, unknown>):
   console.info("[review-first-persist-complete]", payload);
 }
 
+export function logReviewFirstPersistSkipped(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-persist-skipped]", payload);
+}
+
 export function logReviewFirstMintStart(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

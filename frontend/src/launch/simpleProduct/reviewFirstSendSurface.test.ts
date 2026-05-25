@@ -5,8 +5,11 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE } from "../../agreement/recipientAccessMintPayload";
 import {
   REVIEW_FIRST_GENERIC_SEND_FORBIDDEN_COPY,
+  REVIEW_FIRST_SIGNING_TOKEN_SECRET_OPERATOR_HINT,
   REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE,
+  agreementIdShortForReviewFirstLog,
   isReviewFirstPremiumSendIntentActive,
+  isReviewFirstSigningTokenSecretNotConfigured,
   resolveReviewFirstMintFailureUserMessage,
   shouldRenderPaidProReviewFirstSendSurface,
 } from "./reviewFirstSendSurface";
@@ -19,7 +22,16 @@ describe("reviewFirstSendSurface", () => {
         firstErrorStatus: 422,
       }),
     ).toBe(REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE);
-    expect(REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE).toContain("signing token secret");
+    expect(REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE).toContain("signing/review token minting");
+    expect(isReviewFirstSigningTokenSecretNotConfigured({ errorCode: SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE })).toBe(
+      true,
+    );
+    expect(REVIEW_FIRST_SIGNING_TOKEN_SECRET_OPERATOR_HINT).toContain("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET");
+  });
+
+  it("agreementIdShortForReviewFirstLog never returns full uuid", () => {
+    expect(agreementIdShortForReviewFirstLog("f91ba33f-f101-41b0-a6be-82b7c4760e5c")).toBe("f91ba33f");
+    expect(agreementIdShortForReviewFirstLog(null)).toBe("unknown");
   });
 
   it("detects review-first intent from handoff, state, or session marker", () => {

@@ -535,7 +535,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 
   it("review-first retry re-invokes completeGuidedPaidProReviewFirstHandoff without /app/send", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    expect(intake).toContain('completeGuidedPaidProReviewFirstHandoff("simple_pro_review_first_retry")');
+    expect(intake).toContain("simple_pro_review_first_retry");
+    expect(intake).toContain("completeGuidedPaidProReviewFirstHandoff");
+    expect(intake).toContain("reviewFirstSigningTokenSecretMissing");
     expect(intake).toContain("onRetryReviewFirstHandoff");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
     const block = intake.slice(handoffIdx, handoffIdx + 12000);

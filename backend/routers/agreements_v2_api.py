@@ -95,7 +95,9 @@ from backend.llm_usage_guard import (
 )
 from backend.config.agreement_signing_token import (
     SigningTokenSecretMissingInProductionError,
+    operator_signing_token_secret_configured,
     resolve_signing_token_secret_raw,
+    review_link_mint_enabled,
 )
 from backend.config.feed_anchor_policy import settlement_anchor_network_hint
 from backend.proof_status.store import ProofLayerStore
@@ -219,10 +221,23 @@ def _recipient_link_mint_key_ok(request: Request) -> bool:
     return hmac.compare_digest(got.encode("utf-8"), required.encode("utf-8"))
 
 
-def _signing_token_secret_bytes() -> bytes:
+_agreements_log = logging.getLogger("claw.agreements")
+
+
+def _agreement_id_short(agreement_id: str) -> str:
+    aid = (agreement_id or "").strip()
+    return aid[:8] if len(aid) >= 8 else aid or "unknown"
+
+
+def _signing_token_secret_bytes(*, agreement_id: str | None = None) -> bytes:
     try:
         return resolve_signing_token_secret_raw().encode("utf-8")
     except SigningTokenSecretMissingInProductionError as e:
+        _agreements_log.warning(
+            "[review-first-env-token-secret-missing] agreementIdShort=%s claw_environment=%s",
+            _agreement_id_short(agreement_id or ""),
+            os.getenv("CLAW_ENVIRONMENT", "local").strip().lower(),
+        )
         raise HTTPException(
             status_code=422,
             detail={
@@ -4648,7 +4663,8 @@ def recipient_access_policy() -> Dict[str, Any]:
     return {
         "recipient_link_token_required": recipient_access_token_required(),
         "mint_key_configured": bool(os.getenv("CLAW_RECIPIENT_LINK_MINT_KEY", "").strip()),
-        "signing_token_configured": bool(os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()),
+        "signing_token_configured": operator_signing_token_secret_configured(),
+        "review_link_mint_enabled": review_link_mint_enabled(),
         "recipient_token_ttl_seconds": {
             "min": recipient_token_ttl_min_seconds(),
             "max": recipient_token_ttl_max_seconds(),
@@ -4990,7 +5006,7 @@ def post_recipient_access_token(
     else:
         lv = str((lock or {}).get("locked_version_id") or "")
 
-    secret = _signing_token_secret_bytes()
+    secret = _signing_token_secret_bytes(agreement_id=agreement_id)
     token: Optional[str] = None
     last_mint_error: Optional[BaseException] = None
     for attempt in range(3):  # initial + 2 retries (short backoff)

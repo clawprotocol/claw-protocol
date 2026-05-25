@@ -10,6 +10,10 @@ import logging
 import os
 from typing import List
 
+from backend.config.agreement_signing_token import (
+    operator_signing_token_secret_configured,
+    review_link_mint_enabled,
+)
 from backend.config.deployment_runtime import is_production_like_claw_environment
 
 _log = logging.getLogger("claw.env")
@@ -29,9 +33,10 @@ def collect_env_warnings() -> List[str]:
             warnings.append(
                 "CLAW_CORS_ALLOW_ORIGINS unset — browsers cannot call a split-origin API until configured."
             )
-        if not _is_set("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET"):
+        if not operator_signing_token_secret_configured():
             warnings.append(
-                "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET unset — recipient magic links will fail in production."
+                "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET (or CLAW_SIGNING_TOKEN_SECRET) unset — "
+                "review/signing link mint returns 422 signing_token_secret_not_configured in production."
             )
         if not _is_set("STRIPE_WEBHOOK_SECRET"):
             warnings.append(
@@ -72,4 +77,6 @@ def public_env_snapshot() -> dict:
         "admin_secret_configured": _is_set("CLAW_ADMIN_SECRET"),
         "database_url_configured": _is_set("CLAW_DATABASE_URL") or _is_set("DATABASE_URL"),
         "openai_configured": _is_set("OPENAI_API_KEY"),
+        "signing_token_secret_configured": operator_signing_token_secret_configured(),
+        "review_link_mint_enabled": review_link_mint_enabled(),
     }

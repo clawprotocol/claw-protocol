@@ -29,6 +29,10 @@ from backend.config.runtime_environment import (
     review_delivery_mode,
     timeline_db_path,
 )
+from backend.config.agreement_signing_token import (
+    operator_signing_token_secret_configured,
+    review_link_mint_enabled,
+)
 from backend.config.storage_runtime import public_runtime_storage_summary
 
 
@@ -76,7 +80,7 @@ def admin_anchor_http_trigger_enabled() -> bool:
 
 
 def public_runtime_summary() -> Dict[str, Any]:
-    secret_present = bool(os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip())
+    secret_present = operator_signing_token_secret_configured()
     mint_key_present = bool(os.getenv("CLAW_RECIPIENT_LINK_MINT_KEY", "").strip())
     btc_url_set = bool(os.getenv("BITCOIN_RPC_URL", "").strip())
     doge_url_set = bool(os.getenv("DOGECOIN_RPC_URL", "").strip())
@@ -106,6 +110,7 @@ def public_runtime_summary() -> Dict[str, Any]:
             "max": recipient_token_ttl_max_seconds(),
         },
         "signing_token_secret_configured": secret_present,
+        "review_link_mint_enabled": review_link_mint_enabled(),
         "recipient_link_mint_key_configured": mint_key_present,
         "bitcoin_rpc_url_configured": btc_url_set,
         "dogecoin_rpc_url_configured": doge_url_set,

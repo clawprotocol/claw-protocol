@@ -8,6 +8,7 @@ import {
 } from "./guidedDealCompletion/guidedFinalReviewTransition";
 import type { GuidedAppliedChecklistLabel } from "./guidedDealCompletion/guidedAppliedSummaryChecklist";
 import type { UploadedSourceDocumentRecord } from "./uploadedSourceDocumentStorage";
+import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_OPERATOR_HINT } from "../../launch/simpleProduct/reviewFirstSendSurface";
 
 export type SimpleProFinalReviewScreenProps = {
   agreementHtml: string;
@@ -25,6 +26,8 @@ export type SimpleProFinalReviewScreenProps = {
   sendDisabled?: boolean;
   reviewFirstHandoffBusy?: boolean;
   reviewFirstHandoffError?: string | null;
+  /** Railway/production: signing token secret unset — hide retry loop. */
+  reviewFirstSigningTokenSecretMissing?: boolean;
   onBackToFinalReviewFromReviewHandoff?: () => void;
   onRetryReviewFirstHandoff?: () => void;
   /** Signer/reviewer emails captured before final review. */
@@ -80,6 +83,7 @@ export function SimpleProFinalReviewScreen({
   sendDisabled = false,
   reviewFirstHandoffBusy = false,
   reviewFirstHandoffError = null,
+  reviewFirstSigningTokenSecretMissing = false,
   onBackToFinalReviewFromReviewHandoff,
   onRetryReviewFirstHandoff,
   signersReady = false,
@@ -308,9 +312,17 @@ export function SimpleProFinalReviewScreen({
           >
             <p className="text-base font-semibold text-amber-950">Review links unavailable</p>
             <p className="mt-2 leading-relaxed">{reviewFirstHandoffError}</p>
+            {reviewFirstSigningTokenSecretMissing ? (
+              <p
+                className="mt-3 rounded-md border border-amber-600/50 bg-amber-100/80 px-3 py-2 text-[11px] leading-relaxed text-amber-950"
+                data-testid="review-first-env-config-hint"
+              >
+                {REVIEW_FIRST_SIGNING_TOKEN_SECRET_OPERATOR_HINT}
+              </p>
+            ) : null}
             {onBackToFinalReviewFromReviewHandoff || onRetryReviewFirstHandoff ? (
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                {onRetryReviewFirstHandoff ? (
+                {onRetryReviewFirstHandoff && !reviewFirstSigningTokenSecretMissing ? (
                   <button
                     type="button"
                     className="w-full rounded-lg bg-amber-900 px-4 py-2.5 text-sm font-semibold text-amber-50 sm:w-auto"

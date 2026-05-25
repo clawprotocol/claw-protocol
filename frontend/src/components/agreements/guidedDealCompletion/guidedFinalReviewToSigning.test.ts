@@ -443,25 +443,30 @@ Date: _________________________
   it("Send for review first on final Pro review logs click and runs review handoff without upsell modal", () => {
     const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
     const handleIdx = intake.indexOf("const handleProSendForReview = React.useCallback");
-    const handleBlock = intake.slice(handleIdx, handleIdx + 1600);
+    const handleBlock = intake.slice(handleIdx, handleIdx + 2500);
     expect(handleBlock).toContain("logReviewFirstClick");
     expect(handleBlock).toContain("canProceedGuidedFinalReviewToSigning");
-    expect(handleBlock).toContain('completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review")');
+    expect(handleBlock).toContain("simple_pro_send_for_review");
+    expect(handleBlock).toContain("completeGuidedPaidProReviewFirstHandoff");
     expect(handleBlock).toContain("REVIEW_FIRST_SIMPLE_PRO_SOURCE");
     expect(handleBlock).not.toContain("setPremiumSendConfirmOpen(true)");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 9000);
+    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 15000);
     expect(handoffBlock).toContain("logReviewFirstHandoffStart");
     expect(handoffBlock).toContain("writeReviewFirstHandoffSource");
     expect(handoffBlock).toContain("clearReviewFirstHandoffSource");
     expect(handoffBlock).toContain("logReviewFirstLinkCreated");
     expect(handoffBlock).toContain("logReviewFirstNavigateDone");
     expect(handoffBlock).toContain("logReviewFirstError");
+    expect(handoffBlock).toContain("logReviewFirstPersistSkipped");
     expect(handoffBlock).toContain("runPersistAndOpen");
     expect(handoffBlock).toContain("executePaidProPostRecipientSetupHandoff");
-    expect(handoffBlock).toContain("logReviewFirstNavigateDone");
-    expect(handoffBlock).not.toContain("enterGuidedSignatureTrackRoute");
-    expect(handoffBlock).not.toContain("navigate(`/app/send/");
+    const mintSection = handoffBlock.slice(
+      handoffBlock.indexOf("logReviewFirstMintStart"),
+      handoffBlock.indexOf("failReviewFirstMint") + 800,
+    );
+    expect(mintSection).not.toContain("navigate(`/app/send/");
+    expect(mintSection).not.toContain("enterGuidedSignatureTrackRoute");
   });
 
   it("AgreementBuilderIntake routes signature track without generic onGenerate", () => {

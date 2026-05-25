@@ -52,6 +52,7 @@ import {
   isCreatePageReviewFirstHandoffSource,
   peekReviewFirstHandoffSource,
   ReviewFirstMintErrorPanel,
+  isReviewFirstSigningTokenSecretNotConfigured,
   shouldRenderPaidProReviewFirstSendSurface,
 } from "./reviewFirstSendSurface";
 import { logReviewFirstLegacySendBlocked } from "../../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
@@ -137,6 +138,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
   const [flash, setFlash] = useState<"draft_ready" | null>(null);
   /** Inline error when review-link mint yields no usable URLs (paid Pro review-first — no generic send shell). */
   const [reviewLinkMintFailure, setReviewLinkMintFailure] = useState<string | null>(null);
+  const [reviewLinkMintConfigMissing, setReviewLinkMintConfigMissing] = useState(false);
   const [reviewFirstMintBusy, setReviewFirstMintBusy] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallCopy, setPaywallCopy] = useState<{ headline: string; sub: string } | null>(null);
@@ -365,6 +367,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
       }
       setReviewFirstMintBusy(true);
       setReviewLinkMintFailure(null);
+      setReviewLinkMintConfigMissing(false);
       const result = await executePaidProPostRecipientSetupHandoff({
         navigate: (to) => {
           void navigate(to);
@@ -377,6 +380,12 @@ export function SimpleSendPage(props: { agreementId: string }) {
       setReviewFirstMintBusy(false);
       if (!result.ok) {
         setReviewLinkMintFailure(result.failure.userMessage);
+        setReviewLinkMintConfigMissing(
+          isReviewFirstSigningTokenSecretNotConfigured({
+            errorCode: result.failure.mintErrorCode,
+            message: result.failure.userMessage,
+          }),
+        );
         return;
       }
       clearPremiumSendIntent();
@@ -655,8 +664,13 @@ export function SimpleSendPage(props: { agreementId: string }) {
             <ReviewFirstMintErrorPanel
               message={reviewLinkMintFailure}
               busy={reviewFirstMintBusy}
+              signingTokenSecretMissing={reviewLinkMintConfigMissing}
               onBackToFinalReview={navigateBackToCreateForEdit}
-              onRetry={() => void runPaidProReviewFirstMintHandoff("simple_send_review_first_retry")}
+              onRetry={
+                reviewLinkMintConfigMissing
+                  ? undefined
+                  : () => void runPaidProReviewFirstMintHandoff("simple_send_review_first_retry")
+              }
             />
           ) : reviewFirstMintBusy ? null : (
             <p className="text-center text-sm text-slate-400" role="status">

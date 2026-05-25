@@ -125,13 +125,14 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
-  it("shows signing-token config copy with retry and back actions for mint 422", () => {
+  it("shows signing-token config copy with operator hint and back only (no retry loop)", () => {
     const onRetry = vi.fn();
     const onBack = vi.fn();
     render(
       <SimpleProFinalReviewScreen
         agreementHtml="<p>Body</p>"
         reviewFirstHandoffError={REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE}
+        reviewFirstSigningTokenSecretMissing
         onRetryReviewFirstHandoff={onRetry}
         onBackToFinalReviewFromReviewHandoff={onBack}
         onSendForSignature={vi.fn()}
@@ -144,19 +145,20 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(panel.textContent).toContain("Review links unavailable");
     expect(panel.textContent).toContain("Review links could not be created");
     expect(panel.textContent).toContain("signing/review token minting is not configured");
-    fireEvent.click(screen.getByTestId("simple-pro-review-first-retry"));
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("review-first-env-config-hint")).toBeTruthy();
+    expect(screen.queryByTestId("simple-pro-review-first-retry")).toBeNull();
     fireEvent.click(screen.getByTestId("simple-pro-review-first-back"));
     expect(onBack).toHaveBeenCalledTimes(1);
     cleanup();
   });
 
-  it("enables retry when handoff error is shown (mint actions replaced)", () => {
+  it("enables retry for non-config mint failures when handler provided", () => {
+    const onRetry = vi.fn();
     render(
       <SimpleProFinalReviewScreen
         agreementHtml="<p>Body</p>"
-        reviewFirstHandoffError={REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE}
-        onRetryReviewFirstHandoff={vi.fn()}
+        reviewFirstHandoffError="Review links could not be created. Check recipient details and try again."
+        onRetryReviewFirstHandoff={onRetry}
         onSendForSignature={vi.fn()}
         onSendForReview={vi.fn()}
         onCopyAgreement={vi.fn()}
@@ -167,6 +169,8 @@ describe("SimpleProFinalReviewScreen", () => {
     expect((screen.getByTestId("simple-pro-review-first-retry") as HTMLButtonElement).disabled).toBe(
       false,
     );
+    fireEvent.click(screen.getByTestId("simple-pro-review-first-retry"));
+    expect(onRetry).toHaveBeenCalledTimes(1);
     cleanup();
   });
 });

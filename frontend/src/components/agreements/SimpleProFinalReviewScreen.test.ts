@@ -28,11 +28,14 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
     const block = intake.slice(handoffIdx, handoffIdx + 12000);
-    expect(block).toContain("const failReviewFirstMint = (message: string, reason: string) => {");
+    expect(block).toContain("const failReviewFirstMint = (");
     expect(block).toContain("setHardError(null);");
     expect(block).toContain("setReviewFirstHandoffError(message);");
     expect(block).toContain("logReviewFirstInlineErrorRendered");
-    expect(block).toContain("failReviewFirstMint(result.failure.userMessage, result.failure.reason)");
+    expect(block).toContain("logReviewFirstPersistSkipped");
+    expect(block).toContain("logReviewFirstEnvTokenSecretMissing");
+    expect(intake).toContain("reviewFirstSigningTokenSecretMissing");
+    expect(block).toContain("result.failure.mintErrorCode");
     expect(block).toContain("clearReviewFirstMintInFlight()");
     expect(block).not.toMatch(/failReviewFirstMint[\s\S]{0,120}setHardError\(message\)/);
   });
@@ -48,6 +51,8 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(screen).toContain("reviewFirstActionsBlocked");
     expect(screen).toContain('data-testid="simple-pro-review-first-handoff-error"');
     expect(screen).toContain("scrollIntoView");
+    expect(screen).toContain("reviewFirstSigningTokenSecretMissing");
+    expect(screen).toContain("review-first-env-config-hint");
     const actionsIdx = screen.indexOf('data-testid="simple-pro-final-review-actions"');
     const errorIdx = screen.indexOf('data-testid="simple-pro-review-first-handoff-error"');
     expect(errorIdx).toBeGreaterThan(actionsIdx);

@@ -21,6 +21,26 @@ _DEV_FALLBACK_SIGNING_TOKEN_RAW = hashlib.sha256(
 ).hexdigest()
 
 
+def operator_signing_token_secret_configured() -> bool:
+    """True when an explicit operator secret is set (either accepted env name)."""
+    return bool(
+        os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()
+        or os.getenv("CLAW_SIGNING_TOKEN_SECRET", "").strip()
+    )
+
+
+def review_link_mint_enabled() -> bool:
+    """
+    Whether POST …/recipient-access-token can mint in this process.
+
+    Production-like ``CLAW_ENVIRONMENT`` requires an explicit secret; other envs may use the dev fallback.
+    """
+    if operator_signing_token_secret_configured():
+        return True
+    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
+    return env not in ("production", "prod")
+
+
 def resolve_signing_token_secret_raw() -> str:
     s = (
         os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()

@@ -493,7 +493,8 @@ test("create final review click — review-first token error, no legacy /app/sen
     await expect(page.getByText(/signing\/review token minting is not configured/i)).toBeVisible();
     await expect(page.getByText("We couldn't save your draft just now")).toHaveCount(0);
     await expect(page.getByText("Continue with draft version")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Retry creating review links" })).toBeVisible();
+    await expect(page.getByTestId("review-first-env-config-hint")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry creating review links" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Back to final review" })).toBeVisible();
     await inlineError.scrollIntoViewIfNeeded();
     await page.screenshot({

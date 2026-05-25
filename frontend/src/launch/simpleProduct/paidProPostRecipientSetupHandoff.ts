@@ -38,6 +38,8 @@ import {
   mergeDraftWithReviewFirstPinnedCorpus,
   peekReviewFirstMintInFlight,
   peekReviewFirstPinnedCorpus,
+  isReviewFirstSigningTokenSecretNotConfigured,
+  logReviewFirstEnvTokenSecretMissing,
   resolveReviewFirstMintFailureUserMessage,
   setReviewFirstMintInFlight,
 } from "./reviewFirstSendSurface";
@@ -47,6 +49,7 @@ export type PaidProPostRecipientSetupFailure = {
   reason: "review_link_mint" | "vs01_seed";
   agreementId: string;
   premiumSendIntent: PremiumSendIntent;
+  mintErrorCode?: string | null;
 };
 
 export type PaidProPostRecipientSetupResult =
@@ -121,12 +124,21 @@ async function mintAndPersistReviewLinksForHandoff(
       ...mintMeta,
       fallback: reviewLinkMintFailureUserCopy(mintMeta),
     });
+    const mintErrorCode = mintMeta.lastMintErrorCode ?? null;
     logReviewFirstMintError({
       agreementId: id,
       source: logSource ?? null,
-      code: mintMeta.lastMintErrorCode ?? null,
+      code: mintErrorCode,
       status: mintMeta.firstErrorStatus ?? null,
     });
+    if (
+      isReviewFirstSigningTokenSecretNotConfigured({
+        errorCode: mintErrorCode,
+        message: userMessage,
+      })
+    ) {
+      logReviewFirstEnvTokenSecretMissing({ agreementId: id, source: logSource ?? null });
+    }
     return {
       ok: false,
       failure: {
@@ -134,6 +146,7 @@ async function mintAndPersistReviewLinksForHandoff(
         reason: "review_link_mint",
         userMessage,
         premiumSendIntent,
+        mintErrorCode,
       },
     };
   }

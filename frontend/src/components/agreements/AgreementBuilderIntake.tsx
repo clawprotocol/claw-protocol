@@ -418,6 +418,8 @@ import {
 import {
   clearReviewFirstHandoffSource,
   clearReviewFirstMintInFlight,
+  isReviewFirstSigningTokenSecretNotConfigured,
+  logReviewFirstEnvTokenSecretMissing,
   REVIEW_FIRST_SIMPLE_PRO_SOURCE,
   writeReviewFirstHandoffSource,
   writeReviewFirstPinnedCorpus,
@@ -427,6 +429,7 @@ import {
   logReviewFirstInlineErrorRendered,
   logReviewFirstMarkerWritten,
   logReviewFirstPersistComplete,
+  logReviewFirstPersistSkipped,
   logReviewFirstPersistStart,
   logReviewFirstMintStart,
   isReviewFirstMintFailureReason,
@@ -2766,6 +2769,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [guidedFinalReviewTransitionInFlight, setGuidedFinalReviewTransitionInFlight] = useState(false);
   const [reviewFirstHandoffBusy, setReviewFirstHandoffBusy] = useState(false);
   const [reviewFirstHandoffError, setReviewFirstHandoffError] = useState<string | null>(null);
+  const [reviewFirstSigningTokenSecretMissing, setReviewFirstSigningTokenSecretMissing] = useState(false);
   const guidedFinalizeModalActive = guidedFinalizeModalStage !== null;
   /** Snapshot before signer-identity patch — used to recover final review if patch shrinks corpus. */
   const guidedPreIdentityAuthoritativeRef = useRef("");
@@ -16210,12 +16214,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           (vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : guidedAuthoritativeBodyPlain) || undefined,
       });
       if (!result.ok) {
+        const envMissing = isReviewFirstSigningTokenSecretNotConfigured({
+          errorCode: result.failure.mintErrorCode,
+          message: result.failure.userMessage,
+        });
         setHardError(null);
+        setReviewFirstSigningTokenSecretMissing(envMissing);
         setReviewFirstHandoffError(result.failure.userMessage);
+        if (envMissing) {
+          logReviewFirstEnvTokenSecretMissing({ agreementId: id, source: "intake_inline_send_review_first" });
+        }
         logReviewFirstInlineErrorRendered({
           agreementId: id,
           reason: result.failure.reason,
           path: "openPaidProPostInlineSendDestination",
+          envConfigMissing: envMissing,
         });
       }
       return;
@@ -17800,19 +17813,42 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedReviewFirstHandoffInFlightRef.current = true;
       setReviewFirstHandoffBusy(true);
       setReviewFirstHandoffError(null);
+      setReviewFirstSigningTokenSecretMissing(false);
       logReviewFirstHandoffStart({ source, phase: createFlowPhase });
 
       const failReviewFirstPersist = (message: string, reason: string) => {
         logReviewFirstError({ source, reason, message, failureClass: "persist" });
+        setReviewFirstSigningTokenSecretMissing(false);
         setReviewFirstHandoffError(null);
         setHardError(message);
       };
 
-      const failReviewFirstMint = (message: string, reason: string) => {
-        logReviewFirstError({ source, reason, message, failureClass: "mint" });
+      const failReviewFirstMint = (
+        message: string,
+        reason: string,
+        mintErrorCode?: string | null,
+        agreementIdForLog?: string | null,
+      ) => {
+        logReviewFirstError({ source, reason, message, failureClass: "mint", mintErrorCode: mintErrorCode ?? null });
+        const envConfigMissing = isReviewFirstSigningTokenSecretNotConfigured({
+          errorCode: mintErrorCode,
+          message,
+        });
         setHardError(null);
+        setReviewFirstSigningTokenSecretMissing(envConfigMissing);
         setReviewFirstHandoffError(message);
-        logReviewFirstInlineErrorRendered({ source, agreementId: productionSendBarAgreementId || reviewAgreementId, reason });
+        if (envConfigMissing) {
+          logReviewFirstEnvTokenSecretMissing({
+            agreementId: agreementIdForLog ?? productionSendBarAgreementId ?? reviewAgreementId,
+            source,
+          });
+        }
+        logReviewFirstInlineErrorRendered({
+          source,
+          agreementId: agreementIdForLog ?? productionSendBarAgreementId ?? reviewAgreementId,
+          reason,
+          envConfigMissing,
+        });
       };
 
       const failReviewFirst = (message: string, reason: string) => {
@@ -17889,6 +17925,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           draftAgreementId: (mergedDraft as { id?: string | null } | null)?.id ?? null,
           resumeAgreementId: readCreateReviewAgreementResumeId(),
         });
+
+        if (id) {
+          logReviewFirstPersistSkipped({ source, agreementId: id, reason: "agreement_already_persisted" });
+        }
 
         if (!id) {
           const rawFromDraft = buildReviewCoercionRawIntakeFromDraft(mergedDraft, intakeCombined);
@@ -17981,7 +18021,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementCorpusText: bodyPlain,
         });
         if (!result.ok) {
-          failReviewFirstMint(result.failure.userMessage, result.failure.reason);
+          failReviewFirstMint(
+            result.failure.userMessage,
+            result.failure.reason,
+            result.failure.mintErrorCode,
+            id,
+          );
           return;
         }
         logReviewFirstLinkCreated({ agreementId: id, destination: result.destination, source });
@@ -21980,15 +22025,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           onSendForReview={() => void handleProSendForReview()}
                                           reviewFirstHandoffBusy={reviewFirstHandoffBusy}
                                           reviewFirstHandoffError={reviewFirstHandoffError}
+                                          reviewFirstSigningTokenSecretMissing={reviewFirstSigningTokenSecretMissing}
                                           onBackToFinalReviewFromReviewHandoff={() => {
                                             setReviewFirstHandoffError(null);
+                                            setReviewFirstSigningTokenSecretMissing(false);
                                             setHardError(null);
                                           }}
-                                          onRetryReviewFirstHandoff={() => {
-                                            setReviewFirstHandoffError(null);
-                                            setHardError(null);
-                                            void completeGuidedPaidProReviewFirstHandoff("simple_pro_review_first_retry");
-                                          }}
+                                          onRetryReviewFirstHandoff={
+                                            reviewFirstSigningTokenSecretMissing
+                                              ? undefined
+                                              : () => {
+                                                  setReviewFirstHandoffError(null);
+                                                  setHardError(null);
+                                                  void completeGuidedPaidProReviewFirstHandoff(
+                                                    "simple_pro_review_first_retry",
+                                                  );
+                                                }
+                                          }
                                           onCopyAgreement={handleSimpleProFinalReviewCopy}
                                           onExportAgreement={() => void handleSimpleProFinalReviewExport()}
                                           suppressPostReviewEditUx={paidProInlineSignersReady}

@@ -139,8 +139,37 @@ export function isReviewFirstPremiumSendIntentActive(args: {
 }
 
 export const REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE =
-  "Review links could not be created because signing/review token minting is not configured on this environment. " +
-  "Please configure the signing token secret and retry.";
+  "Review links could not be created because signing/review token minting is not configured on this environment.";
+
+export const REVIEW_FIRST_SIGNING_TOKEN_SECRET_OPERATOR_HINT =
+  "Railway/staging operator: set CLAW_AGREEMENT_SIGNING_TOKEN_SECRET (or CLAW_SIGNING_TOKEN_SECRET), redeploy the API service, then use Back to final review and try again.";
+
+export function isReviewFirstSigningTokenSecretNotConfigured(args?: {
+  errorCode?: string | null;
+  message?: string | null;
+}): boolean {
+  const code = (args?.errorCode ?? "").trim();
+  if (code === SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE) return true;
+  const msg = (args?.message ?? "").trim();
+  return /signing_token_secret_not_configured/i.test(msg);
+}
+
+export function agreementIdShortForReviewFirstLog(agreementId: string | null | undefined): string {
+  const id = String(agreementId ?? "").trim();
+  return id.length >= 8 ? id.slice(0, 8) : id || "unknown";
+}
+
+export function logReviewFirstEnvTokenSecretMissing(payload: {
+  agreementId?: string | null;
+  source?: string | null;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[review-first-env-token-secret-missing]", {
+    agreementIdShort: agreementIdShortForReviewFirstLog(payload.agreementId),
+    source: payload.source ?? null,
+  });
+}
 
 export function resolveReviewFirstMintFailureUserMessage(args?: {
   lastMintErrorCode?: string | null;
@@ -216,6 +245,7 @@ export function shouldRenderPaidProReviewFirstSendSurface(args: {
 export type ReviewFirstMintErrorPanelProps = {
   message: string;
   busy?: boolean;
+  signingTokenSecretMissing?: boolean;
   onBackToFinalReview?: () => void;
   onRetry?: () => void;
 };
@@ -223,9 +253,11 @@ export type ReviewFirstMintErrorPanelProps = {
 export function ReviewFirstMintErrorPanel({
   message,
   busy = false,
+  signingTokenSecretMissing = false,
   onBackToFinalReview,
   onRetry,
 }: ReviewFirstMintErrorPanelProps) {
+  const showRetry = Boolean(onRetry) && !signingTokenSecretMissing;
   return (
     <div
       className="mx-auto w-full max-w-xl rounded-xl border border-rose-800/45 bg-rose-950/25 px-5 py-5 text-sm leading-snug text-rose-50/95"
@@ -234,6 +266,14 @@ export function ReviewFirstMintErrorPanel({
     >
       <p className="font-semibold text-rose-100">Review links unavailable</p>
       <p className="mt-2 text-xs leading-relaxed text-rose-100/90">{message}</p>
+      {signingTokenSecretMissing ? (
+        <p
+          className="mt-3 rounded-md border border-rose-700/40 bg-rose-950/40 px-3 py-2 text-[11px] leading-relaxed text-rose-100/85"
+          data-testid="review-first-env-config-hint"
+        >
+          {REVIEW_FIRST_SIGNING_TOKEN_SECRET_OPERATOR_HINT}
+        </p>
+      ) : null}
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         {onBackToFinalReview ? (
           <button
@@ -246,7 +286,7 @@ export function ReviewFirstMintErrorPanel({
             Back to final review
           </button>
         ) : null}
-        {onRetry ? (
+        {showRetry ? (
           <button
             type="button"
             className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
