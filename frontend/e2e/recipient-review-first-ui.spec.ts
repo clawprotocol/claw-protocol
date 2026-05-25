@@ -186,6 +186,9 @@ test("review-first simplified UI (desktop + laptop PNGs)", async ({ page }, test
     await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("recipient-review-first-actions")).toBeVisible();
     await expect(page.getByRole("button", { name: "Approve draft" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Suggest changes" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "More options" })).toBeVisible();
+    await expect(page.getByTestId("recipient-review-upload-updated-draft")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Request changes/i })).toHaveCount(0);
 
     await page.screenshot({
@@ -248,14 +251,18 @@ test("paid Pro review-first skips generic /app/send and lands on owner done", as
     fullPage: true,
   });
   await page.screenshot({
+    path: join(artifactDir, "review-link-created-after.png"),
+    fullPage: true,
+  });
+  await page.screenshot({
     path: join(artifactDir, "review-first-direct-desktop.png"),
     fullPage: true,
   });
 });
 
-test("proposed changes show before/after blocks for other reviewers", async ({ page }, testInfo) => {
+test("proposed changes show before/after blocks for other reviewers", async ({ page }) => {
   test.setTimeout(90_000);
-  const artifactDir = join(testInfo.project.outputDir, "..", "artifacts", "recipient-review-first");
+  const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
   mkdirSync(artifactDir, { recursive: true });
 
   const agreementId = "ag_review_first_change_vis";
@@ -271,6 +278,7 @@ test("proposed changes show before/after blocks for other reviewers", async ({ p
   });
 
   await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("recipient-review-more-options").click();
   await page.getByTestId("recipient-review-edit-draft").click();
   await expect(page.getByTestId("recipient-compose-tablist")).toBeVisible({ timeout: 15_000 });
   await page.getByTestId("recipient-workflow-quick").click();
@@ -285,9 +293,7 @@ test("proposed changes show before/after blocks for other reviewers", async ({ p
   await expect(changeSummary).toBeVisible();
   await expect(changeSummary.getByText("Previous", { exact: true })).toBeVisible();
   await expect(changeSummary.getByText("Proposed", { exact: true })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Summary of proposed changes" })).toContainText(
-    /payment terms updated/i,
-  );
+  await expect(changeSummary).toContainText(/Suggested change by/i);
 
   await page.screenshot({
     path: join(artifactDir, "review-first-change-before-after.png"),

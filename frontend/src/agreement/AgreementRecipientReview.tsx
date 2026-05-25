@@ -142,7 +142,6 @@ import {
   RECIPIENT_AUDIT_MODE_SUBCOPY,
   RECIPIENT_AUDIT_MODE_SUMMARY,
   RECIPIENT_CONDENSED_EXPORT_METRICS_DETAILS_SUMMARY,
-  RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE,
   recipientRedlineTechnicalAppendixSummaryLine,
   RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY,
   RECIPIENT_INTENT_RAW_DETAIL_HEADING,
@@ -155,7 +154,6 @@ import {
   RECIPIENT_PREVIEW_SUGGESTION_DETAILS_SUMMARY,
   RECIPIENT_BUSINESS_REVIEW_SHOW_CHANGED_WORDING_IN_REDLINE,
   RECIPIENT_FOCUS_COMPARE_BEST_MATCH_HEADING,
-  RECIPIENT_PREVIEW_TRUST_SUBCOPY,
   RECIPIENT_ONLY_CHANGED_SECTIONS,
   RECIPIENT_REDLINE_CHANGED_SECTIONS_HEADING,
   RECIPIENT_REDLINE_CHANGED_WORDING_INSTRUCTION,
@@ -202,11 +200,7 @@ import {
 } from "./recipientWholeDocSemanticRender";
 import { buildRecipientFriendlyRedlineChips } from "./recipientFriendlyRedlineSummary";
 import {
-  buildHumanReviewHeadline,
-  buildHumanReviewNegativeAssurances,
   buildHumanReviewStructuredForPdf,
-  friendlyChipToReviewBullet,
-  groupFriendlyChipsForHumanReview,
   humanReviewMeaningfulCount,
 } from "./recipientHumanReviewSummaryModel";
 import {
@@ -222,12 +216,10 @@ import {
   buildNotRestatedOriginalSectionsAppendixHtml,
   RECIPIENT_NOT_RESTAT_ORIGINAL_SECTION_LABELS,
 } from "./recipientCondensedDraftSemanticMap";
-import { RecipientCondensedRevisionSurface, type CondensedRevisionTab } from "./RecipientCondensedRevisionSurface";
+import type { CondensedRevisionTab } from "./RecipientCondensedRevisionSurface";
 import { filterChipsForBusinessReviewPresentation } from "./recipientFriendlyChipsPresentation";
 import { buildIntentSemanticBucketRows } from "./recipientIntentSemanticBuckets";
-import { RecipientBusinessReviewCards } from "./RecipientBusinessReviewCards";
 import { RecipientFocusedWordingDialog } from "./RecipientFocusedWordingDialog";
-import { RecipientHumanReviewSummary } from "./RecipientHumanReviewSummary";
 import { RecipientRedlineStickyNavigator } from "./RecipientRedlineStickyNavigator";
 import { splitRecipientCondensedGiantChangedBlock } from "./recipientCondensedRedlineClauseSplit";
 import { devLogRecipientRedlineNavigation } from "./recipientRedlineNavigationLog";
@@ -244,7 +236,6 @@ import { recipientImportsMatchAuthoritativeBaseline } from "./recipientNoChangeC
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
   buildRecipientRedlineStickyNavRows,
-  buildRecommendedSenderFocusLines,
   businessReviewCardForSemanticId,
   getClauseCompareFallbackForSemanticId,
   getScrollTargetBlockIdForSemanticOrFallback,
@@ -279,7 +270,7 @@ const API_BASE = resolveApiBase();
 const RECIPIENT_SIGNING_READINESS_POLL_MS = 8000;
 const REVIEW_FIRST_TITLE = "Review agreement";
 const REVIEW_FIRST_HELPER =
-  "Review the draft below. You can approve it, edit the text directly, or upload a revised version. Any proposed text changes will be clearly shown to all parties. Once all parties approve the same final draft, the agreement moves to the e-signing step.";
+  "Read the draft, approve it, or suggest a change. Nothing is signed yet. Everyone must approve the same version before signing.";
 const REVIEW_FIRST_APPROVE_LABEL = "Approve draft";
 const REVIEW_FIRST_SAVE_UPDATED_LABEL = "Save updated draft";
 const REVIEW_FIRST_UPLOAD_LABEL = "Upload updated draft";
@@ -621,6 +612,7 @@ export function AgreementRecipientReview({
   const [proRedlineSuggestBusy, setProRedlineSuggestBusy] = useState(false);
   const [proRedlineSuggestErr, setProRedlineSuggestErr] = useState<string | null>(null);
   const [proRedlineSuggestSuccess, setProRedlineSuggestSuccess] = useState(false);
+  const [reviewMoreOptionsOpen, setReviewMoreOptionsOpen] = useState(false);
   type CeremonyPhase = "idle" | "start_error" | "ready" | "signing" | "done";
   const [ceremonyPhase, setCeremonyPhase] = useState<CeremonyPhase>("idle");
   const [ceremonyError, setCeremonyError] = useState<string | null>(null);
@@ -1105,7 +1097,7 @@ export function AgreementRecipientReview({
       }
     | null
   >(null);
-  const [condensedReviewTab, setCondensedReviewTab] = useState<CondensedRevisionTab>("clean");
+  const [, setCondensedReviewTab] = useState<CondensedRevisionTab>("clean");
 
   const recipientRedlineStrippedPlainPair = useMemo(() => {
     if (!recipientRedlinePlainTexts) return null;
@@ -1160,11 +1152,6 @@ export function AgreementRecipientReview({
     const fields = previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).map((r) => r.field);
     return buildRecipientFriendlyRedlineChips(recipientPreview.revisionText ?? "", fields);
   }, [recipientPreview, previewDiff]);
-
-  const recipientBusinessRecommendedFocus = useMemo(
-    () => buildRecommendedSenderFocusLines(recipientFriendlyRedlineChips),
-    [recipientFriendlyRedlineChips],
-  );
 
   const presentationFriendlyRedlineChips = useMemo(
     () => filterChipsForBusinessReviewPresentation(recipientFriendlyRedlineChips),
@@ -1446,6 +1433,26 @@ export function AgreementRecipientReview({
     recipientSemanticPresentation?.shortRevisedVsLongBaseline,
   ]);
 
+  const simpleRecipientChange = useMemo(() => {
+    if (!previewDiff || previewDiff.isCompleteNoOp) return null;
+    const cards = buildRecipientClauseCards(
+      previewDiff.snapshotCompare,
+      previewDiff.hasMaterialTextDiff,
+      previewDiff.clauseContext,
+    );
+    const firstCard = cards.find((c) => c.currentText.trim() || c.proposedText.trim());
+    const fallbackCurrent = recipientRedlinePlainTexts?.currentPlain.trim() ?? "";
+    const fallbackProposed = recipientRedlinePlainTexts?.proposedPlain.trim() ?? "";
+    const previous = (firstCard?.currentText || fallbackCurrent).trim();
+    const proposed = (firstCard?.proposedText || fallbackProposed).trim();
+    if (!previous && !proposed) return null;
+    return {
+      title: firstCard?.cardTitle || "Wording change",
+      previous: previous.length > 520 ? `${previous.slice(0, 520).trim()}…` : previous,
+      proposed: proposed.length > 520 ? `${proposed.slice(0, 520).trim()}…` : proposed,
+    };
+  }, [previewDiff, recipientRedlinePlainTexts]);
+
   const reviewerHeadlineName = useMemo(
     () =>
       participantPid.trim()
@@ -1508,49 +1515,6 @@ export function AgreementRecipientReview({
     }
     return parts.join(" ");
   }, [legalRedlineDocumentVm, compareConfidence, recipientImportNoMaterialDiff]);
-
-  const humanReviewGrouped = useMemo(
-    () => groupFriendlyChipsForHumanReview(recipientFriendlyRedlineChips),
-    [recipientFriendlyRedlineChips],
-  );
-
-  const humanReviewHeadlineText = useMemo(() => {
-    if (recipientImportNoMaterialDiff) return "";
-    if (!legalRedlineDocumentVm) return "";
-    if (recipientPresentationMode === "condensed_clean_revision") {
-      return buildHumanReviewHeadlineCondensedCleanRevision(
-        reviewerHeadlineName,
-        condensedTopicCards.length > 0
-          ? condensedTopicCards.length
-          : humanReviewMeaningfulCount(recipientFriendlyRedlineChips, legalRedlineDocumentVm.stats.changedBlockCount),
-      );
-    }
-    return buildHumanReviewHeadline(
-      reviewerHeadlineName,
-      humanReviewMeaningfulCount(recipientFriendlyRedlineChips, legalRedlineDocumentVm.stats.changedBlockCount),
-    );
-  }, [
-    legalRedlineDocumentVm,
-    reviewerHeadlineName,
-    recipientFriendlyRedlineChips,
-    recipientPresentationMode,
-    condensedTopicCards.length,
-    recipientImportNoMaterialDiff,
-  ]);
-
-  const humanReviewKeyUpdatesLabel = useMemo(() => {
-    if (!legalRedlineDocumentVm || recipientFriendlyRedlineChips.length === 0) return null;
-    const n = humanReviewMeaningfulCount(recipientFriendlyRedlineChips, legalRedlineDocumentVm.stats.changedBlockCount);
-    return `${n} key updates`;
-  }, [legalRedlineDocumentVm, recipientFriendlyRedlineChips]);
-
-  const humanReviewNegativeLines = useMemo(() => {
-    if (!recipientPreview || !previewDiff) return [] as string[];
-    return buildHumanReviewNegativeAssurances(
-      recipientPreview.revisionText ?? "",
-      previewDiff.snapshotCompare.changedFields.filter((r) => r.changed).map((r) => r.field),
-    );
-  }, [recipientPreview, previewDiff]);
 
   const recipientReviewerNotesPlainForExport = useMemo(() => {
     if (recipientPreview?.importMatchesCurrentDraft) return null;
@@ -2760,7 +2724,7 @@ export function AgreementRecipientReview({
   const comparePanel =
     recipientPreview && previewDiff && !previewDiff.isCompleteNoOp && !recipientSuggestedEditsSentAck ? (
       <div
-        className="rounded-lg border border-sky-900/35 bg-slate-900/50 p-4 shadow-sm"
+        className="rounded-xl border border-slate-800/70 bg-slate-950/35 p-4 shadow-sm"
         data-testid="recipient-suggested-changes-panel"
         data-recipient-revision-round={revisionLineage.revisionRound}
         data-recipient-compare-base-version-id={revisionLineage.compareBaseVersionId ?? ""}
@@ -2775,37 +2739,36 @@ export function AgreementRecipientReview({
           Changes proposed
         </h2>
         <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-          Review exactly what changed before approving or saving this updated draft.
+          Changed wording is shown below. Everyone sees the same before and after.
         </p>
         <div
-          className="mt-3 rounded-lg border border-slate-700/55 bg-slate-950/35 p-3"
+          className="mt-4 rounded-xl border border-slate-700/60 bg-slate-950/55 p-4"
           data-testid="recipient-review-change-visibility-summary"
         >
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-            <span>
-              Proposed by <span className="font-semibold text-slate-200">{proposerDisplayNameForApi}</span>
-            </span>
-            <span aria-hidden>·</span>
-            <time dateTime={new Date().toISOString()}>{new Date().toLocaleString()}</time>
+          <div className="text-sm font-semibold text-slate-100">
+            Suggested change by {proposerDisplayNameForApi}
           </div>
-          {recipientRedlinePlainTexts ? (
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <div className="rounded-md border border-rose-900/35 bg-rose-950/20 p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-200">Previous</div>
-                <p className="mt-1 line-clamp-6 whitespace-pre-wrap text-xs leading-relaxed text-rose-50/90">
-                  {recipientRedlinePlainTexts.currentPlain.slice(0, 900)}
+          <p className="mt-0.5 text-[11px] text-slate-500">{simpleRecipientChange?.title ?? "Wording change"}</p>
+          {simpleRecipientChange ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-lg border border-rose-900/35 bg-rose-950/20 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-rose-200">Previous</div>
+                <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-rose-50/95">
+                  “{simpleRecipientChange.previous}”
                 </p>
               </div>
-              <div className="rounded-md border border-emerald-900/35 bg-emerald-950/20 p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-200">Proposed</div>
-                <p className="mt-1 line-clamp-6 whitespace-pre-wrap text-xs leading-relaxed text-emerald-50/90">
-                  {recipientRedlinePlainTexts.proposedPlain.slice(0, 900)}
+              <div className="rounded-lg border border-emerald-800/45 bg-emerald-950/25 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-emerald-200">Proposed</div>
+                <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-emerald-50/95">
+                  “{simpleRecipientChange.proposed}”
                 </p>
               </div>
             </div>
           ) : null}
         </div>
-        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{RECIPIENT_PREVIEW_TRUST_SUBCOPY}</p>
+        <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+          Nothing is signed yet. If this version is saved, everyone must approve it before signing.
+        </p>
         <p className="sr-only">{PRODUCT_NOT_LAW_FIRM}</p>
         {recipientImportSanitizeNote ? (
           <p
@@ -2814,65 +2777,6 @@ export function AgreementRecipientReview({
           >
             {recipientImportSanitizeNote}
           </p>
-        ) : null}
-        {legalRedlineDocumentVm && compareConfidence ? (
-          <RecipientHumanReviewSummary
-            headline={humanReviewHeadlineText}
-            keyUpdatesLabel={humanReviewKeyUpdatesLabel}
-            importantBullets={humanReviewGrouped.important.map(friendlyChipToReviewBullet)}
-            clarificationBullets={humanReviewGrouped.clarifications.map(friendlyChipToReviewBullet)}
-            negativeAssurances={humanReviewNegativeLines}
-            recommendedFocusLines={recipientBusinessRecommendedFocus}
-            confidenceHeadline={compareConfidence.headline}
-            confidenceBody={compareConfidence.body}
-            negotiationContextLines={compareConfidence.gentleContextLines}
-          />
-        ) : null}
-
-        {legalRedlineDocumentVm && compareConfidence && compareConfidence.level !== "high" ? (
-          <p className="mt-3 text-[11px] leading-relaxed text-slate-500" data-testid="recipient-business-review-readability-note">
-            {legalRedlineDocumentVm.fallbackReason ? `${RECIPIENT_BUSINESS_REVIEW_SUBSTANTIAL_REWRITE_SUMMARY} ` : null}
-            {RECIPIENT_BUSINESS_REVIEW_INTENT_NOT_INLINE}
-          </p>
-        ) : null}
-
-        {legalRedlineDocumentVm && presentationFriendlyRedlineChips.length > 0 ? (
-          <RecipientBusinessReviewCards
-            chips={presentationFriendlyRedlineChips}
-            legalVm={legalRedlineDocumentVm}
-            onViewExactWording={(p) => setBusinessReviewFocusedWording(p)}
-            onOpenFullRedline={openFullLegalRedlineSection}
-            onNavigateSemanticInRedline={scrollToSemanticReviewInRedline}
-          />
-        ) : null}
-
-        {recipientPresentationMode === "condensed_clean_revision" && legalRedlineDocumentVm && recipientRedlinePlainTexts ? (
-          <RecipientCondensedRevisionSurface
-            ref={suggestedChangesDocScrollRef}
-            proposedPlainClean={
-              recipientRedlineStrippedPlainPair?.proposedPlain ?? recipientRedlinePlainTexts.proposedPlain
-            }
-            topicCards={condensedTopicCards}
-            notRestatedLabels={RECIPIENT_NOT_RESTAT_ORIGINAL_SECTION_LABELS}
-            legalVm={legalRedlineDocumentVm}
-            onlyChangedRedlineSections={onlyChangedRedlineSections}
-            onOnlyChangedChange={setOnlyChangedRedlineSections}
-            recipientNarrowIntentAnchors={Boolean(recipientRedlinePlainTexts.narrowRecipientTargetedRedline)}
-            narrowRedlineHighlightAnchor={narrowRedlineHighlightAnchor}
-            semanticPresentation={recipientSemanticPresentation}
-            highlightedSemanticAnchor={highlightedSemanticAnchor}
-            stickyNavRows={buildRecipientRedlineStickyNavRows(presentationFriendlyRedlineChips, legalRedlineDocumentVm)}
-            onStickySelect={(id, m) => void scrollToSemanticReviewInRedline(id, m)}
-            onDenseExactWording={(w) =>
-              setBusinessReviewFocusedWording({
-                sectionTitle: w.sectionLabel,
-                oldText: w.oldText,
-                newText: w.newText,
-              })
-            }
-            selectedTab={condensedReviewTab}
-            onTabChange={setCondensedReviewTab}
-          />
         ) : null}
 
         {legalRedlineDocumentVm ? (
@@ -3904,18 +3808,8 @@ export function AgreementRecipientReview({
       <div
         className="flex flex-wrap items-center gap-2"
         data-testid="recipient-review-download-actions"
-        aria-label="Download or copy draft"
+        aria-label="More review options"
       >
-        <RecipientAgreementReadPdfExport
-          bare
-          suppressBareDisclosure
-          agreementId={agreementId}
-          agreementTitle={recipientAgreementTitleForDisplay(draft.title)}
-          readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
-          scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
-          pdfDownloadButtonLabel="Download PDF"
-          pdfDownloadButtonTestId="recipient-review-download-pdf"
-        />
         <button
           type="button"
           data-testid="recipient-review-download-text"
@@ -4390,13 +4284,9 @@ export function AgreementRecipientReview({
         </span>
       </div>
 
-      <p className="text-center text-[10px] text-slate-600 sm:text-left">
-        Support — ID <span className="font-mono text-slate-500 break-all">{agreementId}</span>
-      </p>
-
       {workspaceTab === "read" ? (
         <section
-          className="rounded-xl border border-slate-800/60 bg-slate-950/30 p-4"
+          className="rounded-xl border border-slate-800/55 bg-slate-950/25 p-4"
           data-testid="recipient-review-first-actions"
           aria-label="Review agreement actions"
         >
@@ -4412,38 +4302,78 @@ export function AgreementRecipientReview({
             </button>
             <button
               type="button"
-              data-testid="recipient-review-edit-draft"
+              data-testid="recipient-review-suggest-changes"
               className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
               disabled={suggestControlsDisabled}
               onClick={() => {
-                setComposePathCardsVisible(false);
-                setWorkspaceTab("revise");
-                setWorkflowMode("revised");
-                setRevisedSubmode("edit");
-                setRevisedIntakePhase("editing");
-                if (!externalAiPaste.trim()) setExternalAiPaste(directCompareDefaultRef.current);
-                setError(null);
-                scrollAndFocusSuggestPanel();
+                proRedlineSuggestTextareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                window.setTimeout(() => proRedlineSuggestTextareaRef.current?.focus({ preventScroll: true }), 120);
               }}
             >
-              Edit text directly
+              Suggest changes
             </button>
+            {draft ? (
+              <RecipientAgreementReadPdfExport
+                bare
+                suppressBareDisclosure
+                agreementId={agreementId}
+                agreementTitle={recipientAgreementTitleForDisplay(draft.title)}
+                readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
+                scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
+                pdfDownloadButtonLabel="Download"
+                pdfDownloadButtonTestId="recipient-review-download-pdf"
+              />
+            ) : null}
             <button
               type="button"
-              data-testid="recipient-review-upload-updated-draft"
-              className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-              disabled={suggestControlsDisabled}
-              onClick={() => {
-                prepareOutsideReviewImportUi();
-                window.setTimeout(() => draftImportFileInputRef.current?.click(), 0);
-              }}
+              className="rounded-lg border border-slate-700 bg-transparent px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-slate-900/60"
+              aria-expanded={reviewMoreOptionsOpen}
+              data-testid="recipient-review-more-options"
+              onClick={() => setReviewMoreOptionsOpen((v) => !v)}
             >
-              {REVIEW_FIRST_UPLOAD_LABEL}
+              More options
             </button>
-            {compactReviewDownloadActions}
           </div>
+          {reviewMoreOptionsOpen ? (
+            <div
+              className="mt-3 flex flex-col gap-2 rounded-lg border border-slate-800/70 bg-slate-950/45 p-3 sm:flex-row sm:flex-wrap"
+              data-testid="recipient-review-more-options-panel"
+            >
+              <button
+                type="button"
+                data-testid="recipient-review-edit-draft"
+                className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                disabled={suggestControlsDisabled}
+                onClick={() => {
+                  setComposePathCardsVisible(false);
+                  setWorkspaceTab("revise");
+                  setWorkflowMode("revised");
+                  setRevisedSubmode("edit");
+                  setRevisedIntakePhase("editing");
+                  if (!externalAiPaste.trim()) setExternalAiPaste(directCompareDefaultRef.current);
+                  setError(null);
+                  scrollAndFocusSuggestPanel();
+                }}
+              >
+                Edit text directly
+              </button>
+              <button
+                type="button"
+                data-testid="recipient-review-upload-updated-draft"
+                className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                disabled={suggestControlsDisabled}
+                onClick={() => {
+                  prepareOutsideReviewImportUi();
+                  window.setTimeout(() => draftImportFileInputRef.current?.click(), 0);
+                }}
+              >
+                {REVIEW_FIRST_UPLOAD_LABEL}
+              </button>
+              {compactReviewDownloadActions}
+            </div>
+          ) : null}
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
-            Approval applies only to this displayed draft version. If anyone saves a new draft, reviewers must approve that updated version again.
+            Nothing is signed yet. If anyone saves new wording, everyone reviews that version again.
           </p>
         </section>
       ) : null}
@@ -4453,13 +4383,13 @@ export function AgreementRecipientReview({
       isPaidProAgreementAuthoritative({ draft, agreementId, includeLocalCompletionMarker: false }) &&
       !viewerLike &&
       !recipientAcceptedAwaitingLock ? (
-        <div className="rounded-lg border border-violet-800/45 bg-slate-950/50 px-4 py-4 text-slate-100">
-          <div className="text-xs font-semibold uppercase tracking-wide text-violet-200/90">Note for the owner</div>
-          <p className="mt-1 text-[11px] leading-snug text-slate-400">
-            Plain-language notes for the owner. Nothing is signed on this screen.
+        <div className="rounded-xl border border-slate-800/60 bg-slate-950/35 px-4 py-4 text-slate-100">
+          <div className="text-sm font-semibold text-slate-100">Suggest changes</div>
+          <p className="mt-1 text-xs leading-relaxed text-slate-400">
+            Describe what you want changed. You can also upload a revised draft from More options.
           </p>
           <label className="mt-3 block text-[11px] font-medium text-slate-500" htmlFor="pro-redline-recipient-suggest">
-            Your suggestions
+            Requested change
           </label>
           <textarea
             id="pro-redline-recipient-suggest"
@@ -4472,7 +4402,7 @@ export function AgreementRecipientReview({
               setProRedlineSuggestSuccess(false);
             }}
             disabled={proRedlineSuggestBusy || needsPersonalizedLink}
-            placeholder="Describe what you’d like different…"
+            placeholder="Example: Change payment from 15 days to 45 days."
           />
           {needsPersonalizedLink ? (
             <p className="mt-2 text-[11px] text-amber-200/90">
@@ -4482,7 +4412,7 @@ export function AgreementRecipientReview({
           ) : null}
           <button
             type="button"
-            className="mt-3 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
+            className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
             disabled={
               proRedlineSuggestBusy ||
               needsPersonalizedLink ||

@@ -62,7 +62,6 @@ import {
 import { mergeReviewLinkRecipientEmailsOntoHydratedDraft } from "./reviewLinkRecipientEmailMerge";
 import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
 import {
-  formatAuthoritativeAgreementPartiesHeadline,
   orderedAuthoritativePartyDisplayNames,
 } from "../../agreement/handoffPartyDisplay";
 import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
@@ -192,13 +191,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
     (reviewRecipientHandoff.reviewLinksPending === true || reviewHandoffRows.length === 0);
   const isPaidProReviewDonePath =
     Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review");
-
-  const cachedAgreementPartyDisplayNames = reviewRecipientHandoff?.agreementPartyDisplayNames;
-  const paidProDoneAgreementPartyNames = useMemo(() => {
-    const fromDraft = orderedAuthoritativePartyDisplayNames(ownerHandoffDraft?.parties);
-    if (fromDraft.length > 0) return fromDraft;
-    return cachedAgreementPartyDisplayNames ?? [];
-  }, [ownerHandoffDraft?.parties, cachedAgreementPartyDisplayNames]);
 
   useEffect(() => {
     if (!isPaidProReviewDonePath) return;
@@ -641,12 +633,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
         window.setTimeout(() => setReviewBundleCopyFlash(false), 2000);
       });
     };
-    const showReviewFlowDiagPanel = Boolean(import.meta.env.DEV) || reviewFlowDiagLocal;
+    const showReviewFlowDiagPanel = reviewFlowDiagLocal;
 
     return (
       <SimpleFlowShell title={flowShellTitle}>
-        <div className="vs01-card vs01-card--envelope space-y-5 text-center sm:text-left">
-          <div className="rounded-xl border border-emerald-900/35 bg-emerald-950/25 px-5 py-6">
+        <div className="mx-auto max-w-3xl text-center sm:text-left">
+          <div className="rounded-2xl border border-slate-800/70 bg-slate-950/35 px-5 py-5 shadow-sm sm:px-6">
             {reviewLinksReady && anyReviewHref ? (
               <>
                 {linksStillLoading ? (
@@ -694,18 +686,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   </p>
                 ) : (
                   <p className="text-sm leading-relaxed text-slate-300">
-                    Nothing has been signed. Copy this private link and send it to each reviewer.
+                    Send this private link to reviewers. Nothing is signed yet.
                   </p>
                 )}
-                <p
-                  className="mt-3 rounded-lg border border-emerald-800/40 bg-emerald-950/40 px-3 py-2 text-left text-xs font-medium text-emerald-50"
-                  data-testid="simple-done-owner-approval-status"
-                >
-                  Status:{" "}
-                  {signingLockActive
-                    ? "Signing version locked — continue in workspace"
-                    : reviewApprovalAgg.ownerStatusLine}
-                </p>
+                <span className="sr-only" data-testid="simple-done-owner-approval-status">
+                  {signingLockActive ? "Signing version locked." : reviewApprovalAgg.ownerStatusLine}
+                </span>
                 {showTopAnySigningPrimary ? (
                   <div
                     className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap"
@@ -745,34 +731,14 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     ) : null}
                   </div>
                 ) : null}
-                <dl className="mt-5 space-y-3 text-left text-sm text-slate-300">
+                <dl className="mt-5 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-2">
                   <div>
                     <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</dt>
                     <dd className="mt-0.5 font-medium text-slate-100">{agreementTitle}</dd>
                   </div>
-                  <div>
-                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement parties</dt>
-                    <dd className="mt-0.5 text-slate-200">
-                      {paidProDoneAgreementPartyNames.length > 2 ? (
-                        <ol className="list-decimal space-y-0.5 pl-5">
-                          {paidProDoneAgreementPartyNames.map((n, i) => (
-                            <li key={`simple_done_party_${i}`}>{n}</li>
-                          ))}
-                        </ol>
-                      ) : ownerHandoffDraft?.parties?.length ? (
-                        formatAuthoritativeAgreementPartiesHeadline(ownerHandoffDraft.parties)
-                      ) : paidProDoneAgreementPartyNames.length > 0 ? (
-                        paidProDoneAgreementPartyNames.join(", ")
-                      ) : (
-                        "—"
-                      )}
-                    </dd>
-                  </div>
                   {!multiReviewer && reviewHandoffRows.length > 0 ? (
                     <div>
-                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                        Reviewer{reviewHandoffRows.length > 1 ? "s" : ""}
-                      </dt>
+                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Reviewer</dt>
                       <dd className="mt-0.5 space-y-1">
                         {reviewHandoffRows.map((r) => (
                           <div key={`${r.displayName}-${r.reviewHref}`}>
@@ -786,36 +752,26 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     </div>
                   ) : null}
                 </dl>
-                <PaidProReviewReviewerLinksTable
-                  rows={normalizedReviewerRows}
-                  statuses={reviewerRowStatuses}
-                  rowCopyFlashByKey={rowCopyFlashByKey}
-                  onCopyRow={(k, href) => copyRowReviewLink(k, href)}
-                  onOpenRow={(href, ctx) => {
-                    const id = agreementId.trim();
-                    const agreementIdShort = id.length <= 12 ? id : `${id.slice(0, 8)}…`;
-                    const tok = extractReviewLinkTokenFromHref(href);
-                    logReviewLinkRowOpen({
-                      agreementIdShort,
-                      partyIndex: ctx.partyIndex ?? ctx.rowIndex,
-                      recipientId: (ctx.recipientId || "").trim() || "(none)",
-                      hasToken: Boolean(tok),
-                      tokenHashShort: recipientLinkTokenFingerprint(tok),
-                    });
-                    if (href.trim()) window.open(href, "_blank", "noopener,noreferrer");
-                  }}
-                />
-                {!multiReviewer ? (
-                <label className="mt-5 block text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Review link
-                  <input
-                    type="text"
-                    readOnly
-                    className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2.5 font-mono text-[11px] text-slate-200"
-                    value={primaryReviewHref}
-                    aria-label="Review link URL"
+                {multiReviewer ? (
+                  <PaidProReviewReviewerLinksTable
+                    rows={normalizedReviewerRows}
+                    statuses={reviewerRowStatuses}
+                    rowCopyFlashByKey={rowCopyFlashByKey}
+                    onCopyRow={(k, href) => copyRowReviewLink(k, href)}
+                    onOpenRow={(href, ctx) => {
+                      const id = agreementId.trim();
+                      const agreementIdShort = id.length <= 12 ? id : `${id.slice(0, 8)}…`;
+                      const tok = extractReviewLinkTokenFromHref(href);
+                      logReviewLinkRowOpen({
+                        agreementIdShort,
+                        partyIndex: ctx.partyIndex ?? ctx.rowIndex,
+                        recipientId: (ctx.recipientId || "").trim() || "(none)",
+                        hasToken: Boolean(tok),
+                        tokenHashShort: recipientLinkTokenFingerprint(tok),
+                      });
+                      if (href.trim()) window.open(href, "_blank", "noopener,noreferrer");
+                    }}
                   />
-                </label>
                 ) : null}
                 <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   {showBottomCopyPrimary ? (
@@ -858,11 +814,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     Back to draft
                   </button>
                 </div>
-                <p className="mt-4 text-left text-[11px] leading-relaxed text-slate-500">
-                  {multiReviewer
-                    ? "Each reviewer has a private link in the table above. Open each link in a separate browser or incognito window to test the full multi-reviewer flow."
-                    : "To test the reviewer experience, open the reviewer link in incognito or another browser."}
-                </p>
               </>
             ) : (
               <>
