@@ -55,7 +55,20 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   finalReviewAuthorityOnly?: boolean;
   /** Pre–signer-identity snapshot for recovery when patched body shrank. */
   recoveryAuthoritativePlain?: string | null;
+  /** Immutable pinned signer-applied body — never compete with picker/server length. */
+  pinnedFinalizedSignerPlain?: string | null;
 }): SimpleProFinalReviewCorpusResolution {
+  const pinned = norm(args.pinnedFinalizedSignerPlain);
+  if (pinned.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+    return {
+      plainText: pinned,
+      source: "authoritative_hydrated",
+      authoritativeLen: pinned.length,
+      renderedLen: norm(args.renderedPreviewPlain).length,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
   const authoritative = norm(args.authoritativePlain);
   const rendered = norm(args.renderedPreviewPlain);
   const picker = norm(args.pickerPlain);

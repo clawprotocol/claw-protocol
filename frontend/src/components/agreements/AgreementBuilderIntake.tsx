@@ -829,6 +829,14 @@ import {
   shouldBypassGenericOnGenerateForGuidedSignature,
 } from "./guidedDealCompletion/guidedFinalReviewToSigning";
 import {
+  buildPinnedFinalizedSignerCorpus,
+  logGuidedFinalCorpusPinRejected,
+  logGuidedFinalCorpusPinned,
+  logGuidedFinalCorpusPinRestored,
+  shouldBlockGuidedFinalReviewPhaseRollback,
+  shouldRejectHydratedCorpusOverPin,
+} from "./guidedDealCompletion/guidedFinalCorpusPin";
+import {
   GuidedFinalizeModal,
   GUIDED_FINALIZE_MODAL_MIN_VISIBLE_MS,
   logGuidedFinalizeModalEnter,
@@ -2693,6 +2701,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Premium-style production send: success replaces bottom CTA (no full-screen ceremony). */
   const [productionSendBarPhase, setProductionSendBarPhase] = useState<"idle" | "sent">("idle");
   const [productionSendBarAgreementId, setProductionSendBarAgreementId] = useState<string | null>(null);
+  const productionSendBarAgreementIdRef = useRef<string | null>(null);
   /** Calm send step: collapsible recipient grid; auto-open once when primary contact incomplete. */
   const [createFlowSendRecipientEditorOpen, setCreateFlowSendRecipientEditorOpen] = useState(false);
   const createFlowSendEditorPrimedRef = useRef(false);
@@ -2726,6 +2735,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const authoritativeAgreementSnapshotRef = useRef("");
   const acceptedReviewCorpusRef = useRef("");
   const finalizedSigningCorpusRef = useRef("");
+  const pinnedFinalizedSignerCorpusRef = useRef("");
+  const pinnedFinalizedSignerCorpusHashRef = useRef("");
   const guidedSignatureRebuiltRef = useRef(false);
   const guidedVs01SigningHandoffRef = useRef<ReturnType<typeof buildGuidedVs01SigningHandoff> | null>(null);
   const canonicalSignerManifestRef = useRef<CanonicalSignerManifest | null>(null);
@@ -4071,7 +4082,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
     }
     setDraftNowCommitted(true);
-    setCreateFlowPhase("draft_ready_for_review");
+    setCreateFlowPhaseGuarded("draft_ready_for_review");
     setCreateUiStage(CreateUiStage.DRAFT);
     setMobileWorkspacePane("preview");
     setPreviewPaneRevealed(true);
@@ -8184,10 +8195,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const normalized = await hydrateCreatedAgreement(id, postDraft, partyNameContext);
       console.log("[AgreementIntake] persistence + hydrate OK, advancing wizard", id);
       setHardError(null);
+      reviewAgreementIdRef.current = id;
       setReviewAgreementId(id);
+      const hydratedServerBody = (
+        (normalized as { server_full_document_text?: string | null }).server_full_document_text ||
+        (normalized as { premium_full_document_text?: string | null }).premium_full_document_text ||
+        (normalized as { document_text?: string | null }).document_text ||
+        ""
+      ).trim();
+      if (
+        pinnedFinalizedSignerCorpusHashRef.current &&
+        hydratedServerBody &&
+        shouldRejectHydratedCorpusOverPin({
+          pinnedHash: pinnedFinalizedSignerCorpusHashRef.current,
+          incomingBody: hydratedServerBody,
+        })
+      ) {
+        logGuidedFinalCorpusPinRejected({
+          pinnedHash: pinnedFinalizedSignerCorpusHashRef.current,
+          incomingLen: hydratedServerBody.length,
+          incomingHash: fingerprintAgreementBody(hydratedServerBody),
+          reason: "runPersistAndOpen_hydrate",
+        });
+      }
       setDraft(normalized as unknown as ParsedDraftShape);
-      if (simpleProductFlow && liveWorkspaceTwoPane && !continuitySourcePanel) {
-        setCreateFlowPhase("draft_ready_for_review");
+      restorePinnedFinalizedSignerCorpus("runPersistAndOpen_hydrate");
+      const skipDraftReadyPhaseReset =
+        guidedSignatureTrackInFlightRef.current ||
+        Boolean(pinnedFinalizedSignerCorpusHashRef.current.trim());
+      if (simpleProductFlow && liveWorkspaceTwoPane && !continuitySourcePanel && !skipDraftReadyPhaseReset) {
+        setCreateFlowPhaseGuarded("draft_ready_for_review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setDraftNowCommitted(true);
+      } else if (skipDraftReadyPhaseReset && guidedFinalReviewExplicitlyUnlockedRef.current) {
+        setCreateFlowPhase("guided_final_review");
         setCreateUiStage(CreateUiStage.DRAFT);
         setDraftNowCommitted(true);
       }
@@ -8270,7 +8311,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       clearAgreementCreatorIntakeStorage();
       /** Do not clear premium snapshot / LS here — that is only for post-send teardown; clearing on persist→send caused paid Pro to fall back to free intake. */
       /** Any successful simple-product persist → send/review handoff must not leave a create-page resume id (zombie shell). */
-      if (simpleProductFlow && liveWorkspaceTwoPane) {
+      if (simpleProductFlow && liveWorkspaceTwoPane && !guidedSignatureTrackInFlightRef.current) {
         clearCreateReviewAgreementResumeId();
       }
       const createdHandoff = {
@@ -8294,13 +8335,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return true;
       }
       if (inlineContextualSend) {
+        productionSendBarAgreementIdRef.current = id;
         setProductionSendBarPhase("sent");
         setProductionSendBarAgreementId(id);
         paidAgreementSentRef.current = true;
         emitPaidFunnelEvent("agreement_sent", { extra: { agreement_id: id, send_path: "inline_contextual" } });
-        window.setTimeout(() => {
-          onCreated(id, primedForHandoff, createdHandoff);
-        }, 420);
+        restorePinnedFinalizedSignerCorpus("inline_contextual_send");
+        if (!guidedSignatureTrackInFlightRef.current) {
+          window.setTimeout(() => {
+            onCreated(id, primedForHandoff, createdHandoff);
+          }, 420);
+        }
         return true;
       }
       onCreated(id, primedForHandoff, createdHandoff);
@@ -10680,6 +10725,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [reviewAgreementId]);
 
   useEffect(() => {
+    productionSendBarAgreementIdRef.current = productionSendBarAgreementId;
+  }, [productionSendBarAgreementId]);
+
+  useEffect(() => {
     setOwnerResumeServerLockVid(null);
   }, [reviewAgreementId]);
 
@@ -10757,7 +10806,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setMissing([]);
     setFollowUpDetailTotal(0);
     setCreateUiStage(CreateUiStage.DRAFT);
-    setCreateFlowPhase("draft_ready_for_review");
+    setCreateFlowPhaseGuarded("draft_ready_for_review");
     setDraftNowCommitted(true);
     setDisplayPhase("review");
     setPreviewPaneRevealed(true);
@@ -10866,10 +10915,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setMissing([]);
         setFollowUpDetailTotal(0);
         setCreateUiStage(CreateUiStage.DRAFT);
-        setCreateFlowPhase("draft_ready_for_review");
+        setCreateFlowPhaseGuarded("draft_ready_for_review");
         setDraftNowCommitted(true);
         writeCreateReviewDraftReadyMarker();
         writeCreateReviewDraftSnapshot(next);
+        restorePinnedFinalizedSignerCorpus("production_resume_hydrate");
         logReviewRefreshRestore({
           hasStoredDraft: true,
           agreementIdShort: agreementIdShort(hid),
@@ -11053,6 +11103,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         guidedCompletionPhase,
         finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
         signingConfirmationActive: guidedSigningConfirmationActive,
+        pinnedFinalizedSignerCorpusHash: pinnedFinalizedSignerCorpusHashRef.current,
+        guidedSignatureTrackInFlight: guidedSignatureTrackInFlightRef.current,
       }),
     [
       paidProAuthoritative,
@@ -11062,6 +11114,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedCompletionPhase,
       guidedFinalReviewExplicitlyOpened,
       guidedSigningConfirmationActive,
+      guidedAuthVersionNonce,
     ],
   );
   const guidedFinalReviewActive = simpleProFinalReviewActive;
@@ -15016,6 +15069,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ],
       signerIdentities: guidedSignerCanonicalIdentities,
       signingCorpusReady: guidedSigningCorpusSelectionReady,
+      pinnedFinalizedSignerCorpus: buildPinnedFinalizedSignerCorpus(pinnedFinalizedSignerCorpusRef.current),
     });
   }, [
     agreementDocumentText,
@@ -15129,6 +15183,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       appliedAnswerCount: answeredCount,
       finalReviewAuthorityOnly: simpleProFinalReviewActive,
       recoveryAuthoritativePlain: guidedPreIdentityAuthoritativeRef.current,
+      pinnedFinalizedSignerPlain: pinnedFinalizedSignerCorpusRef.current,
     });
   }, [
     guidedFinalReviewAuthoritativeResolution.body,
@@ -15150,6 +15205,70 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setUploadedRevisionCorpus(next.uploadedRevisionCorpus);
     setLatestAcceptedCorpus(next.latestAcceptedCorpus);
   }, []);
+
+  const pinFinalizedSignerAppliedCorpus = React.useCallback(
+    (body: string, source: string) => {
+      const pinned = buildPinnedFinalizedSignerCorpus(body);
+      if (!pinned) return;
+      pinnedFinalizedSignerCorpusRef.current = pinned.body;
+      pinnedFinalizedSignerCorpusHashRef.current = pinned.hash;
+      finalizedSigningCorpusRef.current = pinned.body;
+      authoritativeAgreementSnapshotRef.current = pinned.body;
+      acceptedReviewCorpusRef.current = pinned.body;
+      hydratedPremiumBodyRef.current = pinned.body;
+      premiumPipelineOutputBodyRef.current = pinned.body;
+      updateLastKnownGoodAuthoritativeDraftRef(
+        lastKnownGoodAuthoritativeDraftRef,
+        pinned.body,
+        "pin_finalized_signer_corpus",
+        { paidProFlow: true, source: "finalized_signer_applied_guided_corpus" },
+      );
+      agreementDocumentDirtyRef.current = false;
+      setAgreementDocumentText(pinned.body);
+      setGuidedAuthVersionNonce((n) => n + 1);
+      logGuidedFinalCorpusPinned({ hash: pinned.hash, bodyLen: pinned.body.length, source });
+    },
+    [setAgreementDocumentText],
+  );
+
+  const restorePinnedFinalizedSignerCorpus = React.useCallback(
+    (reason: string) => {
+      const body = pinnedFinalizedSignerCorpusRef.current.trim();
+      const hash = pinnedFinalizedSignerCorpusHashRef.current.trim();
+      if (!body || !hash) return;
+      finalizedSigningCorpusRef.current = body;
+      authoritativeAgreementSnapshotRef.current = body;
+      acceptedReviewCorpusRef.current = body;
+      hydratedPremiumBodyRef.current = body;
+      premiumPipelineOutputBodyRef.current = body;
+      agreementDocumentDirtyRef.current = false;
+      setAgreementDocumentText(body);
+      setGuidedAuthVersionNonce((n) => n + 1);
+      logGuidedFinalCorpusPinRestored({ hash, bodyLen: body.length, reason });
+    },
+    [setAgreementDocumentText],
+  );
+
+  const setCreateFlowPhaseGuarded = React.useCallback(
+    (next: CreateFlowProductionPhase) => {
+      if (
+        shouldBlockGuidedFinalReviewPhaseRollback({
+          targetPhase: next,
+          currentPhase: createFlowPhaseRef.current as CreateFlowProductionPhase,
+          pinnedHash: pinnedFinalizedSignerCorpusHashRef.current,
+          guidedCompletionPhase,
+          finalReviewExplicitlyOpened:
+            guidedFinalReviewExplicitlyOpened || guidedFinalReviewExplicitlyUnlockedRef.current,
+          guidedSignatureTrackInFlight: guidedSignatureTrackInFlightRef.current,
+        })
+      ) {
+        logGuidedFinalReviewPhaseGuardBlocked("setCreateFlowPhase", next);
+        return;
+      }
+      setCreateFlowPhase(next);
+    },
+    [guidedCompletionPhase, guidedFinalReviewExplicitlyOpened],
+  );
 
   const freezeGuidedAuthoritativeCorpusSnapshot = React.useCallback((corpus: string, source: string) => {
     const stable = corpus.trim();
@@ -15273,6 +15392,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return result;
       }
       const stable = result.body.trim();
+      pinFinalizedSignerAppliedCorpus(stable, source);
       authoritativeAgreementSnapshotRef.current = stable;
       acceptedReviewCorpusRef.current = stable;
       finalizedSigningCorpusRef.current = stable;
@@ -15312,6 +15432,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       currentPremiumMergedIntakeKey,
       intakeCombined,
       syncReviewContinuityState,
+      pinFinalizedSignerAppliedCorpus,
     ],
   );
 
@@ -15474,6 +15595,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPipelineOutputBodyRef.current = corpusText;
     acceptedReviewCorpusRef.current = corpusText;
     authoritativeAgreementSnapshotRef.current = corpusText;
+    pinFinalizedSignerAppliedCorpus(corpusText, "continue_to_signing");
     finalizedSigningCorpusRef.current = corpusText;
     setAgreementDocumentText(corpusText);
     freezeGuidedAuthoritativeCorpusSnapshot(corpusText, "continue_to_signing");
@@ -15525,6 +15647,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient1Email,
     recipient2Email,
     extraPartyReviewEmails,
+    pinFinalizedSignerAppliedCorpus,
   ]);
 
   const handleGuidedOpenFinalReview = React.useCallback((opts?: { modalAlreadyActive?: boolean }): boolean => {
@@ -17735,9 +17858,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       showModalIfSlow("adding_signature_fields");
 
       let id = resolveGuidedSigningPersistAgreementId({
+        postedId: reviewAgreementIdRef.current,
         reviewAgreementIdRef: reviewAgreementIdRef.current,
         reviewAgreementId,
         productionSendBarAgreementId,
+        productionSendBarAgreementIdRef: productionSendBarAgreementIdRef.current,
         draftAgreementId: (mergedDraft as { id?: string | null } | null)?.id ?? null,
         resumeAgreementId: readCreateReviewAgreementResumeId(),
       });
@@ -17763,10 +17888,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setHardError(null);
         const ok = await runPersistAndOpen(mergedDraft, partyCtx, true, "signature", "send");
         setLoading(false);
+        restorePinnedFinalizedSignerCorpus("guided_signature_track_persist");
         id = resolveGuidedSigningPersistAgreementId({
+          postedId: reviewAgreementIdRef.current,
           reviewAgreementIdRef: reviewAgreementIdRef.current,
           reviewAgreementId,
           productionSendBarAgreementId,
+          productionSendBarAgreementIdRef: productionSendBarAgreementIdRef.current,
           draftAgreementId: (mergedDraft as { id?: string | null } | null)?.id ?? null,
           resumeAgreementId: readCreateReviewAgreementResumeId(),
         });

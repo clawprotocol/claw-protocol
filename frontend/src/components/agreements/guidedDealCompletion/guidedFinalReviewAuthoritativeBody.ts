@@ -5,6 +5,7 @@
 
 import type { GuidedFinalCorpusCandidateSource } from "./guidedFinalCorpusFinalizer";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
+import type { PinnedFinalizedSignerCorpus } from "./guidedFinalCorpusPin";
 import {
   scanFatalPartyPlaceholdersAfterManifestApply,
   buildCanonicalFinalPartyManifestFromIdentities,
@@ -128,11 +129,26 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
   minLen?: number;
   signerIdentities?: readonly CanonicalPartyIdentity[];
   signingCorpusReady?: boolean;
+  /** Immutable signer-applied corpus — wins over hydrate/picker/server candidates. */
+  pinnedFinalizedSignerCorpus?: PinnedFinalizedSignerCorpus | null;
 }): GuidedFinalReviewAuthoritativeBodyResolution {
   const minLen = args.minLen ?? GUIDED_FINAL_REVIEW_AUTHORITATIVE_MIN_LEN;
   const identities = args.signerIdentities ?? [];
   const hasSignerHydration = identities.filter((p) => p.partyDisplayName.trim().length >= 2).length >= 2;
   const signingReady = args.signingCorpusReady ?? false;
+
+  const pinned = args.pinnedFinalizedSignerCorpus;
+  if (pinned && pinned.body.length >= minLen) {
+    const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
+      body: pinned.body,
+      source: "finalized_signer_applied_guided_corpus",
+      len: pinned.body.length,
+      hasSignerHydration,
+      finalizedHash: pinned.hash,
+    };
+    logGuidedFinalReviewAuthoritativeBody(resolution);
+    return resolution;
+  }
 
   const eligible = args.candidates
     .filter((c) => !isRejectedGuidedFinalReviewSource(c.source))

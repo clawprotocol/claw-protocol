@@ -507,10 +507,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(slice).toMatch(/setHardError\(null\);[\s\S]*?const existingId = reviewAgreementIdRef/);
     const hydrateOk = intake.indexOf('console.log("[AgreementIntake] persistence + hydrate OK');
     expect(hydrateOk).toBeGreaterThan(0);
-    const afterHydrate = intake.slice(hydrateOk, hydrateOk + 420);
-    expect(afterHydrate).toMatch(/setHardError\(null\);[\s\S]*?setReviewAgreementId\(id\)/);
-    expect(afterHydrate).toContain("setDraft(normalized as unknown as ParsedDraftShape)");
-    expect(afterHydrate).toContain("setCreateFlowPhase(\"draft_ready_for_review\")");
+    expect(intake).toContain("reviewAgreementIdRef.current = id");
+    expect(intake).toContain("restorePinnedFinalizedSignerCorpus(\"runPersistAndOpen_hydrate\")");
+    expect(intake).toContain("setCreateFlowPhaseGuarded(\"draft_ready_for_review\")");
+    expect(intake).toContain("skipDraftReadyPhaseReset");
   });
 
   it("hardErrorForUi suppresses generic save banner when persisted agreement id matches draft id", () => {
@@ -788,6 +788,11 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("openConfirmModal: true");
     expect(intake).toContain("enterGuidedSignatureTrackRoute");
     expect(intake).toContain("resolveGuidedSigningPersistAgreementId");
+    expect(intake).toContain("pinnedFinalizedSignerCorpusHashRef");
+    expect(intake).toContain("pinFinalizedSignerAppliedCorpus");
+    expect(intake).toContain("restorePinnedFinalizedSignerCorpus");
+    expect(intake).toContain("setCreateFlowPhaseGuarded");
+    expect(intake).toContain("reviewAgreementIdRef.current = id");
     expect(intake).toContain("logGuidedSignatureGenericSendBypassed");
     expect(intake).toContain("preparing_signing_links");
     expect(intake).toContain("adding_signature_fields");

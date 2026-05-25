@@ -116,6 +116,17 @@ Date: ____________________`;
 }
 
 describe("resolveGuidedSigningPersistAgreementId", () => {
+  it("prefers postedId immediately after hydrate_before React state flush", () => {
+    expect(
+      resolveGuidedSigningPersistAgreementId({
+        postedId: "bd73-hydrate-success",
+        reviewAgreementIdRef: null,
+        reviewAgreementId: null,
+        productionSendBarAgreementId: null,
+      }),
+    ).toBe("bd73-hydrate-success");
+  });
+
   it("collects agreement id from ref, state, send bar, draft, and resume", () => {
     expect(
       resolveGuidedSigningPersistAgreementId({

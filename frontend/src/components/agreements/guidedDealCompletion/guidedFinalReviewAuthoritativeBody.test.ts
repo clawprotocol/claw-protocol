@@ -63,6 +63,22 @@ describe("guidedFinalReviewAuthoritativeBody", () => {
     expect(resolved.len).toBe(0);
   });
 
+  it("pinned finalized corpus wins over longer server and picker candidates", () => {
+    const signerApplied = "Signer-applied finalized corpus. ".repeat(130);
+    const pinned = { body: signerApplied, hash: "pinned-hash" };
+    const resolved = resolveGuidedFinalReviewAuthoritativeBody({
+      candidates: [
+        { source: "server_full_document_text", body: `${signerApplied} stale server`.repeat(3) },
+        { source: "picker_authoritative", body: `${signerApplied} stale picker`.repeat(3) },
+      ],
+      signerIdentities: identities,
+      signingCorpusReady: true,
+      pinnedFinalizedSignerCorpus: pinned,
+    });
+    expect(resolved.source).toBe("finalized_signer_applied_guided_corpus");
+    expect(resolved.body.trim()).toBe(signerApplied.trim());
+  });
+
   it("rejects server and picker sources when signing-ready", () => {
     const signerApplied = "Signer-applied finalized corpus. ".repeat(130);
     const resolved = resolveGuidedFinalReviewAuthoritativeBody({

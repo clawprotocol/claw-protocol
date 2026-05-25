@@ -40,6 +40,20 @@ describe("resolveSimpleProFinalReviewActive", () => {
     ).toBe(false);
   });
 
+  it("stays active during ready_to_send when finalized corpus is pinned", () => {
+    expect(
+      resolveSimpleProFinalReviewActive({
+        paidProAuthoritative: true,
+        premiumPaidDocumentSurface: true,
+        premiumRecipientUxActive: false,
+        createFlowPhase: "ready_to_send",
+        guidedCompletionPhase: "applied",
+        finalReviewExplicitlyOpened: true,
+        pinnedFinalizedSignerCorpusHash: "abc123",
+      }),
+    ).toBe(true);
+  });
+
   it("is false after recipient_setup_required", () => {
     expect(
       resolveSimpleProFinalReviewActive({

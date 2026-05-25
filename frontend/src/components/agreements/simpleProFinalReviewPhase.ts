@@ -18,15 +18,22 @@ export function resolveSimpleProFinalReviewActive(args: {
   finalReviewExplicitlyOpened?: boolean;
   /** Guided signing confirmation replaces final review document surface. */
   signingConfirmationActive?: boolean;
+  /** Pinned finalized signer corpus — keep final review during signing handoff. */
+  pinnedFinalizedSignerCorpusHash?: string | null;
+  guidedSignatureTrackInFlight?: boolean;
 }): boolean {
   if (!args.paidProAuthoritative || !args.premiumPaidDocumentSurface) return false;
   if (args.premiumRecipientUxActive) return false;
   if (!args.finalReviewExplicitlyOpened) return false;
   if (args.signingConfirmationActive) return false;
-  return (
-    isGuidedFinalReviewPhase(args.createFlowPhase) &&
-    args.guidedCompletionPhase === "applied"
-  );
+  if (args.guidedCompletionPhase !== "applied") return false;
+  const pinActive = Boolean(args.pinnedFinalizedSignerCorpusHash?.trim());
+  const phaseOk =
+    isGuidedFinalReviewPhase(args.createFlowPhase) ||
+    args.createFlowPhase === "ready_to_send" ||
+    (pinActive &&
+      (Boolean(args.guidedSignatureTrackInFlight) || args.createFlowPhase === "draft_ready_for_review"));
+  return phaseOk;
 }
 
 export function logSimpleProFinalReviewMounted(payload: {

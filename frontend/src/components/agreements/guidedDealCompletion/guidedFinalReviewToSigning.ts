@@ -161,22 +161,7 @@ export function resolveGuidedSigningAuthoritativePlain(
   return rendered.length >= minLen ? rendered : "";
 }
 
-export function resolveGuidedSigningPersistAgreementId(args: {
-  reviewAgreementIdRef?: string | null;
-  reviewAgreementId?: string | null;
-  productionSendBarAgreementId?: string | null;
-  draftAgreementId?: string | null;
-  resumeAgreementId?: string | null;
-}): string {
-  return (
-    args.reviewAgreementIdRef?.trim() ||
-    args.reviewAgreementId?.trim() ||
-    args.productionSendBarAgreementId?.trim() ||
-    args.draftAgreementId?.trim() ||
-    args.resumeAgreementId?.trim() ||
-    ""
-  );
-}
+export { resolvePersistAgreementIdAfterHydrate as resolveGuidedSigningPersistAgreementId } from "./guidedFinalCorpusPin";
 
 /** True when body still carries guided pre-signer placeholder tokens (must not enter signing track). */
 export function isGuidedSigningPlaceholderPreviewBody(body: string): boolean {

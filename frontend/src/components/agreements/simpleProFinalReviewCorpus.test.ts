@@ -16,6 +16,19 @@ describe("simpleProFinalReviewCorpus (test28)", () => {
     expect(out.source).toBe("last_known_good");
   });
 
+  it("uses pinned finalized signer corpus over picker when provided", () => {
+    const pinned = "Pinned signer-applied body with Acme LLC. ".repeat(100);
+    const picker = `${pinned} Stale picker appendix. `.repeat(5);
+    const out = resolveSimpleProFinalReviewCorpus({
+      authoritativePlain: "shorter authoritative",
+      pickerPlain: picker,
+      pinnedFinalizedSignerPlain: pinned,
+      finalReviewAuthorityOnly: false,
+    });
+    expect(out.plainText.trim()).toBe(pinned.trim());
+    expect(out.plainText).not.toContain("Stale picker appendix");
+  });
+
   it("does not prefer longer picker/server draft over signer-applied authoritative on final review", () => {
     const signerApplied = "Signer-applied body with Acme LLC and Joe Brown. ".repeat(120);
     const stalePicker = `${signerApplied} Stale picker appendix from server_full_document_text. `.repeat(8);
