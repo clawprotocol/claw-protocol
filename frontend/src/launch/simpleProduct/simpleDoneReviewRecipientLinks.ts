@@ -2,6 +2,10 @@ import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTy
 import { agreementMagicLinkPath } from "../../agreement/AgreementRecipientReview";
 import type { MintRecipientAccessTokenSuccess } from "../../agreement/recipientAccessApi";
 import { mintRecipientAccessTokenResult } from "../../agreement/recipientAccessApi";
+import {
+  resolveRecipientAccessMintFailureMessage,
+  SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE,
+} from "../../agreement/recipientAccessMintPayload";
 import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } from "./reviewLinkRecipientEmailMerge";
 import type { ReviewerLinkRow } from "./reviewerLinkRowModel";
 import { extractReviewLinkTokenFromHref, redactReviewUrlForLog } from "./reviewerLinkRowModel";
@@ -139,6 +143,30 @@ export function clearSimpleDoneReviewRecipientLinks(agreementId: string): void {
 
 export const REVIEW_LINK_MINT_FAILURE_USER_COPY =
   "Review link could not be created. Please check the recipient email and try again.";
+
+export function reviewLinkMintFailureUserCopy(args?: {
+  lastMintErrorCode?: string | null;
+  firstErrorStatus?: number;
+  lastMintErrorDetail?: string | null;
+}): string {
+  if (args?.lastMintErrorCode === SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE) {
+    return resolveRecipientAccessMintFailureMessage({
+      status: args.firstErrorStatus ?? 422,
+      code: args.lastMintErrorCode,
+    });
+  }
+  if (args?.lastMintErrorCode || args?.firstErrorStatus) {
+    const resolved = resolveRecipientAccessMintFailureMessage({
+      status: args.firstErrorStatus ?? 0,
+      code: args.lastMintErrorCode,
+      detail: args.lastMintErrorDetail,
+    });
+    if (resolved !== "Recipient signing link could not be created. Try again in a moment.") {
+      return resolved;
+    }
+  }
+  return REVIEW_LINK_MINT_FAILURE_USER_COPY;
+}
 
 /** True when at least one row has a non-empty review href (caller’s success gate for navigation). */
 export function reviewLinkMintHasUsableUrls(rows: Pick<SimpleDoneReviewRecipientLinkRow, "reviewHref">[]): boolean {

@@ -3,6 +3,7 @@
  */
 
 import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
+import type { Vs01NormTextRect } from "./vs01PageTextLayout";
 import { fieldRectsOverlap, type PlacedSigningField } from "./signingFields";
 import {
   checkInitialsDomTextCollisions,
@@ -105,6 +106,16 @@ export function planVs01InitialsPages(args: {
   return plans;
 }
 
+function canonicalBodyTextOverlapsField(
+  field: PlacedSigningField,
+  text: Pick<Vs01NormTextRect, "text" | "kind" | "x" | "y" | "width" | "height">,
+  tolerance: number,
+): boolean {
+  if (text.kind !== "body") return false;
+  if (!text.text.trim()) return false;
+  return fieldRectsOverlap(field, text, tolerance);
+}
+
 /** Initials/signature summary for canonical signing packet fields (no PDF/corpus merge). */
 export function summarizeCanonicalSigningPacketInitials(args: {
   fields: readonly PlacedSigningField[];
@@ -114,7 +125,13 @@ export function summarizeCanonicalSigningPacketInitials(args: {
 }): Vs01SigningPacketInitialsSummary {
   const pageCount = Math.max(1, args.pageCount);
   const roleCount = Math.max(1, args.roleCount);
-  const eligiblePages = Array.from({ length: pageCount }, (_, i) => i);
+  const witnessPageIndex =
+    args.pages.find((page) =>
+      page.textBlocks.some((b) => /\bIN WITNESS WHEREOF\b/i.test(b.text)),
+    )?.pageIndex ?? pageCount - 1;
+  const eligiblePages = Array.from({ length: pageCount }, (_, i) => i).filter(
+    (p) => p !== witnessPageIndex,
+  );
   const initialsFields = args.fields.filter((f) => f.type === "initials" && f.autoInitials);
   const signatureFields = args.fields.filter((f) => f.type === "signature");
   const pagesWithInitialsPerRole: number[] = [];
@@ -137,7 +154,7 @@ export function summarizeCanonicalSigningPacketInitials(args: {
 
     for (const field of initialsFields.filter((f) => f.page === p)) {
       const hitsText = (pageModel?.textBlocks ?? []).some((text) =>
-        fieldRectsOverlap(field, text, 0.004),
+        canonicalBodyTextOverlapsField(field, text, 0.004),
       );
       const hitsSignature = onPage.some(
         (o) => o.id !== field.id && o.type === "signature" && fieldRectsOverlap(field, o, 0.012),
@@ -147,20 +164,15 @@ export function summarizeCanonicalSigningPacketInitials(args: {
   }
 
   for (const sig of signatureFields) {
+    if (sig.page === witnessPageIndex) continue;
     const pageModel = args.pages.find((page) => page.pageIndex === sig.page);
-    const hitsText = (pageModel?.textBlocks ?? []).some(
-      (text) =>
-        text.text.trim().length > 0 &&
-        fieldRectsOverlap(sig, text, 0.004) &&
-        !/^(?:By|Signature)\s*:/i.test(text.text.trim()),
+    const hitsText = (pageModel?.textBlocks ?? []).some((text) =>
+      canonicalBodyTextOverlapsField(sig, text, 0.004),
     );
     if (hitsText) unsafeSignatureCount += 1;
   }
 
-  const witnessPageIndex =
-    args.pages.find((page) =>
-      page.textBlocks.some((b) => /\bIN WITNESS WHEREOF\b/i.test(b.text)),
-    )?.pageIndex ?? pageCount - 1;
+  const initialsRequired = eligiblePages.length * roleCount;
 
   return {
     pageCount,
@@ -178,7 +190,7 @@ export function summarizeCanonicalSigningPacketInitials(args: {
       unsafeSignatureCount === 0 &&
       incompletePages.length === 0 &&
       unsafeInitialsCount === 0 &&
-      initialsFields.length >= pageCount * roleCount,
+      initialsFields.length >= initialsRequired,
   };
 }
 

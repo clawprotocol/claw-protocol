@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveVs01PreparePacketReadiness } from "./vs01PreparePacketReadiness";
+import {
+  formatVs01PacketReadyDebugLabel,
+  resolveVs01PreparePacketReadiness,
+} from "./vs01PreparePacketReadiness";
 
 const goodSummary = {
   complete: true,
@@ -45,6 +48,12 @@ describe("VS01 prepare packet readiness gate", () => {
       initialsSummary: goodSummary,
     });
     expect(readiness.packetReady).toBe(true);
+  });
+
+  it("maps packet block reasons to safe debug labels without PII", () => {
+    expect(formatVs01PacketReadyDebugLabel("unsafe_initials_fields")).toBe("initials_overlap_or_oob");
+    expect(formatVs01PacketReadyDebugLabel("initials_validation_incomplete")).toBe("initials_incomplete");
+    expect(formatVs01PacketReadyDebugLabel(null)).toBeNull();
   });
 
   it("prepare page uses packetReady-gated bridge copy and no rebuild warning", () => {

@@ -20,6 +20,7 @@ import {
 } from "./signatureRegion";
 import {
   renumberGuidedTopLevelSectionsSequentially,
+  stripGuidedInstructionLeakLines,
   stripOrphanNumberedHeadingLines,
   stripStaleExecutionPlacementCorpusCopy,
 } from "./guidedCorpusLineRepairs";
@@ -377,6 +378,10 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   const dedupe = dedupeGuidedAnswerClauses(out);
   out = dedupe.text;
   repairs.push(...dedupe.repairs);
+
+  const instructionLeak = stripGuidedInstructionLeakLines(out);
+  out = instructionLeak.text;
+  repairs.push(...instructionLeak.repairs);
 
   const executionFooter = stripStaleExecutionPlacementCorpusCopy(out);
   out = executionFooter.text;

@@ -128,7 +128,10 @@ import {
 import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
 import { signingPacketHasVisibleText } from "./vs01CanonicalPageRender";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
-import { resolveVs01PreparePacketReadiness } from "./vs01PreparePacketReadiness";
+import {
+  formatVs01PacketReadyDebugLabel,
+  resolveVs01PreparePacketReadiness,
+} from "./vs01PreparePacketReadiness";
 import { Vs01PrepPreparedBanner } from "./Vs01PrepPreparedBanner";
 
 const INTENT_OPTIONS = ["agree_and_sign"] as const;
@@ -903,11 +906,13 @@ export function StepPrepareSignature({
     setAutoInitialsEveryPage(true);
   }, [agreementBridgePlacementCopy, documentId, numPages]);
 
+  const fieldsForPacketGate = signingPacketModel?.allowed ? signingPacketModel.fields : fields;
+
   const initialsPacketSummary = useMemo(() => {
     if (!autoInitialsEveryPage || numPages <= 0 || !prepareSignerRoles?.length) return null;
     if (signingPacketModel?.allowed) {
       return summarizeCanonicalSigningPacketInitials({
-        fields,
+        fields: fieldsForPacketGate,
         pageCount: numPages,
         roleCount: prepareSignerRoles.length,
         pages: signingPacketModel.pages,
@@ -926,7 +931,7 @@ export function StepPrepareSignature({
     autoInitialsEveryPage,
     numPages,
     prepareSignerRoles,
-    fields,
+    fieldsForPacketGate,
     prepareCorpusText,
     effectivePageLayouts,
     documentId,
@@ -965,7 +970,7 @@ export function StepPrepareSignature({
         placementCanFinish: agreementBridgePlacementCopy
           ? Boolean(
               prepareSignerRoles?.length &&
-                fields.filter((f) => f.type === "signature" && !f.autoInitials).length >=
+                fieldsForPacketGate.filter((f) => f.type === "signature" && !f.autoInitials).length >=
                   prepareSignerRoles.length,
             )
           : Boolean(preparePacketGate?.canFinish),
@@ -978,7 +983,7 @@ export function StepPrepareSignature({
       preparePacketGate,
       agreementBridgePlacementCopy,
       prepareSignerRoles,
-      fields,
+      fieldsForPacketGate,
       initialsPacketSummary,
       canonicalTextRendered,
       canonicalSignatureLinesRendered,
@@ -995,6 +1000,7 @@ export function StepPrepareSignature({
     console.info("[vs01-packet-ready-reason]", {
       packetReady,
       reasons: packetReadiness.reason ? [packetReadiness.reason] : [],
+      debugLabel: formatVs01PacketReadyDebugLabel(packetReadiness.reason),
     });
   }, [agreementBridgePlacementCopy, packetReady, packetReadiness.reason]);
 
@@ -1018,7 +1024,10 @@ export function StepPrepareSignature({
     ) {
       return "Preparing agreement...";
     }
-    return PREPARE_PACKET_BRIDGE_LEAD_BLOCKED;
+    const debug = formatVs01PacketReadyDebugLabel(packetReadiness.reason);
+    return debug
+      ? `${PREPARE_PACKET_BRIDGE_LEAD_BLOCKED} (${debug})`
+      : PREPARE_PACKET_BRIDGE_LEAD_BLOCKED;
   }, [
     agreementBridgePlacementCopy,
     packetReady,
@@ -2670,7 +2679,13 @@ export function StepPrepareSignature({
             </p>
           ) : null}
           {agreementBridgePlacementCopy && !packetReady && !receiptId ? (
-            <div className="vs01-prepare-blocked-panel" role="alert" data-testid="vs01-prepare-packet-blocked">
+            <div
+              className="vs01-prepare-blocked-panel"
+              role="alert"
+              data-testid="vs01-prepare-packet-blocked"
+              data-packet-block-reason={packetReadiness.reason ?? undefined}
+              data-packet-block-debug={formatVs01PacketReadyDebugLabel(packetReadiness.reason) ?? undefined}
+            >
               <p className="vs01-prepare-blocked-panel__title">
                 {showCanonicalFinalizeBlocked
                   ? "Preparing agreement"

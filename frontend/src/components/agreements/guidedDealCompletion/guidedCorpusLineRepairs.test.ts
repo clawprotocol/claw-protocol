@@ -3,6 +3,7 @@ import {
   dedupeRepeatingSentenceLines,
   repairGuidedCorpusLinesBeforeStructure,
   splitMergedSubclauseLine,
+  stripGuidedInstructionLeakLines,
   stripOrphanNumberedHeadingLines,
   stripStaleExecutionPlacementCorpusCopy,
 } from "./guidedCorpusLineRepairs";
@@ -98,6 +99,28 @@ Signature: __________________________
 Name: Joe Smith
 `.trim();
 }
+
+describe("guided instruction leak and subsection splits", () => {
+  it("strips Add LLC suffixes instruction text from body", () => {
+    const raw = `2. Fees and Payment
+Add LLC suffixes for each party listed in the agreement.
+Client will pay Net 30.`;
+    const { text, repairs } = stripGuidedInstructionLeakLines(raw);
+    expect(repairs.some((r) => r.startsWith("strip_instruction_leak"))).toBe(true);
+    expect(text).not.toMatch(/Add LLC suffixes/i);
+    expect(text).toContain("Client will pay Net 30");
+  });
+
+  it("splits run-on section 7 subclauses into separate lines", () => {
+    const line =
+      "7.1 Term. This Agreement starts on the Effective Date. 7.2 Termination for convenience. Either party may terminate. 7.3 Termination for cause.";
+    const parts = splitMergedSubclauseLine(line);
+    expect(parts.length).toBeGreaterThanOrEqual(3);
+    expect(parts[0]).toMatch(/^7\.1 Term\./);
+    expect(parts[1]).toMatch(/^7\.2 Termination for convenience\./);
+    expect(parts[2]).toMatch(/^7\.3/);
+  });
+});
 
 describe("test52 corpus normalization", () => {
   it("repairs corrupted post-answer corpus structure", () => {

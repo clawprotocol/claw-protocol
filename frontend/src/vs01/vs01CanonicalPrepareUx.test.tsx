@@ -15,6 +15,7 @@ import {
 import { prepareGuidedSigningCorpusCleanup } from "../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
 import { resolveCanonicalFinalPartyManifest } from "../components/agreements/guidedDealCompletion/canonicalFinalPartyManifest";
 import { resolveVs01PreparePacketReadiness } from "./vs01PreparePacketReadiness";
+import { summarizeCanonicalSigningPacketInitials } from "./vs01SigningPacketInitials";
 import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
 
 const STARTER_749 = `${"Starter free preview clause. ".repeat(40)}`.slice(0, 749);
@@ -129,11 +130,18 @@ describe("VS01 canonical prepare UX regressions", () => {
     ).not.toContain("text_intersects_initials_band");
   });
 
-  it("places initials on every page for each signer", () => {
+  it("places initials on each body page (not witness) for each signer", () => {
     const model = buildPremiumModel();
     const roleCount = roles().length;
+    const witnessPage = model.pages.find((p) =>
+      p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)),
+    )!;
     for (const page of model.pages) {
       const initials = model.fields.filter((f) => f.type === "initials" && f.page === page.pageIndex);
+      if (page.pageIndex === witnessPage.pageIndex) {
+        expect(initials).toHaveLength(0);
+        continue;
+      }
       expect(initials).toHaveLength(roleCount);
       for (const field of initials) {
         expect(field.y + field.height).toBeLessThanOrEqual(1);
@@ -275,7 +283,27 @@ describe("VS01 canonical prepare UX regressions", () => {
     expect(model.allowed).toBe(true);
     expect(model.pages.length).toBeGreaterThanOrEqual(4);
     expect(model.diagnostics.textIntersectsInitialsBand).toBe(false);
-    expect(model.diagnostics.initialsFieldCount).toBe(model.pages.length * signerRoles.length);
+    const witnessIdx =
+      model.pages.find((p) => p.flowLines.some((l) => /\bIN WITNESS WHEREOF\b/i.test(l)))?.pageIndex ??
+      model.pages.length - 1;
+    const bodyPageCount = model.pages.filter((p) => p.pageIndex !== witnessIdx).length;
+    expect(model.diagnostics.initialsFieldCount).toBe(bodyPageCount * signerRoles.length);
+
+    const initialsSummary = summarizeCanonicalSigningPacketInitials({
+      fields: model.fields,
+      pageCount: model.pages.length,
+      roleCount: signerRoles.length,
+      pages: model.pages,
+    });
+    expect(initialsSummary.complete).toBe(true);
+    const readinessFromModel = resolveVs01PreparePacketReadiness({
+      corpusGate: gate,
+      placementCanFinish: model.fields.filter((f) => f.type === "signature").length >= signerRoles.length,
+      initialsSummary,
+      canonicalTextRendered: true,
+      canonicalSignatureLinesRendered: true,
+    });
+    expect(readinessFromModel.packetReady).toBe(true);
     expect(model.diagnostics.signatureFieldCount).toBe(signerRoles.length);
 
     const signatureFields = model.fields.filter((f) => f.type === "signature");

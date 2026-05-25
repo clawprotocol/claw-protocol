@@ -280,8 +280,12 @@ function assertInitialsModelGeometry(model: ReturnType<typeof buildVisualModel>)
     expect(page.initialsBandRect.height * VS01_PACKET_PAGE_HEIGHT_PT).toBeLessThanOrEqual(72);
     const initials = model.fields.filter((f) => f.type === "initials" && f.page === page.pageIndex);
     const signatures = model.fields.filter((f) => f.type === "signature" && f.page === page.pageIndex);
-    expect(initials).toHaveLength(roleCount);
-    expect(new Set(initials.map((f) => f.assignedPartyIndex)).size).toBe(roleCount);
+    if (page.pageIndex === witnessIdx) {
+      expect(initials).toHaveLength(0);
+    } else {
+      expect(initials).toHaveLength(roleCount);
+      expect(new Set(initials.map((f) => f.assignedPartyIndex)).size).toBe(roleCount);
+    }
 
     const lastLineBottom = Math.max(0, ...page.textBlocks.map((text) => text.y + text.height));
     expect(lastLineBottom).toBeLessThan(page.initialsBandRect.y);
@@ -731,12 +735,17 @@ test.describe("VS01 canonical visual regression", () => {
         await expect(surface).toBeVisible();
         await expect(surface).toHaveCSS("width", `${VS01_PACKET_PAGE_WIDTH_PT}px`);
         await assertAndLogBrowserPageLayoutMetrics(surface, viewport, initialsPage.label, true);
-        await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(2);
-        await expect(surface.locator("[data-vs01-visual-completed-initials]")).toHaveCount(2);
-        await expect(surface.locator("[data-vs01-visual-completed-initials='0']")).toHaveText("AHB");
-        await expect(surface.locator("[data-vs01-visual-completed-initials='1']")).toHaveText("JS");
-        const initialsText = await surface.locator("[data-vs01-visual-completed-initials]").allTextContents();
-        expect(initialsText.map((text) => text.trim()).sort()).toEqual(["AHB", "JS"]);
+        if (initialsPage.label === "witness") {
+          await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(0);
+          await expect(surface.locator("[data-vs01-visual-completed-initials]")).toHaveCount(0);
+        } else {
+          await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(2);
+          await expect(surface.locator("[data-vs01-visual-completed-initials]")).toHaveCount(2);
+          await expect(surface.locator("[data-vs01-visual-completed-initials='0']")).toHaveText("AHB");
+          await expect(surface.locator("[data-vs01-visual-completed-initials='1']")).toHaveText("JS");
+          const initialsText = await surface.locator("[data-vs01-visual-completed-initials]").allTextContents();
+          expect(initialsText.map((text) => text.trim()).sort()).toEqual(["AHB", "JS"]);
+        }
 
         const fontSize = await surface.locator(".vs01-canonical-flow-body").evaluate((el) =>
           getComputedStyle(el).fontSize,

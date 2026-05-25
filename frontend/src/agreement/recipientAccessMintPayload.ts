@@ -88,6 +88,33 @@ export function logRecipientAccessMintPreflight(args: {
   });
 }
 
+export const SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE = "signing_token_secret_not_configured";
+
+export const SIGNING_TOKEN_SECRET_NOT_CONFIGURED_USER_MESSAGE =
+  "Signing links cannot be created on this server: the signing token secret is not configured. " +
+  "Set CLAW_AGREEMENT_SIGNING_TOKEN_SECRET in QA/production, then retry.";
+
+export function resolveRecipientAccessMintFailureMessage(args: {
+  status: number;
+  code?: string | null;
+  detail?: string | null;
+  message?: string | null;
+}): string {
+  const code = (args.code ?? "").trim();
+  if (code === SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE || /signing_token_secret_not_configured/i.test(code)) {
+    return SIGNING_TOKEN_SECRET_NOT_CONFIGURED_USER_MESSAGE;
+  }
+  if (args.status === 422) {
+    return "Recipient signing link could not be created (server rejected the request). Check agreement finalization and server configuration.";
+  }
+  if (args.status === 409) {
+    return "Signing is not finalized on the server yet. Wait a moment and try again.";
+  }
+  const msg = (args.message ?? args.detail ?? "").trim();
+  if (msg) return msg.slice(0, 320);
+  return "Recipient signing link could not be created. Try again in a moment.";
+}
+
 export function logRecipientAccessMint422(detail: unknown, status: number): void {
   if (import.meta.env.MODE === "test") return;
   let code: string | undefined;

@@ -1,6 +1,10 @@
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
-import { stripStaleExecutionPlacementCorpusCopy } from "../components/agreements/guidedDealCompletion/guidedCorpusLineRepairs";
+import {
+  splitMergedSubclauseLine,
+  stripGuidedInstructionLeakLines,
+  stripStaleExecutionPlacementCorpusCopy,
+} from "../components/agreements/guidedDealCompletion/guidedCorpusLineRepairs";
 import {
   corpusHasVisibleSignatureExecutionLines,
   corpusSignatureBlocksHaveRequiredByLines,
@@ -213,12 +217,17 @@ function normalizeLines(corpus: string): string[] {
       continue;
     }
     previousWasBlank = false;
-    if (isStandaloneCanonicalLine(trimmed)) {
-      flushParagraph();
-      out.push(...wrapCanonicalTextLine(trimmed));
-      continue;
+    const expanded = splitMergedSubclauseLine(trimmed);
+    for (const piece of expanded) {
+      const line = piece.trimEnd();
+      if (!line.trim()) continue;
+      if (isStandaloneCanonicalLine(line)) {
+        flushParagraph();
+        out.push(...wrapCanonicalTextLine(line));
+        continue;
+      }
+      paragraph.push(line.trim());
     }
-    paragraph.push(trimmed.trim());
   }
   flushParagraph();
   return out;
@@ -304,7 +313,8 @@ export function maxFlowLinesPerSigningPacketPage(): number {
 }
 
 function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
-  const lines = normalizeLines(corpus);
+  const instructionStripped = stripGuidedInstructionLeakLines(corpus);
+  const lines = normalizeLines(instructionStripped.text);
   const maxLinesPerPage = maxFlowLinesPerSigningPacketPage();
   const pages: PaginatedCorpusSlice[] = [];
   let pageIndex = 0;
@@ -344,7 +354,10 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
             ? 4
             : 0;
     if (/^IN WITNESS WHEREOF/i.test(trimmed) && lineInPage > 0) {
-      flush();
+      const meaningfulOnPage = pageLines.filter((l) => l.trim()).length;
+      if (meaningfulOnPage > 2) {
+        flush();
+      }
     }
     if (
       lineInPage > 0 &&
@@ -614,7 +627,11 @@ export function buildVs01SigningPacketModel(args: {
     fields.push(signatureFieldForAnchor(role, anchor, anchorPage.pageIndex));
   }
 
+  const witnessPageIndex =
+    pages.find((p) => p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)))?.pageIndex ??
+    (pages.length ? pages.length - 1 : 0);
   for (const page of pages) {
+    if (page.pageIndex === witnessPageIndex) continue;
     roles.forEach((role, roleIndex) => {
       fields.push(initialsFieldForRole(role, page.pageIndex, roleIndex, roles.length));
     });

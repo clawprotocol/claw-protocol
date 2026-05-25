@@ -185,7 +185,12 @@ import { readUploadedSourceDocument, writeUploadedSourceDocument } from "./uploa
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { ProRedlineOwnerPanel } from "./ProRedlineOwnerPanel";
 import { normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
-import { mintRecipientAccessToken, putSigningLock } from "../../agreement/recipientAccessApi";
+import {
+  mintRecipientAccessToken,
+  mintRecipientAccessTokenResult,
+  putSigningLock,
+} from "../../agreement/recipientAccessApi";
+import { resolveRecipientAccessMintFailureMessage } from "../../agreement/recipientAccessMintPayload";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import {
   FUNNEL_CTA_SEND_WITH_PRO,
@@ -854,6 +859,9 @@ const AgreementReview: React.FC<Props> = ({
   const [proofOverlay, setProofOverlay] = useState<ExecutionPacketProof | null>(null);
   /** Minted ``t=`` signing URL segment when API + secrets are configured. */
   const [signingAccessToken, setSigningAccessToken] = useState<string | null>(null);
+  const [signingAccessMintConfigWarning, setSigningAccessMintConfigWarning] = useState<string | null>(
+    null,
+  );
   const [recipientProposalFocusId, setRecipientProposalFocusId] = useState<string | null>(null);
   const [economicsOverlay, setEconomicsOverlay] = useState<AgreementEconomicsOverlay | null>(null);
   /** simpleHomeReview: first GET /api/agreements/:id finished (economics parsed); gates send-shell tier flip. */
@@ -1516,8 +1524,23 @@ const AgreementReview: React.FC<Props> = ({
       (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env
         ?.VITE_RECIPIENT_LINK_MINT_KEY || "";
     void (async () => {
-      const minted = await mintRecipientAccessToken(agreementId, { mode: "sign" }, mintKey);
-      if (!cancel && minted?.token) setSigningAccessToken(minted.token);
+      const minted = await mintRecipientAccessTokenResult(agreementId, { mode: "sign" }, mintKey);
+      if (cancel) return;
+      if (minted.ok && minted.data.token?.trim()) {
+        setSigningAccessMintConfigWarning(null);
+        setSigningAccessToken(minted.data.token.trim());
+        return;
+      }
+      if (!minted.ok) {
+        setSigningAccessMintConfigWarning(
+          resolveRecipientAccessMintFailureMessage({
+            status: minted.status,
+            code: minted.code,
+            detail: minted.detail,
+            message: minted.message,
+          }),
+        );
+      }
     })();
     return () => {
       cancel = true;
@@ -5825,6 +5848,15 @@ const AgreementReview: React.FC<Props> = ({
       {!showCompletedAgreementDashboard ? finalizeReadOnlyBanner : null}
       {showPendingSignatureDashboard ? (
         <>
+          {signingAccessMintConfigWarning ? (
+            <p
+              className="mb-3 rounded-lg border border-amber-600/50 bg-amber-950/35 px-4 py-3 text-sm text-amber-100"
+              role="alert"
+              data-testid="signing-access-mint-config-warning"
+            >
+              {signingAccessMintConfigWarning}
+            </p>
+          ) : null}
           <PendingSignaturePanel
             agreementTitle={(draftTitleDisplay || "Untitled agreement")}
             lockedVersionId={lockVidPanel || "—"}

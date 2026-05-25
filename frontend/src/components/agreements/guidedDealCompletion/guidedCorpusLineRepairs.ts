@@ -7,6 +7,11 @@ import { findSignatureRegionStart } from "./signatureRegion";
 const MERGED_SUBCLAUSE_IN_LINE_RE =
   /^(\d+\.\d+)\s+(.+?)\s+(\d+\.\d+)\s+(.+)$/;
 
+const GUIDED_INSTRUCTION_LEAK_RES: readonly RegExp[] = [
+  /^Add LLC suffixes\b/i,
+  /^Use full legal entity names with LLC\/Inc\.\s+suffixes\b/i,
+];
+
 const EXECUTION_PLACEMENT_FOOTER_RE =
   /Execution and signature placement are handled in the electronic signing step\.?/gi;
 
@@ -16,7 +21,25 @@ export function splitMergedSubclauseLine(line: string): string[] {
   if (!trimmed) return [line];
   const merged = trimmed.match(MERGED_SUBCLAUSE_IN_LINE_RE);
   if (!merged) return [line];
-  return [`${merged[1]} ${merged[2]}`, `${merged[3]} ${merged[4]}`];
+  const first = `${merged[1]} ${merged[2]}`.trim();
+  const tail = `${merged[3]} ${merged[4]}${trimmed.slice(merged[0].length)}`.trim();
+  if (!tail) return [first];
+  return [first, ...splitMergedSubclauseLine(tail)];
+}
+
+/** Remove guided UI pill/instruction text accidentally merged into agreement body. */
+export function stripGuidedInstructionLeakLines(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const out: string[] = [];
+  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+    const t = line.trim();
+    if (t && GUIDED_INSTRUCTION_LEAK_RES.some((re) => re.test(t))) {
+      repairs.push(`strip_instruction_leak:${t.slice(0, 24)}`);
+      continue;
+    }
+    out.push(line);
+  }
+  return { text: out.join("\n").replace(/\n{3,}/g, "\n\n"), repairs };
 }
 
 export function splitMergedSubclausesInText(text: string): { text: string; repairs: string[] } {
@@ -285,6 +308,10 @@ export function repairGuidedCorpusLinesBeforeStructure(text: string): { text: st
   const split = splitMergedSubclausesInText(out);
   out = split.text;
   repairs.push(...split.repairs);
+
+  const instructionLeak = stripGuidedInstructionLeakLines(out);
+  out = instructionLeak.text;
+  repairs.push(...instructionLeak.repairs);
 
   const orphanHeadings = stripOrphanNumberedHeadingLines(out);
   out = orphanHeadings.text;

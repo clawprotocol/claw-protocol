@@ -15,6 +15,10 @@ import {
   mergeAgreementDraftWithGuidedSigningHandoff,
 } from "./guidedVs01SigningHandoffSession";
 import { resolveFinalVs01CorpusOrBlock } from "../../../vs01/vs01SigningCorpus";
+import { buildVs01SigningPacketModel } from "../../../vs01/buildVs01SigningPacketModel";
+import { buildVs01PrepareSigningRoles } from "../../../vs01/vs01SignerFieldAssignment";
+import { summarizeCanonicalSigningPacketInitials } from "../../../vs01/vs01SigningPacketInitials";
+import { resolveVs01PreparePacketReadiness } from "../../../vs01/vs01PreparePacketReadiness";
 
 const SHORT_HYDRATED = `${"Hydrated short draft from server. ".repeat(30)}`.slice(0, 2188);
 
@@ -211,5 +215,54 @@ describe("guided VS01 bridge handoff regression (failure shape)", () => {
     );
     expect((merged as { server_full_document_text?: string }).server_full_document_text).toBe(corpus);
     expect((merged as { premium_full_document_text?: string }).premium_full_document_text).toBe(corpus);
+  });
+
+  it("guided Pro handoff corpus yields VS01 prepare packetReady after canonical placement", () => {
+    const corpus = aiAutomationCorpus();
+    expect(corpus).not.toMatch(/Add LLC suffixes/i);
+    const handoff = buildGuidedVs01SigningHandoff({
+      corpusText: corpus,
+      source: "finalized_signer_applied_guided_corpus",
+      signatureRebuilt: true,
+    });
+    const gate = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: corpus,
+      guidedSigningHandoff: handoff,
+      guidedPro: true,
+      premiumComplete: true,
+      signatureRebuilt: true,
+    });
+    expect(gate.allowed).toBe(true);
+    const signerRoles = buildVs01PrepareSigningRoles({
+      agreementId: "ag_bridge_packet",
+      creatorName: "Acme LLC",
+      creatorEmail: "anthem@example.test",
+      ownerSignerName: "Anthem H Blanchard",
+      counterparties: [{ id: "cp1", name: "Joe Smith", email: "joe@example.test" }],
+    });
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: gate.corpus,
+      roles: signerRoles,
+      corpusGateArgs: { guidedSigningHandoff: handoff, premiumComplete: true, signatureRebuilt: true },
+    });
+    expect(model.allowed).toBe(true);
+    const initialsSummary = summarizeCanonicalSigningPacketInitials({
+      fields: model.fields,
+      pageCount: model.pages.length,
+      roleCount: signerRoles.length,
+      pages: model.pages,
+    });
+    expect(initialsSummary.complete).toBe(true);
+    const readiness = resolveVs01PreparePacketReadiness({
+      corpusGate: gate,
+      placementCanFinish:
+        model.fields.filter((f) => f.type === "signature").length >= signerRoles.length,
+      initialsSummary,
+      canonicalTextRendered: true,
+      canonicalSignatureLinesRendered: model.diagnostics.signatureAnchorCount >= signerRoles.length,
+    });
+    expect(readiness.packetReady).toBe(true);
+    expect(readiness.reason).toBeNull();
   });
 });
