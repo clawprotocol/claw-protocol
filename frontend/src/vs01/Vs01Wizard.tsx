@@ -35,6 +35,7 @@ import {
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolveFinalVs01CorpusOrBlock } from "./vs01SigningCorpus";
+import { buildVs01CanonicalPacketSeed, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
 import {
   clearPaidProVs01PostSignHandoff,
@@ -215,6 +216,16 @@ export function Vs01Wizard({
     const seed = (seedDocumentId || "").trim();
     return seed || null;
   });
+
+  useEffect(() => {
+    const did = (documentId ?? "").trim();
+    const aid = (vs01LinkedAgreementId ?? "").trim();
+    const corpus = (prepareCorpusText ?? "").trim();
+    if (!paidProAgreementBridgeSkip || !did || !aid || corpus.length < 1500) return;
+    const seed = buildVs01CanonicalPacketSeed({ documentId: did, agreementId: aid, corpusPlain: corpus });
+    if (seed) storeVs01CanonicalPacketSeed(seed);
+  }, [paidProAgreementBridgeSkip, documentId, vs01LinkedAgreementId, prepareCorpusText]);
+
   const [contentSha256, setContentSha256] = useState<string | null>(null);
   /** Set when document finalize succeeds — drives default agreement title. */
   const [documentMeta, setDocumentMeta] = useState<{
@@ -460,6 +471,7 @@ export function Vs01Wizard({
       counterparties,
       senderPlacedFields,
       recipientPlacedFields,
+      prepareCorpusPlain: prepareCorpusText,
       receiptId,
       receiptHashSha256,
     });

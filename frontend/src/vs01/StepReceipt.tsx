@@ -4,6 +4,7 @@
  */
 import type { Vs01RecipientPlacedField } from "./types";
 import { encodeRecipientManifestForUrl, VS01_RECIPIENT_MANIFEST_QUERY } from "./recipientManifestUrl";
+import { VS01_CANONICAL_PACKET_QUERY } from "./vs01CanonicalPacketSeed";
 
 export const VS01_RECIPIENT_SIGN_QUERY = "vs01_recipient_sign";
 
@@ -70,6 +71,8 @@ export function buildVs01RecipientSigningUrl(opts: {
   agreementId?: string | null;
   /** Stable role id from prepare flow; recipient UI hides other signers’ fields. */
   signerRoleId?: string | null;
+  /** Portable canonical packet payload for cross-device signers. */
+  canonicalPacketPayload?: string | null;
 }): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const path = typeof window !== "undefined" ? window.location.pathname : "/";
@@ -107,6 +110,11 @@ export function buildVs01RecipientSigningUrl(opts: {
     } else {
       params.set("vs01_rmanifest_stored", "1");
     }
+  }
+
+  const canonicalPacketPayload = (opts.canonicalPacketPayload ?? "").trim();
+  if (canonicalPacketPayload) {
+    params.set(VS01_CANONICAL_PACKET_QUERY, canonicalPacketPayload);
   }
 
   const url = `${origin}${path}?${params.toString()}`;

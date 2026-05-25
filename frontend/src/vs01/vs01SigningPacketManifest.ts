@@ -1,8 +1,10 @@
 import type { PlacedSigningField } from "./signingFields";
 import type { Vs01RecipientPlacedField } from "./types";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
+import type { Vs01SigningPacketModel } from "./buildVs01SigningPacketModel";
 import {
   mergeRecipientManifestFieldsForSignerRole,
+  recipientCounterpartyIdForPrepareRole,
   resolveSenderFieldRoleId,
   senderSigningFieldToRecipientExecutionField,
   type Vs01PrepareSigningRole,
@@ -37,6 +39,36 @@ export function buildSignerManifestForRole(args: {
     if (!conv || seen.has(conv.id)) continue;
     seen.add(conv.id);
     out.push(conv);
+  }
+  return out;
+}
+
+/**
+ * Build a full-packet manifest from the canonical signing model so recipient URLs
+ * carry the same field geometry Prepare displayed (initials + witness signatures).
+ */
+export function buildFullPacketManifestFromCanonicalModel(args: {
+  model: Pick<Vs01SigningPacketModel, "fields">;
+  roles: readonly Vs01PrepareSigningRole[];
+}): Vs01RecipientPlacedField[] {
+  const seen = new Set<string>();
+  const out: Vs01RecipientPlacedField[] = [];
+  const roles = [...args.roles];
+  const ownerRole = roles[0]!;
+  for (const role of roles) {
+    const cpId = recipientCounterpartyIdForPrepareRole(role);
+    for (const sf of args.model.fields) {
+      if (resolveSenderFieldRoleId(sf, ownerRole, roles) !== role.roleId) continue;
+      const conv = senderSigningFieldToRecipientExecutionField(sf, cpId);
+      if (!conv || seen.has(conv.id)) continue;
+      seen.add(conv.id);
+      out.push({
+        ...conv,
+        assignedSignerRoleId: role.roleId,
+        assignedSignerRoleLabel: role.roleLabel,
+        assignmentSource: "autoplace",
+      });
+    }
   }
   return out;
 }
@@ -76,6 +108,8 @@ export function buildSigningUrlForPrepareRole(args: {
   roles: Vs01PrepareSigningRole[];
   senderPlacedFields: PlacedSigningField[];
   recipientPlacedFields: Vs01RecipientPlacedField[];
+  packetManifestFields?: readonly Vs01RecipientPlacedField[] | null;
+  canonicalPacketPayload?: string | null;
   documentId: string;
   agreementId: string;
   receiptId?: string | null;
@@ -85,12 +119,15 @@ export function buildSigningUrlForPrepareRole(args: {
   const email =
     (args.role.signerEmail ?? args.role.reviewEmail ?? "").trim() ||
     (args.role.kind === "owner" ? "" : "");
-  const fields = buildFullPacketSigningManifestFields({
-    ownerRole: args.ownerRole,
-    roles: args.roles,
-    senderPlacedFields: args.senderPlacedFields,
-    recipientPlacedFields: args.recipientPlacedFields,
-  });
+  const fields =
+    args.packetManifestFields && args.packetManifestFields.length > 0
+      ? [...args.packetManifestFields]
+      : buildFullPacketSigningManifestFields({
+          ownerRole: args.ownerRole,
+          roles: args.roles,
+          senderPlacedFields: args.senderPlacedFields,
+          recipientPlacedFields: args.recipientPlacedFields,
+        });
   return buildVs01RecipientSigningUrl({
     recipientIndex: args.recipientIndex,
     recipientName: args.role.entityName?.trim() || args.role.partyName,
@@ -101,5 +138,6 @@ export function buildSigningUrlForPrepareRole(args: {
     recipientFieldsForSigner: fields,
     agreementId: args.agreementId,
     signerRoleId: args.role.roleId,
+    canonicalPacketPayload: args.canonicalPacketPayload ?? null,
   });
 }

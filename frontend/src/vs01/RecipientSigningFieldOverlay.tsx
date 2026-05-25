@@ -181,6 +181,7 @@ export function RecipientSigningFieldOverlay({
         required
         value={displayVal}
         data-field-id={field.id}
+        data-vs01-visual-field-type="signature"
         className={`${boxClass} vs01-recipient-signature-slot`}
         style={{
           ...staticStyle,
@@ -271,6 +272,7 @@ export function RecipientSigningFieldOverlay({
           required={false}
           initials={displayVal}
           data-field-id={field.id}
+          data-vs01-visual-field-type="initials"
           className="vs01-recipient-initials-slot__inner"
           style={{ position: "relative", width: "100%", height: "100%", inset: undefined }}
           active={editable && !hasIni}

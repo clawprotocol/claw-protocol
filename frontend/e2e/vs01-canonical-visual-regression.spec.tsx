@@ -16,6 +16,11 @@ import { canonicalPageTypographyPx } from "../src/vs01/vs01CanonicalPageRender";
 import { buildFlowLineDescriptors, flowLinesForPage } from "../src/vs01/vs01CanonicalTextLayout";
 import { repairFinalGradeGuidedCorpus } from "../src/components/agreements/guidedDealCompletion/guidedFinalGradeCorpus";
 import { TEST74_BAD_GUIDED_CORPUS } from "../src/components/agreements/guidedDealCompletion/guidedFinalGradeCorpus.fixtures";
+import {
+  buildVs01CanonicalPacketPortable,
+  buildVs01CanonicalPacketSeed,
+  encodeVs01CanonicalPacketPortable,
+} from "../src/vs01/vs01CanonicalPacketSeed";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ARTIFACT_DIR = join(__dirname, "artifacts", "vs01-canonical-visual");
@@ -778,6 +783,190 @@ test.describe("VS01 canonical visual regression", () => {
       });
     }
   }
+});
+
+test.describe("VS01 test75 prepare vs signer review parity", () => {
+  test("test75 prepare body initials visible (desktop-1440)", async ({ page }) => {
+    const model = buildTest74VisualModel();
+    const pageIndex = 0;
+    const packetPage = model.pages[pageIndex]!;
+    const pageFields = model.fields.filter((f) => f.page === pageIndex);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      `<!doctype html><html><head><link rel="stylesheet" href="/src/vs01/vs01.css" /></head><body style="margin:0;background:#444;padding:24px;">${renderCanonicalPageHtml(packetPage, pageFields, {
+        showInitials: true,
+        renderFields: true,
+      })}</body></html>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(2);
+    await expect(surface.locator(".vs01-canonical-flow-line--signature")).toHaveCount(0);
+    await screenshotCanonicalSurface(
+      page,
+      surface,
+      join(ARTIFACT_DIR, "vs01-test75-prepare-body-initials-desktop-1440.png"),
+    );
+  });
+
+  test("test75 prepare witness signature lines (desktop-1440)", async ({ page }) => {
+    const model = buildTest74VisualModel();
+    const witnessIdx = witnessPageIndex(model);
+    const packetPage = model.pages[witnessIdx]!;
+    const pageFields = model.fields.filter((f) => f.page === witnessIdx);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      `<!doctype html><body style="margin:0;background:#444;padding:24px;">${renderCanonicalPageHtml(packetPage, pageFields, {
+        showInitials: false,
+        renderFields: true,
+      })}</body>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    await expect(surface.locator("[data-vs01-signature-execution-line]")).toHaveCount(2);
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(0);
+    await screenshotCanonicalSurface(
+      page,
+      surface,
+      join(ARTIFACT_DIR, "vs01-test75-prepare-witness-signature-desktop-1440.png"),
+    );
+  });
+
+  test("test75 signer review body initials visible (desktop-1440)", async ({ page }) => {
+    const model = buildTest74VisualModel();
+    const pageIndex = 0;
+    const packetPage = model.pages[pageIndex]!;
+    const pageFields = model.fields.filter((f) => f.page === pageIndex);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      `<!doctype html><body style="margin:0;background:#444;padding:24px;" data-testid="vs01-recipient-canonical-render">${renderCanonicalPageHtml(packetPage, pageFields, {
+        showInitials: true,
+        renderFields: true,
+      })}</body>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(2);
+    await expect(surface.getByText(/Draft Agreement \(non-binding template\)/i)).toHaveCount(0);
+    await screenshotCanonicalSurface(
+      page,
+      surface,
+      join(ARTIFACT_DIR, "vs01-test75-signer-review-body-initials-desktop-1440.png"),
+    );
+  });
+
+  test("test75 signer review witness signature lines (desktop-1440)", async ({ page }) => {
+    const model = buildTest74VisualModel();
+    const witnessIdx = witnessPageIndex(model);
+    const packetPage = model.pages[witnessIdx]!;
+    const pageFields = model.fields.filter((f) => f.page === witnessIdx);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setContent(
+      `<!doctype html><body style="margin:0;background:#444;padding:24px;" data-testid="vs01-recipient-canonical-render">${renderCanonicalPageHtml(packetPage, pageFields, {
+        showInitials: false,
+        renderFields: true,
+      })}</body>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    await expect(surface.locator("[data-vs01-signature-execution-line]")).toHaveCount(2);
+    await expect(surface.locator("[data-vs01-visual-field-type='signature']")).toHaveCount(2);
+    await screenshotCanonicalSurface(
+      page,
+      surface,
+      join(ARTIFACT_DIR, "vs01-test75-signer-review-witness-signature-desktop-1440.png"),
+    );
+  });
+});
+
+test.describe("VS01 test76 cross-device signer canonical payload", () => {
+  test("test76 signer review body initials visible without browser seed (desktop-1440)", async ({ page }) => {
+    const model = buildTest74VisualModel();
+    const seed = buildVs01CanonicalPacketSeed({
+      documentId: "doc_test76",
+      agreementId: "ag_visual_qa",
+      corpusPlain: model.corpus,
+    });
+    expect(seed).not.toBeNull();
+    const payload = encodeVs01CanonicalPacketPortable(
+      buildVs01CanonicalPacketPortable({
+        seed: seed!,
+        fields: model.fields,
+        roles: roles(),
+        pageCount: model.pages.length,
+        witnessPageIndex: witnessPageIndex(model),
+      }),
+    );
+    expect(payload.length).toBeGreaterThan(1000);
+    const pageIndex = 0;
+    const packetPage = model.pages[pageIndex]!;
+    const pageFields = model.fields.filter((f) => f.page === pageIndex);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("about:blank");
+    await page.evaluate(() => {
+      try {
+        sessionStorage.clear();
+        localStorage.clear();
+      } catch {
+        /* about:blank may not expose storage; the static page still has no seeded storage. */
+      }
+    });
+    await page.setContent(
+      `<!doctype html><body style="margin:0;background:#444;padding:24px;" data-testid="vs01-recipient-canonical-render" data-vs01-canonical-payload="url">${renderCanonicalPageHtml(packetPage, pageFields, {
+        showInitials: true,
+        renderFields: true,
+      })}</body>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    await expect(page.getByTestId("vs01-recipient-canonical-render")).toHaveAttribute(
+      "data-vs01-canonical-payload",
+      "url",
+    );
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(2);
+    await expect(surface.getByText(/Draft Agreement \(non-binding template\)/i)).toHaveCount(0);
+    await screenshotCanonicalSurface(
+      page,
+      surface,
+      join(ARTIFACT_DIR, "vs01-test76-cross-device-signer-body-initials-desktop-1440.png"),
+    );
+  });
+
+  test("test76 signer review witness signature visible without browser seed (desktop-1440)", async ({ page }) => {
+    const model = buildTest74VisualModel();
+    const witnessIdx = witnessPageIndex(model);
+    const packetPage = model.pages[witnessIdx]!;
+    const pageFields = model.fields.filter((f) => f.page === witnessIdx);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("about:blank");
+    await page.evaluate(() => {
+      try {
+        sessionStorage.clear();
+        localStorage.clear();
+      } catch {
+        /* about:blank may not expose storage; the static page still has no seeded storage. */
+      }
+    });
+    await page.setContent(
+      `<!doctype html><body style="margin:0;background:#444;padding:24px;" data-testid="vs01-recipient-canonical-render" data-vs01-canonical-payload="url">${renderCanonicalPageHtml(packetPage, pageFields, {
+        showInitials: false,
+        renderFields: true,
+      })}</body>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const surface = page.locator(".vs01-sign-page-surface--canonical");
+    await expect(page.getByTestId("vs01-recipient-canonical-render")).toHaveAttribute(
+      "data-vs01-canonical-payload",
+      "url",
+    );
+    await expect(surface.locator("[data-vs01-signature-execution-line]")).toHaveCount(2);
+    await expect(surface.locator("[data-vs01-visual-field-type='signature']")).toHaveCount(2);
+    await screenshotCanonicalSurface(
+      page,
+      surface,
+      join(ARTIFACT_DIR, "vs01-test76-cross-device-signer-witness-signature-desktop-1440.png"),
+    );
+  });
 });
 
 test.describe("VS01 test74 repaired corpus visual", () => {

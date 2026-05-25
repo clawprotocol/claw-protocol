@@ -97,6 +97,24 @@ export function recipientFinishGateEditableFields(
   return myFields.filter((f) => isRecipientSigningEditableType(f.type));
 }
 
+/** Count distinct signing actions (signature + each initials field) for accurate header copy. */
+export function countRecipientSigningActions(
+  myFields: readonly Vs01RecipientPlacedField[],
+): number {
+  let count = 0;
+  if (myFields.some((f) => f.type === "signature")) count += 1;
+  count += myFields.filter((f) => f.type === "initials").length;
+  return count;
+}
+
+export function recipientSigningActionsLabel(actionCount: number): string {
+  if (actionCount <= 0) return "";
+  if (actionCount === 1) {
+    return "1 action required (signature or initials)";
+  }
+  return `${actionCount} actions required (signature and initials on document pages)`;
+}
+
 /** @deprecated Use {@link recipientEditableFieldIsComplete} for finish gate. */
 export function recipientSigningFieldIsComplete(
   field: Vs01RecipientPlacedField,

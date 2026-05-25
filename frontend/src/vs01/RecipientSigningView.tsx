@@ -34,11 +34,13 @@ import {
   recipientFieldBelongsToLockedSigner,
 } from "./vs01SignerFieldAssignment";
 import {
+  countRecipientSigningActions,
   hydrateRecipientSigningFields,
   isRecipientSigningEditableType,
   recipientEditableFieldIsComplete,
   recipientFinishGateComplete,
   recipientFinishGateEditableFields,
+  recipientSigningActionsLabel,
 } from "./recipientSigningFieldUtils";
 import {
   buildRecipientSigningDocumentFields,
@@ -46,6 +48,13 @@ import {
 } from "./vs01SignerFieldAssignment";
 import { logVs01PersistedGeometryHash } from "./vs01AutoSignaturePacket";
 import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
+import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
+import {
+  VS01_PACKET_PAGE_HEIGHT_PT,
+  VS01_PACKET_PAGE_WIDTH_PT,
+} from "./buildVs01SigningPacketModel";
+import { resolveRecipientCanonicalSigningPacket } from "./resolveRecipientCanonicalSigningPacket";
+import { logVs01CanonicalPacketSeedUse } from "./vs01CanonicalPacketSeed";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -163,29 +172,57 @@ export function RecipientSigningView({
   }, [counterparties]);
 
   const lockedCp = lockedCounterpartyId.trim();
+
+  const prepareRoles = useMemo(() => {
+    const aid = (recipientAgreementId ?? "").trim();
+    if (!aid) return null;
+    const ownerCpId =
+      recipientFields.find((f) => (f.assignedPartyIndex ?? 0) === 0)?.counterpartyId.trim() ||
+      counterparties[0]?.id?.trim() ||
+      lockedCp;
+    const ownerRow =
+      cpById.get(ownerCpId) ?? counterparties.find((c) => c.id === ownerCpId) ?? counterparties[0];
+    const otherCps = counterparties.filter((c) => c.id !== ownerRow?.id);
+    return buildVs01PrepareSigningRoles({
+      agreementId: aid,
+      creatorName: ownerRow?.name?.trim() || "Owner",
+      creatorEmail: ownerRow?.email?.trim() || ownerRow?.signerEmail?.trim() || "",
+      ownerSignerName: ownerRow?.signerName ?? undefined,
+      ownerSignerTitle: ownerRow?.signerTitle ?? undefined,
+      counterparties: otherCps,
+    });
+  }, [recipientAgreementId, recipientFields, counterparties, cpById, lockedCp]);
+
+  const documentFields = useMemo(() => {
+    if (!prepareRoles?.length) return recipientFields;
+    if (!senderPlacedFields.length) return recipientFields;
+    const ownerRole = prepareRoles[0];
+    if (!ownerRole) return recipientFields;
+    return buildRecipientSigningDocumentFields({
+      ownerRole,
+      roles: prepareRoles,
+      recipientPlacedFields: recipientFields,
+      senderPlacedFields,
+    });
+  }, [recipientFields, senderPlacedFields, prepareRoles]);
+
+  const canonicalPacket = useMemo(() => {
+    const did = documentId?.trim() ?? "";
+    const aid = (recipientAgreementId ?? "").trim();
+    if (!did || !aid || !prepareRoles?.length) return null;
+    return resolveRecipientCanonicalSigningPacket({
+      documentId: did,
+      agreementId: aid,
+      roles: prepareRoles,
+    });
+  }, [documentId, recipientAgreementId, prepareRoles]);
+
+  const useCanonicalDocument = Boolean(canonicalPacket?.model.allowed);
+
   const signer = cpById.get(lockedCp);
   const signerName =
     signer?.signerName?.trim() || signer?.name.trim() || "Signer";
   const signerEmail = signer?.email.trim() || "";
-  const documentFields = useMemo(() => {
-    if (!senderPlacedFields.length) return recipientFields;
-    const aid = (recipientAgreementId ?? "").trim();
-    if (!aid) return recipientFields;
-    const roles = buildVs01PrepareSigningRoles({
-      agreementId: aid,
-      creatorName: counterparties[0]?.name?.trim() || "Owner",
-      creatorEmail: counterparties[0]?.email?.trim() || "",
-      counterparties,
-    });
-    const ownerRole = roles[0];
-    if (!ownerRole) return recipientFields;
-    return buildRecipientSigningDocumentFields({
-      ownerRole,
-      roles,
-      recipientPlacedFields: recipientFields,
-      senderPlacedFields,
-    });
-  }, [recipientFields, senderPlacedFields, recipientAgreementId, counterparties]);
 
   const myFields = useMemo(
     () =>
@@ -242,6 +279,23 @@ export function RecipientSigningView({
         return;
       }
 
+      if (useCanonicalDocument && canonicalPacket) {
+        setPdfUrl(null);
+        setPreviewError(null);
+        setPageLayouts(null);
+        setNumPages(canonicalPacket.model.pages.length);
+        setPdfDocReady(true);
+        setPreviewLoading(false);
+        logVs01CanonicalPacketSeedUse({
+          documentId: documentId.trim(),
+          agreementId: (recipientAgreementId ?? "").trim(),
+          corpusHash: canonicalPacket.corpusHash,
+          source: canonicalPacket.seedSource,
+          renderMode: "canonical",
+        });
+        return;
+      }
+
       setPreviewLoading(true);
       setPreviewError(null);
       try {
@@ -276,7 +330,7 @@ export function RecipientSigningView({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [documentId]);
+  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId]);
 
   useLayoutEffect(() => {
     const el = pagesInnerRef.current;
@@ -387,7 +441,9 @@ export function RecipientSigningView({
 
   const allComplete =
     !manifestDecodeError && myFields.length > 0 && recipientFinishGateComplete(myFields);
-  const placementSurface = Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
+  const signingActionCount = countRecipientSigningActions(editableMyFields);
+  const placementSurface =
+    useCanonicalDocument || Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
 
   const genuinelyNoFields = !manifestDecodeError && myFields.length === 0 && !manifestParamPresent;
   const hydrationMiss = !manifestDecodeError && myFields.length === 0 && manifestParamPresent;
@@ -450,11 +506,10 @@ export function RecipientSigningView({
               <span className="vs01-recipient-signing-email">{signerEmail}</span>
             </>
           ) : null}
-          {editableMyFields.length > 0 ? (
+          {signingActionCount > 0 ? (
             <span className="vs01-recipient-signing-field-count">
               {" · "}
-              {editableMyFields.length} action{editableMyFields.length === 1 ? "" : "s"} required
-              (signature &amp; initials)
+              {recipientSigningActionsLabel(signingActionCount)}
             </span>
           ) : null}
         </p>
@@ -507,6 +562,101 @@ export function RecipientSigningView({
           {previewLoading ? (
             <div className="vs01-sign-preview-fallback" role="status">
               Loading document…
+            </div>
+          ) : useCanonicalDocument && canonicalPacket ? (
+            <div
+              className="vs01-sign-doc-pages-wrap vs01-sign-doc-surface vs01-sign-doc-surface--bridge"
+              data-testid="vs01-recipient-canonical-render"
+            >
+              <div ref={pagesInnerRef} className="vs01-sign-pages-inner">
+                {canonicalPacket.model.pages.map((page) => {
+                  const fieldsHere = documentFields.filter((f) => f.page === page.pageIndex);
+                  const senderFieldsHere = senderPlacedFields.filter(
+                    (f) =>
+                      f.page === page.pageIndex &&
+                      !hideSenderTemplateFieldForRecipientSigner(
+                        f,
+                        recipientAgreementId,
+                        lockedSignerRoleId,
+                      ),
+                  );
+                  return (
+                    <div
+                      key={page.pageIndex}
+                      ref={(el) => registerPageStack(page.pageIndex, el)}
+                      className="vs01-sign-page-stack"
+                      data-vs01-sign-page={page.pageIndex}
+                    >
+                      <div
+                        className="vs01-sign-page-surface vs01-sign-page-surface--footer-safe vs01-sign-page-surface--canonical"
+                        style={{
+                          width: VS01_PACKET_PAGE_WIDTH_PT,
+                          height: VS01_PACKET_PAGE_HEIGHT_PT,
+                        }}
+                      >
+                        <Vs01CanonicalSigningPage page={page} pageWidthPx={VS01_PACKET_PAGE_WIDTH_PT} />
+                        <div className="vs01-sign-page-placement-host">
+                          <div
+                            className="vs01-sign-placement-click-layer vs01-sign-placement-click-layer--idle vs01-sign-placement-click-layer--inert"
+                            aria-hidden
+                          />
+                          <div
+                            className={`vs01-sign-overlay${fieldsHere.length > 0 || senderFieldsHere.length > 0 ? " vs01-sign-overlay--placed" : ""}`}
+                            role="presentation"
+                          >
+                            {senderFieldsHere.map((field) => {
+                              const cssRect = normalizedPdfRectToCssPercent(field);
+                              return (
+                                <div
+                                  key={`sender-ref-${field.id}`}
+                                  className={`vs01-sign-sender-ref-box vs01-sign-sender-ref-box--${field.type}`}
+                                  style={{
+                                    position: "absolute",
+                                    left: cssRect.left,
+                                    top: cssRect.top,
+                                    width: cssRect.width,
+                                    height: cssRect.height,
+                                    zIndex: 2,
+                                  }}
+                                  aria-hidden
+                                >
+                                  <SenderReferenceFieldContent
+                                    field={field}
+                                    senderSignatureRef={senderSignatureRef}
+                                  />
+                                </div>
+                              );
+                            })}
+                            {fieldsHere.map((field) => (
+                              <RecipientSigningFieldOverlay
+                                key={field.id}
+                                field={field}
+                                lockedCounterpartyId={lockedCp}
+                                lockedSignerRoleId={lockedSignerRoleId}
+                                recipientAgreementId={recipientAgreementId}
+                                cpById={cpById}
+                                onUpdateValue={updateFieldValue}
+                                signerCount={Math.max(
+                                  2,
+                                  new Set(documentFields.map((f) => f.assignedPartyIndex ?? 0)).size,
+                                )}
+                                pageFieldObstacles={fieldsHere
+                                  .filter((f) => f.id !== field.id)
+                                  .map((f) => ({
+                                    x: f.x,
+                                    y: f.y,
+                                    width: f.width,
+                                    height: f.height,
+                                  }))}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : pdfUrl || (documentId?.trim() && previewError) ? (
             <div className="vs01-sign-doc-pages-wrap vs01-sign-doc-surface">

@@ -9,7 +9,9 @@ import {
   recipientFieldStatusPill,
   recipientFieldStatusPillLabel,
   recipientFinishGateComplete,
+  countRecipientSigningActions,
   recipientFinishGateEditableFields,
+  recipientSigningActionsLabel,
   resolveRecipientSigningAutoValue,
   signerKeyForRecipientField,
 } from "./recipientSigningFieldUtils";
@@ -155,5 +157,15 @@ describe("recipientSigningFieldUtils", () => {
     );
     expect(recipientFinishGateComplete(done)).toBe(true);
     expect(recipientEditableFieldIsComplete(field("printed_name"))).toBe(true);
+  });
+
+  it("countRecipientSigningActions counts signature plus each initials field", () => {
+    const fields = [
+      field("signature"),
+      { ...field("initials"), id: "i1", page: 0 },
+      { ...field("initials"), id: "i2", page: 1 },
+    ];
+    expect(countRecipientSigningActions(fields)).toBe(3);
+    expect(recipientSigningActionsLabel(3)).toContain("3 actions required");
   });
 });

@@ -1,6 +1,17 @@
 import type { PlacedSigningField } from "./signingFields";
 import type { Vs01Counterparty, Vs01RecipientPlacedField } from "./types";
-import { buildSigningUrlForPrepareRole } from "./vs01SigningPacketManifest";
+import {
+  buildFullPacketManifestFromCanonicalModel,
+  buildSigningUrlForPrepareRole,
+} from "./vs01SigningPacketManifest";
+import { buildVs01SigningPacketModel } from "./buildVs01SigningPacketModel";
+import {
+  buildVs01CanonicalPacketPortable,
+  buildVs01CanonicalPacketSeed,
+  encodeVs01CanonicalPacketPortable,
+  storeVs01CanonicalPacketSeed,
+} from "./vs01CanonicalPacketSeed";
+import { VS01_PACKET_MANIFEST_SCOPE, storeRecipientManifest } from "./StepReceipt";
 import {
   evaluatePrepareFinishClick,
   type PrepareFinishClickResult,
@@ -30,6 +41,8 @@ export type PreparePacketContinueInput = {
   counterparties: Vs01Counterparty[];
   senderPlacedFields: PlacedSigningField[];
   recipientPlacedFields: Vs01RecipientPlacedField[];
+  /** Authoritative guided Pro corpus used on Prepare canonical pages. */
+  prepareCorpusPlain?: string | null;
   receiptId?: string | null;
   receiptHashSha256?: string | null;
 };
@@ -72,6 +85,44 @@ export function handlePreparePacketContinue(
   }
 
   const ownerRole = roles[0]!;
+  const corpusPlain = (input.prepareCorpusPlain ?? "").trim();
+  let canonicalManifestFields: Vs01RecipientPlacedField[] | null = null;
+  let canonicalPacketPayload: string | null = null;
+  if (corpusPlain.length >= 1500) {
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: corpusPlain,
+      roles,
+    });
+    if (model.allowed) {
+      const seed = buildVs01CanonicalPacketSeed({
+        documentId: input.documentId,
+        agreementId: input.agreementId,
+        corpusPlain,
+      });
+      if (seed) storeVs01CanonicalPacketSeed(seed);
+      const manifestFields = buildFullPacketManifestFromCanonicalModel({ model, roles });
+      canonicalManifestFields = manifestFields;
+      if (manifestFields.length > 0) {
+        storeRecipientManifest(input.documentId, VS01_PACKET_MANIFEST_SCOPE, manifestFields);
+      }
+      if (seed) {
+        const witnessPageIndex = model.pages.findIndex((p) =>
+          p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)),
+        );
+        canonicalPacketPayload = encodeVs01CanonicalPacketPortable(
+          buildVs01CanonicalPacketPortable({
+            seed,
+            fields: manifestFields,
+            roles,
+            pageCount: model.pages.length,
+            witnessPageIndex,
+          }),
+        );
+      }
+    }
+  }
+
   const rid = (input.receiptId ?? "").trim();
   const named = input.counterparties
     .map((c, recipientIndex) => ({ c, recipientIndex }))
@@ -91,6 +142,8 @@ export function handlePreparePacketContinue(
         roles,
         senderPlacedFields: input.senderPlacedFields,
         recipientPlacedFields: input.recipientPlacedFields,
+        packetManifestFields: canonicalManifestFields,
+        canonicalPacketPayload,
         documentId: input.documentId,
         agreementId: input.agreementId,
         receiptId: rid || null,
@@ -106,6 +159,8 @@ export function handlePreparePacketContinue(
     roles,
     senderPlacedFields: input.senderPlacedFields,
     recipientPlacedFields: input.recipientPlacedFields,
+    packetManifestFields: canonicalManifestFields,
+    canonicalPacketPayload,
     documentId: input.documentId,
     agreementId: input.agreementId,
     receiptId: rid || null,

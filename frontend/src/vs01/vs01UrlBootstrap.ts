@@ -1,6 +1,11 @@
 import type { Vs01Counterparty, Vs01Step, Vs01RecipientPlacedField } from "./types";
 import { VS01_PACKET_MANIFEST_SCOPE, VS01_RECIPIENT_SIGN_QUERY, loadRecipientManifest } from "./StepReceipt";
 import {
+  decodeVs01CanonicalPacketPortable,
+  storeVs01CanonicalPacketSeed,
+  VS01_CANONICAL_PACKET_QUERY,
+} from "./vs01CanonicalPacketSeed";
+import {
   counterpartiesFromRecipientManifestFields,
   decodeRecipientManifestParam,
   ensureRecipientFieldDefaults,
@@ -84,7 +89,12 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
 
   const manifestRaw = params.get(VS01_RECIPIENT_MANIFEST_QUERY);
   const manifestStored = params.get("vs01_rmanifest_stored") === "1";
-  const recipientManifestParamPresent = manifestRaw !== null || manifestStored;
+  const canonicalPacketRaw = params.get(VS01_CANONICAL_PACKET_QUERY);
+  const canonicalPacket = decodeVs01CanonicalPacketPortable(canonicalPacketRaw);
+  if (canonicalPacket) {
+    storeVs01CanonicalPacketSeed(canonicalPacket.seed);
+  }
+  const recipientManifestParamPresent = manifestRaw !== null || manifestStored || canonicalPacketRaw !== null;
 
   let recipientHydratedFields: Vs01RecipientPlacedField[] = [];
   let recipientManifestDecodeError: string | null = null;
@@ -114,6 +124,25 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     } else {
       recipientManifestDecodeError = decoded.error;
     }
+  } else if (canonicalPacket?.fields.length) {
+    const normalized = normalizeRecipientManifestCounterparties(canonicalPacket.fields, lockedId);
+    const cps = counterpartiesFromRecipientManifestFields(
+      normalized,
+      lockedId,
+      recipientName || "Recipient",
+      recipientEmail,
+    );
+    const cpMap = new Map(cps.map((c) => [c.id, c]));
+    recipientHydratedFields = hydrateRecipientSigningFields(
+      ensureRecipientFieldDefaults(
+        normalized,
+        recipientName || "Recipient",
+        recipientEmail || undefined,
+        { signerName: cps.find((c) => c.id === lockedId)?.signerName },
+      ),
+      cpMap,
+    );
+    hydrationSource = "url_manifest";
   } else {
     const lookupId = counterpartyIdFromUrl || lockedId;
     const packetStored = loadRecipientManifest(documentId, VS01_PACKET_MANIFEST_SCOPE);
