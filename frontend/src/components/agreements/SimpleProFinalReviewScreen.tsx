@@ -241,11 +241,12 @@ export function SimpleProFinalReviewScreen({
 
       {reviewFirstHandoffError ? (
         <div
-          className="rounded-md border border-amber-300/90 bg-amber-50 px-3 py-3 text-sm text-amber-950"
+          className="rounded-md border border-amber-400/90 bg-amber-50 px-3 py-3 text-sm text-amber-950"
           role="alert"
           data-testid="simple-pro-review-first-handoff-error"
         >
-          <p className="font-medium">{reviewFirstHandoffError}</p>
+          <p className="font-semibold text-amber-950">Review links unavailable</p>
+          <p className="mt-2 leading-relaxed">{reviewFirstHandoffError}</p>
           {onBackToFinalReviewFromReviewHandoff || onRetryReviewFirstHandoff ? (
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               {onBackToFinalReviewFromReviewHandoff ? (

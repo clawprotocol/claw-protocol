@@ -533,6 +533,16 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("logPaidProEditReturnSkipBasicGenerate");
   });
 
+  it("review-first retry re-invokes completeGuidedPaidProReviewFirstHandoff without /app/send", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain('completeGuidedPaidProReviewFirstHandoff("simple_pro_review_first_retry")');
+    expect(intake).toContain("onRetryReviewFirstHandoff");
+    const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
+    const block = intake.slice(handoffIdx, handoffIdx + 800);
+    expect(block).toContain("guidedReviewFirstHandoffInFlightRef.current = false");
+    expect(block).toContain("setReviewFirstHandoffBusy(false)");
+  });
+
   it("simplified Pro review flow uses SimpleProFinalReviewScreen and signing send verification", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("showSimplifiedProReviewSigningFlow");

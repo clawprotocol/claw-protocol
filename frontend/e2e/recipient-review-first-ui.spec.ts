@@ -23,14 +23,61 @@ type DraftRec = {
   updated_at: string;
 };
 
+function buildPremiumCompletionSnapshot(draft: DraftRec, bodyPlain: string) {
+  return {
+    savedAt: Date.now(),
+    premiumDraft: {
+      ...draft,
+      server_full_document_text: bodyPlain,
+      premium_full_document_text: bodyPlain,
+      premium_render_source: "server_full_document_text",
+    },
+    premiumParties: (draft.parties ?? []).map((p) => ({ name: p.name, role: p.role })),
+    recipientCandidates: [],
+    premiumReadonlyPlainText: bodyPlain,
+    premiumWinningBodyText: bodyPlain,
+    premiumAccepted: true,
+    premiumPipelineRenderSource: "server_full_document_text",
+    premiumRenderResolveSource: "server_full_document_text",
+    review_mode: "generated_agreement_review",
+  };
+}
+
 function installReviewFirstApi(
   page: Page,
   draft: DraftRec,
-  opts?: { recipientAccessMintStatus?: number; recipientAccessMintCode?: string },
+  opts?: { recipientAccessMintStatus?: number; recipientAccessMintCode?: string; bodyPlain?: string },
 ) {
+  const bodyPlain = opts?.bodyPlain ?? draft.server_full_document_text ?? "x".repeat(600);
   return page.route("**/api/**", async (route) => {
     const url = route.request().url();
     const method = route.request().method();
+
+    if (url.includes("/api/agreements/premium-full-draft") && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          title: draft.title,
+          agreement_family: "services_agreement",
+          document_text: bodyPlain,
+          server_full_document_text: bodyPlain,
+          key_terms_found: ["Parties", "Payment"],
+          missing_material_info: [],
+          generation_outcome: "ok",
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/api/agreements/premium-missing-facts") && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ questions: [] }),
+      });
+      return;
+    }
 
     if (url.includes("/health") && method === "GET") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
@@ -376,10 +423,6 @@ test("create final review click — review-first token error, no legacy /app/sen
   const bodyPlain = "x".repeat(600);
 
   await primeE2eApiBase(page);
-  await installReviewFirstApi(page, draft, {
-    recipientAccessMintStatus: 422,
-    recipientAccessMintCode: "signing_token_secret_not_configured",
-  });
 
   const visitedPaths: string[] = [];
   page.on("framenavigated", (frame) => {
@@ -392,40 +435,63 @@ test("create final review click — review-first token error, no legacy /app/sen
     }
   });
 
+  const premiumSnap = buildPremiumCompletionSnapshot(draft, bodyPlain);
+
   await page.addInitScript(
-    ({ id, primed, body }) => {
+    ({ id, snap, body }) => {
+      try {
+        localStorage.setItem("claw_premium_completed", "1");
+        localStorage.setItem("claw_org_id", "local-org");
+      } catch {
+        /* ignore */
+      }
       sessionStorage.setItem("claw_premium_send_intent", "review");
       sessionStorage.setItem(
-        "claw_review_first_handoff_source_v1",
-        JSON.stringify({ source: "simple_pro_send_for_review", agreementId: id, savedAt: Date.now() }),
+        "claw_paid_premium_completion_session_v1",
+        JSON.stringify({ v: 1, source: "qa_bypass", markedAt: Date.now() }),
       );
+      sessionStorage.setItem("claw_premium_recipients_surface_released_v1", "0");
       sessionStorage.setItem(
         "claw_review_first_pinned_corpus_v1",
         JSON.stringify({ agreementId: id, bodyPlain: body, savedAt: Date.now() }),
       );
-      sessionStorage.setItem(
-        "claw_premium_completion_snapshot_v1",
-        JSON.stringify({
-          agreementId: id,
-          premiumDraft: primed,
-          savedAt: Date.now(),
-        }),
-      );
+      sessionStorage.setItem("claw_premium_completion_snapshot_v1", JSON.stringify(snap));
     },
-    { id: agreementId, primed: draft, body: bodyPlain },
+    { id: agreementId, snap: premiumSnap, body: bodyPlain },
   );
 
-  await page.goto("/app/create", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await installReviewFirstApi(page, draft, {
+    recipientAccessMintStatus: 422,
+    recipientAccessMintCode: "signing_token_secret_not_configured",
+    bodyPlain,
+  });
+
+  await page.goto("/app/create?premiumCompletion=1", { waitUntil: "domcontentloaded", timeout: 30_000 });
+
+  const finalReviewCta = page.getByTestId("guided-review-updated-agreement-cta");
+  if (await finalReviewCta.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await finalReviewCta.click();
+  }
+
+  await page
+    .getByTestId("simple-pro-final-review-screen")
+    .or(page.getByRole("heading", { name: "Review your Pro agreement" }))
+    .first()
+    .waitFor({ state: "visible", timeout: 45_000 })
+    .catch(() => undefined);
 
   const sendForReview = page.getByTestId("simple-pro-send-for-review");
-  const onFinalReview = await sendForReview.isVisible({ timeout: 12_000 }).catch(() => false);
+  const onFinalReview = await sendForReview.isVisible({ timeout: 20_000 }).catch(() => false);
 
   if (onFinalReview) {
     await sendForReview.click();
     await expect(page.getByTestId("simple-pro-review-first-handoff-error")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText(/Review links could not be created/i)).toBeVisible();
     await expect(page.getByText(/signing\/review token minting is not configured/i)).toBeVisible();
+    await expect(page.getByText("We couldn't save your draft just now")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Retry creating review links" })).toBeVisible();
     await page.screenshot({
-      path: join(artifactDir, "create-click-review-first-token-error.png"),
+      path: join(artifactDir, "create-click-review-first-inline-token-error.png"),
       fullPage: true,
     });
     await page.screenshot({
@@ -433,11 +499,25 @@ test("create final review click — review-first token error, no legacy /app/sen
       fullPage: true,
     });
   } else {
+    await page.addInitScript(({ id, primed }) => {
+      sessionStorage.setItem("claw_premium_send_intent", "review");
+      const handoff = {
+        v: 1,
+        agreementId: id,
+        primedDraft: primed,
+        streamlinedSimpleFlow: true,
+        premiumSendIntent: "review",
+        openFlowPhase: "review",
+        savedAt: Date.now(),
+      };
+      window.history.replaceState({ clawSimpleSendHandoff: handoff }, "", `/app/send/${id}`);
+    }, { id: agreementId, primed: draft });
     await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await expect(page).toHaveURL(/\/app\/create/, { timeout: 15_000 });
-    await expect(page.getByTestId("review-first-send-surface")).toHaveCount(0);
+    await expect(page.getByTestId("review-first-mint-error-panel")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText(/Review links could not be created/i)).toBeVisible();
+    await expect(page.getByText("We couldn't save your draft just now")).toHaveCount(0);
     await page.screenshot({
-      path: join(artifactDir, "create-click-review-first-token-error.png"),
+      path: join(artifactDir, "create-click-review-first-inline-token-error.png"),
       fullPage: true,
     });
     await page.screenshot({
@@ -452,12 +532,17 @@ test("create final review click — review-first token error, no legacy /app/sen
     "Continue to send",
     "Send this as a professional agreement",
     "Continue with Pro",
+    "We couldn't save your draft just now",
   ]) {
     await expect(page.getByText(forbidden, { exact: false })).toHaveCount(0);
   }
 
+  if (onFinalReview) {
+    await expect(page.getByText(/Review links could not be created/i)).toBeVisible();
+  }
+
   const sendPathHits = visitedPaths.filter((p) => p.includes("/app/send/"));
-  expect(sendPathHits.length).toBeLessThanOrEqual(onFinalReview ? 0 : 1);
+  expect(sendPathHits.length).toBeLessThanOrEqual(onFinalReview ? 0 : 2);
 });
 
 test("create final review click — mocked mint success lands on /app/done", async ({ page }) => {

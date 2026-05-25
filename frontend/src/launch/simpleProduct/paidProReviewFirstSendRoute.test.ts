@@ -40,12 +40,16 @@ describe("paid Pro review-first send route (no generic /app/send gate)", () => {
       "utf8",
     );
     const fnIdx = intake.indexOf("const openPaidProPostInlineSendDestination = React.useCallback");
-    const block = intake.slice(fnIdx, fnIdx + 2200);
-    expect(block).toContain('effectivePremiumSendMode === "review"');
-    expect(block).toContain("intake_inline_send_review_first");
-    const reviewBranchEnd = block.indexOf('premiumSendIntent: "review"');
-    const navigateSendIdx = block.indexOf("navigate(`/app/send/");
-    expect(reviewBranchEnd).toBeGreaterThan(-1);
-    expect(navigateSendIdx).toBeGreaterThan(reviewBranchEnd);
+    const block = intake.slice(fnIdx, fnIdx + 2400);
+    const reviewStart = block.indexOf('if (effectivePremiumSendMode === "review")');
+    const signatureStart = block.indexOf("shouldSkipPaidProPrepareReviewLinkInterstitial");
+    const reviewBranch = block.slice(
+      reviewStart,
+      signatureStart > reviewStart ? signatureStart : reviewStart + 900,
+    );
+    expect(reviewBranch).toContain("intake_inline_send_review_first");
+    expect(reviewBranch).not.toContain("navigate(`/app/send/");
+    expect(reviewBranch).toContain("setReviewFirstHandoffError");
+    expect(reviewBranch).toContain("setHardError(null)");
   });
 });

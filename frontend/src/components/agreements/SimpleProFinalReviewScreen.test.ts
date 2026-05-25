@@ -24,6 +24,24 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(block).not.toContain("navigate(`/app/send/");
   });
 
+  it("mint 422 uses reviewFirstHandoffError only — not setHardError on mint failure", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
+    const block = intake.slice(handoffIdx, handoffIdx + 12000);
+    expect(block).toContain("const failReviewFirstMint = (message: string, reason: string) => {");
+    expect(block).toContain("setHardError(null);");
+    expect(block).toContain("setReviewFirstHandoffError(message);");
+    expect(block).toContain("logReviewFirstInlineErrorRendered");
+    expect(block).toContain("failReviewFirstMint(result.failure.userMessage, result.failure.reason)");
+    expect(block).toContain("clearReviewFirstMintInFlight()");
+    expect(block).not.toMatch(/failReviewFirstMint[\s\S]{0,120}setHardError\(message\)/);
+  });
+
+  it("hardErrorForUi suppresses generic save footer when reviewFirstHandoffError on final review", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("if (reviewFirstHandoffError && simpleProFinalReviewActive) return null;");
+  });
+
   it("openPaidProPostInlineSendDestination never navigates to /app/send for review intent", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const fnIdx = intake.indexOf("const openPaidProPostInlineSendDestination = React.useCallback");

@@ -14,6 +14,8 @@ import {
   shouldBypassGenericOnGenerateForGuidedReview,
   shouldShowPacketSignerMetaLine,
   isGuidedSigningPlaceholderPreviewBody,
+  isReviewFirstMintFailureReason,
+  isReviewFirstPersistFailureReason,
 } from "./guidedFinalReviewToSigning";
 import { finalizeGuidedProAgreementCorpus } from "./guidedFinalCorpusFinalizer";
 import { resolveCanonicalFinalPartyManifest } from "./canonicalFinalPartyManifest";
@@ -533,5 +535,20 @@ Date: ____________________`;
     expect(manifest.parties[0].signerName).toBe("Anthem Blanchard");
     expect(manifest.parties[1].partyName).toBe("Joe Smith");
     expect(manifest.parties[1].signerTitle).toBeNull();
+  });
+});
+
+describe("review-first handoff failure classification", () => {
+  it("treats review_link_mint and handoff_exception as mint failures", () => {
+    expect(isReviewFirstMintFailureReason("review_link_mint")).toBe(true);
+    expect(isReviewFirstMintFailureReason("handoff_exception")).toBe(true);
+    expect(isReviewFirstMintFailureReason("vs01_seed")).toBe(true);
+    expect(isReviewFirstMintFailureReason("persist_failed")).toBe(false);
+  });
+
+  it("treats persist reasons separately from mint", () => {
+    expect(isReviewFirstPersistFailureReason("persist_failed")).toBe(true);
+    expect(isReviewFirstPersistFailureReason("agreement_id_missing")).toBe(true);
+    expect(isReviewFirstPersistFailureReason("review_link_mint")).toBe(false);
   });
 });

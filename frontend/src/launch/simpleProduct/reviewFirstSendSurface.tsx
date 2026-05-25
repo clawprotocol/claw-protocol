@@ -3,6 +3,8 @@ import { SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE } from "../../agreement/recipi
 import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
 import { peekPremiumSendIntent, type PremiumSendIntent } from "./premiumSendIntent";
 
+export const REVIEW_FIRST_INLINE_ERROR_HEADLINE = "Review links unavailable";
+
 /** Session marker: paid Pro final review → “Send for review first” (survives `/app/send` safety-net landings). */
 export const REVIEW_FIRST_HANDOFF_SOURCE_SS_KEY = "claw_review_first_handoff_source_v1";
 

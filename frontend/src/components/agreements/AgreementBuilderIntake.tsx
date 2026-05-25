@@ -417,15 +417,20 @@ import {
 } from "../../launch/simpleProduct/paidProPostRecipientSetupHandoff";
 import {
   clearReviewFirstHandoffSource,
+  clearReviewFirstMintInFlight,
   REVIEW_FIRST_SIMPLE_PRO_SOURCE,
   writeReviewFirstHandoffSource,
   writeReviewFirstPinnedCorpus,
 } from "../../launch/simpleProduct/reviewFirstSendSurface";
 import {
   logReviewFirstLegacySendBlocked,
+  logReviewFirstInlineErrorRendered,
   logReviewFirstMarkerWritten,
   logReviewFirstPersistComplete,
   logReviewFirstPersistStart,
+  logReviewFirstMintStart,
+  isReviewFirstMintFailureReason,
+  isReviewFirstPersistFailureReason,
 } from "./guidedDealCompletion/guidedFinalReviewToSigning";
 import {
   explicitSignerNameForEntity,
@@ -12913,6 +12918,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   const hardErrorForUi = useMemo(() => {
     if (!hardError) return null;
+    /** Paid Pro review-first mint failures use inline panel on final review — never the generic save footer. */
+    if (reviewFirstHandoffError && simpleProFinalReviewActive) return null;
     const humanized = humanizeHardIntakeError(hardError);
     const draftId = String((draft as { id?: unknown } | null)?.id ?? "").trim();
     const rid = (reviewAgreementId || "").trim();
@@ -12972,6 +12979,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     workspaceUi,
     reviewAgreementId,
     guidedProUxState,
+    reviewFirstHandoffError,
+    simpleProFinalReviewActive,
   ]);
   const errorIsHydrate = Boolean(hardError && isHydrateIntakeErrorRaw(hardError));
 
@@ -16201,8 +16210,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           (vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : guidedAuthoritativeBodyPlain) || undefined,
       });
       if (!result.ok) {
+        setHardError(null);
         setReviewFirstHandoffError(result.failure.userMessage);
-        setHardError(result.failure.userMessage);
+        logReviewFirstInlineErrorRendered({
+          agreementId: id,
+          reason: result.failure.reason,
+          path: "openPaidProPostInlineSendDestination",
+        });
       }
       return;
     }
@@ -17788,11 +17802,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setReviewFirstHandoffError(null);
       logReviewFirstHandoffStart({ source, phase: createFlowPhase });
 
-      const failReviewFirst = (message: string, reason: string) => {
-        logReviewFirstError({ source, reason, message });
-        setReviewFirstHandoffError(message);
+      const failReviewFirstPersist = (message: string, reason: string) => {
+        logReviewFirstError({ source, reason, message, failureClass: "persist" });
+        setReviewFirstHandoffError(null);
         setHardError(message);
       };
+
+      const failReviewFirstMint = (message: string, reason: string) => {
+        logReviewFirstError({ source, reason, message, failureClass: "mint" });
+        setHardError(null);
+        setReviewFirstHandoffError(message);
+        logReviewFirstInlineErrorRendered({ source, agreementId: productionSendBarAgreementId || reviewAgreementId, reason });
+      };
+
+      const failReviewFirst = (message: string, reason: string) => {
+        if (isReviewFirstMintFailureReason(reason)) {
+          failReviewFirstMint(message, reason);
+          return;
+        }
+        if (isReviewFirstPersistFailureReason(reason)) {
+          failReviewFirstPersist(message, reason);
+          return;
+        }
+        failReviewFirstMint(message, reason);
+      };
+
+      clearReviewFirstMintInFlight();
 
       try {
         const finalized = finalizeAndFreezeGuidedFinalCorpus("guided_review_first_handoff");
@@ -17928,6 +17963,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         logGuidedReviewGenericSendBypassed({ source, agreementId: id, bodyLen: bodyPlain.length });
 
         const donePath = `/app/done/${encodeURIComponent(id)}`;
+        logReviewFirstMintStart({
+          source,
+          agreementId: id,
+          bodyLen: bodyPlain.length,
+          signingCorpusLen: bodyPlain.length,
+        });
         const result = await executePaidProPostRecipientSetupHandoff({
           navigate: (to) => {
             void navigate(to);
@@ -17940,7 +17981,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementCorpusText: bodyPlain,
         });
         if (!result.ok) {
-          failReviewFirst(result.failure.userMessage, result.failure.reason);
+          failReviewFirstMint(result.failure.userMessage, result.failure.reason);
           return;
         }
         logReviewFirstLinkCreated({ agreementId: id, destination: result.destination, source });

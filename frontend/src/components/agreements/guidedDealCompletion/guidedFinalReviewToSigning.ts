@@ -572,6 +572,29 @@ export function logReviewFirstLegacySendBlocked(payload: Record<string, unknown>
   console.info("[review-first-legacy-send-blocked]", payload);
 }
 
+export function logReviewFirstInlineErrorRendered(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-inline-error-rendered]", payload);
+}
+
+/** Mint/persist failure reasons from paid Pro review-first handoff. */
+export function isReviewFirstMintFailureReason(reason: string): boolean {
+  const r = (reason || "").trim();
+  return r === "review_link_mint" || r === "handoff_exception" || r === "vs01_seed";
+}
+
+export function isReviewFirstPersistFailureReason(reason: string): boolean {
+  const r = (reason || "").trim();
+  return (
+    r === "persist_failed" ||
+    r === "agreement_id_missing" ||
+    r === "draft_missing" ||
+    r === "final_corpus_not_ready" ||
+    r === "transition_not_ready"
+  );
+}
+
 export function logGuidedSignatureTrackStart(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

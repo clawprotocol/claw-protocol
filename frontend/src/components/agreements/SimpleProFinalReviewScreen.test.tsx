@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE } from "../../launch/simpleProduct/reviewFirstSendSurface";
 import { SimpleProFinalReviewScreen } from "./SimpleProFinalReviewScreen";
 
 describe("SimpleProFinalReviewScreen", () => {
@@ -98,6 +99,51 @@ describe("SimpleProFinalReviewScreen", () => {
     );
     expect(screen.getByTestId("simple-pro-send-for-review").textContent).toContain("Creating review links");
     expect((screen.getByTestId("simple-pro-send-for-review") as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+  });
+
+  it("shows signing-token config copy with retry and back actions for mint 422", () => {
+    const onRetry = vi.fn();
+    const onBack = vi.fn();
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        reviewFirstHandoffError={REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE}
+        onRetryReviewFirstHandoff={onRetry}
+        onBackToFinalReviewFromReviewHandoff={onBack}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const panel = screen.getByTestId("simple-pro-review-first-handoff-error");
+    expect(panel.textContent).toContain("Review links unavailable");
+    expect(panel.textContent).toContain("Review links could not be created");
+    expect(panel.textContent).toContain("signing/review token minting is not configured");
+    fireEvent.click(screen.getByTestId("simple-pro-review-first-retry"));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("simple-pro-review-first-back"));
+    expect(onBack).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
+  it("clears busy state on send-for-review when handoff error is shown (retry enabled)", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        reviewFirstHandoffError={REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE}
+        onRetryReviewFirstHandoff={vi.fn()}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    expect((screen.getByTestId("simple-pro-send-for-review") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("simple-pro-review-first-retry") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
     cleanup();
   });
 });
