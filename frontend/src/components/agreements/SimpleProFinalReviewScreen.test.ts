@@ -42,6 +42,17 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(intake).toContain("if (reviewFirstHandoffError && simpleProFinalReviewActive) return null;");
   });
 
+  it("SimpleProFinalReviewScreen renders review-first error in final review actions region", () => {
+    const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
+    expect(screen).toContain('data-testid="simple-pro-final-review-actions"');
+    expect(screen).toContain("reviewFirstActionsBlocked");
+    expect(screen).toContain('data-testid="simple-pro-review-first-handoff-error"');
+    expect(screen).toContain("scrollIntoView");
+    const actionsIdx = screen.indexOf('data-testid="simple-pro-final-review-actions"');
+    const errorIdx = screen.indexOf('data-testid="simple-pro-review-first-handoff-error"');
+    expect(errorIdx).toBeGreaterThan(actionsIdx);
+  });
+
   it("openPaidProPostInlineSendDestination never navigates to /app/send for review intent", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const fnIdx = intake.indexOf("const openPaidProPostInlineSendDestination = React.useCallback");

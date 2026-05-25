@@ -82,23 +82,46 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
-  it("shows inline review-first handoff error and busy label on send for review", () => {
+  it("shows busy status above actions while minting (send buttons remain)", () => {
     render(
       <SimpleProFinalReviewScreen
         agreementHtml="<p>Body</p>"
         reviewFirstHandoffBusy
-        reviewFirstHandoffError="We could not create review links. Try again."
         onSendForSignature={vi.fn()}
         onSendForReview={vi.fn()}
         onCopyAgreement={vi.fn()}
         onExportAgreement={vi.fn()}
       />,
     );
-    expect(screen.getByTestId("simple-pro-review-first-handoff-error").textContent).toContain(
-      "We could not create review links",
+    expect(screen.getByTestId("simple-pro-review-first-handoff-busy").textContent).toContain(
+      "Creating review links",
     );
     expect(screen.getByTestId("simple-pro-send-for-review").textContent).toContain("Creating review links");
     expect((screen.getByTestId("simple-pro-send-for-review") as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+  });
+
+  it("replaces final review action buttons with inline review-first error panel", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        reviewFirstHandoffError="We could not create review links. Try again."
+        onRetryReviewFirstHandoff={vi.fn()}
+        onBackToFinalReviewFromReviewHandoff={vi.fn()}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const actions = screen.getByTestId("simple-pro-final-review-actions");
+    expect(actions.contains(screen.getByTestId("simple-pro-review-first-handoff-error"))).toBe(true);
+    expect(screen.getByTestId("simple-pro-review-first-handoff-error").textContent).toContain(
+      "Review links unavailable",
+    );
+    expect(screen.queryByTestId("simple-pro-send-for-review")).toBeNull();
+    expect(screen.queryByTestId("simple-pro-send-for-signature")).toBeNull();
+    expect(screen.queryByText(/We couldn.t save your draft just now/i)).toBeNull();
     cleanup();
   });
 
@@ -128,7 +151,7 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
-  it("clears busy state on send-for-review when handoff error is shown (retry enabled)", () => {
+  it("enables retry when handoff error is shown (mint actions replaced)", () => {
     render(
       <SimpleProFinalReviewScreen
         agreementHtml="<p>Body</p>"
@@ -140,7 +163,7 @@ describe("SimpleProFinalReviewScreen", () => {
         onExportAgreement={vi.fn()}
       />,
     );
-    expect((screen.getByTestId("simple-pro-send-for-review") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId("simple-pro-send-for-review")).toBeNull();
     expect((screen.getByTestId("simple-pro-review-first-retry") as HTMLButtonElement).disabled).toBe(
       false,
     );

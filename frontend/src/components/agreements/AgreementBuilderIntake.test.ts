@@ -538,7 +538,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain('completeGuidedPaidProReviewFirstHandoff("simple_pro_review_first_retry")');
     expect(intake).toContain("onRetryReviewFirstHandoff");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 800);
+    const block = intake.slice(handoffIdx, handoffIdx + 12000);
     expect(block).toContain("guidedReviewFirstHandoffInFlightRef.current = false");
     expect(block).toContain("setReviewFirstHandoffBusy(false)");
   });

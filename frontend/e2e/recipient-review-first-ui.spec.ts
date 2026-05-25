@@ -485,11 +485,21 @@ test("create final review click — review-first token error, no legacy /app/sen
 
   if (onFinalReview) {
     await sendForReview.click();
-    await expect(page.getByTestId("simple-pro-review-first-handoff-error")).toBeVisible({ timeout: 25_000 });
+    const inlineError = page.getByTestId("simple-pro-review-first-handoff-error");
+    await expect(inlineError).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("simple-pro-final-review-actions")).toBeVisible();
+    await expect(page.getByTestId("simple-pro-send-for-review")).toHaveCount(0);
     await expect(page.getByText(/Review links could not be created/i)).toBeVisible();
     await expect(page.getByText(/signing\/review token minting is not configured/i)).toBeVisible();
     await expect(page.getByText("We couldn't save your draft just now")).toHaveCount(0);
+    await expect(page.getByText("Continue with draft version")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Retry creating review links" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Back to final review" })).toBeVisible();
+    await inlineError.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: join(artifactDir, "create-click-review-first-visible-inline-error.png"),
+      fullPage: true,
+    });
     await page.screenshot({
       path: join(artifactDir, "create-click-review-first-inline-token-error.png"),
       fullPage: true,
@@ -516,6 +526,12 @@ test("create final review click — review-first token error, no legacy /app/sen
     await expect(page.getByTestId("review-first-mint-error-panel")).toBeVisible({ timeout: 25_000 });
     await expect(page.getByText(/Review links could not be created/i)).toBeVisible();
     await expect(page.getByText("We couldn't save your draft just now")).toHaveCount(0);
+    await expect(page.getByText("Continue with draft version")).toHaveCount(0);
+    await page.getByTestId("review-first-mint-error-panel").scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: join(artifactDir, "create-click-review-first-visible-inline-error.png"),
+      fullPage: true,
+    });
     await page.screenshot({
       path: join(artifactDir, "create-click-review-first-inline-token-error.png"),
       fullPage: true,
@@ -532,6 +548,7 @@ test("create final review click — review-first token error, no legacy /app/sen
     "Continue to send",
     "Send this as a professional agreement",
     "Continue with Pro",
+    "Continue with draft version",
     "We couldn't save your draft just now",
   ]) {
     await expect(page.getByText(forbidden, { exact: false })).toHaveCount(0);
@@ -589,6 +606,10 @@ test("create final review click — mocked mint success lands on /app/done", asy
   await mintOk;
   await expect(page).toHaveURL(new RegExp(`/app/done/${agreementId}`), { timeout: 25_000 });
   await expect(page.getByText("Review link created")).toBeVisible({ timeout: 20_000 });
+  await page.screenshot({
+    path: join(artifactDir, "review-link-created-after.png"),
+    fullPage: true,
+  });
   await page.screenshot({
     path: join(artifactDir, "create-click-review-first-success.png"),
     fullPage: true,

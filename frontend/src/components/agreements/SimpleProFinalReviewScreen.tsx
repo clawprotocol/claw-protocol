@@ -114,8 +114,10 @@ export function SimpleProFinalReviewScreen({
   className = "",
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const reviewFirstErrorRef = useRef<HTMLDivElement>(null);
   const [editAgreementTextOpen, setEditAgreementTextOpen] = useState(false);
   const [showUploadActions, setShowUploadActions] = useState(Boolean(uploadedSource));
+  const reviewFirstActionsBlocked = Boolean(reviewFirstHandoffError?.trim());
   const canDirectEditPlainText = Boolean(onEditablePlainTextChange && onSavePlainTextEdits);
   const canSuggestEdits =
     !suppressPostReviewEditUx &&
@@ -135,6 +137,16 @@ export function SimpleProFinalReviewScreen({
   useEffect(() => {
     if (uploadedSource) setShowUploadActions(true);
   }, [uploadedSource]);
+
+  useEffect(() => {
+    if (!reviewFirstHandoffError?.trim()) return;
+    const el = reviewFirstErrorRef.current;
+    if (!el) return;
+    const timer = window.setTimeout(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [reviewFirstHandoffError]);
 
   return (
     <div
@@ -239,43 +251,6 @@ export function SimpleProFinalReviewScreen({
         </p>
       ) : null}
 
-      {reviewFirstHandoffError ? (
-        <div
-          className="rounded-md border border-amber-400/90 bg-amber-50 px-3 py-3 text-sm text-amber-950"
-          role="alert"
-          data-testid="simple-pro-review-first-handoff-error"
-        >
-          <p className="font-semibold text-amber-950">Review links unavailable</p>
-          <p className="mt-2 leading-relaxed">{reviewFirstHandoffError}</p>
-          {onBackToFinalReviewFromReviewHandoff || onRetryReviewFirstHandoff ? (
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              {onBackToFinalReviewFromReviewHandoff ? (
-                <button
-                  type="button"
-                  className="rounded-lg border border-amber-400/80 bg-white px-3 py-2 text-xs font-semibold text-amber-950"
-                  disabled={reviewFirstHandoffBusy}
-                  onClick={onBackToFinalReviewFromReviewHandoff}
-                  data-testid="simple-pro-review-first-back"
-                >
-                  Back to final review
-                </button>
-              ) : null}
-              {onRetryReviewFirstHandoff ? (
-                <button
-                  type="button"
-                  className="rounded-lg bg-amber-900 px-3 py-2 text-xs font-semibold text-amber-50"
-                  disabled={reviewFirstHandoffBusy}
-                  onClick={onRetryReviewFirstHandoff}
-                  data-testid="simple-pro-review-first-retry"
-                >
-                  {reviewFirstHandoffBusy ? "Retrying…" : "Retry creating review links"}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
       {corpusRecoveryMessage ? (
         <div
           className="rounded-md border border-amber-300/90 bg-amber-50 px-3 py-3 text-sm leading-relaxed text-amber-950"
@@ -309,71 +284,125 @@ export function SimpleProFinalReviewScreen({
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-2">
-        <button
-          type="button"
-          className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-          disabled={sendDisabled || packetStale || bulkApplyBusy}
-          onClick={onSendForSignature}
-          data-testid="simple-pro-send-for-signature"
-        >
-          {signaturePrimaryLabel}
-        </button>
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          {onChangeSigningOrder ? (
-            <button
-              type="button"
-              className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-              disabled={sendDisabled || packetStale || bulkApplyBusy}
-              onClick={onChangeSigningOrder}
-              data-testid="simple-pro-change-signing-order"
-            >
-              {signatureSecondaryLabel}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={sendDisabled || packetStale || bulkApplyBusy || reviewFirstHandoffBusy}
-            onClick={onSendForReview}
-            data-testid="simple-pro-send-for-review"
+      <div
+        className="flex flex-col gap-2"
+        data-testid="simple-pro-final-review-actions"
+        aria-live={reviewFirstActionsBlocked ? "assertive" : undefined}
+      >
+        {reviewFirstHandoffBusy && !reviewFirstActionsBlocked ? (
+          <p
+            className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-center text-xs font-medium text-stone-700"
+            role="status"
+            data-testid="simple-pro-review-first-handoff-busy"
           >
-            {reviewFirstHandoffBusy ? "Creating review links…" : reviewSecondaryLabel}
-          </button>
-          <button
-            type="button"
-            className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            onClick={onCopyAgreement}
-            data-testid="simple-pro-copy-agreement"
-          >
-            {copyAck ? "Copied" : "Copy agreement"}
-          </button>
-          <button
-            type="button"
-            className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={exportBusy}
-            onClick={onExportAgreement}
-            data-testid="simple-pro-export-agreement"
-          >
-            {exportBusy ? "Preparing export…" : "Download / export"}
-          </button>
-        </div>
-        {exportError ? (
-          <p className="text-[11px] font-medium text-amber-800" role="alert">
-            {exportError}
+            Creating review links…
           </p>
         ) : null}
-        {canEditAgreementText ? (
-          <button
-            type="button"
-            className="self-start text-[11px] font-medium text-stone-600 underline decoration-stone-400/70 underline-offset-2 hover:text-stone-800"
-            aria-expanded={editAgreementTextOpen}
-            onClick={() => setEditAgreementTextOpen((v) => !v)}
-            data-testid="simple-pro-edit-agreement-text-toggle"
+
+        {reviewFirstActionsBlocked ? (
+          <div
+            ref={reviewFirstErrorRef}
+            className="rounded-lg border-2 border-amber-500/90 bg-amber-50 px-4 py-4 text-sm text-amber-950 shadow-md shadow-amber-900/10"
+            role="alert"
+            data-testid="simple-pro-review-first-handoff-error"
           >
-            {editAgreementTextOpen ? "Hide edit options" : "Edit agreement text"}
-          </button>
-        ) : null}
+            <p className="text-base font-semibold text-amber-950">Review links unavailable</p>
+            <p className="mt-2 leading-relaxed">{reviewFirstHandoffError}</p>
+            {onBackToFinalReviewFromReviewHandoff || onRetryReviewFirstHandoff ? (
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                {onRetryReviewFirstHandoff ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-lg bg-amber-900 px-4 py-2.5 text-sm font-semibold text-amber-50 sm:w-auto"
+                    disabled={reviewFirstHandoffBusy}
+                    onClick={onRetryReviewFirstHandoff}
+                    data-testid="simple-pro-review-first-retry"
+                  >
+                    {reviewFirstHandoffBusy ? "Retrying…" : "Retry creating review links"}
+                  </button>
+                ) : null}
+                {onBackToFinalReviewFromReviewHandoff ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-lg border border-amber-500/80 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 sm:w-auto"
+                    disabled={reviewFirstHandoffBusy}
+                    onClick={onBackToFinalReviewFromReviewHandoff}
+                    data-testid="simple-pro-review-first-back"
+                  >
+                    Back to final review
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
+              disabled={sendDisabled || packetStale || bulkApplyBusy}
+              onClick={onSendForSignature}
+              data-testid="simple-pro-send-for-signature"
+            >
+              {signaturePrimaryLabel}
+            </button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              {onChangeSigningOrder ? (
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+                  disabled={sendDisabled || packetStale || bulkApplyBusy}
+                  onClick={onChangeSigningOrder}
+                  data-testid="simple-pro-change-signing-order"
+                >
+                  {signatureSecondaryLabel}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+                disabled={sendDisabled || packetStale || bulkApplyBusy || reviewFirstHandoffBusy}
+                onClick={onSendForReview}
+                data-testid="simple-pro-send-for-review"
+              >
+                {reviewFirstHandoffBusy ? "Creating review links…" : reviewSecondaryLabel}
+              </button>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+                onClick={onCopyAgreement}
+                data-testid="simple-pro-copy-agreement"
+              >
+                {copyAck ? "Copied" : "Copy agreement"}
+              </button>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+                disabled={exportBusy}
+                onClick={onExportAgreement}
+                data-testid="simple-pro-export-agreement"
+              >
+                {exportBusy ? "Preparing export…" : "Download / export"}
+              </button>
+            </div>
+            {exportError ? (
+              <p className="text-[11px] font-medium text-amber-800" role="alert">
+                {exportError}
+              </p>
+            ) : null}
+            {canEditAgreementText ? (
+              <button
+                type="button"
+                className="self-start text-[11px] font-medium text-stone-600 underline decoration-stone-400/70 underline-offset-2 hover:text-stone-800"
+                aria-expanded={editAgreementTextOpen}
+                onClick={() => setEditAgreementTextOpen((v) => !v)}
+                data-testid="simple-pro-edit-agreement-text-toggle"
+              >
+                {editAgreementTextOpen ? "Hide edit options" : "Edit agreement text"}
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
 
       {canEditAgreementText && editAgreementTextOpen ? (
