@@ -109,13 +109,13 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
     expect(panel.textContent).not.toMatch(/\bCLAW\b/i);
     expect(panel.textContent).toContain("Changes proposed");
-    expect(panel.textContent).toContain("Nothing is signed yet.");
+    expect(panel.textContent).toContain("Nothing is signed yet, and everyone must approve the updated version before signing.");
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /Save updated draft\?/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Submit proposed update\?/i })).toBeTruthy();
     expect(screen.getByTestId("recipient-send-suggested-edits-modal").textContent).toContain(
       "These go to the agreement owner.",
     );

@@ -274,10 +274,13 @@ const API_BASE = resolveApiBase();
 const RECIPIENT_SIGNING_READINESS_POLL_MS = 8000;
 const REVIEW_FIRST_TITLE = "Review agreement";
 const REVIEW_FIRST_HELPER =
-  "Read the draft, approve it, or suggest a change. Nothing is signed yet. Everyone must approve the same version before signing.";
+  "Read the draft, approve it, or propose an updated draft. Nothing is signed yet. Everyone must approve the same version before signing.";
 const REVIEW_FIRST_APPROVE_LABEL = "Approve draft";
-const REVIEW_FIRST_SAVE_UPDATED_LABEL = "Save updated draft";
+const REVIEW_FIRST_PROPOSE_UPDATED_LABEL = "Propose updated draft";
+const REVIEW_FIRST_SAVE_UPDATED_LABEL = "Submit proposed update";
 const REVIEW_FIRST_UPLOAD_LABEL = "Upload updated draft";
+const REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE =
+  "Open the personal review link the sender gave you so LawDog can attribute your proposed update.";
 
 function recipientAcceptTransitionDiag(message: string, payload: Record<string, unknown>) {
   if (typeof window === "undefined") return;
@@ -483,6 +486,17 @@ function recipientAgreementTitleForDisplay(raw: string | null | undefined): stri
   const t = (raw || "").trim();
   if (!t) return null;
   return normalizeAgreementDisplayTitle(t) || t;
+}
+
+function scheduleAExcerpt(text: string): string {
+  const t = (text || "").trim();
+  if (!t) return "";
+  const idx = t.search(/SCHEDULE\s+A\b/i);
+  if (idx < 0) return "";
+  const rest = t.slice(idx).trim();
+  const next = rest.slice(1).search(/\n\s*SCHEDULE\s+[B-Z]\b/i);
+  const section = next >= 0 ? rest.slice(0, next + 1).trim() : rest;
+  return section.length > 900 ? `${section.slice(0, 900).trim()}…` : section;
 }
 
 export type AgreementRecipientEntry =
@@ -1457,6 +1471,17 @@ export function AgreementRecipientReview({
 
   const simpleRecipientChange = useMemo(() => {
     if (!previewDiff || previewDiff.isCompleteNoOp) return null;
+    if (recipientPreview?.routingKind === "whole_document") {
+      const schedulePrevious = scheduleAExcerpt(recipientRedlinePlainTexts?.currentPlain ?? "");
+      const scheduleProposed = scheduleAExcerpt(recipientRedlinePlainTexts?.proposedPlain ?? "");
+      if (schedulePrevious && scheduleProposed && schedulePrevious !== scheduleProposed) {
+        return {
+          title: "Schedule A updated",
+          previous: schedulePrevious,
+          proposed: scheduleProposed,
+        };
+      }
+    }
     const cards = buildRecipientClauseCards(
       previewDiff.snapshotCompare,
       previewDiff.hasMaterialTextDiff,
@@ -1473,7 +1498,7 @@ export function AgreementRecipientReview({
       previous: previous.length > 520 ? `${previous.slice(0, 520).trim()}…` : previous,
       proposed: proposed.length > 520 ? `${proposed.slice(0, 520).trim()}…` : proposed,
     };
-  }, [previewDiff, recipientRedlinePlainTexts]);
+  }, [previewDiff, recipientPreview?.routingKind, recipientRedlinePlainTexts]);
 
   const reviewerHeadlineName = useMemo(
     () =>
@@ -2035,6 +2060,7 @@ export function AgreementRecipientReview({
     !previewing &&
     !saving &&
     !revisedUploadAnalyzing &&
+    !needsPersonalizedLink &&
     (workflowMode === "revised"
       ? Boolean(externalAiPaste.trim())
       : Boolean(instruction.trim()) &&
@@ -2803,7 +2829,7 @@ export function AgreementRecipientReview({
           ) : null}
         </div>
         <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-          Nothing is signed yet. If this version is saved, everyone must approve it before signing.
+          Nothing is signed yet, and everyone must approve the updated version before signing.
         </p>
         <p className="sr-only">{PRODUCT_NOT_LAW_FIRM}</p>
         {recipientImportSanitizeNote ? (
@@ -4235,9 +4261,7 @@ export function AgreementRecipientReview({
           className="rounded-lg border border-rose-800/45 bg-rose-950/25 px-4 py-3 text-xs text-rose-100"
           role="alert"
         >
-          This agreement uses participant ids. Open the personal link the owner sent you (it includes{" "}
-          <code className="text-rose-200">?p=…</code> in the URL) so your suggestions and approvals are attributed
-          correctly.
+          {REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE}
         </div>
       ) : null}
 
@@ -4338,15 +4362,23 @@ export function AgreementRecipientReview({
             </button>
             <button
               type="button"
-              data-testid="recipient-review-suggest-changes"
+              data-testid="recipient-review-propose-updated-draft"
               className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
               disabled={suggestControlsDisabled}
               onClick={() => {
-                proRedlineSuggestTextareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-                window.setTimeout(() => proRedlineSuggestTextareaRef.current?.focus({ preventScroll: true }), 120);
+                setComposePathCardsVisible(false);
+                setWorkspaceTab("revise");
+                setWorkflowMode("revised");
+                setRevisedSubmode("paste");
+                setRevisedIntakePhase("editing");
+                setDraftImportError(null);
+                setRecipientPreview(null);
+                setRecipientRevisePreviewError(null);
+                setError(null);
+                scrollAndFocusSuggestPanel();
               }}
             >
-              Suggest changes
+              {REVIEW_FIRST_PROPOSE_UPDATED_LABEL}
             </button>
             {draft ? (
               <RecipientAgreementReadPdfExport
@@ -4414,7 +4446,8 @@ export function AgreementRecipientReview({
         </section>
       ) : null}
 
-      {entry.kind === "review" &&
+      {false &&
+      entry.kind === "review" &&
       draft &&
       isPaidProAgreementAuthoritative({ draft, agreementId, includeLocalCompletionMarker: false }) &&
       !viewerLike &&
@@ -4543,6 +4576,16 @@ export function AgreementRecipientReview({
           >
             ← Back to agreement
           </button>
+
+          {needsPersonalizedLink ? (
+            <div
+              className="rounded-lg border border-rose-800/45 bg-rose-950/25 px-4 py-3 text-xs text-rose-100"
+              role="alert"
+              data-testid="recipient-review-personal-link-required"
+            >
+              {REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE}
+            </div>
+          ) : null}
 
           {hasPendingSuggestion ? (
             <div className="rounded-lg border border-amber-800/45 bg-amber-950/25 p-4 text-sm text-amber-100">

@@ -236,7 +236,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(screen.getByTestId("recipient-revised-workspace-notes-hint")).toBeTruthy();
     const paste = "x".repeat(2500);
     fireEvent.change(scoped.getByTestId("recipient-revised-draft-paste"), { target: { value: paste } });
-    expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Save updated draft/i);
+    expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Submit proposed update/i);
     await userEvent.click(screen.getAllByTestId("recipient-compare-versions-button")[0]!);
 
     await waitFor(() => {

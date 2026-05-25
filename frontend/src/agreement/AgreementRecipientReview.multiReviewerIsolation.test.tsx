@@ -92,7 +92,7 @@ describe("AgreementRecipientReview multi-reviewer token isolation", () => {
 
     expect(screen.getByTestId("recipient-review-first-actions")).toBeTruthy();
     expect(screen.getByTestId("recipient-review-approve-draft")).toBeTruthy();
-    expect(screen.getByTestId("recipient-review-suggest-changes")).toBeTruthy();
+    expect(screen.getByTestId("recipient-review-propose-updated-draft")).toBeTruthy();
     expect(screen.queryByTestId("recipient-review-edit-draft")).toBeNull();
   });
 });

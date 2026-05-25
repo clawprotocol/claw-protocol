@@ -23,6 +23,12 @@ type DraftRec = {
   updated_at: string;
 };
 
+const ORIGINAL_SCHEDULE_A =
+  "SCHEDULE A — Phase, Payment, and Support Terms\n\nSpecific compensation mechanics will be completed in Schedule A before execution.";
+
+const UPDATED_SCHEDULE_A =
+  "SCHEDULE A — Phase, Payment, and Support Terms\n\nTotal project fee: $120,000 USD.\n\n$72,000 build/configuration due kickoff.\n\n$30,000 rollout/launch due when workflows/dashboards ready for client review.\n\n$18,000 support handoff/acceptance due at final acceptance or 30 days after launch.\n\n$6,000 monthly support begins after launch. Support scope and Net 30 invoice terms apply.";
+
 function buildPremiumCompletionSnapshot(draft: DraftRec, bodyPlain: string) {
   return {
     savedAt: Date.now(),
@@ -117,6 +123,25 @@ function installReviewFirstApi(
           signing_token_env_var_detected:
             opts?.signingTokenEnvVarDetected ??
             (signingConfigured ? "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET" : null),
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/api/agreements/access/validate") && method === "GET") {
+      const partyIdx = (draft.parties ?? []).findIndex((p) => p.role !== "owner");
+      const party = partyIdx >= 0 ? draft.parties[partyIdx] : undefined;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          agreement_id: draft.id,
+          mode: "review",
+          locked_version_id: "",
+          role: "reviewer",
+          recipient_party_id: (party as { id?: string } | undefined)?.id ?? `p-${partyIdx}`,
+          inviter_display_name: draft.parties?.[0]?.name ?? "Owner",
         }),
       });
       return;
@@ -287,7 +312,8 @@ test("review-first simplified UI (desktop + laptop PNGs)", async ({ page }, test
     await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("recipient-review-first-actions")).toBeVisible();
     await expect(page.getByRole("button", { name: "Approve draft" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Suggest changes" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Propose updated draft" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Suggest changes" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "More options" })).toBeVisible();
     await expect(page.getByTestId("recipient-review-upload-updated-draft")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Request changes/i })).toHaveCount(0);
@@ -412,30 +438,45 @@ test("paid Pro review-first on /app/send shows token-config error, not generic s
   });
 });
 
-test("proposed changes show before/after blocks for other reviewers", async ({ page }) => {
+test("propose updated draft shows Schedule A before/after blocks", async ({ page }) => {
   test.setTimeout(90_000);
   const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
   mkdirSync(artifactDir, { recursive: true });
 
   const agreementId = "ag_review_first_change_vis";
-  const draft = paidProAuthoritativeDraft(agreementId);
+  const originalBody = `AI Automation Services Agreement\n\n${ORIGINAL_SCHEDULE_A}`;
+  const updatedBody = `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`;
+  const draft = {
+    ...paidProAuthoritativeDraft(agreementId),
+    parties: [
+      { id: "p-owner", name: "Studio LLC", role: "owner", email: "owner@example.com" },
+      { id: "p-client", name: "Client LLC", role: "party", email: "client@example.com" },
+    ],
+    purpose: originalBody,
+    payment_terms: "",
+    server_full_document_text: originalBody,
+    premium_render_source: "review_first_final_corpus",
+  };
 
   await primeE2eApiBase(page);
   await installReviewFirstApi(page, draft);
 
   await page.setViewportSize({ width: 1440, height: 1100 });
-  await page.goto(`/agreements/${agreementId}/review?role=reviewer`, {
+  await page.goto(`/agreements/${agreementId}/review?role=reviewer&t=tok_review_personal`, {
     waitUntil: "domcontentloaded",
     timeout: 30_000,
   });
 
   await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
-  await page.getByTestId("recipient-review-more-options").click();
-  await page.getByTestId("recipient-review-edit-draft").click();
-  await expect(page.getByTestId("recipient-compose-tablist")).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId("recipient-workflow-quick").click();
-  await expect(page.getByTestId("recipient-revision-voice-field")).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId("recipient-revision-voice-field").fill("Change payment to Net 45.");
+  await page.getByTestId("recipient-review-propose-updated-draft").click();
+  await expect(page.getByTestId("recipient-revised-draft-paste")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("recipient-review-personal-link-required")).toHaveCount(0);
+  await page.screenshot({
+    path: join(artifactDir, "review-first-propose-update-clean.png"),
+    fullPage: true,
+  });
+  await page.getByTestId("recipient-revised-draft-paste").fill(updatedBody);
+  await expect(page.getByTestId("recipient-compare-versions-button")).toBeEnabled();
   await page.getByTestId("recipient-compare-versions-button").click();
 
   await expect(page.getByTestId("recipient-preview-summary-heading")).toHaveText("Changes proposed", {
@@ -445,10 +486,54 @@ test("proposed changes show before/after blocks for other reviewers", async ({ p
   await expect(changeSummary).toBeVisible();
   await expect(changeSummary.getByText("Previous", { exact: true })).toBeVisible();
   await expect(changeSummary.getByText("Proposed", { exact: true })).toBeVisible();
-  await expect(changeSummary).toContainText(/Suggested change by/i);
+  await expect(changeSummary).toContainText(/Suggested change by Client LLC/i);
+  await expect(changeSummary).toContainText(/Specific compensation mechanics will be completed in Schedule A before execution/i);
+  await expect(changeSummary).toContainText(/Total project fee: \$120,000 USD/i);
+  await expect(changeSummary).toContainText(/\$72,000 build\/configuration due kickoff/i);
+  await expect(page.getByText(/Nothing is signed yet, and everyone must approve the updated version before signing/i)).toBeVisible();
 
   await page.screenshot({
     path: join(artifactDir, "review-first-change-before-after.png"),
+    fullPage: true,
+  });
+  await page.screenshot({
+    path: join(artifactDir, "review-first-schedule-a-before-after.png"),
+    fullPage: true,
+  });
+});
+
+test("review-first missing token shows attribution message before revised draft editor", async ({ page }) => {
+  test.setTimeout(60_000);
+  const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
+  mkdirSync(artifactDir, { recursive: true });
+  const agreementId = "ag_review_first_missing_token";
+  const originalBody = `AI Automation Services Agreement\n\n${ORIGINAL_SCHEDULE_A}`;
+  const draft = {
+    ...paidProAuthoritativeDraft(agreementId),
+    parties: [
+      { id: "p-owner", name: "Studio LLC", role: "owner", email: "owner@example.com" },
+      { id: "p-client", name: "Client LLC", role: "party", email: "client@example.com" },
+    ],
+    purpose: originalBody,
+    payment_terms: "",
+    server_full_document_text: originalBody,
+    premium_render_source: "review_first_final_corpus",
+  };
+  await primeE2eApiBase(page);
+  await installReviewFirstApi(page, draft);
+  await page.goto(`/agreements/${agreementId}/review?role=reviewer`, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("recipient-review-propose-updated-draft").click();
+  await expect(page.getByTestId("recipient-review-personal-link-required")).toContainText(
+    "Open the personal review link the sender gave you so LawDog can attribute your proposed update.",
+  );
+  await page.getByTestId("recipient-revised-draft-paste").fill(`AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+  await expect(page.getByTestId("recipient-compare-versions-button")).toBeDisabled();
+  await page.screenshot({
+    path: join(artifactDir, "review-first-missing-token-attribution-message.png"),
     fullPage: true,
   });
 });
