@@ -237,6 +237,15 @@ import {
 } from "./recipientPreviewPdfHtml";
 import { stripCompareMarkupFromOriginalDraftHtml } from "./recipientOriginalDraftExportSanitize";
 import { recipientImportsMatchAuthoritativeBaseline } from "./recipientNoChangeCompareGuard";
+import {
+  ReviewActions,
+  ReviewDocumentFrame,
+  ReviewFuturePanel,
+  ReviewHeader,
+  ReviewMetaGrid,
+  ReviewNotice,
+  reviewActionButtonClass,
+} from "./reviewFirstLayout";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
   buildRecipientRedlineStickyNavRows,
@@ -3863,7 +3872,7 @@ export function AgreementRecipientReview({
     recipientAcceptedAwaitingLock;
 
   const recipientDraftBodyTextareaClass =
-    "w-full min-h-[280px] max-w-full resize-y overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 sm:min-h-[420px]";
+    "w-full min-h-[280px] max-w-full resize-y overflow-x-hidden break-words rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200 sm:min-h-[420px]";
 
   const compactReviewDownloadActions =
     entry.kind === "review" && !viewerLike && draft ? (
@@ -4257,12 +4266,9 @@ export function AgreementRecipientReview({
       ) : null}
 
       {needsPersonalizedLink ? (
-        <div
-          className="rounded-lg border border-rose-800/45 bg-rose-950/25 px-4 py-3 text-xs text-rose-100"
-          role="alert"
-        >
+        <ReviewNotice blocking>
           {REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE}
-        </div>
+        </ReviewNotice>
       ) : null}
 
       {entry.kind === "review" && bundle?.pendingRecipientNotice ? (
@@ -4295,66 +4301,69 @@ export function AgreementRecipientReview({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-800/60 pb-3">
-          <div className="min-w-0">
-          <h1 className="text-lg font-semibold tracking-tight text-slate-100 sm:text-xl">{REVIEW_FIRST_TITLE}</h1>
-          <p className="mt-1 max-w-xl text-sm text-slate-400">
-            {workspaceTab === "read"
-              ? recipientAcceptedAwaitingLock
-                ? "You are done reviewing. The sender will open signing when they finalize — this page updates automatically."
-                : REVIEW_FIRST_HELPER
-              : "Edit the agreement text or upload a revised draft. Before anything is saved, the exact changes are shown for review."}
-          </p>
-          {workspaceTab === "read" ? recipientTrustCueStrip() : null}
-        </div>
-        {onClose ? (
-          <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
+      <ReviewHeader
+        eyebrow="Professional review"
+        title={REVIEW_FIRST_TITLE}
+        description={
+          workspaceTab === "read"
+            ? recipientAcceptedAwaitingLock
+              ? "You are done reviewing. The sender will open signing when they finalize — this page updates automatically."
+              : REVIEW_FIRST_HELPER
+            : "Paste or import the revised draft. LawDog will show the exact before and after before anything is sent."
+        }
+        reassurance="Nothing is signed yet."
+        action={
+          onClose ? (
+          <button type="button" className={reviewActionButtonClass("secondary")} onClick={onClose}>
             Close
           </button>
-        ) : null}
-      </div>
+          ) : null
+        }
+      />
 
-      <section
-        className="rounded-xl border border-slate-700/80 bg-white text-slate-900 shadow-sm"
-        data-testid="recipient-document-shell"
-        aria-label="Agreement draft"
+      {workspaceTab === "read" ? <div className="text-slate-700">{recipientTrustCueStrip()}</div> : null}
+
+      <ReviewDocumentFrame
+        title="Document"
+        className="overflow-hidden"
+        testId="recipient-document-shell"
+        ariaLabel="Agreement draft"
       >
-        <div className="p-5 sm:p-7">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
           <div
             ref={recipientReadDocAnchorRef}
             tabIndex={-1}
             className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
             dangerouslySetInnerHTML={{ __html: renderedHtmlDisplay || "<p>No preview yet.</p>" }}
           />
-        </div>
-      </section>
+      </ReviewDocumentFrame>
 
-      {recipientAgreementSummaryCard({
-        agreementType: activeSummaryType,
-        partiesLine: activeSummaryParties,
-        sharedBy: activeSummaryInviter,
-        compact: true,
-      })}
+      <ReviewMetaGrid
+        testId="recipient-summary-card"
+        items={[
+          { label: "Type", value: activeSummaryType },
+          { label: "Shared by", value: activeSummaryInviter },
+          { label: "Agreement parties", value: activeSummaryParties },
+        ]}
+      />
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 sm:text-[13px]">
         <ProofBadge state={recipientProofBadge} title="Agreement status (LawDog)" />
-        <span className="rounded-md border border-slate-700 bg-slate-950/50 px-2 py-0.5 font-medium text-slate-300">
+        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-600">
           {versionLabelHub}
         </span>
       </div>
 
       {workspaceTab === "read" ? (
-        <section
-          className="rounded-xl border border-slate-800/55 bg-slate-950/25 p-4"
-          data-testid="recipient-review-first-actions"
-          aria-label="Review agreement actions"
+        <ReviewActions
+          className="recipient-review-first-actions"
+          note="Nothing is signed yet. If anyone saves new wording, everyone reviews that version again."
+          testId="recipient-review-first-actions"
+          ariaLabel="Review agreement actions"
         >
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <button
               type="button"
               data-testid="recipient-review-approve-draft"
-              className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className={reviewActionButtonClass("primary")}
               disabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
               onClick={() => void acceptCurrentDraft()}
             >
@@ -4363,7 +4372,7 @@ export function AgreementRecipientReview({
             <button
               type="button"
               data-testid="recipient-review-propose-updated-draft"
-              className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+              className={reviewActionButtonClass("secondary")}
               disabled={suggestControlsDisabled}
               onClick={() => {
                 setComposePathCardsVisible(false);
@@ -4394,23 +4403,22 @@ export function AgreementRecipientReview({
             ) : null}
             <button
               type="button"
-              className="rounded-lg border border-slate-700 bg-transparent px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-slate-900/60"
+              className={reviewActionButtonClass("secondary")}
               aria-expanded={reviewMoreOptionsOpen}
               data-testid="recipient-review-more-options"
               onClick={() => setReviewMoreOptionsOpen((v) => !v)}
             >
               More options
             </button>
-          </div>
           {reviewMoreOptionsOpen ? (
             <div
-              className="mt-3 flex flex-col gap-2 rounded-lg border border-slate-800/70 bg-slate-950/45 p-3 sm:flex-row sm:flex-wrap"
+              className="mt-3 flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:flex-wrap"
               data-testid="recipient-review-more-options-panel"
             >
               <button
                 type="button"
                 data-testid="recipient-review-edit-draft"
-                className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                className={reviewActionButtonClass("secondary")}
                 disabled={suggestControlsDisabled}
                 onClick={() => {
                   setComposePathCardsVisible(false);
@@ -4428,7 +4436,7 @@ export function AgreementRecipientReview({
               <button
                 type="button"
                 data-testid="recipient-review-upload-updated-draft"
-                className="rounded-lg border border-slate-600 bg-slate-900/70 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                className={reviewActionButtonClass("secondary")}
                 disabled={suggestControlsDisabled}
                 onClick={() => {
                   prepareOutsideReviewImportUi();
@@ -4440,10 +4448,7 @@ export function AgreementRecipientReview({
               {compactReviewDownloadActions}
             </div>
           ) : null}
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">
-            Nothing is signed yet. If anyone saves new wording, everyone reviews that version again.
-          </p>
-        </section>
+        </ReviewActions>
       ) : null}
 
       {false &&
@@ -4578,13 +4583,9 @@ export function AgreementRecipientReview({
           </button>
 
           {needsPersonalizedLink ? (
-            <div
-              className="rounded-lg border border-rose-800/45 bg-rose-950/25 px-4 py-3 text-xs text-rose-100"
-              role="alert"
-              data-testid="recipient-review-personal-link-required"
-            >
+            <ReviewNotice blocking testId="recipient-review-personal-link-required">
               {REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE}
-            </div>
+            </ReviewNotice>
           ) : null}
 
           {hasPendingSuggestion ? (
@@ -4595,7 +4596,7 @@ export function AgreementRecipientReview({
               </p>
             </div>
           ) : (
-            <div className="space-y-5 rounded-xl border border-slate-800/50 bg-slate-950/20 p-5">
+            <ReviewFuturePanel testId="recipient-propose-update-standard-panel" className="space-y-5">
               <input
                 ref={draftImportFileInputRef}
                 type="file"
@@ -4608,14 +4609,14 @@ export function AgreementRecipientReview({
               {composePathCardsVisible && !recipientPreview ? (
                 <section className="space-y-4" data-testid="recipient-compose-path-cards">
                   <div>
-                    <h2 className="text-lg font-semibold tracking-tight text-slate-50">{RECIPIENT_WORKSPACE_HEADLINE}</h2>
-                    <p className="mt-1.5 text-sm leading-relaxed text-slate-400">{RECIPIENT_WORKSPACE_SUBCOPY}</p>
+                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">{RECIPIENT_WORKSPACE_HEADLINE}</h2>
+                    <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{RECIPIENT_WORKSPACE_SUBCOPY}</p>
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <button
                       type="button"
                       data-testid="recipient-compose-card-small-tweak"
-                      className="flex min-h-[120px] flex-col rounded-xl border border-slate-700/50 bg-slate-900/35 p-4 text-left transition-colors hover:bg-slate-900/55"
+                      className="flex min-h-[120px] flex-col rounded-xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:bg-slate-100"
                       onClick={() => {
                         setComposePathCardsVisible(false);
                         setWorkflowMode("quick");
@@ -4624,14 +4625,14 @@ export function AgreementRecipientReview({
                         setError(null);
                       }}
                     >
-                      <span className="text-base font-semibold text-slate-100">{RECIPIENT_CARD_SMALL_TWEAK_TITLE}</span>
-                      <span className="mt-2 flex-1 text-sm leading-snug text-slate-400">{RECIPIENT_CARD_SMALL_TWEAK_BODY}</span>
-                      <span className="mt-3 text-sm font-semibold text-sky-400/95">{RECIPIENT_CARD_SMALL_TWEAK_CTA}</span>
+                      <span className="text-base font-semibold text-slate-950">{RECIPIENT_CARD_SMALL_TWEAK_TITLE}</span>
+                      <span className="mt-2 flex-1 text-sm leading-snug text-slate-600">{RECIPIENT_CARD_SMALL_TWEAK_BODY}</span>
+                      <span className="mt-3 text-sm font-semibold text-slate-800">{RECIPIENT_CARD_SMALL_TWEAK_CTA}</span>
                     </button>
                     <button
                       type="button"
                       data-testid="recipient-compose-card-bigger-rewrite"
-                      className="flex min-h-[120px] flex-col rounded-xl border border-slate-700/50 bg-slate-900/35 p-4 text-left transition-colors hover:bg-slate-900/55"
+                      className="flex min-h-[120px] flex-col rounded-xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:bg-slate-100"
                       onClick={() => {
                         setComposePathCardsVisible(false);
                         setWorkflowMode("revised");
@@ -4643,9 +4644,9 @@ export function AgreementRecipientReview({
                         setError(null);
                       }}
                     >
-                      <span className="text-base font-semibold text-slate-100">{RECIPIENT_CARD_BIGGER_REWRITE_TITLE}</span>
-                      <span className="mt-2 flex-1 text-sm leading-snug text-slate-400">{RECIPIENT_CARD_BIGGER_REWRITE_BODY}</span>
-                      <span className="mt-3 text-sm font-semibold text-sky-400/95">{RECIPIENT_CARD_BIGGER_REWRITE_CTA}</span>
+                      <span className="text-base font-semibold text-slate-950">{RECIPIENT_CARD_BIGGER_REWRITE_TITLE}</span>
+                      <span className="mt-2 flex-1 text-sm leading-snug text-slate-600">{RECIPIENT_CARD_BIGGER_REWRITE_BODY}</span>
+                      <span className="mt-3 text-sm font-semibold text-slate-800">{RECIPIENT_CARD_BIGGER_REWRITE_CTA}</span>
                     </button>
                   </div>
                 </section>
@@ -4653,7 +4654,7 @@ export function AgreementRecipientReview({
                 <>
               {!recipientPreview ? (
                 <div
-                  className="flex max-w-lg gap-1 rounded-xl border border-slate-700/60 bg-slate-950/40 p-1"
+                  className="flex max-w-lg gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1"
                   role="tablist"
                   aria-label={`${RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL} / ${RECIPIENT_CARD_SMALL_TWEAK_TITLE}`}
                   data-testid="recipient-compose-tablist"
@@ -4663,8 +4664,8 @@ export function AgreementRecipientReview({
                     data-testid="recipient-workflow-revised"
                     className={`min-h-[44px] flex-1 rounded-lg px-3 py-2 text-center text-xs font-semibold transition-colors ${
                       workflowMode === "revised"
-                        ? "bg-slate-800 text-slate-100"
-                        : "text-slate-500 hover:bg-slate-900/80 hover:text-slate-200"
+                        ? "bg-white text-slate-950 shadow-sm"
+                        : "text-slate-500 hover:bg-white/70 hover:text-slate-900"
                     }`}
                     onClick={() => {
                       setWorkflowMode("revised");
@@ -4683,8 +4684,8 @@ export function AgreementRecipientReview({
                     data-testid="recipient-workflow-quick"
                     className={`min-h-[44px] flex-1 rounded-lg px-3 py-2 text-center text-xs font-semibold transition-colors ${
                       workflowMode === "quick"
-                        ? "bg-slate-800 text-slate-100"
-                        : "text-slate-500 hover:bg-slate-900/80 hover:text-slate-200"
+                        ? "bg-white text-slate-950 shadow-sm"
+                        : "text-slate-500 hover:bg-white/70 hover:text-slate-900"
                     }`}
                     onClick={() => {
                       setWorkflowMode("quick");
@@ -4705,9 +4706,9 @@ export function AgreementRecipientReview({
               {workflowMode === "quick" && !recipientPreview ? (
                 <div
                   data-testid="recipient-quick-change-panel"
-                  className="space-y-3 rounded-xl border border-slate-700/45 bg-slate-950/30 p-4"
+                  className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4"
                 >
-                  <p className="text-xs leading-relaxed text-slate-400">{RECIPIENT_SMALL_TWEAK_HELPER}</p>
+                  <p className="text-xs leading-relaxed text-slate-600">{RECIPIENT_SMALL_TWEAK_HELPER}</p>
                   {quickChangeLooksLikeFullDraft ? (
                     <div
                       className="rounded-lg border border-amber-800/40 bg-amber-950/20 px-3 py-2 text-xs leading-snug text-amber-100"
@@ -4749,13 +4750,13 @@ export function AgreementRecipientReview({
                       {RECIPIENT_SWITCH_TO_REVISED_DRAFT_LINK}
                     </button>
                   )}
-                  <label className="text-sm font-semibold text-slate-200" htmlFor={revisionPlainFieldId}>
+                  <label className="text-sm font-semibold text-slate-800" htmlFor={revisionPlainFieldId}>
                     {RECIPIENT_QUICK_REQUEST_LABEL}
                   </label>
                   <VoiceAugmentedTextArea
                     id={revisionPlainFieldId}
                     data-testid="recipient-revision-voice-field"
-                    className="w-full min-h-0 max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
+                    className="w-full min-h-0 max-w-full resize-none overflow-x-hidden break-words rounded-xl border border-slate-300 bg-white px-3 py-2 pb-11 pr-12 text-sm text-slate-900"
                     placeholder={RECIPIENT_QUICK_REQUEST_PLACEHOLDER}
                     value={instruction}
                     onValueChange={(v) => {
@@ -4776,7 +4777,7 @@ export function AgreementRecipientReview({
               {workflowMode === "revised" && !recipientPreview ? (
                 <div
                   data-testid="recipient-revised-version-panel"
-                  className="space-y-4 rounded-xl border border-slate-700/45 bg-slate-950/30 p-4"
+                  className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4"
                   onDragOver={(ev: DragEvent<HTMLDivElement>) => {
                     if (suggestControlsDisabled) return;
                     ev.preventDefault();
@@ -4792,8 +4793,8 @@ export function AgreementRecipientReview({
                   {revisedIntakePhase === "pick-method" ? (
                     <div className="space-y-3">
                       <div>
-                        <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
-                        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                        <h3 className="text-base font-semibold text-slate-950">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
+                        <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
                           {RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY}
                         </p>
                       </div>
@@ -4818,7 +4819,7 @@ export function AgreementRecipientReview({
                       <button
                         type="button"
                         data-testid="recipient-upload-revised-file"
-                        className="min-h-[48px] w-full rounded-xl border border-emerald-900/35 bg-emerald-950/25 px-4 py-3 text-center text-sm font-semibold text-emerald-50 hover:bg-emerald-950/40 disabled:opacity-50"
+                        className={reviewActionButtonClass("secondary") + " w-full"}
                         disabled={suggestControlsDisabled}
                         onClick={() => draftImportFileInputRef.current?.click()}
                       >
@@ -4827,7 +4828,7 @@ export function AgreementRecipientReview({
                       <button
                         type="button"
                         data-testid="recipient-intake-mode-paste-revised"
-                        className="min-h-[48px] w-full rounded-xl border border-slate-600 bg-slate-900/50 px-4 py-3 text-center text-sm font-semibold text-slate-100 hover:bg-slate-900/70 disabled:opacity-50"
+                        className={reviewActionButtonClass("secondary") + " w-full"}
                         disabled={suggestControlsDisabled}
                         onClick={() => {
                           setRevisedSubmode("paste");
@@ -4843,7 +4844,7 @@ export function AgreementRecipientReview({
                       <button
                         type="button"
                         data-testid="recipient-intake-mode-edit-draft"
-                        className="w-full pt-1 text-center text-xs font-medium text-sky-400/95 underline decoration-sky-800/50 underline-offset-2 hover:text-sky-200"
+                        className="w-full pt-1 text-center text-xs font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 hover:text-slate-900"
                         disabled={suggestControlsDisabled}
                         onClick={() => {
                           setDraftImportError(null);
@@ -4864,8 +4865,8 @@ export function AgreementRecipientReview({
                     <>
                   {!revisedUploadAnalyzing && !recipientPostUploadSurface && RECIPIENT_REVISED_PANEL_SUB.trim() ? (
                     <div>
-                      <h3 className="text-base font-semibold text-slate-100">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
-                      <p className="mt-1 text-xs leading-snug text-slate-400">{RECIPIENT_REVISED_PANEL_SUB}</p>
+                      <h3 className="text-base font-semibold text-slate-950">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
+                      <p className="mt-1 text-xs leading-snug text-slate-600">{RECIPIENT_REVISED_PANEL_SUB}</p>
                     </div>
                   ) : null}
 
@@ -5218,7 +5219,7 @@ export function AgreementRecipientReview({
               {compareImportNoChangePanel}
                 </>
               )}
-            </div>
+            </ReviewFuturePanel>
           )}
         </div>
       )}

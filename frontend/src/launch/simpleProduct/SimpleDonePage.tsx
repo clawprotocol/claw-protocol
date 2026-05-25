@@ -69,6 +69,15 @@ import {
   logReviewFirstDisplayCorpusSelected,
   resolveReviewFirstDisplayCorpus,
 } from "./reviewFirstDisplayCorpus";
+import {
+  ReviewActions,
+  ReviewDocumentFrame,
+  ReviewHeader,
+  ReviewMetaGrid,
+  ReviewNotice,
+  ReviewShell,
+  reviewActionButtonClass,
+} from "../../agreement/reviewFirstLayout";
 
 const EMPTY_REVIEW_HANDOFF_RECIPIENTS: SimpleDoneReviewRecipientLinkRow[] = [];
 
@@ -654,57 +663,58 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
     return (
       <SimpleFlowShell title={flowShellTitle}>
-        <div className="mx-auto max-w-3xl text-center sm:text-left">
-          <div className="rounded-2xl border border-slate-800/70 bg-slate-950/35 px-5 py-5 shadow-sm sm:px-6">
+        <ReviewShell>
+          <ReviewHeader
+            eyebrow="Professional review"
+            title={reviewLinksReady && anyReviewHref ? "Review link created" : "Review link needs attention"}
+            description={
+              reviewLinksReady && anyReviewHref
+                ? "Share the private reviewer link below. The draft is open for review, and nothing is signed yet."
+                : "LawDog could not finish creating the reviewer link. You can retry or return to the draft."
+            }
+            reassurance="Nothing is signed until the review is complete."
+          />
+          <div className="text-left">
             {reviewLinksReady && anyReviewHref ? (
               <>
                 {linksStillLoading ? (
-                  <p
-                    className="mb-4 rounded-lg border border-amber-800/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-100"
-                    data-testid="simple-done-review-links-loading-warning"
-                  >
+                  <ReviewNotice tone="warning" testId="simple-done-review-links-loading-warning">
                     Reviewer links are still loading. Refresh or try again.
-                  </p>
+                  </ReviewNotice>
                 ) : null}
                 {linksIncomplete ? (
-                  <p
-                    className="mb-4 rounded-lg border border-amber-800/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-100"
-                    data-testid="simple-done-review-links-incomplete-warning"
-                  >
+                  <ReviewNotice tone="warning" testId="simple-done-review-links-incomplete-warning">
                     Some reviewer links did not load ({normalizedReviewerRows.length} of{" "}
                     {reviewApprovalAgg.requiredReviewerCount}). Try again from send or refresh this page.
-                  </p>
+                  </ReviewNotice>
                 ) : null}
                 {signingLockActive ? (
-                  <p className="text-sm leading-relaxed text-emerald-100/95">
+                  <ReviewNotice tone="success">
                     This agreement is locked for signature. Open it in your workspace to continue signing or copy
                     signing links.
-                  </p>
+                  </ReviewNotice>
                 ) : showAllReviewersApprovedNoEditsCopy ? (
-                  <p
-                    className="text-base font-semibold text-emerald-100"
-                    data-testid="simple-done-all-approved-body"
-                  >
+                  <ReviewNotice tone="success" testId="simple-done-all-approved-body">
                     {OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY}
-                  </p>
+                  </ReviewNotice>
                 ) : reviewApprovalAgg.hasOpenChangeRequests ? (
-                  <>
-                    <p className="text-base font-semibold text-emerald-100">Open change requests on this draft.</p>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                  <ReviewNotice tone="warning">
+                    <p className="font-semibold">Open change requests on this draft.</p>
+                    <p className="mt-1">
                       There are still open change requests on this agreement. Open the workspace to resolve them before
                       finalizing.
                     </p>
-                  </>
+                  </ReviewNotice>
                 ) : reviewApprovalAgg.anyReviewerApproval ? (
-                  <p className="text-sm leading-relaxed text-slate-300">
+                  <ReviewNotice>
                     {reviewApprovalAgg.requiredReviewerCount > 1
                       ? "Track each reviewer in the table. When everyone has approved without open change requests, you can finalize for signing."
                       : reviewApprovalAgg.ownerStatusLine}
-                  </p>
+                  </ReviewNotice>
                 ) : (
-                  <p className="text-sm leading-relaxed text-slate-300">
+                  <ReviewNotice>
                     Send this private link to reviewers. Nothing is signed yet.
-                  </p>
+                  </ReviewNotice>
                 )}
                 <span className="sr-only" data-testid="simple-done-owner-approval-status">
                   {signingLockActive ? "Signing version locked." : reviewApprovalAgg.ownerStatusLine}
@@ -748,39 +758,35 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     ) : null}
                   </div>
                 ) : null}
-                <dl className="mt-5 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-2">
-                  <div>
-                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement</dt>
-                    <dd className="mt-0.5 font-medium text-slate-100">{agreementTitle}</dd>
-                  </div>
-                  {!multiReviewer && reviewHandoffRows.length > 0 ? (
-                    <div>
-                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Reviewer</dt>
-                      <dd className="mt-0.5 space-y-1">
-                        {reviewHandoffRows.map((r) => (
-                          <div key={`${r.displayName}-${r.reviewHref}`}>
-                            <span className="font-medium text-slate-100">{r.displayName}</span>
-                            {r.recipientEmail ? (
-                              <span className="text-slate-400"> · {r.recipientEmail}</span>
-                            ) : null}
-                          </div>
-                        ))}
-                      </dd>
-                    </div>
-                  ) : null}
-                </dl>
+                <ReviewMetaGrid
+                  className="mt-4"
+                  items={[
+                    { label: "Agreement", value: agreementTitle },
+                    ...(!multiReviewer && reviewHandoffRows.length > 0
+                      ? [
+                          {
+                            label: "Reviewer",
+                            value: (
+                              <span className="space-y-1">
+                                {reviewHandoffRows.map((r) => (
+                                  <span className="block" key={`${r.displayName}-${r.reviewHref}`}>
+                                    {r.displayName}
+                                    {r.recipientEmail ? <span className="text-slate-500"> · {r.recipientEmail}</span> : null}
+                                  </span>
+                                ))}
+                              </span>
+                            ),
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
                 {ownerReviewFirstDisplayCorpus ? (
-                  <div
-                    className="mt-5 rounded-xl border border-slate-800/70 bg-slate-950/45 p-4 text-left"
-                    data-testid="simple-done-review-first-final-corpus-preview"
-                  >
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      Review draft preview
-                    </p>
-                    <p className="mt-2 max-h-40 overflow-hidden whitespace-pre-wrap text-xs leading-relaxed text-slate-300">
+                  <ReviewDocumentFrame title="Review draft preview" className="mt-4" testId="simple-done-review-first-final-corpus-preview">
+                    <p className="max-h-52 overflow-hidden whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
                       {ownerReviewFirstDisplayCorpus.text.slice(0, 900)}
                     </p>
-                  </div>
+                  </ReviewDocumentFrame>
                 ) : null}
                 {multiReviewer ? (
                   <PaidProReviewReviewerLinksTable
@@ -803,11 +809,11 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     }}
                   />
                 ) : null}
-                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                <ReviewActions className="mt-4">
                   {showBottomCopyPrimary ? (
                     <button
                       type="button"
-                      className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                      className={reviewActionButtonClass("primary")}
                       data-testid="simple-done-copy-review-link-primary"
                       onClick={() => copyPrimaryReviewLink()}
                     >
@@ -817,7 +823,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   {(signingLockActive || reviewApprovalAgg.anyReviewerApproval) && !multiReviewer ? (
                     <button
                       type="button"
-                      className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                      className={reviewActionButtonClass("secondary")}
                       data-testid="simple-done-copy-review-link-secondary"
                       onClick={() => copyPrimaryReviewLink()}
                     >
@@ -827,7 +833,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   {!multiReviewer ? (
                   <button
                     type="button"
-                    className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                    className={reviewActionButtonClass("secondary")}
                     data-testid="simple-done-open-reviewer-view-global"
                     onClick={() => {
                       if (primaryReviewHref) window.open(primaryReviewHref, "_blank", "noopener,noreferrer");
@@ -838,12 +844,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   ) : null}
                   <button
                     type="button"
-                    className="text-sm font-medium text-slate-500 underline-offset-2 hover:text-slate-400 hover:underline sm:min-h-[2.5rem]"
+                    className={reviewActionButtonClass("ghost")}
                     onClick={() => void backToDraft()}
                   >
                     Back to draft
                   </button>
-                </div>
+                </ReviewActions>
               </>
             ) : (
               <>
@@ -859,10 +865,10 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     Review link could not be created. Please try again.
                   </p>
                 )}
-                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                <ReviewActions className="mt-4">
                   <button
                     type="button"
-                    className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm disabled:opacity-50"
+                    className={reviewActionButtonClass("primary")}
                     disabled={remintBusy}
                     onClick={() => void retryRemintReviewLink()}
                   >
@@ -870,12 +876,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   </button>
                   <button
                     type="button"
-                    className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                    className={reviewActionButtonClass("secondary")}
                     onClick={() => void backToDraft()}
                   >
                     Back to draft
                   </button>
-                </div>
+                </ReviewActions>
               </>
             )}
           </div>
@@ -889,7 +895,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
               statuses={reviewerRowStatuses}
             />
           ) : null}
-        </div>
+        </ReviewShell>
       </SimpleFlowShell>
     );
   }

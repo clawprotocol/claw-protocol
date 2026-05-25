@@ -301,6 +301,7 @@ test("review-first simplified UI (desktop + laptop PNGs)", async ({ page }, test
 
   for (const viewport of [
     { name: "desktop", width: 1440, height: 1100 },
+    { name: "mobile", width: 376, height: 782 },
     { name: "laptop", width: 1100, height: 900 },
   ] as const) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -321,7 +322,11 @@ test("review-first simplified UI (desktop + laptop PNGs)", async ({ page }, test
     await page.screenshot({
       path: join(
         artifactDir,
-        viewport.name === "desktop" ? "reviewer-simplified-review-page.png" : `review-first-${viewport.name}.png`,
+        viewport.name === "desktop"
+          ? "reviewer-simplified-review-page.png"
+          : viewport.name === "mobile"
+            ? "review-first-recipient-review-standardized.png"
+            : `review-first-${viewport.name}.png`,
       ),
       fullPage: true,
     });
@@ -374,7 +379,9 @@ test("paid Pro review-first skips generic /app/send and lands on owner done", as
   await expect(page.getByText("Send this as a professional agreement")).toHaveCount(0);
   await expect(page.getByText("Continue with Pro")).toHaveCount(0);
   await expect(page.getByText("Continue with draft version")).toHaveCount(0);
-  await expect(page.getByText("Review link created")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("review-first-standard-shell").getByRole("heading", { name: "Review link created" })).toBeVisible({
+    timeout: 20_000,
+  });
 
   await page.screenshot({
     path: join(artifactDir, "send-for-review-link-created-after.png"),
@@ -384,6 +391,12 @@ test("paid Pro review-first skips generic /app/send and lands on owner done", as
     path: join(artifactDir, "review-link-created-after.png"),
     fullPage: true,
   });
+  await page.setViewportSize({ width: 376, height: 782 });
+  await page.screenshot({
+    path: join(artifactDir, "review-first-owner-done-standardized.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1100 });
   await page.screenshot({
     path: join(artifactDir, "review-first-direct-desktop.png"),
     fullPage: true,
@@ -475,6 +488,12 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
     path: join(artifactDir, "review-first-propose-update-clean.png"),
     fullPage: true,
   });
+  await page.setViewportSize({ width: 376, height: 782 });
+  await page.screenshot({
+    path: join(artifactDir, "review-first-propose-update-standardized.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1100 });
   await page.getByTestId("recipient-revised-draft-paste").fill(updatedBody);
   await expect(page.getByTestId("recipient-compare-versions-button")).toBeEnabled();
   await page.getByTestId("recipient-compare-versions-button").click();
@@ -798,7 +817,9 @@ test("create final review click — mocked mint success lands on /app/done", asy
   }
   await mintOk;
   await expect(page).toHaveURL(new RegExp(`/app/done/${agreementId}`), { timeout: 25_000 });
-  await expect(page.getByText("Review link created")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("review-first-standard-shell").getByRole("heading", { name: "Review link created" })).toBeVisible({
+    timeout: 20_000,
+  });
   await expect(page.getByText(finalMarker)).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(starterMarker)).toHaveCount(0);
   await expect(page.getByText(premiumMarker)).toHaveCount(0);
@@ -986,7 +1007,9 @@ test("paid Pro review-first handoff lands on done with review link artifacts", a
   await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await mintResponse;
   await expect(page).toHaveURL(new RegExp(`/app/done/${agreementId}`), { timeout: 25_000 });
-  await expect(page.getByText("Review link created")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("review-first-standard-shell").getByRole("heading", { name: "Review link created" })).toBeVisible({
+    timeout: 20_000,
+  });
 });
 
 test("paid Pro review-first direct route laptop PNG", async ({ page }) => {
