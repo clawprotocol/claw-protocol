@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import html
+import hashlib
 import io
 import json
 import logging
@@ -95,6 +96,7 @@ from backend.llm_usage_guard import (
 )
 from backend.config.agreement_signing_token import (
     SigningTokenSecretMissingInProductionError,
+    detected_signing_token_env_var,
     operator_signing_token_secret_configured,
     resolve_signing_token_secret_raw,
     review_link_mint_enabled,
@@ -2992,6 +2994,36 @@ def _purpose_looks_like_full_client_agreement_text(purpose: str) -> bool:
 
 
 def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
+    review_first_corpus, review_first_source = _review_first_final_corpus_from_draft(draft)
+    if review_first_corpus:
+        log.info(
+            "[review-first-reviewer-corpus-selected] agreement_id_short=%s source=%s len=%s hash=%s",
+            draft.id[:8],
+            review_first_source,
+            len(review_first_corpus),
+            _review_first_corpus_hash(review_first_corpus),
+        )
+        purpose_for_body = (
+            _strip_watermark_label_from_body(
+                _collapse_duplicate_watermark_labels(review_first_corpus, WATERMARK_LABEL),
+                WATERMARK_LABEL,
+            )
+            if watermark
+            else review_first_corpus
+        )
+        body = html.escape(purpose_for_body)
+        wm = html.escape(WATERMARK_LABEL)
+        article = (
+            "<article style='position:relative;max-width:720px;margin:0 auto'>"
+            "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>"
+            "Draft Agreement (non-binding template)</p>"
+            "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;"
+            "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>"
+            f"{body}</pre>"
+            "</article>"
+        )
+        return article if not watermark else f"{article}{_html_watermark_footer(wm)}"
+
     purpose_raw = (draft.purpose or "").strip()
     if _purpose_looks_like_full_client_agreement_text(purpose_raw):
         if watermark:
@@ -4655,6 +4687,112 @@ class RecipientAccessMintRequest(BaseModel):
     inviter_display_name: Optional[str] = None
     single_use: bool = False
     ttl_seconds: int = 60 * 60 * 24 * 7
+    # Paid Pro review-first only: exact frozen corpus used by the SPA to mint/share review links.
+    review_first_document_text: Optional[str] = None
+    review_first_document_source: Optional[str] = None
+
+
+def _review_first_corpus_hash(text: str) -> str:
+    body = (text or "").strip()
+    return f"{len(body)}:{hashlib.sha256(body.encode('utf-8')).hexdigest()[:8]}"
+
+
+def _review_first_final_corpus_from_draft(
+    draft: AgreementDraft, *, include_field_fallbacks: bool = False
+) -> Tuple[str, str]:
+    pr = draft.pro_redline_v1 if isinstance(draft.pro_redline_v1, dict) else {}
+    rf = pr.get("review_first_final_corpus") if isinstance(pr, dict) else None
+    if isinstance(rf, dict):
+        txt = str(rf.get("text") or "").strip()
+        if txt:
+            return txt, "review_first_final_corpus"
+    if not include_field_fallbacks:
+        return "", "none"
+    for key in (
+        "server_full_document_text",
+        "premium_server_full_document_text",
+        "premium_full_document_text",
+        "document_text",
+        "rendered_document_text",
+    ):
+        txt = str(getattr(draft, key, "") or "").strip()
+        if txt:
+            return txt, key
+    return "", "none"
+
+
+def _persist_review_first_final_corpus_if_supplied(
+    agreement_id: str,
+    body: RecipientAccessMintRequest,
+    *,
+    locked_version_id: str,
+) -> None:
+    if body.mode != "review":
+        return
+    corpus = (body.review_first_document_text or "").strip()
+    if len(corpus) < 80:
+        return
+    draft = _load_or_404(agreement_id)
+    now = _utc_now_iso()
+    corpus_hash = _review_first_corpus_hash(corpus)
+    existing, _source = _review_first_final_corpus_from_draft(draft)
+    existing_hash = _review_first_corpus_hash(existing) if existing else ""
+    if existing_hash == corpus_hash:
+        return
+
+    pro_redline = dict(draft.pro_redline_v1 or {})
+    pro_redline["review_first_final_corpus"] = {
+        "text": corpus,
+        "source": (body.review_first_document_source or "recipient_access_token").strip(),
+        "hash": corpus_hash,
+        "persisted_at": now,
+        "locked_version_id": locked_version_id or None,
+    }
+    audit = [*(draft.audit_log or [])]
+    audit.append(
+        AuditEvent(
+            event_type="review_first_final_corpus_persisted",
+            at=now,
+            field="review_first_final_corpus",
+            value={
+                "hash": corpus_hash,
+                "len": len(corpus),
+                "source": (body.review_first_document_source or "recipient_access_token").strip(),
+                "locked_version_id": locked_version_id or None,
+            },
+        )
+    )
+    versions = [*(draft.versions or [])]
+    versions.append(
+        VersionSnapshot(
+            version=len(versions) + 1,
+            created_at=now,
+            note="Review-first final corpus",
+        )
+    )
+    next_draft = _merge_agreement_draft(
+        draft,
+        updated_at=now,
+        review_sent_at=draft.review_sent_at or now,
+        purpose=corpus,
+        document_text=corpus,
+        server_full_document_text=corpus,
+        premium_server_full_document_text=corpus,
+        premium_full_document_text=corpus,
+        rendered_document_text=corpus,
+        premium_render_source="review_first_final_corpus",
+        pro_redline_v1=pro_redline,
+        audit_log=audit,
+        versions=versions,
+    )
+    save_draft(next_draft.model_dump())
+    log.info(
+        "[review-first-backend-corpus-persisted] agreement_id_short=%s len=%s hash=%s source=%s",
+        agreement_id[:8],
+        len(corpus),
+        corpus_hash,
+        (body.review_first_document_source or "recipient_access_token").strip(),
+    )
 
 
 @router.get("/access/policy")
@@ -4665,6 +4803,7 @@ def recipient_access_policy() -> Dict[str, Any]:
         "mint_key_configured": bool(os.getenv("CLAW_RECIPIENT_LINK_MINT_KEY", "").strip()),
         "signing_token_configured": operator_signing_token_secret_configured(),
         "review_link_mint_enabled": review_link_mint_enabled(),
+        "signing_token_env_var_detected": detected_signing_token_env_var(),
         "recipient_token_ttl_seconds": {
             "min": recipient_token_ttl_min_seconds(),
             "max": recipient_token_ttl_max_seconds(),
@@ -5046,6 +5185,11 @@ def post_recipient_access_token(
         event_type=u_ev,
         agreement_id=agreement_id,
         metadata={"role": body.role},
+    )
+    _persist_review_first_final_corpus_if_supplied(
+        agreement_id,
+        body,
+        locked_version_id=lv,
     )
     return {
         "token": token,

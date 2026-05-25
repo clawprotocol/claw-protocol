@@ -20,6 +20,9 @@ export type RecipientAccessPolicy = {
   recipient_link_token_required: boolean;
   mint_key_configured: boolean;
   signing_token_configured: boolean;
+  review_link_mint_enabled?: boolean;
+  /** Set env var name when configured — never the secret value. */
+  signing_token_env_var_detected?: string | null;
   recipient_token_ttl_seconds?: { min: number; max: number };
 };
 

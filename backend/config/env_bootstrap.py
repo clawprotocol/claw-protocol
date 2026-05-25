@@ -11,6 +11,7 @@ import os
 from typing import List
 
 from backend.config.agreement_signing_token import (
+    detected_signing_token_env_var,
     operator_signing_token_secret_configured,
     review_link_mint_enabled,
 )
@@ -78,5 +79,6 @@ def public_env_snapshot() -> dict:
         "database_url_configured": _is_set("CLAW_DATABASE_URL") or _is_set("DATABASE_URL"),
         "openai_configured": _is_set("OPENAI_API_KEY"),
         "signing_token_secret_configured": operator_signing_token_secret_configured(),
+        "signing_token_env_var_detected": detected_signing_token_env_var(),
         "review_link_mint_enabled": review_link_mint_enabled(),
     }

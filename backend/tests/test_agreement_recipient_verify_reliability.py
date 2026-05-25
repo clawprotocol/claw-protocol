@@ -68,6 +68,41 @@ def test_recipient_access_token_mint_succeeds_without_explicit_secret_non_prod(
     assert body.get("expires_in_seconds")
 
 
+def test_recipient_access_token_persists_review_first_final_corpus(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-review-first-corpus")
+    client = TestClient(app)
+    aid = _create_draft_with_parties(client)
+    final_corpus = "FINAL_GUIDED_REVIEW_CORPUS_MARKER\n" + ("final guided review body " * 40)
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG,
+        json={
+            "mode": "review",
+            "role": "signer",
+            "review_first_document_text": final_corpus,
+            "review_first_document_source": "unit_test",
+        },
+    )
+    assert mint.status_code == 200
+
+    got = client.get(f"/api/agreements/{aid}", headers=_ORG)
+    assert got.status_code == 200
+    draft = got.json()["draft"]
+    assert "FINAL_GUIDED_REVIEW_CORPUS_MARKER" in draft["purpose"]
+    assert "FINAL_GUIDED_REVIEW_CORPUS_MARKER" in draft["server_full_document_text"]
+    stored = draft["pro_redline_v1"]["review_first_final_corpus"]
+    assert stored["source"] == "unit_test"
+    assert stored["hash"].startswith(f"{len(final_corpus.strip())}:")
+
+    rendered = client.post(f"/api/agreements/{aid}/render", headers=_ORG)
+    assert rendered.status_code == 200
+    assert "FINAL_GUIDED_REVIEW_CORPUS_MARKER" in rendered.json()["rendered_html"]
+    assert "Net 30" not in rendered.json()["rendered_html"]
+
+
 def test_recipient_access_token_does_not_503_without_signing_lock(monkeypatch, tmp_path):
     """(b) Review mint must not 503 when optional signing-lock / proof fields are absent."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))

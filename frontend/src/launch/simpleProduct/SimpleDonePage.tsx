@@ -65,6 +65,10 @@ import {
   orderedAuthoritativePartyDisplayNames,
 } from "../../agreement/handoffPartyDisplay";
 import { normalizeAgreementDisplayTitle } from "../../components/agreements/canonicalAgreementTitle";
+import {
+  logReviewFirstDisplayCorpusSelected,
+  resolveReviewFirstDisplayCorpus,
+} from "./reviewFirstDisplayCorpus";
 
 const EMPTY_REVIEW_HANDOFF_RECIPIENTS: SimpleDoneReviewRecipientLinkRow[] = [];
 
@@ -191,6 +195,19 @@ export function SimpleDonePage(props: { agreementId: string }) {
     (reviewRecipientHandoff.reviewLinksPending === true || reviewHandoffRows.length === 0);
   const isPaidProReviewDonePath =
     Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review");
+  const ownerReviewFirstDisplayCorpus = useMemo(
+    () => resolveReviewFirstDisplayCorpus(ownerHandoffDraft),
+    [ownerHandoffDraft],
+  );
+
+  useEffect(() => {
+    if (!isPaidProReviewDonePath || !ownerHandoffDraft) return;
+    logReviewFirstDisplayCorpusSelected({
+      agreementId,
+      corpus: ownerReviewFirstDisplayCorpus,
+      surface: "owner_done",
+    });
+  }, [agreementId, isPaidProReviewDonePath, ownerHandoffDraft, ownerReviewFirstDisplayCorpus]);
 
   useEffect(() => {
     if (!isPaidProReviewDonePath) return;
@@ -752,6 +769,19 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     </div>
                   ) : null}
                 </dl>
+                {ownerReviewFirstDisplayCorpus ? (
+                  <div
+                    className="mt-5 rounded-xl border border-slate-800/70 bg-slate-950/45 p-4 text-left"
+                    data-testid="simple-done-review-first-final-corpus-preview"
+                  >
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      Review draft preview
+                    </p>
+                    <p className="mt-2 max-h-40 overflow-hidden whitespace-pre-wrap text-xs leading-relaxed text-slate-300">
+                      {ownerReviewFirstDisplayCorpus.text.slice(0, 900)}
+                    </p>
+                  </div>
+                ) : null}
                 {multiReviewer ? (
                   <PaidProReviewReviewerLinksTable
                     rows={normalizedReviewerRows}

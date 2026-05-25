@@ -5,10 +5,23 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from backend.config.agreement_signing_token import (
+    detected_signing_token_env_var,
     operator_signing_token_secret_configured,
     review_link_mint_enabled,
 )
 from backend.main import app
+
+
+def test_detected_signing_token_env_var_prefers_primary(monkeypatch):
+    monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
+    monkeypatch.delenv("CLAW_SIGNING_TOKEN_SECRET", raising=False)
+    assert detected_signing_token_env_var() is None
+
+    monkeypatch.setenv("CLAW_SIGNING_TOKEN_SECRET", "alias-secret")
+    assert detected_signing_token_env_var() == "CLAW_SIGNING_TOKEN_SECRET"
+
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "primary-secret")
+    assert detected_signing_token_env_var() == "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET"
 
 
 def test_operator_signing_token_secret_accepts_either_env_name(monkeypatch):
@@ -44,3 +57,4 @@ def test_access_policy_reports_review_link_mint_enabled(monkeypatch):
     body = r.json()
     assert body["signing_token_configured"] is True
     assert body["review_link_mint_enabled"] is True
+    assert body["signing_token_env_var_detected"] == "CLAW_SIGNING_TOKEN_SECRET"

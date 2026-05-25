@@ -30,6 +30,7 @@ from backend.config.runtime_environment import (
     timeline_db_path,
 )
 from backend.config.agreement_signing_token import (
+    detected_signing_token_env_var,
     operator_signing_token_secret_configured,
     review_link_mint_enabled,
 )
@@ -110,6 +111,7 @@ def public_runtime_summary() -> Dict[str, Any]:
             "max": recipient_token_ttl_max_seconds(),
         },
         "signing_token_secret_configured": secret_present,
+        "signing_token_env_var_detected": detected_signing_token_env_var(),
         "review_link_mint_enabled": review_link_mint_enabled(),
         "recipient_link_mint_key_configured": mint_key_present,
         "bitcoin_rpc_url_configured": btc_url_set,

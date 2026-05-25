@@ -117,6 +117,10 @@ import { isPaidProAgreementAuthoritative } from "../components/agreements/paidPr
 import { RecipientWantACopyStrip } from "./recipientWantACopyStrip";
 import { cloneDraftForRecipientPreview } from "./recipientPreviewBaseline";
 import {
+  logReviewFirstDisplayCorpusSelected,
+  resolveReviewFirstDisplayCorpus,
+} from "../launch/simpleProduct/reviewFirstDisplayCorpus";
+import {
   PORTABLE_REVIEW_PASTE_LABEL,
   PORTABLE_REVIEW_PASTE_PLACEHOLDER,
   RECIPIENT_BTN_CONTINUE_EDITING,
@@ -297,6 +301,24 @@ function recipientFlowDiag(tag: string, payload: Record<string, unknown>) {
   if (!on) return;
   // eslint-disable-next-line no-console
   console.info(tag, payload);
+}
+
+function escapeReviewFirstCorpusHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderReviewFirstCorpusHtml(text: string): string {
+  return (
+    "<article style='position:relative;max-width:720px;margin:0 auto'>" +
+    "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>Draft Agreement (non-binding template)</p>" +
+    "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;color:#0f172a;margin:0;padding:0;border:0;background:transparent'>" +
+    escapeReviewFirstCorpusHtml(text) +
+    "</pre></article>"
+  );
 }
 
 type RecipientPostUploadSurfaceState =
@@ -1715,10 +1737,24 @@ export function AgreementRecipientReview({
       }
       const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
       const html = String(rp?.rendered_html || "");
-      setRenderedHtml(html);
+      const reviewFirstCorpus = resolveReviewFirstDisplayCorpus(d);
+      const htmlPlain = htmlToPlainText(html).trim();
+      const effectiveHtml =
+        reviewFirstCorpus && !htmlPlain.includes(reviewFirstCorpus.text.slice(0, Math.min(120, reviewFirstCorpus.text.length)))
+          ? renderReviewFirstCorpusHtml(reviewFirstCorpus.text)
+          : html;
+      if (entry.kind === "review" && reviewFirstCorpus) {
+        logReviewFirstDisplayCorpusSelected({
+          agreementId,
+          corpus: reviewFirstCorpus,
+          surface: "reviewer",
+          fallbackPreview: !effectiveHtml.trim(),
+        });
+      }
+      setRenderedHtml(effectiveHtml);
       let b = loadBundle(agreementId, recipientVersionStoreScope);
       if (!b || b.versions.length === 0) {
-        b = ensureInitialVersion(agreementId, d, html, recipientVersionStoreScope);
+        b = ensureInitialVersion(agreementId, d, effectiveHtml, recipientVersionStoreScope);
       }
       const signingLockPresentInPayload = Object.prototype.hasOwnProperty.call(payload, "signing_lock");
       const sl = payload.signing_lock;
@@ -1759,7 +1795,7 @@ export function AgreementRecipientReview({
     } finally {
       setLoading(false);
     }
-  }, [agreementId, recipientAccessToken, recipientVersionStoreScope, participantPid]);
+  }, [agreementId, entry.kind, recipientAccessToken, recipientVersionStoreScope, participantPid]);
 
   const draftSanitizeContext = useMemo(() => {
     if (!draft) return "";

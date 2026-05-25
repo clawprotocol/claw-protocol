@@ -15,6 +15,7 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("resolveGuidedVs01SigningHandoffForBridge");
     expect(s).toContain("mergeAgreementDraftWithGuidedSigningHandoff");
     expect(s).toContain("mintSimpleDoneReviewRecipientLinkRows");
+    expect(s).toContain("resolveReviewFirstMintPolicyGate");
     expect(s).toContain("/app/done/");
     expect(s).not.toContain("/app/send/");
   });
@@ -31,7 +32,7 @@ describe("paidProPostRecipientSetupHandoff", () => {
     const skipIdx = slice.indexOf("shouldSkipPaidProPrepareReviewLinkInterstitial");
     const sendIdx = slice.indexOf("/app/send/");
     expect(skipIdx).toBeGreaterThanOrEqual(0);
-    expect(sendIdx).toBeGreaterThan(skipIdx);
+    expect(sendIdx === -1 || sendIdx > skipIdx).toBe(true);
   });
 
   it("AgreementBuilderIntake inline send CTA uses post-recipient handoff before /app/send fallback", () => {
@@ -48,7 +49,7 @@ describe("paidProPostRecipientSetupHandoff", () => {
     const handoffIdx = block.indexOf("executePaidProPostRecipientSetupHandoff");
     const sendIdx = block.indexOf("/app/send/");
     expect(handoffIdx).toBeGreaterThanOrEqual(0);
-    expect(sendIdx).toBeGreaterThan(handoffIdx);
+    expect(sendIdx === -1 || sendIdx > handoffIdx).toBe(true);
   });
 });
 

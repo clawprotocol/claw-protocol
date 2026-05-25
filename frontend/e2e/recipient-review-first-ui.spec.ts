@@ -46,9 +46,17 @@ function buildPremiumCompletionSnapshot(draft: DraftRec, bodyPlain: string) {
 function installReviewFirstApi(
   page: Page,
   draft: DraftRec,
-  opts?: { recipientAccessMintStatus?: number; recipientAccessMintCode?: string; bodyPlain?: string },
+  opts?: {
+    recipientAccessMintStatus?: number;
+    recipientAccessMintCode?: string;
+    bodyPlain?: string;
+    signingTokenConfigured?: boolean;
+    reviewLinkMintEnabled?: boolean;
+    signingTokenEnvVarDetected?: string | null;
+  },
 ) {
   const bodyPlain = opts?.bodyPlain ?? draft.server_full_document_text ?? "x".repeat(600);
+  let storedDraft: DraftRec = { ...draft };
   return page.route("**/api/**", async (route) => {
     const url = route.request().url();
     const method = route.request().method();
@@ -94,13 +102,21 @@ function installReviewFirstApi(
     }
 
     if (url.includes("/api/agreements/access/policy") && method === "GET") {
+      const signingConfigured = opts?.signingTokenConfigured ?? true;
+      const mintEnabled =
+        opts?.reviewLinkMintEnabled ??
+        (signingConfigured ? true : false);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
           recipient_link_token_required: false,
           mint_key_configured: false,
-          signing_token_configured: false,
+          signing_token_configured: signingConfigured,
+          review_link_mint_enabled: mintEnabled,
+          signing_token_env_var_detected:
+            opts?.signingTokenEnvVarDetected ??
+            (signingConfigured ? "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET" : null),
         }),
       });
       return;
@@ -111,7 +127,7 @@ function installReviewFirstApi(
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          rendered_html: `<p>${draft.title}</p><p>${draft.purpose}</p><p>${draft.payment_terms}</p>`,
+          rendered_html: `<p>${storedDraft.title}</p><p>${storedDraft.purpose}</p><p>${storedDraft.payment_terms}</p>`,
         }),
       });
       return;
@@ -150,6 +166,26 @@ function installReviewFirstApi(
         });
         return;
       }
+      let rawBody: unknown = {};
+      try {
+        rawBody = route.request().postDataJSON();
+      } catch {
+        rawBody = {};
+      }
+      const reviewFirstDocumentText =
+        rawBody && typeof rawBody === "object"
+          ? String((rawBody as Record<string, unknown>).review_first_document_text ?? "").trim()
+          : "";
+      if (reviewFirstDocumentText) {
+        storedDraft = {
+          ...storedDraft,
+          purpose: reviewFirstDocumentText,
+          payment_terms: "",
+          server_full_document_text: reviewFirstDocumentText,
+          premium_render_source: "review_first_final_corpus",
+          updated_at: new Date().toISOString(),
+        };
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -185,7 +221,7 @@ function installReviewFirstApi(
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ draft, economics: { tier: "paid", watermark_required: false } }),
+        body: JSON.stringify({ draft: storedDraft, economics: { tier: "paid", watermark_required: false } }),
       });
       return;
     }
@@ -338,6 +374,9 @@ test("paid Pro review-first on /app/send shows token-config error, not generic s
   await installReviewFirstApi(page, draft, {
     recipientAccessMintStatus: 422,
     recipientAccessMintCode: "signing_token_secret_not_configured",
+    signingTokenConfigured: false,
+    reviewLinkMintEnabled: false,
+    signingTokenEnvVarDetected: null,
   });
 
   await page.addInitScript(
@@ -464,6 +503,9 @@ test("create final review click — review-first token error, no legacy /app/sen
     recipientAccessMintStatus: 422,
     recipientAccessMintCode: "signing_token_secret_not_configured",
     bodyPlain,
+    signingTokenConfigured: false,
+    reviewLinkMintEnabled: false,
+    signingTokenEnvVarDetected: null,
   });
 
   await page.goto("/app/create?premiumCompletion=1", { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -506,6 +548,10 @@ test("create final review click — review-first token error, no legacy /app/sen
       fullPage: true,
     });
     await page.screenshot({
+      path: join(artifactDir, "create-click-review-first-token-config-error.png"),
+      fullPage: true,
+    });
+    await page.screenshot({
       path: join(artifactDir, "create-click-review-first-final.png"),
       fullPage: true,
     });
@@ -525,7 +571,7 @@ test("create final review click — review-first token error, no legacy /app/sen
     }, { id: agreementId, primed: draft });
     await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await expect(page.getByTestId("review-first-mint-error-panel")).toBeVisible({ timeout: 25_000 });
-    await expect(page.getByText(/Review links could not be created/i)).toBeVisible();
+    await expect(page.getByTestId("review-first-mint-error-panel").getByText(/signing\/review token minting/i)).toBeVisible();
     await expect(page.getByText("We couldn't save your draft just now")).toHaveCount(0);
     await expect(page.getByText("Continue with draft version")).toHaveCount(0);
     await page.getByTestId("review-first-mint-error-panel").scrollIntoViewIfNeeded();
@@ -535,6 +581,10 @@ test("create final review click — review-first token error, no legacy /app/sen
     });
     await page.screenshot({
       path: join(artifactDir, "create-click-review-first-inline-token-error.png"),
+      fullPage: true,
+    });
+    await page.screenshot({
+      path: join(artifactDir, "create-click-review-first-token-config-error.png"),
       fullPage: true,
     });
     await page.screenshot({
@@ -568,32 +618,87 @@ test("create final review click — mocked mint success lands on /app/done", asy
   const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
   mkdirSync(artifactDir, { recursive: true });
   const agreementId = "ag_create_click_review_first_success";
-  const draft = paidProAuthoritativeDraft(agreementId);
-  const bodyPlain = "x".repeat(600);
+  const starterMarker = "STARTER_BODY_SHOULD_NOT_DISPLAY";
+  const premiumMarker = "PREMIUM_BODY_SHOULD_NOT_DISPLAY";
+  const finalMarker = "FINAL_GUIDED_REVIEW_CORPUS_MARKER";
+  const draft = {
+    ...paidProAuthoritativeDraft(agreementId),
+    purpose: starterMarker,
+    payment_terms: premiumMarker,
+    server_full_document_text: `${premiumMarker}\n${"premium ".repeat(120)}`,
+  };
+  const bodyPlain = `${finalMarker}\nFinal guided review corpus with signer metadata and five guided answers.\n${"final guided corpus ".repeat(120)}`;
+  const premiumSnap = buildPremiumCompletionSnapshot(draft, bodyPlain);
 
   await primeE2eApiBase(page);
-  await installReviewFirstApi(page, draft);
+  await installReviewFirstApi(page, draft, {
+    bodyPlain,
+    signingTokenConfigured: true,
+    reviewLinkMintEnabled: true,
+  });
 
   await page.addInitScript(
-    ({ id, primed, body }) => {
+    ({ id, snap, body, primed }) => {
+      try {
+        localStorage.setItem("claw_premium_completed", "1");
+        localStorage.setItem("claw_org_id", "local-org");
+      } catch {
+        /* ignore */
+      }
+      sessionStorage.setItem("claw_agreement_create_review_resume_v1", id);
       sessionStorage.setItem("claw_premium_send_intent", "review");
+      sessionStorage.setItem(
+        "claw_paid_premium_completion_session_v1",
+        JSON.stringify({ v: 1, source: "qa_bypass", markedAt: Date.now() }),
+      );
+      sessionStorage.setItem("claw_premium_recipients_surface_released_v1", "0");
       sessionStorage.setItem(
         "claw_review_first_pinned_corpus_v1",
         JSON.stringify({ agreementId: id, bodyPlain: body, savedAt: Date.now() }),
       );
-      sessionStorage.setItem(
-        "claw_premium_completion_snapshot_v1",
-        JSON.stringify({ agreementId: id, premiumDraft: primed, savedAt: Date.now() }),
-      );
+      sessionStorage.setItem("claw_premium_completion_snapshot_v1", JSON.stringify(snap));
     },
-    { id: agreementId, primed: draft, body: bodyPlain },
+    { id: agreementId, snap: premiumSnap, body: bodyPlain, primed: draft },
   );
 
-  await page.goto("/app/create", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.goto("/app/create?premiumCompletion=1", { waitUntil: "domcontentloaded", timeout: 30_000 });
+
+  const finalReviewCta = page.getByTestId("guided-review-updated-agreement-cta");
+  if (await finalReviewCta.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await finalReviewCta.click();
+  }
+
+  await page
+    .getByTestId("simple-pro-final-review-screen")
+    .or(page.getByRole("heading", { name: "Review your Pro agreement" }))
+    .first()
+    .waitFor({ state: "visible", timeout: 45_000 })
+    .catch(() => undefined);
+
   const sendForReview = page.getByTestId("simple-pro-send-for-review");
-  if (!(await sendForReview.isVisible({ timeout: 12_000 }).catch(() => false))) {
-    test.skip(true, "Final Pro review surface not reachable in this e2e harness");
-    return;
+  let onFinalReview = await sendForReview.isVisible({ timeout: 20_000 }).catch(() => false);
+
+  if (!onFinalReview) {
+    await page.addInitScript(({ id, primed }) => {
+      sessionStorage.setItem("claw_premium_send_intent", "review");
+      window.history.replaceState(
+        {
+          clawSimpleSendHandoff: {
+            v: 1,
+            agreementId: id,
+            primedDraft: primed,
+            streamlinedSimpleFlow: true,
+            premiumSendIntent: "review",
+            openFlowPhase: "review",
+            savedAt: Date.now(),
+          },
+        },
+        "",
+        `/app/send/${id}`,
+      );
+    }, { id: agreementId, primed: draft });
+    await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    onFinalReview = false;
   }
 
   const mintOk = page.waitForResponse(
@@ -603,10 +708,15 @@ test("create final review click — mocked mint success lands on /app/done", asy
       res.status() === 200,
     { timeout: 25_000 },
   );
-  await sendForReview.click();
+  if (onFinalReview) {
+    await sendForReview.click();
+  }
   await mintOk;
   await expect(page).toHaveURL(new RegExp(`/app/done/${agreementId}`), { timeout: 25_000 });
   await expect(page.getByText("Review link created")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(finalMarker)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(starterMarker)).toHaveCount(0);
+  await expect(page.getByText(premiumMarker)).toHaveCount(0);
   await page.screenshot({
     path: join(artifactDir, "review-link-created-after.png"),
     fullPage: true,
@@ -615,6 +725,137 @@ test("create final review click — mocked mint success lands on /app/done", asy
     path: join(artifactDir, "create-click-review-first-success.png"),
     fullPage: true,
   });
+  await page.screenshot({
+    path: join(artifactDir, "review-first-final-corpus-owner-done.png"),
+    fullPage: true,
+  });
+
+  const reviewerPage = await page.context().newPage();
+  await primeE2eApiBase(reviewerPage);
+  await installReviewFirstApi(
+    reviewerPage,
+    {
+      ...draft,
+      purpose: bodyPlain,
+      payment_terms: "",
+      server_full_document_text: bodyPlain,
+      premium_render_source: "review_first_final_corpus",
+    },
+    { bodyPlain, signingTokenConfigured: true, reviewLinkMintEnabled: true },
+  );
+  await reviewerPage.goto(`/agreements/${agreementId}/review?role=reviewer`, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  await expect(reviewerPage.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
+  await expect(reviewerPage.getByText(finalMarker)).toBeVisible({ timeout: 20_000 });
+  await expect(reviewerPage.getByText(starterMarker)).toHaveCount(0);
+  await expect(reviewerPage.getByText(premiumMarker)).toHaveCount(0);
+  await reviewerPage.screenshot({
+    path: join(artifactDir, "review-first-final-corpus-reviewer.png"),
+    fullPage: true,
+  });
+  await reviewerPage.close();
+});
+
+test("paid Pro review-first on /app/send policy preflight blocks mint POST", async ({ page }) => {
+  test.setTimeout(60_000);
+  const agreementId = "ag_send_policy_preflight_block";
+  const draft = paidProAuthoritativeDraft(agreementId);
+
+  let mintPostCount = 0;
+  page.on("request", (req) => {
+    if (req.method() === "POST" && req.url().includes("/recipient-access-token")) {
+      mintPostCount += 1;
+    }
+  });
+
+  await primeE2eApiBase(page);
+  await installReviewFirstApi(page, draft, {
+    signingTokenConfigured: false,
+    reviewLinkMintEnabled: false,
+    signingTokenEnvVarDetected: null,
+  });
+
+  await page.addInitScript(
+    ({ id, primed }) => {
+      sessionStorage.setItem("claw_premium_send_intent", "review");
+      window.history.replaceState(
+        {
+          clawSimpleSendHandoff: {
+            v: 1,
+            agreementId: id,
+            primedDraft: primed,
+            streamlinedSimpleFlow: true,
+            premiumSendIntent: "review",
+            openFlowPhase: "review",
+            savedAt: Date.now(),
+          },
+        },
+        "",
+        `/app/send/${id}`,
+      );
+    },
+    { id: agreementId, primed: draft },
+  );
+
+  await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await expect(page.getByTestId("review-first-mint-error-panel")).toBeVisible({ timeout: 25_000 });
+  await page.waitForTimeout(500);
+  expect(mintPostCount).toBe(0);
+  await expect(page.getByText("Your Agreement")).toHaveCount(0);
+  await expect(page.getByText("Continue with Pro")).toHaveCount(0);
+});
+
+test("create policy preflight blocks mint POST when review_link_mint_enabled is false", async ({ page }) => {
+  test.setTimeout(90_000);
+  const agreementId = "ag_create_policy_preflight_block";
+  const draft = paidProAuthoritativeDraft(agreementId);
+  const bodyPlain = "x".repeat(600);
+  const premiumSnap = buildPremiumCompletionSnapshot(draft, bodyPlain);
+
+  let mintPostCount = 0;
+  page.on("request", (req) => {
+    if (req.method() === "POST" && req.url().includes("/recipient-access-token")) {
+      mintPostCount += 1;
+    }
+  });
+
+  await primeE2eApiBase(page);
+  await installReviewFirstApi(page, draft, {
+    bodyPlain,
+    signingTokenConfigured: false,
+    reviewLinkMintEnabled: false,
+    signingTokenEnvVarDetected: null,
+  });
+
+  await page.addInitScript(
+    ({ id, snap, body }) => {
+      sessionStorage.setItem("claw_agreement_create_review_resume_v1", id);
+      sessionStorage.setItem("claw_premium_send_intent", "review");
+      sessionStorage.setItem("claw_premium_completion_snapshot_v1", JSON.stringify(snap));
+      sessionStorage.setItem(
+        "claw_review_first_pinned_corpus_v1",
+        JSON.stringify({ agreementId: id, bodyPlain: body, savedAt: Date.now() }),
+      );
+    },
+    { id: agreementId, snap: premiumSnap, body: bodyPlain },
+  );
+
+  await page.goto("/app/create?premiumCompletion=1", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  const finalReviewCta = page.getByTestId("guided-review-updated-agreement-cta");
+  if (await finalReviewCta.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await finalReviewCta.click();
+  }
+  const sendForReview = page.getByTestId("simple-pro-send-for-review");
+  if (!(await sendForReview.isVisible({ timeout: 20_000 }).catch(() => false))) {
+    test.skip(true, "Final Pro review surface not reachable in this e2e harness");
+    return;
+  }
+  await sendForReview.click();
+  await expect(page.getByTestId("simple-pro-review-first-handoff-error")).toBeVisible({ timeout: 25_000 });
+  await page.waitForTimeout(500);
+  expect(mintPostCount).toBe(0);
 });
 
 /**

@@ -10,6 +10,9 @@ export type RecipientAccessMintBodyInput = {
   inviter_display_name?: string;
   single_use?: boolean;
   recipient_subject?: string;
+  /** Paid Pro review-first only: exact frozen corpus used for review-link minting/display. */
+  review_first_document_text?: string;
+  review_first_document_source?: string;
 };
 
 export type RecipientAccessMintBody = {
@@ -20,6 +23,8 @@ export type RecipientAccessMintBody = {
   recipient_party_id?: string;
   inviter_display_name?: string;
   recipient_subject?: string;
+  review_first_document_text?: string;
+  review_first_document_source?: string;
 };
 
 const DEFAULT_TTL = 60 * 60 * 24 * 7;
@@ -52,9 +57,15 @@ export function buildRecipientAccessMintBody(
   const partyId = trimOpt(input.recipient_party_id, 64);
   const inviter = trimOpt(input.inviter_display_name, 120);
   const subject = trimOpt(input.recipient_subject, 200);
+  const reviewFirstDocumentText = trimOpt(input.review_first_document_text, 200_000);
+  const reviewFirstDocumentSource = trimOpt(input.review_first_document_source, 80);
   if (partyId) out.recipient_party_id = partyId;
   if (inviter) out.inviter_display_name = inviter;
   if (subject) out.recipient_subject = subject;
+  if (mode === "review" && reviewFirstDocumentText) {
+    out.review_first_document_text = reviewFirstDocumentText;
+    out.review_first_document_source = reviewFirstDocumentSource || "review_first_final_corpus";
+  }
   return out;
 }
 

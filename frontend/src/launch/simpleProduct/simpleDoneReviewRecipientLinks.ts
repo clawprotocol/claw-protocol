@@ -235,6 +235,8 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
         role,
         recipient_party_id: partyId || undefined,
         inviter_display_name: inviter || undefined,
+        review_first_document_text: signingCorpusLen > 0 ? args.signingCorpusPlain?.trim() : undefined,
+        review_first_document_source: signingCorpusLen > 0 ? args.signingCorpusSource ?? "review_first_pinned_corpus" : undefined,
       },
       mintKey,
       {

@@ -33,6 +33,7 @@ import {
   logReviewFirstMintStart,
   logReviewFirstMintSuccess,
 } from "../../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
+import { resolveReviewFirstMintPolicyGate } from "./reviewFirstAccessPolicy";
 import {
   clearReviewFirstMintInFlight,
   mergeDraftWithReviewFirstPinnedCorpus,
@@ -88,6 +89,23 @@ async function mintAndPersistReviewLinksForHandoff(
     String((draftForMint as { server_full_document_text?: string }).server_full_document_text ?? "").length,
     String((draftForMint as { premium_full_document_text?: string }).premium_full_document_text ?? "").length,
   );
+  const policyGate = await resolveReviewFirstMintPolicyGate({
+    agreementId: id,
+    source: logSource ?? null,
+  });
+  if (!policyGate.ok) {
+    return {
+      ok: false,
+      failure: {
+        agreementId: id,
+        reason: "review_link_mint",
+        userMessage: policyGate.userMessage,
+        premiumSendIntent,
+        mintErrorCode: policyGate.mintErrorCode,
+      },
+    };
+  }
+
   logReviewFirstMintStart({
     agreementId: id,
     source: logSource ?? null,

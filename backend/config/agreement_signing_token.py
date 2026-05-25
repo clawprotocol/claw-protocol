@@ -23,10 +23,20 @@ _DEV_FALLBACK_SIGNING_TOKEN_RAW = hashlib.sha256(
 
 def operator_signing_token_secret_configured() -> bool:
     """True when an explicit operator secret is set (either accepted env name)."""
-    return bool(
-        os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip()
-        or os.getenv("CLAW_SIGNING_TOKEN_SECRET", "").strip()
-    )
+    return bool(detected_signing_token_env_var())
+
+
+def detected_signing_token_env_var() -> str | None:
+    """
+    Which accepted env var is set (primary wins over alias).
+
+    Safe for operator diagnostics — never returns the secret value.
+    """
+    if os.getenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "").strip():
+        return "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET"
+    if os.getenv("CLAW_SIGNING_TOKEN_SECRET", "").strip():
+        return "CLAW_SIGNING_TOKEN_SECRET"
+    return None
 
 
 def review_link_mint_enabled() -> bool:

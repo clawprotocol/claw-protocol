@@ -377,7 +377,7 @@ describe("SimpleDonePage owner approval UX", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("Nothing has been signed. Copy this private link and send it to each reviewer."),
+        screen.getByText("Send this private link to reviewers. Nothing is signed yet."),
       ).toBeTruthy();
     });
     expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
