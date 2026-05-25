@@ -24,6 +24,7 @@ import {
   stripOrphanNumberedHeadingLines,
   stripStaleExecutionPlacementCorpusCopy,
 } from "./guidedCorpusLineRepairs";
+import { repairFinalGradeGuidedCorpus } from "./guidedFinalGradeCorpus";
 
 export type ResolveGuidedSigningAuthoritativeArgs = {
   snapshot?: string;
@@ -337,7 +338,7 @@ export function stripDuplicatePreWitnessIdentityFragment(
     }
   }
 
-  if (meaningful < 3 || !hasSigLabel || start >= lines.length) {
+  if (meaningful < 2 || !hasSigLabel || start >= lines.length) {
     return { text, repairs: [] };
   }
   const kept = lines.slice(0, start).join("\n").trimEnd();
@@ -382,6 +383,13 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   const instructionLeak = stripGuidedInstructionLeakLines(out);
   out = instructionLeak.text;
   repairs.push(...instructionLeak.repairs);
+
+  const finalGrade = repairFinalGradeGuidedCorpus(out, {
+    signerIdentities: identities,
+    authoritativePartyNames: identities.map((id) => id.partyDisplayName).filter(Boolean),
+  });
+  out = finalGrade.text;
+  repairs.push(...finalGrade.repairs.map((r) => `final_grade:${r}`));
 
   const executionFooter = stripStaleExecutionPlacementCorpusCopy(out);
   out = executionFooter.text;

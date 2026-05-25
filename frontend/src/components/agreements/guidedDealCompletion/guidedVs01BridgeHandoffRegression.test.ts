@@ -265,4 +265,44 @@ describe("guided VS01 bridge handoff regression (failure shape)", () => {
     expect(readiness.packetReady).toBe(true);
     expect(readiness.reason).toBeNull();
   });
+
+  it("VS01 handoff preserves pro final review plain-text edits through signing cleanup", () => {
+    const base = aiAutomationCorpus();
+    const editMarker = "PRO_REVIEW_USER_EDIT_NET_45_DAYS";
+    const edited = base.replace("Net 30", editMarker);
+    const manifest = resolveCanonicalFinalPartyManifest({
+      partyCount: 2,
+      partySignerNames: ["Anthem H Blanchard", ""],
+      partySignerTitles: ["Manager", ""],
+      recipient1Name: "Acme LLC",
+      recipient2Name: "Joe Smith",
+      recipient1Email: "anthem@example.test",
+      recipient2Email: "joe@example.test",
+      extraPartyReviewEmails: [],
+      draftPartyNames: ["Acme LLC", "Joe Smith"],
+      sendMode: "signature",
+      recipientsDeferred: false,
+    });
+    const cleaned = prepareGuidedSigningCorpusCleanup({
+      body: edited,
+      partyManifest: manifest,
+    }).body;
+    expect(cleaned).toContain(editMarker);
+
+    const handoff = buildGuidedVs01SigningHandoff({
+      corpusText: cleaned,
+      source: "finalized_signer_applied_guided_corpus",
+      signatureRebuilt: true,
+    });
+    writeGuidedVs01SigningHandoffSession(handoff);
+
+    const gate = resolveFinalVs01CorpusOrBlock({
+      guidedSigningHandoff: readGuidedVs01SigningHandoffSession(),
+      agreementCorpusText: cleaned,
+      guidedPro: true,
+      signatureRebuilt: true,
+    });
+    expect(gate.allowed).toBe(true);
+    expect(gate.corpus).toContain(editMarker);
+  });
 });

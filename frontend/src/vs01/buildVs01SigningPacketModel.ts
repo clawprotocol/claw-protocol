@@ -344,8 +344,11 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     const startsSectionHeading =
       /^[A-Z][A-Z0-9 ,;:'"()/&.-]{3,}$/.test(trimmed) && trimmed.length <= 90;
     const nextStartsExecutionLine = /^(?:By|Signature|Name|Title|Date)\s*:/i.test(nextNonBlank);
+    const witnessLinesRemaining = /^IN WITNESS WHEREOF/i.test(trimmed)
+      ? lines.slice(i).filter((l) => l.trim()).length
+      : 0;
     const minKeepTogether = /^IN WITNESS WHEREOF/i.test(trimmed)
-      ? 14
+      ? Math.min(14, Math.max(witnessLinesRemaining, 6))
       : startsExecutionBlock
         ? 7
         : startsSectionHeading

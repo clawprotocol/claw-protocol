@@ -836,6 +836,7 @@ import {
   shouldBlockGuidedFinalReviewPhaseRollback,
   shouldRejectHydratedCorpusOverPin,
 } from "./guidedDealCompletion/guidedFinalCorpusPin";
+import { repairFinalGradeGuidedCorpus } from "./guidedDealCompletion/guidedFinalGradeCorpus";
 import {
   GuidedFinalizeModal,
   GUIDED_FINALIZE_MODAL_MIN_VISIBLE_MS,
@@ -2678,6 +2679,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [proReviewSuggestEditsDraft, setProReviewSuggestEditsDraft] = useState("");
   const [proReviewSuggestEditsBusy, setProReviewSuggestEditsBusy] = useState(false);
   const [proReviewSuggestEditsError, setProReviewSuggestEditsError] = useState<string | null>(null);
+  const [proFinalReviewEditPlain, setProFinalReviewEditPlain] = useState("");
+  const [proFinalReviewSaveBusy, setProFinalReviewSaveBusy] = useState(false);
+  const [proFinalReviewSaveAck, setProFinalReviewSaveAck] = useState(false);
   const [proFinalReviewCopyAck, setProFinalReviewCopyAck] = useState(false);
   const [proFinalReviewExportBusy, setProFinalReviewExportBusy] = useState(false);
   const [proFinalReviewExportError, setProFinalReviewExportError] = useState<string | null>(null);
@@ -17099,6 +17103,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setReviewDocRefreshTick((n) => n + 1);
   }, [proReviewSuggestEditsDraft, runPersistedRefineFromStepBuffer, bumpPremiumSurfaceGateTick]);
 
+  React.useEffect(() => {
+    if (!simpleProFinalReviewActive) return;
+    setProFinalReviewEditPlain(simpleProFinalReviewCorpus.plainText);
+  }, [simpleProFinalReviewActive, simpleProFinalReviewCorpus.plainText]);
+
+  const handleSaveProFinalReviewPlainEdits = React.useCallback(() => {
+    const raw = proFinalReviewEditPlain.trim();
+    if (!raw) return;
+    setProFinalReviewSaveBusy(true);
+    setProFinalReviewSaveAck(false);
+    const repaired = repairFinalGradeGuidedCorpus(raw, {
+      signerIdentities: guidedSignerCanonicalIdentities,
+      authoritativePartyNames: guidedSignerCanonicalIdentities.map((p) => p.partyDisplayName).filter(Boolean),
+    });
+    pinFinalizedSignerAppliedCorpus(repaired.text, "pro_final_review_plain_edit");
+    setProFinalReviewEditPlain(repaired.text);
+    setProFinalReviewSaveBusy(false);
+    setProFinalReviewSaveAck(true);
+    window.setTimeout(() => setProFinalReviewSaveAck(false), 2200);
+  }, [proFinalReviewEditPlain, guidedSignerCanonicalIdentities, pinFinalizedSignerAppliedCorpus]);
+
   const proReviewSigningFlowState = useMemo(() => {
     const packetPrepared = Boolean(
       agreementIdForReview && isAgreementPacketPrepared(agreementIdForReview),
@@ -21582,45 +21607,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                 ? "LawDog recovered the full agreement from the frozen authoritative snapshot before rendering final review."
                                               : null
                                           }
-                                          suggestEditsDraft={
-                                            paidProInlineSignersReady ? undefined : proReviewSuggestEditsDraft
-                                          }
-                                          suggestEditsBusy={
-                                            paidProInlineSignersReady ? undefined : proReviewSuggestEditsBusy
-                                          }
-                                          suggestEditsError={
-                                            paidProInlineSignersReady ? undefined : proReviewSuggestEditsError
-                                          }
-                                          uploadBusy={paidProInlineSignersReady ? undefined : reviewUploadBusy}
-                                          uploadError={paidProInlineSignersReady ? undefined : reviewUploadError}
-                                          uploadedSource={
-                                            paidProInlineSignersReady ? undefined : uploadedSourceForReview
-                                          }
-                                          onSuggestEditsDraftChange={
-                                            paidProInlineSignersReady
-                                              ? undefined
-                                              : setProReviewSuggestEditsDraft
-                                          }
-                                          onApplySuggestEdits={
-                                            paidProInlineSignersReady
-                                              ? undefined
-                                              : () => void handleProReviewApplySuggestEdits()
-                                          }
-                                          onUploadFile={
-                                            paidProInlineSignersReady
-                                              ? undefined
-                                              : (f) => void handleReviewEditedVersionFile(f)
-                                          }
-                                          onUseUploadedForSigning={
-                                            paidProInlineSignersReady
-                                              ? undefined
-                                              : handleUseUploadedVersionForSigning
-                                          }
-                                          onKeepLawDogVersion={
-                                            paidProInlineSignersReady
-                                              ? undefined
-                                              : handleKeepLawDogVersionAfterUpload
-                                          }
+                                          editablePlainText={proFinalReviewEditPlain}
+                                          onEditablePlainTextChange={setProFinalReviewEditPlain}
+                                          onSavePlainTextEdits={handleSaveProFinalReviewPlainEdits}
+                                          savePlainTextBusy={proFinalReviewSaveBusy}
+                                          savePlainTextAck={proFinalReviewSaveAck}
+                                          suggestEditsDraft={proReviewSuggestEditsDraft}
+                                          suggestEditsBusy={proReviewSuggestEditsBusy}
+                                          suggestEditsError={proReviewSuggestEditsError}
+                                          uploadBusy={reviewUploadBusy}
+                                          uploadError={reviewUploadError}
+                                          uploadedSource={uploadedSourceForReview}
+                                          onSuggestEditsDraftChange={setProReviewSuggestEditsDraft}
+                                          onApplySuggestEdits={() => void handleProReviewApplySuggestEdits()}
+                                          onUploadFile={(f) => void handleReviewEditedVersionFile(f)}
+                                          onUseUploadedForSigning={handleUseUploadedVersionForSigning}
+                                          onKeepLawDogVersion={handleKeepLawDogVersionAfterUpload}
                                           onBackToSignerDetails={handleGuidedBackToSignerDetailsFromFinalReview}
                                           signersReady={paidProInlineSignersReady}
                                           enableSectionJump={false}

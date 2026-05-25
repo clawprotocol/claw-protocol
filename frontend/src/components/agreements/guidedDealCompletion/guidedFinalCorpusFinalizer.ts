@@ -46,6 +46,10 @@ import {
   normalizeGuidedProCorpusStructure,
   validateNormalizedCorpusStructure,
 } from "./guidedCanonicalCorpusNormalizer";
+import {
+  logFinalGradeCorpusDefects,
+  repairFinalGradeGuidedCorpus,
+} from "./guidedFinalGradeCorpus";
 
 export const GUIDED_FINAL_CORPUS_MIN_LEN = 1500;
 
@@ -478,6 +482,17 @@ export function finalizeGuidedProAgreementCorpus(
   const preWitnessIdentity = stripDuplicatePreWitnessIdentityFragment(body, args.signerIdentities);
   body = preWitnessIdentity.text;
   diagnostics.repairs.push(...preWitnessIdentity.repairs);
+  const finalGrade = repairFinalGradeGuidedCorpus(body, {
+    signerIdentities: args.signerIdentities,
+    authoritativePartyNames: args.signerIdentities.map((id) => id.partyDisplayName).filter(Boolean),
+  });
+  body = finalGrade.text;
+  diagnostics.repairs.push(...finalGrade.repairs.map((r) => `final_grade:${r}`));
+  logFinalGradeCorpusDefects({
+    defects: finalGrade.defects,
+    repaired: true,
+    bodyLen: body.length,
+  });
   const structureNormalized = normalizeGuidedProCorpusStructure(body);
   body = structureNormalized.text;
   diagnostics.repairs.push(...structureNormalized.repairs.map((r) => `structure:${r}`));

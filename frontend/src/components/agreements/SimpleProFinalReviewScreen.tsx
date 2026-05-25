@@ -47,6 +47,12 @@ export type SimpleProFinalReviewScreenProps = {
   uploadedSource?: UploadedSourceDocumentRecord | null;
   onSuggestEditsDraftChange?: (value: string) => void;
   onApplySuggestEdits?: () => void;
+  /** Full agreement plain text for direct edit before signing. */
+  editablePlainText?: string;
+  onEditablePlainTextChange?: (value: string) => void;
+  onSavePlainTextEdits?: () => void;
+  savePlainTextBusy?: boolean;
+  savePlainTextAck?: boolean;
   onUploadFile?: (file: File) => void;
   onUseUploadedForSigning?: () => void;
   onKeepLawDogVersion?: () => void;
@@ -88,6 +94,11 @@ export function SimpleProFinalReviewScreen({
   uploadedSource = null,
   onSuggestEditsDraftChange,
   onApplySuggestEdits,
+  editablePlainText,
+  onEditablePlainTextChange,
+  onSavePlainTextEdits,
+  savePlainTextBusy = false,
+  savePlainTextAck = false,
   onUploadFile,
   onUseUploadedForSigning,
   onKeepLawDogVersion,
@@ -97,9 +108,11 @@ export function SimpleProFinalReviewScreen({
   const fileRef = useRef<HTMLInputElement>(null);
   const [editAgreementTextOpen, setEditAgreementTextOpen] = useState(false);
   const [showUploadActions, setShowUploadActions] = useState(Boolean(uploadedSource));
-  const canEditAgreementText =
+  const canDirectEditPlainText = Boolean(onEditablePlainTextChange && onSavePlainTextEdits);
+  const canSuggestEdits =
     !suppressPostReviewEditUx &&
     Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
+  const canEditAgreementText = canDirectEditPlainText || canSuggestEdits;
   const showDocument = agreementHtml.trim().length > 0 && !corpusRecoveryMessage;
   const answerCount = appliedAnswerCount > 0 ? appliedAnswerCount : appliedVariableIds.length;
 
@@ -323,49 +336,86 @@ export function SimpleProFinalReviewScreen({
           className="rounded-md border border-stone-200/95 bg-stone-50/95 px-2.5 py-2.5"
           data-testid="simple-pro-edit-agreement-text-card"
         >
-          <label
-            className="text-xs font-semibold text-stone-900"
-            htmlFor="simple-pro-edit-agreement-text-input"
-          >
-            Edit or paste changes before sending
-          </label>
-          <textarea
-            id="simple-pro-edit-agreement-text-input"
-            className="mt-2 min-h-[4.5rem] w-full resize-y rounded-md border border-stone-300/90 bg-white px-2.5 py-2 text-xs leading-relaxed text-stone-900 placeholder:text-stone-400"
-            placeholder="Type requested changes…"
-            value={suggestEditsDraft}
-            disabled={suggestEditsBusy}
-            onChange={(e) => onSuggestEditsDraftChange?.(e.target.value)}
-            data-testid="simple-pro-suggest-edits-input"
-          />
-          {suggestEditsError ? (
-            <p className="mt-1.5 text-[11px] font-medium text-amber-800" role="alert">
-              {suggestEditsError}
-            </p>
+          {canDirectEditPlainText ? (
+            <>
+              <label
+                className="text-xs font-semibold text-stone-900"
+                htmlFor="simple-pro-edit-agreement-plain-input"
+              >
+                Edit agreement text before sending
+              </label>
+              <textarea
+                id="simple-pro-edit-agreement-plain-input"
+                className="mt-2 min-h-[12rem] w-full resize-y rounded-md border border-stone-300/90 bg-white px-2.5 py-2 font-mono text-[11px] leading-relaxed text-stone-900"
+                value={editablePlainText ?? ""}
+                disabled={savePlainTextBusy}
+                onChange={(e) => onEditablePlainTextChange?.(e.target.value)}
+                data-testid="simple-pro-edit-agreement-plain-input"
+              />
+              <div className="mt-2 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
+                <button
+                  type="button"
+                  className="rounded-md bg-emerald-800 px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-45"
+                  disabled={savePlainTextBusy || !(editablePlainText ?? "").trim()}
+                  onClick={onSavePlainTextEdits}
+                  data-testid="simple-pro-save-agreement-edits"
+                >
+                  {savePlainTextBusy ? "Saving…" : savePlainTextAck ? "Saved ✓" : "Save edits"}
+                </button>
+              </div>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-stone-500">
+                Saved edits update the version sent for signing and e-sign field placement.
+              </p>
+            </>
           ) : null}
-          <div className="mt-2 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
-            <button
-              type="button"
-              className="rounded-md bg-stone-800 px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-45"
-              disabled={suggestEditsBusy || !suggestEditsDraft.trim()}
-              onClick={onApplySuggestEdits}
-              data-testid="simple-pro-apply-suggest-edits"
-            >
-              {suggestEditsBusy ? "Applying…" : "Apply changes"}
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-stone-300/90 px-2.5 py-1.5 text-[11px] font-medium text-stone-700"
-              disabled={uploadBusy}
-              onClick={() => fileRef.current?.click()}
-              data-testid="simple-pro-upload-revised-document"
-            >
-              {uploadBusy ? "Uploading…" : "Upload revised agreement"}
-            </button>
-          </div>
-          <p className="mt-1.5 text-[10px] leading-relaxed text-stone-500">
-            PDF, TXT, Markdown, or Word (.doc/.docx) when text can be extracted.
-          </p>
+          {canSuggestEdits ? (
+            <>
+              <label
+                className="text-xs font-semibold text-stone-900"
+                htmlFor="simple-pro-edit-agreement-text-input"
+              >
+                {canDirectEditPlainText ? "Or suggest AI edits" : "Edit or paste changes before sending"}
+              </label>
+              <textarea
+                id="simple-pro-edit-agreement-text-input"
+                className="mt-2 min-h-[4.5rem] w-full resize-y rounded-md border border-stone-300/90 bg-white px-2.5 py-2 text-xs leading-relaxed text-stone-900 placeholder:text-stone-400"
+                placeholder="Type requested changes…"
+                value={suggestEditsDraft}
+                disabled={suggestEditsBusy}
+                onChange={(e) => onSuggestEditsDraftChange?.(e.target.value)}
+                data-testid="simple-pro-suggest-edits-input"
+              />
+              {suggestEditsError ? (
+                <p className="mt-1.5 text-[11px] font-medium text-amber-800" role="alert">
+                  {suggestEditsError}
+                </p>
+              ) : null}
+              <div className="mt-2 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
+                <button
+                  type="button"
+                  className="rounded-md bg-stone-800 px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-45"
+                  disabled={suggestEditsBusy || !suggestEditsDraft.trim()}
+                  onClick={onApplySuggestEdits}
+                  data-testid="simple-pro-apply-suggest-edits"
+                >
+                  {suggestEditsBusy ? "Applying…" : "Apply changes"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-stone-300/90 px-2.5 py-1.5 text-[11px] font-medium text-stone-700"
+                  disabled={uploadBusy}
+                  onClick={() => fileRef.current?.click()}
+                  data-testid="simple-pro-upload-revised-document"
+                >
+                  {uploadBusy ? "Uploading…" : "Upload revised agreement"}
+                </button>
+              </div>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-stone-500">
+                PDF, TXT, Markdown, or Word (.doc/.docx) when text can be extracted.
+              </p>
+            </>
+          ) : null}
+          {canSuggestEdits ? (
           <input
             ref={fileRef}
             type="file"
@@ -380,6 +430,7 @@ export function SimpleProFinalReviewScreen({
               e.target.value = "";
             }}
           />
+          ) : null}
         </div>
       ) : null}
 

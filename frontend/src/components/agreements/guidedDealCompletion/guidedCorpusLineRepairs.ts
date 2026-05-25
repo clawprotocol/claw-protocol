@@ -7,6 +7,19 @@ import { findSignatureRegionStart } from "./signatureRegion";
 const MERGED_SUBCLAUSE_IN_LINE_RE =
   /^(\d+\.\d+)\s+(.+?)\s+(\d+\.\d+)\s+(.+)$/;
 
+function subsectionContentHostNumber(line: string): number | null {
+  const t = line.toLowerCase();
+  if (/\b(?:confidential|non-public|proprietary information)\b/.test(t)) return 3;
+  if (/\b(?:uptime|sla|support hours|production automation)\b/.test(t)) return 5;
+  if (/\b(?:termination|renewal|notice period)\b/.test(t) && !/\bconfidential\b/.test(t)) return 6;
+  if (/\b(?:deliverables|work product|ownership|background technology)\b/.test(t)) return 4;
+  if (/\b(?:invoice|net\s*30|monthly service fee|payment timing)\b/.test(t)) return 2;
+  if (/\b(?:purpose|scope of services)\b/.test(t)) return 1;
+  if (/\b(?:notices|notice address)\b/.test(t)) return 7;
+  if (/\b(?:electronic signature|counterpart)\b/.test(t)) return 9;
+  return null;
+}
+
 const GUIDED_INSTRUCTION_LEAK_RES: readonly RegExp[] = [
   /^Add LLC suffixes\b/i,
   /^Use full legal entity names with LLC\/Inc\.\s+suffixes\b/i,
@@ -129,10 +142,13 @@ export function extractOrphanSubclausesFromBodyLines(
       const t = line.trim();
       const sub = t.match(/^(\d+)\.(\d+)\s+/);
       if (sub && hostSectionNumber != null && Number(sub[1]) !== hostSectionNumber) {
-        const n = Number(sub[1]);
-        const bucket = orphans.get(n) ?? [];
+        const subNum = Number(sub[1]);
+        const hinted = subsectionContentHostNumber(line);
+        const target =
+          subNum !== hostSectionNumber ? (hinted ?? subNum) : hinted && hinted !== hostSectionNumber ? hinted : subNum;
+        const bucket = orphans.get(target) ?? [];
         bucket.push(line);
-        orphans.set(n, bucket);
+        orphans.set(target, bucket);
         continue;
       }
       if (sub && hostSectionNumber == null && Number(sub[1]) >= 2) {

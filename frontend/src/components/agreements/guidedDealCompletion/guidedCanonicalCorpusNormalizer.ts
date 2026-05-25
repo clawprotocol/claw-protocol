@@ -151,7 +151,7 @@ function renumberSubclausesInSection(bodyLines: string[], sectionNumber: number)
   return bodyLines.map((line) => {
     const t = line.trim();
     const subMatch = t.match(/^(\d+)\.(\d+)\.?\s+(.*)$/);
-    if (subMatch && Number(subMatch[1]) === sectionNumber) {
+    if (subMatch) {
       sub += 1;
       return `${sectionNumber}.${sub} ${subMatch[3]}`;
     }

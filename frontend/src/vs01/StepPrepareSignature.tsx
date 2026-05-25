@@ -906,13 +906,14 @@ export function StepPrepareSignature({
     setAutoInitialsEveryPage(true);
   }, [agreementBridgePlacementCopy, documentId, numPages]);
 
-  const fieldsForPacketGate = signingPacketModel?.allowed ? signingPacketModel.fields : fields;
+  const canonicalFieldsForGate =
+    agreementBridgePlacementCopy && signingPacketModel?.allowed ? signingPacketModel.fields : fields;
 
   const initialsPacketSummary = useMemo(() => {
     if (!autoInitialsEveryPage || numPages <= 0 || !prepareSignerRoles?.length) return null;
     if (signingPacketModel?.allowed) {
       return summarizeCanonicalSigningPacketInitials({
-        fields: fieldsForPacketGate,
+        fields: canonicalFieldsForGate,
         pageCount: numPages,
         roleCount: prepareSignerRoles.length,
         pages: signingPacketModel.pages,
@@ -931,7 +932,7 @@ export function StepPrepareSignature({
     autoInitialsEveryPage,
     numPages,
     prepareSignerRoles,
-    fieldsForPacketGate,
+    canonicalFieldsForGate,
     prepareCorpusText,
     effectivePageLayouts,
     documentId,
@@ -970,7 +971,7 @@ export function StepPrepareSignature({
         placementCanFinish: agreementBridgePlacementCopy
           ? Boolean(
               prepareSignerRoles?.length &&
-                fieldsForPacketGate.filter((f) => f.type === "signature" && !f.autoInitials).length >=
+                canonicalFieldsForGate.filter((f) => f.type === "signature" && !f.autoInitials).length >=
                   prepareSignerRoles.length,
             )
           : Boolean(preparePacketGate?.canFinish),
@@ -983,7 +984,7 @@ export function StepPrepareSignature({
       preparePacketGate,
       agreementBridgePlacementCopy,
       prepareSignerRoles,
-      fieldsForPacketGate,
+      canonicalFieldsForGate,
       initialsPacketSummary,
       canonicalTextRendered,
       canonicalSignatureLinesRendered,
