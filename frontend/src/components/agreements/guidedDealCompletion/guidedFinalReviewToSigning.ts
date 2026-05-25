@@ -530,6 +530,48 @@ export function logReviewFirstError(payload: Record<string, unknown>): void {
   console.info("[review-first-error]", payload);
 }
 
+export function logReviewFirstMarkerWritten(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-marker-written]", payload);
+}
+
+export function logReviewFirstPersistStart(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-persist-start]", payload);
+}
+
+export function logReviewFirstPersistComplete(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-persist-complete]", payload);
+}
+
+export function logReviewFirstMintStart(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-mint-start]", payload);
+}
+
+export function logReviewFirstMintSuccess(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-mint-success]", payload);
+}
+
+export function logReviewFirstMintError(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-mint-error]", payload);
+}
+
+export function logReviewFirstLegacySendBlocked(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-legacy-send-blocked]", payload);
+}
+
 export function logGuidedSignatureTrackStart(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

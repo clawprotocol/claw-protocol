@@ -57,6 +57,8 @@ import {
   shouldSkipPaidProPrepareReviewLinkInterstitial,
   type PaidProPostRecipientSetupFailure,
 } from "./paidProPostRecipientSetupHandoff";
+import { peekReviewFirstHandoffSource } from "./reviewFirstSendSurface";
+import { logReviewFirstLegacySendBlocked } from "../../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
 import { shouldSuppressReviewPipelineTelemetry } from "../../vs01/vs01SignatureDashboardFlow";
 import { getOrgId } from "../orgContext";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
@@ -611,6 +613,14 @@ export function SimpleCreatePage() {
                 console.debug("[SimpleCreate] navigate to review with agreement id", agreementId);
               }
               void (async () => {
+                if (peekReviewFirstHandoffSource(agreementId)) {
+                  logReviewFirstLegacySendBlocked({
+                    agreementId,
+                    path: "simple_create_onCreated",
+                    premiumSendIntent: handoff?.premiumSendIntent ?? null,
+                  });
+                  return;
+                }
                 const resolvedIntent: PremiumSendIntent | null =
                   handoff?.premiumSendIntent === "signature" || handoff?.premiumSendIntent === "review"
                     ? handoff.premiumSendIntent

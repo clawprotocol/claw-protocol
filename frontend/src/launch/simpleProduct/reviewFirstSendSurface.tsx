@@ -6,6 +6,14 @@ import { peekPremiumSendIntent, type PremiumSendIntent } from "./premiumSendInte
 /** Session marker: paid Pro final review → “Send for review first” (survives `/app/send` safety-net landings). */
 export const REVIEW_FIRST_HANDOFF_SOURCE_SS_KEY = "claw_review_first_handoff_source_v1";
 
+/** Pinned authoritative corpus for review-link mint (survives hydrate / `/app/send` fallback). */
+export const REVIEW_FIRST_PINNED_CORPUS_SS_KEY = "claw_review_first_pinned_corpus_v1";
+
+/** Prevents duplicate POST mint when create handoff and `/app/send` safety-net race. */
+export const REVIEW_FIRST_MINT_IN_FLIGHT_SS_KEY = "claw_review_first_mint_in_flight_v1";
+
+export const REVIEW_FIRST_SIMPLE_PRO_SOURCE = "simple_pro_send_for_review";
+
 /** Copy that must never appear for paid Pro review-first (generic `/app/send` gate + upsell). */
 export const REVIEW_FIRST_GENERIC_SEND_FORBIDDEN_COPY = [
   "Your Agreement",
@@ -45,9 +53,73 @@ export function peekReviewFirstHandoffSource(agreementId?: string): string | nul
 export function clearReviewFirstHandoffSource(): void {
   try {
     sessionStorage.removeItem(REVIEW_FIRST_HANDOFF_SOURCE_SS_KEY);
+    sessionStorage.removeItem(REVIEW_FIRST_PINNED_CORPUS_SS_KEY);
+    sessionStorage.removeItem(REVIEW_FIRST_MINT_IN_FLIGHT_SS_KEY);
   } catch {
     /* ignore */
   }
+}
+
+export function writeReviewFirstPinnedCorpus(agreementId: string, bodyPlain: string): void {
+  const id = String(agreementId || "").trim();
+  const body = String(bodyPlain || "").trim();
+  if (!id || !body) return;
+  try {
+    sessionStorage.setItem(
+      REVIEW_FIRST_PINNED_CORPUS_SS_KEY,
+      JSON.stringify({ agreementId: id, bodyPlain: body, savedAt: Date.now() }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+export function peekReviewFirstPinnedCorpus(agreementId: string): string | null {
+  try {
+    const raw = sessionStorage.getItem(REVIEW_FIRST_PINNED_CORPUS_SS_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as { agreementId?: string; bodyPlain?: string };
+    if (String(o.agreementId ?? "").trim() !== String(agreementId || "").trim()) return null;
+    const body = String(o.bodyPlain ?? "").trim();
+    return body || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setReviewFirstMintInFlight(agreementId: string): void {
+  const id = String(agreementId || "").trim();
+  if (!id) return;
+  try {
+    sessionStorage.setItem(REVIEW_FIRST_MINT_IN_FLIGHT_SS_KEY, id);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function peekReviewFirstMintInFlight(agreementId?: string): boolean {
+  try {
+    const v = sessionStorage.getItem(REVIEW_FIRST_MINT_IN_FLIGHT_SS_KEY);
+    if (!v) return false;
+    const id = String(agreementId ?? "").trim();
+    return !id || v === id;
+  } catch {
+    return false;
+  }
+}
+
+export function clearReviewFirstMintInFlight(): void {
+  try {
+    sessionStorage.removeItem(REVIEW_FIRST_MINT_IN_FLIGHT_SS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** True when create-page review-first owns routing (must not call generic onCreated → `/app/send`). */
+export function isCreatePageReviewFirstHandoffSource(source: string | null | undefined): boolean {
+  const s = String(source ?? "").trim();
+  return s === REVIEW_FIRST_SIMPLE_PRO_SOURCE || s.startsWith("simple_pro_") || s.includes("review_first");
 }
 
 export function isReviewFirstPremiumSendIntentActive(args: {
@@ -81,6 +153,20 @@ export function resolveReviewFirstMintFailureUserMessage(args?: {
   const fallback = (args?.fallback ?? "").trim();
   if (fallback) return fallback;
   return "Review links could not be created. Check recipient details and try again.";
+}
+
+export function mergeDraftWithReviewFirstPinnedCorpus(
+  draft: AgreementDraft,
+  agreementId: string,
+): AgreementDraft {
+  const pinned = peekReviewFirstPinnedCorpus(agreementId);
+  if (!pinned) return draft;
+  return {
+    ...draft,
+    server_full_document_text: pinned,
+    premium_full_document_text: pinned,
+    document_text: pinned,
+  } as AgreementDraft;
 }
 
 export function isPaidProReviewFirstSendIntent(
@@ -117,8 +203,8 @@ export function shouldRenderPaidProReviewFirstSendSurface(args: {
   ) {
     return false;
   }
+  if (peekReviewFirstHandoffSource(args.agreementId)) return true;
   if (args.streamlinedSimpleFlow && args.handoffPremiumIntent === "review") return true;
-  if (args.streamlinedSimpleFlow && peekReviewFirstHandoffSource(args.agreementId)) return true;
   if (args.sendAuthoritative) return true;
   if (args.paidProSendAllowed) return true;
   if (args.hasPrimedHandoffDraft && args.handoffPremiumIntent === "review") return true;
@@ -144,7 +230,7 @@ export function ReviewFirstMintErrorPanel({
       role="alert"
       data-testid="review-first-mint-error-panel"
     >
-      <p className="font-semibold text-rose-100">Review links could not be created</p>
+      <p className="font-semibold text-rose-100">Review links unavailable</p>
       <p className="mt-2 text-xs leading-relaxed text-rose-100/90">{message}</p>
       <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         {onBackToFinalReview ? (

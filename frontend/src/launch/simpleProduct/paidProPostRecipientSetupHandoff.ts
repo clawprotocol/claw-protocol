@@ -28,7 +28,19 @@ import {
   reviewLinkMintHasUsableUrls,
   writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
-import { resolveReviewFirstMintFailureUserMessage } from "./reviewFirstSendSurface";
+import {
+  logReviewFirstMintError,
+  logReviewFirstMintStart,
+  logReviewFirstMintSuccess,
+} from "../../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
+import {
+  clearReviewFirstMintInFlight,
+  mergeDraftWithReviewFirstPinnedCorpus,
+  peekReviewFirstMintInFlight,
+  peekReviewFirstPinnedCorpus,
+  resolveReviewFirstMintFailureUserMessage,
+  setReviewFirstMintInFlight,
+} from "./reviewFirstSendSurface";
 
 export type PaidProPostRecipientSetupFailure = {
   userMessage: string;
@@ -62,7 +74,23 @@ async function mintAndPersistReviewLinksForHandoff(
   agreementId: string,
   draft: AgreementDraft,
   premiumSendIntent: PremiumSendIntent,
+  agreementCorpusText?: string | null,
+  logSource?: string,
 ): Promise<{ ok: true } | { ok: false; failure: PaidProPostRecipientSetupFailure }> {
+  const id = agreementId.trim();
+  const draftForMint = mergeDraftWithReviewFirstPinnedCorpus(draft, id);
+  const signingCorpusPlain = (agreementCorpusText ?? peekReviewFirstPinnedCorpus(id) ?? "").trim();
+  const draftDocumentLen = Math.max(
+    String((draftForMint as { document_text?: string }).document_text ?? "").length,
+    String((draftForMint as { server_full_document_text?: string }).server_full_document_text ?? "").length,
+    String((draftForMint as { premium_full_document_text?: string }).premium_full_document_text ?? "").length,
+  );
+  logReviewFirstMintStart({
+    agreementId: id,
+    source: logSource ?? null,
+    signingCorpusLen: signingCorpusPlain.length,
+    draftDocumentLen,
+  });
   let linkRows: Awaited<ReturnType<typeof mintSimpleDoneReviewRecipientLinkRows>>["rows"] = [];
   let mintThrew = false;
   let mintMeta: {
@@ -71,7 +99,12 @@ async function mintAndPersistReviewLinksForHandoff(
     lastMintErrorCode?: string;
   } = {};
   try {
-    const minted = await mintSimpleDoneReviewRecipientLinkRows({ agreementId, draft });
+    const minted = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: id,
+      draft: draftForMint,
+      signingCorpusPlain: signingCorpusPlain || undefined,
+      signingCorpusSource: signingCorpusPlain ? "review_first_pinned_corpus" : undefined,
+    });
     linkRows = minted.rows;
     mintMeta = {
       firstErrorStatus: minted.firstErrorStatus,
@@ -88,20 +121,27 @@ async function mintAndPersistReviewLinksForHandoff(
       ...mintMeta,
       fallback: reviewLinkMintFailureUserCopy(mintMeta),
     });
+    logReviewFirstMintError({
+      agreementId: id,
+      source: logSource ?? null,
+      code: mintMeta.lastMintErrorCode ?? null,
+      status: mintMeta.firstErrorStatus ?? null,
+    });
     return {
       ok: false,
       failure: {
-        agreementId,
+        agreementId: id,
         reason: "review_link_mint",
         userMessage,
         premiumSendIntent,
       },
     };
   }
+  logReviewFirstMintSuccess({ agreementId: id, source: logSource ?? null, recipientCount: linkRows.length });
   writeSimpleDoneReviewRecipientLinks({
-    agreementId,
+    agreementId: id,
     recipients: linkRows,
-    agreementPartyDisplayNames: orderedAuthoritativePartyDisplayNames(draft.parties),
+    agreementPartyDisplayNames: orderedAuthoritativePartyDisplayNames(draftForMint.parties),
   });
   return { ok: true };
 }
@@ -142,12 +182,39 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   });
 
   if (options.premiumSendIntent === "review") {
-    const minted = await mintAndPersistReviewLinksForHandoff(id, options.draft, options.premiumSendIntent);
-    if (!minted.ok) return { ok: false, failure: minted.failure };
-    markSimpleFlowSent(id);
-    emitActionCompleted("send", { agreementId: id });
-    void options.navigate(`/app/done/${encodeURIComponent(id)}`);
-    return { ok: true, destination: "done" };
+    if (peekReviewFirstMintInFlight(id)) {
+      // eslint-disable-next-line no-console
+      console.info("[review-first-mint-duplicate-suppressed]", {
+        agreementId: id,
+        source: options.logSource,
+      });
+      return {
+        ok: false,
+        failure: {
+          agreementId: id,
+          reason: "review_link_mint",
+          userMessage: "Review links are already being created. Wait a moment and retry.",
+          premiumSendIntent: options.premiumSendIntent,
+        },
+      };
+    }
+    setReviewFirstMintInFlight(id);
+    try {
+      const minted = await mintAndPersistReviewLinksForHandoff(
+        id,
+        options.draft,
+        options.premiumSendIntent,
+        options.agreementCorpusText,
+        options.logSource,
+      );
+      if (!minted.ok) return { ok: false, failure: minted.failure };
+      markSimpleFlowSent(id);
+      emitActionCompleted("send", { agreementId: id });
+      void options.navigate(`/app/done/${encodeURIComponent(id)}`);
+      return { ok: true, destination: "done" };
+    } finally {
+      clearReviewFirstMintInFlight();
+    }
   }
 
   const handoff = resolveGuidedVs01SigningHandoffForBridge(options.guidedSigningHandoff);

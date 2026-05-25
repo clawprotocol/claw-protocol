@@ -417,8 +417,16 @@ import {
 } from "../../launch/simpleProduct/paidProPostRecipientSetupHandoff";
 import {
   clearReviewFirstHandoffSource,
+  REVIEW_FIRST_SIMPLE_PRO_SOURCE,
   writeReviewFirstHandoffSource,
+  writeReviewFirstPinnedCorpus,
 } from "../../launch/simpleProduct/reviewFirstSendSurface";
+import {
+  logReviewFirstLegacySendBlocked,
+  logReviewFirstMarkerWritten,
+  logReviewFirstPersistComplete,
+  logReviewFirstPersistStart,
+} from "./guidedDealCompletion/guidedFinalReviewToSigning";
 import {
   explicitSignerNameForEntity,
   logSignerMetadataInputChange,
@@ -8163,6 +8171,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     inlineContextualSend?: boolean,
     premiumSendIntent?: PremiumSendIntent | null,
     simpleSendOpenPhase?: "review" | "send",
+    reviewFirstHandoffPersist = false,
   ): Promise<boolean> {
     let postedId = "";
     try {
@@ -8366,6 +8375,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidAgreementSentRef.current = true;
         emitPaidFunnelEvent("agreement_sent", { extra: { agreement_id: id, send_path: "inline_contextual" } });
         restorePinnedFinalizedSignerCorpus("inline_contextual_send");
+        if (reviewFirstHandoffPersist) {
+          logReviewFirstPersistComplete({ agreementId: id, premiumSendIntent: premiumSendIntent ?? null });
+          logReviewFirstLegacySendBlocked({
+            agreementId: id,
+            reason: "suppress_onCreated_for_review_first_persist",
+          });
+          return true;
+        }
         if (!guidedSignatureTrackInFlightRef.current) {
           window.setTimeout(() => {
             onCreated(id, primedForHandoff, createdHandoff);
@@ -17856,8 +17873,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ]
             .filter(Boolean)
             .join("\n");
+          logReviewFirstPersistStart({ source, premiumSendIntent: "review" });
           setLoading(true);
-          const ok = await runPersistAndOpen(mergedDraft, partyCtx, true, "review", "review");
+          const ok = await runPersistAndOpen(mergedDraft, partyCtx, true, "review", "review", true);
           setLoading(false);
           restorePinnedFinalizedSignerCorpus("guided_review_first_handoff_persist");
           mergedDraft =
@@ -17890,6 +17908,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
 
         writeReviewFirstHandoffSource(source, id);
+        writeReviewFirstPinnedCorpus(id, bodyPlain);
+        logReviewFirstMarkerWritten({ agreementId: id, source });
 
         const primedForHandoff =
           mergeLiveDraftWithRecipientSetupForVs01Bridge(
@@ -18712,7 +18732,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ""
     ).trim();
     if (reviewFirstAgId) {
-      writeReviewFirstHandoffSource("simple_pro_send_for_review", reviewFirstAgId);
+      writeReviewFirstHandoffSource(REVIEW_FIRST_SIMPLE_PRO_SOURCE, reviewFirstAgId);
+      logReviewFirstMarkerWritten({ agreementId: reviewFirstAgId, source: REVIEW_FIRST_SIMPLE_PRO_SOURCE });
     }
     if (guidedCompletionActive) {
       logGuidedReviewTransition({

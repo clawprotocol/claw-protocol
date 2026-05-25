@@ -441,10 +441,11 @@ Date: _________________________
   it("Send for review first on final Pro review logs click and runs review handoff without upsell modal", () => {
     const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
     const handleIdx = intake.indexOf("const handleProSendForReview = React.useCallback");
-    const handleBlock = intake.slice(handleIdx, handleIdx + 900);
+    const handleBlock = intake.slice(handleIdx, handleIdx + 1600);
     expect(handleBlock).toContain("logReviewFirstClick");
     expect(handleBlock).toContain("canProceedGuidedFinalReviewToSigning");
     expect(handleBlock).toContain('completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review")');
+    expect(handleBlock).toContain("REVIEW_FIRST_SIMPLE_PRO_SOURCE");
     expect(handleBlock).not.toContain("setPremiumSendConfirmOpen(true)");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
     const handoffBlock = intake.slice(handoffIdx, handoffIdx + 9000);

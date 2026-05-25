@@ -68,6 +68,8 @@ describe("reviewFirstSendSurface", () => {
     expect(page).toContain('data-testid="review-first-send-surface"');
     expect(page).toContain("ReviewFirstMintErrorPanel");
     expect(page).toContain("shouldRenderPaidProReviewFirstSendSurface");
+    expect(page).toContain("isCreatePageReviewFirstHandoffSource");
+    expect(page).toContain("redirect_create");
     const earlyReturnIdx = page.indexOf("if (paidProReviewFirstRoute) {");
     const agreementReviewIdx = page.indexOf("<AgreementReview");
     expect(earlyReturnIdx).toBeGreaterThan(-1);

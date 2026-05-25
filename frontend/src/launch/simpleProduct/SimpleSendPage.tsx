@@ -49,9 +49,12 @@ import {
 } from "./simpleDoneReviewRecipientLinks";
 import {
   clearReviewFirstHandoffSource,
+  isCreatePageReviewFirstHandoffSource,
+  peekReviewFirstHandoffSource,
   ReviewFirstMintErrorPanel,
   shouldRenderPaidProReviewFirstSendSurface,
 } from "./reviewFirstSendSurface";
+import { logReviewFirstLegacySendBlocked } from "../../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
 import {
   clearPersistedSimpleSendPhase,
   readSimpleSendHandoffFromHistory,
@@ -386,6 +389,17 @@ export function SimpleSendPage(props: { agreementId: string }) {
   /** Paid Pro review-first must never sit on the generic `/app/send` review gate or upsell modal. */
   useEffect(() => {
     if (!paidProReviewFirstRoute) return;
+    const handoffSource = peekReviewFirstHandoffSource(agreementId);
+    if (isCreatePageReviewFirstHandoffSource(handoffSource)) {
+      logReviewFirstLegacySendBlocked({
+        agreementId,
+        source: handoffSource,
+        path: "/app/send",
+        action: "redirect_create",
+      });
+      void navigate("/app/create");
+      return;
+    }
     const draft = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null);
     if (!draft) return;
     void runPaidProReviewFirstMintHandoff("simple_send_review_first_redirect");
@@ -395,6 +409,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
     paidProReviewFirstRoute,
     redirectDraftTick,
     runPaidProReviewFirstMintHandoff,
+    navigate,
   ]);
 
   useEffect(() => {

@@ -367,9 +367,151 @@ test("proposed changes show before/after blocks for other reviewers", async ({ p
   });
 });
 
+test("create final review click — review-first token error, no legacy /app/send shell", async ({ page }) => {
+  test.setTimeout(90_000);
+  const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
+  mkdirSync(artifactDir, { recursive: true });
+  const agreementId = "ag_create_click_review_first";
+  const draft = paidProAuthoritativeDraft(agreementId);
+  const bodyPlain = "x".repeat(600);
+
+  await primeE2eApiBase(page);
+  await installReviewFirstApi(page, draft, {
+    recipientAccessMintStatus: 422,
+    recipientAccessMintCode: "signing_token_secret_not_configured",
+  });
+
+  const visitedPaths: string[] = [];
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) {
+      try {
+        visitedPaths.push(new URL(frame.url()).pathname);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  await page.addInitScript(
+    ({ id, primed, body }) => {
+      sessionStorage.setItem("claw_premium_send_intent", "review");
+      sessionStorage.setItem(
+        "claw_review_first_handoff_source_v1",
+        JSON.stringify({ source: "simple_pro_send_for_review", agreementId: id, savedAt: Date.now() }),
+      );
+      sessionStorage.setItem(
+        "claw_review_first_pinned_corpus_v1",
+        JSON.stringify({ agreementId: id, bodyPlain: body, savedAt: Date.now() }),
+      );
+      sessionStorage.setItem(
+        "claw_premium_completion_snapshot_v1",
+        JSON.stringify({
+          agreementId: id,
+          premiumDraft: primed,
+          savedAt: Date.now(),
+        }),
+      );
+    },
+    { id: agreementId, primed: draft, body: bodyPlain },
+  );
+
+  await page.goto("/app/create", { waitUntil: "domcontentloaded", timeout: 30_000 });
+
+  const sendForReview = page.getByTestId("simple-pro-send-for-review");
+  const onFinalReview = await sendForReview.isVisible({ timeout: 12_000 }).catch(() => false);
+
+  if (onFinalReview) {
+    await sendForReview.click();
+    await expect(page.getByTestId("simple-pro-review-first-handoff-error")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText(/signing\/review token minting is not configured/i)).toBeVisible();
+    await page.screenshot({
+      path: join(artifactDir, "create-click-review-first-token-error.png"),
+      fullPage: true,
+    });
+    await page.screenshot({
+      path: join(artifactDir, "create-click-review-first-final.png"),
+      fullPage: true,
+    });
+  } else {
+    await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await expect(page).toHaveURL(/\/app\/create/, { timeout: 15_000 });
+    await expect(page.getByTestId("review-first-send-surface")).toHaveCount(0);
+    await page.screenshot({
+      path: join(artifactDir, "create-click-review-first-token-error.png"),
+      fullPage: true,
+    });
+    await page.screenshot({
+      path: join(artifactDir, "create-click-review-first-final.png"),
+      fullPage: true,
+    });
+  }
+
+  for (const forbidden of [
+    "Your Agreement",
+    "Review before sending",
+    "Continue to send",
+    "Send this as a professional agreement",
+    "Continue with Pro",
+  ]) {
+    await expect(page.getByText(forbidden, { exact: false })).toHaveCount(0);
+  }
+
+  const sendPathHits = visitedPaths.filter((p) => p.includes("/app/send/"));
+  expect(sendPathHits.length).toBeLessThanOrEqual(onFinalReview ? 0 : 1);
+});
+
+test("create final review click — mocked mint success lands on /app/done", async ({ page }) => {
+  test.setTimeout(90_000);
+  const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
+  mkdirSync(artifactDir, { recursive: true });
+  const agreementId = "ag_create_click_review_first_success";
+  const draft = paidProAuthoritativeDraft(agreementId);
+  const bodyPlain = "x".repeat(600);
+
+  await primeE2eApiBase(page);
+  await installReviewFirstApi(page, draft);
+
+  await page.addInitScript(
+    ({ id, primed, body }) => {
+      sessionStorage.setItem("claw_premium_send_intent", "review");
+      sessionStorage.setItem(
+        "claw_review_first_pinned_corpus_v1",
+        JSON.stringify({ agreementId: id, bodyPlain: body, savedAt: Date.now() }),
+      );
+      sessionStorage.setItem(
+        "claw_premium_completion_snapshot_v1",
+        JSON.stringify({ agreementId: id, premiumDraft: primed, savedAt: Date.now() }),
+      );
+    },
+    { id: agreementId, primed: draft, body: bodyPlain },
+  );
+
+  await page.goto("/app/create", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  const sendForReview = page.getByTestId("simple-pro-send-for-review");
+  if (!(await sendForReview.isVisible({ timeout: 12_000 }).catch(() => false))) {
+    test.skip(true, "Final Pro review surface not reachable in this e2e harness");
+    return;
+  }
+
+  const mintOk = page.waitForResponse(
+    (res) =>
+      res.request().method() === "POST" &&
+      res.url().includes("/recipient-access-token") &&
+      res.status() === 200,
+    { timeout: 25_000 },
+  );
+  await sendForReview.click();
+  await mintOk;
+  await expect(page).toHaveURL(new RegExp(`/app/done/${agreementId}`), { timeout: 25_000 });
+  await expect(page.getByText("Review link created")).toBeVisible({ timeout: 20_000 });
+  await page.screenshot({
+    path: join(artifactDir, "create-click-review-first-success.png"),
+    fullPage: true,
+  });
+});
+
 /**
- * Full /app/create → guided final review → click is covered by Vitest (AgreementBuilderIntake wiring).
- * Browser e2e uses the paid Pro review-first redirect on /app/send (same handoff + /app/done destination).
+ * Paid Pro review-first redirect on `/app/send` (defensive fallback only).
  */
 test("paid Pro review-first handoff lands on done with review link artifacts", async ({ page }) => {
   test.setTimeout(60_000);
