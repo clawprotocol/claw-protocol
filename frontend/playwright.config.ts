@@ -23,6 +23,8 @@ export default defineConfig({
       ...process.env,
       /** Quiets `[CLAW] API base (once)` in Playwright-driven dev sessions (see `clawApi.ts`). */
       VITE_CLAW_SUPPRESS_API_BASE_LOG: "1",
+      // Same-origin API so page.route("**/api/**") intercepts mint in e2e (dev default is :8000).
+      VITE_CLAW_API_BASE: "http://127.0.0.1:4173",
     },
   },
 });

@@ -113,6 +113,20 @@ export function resolveSimpleSendPhaseFromHandoff(params: {
  * 3. Premium collaborate (`review`) / signature (`send` when unlocked) — unchanged product rules.
  * 4. SessionStorage last resort for refresh after URL strip (see SimpleSendPage).
  */
+const SIMPLE_SEND_PHASE_SS_KEY = (id: string) => `claw_simple_send_phase_v1_${encodeURIComponent(id)}`;
+
+/** Clear persisted send phase so review-first handoffs do not reopen the generic send step. */
+export function clearPersistedSimpleSendPhase(agreementId: string): void {
+  if (typeof window === "undefined") return;
+  const id = String(agreementId || "").trim();
+  if (!id) return;
+  try {
+    sessionStorage.removeItem(SIMPLE_SEND_PHASE_SS_KEY(id));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function resolveSimpleSendOpenPhase(params: {
   urlPhase: string | null;
   handoffOpenPhase: "review" | "send" | null;

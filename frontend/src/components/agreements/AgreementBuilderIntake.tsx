@@ -830,6 +830,8 @@ import {
   resolveGuidedSigningPersistAgreementId,
   selectGuidedSignatureTrackCorpus,
   shouldBypassGenericOnGenerateForGuidedSignature,
+  shouldBypassGenericOnGenerateForGuidedReview,
+  logGuidedReviewGenericSendBypassed,
 } from "./guidedDealCompletion/guidedFinalReviewToSigning";
 import {
   buildPinnedFinalizedSignerCorpus,
@@ -8425,6 +8427,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }
 
   const onGenerate = async () => {
+    if (
+      shouldBypassGenericOnGenerateForGuidedReview({
+        createFlowPhase,
+        reviewIntentActive:
+          finalReviewSendIntentRef.current === "review_only" ||
+          effectivePremiumSendMode === "review" ||
+          premiumSendModeUserChoice === "review",
+        finalReviewSendPathChosen: finalReviewSendPathChosenRef.current,
+      })
+    ) {
+      logGuidedReviewGenericSendBypassed({ phase: createFlowPhase });
+      void completeGuidedPaidProReviewFirstHandoff("on_generate_guided_review");
+      return;
+    }
     if (
       shouldBypassGenericOnGenerateForGuidedSignature({
         createFlowPhase,
@@ -17715,6 +17731,102 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     debouncedStepBuffer,
   ]);
 
+  const completeGuidedPaidProReviewFirstHandoff = React.useCallback(
+    async (source: string) => {
+      const finalized = finalizeAndFreezeGuidedFinalCorpus("guided_review_first_handoff");
+      if (!finalized.ok) {
+        const msg =
+          finalized.unresolvedPlaceholders.length > 0
+            ? "Signer names are saved, but the final agreement still contains party placeholders. Return to signer details before sending."
+            : "The final agreement body is not ready yet. Return to final review and try again.";
+        setGuidedSigningConfirmationBlockMessage(msg);
+        setHardError(msg);
+        return;
+      }
+      const bodyPlain = finalized.body.trim();
+      acceptGuidedReviewCorpus(bodyPlain, "review_only");
+      const transition = assertGuidedTransitionReady("review_only");
+      if (!transition.ok) return;
+
+      finalReviewSendPathChosenRef.current = true;
+      setGuidedSendIntentSelected(true);
+      finalReviewSendIntentRef.current = "review_only";
+      handlePremiumSendModePick("review");
+      writePremiumSendIntent("review");
+      setGuidedSigningConfirmationActive(false);
+      setGuidedSigningConfirmationBlockMessage(null);
+      setHardError(null);
+      syncReviewContinuityState({
+        ...reviewContinuityStateRef.current,
+        reviewSessionState: "review_package_ready",
+        latestAcceptedCorpus: bodyPlain,
+      });
+
+      const id = resolveGuidedSigningPersistAgreementId({
+        postedId: reviewAgreementIdRef.current,
+        reviewAgreementIdRef: reviewAgreementIdRef.current,
+        reviewAgreementId,
+        productionSendBarAgreementId,
+        productionSendBarAgreementIdRef: productionSendBarAgreementIdRef.current,
+        draftAgreementId: (draft as { id?: string | null } | null)?.id ?? null,
+        resumeAgreementId: readCreateReviewAgreementResumeId(),
+      });
+      if (!id || !draft) {
+        setHardError("We could not open the review link screen. Save the agreement and try again.");
+        return;
+      }
+
+      const mergedDraft = mergeDraftPartiesFromCanonicalIdentities(draft, guidedSignerCanonicalIdentities);
+      setDraft(mergedDraft);
+      persistPremiumRecipientHandoffFromDraftAndUi(mergedDraft);
+      setAgreementDocumentText(bodyPlain);
+      agreementDocumentDirtyRef.current = false;
+      acceptedReviewCorpusRef.current = bodyPlain;
+
+      const primedForHandoff =
+        mergeLiveDraftWithRecipientSetupForVs01Bridge(
+          {
+            ...mergedDraft,
+            server_full_document_text: bodyPlain,
+            premium_full_document_text: bodyPlain,
+          } as unknown as AgreementDraft,
+          buildRecipientSetupForVs01Bridge(mergedDraft),
+        ) ?? ({
+          ...mergedDraft,
+          server_full_document_text: bodyPlain,
+          premium_full_document_text: bodyPlain,
+        } as unknown as AgreementDraft);
+
+      logGuidedReviewGenericSendBypassed({ source, agreementId: id, bodyLen: bodyPlain.length });
+
+      const result = await executePaidProPostRecipientSetupHandoff({
+        navigate: (to) => void navigate(to),
+        agreementId: id,
+        draft: primedForHandoff,
+        premiumSendIntent: "review",
+        recipientSetup: buildRecipientSetupForVs01Bridge(mergedDraft),
+        logSource: source,
+        agreementCorpusText: bodyPlain,
+      });
+      if (!result.ok) {
+        setHardError(result.failure.userMessage);
+      }
+    },
+    [
+      finalizeAndFreezeGuidedFinalCorpus,
+      acceptGuidedReviewCorpus,
+      assertGuidedTransitionReady,
+      handlePremiumSendModePick,
+      draft,
+      guidedSignerCanonicalIdentities,
+      persistPremiumRecipientHandoffFromDraftAndUi,
+      reviewAgreementId,
+      productionSendBarAgreementId,
+      navigate,
+      syncReviewContinuityState,
+    ],
+  );
+
   const enterGuidedSigningConfirmationFromFinalReview = React.useCallback(
     (intent: FinalReviewSendIntent) => {
       const finalized = finalizeAndFreezeGuidedFinalCorpus(
@@ -18114,6 +18226,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setPremiumRecipientUxActive(true);
       bumpPremiumSurfaceGateTick();
       setGuidedSigningConfirmationActive(false);
+      if (sendMode === "review") {
+        void completeGuidedPaidProReviewFirstHandoff("complete_guided_signing_handoff");
+        return;
+      }
       if (opts?.openConfirmModal) {
         setPremiumSendConfirmOpen(true);
       } else if (sendMode === "signature") {
@@ -18131,6 +18247,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ensureGuidedSigningCorpusReady,
       guidedSignerCanonicalIdentities,
       mergeDraftPartiesFromCanonicalIdentities,
+      completeGuidedPaidProReviewFirstHandoff,
     ],
   );
 
@@ -18143,6 +18260,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       if (!canProceedGuidedFinalReviewToSigning) {
         scrollGuidedSignerSetupIntoView();
+        return;
+      }
+      if (opts.intent === "review_only") {
+        void completeGuidedPaidProReviewFirstHandoff("continue_guided_final_review");
         return;
       }
       if (opts.intent === "signature") {
@@ -18169,6 +18290,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       scrollGuidedSignerSetupIntoView,
       ensureGuidedSigningCorpusReady,
       completeGuidedSigningHandoff,
+      completeGuidedPaidProReviewFirstHandoff,
       handlePremiumSendModePick,
       enterGuidedSigningConfirmationFromFinalReview,
       enterGuidedSignatureTrackRoute,
@@ -18185,8 +18307,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const handleGuidedSigningConfirmationContinue = React.useCallback(() => {
     const intent = finalReviewSendIntentRef.current ?? "signature";
+    if (intent === "review_only") {
+      void completeGuidedPaidProReviewFirstHandoff("guided_signing_confirmation_continue");
+      return;
+    }
     completeGuidedSigningHandoff(intent, { openConfirmModal: true });
-  }, [completeGuidedSigningHandoff]);
+  }, [completeGuidedSigningHandoff, completeGuidedPaidProReviewFirstHandoff]);
 
   const handlePremiumReviewFirstContinueToSigners = React.useCallback((opts?: { telemetryMode?: PremiumSendIntent }) => {
     if (guidedSigningConfirmationActive) return;
@@ -18471,9 +18597,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         canProceedGuidedFinalReviewToSigning &&
         (mode === "signature" || mode === "review")
       ) {
-        continueGuidedFinalReviewToSigning({
-          intent: mode === "review" ? "review_only" : "signature",
-        });
+        if (mode === "review") {
+          void completeGuidedPaidProReviewFirstHandoff("finalize_route_primary_review");
+          return;
+        }
+        continueGuidedFinalReviewToSigning({ intent: "signature" });
         return;
       }
       handlePremiumSendModePick(mode);
@@ -18489,6 +18617,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       canProceedGuidedFinalReviewToSigning,
       continueGuidedFinalReviewToSigning,
       handleProSendForSignature,
+      completeGuidedPaidProReviewFirstHandoff,
       guidedCompletionActive,
       guidedCompletionRenderDocument.plainText,
       guidedCompletionRenderDocument.source,

@@ -47,7 +47,15 @@ import {
   writeSimpleDoneReviewRecipientLinks,
   type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
-import { readSimpleSendHandoffFromHistory, resolveSimpleSendOpenPhase } from "./simpleSendHandoff";
+import {
+  clearPersistedSimpleSendPhase,
+  readSimpleSendHandoffFromHistory,
+  resolveSimpleSendOpenPhase,
+} from "./simpleSendHandoff";
+import {
+  executePaidProPostRecipientSetupHandoff,
+  shouldSkipPaidProPrepareReviewLinkInterstitial,
+} from "./paidProPostRecipientSetupHandoff";
 import {
   linearPremiumRecipientSlots,
   MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
@@ -181,6 +189,8 @@ export function SimpleSendPage(props: { agreementId: string }) {
   } | null>(null);
   const [senderFirstRouteRetryTick, setSenderFirstRouteRetryTick] = useState(0);
   const [editReturnNavigateBlocked, setEditReturnNavigateBlocked] = useState<string | null>(null);
+  /** Bumps when AgreementReview reports a live draft so review-first redirect can re-run after hydration. */
+  const [redirectDraftTick, setRedirectDraftTick] = useState(0);
   const authoritativeProBypassRef = useRef(paidProSendBranch.paidProSendAllowed);
   authoritativeProBypassRef.current = paidProSendBranch.paidProSendAllowed;
   const premiumSendUnlocked = useMemo(() => {
@@ -303,8 +313,59 @@ export function SimpleSendPage(props: { agreementId: string }) {
     const intent = sendLanding.premiumIntent ?? peekPremiumSendIntent();
     setSimpleFlowPremiumHandoffIntent(intent);
     setSimpleFlowPhase(resolveSimpleFlowPhase(intent));
-    clearPremiumSendIntent();
+    if (intent === "review") {
+      clearPersistedSimpleSendPhase(agreementId);
+    }
   }, [agreementId, resolveSimpleFlowPhase, sendLanding.openFlowPhase, sendLanding.premiumIntent]);
+
+  /** Paid Pro review-first must never sit on the generic `/app/send` review gate or upsell modal. */
+  useEffect(() => {
+    const draft = (initialDraftSnapshot as AgreementDraft | null) ?? bridgeHandoffDraftRef.current;
+    const intent = sendLanding.premiumIntent ?? simpleFlowPremiumHandoffIntent ?? peekPremiumSendIntent();
+    const reviewFirst = intent === "review" || sendLanding.openFlowPhase === "review";
+    if (!reviewFirst || !draft) return;
+    if (
+      !shouldSkipPaidProPrepareReviewLinkInterstitial({
+        draft,
+        agreementId,
+        premiumSendIntent: "review",
+      })
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const result = await executePaidProPostRecipientSetupHandoff({
+        // Navigation must not be dropped on Strict Mode effect cleanup.
+        navigate: (to) => {
+          void navigate(to);
+        },
+        agreementId,
+        draft,
+        premiumSendIntent: "review",
+        logSource: "simple_send_review_first_redirect",
+      });
+      if (result.ok) {
+        clearPremiumSendIntent();
+        clearPersistedSimpleSendPhase(agreementId);
+        return;
+      }
+      if (!cancelled) {
+        setReviewLinkMintFailure(result.failure.userMessage);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    agreementId,
+    initialDraftSnapshot,
+    navigate,
+    redirectDraftTick,
+    sendLanding.openFlowPhase,
+    sendLanding.premiumIntent,
+    simpleFlowPremiumHandoffIntent,
+  ]);
 
   useEffect(() => {
     if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
@@ -666,6 +727,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
           initialDraftSnapshot={initialDraftSnapshot}
           onBridgeHandoffDraftSnapshot={(d) => {
             bridgeHandoffDraftRef.current = d;
+            if (d) setRedirectDraftTick((t) => t + 1);
           }}
           simpleFlowPhase={simpleFlowPhase}
           simpleSendActionsUnlocked={premiumSendUnlocked}
@@ -716,9 +778,43 @@ export function SimpleSendPage(props: { agreementId: string }) {
                   authoritativeLen: paidProSendBranch.authoritativeLen,
                 });
               }
-              if (blockPaywall) {
+              const draftForReviewContinue =
+                bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+              if (
+                shouldSkipPaidProPrepareReviewLinkInterstitial({
+                  draft: draftForReviewContinue,
+                  agreementId,
+                  premiumSendIntent: "review",
+                }) &&
+                simpleFlowPremiumHandoffIntent === "review" &&
+                draftForReviewContinue
+              ) {
+                setReviewLinkMintFailure(null);
+                const result = await executePaidProPostRecipientSetupHandoff({
+                  navigate,
+                  agreementId,
+                  draft: draftForReviewContinue,
+                  premiumSendIntent: "review",
+                  logSource: "simple_send_review_first_continue",
+                });
+                if (!result.ok) {
+                  setReviewLinkMintFailure(result.failure.userMessage);
+                } else {
+                  clearPremiumSendIntent();
+                  clearPersistedSimpleSendPhase(agreementId);
+                }
+                return;
+              }
+              if (
+                blockPaywall &&
+                !shouldSkipPaidProPrepareReviewLinkInterstitial({
+                  draft: draftForReviewContinue,
+                  agreementId,
+                  premiumSendIntent: "review",
+                })
+              ) {
                 setPaywallOpen(true);
-              } else {
+              } else if (simpleFlowPremiumHandoffIntent !== "review") {
                 setSimpleFlowPhase("send");
               }
               return;

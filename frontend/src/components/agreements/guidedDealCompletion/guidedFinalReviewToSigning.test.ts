@@ -11,6 +11,7 @@ import {
   resolveGuidedSigningPersistAgreementId,
   selectGuidedSignatureTrackCorpus,
   shouldBypassGenericOnGenerateForGuidedSignature,
+  shouldBypassGenericOnGenerateForGuidedReview,
   shouldShowPacketSignerMetaLine,
   isGuidedSigningPlaceholderPreviewBody,
 } from "./guidedFinalReviewToSigning";
@@ -390,6 +391,23 @@ Date: _________________________
     expect(new Set([cleaned.hash, cleaned.hash, cleaned.hash]).size).toBe(1);
   });
 
+  it("shouldBypassGenericOnGenerateForGuidedReview when guided final review review-first path is active", () => {
+    expect(
+      shouldBypassGenericOnGenerateForGuidedReview({
+        createFlowPhase: "guided_final_review",
+        reviewIntentActive: true,
+        finalReviewSendPathChosen: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassGenericOnGenerateForGuidedReview({
+        createFlowPhase: "guided_final_review",
+        reviewIntentActive: true,
+        finalReviewSendPathChosen: false,
+      }),
+    ).toBe(false);
+  });
+
   it("shouldBypassGenericOnGenerateForGuidedSignature when guided final review signature path is active", () => {
     expect(
       shouldBypassGenericOnGenerateForGuidedSignature({
@@ -405,6 +423,18 @@ Date: _________________________
         finalReviewSendPathChosen: false,
       }),
     ).toBe(false);
+  });
+
+  it("AgreementBuilderIntake routes paid Pro review-first without generic /app/send", () => {
+    const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("completeGuidedPaidProReviewFirstHandoff");
+    expect(intake).toContain('completeGuidedPaidProReviewFirstHandoff("continue_guided_final_review")');
+    expect(intake).toContain("logGuidedReviewGenericSendBypassed");
+    expect(intake).toContain('premiumSendIntent: "review"');
+    const reviewContinueIdx = intake.indexOf("if (opts.intent === \"review_only\")");
+    const reviewContinueBlock = intake.slice(reviewContinueIdx, reviewContinueIdx + 400);
+    expect(reviewContinueBlock).toContain("completeGuidedPaidProReviewFirstHandoff");
+    expect(reviewContinueBlock).not.toContain("enterGuidedSigningConfirmationFromFinalReview");
   });
 
   it("AgreementBuilderIntake routes signature track without generic onGenerate", () => {

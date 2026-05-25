@@ -482,6 +482,24 @@ export function shouldBypassGenericOnGenerateForGuidedSignature(args: {
   );
 }
 
+export function shouldBypassGenericOnGenerateForGuidedReview(args: {
+  createFlowPhase: string;
+  reviewIntentActive: boolean;
+  finalReviewSendPathChosen: boolean;
+}): boolean {
+  return (
+    args.createFlowPhase === "guided_final_review" &&
+    args.reviewIntentActive &&
+    args.finalReviewSendPathChosen
+  );
+}
+
+export function logGuidedReviewGenericSendBypassed(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-review-generic-send-bypassed]", payload);
+}
+
 export function logGuidedSignatureTrackStart(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
