@@ -4741,7 +4741,7 @@ button.vs01-upload-btn:disabled {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
 }
 
-.vs01-recipient-signing-view .vs01-sign-placement-box {
+.vs01-recipient-signing-view .vs01-sign-page-surface:not(.vs01-sign-page-surface--canonical) .vs01-sign-placement-box {
   min-width: 12cqi;
   min-height: 3.25rem;
   box-sizing: border-box;
@@ -5074,8 +5074,10 @@ button.vs01-upload-btn:disabled {
   margin-top: 0.5rem;
 }
 
-/* Recipient signing — field overlays (always visible on document) */
-.vs01-recipient-signing-view .lawdog-signing-field.vs01-sign-placement-box {
+/* Recipient signing — field overlays (PDF / non-canonical document path) */
+.vs01-recipient-signing-view
+  .vs01-sign-page-surface:not(.vs01-sign-page-surface--canonical)
+  .lawdog-signing-field.vs01-sign-placement-box {
   position: absolute;
   box-sizing: border-box;
   display: flex;
@@ -5090,6 +5092,99 @@ button.vs01-upload-btn:disabled {
   background: var(--lawdog-field-bg);
   box-shadow: var(--lawdog-field-shadow);
   pointer-events: auto;
+}
+
+/* Recipient signer review — same compact geometry as prepare/final placement chrome. */
+.vs01-recipient-signing-view .lawdog-signing-field.vs01-sign-placement-box.vs01-recipient-signing-field--canonical-compact {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.02rem;
+  padding: 0.07rem 0.16rem 0.1rem;
+  border-radius: 6px;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  z-index: 4;
+  border: 1.5px solid var(--lawdog-field-border);
+  background: var(--lawdog-field-bg);
+  box-shadow: var(--lawdog-field-shadow);
+  pointer-events: auto;
+}
+
+.vs01-recipient-signing-view .vs01-sign-placement-box--signature.vs01-recipient-signing-field--canonical-compact {
+  justify-content: center;
+  border-color: color-mix(in srgb, var(--vs01-color-accent) 72%, #111827 8%);
+  background: rgba(212, 165, 116, 0.06);
+}
+
+.vs01-recipient-signing-view .vs01-sign-placement-box--signature.vs01-recipient-signing-field--canonical-compact .vs01-sign-placement-label {
+  position: static;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0 0.14rem;
+  border-radius: 999px;
+  font-size: 0.46rem;
+  line-height: 1.08;
+  letter-spacing: 0.045em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.vs01-recipient-signing-view .vs01-sign-placement-box--auto-initials.vs01-recipient-signing-field--canonical-compact {
+  z-index: 5;
+  border-width: 1px;
+  border-color: color-mix(in srgb, var(--vs01-color-text-muted) 72%, var(--vs01-color-border-subtle));
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.vs01-recipient-signing-view .vs01-sign-placement-box--auto-initials.vs01-recipient-signing-field--canonical-compact .vs01-sign-placement-label {
+  max-width: calc(100% - 0.28rem);
+  font-size: 0.46rem;
+  line-height: 1.08;
+  letter-spacing: 0.045em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vs01-recipient-signing-view .vs01-sign-placement-box--auto-initials.vs01-recipient-signing-field--canonical-compact .vs01-sign-placement-initials,
+.vs01-recipient-signing-view .vs01-recipient-signing-field--canonical-compact .vs01-recipient-signing-field__compact-input {
+  font-size: 0.58rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.vs01-recipient-signing-view .vs01-recipient-signing-field--canonical-compact .vs01-recipient-signing-field__compact-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: #0f172a;
+}
+
+.vs01-recipient-signing-view .vs01-recipient-signing-field--canonical-compact .vs01-recipient-signing-pill {
+  position: absolute;
+  right: 0.12rem;
+  bottom: 0.08rem;
+  margin: 0;
+  font-size: 0.5rem;
+  padding: 0.08rem 0.35rem;
+  pointer-events: none;
+}
+
+.vs01-recipient-signing-view .vs01-recipient-signing-field--canonical-compact .lawdog-signing-field__signer {
+  display: none;
 }
 
 .vs01-recipient-signing-view .lawdog-signing-field.vs01-sign-placement-box .vs01-sign-placement-label,
@@ -5187,7 +5282,9 @@ button.vs01-upload-btn:disabled {
   max-width: 100%;
 }
 
-.vs01-recipient-signature-slot {
+.vs01-recipient-signing-view
+  .vs01-sign-page-surface:not(.vs01-sign-page-surface--canonical)
+  .vs01-recipient-signature-slot {
   min-height: 4.5rem;
 }
 

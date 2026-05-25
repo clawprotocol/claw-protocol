@@ -26,9 +26,13 @@ import { TEST74_BAD_GUIDED_CORPUS } from "../src/components/agreements/guidedDea
 import {
   buildVs01CanonicalPacketPortable,
   buildVs01CanonicalPacketSeed,
+  computeVs01PacketRevision,
   encodeVs01CanonicalPacketPortable,
+  VS01_CANONICAL_PACKET_QUERY,
+  VS01_PACKET_REVISION_QUERY,
 } from "../src/vs01/vs01CanonicalPacketSeed";
 import { buildFullPacketManifestFromCanonicalModel } from "../src/vs01/vs01SigningPacketManifest";
+import { VS01_RECIPIENT_SIGN_QUERY } from "../src/vs01/StepReceipt";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ARTIFACT_DIR = join(__dirname, "artifacts", "vs01-canonical-visual");
@@ -2184,6 +2188,431 @@ test.describe("VS01 test78 recipient signing review placement", () => {
         signerEmail: "ben@example.test",
         actionLabel: "4 actions required (signature and initials on document pages)",
         testId: `vs01-test78-counterparty-witness-${viewport.label}`,
+      });
+    });
+  }
+});
+
+type Test79SignerCase = {
+  label: "owner" | "counterparty";
+  partyIndex: 0 | 1;
+  ownerSigned: boolean;
+  signerName: string;
+  signerEmail: string;
+  initialsValue: string;
+  signatureValue: string;
+};
+
+function buildTest79RecipientContext(args: { ownerSigned: boolean; partyIndex: 0 | 1 }) {
+  const roles = test78Roles();
+  const model = buildTest78VisualModel(true);
+  const witnessIdx = witnessPageIndex(model);
+  const agreementId = "ag_test79_actual_recipient";
+  const documentId = `doc_test79_${args.partyIndex}_${args.ownerSigned ? "owner_signed" : "active"}`;
+  const fields = buildFullPacketManifestFromCanonicalModel({ model, roles }).map((f) => {
+    if (!args.ownerSigned || (f.assignedPartyIndex ?? 0) !== 0) return f;
+    if (f.type === "signature") return { ...f, value: "Anthem H Blanchard" };
+    if (f.type === "initials") return { ...f, value: "AHB" };
+    return f;
+  });
+  const seed = buildVs01CanonicalPacketSeed({
+    documentId,
+    agreementId,
+    corpusPlain: model.corpus,
+  });
+  if (!seed) throw new Error("test79 seed build failed");
+  const portable = buildVs01CanonicalPacketPortable({
+    seed,
+    fields,
+    roles,
+    pageCount: model.pages.length,
+    witnessPageIndex: witnessIdx,
+    initialsEnabled: true,
+  });
+  const encoded = encodeVs01CanonicalPacketPortable(portable);
+  const packetRevision = computeVs01PacketRevision({
+    corpusHash: seed.corpusHash,
+    initialsEnabled: portable.initialsPolicy.enabled,
+    fieldCount: portable.fieldCount,
+  });
+  const role = roles[args.partyIndex]!;
+  const cpId = recipientCounterpartyIdForPrepareRole(role);
+  const params = new URLSearchParams();
+  params.set(VS01_RECIPIENT_SIGN_QUERY, "1");
+  params.set("recipient_index", String(args.partyIndex));
+  params.set("recipient_name", role.signerName || role.partyName || role.roleLabel);
+  params.set("recipient_email", role.signerEmail || "");
+  params.set("counterparty_id", cpId);
+  params.set("document_id", documentId);
+  params.set("receipt_id", `rcpt_${documentId}`);
+  params.set("agreement_id", agreementId);
+  params.set("signer_role_id", role.roleId);
+  params.set("assigned_party_index", String(args.partyIndex));
+  params.set(VS01_PACKET_REVISION_QUERY, packetRevision);
+  params.set(VS01_CANONICAL_PACKET_QUERY, encoded);
+
+  return {
+    agreementId,
+    documentId,
+    fields,
+    model,
+    params,
+    role,
+    roles,
+    witnessIdx,
+  };
+}
+
+async function gotoTest79RecipientSigningView(
+  page: Page,
+  args: Test79SignerCase,
+) {
+  const ctx = buildTest79RecipientContext({
+    ownerSigned: args.ownerSigned,
+    partyIndex: args.partyIndex,
+  });
+  const ownerRole = ctx.roles[0]!;
+  const counterpartyRole = ctx.roles[1]!;
+  await page.addInitScript(
+    ({ agreementId, ownerRoleId, counterpartyRoleId, ownerSigned }) => {
+      localStorage.setItem(
+        `vs01_signing_packet_status_v1:${agreementId}`,
+        JSON.stringify({
+          agreementId,
+          updatedAt: new Date().toISOString(),
+          bySignerKey: {
+            [ownerRoleId]: ownerSigned ? "signed" : "opened",
+            [counterpartyRoleId]: "opened",
+          },
+          fullySigned: false,
+        }),
+      );
+    },
+    {
+      agreementId: ctx.agreementId,
+      ownerRoleId: ownerRole.roleId,
+      counterpartyRoleId: counterpartyRole.roleId,
+      ownerSigned: args.ownerSigned,
+    },
+  );
+
+  await page.goto(`/app/esign/${ctx.documentId}?${ctx.params.toString()}`);
+  await expect(page.getByTestId("vs01-recipient-canonical-render")).toBeVisible({ timeout: 15_000 });
+  await page.addStyleTag({
+    content: `
+      .vs01-recipient-signing-shell,
+      .vs01-recipient-signing-view,
+      .vs01-recipient-signing-view .vs01-sign-scroll,
+      .vs01-recipient-signing-view .vs01-recipient-signing-scroll,
+      .vs01-recipient-signing-view .vs01-sign-doc-pages-wrap,
+      .vs01-recipient-signing-view .vs01-sign-doc-surface--bridge,
+      .vs01-recipient-signing-view .vs01-sign-pages-inner {
+        max-height: none !important;
+        overflow: visible !important;
+      }
+    `,
+  });
+  return ctx;
+}
+
+async function fillTest79ActiveFields(
+  page: Page,
+  args: Test79SignerCase & { pageIndex: number; witness: boolean },
+): Promise<void> {
+  const pageStack = page.locator(`[data-vs01-sign-page="${args.pageIndex}"]`);
+  await expect(pageStack).toBeVisible();
+  await pageStack.scrollIntoViewIfNeeded();
+  if (args.witness) {
+    const input = pageStack
+      .locator('[data-vs01-field-type="signature"][data-vs01-field-state="active"] input')
+      .first();
+    await input.fill(args.signatureValue);
+  } else {
+    const input = pageStack
+      .locator('[data-vs01-field-type="initials"][data-vs01-field-state="active"] input')
+      .first();
+    await input.fill(args.initialsValue);
+  }
+}
+
+function parseRgbForTest79(color: string): { r: number; g: number; b: number } | null {
+  const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!match) return null;
+  return { r: Number(match[1]), g: Number(match[2]), b: Number(match[3]) };
+}
+
+async function assertTest79ActualOverlayGeometry(
+  pageStack: Locator,
+  expectedFields: readonly Vs01RecipientPlacedField[],
+  opts: { witness: boolean },
+): Promise<void> {
+  const expectedById = Object.fromEntries(
+    expectedFields.map((f) => [
+      f.id,
+      {
+        id: f.id,
+        type: f.type,
+        partyIndex: f.assignedPartyIndex ?? 0,
+        x: f.x,
+        y: f.y,
+        width: f.width,
+        height: f.height,
+      },
+    ]),
+  );
+  const metrics = await pageStack.evaluate((stackEl, expected) => {
+    const stack = stackEl as HTMLElement;
+    const page = stack.querySelector(".vs01-sign-page-surface--canonical") as HTMLElement | null;
+    if (!page) return { ok: false as const, reason: "missing-page" };
+    const pageRect = page.getBoundingClientRect();
+    const captureRect = stack.getBoundingClientRect();
+    const band = page.querySelector(".vs01-canonical-initials-band") as HTMLElement | null;
+    const bandRect = band?.getBoundingClientRect() ?? null;
+    const pxRect = (el: Element) => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return {
+        left: r.left - pageRect.left,
+        top: r.top - pageRect.top,
+        right: r.right - pageRect.left,
+        bottom: r.bottom - pageRect.top,
+        width: r.width,
+        height: r.height,
+        centerY: r.top - pageRect.top + r.height / 2,
+      };
+    };
+    const intersects = (
+      a: { left: number; top: number; right: number; bottom: number },
+      b: { left: number; top: number; right: number; bottom: number },
+      tolerancePx = 0,
+    ) =>
+      a.left < b.right - tolerancePx &&
+      a.right > b.left + tolerancePx &&
+      a.top < b.bottom - tolerancePx &&
+      a.bottom > b.top + tolerancePx;
+    const expectedMap = expected as Record<
+      string,
+      { id: string; type: string; partyIndex: number; x: number; y: number; width: number; height: number }
+    >;
+    const bodyTextRects = [...page.querySelectorAll("[data-vs01-canonical-text]")].map(pxRect);
+    const bodyTextBottom = Math.max(0, ...bodyTextRects.map((r) => r.bottom));
+    const fields = [...page.querySelectorAll("[data-vs01-field-id]")].map((node) => {
+      const el = node as HTMLElement;
+      const id = el.getAttribute("data-vs01-field-id") ?? "";
+      const exp = expectedMap[id];
+      const rect = pxRect(el);
+      const expectedRect = exp
+        ? {
+            left: exp.x * pageRect.width,
+            top: exp.y * pageRect.height,
+            right: (exp.x + exp.width) * pageRect.width,
+            bottom: (exp.y + exp.height) * pageRect.height,
+            width: exp.width * pageRect.width,
+            height: exp.height * pageRect.height,
+            centerY: (exp.y + exp.height / 2) * pageRect.height,
+          }
+        : null;
+      const input = el.querySelector("input") as HTMLElement | null;
+      const inputRect = input ? pxRect(input) : null;
+      const textNode =
+        input ??
+        (el.querySelector(".vs01-recipient-signing-readonly-val, .vs01-sign-placement-initials") as HTMLElement | null) ??
+        el;
+      const color = getComputedStyle(textNode).color;
+      const underline = page.querySelector(
+        `[data-vs01-signature-execution-line][data-vs01-signature-party="${exp?.partyIndex ?? 0}"] .vs01-canonical-signature-underline`,
+      );
+      const underlineRect = underline ? pxRect(underline) : null;
+      const protectedText = bodyTextRects.filter((_, i) => {
+        const node = page.querySelectorAll("[data-vs01-canonical-text]")[i];
+        const text = (node?.textContent ?? "").trim();
+        return /^(CLIENT|SERVICE PROVIDER|Name|Title|Date)\b|^(Acme LLC|Ben Davis|Anthem H Blanchard|ABC LLC|Joe Blow)\b/i.test(text);
+      });
+      return {
+        id,
+        type: el.getAttribute("data-vs01-field-type"),
+        state: el.getAttribute("data-vs01-field-state"),
+        partyIndex: el.getAttribute("data-vs01-assigned-party-index"),
+        rect,
+        expectedRect,
+        pageWidth: pageRect.width,
+        pageHeight: pageRect.height,
+        insidePage:
+          rect.left >= -1 &&
+          rect.top >= -1 &&
+          rect.right <= pageRect.width + 1 &&
+          rect.bottom <= pageRect.height + 1,
+        expansion:
+          expectedRect == null
+            ? null
+            : Math.max(
+                Math.abs(rect.left - expectedRect.left),
+                Math.abs(rect.top - expectedRect.top),
+                Math.abs(rect.width - expectedRect.width),
+                Math.abs(rect.height - expectedRect.height),
+              ),
+        inputInside:
+          !inputRect ||
+          (inputRect.left >= rect.left - 1 &&
+            inputRect.top >= rect.top - 1 &&
+            inputRect.right <= rect.right + 1 &&
+            inputRect.bottom <= rect.bottom + 1),
+        color,
+        signature: underlineRect
+          ? {
+              leftDelta: rect.left - underlineRect.left,
+              centerDelta: rect.centerY - underlineRect.centerY,
+              protectedHits: protectedText.filter((text) => intersects(rect, text, 1.25)).length,
+            }
+          : null,
+        initials: bandRect
+          ? {
+              belowBody: rect.top >= bodyTextBottom - 1,
+              inBand:
+                rect.top >= bandRect.top - pageRect.top - 2 &&
+                rect.bottom <= bandRect.bottom - pageRect.top + 2,
+              abovePageBottom: rect.bottom <= pageRect.height + 1,
+            }
+          : null,
+      };
+    });
+    return {
+      ok: true as const,
+      page: {
+        width: pageRect.width,
+        height: pageRect.height,
+        top: pageRect.top - captureRect.top,
+        bottom: pageRect.bottom - captureRect.top,
+        captureHeight: captureRect.height,
+        bottomVisible: pageRect.bottom <= captureRect.bottom + 1,
+      },
+      fields,
+    };
+  }, expectedById);
+
+  expect(metrics.ok).toBe(true);
+  if (!metrics.ok) return;
+  expect(metrics.page.width).toBeGreaterThanOrEqual(VS01_PACKET_PAGE_WIDTH_PT - 2);
+  expect(metrics.page.height).toBeGreaterThanOrEqual(VS01_PACKET_PAGE_HEIGHT_PT - 2);
+  expect(metrics.page.bottomVisible).toBe(true);
+  for (const item of metrics.fields) {
+    expect(item.expectedRect, `missing expected model rect for ${item.id}`).not.toBeNull();
+    expect(item.insidePage, `${item.id} inside page`).toBe(true);
+    expect(item.expansion, `${item.id} expansion`).not.toBeNull();
+    expect(item.expansion!, `${item.id} expands beyond model rect`).toBeLessThanOrEqual(2);
+    expect(item.inputInside, `${item.id} input inside field`).toBe(true);
+    const rgb = parseRgbForTest79(item.color);
+    expect(rgb, `${item.id} readable color ${item.color}`).not.toBeNull();
+    expect(Math.max(rgb!.r, rgb!.g, rgb!.b), `${item.id} text too close to white`).toBeLessThan(230);
+    if (item.type === "signature") {
+      expect(item.signature, `${item.id} has underline`).not.toBeNull();
+      expect(item.signature!.leftDelta, `${item.id} left edge vs underline`).toBeGreaterThanOrEqual(-2);
+      expect(Math.abs(item.signature!.centerDelta), `${item.id} centerline`).toBeLessThanOrEqual(3);
+      expect(item.signature!.protectedHits, `${item.id} protected text hits`).toBe(0);
+    }
+    if (item.type === "initials") {
+      expect(item.initials, `${item.id} initials band`).not.toBeNull();
+      expect(item.initials!.belowBody, `${item.id} below body text`).toBe(true);
+      expect(item.initials!.inBand, `${item.id} in initials band`).toBe(true);
+      expect(item.initials!.abovePageBottom, `${item.id} above page bottom`).toBe(true);
+    }
+  }
+  if (opts.witness) {
+    expect(metrics.fields.every((f) => f.type !== "initials")).toBe(true);
+  } else {
+    expect(metrics.fields.some((f) => f.type === "initials")).toBe(true);
+  }
+}
+
+async function screenshotTest79PageStack(pageStack: Locator, path: string): Promise<void> {
+  await pageStack.scrollIntoViewIfNeeded();
+  await expect(pageStack.locator(".vs01-sign-page-surface--canonical")).toBeVisible();
+  await pageStack.screenshot({ path, timeout: 15_000 });
+}
+
+async function renderTest79ActualRecipientArtifact(
+  page: Page,
+  args: Test79SignerCase & {
+    viewport: { width: number; height: number; label: string };
+    witness: boolean;
+    filename: string;
+  },
+): Promise<void> {
+  await page.setViewportSize({
+    width: args.viewport.width,
+    height: Math.max(args.viewport.height, VS01_PACKET_PAGE_HEIGHT_PT + 180),
+  });
+  const ctx = await gotoTest79RecipientSigningView(page, args);
+  const pageIndex = args.witness ? ctx.witnessIdx : 0;
+  await fillTest79ActiveFields(page, { ...args, pageIndex });
+
+  const pageStack = page.locator(`[data-vs01-sign-page="${pageIndex}"]`);
+  const expectedFields = ctx.fields.filter((f) => f.page === pageIndex);
+  await assertTest79ActualOverlayGeometry(pageStack, expectedFields, { witness: args.witness });
+  await screenshotTest79PageStack(pageStack, join(ARTIFACT_DIR, args.filename));
+}
+
+test.describe("VS01 test79 actual recipient signing path placement", () => {
+  test.beforeAll(() => {
+    mkdirSync(ARTIFACT_DIR, { recursive: true });
+  });
+
+  const viewports = [
+    { width: 1440, height: 900, label: "desktop-1440" },
+    { width: 1280, height: 800, label: "laptop-1280" },
+  ] as const;
+  const owner: Test79SignerCase = {
+    label: "owner",
+    partyIndex: 0,
+    ownerSigned: false,
+    signerName: "Owner",
+    signerEmail: "anthemhayek@gmail.com",
+    initialsValue: "AHB",
+    signatureValue: "Anthem H Blanchard",
+  };
+  const counterparty: Test79SignerCase = {
+    label: "counterparty",
+    partyIndex: 1,
+    ownerSigned: true,
+    signerName: "Ben Davis",
+    signerEmail: "ben@example.test",
+    initialsValue: "BD",
+    signatureValue: "Ben Davis",
+  };
+
+  for (const viewport of viewports) {
+    test(`test79 owner body initials active (${viewport.label})`, async ({ page }) => {
+      await renderTest79ActualRecipientArtifact(page, {
+        ...owner,
+        viewport,
+        witness: false,
+        filename: `vs01-test79-owner-body-initials-active-${viewport.label}.png`,
+      });
+    });
+
+    test(`test79 owner witness signature active (${viewport.label})`, async ({ page }) => {
+      await renderTest79ActualRecipientArtifact(page, {
+        ...owner,
+        viewport,
+        witness: true,
+        filename: `vs01-test79-owner-witness-signature-active-${viewport.label}.png`,
+      });
+    });
+
+    test(`test79 counterparty body initials active after owner signed (${viewport.label})`, async ({ page }) => {
+      await renderTest79ActualRecipientArtifact(page, {
+        ...counterparty,
+        viewport,
+        witness: false,
+        filename: `vs01-test79-counterparty-body-initials-active-after-owner-signed-${viewport.label}.png`,
+      });
+    });
+
+    test(`test79 counterparty witness signature active after owner signed (${viewport.label})`, async ({ page }) => {
+      await renderTest79ActualRecipientArtifact(page, {
+        ...counterparty,
+        viewport,
+        witness: true,
+        filename: `vs01-test79-counterparty-witness-signature-active-after-owner-signed-${viewport.label}.png`,
       });
     });
   }

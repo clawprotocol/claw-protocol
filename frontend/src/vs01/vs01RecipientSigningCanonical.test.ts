@@ -53,6 +53,7 @@ describe("recipient canonical signing packet (test75)", () => {
     expect(src).toContain("useCanonicalDocument");
     expect(src).toContain("resolveRecipientCanonicalSigningPacket");
     expect(src).toContain("Vs01CanonicalSigningPage");
+    expect(src).toContain("canonicalCompact");
   });
 
   it("prepare and recipient resolve the same corpus hash from stored seed", () => {

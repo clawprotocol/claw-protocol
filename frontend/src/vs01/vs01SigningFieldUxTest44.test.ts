@@ -47,6 +47,8 @@ describe("VS01 signing-field UX test44", () => {
     expect(recipient).toContain("LawDogSigningField");
     expect(css).toContain(".lawdog-signing-field");
     expect(css).toContain(".vs01-recipient-signing-view .lawdog-signing-field.vs01-sign-placement-box");
+    expect(css).toContain("vs01-recipient-signing-field--canonical-compact");
+    expect(recipient).toContain("canonicalCompact");
   });
 
   it("final-review preview geometry source matches VS01 packet geometry", () => {

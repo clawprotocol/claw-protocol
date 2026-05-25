@@ -707,6 +707,7 @@ export function RecipientSigningView({
                                 recipientAgreementId={recipientAgreementId}
                                 cpById={cpById}
                                 onUpdateValue={updateFieldValue}
+                                canonicalCompact
                                 signerCount={Math.max(
                                   2,
                                   new Set(documentFields.map((f) => f.assignedPartyIndex ?? 0)).size,
@@ -719,6 +720,12 @@ export function RecipientSigningView({
                                     width: f.width,
                                     height: f.height,
                                   }))}
+                                pageTextRects={page.textBlocks.map((text) => ({
+                                  x: text.x,
+                                  y: text.y,
+                                  width: text.width,
+                                  height: text.height,
+                                }))}
                               />
                             ))}
                           </div>
@@ -835,6 +842,7 @@ export function RecipientSigningView({
                                             recipientAgreementId={recipientAgreementId}
                                             cpById={cpById}
                                             onUpdateValue={updateFieldValue}
+                                            canonicalCompact
                                             signerCount={Math.max(
                                               2,
                                               new Set(
