@@ -500,6 +500,36 @@ export function logGuidedReviewGenericSendBypassed(payload: Record<string, unkno
   console.info("[guided-review-generic-send-bypassed]", payload);
 }
 
+export function logReviewFirstClick(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-click]", payload);
+}
+
+export function logReviewFirstHandoffStart(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-handoff-start]", payload);
+}
+
+export function logReviewFirstLinkCreated(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-link-created]", payload);
+}
+
+export function logReviewFirstNavigateDone(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-navigate-done]", payload);
+}
+
+export function logReviewFirstError(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-error]", payload);
+}
+
 export function logGuidedSignatureTrackStart(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

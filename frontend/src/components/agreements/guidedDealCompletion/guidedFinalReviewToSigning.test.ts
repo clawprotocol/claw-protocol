@@ -429,12 +429,33 @@ Date: _________________________
     const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("completeGuidedPaidProReviewFirstHandoff");
     expect(intake).toContain('completeGuidedPaidProReviewFirstHandoff("continue_guided_final_review")');
+    expect(intake).toContain('completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review")');
     expect(intake).toContain("logGuidedReviewGenericSendBypassed");
     expect(intake).toContain('premiumSendIntent: "review"');
     const reviewContinueIdx = intake.indexOf("if (opts.intent === \"review_only\")");
     const reviewContinueBlock = intake.slice(reviewContinueIdx, reviewContinueIdx + 400);
     expect(reviewContinueBlock).toContain("completeGuidedPaidProReviewFirstHandoff");
     expect(reviewContinueBlock).not.toContain("enterGuidedSigningConfirmationFromFinalReview");
+  });
+
+  it("Send for review first on final Pro review logs click and runs review handoff without upsell modal", () => {
+    const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
+    const handleIdx = intake.indexOf("const handleProSendForReview = React.useCallback");
+    const handleBlock = intake.slice(handleIdx, handleIdx + 900);
+    expect(handleBlock).toContain("logReviewFirstClick");
+    expect(handleBlock).toContain("canProceedGuidedFinalReviewToSigning");
+    expect(handleBlock).toContain('completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review")');
+    expect(handleBlock).not.toContain("setPremiumSendConfirmOpen(true)");
+    const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
+    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 9000);
+    expect(handoffBlock).toContain("logReviewFirstHandoffStart");
+    expect(handoffBlock).toContain("logReviewFirstLinkCreated");
+    expect(handoffBlock).toContain("logReviewFirstNavigateDone");
+    expect(handoffBlock).toContain("logReviewFirstError");
+    expect(handoffBlock).toContain("runPersistAndOpen");
+    expect(handoffBlock).toContain("executePaidProPostRecipientSetupHandoff");
+    expect(handoffBlock).toContain("logReviewFirstNavigateDone");
+    expect(handoffBlock).not.toContain("enterGuidedSignatureTrackRoute");
   });
 
   it("AgreementBuilderIntake routes signature track without generic onGenerate", () => {

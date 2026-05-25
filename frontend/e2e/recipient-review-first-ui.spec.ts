@@ -28,6 +28,20 @@ function installReviewFirstApi(page: Page, draft: DraftRec) {
     const url = route.request().url();
     const method = route.request().method();
 
+    if (url.includes("/health") && method === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      return;
+    }
+
+    if (method === "POST" && url.includes("/api/agreements/draft")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ id: draft.id, draft }),
+      });
+      return;
+    }
+
     if (url.includes("/api/agreements/access/policy") && method === "GET") {
       await route.fulfill({
         status: 200,
@@ -215,6 +229,10 @@ test("paid Pro review-first skips generic /app/send and lands on owner done", as
     { timeout: 25_000 },
   );
   await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.screenshot({
+    path: join(artifactDir, "send-for-review-click-before.png"),
+    fullPage: true,
+  });
   await mintResponse;
 
   await expect(page).toHaveURL(new RegExp(`/app/done/${agreementId}`), { timeout: 25_000 });
@@ -223,7 +241,12 @@ test("paid Pro review-first skips generic /app/send and lands on owner done", as
   await expect(page.getByText("Send this as a professional agreement")).toHaveCount(0);
   await expect(page.getByText("Continue with Pro")).toHaveCount(0);
   await expect(page.getByText("Continue with draft version")).toHaveCount(0);
+  await expect(page.getByText("Review link created")).toBeVisible({ timeout: 20_000 });
 
+  await page.screenshot({
+    path: join(artifactDir, "send-for-review-link-created-after.png"),
+    fullPage: true,
+  });
   await page.screenshot({
     path: join(artifactDir, "review-first-direct-desktop.png"),
     fullPage: true,
@@ -270,6 +293,53 @@ test("proposed changes show before/after blocks for other reviewers", async ({ p
     path: join(artifactDir, "review-first-change-before-after.png"),
     fullPage: true,
   });
+});
+
+/**
+ * Full /app/create → guided final review → click is covered by Vitest (AgreementBuilderIntake wiring).
+ * Browser e2e uses the paid Pro review-first redirect on /app/send (same handoff + /app/done destination).
+ */
+test("paid Pro review-first handoff lands on done with review link artifacts", async ({ page }) => {
+  test.setTimeout(60_000);
+  const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
+  mkdirSync(artifactDir, { recursive: true });
+  const agreementId = "ag_create_review_first_handoff_e2e";
+  const draft = paidProAuthoritativeDraft(agreementId);
+  await primeE2eApiBase(page);
+  await installReviewFirstApi(page, draft);
+
+  await page.addInitScript(
+    ({ id, primed }) => {
+      sessionStorage.setItem("claw_premium_send_intent", "review");
+      window.history.replaceState(
+        {
+          clawSimpleSendHandoff: {
+            v: 1,
+            agreementId: id,
+            primedDraft: primed,
+            premiumSendIntent: "review",
+            openFlowPhase: "review",
+            savedAt: Date.now(),
+          },
+        },
+        "",
+        `/app/send/${id}`,
+      );
+    },
+    { id: agreementId, primed: draft },
+  );
+
+  const mintResponse = page.waitForResponse(
+    (res) =>
+      res.request().method() === "POST" &&
+      res.url().includes("/recipient-access-token") &&
+      res.status() === 200,
+    { timeout: 25_000 },
+  );
+  await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await mintResponse;
+  await expect(page).toHaveURL(new RegExp(`/app/done/${agreementId}`), { timeout: 25_000 });
+  await expect(page.getByText("Review link created")).toBeVisible({ timeout: 20_000 });
 });
 
 test("paid Pro review-first direct route laptop PNG", async ({ page }) => {

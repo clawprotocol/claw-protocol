@@ -80,4 +80,24 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(screen.getByTestId("simple-pro-edit-agreement-text-card")).toBeTruthy();
     cleanup();
   });
+
+  it("shows inline review-first handoff error and busy label on send for review", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        reviewFirstHandoffBusy
+        reviewFirstHandoffError="We could not create review links. Try again."
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("simple-pro-review-first-handoff-error").textContent).toContain(
+      "We could not create review links",
+    );
+    expect(screen.getByTestId("simple-pro-send-for-review").textContent).toContain("Creating review links");
+    expect((screen.getByTestId("simple-pro-send-for-review") as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+  });
 });

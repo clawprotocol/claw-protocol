@@ -23,6 +23,8 @@ export type SimpleProFinalReviewScreenProps = {
   exportBusy?: boolean;
   exportError?: string | null;
   sendDisabled?: boolean;
+  reviewFirstHandoffBusy?: boolean;
+  reviewFirstHandoffError?: string | null;
   /** Signer/reviewer emails captured before final review. */
   signersReady?: boolean;
   /** Hide edit/suggest/upload chrome after signer setup is complete. */
@@ -74,6 +76,8 @@ export function SimpleProFinalReviewScreen({
   exportBusy = false,
   exportError = null,
   sendDisabled = false,
+  reviewFirstHandoffBusy = false,
+  reviewFirstHandoffError = null,
   signersReady = false,
   suppressPostReviewEditUx = false,
   corpusRecoveryMessage = null,
@@ -231,6 +235,16 @@ export function SimpleProFinalReviewScreen({
         </p>
       ) : null}
 
+      {reviewFirstHandoffError ? (
+        <p
+          className="rounded-md border border-amber-300/90 bg-amber-50 px-3 py-2.5 text-sm font-medium text-amber-950"
+          role="alert"
+          data-testid="simple-pro-review-first-handoff-error"
+        >
+          {reviewFirstHandoffError}
+        </p>
+      ) : null}
+
       {corpusRecoveryMessage ? (
         <div
           className="rounded-md border border-amber-300/90 bg-amber-50 px-3 py-3 text-sm leading-relaxed text-amber-950"
@@ -289,11 +303,11 @@ export function SimpleProFinalReviewScreen({
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={sendDisabled || packetStale || bulkApplyBusy}
+            disabled={sendDisabled || packetStale || bulkApplyBusy || reviewFirstHandoffBusy}
             onClick={onSendForReview}
             data-testid="simple-pro-send-for-review"
           >
-            {reviewSecondaryLabel}
+            {reviewFirstHandoffBusy ? "Creating review links…" : reviewSecondaryLabel}
           </button>
           <button
             type="button"
