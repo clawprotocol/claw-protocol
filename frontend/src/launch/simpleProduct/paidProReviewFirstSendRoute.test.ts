@@ -30,5 +30,22 @@ describe("paid Pro review-first send route (no generic /app/send gate)", () => {
     expect(handoff).toContain('premiumSendIntent === "review"');
     expect(handoff).toContain("navigate(`/app/done/");
     expect(handoff).toContain("shouldSkipPaidProPrepareReviewLinkInterstitial");
+    expect(handoff).toContain("reviewLinkMintFailureUserCopy");
+    expect(handoff).toContain("resolveReviewFirstMintFailureUserMessage");
+  });
+
+  it("AgreementBuilderIntake never navigates to /app/send for review-only inline send", () => {
+    const intake = readFileSync(
+      join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx"),
+      "utf8",
+    );
+    const fnIdx = intake.indexOf("const openPaidProPostInlineSendDestination = React.useCallback");
+    const block = intake.slice(fnIdx, fnIdx + 2200);
+    expect(block).toContain('effectivePremiumSendMode === "review"');
+    expect(block).toContain("intake_inline_send_review_first");
+    const reviewBranchEnd = block.indexOf('premiumSendIntent: "review"');
+    const navigateSendIdx = block.indexOf("navigate(`/app/send/");
+    expect(reviewBranchEnd).toBeGreaterThan(-1);
+    expect(navigateSendIdx).toBeGreaterThan(reviewBranchEnd);
   });
 });

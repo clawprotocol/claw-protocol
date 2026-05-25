@@ -10,11 +10,11 @@ describe("Review link handoff UX (LawDog)", () => {
     const signalsSrc = readFileSync(signals, "utf8");
     expect(s).toContain("reviewApprovalAgg.flowShellTitle");
     expect(signalsSrc).toContain("Review link created");
-    expect(s).toContain("Nothing has been signed. Copy this private link and send it to each reviewer.");
+    expect(s).toContain("Send this private link to reviewers. Nothing is signed yet.");
     expect(s).toContain("Copy review link");
     expect(s).toContain("Open reviewer view");
     expect(s).toContain("[review-link-owner-success-visible]");
-    expect(s).toContain("incognito or another browser");
+    expect(s).toContain("showReviewFlowDiagPanel = reviewFlowDiagLocal");
     expect(s).toContain("Review link could not be created. Please try again.");
     expect(s).not.toMatch(/Your Agreement/);
   });
@@ -44,6 +44,8 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).toContain("REVIEW_FIRST_HELPER");
     expect(s).toContain("recipient-review-first-actions");
     expect(s).toContain("recipient-review-approve-draft");
+    expect(s).toContain("recipient-review-suggest-changes");
+    expect(s).toContain("recipient-review-more-options");
     expect(s).toContain("recipient-review-edit-draft");
     expect(s).toContain("recipient-review-upload-updated-draft");
     expect(s).toContain("recipient-review-download-actions");

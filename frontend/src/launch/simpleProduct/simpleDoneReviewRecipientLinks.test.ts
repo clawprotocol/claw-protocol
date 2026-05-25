@@ -3,10 +3,13 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   mintSimpleDoneReviewRecipientLinkRows,
   readSimpleDoneReviewRecipientLinks,
+  reviewLinkMintFailureUserCopy,
   reviewLinkMintHasUsableUrls,
   REVIEW_LINK_MINT_FAILURE_USER_COPY,
   writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
+import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE } from "./reviewFirstSendSurface";
+import { SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE } from "../../agreement/recipientAccessMintPayload";
 
 describe("simpleDoneReviewRecipientLinks session handoff", () => {
   const sessionStore = new Map<string, string>();
@@ -85,6 +88,15 @@ describe("REVIEW_LINK_MINT_FAILURE_USER_COPY", () => {
     expect(REVIEW_LINK_MINT_FAILURE_USER_COPY).toContain("Review link could not be created");
     expect(REVIEW_LINK_MINT_FAILURE_USER_COPY).toContain("recipient email");
   });
+
+  it("reviewLinkMintFailureUserCopy surfaces signing_token_secret_not_configured for review-first", () => {
+    expect(
+      reviewLinkMintFailureUserCopy({
+        lastMintErrorCode: SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE,
+        firstErrorStatus: 422,
+      }),
+    ).toBe(REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE);
+  });
 });
 
 describe("mintSimpleDoneReviewRecipientLinkRows", () => {
@@ -124,6 +136,36 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
     expect(body.mode).toBe("review");
     expect(body.recipient_party_id).toBe("p_rev");
+  });
+
+  it("returns signing_token_secret_not_configured code on 422", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 422,
+        json: async () => ({
+          detail: {
+            code: SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE,
+            message: "not configured",
+          },
+        }),
+      })) as unknown as typeof fetch,
+    );
+    const draft = {
+      id: "ag_422",
+      parties: [
+        { id: "p_owner", name: "Owner", role: "owner", email: "o@example.com" },
+        { id: "p_rev", name: "Sarah Collins", role: "reviewer", email: "sarah@example.com" },
+      ],
+    } as AgreementDraft;
+    const { rows, lastMintErrorCode, firstErrorStatus } = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: "ag_422",
+      draft,
+    });
+    expect(rows.length).toBe(0);
+    expect(firstErrorStatus).toBe(422);
+    expect(lastMintErrorCode).toBe(SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE);
   });
 
   it("returns empty rows on 503 with attempted count and error status", async () => {

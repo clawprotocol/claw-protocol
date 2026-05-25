@@ -24,10 +24,11 @@ import {
 } from "./premiumSendIntent";
 import {
   mintSimpleDoneReviewRecipientLinkRows,
+  reviewLinkMintFailureUserCopy,
   reviewLinkMintHasUsableUrls,
-  REVIEW_LINK_MINT_FAILURE_USER_COPY,
   writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
+import { resolveReviewFirstMintFailureUserMessage } from "./reviewFirstSendSurface";
 
 export type PaidProPostRecipientSetupFailure = {
   userMessage: string;
@@ -64,21 +65,35 @@ async function mintAndPersistReviewLinksForHandoff(
 ): Promise<{ ok: true } | { ok: false; failure: PaidProPostRecipientSetupFailure }> {
   let linkRows: Awaited<ReturnType<typeof mintSimpleDoneReviewRecipientLinkRows>>["rows"] = [];
   let mintThrew = false;
+  let mintMeta: {
+    firstErrorStatus?: number;
+    lastMintErrorDetail?: string;
+    lastMintErrorCode?: string;
+  } = {};
   try {
     const minted = await mintSimpleDoneReviewRecipientLinkRows({ agreementId, draft });
     linkRows = minted.rows;
+    mintMeta = {
+      firstErrorStatus: minted.firstErrorStatus,
+      lastMintErrorDetail: minted.lastMintErrorDetail,
+      lastMintErrorCode: minted.lastMintErrorCode,
+    };
   } catch {
     mintThrew = true;
     linkRows = [];
   }
   const mintSucceeded = reviewLinkMintHasUsableUrls(linkRows);
   if (!mintSucceeded || mintThrew) {
+    const userMessage = resolveReviewFirstMintFailureUserMessage({
+      ...mintMeta,
+      fallback: reviewLinkMintFailureUserCopy(mintMeta),
+    });
     return {
       ok: false,
       failure: {
         agreementId,
         reason: "review_link_mint",
-        userMessage: REVIEW_LINK_MINT_FAILURE_USER_COPY,
+        userMessage,
         premiumSendIntent,
       },
     };

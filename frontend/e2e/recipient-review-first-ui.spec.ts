@@ -23,7 +23,11 @@ type DraftRec = {
   updated_at: string;
 };
 
-function installReviewFirstApi(page: Page, draft: DraftRec) {
+function installReviewFirstApi(
+  page: Page,
+  draft: DraftRec,
+  opts?: { recipientAccessMintStatus?: number; recipientAccessMintCode?: string },
+) {
   return page.route("**/api/**", async (route) => {
     const url = route.request().url();
     const method = route.request().method();
@@ -85,6 +89,20 @@ function installReviewFirstApi(page: Page, draft: DraftRec) {
 
     if (url.includes("/recipient-access-token") && method === "POST") {
       const partyIdx = (draft.parties ?? []).findIndex((p) => p.role !== "owner");
+      const mintStatus = opts?.recipientAccessMintStatus ?? 200;
+      if (mintStatus !== 200) {
+        await route.fulfill({
+          status: mintStatus,
+          contentType: "application/json",
+          body: JSON.stringify({
+            detail: {
+              code: opts?.recipientAccessMintCode ?? "signing_token_secret_not_configured",
+              message: "Signing token secret is not configured",
+            },
+          }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -256,6 +274,51 @@ test("paid Pro review-first skips generic /app/send and lands on owner done", as
   });
   await page.screenshot({
     path: join(artifactDir, "review-first-direct-desktop.png"),
+    fullPage: true,
+  });
+});
+
+test("paid Pro review-first on /app/send shows token-config error, not generic send shell", async ({ page }) => {
+  test.setTimeout(60_000);
+  const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
+  mkdirSync(artifactDir, { recursive: true });
+  const agreementId = "ag_paid_pro_review_first_mint_422";
+  const draft = paidProAuthoritativeDraft(agreementId);
+  await primeE2eApiBase(page);
+  await installReviewFirstApi(page, draft, {
+    recipientAccessMintStatus: 422,
+    recipientAccessMintCode: "signing_token_secret_not_configured",
+  });
+
+  await page.addInitScript(
+    ({ id, primed }) => {
+      sessionStorage.setItem("claw_premium_send_intent", "review");
+      const handoff = {
+        v: 1,
+        agreementId: id,
+        primedDraft: primed,
+        streamlinedSimpleFlow: true,
+        premiumSendIntent: "review",
+        openFlowPhase: "review",
+        savedAt: Date.now(),
+      };
+      window.history.replaceState({ clawSimpleSendHandoff: handoff }, "", `/app/send/${id}`);
+    },
+    { id: agreementId, primed: draft },
+  );
+
+  await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await expect(page.getByTestId("review-first-mint-error-panel")).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByText(/signing\/review token minting is not configured/i)).toBeVisible();
+  await expect(page.getByText("Your Agreement")).toHaveCount(0);
+  await expect(page.getByText("Review before sending")).toHaveCount(0);
+  await expect(page.getByText("Continue to send")).toHaveCount(0);
+  await expect(page.getByText("Send this as a professional agreement")).toHaveCount(0);
+  await expect(page.getByText("Continue with Pro")).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/app/send/${agreementId}`));
+
+  await page.screenshot({
+    path: join(artifactDir, "review-first-token-config-error.png"),
     fullPage: true,
   });
 });

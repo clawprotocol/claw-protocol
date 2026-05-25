@@ -91,7 +91,7 @@ describe("AgreementRecipientReview want-copy draft PDF (baseline only)", () => {
     await waitFor(() => expect(screen.queryByText(/Loading agreement/i)).toBeNull());
 
     const draftBtn = screen.getByTestId("recipient-review-download-pdf");
-    expect(draftBtn.textContent).toMatch(/Download PDF/i);
+    expect(draftBtn.textContent).toMatch(/Download/i);
 
     await openRecipientReviseUploadPickMethod();
 

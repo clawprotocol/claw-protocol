@@ -25,6 +25,8 @@ export type SimpleProFinalReviewScreenProps = {
   sendDisabled?: boolean;
   reviewFirstHandoffBusy?: boolean;
   reviewFirstHandoffError?: string | null;
+  onBackToFinalReviewFromReviewHandoff?: () => void;
+  onRetryReviewFirstHandoff?: () => void;
   /** Signer/reviewer emails captured before final review. */
   signersReady?: boolean;
   /** Hide edit/suggest/upload chrome after signer setup is complete. */
@@ -78,6 +80,8 @@ export function SimpleProFinalReviewScreen({
   sendDisabled = false,
   reviewFirstHandoffBusy = false,
   reviewFirstHandoffError = null,
+  onBackToFinalReviewFromReviewHandoff,
+  onRetryReviewFirstHandoff,
   signersReady = false,
   suppressPostReviewEditUx = false,
   corpusRecoveryMessage = null,
@@ -236,13 +240,39 @@ export function SimpleProFinalReviewScreen({
       ) : null}
 
       {reviewFirstHandoffError ? (
-        <p
-          className="rounded-md border border-amber-300/90 bg-amber-50 px-3 py-2.5 text-sm font-medium text-amber-950"
+        <div
+          className="rounded-md border border-amber-300/90 bg-amber-50 px-3 py-3 text-sm text-amber-950"
           role="alert"
           data-testid="simple-pro-review-first-handoff-error"
         >
-          {reviewFirstHandoffError}
-        </p>
+          <p className="font-medium">{reviewFirstHandoffError}</p>
+          {onBackToFinalReviewFromReviewHandoff || onRetryReviewFirstHandoff ? (
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              {onBackToFinalReviewFromReviewHandoff ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-amber-400/80 bg-white px-3 py-2 text-xs font-semibold text-amber-950"
+                  disabled={reviewFirstHandoffBusy}
+                  onClick={onBackToFinalReviewFromReviewHandoff}
+                  data-testid="simple-pro-review-first-back"
+                >
+                  Back to final review
+                </button>
+              ) : null}
+              {onRetryReviewFirstHandoff ? (
+                <button
+                  type="button"
+                  className="rounded-lg bg-amber-900 px-3 py-2 text-xs font-semibold text-amber-50"
+                  disabled={reviewFirstHandoffBusy}
+                  onClick={onRetryReviewFirstHandoff}
+                  data-testid="simple-pro-review-first-retry"
+                >
+                  {reviewFirstHandoffBusy ? "Retrying…" : "Retry creating review links"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {corpusRecoveryMessage ? (

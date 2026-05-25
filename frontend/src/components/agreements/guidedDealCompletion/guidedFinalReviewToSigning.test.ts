@@ -456,6 +456,7 @@ Date: _________________________
     expect(handoffBlock).toContain("executePaidProPostRecipientSetupHandoff");
     expect(handoffBlock).toContain("logReviewFirstNavigateDone");
     expect(handoffBlock).not.toContain("enterGuidedSignatureTrackRoute");
+    expect(handoffBlock).not.toContain("navigate(`/app/send/");
   });
 
   it("AgreementBuilderIntake routes signature track without generic onGenerate", () => {

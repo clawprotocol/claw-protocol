@@ -6,6 +6,7 @@ import {
   resolveRecipientAccessMintFailureMessage,
   SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE,
 } from "../../agreement/recipientAccessMintPayload";
+import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE } from "./reviewFirstSendSurface";
 import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } from "./reviewLinkRecipientEmailMerge";
 import type { ReviewerLinkRow } from "./reviewerLinkRowModel";
 import { extractReviewLinkTokenFromHref, redactReviewUrlForLog } from "./reviewerLinkRowModel";
@@ -150,10 +151,7 @@ export function reviewLinkMintFailureUserCopy(args?: {
   lastMintErrorDetail?: string | null;
 }): string {
   if (args?.lastMintErrorCode === SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE) {
-    return resolveRecipientAccessMintFailureMessage({
-      status: args.firstErrorStatus ?? 422,
-      code: args.lastMintErrorCode,
-    });
+    return REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE;
   }
   if (args?.lastMintErrorCode || args?.firstErrorStatus) {
     const resolved = resolveRecipientAccessMintFailureMessage({

@@ -102,11 +102,7 @@ describe("AgreementRecipientReview suggested-changes single surface", () => {
     });
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
-    const humanSummary = within(panel).getByTestId("recipient-human-review-summary");
-    const docScroll = within(panel).getByTestId("recipient-suggested-changes-document");
-    expect(
-      humanSummary.compareDocumentPosition(docScroll) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(within(panel).getByTestId("recipient-review-change-visibility-summary")).toBeTruthy();
 
     expect(screen.queryByTestId("recipient-tab-redline")).toBeNull();
     expect(screen.queryByTestId("recipient-tab-clean-proposed")).toBeNull();

@@ -16168,6 +16168,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draft as unknown as AgreementDraft,
         buildRecipientSetupForVs01Bridge(draft),
       ) ?? (draft as unknown as AgreementDraft);
+    if (effectivePremiumSendMode === "review") {
+      const result = await executePaidProPostRecipientSetupHandoff({
+        navigate: (to) => void navigate(to),
+        agreementId: id,
+        draft: primedForHandoff,
+        premiumSendIntent: "review",
+        recipientSetup: buildRecipientSetupForVs01Bridge(draft as unknown as ParsedDraftShape),
+        logSource: "intake_inline_send_review_first",
+        agreementCorpusText:
+          (vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : guidedAuthoritativeBodyPlain) || undefined,
+      });
+      if (!result.ok) {
+        setReviewFirstHandoffError(result.failure.userMessage);
+        setHardError(result.failure.userMessage);
+      }
+      return;
+    }
     if (
       shouldSkipPaidProPrepareReviewLinkInterstitial({
         draft: primedForHandoff,
@@ -21885,6 +21902,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           onSendForReview={() => void handleProSendForReview()}
                                           reviewFirstHandoffBusy={reviewFirstHandoffBusy}
                                           reviewFirstHandoffError={reviewFirstHandoffError}
+                                          onBackToFinalReviewFromReviewHandoff={() => {
+                                            setReviewFirstHandoffError(null);
+                                            setHardError(null);
+                                          }}
+                                          onRetryReviewFirstHandoff={() => {
+                                            setReviewFirstHandoffError(null);
+                                            setHardError(null);
+                                            void completeGuidedPaidProReviewFirstHandoff("simple_pro_review_first_retry");
+                                          }}
                                           onCopyAgreement={handleSimpleProFinalReviewCopy}
                                           onExportAgreement={() => void handleSimpleProFinalReviewExport()}
                                           suppressPostReviewEditUx={paidProInlineSignersReady}

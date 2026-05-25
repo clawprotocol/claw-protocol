@@ -6,6 +6,8 @@ import { expect } from "vitest";
 export async function openRecipientReviseEditWorkspace(
   user: Pick<typeof userEvent, "click"> = userEvent,
 ): Promise<void> {
+  const more = screen.queryByTestId("recipient-review-more-options");
+  if (more) await user.click(more);
   await user.click(screen.getByTestId("recipient-review-edit-draft"));
   await waitFor(() => {
     expect(screen.getByTestId("recipient-compose-tablist")).toBeTruthy();
@@ -24,6 +26,8 @@ export async function openRecipientQuickChangeWorkspace(
 export async function openRecipientReviseUploadPickMethod(
   user: Pick<typeof userEvent, "click"> = userEvent,
 ): Promise<void> {
+  const more = screen.queryByTestId("recipient-review-more-options");
+  if (more) await user.click(more);
   await user.click(screen.getByTestId("recipient-review-upload-updated-draft"));
   await waitFor(() => {
     expect(screen.getByTestId("recipient-revised-version-panel")).toBeTruthy();

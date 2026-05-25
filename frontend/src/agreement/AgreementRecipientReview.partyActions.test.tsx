@@ -86,7 +86,7 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect(within(summary).queryByText(/Agreement type/i)).toBeNull();
 
     expect(screen.getByRole("heading", { name: "Review agreement" })).toBeTruthy();
-    expect(screen.getByText(/Review the draft below/i)).toBeTruthy();
+    expect(screen.getByText(/Read the draft, approve it, or suggest a change/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Request changes/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /I'm not participating|I’m not participating/i })).toBeNull();
     expect(screen.queryByText(/Review somewhere else/i)).toBeNull();
@@ -94,9 +94,13 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     const actions = screen.getByTestId("recipient-review-first-actions");
     expect(within(actions).getByRole("button", { name: /Approve draft/i })).toBeTruthy();
+    expect(within(actions).getByRole("button", { name: /Suggest changes/i })).toBeTruthy();
+    expect(within(actions).getByRole("button", { name: /^Download$/i })).toBeTruthy();
+    expect(within(actions).getByRole("button", { name: /More options/i })).toBeTruthy();
+    expect(within(actions).queryByRole("button", { name: /Edit text directly/i })).toBeNull();
+    await userEvent.click(within(actions).getByRole("button", { name: /More options/i }));
     expect(within(actions).getByRole("button", { name: /Edit text directly/i })).toBeTruthy();
     expect(within(actions).getByRole("button", { name: /Upload updated draft/i })).toBeTruthy();
-    expect(within(actions).getByRole("button", { name: /^Download PDF$/i })).toBeTruthy();
     expect(within(actions).getByRole("button", { name: /^Download text$/i })).toBeTruthy();
     expect(within(actions).getByRole("button", { name: /^Copy text$/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
@@ -141,6 +145,7 @@ describe("AgreementRecipientReview review-first actions", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
+    await userEvent.click(screen.getByTestId("recipient-review-more-options"));
     await userEvent.click(screen.getByTestId("recipient-review-edit-draft"));
     expect(await screen.findByTestId("recipient-edit-draft-textarea")).toBeTruthy();
     expect(screen.getByTestId("recipient-compare-versions-button").textContent).toMatch(/Save updated draft/i);

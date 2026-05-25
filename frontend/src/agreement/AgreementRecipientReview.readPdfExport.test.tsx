@@ -66,11 +66,13 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
 
+    expect(screen.getByTestId("recipient-review-download-pdf")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Download$/i })).toBeTruthy();
+    await userEvent.click(screen.getByTestId("recipient-review-more-options"));
     await waitFor(() => {
       expect(screen.getByTestId("recipient-review-download-actions")).toBeTruthy();
     });
     expect(screen.getByTestId("recipient-review-download-pdf")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Download PDF/i })).toBeTruthy();
     expect(screen.getByTestId("recipient-review-download-text")).toBeTruthy();
     expect(screen.getByTestId("recipient-review-copy-text")).toBeTruthy();
     expect(screen.queryAllByTestId("recipient-review-download-pdf")).toHaveLength(1);

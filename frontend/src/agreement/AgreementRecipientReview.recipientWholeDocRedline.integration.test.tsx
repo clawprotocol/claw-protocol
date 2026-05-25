@@ -5,7 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { openRecipientQuickChangeWorkspace } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
-import { RECIPIENT_PREVIEW_TRUST_SUBCOPY } from "./portableReviewCopy";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -113,7 +112,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     expect(within(panel).getByTestId("recipient-preview-summary-heading").textContent).toBe(
       "Changes proposed",
     );
-    expect(within(panel).getByText(RECIPIENT_PREVIEW_TRUST_SUBCOPY)).toBeTruthy();
+    expect(within(panel).getByText(/Nothing is signed yet/i)).toBeTruthy();
 
     const legalRoot = screen.getByTestId("recipient-legal-redline-document");
     const insertEl = legalRoot.querySelector('[data-redline="insert"]');

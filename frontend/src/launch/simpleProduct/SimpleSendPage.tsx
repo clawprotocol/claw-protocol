@@ -42,11 +42,15 @@ import {
 import {
   clearSimpleDoneReviewRecipientLinks,
   mintSimpleDoneReviewRecipientLinkRows,
+  reviewLinkMintFailureUserCopy,
   reviewLinkMintHasUsableUrls,
-  REVIEW_LINK_MINT_FAILURE_USER_COPY,
   writeSimpleDoneReviewRecipientLinks,
   type SimpleDoneReviewRecipientLinkRow,
 } from "./simpleDoneReviewRecipientLinks";
+import {
+  isPaidProReviewFirstSendIntent,
+  ReviewFirstMintErrorPanel,
+} from "./reviewFirstSendSurface";
 import {
   clearPersistedSimpleSendPhase,
   readSimpleSendHandoffFromHistory,
@@ -127,8 +131,9 @@ export function SimpleSendPage(props: { agreementId: string }) {
   const { agreementId } = props;
   const { navigate, pathname } = useLaunchNav();
   const [flash, setFlash] = useState<"draft_ready" | null>(null);
-  /** Inline error when review-link mint yields no usable URLs (stay on /app/send). */
+  /** Inline error when review-link mint yields no usable URLs (paid Pro review-first — no generic send shell). */
   const [reviewLinkMintFailure, setReviewLinkMintFailure] = useState<string | null>(null);
+  const [reviewFirstMintBusy, setReviewFirstMintBusy] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallCopy, setPaywallCopy] = useState<{ headline: string; sub: string } | null>(null);
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(false);
@@ -191,6 +196,20 @@ export function SimpleSendPage(props: { agreementId: string }) {
   const [editReturnNavigateBlocked, setEditReturnNavigateBlocked] = useState<string | null>(null);
   /** Bumps when AgreementReview reports a live draft so review-first redirect can re-run after hydration. */
   const [redirectDraftTick, setRedirectDraftTick] = useState(0);
+  const paidProReviewFirstRoute = useMemo(() => {
+    const intent = sendLanding.premiumIntent ?? simpleFlowPremiumHandoffIntent ?? peekPremiumSendIntent();
+    if (intent !== "review") return false;
+    const draft = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null);
+    if (isPaidProReviewFirstSendIntent(draft, agreementId, "review")) return true;
+    return Boolean(sendAuthoritative && intent === "review");
+  }, [
+    agreementId,
+    initialDraftSnapshot,
+    redirectDraftTick,
+    sendAuthoritative,
+    sendLanding.premiumIntent,
+    simpleFlowPremiumHandoffIntent,
+  ]);
   const authoritativeProBypassRef = useRef(paidProSendBranch.paidProSendAllowed);
   authoritativeProBypassRef.current = paidProSendBranch.paidProSendAllowed;
   const premiumSendUnlocked = useMemo(() => {
@@ -294,6 +313,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
 
   useEffect(() => {
     const onPaywallRequired = (e: Event) => {
+      if (paidProReviewFirstRoute) return;
       if (workspaceProEntitled || authoritativeProBypassRef.current || sendAuthoritative) return;
       const d = (e as CustomEvent<Record<string, unknown>>).detail ?? {};
       setPaywallOpen(true);
@@ -307,7 +327,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
     };
     window.addEventListener("claw:paywall-required", onPaywallRequired);
     return () => window.removeEventListener("claw:paywall-required", onPaywallRequired);
-  }, [workspaceProEntitled, sendAuthoritative]);
+  }, [workspaceProEntitled, sendAuthoritative, paidProReviewFirstRoute]);
 
   useEffect(() => {
     const intent = sendLanding.premiumIntent ?? peekPremiumSendIntent();
@@ -318,12 +338,41 @@ export function SimpleSendPage(props: { agreementId: string }) {
     }
   }, [agreementId, resolveSimpleFlowPhase, sendLanding.openFlowPhase, sendLanding.premiumIntent]);
 
+  const runPaidProReviewFirstMintHandoff = useCallback(
+    async (logSource: string) => {
+      const draft =
+        bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+      if (!draft) {
+        setReviewLinkMintFailure("We could not load the agreement draft. Return to final review and try again.");
+        return;
+      }
+      setReviewFirstMintBusy(true);
+      setReviewLinkMintFailure(null);
+      const result = await executePaidProPostRecipientSetupHandoff({
+        navigate: (to) => {
+          void navigate(to);
+        },
+        agreementId,
+        draft,
+        premiumSendIntent: "review",
+        logSource,
+      });
+      setReviewFirstMintBusy(false);
+      if (!result.ok) {
+        setReviewLinkMintFailure(result.failure.userMessage);
+        return;
+      }
+      clearPremiumSendIntent();
+      clearPersistedSimpleSendPhase(agreementId);
+    },
+    [agreementId, initialDraftSnapshot, navigate],
+  );
+
   /** Paid Pro review-first must never sit on the generic `/app/send` review gate or upsell modal. */
   useEffect(() => {
-    const draft = (initialDraftSnapshot as AgreementDraft | null) ?? bridgeHandoffDraftRef.current;
-    const intent = sendLanding.premiumIntent ?? simpleFlowPremiumHandoffIntent ?? peekPremiumSendIntent();
-    const reviewFirst = intent === "review" || sendLanding.openFlowPhase === "review";
-    if (!reviewFirst || !draft) return;
+    if (!paidProReviewFirstRoute) return;
+    const draft = bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null);
+    if (!draft) return;
     if (
       !shouldSkipPaidProPrepareReviewLinkInterstitial({
         draft,
@@ -333,38 +382,13 @@ export function SimpleSendPage(props: { agreementId: string }) {
     ) {
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      const result = await executePaidProPostRecipientSetupHandoff({
-        // Navigation must not be dropped on Strict Mode effect cleanup.
-        navigate: (to) => {
-          void navigate(to);
-        },
-        agreementId,
-        draft,
-        premiumSendIntent: "review",
-        logSource: "simple_send_review_first_redirect",
-      });
-      if (result.ok) {
-        clearPremiumSendIntent();
-        clearPersistedSimpleSendPhase(agreementId);
-        return;
-      }
-      if (!cancelled) {
-        setReviewLinkMintFailure(result.failure.userMessage);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void runPaidProReviewFirstMintHandoff("simple_send_review_first_redirect");
   }, [
     agreementId,
     initialDraftSnapshot,
-    navigate,
+    paidProReviewFirstRoute,
     redirectDraftTick,
-    sendLanding.openFlowPhase,
-    sendLanding.premiumIntent,
-    simpleFlowPremiumHandoffIntent,
+    runPaidProReviewFirstMintHandoff,
   ]);
 
   useEffect(() => {
@@ -425,11 +449,14 @@ export function SimpleSendPage(props: { agreementId: string }) {
       ? lifecycleStepForStage("review")
       : lifecycleStepForStage("sign");
   const shellTitle = useMemo(() => {
+    if (paidProReviewFirstRoute) {
+      return reviewLinkMintFailure ? "Review links unavailable" : "Creating review links";
+    }
     if (!premiumSendUnlocked) return "Your Agreement";
     if (simpleFlowPremiumHandoffIntent === "review") return "Prepare review link";
     if (simpleFlowPremiumHandoffIntent === "signature") return "Owner workspace";
     return "Your Agreement";
-  }, [premiumSendUnlocked, simpleFlowPremiumHandoffIntent]);
+  }, [paidProReviewFirstRoute, premiumSendUnlocked, reviewLinkMintFailure, simpleFlowPremiumHandoffIntent]);
   const showPremiumFork = premiumSendUnlocked && simpleFlowPhase === "review" && simpleFlowPremiumHandoffIntent === null;
 
   const subtitle =
@@ -719,6 +746,27 @@ export function SimpleSendPage(props: { agreementId: string }) {
         )
       ) : null}
 
+      {paidProReviewFirstRoute ? (
+        <div className="flex flex-col gap-4 py-2">
+          {reviewFirstMintBusy && !reviewLinkMintFailure ? (
+            <p className="text-center text-sm text-slate-400" role="status" data-testid="review-first-mint-busy">
+              Creating review links…
+            </p>
+          ) : null}
+          {reviewLinkMintFailure ? (
+            <ReviewFirstMintErrorPanel
+              message={reviewLinkMintFailure}
+              busy={reviewFirstMintBusy}
+              onBackToFinalReview={navigateBackToCreateForEdit}
+              onRetry={() => void runPaidProReviewFirstMintHandoff("simple_send_review_first_retry")}
+            />
+          ) : reviewFirstMintBusy ? null : (
+            <p className="text-center text-sm text-slate-400" role="status">
+              Preparing review links…
+            </p>
+          )}
+        </div>
+      ) : (
       <AgreementReviewErrorBoundary onBack={navigateBackToCreateForEdit}>
         <AgreementReview
           agreementId={agreementId}
@@ -879,7 +927,13 @@ export function SimpleSendPage(props: { agreementId: string }) {
                   ...(lastMintErrorCode ? { errorCode: lastMintErrorCode } : {}),
                   ...(lastMintErrorDetail ? { errorMessage: lastMintErrorDetail } : {}),
                 });
-                setReviewLinkMintFailure(REVIEW_LINK_MINT_FAILURE_USER_COPY);
+                setReviewLinkMintFailure(
+                  reviewLinkMintFailureUserCopy({
+                    firstErrorStatus,
+                    lastMintErrorCode,
+                    lastMintErrorDetail,
+                  }),
+                );
                 return;
               }
 
@@ -918,9 +972,10 @@ export function SimpleSendPage(props: { agreementId: string }) {
           }}
         />
       </AgreementReviewErrorBoundary>
+      )}
 
       <SendConversionModal
-        open={paywallOpen && !sendAuthoritative}
+        open={paywallOpen && !sendAuthoritative && !paidProReviewFirstRoute}
         agreementId={agreementId}
         paywallHeadline={paywallCopy?.headline ?? PAYWALL_SEND_FINAL_HEADLINE}
         paywallSub={paywallCopy?.sub ?? PAYWALL_SEND_FINAL_SUB}
