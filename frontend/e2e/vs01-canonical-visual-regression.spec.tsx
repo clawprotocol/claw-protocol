@@ -2,7 +2,14 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildVs01PrepareSigningRoles } from "../src/vs01/vs01SignerFieldAssignment";
+import {
+  buildRecipientSigningDocumentFields,
+  buildVs01PrepareSigningRoles,
+  recipientCounterpartyIdForPrepareRole,
+  recipientFieldBelongsToLockedSigner,
+  type Vs01PrepareSigningRole,
+} from "../src/vs01/vs01SignerFieldAssignment";
+import type { Vs01RecipientPlacedField } from "../src/vs01/types";
 import {
   buildVs01SigningPacketModel,
   canonicalFlowStackBottomNorm,
@@ -172,6 +179,145 @@ async function screenshotAppViewport(page: Page, root: Locator, path: string): P
   await expect(root.locator(".vs01-sign-rail")).toBeVisible();
   await expect(root.locator(".vs01-sign-page-surface--canonical")).toBeVisible();
   await page.screenshot({ path, fullPage: false, timeout: 15_000 });
+}
+
+const TEST78_PAGE_CAPTURE_PAD_PX = 24;
+
+/** Recipient review scroll uses max-height:70vh; test78 must show full 612×792 page for QA PNGs. */
+async function ensureTest78CaptureOverflowVisible(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: `
+      .vs01-test78-fixture .vs01-sign-scroll,
+      .vs01-test78-fixture .vs01-recipient-signing-scroll,
+      .vs01-test78-fixture .vs01-sign-doc-pages-wrap,
+      .vs01-test78-fixture .vs01-sign-doc-surface--bridge,
+      .vs01-test78-fixture .vs01-sign-pages-inner {
+        max-height: none !important;
+        overflow: visible !important;
+      }
+      .vs01-test78-fixture .vs01-recipient-signing-header {
+        margin-bottom: 0.35rem;
+      }
+      .vs01-test78-fixture .vs01-recipient-signing-header .vs01-card-title {
+        margin: 0 0 0.2rem;
+        font-size: 1.05rem;
+      }
+      .vs01-test78-fixture .vs01-recipient-signing-subtitle,
+      .vs01-test78-fixture .vs01-recipient-signing-signer {
+        margin: 0 0 0.15rem;
+        font-size: 0.78rem;
+        line-height: 1.25;
+      }
+    `,
+  });
+}
+
+async function assertCanonicalPageFullyVisible(
+  page: Page,
+  surface: Locator,
+  captureRoot: Locator,
+  opts: { witness: boolean; initialsEnabled: boolean },
+): Promise<void> {
+  await expect(surface).toHaveCSS("width", `${VS01_PACKET_PAGE_WIDTH_PT}px`);
+  await expect(surface).toHaveCSS("height", `${VS01_PACKET_PAGE_HEIGHT_PT}px`);
+
+  const metrics = await surface.evaluate((pageEl) => {
+    const pageNode = pageEl as HTMLElement;
+    const pageRect = pageNode.getBoundingClientRect();
+    const band = pageNode.querySelector(".vs01-canonical-initials-band") as HTMLElement | null;
+    const bandRect = band?.getBoundingClientRect() ?? null;
+    const scroll = pageNode.closest(".vs01-sign-scroll") as HTMLElement | null;
+    const scrollRect = scroll?.getBoundingClientRect() ?? null;
+    const captureRootEl = pageNode.closest("[data-vs01-test78-capture-root]") as HTMLElement | null;
+    const captureRect = captureRootEl?.getBoundingClientRect() ?? null;
+    return {
+      pageTop: pageRect.top,
+      pageBottom: pageRect.bottom,
+      pageLeft: pageRect.left,
+      pageRight: pageRect.right,
+      pageHeight: pageRect.height,
+      pageWidth: pageRect.width,
+      bandVisible: Boolean(bandRect && bandRect.height > 2 && bandRect.width > 2),
+      bandTop: bandRect?.top ?? null,
+      bandBottom: bandRect?.bottom ?? null,
+      scrollClipsPage: scrollRect ? pageRect.bottom > scrollRect.bottom + 1.5 : false,
+      scrollTop: scrollRect?.top ?? null,
+      scrollBottom: scrollRect?.bottom ?? null,
+      captureTop: captureRect?.top ?? null,
+      captureBottom: captureRect?.bottom ?? null,
+      pageInsideCapture:
+        captureRect != null
+          ? pageRect.top >= captureRect.top - 1 &&
+            pageRect.bottom <= captureRect.bottom + 1.5 &&
+            pageRect.left >= captureRect.left - 1 &&
+            pageRect.right <= captureRect.right + 1.5
+          : false,
+    };
+  });
+
+  expect(metrics.pageHeight).toBeGreaterThanOrEqual(VS01_PACKET_PAGE_HEIGHT_PT - 2);
+  expect(metrics.pageHeight).toBeLessThanOrEqual(VS01_PACKET_PAGE_HEIGHT_PT + 2);
+  expect(metrics.pageWidth).toBeGreaterThanOrEqual(VS01_PACKET_PAGE_WIDTH_PT - 2);
+  expect(metrics.pageWidth).toBeLessThanOrEqual(VS01_PACKET_PAGE_WIDTH_PT + 2);
+  expect(metrics.scrollClipsPage).toBe(false);
+  expect(metrics.pageInsideCapture).toBe(true);
+
+  const vp = page.viewportSize();
+  expect(vp).not.toBeNull();
+  expect(metrics.pageBottom).toBeLessThanOrEqual((vp?.height ?? 0) + 2);
+  expect(metrics.pageTop).toBeGreaterThanOrEqual(0);
+
+  const captureBox = await captureRoot.boundingBox();
+  expect(captureBox).not.toBeNull();
+  expect(metrics.pageBottom).toBeLessThanOrEqual((captureBox?.y ?? 0) + (captureBox?.height ?? 0) + 2);
+
+  if (!opts.witness && opts.initialsEnabled) {
+    expect(metrics.bandVisible).toBe(true);
+    expect(metrics.bandBottom).not.toBeNull();
+    expect(metrics.bandBottom!).toBeLessThanOrEqual(metrics.pageBottom + 1.5);
+    expect(metrics.bandBottom!).toBeGreaterThan(metrics.pageTop);
+    await expect(surface.locator(".vs01-canonical-initials-band")).toBeVisible();
+    const initialsCount = await surface.locator("[data-vs01-visual-field-type='initials']").count();
+    expect(initialsCount).toBeGreaterThan(0);
+  }
+
+  if (!opts.witness && !opts.initialsEnabled) {
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(0);
+    expect(metrics.pageBottom).toBeGreaterThan(metrics.pageTop + VS01_PACKET_PAGE_HEIGHT_PT - 4);
+  }
+
+  if (opts.witness) {
+    await expect(surface.locator("[data-vs01-visual-field-type='initials']")).toHaveCount(0);
+    expect(metrics.pageBottom).toBeGreaterThan(metrics.pageTop + VS01_PACKET_PAGE_HEIGHT_PT - 4);
+  }
+}
+
+async function screenshotTest78RecipientArtifact(
+  page: Page,
+  captureRoot: Locator,
+  surface: Locator,
+  path: string,
+): Promise<void> {
+  await expect(captureRoot).toBeVisible();
+  await expect(surface).toBeVisible();
+  const box = await captureRoot.boundingBox();
+  if (!box) {
+    throw new Error("test78 capture root was not available for screenshot");
+  }
+  const vp = page.viewportSize();
+  const neededHeight = Math.ceil(box.height) + TEST78_PAGE_CAPTURE_PAD_PX;
+  const neededWidth = Math.ceil(box.width) + TEST78_PAGE_CAPTURE_PAD_PX;
+  if (
+    !vp ||
+    vp.height < neededHeight ||
+    vp.width < neededWidth
+  ) {
+    await page.setViewportSize({
+      width: Math.max(vp?.width ?? 0, neededWidth, VS01_PACKET_PAGE_WIDTH_PT + 120),
+      height: Math.max(vp?.height ?? 0, neededHeight, VS01_PACKET_PAGE_HEIGHT_PT + 200),
+    });
+  }
+  await captureRoot.screenshot({ path, timeout: 15_000 });
 }
 
 function renderSignatureLineHtml(line: string): string {
@@ -1707,6 +1853,340 @@ test.describe("VS01 test77 prepare links and initials toggle", () => {
     const encoded = encodeVs01CanonicalPacketPortable(portable);
     expect(encoded).not.toMatch(/"type":"initials"/);
   });
+});
+
+function test78Roles(): Vs01PrepareSigningRole[] {
+  return buildVs01PrepareSigningRoles({
+    agreementId: "ag_visual_qa",
+    creatorName: "Acme LLC",
+    creatorEmail: "anthemhayek@gmail.com",
+    ownerSignerName: "Anthem H Blanchard",
+    ownerSignerTitle: "Manager",
+    counterparties: [
+      { id: "cp_ben", name: "Ben Davis", email: "ben@example.test", signerName: "Ben Davis" },
+    ],
+  });
+}
+
+function test78CorpusPlain(): string {
+  return TEST77_REALISTIC_FINAL_CORPUS.replace(/Joe Brown/g, "Ben Davis");
+}
+
+function buildTest78VisualModel(initialsEnabled = true) {
+  const model = buildVs01SigningPacketModel({
+    mode: "guided_pro",
+    authoritativeCorpusPlain: test78CorpusPlain(),
+    roles: test78Roles(),
+    corpusGateArgs: { freeBaselinePlain: STARTER_749 },
+    initialsEnabled,
+  });
+  if (!model.allowed) {
+    throw new Error(`Test78 model not allowed: ${model.diagnostics.validationErrors.join(", ")}`);
+  }
+  return model;
+}
+
+function renderRecipientCanonicalCompactFieldHtml(
+  field: Vs01RecipientPlacedField,
+  args: { roles: Vs01PrepareSigningRole[]; lockedPartyIndex: number },
+): string {
+  const css = normalizedPdfRectToCssPercent(field);
+  const lockedRole = args.roles[args.lockedPartyIndex]!;
+  const lockedCp = recipientCounterpartyIdForPrepareRole(lockedRole);
+  const isMine = recipientFieldBelongsToLockedSigner(field, lockedCp, lockedRole.roleId);
+  const autoClass = field.autoInitials ? " vs01-sign-placement-box--auto-initials" : "";
+  const mineClass = isMine
+    ? " vs01-recipient-signing-field--mine vs01-recipient-signing-field--editable"
+    : " vs01-recipient-signing-field--other vs01-recipient-signing-field--locked";
+  const pill = isMine ? "click-to-sign" : "waiting";
+  const pillLabel = isMine ? "Click to sign" : "Waiting";
+  const pillClass = isMine ? "vs01-recipient-signing-pill--action" : "vs01-recipient-signing-pill--waiting";
+  const label = field.type === "signature" ? "Signature" : "Initials";
+  const body =
+    field.type === "initials"
+      ? isMine
+        ? `<input type="text" class="vs01-sign-field-inline-input vs01-recipient-signing-field__compact-input" value="" placeholder="Initials" aria-label="Initials" />`
+        : `<span class="vs01-sign-placement-initials vs01-recipient-signing-readonly-val">—</span>`
+      : isMine
+        ? `<input type="text" class="vs01-sign-field-inline-input vs01-recipient-signing-field__compact-input" value="" placeholder="Type signature" aria-label="Signature" />`
+        : `<span class="vs01-recipient-signing-pill ${pillClass}">${pillLabel}</span><span class="vs01-recipient-signing-readonly-val">—</span>`;
+  return `<div class="lawdog-signing-field lawdog-signing-field--${field.type} vs01-sign-placement-box vs01-sign-placement-box--${field.type}${autoClass} vs01-recipient-signing-field vs01-recipient-signing-field--canonical-compact${mineClass}" data-vs01-recipient-field-type="${field.type}" data-vs01-recipient-field-role="${field.assignedSignerRoleKind ?? ""}" data-vs01-page-index="${field.page}" data-vs01-field-page="${field.page}" data-vs01-field-ready-state="${pill}" data-vs01-visual-field-type="${field.type}" data-vs01-visual-party-index="${field.assignedPartyIndex ?? 0}" style="position:absolute;left:${css.left};top:${css.top};width:${css.width};height:${css.height};z-index:${isMine ? 4 : 2};"><span class="vs01-sign-placement-label">${label}</span>${body}</div>`;
+}
+
+function renderRecipientSigningOverlaysHtml(
+  pageFields: readonly Vs01RecipientPlacedField[],
+  args: {
+    roles: Vs01PrepareSigningRole[];
+    lockedPartyIndex: number;
+  },
+): string {
+  return pageFields
+    .map((field) => renderRecipientCanonicalCompactFieldHtml(field, args))
+    .join("");
+}
+
+function renderTest78RecipientPageHtml(
+  page: Vs01SigningPacketPage,
+  documentFields: readonly Vs01RecipientPlacedField[],
+  args: {
+    roles: Vs01PrepareSigningRole[];
+    lockedPartyIndex: number;
+  },
+): string {
+  const pageFields = documentFields.filter((f) => f.page === page.pageIndex);
+  const overlayHtml = renderRecipientSigningOverlaysHtml(pageFields, {
+    roles: args.roles,
+    lockedPartyIndex: args.lockedPartyIndex,
+  });
+  const base = renderCanonicalPageHtml(page, [], { renderFields: false });
+  return base.replace(
+    '<div class="vs01-sign-overlay vs01-sign-overlay--placed" role="presentation"></div>',
+    `<div class="vs01-sign-overlay vs01-sign-overlay--placed" role="presentation">${overlayHtml}</div>`,
+  );
+}
+
+function buildTest78RecipientWorkspaceHtml(opts: {
+  lockedPartyIndex: number;
+  witness?: boolean;
+  pageIndex?: number;
+  initialsEnabled?: boolean;
+  signerName: string;
+  signerEmail: string;
+  actionLabel: string;
+  testId: string;
+}): string {
+  const roles = test78Roles();
+  const model = buildTest78VisualModel(opts.initialsEnabled ?? true);
+  const manifest = buildFullPacketManifestFromCanonicalModel({ model, roles });
+  const documentFields = buildRecipientSigningDocumentFields({
+    ownerRole: roles[0]!,
+    roles,
+    recipientPlacedFields: manifest,
+    senderPlacedFields: [],
+  });
+  const witnessIdx = witnessPageIndex(model);
+  const pageIndex = opts.witness ? witnessIdx : (opts.pageIndex ?? 0);
+  const packetPage = model.pages[pageIndex] ?? model.pages[model.pages.length - 1]!;
+  const pageMarkup = renderTest78RecipientPageHtml(packetPage, documentFields, {
+    roles,
+    lockedPartyIndex: opts.lockedPartyIndex,
+  });
+  const css = readFileSync(join(__dirname, "../src/vs01/vs01.css"), "utf8");
+  const tokens = readFileSync(join(__dirname, "../src/vs01/vs01-tokens.css"), "utf8");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <style>${tokens}\n${css}</style>
+</head>
+<body style="margin:0;background:#0f172a;color:#e5e7eb;">
+  <section class="vs01-recipient-signing-view vs01-sign-step vs01-test78-fixture" data-testid="${opts.testId}" data-vs01-test78-capture-root="true" style="max-width:1180px;margin:0 auto;padding:12px 16px 20px;box-sizing:border-box;">
+    <header class="vs01-recipient-signing-header">
+      <h2 class="vs01-card-title">Review and sign</h2>
+      <p class="vs01-recipient-signing-subtitle">Complete your assigned fields below, then finish signing.</p>
+      <p class="vs01-recipient-signing-signer">
+        <span class="vs01-recipient-signing-name">${escapeHtml(opts.signerName)}</span>
+        <span class="vs01-recipient-signing-sep" aria-hidden> · </span>
+        <span class="vs01-recipient-signing-email">${escapeHtml(opts.signerEmail)}</span>
+        <span class="vs01-recipient-signing-field-count" aria-hidden> · ${escapeHtml(opts.actionLabel)}</span>
+      </p>
+    </header>
+    <div class="vs01-recipient-signing-doc-wrap">
+      <div class="vs01-sign-page-bar" aria-label="Page navigation">
+        <span class="vs01-sign-page-label">Page ${pageIndex + 1} of ${model.pages.length}</span>
+      </div>
+      <div class="vs01-sign-scroll vs01-recipient-signing-scroll">
+        <div class="vs01-sign-doc-pages-wrap vs01-sign-doc-surface vs01-sign-doc-surface--bridge" data-testid="vs01-recipient-canonical-render">
+          <div class="vs01-sign-pages-inner">${pageMarkup}</div>
+        </div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>`;
+}
+
+async function expectRecipientBodyInitialsPlacement(surface: Locator): Promise<void> {
+  const metrics = await surface.evaluate(() => {
+    const page = document.querySelector(".vs01-sign-page-surface--canonical") as HTMLElement | null;
+    const band = page?.querySelector(".vs01-canonical-initials-band") as HTMLElement | null;
+    if (!page || !band) return null;
+    const pageRect = page.getBoundingClientRect();
+    const bandRect = band.getBoundingClientRect();
+    const bandNorm = {
+      x: (bandRect.left - pageRect.left) / pageRect.width,
+      y: (bandRect.top - pageRect.top) / pageRect.height,
+      width: bandRect.width / pageRect.width,
+      height: bandRect.height / pageRect.height,
+    };
+    const pxRect = (el: Element) => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return {
+        left: r.left - pageRect.left,
+        top: r.top - pageRect.top,
+        right: r.right - pageRect.left,
+        bottom: r.bottom - pageRect.top,
+        width: r.width,
+        height: r.height,
+      };
+    };
+    const intersects = (
+      a: { left: number; top: number; right: number; bottom: number },
+      b: { left: number; top: number; right: number; bottom: number },
+    ) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+
+    const initials = [...page.querySelectorAll("[data-vs01-visual-field-type='initials']")] as HTMLElement[];
+    const bodyText = [...page.querySelectorAll("[data-vs01-canonical-text]")].map(pxRect);
+    return initials.map((node) => {
+      const field = pxRect(node);
+      const inBand =
+        field.left >= bandNorm.x * pageRect.width - 2 &&
+        field.top >= bandNorm.y * pageRect.height - 2 &&
+        field.right <= (bandNorm.x + bandNorm.width) * pageRect.width + 2 &&
+        field.bottom <= (bandNorm.y + bandNorm.height) * pageRect.height + 2;
+      const bodyHits = bodyText.filter((text) => intersects(field, text)).length;
+      return { inBand, bodyHits, width: field.width, height: field.height };
+    });
+  });
+  expect(metrics).not.toBeNull();
+  expect(metrics!.length).toBeGreaterThan(0);
+  for (const item of metrics!) {
+    expect(item.inBand).toBe(true);
+    expect(item.bodyHits).toBe(0);
+    expect(item.width).toBeGreaterThanOrEqual(40);
+    expect(item.height).toBeGreaterThanOrEqual(16);
+    expect(item.height).toBeLessThanOrEqual(48);
+  }
+}
+
+async function renderTest78RecipientArtifact(
+  page: Page,
+  args: {
+    viewport: { width: number; height: number };
+    filename: string;
+    lockedPartyIndex: number;
+    witness: boolean;
+    initialsEnabled?: boolean;
+    signerName: string;
+    signerEmail: string;
+    actionLabel: string;
+    testId: string;
+  },
+): Promise<void> {
+  const initialsEnabled = args.initialsEnabled ?? true;
+  await page.setViewportSize({
+    width: args.viewport.width,
+    height: Math.max(
+      args.viewport.height,
+      VS01_PACKET_PAGE_HEIGHT_PT + 220,
+    ),
+  });
+  await page.setContent(
+    buildTest78RecipientWorkspaceHtml({
+      lockedPartyIndex: args.lockedPartyIndex,
+      witness: args.witness,
+      initialsEnabled,
+      signerName: args.signerName,
+      signerEmail: args.signerEmail,
+      actionLabel: args.actionLabel,
+      testId: args.testId,
+    }),
+    { waitUntil: "domcontentloaded" },
+  );
+  await ensureTest78CaptureOverflowVisible(page);
+  const surface = page.locator(".vs01-sign-page-surface--canonical");
+  const captureRoot = page.locator(`[data-testid="${args.testId}"]`);
+  await expect(surface).toBeVisible();
+  await expect(captureRoot).toBeVisible();
+
+  await assertCanonicalPageFullyVisible(page, surface, captureRoot, {
+    witness: args.witness,
+    initialsEnabled,
+  });
+
+  if (args.witness) {
+    const sigCount = await surface.locator("[data-vs01-visual-field-type='signature']").count();
+    expect(sigCount).toBeGreaterThanOrEqual(1);
+    await expectVisualFieldsInsidePage(surface, "[data-vs01-visual-field-type='signature']");
+    await expectWitnessSignatureOverlayGeometry(surface, sigCount);
+  } else {
+    expect(initialsEnabled).toBe(true);
+    await expectRecipientBodyInitialsPlacement(surface);
+    await expectVisualFieldsInsidePage(surface, "[data-vs01-visual-field-type='initials']");
+  }
+
+  await screenshotTest78RecipientArtifact(
+    page,
+    captureRoot,
+    surface,
+    join(ARTIFACT_DIR, args.filename),
+  );
+}
+
+test.describe("VS01 test78 recipient signing review placement", () => {
+  test.beforeAll(() => {
+    mkdirSync(ARTIFACT_DIR, { recursive: true });
+  });
+
+  const viewports = [
+    { width: 1440, height: 900, label: "desktop-1440" },
+    { width: 1280, height: 800, label: "laptop-1280" },
+  ] as const;
+
+  for (const viewport of viewports) {
+    test(`test78 owner body initials (${viewport.label})`, async ({ page }) => {
+      await renderTest78RecipientArtifact(page, {
+        viewport,
+        filename: `vs01-test78-recipient-owner-body-initials-${viewport.label}.png`,
+        lockedPartyIndex: 0,
+        witness: false,
+        signerName: "Owner",
+        signerEmail: "anthemhayek@gmail.com",
+        actionLabel: "4 actions required (signature and initials on document pages)",
+        testId: `vs01-test78-owner-body-${viewport.label}`,
+      });
+    });
+
+    test(`test78 counterparty body initials (${viewport.label})`, async ({ page }) => {
+      await renderTest78RecipientArtifact(page, {
+        viewport,
+        filename: `vs01-test78-recipient-counterparty-body-initials-${viewport.label}.png`,
+        lockedPartyIndex: 1,
+        witness: false,
+        signerName: "Ben Davis",
+        signerEmail: "ben@example.test",
+        actionLabel: "4 actions required (signature and initials on document pages)",
+        testId: `vs01-test78-counterparty-body-${viewport.label}`,
+      });
+    });
+
+    test(`test78 owner witness signature (${viewport.label})`, async ({ page }) => {
+      await renderTest78RecipientArtifact(page, {
+        viewport,
+        filename: `vs01-test78-recipient-owner-witness-signature-${viewport.label}.png`,
+        lockedPartyIndex: 0,
+        witness: true,
+        signerName: "Owner",
+        signerEmail: "anthemhayek@gmail.com",
+        actionLabel: "4 actions required (signature and initials on document pages)",
+        testId: `vs01-test78-owner-witness-${viewport.label}`,
+      });
+    });
+
+    test(`test78 counterparty witness signature (${viewport.label})`, async ({ page }) => {
+      await renderTest78RecipientArtifact(page, {
+        viewport,
+        filename: `vs01-test78-recipient-counterparty-witness-signature-${viewport.label}.png`,
+        lockedPartyIndex: 1,
+        witness: true,
+        signerName: "Ben Davis",
+        signerEmail: "ben@example.test",
+        actionLabel: "4 actions required (signature and initials on document pages)",
+        testId: `vs01-test78-counterparty-witness-${viewport.label}`,
+      });
+    });
+  }
 });
 
 test.describe("VS01 test74 repaired corpus visual", () => {
