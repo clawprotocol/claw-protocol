@@ -25,6 +25,7 @@ import {
   GUIDED_VS01_HANDOFF_ALLOWED_SOURCES,
   GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE,
 } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
+import { applyProCorpusIntegrity } from "../components/agreements/proCorpusIntegrity";
 
 export const VS01_SIGNING_CORPUS_MIN_LEN = GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 /** Preferred final guided Pro corpus length (test59 / full premium snapshot). */
@@ -362,7 +363,13 @@ export function resolveFinalVs01CorpusOrBlock(
     bridge: handoffTrusted ? null : args.bridge ?? null,
     signerCount,
   });
-  const corpus = witness.corpus;
+  const integrity = applyProCorpusIntegrity(witness.corpus, {
+    canonicalPartyNames: args.bridge
+      ? [args.bridge.creatorName, ...args.bridge.counterparties.map((cp) => cp.name)].filter(Boolean)
+      : (args.draft?.parties ?? []).map((party) => String(party?.name ?? "")).filter(Boolean),
+    surface: "vs01_signing_corpus",
+  });
+  const corpus = integrity.text;
   let source: FinalVs01CorpusSource = witness.rebuilt ? "rebuilt_witness_block" : best.source;
   if (witness.rebuilt) {
     logVs01CorpusGateRebuiltWitness({

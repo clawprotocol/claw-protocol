@@ -736,7 +736,10 @@ import {
   logSignerSetupWriteDeduped,
   logGuidedFinalReviewBlockedSignersIncomplete,
 } from "./guidedDealCompletion/guidedSignerSetupUx";
-import { resolveGuidedPreReviewSignerSlots } from "./guidedDealCompletion/resolveGuidedPreReviewSignerSlots";
+import {
+  isNameTypedInEmailField,
+  resolveGuidedPreReviewSignerSlots,
+} from "./guidedDealCompletion/resolveGuidedPreReviewSignerSlots";
 import {
   agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup,
   formatSignerPartyIdentityConfirmationLines,
@@ -11300,11 +11303,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const recipientEmailsHaveValidationErrors = useMemo(() => {
     const r1e = stripRecipientEmailNoise(recipient1Email);
     const r2e = stripRecipientEmailNoise(recipient2Email);
-    if (r1e.length > 0 && !looksLikeEmail(r1e)) return true;
-    if (recipient2Name.trim() && r2e.length > 0 && !looksLikeEmail(r2e)) return true;
+    if (r1e.length > 0 && (isNameTypedInEmailField(recipient1Email) || !looksLikeEmail(r1e))) return true;
+    if (recipient2Name.trim() && r2e.length > 0 && (isNameTypedInEmailField(recipient2Email) || !looksLikeEmail(r2e)))
+      return true;
     for (const raw of extraPartyReviewEmails) {
       const e = stripRecipientEmailNoise(raw);
-      if (e.length > 0 && !looksLikeEmail(e)) return true;
+      if (e.length > 0 && (isNameTypedInEmailField(raw) || !looksLikeEmail(e))) return true;
     }
     return false;
   }, [recipient1Email, recipient2Email, recipient2Name, extraPartyReviewEmails]);
@@ -11686,6 +11690,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [canonicalSignerManifest, guidedPreReviewSignerSlots.complete]);
 
   /** Paid Pro inline recipient card: emails valid and no helper blockers (matches send_agreement gate). */
+  const guidedSignerSetupPrimaryHelper = useMemo(() => {
+    if (guidedPreReviewSignerSlots.complete) return null;
+    return guidedPreReviewSignerSlots.blockerMessage || null;
+  }, [guidedPreReviewSignerSlots.complete, guidedPreReviewSignerSlots.blockerMessage]);
+
   const paidProInlineSignersReady = Boolean(
     guidedPreReviewSignerSlots.complete && !createFlowRecipientPrimaryHelper,
   );
@@ -16866,9 +16875,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 });
                 scrollGuidedSignerSetupIntoView();
               }
-              setGuidedFinalizeModalBlockedMessage(
-                userMessageForGuidedSignerSetupContinueBlock(readiness.reason),
-              );
+              const signerBlockMsg =
+                readiness.reason === "signers_incomplete" && guidedPreReviewSignerSlots.blockerMessage
+                  ? guidedPreReviewSignerSlots.blockerMessage
+                  : userMessageForGuidedSignerSetupContinueBlock(readiness.reason);
+              setGuidedFinalizeModalBlockedMessage(signerBlockMsg);
               setGuidedFinalizeModalBlockedPresentation(
                 resolveGuidedFinalizeModalBlockedPresentation({
                   reason: readiness.reason,
@@ -16877,7 +16888,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               );
               setGuidedFinalizeModalStage("blocked");
               logGuidedFinalizeModalStage("blocked");
-              setHardError(userMessageForGuidedSignerSetupContinueBlock(readiness.reason));
+              setHardError(signerBlockMsg);
               return;
             }
           }
@@ -17185,8 +17196,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (guidedPacketSendBlocked) {
       return "Refresh signing packet before you send.";
     }
+    if (guidedSignerSetupPrimaryHelper) return guidedSignerSetupPrimaryHelper;
     return createFlowRecipientPrimaryHelper;
-  }, [guidedPacketSendBlocked, createFlowRecipientPrimaryHelper]);
+  }, [guidedPacketSendBlocked, guidedSignerSetupPrimaryHelper, createFlowRecipientPrimaryHelper]);
 
   useEffect(() => {
     if (!simpleProductFlow || !liveWorkspaceTwoPane) return;
@@ -21954,6 +21966,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           slotsComplete={guidedPreReviewSignerSlots.complete}
                                           filledCount={guidedPreReviewSignerSlots.filledCount}
                                           requiredCount={guidedPreReviewSignerSlots.requiredCount}
+                                          signerBlockerMessage={
+                                            guidedPreReviewSignerSlots.complete
+                                              ? ""
+                                              : guidedPreReviewSignerSlots.blockerMessage
+                                          }
                                           backgroundApplyActive={resolvedGuidedAnswerApplyStatus === "applying"}
                                           backgroundApplyComplete={resolvedGuidedAnswerApplyStatus === "applied"}
                                           finalVersionPartyLines={guidedSignerFinalVersionLines}

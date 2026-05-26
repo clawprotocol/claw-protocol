@@ -51,6 +51,11 @@ import {
   repairFinalGradeGuidedCorpus,
 } from "./guidedFinalGradeCorpus";
 import { canonicalizeProAgreementText } from "../proAgreementCanonicalizer";
+import {
+  corpusHasPaymentStructureContradictions,
+  extractGuidedSemanticFacts,
+  reconcileGuidedSemanticCorpus,
+} from "./guidedAnswerSemanticMerger";
 
 export const GUIDED_FINAL_CORPUS_MIN_LEN = 1500;
 
@@ -191,6 +196,7 @@ function sessionRequiresIpOwnershipCheck(session: GuidedCompletionSession | null
 export function validateFinalGuidedProCorpusBeforeFreeze(args: {
   body: string;
   guidedSession: GuidedCompletionSession | null | undefined;
+  originalIntake?: string;
 }): FinalGuidedProCorpusValidation {
   const body = (args.body || "").replace(/\s+/g, " ");
   const contradictions: string[] = [];
@@ -215,16 +221,26 @@ export function validateFinalGuidedProCorpusBeforeFreeze(args: {
     contradictions.push("deliverables_assigned_to_provider");
   }
 
+  const semantic = extractGuidedSemanticFacts(args.guidedSession, args.originalIntake ?? "");
+  contradictions.push(...corpusHasPaymentStructureContradictions(body, semantic));
+
   return { ok: missing.length === 0 && contradictions.length === 0, missing, contradictions };
 }
 
 function applyGuidedAnswersDeterministically(
   body: string,
   session: GuidedCompletionSession | null | undefined,
+  intakeRaw = "",
 ): { body: string; appliedAnswerIds: string[]; repairs: string[] } {
   const appliedAnswerIds = listGuidedAnsweredVariableIds(session);
   const merged = mergeAllGuidedAnswersIntoCorpus(body, session);
-  return { body: merged.body, appliedAnswerIds, repairs: merged.repairs };
+  const semantic = extractGuidedSemanticFacts(session, intakeRaw);
+  const reconciled = reconcileGuidedSemanticCorpus(merged.body, semantic, intakeRaw);
+  return {
+    body: reconciled.text,
+    appliedAnswerIds,
+    repairs: [...merged.repairs, ...reconciled.repairs],
+  };
 }
 
 function buildPartyManifestFromIdentities(
@@ -369,6 +385,7 @@ export function finalizeGuidedProAgreementCorpus(
     const prepared = prepareCanonicalWorkingDraftForFinalization({
       body: workingSeed,
       guidedSession: args.guidedSession,
+      originalIntake: args.originalIntake,
     });
     if (prepared.body.length >= 500) {
       augmentedCandidates.unshift({
@@ -384,12 +401,14 @@ export function finalizeGuidedProAgreementCorpus(
   const preValidation = validateFinalGuidedProCorpusBeforeFreeze({
     body: selected.body,
     guidedSession: args.guidedSession,
+    originalIntake: args.originalIntake,
   });
   if (!preValidation.ok) {
     const recovery = eligiblePaidCandidates({ ...args, candidates: augmentedCandidates }).find((candidate) =>
       validateFinalGuidedProCorpusBeforeFreeze({
         body: candidate.body,
         guidedSession: args.guidedSession,
+        originalIntake: args.originalIntake,
       }).ok,
     );
     if (recovery && recovery.source !== selected.source) {
@@ -418,7 +437,7 @@ export function finalizeGuidedProAgreementCorpus(
   body = hard.text;
   diagnostics.repairs.push(...hard.repairs);
 
-  const guided = applyGuidedAnswersDeterministically(body, args.guidedSession);
+  const guided = applyGuidedAnswersDeterministically(body, args.guidedSession, args.originalIntake);
   body = guided.body;
   diagnostics.appliedAnswerIds = guided.appliedAnswerIds;
   diagnostics.repairs.push(...guided.repairs);
@@ -472,6 +491,7 @@ export function finalizeGuidedProAgreementCorpus(
   const semanticValidation = validateFinalGuidedProCorpusBeforeFreeze({
     body,
     guidedSession: args.guidedSession,
+    originalIntake: args.originalIntake,
   });
   diagnostics.validationMissing = semanticValidation.missing;
   diagnostics.validationContradictions = semanticValidation.contradictions;
@@ -480,12 +500,13 @@ export function finalizeGuidedProAgreementCorpus(
       ...semanticValidation.missing.map((m) => `validation_missing:${m}`),
       ...semanticValidation.contradictions.map((c) => `validation_contradiction:${c}`),
     );
-    const repaired = applyGuidedAnswersDeterministically(body, args.guidedSession);
+    const repaired = applyGuidedAnswersDeterministically(body, args.guidedSession, args.originalIntake);
     body = repaired.body;
     diagnostics.repairs.push(...repaired.repairs.map((r) => `validation_repair:${r}`));
     const repairedValidation = validateFinalGuidedProCorpusBeforeFreeze({
       body,
       guidedSession: args.guidedSession,
+      originalIntake: args.originalIntake,
     });
     diagnostics.validationMissing = repairedValidation.missing;
     diagnostics.validationContradictions = repairedValidation.contradictions;
@@ -520,10 +541,14 @@ export function finalizeGuidedProAgreementCorpus(
   const structureNormalized = normalizeGuidedProCorpusStructure(body);
   body = structureNormalized.text;
   diagnostics.repairs.push(...structureNormalized.repairs.map((r) => `structure:${r}`));
+  const finalSemanticFacts = extractGuidedSemanticFacts(args.guidedSession, args.originalIntake);
   const canonicalized = canonicalizeProAgreementText(body, {
     canonicalPartyNames: args.signerIdentities.map((id) => id.partyDisplayName).filter(Boolean),
     canonicalRoles: ["Client", "Service Provider"],
     canonicalTerminationNoticeDays: guidedTerminationNoticeDays(args.guidedSession),
+    intakeText: args.originalIntake,
+    semanticFacts: finalSemanticFacts,
+    surface: "guided_final_corpus_finalizer",
   });
   body = canonicalized.text;
   diagnostics.repairs.push(...canonicalized.repairs.map((r) => `canonical:${r}`));
@@ -588,6 +613,7 @@ export function finalizeGuidedProAgreementCorpus(
       const prepared = prepareCanonicalWorkingDraftForFinalization({
         body: workingRecovery.body,
         guidedSession: args.guidedSession,
+        originalIntake: args.originalIntake,
       });
       if (prepared.body.length >= GUIDED_FINAL_CORPUS_MIN_LEN) {
         const identityApply = applySignerPartyIdentityToAuthoritativeAgreement(
@@ -598,7 +624,11 @@ export function finalizeGuidedProAgreementCorpus(
         let recoveredBody = identityApply.rejected ? prepared.body : identityApply.text;
         const identityDirect = replaceIdentityPlaceholders(recoveredBody, args.signerIdentities, partyManifest);
         recoveredBody = identityDirect.body;
-        const recoveredGuided = applyGuidedAnswersDeterministically(recoveredBody, args.guidedSession);
+        const recoveredGuided = applyGuidedAnswersDeterministically(
+          recoveredBody,
+          args.guidedSession,
+          args.originalIntake,
+        );
         recoveredBody = recoveredGuided.body;
         diagnostics.repairs.push(...recoveredGuided.repairs.map((r) => `working_draft_recovery:${r}`));
         if (args.signerManifest && args.signerIdentities.length > 0) {
@@ -612,6 +642,7 @@ export function finalizeGuidedProAgreementCorpus(
         const recoveredValidation = validateFinalGuidedProCorpusBeforeFreeze({
           body: recoveredBody,
           guidedSession: args.guidedSession,
+          originalIntake: args.originalIntake,
         });
         const recoveredFatal = scanFatalPartyPlaceholdersAfterManifestApply({
           body: recoveredBody,

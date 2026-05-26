@@ -10,6 +10,8 @@ export type GuidedSignerSetupBeforeReviewCardProps = {
   slotsComplete?: boolean;
   filledCount?: number;
   requiredCount?: number;
+  /** Field-level blocker copy when signer setup is incomplete. */
+  signerBlockerMessage?: string;
   backgroundApplyActive?: boolean;
   backgroundApplyComplete?: boolean;
   /** Shown when signer slots complete — final corpus will use these identities. */
@@ -23,6 +25,7 @@ export function GuidedSignerSetupBeforeReviewCard({
   slotsComplete = false,
   filledCount = 0,
   requiredCount = 2,
+  signerBlockerMessage = "",
   backgroundApplyActive = false,
   backgroundApplyComplete = false,
   finalVersionPartyLines = [],
@@ -54,6 +57,15 @@ export function GuidedSignerSetupBeforeReviewCard({
       <p className="mt-2 text-[11px] text-stone-600" data-testid="guided-signer-setup-progress">
         {filledCount} of {requiredCount} signer slots complete
       </p>
+      {!slotsComplete && signerBlockerMessage ? (
+        <p
+          className="mt-2 text-[11px] font-medium text-amber-900"
+          data-testid="guided-signer-setup-blocker"
+          role="alert"
+        >
+          {signerBlockerMessage}
+        </p>
+      ) : null}
       {slotsComplete && finalVersionPartyLines.length > 0 ? (
         <div
           className="mt-3 rounded-md border border-emerald-200/90 bg-white/80 px-3 py-2.5"

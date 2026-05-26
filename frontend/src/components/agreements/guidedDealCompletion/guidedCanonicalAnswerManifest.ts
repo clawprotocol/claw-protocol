@@ -106,6 +106,14 @@ function clauseForProjectFee(answer: string): { clause: string; evidence: RegExp
 }
 
 function clauseForPhaseAllocation(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } {
+  if (/40\s*%|40%\s*build|40\s*\/\s*30\s*\/\s*30|forty.{0,24}thirty.{0,24}thirty/i.test(answer)) {
+    return {
+      clause:
+        "Schedule A allocates the total project fee as follows: forty percent (40%) upon completion of build/configuration, thirty percent (30%) upon rollout and onboarding, and thirty percent (30%) upon support, handoff, and acceptance milestones.",
+      evidence: /40\s*%[\s\S]{0,100}30\s*%[\s\S]{0,100}30\s*%|40\s*\/\s*30\s*\/\s*30/i,
+      patterns: [/40\s*%[\s\S]{0,100}30\s*%[\s\S]{0,100}30\s*%|40\s*\/\s*30\s*\/\s*30|build.{0,40}rollout.{0,40}support/i],
+    };
+  }
   if (/even\s+thirds|one[-\s]?third\s+each|thirds\s+across/i.test(answer)) {
     return {
       clause:

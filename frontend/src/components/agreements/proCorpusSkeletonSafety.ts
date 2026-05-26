@@ -82,6 +82,14 @@ function lineHasInlineClauseBody(line: string): boolean {
   if (!m) return false;
   const rest = m[2].trim();
   if (/^[^.]+\.\s+(.{20,})/.test(rest)) return true;
+  if (
+    /\b(?:shall|will|must|may|is|are|owns?|agrees?|pays?|provides?|delivered|terminat|retains?|protect|disclose)\b/i.test(
+      rest,
+    ) &&
+    /\b(?:fee|invoice|confidential|deliverables?|tools?|notice|law|signature|payment|services?)\b/i.test(rest)
+  ) {
+    return true;
+  }
   if (rest.length >= 42 && /\b(?:shall|will|must|may|owns?|agrees?|pays?|provides?|delivered|terminat)\b/i.test(rest)) {
     return true;
   }
@@ -120,6 +128,9 @@ export function isBareSkeletonHeadingAt(lines: string[], index: number): boolean
   for (let i = index + 1; i < lines.length; i++) {
     const t = cleanProCorpusLine(lines[i]);
     if (!t) continue;
+    if (isTopLevelSectionLine(current) && isSubsectionHeadingLine(lines[i])) {
+      return false;
+    }
     if (isProClauseHeadingLine(lines[i]) && !lineHasInlineClauseBody(lines[i])) {
       return true;
     }

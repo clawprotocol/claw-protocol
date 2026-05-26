@@ -154,8 +154,8 @@ describe("canonicalizeProAgreementText", () => {
 
     expect(result.text).not.toMatch(/^1\. Purpose and Scope\s*(?:\n\s*)*2\./m);
     expect(result.text).toMatch(/Service Provider retains ownership of its pre-existing tools/i);
-    expect(result.text).toMatch(/5\.2 Required disclosure\./i);
     expect(result.text).toMatch(/Each party will disclose information only as required by law/i);
+    expect(result.text).toMatch(/4\. Confidentiality[\s\S]*Each party will disclose information only as required by law/i);
     expect(result.text).not.toContain(
       "Invoices will be sent to the billing contact identified in the Notices section.",
     );

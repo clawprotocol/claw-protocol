@@ -12,11 +12,16 @@ import {
   stripBillingNoticesFiller,
   stripWeakElectronicSignatureFluff,
 } from "./proCorpusSkeletonSafety";
+import { applyProCorpusIntegrity } from "./proCorpusIntegrity";
+import type { GuidedSemanticFacts } from "./guidedDealCompletion/guidedAnswerSemanticMerger";
 
 export type ProAgreementCanonicalizationOptions = {
   canonicalPartyNames?: readonly string[];
   canonicalRoles?: readonly string[];
   canonicalTerminationNoticeDays?: string | number | null;
+  intakeText?: string | null;
+  semanticFacts?: GuidedSemanticFacts | null;
+  surface?: string;
 };
 
 export { assertNoBareProSkeletonClauses } from "./proCorpusSkeletonSafety";
@@ -432,6 +437,16 @@ export function canonicalizeProAgreementText(
   const finalOrphans = stripOrphanFragments(out);
   out = finalOrphans.text;
   repairs.push(...finalOrphans.repairs);
+
+  const integrity = applyProCorpusIntegrity(out, {
+    intakeText: opts?.intakeText,
+    semanticFacts: opts?.semanticFacts,
+    canonicalPartyNames: opts?.canonicalPartyNames,
+    surface: opts?.surface ?? "pro_agreement_canonicalizer",
+  });
+  out = integrity.text;
+  repairs.push(...integrity.repairs);
+  warnings.push(...integrity.report.warnings.map((w) => `integrity:${w}`));
 
   out = out
     .replace(/[ \t]+$/gm, "")

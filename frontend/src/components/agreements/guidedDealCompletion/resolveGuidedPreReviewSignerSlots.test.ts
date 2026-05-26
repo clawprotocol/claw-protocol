@@ -69,4 +69,18 @@ describe("resolveGuidedPreReviewSignerSlots", () => {
     });
     expect(r.complete).toBe(true);
   });
+
+  it("marketing QA: name in email field blocks with clear copy", () => {
+    const r = resolveGuidedPreReviewSignerSlots({
+      ...BASE,
+      sendMode: "review",
+      recipient1Name: "Agency LLC",
+      recipient2Name: "Client Co",
+      recipient1Email: "ops@agency.test",
+      recipient2Email: "Pat Smith",
+    });
+    expect(r.complete).toBe(false);
+    expect(r.blockers[0]?.reason).toBe("name_in_email_field");
+    expect(r.blockerMessage).toContain("valid email");
+  });
 });

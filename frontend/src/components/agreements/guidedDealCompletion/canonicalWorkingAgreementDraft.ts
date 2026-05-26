@@ -13,6 +13,7 @@ import {
   stripMisplacedGuidedClausesBeforeSignature,
   normalizeGuidedCorpusSectionFormatting,
 } from "./guidedSectionAwareMerge";
+import { extractGuidedSemanticFacts, reconcileGuidedSemanticCorpus } from "./guidedAnswerSemanticMerger";
 import { normalizeGuidedProCorpusStructure } from "./guidedCanonicalCorpusNormalizer";
 import { scanFatalPartyPlaceholdersAfterManifestApply, type CanonicalFinalPartyManifest } from "./canonicalFinalPartyManifest";
 
@@ -60,6 +61,7 @@ export function isCanonicalWorkingDraftReadyForFinalization(args: {
 export function prepareCanonicalWorkingDraftForFinalization(args: {
   body: string;
   guidedSession: GuidedCompletionSession | null | undefined;
+  originalIntake?: string;
 }): { body: string; repairs: string[] } {
   let out = (args.body || "").trim();
   const repairs: string[] = [];
@@ -72,6 +74,10 @@ export function prepareCanonicalWorkingDraftForFinalization(args: {
   const merged = mergeAllGuidedAnswersIntoCorpus(out, args.guidedSession);
   out = merged.body;
   repairs.push(...merged.repairs);
+  const semantic = extractGuidedSemanticFacts(args.guidedSession, args.originalIntake ?? "");
+  const reconciled = reconcileGuidedSemanticCorpus(out, semantic, args.originalIntake ?? "");
+  out = reconciled.text;
+  repairs.push(...reconciled.repairs);
   const structured = normalizeGuidedProCorpusStructure(out);
   out = structured.text;
   repairs.push(...structured.repairs.map((r) => `structure:${r}`));

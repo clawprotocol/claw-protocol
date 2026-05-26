@@ -180,6 +180,8 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     const finalized = canonicalizeProAgreementText(finalizedRaw, {
       canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
       canonicalRoles: ["Client", "Service Provider"],
+      intakeText: args.intakeText,
+      surface: "premium_readonly_hydrated_authoritative",
     }).text;
     const nonThin =
       finalized.length >= 1200 || premiumReadonlyCorpusSignalHits(finalized) >= 3;
@@ -243,6 +245,8 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   finalizedPlain = canonicalizeProAgreementText(finalizedPlain, {
     canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
     canonicalRoles: ["Client", "Service Provider"],
+    intakeText: args.intakeText,
+    surface: "premium_readonly_pick",
   }).text;
   const freeBaseline =
     args.draft && args.premiumCheckoutCompleted
@@ -267,6 +271,8 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     finalizedPlain = canonicalizeProAgreementText(paidFallback, {
       canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
       canonicalRoles: ["Client", "Service Provider"],
+      intakeText: args.intakeText,
+      surface: "premium_readonly_paid_fallback",
     }).text;
   }
   const nonThin =
