@@ -141,7 +141,7 @@ describe("guided final corpus finalizer (test32)", () => {
     expect(result.body).toMatch(/\bNet 30\b/i);
     expect(result.body).toMatch(/\b99\.9\s*%/i);
     expect(result.body).toMatch(/\b(?:30|thirty)\s+days?.{0,24}notice\b/i);
-    expect(result.body).toMatch(/\bCompany owns the project deliverables\b/i);
+    expect(result.body).toMatch(/\b(?:Client|Company) owns the project deliverables\b/i);
     expect(result.body).toMatch(/\bbuild-heavy\b/i);
     expect(result.appliedAnswerIds).toHaveLength(5);
   });
@@ -152,6 +152,63 @@ describe("guided final corpus finalizer (test32)", () => {
     expect(result.body).toContain("Acme Automation LLC");
     expect(result.body).toContain("Botsmith Services LLC");
     expect(result.body).not.toMatch(/Your Company Name|\[Your Company's Address\]|Service Provider Name|\[Service Provider's Address\]/i);
+  });
+
+  it("applies the Pro corpus safety gate before final review, review-first, and signing handoff", () => {
+    const badQaBody = `
+Professional Services Agreement
+
+This Professional Services Agreement is entered into by party_a (the "Client") and party_b (the "Service Provider").
+
+1. Purpose and Scope
+
+2. Services
+The Service Provider will provide workflow automation services to the Client.
+(b) materially breaches this Agreement and fails to cure after notice.
+(c) repeatedly fails to perform the services.
+
+3. Fees and Payment
+Client will pay invoices Net 30.
+Invoices are payable Net 30.
+Invoices are payable Net 30.
+The Company will reimburse approved expenses.
+
+4. Term and Termination
+Either party may terminate this Agreement for convenience on 14 days written notice.
+Either party may terminate this Agreement for convenience on 30 days written notice.
+
+5. Electronic Signatures and Counterparts
+The parties may execute this Agreement using electronic signatures and counterparts.
+
+8. Miscellaneous
+The parties agree that e-signatures and counterparts are valid.
+
+IN WITNESS WHEREOF, the parties execute this Agreement.
+`.trim() + "\n\n" + "Commercial safeguard paragraph. ".repeat(130);
+
+    const result = finalizeGuidedProAgreementCorpus({
+      candidates: [{ source: "last_accepted_premium_candidate", body: badQaBody, paid: true }],
+      guidedSession: session(),
+      signerIdentities: identities,
+      signerManifest: buildCanonicalSignerManifest({ identities, signFirst: true }),
+      originalIntake: "AI automation setup/support agreement, Net 30, 30 days notice, client ownership",
+    });
+
+    expect(result.ok).toBe(true);
+    const finalReviewCorpus = result.body;
+    const reviewFirstMintedCorpus = result.body;
+    const recipientReviewCorpus = result.body;
+    const vs01SigningCorpus = result.body;
+    for (const corpus of [finalReviewCorpus, reviewFirstMintedCorpus, recipientReviewCorpus, vs01SigningCorpus]) {
+      expect(corpus).not.toMatch(/\bparty_a\b|\bparty_b\b|\bpartyA\b|\bpartyB\b/i);
+      expect(corpus).not.toMatch(/^1\. Purpose and Scope\s*(?:\n\s*)*2\./m);
+      expect(corpus).not.toMatch(/e-signatures and counterparts are valid/i);
+      expect(corpus.match(/\bNet 30\b/g)).toHaveLength(1);
+      expect(corpus).not.toMatch(/^\([bc]\)\s+/m);
+      expect(corpus).not.toMatch(/\b14 days? written notice\b/i);
+    }
+    expect(result.body).toContain("Acme Automation LLC");
+    expect(result.body).toContain("Botsmith Services LLC");
   });
 
   it("blocks final corpus when signer manifest exists but placeholders remain unresolved", () => {

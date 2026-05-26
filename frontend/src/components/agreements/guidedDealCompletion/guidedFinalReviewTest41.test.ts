@@ -147,7 +147,7 @@ describe("guided Pro final review test41 regression", () => {
     expect(result.body).toMatch(/\bNet 30\b/i);
     expect(result.body).toMatch(/\bbuild-heavy\b/i);
     expect(result.body).toMatch(/\b99\.9\s*%/i);
-    expect(result.body).toMatch(/\bCompany owns the project deliverables\b/i);
+    expect(result.body).toMatch(/\bClient owns the project deliverables\b/i);
     expect(result.body).toMatch(/\b30\s+days?.{0,30}notice\b/i);
     expect(result.body).not.toMatch(/\[Your Company Name\]|\[Service Provider Name\]/i);
     expect(result.body).toMatch(/CLIENT:\s*\nAcme LLC[\s\S]*Name: Anthem Blanchard[\s\S]*Title: Manager/i);

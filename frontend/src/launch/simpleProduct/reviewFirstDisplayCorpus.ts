@@ -31,6 +31,20 @@ function stringField(draft: AgreementDraft, key: keyof AgreementDraft): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
+function canonicalPartyNamesFromDraft(draft: AgreementDraft): string[] {
+  return (draft.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((name) => name.length >= 2)
+    .slice(0, 2);
+}
+
+function canonicalizeReviewFirstCorpus(text: string, draft: AgreementDraft): string {
+  return canonicalizeProAgreementText(text, {
+    canonicalPartyNames: canonicalPartyNamesFromDraft(draft),
+    canonicalRoles: ["Client", "Service Provider"],
+  }).text;
+}
+
 export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): ReviewFirstDisplayCorpus | null {
   if (!draft) return null;
   const pr = draft.pro_redline_v1;
@@ -39,7 +53,7 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
       ? (pr as Record<string, unknown>).review_first_final_corpus
       : null;
   if (rf && typeof rf === "object" && !Array.isArray(rf)) {
-    const text = canonicalizeProAgreementText(String((rf as Record<string, unknown>).text ?? "").trim()).text;
+    const text = canonicalizeReviewFirstCorpus(String((rf as Record<string, unknown>).text ?? "").trim(), draft);
     if (text) return { text, source: "review_first_final_corpus", hash: corpusHash(text) };
   }
 
@@ -52,7 +66,7 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
     "document_text",
     "rendered_document_text",
   ] as const) {
-    const text = canonicalizeProAgreementText(stringField(draft, source).trim()).text;
+    const text = canonicalizeReviewFirstCorpus(stringField(draft, source).trim(), draft);
     if (text) return { text, source, hash: corpusHash(text) };
   }
   return null;

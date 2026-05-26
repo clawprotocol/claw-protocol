@@ -41,6 +41,13 @@ const COMMERCIAL_SIGNAL_RES = [
   /\bretainer\b/i,
 ];
 
+function canonicalPartyNamesFromDraft(draft: ParsedDraftShape | null | undefined): string[] {
+  return (draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((name) => name.length >= 2)
+    .slice(0, 2);
+}
+
 /** Counts discrete commercial concepts present in the paper body (used to prefer richer corpus). */
 export function premiumReadonlyCorpusSignalHits(text: string): number {
   const t = (text || "").toLowerCase();
@@ -170,7 +177,10 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       args.draft && authHydr.trim()
         ? hydrateIdentityPlaceholdersInAgreementPreviewPlain(authHydr, args.draft, args.intakeText ?? null)
         : authHydr;
-    const finalized = canonicalizeProAgreementText(finalizedRaw).text;
+    const finalized = canonicalizeProAgreementText(finalizedRaw, {
+      canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
+      canonicalRoles: ["Client", "Service Provider"],
+    }).text;
     const nonThin =
       finalized.length >= 1200 || premiumReadonlyCorpusSignalHits(finalized) >= 3;
     return {
@@ -230,7 +240,10 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   const plain = (res.text || "").trim();
   let finalizedPlain =
     args.draft && plain ? hydrateIdentityPlaceholdersInAgreementPreviewPlain(plain, args.draft, args.intakeText ?? null) : plain;
-  finalizedPlain = canonicalizeProAgreementText(finalizedPlain).text;
+  finalizedPlain = canonicalizeProAgreementText(finalizedPlain, {
+    canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
+    canonicalRoles: ["Client", "Service Provider"],
+  }).text;
   const freeBaseline =
     args.draft && args.premiumCheckoutCompleted
       ? buildAgreementPreviewTextCore(args.draft, { starterPreview: true })
@@ -251,7 +264,10 @@ export function pickPremiumPaidReadonlyPlainText(args: {
         fallbackLen: paidFallback.length,
       });
     }
-    finalizedPlain = canonicalizeProAgreementText(paidFallback).text;
+    finalizedPlain = canonicalizeProAgreementText(paidFallback, {
+      canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
+      canonicalRoles: ["Client", "Service Provider"],
+    }).text;
   }
   const nonThin =
     finalizedPlain.length >= 1200 || premiumReadonlyCorpusSignalHits(finalizedPlain) >= 3;

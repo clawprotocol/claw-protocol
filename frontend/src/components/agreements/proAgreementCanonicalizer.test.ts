@@ -44,6 +44,36 @@ The parties may execute this Agreement using electronic signatures and counterpa
 IN WITNESS WHEREOF, the parties execute this Agreement.
 `;
 
+const QA_PLACEHOLDER_REGRESSION_BODY = `Professional Services Agreement
+
+This Professional Services Agreement is entered into by party_a (the "Client") and party_b (the "Service Provider").
+
+1. Purpose and Scope
+
+2. Services
+The Service Provider will provide workflow automation services to the Client.
+(b) materially breaches this Agreement and fails to cure after notice.
+(c) repeatedly fails to perform the services.
+
+3. Fees and Payment
+Client will pay invoices Net 30.
+Invoices are payable Net 30.
+Invoices are payable Net 30.
+The Company will reimburse approved expenses.
+
+4. Term and Termination
+Either party may terminate this Agreement for convenience on 14 days written notice.
+Either party may terminate this Agreement for convenience on 30 days written notice.
+
+5. Electronic Signatures and Counterparts
+The parties may execute this Agreement using electronic signatures and counterparts.
+
+8. Miscellaneous
+The parties agree that e-signatures and counterparts are valid.
+[Your Company Name] will receive notices at its address on file.
+[Service Provider Name] will receive notices at its address on file.
+`;
+
 describe("canonicalizeProAgreementText", () => {
   it("removes empty numbered headings and repeated title inside Section 1", () => {
     const result = canonicalizeProAgreementText(BAD_PRO_BODY);
@@ -82,5 +112,35 @@ describe("canonicalizeProAgreementText", () => {
     });
 
     expect(bareHeading).toBeUndefined();
+  });
+
+  it("runs the final Pro corpus safety gate for the exact QA placeholder regression", () => {
+    const result = canonicalizeProAgreementText(QA_PLACEHOLDER_REGRESSION_BODY, {
+      canonicalPartyNames: ["ABC LLC", "Bob Smith"],
+      canonicalRoles: ["Client", "Service Provider"],
+      canonicalTerminationNoticeDays: 30,
+    });
+
+    expect(result.text).toContain('ABC LLC ("Client")');
+    expect(result.text).toContain('Bob Smith ("Service Provider")');
+    expect(result.text).not.toMatch(/\bparty_a\b|\bparty_b\b|\bpartyA\b|\bpartyB\b/i);
+    expect(result.text).not.toContain("[Your Company Name]");
+    expect(result.text).not.toContain("[Service Provider Name]");
+    expect(result.text).not.toMatch(/^1\. Purpose and Scope\s*(?:\n\s*)*2\./m);
+    expect(result.text).not.toMatch(/e-signatures and counterparts are valid/i);
+    expect(result.text.match(/\bNet 30\b/g)).toHaveLength(1);
+    expect(result.text).not.toMatch(/^\([bc]\)\s+/m);
+    expect(result.text).not.toMatch(/\b14 days? written notice\b/i);
+    expect(result.text).toMatch(/\b30 days? written notice\b/i);
+    expect(result.text).not.toMatch(/\bThe Company\b|\bCompany will\b/);
+    expect(result.repairs.some((r) => r.startsWith("placeholder_party:resolved"))).toBe(true);
+    expect(result.repairs.some((r) => r.startsWith("orphan_subsection:"))).toBe(true);
+  });
+
+  it("fails closed by removing unresolved placeholder party lines when names are unavailable", () => {
+    const result = canonicalizeProAgreementText(QA_PLACEHOLDER_REGRESSION_BODY);
+
+    expect(result.text).not.toMatch(/\bparty_a\b|\bparty_b\b|\[Your Company Name\]|\[Service Provider Name\]/i);
+    expect(result.warnings).toContain("placeholder_party_unresolved_removed");
   });
 });

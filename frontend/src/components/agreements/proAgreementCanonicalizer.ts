@@ -4,8 +4,15 @@ export type ProAgreementCanonicalizationResult = {
   warnings: string[];
 };
 
+export type ProAgreementCanonicalizationOptions = {
+  canonicalPartyNames?: readonly string[];
+  canonicalRoles?: readonly string[];
+  canonicalTerminationNoticeDays?: string | number | null;
+};
+
 const NUMBERED_HEADING_RE = /^(\d+(?:\.\d+)*)\.?\s+(.+?)\.?\s*$/;
 const TOP_LEVEL_HEADING_RE = /^(\d+)\.\s+(.+?)\.?\s*$/;
+const PLACEHOLDER_PARTY_RE = /\b(?:party_a|party_b|partyA|partyB)\b|\[(?:Your Company Name|Service Provider Name)\]/i;
 
 function cleanLine(line: string): string {
   return line.replace(/\s+/g, " ").trim();
@@ -96,6 +103,61 @@ function stripTemplatePlaceholders(text: string): { text: string; repairs: strin
   return { text: out, repairs };
 }
 
+function partyNameAt(opts: ProAgreementCanonicalizationOptions | undefined, index: number): string {
+  return cleanLine(opts?.canonicalPartyNames?.[index] ?? "");
+}
+
+function canonicalRoleAt(opts: ProAgreementCanonicalizationOptions | undefined, index: number, fallback: string): string {
+  return cleanLine(opts?.canonicalRoles?.[index] ?? fallback) || fallback;
+}
+
+function replaceProCorpusPartyPlaceholders(
+  text: string,
+  opts?: ProAgreementCanonicalizationOptions,
+): { text: string; repairs: string[]; warnings: string[] } {
+  const repairs: string[] = [];
+  const warnings: string[] = [];
+  const clientName = partyNameAt(opts, 0);
+  const providerName = partyNameAt(opts, 1);
+  const clientRole = canonicalRoleAt(opts, 0, "Client");
+  const providerRole = canonicalRoleAt(opts, 1, "Service Provider");
+
+  const resolveLine = (line: string): string | null => {
+    let next = line;
+    const before = next;
+    if (clientName) {
+      next = next
+        .replace(/\b(?:party_a|partyA)\b\s*(?:\(\s*the\s+["“]?Client["”]?\s*\))?/gi, `${clientName} ("${clientRole}")`)
+        .replace(/\[Your Company Name\]/gi, clientName);
+    }
+    if (providerName) {
+      next = next
+        .replace(
+          /\b(?:party_b|partyB)\b\s*(?:\(\s*the\s+["“]?Service Provider["”]?\s*\))?/gi,
+          `${providerName} ("${providerRole}")`,
+        )
+        .replace(/\[Service Provider Name\]/gi, providerName);
+    }
+    if (!PLACEHOLDER_PARTY_RE.test(next)) {
+      if (next !== before) repairs.push("placeholder_party:resolved");
+      return next;
+    }
+    if (PLACEHOLDER_PARTY_RE.test(line)) {
+      repairs.push("placeholder_party:line_removed");
+      warnings.push("placeholder_party_unresolved_removed");
+      return null;
+    }
+    return next;
+  };
+
+  const out = text
+    .split("\n")
+    .map(resolveLine)
+    .filter((line): line is string => line !== null)
+    .join("\n");
+  return { text: out, repairs, warnings };
+}
+
 function stripDuplicateParagraphs(text: string): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   const blocks = text.split(/\n{2,}/);
@@ -148,7 +210,9 @@ function canonicalizeRepeatedESignature(text: string): { text: string; repairs: 
       const key = normalizeKey(block);
       const electronicSignature =
         /\belectronic signatures?\b/.test(key) ||
-        (/\bcounterparts?\b/.test(key) && /\belectronic\b|\besign\b|e-sign/.test(key));
+        /\be signatures?\b/.test(key) ||
+        /\be-signatures?\b/.test(key) ||
+        (/\bcounterparts?\b/.test(key) && (/\belectronic\b/.test(key) || /\besign\b/.test(key) || /e-sign/.test(key)));
       if (!electronicSignature) return true;
       if (!seen) {
         seen = true;
@@ -166,71 +230,164 @@ function normalizePaymentConsistency(text: string): { text: string; repairs: str
   const warnings: string[] = [];
   const lines = text.split("\n");
   let canonicalNet: string | null = null;
-  const out = lines.map((line) => {
-    const paymentContext = /\b(payment|invoice|fee|compensation|commercial terms)\b/i.test(line);
+  let netInvoiceLineSeen = false;
+  const out = lines.filter((line) => {
+    const paymentContext = /\b(payment|invoices?|fee|compensation|commercial terms)\b/i.test(line);
     const net = line.match(/\bNet\s+(\d{1,3})\b/i);
-    if (!paymentContext || !net) return line;
+    if (!paymentContext || !net) return true;
     const found = net[1];
     if (!canonicalNet) {
       canonicalNet = found;
-      return line;
+      netInvoiceLineSeen = true;
+      return true;
+    }
+    const duplicateNetInvoice = found === canonicalNet && /\binvoices?\b/i.test(line) && netInvoiceLineSeen;
+    if (duplicateNetInvoice) {
+      repairs.push(`payment_terms:duplicate_net_${found}_invoice_removed`);
+      return false;
     }
     if (found !== canonicalNet) {
       repairs.push(`payment_terms:net_${found}_normalized_to_net_${canonicalNet}`);
       warnings.push("payment_terms_conflict_resolved");
-      return line.replace(/\bNet\s+\d{1,3}\b/gi, `Net ${canonicalNet}`);
+      return true;
     }
-    return line;
+    return true;
   });
-  return { text: out.join("\n"), repairs, warnings };
+  const normalized = out.map((line) => {
+    const paymentContext = /\b(payment|invoices?|fee|compensation|commercial terms)\b/i.test(line);
+    const net = line.match(/\bNet\s+(\d{1,3})\b/i);
+    if (!paymentContext || !net || !canonicalNet || net[1] === canonicalNet) return line;
+    return line.replace(/\bNet\s+\d{1,3}\b/gi, `Net ${canonicalNet}`);
+  });
+  return { text: normalized.join("\n"), repairs, warnings };
 }
 
-function normalizeTerminationNoticeConsistency(text: string): { text: string; repairs: string[]; warnings: string[] } {
+function normalizeTerminationNoticeConsistency(
+  text: string,
+  opts?: ProAgreementCanonicalizationOptions,
+): { text: string; repairs: string[]; warnings: string[] } {
   const repairs: string[] = [];
   const warnings: string[] = [];
   const lines = text.split("\n");
-  let canonicalDays: string | null = null;
-  const out = lines.map((line) => {
+  let canonicalDays: string | null = cleanLine(String(opts?.canonicalTerminationNoticeDays ?? "")).match(/\d{1,3}/)?.[0] ?? null;
+  let keptTerminationForConvenience = false;
+  const out = lines.filter((line) => {
     const terminationContext = /\b(termination|terminate|notice)\b/i.test(line);
+    const terminationForConvenience = /\bterminat(?:e|ion)\b[\s\S]{0,80}\bconvenience\b|\bconvenience\b[\s\S]{0,80}\bterminat/i.test(line);
     const days = line.match(/\b(\d{1,3})\s+days?\b/i);
-    if (!terminationContext || !days) return line;
+    if (!terminationContext || !days) return true;
     const found = days[1];
     if (!canonicalDays) {
       canonicalDays = found;
-      return line;
+      if (terminationForConvenience) keptTerminationForConvenience = true;
+      return true;
+    }
+    if (terminationForConvenience && keptTerminationForConvenience) {
+      repairs.push(`termination_notice:duplicate_${found}_days_removed`);
+      if (found !== canonicalDays) warnings.push("termination_notice_conflict_resolved");
+      return false;
     }
     if (found !== canonicalDays) {
       repairs.push(`termination_notice:${found}_days_normalized_to_${canonicalDays}_days`);
       warnings.push("termination_notice_conflict_resolved");
-      return line.replace(/\b\d{1,3}\s+days?\b/gi, `${canonicalDays} days`);
     }
-    return line;
+    if (terminationForConvenience) keptTerminationForConvenience = true;
+    return true;
   });
-  return { text: out.join("\n"), repairs, warnings };
+  const normalized = out.map((line) => {
+    const terminationContext = /\b(termination|terminate|notice)\b/i.test(line);
+    const days = line.match(/\b(\d{1,3})\s+days?\b/i);
+    if (!terminationContext || !days || !canonicalDays || days[1] === canonicalDays) return line;
+    return line.replace(/\b\d{1,3}\s+days?\b/gi, `${canonicalDays} days`);
+  });
+  return { text: normalized.join("\n"), repairs, warnings };
 }
 
 function stripOrphanFragments(text: string): { text: string; repairs: string[] } {
   const repairs: string[] = [];
-  const out = text
-    .split("\n")
-    .filter((line) => {
-      const t = cleanLine(line);
-      if (!t) return true;
-      if (/^(?:and|or|provided,? however|except that|subject to)\b/i.test(t) && t.length < 80) {
-        repairs.push(`orphan_fragment:${t.slice(0, 48)}`);
-        return false;
+  let sawParentSubsectionInSection = false;
+  const out = text.split("\n").filter((line) => {
+    const t = cleanLine(line);
+    if (!t) return true;
+    if (TOP_LEVEL_HEADING_RE.test(t)) sawParentSubsectionInSection = false;
+    const subsection = t.match(/^\(([a-z])\)\s+/i);
+    if (subsection) {
+      const marker = subsection[1].toLowerCase();
+      if (marker === "a") {
+        sawParentSubsectionInSection = true;
+        return true;
       }
-      if (/^[).,;:-]+/.test(t)) {
-        repairs.push(`orphan_punctuation:${t.slice(0, 48)}`);
+      if (!sawParentSubsectionInSection) {
+        repairs.push(`orphan_subsection:${t.slice(0, 48)}`);
         return false;
       }
       return true;
-    })
-    .join("\n");
+    }
+    if (/^(?:and|or|provided,? however|except that|subject to)\b/i.test(t) && t.length < 80) {
+      repairs.push(`orphan_fragment:${t.slice(0, 48)}`);
+      return false;
+    }
+    if (/^[).,;:-]+/.test(t)) {
+      repairs.push(`orphan_punctuation:${t.slice(0, 48)}`);
+      return false;
+    }
+    return true;
+  }).join("\n");
   return { text: out, repairs };
 }
 
-export function canonicalizeProAgreementText(text: string): ProAgreementCanonicalizationResult {
+function normalizeGenericCompanyRole(
+  text: string,
+  opts?: ProAgreementCanonicalizationOptions,
+): { text: string; repairs: string[] } {
+  const clientRole = canonicalRoleAt(opts, 0, "Client");
+  if (!/^Client$/i.test(clientRole)) return { text, repairs: [] };
+  const partyNames = opts?.canonicalPartyNames ?? [];
+  if (partyNames.some((name) => /\bCompany\b/i.test(name))) return { text, repairs: [] };
+  let replacements = 0;
+  const out = text.replace(/\b(?:the\s+)?Company\b/g, (match) => {
+    if (/^[Tt]he\s+/.test(match)) {
+      replacements += 1;
+      return clientRole;
+    }
+    replacements += 1;
+    return clientRole;
+  });
+  return { text: out, repairs: replacements ? [`generic_company:normalized_to_${clientRole}`] : [] };
+}
+
+export function logProCorpusSafetyGate(payload: {
+  placeholdersRemoved: number;
+  placeholdersResolved: number;
+  emptyHeadingsRemoved: number;
+  duplicateClausesRemoved: number;
+  conflictsResolved: number;
+  finalLength: number;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "production") return;
+  const shouldLog =
+    typeof import.meta !== "undefined" &&
+    (Boolean(import.meta.env?.DEV) || import.meta.env?.MODE === "test");
+  if (!shouldLog) return;
+  // eslint-disable-next-line no-console
+  console.info("[pro-corpus-safety-gate]", payload);
+}
+
+function safetyGatePayload(repairs: readonly string[], warnings: readonly string[], finalLength: number) {
+  return {
+    placeholdersRemoved: repairs.filter((r) => r.includes("placeholder") && r.includes("removed")).length,
+    placeholdersResolved: repairs.filter((r) => r.includes("placeholder") && r.includes("resolved")).length,
+    emptyHeadingsRemoved: repairs.filter((r) => r.startsWith("empty_heading:")).length,
+    duplicateClausesRemoved: repairs.filter((r) => r.includes("duplicate")).length,
+    conflictsResolved: warnings.filter((w) => w.includes("conflict_resolved")).length,
+    finalLength,
+  };
+}
+
+export function canonicalizeProAgreementText(
+  text: string,
+  opts?: ProAgreementCanonicalizationOptions,
+): ProAgreementCanonicalizationResult {
   const repairs: string[] = [];
   const warnings: string[] = [];
   let out = (text || "")
@@ -239,6 +396,11 @@ export function canonicalizeProAgreementText(text: string): ProAgreementCanonica
     .replace(/[ \t]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+  const placeholderParties = replaceProCorpusPartyPlaceholders(out, opts);
+  out = placeholderParties.text;
+  repairs.push(...placeholderParties.repairs);
+  warnings.push(...placeholderParties.warnings);
 
   for (const step of [
     stripTemplatePlaceholders,
@@ -255,20 +417,35 @@ export function canonicalizeProAgreementText(text: string): ProAgreementCanonica
     repairs.push(...result.repairs);
   }
 
+  const genericCompany = normalizeGenericCompanyRole(out, opts);
+  out = genericCompany.text;
+  repairs.push(...genericCompany.repairs);
+
   const payment = normalizePaymentConsistency(out);
   out = payment.text;
   repairs.push(...payment.repairs);
   warnings.push(...payment.warnings);
 
-  const termination = normalizeTerminationNoticeConsistency(out);
+  const termination = normalizeTerminationNoticeConsistency(out, opts);
   out = termination.text;
   repairs.push(...termination.repairs);
   warnings.push(...termination.warnings);
+
+  const finalEmptyHeadings = stripEmptyNumberedHeadings(out);
+  out = finalEmptyHeadings.text;
+  repairs.push(...finalEmptyHeadings.repairs);
+
+  const finalOrphans = stripOrphanFragments(out);
+  out = finalOrphans.text;
+  repairs.push(...finalOrphans.repairs);
 
   out = out
     .replace(/[ \t]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  return { text: out, repairs: [...new Set(repairs)], warnings: [...new Set(warnings)] };
+  const uniqueRepairs = [...new Set(repairs)];
+  const uniqueWarnings = [...new Set(warnings)];
+  logProCorpusSafetyGate(safetyGatePayload(uniqueRepairs, uniqueWarnings, out.length));
+  return { text: out, repairs: uniqueRepairs, warnings: uniqueWarnings };
 }

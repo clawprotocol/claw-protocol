@@ -30,8 +30,23 @@ type CorpusDraftLike = Partial<
     | "server_full_document_text"
     | "document_text"
     | "rendered_document_text"
+    | "parties"
   >
 >;
+
+function canonicalPartyNamesFromDraft(draft: CorpusDraftLike | null | undefined): string[] {
+  return (draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((name) => name.length >= 2)
+    .slice(0, 2);
+}
+
+function canonicalizeHandoffCorpus(text: string, draft: CorpusDraftLike | null | undefined): string {
+  return canonicalizeProAgreementText(text, {
+    canonicalPartyNames: canonicalPartyNamesFromDraft(draft),
+    canonicalRoles: ["Client", "Service Provider"],
+  }).text;
+}
 
 /** DEV / routing: explains paid-Pro send modal bypass for `/app/send`. */
 export type PaidProSendBranchMeta = {
@@ -210,19 +225,19 @@ export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | nu
   let best: SendHandoffCorpusPick | null = null;
   for (const [field, text] of nonPurpose) {
     if (text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN && (!best || text.length > best.text.length)) {
-      best = { field, text: canonicalizeProAgreementText(text).text };
+      best = { field, text: canonicalizeHandoffCorpus(text, draft) };
     }
   }
   if (best) return best;
   for (const [field, text] of candidates) {
     if (text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN && (!best || text.length > best.text.length)) {
-      best = { field, text: canonicalizeProAgreementText(text).text };
+      best = { field, text: canonicalizeHandoffCorpus(text, draft) };
     }
   }
   if (best) return best;
   for (const [field, text] of candidates) {
     if (text.length > 0 && (!best || text.length > best.text.length)) {
-      best = { field, text: canonicalizeProAgreementText(text).text };
+      best = { field, text: canonicalizeHandoffCorpus(text, draft) };
     }
   }
   return best;
@@ -241,7 +256,7 @@ export function longestPlainForAgreementPersist(
     String(merged.purpose ?? "").trim(),
   ].filter(Boolean);
   if (candidates.length === 0) return "";
-  return canonicalizeProAgreementText(candidates.reduce((a, b) => (b.length > a.length ? b : a))).text;
+  return canonicalizeHandoffCorpus(candidates.reduce((a, b) => (b.length > a.length ? b : a)), merged);
 }
 
 export type BuildSendRouteReadonlyHtmlOpts = {

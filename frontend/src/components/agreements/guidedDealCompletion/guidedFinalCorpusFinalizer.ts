@@ -117,6 +117,28 @@ function norm(s: string | null | undefined): string {
   return (s || "").trim();
 }
 
+function guidedTerminationNoticeDays(session: GuidedCompletionSession | null | undefined): string | null {
+  const answered = session?.answered ?? {};
+  const candidates = Object.entries(answered)
+    .filter(([id]) => /renewal|termination|notice/i.test(id))
+    .sort(([a], [b]) => {
+      const atA = session?.answeredAt?.[a] ?? 0;
+      const atB = session?.answeredAt?.[b] ?? 0;
+      return atB - atA;
+    })
+    .map(([, answer]) => String(answer ?? ""));
+  for (const answer of candidates) {
+    const numeric = answer.match(/\b(\d{1,3})\s+days?\b/i)?.[1];
+    if (numeric) return numeric;
+    const word = answer.match(/\b(thirty|sixty|fourteen|fifteen)\b/i)?.[1]?.toLowerCase();
+    if (word === "thirty") return "30";
+    if (word === "sixty") return "60";
+    if (word === "fourteen") return "14";
+    if (word === "fifteen") return "15";
+  }
+  return null;
+}
+
 function hashText(text: string): string {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) {
@@ -498,7 +520,11 @@ export function finalizeGuidedProAgreementCorpus(
   const structureNormalized = normalizeGuidedProCorpusStructure(body);
   body = structureNormalized.text;
   diagnostics.repairs.push(...structureNormalized.repairs.map((r) => `structure:${r}`));
-  const canonicalized = canonicalizeProAgreementText(body);
+  const canonicalized = canonicalizeProAgreementText(body, {
+    canonicalPartyNames: args.signerIdentities.map((id) => id.partyDisplayName).filter(Boolean),
+    canonicalRoles: ["Client", "Service Provider"],
+    canonicalTerminationNoticeDays: guidedTerminationNoticeDays(args.guidedSession),
+  });
   body = canonicalized.text;
   diagnostics.repairs.push(...canonicalized.repairs.map((r) => `canonical:${r}`));
   diagnostics.repairs.push(...canonicalized.warnings.map((w) => `canonical_warning:${w}`));
