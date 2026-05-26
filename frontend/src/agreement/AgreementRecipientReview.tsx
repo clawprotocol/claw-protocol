@@ -237,8 +237,10 @@ import {
 } from "./reviewFirstLayout";
 import {
   buildReviewFirstTextDiffSummary,
+  canReviewChanges,
   canSubmitReviewFirstProposal,
   logReviewFirstProposalCompareDiag,
+  logReviewFirstProposalReadiness,
   type ReviewFirstChangedSection,
   type ReviewFirstDiffPart,
 } from "./reviewFirstTextDiff";
@@ -281,6 +283,10 @@ const REVIEW_FIRST_PROPOSE_UPDATED_LABEL = "Propose updated agreement";
 const REVIEW_FIRST_SAVE_UPDATED_LABEL = "Submit proposed update";
 const REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE =
   "Open your personal review link to send this update.";
+const REVIEW_FIRST_PERSONAL_LINK_OPTIONAL_NOTICE =
+  "Submitting requires the personal review link from the sender. You can still review wording changes here.";
+const REVIEW_FIRST_PERSONAL_LINK_SUBMIT_STAGE_MESSAGE =
+  "Open the personal review link from the sender to submit this proposed update. You can still review the changes here.";
 const REVIEW_FIRST_REVISED_DRAFT_FILE_TYPES = "Or upload a .txt file instead";
 const REVIEW_FIRST_REVISED_DRAFT_FILE_ACCEPT = ".txt,.md,text/plain,text/markdown,text/x-markdown";
 const REVIEW_FIRST_UNSUPPORTED_REVISED_DRAFT_FILE =
@@ -2195,8 +2201,12 @@ export function AgreementRecipientReview({
     recipientPreview &&
       (reviewFirstConfirmedDiff?.hasMaterialChanges || (previewDiff && !previewDiff.isCompleteNoOp)),
   );
-  const reviewFirstProposalSubmitReady = canSubmitReviewFirstProposal({
+  const reviewFirstCanReviewChanges = canReviewChanges({
     diff: reviewFirstTextDiff,
+    proposedText: externalAiPaste,
+  });
+  const reviewFirstProposalSubmitReady = canSubmitReviewFirstProposal({
+    diff: reviewFirstConfirmedDiff ?? reviewFirstTextDiff,
     hasReviewerAttribution,
     comparisonPreviewRendered: reviewFirstComparisonPreviewRendered,
   });
@@ -2211,12 +2221,33 @@ export function AgreementRecipientReview({
     !previewing &&
     !saving &&
     !revisedUploadAnalyzing &&
-    !needsPersonalizedLink &&
     (workflowMode === "revised"
-      ? Boolean(externalAiPaste.trim()) && Boolean(reviewFirstTextDiff?.hasMaterialChanges)
-      : Boolean(instruction.trim()) &&
+      ? reviewFirstCanReviewChanges
+      : !needsPersonalizedLink &&
+        Boolean(instruction.trim()) &&
         !quickChangeLooksLikeFullDraft &&
         instruction.trim().length <= RECIPIENT_MAX_INSTRUCTION_CHARS);
+
+  useEffect(() => {
+    if (workflowMode !== "revised" || revisedIntakePhase !== "editing") return;
+    logReviewFirstProposalReadiness({
+      hasProposedText: Boolean(externalAiPaste.trim()),
+      hasMaterialChanges: Boolean(reviewFirstTextDiff?.hasMaterialChanges),
+      hasParticipantAttribution: hasReviewerAttribution,
+      canReviewChanges: reviewFirstCanReviewChanges,
+      canSubmitProposedUpdate: reviewFirstProposalSubmitReady,
+      normalizedOriginalLength: reviewFirstTextDiff?.normalizedPrevious.length ?? 0,
+      normalizedProposedLength: reviewFirstTextDiff?.normalizedProposed.length ?? 0,
+    });
+  }, [
+    externalAiPaste,
+    hasReviewerAttribution,
+    reviewFirstCanReviewChanges,
+    reviewFirstProposalSubmitReady,
+    reviewFirstTextDiff,
+    revisedIntakePhase,
+    workflowMode,
+  ]);
 
   async function previewQuickChange() {
     if (needsPersonalizedLink) {
@@ -2353,10 +2384,6 @@ export function AgreementRecipientReview({
   }
 
   async function previewWholeDocumentRevision(opts?: RecipientWholeDocPreviewOpts): Promise<boolean> {
-    if (needsPersonalizedLink) {
-      setError("Use the personal review link from the sender (it includes your participant id).");
-      return false;
-    }
     if (bundle && isSigningLockActive(bundle)) {
       setError("Review is closed on this agreement — you can still read the document.");
       return false;
@@ -3139,6 +3166,14 @@ export function AgreementRecipientReview({
                 {RECIPIENT_BTN_CONTINUE_EDITING}
               </button>
             </div>
+            {workflowMode === "revised" && needsPersonalizedLink ? (
+              <p
+                className="mt-3 text-xs leading-relaxed text-amber-800"
+                data-testid="recipient-review-submit-attribution-hint"
+              >
+                {REVIEW_FIRST_PERSONAL_LINK_SUBMIT_STAGE_MESSAGE}
+              </p>
+            ) : null}
             {false && recipientPresentationMode === "condensed_clean_revision" ? (
               <p
                 className="mt-2 max-w-xl text-[10px] leading-snug text-slate-500"
@@ -4496,7 +4531,7 @@ export function AgreementRecipientReview({
         </div>
       ) : null}
 
-      {needsPersonalizedLink ? (
+      {needsPersonalizedLink && workspaceTab === "read" ? (
         <ReviewNotice blocking>
           {REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE}
         </ReviewNotice>
@@ -4761,10 +4796,13 @@ export function AgreementRecipientReview({
             ← Back to agreement
           </button>
 
-          {needsPersonalizedLink ? (
-            <ReviewNotice blocking testId="recipient-review-personal-link-required">
-              {REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE}
-            </ReviewNotice>
+          {needsPersonalizedLink && !recipientPreview ? (
+            <p
+              className="text-[11px] leading-snug text-slate-500"
+              data-testid="recipient-review-personal-link-optional-notice"
+            >
+              {REVIEW_FIRST_PERSONAL_LINK_OPTIONAL_NOTICE}
+            </p>
           ) : null}
 
           {hasPendingSuggestion ? (
@@ -5397,19 +5435,13 @@ export function AgreementRecipientReview({
                   </p>
                   <p
                     className={`mt-3 inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ${
-                      needsPersonalizedLink
-                        ? "bg-amber-50 text-amber-800"
-                        : reviewFirstTextDiff.hasMaterialChanges
-                          ? "bg-emerald-50 text-emerald-700"
-                          : "bg-slate-100 text-slate-700"
+                      reviewFirstTextDiff.hasMaterialChanges
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-slate-100 text-slate-700"
                     }`}
                     data-testid="recipient-review-proposed-update-state"
                   >
-                    {needsPersonalizedLink
-                      ? REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE
-                      : reviewFirstTextDiff.hasMaterialChanges
-                        ? "Ready to review"
-                        : "No changes detected"}
+                    {reviewFirstTextDiff.hasMaterialChanges ? "Ready to review" : "No changes detected"}
                   </p>
                 </div>
               ) : null}

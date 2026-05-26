@@ -328,12 +328,40 @@ export function buildReviewFirstTextDiffSummary(previousText: string, proposedTe
   };
 }
 
+export function canReviewChanges(args: {
+  diff: ReviewFirstTextDiffSummary | null;
+  proposedText: string;
+}): boolean {
+  return Boolean(args.proposedText.trim() && args.diff?.hasMaterialChanges);
+}
+
 export function canSubmitReviewFirstProposal(args: {
   diff: ReviewFirstTextDiffSummary | null;
   hasReviewerAttribution: boolean;
   comparisonPreviewRendered: boolean;
 }): boolean {
   return Boolean(args.diff?.hasMaterialChanges && args.hasReviewerAttribution && args.comparisonPreviewRendered);
+}
+
+/** Dev/test QA only — logs review-first proposal readiness (compare vs submit gates). */
+export function logReviewFirstProposalReadiness(payload: {
+  hasProposedText: boolean;
+  hasMaterialChanges: boolean;
+  hasParticipantAttribution: boolean;
+  canReviewChanges: boolean;
+  canSubmitProposedUpdate: boolean;
+  normalizedOriginalLength: number;
+  normalizedProposedLength: number;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "production") return;
+  if (typeof window === "undefined") return;
+  const on =
+    Boolean(typeof import.meta !== "undefined" && import.meta.env?.DEV) ||
+    import.meta.env?.MODE === "test" ||
+    window.localStorage?.getItem("lawdogReviewFirstCompareDiag") === "1";
+  if (!on) return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-proposal-readiness]", payload);
 }
 
 /** Dev/test QA only — logs review-first proposal compare diagnostics. */

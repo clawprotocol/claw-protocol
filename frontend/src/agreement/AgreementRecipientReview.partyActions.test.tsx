@@ -244,7 +244,7 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect(screen.queryByText(/Nothing is signed yet, and everyone must approve the updated version before signing/i)).toBeNull();
   });
 
-  it("missing participant token blocks proposed update with personal-link attribution message", async () => {
+  it("without participant id: material paste enables review changes and diff preview but blocks submit", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
         typeof input === "string"
@@ -275,15 +275,72 @@ describe("AgreementRecipientReview review-first actions", () => {
     });
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
-    expect((await screen.findByTestId("recipient-review-personal-link-required")).textContent).toContain(
-      "Open your personal review link to send this update.",
+    expect(screen.queryByTestId("recipient-review-personal-link-required")).toBeNull();
+    expect((await screen.findByTestId("recipient-review-personal-link-optional-notice")).textContent).toContain(
+      "You can still review wording changes here",
     );
     const paste = await screen.findByTestId("recipient-edit-draft-textarea");
+    await userEvent.clear(paste);
     await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
     expect((await screen.findByTestId("recipient-review-proposed-update-state")).textContent).toContain(
-      "Open your personal review link to send this update.",
+      "Ready to review",
     );
-    expect(screen.getByTestId("recipient-compare-versions-button")).toHaveProperty("disabled", true);
+    const reviewBtn = screen.getByTestId("recipient-compare-versions-button");
+    expect(reviewBtn).toHaveProperty("disabled", false);
+    await userEvent.click(reviewBtn);
+
+    expect((await screen.findByTestId("recipient-preview-summary-heading")).textContent).toBe("Changes detected");
+    expect(screen.getByTestId("recipient-review-proposed-update-before-after")).toBeTruthy();
+    expect(screen.getByTestId("recipient-open-send-suggested-edits-modal")).toHaveProperty("disabled", true);
+    expect((await screen.findByTestId("recipient-review-submit-attribution-hint")).textContent).toContain(
+      "You can still review the changes here",
+    );
+  });
+
+  it("with participant id: material paste enables review changes and submit after preview", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (init?.method || (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({ rendered_html: `<article><pre>${reviewFirstDraft.purpose}</pre></article>` });
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({ draft: reviewFirstDraft });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview
+          agreementId={agreementId}
+          recipientAccessToken="tok_test"
+          participantPartyId="p-bob"
+        />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading agreement/i)).toBeNull();
+    });
+
+    await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
+    const paste = await screen.findByTestId("recipient-edit-draft-textarea");
+    await userEvent.clear(paste);
+    await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+    expect(screen.getByTestId("recipient-compare-versions-button")).toHaveProperty("disabled", false);
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
+    expect((await screen.findByTestId("recipient-preview-summary-heading")).textContent).toBe("Changes detected");
+    expect(screen.getByTestId("recipient-review-proposed-update-before-after")).toBeTruthy();
+    expect(screen.getByTestId("recipient-open-send-suggested-edits-modal")).toHaveProperty("disabled", false);
+    expect(screen.queryByTestId("recipient-review-submit-attribution-hint")).toBeNull();
   });
 
   it("no-change revised draft disables submit and shows a no-change state", async () => {

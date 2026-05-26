@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildReviewFirstTextDiffSummary,
+  canReviewChanges,
   canSubmitReviewFirstProposal,
   normalizeReviewTextForComparison,
 } from "./reviewFirstTextDiff";
@@ -51,6 +52,19 @@ describe("reviewFirstTextDiff", () => {
     expect(section?.proposed).toContain("scripts");
     expect(section?.previous.length ?? 0).toBeLessThan(previous.length);
     expect(section?.proposed.length ?? 0).toBeLessThan(proposed.length);
+  });
+
+  it("enables review changes from pasted text diff only (not attribution)", () => {
+    const diff = buildReviewFirstTextDiffSummary("Payment is due in 30 days.", "Payment is due in 15 days.");
+
+    expect(canReviewChanges({ diff, proposedText: "Payment is due in 15 days." })).toBe(true);
+    expect(canReviewChanges({ diff, proposedText: "" })).toBe(false);
+    expect(
+      canReviewChanges({
+        diff: buildReviewFirstTextDiffSummary("Payment is due in 30 days.", "Payment is due in 30 days."),
+        proposedText: "Payment is due in 30 days.",
+      }),
+    ).toBe(false);
   });
 
   it("requires changed wording, attribution, and rendered preview before submit", () => {

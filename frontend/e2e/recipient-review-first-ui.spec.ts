@@ -590,12 +590,13 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
 
 });
 
-test("review-first missing token shows attribution message before revised draft editor", async ({ page }) => {
-  test.setTimeout(60_000);
+test("review-first without token: review changes enabled, submit blocked with attribution hint", async ({ page }) => {
+  test.setTimeout(90_000);
   const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
   mkdirSync(artifactDir, { recursive: true });
   const agreementId = "ag_review_first_missing_token";
   const originalBody = `AI Automation Services Agreement\n\n${ORIGINAL_SCHEDULE_A}`;
+  const updatedBody = `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`;
   const draft = {
     ...paidProAuthoritativeDraft(agreementId),
     parties: [
@@ -615,16 +616,78 @@ test("review-first missing token shows attribution message before revised draft 
   });
   await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("recipient-review-propose-updated-draft").click();
-  await expect(page.getByTestId("recipient-review-personal-link-required")).toContainText(
-    "Open your personal review link to send this update.",
+  await expect(page.getByTestId("recipient-review-personal-link-required")).toHaveCount(0);
+  await expect(page.getByTestId("recipient-review-personal-link-optional-notice")).toContainText(
+    "You can still review wording changes here",
   );
-  await page.getByTestId("recipient-edit-draft-textarea").fill(`AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
-  await expect(page.getByTestId("recipient-review-proposed-update-state")).toContainText(
-    "Open your personal review link to send this update.",
-  );
-  await expect(page.getByTestId("recipient-compare-versions-button")).toBeDisabled();
+  await page.getByTestId("recipient-edit-draft-textarea").fill(updatedBody);
+  await expect(page.getByTestId("recipient-review-proposed-update-state")).toContainText("Ready to review");
+  await expect(page.getByTestId("recipient-compare-versions-button")).toBeEnabled();
+  await page.setViewportSize({ width: 376, height: 782 });
+  await page.getByTestId("recipient-review-proposed-update-preview").scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: join(artifactDir, "review-first-missing-token-attribution-message.png"),
+    path: join(artifactDir, "proposal-pasted-review-button-enabled-without-token-mobile.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.getByTestId("recipient-compare-versions-button").click();
+  await expect(page.getByTestId("recipient-preview-summary-heading")).toHaveText("Changes detected", {
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toBeVisible();
+  await expect(page.getByTestId("recipient-open-send-suggested-edits-modal")).toBeDisabled();
+  await expect(page.getByTestId("recipient-review-submit-attribution-hint")).toContainText(
+    "You can still review the changes here",
+  );
+  await page.setViewportSize({ width: 376, height: 782 });
+  await page.getByTestId("recipient-review-change-visibility-summary").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: join(artifactDir, "proposal-after-review-changes-click-without-token-mobile.png"),
+    fullPage: true,
+  });
+  await page.screenshot({
+    path: join(artifactDir, "proposal-submit-disabled-attribution-message-mobile.png"),
+    fullPage: true,
+  });
+});
+
+test("review-first with personal token: submit enabled after review changes", async ({ page }) => {
+  test.setTimeout(90_000);
+  const artifactDir = join(process.cwd(), "artifacts/recipient-review-first");
+  mkdirSync(artifactDir, { recursive: true });
+  const agreementId = "ag_review_first_with_token_submit";
+  const originalBody = `AI Automation Services Agreement\n\n${ORIGINAL_SCHEDULE_A}`;
+  const updatedBody = `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`;
+  const draft = {
+    ...paidProAuthoritativeDraft(agreementId),
+    parties: [
+      { id: "p-owner", name: "Studio LLC", role: "owner", email: "owner@example.com" },
+      { id: "p-client", name: "Client LLC", role: "party", email: "client@example.com" },
+    ],
+    purpose: originalBody,
+    payment_terms: "",
+    server_full_document_text: originalBody,
+    premium_render_source: "review_first_final_corpus",
+  };
+  await primeE2eApiBase(page);
+  await installReviewFirstApi(page, draft);
+  await page.goto(`/agreements/${agreementId}/review?role=reviewer&t=tok_review_personal&p=p-client`, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("recipient-review-propose-updated-draft").click();
+  await page.getByTestId("recipient-edit-draft-textarea").fill(updatedBody);
+  await expect(page.getByTestId("recipient-compare-versions-button")).toBeEnabled();
+  await page.getByTestId("recipient-compare-versions-button").click();
+  await expect(page.getByTestId("recipient-preview-summary-heading")).toHaveText("Changes detected", {
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId("recipient-open-send-suggested-edits-modal")).toBeEnabled();
+  await page.setViewportSize({ width: 376, height: 782 });
+  await page.getByTestId("recipient-review-change-visibility-summary").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: join(artifactDir, "proposal-with-token-submit-enabled-mobile.png"),
     fullPage: true,
   });
 });
