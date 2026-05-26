@@ -38,6 +38,12 @@ const DEFAULTS_BY_CATEGORY: Partial<
       value: "Service availability target of 99.5% monthly uptime.",
     },
     { id: "commercial", label: "Commercially reasonable", value: "Commercially reasonable uptime and support levels." },
+    {
+      id: "no_uptime_guarantee",
+      label: "No third-party uptime guarantee",
+      value:
+        "No guaranteed uptime for third-party AI platforms; commercially reasonable support and response efforts only.",
+    },
     { id: "custom", label: "Custom", value: "" },
   ],
   milestones: () => [
@@ -47,6 +53,8 @@ const DEFAULTS_BY_CATEGORY: Partial<
   ],
   governing_law: () => [
     { id: "de", label: "Delaware", value: "Governed by the laws of the State of Delaware." },
+    { id: "ok", label: "Oklahoma", value: "Governed by the laws of the State of Oklahoma." },
+    { id: "tx", label: "Texas", value: "Governed by the laws of the State of Texas." },
     { id: "ca", label: "California", value: "Governed by the laws of the State of California." },
     { id: "ny", label: "New York", value: "Governed by the laws of the State of New York." },
     { id: "custom", label: "Custom", value: "" },
@@ -134,6 +142,11 @@ const TERM_CONTRADICTION: DealVariableDefault[] = [
 ];
 
 const PHASE_PAYMENT: DealVariableDefault[] = [
+  {
+    id: "forty_thirty_thirty",
+    label: "40% / 30% / 30% phase split",
+    value: "40% on build/configuration, 30% on rollout/onboarding, 30% on support and acceptance.",
+  },
   { id: "even_thirds", label: "Even thirds across phases", value: "Fees split evenly across build, rollout, and support phases (approximately one-third each)." },
   { id: "build_heavy", label: "Build-heavy split", value: "40% on build acceptance, 40% on rollout go-live, 20% for first-year support." },
   { id: "milestone", label: "Milestone triggers", value: "Payments due on written acceptance of each phase deliverable per Schedule A." },

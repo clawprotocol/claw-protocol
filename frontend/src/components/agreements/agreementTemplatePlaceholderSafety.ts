@@ -19,6 +19,7 @@ import {
   transientGateInputFromPlaceholderContext,
 } from "./agreementPreviewPlaceholderTransientGate";
 import { formatStarterPreviewForDisplay } from "./starterPreviewFormatting";
+import { repairMoneyCommaBracketPlaceholderCorruption } from "./agreementMoneyPlaceholderRepair";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -925,6 +926,11 @@ export function repairAgreementTemplatePlaceholders(
   const prepared = prepareAgreementTextForPlaceholderScan(text);
   let out = prepared;
   const repaired: string[] = [];
+  const moneyRepair = repairMoneyCommaBracketPlaceholderCorruption(out);
+  if (moneyRepair.repairs.length) {
+    out = moneyRepair.text;
+    repaired.push(...moneyRepair.repairs);
+  }
   const resolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
   const names = resolution.names;
   const partyLine = [String(ctx.intakeRaw || ""), ...names].join("\n");

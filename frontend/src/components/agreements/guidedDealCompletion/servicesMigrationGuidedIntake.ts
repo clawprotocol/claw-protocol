@@ -78,6 +78,20 @@ export function isServicesMigrationIntake(intakeRaw?: string | null, body?: stri
   return analyzeServicesMigrationIntake(intakeRaw, body).isServicesMigration;
 }
 
+const INTAKE_403030_RE =
+  /40\s*%[\s\S]{0,80}30\s*%[\s\S]{0,80}30\s*%|40\s*\/\s*30\s*\/\s*30|forty.{0,24}thirty.{0,24}thirty/i;
+
+const NO_THIRD_PARTY_UPTIME_GUARANTEE_RE =
+  /\bno\s+(?:guaranteed?|guarantee)\s+(?:uptime|availability|sla)\b|\b(?:do\s+not|don't|without)\s+(?:guarantee|guaranteeing)\s+.{0,40}(?:third[-\s]?party|ai\s+platform|platform)\b|\bthird[-\s]?party\s+ai\s+platforms?\s+.{0,40}(?:no|without)\s+guarantee/i;
+
+export function intakeSpecifies403030PhaseSplit(intakeRaw?: string | null, body?: string | null): boolean {
+  return INTAKE_403030_RE.test(`${intakeRaw || ""}\n${body || ""}`);
+}
+
+export function intakeDisclaimsThirdPartyUptimeGuarantee(intakeRaw?: string | null, body?: string | null): boolean {
+  return NO_THIRD_PARTY_UPTIME_GUARANTEE_RE.test(`${intakeRaw || ""}\n${body || ""}`);
+}
+
 /** AI automation setup / workflow support agreements (casual monthly-fee services). */
 export function isAutomationServicesIntake(intakeRaw?: string | null, body?: string | null): boolean {
   const intake = (intakeRaw || "").toLowerCase();

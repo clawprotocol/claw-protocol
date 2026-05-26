@@ -9,9 +9,12 @@ import { isConsultingDevIntake } from "./consultingGuidedIntake";
 import { isContractorDeveloperIntake } from "./contractorGuidedIntake";
 import {
   analyzeServicesMigrationIntake,
+  intakeDisclaimsThirdPartyUptimeGuarantee,
+  intakeSpecifies403030PhaseSplit,
   isAutomationServicesIntake,
   isServicesMigrationIntake,
 } from "./servicesMigrationGuidedIntake";
+import { isGuidedVariableSatisfiedByIntake } from "./guidedIntakeFactPrefill";
 import { parseMonthlyPaymentUsdHint } from "./intakeRecommendationEngine";
 import {
   detectSemanticContractGaps,
@@ -349,7 +352,10 @@ function inferAutomationServicesVariablesFromIntake(
       canProceedWithoutAnswer: false,
     });
   }
-  if (signals.mentionsSupport || /\bsupport\b/i.test(intakeRaw)) {
+  if (
+    (signals.mentionsSupport || /\bsupport\b/i.test(intakeRaw)) &&
+    !intakeDisclaimsThirdPartyUptimeGuarantee(intakeRaw, body)
+  ) {
     push({
       id: "saas_sla",
       severity: "material",
@@ -439,7 +445,7 @@ function inferServicesMigrationVariablesFromIntake(
       canProceedWithoutAnswer: false,
     });
   }
-  if (signals.mentionsPhases) {
+  if (signals.mentionsPhases && !intakeSpecifies403030PhaseSplit(intakeRaw, body)) {
     push({
       id: "phase_payment_allocation",
       severity: "material",
@@ -463,7 +469,10 @@ function inferServicesMigrationVariablesFromIntake(
       canProceedWithoutAnswer: true,
     });
   }
-  if (signals.mentionsSupport || signals.mentionsSla) {
+  if (
+    (signals.mentionsSupport || signals.mentionsSla) &&
+    !intakeDisclaimsThirdPartyUptimeGuarantee(intakeRaw, body)
+  ) {
     push({
       id: "saas_sla",
       severity: "material",
@@ -633,6 +642,7 @@ export function extractDealVariables(args: {
     vars = dedupeVariables(fallbackItems.map((m) => materialItemToDealVariable(m, intake)));
   }
   vars = ensureRenderableGuidedVariables(vars, intake, body, family);
+  vars = vars.filter((v) => !isGuidedVariableSatisfiedByIntake(v.id, intake, body));
   return enrichDealVariables(intake || null, vars);
 }
 

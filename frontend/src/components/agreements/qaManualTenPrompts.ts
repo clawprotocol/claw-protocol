@@ -127,6 +127,17 @@ export const LIGHTHOUSE_APEX_LOOSE_QA_INTAKE = [
 export const CONTRACTOR_DEVELOPER_QA_INTAKE =
   "Need a contractor agreement for a developer. They should own all their work product but we also need full exclusive ownership of everything they create. The arrangement is month-to-month but should automatically lock in for 3 years unless terminated. Need it simple and founder-friendly.";
 
+/** ABC LLC / Jordan Lee — $120k milestone 40/30/30, Oklahoma, no third-party uptime guarantee. */
+export const ABC_JORDAN_AI_AUTOMATION_FINALIZATION_QA_INTAKE = [
+  "AI automation services agreement between ABC LLC (Client) and Jordan Lee Consulting LLC (Service Provider).",
+  "$120,000 total project fee. 40% build/configuration. 30% rollout and onboarding. 30% support and acceptance.",
+  "Optional $6,000/month support after go-live.",
+  "No guaranteed uptime for third-party AI platforms.",
+  "Either party may terminate on 30 days written notice.",
+  "Governing law: Oklahoma. Formal notices by email.",
+  "Client owns deliverables; provider retains pre-existing tools.",
+].join("\n");
+
 /** Casual AI automation services intake — monthly ~$6k, phases, support (guided recommend QA). */
 export const AI_AUTOMATION_SERVICES_QA_INTAKE = [
   "hey need an agreement for somebody helping us with AI automation setup",

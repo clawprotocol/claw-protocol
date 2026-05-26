@@ -1,4 +1,8 @@
 import { analyzeConsultingIntake } from "./consultingGuidedIntake";
+import {
+  filterContradictoryGuidedPills,
+  parseGuidedIntakeFacts,
+} from "./guidedIntakeFactPrefill";
 import { analyzeServicesMigrationIntake } from "./servicesMigrationGuidedIntake";
 import type { DealVariable, DealVariableDefault } from "./types";
 
@@ -83,7 +87,11 @@ function buildRecommendResult(args: {
 export function enrichDealVariableFromIntake(variable: DealVariable, intakeRaw?: string | null): DealVariable {
   const signals = analyzeConsultingIntake(intakeRaw);
   const migration = analyzeServicesMigrationIntake(intakeRaw);
-  const pills = withRecommendPill(variable.suggestedDefaults);
+  const intakeFacts = parseGuidedIntakeFacts(intakeRaw || "");
+  const pills = filterContradictoryGuidedPills(
+    { ...variable, suggestedDefaults: withRecommendPill(variable.suggestedDefaults) },
+    intakeRaw || "",
+  );
   let recommendedPillId: string | undefined;
   let recommendedLabel: string | undefined;
 
@@ -96,8 +104,13 @@ export function enrichDealVariableFromIntake(variable: DealVariable, intakeRaw?:
       recommendedLabel = "Recommended from your intake";
     }
   } else if (variable.id === "phase_payment_allocation") {
-    recommendedPillId = migration.mentionsSupport ? "build_heavy" : "even_thirds";
-    recommendedLabel = "Recommended from your intake";
+    if (intakeFacts.milestoneSplit403030) {
+      recommendedPillId = "forty_thirty_thirty";
+      recommendedLabel = "Matches your intake";
+    } else {
+      recommendedPillId = migration.mentionsSupport ? "build_heavy" : "even_thirds";
+      recommendedLabel = "Recommended from your intake";
+    }
   } else if (variable.id === "total_fee_confirmation") {
     if (parseMonthlyPaymentUsdHint(intakeRaw)) {
       recommendedPillId = "confirm_intake";
@@ -133,7 +146,17 @@ export function enrichDealVariableFromIntake(variable: DealVariable, intakeRaw?:
     recommendedPillId = "retainer";
     recommendedLabel = "Recommended from your intake";
   } else if (variable.id === "governing_law_notice" || variable.id === "governing_venue") {
-    recommendedPillId = "de";
+    if (intakeFacts.governingLaw?.toLowerCase() === "oklahoma") {
+      recommendedPillId = "ok";
+      recommendedLabel = "Matches your intake";
+    } else if (intakeFacts.governingLaw?.toLowerCase() === "texas") {
+      recommendedPillId = "tx";
+    } else {
+      recommendedPillId = "de";
+    }
+  } else if (variable.id === "saas_sla" && intakeFacts.noThirdPartyUptimeGuarantee) {
+    recommendedPillId = "no_uptime_guarantee";
+    recommendedLabel = "Matches your intake";
   }
 
   const pillExplanations = pillExplanationsForVariable(variable.id);

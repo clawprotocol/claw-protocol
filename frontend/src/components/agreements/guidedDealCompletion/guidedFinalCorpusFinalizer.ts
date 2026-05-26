@@ -56,6 +56,7 @@ import {
   extractGuidedSemanticFacts,
   reconcileGuidedSemanticCorpus,
 } from "./guidedAnswerSemanticMerger";
+import { filterManifestMissingWithSemanticEvidence } from "./guidedSemanticManifestValidation";
 
 export const GUIDED_FINAL_CORPUS_MIN_LEN = 1500;
 
@@ -202,7 +203,12 @@ export function validateFinalGuidedProCorpusBeforeFreeze(args: {
   const contradictions: string[] = [];
   const manifest = buildCanonicalGuidedAnswerManifest(args.guidedSession);
   const validation = validateCorpusAgainstCanonicalManifest(body, manifest);
-  const missing = [...validation.missing];
+  const missing = filterManifestMissingWithSemanticEvidence({
+    missing: validation.missing,
+    body: args.body,
+    guidedSession: args.guidedSession,
+    originalIntake: args.originalIntake,
+  });
 
   const needsIp = sessionRequiresIpOwnershipCheck(args.guidedSession);
   if (

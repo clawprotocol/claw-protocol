@@ -1,6 +1,12 @@
 import type { MaterialMissingItem } from "../proAgreementCompleteness/types";
 import { ensureRenderableGuidedVariables, extractDealVariables } from "./missingVariableExtractor";
 import {
+  applyIntakePrefillToSession,
+  isGuidedVariableSatisfiedByIntake,
+  reconcileSessionAnswersWithIntake,
+} from "./guidedIntakeFactPrefill";
+import { buildStableGuidedQuestionQueue } from "./guidedQuestionQueue";
+import {
   buildGuidedCompletionIntro,
   computeCompletenessPercent,
   createGuidedCompletionSession,
@@ -29,12 +35,38 @@ export function buildGuidedSessionFromAgreement(args: {
   const family =
     args.agreementFamily ?? variables[0]?.applicableAgreementFamilies[0] ?? "generic_business_agreement";
   variables = ensureRenderableGuidedVariables(variables, intake, body, family);
+  variables = variables.filter((v) => !isGuidedVariableSatisfiedByIntake(v.id, intake, body));
   if (!variables.length) return null;
-  return createGuidedCompletionSession({
+  let session = createGuidedCompletionSession({
     variables,
     agreementFamily: family,
     bodyLen: (args.body || "").trim().length,
   });
+  session = applyIntakePrefillToSession(session, intake);
+  session = reconcileSessionAnswersWithIntake(session, intake);
+  const rebuilt = buildStableGuidedQuestionQueue({
+    variables: session.variables,
+    answered: session.answered,
+    skipped: session.skipped,
+  });
+  const queue = rebuilt.queue;
+  return {
+    ...session,
+    variables: rebuilt.variables.length ? rebuilt.variables : session.variables,
+    queue,
+    frozenTotalQuestions: queue.length,
+    currentIndex: resolveGuidedCurrentIndex({
+      ...session,
+      queue,
+      variables: rebuilt.variables.length ? rebuilt.variables : session.variables,
+    }),
+    completenessPercent: computeCompletenessPercent({
+      totalVariables: queue.length,
+      answeredCount: Object.keys(session.answered).length,
+      skippedCount: session.skipped.size,
+      bodyLen: (args.body || "").trim().length,
+    }),
+  };
 }
 
 function isVisibleGuidedQueueItem(session: GuidedCompletionSession, id: string): boolean {

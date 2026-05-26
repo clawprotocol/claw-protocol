@@ -52,9 +52,17 @@ export function finalizePremiumIdentityCorpusInPreview(
   context: string,
 ): string {
   let out = collapseDuplicateEntitySuffixPunct(text);
-  if (!textContainsPremiumIdentityDefects(out)) return out;
-  const auth = authoritativeParties;
+  const auth = authoritativeParties
+    .map((n) => String(n ?? "").replace(/\s+/g, " ").trim())
+    .filter((n) => n.length > 0);
   const ctx = context;
+  if (auth.length > 0) {
+    out = substitutePartyPlaceholdersInUserFacingText(out, ctx, auth);
+    out = hydratePartyIntroductionParagraphs(out, auth);
+    out = hydratePartyListAndSignatureOrdinals(out, auth);
+    out = collapseDuplicateEntitySuffixPunct(out);
+  }
+  if (!textContainsPremiumIdentityDefects(out)) return out;
   out = substitutePartyPlaceholdersInUserFacingText(out, ctx, auth.length ? auth : null);
   out = hydratePartyIntroductionParagraphs(out, auth);
   out = hydratePartyListAndSignatureOrdinals(out, auth);
