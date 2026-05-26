@@ -94,15 +94,17 @@ describe("guidedSignerSetupToFinalReview", () => {
     expect(modal.ctaLabel).toBeNull();
   });
 
-  it("test41: internal failure uses Retry final review CTA with generic copy", () => {
+  it("test41: internal stabilization uses neutral copy and preserves signer state", () => {
     const modal = resolveGuidedFinalizeModalBlockedPresentation({
       reason: "guided_validation_incomplete",
       workingDraftLen: 900,
       validationMissing: ["saas_sla"],
     });
-    expect(modal.headline).toBe("Final review needs another pass.");
+    expect(modal.headline).toBe("Optimizing agreement structure.");
     expect(modal.body).not.toMatch(/Net\s*30/i);
-    expect(modal.ctaLabel).toBe("Retry final review");
-    expect(modal.kind).toBe("internal_retry");
+    expect(modal.body).not.toMatch(/could not finish|another pass|retry final review/i);
+    expect(modal.ctaLabel).toBeNull();
+    expect(modal.kind).toBe("still_preparing");
+    expect(modal.footnote).toMatch(/signer details are saved/i);
   });
 });

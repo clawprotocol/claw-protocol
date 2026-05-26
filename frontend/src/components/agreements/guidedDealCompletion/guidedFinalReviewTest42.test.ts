@@ -200,15 +200,16 @@ describe("guided Pro final review test42 regression", () => {
     expect(packet.placedCount).toBeGreaterThan(0);
   });
 
-  it("modal does not surface false Net 30 missing copy for validation retry", () => {
+  it("modal keeps validation stabilization invisible and neutral", () => {
     const modal = resolveGuidedFinalizeModalBlockedPresentation({
       reason: "guided_validation_incomplete",
       workingDraftLen: 900,
       validationMissing: ["project_fee_phase_confirmation"],
     });
-    expect(modal.headline).toBe("Final review needs another pass.");
+    expect(modal.headline).toBe("Optimizing agreement structure.");
     expect(modal.body).not.toMatch(/Net\s*30/i);
-    expect(modal.ctaLabel).toBe("Retry final review");
+    expect(modal.body).not.toMatch(/could not finish|another pass|retry final review/i);
+    expect(modal.ctaLabel).toBeNull();
   });
 
   it("intake wires retry final review logs and finalizer re-run", () => {

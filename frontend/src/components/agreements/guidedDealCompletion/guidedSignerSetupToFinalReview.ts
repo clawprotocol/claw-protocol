@@ -246,10 +246,10 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
     case "guided_validation_incomplete":
       if ((args.validationMissing?.length ?? 0) > 0 || (args.validationContradictions?.length ?? 0) > 0) {
         return {
-          kind: "internal_retry",
-          headline: "Final review needs another pass.",
-          body: "LawDog could not finish applying one of your answers. Retry final review to re-run the finalization step.",
-          ctaLabel: "Retry final review",
+          kind: "still_preparing",
+          headline: "Optimizing agreement structure.",
+          body: "LawDog is finalizing your agreement and preserving your signer details.",
+          ctaLabel: null,
           footnote: "Your answers and signer details are saved.",
         };
       }
@@ -263,10 +263,10 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
         };
       }
       return {
-        kind: "internal_retry",
-        headline: "Final review needs another pass.",
-        body: "LawDog could not finish applying one of your answers. Retry final review to re-run the finalization step.",
-        ctaLabel: "Retry final review",
+        kind: "still_preparing",
+        headline: "Optimizing agreement structure.",
+        body: "LawDog is finalizing your agreement and preserving your signer details.",
+        ctaLabel: null,
         footnote: "Your answers and signer details are saved.",
       };
     case "authoritative_body_missing":
@@ -279,10 +279,10 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
             footnote: "This usually takes a few seconds.",
           }
         : {
-            kind: "internal_retry",
-            headline: "Final review needs another pass.",
-            body: "LawDog could not finish applying one of your answers. Retry final review to re-run the finalization step.",
-            ctaLabel: "Retry final review",
+            kind: "still_preparing",
+            headline: "Finalizing agreement.",
+            body: "Your agreement draft is ready, but a few formatting refinements are still processing.",
+            ctaLabel: null,
             footnote: "Your answers and signer details are saved.",
           };
     case "apply_not_complete":
@@ -297,10 +297,10 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
       };
     default:
       return {
-        kind: "internal_retry",
-        headline: "Final review needs another pass.",
-        body: "LawDog could not finish applying one of your answers. Retry final review to re-run the finalization step.",
-        ctaLabel: "Retry final review",
+        kind: "still_preparing",
+        headline: "Finalizing agreement.",
+        body: "Your agreement draft is ready, but a few formatting refinements are still processing.",
+        ctaLabel: null,
         footnote: "Your answers and signer details are saved.",
       };
   }

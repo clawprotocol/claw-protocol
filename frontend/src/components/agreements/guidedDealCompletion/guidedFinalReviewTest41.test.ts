@@ -180,15 +180,16 @@ describe("guided Pro final review test41 regression", () => {
     expect(modal.headline).not.toBe("Needs your attention");
   });
 
-  it("modal retry CTA is Retry final review, not Try again", () => {
+  it("modal hides retry framing while stabilization runs", () => {
     const modal = resolveGuidedFinalizeModalBlockedPresentation({
       reason: "guided_validation_incomplete",
       workingDraftLen: 900,
       validationMissing: ["saas_sla", "ip_ownership"],
     });
-    expect(modal.ctaLabel).toBe("Retry final review");
-    expect(modal.ctaLabel).not.toBe("Try again");
-    expect(modal.kind).toBe("internal_retry");
+    expect(modal.ctaLabel).toBeNull();
+    expect(modal.headline).toBe("Optimizing agreement structure.");
+    expect(modal.body).not.toMatch(/could not finish|another pass|retry final review|try again/i);
+    expect(modal.kind).toBe("still_preparing");
   });
 
   it("intake wires retry final review to continueGuidedSignerSetupToFinalReview", () => {

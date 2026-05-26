@@ -7,6 +7,7 @@ import {
   type CommercialSpecificityScore,
 } from "./commercialSpecificity";
 import { forbiddenSemanticFactForLine, reconstructProSectionsFromSemanticBlocks } from "./proSemanticBlocks";
+import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
 
 export type ProCorpusArchetype =
   | "monthly_consulting"
@@ -780,6 +781,13 @@ export function applyProCorpusIntegrity(
   });
   out = reconstructed.text;
   repairs.push(...reconstructed.repairs);
+  const stabilized = stabilizeFinalAgreementCompilerOutput(out, {
+    intakeText: context.intakeText,
+    draftText: text,
+    surface: context.surface ?? "pro_corpus_integrity",
+  });
+  out = stabilized.text;
+  repairs.push(...stabilized.repairs.map((r) => `compiler:${r}`));
   if (finalSpecificity.score.score < MINIMUM_COMMERCIAL_SPECIFICITY_SCORE) {
     const hardSpecificityFallback = preserveProtectedCommercialFacts({
       text: softNormalizationInput,

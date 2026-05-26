@@ -55,6 +55,7 @@ import {
   buildCanonicalAgreementSnapshot,
   freezeCanonicalAgreementSnapshot,
 } from "../canonicalAgreementSnapshot";
+import { stabilizeFinalAgreementCompilerOutput } from "../finalAgreementCompilerIntegrity";
 import {
   corpusHasPaymentStructureContradictions,
   extractGuidedSemanticFacts,
@@ -643,6 +644,13 @@ export function finalizeGuidedProAgreementCorpus(
       diagnostics.repairs.push("signature:final_by_line_guard");
     }
   }
+  const stabilizedForSigning = stabilizeFinalAgreementCompilerOutput(body, {
+    intakeText: args.originalIntake,
+    signerIdentities: args.signerIdentities,
+    surface: "guided_final_corpus_finalizer_post_signature",
+  });
+  body = stabilizedForSigning.text;
+  diagnostics.repairs.push(...stabilizedForSigning.repairs.map((r) => `compiler:${r}`));
 
   const fatalScan =
     args.signerIdentities.length > 0 || Boolean(args.signerManifest)
@@ -704,6 +712,13 @@ export function finalizeGuidedProAgreementCorpus(
         });
         recoveredBody = recoveredCanonical.text;
         diagnostics.repairs.push(...recoveredCanonical.repairs.map((r) => `working_draft_recovery_canonical:${r}`));
+        const recoveredStabilized = stabilizeFinalAgreementCompilerOutput(recoveredBody, {
+          intakeText: args.originalIntake,
+          signerIdentities: args.signerIdentities,
+          surface: "guided_final_corpus_finalizer_recovery",
+        });
+        recoveredBody = recoveredStabilized.text;
+        diagnostics.repairs.push(...recoveredStabilized.repairs.map((r) => `working_draft_recovery_compiler:${r}`));
         const recoveredValidation = validateFinalGuidedProCorpusBeforeFreeze({
           body: recoveredBody,
           guidedSession: args.guidedSession,
