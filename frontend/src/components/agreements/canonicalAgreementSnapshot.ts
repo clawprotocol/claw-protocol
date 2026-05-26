@@ -6,6 +6,12 @@ import {
 } from "./guidedDealCompletion/guidedAnswerSemanticMerger";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import type { GuidedCompletionSession } from "./guidedDealCompletion/types";
+import {
+  MINIMUM_COMMERCIAL_SPECIFICITY_SCORE,
+  logCommercialSpecificityScore,
+  scoreCommercialSpecificity,
+  type CommercialSpecificityScore,
+} from "./commercialSpecificity";
 
 export type CanonicalAgreementSnapshotSource =
   | "free_starter"
@@ -56,6 +62,7 @@ export type CanonicalAgreementSnapshot = {
   integrityOk: boolean;
   placeholderIssues: string[];
   blockerIssues: string[];
+  commercialSpecificity: CommercialSpecificityScore;
   frozen: boolean;
 };
 
@@ -181,6 +188,14 @@ export function buildCanonicalAgreementSnapshot(
 
   const placeholderIssues = collectPlaceholderIssues(canonicalText);
   const blockerIssues = collectBlockerIssues(canonicalText);
+  const commercialSpecificity =
+    integrityReport?.commercialSpecificity ??
+    scoreCommercialSpecificity(`${args.intakeText ?? ""}\n${Object.values(semanticFacts.facts ?? {}).join("\n")}`, canonicalText);
+  logCommercialSpecificityScore({
+    score: commercialSpecificity,
+    normalizationMode: "soft",
+    surface: args.surface,
+  });
   const minLen = args.minLen ?? (args.tier === "pro" ? 1500 : 300);
   const signatureMissing =
     signerState.requireSignerBlocks &&
@@ -191,6 +206,7 @@ export function buildCanonicalAgreementSnapshot(
     placeholderIssues.length === 0 &&
     blockerIssues.length === 0 &&
     !signatureMissing &&
+    (args.tier === "starter" || commercialSpecificity.score >= MINIMUM_COMMERCIAL_SPECIFICITY_SCORE) &&
     (args.tier === "starter" || Boolean(integrityReport?.ok));
 
   const snapshot: CanonicalAgreementSnapshot = {
@@ -206,6 +222,7 @@ export function buildCanonicalAgreementSnapshot(
     integrityOk,
     placeholderIssues: signatureMissing ? [...placeholderIssues, "missing_signer_blocks"] : placeholderIssues,
     blockerIssues,
+    commercialSpecificity,
     frozen: false,
   };
   logCanonicalSnapshotSelected(snapshot, args.surface);

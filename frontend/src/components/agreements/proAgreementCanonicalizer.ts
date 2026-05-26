@@ -2,6 +2,7 @@ export type ProAgreementCanonicalizationResult = {
   text: string;
   repairs: string[];
   warnings: string[];
+  commercialSpecificity?: import("./commercialSpecificity").CommercialSpecificityScore;
 };
 
 import {
@@ -14,6 +15,7 @@ import {
 } from "./proCorpusSkeletonSafety";
 import { applyProCorpusIntegrity } from "./proCorpusIntegrity";
 import type { GuidedSemanticFacts } from "./guidedDealCompletion/guidedAnswerSemanticMerger";
+import { logCommercialSpecificityScore, scoreCommercialSpecificity } from "./commercialSpecificity";
 
 export type ProAgreementCanonicalizationOptions = {
   canonicalPartyNames?: readonly string[];
@@ -455,6 +457,15 @@ export function canonicalizeProAgreementText(
 
   const uniqueRepairs = [...new Set(repairs)];
   const uniqueWarnings = [...new Set(warnings)];
+  const commercialSpecificity = scoreCommercialSpecificity(
+    `${opts?.intakeText ?? ""}\n${Object.values(opts?.semanticFacts?.facts ?? {}).join("\n")}`,
+    out,
+  );
+  logCommercialSpecificityScore({
+    score: commercialSpecificity,
+    normalizationMode: "soft",
+    surface: opts?.surface ?? "pro_agreement_canonicalizer",
+  });
   logProCorpusSafetyGate(safetyGatePayload(uniqueRepairs, uniqueWarnings, out.length));
-  return { text: out, repairs: uniqueRepairs, warnings: uniqueWarnings };
+  return { text: out, repairs: uniqueRepairs, warnings: uniqueWarnings, commercialSpecificity };
 }

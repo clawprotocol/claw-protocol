@@ -15593,6 +15593,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               validationMissing: [],
               validationContradictions: [],
               structureDefects: [],
+              commercialSpecificityScore: 100,
             },
           };
         }

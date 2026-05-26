@@ -61,6 +61,7 @@ import {
   reconcileGuidedSemanticCorpus,
 } from "./guidedAnswerSemanticMerger";
 import { filterManifestMissingWithSemanticEvidence } from "./guidedSemanticManifestValidation";
+import { MINIMUM_COMMERCIAL_SPECIFICITY_SCORE } from "../commercialSpecificity";
 
 export const GUIDED_FINAL_CORPUS_MIN_LEN = 1500;
 
@@ -100,6 +101,7 @@ export type GuidedFinalCorpusDiagnostics = {
   validationMissing: string[];
   validationContradictions: string[];
   structureDefects: string[];
+  commercialSpecificityScore: number;
 };
 
 export type FinalizeGuidedProAgreementCorpusArgs = {
@@ -384,6 +386,7 @@ export function finalizeGuidedProAgreementCorpus(
     validationMissing: [],
     validationContradictions: [],
     structureDefects: [],
+    commercialSpecificityScore: 100,
   };
 
   const workingSeed = args.candidates
@@ -561,6 +564,7 @@ export function finalizeGuidedProAgreementCorpus(
     surface: "guided_final_corpus_finalizer",
   });
   body = canonicalized.text;
+  diagnostics.commercialSpecificityScore = canonicalized.commercialSpecificity?.score ?? 100;
   diagnostics.repairs.push(...canonicalized.repairs.map((r) => `canonical:${r}`));
   diagnostics.repairs.push(...canonicalized.warnings.map((w) => `canonical_warning:${w}`));
   const canonicalSnapshot = buildCanonicalAgreementSnapshot({
@@ -583,6 +587,7 @@ export function finalizeGuidedProAgreementCorpus(
     minLen: GUIDED_FINAL_CORPUS_MIN_LEN,
   });
   body = canonicalSnapshot.canonicalText;
+  diagnostics.commercialSpecificityScore = canonicalSnapshot.commercialSpecificity.score;
   diagnostics.finalHash = canonicalSnapshot.hash;
   diagnostics.repairs.push(
     ...(canonicalSnapshot.integrityReport?.warnings ?? []).map((w) => `canonical_snapshot_warning:${w}`),
@@ -595,6 +600,9 @@ export function finalizeGuidedProAgreementCorpus(
       ...(canonicalSnapshot.placeholderIssues.length ? canonicalSnapshot.placeholderIssues : []),
       ...(canonicalSnapshot.blockerIssues.length ? canonicalSnapshot.blockerIssues : []),
       ...(canonicalSnapshot.integrityReport?.ok === false ? ["pro_corpus_integrity_failed"] : []),
+      ...(canonicalSnapshot.commercialSpecificity.score < MINIMUM_COMMERCIAL_SPECIFICITY_SCORE
+        ? ["commercial_specificity_below_threshold"]
+        : []),
       ...(canonicalSnapshot.len < GUIDED_FINAL_CORPUS_MIN_LEN ? ["canonical_corpus_missing"] : []),
     ].filter((value, index, arr) => arr.indexOf(value) === index);
   } else {

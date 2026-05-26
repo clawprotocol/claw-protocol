@@ -1,5 +1,11 @@
 import type { GuidedSemanticFacts } from "./guidedDealCompletion/guidedAnswerSemanticMerger";
 import { cleanProCorpusLine, repairBareProSkeletonClauses } from "./proCorpusSkeletonSafety";
+import {
+  MINIMUM_COMMERCIAL_SPECIFICITY_SCORE,
+  preserveProtectedCommercialFacts,
+  scoreCommercialSpecificity,
+  type CommercialSpecificityScore,
+} from "./commercialSpecificity";
 
 export type ProCorpusArchetype =
   | "monthly_consulting"
@@ -23,6 +29,7 @@ export type ProCorpusIntegrityReport = {
   archetype: ProCorpusArchetype;
   warnings: string[];
   counters: ProCorpusIntegrityCounters;
+  commercialSpecificity: CommercialSpecificityScore;
 };
 
 export type ProCorpusIntegrityContext = {
@@ -655,10 +662,18 @@ export function verifyProCorpusIntegrity(
   const archetype = inferArchetypeFromText(text, context);
   const unresolvedPlaceholders = countUnresolvedPlaceholders(text);
   const warnings = buildWarnings(text, archetype);
+  const commercialSpecificity = scoreCommercialSpecificity(
+    `${context.intakeText ?? ""}\n${Object.values(context.semanticFacts?.facts ?? {}).join("\n")}`,
+    text,
+  );
   const report: ProCorpusIntegrityReport = {
-    ok: warnings.length === 0 && unresolvedPlaceholders === 0,
+    ok:
+      warnings.length === 0 &&
+      unresolvedPlaceholders === 0 &&
+      commercialSpecificity.score >= MINIMUM_COMMERCIAL_SPECIFICITY_SCORE,
     archetype,
     warnings,
+    commercialSpecificity,
     counters: {
       ...counters,
       unresolvedPlaceholders,
@@ -670,6 +685,7 @@ export function verifyProCorpusIntegrity(
       ok: report.ok,
       archetype: report.archetype,
       warnings: report.warnings,
+      commercialSpecificityScore: report.commercialSpecificity.score,
       counters: report.counters,
       surface: context.surface ?? null,
     });
@@ -693,6 +709,7 @@ export function applyProCorpusIntegrity(
     const report = verifyProCorpusIntegrity(out, context, counters);
     return { text: out, repairs, report };
   }
+  const softNormalizationInput = out;
 
   const skeleton = repairBareProSkeletonClauses(out);
   out = skeleton.text;
@@ -711,6 +728,15 @@ export function applyProCorpusIntegrity(
   sections = ensureRequiredIntegritySections(sections, { ...context, archetype }, counters);
   sections = removeEmptySections(sections, counters);
   out = serializeSections(sections, counters);
+  const commercialSpecificity = preserveProtectedCommercialFacts({
+    text: out,
+    intakeText: context.intakeText,
+    draftText: text,
+    normalizationMode: "soft",
+    surface: context.surface,
+  });
+  out = commercialSpecificity.text;
+  repairs.push(...commercialSpecificity.repairs);
 
   const finalSkeleton = repairBareProSkeletonClauses(out);
   out = finalSkeleton.text;
@@ -724,6 +750,28 @@ export function applyProCorpusIntegrity(
   }
 
   out = out.replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
+  const finalSpecificity = preserveProtectedCommercialFacts({
+    text: out,
+    intakeText: context.intakeText,
+    draftText: text,
+    normalizationMode: "soft",
+    surface: context.surface,
+  });
+  out = finalSpecificity.text;
+  repairs.push(...finalSpecificity.repairs.map((r) => `final_${r}`));
+  if (finalSpecificity.score.score < MINIMUM_COMMERCIAL_SPECIFICITY_SCORE) {
+    const hardSpecificityFallback = preserveProtectedCommercialFacts({
+      text: softNormalizationInput,
+      intakeText: context.intakeText,
+      draftText: text,
+      normalizationMode: "hard",
+      surface: context.surface,
+    });
+    if (hardSpecificityFallback.score.score >= MINIMUM_COMMERCIAL_SPECIFICITY_SCORE) {
+      out = hardSpecificityFallback.text;
+      repairs.push("commercial_specificity:rejected_overcompressed_soft_normalization");
+    }
+  }
   const report = verifyProCorpusIntegrity(out, { ...context, archetype }, counters);
   return { text: out, repairs: [...new Set(repairs)], report };
 }
