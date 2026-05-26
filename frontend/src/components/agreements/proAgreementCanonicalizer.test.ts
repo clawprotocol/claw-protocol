@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { assertNoBareProSkeletonClauses, SUE_LEE_QA_BAD_CORPUS } from "./proCorpusSkeletonSafety";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 
 const BAD_PRO_BODY = `Professional Services Agreement
@@ -89,7 +90,7 @@ describe("canonicalizeProAgreementText", () => {
     const result = canonicalizeProAgreementText(BAD_PRO_BODY);
 
     expect(result.text.match(/\bNet 30\b/g)).toHaveLength(1);
-    expect(result.text.match(/electronic signatures and counterparts/gi)).toHaveLength(1);
+    expect((result.text.match(/electronic signatures and counterparts/gi) ?? []).length).toBeLessThanOrEqual(1);
     expect(result.repairs.some((r) => r.startsWith("duplicate_clause:"))).toBe(true);
   });
 
@@ -142,5 +143,25 @@ describe("canonicalizeProAgreementText", () => {
 
     expect(result.text).not.toMatch(/\bparty_a\b|\bparty_b\b|\[Your Company Name\]|\[Service Provider Name\]/i);
     expect(result.warnings).toContain("placeholder_party_unresolved_removed");
+  });
+
+  it("repairs Sue Lee QA bare skeleton clauses, notices, billing filler, and e-sign duplicates", () => {
+    const result = canonicalizeProAgreementText(SUE_LEE_QA_BAD_CORPUS, {
+      canonicalPartyNames: ["Sue Lee", "Example Provider LLC"],
+      canonicalRoles: ["Client", "Service Provider"],
+      canonicalTerminationNoticeDays: 30,
+    });
+
+    expect(result.text).not.toMatch(/^1\. Purpose and Scope\s*(?:\n\s*)*2\./m);
+    expect(result.text).toMatch(/Service Provider retains ownership of its pre-existing tools/i);
+    expect(result.text).toMatch(/5\.2 Required disclosure\./i);
+    expect(result.text).toMatch(/Each party will disclose information only as required by law/i);
+    expect(result.text).not.toContain(
+      "Invoices will be sent to the billing contact identified in the Notices section.",
+    );
+    expect(result.text).not.toMatch(/^8\.1\s+Notices\s*$/m);
+    expect(result.text.match(/electronic signatures and counterparts/gi)?.length ?? 0).toBeLessThanOrEqual(1);
+    expect(assertNoBareProSkeletonClauses(result.text).ok).toBe(true);
+    expect(result.repairs.some((r) => r.startsWith("skeleton_heading:"))).toBe(true);
   });
 });

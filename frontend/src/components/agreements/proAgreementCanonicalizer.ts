@@ -4,13 +4,23 @@ export type ProAgreementCanonicalizationResult = {
   warnings: string[];
 };
 
+import {
+  consolidateDuplicateNoticesSections,
+  dedupeElectronicSignatureLines,
+  isProClauseHeadingLine,
+  repairBareProSkeletonClauses,
+  stripBillingNoticesFiller,
+  stripWeakElectronicSignatureFluff,
+} from "./proCorpusSkeletonSafety";
+
 export type ProAgreementCanonicalizationOptions = {
   canonicalPartyNames?: readonly string[];
   canonicalRoles?: readonly string[];
   canonicalTerminationNoticeDays?: string | number | null;
 };
 
-const NUMBERED_HEADING_RE = /^(\d+(?:\.\d+)*)\.?\s+(.+?)\.?\s*$/;
+export { assertNoBareProSkeletonClauses } from "./proCorpusSkeletonSafety";
+
 const TOP_LEVEL_HEADING_RE = /^(\d+)\.\s+(.+?)\.?\s*$/;
 const PLACEHOLDER_PARTY_RE = /\b(?:party_a|party_b|partyA|partyB)\b|\[(?:Your Company Name|Service Provider Name)\]/i;
 
@@ -27,36 +37,6 @@ function normalizeKey(text: string): string {
     .replace(/\b(the|a|an)\b/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function isNumberedHeading(line: string): boolean {
-  const t = cleanLine(line);
-  const m = t.match(NUMBERED_HEADING_RE);
-  if (!m) return false;
-  const heading = m[2] ?? "";
-  // A line like "1. SCOPE. Provider will perform..." is a clause with body text, not a bare heading.
-  if (/\.\s+\S/.test(heading)) return false;
-  if (heading.length > 95) return false;
-  return /[A-Za-z]/.test(heading);
-}
-
-function isBareNumberedHeading(lines: string[], index: number): boolean {
-  const current = lines[index] ?? "";
-  if (!isNumberedHeading(current)) return false;
-  const next = lines.slice(index + 1).find((line) => cleanLine(line));
-  if (!next) return true;
-  return isNumberedHeading(next);
-}
-
-function stripEmptyNumberedHeadings(text: string): { text: string; repairs: string[] } {
-  const repairs: string[] = [];
-  const lines = text.split("\n");
-  const out = lines.filter((line, index) => {
-    if (!isBareNumberedHeading(lines, index)) return true;
-    repairs.push(`empty_heading:${cleanLine(line).slice(0, 48)}`);
-    return false;
-  });
-  return { text: out.join("\n"), repairs };
 }
 
 function stripRepeatedTitleInsideSectionOne(text: string): { text: string; repairs: string[] } {
@@ -181,7 +161,7 @@ function stripDuplicateLines(text: string): { text: string; repairs: string[] } 
   const out: string[] = [];
   for (const line of text.split("\n")) {
     const key = normalizeKey(line);
-    const isSubstantive = key.length > 36 && !isNumberedHeading(line);
+    const isSubstantive = key.length > 36 && !isProClauseHeadingLine(line);
     if (isSubstantive && seen.has(key)) {
       repairs.push(`duplicate_line:${key.slice(0, 48)}`);
       continue;
@@ -377,7 +357,9 @@ function safetyGatePayload(repairs: readonly string[], warnings: readonly string
   return {
     placeholdersRemoved: repairs.filter((r) => r.includes("placeholder") && r.includes("removed")).length,
     placeholdersResolved: repairs.filter((r) => r.includes("placeholder") && r.includes("resolved")).length,
-    emptyHeadingsRemoved: repairs.filter((r) => r.startsWith("empty_heading:")).length,
+    emptyHeadingsRemoved: repairs.filter(
+      (r) => r.startsWith("empty_heading:") || r.startsWith("skeleton_heading:removed"),
+    ).length,
     duplicateClausesRemoved: repairs.filter((r) => r.includes("duplicate")).length,
     conflictsResolved: warnings.filter((w) => w.includes("conflict_resolved")).length,
     finalLength,
@@ -405,12 +387,16 @@ export function canonicalizeProAgreementText(
   for (const step of [
     stripTemplatePlaceholders,
     stripRepeatedTitleInsideSectionOne,
-    stripEmptyNumberedHeadings,
+    repairBareProSkeletonClauses,
     stripOrphanFragments,
     stripDuplicateParagraphs,
     stripDuplicateLines,
+    dedupeElectronicSignatureLines,
+    stripWeakElectronicSignatureFluff,
     canonicalizeRepeatedESignature,
-    stripEmptyNumberedHeadings,
+    consolidateDuplicateNoticesSections,
+    stripBillingNoticesFiller,
+    repairBareProSkeletonClauses,
   ]) {
     const result = step(out);
     out = result.text;
@@ -431,9 +417,17 @@ export function canonicalizeProAgreementText(
   repairs.push(...termination.repairs);
   warnings.push(...termination.warnings);
 
-  const finalEmptyHeadings = stripEmptyNumberedHeadings(out);
-  out = finalEmptyHeadings.text;
-  repairs.push(...finalEmptyHeadings.repairs);
+  const finalSkeleton = repairBareProSkeletonClauses(out);
+  out = finalSkeleton.text;
+  repairs.push(...finalSkeleton.repairs);
+
+  const finalNotices = consolidateDuplicateNoticesSections(out);
+  out = finalNotices.text;
+  repairs.push(...finalNotices.repairs);
+
+  const finalBillingFiller = stripBillingNoticesFiller(out);
+  out = finalBillingFiller.text;
+  repairs.push(...finalBillingFiller.repairs);
 
   const finalOrphans = stripOrphanFragments(out);
   out = finalOrphans.text;

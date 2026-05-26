@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { assertNoBareProSkeletonClauses, SUE_LEE_QA_BAD_CORPUS } from "../proCorpusSkeletonSafety";
 import {
   finalizeGuidedProAgreementCorpus,
   GUIDED_FINAL_CORPUS_MIN_LEN,
@@ -206,9 +207,52 @@ IN WITNESS WHEREOF, the parties execute this Agreement.
       expect(corpus.match(/\bNet 30\b/g)).toHaveLength(1);
       expect(corpus).not.toMatch(/^\([bc]\)\s+/m);
       expect(corpus).not.toMatch(/\b14 days? written notice\b/i);
+      expect(assertNoBareProSkeletonClauses(corpus).ok).toBe(true);
     }
     expect(result.body).toContain("Acme Automation LLC");
     expect(result.body).toContain("Botsmith Services LLC");
+  });
+
+  it("repairs Sue Lee QA bare skeleton corpus for final review and signing handoff", () => {
+    const sueIdentities: CanonicalPartyIdentity[] = [
+      {
+        index: 0,
+        partyDisplayName: "Sue Lee",
+        email: "sue@example.com",
+        representativeName: "Sue Lee",
+        title: "Owner",
+        blockHeading: "CLIENT",
+        isIndividual: true,
+      },
+      {
+        index: 1,
+        partyDisplayName: "Example Provider LLC",
+        email: "ops@example.com",
+        representativeName: "Pat Provider",
+        title: "Manager",
+        blockHeading: "SERVICE PROVIDER",
+        isIndividual: false,
+      },
+    ];
+    const badBody =
+      SUE_LEE_QA_BAD_CORPUS.trim() + "\n\n" + "Commercial safeguard paragraph. ".repeat(130);
+    const result = finalizeGuidedProAgreementCorpus({
+      candidates: [{ source: "last_accepted_premium_candidate", body: badBody, paid: true }],
+      guidedSession: session(),
+      signerIdentities: sueIdentities,
+      signerManifest: buildCanonicalSignerManifest({ identities: sueIdentities, signFirst: true }),
+      originalIntake: "AI automation for Sue Lee, Net 30, 30 days notice, ownership and support",
+    });
+
+    expect(result.body.length).toBeGreaterThan(GUIDED_FINAL_CORPUS_MIN_LEN);
+    expect(result.body).not.toMatch(/^1\. Purpose and Scope\s*(?:\n\s*)*2\./m);
+    expect(result.body).toMatch(/Service Provider retains ownership of its pre-existing tools/i);
+    expect(result.body).toMatch(/Each party will disclose information only as required by law/i);
+    expect(result.body).not.toContain(
+      "Invoices will be sent to the billing contact identified in the Notices section.",
+    );
+    expect(result.body).not.toMatch(/e-signatures and counterparts are valid/i);
+    expect(assertNoBareProSkeletonClauses(result.body).ok).toBe(true);
   });
 
   it("blocks final corpus when signer manifest exists but placeholders remain unresolved", () => {

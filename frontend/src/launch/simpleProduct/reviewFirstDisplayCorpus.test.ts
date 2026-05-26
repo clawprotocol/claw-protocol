@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { assertNoBareProSkeletonClauses, SUE_LEE_QA_BAD_CORPUS } from "../../components/agreements/proCorpusSkeletonSafety";
 import { resolveReviewFirstDisplayCorpus } from "./reviewFirstDisplayCorpus";
 
 function draft(overrides: Partial<AgreementDraft>): AgreementDraft {
@@ -50,5 +51,23 @@ describe("reviewFirstDisplayCorpus", () => {
         }),
       )?.source,
     ).toBe("server_full_document_text");
+  });
+
+  it("canonicalizes review-first display corpus with no bare skeleton clauses", () => {
+    const resolved = resolveReviewFirstDisplayCorpus(
+      draft({
+        parties: [
+          { id: "p-client", name: "Sue Lee", role: "party" },
+          { id: "p-provider", name: "Example Provider LLC", role: "owner" },
+        ],
+        premium_render_source: "review_first_final_corpus",
+        server_full_document_text: SUE_LEE_QA_BAD_CORPUS,
+        pro_redline_v1: {
+          review_first_final_corpus: { text: SUE_LEE_QA_BAD_CORPUS },
+        },
+      }),
+    );
+    expect(resolved?.text).toBeTruthy();
+    expect(assertNoBareProSkeletonClauses(resolved?.text ?? "").ok).toBe(true);
   });
 });
