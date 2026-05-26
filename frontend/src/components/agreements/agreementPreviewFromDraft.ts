@@ -424,7 +424,7 @@ export type AgreementPreviewBuildOptions = {
   /** Transient starter review: skip fatal placeholder block until draft payload / min length. */
   placeholderGate?: Pick<
     PlaceholderSafetyContext,
-    "isGenerating" | "hasDraftPayload" | "authoritativeSource"
+    "isGenerating" | "hasDraftPayload" | "authoritativeSource" | "createFlowPhase" | "displayPhase"
   >;
 };
 
@@ -745,6 +745,8 @@ function applyAgreementPreviewPlaceholderGate(
     isGenerating: options?.placeholderGate?.isGenerating,
     hasDraftPayload: options?.placeholderGate?.hasDraftPayload,
     authoritativeSource: options?.placeholderGate?.authoritativeSource ?? null,
+    createFlowPhase: options?.placeholderGate?.createFlowPhase,
+    displayPhase: options?.placeholderGate?.displayPhase,
   };
   const transientSkip = shouldSkipPlaceholderScanForTransientPreview({
     text: display,
@@ -753,6 +755,8 @@ function applyAgreementPreviewPlaceholderGate(
     isGenerating: placeholderCtx.isGenerating,
     hasDraftPayload: placeholderCtx.hasDraftPayload,
     authoritativeSource: placeholderCtx.authoritativeSource,
+    createFlowPhase: placeholderCtx.createFlowPhase,
+    displayPhase: placeholderCtx.displayPhase,
   });
   if (transientSkip) {
     logPlaceholderScanSkippedTransient({

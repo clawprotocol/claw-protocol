@@ -161,6 +161,10 @@ export type PlaceholderSafetyContext = {
   hasDraftPayload?: boolean;
   /** Authoritative corpus source; `none` / `blocked_short_preview` skip fatal scan. */
   authoritativeSource?: string | null;
+  /** Free starter create flow phase for transient / loading release. */
+  createFlowPhase?: string;
+  /** Free starter display phase for transient / loading release. */
+  displayPhase?: string;
 };
 
 export type PlaceholderSafetyOutcome = {

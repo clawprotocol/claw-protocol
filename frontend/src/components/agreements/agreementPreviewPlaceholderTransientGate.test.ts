@@ -12,6 +12,8 @@ import {
 } from "./agreementTemplatePlaceholderSafety";
 import {
   isPlaceholderSafetyBlockedPreviewText,
+  resolveEffectiveStarterHasDraftPayload,
+  resolveStarterPreviewLoadingReleaseReason,
   shouldDeferStarterPreviewToLoadingShell,
   shouldSkipPlaceholderScanForTransientPreview,
   stripPlaceholderBlockerFromPersistPlain,
@@ -100,6 +102,8 @@ describe("agreementPreviewPlaceholderTransientGate", () => {
       isGenerating: false,
       hasDraftPayload: false,
       authoritativeSource: "none" as const,
+      createFlowPhase: "generating_draft" as const,
+      displayPhase: "generating_draft" as const,
     };
     const earlyPreview = buildStarterAgreementPreviewForReview(thinPlaceholderDraft(), {
       intakeText: "Consulting for [Client Name]",
@@ -119,7 +123,12 @@ describe("agreementPreviewPlaceholderTransientGate", () => {
 
     const readyPreview = buildStarterAgreementPreviewForReview(ironcladDraft(), {
       intakeText: IRONCLAD_JOINT_ROLLOUT_INTAKE,
-      placeholderGate: { hasDraftPayload: true, isGenerating: false },
+      placeholderGate: {
+        hasDraftPayload: true,
+        isGenerating: false,
+        createFlowPhase: "draft_ready_for_review",
+        displayPhase: "review",
+      },
     });
     expect(readyPreview.length).toBeGreaterThan(400);
     expect(readyPreview).not.toContain("LawDog blocked this preview");
@@ -148,8 +157,99 @@ describe("agreementPreviewPlaceholderTransientGate", () => {
         hasLocalDraft: true,
         hasDraftPayload: true,
         isGenerating: false,
+        createFlowPhase: "draft_ready_for_review",
+        displayPhase: "review",
       }),
     ).toBe(false);
+  });
+
+  it("valid_preview_fallback releases shell when draft_ready and preview > 400 without server ref", () => {
+    const preview = "x".repeat(825);
+    expect(
+      resolveEffectiveStarterHasDraftPayload({
+        hasDraftPayload: false,
+        createFlowPhase: "draft_ready_for_review",
+        displayPhase: "review",
+        previewLen: preview.length,
+        isGenerating: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeferStarterPreviewToLoadingShell({
+        text: preview,
+        len: preview.length,
+        hasLocalDraft: true,
+        hasDraftPayload: false,
+        isGenerating: false,
+        createFlowPhase: "draft_ready_for_review",
+        displayPhase: "review",
+      }),
+    ).toBe(false);
+    expect(
+      resolveStarterPreviewLoadingReleaseReason({
+        hasLocalDraft: true,
+        hasDraftPayload: false,
+        isGenerating: false,
+        createFlowPhase: "draft_ready_for_review",
+        displayPhase: "review",
+        previewText: preview,
+      }),
+    ).toBe("valid_preview_fallback");
+  });
+
+  it("free starter sequence: generating defers, server payload releases preview", () => {
+    const generatingGate = {
+      isGenerating: true,
+      hasDraftPayload: false,
+      createFlowPhase: "generating_draft" as const,
+      displayPhase: "generating_draft" as const,
+    };
+    const earlyPreview = buildStarterAgreementPreviewForReview(thinPlaceholderDraft(), {
+      intakeText: "Consulting for [Client Name]",
+      placeholderGate: generatingGate,
+    });
+    expect(earlyPreview).not.toContain("LawDog blocked this preview");
+    expect(
+      shouldDeferStarterPreviewToLoadingShell({
+        text: earlyPreview,
+        len: earlyPreview.length,
+        hasLocalDraft: true,
+        ...generatingGate,
+      }),
+    ).toBe(true);
+
+    const readyPreview = buildStarterAgreementPreviewForReview(ironcladDraft(), {
+      intakeText: IRONCLAD_JOINT_ROLLOUT_INTAKE,
+      placeholderGate: {
+        isGenerating: false,
+        hasDraftPayload: true,
+        createFlowPhase: "draft_ready_for_review",
+        displayPhase: "review",
+      },
+    });
+    expect(readyPreview.length).toBeGreaterThan(400);
+    expect(readyPreview).not.toContain("LawDog blocked this preview");
+    expect(
+      shouldDeferStarterPreviewToLoadingShell({
+        text: readyPreview,
+        len: readyPreview.length,
+        hasLocalDraft: true,
+        hasDraftPayload: true,
+        isGenerating: false,
+        createFlowPhase: "draft_ready_for_review",
+        displayPhase: "review",
+      }),
+    ).toBe(false);
+    expect(
+      resolveStarterPreviewLoadingReleaseReason({
+        hasLocalDraft: true,
+        hasDraftPayload: true,
+        isGenerating: false,
+        createFlowPhase: "draft_ready_for_review",
+        displayPhase: "review",
+        previewText: readyPreview,
+      }),
+    ).toBe("server_payload_ready");
   });
 
   it("stripPlaceholderBlockerFromPersistPlain removes blocker from persist candidates", () => {

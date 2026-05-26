@@ -286,13 +286,17 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("free starter review skips transient placeholder block until server draft payload", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("starterReviewServerDraftReadyRef");
+    expect(intake).toContain("markStarterReviewServerDraftReady");
     expect(intake).toContain("placeholderGate");
     expect(intake).toContain("shouldSkipPlaceholderScanForTransientPreview");
+    expect(intake).toContain("resolveStarterPreviewLoadingReleaseReason");
+    expect(intake).toContain("logStarterPreviewLoadingRelease");
     const previewDraft = readFileSync(join(__dirname, "agreementPreviewFromDraft.ts"), "utf8");
     expect(previewDraft).toContain("logPlaceholderScanSkippedTransient");
     expect(intake).toContain("showStarterPreviewLoadingShell");
     expect(intake).toContain("visibleStarterAgreementDocumentText");
     expect(intake).toContain("stripPlaceholderBlockerFromPersistPlain");
+    expect(intake).toMatch(/payload\?\.draft != null[\s\S]{0,120}markStarterReviewServerDraftReady/);
     expect(intake).toMatch(
       /isPlaceholderSafetyBlockedPreviewText\(nextPreview\)[\s\S]{0,320}shouldSkipPlaceholderScanForTransientPreview/,
     );

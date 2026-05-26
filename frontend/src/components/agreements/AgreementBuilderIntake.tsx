@@ -173,6 +173,8 @@ import {
 } from "./agreementPreviewFromDraft";
 import {
   isPlaceholderSafetyBlockedPreviewText,
+  logStarterPreviewLoadingRelease,
+  resolveStarterPreviewLoadingReleaseReason,
   shouldDeferStarterPreviewToLoadingShell,
   shouldSkipPlaceholderScanForTransientPreview,
   stripPlaceholderBlockerFromPersistPlain,
@@ -2352,6 +2354,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [starterReviewServerDraftReadyTick, setStarterReviewServerDraftReadyTick] = useState(0);
   const previewPlaceholderGateIsGeneratingRef = useRef(false);
   const [previewPlaceholderGateSyncTick, setPreviewPlaceholderGateSyncTick] = useState(0);
+  const starterPreviewLoadingReleaseLoggedRef = useRef<string | null>(null);
+
+  const markStarterReviewServerDraftReady = React.useCallback(() => {
+    if (starterReviewServerDraftReadyRef.current) return;
+    starterReviewServerDraftReadyRef.current = true;
+    setStarterReviewServerDraftReadyTick((n) => n + 1);
+  }, []);
   const proRefineIntakeTextForProPanelsRef = useRef("");
   const proRefineCurrentDocumentTextForProPanelsRef = useRef("");
   const applyProRefineOutputToProSurfaceRef = useRef<
@@ -2614,6 +2623,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         isGenerating: previewPlaceholderGateIsGeneratingRef.current,
         hasDraftPayload: starterReviewServerDraftReadyRef.current,
         authoritativeSource: null as string | null,
+        createFlowPhase,
+        displayPhase,
       };
       if (starterPreview) {
         return buildStarterAgreementPreviewForReview(d, {
@@ -2635,6 +2646,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       debouncedStepBuffer,
       starterReviewServerDraftReadyTick,
       previewPlaceholderGateSyncTick,
+      createFlowPhase,
+      displayPhase,
     ],
   );
 
@@ -3995,6 +4008,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       partyNameContext,
     });
     if (!id) throw new Error("missing_id");
+    if (payload?.draft != null) {
+      markStarterReviewServerDraftReady();
+    }
     if (postDraft && !isAgreementDetailsStepReady(postDraft, id)) {
       console.warn("[AgreementIntake] POST draft failed details-step invariant — will rely on GET hydrate");
     }
@@ -7228,6 +7244,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setGuidedCompletionSession(null);
     starterReviewServerDraftReadyRef.current = false;
     setStarterReviewServerDraftReadyTick((n) => n + 1);
+    starterPreviewLoadingReleaseLoggedRef.current = null;
     setCreateFlowPhase("generating_draft");
     setDisplayPhase("generating_draft");
     setCreateUiStage(CreateUiStage.DRAFT);
@@ -8220,6 +8237,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       let postDraft: AgreementDraft | null;
       if (existingId) {
         id = existingId;
+        markStarterReviewServerDraftReady();
         const mergedForFallback = mergeParsedForApiPersist(parsed);
         postDraft = normalizeAgreementDraftFromApi(
           {
@@ -8267,8 +8285,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const normalized = await hydrateCreatedAgreement(id, postDraft, partyNameContext);
       console.log("[AgreementIntake] persistence + hydrate OK, advancing wizard", id);
       setHardError(null);
-      starterReviewServerDraftReadyRef.current = true;
-      setStarterReviewServerDraftReadyTick((n) => n + 1);
+      markStarterReviewServerDraftReady();
       reviewAgreementIdRef.current = id;
       setReviewAgreementId(id);
       const hydratedServerBody = (
@@ -9553,6 +9570,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       isGenerating: previewPlaceholderGateIsGeneratingRef.current,
       hasDraftPayload: starterReviewServerDraftReadyRef.current,
       authoritativeSource: null as string | null,
+      createFlowPhase: createFlowPhaseRef.current,
+      displayPhase: displayPhaseRef.current,
     };
     const snapGuard = readPremiumCompletionSnapshot();
     if (
@@ -10193,8 +10212,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       isGenerating,
       hasDraftPayload: starterReviewServerDraftReadyRef.current,
       authoritativeSource: null as string | null,
+      createFlowPhase,
+      displayPhase,
     }),
-    [isGenerating, starterReviewServerDraftReadyTick],
+    [isGenerating, starterReviewServerDraftReadyTick, createFlowPhase, displayPhase],
   );
 
   const visibleStarterAgreementDocumentText = useMemo(() => {
@@ -10213,24 +10234,66 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return stripPlaceholderBlockerFromPersistPlain(agreementDocumentText);
   }, [agreementDocumentText, starterPreviewTransientGate]);
 
+  const starterPreviewBodyForShell = visibleStarterAgreementDocumentText || renderedAgreementPreview;
+
   const showStarterPreviewLoadingShell = useMemo(
     () =>
       isFreeStreamlineDraftReview &&
       shouldDeferStarterPreviewToLoadingShell({
-        text: visibleStarterAgreementDocumentText || renderedAgreementPreview,
+        text: starterPreviewBodyForShell,
         surface: "preview_starter",
-        len: (visibleStarterAgreementDocumentText || renderedAgreementPreview).trim().length,
+        len: starterPreviewBodyForShell.trim().length,
         ...starterPreviewTransientGate,
         hasLocalDraft: Boolean(draft),
       }),
     [
       isFreeStreamlineDraftReview,
-      visibleStarterAgreementDocumentText,
-      renderedAgreementPreview,
+      starterPreviewBodyForShell,
       starterPreviewTransientGate,
       draft,
     ],
   );
+
+  const starterPreviewLoadingReleaseReason = useMemo(() => {
+    if (!isFreeStreamlineDraftReview || showStarterPreviewLoadingShell) return null;
+    return resolveStarterPreviewLoadingReleaseReason({
+      hasLocalDraft: Boolean(draft),
+      isGenerating,
+      hasDraftPayload: starterReviewServerDraftReadyRef.current,
+      createFlowPhase,
+      displayPhase,
+      previewText: starterPreviewBodyForShell,
+    });
+  }, [
+    isFreeStreamlineDraftReview,
+    showStarterPreviewLoadingShell,
+    draft,
+    isGenerating,
+    starterReviewServerDraftReadyTick,
+    createFlowPhase,
+    displayPhase,
+    starterPreviewBodyForShell,
+  ]);
+
+  useEffect(() => {
+    if (!starterPreviewLoadingReleaseReason) return;
+    const previewLen = starterPreviewBodyForShell.trim().length;
+    const logKey = `${starterPreviewLoadingReleaseReason}:${previewLen}:${createFlowPhase}`;
+    if (starterPreviewLoadingReleaseLoggedRef.current === logKey) return;
+    starterPreviewLoadingReleaseLoggedRef.current = logKey;
+    logStarterPreviewLoadingRelease({
+      reason: starterPreviewLoadingReleaseReason,
+      previewLen,
+      createFlowPhase,
+      displayPhase,
+      hasDraftPayload: starterReviewServerDraftReadyRef.current,
+    });
+  }, [
+    starterPreviewLoadingReleaseReason,
+    starterPreviewBodyForShell,
+    createFlowPhase,
+    displayPhase,
+  ]);
 
   useEffect(() => {
     if (!isFreeStreamlineDraftReview) return;
