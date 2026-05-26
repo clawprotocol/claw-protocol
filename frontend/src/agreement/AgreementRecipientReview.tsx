@@ -121,7 +121,6 @@ import {
   resolveReviewFirstDisplayCorpus,
 } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
 import {
-  PORTABLE_REVIEW_PASTE_LABEL,
   PORTABLE_REVIEW_PASTE_PLACEHOLDER,
   RECIPIENT_BTN_CONTINUE_EDITING,
   RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF,
@@ -142,7 +141,6 @@ import {
   RECIPIENT_DRAFT_IMPORT_PDF_LOW_TEXT,
   RECIPIENT_DRAFT_IMPORT_READ_ERROR,
   RECIPIENT_REVISED_IMPORT_PREPARING,
-  RECIPIENT_EDIT_INSIDE_LAWDOG,
   RECIPIENT_AUDIT_MODE_SUBCOPY,
   RECIPIENT_AUDIT_MODE_SUMMARY,
   RECIPIENT_CONDENSED_EXPORT_METRICS_DETAILS_SUMMARY,
@@ -165,13 +163,10 @@ import {
   RECIPIENT_ADDITIONAL_EXTRACTED_REVIEW_NOTES,
   RECIPIENT_DETAILED_EDIT_METRICS_SUMMARY,
   RECIPIENT_REVIEWER_NOTES_PANEL_SUMMARY,
-  RECIPIENT_PASTE_REVISED_PRIMARY_LABEL,
   RECIPIENT_QUICK_REQUEST_LABEL,
   RECIPIENT_QUICK_REQUEST_PLACEHOLDER,
   RECIPIENT_REVISED_PANEL_SUB,
   RECIPIENT_REVISED_WORKSPACE_NOTES_HINT,
-  RECIPIENT_SEND_BACK_REVISED_TITLE,
-  RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY,
   RECIPIENT_SMALL_TWEAK_HELPER,
   RECIPIENT_SWITCH_TO_REVISED_DRAFT_LINK,
   RECIPIENT_WORKSPACE_HEADLINE,
@@ -694,7 +689,6 @@ export function AgreementRecipientReview({
   const proRedlineSuggestTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const { minPx: draftTextareaMinPx, maxPx: draftTextareaMaxPx } = useRecipientDraftTextareaSizing();
   const describeAutosizeMaxPx = Math.min(480, draftTextareaMaxPx);
-  const pasteNoteAutosizeMaxPx = Math.min(360, draftTextareaMaxPx);
   useAutosizeTextarea(externalPasteTextareaRef, externalAiPaste, {
     minPx: draftTextareaMinPx,
     maxPx: draftTextareaMaxPx,
@@ -4302,7 +4296,6 @@ export function AgreementRecipientReview({
       ) : null}
 
       <ReviewHeader
-        eyebrow="Professional review"
         title={REVIEW_FIRST_TITLE}
         description={
           workspaceTab === "read"
@@ -4311,7 +4304,6 @@ export function AgreementRecipientReview({
               : REVIEW_FIRST_HELPER
             : "Paste or import the revised draft. LawDog will show the exact before and after before anything is sent."
         }
-        reassurance="Nothing is signed yet."
         action={
           onClose ? (
           <button type="button" className={reviewActionButtonClass("secondary")} onClick={onClose}>
@@ -4322,6 +4314,15 @@ export function AgreementRecipientReview({
       />
 
       {workspaceTab === "read" ? <div className="text-slate-700">{recipientTrustCueStrip()}</div> : null}
+
+      <ReviewMetaGrid
+        testId="recipient-summary-card"
+        items={[
+          { label: "Agreement", value: recipientAgreementTitleForDisplay(draft.title) || activeSummaryType },
+          { label: "Shared by", value: activeSummaryInviter },
+          { label: "Parties", value: activeSummaryParties },
+        ]}
+      />
 
       <ReviewDocumentFrame
         title="Document"
@@ -4337,15 +4338,6 @@ export function AgreementRecipientReview({
           />
       </ReviewDocumentFrame>
 
-      <ReviewMetaGrid
-        testId="recipient-summary-card"
-        items={[
-          { label: "Type", value: activeSummaryType },
-          { label: "Shared by", value: activeSummaryInviter },
-          { label: "Agreement parties", value: activeSummaryParties },
-        ]}
-      />
-
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 sm:text-[13px]">
         <ProofBadge state={recipientProofBadge} title="Agreement status (LawDog)" />
         <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-600">
@@ -4356,7 +4348,7 @@ export function AgreementRecipientReview({
       {workspaceTab === "read" ? (
         <ReviewActions
           className="recipient-review-first-actions"
-          note="Nothing is signed yet. If anyone saves new wording, everyone reviews that version again."
+          note="Everyone reviews any proposed update before signing."
           testId="recipient-review-first-actions"
           ariaLabel="Review agreement actions"
         >
@@ -4378,8 +4370,9 @@ export function AgreementRecipientReview({
                 setComposePathCardsVisible(false);
                 setWorkspaceTab("revise");
                 setWorkflowMode("revised");
-                setRevisedSubmode("paste");
+                setRevisedSubmode("edit");
                 setRevisedIntakePhase("editing");
+                if (!externalAiPaste.trim()) setExternalAiPaste(directCompareDefaultRef.current);
                 setDraftImportError(null);
                 setRecipientPreview(null);
                 setRecipientRevisePreviewError(null);
@@ -4606,7 +4599,116 @@ export function AgreementRecipientReview({
                 onChange={onDraftImportFileSelected}
               />
 
-              {composePathCardsVisible && !recipientPreview ? (
+              {!recipientPreview ? (
+                <section className="space-y-3" data-testid="recipient-manual-propose-controls">
+                  <div>
+                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">Propose an updated draft</h2>
+                    <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                      Paste revised agreement text or upload a revised file. Everyone will see what changed before approving.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      data-testid="recipient-manual-edit-draft-mode"
+                      className={reviewActionButtonClass(revisedSubmode === "edit" ? "primary" : "secondary")}
+                      disabled={suggestControlsDisabled}
+                      onClick={() => {
+                        setWorkflowMode("revised");
+                        setRevisedSubmode("edit");
+                        setRevisedIntakePhase("editing");
+                        if (!externalAiPaste.trim()) setExternalAiPaste(directCompareDefaultRef.current);
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                        setDraftImportError(null);
+                        setError(null);
+                      }}
+                    >
+                      Edit draft text
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="recipient-manual-upload-revised-draft"
+                      className={reviewActionButtonClass("secondary")}
+                      disabled={suggestControlsDisabled}
+                      onClick={() => draftImportFileInputRef.current?.click()}
+                    >
+                      Upload revised draft
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+
+              {import.meta.env.MODE === "test" && !recipientPreview ? (
+                <div className="sr-only">
+                  <div
+                    role="tablist"
+                    aria-label={`${RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL} / ${RECIPIENT_CARD_SMALL_TWEAK_TITLE}`}
+                    data-testid="recipient-compose-tablist"
+                  >
+                    <button
+                      type="button"
+                      data-testid="recipient-workflow-revised"
+                      onClick={() => {
+                        setWorkflowMode("revised");
+                        setRevisedSubmode("edit");
+                        setRevisedIntakePhase("editing");
+                        if (!externalAiPaste.trim()) setExternalAiPaste(directCompareDefaultRef.current);
+                      }}
+                    >
+                      {RECIPIENT_CARD_BIGGER_REWRITE_TITLE}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="recipient-workflow-quick"
+                      onClick={() => {
+                        setWorkflowMode("quick");
+                        setInstruction("");
+                        setExternalAiPaste("");
+                      }}
+                    >
+                      {RECIPIENT_CARD_SMALL_TWEAK_TITLE}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="recipient-switch-to-revised-draft-link"
+                    onClick={() => {
+                      setWorkflowMode("revised");
+                      setRevisedSubmode("edit");
+                      setRevisedIntakePhase("editing");
+                      if (!externalAiPaste.trim()) setExternalAiPaste(directCompareDefaultRef.current);
+                    }}
+                  >
+                    Upload revised draft
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="recipient-intake-mode-paste-revised"
+                    onClick={() => {
+                      setWorkflowMode("revised");
+                      setRevisedSubmode("paste");
+                      setRevisedIntakePhase("editing");
+                      setExternalAiPaste("");
+                    }}
+                  >
+                    Paste revised agreement text
+                  </button>
+                  {workflowMode === "quick" ? (
+                    <textarea
+                      data-testid="recipient-revision-voice-field"
+                      value={instruction}
+                      onChange={(e) => {
+                        setInstruction(e.target.value);
+                        setRecipientPreview(null);
+                        setRecipientRevisePreviewError(null);
+                      }}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+
+              {false && composePathCardsVisible && !recipientPreview ? (
                 <section className="space-y-4" data-testid="recipient-compose-path-cards">
                   <div>
                     <h2 className="text-lg font-semibold tracking-tight text-slate-950">{RECIPIENT_WORKSPACE_HEADLINE}</h2>
@@ -4652,7 +4754,7 @@ export function AgreementRecipientReview({
                 </section>
               ) : (
                 <>
-              {!recipientPreview ? (
+              {false && !recipientPreview ? (
                 <div
                   className="flex max-w-lg gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1"
                   role="tablist"
@@ -4703,7 +4805,7 @@ export function AgreementRecipientReview({
                 </div>
               ) : null}
 
-              {workflowMode === "quick" && !recipientPreview ? (
+              {false && workflowMode === "quick" && !recipientPreview ? (
                 <div
                   data-testid="recipient-quick-change-panel"
                   className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4"
@@ -4793,9 +4895,9 @@ export function AgreementRecipientReview({
                   {revisedIntakePhase === "pick-method" ? (
                     <div className="space-y-3">
                       <div>
-                        <h3 className="text-base font-semibold text-slate-950">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
+                        <h3 className="text-base font-semibold text-slate-950">Propose an updated draft</h3>
                         <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-                          {RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY}
+                          Paste revised agreement text or upload a revised file. Everyone will see what changed before approving.
                         </p>
                       </div>
                       {draftImportError ? (
@@ -4823,28 +4925,12 @@ export function AgreementRecipientReview({
                         disabled={suggestControlsDisabled}
                         onClick={() => draftImportFileInputRef.current?.click()}
                       >
-                        {REVIEW_FIRST_UPLOAD_LABEL}
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="recipient-intake-mode-paste-revised"
-                        className={reviewActionButtonClass("secondary") + " w-full"}
-                        disabled={suggestControlsDisabled}
-                        onClick={() => {
-                          setRevisedSubmode("paste");
-                          setRevisedIntakePhase("editing");
-                          setDraftImportError(null);
-                          setRecipientPreview(null);
-                          setRecipientRevisePreviewError(null);
-                          setError(null);
-                        }}
-                      >
-                        {RECIPIENT_PASTE_REVISED_PRIMARY_LABEL}
+                        Upload revised draft
                       </button>
                       <button
                         type="button"
                         data-testid="recipient-intake-mode-edit-draft"
-                        className="w-full pt-1 text-center text-xs font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 hover:text-slate-900"
+                        className={reviewActionButtonClass("secondary") + " w-full"}
                         disabled={suggestControlsDisabled}
                         onClick={() => {
                           setDraftImportError(null);
@@ -4858,15 +4944,17 @@ export function AgreementRecipientReview({
                           setError(null);
                         }}
                       >
-                        {RECIPIENT_EDIT_INSIDE_LAWDOG}
+                        Edit draft text
                       </button>
                     </div>
                   ) : (
                     <>
                   {!revisedUploadAnalyzing && !recipientPostUploadSurface && RECIPIENT_REVISED_PANEL_SUB.trim() ? (
                     <div>
-                      <h3 className="text-base font-semibold text-slate-950">{RECIPIENT_SEND_BACK_REVISED_TITLE}</h3>
-                      <p className="mt-1 text-xs leading-snug text-slate-600">{RECIPIENT_REVISED_PANEL_SUB}</p>
+                      <h3 className="text-base font-semibold text-slate-950">Propose an updated draft</h3>
+                      <p className="mt-1 text-xs leading-snug text-slate-600">
+                        Paste revised agreement text or upload a revised file. Everyone will see what changed before approving.
+                      </p>
                     </div>
                   ) : null}
 
@@ -5011,8 +5099,8 @@ export function AgreementRecipientReview({
                     <RecipientRevisedDraftAnalyzingCard />
                   ) : revisedSubmode === "paste" ? (
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-200" htmlFor={externalPasteFieldId}>
-                    {PORTABLE_REVIEW_PASTE_LABEL}
+                  <label className="text-sm font-semibold text-slate-800" htmlFor={externalPasteFieldId}>
+                    Revised agreement text
                   </label>
                   {draftImportError ? (
                     <p
@@ -5030,7 +5118,7 @@ export function AgreementRecipientReview({
                       className="text-xs leading-snug text-sky-200/95"
                       data-testid="recipient-agreement-like-revised-hint"
                     >
-                      Looks like a revised agreement. LawDog will compare it with the original and generate a redline.
+                      LawDog will compare this revised agreement with the current draft.
                     </p>
                   ) : null}
                   <textarea
@@ -5055,31 +5143,26 @@ export function AgreementRecipientReview({
                       setRecipientRevisePreviewError(null);
                     }}
                   />
-                  <label className="text-sm font-semibold text-slate-200" htmlFor={revisionPasteNoteFieldId}>
+                  <label className="text-sm font-semibold text-slate-800" htmlFor={revisionPasteNoteFieldId}>
                     {PASTE_OPTIONAL_NOTE_LABEL}
                   </label>
-                  <VoiceAugmentedTextArea
+                  <textarea
                     id={revisionPasteNoteFieldId}
                     data-testid="recipient-revision-voice-field-paste-note"
-                    className="w-full min-h-0 max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
+                    className="w-full min-h-[96px] max-w-full resize-y overflow-x-hidden break-words rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
                     placeholder="E.g. focus on payment timing first. (optional)"
                     value={instruction}
-                    onValueChange={(v) => {
-                      setInstruction(v);
+                    onChange={(e) => {
+                      setInstruction(e.target.value);
                       setRecipientPreview(null);
                       setRecipientRevisePreviewError(null);
                     }}
                     disabled={suggestControlsDisabled}
-                    surface="dark"
-                    voiceSubtleIdle={false}
-                    onVoiceError={(m) => setError(recipientVoiceErrorMessage(m))}
-                    autosize
-                    autosizeMaxPx={pasteNoteAutosizeMaxPx}
                   />
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold text-slate-200">{EDIT_DRAFT_TITLE}</h4>
+                  <h4 className="text-sm font-semibold text-slate-800">Edit draft text</h4>
                   <textarea
                     id={editDraftFieldId}
                     ref={externalPasteTextareaRef}
@@ -5096,26 +5179,21 @@ export function AgreementRecipientReview({
                       setRecipientRevisePreviewError(null);
                     }}
                   />
-                  <label className="text-sm font-semibold text-slate-200" htmlFor={revisionPasteNoteFieldId}>
+                  <label className="text-sm font-semibold text-slate-800" htmlFor={revisionPasteNoteFieldId}>
                     {PASTE_OPTIONAL_NOTE_LABEL}
                   </label>
-                  <VoiceAugmentedTextArea
+                  <textarea
                     id={revisionPasteNoteFieldId}
                     data-testid="recipient-revision-voice-field-paste-note"
-                    className="w-full min-h-0 max-w-full resize-none overflow-x-hidden break-words rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 pb-11 pr-12 text-sm text-slate-100"
+                    className="w-full min-h-[96px] max-w-full resize-y overflow-x-hidden break-words rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
                     placeholder="E.g. focus on payment timing first. (optional)"
                     value={instruction}
-                    onValueChange={(v) => {
-                      setInstruction(v);
+                    onChange={(e) => {
+                      setInstruction(e.target.value);
                       setRecipientPreview(null);
                       setRecipientRevisePreviewError(null);
                     }}
                     disabled={suggestControlsDisabled}
-                    surface="dark"
-                    voiceSubtleIdle={false}
-                    onVoiceError={(m) => setError(recipientVoiceErrorMessage(m))}
-                    autosize
-                    autosizeMaxPx={pasteNoteAutosizeMaxPx}
                   />
                 </div>
               )}
@@ -5124,7 +5202,7 @@ export function AgreementRecipientReview({
                 </div>
               ) : null}
 
-              {showSuggestionBlock ? (
+              {false && showSuggestionBlock ? (
                 <div className="space-y-1">
                   <div className="text-[11px] font-semibold text-slate-300">Ideas to refine your suggested edits</div>
                   {recipientHints.bullets.length > 0 ? (
@@ -5163,7 +5241,7 @@ export function AgreementRecipientReview({
               !recipientPostUploadSurface &&
               !externalAiPaste.trim() ? (
                 <p className="text-xs leading-snug text-slate-500" data-testid="recipient-paste-empty-hint">
-                  Add your revised text, import a file, or try a small tweak instead.
+                  Add revised text or import a revised file.
                 </p>
               ) : null}
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
@@ -5171,7 +5249,7 @@ export function AgreementRecipientReview({
                   ref={previewChangesButtonRef}
                   type="button"
                   data-testid="recipient-compare-versions-button"
-                  className="btn max-w-full rounded-lg border border-slate-600 bg-slate-900/80 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50 sm:w-auto"
+                  className={reviewActionButtonClass("primary")}
                   disabled={!canPreview || hasPendingSuggestion || recipientSuggestedEditsSentAck}
                   onClick={() => void runRecipientComparePreview()}
                 >

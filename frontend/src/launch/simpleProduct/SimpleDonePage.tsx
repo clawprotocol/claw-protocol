@@ -660,19 +660,25 @@ export function SimpleDonePage(props: { agreementId: string }) {
       });
     };
     const showReviewFlowDiagPanel = reviewFlowDiagLocal;
+    const reviewReadyTitle =
+      reviewLinksReady && anyReviewHref && reviewApprovalAgg.flowShellTitle === "Review link created"
+        ? "Review link ready"
+        : flowShellTitle;
+    const reviewReadyDescription =
+      reviewReadyTitle === "Review link ready"
+        ? "Send this private link to the reviewer. Nothing is signed until all parties approve the same final draft."
+        : reviewApprovalAgg.ownerStatusLine;
 
     return (
-      <SimpleFlowShell title={flowShellTitle}>
+      <SimpleFlowShell title={reviewReadyTitle} hideHeader>
         <ReviewShell>
           <ReviewHeader
-            eyebrow="Professional review"
-            title={reviewLinksReady && anyReviewHref ? "Review link created" : "Review link needs attention"}
+            title={reviewLinksReady && anyReviewHref ? reviewReadyTitle : "Review link needs attention"}
             description={
               reviewLinksReady && anyReviewHref
-                ? "Share the private reviewer link below. The draft is open for review, and nothing is signed yet."
+                ? reviewReadyDescription
                 : "LawDog could not finish creating the reviewer link. You can retry or return to the draft."
             }
-            reassurance="Nothing is signed until the review is complete."
           />
           <div className="text-left">
             {reviewLinksReady && anyReviewHref ? (
@@ -711,11 +717,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       ? "Track each reviewer in the table. When everyone has approved without open change requests, you can finalize for signing."
                       : reviewApprovalAgg.ownerStatusLine}
                   </ReviewNotice>
-                ) : (
-                  <ReviewNotice>
-                    Send this private link to reviewers. Nothing is signed yet.
-                  </ReviewNotice>
-                )}
+                ) : null}
                 <span className="sr-only" data-testid="simple-done-owner-approval-status">
                   {signingLockActive ? "Signing version locked." : reviewApprovalAgg.ownerStatusLine}
                 </span>

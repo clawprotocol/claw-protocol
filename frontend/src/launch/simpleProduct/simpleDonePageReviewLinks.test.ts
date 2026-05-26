@@ -10,7 +10,7 @@ describe("SimpleDonePage review-link receipt", () => {
     const signalsSrc = readFileSync(signals, "utf8");
     expect(s).toContain("readSimpleDoneReviewRecipientLinks");
     expect(s).toContain("Copy review link");
-    expect(s).toContain("reviewApprovalAgg.flowShellTitle");
+    expect(s).toContain("Review link ready");
     expect(signalsSrc).toContain("Review link created");
     expect(s).toContain("Open reviewer view");
     expect(s).toContain("Back to draft");

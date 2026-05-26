@@ -10,12 +10,6 @@ import {
 } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 import { computeRecipientDraftTextareaMaxPx } from "../hooks/useRecipientDraftTextareaMaxPx";
-import {
-  RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL,
-  RECIPIENT_CARD_SMALL_TWEAK_TITLE,
-  RECIPIENT_SEND_BACK_REVISED_TITLE,
-  RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY,
-} from "./portableReviewCopy";
 import { REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
 
 function jsonResponse(obj: unknown, status = 200) {
@@ -84,15 +78,13 @@ describe("AgreementRecipientReview revise workflow routing", () => {
 
     expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
     expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
-    expect(
-      screen.getByRole("tablist", { name: `${RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL} / ${RECIPIENT_CARD_SMALL_TWEAK_TITLE}` }),
-    ).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_SEND_BACK_REVISED_TITLE)).toBeTruthy();
-    expect(screen.getByText(RECIPIENT_SEND_BACK_REVISED_WORKSPACE_SUBCOPY)).toBeTruthy();
+    expect(screen.getByTestId("recipient-manual-propose-controls")).toBeTruthy();
+    expect(screen.getAllByText("Propose an updated draft").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Paste revised agreement text or upload a revised file/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
   });
 
-  it("quick-change mode hides revised-version panel and upload controls", async () => {
+  it("manual review path does not show quick-change controls", async () => {
     const agreementId = "ag_quick_isolated";
     const draft = makeDraft(agreementId);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
@@ -116,19 +108,9 @@ describe("AgreementRecipientReview revise workflow routing", () => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
     await openRecipientReviseEditWorkspace();
-    await userEvent.click(
-      within(
-        screen.getAllByRole("tablist", {
-          name: `${RECIPIENT_ASSISTED_COMPOSE_TAB_LABEL} / ${RECIPIENT_CARD_SMALL_TWEAK_TITLE}`,
-        })[0]!,
-      ).getByRole("button", { name: /Small tweak/i }),
-    );
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("recipient-revised-version-panel")).toBeNull();
-    });
-    expect(screen.getAllByTestId("recipient-quick-change-panel")[0]).toBeTruthy();
-    expect(screen.queryByTestId("recipient-upload-revised-file")).toBeNull();
+    expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
+    expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
+    expect(screen.getByTestId("recipient-edit-draft-textarea")).toBeTruthy();
   });
 
   it("Need to upload… link switches to revised-version panel", async () => {
@@ -230,12 +212,13 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(importDraftInput.getAttribute("accept")).toContain(".pdf");
     expect(importDraftInput.getAttribute("accept")).toContain("application/pdf");
 
-    const revisedPanel = screen.getAllByTestId("recipient-revised-version-panel")[0]!;
-    const scoped = within(revisedPanel);
-    await userEvent.click(scoped.getByTestId("recipient-intake-mode-paste-revised"));
-    expect(screen.getByTestId("recipient-revised-workspace-notes-hint")).toBeTruthy();
+    const scoped = within(screen.getByTestId("recipient-propose-update-standard-panel"));
+    await userEvent.click(screen.getByTestId("recipient-intake-mode-edit-draft"));
+    await waitFor(() => {
+      expect(scoped.getByTestId("recipient-edit-draft-textarea")).toBeTruthy();
+    });
     const paste = "x".repeat(2500);
-    fireEvent.change(scoped.getByTestId("recipient-revised-draft-paste"), { target: { value: paste } });
+    fireEvent.change(scoped.getByTestId("recipient-edit-draft-textarea"), { target: { value: paste } });
     expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Submit proposed update/i);
     await userEvent.click(screen.getAllByTestId("recipient-compare-versions-button")[0]!);
 
@@ -245,7 +228,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(fetchSpy.mock.calls.some((c) => String(c[0]).includes("/revise"))).toBe(false);
   });
 
-  it("quick change full-agreement paste shows switch hint", async () => {
+  it("manual full-agreement edit keeps submit enabled", async () => {
     const agreementId = "ag_quick_hint";
     const draft = makeDraft(agreementId);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
@@ -268,17 +251,13 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await waitFor(() => {
       expect(screen.queryByText(/Loading agreement/i)).toBeNull();
     });
-    await openRecipientQuickChangeWorkspace();
+    await openRecipientReviseEditWorkspace();
 
     const big = "THIS AGREEMENT\n\n".repeat(200);
-    fireEvent.change(screen.getAllByTestId("recipient-revision-voice-field")[0]!, { target: { value: big } });
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId("recipient-quick-change-full-doc-hint")[0]).toBeTruthy();
-    });
+    fireEvent.change(screen.getByTestId("recipient-edit-draft-textarea"), { target: { value: big } });
     const previewBtn = screen.getByTestId("recipient-compare-versions-button") as HTMLButtonElement;
-    expect(previewBtn.textContent).toMatch(/Preview changes/i);
-    expect(previewBtn.disabled).toBe(true);
+    expect(previewBtn.textContent).toMatch(/Submit proposed update/i);
+    expect(previewBtn.disabled).toBe(false);
   });
 
   it("paste textarea sizing and mobile overflow", async () => {

@@ -149,9 +149,8 @@ describe("AgreementRecipientReview DOM integrity (recipient export)", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "← Back to agreement" }));
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-review-download-actions")).toBeTruthy();
+      expect(screen.getByTestId("recipient-review-first-actions")).toBeTruthy();
     });
-    expect(screen.queryAllByTestId("recipient-review-download-actions")).toHaveLength(1);
     expect(screen.queryAllByTestId("recipient-preview-versions-export")).toHaveLength(0);
     expect(duplicateDomIds(container)).toEqual([]);
   });

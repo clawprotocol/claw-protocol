@@ -111,7 +111,7 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect(screen.queryByTestId("recipient-open-draft-preview")).toBeNull();
 
     const summary = screen.getByTestId("recipient-summary-card");
-    expect(within(summary).getByText("Type")).toBeTruthy();
+    expect(within(summary).getByText("Agreement")).toBeTruthy();
     expect(within(summary).getByText("Services")).toBeTruthy();
     expect(within(summary).queryByText(/Agreement type/i)).toBeNull();
 
@@ -177,8 +177,7 @@ describe("AgreementRecipientReview review-first actions", () => {
     });
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
-    expect(await screen.findByTestId("recipient-revised-draft-paste")).toBeTruthy();
-    expect(screen.queryAllByTestId("recipient-revision-voice-field")).toHaveLength(0);
+    expect(await screen.findByTestId("recipient-edit-draft-textarea")).toBeTruthy();
     expect(screen.getByTestId("recipient-compare-versions-button").textContent).toMatch(/Submit proposed update/i);
   });
 
@@ -221,7 +220,7 @@ describe("AgreementRecipientReview review-first actions", () => {
     });
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
-    const paste = await screen.findByTestId("recipient-revised-draft-paste");
+    const paste = await screen.findByTestId("recipient-edit-draft-textarea");
     await userEvent.clear(paste);
     await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
     const submit = screen.getByTestId("recipient-compare-versions-button");
@@ -273,7 +272,7 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect((await screen.findByTestId("recipient-review-personal-link-required")).textContent).toContain(
       "Open the personal review link the sender gave you so LawDog can attribute your proposed update.",
     );
-    const paste = await screen.findByTestId("recipient-revised-draft-paste");
+    const paste = await screen.findByTestId("recipient-edit-draft-textarea");
     await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
     expect(screen.getByTestId("recipient-compare-versions-button")).toHaveProperty("disabled", true);
   });

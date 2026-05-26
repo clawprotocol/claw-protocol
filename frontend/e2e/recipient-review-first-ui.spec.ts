@@ -325,7 +325,7 @@ test("review-first simplified UI (desktop + laptop PNGs)", async ({ page }, test
         viewport.name === "desktop"
           ? "reviewer-simplified-review-page.png"
           : viewport.name === "mobile"
-            ? "review-first-recipient-review-standardized.png"
+            ? "recipient-review-metadata-above-document-mobile.png"
             : `review-first-${viewport.name}.png`,
       ),
       fullPage: true,
@@ -379,7 +379,7 @@ test("paid Pro review-first skips generic /app/send and lands on owner done", as
   await expect(page.getByText("Send this as a professional agreement")).toHaveCount(0);
   await expect(page.getByText("Continue with Pro")).toHaveCount(0);
   await expect(page.getByText("Continue with draft version")).toHaveCount(0);
-  await expect(page.getByTestId("review-first-standard-shell").getByRole("heading", { name: "Review link created" })).toBeVisible({
+  await expect(page.getByTestId("review-first-standard-shell").getByRole("heading", { name: "Review link ready" })).toBeVisible({
     timeout: 20_000,
   });
 
@@ -393,7 +393,7 @@ test("paid Pro review-first skips generic /app/send and lands on owner done", as
   });
   await page.setViewportSize({ width: 376, height: 782 });
   await page.screenshot({
-    path: join(artifactDir, "review-first-owner-done-standardized.png"),
+    path: join(artifactDir, "review-link-created-simplified-mobile.png"),
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1100 });
@@ -482,7 +482,7 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
 
   await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("recipient-review-propose-updated-draft").click();
-  await expect(page.getByTestId("recipient-revised-draft-paste")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("recipient-edit-draft-textarea")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("recipient-review-personal-link-required")).toHaveCount(0);
   await page.screenshot({
     path: join(artifactDir, "review-first-propose-update-clean.png"),
@@ -490,11 +490,13 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   });
   await page.setViewportSize({ width: 376, height: 782 });
   await page.screenshot({
-    path: join(artifactDir, "review-first-propose-update-standardized.png"),
+    path: join(artifactDir, "propose-updated-draft-no-ai-controls-mobile.png"),
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1100 });
-  await page.getByTestId("recipient-revised-draft-paste").fill(updatedBody);
+  await expect(page.getByTestId("recipient-revision-voice-field")).toHaveCount(0);
+  await expect(page.getByTestId("recipient-compose-tablist")).toHaveCount(0);
+  await page.getByTestId("recipient-edit-draft-textarea").fill(updatedBody);
   await expect(page.getByTestId("recipient-compare-versions-button")).toBeEnabled();
   await page.getByTestId("recipient-compare-versions-button").click();
 
@@ -549,7 +551,7 @@ test("review-first missing token shows attribution message before revised draft 
   await expect(page.getByTestId("recipient-review-personal-link-required")).toContainText(
     "Open the personal review link the sender gave you so LawDog can attribute your proposed update.",
   );
-  await page.getByTestId("recipient-revised-draft-paste").fill(`AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+  await page.getByTestId("recipient-edit-draft-textarea").fill(`AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
   await expect(page.getByTestId("recipient-compare-versions-button")).toBeDisabled();
   await page.screenshot({
     path: join(artifactDir, "review-first-missing-token-attribution-message.png"),
@@ -817,7 +819,7 @@ test("create final review click — mocked mint success lands on /app/done", asy
   }
   await mintOk;
   await expect(page).toHaveURL(new RegExp(`/app/done/${agreementId}`), { timeout: 25_000 });
-  await expect(page.getByTestId("review-first-standard-shell").getByRole("heading", { name: "Review link created" })).toBeVisible({
+  await expect(page.getByTestId("review-first-standard-shell").getByRole("heading", { name: "Review link ready" })).toBeVisible({
     timeout: 20_000,
   });
   await expect(page.getByText(finalMarker)).toBeVisible({ timeout: 20_000 });
@@ -1007,7 +1009,7 @@ test("paid Pro review-first handoff lands on done with review link artifacts", a
   await page.goto(`/app/send/${agreementId}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await mintResponse;
   await expect(page).toHaveURL(new RegExp(`/app/done/${agreementId}`), { timeout: 25_000 });
-  await expect(page.getByTestId("review-first-standard-shell").getByRole("heading", { name: "Review link created" })).toBeVisible({
+  await expect(page.getByTestId("review-first-standard-shell").getByRole("heading", { name: "Review link ready" })).toBeVisible({
     timeout: 20_000,
   });
 });

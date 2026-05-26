@@ -376,9 +376,7 @@ describe("SimpleDonePage owner approval UX", () => {
     render(<SimpleDonePage agreementId={agreementId} />);
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Send this private link to reviewers. Nothing is signed yet."),
-      ).toBeTruthy();
+      expect(screen.getByText("Review link ready")).toBeTruthy();
     });
     expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
     const primaries = screen.getAllByRole("button", { name: /Copy review link/i });

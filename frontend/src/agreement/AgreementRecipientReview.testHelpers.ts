@@ -6,20 +6,22 @@ import { expect } from "vitest";
 export async function openRecipientReviseEditWorkspace(
   user: Pick<typeof userEvent, "click"> = userEvent,
 ): Promise<void> {
-  const more = screen.queryByTestId("recipient-review-more-options");
-  if (more) await user.click(more);
-  await user.click(screen.getByTestId("recipient-review-edit-draft"));
+  await user.click(screen.getByTestId("recipient-review-propose-updated-draft"));
   await waitFor(() => {
-    expect(screen.getByTestId("recipient-compose-tablist")).toBeTruthy();
+    expect(screen.getByTestId("recipient-edit-draft-textarea")).toBeTruthy();
   });
 }
 
-/** Opens quick-change mode from review-first read tab. */
+/** Opens the manual updated-draft editor used by the review-first path. */
 export async function openRecipientQuickChangeWorkspace(
   user: Pick<typeof userEvent, "click"> = userEvent,
 ): Promise<void> {
   await openRecipientReviseEditWorkspace(user);
-  await user.click(screen.getByTestId("recipient-workflow-quick"));
+  const quick = screen.queryByTestId("recipient-workflow-quick");
+  if (quick) await user.click(quick);
+  await waitFor(() => {
+    expect(screen.getByTestId("recipient-revision-voice-field")).toBeTruthy();
+  });
 }
 
 /** Opens upload pick-method from review-first read tab. */

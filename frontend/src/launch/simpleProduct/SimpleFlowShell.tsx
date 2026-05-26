@@ -27,6 +27,7 @@ export function SimpleFlowShell(props: {
   subtitleClassName?: string;
   /** Optional class on the main H1 (e.g. checkout conversion typography). */
   titleClassName?: string;
+  hideHeader?: boolean;
   /** Optional id on the page H1 for post-checkout scroll/focus restore. */
   titleHeadingId?: string;
   /** Optional progress: highlights current step only; earlier steps show as completed. */
@@ -43,6 +44,7 @@ export function SimpleFlowShell(props: {
     subtitle,
     subtitleClassName,
     titleClassName,
+    hideHeader,
     titleHeadingId,
     step,
     progressLabels = DEFAULT_PROGRESS,
@@ -112,6 +114,7 @@ export function SimpleFlowShell(props: {
             </ol>
           ) : null}
         </nav>
+        {!hideHeader ? (
         <header className="vs01-header pb-2 pt-4">
           {kicker ? (
             <p className="mb-2 text-center text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-slate-500 sm:text-left sm:text-xs md:text-[0.8125rem] lg:tracking-[0.1em] lg:text-slate-400">
@@ -132,6 +135,7 @@ export function SimpleFlowShell(props: {
             </p>
           ) : null}
         </header>
+        ) : null}
         <main className="vs01-main vs01-main--lawdog-funnel min-w-0 max-w-full pb-8">{children}</main>
         <footer className="vs01-footer">
           <DisclosureFooter slim dense className="border-0 pt-0" />

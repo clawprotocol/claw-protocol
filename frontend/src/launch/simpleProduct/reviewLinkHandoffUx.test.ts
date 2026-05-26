@@ -8,9 +8,9 @@ describe("Review link handoff UX (LawDog)", () => {
     const signals = join(__dirname, "../../components/agreements/draftRecipientReviewSignals.ts");
     const s = readFileSync(p, "utf8");
     const signalsSrc = readFileSync(signals, "utf8");
-    expect(s).toContain("reviewApprovalAgg.flowShellTitle");
+    expect(s).toContain("Review link ready");
     expect(signalsSrc).toContain("Review link created");
-    expect(s).toContain("Send this private link to reviewers. Nothing is signed yet.");
+    expect(s).toContain("Send this private link to the reviewer. Nothing is signed until all parties approve the same final draft.");
     expect(s).toContain("Copy review link");
     expect(s).toContain("Open reviewer view");
     expect(s).toContain("[review-link-owner-success-visible]");
@@ -44,7 +44,7 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).toContain("REVIEW_FIRST_HELPER");
     expect(s).toContain("recipient-review-first-actions");
     expect(s).toContain("recipient-review-approve-draft");
-    expect(s).toContain("recipient-review-suggest-changes");
+    expect(s).toContain("recipient-review-propose-updated-draft");
     expect(s).toContain("recipient-review-more-options");
     expect(s).toContain("recipient-review-edit-draft");
     expect(s).toContain("recipient-review-upload-updated-draft");
@@ -58,8 +58,8 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).not.toContain("Bring back suggested edits");
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
-    expect(s).toContain("recipient-workflow-revised");
-    expect(s).toContain("recipient-workflow-quick");
+    expect(s).toContain("recipient-manual-edit-draft-mode");
+    expect(s).toContain("recipient-manual-upload-revised-draft");
     expect(s).toContain("recipient-suggested-changes-panel");
     expect(s).toContain("recipient-suggested-changes-document");
     expect(s).not.toContain("recipient-tab-redline");
