@@ -107,7 +107,7 @@ export function buildReviewFirstTextDiffSummary(previousText: string, proposedTe
     return {
       hasMaterialChanges: false,
       status: "empty",
-      summary: "Paste updated agreement wording or upload a .txt or .md file.",
+      summary: "Paste the complete updated agreement to compare wording changes.",
       changedSections: [],
       normalizedPrevious,
       normalizedProposed,

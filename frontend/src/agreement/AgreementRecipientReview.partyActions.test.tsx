@@ -124,16 +124,13 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     const actions = screen.getByTestId("recipient-review-first-actions");
     expect(within(actions).getByRole("button", { name: /Approve draft/i })).toBeTruthy();
-    expect(within(actions).getByRole("button", { name: /Propose updated draft/i })).toBeTruthy();
+    expect(within(actions).getByRole("button", { name: /Propose updated agreement/i })).toBeTruthy();
     expect(within(actions).getByRole("button", { name: /^Download$/i })).toBeTruthy();
-    expect(within(actions).getByRole("button", { name: /More options/i })).toBeTruthy();
     expect(screen.queryByLabelText(/Requested change/i)).toBeNull();
     expect(within(actions).queryByRole("button", { name: /Paste updated wording/i })).toBeNull();
-    await userEvent.click(within(actions).getByRole("button", { name: /More options/i }));
-    expect(within(actions).getByRole("button", { name: /Paste updated wording/i })).toBeTruthy();
-    expect(within(actions).getByRole("button", { name: /Upload .txt or .md/i })).toBeTruthy();
-    expect(within(actions).getByRole("button", { name: /^Download text$/i })).toBeTruthy();
-    expect(within(actions).getByRole("button", { name: /^Copy text$/i })).toBeTruthy();
+    expect(within(actions).queryByRole("button", { name: /More options/i })).toBeNull();
+    expect(within(actions).queryByRole("button", { name: /^Download text$/i })).toBeNull();
+    expect(within(actions).queryByRole("button", { name: /^Copy text$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
 
     await userEvent.click(within(actions).getByRole("button", { name: /Approve draft/i }));

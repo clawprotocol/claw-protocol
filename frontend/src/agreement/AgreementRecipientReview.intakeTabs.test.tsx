@@ -78,9 +78,10 @@ describe("AgreementRecipientReview revise workflow routing", () => {
 
     expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
     expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
-    expect(screen.getByTestId("recipient-manual-propose-controls")).toBeTruthy();
-    expect(screen.getAllByText("Update agreement").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Edit the agreement anywhere, then paste the updated wording/i).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("recipient-manual-propose-controls")).toBeNull();
+    expect(screen.getAllByText("Propose updated agreement").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Edit the agreement in any software you prefer/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/LawDog will compare the wording and show all material changes before submission/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
   });
 
@@ -213,10 +214,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(importDraftInput.getAttribute("accept")).not.toContain("application/pdf");
 
     const scoped = within(screen.getByTestId("recipient-propose-update-standard-panel"));
-    await userEvent.click(screen.getByTestId("recipient-intake-mode-edit-draft"));
-    await waitFor(() => {
-      expect(scoped.getByTestId("recipient-edit-draft-textarea")).toBeTruthy();
-    });
+    expect(scoped.getByTestId("recipient-edit-draft-textarea")).toBeTruthy();
     const paste = "x".repeat(2500);
     fireEvent.change(scoped.getByTestId("recipient-edit-draft-textarea"), { target: { value: paste } });
     expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Review changes/i);

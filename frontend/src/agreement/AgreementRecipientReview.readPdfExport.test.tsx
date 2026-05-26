@@ -68,17 +68,15 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
 
     expect(screen.getByTestId("recipient-review-download-pdf")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Download$/i })).toBeTruthy();
-    await userEvent.click(screen.getByTestId("recipient-review-more-options"));
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-review-download-actions")).toBeTruthy();
-    });
+    expect(screen.queryByTestId("recipient-review-more-options")).toBeNull();
+    expect(screen.queryByTestId("recipient-review-download-actions")).toBeNull();
     expect(screen.getByTestId("recipient-review-download-pdf")).toBeTruthy();
-    expect(screen.getByTestId("recipient-review-download-text")).toBeTruthy();
-    expect(screen.getByTestId("recipient-review-copy-text")).toBeTruthy();
+    expect(screen.queryByTestId("recipient-review-download-text")).toBeNull();
+    expect(screen.queryByTestId("recipient-review-copy-text")).toBeNull();
     expect(screen.queryAllByTestId("recipient-review-download-pdf")).toHaveLength(1);
     expect(screen.queryByTestId("recipient-want-a-copy-card")).toBeNull();
 
-    const block = screen.getByTestId("recipient-review-download-actions").textContent ?? "";
+    const block = screen.getByTestId("recipient-review-first-actions").textContent ?? "";
     const upper = block.toUpperCase();
     for (const b of bannedInBlock) {
       expect(upper.includes(b.toUpperCase()), `unexpected “${b}” in export block`).toBe(false);

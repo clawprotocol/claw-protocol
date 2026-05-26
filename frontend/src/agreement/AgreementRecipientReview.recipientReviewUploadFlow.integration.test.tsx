@@ -74,7 +74,7 @@ function mockFetchForCompare() {
 
 async function openWorkspaceRevisedPickMethod(user: ReturnType<typeof userEvent.setup>) {
   await openRecipientReviseUploadPickMethod(user);
-  expect(screen.getByTestId("recipient-upload-revised-file")).toBeTruthy();
+  expect(screen.getByTestId("recipient-manual-upload-revised-draft")).toBeTruthy();
 }
 
 describe("AgreementRecipientReview revised upload → compare (regression guard)", () => {
@@ -119,7 +119,7 @@ describe("AgreementRecipientReview revised upload → compare (regression guard)
     expect(within(panel).getByRole("button", { name: RECIPIENT_BTN_CONTINUE_EDITING })).toBeTruthy();
   }, 30_000);
 
-  it("empty workspace upload shows inline error in pick-method (no silent fail)", async () => {
+  it("empty workspace upload shows inline error in proposal panel (no silent fail)", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -143,7 +143,7 @@ describe("AgreementRecipientReview revised upload → compare (regression guard)
     await user.upload(screen.getByTestId("recipient-import-draft-file-input"), emptyTxt);
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-draft-import-error-pick-method")).toBeTruthy();
+      expect(screen.getByText(/no usable agreement text to compare/i)).toBeTruthy();
     });
     expect(screen.queryByTestId("recipient-suggested-changes-panel")).toBeNull();
   }, 25_000);

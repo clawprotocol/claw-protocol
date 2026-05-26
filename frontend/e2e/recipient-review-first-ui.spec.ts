@@ -313,9 +313,9 @@ test("review-first simplified UI (desktop + laptop PNGs)", async ({ page }, test
     await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("recipient-review-first-actions")).toBeVisible();
     await expect(page.getByRole("button", { name: "Approve draft" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Propose updated draft" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Propose updated agreement" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Suggest changes" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "More options" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "More options" })).toHaveCount(0);
     await expect(page.getByTestId("recipient-review-upload-updated-draft")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Request changes/i })).toHaveCount(0);
 
@@ -330,6 +330,12 @@ test("review-first simplified UI (desktop + laptop PNGs)", async ({ page }, test
       ),
       fullPage: true,
     });
+    if (viewport.name === "mobile") {
+      await page.screenshot({
+        path: join(artifactDir, "initial-review-screen-mobile.png"),
+        fullPage: true,
+      });
+    }
   }
 });
 
@@ -483,9 +489,18 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("recipient-review-propose-updated-draft").click();
   await expect(page.getByTestId("recipient-edit-draft-textarea")).toBeVisible({ timeout: 15_000 });
-  const entryControls = page.getByTestId("recipient-manual-propose-controls");
-  await expect(entryControls.getByRole("heading", { name: "Update agreement" })).toBeVisible();
-  await expect(entryControls.getByText("Edit the agreement anywhere, then paste the updated wording below.")).toBeVisible();
+  const proposalPanel = page.getByTestId("recipient-propose-update-standard-panel");
+  await expect(proposalPanel.getByRole("heading", { name: "Propose updated agreement" })).toBeVisible();
+  await expect(proposalPanel.getByText("Edit the agreement in any software you prefer.")).toBeVisible();
+  await expect(proposalPanel.getByText("When finished, paste the FULL updated agreement below.")).toBeVisible();
+  await expect(
+    proposalPanel.getByText("LawDog will compare the wording and show all material changes before submission."),
+  ).toBeVisible();
+  await expect(page.getByTestId("recipient-edit-draft-textarea")).toHaveAttribute(
+    "placeholder",
+    "Paste the complete updated agreement here…",
+  );
+  await expect(page.getByRole("button", { name: "Or upload a .txt file instead" })).toBeVisible();
   await expect(page.getByTestId("recipient-review-personal-link-required")).toHaveCount(0);
   await page.screenshot({
     path: join(artifactDir, "review-first-propose-update-clean.png"),
@@ -500,6 +515,15 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
     path: join(artifactDir, "revised-draft-minimal-entry-mobile.png"),
     fullPage: true,
   });
+  await page.screenshot({
+    path: join(artifactDir, "propose-updated-agreement-state-mobile.png"),
+    fullPage: true,
+  });
+  await page.getByTestId("recipient-edit-draft-textarea").focus();
+  await page.screenshot({
+    path: join(artifactDir, "textarea-focused-proposal-state-mobile.png"),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 1440, height: 1100 });
   await expect(page.getByTestId("recipient-revision-voice-field")).toHaveCount(0);
   await expect(page.getByTestId("recipient-compose-tablist")).toHaveCount(0);
@@ -512,6 +536,10 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   await page.getByTestId("recipient-review-proposed-update-preview").scrollIntoViewIfNeeded();
   await page.screenshot({
     path: join(artifactDir, "revised-draft-changes-detected-mobile.png"),
+    fullPage: true,
+  });
+  await page.screenshot({
+    path: join(artifactDir, "detected-changes-preview-state-mobile.png"),
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1100 });
