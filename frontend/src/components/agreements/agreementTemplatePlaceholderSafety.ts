@@ -13,6 +13,11 @@ import { buildPartyEntries, normalizeSignatureBlockHeadings } from "./paidProAgr
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import { isCanonicalCommittedText, stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
 import { isStarterDocumentSurface } from "./agreementDocumentSurfacePolicy";
+import {
+  logPlaceholderScanSkippedTransient,
+  shouldSkipPlaceholderScanForTransientPreview,
+  transientGateInputFromPlaceholderContext,
+} from "./agreementPreviewPlaceholderTransientGate";
 import { formatStarterPreviewForDisplay } from "./starterPreviewFormatting";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
@@ -150,6 +155,12 @@ export type PlaceholderSafetyContext = {
   partyNames?: readonly (string | null | undefined)[] | null;
   agreementFamily?: string | null;
   surface: string;
+  /** When true, do not run fatal scan (generation / hydrate still in flight). */
+  isGenerating?: boolean;
+  /** When false, backend draft payload is not ready — skip fatal preview block. */
+  hasDraftPayload?: boolean;
+  /** Authoritative corpus source; `none` / `blocked_short_preview` skip fatal scan. */
+  authoritativeSource?: string | null;
 };
 
 export type PlaceholderSafetyOutcome = {
@@ -1051,6 +1062,25 @@ export function inspectStarterUserVisibleAgreementPlainText(
 ): PlaceholderSafetyOutcome {
   const intakeRaw = (ctx.intakeRaw ?? "").trim();
   const display = formatStarterPreviewForDisplay(stripCanonicalCommitMarker(text));
+  const transient = transientGateInputFromPlaceholderContext(ctx, display);
+  if (shouldSkipPlaceholderScanForTransientPreview(transient)) {
+    logPlaceholderScanSkippedTransient({
+      surface: ctx.surface,
+      len: transient.len ?? display.length,
+      isGenerating: ctx.isGenerating,
+      hasDraftPayload: ctx.hasDraftPayload,
+      authoritativeSource: ctx.authoritativeSource ?? null,
+    });
+    return {
+      ok: true,
+      text: display,
+      repaired: [],
+      remaining: [],
+      remainingFatal: [],
+      remainingDetail: [],
+      partyResolution: resolvePlaceholderPartyNamesWithMeta({ ...ctx, intakeRaw }, display),
+    };
+  }
   const partyResolution = resolvePlaceholderPartyNamesWithMeta(
     { ...ctx, intakeRaw },
     display,

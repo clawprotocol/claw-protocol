@@ -171,6 +171,12 @@ import {
   collapseDuplicateEsignNoticesInFullPreview,
   hydrateIdentityPlaceholdersInAgreementPreviewPlain,
 } from "./agreementPreviewFromDraft";
+import {
+  isPlaceholderSafetyBlockedPreviewText,
+  shouldDeferStarterPreviewToLoadingShell,
+  shouldSkipPlaceholderScanForTransientPreview,
+  stripPlaceholderBlockerFromPersistPlain,
+} from "./agreementPreviewPlaceholderTransientGate";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import { extractStructuredPatchesFromPreview } from "./agreementPreviewSync";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
@@ -2341,6 +2347,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [agreementDocumentText, setAgreementDocumentText] = useState("");
   const agreementDocumentDirtyRef = useRef(false);
   const agreementDocumentTextRef = useRef("");
+  /** True after POST /api/agreements/draft returns a draft payload (free starter review). */
+  const starterReviewServerDraftReadyRef = useRef(false);
+  const [starterReviewServerDraftReadyTick, setStarterReviewServerDraftReadyTick] = useState(0);
+  const previewPlaceholderGateIsGeneratingRef = useRef(false);
+  const [previewPlaceholderGateSyncTick, setPreviewPlaceholderGateSyncTick] = useState(0);
   const proRefineIntakeTextForProPanelsRef = useRef("");
   const proRefineCurrentDocumentTextForProPanelsRef = useRef("");
   const applyProRefineOutputToProSurfaceRef = useRef<
@@ -2599,16 +2610,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumSendPathUnlocked ||
         premiumPersistedFlowActive
       );
+      const placeholderGate = {
+        isGenerating: previewPlaceholderGateIsGeneratingRef.current,
+        hasDraftPayload: starterReviewServerDraftReadyRef.current,
+        authoritativeSource: null as string | null,
+      };
       if (starterPreview) {
-        return buildStarterAgreementPreviewForReview(d, { intakeText: debouncedStepBuffer });
+        return buildStarterAgreementPreviewForReview(d, {
+          intakeText: debouncedStepBuffer,
+          placeholderGate,
+        });
       }
       return buildAgreementPreviewText(d, {
         starterPreview: false,
         premiumDeliverablePreview: true,
         intakeText: debouncedStepBuffer,
+        placeholderGate,
       });
     },
-    [tier, premiumSendPathUnlocked, premiumPersistedFlowActive, debouncedStepBuffer],
+    [
+      tier,
+      premiumSendPathUnlocked,
+      premiumPersistedFlowActive,
+      debouncedStepBuffer,
+      starterReviewServerDraftReadyTick,
+      previewPlaceholderGateSyncTick,
+    ],
   );
 
   /** Recipient / modal handoffs must not replace a committed POST /premium-full-draft corpus with live preview. */
@@ -7199,6 +7226,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setHardError(null);
     setGuidedCompletionPhase(GUIDED_COMPLETION_PHASE_INACTIVE);
     setGuidedCompletionSession(null);
+    starterReviewServerDraftReadyRef.current = false;
+    setStarterReviewServerDraftReadyTick((n) => n + 1);
     setCreateFlowPhase("generating_draft");
     setDisplayPhase("generating_draft");
     setCreateUiStage(CreateUiStage.DRAFT);
@@ -8238,6 +8267,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const normalized = await hydrateCreatedAgreement(id, postDraft, partyNameContext);
       console.log("[AgreementIntake] persistence + hydrate OK, advancing wizard", id);
       setHardError(null);
+      starterReviewServerDraftReadyRef.current = true;
+      setStarterReviewServerDraftReadyTick((n) => n + 1);
       reviewAgreementIdRef.current = id;
       setReviewAgreementId(id);
       const hydratedServerBody = (
@@ -9165,6 +9196,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       loading);
 
   useEffect(() => {
+    previewPlaceholderGateIsGeneratingRef.current = isGenerating;
+    setPreviewPlaceholderGateSyncTick((n) => n + 1);
+  }, [isGenerating]);
+
+  useEffect(() => {
     if (!homeHeroAutoGenerate || !onHomeGuidedTransitionPhase) return;
     const reviewReady =
       Boolean(draft) &&
@@ -9513,6 +9549,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     if (agreementDocumentDirtyRef.current) return;
+    const placeholderGate = {
+      isGenerating: previewPlaceholderGateIsGeneratingRef.current,
+      hasDraftPayload: starterReviewServerDraftReadyRef.current,
+      authoritativeSource: null as string | null,
+    };
     const snapGuard = readPremiumCompletionSnapshot();
     if (
       shouldSkipAgreementDocLivePreviewSync({
@@ -9540,13 +9581,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumSendPathUnlocked ||
         premiumPersistedFlowActive
       );
-      setAgreementDocumentText(
-        buildAgreementPreviewText(draft, {
-          starterPreview,
-          premiumDeliverablePreview: !starterPreview,
-          intakeText: debouncedStepBuffer,
-        }),
-      );
+      const nextPreview = buildAgreementPreviewText(draft, {
+        starterPreview,
+        premiumDeliverablePreview: !starterPreview,
+        intakeText: debouncedStepBuffer,
+        placeholderGate,
+      });
+      if (
+        isPlaceholderSafetyBlockedPreviewText(nextPreview) &&
+        shouldSkipPlaceholderScanForTransientPreview({
+          text: nextPreview,
+          surface: starterPreview ? "preview_starter" : "preview_structured",
+          len: nextPreview.length,
+          ...placeholderGate,
+        })
+      ) {
+        return;
+      }
+      setAgreementDocumentText(stripPlaceholderBlockerFromPersistPlain(nextPreview));
     } catch {
       setAgreementDocumentText("");
     }
@@ -9558,6 +9610,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
     debouncedStepBuffer,
+    starterReviewServerDraftReadyTick,
+    previewPlaceholderGateSyncTick,
   ]);
 
   const scheduleAgreementDocSync = React.useCallback((text: string) => {
@@ -10131,6 +10185,50 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSendPathUnlocked,
       premiumSurfaceGateTick,
       showUpgradeToFullDraftOnReview,
+    ],
+  );
+
+  const starterPreviewTransientGate = useMemo(
+    () => ({
+      isGenerating,
+      hasDraftPayload: starterReviewServerDraftReadyRef.current,
+      authoritativeSource: null as string | null,
+    }),
+    [isGenerating, starterReviewServerDraftReadyTick],
+  );
+
+  const visibleStarterAgreementDocumentText = useMemo(() => {
+    const doc = agreementDocumentText.trim();
+    if (
+      isPlaceholderSafetyBlockedPreviewText(doc) &&
+      shouldSkipPlaceholderScanForTransientPreview({
+        text: doc,
+        surface: "preview_starter",
+        len: doc.length,
+        ...starterPreviewTransientGate,
+      })
+    ) {
+      return "";
+    }
+    return stripPlaceholderBlockerFromPersistPlain(agreementDocumentText);
+  }, [agreementDocumentText, starterPreviewTransientGate]);
+
+  const showStarterPreviewLoadingShell = useMemo(
+    () =>
+      isFreeStreamlineDraftReview &&
+      shouldDeferStarterPreviewToLoadingShell({
+        text: visibleStarterAgreementDocumentText || renderedAgreementPreview,
+        surface: "preview_starter",
+        len: (visibleStarterAgreementDocumentText || renderedAgreementPreview).trim().length,
+        ...starterPreviewTransientGate,
+        hasLocalDraft: Boolean(draft),
+      }),
+    [
+      isFreeStreamlineDraftReview,
+      visibleStarterAgreementDocumentText,
+      renderedAgreementPreview,
+      starterPreviewTransientGate,
+      draft,
     ],
   );
 
@@ -22357,7 +22455,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     : ""
                                 }`}
                               >
-                                {useStarterDocumentPaperSurface ? (
+                                {useStarterDocumentPaperSurface && showStarterPreviewLoadingShell ? (
+                                  <div
+                                    className="mb-4 motion-safe:animate-pulse rounded-xl border border-emerald-500/20 bg-slate-950/60 p-5 shadow-md shadow-emerald-950/10 sm:p-6"
+                                    role="status"
+                                    aria-live="polite"
+                                    aria-busy="true"
+                                  >
+                                    <p className="text-sm font-medium text-slate-200 sm:text-base">
+                                      {resolveProductionTwoPaneLoadingUserCopy()}
+                                    </p>
+                                    <div className="mt-5 space-y-3">
+                                      <div className="h-3 w-3/4 rounded bg-slate-800/90" />
+                                      <div className="h-3 w-full rounded bg-slate-800/70" />
+                                      <div className="h-24 w-full rounded-lg border border-slate-800/60 bg-[#0d1424]/80" />
+                                    </div>
+                                  </div>
+                                ) : useStarterDocumentPaperSurface ? (
                                   <StarterDraftDocumentSurface
                                     editorRef={agreementPreviewEditorRef}
                                     id="claw-agreement-preview-editor"
@@ -22365,7 +22479,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     parties={draft?.parties}
                                     intakeText={intakeCombined}
                                     partiesLine={displayLivePreviewModel.partiesLine}
-                                    value={agreementDocumentText}
+                                    value={visibleStarterAgreementDocumentText}
                                     disabled={(isGenerating && !draft) || upgradeLockActive}
                                     onChange={(next) => {
                                       agreementDocumentDirtyRef.current = true;

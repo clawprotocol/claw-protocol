@@ -283,6 +283,21 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
   });
 
+  it("free starter review skips transient placeholder block until server draft payload", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("starterReviewServerDraftReadyRef");
+    expect(intake).toContain("placeholderGate");
+    expect(intake).toContain("shouldSkipPlaceholderScanForTransientPreview");
+    const previewDraft = readFileSync(join(__dirname, "agreementPreviewFromDraft.ts"), "utf8");
+    expect(previewDraft).toContain("logPlaceholderScanSkippedTransient");
+    expect(intake).toContain("showStarterPreviewLoadingShell");
+    expect(intake).toContain("visibleStarterAgreementDocumentText");
+    expect(intake).toContain("stripPlaceholderBlockerFromPersistPlain");
+    expect(intake).toMatch(
+      /isPlaceholderSafetyBlockedPreviewText\(nextPreview\)[\s\S]{0,320}shouldSkipPlaceholderScanForTransientPreview/,
+    );
+  });
+
   it("paid authoritative Pro hides top adjust card but keeps lower Finalize panel", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("showTopProAdjustCard");

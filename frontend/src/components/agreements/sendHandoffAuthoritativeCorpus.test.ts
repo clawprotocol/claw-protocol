@@ -92,6 +92,14 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     expect(longestPlainForAgreementPersist(parsed, "e".repeat(50))).toBe(longPremium);
   });
 
+  it("longestPlainForAgreementPersist ignores placeholder blocker editor text", () => {
+    const parsed = minimalParsed({ purpose: "real agreement body ".repeat(40) });
+    const blocker =
+      "LawDog blocked this preview because unresolved drafting placeholders remain in the agreement text.";
+    expect(longestPlainForAgreementPersist(parsed, blocker).length).toBeGreaterThan(100);
+    expect(longestPlainForAgreementPersist(parsed, blocker)).not.toContain("LawDog blocked");
+  });
+
   it("regression: ~15k persisted draft must not resolve to starter-length preview via picker", () => {
     const corpus = "y".repeat(15_000);
     expect(corpus.length).toBeGreaterThan(SEND_HANDOFF_AUTHORITATIVE_MIN_LEN);

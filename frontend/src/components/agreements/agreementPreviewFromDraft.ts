@@ -57,8 +57,13 @@ import { finalizeAgreementOutput } from "./agreementOutputQuality";
 import { formatMilestonePaymentTermsFromIntake } from "./intakeCurrencyParse";
 import { renderClausePrimitive, selectClausePrimitivesForIntake } from "./agreementOutputQuality/canonicalClausePrimitives";
 import {
+  logPlaceholderScanSkippedTransient,
+  shouldSkipPlaceholderScanForTransientPreview,
+} from "./agreementPreviewPlaceholderTransientGate";
+import {
   finalizeUserVisibleAgreementPlainText,
   PLACEHOLDER_SAFETY_PREVIEW_BLOCKED,
+  type PlaceholderSafetyContext,
 } from "./agreementTemplatePlaceholderSafety";
 
 const MISSING = "[Not yet specified]";
@@ -416,6 +421,11 @@ export type AgreementPreviewBuildOptions = {
   premiumWinningCorpusFallback?: string;
   /** When the paid pipeline already accepted the Pro body; trust over live preview. */
   paidAuthoritativeProBody?: string | null;
+  /** Transient starter review: skip fatal placeholder block until draft payload / min length. */
+  placeholderGate?: Pick<
+    PlaceholderSafetyContext,
+    "isGenerating" | "hasDraftPayload" | "authoritativeSource"
+  >;
 };
 
 function buildOperatingAgreementPreviewText(draft: ParsedDraftShape, options?: AgreementPreviewBuildOptions): string {
@@ -727,12 +737,37 @@ function applyAgreementPreviewPlaceholderGate(
     tier,
   });
   let display = tier === "starter" ? formatStarterPreviewForDisplay(quality.text) : quality.text;
-  const gate = finalizeUserVisibleAgreementPlainText(display, {
+  const placeholderCtx: PlaceholderSafetyContext = {
     intakeRaw: options?.intakeText ?? null,
     partyNames: (draft.parties || []).map((p) => p.name),
     agreementFamily: draft.agreement_family ?? null,
     surface,
+    isGenerating: options?.placeholderGate?.isGenerating,
+    hasDraftPayload: options?.placeholderGate?.hasDraftPayload,
+    authoritativeSource: options?.placeholderGate?.authoritativeSource ?? null,
+  };
+  const transientSkip = shouldSkipPlaceholderScanForTransientPreview({
+    text: display,
+    surface,
+    len: display.trim().length,
+    isGenerating: placeholderCtx.isGenerating,
+    hasDraftPayload: placeholderCtx.hasDraftPayload,
+    authoritativeSource: placeholderCtx.authoritativeSource,
   });
+  if (transientSkip) {
+    logPlaceholderScanSkippedTransient({
+      surface,
+      len: display.trim().length,
+      isGenerating: placeholderCtx.isGenerating,
+      hasDraftPayload: placeholderCtx.hasDraftPayload,
+      authoritativeSource: placeholderCtx.authoritativeSource ?? null,
+    });
+    if (tier === "starter" && !starterPreviewHasParagraphSectionBreaks(display)) {
+      return formatStarterPreviewForDisplay(display);
+    }
+    return display;
+  }
+  const gate = finalizeUserVisibleAgreementPlainText(display, placeholderCtx);
   if (!gate.ok) return PLACEHOLDER_SAFETY_PREVIEW_BLOCKED;
   if (tier === "starter" && !starterPreviewHasParagraphSectionBreaks(gate.text)) {
     return formatStarterPreviewForDisplay(gate.text);

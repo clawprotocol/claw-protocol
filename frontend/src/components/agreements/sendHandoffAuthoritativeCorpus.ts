@@ -1,4 +1,5 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { stripPlaceholderBlockerFromPersistPlain } from "./agreementPreviewPlaceholderTransientGate";
 import { corpusHasVisibleSignatureExecutionLines } from "./guidedDealCompletion/signatureRegion";
 import { resolvePaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -252,7 +253,7 @@ export function longestPlainForAgreementPersist(
     String(merged.premium_full_document_text ?? "").trim(),
     String(merged.premium_server_full_document_text ?? "").trim(),
     String(merged.premium_server_repair_document_text ?? "").trim(),
-    String(agreementEditorPlain ?? "").trim(),
+    stripPlaceholderBlockerFromPersistPlain(String(agreementEditorPlain ?? "").trim()),
     String(merged.purpose ?? "").trim(),
   ].filter(Boolean);
   if (candidates.length === 0) return "";
