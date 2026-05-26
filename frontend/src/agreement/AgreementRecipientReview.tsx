@@ -238,6 +238,8 @@ import {
 import {
   buildReviewFirstTextDiffSummary,
   canSubmitReviewFirstProposal,
+  logReviewFirstProposalCompareDiag,
+  type ReviewFirstChangedSection,
   type ReviewFirstDiffPart,
 } from "./reviewFirstTextDiff";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
@@ -290,6 +292,39 @@ function isSupportedReviewFirstRevisedDraftFile(file: File): boolean {
   return name.endsWith(".txt") || name.endsWith(".md") || type === "text/plain" || type === "text/markdown";
 }
 
+function renderReviewFirstChangeSection(section: ReviewFirstChangedSection) {
+  return (
+    <article key={`${section.title}-${section.summary}`} className="rounded-xl bg-slate-50/80 p-3">
+      <div className="text-sm font-semibold text-slate-950">{section.title}</div>
+      <div className="mt-3 space-y-2">
+        <div className="rounded-lg bg-white p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Previous</div>
+          <p className="mt-1.5 break-words text-sm leading-relaxed text-slate-800">
+            {renderReviewFirstDiffParts(section.previousParts, "removed") ?? section.previous}
+          </p>
+        </div>
+        <div className="rounded-lg bg-white p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Updated</div>
+          <p className="mt-1.5 break-words text-sm leading-relaxed text-slate-800">
+            {renderReviewFirstDiffParts(section.proposedParts, "added") ?? section.proposed}
+          </p>
+        </div>
+      </div>
+      <details className="mt-3 text-xs text-slate-600">
+        <summary className="cursor-pointer font-medium text-slate-500">View full section</summary>
+        <div className="mt-2 grid gap-2 md:grid-cols-2">
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 font-sans text-xs leading-relaxed">
+            {section.fullPrevious}
+          </pre>
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 font-sans text-xs leading-relaxed">
+            {section.fullProposed}
+          </pre>
+        </div>
+      </details>
+    </article>
+  );
+}
+
 function renderReviewFirstDiffParts(parts: ReviewFirstDiffPart[] | null | undefined, changedKind: "added" | "removed") {
   if (!parts?.length) return null;
   const grouped = parts.reduce<ReviewFirstDiffPart[]>((acc, part) => {
@@ -302,7 +337,7 @@ function renderReviewFirstDiffParts(parts: ReviewFirstDiffPart[] | null | undefi
     return acc;
   }, []);
   let used = 0;
-  const maxChars = 240;
+  const maxChars = 280;
   const visible = grouped.flatMap((part, index) => {
     if (used >= maxChars) return [];
     const remaining = maxChars - used;
@@ -1112,8 +1147,22 @@ export function AgreementRecipientReview({
     if (!recipientPreview || !previewDiff) return null;
     const structuralPaste =
       recipientPreview.routingKind === "whole_document"
-        ? String(recipientPreview.proposedDraft.purpose ?? "").trim()
+        ? externalAiPaste.trim() || String(recipientPreview.proposedDraft.purpose ?? "").trim()
         : "";
+    const structuralBaseline =
+      recipientPreview.routingKind === "whole_document"
+        ? (
+            resolveReviewFirstDisplayCorpus(recipientPreview.baselineDraft)?.text.trim() ||
+            htmlToPlainText(recipientPreview.baselineHtml || "").trim()
+          )
+        : "";
+    const structuralOptions =
+      structuralPaste || structuralBaseline
+        ? {
+            ...(structuralPaste ? { structuralProposedPlainOverride: structuralPaste } : {}),
+            ...(structuralBaseline ? { structuralBaselinePlainOverride: structuralBaseline } : {}),
+          }
+        : undefined;
     return buildRecipientLegalRedlinePlainTexts(
       recipientPreview.baselineDraft,
       recipientPreview.proposedDraft,
@@ -1122,9 +1171,9 @@ export function AgreementRecipientReview({
       previewDiff.hasSnapshotDiff,
       recipientPreview.revisionText ?? "",
       previewDiff.snapshotCompare.changedFields,
-      structuralPaste ? { structuralProposedPlainOverride: structuralPaste } : undefined,
+      structuralOptions,
     );
-  }, [recipientPreview, previewDiff]);
+  }, [externalAiPaste, previewDiff, recipientPreview]);
 
   const recipientIntentGapCount = useMemo(() => {
     const o = recipientRedlinePlainTexts?.instructionIntentOutcomes;
@@ -2130,8 +2179,22 @@ export function AgreementRecipientReview({
     if (workflowMode !== "revised" || revisedIntakePhase !== "editing") return null;
     return buildReviewFirstTextDiffSummary(reviewFirstComparisonBaseline, externalAiPaste);
   }, [externalAiPaste, revisedIntakePhase, reviewFirstComparisonBaseline, workflowMode]);
+  const reviewFirstConfirmedDiff = useMemo(() => {
+    if (workflowMode !== "revised" || !recipientPreview) return null;
+    const pasted =
+      externalAiPaste.trim() || String(recipientPreview.proposedDraft.purpose ?? "").trim();
+    if (!pasted) return null;
+    return buildReviewFirstTextDiffSummary(reviewFirstComparisonBaseline, pasted);
+  }, [externalAiPaste, recipientPreview, reviewFirstComparisonBaseline, workflowMode]);
+  const reviewFirstCompareSections = useMemo(
+    () => reviewFirstConfirmedDiff?.changedSections.slice(0, 4) ?? [],
+    [reviewFirstConfirmedDiff],
+  );
   const hasReviewerAttribution = !needsPersonalizedLink && Boolean(participantPid.trim() || !partiesHaveIds);
-  const reviewFirstComparisonPreviewRendered = Boolean(recipientPreview && previewDiff && !previewDiff.isCompleteNoOp);
+  const reviewFirstComparisonPreviewRendered = Boolean(
+    recipientPreview &&
+      (reviewFirstConfirmedDiff?.hasMaterialChanges || (previewDiff && !previewDiff.isCompleteNoOp)),
+  );
   const reviewFirstProposalSubmitReady = canSubmitReviewFirstProposal({
     diff: reviewFirstTextDiff,
     hasReviewerAttribution,
@@ -2332,12 +2395,33 @@ export function AgreementRecipientReview({
       }
       const proposedDraft = cloneDraftForRecipientPreview(draft);
       proposedDraft.purpose = paste;
-      const proposedHtml = renderAgreementDraftHtmlLikeBackend(proposedDraft);
+      const reviewFirstPasteDiff = buildReviewFirstTextDiffSummary(reviewFirstComparisonBaseline, paste);
+      const reviewFirstHasMaterialChanges = reviewFirstPasteDiff.hasMaterialChanges;
+      const baselineCorpus = reviewFirstComparisonBaseline.trim();
+      let proposedHtml: string;
+      if (baselineCorpus) {
+        baselineHtml = renderReviewFirstCorpusHtml(baselineCorpus);
+        proposedHtml = renderReviewFirstCorpusHtml(paste);
+        proposedDraft.server_full_document_text = paste;
+        if (draft.premium_render_source === "review_first_final_corpus") {
+          proposedDraft.premium_server_full_document_text = paste;
+        }
+      } else {
+        proposedHtml = renderAgreementDraftHtmlLikeBackend(proposedDraft);
+      }
       const revisionText = buildRecipientRevisionText(instCombined, paste).text;
       const integrity = assessRecipientPreviewDiff(baselineDraft, proposedDraft, baselineHtml, proposedHtml, {
         recipientInstructionPlain: revisionText.trim(),
       });
-      if (integrity.isCompleteNoOp) {
+      logReviewFirstProposalCompareDiag({
+        normalizedOriginalLen: reviewFirstPasteDiff.normalizedPrevious.length,
+        normalizedProposalLen: reviewFirstPasteDiff.normalizedProposed.length,
+        changedSectionCount: reviewFirstPasteDiff.changedSections.length,
+        comparisonGenerated: reviewFirstHasMaterialChanges,
+        integrityIsCompleteNoOp: integrity.isCompleteNoOp,
+        proposalReadyState: reviewFirstHasMaterialChanges || !integrity.isCompleteNoOp,
+      });
+      if (integrity.isCompleteNoOp && !reviewFirstHasMaterialChanges) {
         setRecipientRevisePreviewError(null);
         setError(RECIPIENT_COMPARE_FAILED_FALLBACK);
         setRecipientPreview(null);
@@ -2876,10 +2960,22 @@ export function AgreementRecipientReview({
     );
   }
 
-  const comparePanel =
-    recipientPreview && previewDiff && !previewDiff.isCompleteNoOp && !recipientSuggestedEditsSentAck ? (
+  const showRecipientComparePanel = Boolean(
+    recipientPreview &&
+      !recipientSuggestedEditsSentAck &&
+      !recipientImportNoMaterialDiff &&
+      (workflowMode === "revised"
+        ? reviewFirstConfirmedDiff?.hasMaterialChanges
+        : previewDiff && !previewDiff.isCompleteNoOp),
+  );
+
+  const comparePanel = showRecipientComparePanel ? (
       <div
-        className="rounded-xl border border-slate-800/70 bg-slate-950/35 p-4 shadow-sm"
+        className={
+          workflowMode === "revised"
+            ? "rounded-xl bg-white p-4 shadow-sm"
+            : "rounded-xl border border-slate-800/70 bg-slate-950/35 p-4 shadow-sm"
+        }
         data-testid="recipient-suggested-changes-panel"
         data-recipient-revision-round={revisionLineage.revisionRound}
         data-recipient-compare-base-version-id={revisionLineage.compareBaseVersionId ?? ""}
@@ -2888,38 +2984,95 @@ export function AgreementRecipientReview({
         <h2
           ref={previewSummaryHeadingRef}
           tabIndex={-1}
-          className="text-base font-semibold tracking-tight text-slate-100"
+          className={`text-base font-semibold tracking-tight ${
+            workflowMode === "revised" ? "text-slate-950" : "text-slate-100"
+          }`}
           data-testid="recipient-preview-summary-heading"
         >
           Changes detected
         </h2>
-        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+        <p
+          className={`mt-1.5 text-xs leading-relaxed ${
+            workflowMode === "revised" ? "text-slate-600" : "text-slate-400"
+          }`}
+        >
           Everyone will review these wording changes before approval.
         </p>
+        {workflowMode === "revised" && reviewFirstConfirmedDiff ? (
+          <p className="mt-2 text-sm leading-relaxed text-slate-700" data-testid="recipient-review-proposed-update-summary">
+            {reviewFirstConfirmedDiff.summary}
+          </p>
+        ) : null}
         <div
-          className="mt-4 rounded-xl border border-slate-700/60 bg-slate-950/55 p-4"
+          className={`mt-4 rounded-xl p-4 ${
+            workflowMode === "revised" ? "bg-slate-50/80" : "border border-slate-700/60 bg-slate-950/55"
+          }`}
           data-testid="recipient-review-change-visibility-summary"
         >
-          <div className="text-sm font-semibold text-slate-100">
+          <div
+            className={`text-sm font-semibold ${workflowMode === "revised" ? "text-slate-950" : "text-slate-100"}`}
+          >
             Ready to submit
           </div>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            {simpleRecipientChange?.summary ?? simpleRecipientChange?.title ?? "Wording change"} · Updated by {proposerDisplayNameForApi}
+            {reviewFirstConfirmedDiff?.summary ??
+              simpleRecipientChange?.summary ??
+              simpleRecipientChange?.title ??
+              "Wording change"}{" "}
+            · Updated by {proposerDisplayNameForApi}
           </p>
-          {simpleRecipientChange ? (
+          {workflowMode === "revised" && reviewFirstCompareSections.length > 0 ? (
+            <div className="mt-4 space-y-3" data-testid="recipient-review-proposed-update-before-after">
+              {reviewFirstCompareSections.map((section) => renderReviewFirstChangeSection(section))}
+            </div>
+          ) : simpleRecipientChange ? (
             <div className="mt-4 space-y-3">
-              <div className="text-sm font-semibold text-slate-100">{simpleRecipientChange.title}</div>
-              <div className="rounded-lg border border-rose-900/35 bg-slate-950/45 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-rose-200">Previous</div>
-                <p className="mt-2 text-sm leading-relaxed text-slate-100">
+              <div className={`text-sm font-semibold ${workflowMode === "revised" ? "text-slate-950" : "text-slate-100"}`}>
+                {simpleRecipientChange.title}
+              </div>
+              <div
+                className={
+                  workflowMode === "revised"
+                    ? "rounded-lg bg-white p-3"
+                    : "rounded-lg border border-rose-900/35 bg-slate-950/45 p-3"
+                }
+              >
+                <div
+                  className={`text-xs font-semibold uppercase tracking-wide ${
+                    workflowMode === "revised" ? "text-rose-700" : "text-rose-200"
+                  }`}
+                >
+                  Previous
+                </div>
+                <p
+                  className={`mt-2 text-sm leading-relaxed ${
+                    workflowMode === "revised" ? "break-words text-slate-800" : "text-slate-100"
+                  }`}
+                >
                   {simpleRecipientChange.previousParts
                     ? renderReviewFirstDiffParts(simpleRecipientChange.previousParts, "removed")
                     : `“${simpleRecipientChange.previous}”`}
                 </p>
               </div>
-              <div className="rounded-lg border border-emerald-800/45 bg-slate-950/45 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-emerald-200">Updated</div>
-                <p className="mt-2 text-sm leading-relaxed text-slate-100">
+              <div
+                className={
+                  workflowMode === "revised"
+                    ? "rounded-lg bg-white p-3"
+                    : "rounded-lg border border-emerald-800/45 bg-slate-950/45 p-3"
+                }
+              >
+                <div
+                  className={`text-xs font-semibold uppercase tracking-wide ${
+                    workflowMode === "revised" ? "text-emerald-700" : "text-emerald-200"
+                  }`}
+                >
+                  Updated
+                </div>
+                <p
+                  className={`mt-2 text-sm leading-relaxed ${
+                    workflowMode === "revised" ? "break-words text-slate-800" : "text-slate-100"
+                  }`}
+                >
                   {simpleRecipientChange.proposedParts
                     ? renderReviewFirstDiffParts(simpleRecipientChange.proposedParts, "added")
                     : `“${simpleRecipientChange.proposed}”`}
@@ -2928,10 +3081,22 @@ export function AgreementRecipientReview({
               <details className="text-xs text-slate-400">
                 <summary className="cursor-pointer font-medium text-slate-500">View full section</summary>
                 <div className="mt-2 grid gap-2 md:grid-cols-2">
-                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/55 p-3 font-sans text-xs leading-relaxed text-slate-300">
+                  <pre
+                    className={`max-h-52 overflow-auto whitespace-pre-wrap rounded-lg p-3 font-sans text-xs leading-relaxed ${
+                      workflowMode === "revised"
+                        ? "border border-slate-200 bg-white text-slate-700"
+                        : "border border-slate-800 bg-slate-950/55 text-slate-300"
+                    }`}
+                  >
                     {simpleRecipientChange.fullPrevious}
                   </pre>
-                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/55 p-3 font-sans text-xs leading-relaxed text-slate-300">
+                  <pre
+                    className={`max-h-52 overflow-auto whitespace-pre-wrap rounded-lg p-3 font-sans text-xs leading-relaxed ${
+                      workflowMode === "revised"
+                        ? "border border-slate-200 bg-white text-slate-700"
+                        : "border border-slate-800 bg-slate-950/55 text-slate-300"
+                    }`}
+                  >
                     {simpleRecipientChange.fullProposed}
                   </pre>
                 </div>
@@ -2949,7 +3114,7 @@ export function AgreementRecipientReview({
           </p>
         ) : null}
 
-        {legalRedlineDocumentVm ? (
+        {(workflowMode === "revised" && reviewFirstConfirmedDiff?.hasMaterialChanges) || legalRedlineDocumentVm ? (
           <>
             <div className="mt-5 flex flex-wrap gap-2">
               <button
@@ -2963,7 +3128,11 @@ export function AgreementRecipientReview({
               </button>
               <button
                 type="button"
-                className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-200 hover:bg-slate-900/60"
+                className={`btn rounded-lg px-4 py-2 text-xs disabled:opacity-50 ${
+                  workflowMode === "revised"
+                    ? "border border-slate-300 text-slate-700 hover:bg-slate-50"
+                    : "border border-slate-600 text-slate-200 hover:bg-slate-900/60"
+                }`}
                 disabled={saving || previewing}
                 onClick={() => discardPreview()}
               >
@@ -3252,7 +3421,7 @@ export function AgreementRecipientReview({
                 ) : null}
                 </div>
               </details>
-            ) : previewDiff.instructionCaptureWarning ? (
+            ) : previewDiff?.instructionCaptureWarning ? (
               <p
                 className="mt-3 rounded-md border border-amber-600/55 bg-amber-950/35 px-3 py-2.5 text-sm leading-snug text-amber-50"
                 data-testid="recipient-redline-not-reflected-callout"
@@ -3272,7 +3441,7 @@ export function AgreementRecipientReview({
               >
                 We could not place these payment edits in the matched payment section of the agreement text. Your note
                 still goes to the owner. Requested timing:{" "}
-                {extractPaymentPlacementCalloutSnippet(String(recipientPreview.proposedDraft.payment_terms ?? ""))}.{" "}
+                {extractPaymentPlacementCalloutSnippet(String(recipientPreview?.proposedDraft.payment_terms ?? ""))}.{" "}
                 {RECIPIENT_INTENT_REVIEW_BEFORE_SENDING}
               </p>
             ) : recipientRedlinePlainTexts?.paymentTermsInlinePlacementFailed ? (
@@ -3286,7 +3455,7 @@ export function AgreementRecipientReview({
               </p>
             ) : null}
 
-            {recipientRedlinePlainTexts && recipientPreview ? (
+            {recipientRedlinePlainTexts && recipientPreview && legalRedlineDocumentVm ? (
               <details
                 className="hidden mt-2 rounded-md border border-slate-700/40 bg-slate-950/25"
                 data-testid="recipient-preview-export-details"

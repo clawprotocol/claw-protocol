@@ -104,6 +104,8 @@ export type BuildRecipientLegalRedlinePlainTextsOptions = {
    * instead of {@link htmlToPlainTextForLegalRedline} on `proposedHtml` (avoids phantom mass deletions).
    */
   structuralProposedPlainOverride?: string | null;
+  /** Review-first: compare against authoritative display corpus, not rendered field-template HTML. */
+  structuralBaselinePlainOverride?: string | null;
 };
 
 export type BuildRecipientLegalRedlinePlainTextsResult = {
@@ -782,7 +784,11 @@ export function buildRecipientLegalRedlinePlainTexts(
   changedFields: readonly AgreementFieldChange[],
   options?: BuildRecipientLegalRedlinePlainTextsOptions,
 ): BuildRecipientLegalRedlinePlainTextsResult {
-  const cur = htmlToPlainTextForLegalRedline(baselineHtml || "");
+  const baselineOverride = String(options?.structuralBaselinePlainOverride ?? "").trim();
+  const cur =
+    baselineOverride.length >= STRUCTURAL_PURPOSE_MIN_CHARS
+      ? normalizeNewlinesForLegalRedline(baselineOverride)
+      : htmlToPlainTextForLegalRedline(baselineHtml || "");
   const propFromHtml = htmlToPlainTextForLegalRedline(proposedHtml || "");
   const override = String(options?.structuralProposedPlainOverride ?? "").trim();
 

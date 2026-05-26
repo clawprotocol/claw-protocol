@@ -335,3 +335,22 @@ export function canSubmitReviewFirstProposal(args: {
 }): boolean {
   return Boolean(args.diff?.hasMaterialChanges && args.hasReviewerAttribution && args.comparisonPreviewRendered);
 }
+
+/** Dev/test QA only — logs review-first proposal compare diagnostics. */
+export function logReviewFirstProposalCompareDiag(payload: {
+  normalizedOriginalLen: number;
+  normalizedProposalLen: number;
+  changedSectionCount: number;
+  comparisonGenerated: boolean;
+  integrityIsCompleteNoOp: boolean;
+  proposalReadyState: boolean;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "production") return;
+  if (typeof window === "undefined") return;
+  const on =
+    Boolean(typeof import.meta !== "undefined" && import.meta.env?.DEV) ||
+    window.localStorage?.getItem("lawdogReviewFirstCompareDiag") === "1";
+  if (!on) return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-proposal-compare]", payload);
+}
