@@ -22,6 +22,8 @@ export type GuidedIntakeFacts = {
   noticesByEmail: boolean;
   noThirdPartyUptimeGuarantee: boolean;
   ownershipClient: boolean;
+  confidentialityRequested: boolean;
+  providerRetainsBackgroundTools: boolean;
   phaseAllocationText: string | null;
   paymentStructureText: string | null;
 };
@@ -77,7 +79,12 @@ export function parseGuidedIntakeFacts(intakeRaw = ""): GuidedIntakeFacts {
     noThirdPartyUptimeGuarantee: NO_UPTIME_GUARANTEE_RE.test(intake),
     ownershipClient:
       /\b(?:company|client)\s+owns?\b/i.test(intake) ||
-      /\bownership\s+of\s+what\s+gets\s+built\b/i.test(intake),
+      /\bownership\s+of\s+what\s+gets\s+built\b/i.test(intake) ||
+      /\bownership\s+after\s+payment\b/i.test(intake),
+    confidentialityRequested: /\bconfidential(?:ity| information)?\b/i.test(intake),
+    providerRetainsBackgroundTools:
+      /\b(?:service provider|provider|consultant|contractor|vendor)\s+retains?.{0,80}(?:pre[-\s]?existing|background|tools?|templates?|know-how|methods?)\b/i.test(intake) ||
+      /\b(?:pre[-\s]?existing|background)\s+(?:tools?|templates?|materials?|technology|know-how).{0,80}\b(?:retained|remain|provider|consultant|contractor|vendor)\b/i.test(intake),
     phaseAllocationText: milestoneSplit403030
       ? "40% build/configuration, 30% rollout/onboarding, 30% support/acceptance"
       : null,
@@ -114,6 +121,13 @@ export function deriveIntakePrefilledAnswers(facts: GuidedIntakeFacts): Record<s
   }
   if (facts.ownershipClient) {
     out.ip_ownership = "Company owns project deliverables";
+  }
+  if (facts.providerRetainsBackgroundTools) {
+    out.license_background_tools = "Service Provider retains pre-existing tools, templates, know-how, and background materials.";
+  }
+  if (facts.confidentialityRequested) {
+    out.security_obligations = "Mutual confidentiality with reasonable care for shared business and automation information.";
+    out.nda_survival = "Confidentiality obligations survive termination.";
   }
   if (facts.noThirdPartyUptimeGuarantee) {
     out.saas_sla =
@@ -155,6 +169,11 @@ export function isGuidedVariableSatisfiedByIntake(variableId: string, intakeRaw 
     case "ip_ownership":
     case "ip_allocation":
       return facts.ownershipClient;
+    case "license_background_tools":
+      return facts.providerRetainsBackgroundTools;
+    case "security_obligations":
+    case "nda_survival":
+      return facts.confidentialityRequested;
     case "payment_timing":
       return /\bnet\s*\d+\b/i.test(intakeRaw) || /\bon\s+receipt\b/i.test(intakeRaw);
     default:

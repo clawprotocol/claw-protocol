@@ -65,6 +65,8 @@ const MILESTONE_LANGUAGE_RE =
 
 const GOVERNING_LAW_IN_FEES_RE =
   /\b(?:governing\s+law|laws?\s+of\s+(?:the\s+State\s+of\s+)?(?:Delaware|Texas|Oklahoma|New York|California))\b/i;
+const NO_THIRD_PARTY_UPTIME_GUARANTEE_RE =
+  /\bno\s+(?:guaranteed?|guarantee)\s+(?:uptime|availability|sla)\b|\b(?:do\s+not|don't|without)\s+(?:guarantee|guaranteeing)\s+.{0,40}(?:third[-\s]?party|ai\s+platform|platform)\b|\bthird[-\s]?party\s+ai\s+platforms?\.?.{0,60}(?:no|without)\s+guarantee/i;
 
 function normAnswer(s: string): string {
   return (s || "").replace(/\s+/g, " ").trim();
@@ -180,6 +182,10 @@ export function extractGuidedSemanticFacts(
     parseTerminationDays(facts.termination_notice || "") ?? parseTerminationDays(intake);
   const governingLaw =
     parseGoverningLaw(facts.governing_law || "", intake) ?? parseGoverningLaw(intake, "");
+  if (NO_THIRD_PARTY_UPTIME_GUARANTEE_RE.test(intake)) {
+    facts.support_sla =
+      "No guaranteed uptime for third-party AI platforms; commercially reasonable support only.";
+  }
 
   if (paymentMode === "monthly_retainer" && !facts.monthly_fee) {
     const m = intake.match(/\$[\d,]+(?:\.\d{2})?\s*(?:per\s+)?month/i);
@@ -309,6 +315,31 @@ function dedupeGenericBoilerplate(text: string): { text: string; repairs: string
   return { text: dupes.text, repairs };
 }
 
+function stripUptimeGuaranteeContraryToIntake(text: string, intakeRaw: string): { text: string; repairs: string[] } {
+  if (!NO_THIRD_PARTY_UPTIME_GUARANTEE_RE.test(intakeRaw)) return { text, repairs: [] };
+  const repairs: string[] = [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const out = lines.filter((line) => {
+    if (!/\b99\.(?:9|5)\s*%|\buptime\s+target\b/i.test(line)) return true;
+    repairs.push(`semantic_strip_conflicting_uptime:${line.trim().slice(0, 48)}`);
+    return false;
+  });
+  const next = out.join("\n").replace(/\n{3,}/g, "\n\n");
+  if (/no\s+guaranteed\s+uptime|third[-\s]?party\s+ai\s+platforms?/i.test(next)) {
+    return { text: next, repairs };
+  }
+  const injected =
+    "Provider does not guarantee uptime or availability for third-party AI platforms; support is limited to commercially reasonable assistance within Provider-controlled systems.";
+  const supportMatch = next.match(/^\s*\d+\.\s+.*(?:Support|Service Levels|SLA|Maintenance|Acceptance).*$/im);
+  if (!supportMatch || supportMatch.index == null) {
+    repairs.push("semantic_add_no_third_party_uptime");
+    return { text: `${next}\n\n5. Support\n${injected}`.replace(/\n{3,}/g, "\n\n"), repairs };
+  }
+  const insertAt = supportMatch.index + supportMatch[0].length;
+  repairs.push("semantic_add_no_third_party_uptime");
+  return { text: `${next.slice(0, insertAt)}\n${injected}${next.slice(insertAt)}`.replace(/\n{3,}/g, "\n\n"), repairs };
+}
+
 /** Post-Q&A deterministic corpus hygiene driven by structured guided facts. */
 export function reconcileGuidedSemanticCorpus(
   text: string,
@@ -332,6 +363,7 @@ export function reconcileGuidedSemanticCorpus(
     run((t) => stripMilestoneLanguageForMonthly(t));
   }
   run((t) => stripGoverningLawFromFeesSection(t));
+  run((t) => stripUptimeGuaranteeContraryToIntake(t, _intakeRaw));
   run((t) => fixBrokenTerminationNoticeDays(t, semantic.terminationDays));
   run((t) => dedupeNet30Lines(t));
   run((t) => dedupeGenericBoilerplate(t));

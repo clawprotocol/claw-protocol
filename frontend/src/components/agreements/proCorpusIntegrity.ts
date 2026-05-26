@@ -67,7 +67,10 @@ type SemanticFingerprint =
   | "notices_email"
   | "electronic_signatures"
   | "support_uptime"
-  | "support_exclusions";
+  | "support_exclusions"
+  | "acceptance_terms"
+  | "misc_amendment_waiver"
+  | "force_majeure";
 
 type CorpusSection = {
   heading: string | null;
@@ -108,6 +111,22 @@ const FINGERPRINT_OWNER: Record<SemanticFingerprint, SectionCategory> = {
   electronic_signatures: "esign",
   support_uptime: "support",
   support_exclusions: "support",
+  acceptance_terms: "support",
+  misc_amendment_waiver: "misc",
+  force_majeure: "misc",
+};
+
+const SECTION_HEADING_BY_CATEGORY: Partial<Record<SectionCategory, string>> = {
+  purpose: "Purpose and Scope",
+  fees: "Fees and Payment",
+  ownership: "Ownership",
+  confidentiality: "Confidentiality",
+  support: "Support",
+  termination: "Termination",
+  liability: "Liability",
+  notices: "Notices",
+  misc: "Miscellaneous",
+  esign: "Electronic Signatures",
 };
 
 function blankCounters(): ProCorpusIntegrityCounters {
@@ -297,8 +316,15 @@ function classifySemanticFingerprint(line: string): SemanticFingerprint | null {
     return "monthly_fee";
   }
   if (/\b(?:uptime|service levels?|sla|response time|support hours)\b/i.test(t)) return "support_uptime";
-  if (/\b(?:support excludes|support does not include|third-party (?:ai )?platform|platform limits?|model provider)\b/i.test(t)) {
+  if (/\b(?:support excludes|support does not include|third-party (?:ai )?platforms?|platform limits?|model provider)\b/i.test(t)) {
     return "support_exclusions";
+  }
+  if (/\b(?:acceptance testing|acceptance criteria|support\/acceptance|support and acceptance|client acceptance|acceptance milestone|acceptance period)\b/i.test(t)) {
+    return "acceptance_terms";
+  }
+  if (/\b(?:amendments?|waivers?|severability|entire agreement|counterparts)\b/i.test(t)) return "misc_amendment_waiver";
+  if (/\bforce majeure\b|\bacts of god\b|\beyond (?:a party's|the parties') reasonable control\b/i.test(t)) {
+    return "force_majeure";
   }
   if (/\b(?:pre-existing|background)\s+(?:tools|materials|technology|ip|intellectual property|know-how)|\bretains? (?:its )?(?:tools|templates|know-how)\b/i.test(t)) {
     return "background_tools_retained";
@@ -323,6 +349,21 @@ function firstTargetSection(sections: CorpusSection[], category: SectionCategory
   return sections.find((section) => section.category === category) ?? null;
 }
 
+function ensureTargetSection(sections: CorpusSection[], category: SectionCategory): CorpusSection | null {
+  const existing = firstTargetSection(sections, category);
+  if (existing) return existing;
+  const heading = SECTION_HEADING_BY_CATEGORY[category];
+  if (!heading) return null;
+  const created: CorpusSection = {
+    heading: `1. ${heading}`,
+    lines: [],
+    category,
+    originalIndex: sections.length,
+  };
+  sections.push(created);
+  return created;
+}
+
 function sameSemanticExistsInOwner(sections: readonly CorpusSection[], fp: SemanticFingerprint): boolean {
   const owner = FINGERPRINT_OWNER[fp];
   return sections.some((section) =>
@@ -342,12 +383,12 @@ function relocateMisplacedClauses(sections: CorpusSection[], counters: ProCorpus
         continue;
       }
       const owner = FINGERPRINT_OWNER[fp];
-      if (section.category === owner || !hasTargetSection(sections, owner)) {
-        if (section.category !== owner && sameSemanticExistsInOwner(sections, fp)) {
-          counters.removedSemanticDuplicates += 1;
-          continue;
-        }
+      if (section.category === owner) {
         kept.push(line);
+        continue;
+      }
+      if (sameSemanticExistsInOwner(sections, fp)) {
+        counters.removedSemanticDuplicates += 1;
         continue;
       }
       moved.push({ target: owner, line });
@@ -356,7 +397,7 @@ function relocateMisplacedClauses(sections: CorpusSection[], counters: ProCorpus
     section.lines = kept;
   }
   for (const item of moved) {
-    const target = firstTargetSection(sections, item.target);
+    const target = ensureTargetSection(sections, item.target);
     if (target && !target.lines.some((line) => normalizeText(line) === normalizeText(item.line))) {
       if (target.lines.some((line) => cleanProCorpusLine(line))) target.lines.push("");
       target.lines.push(item.line);
@@ -410,7 +451,25 @@ function normalizeGuidedPaymentAndTerminationFacts(
         next = next.replace(/\b(?:O|0|\d{1,3})\s+days?\b/gi, `${guidedDays} days`);
         if (next !== before) counters.removedSemanticDuplicates += 1;
       }
+      if (semantic.milestoneSplit === "40_30_30" && fp === "milestone_allocation" && !lineReflectsGuidedFact(next, fp, context)) {
+        next =
+          "Schedule A phase allocation is 40% build/configuration, 30% rollout/onboarding, and 30% support/acceptance.";
+        counters.removedArchetypeContradictions += 1;
+      }
       return next;
+    })
+    .join("\n");
+}
+
+function removeRawGuidedAnswerLabelLines(text: string, counters: ProCorpusIntegrityCounters): string {
+  const rawLabel =
+    /^\s*(?:99\.9%\s+uptime|99\.9%\s+monthly\s+uptime|Software development and bug fixes|Client gets perpetual license to embedded tools|On acceptance|Milestone[-\s]?based|Monthly\s+retainer|Net\s*(?:15|30)|Delaware|Texas|Oklahoma|Company owns project deliverables|30\s+days?\s+notice|15\s+days?\s+notice|Even\s+thirds|Build[-\s]?heavy|As\s+specified\s+in\s+Schedule\s+A)\.?\s*$/i;
+  return text
+    .split("\n")
+    .filter((line) => {
+      if (!rawLabel.test(line)) return true;
+      counters.removedSemanticDuplicates += 1;
+      return false;
     })
     .join("\n");
 }
@@ -497,6 +556,8 @@ function removeArchetypeContradictions(
   const milestoneRequested = /\b(?:milestone|40\s*%|30\s*%|phase allocation|build\/configuration|rollout\/onboarding)\b/i.test(intake);
   const supportRetainerRequested = /\b(?:optional|support).{0,40}\$[\d,]+(?:\.\d{2})?\s*(?:\/|\s+per\s+)?month\b|\$[\d,]+(?:\.\d{2})?\s*(?:\/|\s+per\s+)?month.{0,40}\bsupport\b/i.test(intake);
   const softwareSlaRequested = /\b(?:sla|uptime|service level|response time)\b/i.test(intake);
+  const noThirdPartyUptimeGuarantee =
+    /\bno\s+(?:guaranteed?|guarantee)\s+(?:uptime|availability|sla)\b|\bthird[-\s]?party\s+ai\s+platforms?\.?.{0,60}(?:no|without)\s+guarantee/i.test(intake);
 
   for (const section of sections) {
     section.lines = section.lines.filter((line) => {
@@ -507,6 +568,10 @@ function removeArchetypeContradictions(
         return false;
       }
       if (archetype === "marketing_services" && !softwareSlaRequested && /\b(?:uptime|sla|service level|software platform|production automation)\b/i.test(t)) {
+        counters.removedArchetypeContradictions += 1;
+        return false;
+      }
+      if (noThirdPartyUptimeGuarantee && /\b99\.(?:9|5)\s*%|\buptime\s+target\b/i.test(t)) {
         counters.removedArchetypeContradictions += 1;
         return false;
       }
@@ -530,8 +595,31 @@ function removeEmptySections(sections: CorpusSection[], counters: ProCorpusInteg
   });
 }
 
+function ensureRequiredIntegritySections(
+  sections: CorpusSection[],
+  context: ProCorpusIntegrityContext,
+  counters: ProCorpusIntegrityCounters,
+): CorpusSection[] {
+  const blob = `${context.intakeText ?? ""}\n${sections.flatMap((s) => s.lines).join("\n")}`;
+  const needsConfidentiality =
+    /\bconfidential(?:ity| information)?\b/i.test(blob) ||
+    /(?:services_agreement|consulting|automation|marketing|support)/i.test(context.archetype ?? "");
+  if (needsConfidentiality && !sections.some((s) => s.category === "confidentiality")) {
+    const section = ensureTargetSection(sections, "confidentiality");
+    if (section && !section.lines.some((line) => /confidential/i.test(line))) {
+      section.lines.push(
+        "Each Party will protect confidential information using reasonable care and use it only to perform or receive services under this Agreement.",
+      );
+      counters.relocatedClauses += 1;
+    }
+  }
+  return sections;
+}
+
 function countUnresolvedPlaceholders(text: string): number {
-  const matches = text.match(/\bparty[_\s-]?[ab]\b|\[(?:[^\]]*placeholder[^\]]*|your company name|service provider name|client name|provider name)\]/gi);
+  const matches = text.match(
+    /\bparty[_\s-]?[ab]\b|\bparty\s+[ab]\b|\[(?:ORG|PERSON|ADDRESS|PARTY|ENTITY|CLIENT|PROVIDER|COMPANY|ORGANIZATION)[_\s-]*\d*\]|\[(?:[^\]]*placeholder[^\]]*|your company name|service provider name|client name|provider name)\]/gi,
+  );
   return matches?.length ?? 0;
 }
 
@@ -546,7 +634,7 @@ function buildWarnings(text: string, archetype: ProCorpusArchetype): string[] {
       }
     }
   }
-  if (/^\s*(?:Milestone[-\s]?based|Delaware|Texas|Oklahoma|Company owns project deliverables)\.?\s*$/im.test(text)) {
+  if (/^\s*(?:99\.9%\s+uptime|Software development and bug fixes|Client gets perpetual license to embedded tools|On acceptance|Milestone[-\s]?based|Delaware|Texas|Oklahoma|Company owns project deliverables)\.?\s*$/im.test(text)) {
     warnings.push("raw_guided_answer_label");
   }
   if (/\bO\s+days?\b/i.test(text) || /\b0\s+days?\s+written\s+notice\b/i.test(text)) {
@@ -611,6 +699,7 @@ export function applyProCorpusIntegrity(
   counters.removedBareHeadings += skeleton.repairs.filter((r) => r.startsWith("empty_heading:")).length;
   repairs.push(...skeleton.repairs.map((r) => `integrity:${r}`));
   out = normalizeGuidedPaymentAndTerminationFacts(out, context, counters);
+  out = removeRawGuidedAnswerLabelLines(out, counters);
 
   const archetype = inferArchetypeFromText(out, context);
   let sections = parseSections(out);
@@ -619,6 +708,7 @@ export function applyProCorpusIntegrity(
   sections = relocateMisplacedClauses(sections, counters);
   sections = removeArchetypeContradictions(sections, archetype, context, counters);
   sections = dedupeSemanticFingerprints(sections, counters, context);
+  sections = ensureRequiredIntegritySections(sections, { ...context, archetype }, counters);
   sections = removeEmptySections(sections, counters);
   out = serializeSections(sections, counters);
 

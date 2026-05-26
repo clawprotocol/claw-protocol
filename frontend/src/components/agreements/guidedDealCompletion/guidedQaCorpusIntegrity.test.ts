@@ -8,8 +8,10 @@ import {
 import { mergeAllGuidedAnswersIntoCorpus } from "./guidedSectionAwareMerge";
 import { finalizeGuidedProAgreementCorpus } from "./guidedFinalCorpusFinalizer";
 import { resolveGuidedPreReviewSignerSlots } from "./resolveGuidedPreReviewSignerSlots";
+import { buildGuidedSessionFromAgreement } from "./guidedCompletionEngine";
 import type { CommercialFamilyHint } from "../proAgreementCompleteness/types";
 import type { GuidedCompletionSession } from "./types";
+import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
 
 const AI_AUTOMATION_INTAKE = `
 AI automation services agreement between Acme Automation LLC and Botsmith Services LLC.
@@ -23,6 +25,21 @@ Marketing services agreement. $18,000 across 3 milestones over 4 months. Texas l
 
 const CONSULTING_INTAKE = `
 Consulting and support agreement. $4,500 per month, month-to-month. 15-day termination. Delaware law.
+`.trim();
+
+const TEST93_AI_AUTOMATION_INTAKE = `
+AI automation services agreement for AI workflow implementation, dashboard setup, automation support, onboarding assistance, and light ongoing maintenance.
+$120,000 total project fee.
+40% build/configuration.
+30% rollout/onboarding.
+30% support/acceptance.
+Optional $6,000/month continuing support after launch.
+No guaranteed uptime for third-party AI platforms.
+Either party may terminate on 30 days written notice.
+Oklahoma law.
+Notices by email.
+Include confidentiality.
+Client owns deliverables after payment; Service Provider retains pre-existing tools, templates, and know-how.
 `.trim();
 
 function session(
@@ -188,6 +205,43 @@ function padCorpus(core: string): string {
   return `${core}\n\n${"Supporting operational detail. ".repeat(90)}`;
 }
 
+function section(body: string, heading: RegExp): string {
+  const lines = body.replace(/\r\n?/g, "\n").split("\n");
+  const start = lines.findIndex((line) => heading.test(line));
+  if (start < 0) return "";
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\s*\d+\.\s+[A-Z]/.test(lines[i]) || /^IN WITNESS WHEREOF/i.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+function test93SignerIdentities(): CanonicalPartyIdentity[] {
+  return [
+    {
+      index: 0,
+      partyDisplayName: "ABC LLC",
+      email: "client@example.test",
+      representativeName: "Client Signer",
+      title: "Manager",
+      blockHeading: "CLIENT",
+      isIndividual: false,
+    },
+    {
+      index: 1,
+      partyDisplayName: "Jordan Lee Consulting LLC",
+      email: "provider@example.test",
+      representativeName: "Jordan Lee",
+      title: "Managing Member",
+      blockHeading: "SERVICE PROVIDER",
+      isIndividual: false,
+    },
+  ];
+}
+
 describe("guided Q&A corpus integrity — QA fixtures", () => {
   it("A. AI automation: reconciles 40/30/30 without build-heavy, even thirds, or raw Milestone-based", () => {
     const sem = extractGuidedSemanticFacts(aiAutomationSession(), AI_AUTOMATION_INTAKE);
@@ -253,6 +307,113 @@ describe("guided Q&A corpus integrity — QA fixtures", () => {
     expect(result.body.length).toBeGreaterThan(500);
     expect(result.body).not.toMatch(/\bbuild-heavy\b/i);
     expect(result.body).not.toMatch(/^\s*Milestone-based\s*$/im);
+  });
+
+  it("test93 AI automation: strict guided queue, no raw-answer injection, and section ownership after finalization", () => {
+    const badDraft = padCorpus(`
+AI AUTOMATION SERVICES AGREEMENT
+
+This Agreement is between ABC LLC ("Client") and Jordan Lee Consulting LLC ("Service Provider").
+
+1. Purpose and Scope
+Service Provider will provide AI workflow implementation, dashboard setup, automation support, onboarding assistance, and light ongoing maintenance.
+
+2. Fees and Payment
+Total project fee is $120,000 USD.
+Schedule A phase allocation is build-heavy.
+Force majeure excuses payment obligations.
+Milestone-based
+On acceptance
+
+3. Ownership
+Client owns deliverables after payment.
+Acceptance will occur after support and acceptance milestones.
+Third-party AI platforms may experience outages.
+Client gets perpetual license to embedded tools
+
+4. Termination
+Either party may terminate on 30 days written notice.
+Oklahoma law applies.
+Amendments and waivers must be in writing.
+
+5. Support
+Software development and bug fixes
+99.9% uptime
+
+6. Miscellaneous
+Electronic signatures are permitted.
+
+IN WITNESS WHEREOF, the parties execute this Agreement.
+
+CLIENT:
+ABC LLC
+By: _________________________
+
+SERVICE PROVIDER:
+Jordan Lee Consulting LLC
+By: _________________________
+`);
+
+    const guided = buildGuidedSessionFromAgreement({
+      intakeRaw: TEST93_AI_AUTOMATION_INTAKE,
+      body: badDraft,
+    });
+    const queueText = [
+      ...(guided?.queue ?? []),
+      ...(guided?.variables ?? []).map((v) => `${v.id} ${v.label} ${v.question} ${v.agreementImpact}`),
+    ].join("\n");
+    expect(queueText).not.toMatch(/hardware|energy|site costs?|insurance|data center|deployment site/i);
+    expect(queueText).not.toMatch(/sublicens/i);
+    expect(queueText).not.toMatch(/uptime target|99\.9|SLA target/i);
+    expect(queueText).not.toMatch(/what will the developer deliver|software development and bug fixes/i);
+    expect(queueText).not.toMatch(/deployment milestone owners/i);
+
+    const hostileAnswers = session({
+      payment_structure: "Milestone-based",
+      phase_payment_allocation: "Even thirds",
+      saas_sla: "99.9% uptime",
+      license_background_tools: "Client gets perpetual license to embedded tools",
+      deliverables_scope: "Software development and bug fixes",
+      milestone_schedule: "On acceptance",
+      governing_law_notice: "Oklahoma",
+      security_obligations: "Mutual confidentiality with reasonable care",
+      renewal_notice: "30 days written notice",
+    });
+    const result = finalizeGuidedProAgreementCorpus({
+      candidates: [{ source: "canonical_working_draft", body: badDraft, paid: true }],
+      guidedSession: hostileAnswers,
+      signerIdentities: test93SignerIdentities(),
+      signerManifest: null,
+      originalIntake: TEST93_AI_AUTOMATION_INTAKE,
+    });
+
+    expect(result.ok).toBe(true);
+    const body = result.body;
+    const purpose = section(body, /^\s*1\.\s+(?:Purpose|Services|Scope)/i);
+    const fees = section(body, /^\s*2\.\s+.*(?:Fees|Payment|Compensation)/i);
+    const ownership = section(body, /^\s*\d+\.\s+.*(?:Ownership|Work Product|Intellectual Property)/i);
+    const confidentiality = section(body, /^\s*\d+\.\s+.*Confidential/i);
+    const support = section(body, /^\s*\d+\.\s+.*(?:Support|Service Levels|Acceptance)/i);
+    const termination = section(body, /^\s*\d+\.\s+.*(?:Term|Termination)/i);
+    const misc = section(body, /^\s*\d+\.\s+.*(?:Miscellaneous|Governing Law|General Provisions)/i);
+
+    expect(purpose).not.toMatch(/99\.9% uptime|Software development and bug fixes|Client gets perpetual license|On acceptance|Milestone-based|^\s*Oklahoma\s*$/im);
+    expect(body).not.toMatch(/99\.9% uptime/i);
+    expect(body).not.toMatch(/^\s*(?:Milestone-based|On acceptance|Software development and bug fixes|Client gets perpetual license to embedded tools|Oklahoma)\.?\s*$/im);
+    expect(confidentiality).toMatch(/confidential/i);
+    expect(body.match(/\bOklahoma\b/gi)?.length).toBe(1);
+    expect(misc).toMatch(/\bOklahoma\b/i);
+    expect(fees).not.toMatch(/force majeure/i);
+    expect(misc).toMatch(/force majeure|beyond .*reasonable control/i);
+    expect(ownership).not.toMatch(/acceptance|third-party AI platforms/i);
+    expect(support).toMatch(/acceptance|third-party AI platforms|No guaranteed uptime/i);
+    expect(termination).not.toMatch(/amendments?|waivers?|Oklahoma/i);
+    expect(misc).toMatch(/amendments?|waivers?|Oklahoma/i);
+    expect(fees).toMatch(/40\s*%[\s\S]{0,120}30\s*%[\s\S]{0,120}30\s*%/i);
+    expect(body).not.toMatch(/\beven\s+thirds\b/i);
+    expect(body).not.toMatch(/\bbuild-heavy\b/i);
+    expect(result.diagnostics.validationMissing).toEqual([]);
+    expect(result.unresolvedPlaceholders).toEqual([]);
   });
 });
 

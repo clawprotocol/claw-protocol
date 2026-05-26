@@ -27,6 +27,54 @@ import { enrichDealVariables } from "./intakeRecommendationEngine";
 import { suggestedDefaultsForVariable } from "./suggestedDefaultsEngine";
 import type { DealVariable, DealVariableCategory, DealVariableSeverity } from "./types";
 
+const AI_AUTOMATION_ALLOWED_GUIDED_IDS = new Set([
+  "payment_timing",
+  "payment_structure",
+  "total_fee_confirmation",
+  "project_fee_phase_confirmation",
+  "amount_to_be_confirmed",
+  "payment_timing_to_be_confirmed",
+  "phase_payment_allocation",
+  "milestone_schedule",
+  "supplemental_schedule_confirmation",
+  "as_specified_in_schedule_a",
+  "ip_ownership",
+  "ip_allocation",
+  "license_background_tools",
+  "support_obligations",
+  "saas_sla",
+  "renewal_notice",
+  "termination",
+  "governing_law_notice",
+  "governing_venue",
+  "security_obligations",
+  "nda_survival",
+  "party_legal_names",
+  "deal_terms_confirmation",
+]);
+
+const AI_AUTOMATION_BLOCKED_GUIDED_ID_RE = /^(?:ai_ops_economics|ai_deployment|license_scope|deliverables_scope)$/i;
+
+const AI_AUTOMATION_BLOCKED_GUIDED_TEXT_RE =
+  /\b(?:hardware|energy|site costs?|deployment site|data center|insurance|sublicens|what will the developer deliver|software development and bug fixes|bug fixes and maintenance included)\b/i;
+
+function filterAiAutomationGuidedVariables(
+  variables: DealVariable[],
+  intake: string,
+  body: string,
+): DealVariable[] {
+  if (!isAutomationServicesIntake(intake, body)) return variables;
+  return variables.filter((v) => {
+    const blob = `${v.id} ${v.label} ${v.question} ${v.agreementImpact}`.toLowerCase();
+    if (!AI_AUTOMATION_ALLOWED_GUIDED_IDS.has(v.id)) return false;
+    if (AI_AUTOMATION_BLOCKED_GUIDED_ID_RE.test(v.id)) return false;
+    if (AI_AUTOMATION_BLOCKED_GUIDED_TEXT_RE.test(blob)) return false;
+    if (v.id === "saas_sla" && intakeDisclaimsThirdPartyUptimeGuarantee(intake, body)) return false;
+    if (v.id === "payment_structure" && intakeSpecifies403030PhaseSplit(intake, body)) return false;
+    return true;
+  });
+}
+
 const MATERIAL_TO_SEVERITY: Record<MaterialSeverity, DealVariableSeverity> = {
   critical: "critical",
   material: "important",
@@ -642,6 +690,7 @@ export function extractDealVariables(args: {
     vars = dedupeVariables(fallbackItems.map((m) => materialItemToDealVariable(m, intake)));
   }
   vars = ensureRenderableGuidedVariables(vars, intake, body, family);
+  vars = filterAiAutomationGuidedVariables(vars, intake, body);
   vars = vars.filter((v) => !isGuidedVariableSatisfiedByIntake(v.id, intake, body));
   return enrichDealVariables(intake || null, vars);
 }

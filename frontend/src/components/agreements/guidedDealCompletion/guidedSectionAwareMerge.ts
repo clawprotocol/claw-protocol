@@ -78,6 +78,35 @@ function resolveClauseSpecForQuestion(
 const PREEXISTING_CARVEOUT =
   "Provider retains ownership of pre-existing tools, templates, know-how, and background technology used in performing the services.";
 
+const RAW_GUIDED_ANSWER_LINE_RE =
+  /^\s*(?:99\.9%\s+uptime|99\.9%\s+monthly\s+uptime|Software development and bug fixes|Client gets perpetual license to embedded tools|On acceptance|Milestone[-\s]?based|Oklahoma|Texas|Delaware)\.?\s*$/i;
+
+function stripRawGuidedAnswerStandaloneLines(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const out = text
+    .split("\n")
+    .filter((line) => {
+      if (!RAW_GUIDED_ANSWER_LINE_RE.test(line)) return true;
+      repairs.push(`raw_guided_answer_line:${line.trim().slice(0, 48)}`);
+      return false;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+  return { text: out, repairs };
+}
+
+function applyGuidedSectionOwnershipIntegrity(
+  text: string,
+  session: GuidedCompletionSession | null | undefined,
+): { text: string; repairs: string[] } {
+  void session;
+  const stripped = stripRawGuidedAnswerStandaloneLines(text);
+  return {
+    text: stripped.text,
+    repairs: stripped.repairs,
+  };
+}
+
 function normLines(text: string): string[] {
   return text.replace(/\r\n/g, "\n").split("\n");
 }
@@ -320,7 +349,8 @@ export function mergeSingleGuidedAnswerIntoCorpus(args: {
   let out = applyOwnershipContradictionFixes(args.body);
 
   if (!spec) {
-    return { body: out, repairs, merges };
+    const cleaned = applyGuidedSectionOwnershipIntegrity(out, args.session);
+    return { body: cleaned.text, repairs: [...repairs, ...cleaned.repairs], merges };
   }
   if (clauseAlreadyPresentInTargetSection(out, target, spec)) {
     merges.push({ questionId: args.questionId, action: "skipped_present", sectionLabel: target.sectionLabel });
@@ -360,6 +390,9 @@ export function mergeSingleGuidedAnswerIntoCorpus(args: {
   const normalized = normalizeGuidedCorpusSectionFormatting(out);
   out = normalized.text;
   repairs.push(...normalized.repairs);
+  const integrity = applyGuidedSectionOwnershipIntegrity(out, args.session);
+  out = integrity.text;
+  repairs.push(...integrity.repairs);
 
   return { body: out, repairs, merges };
 }
@@ -410,6 +443,10 @@ export function mergeAllGuidedAnswersIntoCorpus(
       });
     }
   }
+
+  const finalIntegrity = applyGuidedSectionOwnershipIntegrity(out, session);
+  out = finalIntegrity.text;
+  allRepairs.push(...finalIntegrity.repairs);
 
   logGuidedCorpusNormalization({ repairs: allRepairs.length, merges: allMerges.length });
   return { body: out, repairs: allRepairs, merges: allMerges };

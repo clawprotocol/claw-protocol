@@ -49,7 +49,21 @@ function targetsFromAnswer(answer: string, extras: string[] = []): string[] {
   return [...out];
 }
 
-function clauseForPaymentTiming(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } {
+function clauseForPaymentTiming(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } | null {
+  if (/milestone|phase acceptance|schedule a/i.test(answer)) {
+    return {
+      clause: "Payments are due according to the milestone and phase acceptance triggers stated in Schedule A.",
+      evidence: /(?:milestone|phase acceptance|schedule a)/i,
+      patterns: [/(?:milestone|phase acceptance|schedule a)/i],
+    };
+  }
+  if (/\$[\d,]+(?:\.\d{2})?\s*(?:\/|\s+per\s+)?month|monthly/i.test(answer)) {
+    return {
+      clause: "Monthly support or retainer amounts are invoiced monthly as stated in the applicable support terms.",
+      evidence: /\$[\d,]+(?:\.\d{2})?\s*(?:\/|\s+per\s+)?month|monthly/i,
+      patterns: [/\$[\d,]+(?:\.\d{2})?\s*(?:\/|\s+per\s+)?month|monthly/i],
+    };
+  }
   if (/\bnet\s*30\b/i.test(answer)) {
     return {
       clause: "Invoices are due Net 30 from receipt unless a signed change order states otherwise.",
@@ -71,15 +85,10 @@ function clauseForPaymentTiming(answer: string): { clause: string; evidence: Reg
       patterns: [/\bon\s+receipt\b/i],
     };
   }
-  const loose = buildLooseAnswerEvidencePattern(answer);
-  return {
-    clause: answer.trim(),
-    evidence: loose ?? new RegExp(escapeRegexLiteral(answer.slice(0, 24)), "i"),
-    patterns: loose ? [loose] : [new RegExp(escapeRegexLiteral(answer.slice(0, 24)), "i")],
-  };
+  return null;
 }
 
-function clauseForProjectFee(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } {
+function clauseForProjectFee(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } | null {
   const has120k = /\$?\s*120[\s,]*000|\b120\s*k\b/i.test(answer);
   const evenPhases = /even\s+(?:thirds|across\s+phases|split)/i.test(answer);
   if (has120k && evenPhases) {
@@ -97,15 +106,10 @@ function clauseForProjectFee(answer: string): { clause: string; evidence: RegExp
       patterns: [/\$?\s*120[\s,]*000|\b120\s*k\b/i],
     };
   }
-  const loose = buildLooseAnswerEvidencePattern(answer);
-  return {
-    clause: answer.trim(),
-    evidence: loose ?? /\bfee\b/i,
-    patterns: loose ? [loose] : [/\bfee\b/i],
-  };
+  return null;
 }
 
-function clauseForPhaseAllocation(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } {
+function clauseForPhaseAllocation(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } | null {
   if (/40\s*%|40%\s*build|40\s*\/\s*30\s*\/\s*30|forty.{0,24}thirty.{0,24}thirty/i.test(answer)) {
     return {
       clause:
@@ -137,15 +141,18 @@ function clauseForPhaseAllocation(answer: string): { clause: string; evidence: R
       patterns: [/milestone|written\s+acceptance/i],
     };
   }
-  const loose = buildLooseAnswerEvidencePattern(answer);
-  return {
-    clause: answer.trim(),
-    evidence: loose ?? /phase\s+allocation/i,
-    patterns: loose ? [loose] : [/phase\s+allocation/i],
-  };
+  return null;
 }
 
-function clauseForSla(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } {
+function clauseForSla(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } | null {
+  if (/no\s+guaranteed\s+uptime|third[-\s]?party\s+ai\s+platform|without\s+uptime\s+guarantees?/i.test(answer)) {
+    return {
+      clause:
+        "Provider does not guarantee uptime or availability for third-party AI platforms; support is limited to commercially reasonable assistance within Provider-controlled systems.",
+      evidence: /(?:no\s+guaranteed\s+uptime|third[-\s]?party\s+ai\s+platform|commercially\s+reasonable\s+assistance)/i,
+      patterns: [/(?:no\s+guaranteed\s+uptime|third[-\s]?party\s+ai\s+platform|commercially\s+reasonable\s+assistance)/i],
+    };
+  }
   if (/99\.9\s*%/i.test(answer)) {
     return {
       clause:
@@ -161,15 +168,18 @@ function clauseForSla(answer: string): { clause: string; evidence: RegExp; patte
       patterns: [/(?:99\.5\s*%.{0,80}(?:uptime|availability)|(?:uptime|availability).{0,80}99\.5\s*%)/i],
     };
   }
-  const loose = buildLooseAnswerEvidencePattern(answer);
-  return {
-    clause: answer.trim(),
-    evidence: loose ?? /\buptime\b/i,
-    patterns: loose ? [loose] : [/\buptime\b/i],
-  };
+  return null;
 }
 
-function clauseForIp(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } {
+function clauseForIp(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } | null {
+  if (/pre[-\s]?existing|background|embedded|tools?|templates?|know-how|perpetual license/i.test(answer)) {
+    return {
+      clause:
+        "Provider retains pre-existing tools, templates, know-how, and background materials, and Client receives the rights reasonably necessary to use the delivered work product.",
+      evidence: /\b(?:pre-existing|background)\s+(?:tools|materials|technology|ip|intellectual property|know-how)|\bretains? (?:its )?(?:tools|templates|know-how)\b/i,
+      patterns: [/\b(?:pre-existing|background)\s+(?:tools|materials|technology|ip|intellectual property|know-how)|\bretains? (?:its )?(?:tools|templates|know-how)\b/i],
+    };
+  }
   if (/company|client/i.test(answer) && /own|deliverable/i.test(answer)) {
     return {
       clause:
@@ -181,15 +191,10 @@ function clauseForIp(answer: string): { clause: string; evidence: RegExp; patter
       ],
     };
   }
-  const loose = buildLooseAnswerEvidencePattern(answer);
-  return {
-    clause: answer.trim(),
-    evidence: loose ?? /\bownership\b/i,
-    patterns: loose ? [loose] : [/\bownership\b/i],
-  };
+  return null;
 }
 
-function clauseForTermination(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } {
+function clauseForTermination(answer: string): { clause: string; evidence: RegExp; patterns: RegExp[] } | null {
   if (/\b30\b|\bthirty\b/i.test(answer) && /notice|terminat/i.test(answer)) {
     return {
       clause:
@@ -205,12 +210,7 @@ function clauseForTermination(answer: string): { clause: string; evidence: RegEx
       patterns: [/\b(?:60|sixty)\s+days?.{0,30}notice\b/i],
     };
   }
-  const loose = buildLooseAnswerEvidencePattern(answer);
-  return {
-    clause: answer.trim(),
-    evidence: loose ?? /\bnotice\b/i,
-    patterns: loose ? [loose] : [/\bnotice\b/i],
-  };
+  return null;
 }
 
 function buildEntryForVariable(
@@ -237,6 +237,7 @@ function buildEntryForVariable(
     case "payment_timing_to_be_confirmed":
     case "payment_structure": {
       const r = clauseForPaymentTiming(trimmed);
+      if (!r) return null;
       resolved = { ...r, targets: targetsFromAnswer(trimmed, ["payment", "invoice"]) };
       break;
     }
@@ -244,6 +245,7 @@ function buildEntryForVariable(
     case "total_fee_confirmation":
     case "amount_to_be_confirmed": {
       const r = clauseForProjectFee(trimmed);
+      if (!r) return null;
       resolved = { ...r, targets: targetsFromAnswer(trimmed, ["120000", "fee", "total"]) };
       break;
     }
@@ -252,6 +254,7 @@ function buildEntryForVariable(
     case "as_specified_in_schedule_a":
     case "milestone_schedule": {
       const r = clauseForPhaseAllocation(trimmed);
+      if (!r) return null;
       resolved = { ...r, targets: targetsFromAnswer(trimmed, ["phase", "allocation", "schedule a"]) };
       break;
     }
@@ -259,6 +262,7 @@ function buildEntryForVariable(
     case "sla":
     case "support_obligations": {
       const r = clauseForSla(trimmed);
+      if (!r) return null;
       resolved = { ...r, targets: targetsFromAnswer(trimmed, ["uptime", "sla", "support"]) };
       break;
     }
@@ -267,24 +271,19 @@ function buildEntryForVariable(
     case "ip_ownership_contradiction":
     case "license_background_tools": {
       const r = clauseForIp(trimmed);
+      if (!r) return null;
       resolved = { ...r, targets: targetsFromAnswer(trimmed, ["ownership", "deliverables", "company"]) };
       break;
     }
     case "renewal_notice":
     case "termination": {
       const r = clauseForTermination(trimmed);
+      if (!r) return null;
       resolved = { ...r, targets: targetsFromAnswer(trimmed, ["termination", "notice"]) };
       break;
     }
     default: {
-      const loose = buildLooseAnswerEvidencePattern(trimmed);
-      if (!loose) return null;
-      resolved = {
-        clause: trimmed,
-        evidence: loose,
-        patterns: [loose],
-        targets: targetsFromAnswer(trimmed),
-      };
+      return null;
     }
   }
 

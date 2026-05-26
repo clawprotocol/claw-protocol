@@ -11,6 +11,7 @@ import {
   buildCanonicalFinalPartyManifestFromIdentities,
   type CanonicalFinalPartyManifest,
 } from "./canonicalFinalPartyManifest";
+import { buildCanonicalAgreementSnapshot } from "../canonicalAgreementSnapshot";
 
 export const GUIDED_FINAL_REVIEW_AUTHORITATIVE_MIN_LEN = 1500;
 
@@ -139,12 +140,36 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
 
   const pinned = args.pinnedFinalizedSignerCorpus;
   if (pinned && pinned.body.length >= minLen) {
+    const pinnedSnapshot = buildCanonicalAgreementSnapshot({
+      surface: "guided_final_review_authoritative_body",
+      tier: "pro",
+      candidates: [{ source: "finalized_signer_applied_guided_corpus", text: pinned.body }],
+      parties: identities.map((id) => ({ name: id.partyDisplayName, role: id.blockHeading, email: id.email })),
+      signerState: { complete: hasSignerHydration, signerCount: identities.length },
+      minLen,
+    });
+    if (!pinnedSnapshot.integrityOk) {
+      logGuidedFinalReviewAuthoritativeBody({
+        body: "",
+        source: "none",
+        len: 0,
+        hasSignerHydration,
+        finalizedHash: "",
+      });
+      return {
+        body: "",
+        source: "none",
+        len: 0,
+        hasSignerHydration,
+        finalizedHash: "",
+      };
+    }
     const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
-      body: pinned.body,
+      body: pinnedSnapshot.canonicalText,
       source: "finalized_signer_applied_guided_corpus",
-      len: pinned.body.length,
+      len: pinnedSnapshot.len,
       hasSignerHydration,
-      finalizedHash: pinned.hash,
+      finalizedHash: pinnedSnapshot.hash || pinned.hash,
     };
     logGuidedFinalReviewAuthoritativeBody(resolution);
     return resolution;
@@ -157,14 +182,31 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
     .filter((c) => c.body.length >= minLen)
     .sort((a, b) => sourcePriority(a.source) - sourcePriority(b.source) || b.body.length - a.body.length);
 
-  const picked = eligible[0] ?? { source: "none" as const, body: "" };
+  let picked: {
+    source: GuidedFinalCorpusCandidateSource | "none";
+    body: string;
+    hash: string;
+  } = { source: "none", body: "", hash: "" };
+  for (const candidate of eligible) {
+    const snapshot = buildCanonicalAgreementSnapshot({
+      surface: "guided_final_review_authoritative_body",
+      tier: "pro",
+      candidates: [{ source: candidate.source, text: candidate.body }],
+      parties: identities.map((id) => ({ name: id.partyDisplayName, role: id.blockHeading, email: id.email })),
+      signerState: { complete: hasSignerHydration, signerCount: identities.length },
+      minLen,
+    });
+    if (!snapshot.integrityOk) continue;
+    picked = { source: candidate.source, body: snapshot.canonicalText, hash: snapshot.hash };
+    break;
+  }
 
   const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
     body: picked.body,
     source: picked.source,
     len: picked.body.length,
     hasSignerHydration,
-    finalizedHash: picked.body ? hashText(picked.body) : "",
+    finalizedHash: picked.hash || (picked.body ? hashText(picked.body) : ""),
   };
 
   logGuidedFinalReviewAuthoritativeBody(resolution);

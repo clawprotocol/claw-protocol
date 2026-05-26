@@ -897,6 +897,7 @@ import {
   type GuidedFinalCorpusCandidate,
   type FinalizeGuidedProAgreementCorpusResult,
 } from "./guidedDealCompletion/guidedFinalCorpusFinalizer";
+import { buildCanonicalAgreementSnapshot } from "./canonicalAgreementSnapshot";
 import { pickCanonicalWorkingAgreementDraft, CANONICAL_WORKING_DRAFT_SOURCE } from "./guidedDealCompletion/canonicalWorkingAgreementDraft";
 import {
   logGuidedFinalReviewRender,
@@ -2630,10 +2631,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         displayPhase,
       };
       if (starterPreview) {
-        return buildStarterAgreementPreviewForReview(d, {
+        const starterText = buildStarterAgreementPreviewForReview(d, {
           intakeText: debouncedStepBuffer,
           placeholderGate,
         });
+        const draftParties = ((d as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? [])
+          .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
+          .filter((p) => p.name.trim());
+        const snapshot = buildCanonicalAgreementSnapshot({
+          surface: "free_starter_review_display",
+          tier: "starter",
+          candidates: [{ source: "free_starter", text: starterText }],
+          intakeText: debouncedStepBuffer,
+          parties: draftParties,
+          minLen: 120,
+        });
+        return snapshot.integrityOk ? snapshot.canonicalText : "";
       }
       return buildAgreementPreviewText(d, {
         starterPreview: false,
@@ -15252,13 +15265,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProStarterPreviewPlain = useMemo(() => {
     if (!draft) return "";
     try {
-      return buildAgreementPreviewText(draft as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
+      const text = buildAgreementPreviewText(draft as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
         starterPreview: true,
       }).trim();
+      const draftParties = (((draft as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? []))
+        .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
+        .filter((p) => p.name.trim());
+      const snapshot = buildCanonicalAgreementSnapshot({
+        surface: "free_starter_paid_pro_baseline",
+        tier: "starter",
+        candidates: [{ source: "free_starter", text }],
+        intakeText: debouncedStepBuffer,
+        parties: draftParties,
+        minLen: 120,
+      });
+      return snapshot.integrityOk ? snapshot.canonicalText : "";
     } catch {
       return "";
     }
-  }, [draft, reviewDocRefreshTick, premiumSurfaceGateTick]);
+  }, [draft, debouncedStepBuffer, reviewDocRefreshTick, premiumSurfaceGateTick]);
 
   const guidedAuthoritativeVersionId = useMemo(() => {
     void guidedAuthVersionNonce;

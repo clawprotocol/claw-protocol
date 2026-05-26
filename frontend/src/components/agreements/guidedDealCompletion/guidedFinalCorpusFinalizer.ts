@@ -52,6 +52,10 @@ import {
 } from "./guidedFinalGradeCorpus";
 import { canonicalizeProAgreementText } from "../proAgreementCanonicalizer";
 import {
+  buildCanonicalAgreementSnapshot,
+  freezeCanonicalAgreementSnapshot,
+} from "../canonicalAgreementSnapshot";
+import {
   corpusHasPaymentStructureContradictions,
   extractGuidedSemanticFacts,
   reconcileGuidedSemanticCorpus,
@@ -559,6 +563,43 @@ export function finalizeGuidedProAgreementCorpus(
   body = canonicalized.text;
   diagnostics.repairs.push(...canonicalized.repairs.map((r) => `canonical:${r}`));
   diagnostics.repairs.push(...canonicalized.warnings.map((w) => `canonical_warning:${w}`));
+  const canonicalSnapshot = buildCanonicalAgreementSnapshot({
+    surface: "guided_final_corpus_finalizer",
+    tier: "pro",
+    candidates: [{ source: diagnostics.selectedSource, text: body }],
+    intakeText: args.originalIntake,
+    guidedSession: args.guidedSession,
+    semanticFacts: finalSemanticFacts,
+    parties: args.signerIdentities.map((id) => ({
+      name: id.partyDisplayName,
+      role: id.blockHeading,
+      email: id.email,
+    })),
+    signerState: {
+      complete: args.signerIdentities.length >= 2,
+      signerCount: args.signerIdentities.length,
+      requireSignerBlocks: args.signerIdentities.length >= 2 || Boolean(args.signerManifest),
+    },
+    minLen: GUIDED_FINAL_CORPUS_MIN_LEN,
+  });
+  body = canonicalSnapshot.canonicalText;
+  diagnostics.finalHash = canonicalSnapshot.hash;
+  diagnostics.repairs.push(
+    ...(canonicalSnapshot.integrityReport?.warnings ?? []).map((w) => `canonical_snapshot_warning:${w}`),
+    ...canonicalSnapshot.placeholderIssues.map((p) => `canonical_snapshot_placeholder:${p}`),
+    ...canonicalSnapshot.blockerIssues.map((b) => `canonical_snapshot_blocker:${b}`),
+  );
+  if (!canonicalSnapshot.integrityOk) {
+    diagnostics.validationMissing = [
+      ...diagnostics.validationMissing,
+      ...(canonicalSnapshot.placeholderIssues.length ? canonicalSnapshot.placeholderIssues : []),
+      ...(canonicalSnapshot.blockerIssues.length ? canonicalSnapshot.blockerIssues : []),
+      ...(canonicalSnapshot.integrityReport?.ok === false ? ["pro_corpus_integrity_failed"] : []),
+      ...(canonicalSnapshot.len < GUIDED_FINAL_CORPUS_MIN_LEN ? ["canonical_corpus_missing"] : []),
+    ].filter((value, index, arr) => arr.indexOf(value) === index);
+  } else {
+    freezeCanonicalAgreementSnapshot(canonicalSnapshot, "finalized_signer_applied_guided_corpus");
+  }
   logGuidedCorpusSectionNormalized({
     beforeSections: structureNormalized.repairs.filter((r) => r.startsWith("canonical_section:")).length,
     afterSections: (body.match(/^\s*\d+\.\s+[A-Za-z]/gm) ?? []).length,
