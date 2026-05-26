@@ -122,7 +122,6 @@ import {
 } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
 import {
   RECIPIENT_BTN_CONTINUE_EDITING,
-  RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF,
   RECIPIENT_BTN_PREVIEW_CHANGES,
   RECIPIENT_BTN_SEND_CLEAN_PROPOSED_SUBCOPY,
   RECIPIENT_CARD_BIGGER_REWRITE_BODY,
@@ -239,6 +238,7 @@ import {
 import {
   buildReviewFirstTextDiffSummary,
   canSubmitReviewFirstProposal,
+  type ReviewFirstDiffPart,
 } from "./reviewFirstTextDiff";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
@@ -273,7 +273,7 @@ const API_BASE = resolveApiBase();
 const RECIPIENT_SIGNING_READINESS_POLL_MS = 8000;
 const REVIEW_FIRST_TITLE = "Review agreement";
 const REVIEW_FIRST_HELPER =
-  "Read the draft, approve it, or propose an updated draft. Nothing is signed yet. Everyone must approve the same version before signing.";
+  "Read the agreement, approve it, or propose an updated version. Nothing is signed until everyone approves the same version.";
 const REVIEW_FIRST_APPROVE_LABEL = "Approve draft";
 const REVIEW_FIRST_PROPOSE_UPDATED_LABEL = "Propose updated agreement";
 const REVIEW_FIRST_SAVE_UPDATED_LABEL = "Submit proposed update";
@@ -288,6 +288,45 @@ function isSupportedReviewFirstRevisedDraftFile(file: File): boolean {
   const name = file.name.toLowerCase();
   const type = file.type.toLowerCase();
   return name.endsWith(".txt") || name.endsWith(".md") || type === "text/plain" || type === "text/markdown";
+}
+
+function renderReviewFirstDiffParts(parts: ReviewFirstDiffPart[] | null | undefined, changedKind: "added" | "removed") {
+  if (!parts?.length) return null;
+  const grouped = parts.reduce<ReviewFirstDiffPart[]>((acc, part) => {
+    const prev = acc[acc.length - 1];
+    if (prev && prev.kind === part.kind) {
+      prev.text = `${prev.text} ${part.text}`.replace(/\s+([,.;:!?])/g, "$1");
+    } else {
+      acc.push({ ...part });
+    }
+    return acc;
+  }, []);
+  let used = 0;
+  const maxChars = 240;
+  const visible = grouped.flatMap((part, index) => {
+    if (used >= maxChars) return [];
+    const remaining = maxChars - used;
+    const text = part.text.length > remaining ? `${part.text.slice(0, Math.max(0, remaining - 1)).trim()}…` : part.text;
+    used += text.length;
+    return [{ ...part, text, originalIndex: index }];
+  });
+  if (visible.length < grouped.length && visible[visible.length - 1]?.text !== "...") {
+    visible.push({ text: "...", kind: "same", originalIndex: grouped.length });
+  }
+  return visible.map((part, index) => {
+    const changed = part.kind === changedKind;
+    const className = changed
+      ? changedKind === "added"
+        ? "rounded bg-emerald-100 px-1 py-0.5 font-semibold text-emerald-900"
+        : "rounded bg-rose-100 px-1 py-0.5 font-semibold text-rose-900"
+      : "text-slate-700";
+    return (
+      <span key={`${part.kind}-${index}-${part.text.slice(0, 12)}`} className={className}>
+        {part.text}
+        {index < visible.length - 1 ? " " : ""}
+      </span>
+    );
+  });
 }
 
 function recipientAcceptTransitionDiag(message: string, payload: Record<string, unknown>) {
@@ -1480,10 +1519,46 @@ export function AgreementRecipientReview({
       const schedulePrevious = scheduleAExcerpt(recipientRedlinePlainTexts?.currentPlain ?? "");
       const scheduleProposed = scheduleAExcerpt(recipientRedlinePlainTexts?.proposedPlain ?? "");
       if (schedulePrevious && scheduleProposed && schedulePrevious !== scheduleProposed) {
+        const compactScheduleDiff = buildReviewFirstTextDiffSummary(schedulePrevious, scheduleProposed);
+        const scheduleSection = compactScheduleDiff.changedSections[0];
+        if (scheduleSection) {
+          return {
+            title: scheduleSection.title,
+            summary: scheduleSection.summary,
+            previous: scheduleSection.previous,
+            proposed: scheduleSection.proposed,
+            fullPrevious: scheduleSection.fullPrevious,
+            fullProposed: scheduleSection.fullProposed,
+            previousParts: scheduleSection.previousParts,
+            proposedParts: scheduleSection.proposedParts,
+          };
+        }
         return {
           title: "Schedule A updated",
+          summary: "Payment schedule updated",
           previous: schedulePrevious,
           proposed: scheduleProposed,
+          fullPrevious: schedulePrevious,
+          fullProposed: scheduleProposed,
+          previousParts: null,
+          proposedParts: null,
+        };
+      }
+      const compactReviewFirstDiff = buildReviewFirstTextDiffSummary(
+        recipientRedlinePlainTexts?.currentPlain ?? "",
+        recipientRedlinePlainTexts?.proposedPlain ?? "",
+      );
+      const reviewFirstSection = compactReviewFirstDiff.changedSections[0];
+      if (reviewFirstSection) {
+        return {
+          title: reviewFirstSection.title,
+          summary: reviewFirstSection.summary,
+          previous: reviewFirstSection.previous,
+          proposed: reviewFirstSection.proposed,
+          fullPrevious: reviewFirstSection.fullPrevious,
+          fullProposed: reviewFirstSection.fullProposed,
+          previousParts: reviewFirstSection.previousParts,
+          proposedParts: reviewFirstSection.proposedParts,
         };
       }
     }
@@ -1500,8 +1575,13 @@ export function AgreementRecipientReview({
     if (!previous && !proposed) return null;
     return {
       title: firstCard?.cardTitle || "Wording change",
+      summary: firstCard?.cardTitle ? `${firstCard.cardTitle} updated` : "Wording updated",
       previous: previous.length > 520 ? `${previous.slice(0, 520).trim()}…` : previous,
       proposed: proposed.length > 520 ? `${proposed.slice(0, 520).trim()}…` : proposed,
+      fullPrevious: previous,
+      fullProposed: proposed,
+      previousParts: null,
+      proposedParts: null,
     };
   }, [previewDiff, recipientPreview?.routingKind, recipientRedlinePlainTexts]);
 
@@ -2824,28 +2904,41 @@ export function AgreementRecipientReview({
             Ready to submit
           </div>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            {simpleRecipientChange?.title ?? "Wording change"} · Updated by {proposerDisplayNameForApi}
+            {simpleRecipientChange?.summary ?? simpleRecipientChange?.title ?? "Wording change"} · Updated by {proposerDisplayNameForApi}
           </p>
           {simpleRecipientChange ? (
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg border border-rose-900/35 bg-rose-950/20 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-rose-200">Previous wording</div>
-                <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-rose-50/95">
-                  “{simpleRecipientChange.previous}”
+            <div className="mt-4 space-y-3">
+              <div className="text-sm font-semibold text-slate-100">{simpleRecipientChange.title}</div>
+              <div className="rounded-lg border border-rose-900/35 bg-slate-950/45 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-rose-200">Previous</div>
+                <p className="mt-2 text-sm leading-relaxed text-slate-100">
+                  {simpleRecipientChange.previousParts
+                    ? renderReviewFirstDiffParts(simpleRecipientChange.previousParts, "removed")
+                    : `“${simpleRecipientChange.previous}”`}
                 </p>
               </div>
-              <div className="rounded-lg border border-emerald-800/45 bg-emerald-950/25 p-4">
-                <div className="text-xs font-semibold uppercase tracking-wide text-emerald-200">Updated wording</div>
-                <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-emerald-50/95">
-                  “{simpleRecipientChange.proposed}”
+              <div className="rounded-lg border border-emerald-800/45 bg-slate-950/45 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-emerald-200">Updated</div>
+                <p className="mt-2 text-sm leading-relaxed text-slate-100">
+                  {simpleRecipientChange.proposedParts
+                    ? renderReviewFirstDiffParts(simpleRecipientChange.proposedParts, "added")
+                    : `“${simpleRecipientChange.proposed}”`}
                 </p>
               </div>
+              <details className="text-xs text-slate-400">
+                <summary className="cursor-pointer font-medium text-slate-500">View full section</summary>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/55 p-3 font-sans text-xs leading-relaxed text-slate-300">
+                    {simpleRecipientChange.fullPrevious}
+                  </pre>
+                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/55 p-3 font-sans text-xs leading-relaxed text-slate-300">
+                    {simpleRecipientChange.fullProposed}
+                  </pre>
+                </div>
+              </details>
             </div>
           ) : null}
         </div>
-        <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-          Nothing is signed yet, and everyone must approve the updated version before signing.
-        </p>
         <p className="sr-only">{PRODUCT_NOT_LAW_FIRM}</p>
         {recipientImportSanitizeNote ? (
           <p
@@ -3314,17 +3407,6 @@ export function AgreementRecipientReview({
               </button>
             </>
           )}
-          <button
-            type="button"
-            data-testid="recipient-toolbar-download-redline-pdf"
-            className="btn rounded-lg border border-slate-600 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-900/60 disabled:opacity-50"
-            disabled={saving || previewing}
-            onClick={() => {
-              document.querySelector<HTMLButtonElement>('[data-testid="recipient-preview-download-redline-pdf"]')?.click();
-            }}
-          >
-            {RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF}
-          </button>
         </div>
       </div>
     ) : null;
@@ -4159,7 +4241,7 @@ export function AgreementRecipientReview({
 
   return (
     <div
-      className={`vs01-agreement-review-inner space-y-6 sm:pb-8 ${
+      className={`vs01-agreement-review-inner mx-auto max-w-4xl space-y-4 px-3 sm:px-4 sm:pb-8 ${
         recipientPreview && !recipientSuggestedEditsSentAck ? "pb-32" : "pb-24"
       }`}
     >
@@ -4299,8 +4381,6 @@ export function AgreementRecipientReview({
         }
       />
 
-      {workspaceTab === "read" ? <div className="text-slate-700">{recipientTrustCueStrip()}</div> : null}
-
       <ReviewMetaGrid
         testId="recipient-summary-card"
         items={[
@@ -4311,7 +4391,6 @@ export function AgreementRecipientReview({
       />
 
       <ReviewDocumentFrame
-        title="Document"
         className="overflow-hidden"
         testId="recipient-document-shell"
         ariaLabel="Agreement draft"
@@ -4319,22 +4398,21 @@ export function AgreementRecipientReview({
           <div
             ref={recipientReadDocAnchorRef}
             tabIndex={-1}
-            className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+            className="prose max-w-none text-[0.9375rem] leading-relaxed text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
             dangerouslySetInnerHTML={{ __html: renderedHtmlDisplay || "<p>No preview yet.</p>" }}
           />
       </ReviewDocumentFrame>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 sm:text-[13px]">
+      {false ? <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 sm:text-[13px]">
         <ProofBadge state={recipientProofBadge} title="Agreement status (LawDog)" />
         <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-600">
           {versionLabelHub}
         </span>
-      </div>
+      </div> : null}
 
       {workspaceTab === "read" ? (
         <ReviewActions
           className="recipient-review-first-actions"
-          note="Everyone reviews any proposed update before signing."
           testId="recipient-review-first-actions"
           ariaLabel="Review agreement actions"
         >
@@ -4528,7 +4606,10 @@ export function AgreementRecipientReview({
               </p>
             </div>
           ) : (
-            <ReviewFuturePanel testId="recipient-propose-update-standard-panel" className="space-y-4">
+            <ReviewFuturePanel
+              testId="recipient-propose-update-standard-panel"
+              className="space-y-4 border-0 bg-transparent p-0 shadow-none"
+            >
               <input
                 ref={draftImportFileInputRef}
                 type="file"
@@ -4543,7 +4624,7 @@ export function AgreementRecipientReview({
                   <div>
                     <h2 className="text-lg font-semibold tracking-tight text-slate-950">Propose updated agreement</h2>
                     <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                      Edit the agreement in any software you prefer.
+                      Edit your agreement in any software you prefer.
                     </p>
                   </div>
                 </section>
@@ -4807,7 +4888,7 @@ export function AgreementRecipientReview({
                       <div>
                         <h3 className="text-base font-semibold text-slate-950">Propose updated agreement</h3>
                         <div className="mt-1.5 space-y-2 text-sm leading-relaxed text-slate-600">
-                          <p>Edit the agreement in any software you prefer.</p>
+                          <p>Edit your agreement in any software you prefer.</p>
                           <p>When finished, paste the FULL updated agreement below.</p>
                           <p>LawDog will compare the wording and show all material changes before submission.</p>
                         </div>
@@ -4863,7 +4944,7 @@ export function AgreementRecipientReview({
                     <div>
                       <h3 className="text-base font-semibold text-slate-950">Propose updated agreement</h3>
                       <div className="mt-1.5 space-y-2 text-sm leading-relaxed text-slate-600">
-                        <p>Edit the agreement in any software you prefer.</p>
+                      <p>Edit your agreement in any software you prefer.</p>
                         <p>When finished, paste the FULL updated agreement below.</p>
                         <p>LawDog will compare the wording and show all material changes before submission.</p>
                       </div>
@@ -5131,7 +5212,7 @@ export function AgreementRecipientReview({
               externalAiPaste.trim() &&
               !recipientPreview ? (
                 <div
-                  className="rounded-xl border border-slate-200 bg-white p-4"
+                  className="rounded-xl bg-white p-4 shadow-sm"
                   data-testid="recipient-review-proposed-update-preview"
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -5163,31 +5244,64 @@ export function AgreementRecipientReview({
                   <p className="mt-3 text-sm leading-relaxed text-slate-700" data-testid="recipient-review-proposed-update-summary">
                     {reviewFirstTextDiff.summary}
                   </p>
+                  {reviewFirstTextDiff.changedSections.length > 0 ? (
+                    <ul className="mt-3 space-y-1 text-sm leading-relaxed text-slate-700">
+                      {reviewFirstTextDiff.changedSections.slice(0, 4).map((section) => (
+                        <li key={`${section.title}-${section.summary}`} className="flex gap-2">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" aria-hidden="true" />
+                          <span>{section.summary}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                   <p className="mt-1 text-xs leading-relaxed text-slate-500" data-testid="recipient-review-proposed-update-attribution">
                     Updated by {proposerDisplayNameForApi || "this reviewer"}.
                   </p>
-                  {reviewFirstTextDiff.changedSections[0] ? (
-                    <div className="mt-4 grid gap-3 md:grid-cols-2" data-testid="recipient-review-proposed-update-before-after">
-                      <div className="rounded-lg border border-rose-200 bg-rose-50/70 p-3">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">
-                          Previous wording
-                        </div>
-                        <p className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
-                          {reviewFirstTextDiff.changedSections[0].previous}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-                          Updated wording
-                        </div>
-                        <p className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
-                          {reviewFirstTextDiff.changedSections[0].proposed}
-                        </p>
-                      </div>
+                  {reviewFirstTextDiff.changedSections.length > 0 ? (
+                    <div className="mt-4 space-y-3" data-testid="recipient-review-proposed-update-before-after">
+                      {reviewFirstTextDiff.changedSections.slice(0, 4).map((section) => (
+                        <article
+                          key={`${section.title}-${section.previous}`}
+                          className="rounded-xl bg-slate-50/80 p-3"
+                        >
+                          <div className="text-sm font-semibold text-slate-950">{section.title}</div>
+                          <p className="mt-1 text-xs text-slate-500">{section.summary}</p>
+                          <div className="mt-3 space-y-2">
+                            <div className="rounded-lg bg-white p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+                                Previous
+                              </div>
+                              <p className="mt-1.5 text-sm leading-relaxed text-slate-800">
+                                {renderReviewFirstDiffParts(section.previousParts, "removed") ?? section.previous}
+                              </p>
+                            </div>
+                            <div className="rounded-lg bg-white p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                                Updated
+                              </div>
+                              <p className="mt-1.5 text-sm leading-relaxed text-slate-800">
+                                {renderReviewFirstDiffParts(section.proposedParts, "added") ?? section.proposed}
+                              </p>
+                            </div>
+                          </div>
+                          <details className="mt-3 text-xs text-slate-600">
+                            <summary className="cursor-pointer font-medium text-slate-500">View full section</summary>
+                            <div className="mt-2 grid gap-2 md:grid-cols-2">
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 font-sans text-xs leading-relaxed">
+                                {section.fullPrevious}
+                              </pre>
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 font-sans text-xs leading-relaxed">
+                                {section.fullProposed}
+                              </pre>
+                            </div>
+                          </details>
+                        </article>
+                      ))}
                     </div>
                   ) : null}
                 </div>
               ) : null}
+              {!recipientPreview ? (
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                 <button
                   ref={previewChangesButtonRef}
@@ -5204,6 +5318,7 @@ export function AgreementRecipientReview({
                       : "Review changes"}
                 </button>
               </div>
+              ) : null}
               {recipientRevisePreviewError ? (
                 <p
                   role="alert"
@@ -5255,17 +5370,6 @@ export function AgreementRecipientReview({
             onClick={() => discardPreview()}
           >
             {RECIPIENT_BTN_CONTINUE_EDITING}
-          </button>
-          <button
-            type="button"
-            data-testid="recipient-toolbar-download-redline-pdf-mobile"
-            className="btn w-full rounded-lg border border-slate-600 px-4 py-3 text-sm font-semibold text-slate-100 hover:bg-slate-900/60 disabled:opacity-50"
-            disabled={saving || previewing}
-            onClick={() => {
-              document.querySelector<HTMLButtonElement>('[data-testid="recipient-preview-download-redline-pdf"]')?.click();
-            }}
-          >
-            {RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF}
           </button>
         </div>
       ) : null}

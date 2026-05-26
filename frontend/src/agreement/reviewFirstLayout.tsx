@@ -53,7 +53,7 @@ export function ReviewHeader(props: {
 export function ReviewMetaGrid(props: { items: Array<{ label: ReactNode; value: ReactNode }>; className?: string; testId?: string }) {
   return (
     <dl
-      className={`grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm sm:grid-cols-3 ${props.className ?? ""}`}
+      className={`grid gap-3 px-1 py-1 text-left sm:grid-cols-3 ${props.className ?? ""}`}
       data-testid={props.testId}
     >
       {props.items.map((item, idx) => (

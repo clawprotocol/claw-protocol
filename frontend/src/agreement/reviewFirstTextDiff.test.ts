@@ -28,6 +28,29 @@ describe("reviewFirstTextDiff", () => {
     expect(diff.changedSections[0]?.title).toContain("Schedule A");
     expect(diff.changedSections[0]?.previous).toContain("30 days");
     expect(diff.changedSections[0]?.proposed).toContain("15 days");
+    expect(diff.summary).toBe("1 material wording update found.");
+    expect(diff.changedSections[0]?.summary).toBe("Payment schedule updated");
+    expect(diff.changedSections[0]?.previousParts.some((part) => part.kind === "removed" && part.text.includes("30"))).toBe(true);
+    expect(diff.changedSections[0]?.proposedParts.some((part) => part.kind === "added" && part.text.includes("15"))).toBe(true);
+  });
+
+  it("shows compact changed snippets instead of entire unchanged clauses", () => {
+    const previous =
+      "Ownership and Work Product\nCompany owns the project deliverables and work product created specifically for Company after payment. Existing background materials remain separately owned. This paragraph also confirms routine cooperation, ordinary access, and unchanged project administration terms that do not affect ownership.";
+    const proposed =
+      "Ownership and Work Product\nClient owns the project deliverables and work product created specifically for Client after full payment. Existing scripts, background technology, and reusable automation components remain separately owned. This paragraph also confirms routine cooperation, ordinary access, and unchanged project administration terms that do not affect ownership.";
+
+    const diff = buildReviewFirstTextDiffSummary(previous, proposed);
+    const section = diff.changedSections[0];
+
+    expect(section?.summary).toBe("Ownership clause revised");
+    expect(section?.previous).toContain("Company");
+    expect(section?.previous).toContain("after payment");
+    expect(section?.proposed).toContain("Client");
+    expect(section?.proposed).toContain("after full payment");
+    expect(section?.proposed).toContain("scripts");
+    expect(section?.previous.length ?? 0).toBeLessThan(previous.length);
+    expect(section?.proposed.length ?? 0).toBeLessThan(proposed.length);
   });
 
   it("requires changed wording, attribution, and rendered preview before submit", () => {

@@ -109,7 +109,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
     expect(panel.textContent).not.toMatch(/\bCLAW\b/i);
     expect(panel.textContent).toContain("Changes detected");
-    expect(panel.textContent).toContain("Nothing is signed yet, and everyone must approve the updated version before signing.");
+    expect(panel.textContent).not.toContain("Nothing is signed yet, and everyone must approve the updated version before signing.");
 
     await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
 

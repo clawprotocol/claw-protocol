@@ -129,7 +129,7 @@ describe("AgreementRecipientReview redline chrome", () => {
     expect(screen.getByTestId("recipient-copy-redline-summary")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Download original draft PDF/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Download revised agreement PDF/i })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /Download redline PDF/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("button", { name: /Download comparison/i }).length).toBeGreaterThanOrEqual(1);
     expect((screen.getByTestId("recipient-preview-download-original-pdf") as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTestId("recipient-preview-download-proposed-pdf") as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTestId("recipient-preview-download-redline-pdf") as HTMLButtonElement).disabled).toBe(false);

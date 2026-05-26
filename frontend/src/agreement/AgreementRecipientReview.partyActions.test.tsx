@@ -116,7 +116,7 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect(within(summary).queryByText(/Agreement type/i)).toBeNull();
 
     expect(screen.getByRole("heading", { name: "Review agreement" })).toBeTruthy();
-    expect(screen.getByText(/Read the draft, approve it, or propose an updated draft/i)).toBeTruthy();
+    expect(screen.getByText(/Read the agreement, approve it, or propose an updated version/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Request changes/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /I'm not participating|I’m not participating/i })).toBeNull();
     expect(screen.queryByText(/Review somewhere else/i)).toBeNull();
@@ -224,8 +224,9 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect(within(livePreview).getByText(/Changes detected/i)).toBeTruthy();
     expect(within(livePreview).getByText(/Everyone will review these wording changes before approval./i)).toBeTruthy();
     expect(within(livePreview).getByText(/Ready to submit/i)).toBeTruthy();
-    expect(within(livePreview).getByText(/Previous wording/i)).toBeTruthy();
-    expect(within(livePreview).getByText(/Updated wording/i)).toBeTruthy();
+    expect(within(livePreview).getByText(/1 material wording update found/i)).toBeTruthy();
+    expect(within(livePreview).getAllByText(/Previous/i).length).toBeGreaterThan(0);
+    expect(within(livePreview).getAllByText(/Updated/i).length).toBeGreaterThan(0);
     expect(within(livePreview).getByText(/Updated by Bob/i)).toBeTruthy();
     const submit = screen.getByTestId("recipient-compare-versions-button");
     expect(submit).toHaveProperty("disabled", false);
@@ -234,14 +235,15 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect((await screen.findByTestId("recipient-preview-summary-heading")).textContent).toBe(
       "Changes detected",
     );
+    expect(screen.queryByTestId("recipient-compare-versions-button")).toBeNull();
     const summary = screen.getByTestId("recipient-review-change-visibility-summary");
-    expect(within(summary).getByText(/Previous wording/i)).toBeTruthy();
-    expect(within(summary).getByText(/Updated wording/i)).toBeTruthy();
+    expect(within(summary).getAllByText(/Previous/i).length).toBeGreaterThan(0);
+    expect(within(summary).getAllByText(/Updated/i).length).toBeGreaterThan(0);
     expect(within(summary).getByText(/Updated by Bob/i)).toBeTruthy();
-    expect(within(summary).getByText(/Specific compensation mechanics will be completed in Schedule A before execution/i)).toBeTruthy();
-    expect(within(summary).getByText(/Total project fee: \$120,000 USD/i)).toBeTruthy();
-    expect(within(summary).getByText(/\$72,000 build\/configuration due kickoff/i)).toBeTruthy();
-    expect(screen.getByText(/Nothing is signed yet, and everyone must approve the updated version before signing/i)).toBeTruthy();
+    expect(within(summary).getAllByText(/Specific compensation mechanics will be completed in Schedule A before execution/i).length).toBeGreaterThan(0);
+    expect(within(summary).getAllByText(/Total project fee: \$120,000 USD/i).length).toBeGreaterThan(0);
+    expect(within(summary).getAllByText(/\$72,000 build\/configuration due kickoff/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Nothing is signed yet, and everyone must approve the updated version before signing/i)).toBeNull();
   });
 
   it("missing participant token blocks proposed update with personal-link attribution message", async () => {

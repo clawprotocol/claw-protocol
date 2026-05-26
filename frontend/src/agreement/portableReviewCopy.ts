@@ -151,7 +151,7 @@ export const RECIPIENT_DOWNLOAD_DRAFT_PDF_BUTTON_TITLE =
 /** Compare-panel exports: three separate PDF roles. */
 export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_ORIGINAL_DRAFT_PDF = "Download original draft PDF";
 export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REVISED_AGREEMENT_PDF = "Download revised agreement PDF";
-export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REDLINE_PDF = "Download redline PDF";
+export const RECIPIENT_EXPORT_REVIEW_DOWNLOAD_REDLINE_PDF = "Download comparison";
 /** Redline PDF when import matches the sender’s current draft (summary only, no tracked diff). */
 export const RECIPIENT_EXPORT_IMPORT_NO_CHANGE_REDLINE_PDF =
   "Download comparison summary (no edits detected)";
@@ -410,7 +410,7 @@ export const RECIPIENT_BTN_SEND_CHANGES = "Send changes";
 export const RECIPIENT_BTN_SEND_CLEAN_PROPOSED_SUBCOPY =
   "Sends the clean proposed version from your preview — not the compare markup.";
 export const RECIPIENT_BTN_CONTINUE_EDITING = "Continue editing";
-export const RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF = "Download redline PDF";
+export const RECIPIENT_BTN_DOWNLOAD_REDLINE_PDF = "Download comparison";
 
 /** @deprecated Manual compare removed from recipient review UI (panel may still exist for tooling). */
 export const RECIPIENT_DIRECT_COMPARE_LABEL = "Manual compare";

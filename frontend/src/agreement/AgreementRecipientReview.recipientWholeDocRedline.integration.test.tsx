@@ -112,7 +112,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
     expect(within(panel).getByTestId("recipient-preview-summary-heading").textContent).toBe(
       "Changes detected",
     );
-    expect(within(panel).getByText(/Nothing is signed yet/i)).toBeTruthy();
+    expect(within(panel).queryByText(/Nothing is signed yet/i)).toBeNull();
 
     const legalRoot = screen.getByTestId("recipient-legal-redline-document");
     const insertEl = legalRoot.querySelector('[data-redline="insert"]');

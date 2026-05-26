@@ -491,7 +491,7 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   await expect(page.getByTestId("recipient-edit-draft-textarea")).toBeVisible({ timeout: 15_000 });
   const proposalPanel = page.getByTestId("recipient-propose-update-standard-panel");
   await expect(proposalPanel.getByRole("heading", { name: "Propose updated agreement" })).toBeVisible();
-  await expect(proposalPanel.getByText("Edit the agreement in any software you prefer.")).toBeVisible();
+  await expect(proposalPanel.getByText("Edit your agreement in any software you prefer.")).toBeVisible();
   await expect(proposalPanel.getByText("When finished, paste the FULL updated agreement below.")).toBeVisible();
   await expect(
     proposalPanel.getByText("LawDog will compare the wording and show all material changes before submission."),
@@ -530,8 +530,9 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   await page.getByTestId("recipient-edit-draft-textarea").fill(updatedBody);
   await expect(page.getByTestId("recipient-review-proposed-update-preview")).toBeVisible();
   await expect(page.getByTestId("recipient-review-proposed-update-state")).toContainText("Ready to submit");
-  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toContainText("Previous wording");
-  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toContainText("Updated wording");
+  await expect(page.getByTestId("recipient-review-proposed-update-summary")).toContainText("material wording update found");
+  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toContainText("Previous");
+  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toContainText("Updated");
   await page.setViewportSize({ width: 376, height: 782 });
   await page.getByTestId("recipient-review-proposed-update-preview").scrollIntoViewIfNeeded();
   await page.screenshot({
@@ -551,13 +552,13 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   });
   const changeSummary = page.getByTestId("recipient-review-change-visibility-summary");
   await expect(changeSummary).toBeVisible();
-  await expect(changeSummary.getByText("Previous wording", { exact: true })).toBeVisible();
-  await expect(changeSummary.getByText("Updated wording", { exact: true })).toBeVisible();
+  await expect(changeSummary.getByText("Previous", { exact: true })).toBeVisible();
+  await expect(changeSummary.getByText("Updated", { exact: true })).toBeVisible();
   await expect(changeSummary).toContainText(/Updated by Client LLC/i);
   await expect(changeSummary).toContainText(/Specific compensation mechanics will be completed in Schedule A before execution/i);
   await expect(changeSummary).toContainText(/Total project fee: \$120,000 USD/i);
   await expect(changeSummary).toContainText(/\$72,000 build\/configuration due kickoff/i);
-  await expect(page.getByText(/Nothing is signed yet, and everyone must approve the updated version before signing/i)).toBeVisible();
+  await expect(page.getByText(/Nothing is signed yet, and everyone must approve the updated version before signing/i)).toHaveCount(0);
 
   await page.screenshot({
     path: join(artifactDir, "review-first-change-before-after.png"),
