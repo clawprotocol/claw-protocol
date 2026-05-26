@@ -237,7 +237,14 @@ export function applyPaidProRenderPolish(
     surface,
     tier: "premium",
   });
-  working = markCanonicalCommittedText(quality.text);
+  working = quality.text;
+  if (!/\bIN WITNESS WHEREOF\b/i.test(working) && (partyNames?.length ?? 0) >= 2) {
+    const signatureBlocks = (partyNames ?? [])
+      .map((party) => `${party}\nBy: _________________________`)
+      .join("\n\n");
+    working = `${working.trim()}\n\nIN WITNESS WHEREOF, the Parties will execute this Agreement through the LawDog signing workflow.\n\n${signatureBlocks}`;
+  }
+  working = markCanonicalCommittedText(working);
 
   if (!isIdempotentPolishOutput(baseText, working) && import.meta.env.DEV) {
     // eslint-disable-next-line no-console

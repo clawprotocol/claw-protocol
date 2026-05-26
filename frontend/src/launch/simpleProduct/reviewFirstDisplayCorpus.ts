@@ -1,4 +1,5 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { canonicalizeProAgreementText } from "../../components/agreements/proAgreementCanonicalizer";
 
 export type ReviewFirstDisplayCorpusSource =
   | "review_first_final_corpus"
@@ -38,7 +39,7 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
       ? (pr as Record<string, unknown>).review_first_final_corpus
       : null;
   if (rf && typeof rf === "object" && !Array.isArray(rf)) {
-    const text = String((rf as Record<string, unknown>).text ?? "").trim();
+    const text = canonicalizeProAgreementText(String((rf as Record<string, unknown>).text ?? "").trim()).text;
     if (text) return { text, source: "review_first_final_corpus", hash: corpusHash(text) };
   }
 
@@ -51,7 +52,7 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
     "document_text",
     "rendered_document_text",
   ] as const) {
-    const text = stringField(draft, source).trim();
+    const text = canonicalizeProAgreementText(stringField(draft, source).trim()).text;
     if (text) return { text, source, hash: corpusHash(text) };
   }
   return null;

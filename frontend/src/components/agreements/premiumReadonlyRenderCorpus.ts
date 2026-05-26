@@ -10,6 +10,7 @@ import {
   resolvePremiumRenderSource,
 } from "./premiumRenderSourceResolver";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
+import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 
 /** @deprecated Use PremiumRenderResolveSource — kept as alias for gradual migration. */
 export type PremiumPaidReadonlySourceUsed = PremiumRenderResolveSource;
@@ -165,10 +166,11 @@ export function pickPremiumPaidReadonlyPlainText(args: {
         pipelineSource: pipeSrc,
       });
     }
-    const finalized =
+    const finalizedRaw =
       args.draft && authHydr.trim()
         ? hydrateIdentityPlaceholdersInAgreementPreviewPlain(authHydr, args.draft, args.intakeText ?? null)
         : authHydr;
+    const finalized = canonicalizeProAgreementText(finalizedRaw).text;
     const nonThin =
       finalized.length >= 1200 || premiumReadonlyCorpusSignalHits(finalized) >= 3;
     return {
@@ -228,6 +230,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   const plain = (res.text || "").trim();
   let finalizedPlain =
     args.draft && plain ? hydrateIdentityPlaceholdersInAgreementPreviewPlain(plain, args.draft, args.intakeText ?? null) : plain;
+  finalizedPlain = canonicalizeProAgreementText(finalizedPlain).text;
   const freeBaseline =
     args.draft && args.premiumCheckoutCompleted
       ? buildAgreementPreviewTextCore(args.draft, { starterPreview: true })
@@ -248,7 +251,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
         fallbackLen: paidFallback.length,
       });
     }
-    finalizedPlain = paidFallback;
+    finalizedPlain = canonicalizeProAgreementText(paidFallback).text;
   }
   const nonThin =
     finalizedPlain.length >= 1200 || premiumReadonlyCorpusSignalHits(finalizedPlain) >= 3;

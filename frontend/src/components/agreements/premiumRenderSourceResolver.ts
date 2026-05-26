@@ -1,6 +1,7 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { rejectPremiumBodyForProRender, rejectProUpgradeSourceFactDrift } from "./premiumFullDraftClientAcceptance";
 import { isAcceptablePremiumFullDocumentText } from "./premiumFullDraftQuality";
+import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 
 const SECTION_SIGNAL_RES = [
   /\bterminat/i,
@@ -239,6 +240,11 @@ function trim(s: string | null | undefined): string {
   return (s || "").trim();
 }
 
+function canonicalProText(s: string | null | undefined): string {
+  const t = trim(s);
+  return t ? canonicalizeProAgreementText(t).text : "";
+}
+
 function devWarnLiveWhileAuthoritativeCorpusExists(
   args: ResolvePremiumRenderSourceArgs,
   res: PremiumRenderResolveResult,
@@ -265,17 +271,18 @@ function devWarnLiveWhileAuthoritativeCorpusExists(
 export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs): PremiumRenderResolveResult {
   const paidAuthoritative = trim(args.paidAuthoritativeProBody);
   if (paidAuthoritative.length >= 500) {
+    const canonicalPaidAuthoritative = canonicalProText(paidAuthoritative);
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.info("[premium-success-hydrate]", {
         phase: "authoritative_body_short_circuit",
-        bodyLen: paidAuthoritative.length,
+        bodyLen: canonicalPaidAuthoritative.length,
         reason: "paid_pipeline_authoritative",
         premium_render_source: "server_full_document_text" as const,
       });
     }
     return {
-      text: paidAuthoritative,
+      text: canonicalPaidAuthoritative,
       premium_render_source: "server_full_document_text",
       premium_render_reason: "paid_pipeline_authoritative",
       premium_validation_result: { ok: true, reasons: [] },
@@ -285,17 +292,17 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
   const draft = args.draft;
   const intakeProbe = intakeProbeText(draft, args.intakeText);
 
-  const fromDraftFull = draft ? trim(draft.premium_server_full_document_text) : "";
-  const fromDraftRepair = draft ? trim(draft.premium_server_repair_document_text) : "";
-  const legacySingleFull = draft ? trim(draft.premium_full_document_text) : "";
+  const fromDraftFull = draft ? canonicalProText(draft.premium_server_full_document_text) : "";
+  const fromDraftRepair = draft ? canonicalProText(draft.premium_server_repair_document_text) : "";
+  const legacySingleFull = draft ? canonicalProText(draft.premium_full_document_text) : "";
 
   const serverFull =
-    trim(args.serverFullDocumentText) ||
+    canonicalProText(args.serverFullDocumentText) ||
     fromDraftFull ||
     (!fromDraftRepair && legacySingleFull ? legacySingleFull : "") ||
-    trim(args.premiumWinningCorpusFallback);
+    canonicalProText(args.premiumWinningCorpusFallback);
 
-  const serverRepair = trim(args.serverRepairDocumentText) || fromDraftRepair;
+  const serverRepair = canonicalProText(args.serverRepairDocumentText) || fromDraftRepair;
 
   const tryServer = (body: string, tier: PremiumRenderResolveSource): PremiumRenderResolveResult | null => {
     if (!body) return null;
@@ -317,12 +324,12 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
 
   const liveRaw = (() => {
     try {
-      return trim(args.buildLivePreview());
+      return canonicalProText(args.buildLivePreview());
     } catch {
       return "";
     }
   })();
-  const snap = trim(args.legacySnapshotText);
+  const snap = canonicalProText(args.legacySnapshotText);
 
   if (liveRaw) {
     const vLive = validatePremiumRenderBody(liveRaw, { intakeText: intakeProbe, draft, mode: "live" });

@@ -50,6 +50,7 @@ import {
   logFinalGradeCorpusDefects,
   repairFinalGradeGuidedCorpus,
 } from "./guidedFinalGradeCorpus";
+import { canonicalizeProAgreementText } from "../proAgreementCanonicalizer";
 
 export const GUIDED_FINAL_CORPUS_MIN_LEN = 1500;
 
@@ -497,6 +498,10 @@ export function finalizeGuidedProAgreementCorpus(
   const structureNormalized = normalizeGuidedProCorpusStructure(body);
   body = structureNormalized.text;
   diagnostics.repairs.push(...structureNormalized.repairs.map((r) => `structure:${r}`));
+  const canonicalized = canonicalizeProAgreementText(body);
+  body = canonicalized.text;
+  diagnostics.repairs.push(...canonicalized.repairs.map((r) => `canonical:${r}`));
+  diagnostics.repairs.push(...canonicalized.warnings.map((w) => `canonical_warning:${w}`));
   logGuidedCorpusSectionNormalized({
     beforeSections: structureNormalized.repairs.filter((r) => r.startsWith("canonical_section:")).length,
     afterSections: (body.match(/^\s*\d+\.\s+[A-Za-z]/gm) ?? []).length,

@@ -3,6 +3,7 @@ import { corpusHasVisibleSignatureExecutionLines } from "./guidedDealCompletion/
 import { resolvePaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { escapeHtml } from "./premiumAgreementDocumentHtml";
+import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 
 /** Minimum length to treat plain text as authoritative Pro/full-draft handoff (not starter stub). */
 export const SEND_HANDOFF_AUTHORITATIVE_MIN_LEN = 500;
@@ -209,19 +210,19 @@ export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | nu
   let best: SendHandoffCorpusPick | null = null;
   for (const [field, text] of nonPurpose) {
     if (text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN && (!best || text.length > best.text.length)) {
-      best = { field, text };
+      best = { field, text: canonicalizeProAgreementText(text).text };
     }
   }
   if (best) return best;
   for (const [field, text] of candidates) {
     if (text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN && (!best || text.length > best.text.length)) {
-      best = { field, text };
+      best = { field, text: canonicalizeProAgreementText(text).text };
     }
   }
   if (best) return best;
   for (const [field, text] of candidates) {
     if (text.length > 0 && (!best || text.length > best.text.length)) {
-      best = { field, text };
+      best = { field, text: canonicalizeProAgreementText(text).text };
     }
   }
   return best;
@@ -240,7 +241,7 @@ export function longestPlainForAgreementPersist(
     String(merged.purpose ?? "").trim(),
   ].filter(Boolean);
   if (candidates.length === 0) return "";
-  return candidates.reduce((a, b) => (b.length > a.length ? b : a));
+  return canonicalizeProAgreementText(candidates.reduce((a, b) => (b.length > a.length ? b : a))).text;
 }
 
 export type BuildSendRouteReadonlyHtmlOpts = {
