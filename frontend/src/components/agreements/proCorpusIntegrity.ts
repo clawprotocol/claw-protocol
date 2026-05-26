@@ -6,6 +6,7 @@ import {
   scoreCommercialSpecificity,
   type CommercialSpecificityScore,
 } from "./commercialSpecificity";
+import { forbiddenSemanticFactForLine, reconstructProSectionsFromSemanticBlocks } from "./proSemanticBlocks";
 
 export type ProCorpusArchetype =
   | "monthly_consulting"
@@ -329,10 +330,6 @@ function classifySemanticFingerprint(line: string): SemanticFingerprint | null {
   if (/\b(?:acceptance testing|acceptance criteria|support\/acceptance|support and acceptance|client acceptance|acceptance milestone|acceptance period)\b/i.test(t)) {
     return "acceptance_terms";
   }
-  if (/\b(?:amendments?|waivers?|severability|entire agreement|counterparts)\b/i.test(t)) return "misc_amendment_waiver";
-  if (/\bforce majeure\b|\bacts of god\b|\beyond (?:a party's|the parties') reasonable control\b/i.test(t)) {
-    return "force_majeure";
-  }
   if (/\b(?:pre-existing|background)\s+(?:tools|materials|technology|ip|intellectual property|know-how)|\bretains? (?:its )?(?:tools|templates|know-how)\b/i.test(t)) {
     return "background_tools_retained";
   }
@@ -345,6 +342,10 @@ function classifySemanticFingerprint(line: string): SemanticFingerprint | null {
     return "notices_email";
   }
   if (/\b(?:electronic signatures?|e-?signatures?|counterparts?)\b/i.test(t)) return "electronic_signatures";
+  if (/\b(?:amendments?|waivers?|severability|entire agreement|counterparts)\b/i.test(t)) return "misc_amendment_waiver";
+  if (/\bforce majeure\b|\bacts of god\b|\beyond (?:a party's|the parties') reasonable control\b/i.test(t)) {
+    return "force_majeure";
+  }
   return null;
 }
 
@@ -570,11 +571,24 @@ function removeArchetypeContradictions(
     section.lines = section.lines.filter((line) => {
       const t = cleanProCorpusLine(line);
       if (!t) return true;
+      const forbiddenFact = forbiddenSemanticFactForLine(
+        t,
+        archetype === "monthly_consulting" ? "monthly_consulting" : archetype,
+        intake,
+      );
+      if (forbiddenFact) {
+        counters.removedArchetypeContradictions += 1;
+        return false;
+      }
       if (archetype === "monthly_consulting" && !milestoneRequested && classifySemanticFingerprint(line) === "milestone_allocation") {
         counters.removedArchetypeContradictions += 1;
         return false;
       }
       if (archetype === "marketing_services" && !softwareSlaRequested && /\b(?:uptime|sla|service level|software platform|production automation)\b/i.test(t)) {
+        counters.removedArchetypeContradictions += 1;
+        return false;
+      }
+      if (archetype === "marketing_services" && !/\bmonthly\s+(?:arrears|retainer|fee)|per\s+month\b/i.test(intake) && /\bmonthly arrears\b/i.test(t)) {
         counters.removedArchetypeContradictions += 1;
         return false;
       }
@@ -759,6 +773,13 @@ export function applyProCorpusIntegrity(
   });
   out = finalSpecificity.text;
   repairs.push(...finalSpecificity.repairs.map((r) => `final_${r}`));
+  const reconstructed = reconstructProSectionsFromSemanticBlocks(out, {
+    intakeText: context.intakeText,
+    draftText: text,
+    archetype,
+  });
+  out = reconstructed.text;
+  repairs.push(...reconstructed.repairs);
   if (finalSpecificity.score.score < MINIMUM_COMMERCIAL_SPECIFICITY_SCORE) {
     const hardSpecificityFallback = preserveProtectedCommercialFacts({
       text: softNormalizationInput,

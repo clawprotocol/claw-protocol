@@ -288,4 +288,83 @@ By: ______________________`;
     expect(report.counters.removedArchetypeContradictions).toBeGreaterThanOrEqual(1);
     expect(report.counters.removedSemanticDuplicates).toBeGreaterThanOrEqual(1);
   });
+
+  it("removes archetype-forbidden semantic facts and preserves atomic payment structures", () => {
+    const marketing = canonicalizeProAgreementText(
+      `Marketing Services Agreement
+
+1. Purpose and Scope
+Agency will provide paid advertising management, launch coordination, email marketing, analytics reporting, creative strategy, and campaign optimization.
+
+2. Fees and Payment
+Client will pay $18,000 total across 3 milestones over 4 months.
+Client will pay monthly arrears.
+
+3. Support
+Provider will maintain 99.9% uptime for production automation components.
+
+4. Miscellaneous
+Texas law applies.`,
+      {
+        intakeText:
+          "Marketing services: paid advertising management, launch coordination, email marketing, analytics reporting, creative strategy, campaign optimization. $18,000 across 3 milestones over 4 months. Texas law.",
+        surface: "test_forbidden_marketing",
+      },
+    );
+    expect(marketing.text).not.toMatch(/99\.9% uptime|production automation components/i);
+    expect(marketing.text).not.toMatch(/monthly arrears/i);
+    expect(section(marketing.text, /Fees and Payment/i)).toMatch(/\$18,000 total.*3 milestones.*4-month/i);
+    expect(marketing.text).not.toMatch(/The project phase allocation includes 3 milestones/i);
+
+    const consulting = canonicalizeProAgreementText(
+      `Consulting and Support Agreement
+
+1. Purpose and Scope
+Consultant will provide operations consulting, recurring advisory calls, workflow recommendations, vendor coordination, and monthly reporting support.
+
+2. Fees and Payment
+Client will pay $4,500/month.
+Milestone-based payments apply.
+Schedule A phase allocation is 40% build/configuration, 30% rollout/onboarding, and 30% support/acceptance.
+
+3. Termination
+Either party may terminate on 15 days written notice.
+
+4. Miscellaneous
+Delaware law applies.`,
+      {
+        intakeText:
+          "Operations consulting, recurring advisory calls, workflow recommendations, vendor coordination, monthly reporting support. $4,500/month, month-to-month. 15-day termination. Delaware law.",
+        semanticFacts: CONSULTING_CONTEXT.semanticFacts,
+        surface: "test_forbidden_consulting",
+      },
+    );
+    expect(consulting.text).not.toMatch(/milestone|phase allocation|build\/configuration|rollout\/onboarding|support\/acceptance/i);
+    expect(section(consulting.text, /Fees and Payment/i)).toMatch(/\$4,500\/month.*month-to-month/i);
+
+    const ai = canonicalizeProAgreementText(
+      `AI Automation Services Agreement
+
+1. Purpose and Scope
+Service Provider will provide AI workflow implementation, dashboard setup, automation support, onboarding assistance, and light ongoing maintenance.
+
+2. Fees and Payment
+Client will pay $120,000 total.
+The project milestone allocation is 40% build/configuration and 30% rollout/onboarding.
+
+3. Support
+No guaranteed third-party AI uptime.
+
+4. Miscellaneous
+Oklahoma law applies.`,
+      {
+        intakeText:
+          "AI workflow implementation, dashboard setup, automation support, onboarding assistance, light ongoing maintenance. $120,000 total. 40% build/configuration, 30% rollout/onboarding, 30% support/acceptance. No guaranteed third-party AI uptime. Oklahoma law.",
+        surface: "test_atomic_ai_payment",
+      },
+    );
+    expect(section(ai.text, /Fees and Payment/i)).toMatch(/40%\s+build\/configuration/i);
+    expect(section(ai.text, /Fees and Payment/i)).toMatch(/30%\s+rollout\/onboarding/i);
+    expect(section(ai.text, /Fees and Payment/i)).toMatch(/30%\s+support\/acceptance/i);
+  });
 });

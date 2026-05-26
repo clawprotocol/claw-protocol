@@ -101,7 +101,7 @@ describe("commercialSpecificity", () => {
       text: GENERIC_PRO_CORPUS,
       intakeText: TEST94_INTAKE,
     });
-    expect(result.repairs).toContain("commercial_specificity:scope_facts_preserved");
+    expect(result.repairs).toContain("commercial_specificity:scope_block_preserved");
     expectTest94ScopePreserved(result.text);
   });
 

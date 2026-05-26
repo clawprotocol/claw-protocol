@@ -694,6 +694,16 @@ export function finalizeGuidedProAgreementCorpus(
           }
         }
         recoveredBody = normalizePartyNameSpacingInCorpus(recoveredBody);
+        const recoveredCanonical = canonicalizeProAgreementText(recoveredBody, {
+          canonicalPartyNames: args.signerIdentities.map((id) => id.partyDisplayName).filter(Boolean),
+          canonicalRoles: ["Client", "Service Provider"],
+          canonicalTerminationNoticeDays: guidedTerminationNoticeDays(args.guidedSession),
+          intakeText: args.originalIntake,
+          semanticFacts: finalSemanticFacts,
+          surface: "guided_final_corpus_finalizer_recovery",
+        });
+        recoveredBody = recoveredCanonical.text;
+        diagnostics.repairs.push(...recoveredCanonical.repairs.map((r) => `working_draft_recovery_canonical:${r}`));
         const recoveredValidation = validateFinalGuidedProCorpusBeforeFreeze({
           body: recoveredBody,
           guidedSession: args.guidedSession,

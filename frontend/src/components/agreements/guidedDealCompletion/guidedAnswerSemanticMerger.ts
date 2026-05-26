@@ -7,6 +7,7 @@ import type { GuidedCompletionSession } from "./types";
 import { listGuidedAnsweredVariableIds } from "./guidedAnswerApplyOrchestration";
 import { repairBareProSkeletonClauses } from "../proCorpusSkeletonSafety";
 import { dedupeRepeatingSentenceLines } from "./guidedCorpusLineRepairs";
+import { stripForbiddenSemanticFactsFromText } from "../proSemanticBlocks";
 
 export type GuidedSemanticFactKey =
   | "payment_timing"
@@ -340,6 +341,20 @@ function stripUptimeGuaranteeContraryToIntake(text: string, intakeRaw: string): 
   return { text: `${next.slice(0, insertAt)}\n${injected}${next.slice(insertAt)}`.replace(/\n{3,}/g, "\n\n"), repairs };
 }
 
+function inferSemanticArchetype(intakeRaw: string, semantic: GuidedSemanticFacts): string {
+  const blob = `${intakeRaw}\n${Object.values(semantic.facts).join("\n")}`;
+  if (/\b(?:paid advertising|email marketing|creative strategy|campaign optimization|analytics reporting|marketing services?)\b/i.test(blob)) {
+    return "marketing_services";
+  }
+  if (semantic.paymentMode === "monthly_retainer" || /\$[\d,]+(?:\.\d{2})?\s*(?:\/|\s+per\s+)?month|month[-\s]?to[-\s]?month/i.test(blob)) {
+    return "monthly_consulting";
+  }
+  if (/\b(?:ai automation|ai workflow|dashboard setup|third[-\s]?party ai|automation support)\b/i.test(blob)) {
+    return "ai_automation_services";
+  }
+  return "generic_services";
+}
+
 /** Post-Q&A deterministic corpus hygiene driven by structured guided facts. */
 export function reconcileGuidedSemanticCorpus(
   text: string,
@@ -364,6 +379,10 @@ export function reconcileGuidedSemanticCorpus(
   }
   run((t) => stripGoverningLawFromFeesSection(t));
   run((t) => stripUptimeGuaranteeContraryToIntake(t, _intakeRaw));
+  run((t) => {
+    const stripped = stripForbiddenSemanticFactsFromText(t, inferSemanticArchetype(_intakeRaw, semantic), _intakeRaw);
+    return { text: stripped.text, repairs: stripped.repairs.map((r) => `semantic_${r}`) };
+  });
   run((t) => fixBrokenTerminationNoticeDays(t, semantic.terminationDays));
   run((t) => dedupeNet30Lines(t));
   run((t) => dedupeGenericBoilerplate(t));

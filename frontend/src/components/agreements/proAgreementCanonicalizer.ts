@@ -450,6 +450,10 @@ export function canonicalizeProAgreementText(
   repairs.push(...integrity.repairs);
   warnings.push(...integrity.report.warnings.map((w) => `integrity:${w}`));
 
+  const finalGenericCompany = normalizeGenericCompanyRole(out, opts);
+  out = finalGenericCompany.text;
+  repairs.push(...finalGenericCompany.repairs.map((r) => `final_${r}`));
+
   out = out
     .replace(/[ \t]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")

@@ -172,7 +172,7 @@ const RAW_FIXTURES: GenesisFixture[] = [
   {
     name: "Consulting and Support Agreement",
     intake:
-      "Simple consulting and support agreement between OpsCo LLC and Northstar Consulting LLC. Scope includes operations consulting, advisory calls, workflow recommendations, vendor coordination, and monthly reporting. $4,500/month, month-to-month. 15-day termination. Delaware law. Notices by email.",
+      "Simple consulting and support agreement between OpsCo LLC and Northstar Consulting LLC. Scope includes operations consulting, recurring advisory calls, workflow recommendations, vendor coordination, and monthly reporting support. $4,500/month, month-to-month. 15-day termination. Delaware law. Notices by email.",
     parties: ["OpsCo LLC", "Northstar Consulting LLC"],
     roles: ["COO", "Principal"],
     answers: {
@@ -184,10 +184,10 @@ const RAW_FIXTURES: GenesisFixture[] = [
     corpus: "",
     expectedFacts: [
       "operations consulting",
-      "advisory calls",
+      "recurring advisory calls",
       "workflow recommendations",
       "vendor coordination",
-      "monthly reporting",
+      "monthly reporting support",
       "$4,500/month",
       "15-day termination",
     ],

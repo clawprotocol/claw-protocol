@@ -12,6 +12,13 @@ export type ProtectedCommercialFact = {
   canonical: string;
 };
 
+import {
+  extractProtectedCommercialClusters,
+  renderSemanticBlock,
+  textRetainsSemanticBlock,
+  type ProSemanticBlock,
+} from "./proSemanticBlocks";
+
 export type CommercialSpecificityPreservationResult = {
   text: string;
   facts: ProtectedCommercialFact[];
@@ -22,6 +29,8 @@ export type CommercialSpecificityPreservationResult = {
 export type CommercialSpecificityScore = {
   retainedFacts: ProtectedCommercialFact[];
   missingFacts: ProtectedCommercialFact[];
+  retainedClusters: ProSemanticBlock[];
+  missingClusters: ProSemanticBlock[];
   score: number;
 };
 
@@ -51,7 +60,7 @@ const CONCRETE_FACT_PATTERNS: ReadonlyArray<{
   },
   {
     category: "support_model",
-    patterns: [/\bonboarding assistance\b/i, /\bonboarding\b/i],
+    patterns: [/\bonboarding assistance\b/i],
     canonical: "onboarding assistance",
   },
   {
@@ -145,7 +154,7 @@ const CONCRETE_FACT_PATTERNS: ReadonlyArray<{
   {
     category: "support_model",
     patterns: [/\badvisory calls\b/i],
-    canonical: "advisory calls",
+    canonical: "recurring advisory calls",
   },
   {
     category: "deliverable",
@@ -160,7 +169,7 @@ const CONCRETE_FACT_PATTERNS: ReadonlyArray<{
   {
     category: "deliverable",
     patterns: [/\bmonthly reporting\b/i],
-    canonical: "monthly reporting",
+    canonical: "monthly reporting support",
   },
   {
     category: "payment_structure",
@@ -241,18 +250,46 @@ function textRetainsFact(text: string, fact: ProtectedCommercialFact): boolean {
   return retained / terms.length >= 0.75;
 }
 
+function factCoveredByCluster(fact: ProtectedCommercialFact, block: ProSemanticBlock): boolean {
+  const factTerms = significantTerms(fact.canonical).filter((term) => !/^\d+$/.test(term) || term.length >= 4);
+  const blockTerms = significantTerms(block.requiredPhrases.join(" "));
+  if (factTerms.length === 0) return false;
+  return factTerms.every((term) => blockTerms.includes(term));
+}
+
+function inferClustersFromFacts(facts: readonly ProtectedCommercialFact[]): ProSemanticBlock[] {
+  return extractProtectedCommercialClusters(facts.map((fact) => fact.canonical).join(". "));
+}
+
 export function scoreCommercialSpecificity(
   intakeFacts: readonly ProtectedCommercialFact[] | string | null | undefined,
   finalText: string | null | undefined,
 ): CommercialSpecificityScore {
   const facts = typeof intakeFacts === "string" ? extractProtectedCommercialFacts(intakeFacts) : [...(intakeFacts ?? [])];
+  const clusters = typeof intakeFacts === "string" ? extractProtectedCommercialClusters(intakeFacts) : inferClustersFromFacts(facts);
   const text = finalText ?? "";
-  const retainedFacts = facts.filter((fact) => textRetainsFact(text, fact));
-  const missingFacts = facts.filter((fact) => !textRetainsFact(text, fact));
+  const retainedClusters = clusters.filter((cluster) => textRetainsSemanticBlock(cluster, text));
+  const missingClusters = clusters.filter((cluster) => !textRetainsSemanticBlock(cluster, text));
+  const clusteredFacts = facts.filter((fact) => clusters.some((cluster) => factCoveredByCluster(fact, cluster)));
+  const unclusteredFacts = facts.filter((fact) => !clusteredFacts.includes(fact));
+  const retainedClusterFacts = clusteredFacts.filter((fact) =>
+    retainedClusters.some((cluster) => factCoveredByCluster(fact, cluster)) || textRetainsFact(text, fact),
+  );
+  const missingClusterFacts = clusteredFacts.filter((fact) =>
+    missingClusters.some((cluster) => factCoveredByCluster(fact, cluster)) && !textRetainsFact(text, fact),
+  );
+  const retainedUnclusteredFacts = unclusteredFacts.filter((fact) => textRetainsFact(text, fact));
+  const missingUnclusteredFacts = unclusteredFacts.filter((fact) => !textRetainsFact(text, fact));
+  const retainedFacts = [...retainedClusterFacts, ...retainedUnclusteredFacts];
+  const missingFacts = [...missingClusterFacts, ...missingUnclusteredFacts];
+  const denominator = clusters.length > 0 ? clusters.length + unclusteredFacts.length : facts.length;
+  const numerator = clusters.length > 0 ? retainedClusters.length + retainedUnclusteredFacts.length : retainedFacts.length;
   return {
     retainedFacts,
     missingFacts,
-    score: facts.length === 0 ? 100 : Math.round((retainedFacts.length / facts.length) * 100),
+    retainedClusters,
+    missingClusters,
+    score: denominator === 0 ? 100 : Math.round((numerator / denominator) * 100),
   };
 }
 
@@ -272,6 +309,8 @@ export function logCommercialSpecificityScore(args: {
     score: args.score.score,
     retainedFacts: args.score.retainedFacts.map((fact) => fact.canonical),
     missingFacts: args.score.missingFacts.map((fact) => fact.canonical),
+    retainedClusters: args.score.retainedClusters.map((block) => block.id),
+    missingClusters: args.score.missingClusters.map((block) => block.id),
     normalizationMode: args.normalizationMode,
     surface: args.surface ?? null,
   });
@@ -356,6 +395,51 @@ function replaceOrInsertScopeSection(text: string, facts: readonly ProtectedComm
   };
 }
 
+function sectionPatternForOwner(ownerSection: ProSemanticBlock["ownerSection"]): RegExp {
+  if (ownerSection === "purpose") return /\b(?:purpose|scope|services)\b/i;
+  if (ownerSection === "fees") return /\b(?:fees?|payment|compensation|commercial terms)\b/i;
+  if (ownerSection === "support") return /\b(?:support|maintenance|service levels?|sla)\b/i;
+  if (ownerSection === "ownership") return /\b(?:ownership|work product|intellectual property|ip)\b/i;
+  if (ownerSection === "termination") return /\b(?:term|termination)\b/i;
+  if (ownerSection === "notices") return /\bnotices?\b/i;
+  return /\b(?:miscellaneous|governing law|law)\b/i;
+}
+
+function headingForOwner(ownerSection: ProSemanticBlock["ownerSection"]): string {
+  if (ownerSection === "purpose") return "Purpose and Scope";
+  if (ownerSection === "fees") return "Fees and Payment";
+  if (ownerSection === "support") return "Support";
+  if (ownerSection === "ownership") return "Ownership";
+  if (ownerSection === "termination") return "Termination";
+  if (ownerSection === "notices") return "Notices";
+  return "Miscellaneous";
+}
+
+function insertSemanticBlockIntoOwningSection(text: string, block: ProSemanticBlock): { text: string; repaired: boolean } {
+  if (textRetainsSemanticBlock(block, text)) return { text, repaired: false };
+  const sections = splitSections(text);
+  const target = sections.find((section) => sectionPatternForOwner(block.ownerSection).test(section.heading));
+  const sentence = renderSemanticBlock(block);
+  if (!target) {
+    const nextNumber = Math.max(0, ...sections.map((section) => Number(section.heading.match(/^\s*(\d+)\./)?.[1] ?? 0))) + 1;
+    return {
+      text: `${text}\n\n${nextNumber}. ${headingForOwner(block.ownerSection)}\n${sentence}`.replace(/\n{3,}/g, "\n\n").trim(),
+      repaired: true,
+    };
+  }
+  const bodyWithoutGeneric = target.body
+    .split("\n")
+    .filter((line) => !FORBIDDEN_GENERIC_SCOPE_RE.test(line))
+    .join("\n")
+    .trim();
+  return {
+    text: `${text.slice(0, target.start)}${bodyWithoutGeneric}\n${sentence}\n\n${text.slice(target.end).replace(/^\s+/, "")}`
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+    repaired: true,
+  };
+}
+
 function sentenceForFact(fact: ProtectedCommercialFact): string {
   if (fact.category === "payment_structure") return `The commercial terms include a ${fact.canonical}.`;
   if (fact.category === "support_model" && /[$]\d|\/month/i.test(fact.canonical)) {
@@ -411,9 +495,20 @@ export function preserveProtectedCommercialFacts(args: {
   normalizationMode?: CommercialNormalizationMode;
   surface?: string | null;
 }): CommercialSpecificityPreservationResult {
-  const facts = extractProtectedCommercialFacts(args.intakeText, args.draftText ?? args.text);
+  let facts = extractProtectedCommercialFacts(args.intakeText, args.draftText ?? args.text);
+  const clusters = extractProtectedCommercialClusters(args.intakeText, args.draftText ?? args.text);
   const repairs: string[] = [];
   let out = (args.text || "").replace(/\r\n?/g, "\n").trim();
+  const intakeBlob = `${args.intakeText ?? ""}\n${Object.values({}).join("\n")}`;
+  const intakeIsMonthlyWithoutMilestones =
+    /\$[\d,]+(?:\.\d{2})?\s*(?:\/|\s+per\s+)?month|month[-\s]?to[-\s]?month|monthly\s+(?:fee|retainer)/i.test(intakeBlob) &&
+    !/\b(?:milestone|phase allocation|40\s*%|30\s*%|build\/configuration|rollout\/onboarding|support\/acceptance)\b/i.test(intakeBlob);
+  if (intakeIsMonthlyWithoutMilestones) facts = facts.filter((fact) => fact.category !== "phase");
+  for (const cluster of clusters) {
+    const inserted = insertSemanticBlockIntoOwningSection(out, cluster);
+    out = inserted.text;
+    if (inserted.repaired) repairs.push(`commercial_specificity:${cluster.id}_preserved`);
+  }
   const protectedScopeFacts = scopeFacts(facts);
   if (protectedScopeFacts.length > 0) {
     const scope = replaceOrInsertScopeSection(out, protectedScopeFacts);
