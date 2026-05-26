@@ -221,13 +221,11 @@ describe("AgreementRecipientReview review-first actions", () => {
     await userEvent.clear(paste);
     await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
     const livePreview = await screen.findByTestId("recipient-review-proposed-update-preview");
-    expect(within(livePreview).getByText(/Changes detected/i)).toBeTruthy();
-    expect(within(livePreview).getByText(/Everyone will review these wording changes before approval./i)).toBeTruthy();
-    expect(within(livePreview).getByText(/Ready to submit/i)).toBeTruthy();
-    expect(within(livePreview).getByText(/1 material wording update found/i)).toBeTruthy();
-    expect(within(livePreview).getAllByText(/Previous/i).length).toBeGreaterThan(0);
-    expect(within(livePreview).getAllByText(/Updated/i).length).toBeGreaterThan(0);
-    expect(within(livePreview).getByText(/Updated by Bob/i)).toBeTruthy();
+    expect(within(livePreview).getByText(/Updated agreement pasted/i)).toBeTruthy();
+    expect(within(livePreview).getByText(/Review changes to continue/i)).toBeTruthy();
+    expect(within(livePreview).getByText(/Ready to review/i)).toBeTruthy();
+    expect(within(livePreview).queryByText(/Previous/i)).toBeNull();
+    expect(within(livePreview).queryByText(/Updated by Bob/i)).toBeNull();
     const submit = screen.getByTestId("recipient-compare-versions-button");
     expect(submit).toHaveProperty("disabled", false);
     await userEvent.click(submit);

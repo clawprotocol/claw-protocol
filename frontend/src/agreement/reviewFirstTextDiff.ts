@@ -106,12 +106,18 @@ function lcsPairs(previousKeys: string[], proposedKeys: string[]): Array<[number
   return pairs;
 }
 
-function joinTokenParts(parts: ReviewFirstDiffPart[]): string {
-  return parts
+function joinTokenParts(parts: ReviewFirstDiffPart[], maxChars = 280): string {
+  const joined = parts
     .map((part) => part.text)
     .join(" ")
     .replace(/\s+([,.;:!?])/g, "$1")
     .trim();
+  if (joined.length <= maxChars) return joined;
+  const startsClipped = joined.startsWith("...");
+  const endsClipped = joined.endsWith("...");
+  const core = joined.replace(/^\.\.\.\s*/, "").replace(/\s*\.\.\.$/, "");
+  const clipped = core.slice(0, maxChars - (startsClipped ? 4 : 0) - 2).trim();
+  return `${startsClipped ? "... " : ""}${clipped}${endsClipped || core.length > clipped.length ? "..." : ""}`;
 }
 
 function compactParts(parts: ReviewFirstDiffPart[], changedKind: "added" | "removed"): ReviewFirstDiffPart[] {
@@ -172,39 +178,45 @@ function buildInlineDiff(previous: string, proposed: string): {
   };
 }
 
-function sectionTitle(previous: string, proposed: string, index: number): string {
+function sectionTitle(previous: string, proposed: string): string {
   const candidate = [proposed, previous]
     .flatMap((body) => body.split("\n"))
     .map((line) => line.trim())
     .find((line) => /^(schedule|section|article)\b/i.test(line));
   if (candidate) return candidate.length > 90 ? `${candidate.slice(0, 90).trim()}...` : candidate;
-  return index === 0 ? "Updated wording" : `Updated wording ${index + 1}`;
+  return "";
 }
 
-function sectionSummary(title: string, previous: string, proposed: string): string {
+function sectionLabel(title: string, previous: string, proposed: string): { label: string; priority: number } {
   const haystack = `${title} ${previous} ${proposed}`.toLocaleLowerCase();
-  if (/\b(owner|owns|ownership|deliverables|work product|intellectual property|ip)\b/.test(haystack)) {
-    return "Ownership clause revised";
+  if (/\bschedule a\b/.test(haystack)) {
+    return { label: "Payment terms changed", priority: 10 };
   }
-  if (/\b(payment|fee|invoice|net \d+|compensation|due|schedule a)\b/.test(haystack)) {
-    return title.toLocaleLowerCase().includes("schedule") ? "Payment schedule updated" : "Payment terms updated";
+  if (/\b(owner|owns|ownership|deliverables|work product|intellectual property|ip)\b/.test(haystack)) {
+    return { label: "Ownership changed", priority: 30 };
+  }
+  if (/\b(payment|fee|invoice|net \d+|compensation|due)\b/.test(haystack)) {
+    return { label: "Payment terms changed", priority: 10 };
+  }
+  if (/\b(purpose|scope|services|statement of work|sow)\b/.test(haystack)) {
+    return { label: "Purpose and scope changed", priority: 20 };
   }
   if (/\b(support|response|escalation|handoff|acceptance)\b/.test(haystack)) {
-    return "Support response timing changed";
+    return { label: "Support terms changed", priority: 40 };
   }
   if (/\b(terminate|termination|cancel|notice)\b/.test(haystack)) {
-    return "Termination wording updated";
+    return { label: "Termination terms changed", priority: 50 };
   }
   if (/\b(confidential|confidentiality|non-disclosure)\b/.test(haystack)) {
-    return "Confidentiality wording updated";
+    return { label: "Confidentiality changed", priority: 60 };
   }
   if (/\b(liability|indemn|damages|warranty)\b/.test(haystack)) {
-    return "Risk allocation wording updated";
+    return { label: "Risk allocation changed", priority: 70 };
   }
-  if (/\b(scope|services|statement of work|sow)\b/.test(haystack)) {
-    return "Scope wording updated";
+  if (/\b(signature|signed by|signer|name|title|company|client llc|studio llc)\b/.test(haystack)) {
+    return { label: "Signer name changed", priority: 100 };
   }
-  return title && !/^updated wording/i.test(title) ? `${title} updated` : "Agreement wording updated";
+  return { label: "Agreement wording changed", priority: 90 };
 }
 
 export function getChangedReviewSections(previousText: string, proposedText: string): ReviewFirstChangedSection[] {
@@ -222,13 +234,14 @@ export function getChangedReviewSections(previousText: string, proposedText: str
     previousCursor = previousEnd + 1;
     proposedCursor = proposedEnd + 1;
     if (!changedPrevious && !changedProposed) return;
-    const title = sectionTitle(changedPrevious, changedProposed, sections.length);
+    const rawTitle = sectionTitle(changedPrevious, changedProposed);
+    const label = sectionLabel(rawTitle, changedPrevious, changedProposed);
     const inline = buildInlineDiff(changedPrevious, changedProposed);
     const previousParts = inline.previousParts.length ? inline.previousParts : [{ text: "(No prior wording)", kind: "removed" as const }];
     const proposedParts = inline.proposedParts.length ? inline.proposedParts : [{ text: "(Removed)", kind: "added" as const }];
     sections.push({
-      title,
-      summary: sectionSummary(title, changedPrevious, changedProposed),
+      title: label.label,
+      summary: label.label,
       previous: joinTokenParts(previousParts) || "(No prior wording)",
       proposed: joinTokenParts(proposedParts) || "(Removed)",
       fullPrevious: changedPrevious || "(No prior wording)",
@@ -254,13 +267,14 @@ export function getChangedReviewSections(previousText: string, proposedText: str
     const changedPrevious = previousBlocks.slice(previousCursor, previousEnd).join("\n\n").trim();
     const changedProposed = proposedBlocks.slice(proposedCursor, proposedEnd).join("\n\n").trim();
     if (changedPrevious || changedProposed) {
-      const title = sectionTitle(changedPrevious, changedProposed, sections.length);
+      const rawTitle = sectionTitle(changedPrevious, changedProposed);
+      const label = sectionLabel(rawTitle, changedPrevious, changedProposed);
       const inline = buildInlineDiff(changedPrevious, changedProposed);
       const previousParts = inline.previousParts.length ? inline.previousParts : [{ text: "(No prior wording)", kind: "removed" as const }];
       const proposedParts = inline.proposedParts.length ? inline.proposedParts : [{ text: "(Removed)", kind: "added" as const }];
       sections.push({
-        title,
-        summary: sectionSummary(title, changedPrevious, changedProposed),
+        title: label.label,
+        summary: label.label,
         previous: joinTokenParts(previousParts) || "(No prior wording)",
         proposed: joinTokenParts(proposedParts) || "(Removed)",
         fullPrevious: changedPrevious || "(No prior wording)",
@@ -272,7 +286,11 @@ export function getChangedReviewSections(previousText: string, proposedText: str
       });
     }
   }
-  return sections;
+  return sections.sort((a, b) => {
+    const ap = sectionLabel(a.title, a.fullPrevious, a.fullProposed).priority;
+    const bp = sectionLabel(b.title, b.fullPrevious, b.fullProposed).priority;
+    return ap - bp;
+  });
 }
 
 export function buildReviewFirstTextDiffSummary(previousText: string, proposedText: string): ReviewFirstTextDiffSummary {

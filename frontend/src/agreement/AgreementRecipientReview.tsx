@@ -5215,90 +5215,33 @@ export function AgreementRecipientReview({
                   className="rounded-xl bg-white p-4 shadow-sm"
                   data-testid="recipient-review-proposed-update-preview"
                 >
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h3 className="text-base font-semibold tracking-tight text-slate-950">
-                        Changes detected
-                      </h3>
-                      <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                        Everyone will review these wording changes before approval.
-                      </p>
-                    </div>
-                    <p
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
-                        needsPersonalizedLink
-                          ? "bg-amber-50 text-amber-800"
-                          : reviewFirstTextDiff.hasMaterialChanges
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-slate-100 text-slate-700"
-                      }`}
-                      data-testid="recipient-review-proposed-update-state"
-                    >
-                      {needsPersonalizedLink
-                        ? REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE
+                  <h3 className="text-base font-semibold tracking-tight text-slate-950">
+                    {reviewFirstTextDiff.hasMaterialChanges ? "Updated agreement pasted" : "No wording changes detected"}
+                  </h3>
+                  <p
+                    className="mt-1 text-sm leading-relaxed text-slate-600"
+                    data-testid="recipient-review-proposed-update-summary"
+                  >
+                    {reviewFirstTextDiff.hasMaterialChanges
+                      ? "Review changes to continue."
+                      : "No wording changes detected."}
+                  </p>
+                  <p
+                    className={`mt-3 inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ${
+                      needsPersonalizedLink
+                        ? "bg-amber-50 text-amber-800"
                         : reviewFirstTextDiff.hasMaterialChanges
-                            ? "Ready to submit"
-                          : "No changes detected"}
-                    </p>
-                  </div>
-                  <p className="mt-3 text-sm leading-relaxed text-slate-700" data-testid="recipient-review-proposed-update-summary">
-                    {reviewFirstTextDiff.summary}
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-700"
+                    }`}
+                    data-testid="recipient-review-proposed-update-state"
+                  >
+                    {needsPersonalizedLink
+                      ? REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE
+                      : reviewFirstTextDiff.hasMaterialChanges
+                        ? "Ready to review"
+                        : "No changes detected"}
                   </p>
-                  {reviewFirstTextDiff.changedSections.length > 0 ? (
-                    <ul className="mt-3 space-y-1 text-sm leading-relaxed text-slate-700">
-                      {reviewFirstTextDiff.changedSections.slice(0, 4).map((section) => (
-                        <li key={`${section.title}-${section.summary}`} className="flex gap-2">
-                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" aria-hidden="true" />
-                          <span>{section.summary}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  <p className="mt-1 text-xs leading-relaxed text-slate-500" data-testid="recipient-review-proposed-update-attribution">
-                    Updated by {proposerDisplayNameForApi || "this reviewer"}.
-                  </p>
-                  {reviewFirstTextDiff.changedSections.length > 0 ? (
-                    <div className="mt-4 space-y-3" data-testid="recipient-review-proposed-update-before-after">
-                      {reviewFirstTextDiff.changedSections.slice(0, 4).map((section) => (
-                        <article
-                          key={`${section.title}-${section.previous}`}
-                          className="rounded-xl bg-slate-50/80 p-3"
-                        >
-                          <div className="text-sm font-semibold text-slate-950">{section.title}</div>
-                          <p className="mt-1 text-xs text-slate-500">{section.summary}</p>
-                          <div className="mt-3 space-y-2">
-                            <div className="rounded-lg bg-white p-3">
-                              <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">
-                                Previous
-                              </div>
-                              <p className="mt-1.5 text-sm leading-relaxed text-slate-800">
-                                {renderReviewFirstDiffParts(section.previousParts, "removed") ?? section.previous}
-                              </p>
-                            </div>
-                            <div className="rounded-lg bg-white p-3">
-                              <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-                                Updated
-                              </div>
-                              <p className="mt-1.5 text-sm leading-relaxed text-slate-800">
-                                {renderReviewFirstDiffParts(section.proposedParts, "added") ?? section.proposed}
-                              </p>
-                            </div>
-                          </div>
-                          <details className="mt-3 text-xs text-slate-600">
-                            <summary className="cursor-pointer font-medium text-slate-500">View full section</summary>
-                            <div className="mt-2 grid gap-2 md:grid-cols-2">
-                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 font-sans text-xs leading-relaxed">
-                                {section.fullPrevious}
-                              </pre>
-                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 font-sans text-xs leading-relaxed">
-                                {section.fullProposed}
-                              </pre>
-                            </div>
-                          </details>
-                        </article>
-                      ))}
-                    </div>
-                  ) : null}
                 </div>
               ) : null}
               {!recipientPreview ? (

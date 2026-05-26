@@ -25,11 +25,11 @@ describe("reviewFirstTextDiff", () => {
 
     expect(diff.status).toBe("changed");
     expect(diff.hasMaterialChanges).toBe(true);
-    expect(diff.changedSections[0]?.title).toContain("Schedule A");
+    expect(diff.changedSections[0]?.title).toBe("Payment terms changed");
     expect(diff.changedSections[0]?.previous).toContain("30 days");
     expect(diff.changedSections[0]?.proposed).toContain("15 days");
     expect(diff.summary).toBe("1 material wording update found.");
-    expect(diff.changedSections[0]?.summary).toBe("Payment schedule updated");
+    expect(diff.changedSections[0]?.summary).toBe("Payment terms changed");
     expect(diff.changedSections[0]?.previousParts.some((part) => part.kind === "removed" && part.text.includes("30"))).toBe(true);
     expect(diff.changedSections[0]?.proposedParts.some((part) => part.kind === "added" && part.text.includes("15"))).toBe(true);
   });
@@ -43,7 +43,7 @@ describe("reviewFirstTextDiff", () => {
     const diff = buildReviewFirstTextDiffSummary(previous, proposed);
     const section = diff.changedSections[0];
 
-    expect(section?.summary).toBe("Ownership clause revised");
+    expect(section?.summary).toBe("Ownership changed");
     expect(section?.previous).toContain("Company");
     expect(section?.previous).toContain("after payment");
     expect(section?.proposed).toContain("Client");

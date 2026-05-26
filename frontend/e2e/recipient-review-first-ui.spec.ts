@@ -527,20 +527,25 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   await page.setViewportSize({ width: 1440, height: 1100 });
   await expect(page.getByTestId("recipient-revision-voice-field")).toHaveCount(0);
   await expect(page.getByTestId("recipient-compose-tablist")).toHaveCount(0);
-  await page.getByTestId("recipient-edit-draft-textarea").fill(updatedBody);
-  await expect(page.getByTestId("recipient-review-proposed-update-preview")).toBeVisible();
-  await expect(page.getByTestId("recipient-review-proposed-update-state")).toContainText("Ready to submit");
-  await expect(page.getByTestId("recipient-review-proposed-update-summary")).toContainText("material wording update found");
-  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toContainText("Previous");
-  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toContainText("Updated");
+  await page.getByTestId("recipient-edit-draft-textarea").fill(originalBody);
+  await expect(page.getByTestId("recipient-review-proposed-update-state")).toContainText("No changes detected");
+  await expect(page.getByTestId("recipient-compare-versions-button")).toBeDisabled();
   await page.setViewportSize({ width: 376, height: 782 });
   await page.getByTestId("recipient-review-proposed-update-preview").scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: join(artifactDir, "revised-draft-changes-detected-mobile.png"),
+    path: join(artifactDir, "proposal-no-change-disabled-mobile.png"),
     fullPage: true,
   });
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.getByTestId("recipient-edit-draft-textarea").fill(updatedBody);
+  await expect(page.getByTestId("recipient-review-proposed-update-preview")).toBeVisible();
+  await expect(page.getByTestId("recipient-review-proposed-update-state")).toContainText("Ready to review");
+  await expect(page.getByTestId("recipient-review-proposed-update-summary")).toContainText("Review changes to continue");
+  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toHaveCount(0);
+  await page.setViewportSize({ width: 376, height: 782 });
+  await page.getByTestId("recipient-review-proposed-update-preview").scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: join(artifactDir, "detected-changes-preview-state-mobile.png"),
+    path: join(artifactDir, "proposal-pasted-review-button-enabled-mobile.png"),
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1100 });
@@ -561,6 +566,10 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   await expect(page.getByText(/Nothing is signed yet, and everyone must approve the updated version before signing/i)).toHaveCount(0);
 
   await page.screenshot({
+    path: join(artifactDir, "proposal-short-diff-snippets-desktop.png"),
+    fullPage: true,
+  });
+  await page.screenshot({
     path: join(artifactDir, "review-first-change-before-after.png"),
     fullPage: true,
   });
@@ -570,6 +579,10 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   });
   await page.setViewportSize({ width: 376, height: 782 });
   await changeSummary.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: join(artifactDir, "proposal-after-review-changes-click-mobile.png"),
+    fullPage: true,
+  });
   await page.screenshot({
     path: join(artifactDir, "revised-draft-submit-ready-mobile.png"),
     fullPage: true,
