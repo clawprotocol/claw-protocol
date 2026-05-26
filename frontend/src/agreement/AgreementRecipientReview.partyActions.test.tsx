@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
@@ -128,10 +128,10 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect(within(actions).getByRole("button", { name: /^Download$/i })).toBeTruthy();
     expect(within(actions).getByRole("button", { name: /More options/i })).toBeTruthy();
     expect(screen.queryByLabelText(/Requested change/i)).toBeNull();
-    expect(within(actions).queryByRole("button", { name: /Edit text directly/i })).toBeNull();
+    expect(within(actions).queryByRole("button", { name: /Paste updated wording/i })).toBeNull();
     await userEvent.click(within(actions).getByRole("button", { name: /More options/i }));
-    expect(within(actions).getByRole("button", { name: /Edit text directly/i })).toBeTruthy();
-    expect(within(actions).getByRole("button", { name: /Upload updated draft/i })).toBeTruthy();
+    expect(within(actions).getByRole("button", { name: /Paste updated wording/i })).toBeTruthy();
+    expect(within(actions).getByRole("button", { name: /Upload .txt or .md/i })).toBeTruthy();
     expect(within(actions).getByRole("button", { name: /^Download text$/i })).toBeTruthy();
     expect(within(actions).getByRole("button", { name: /^Copy text$/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
@@ -178,7 +178,7 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
     expect(await screen.findByTestId("recipient-edit-draft-textarea")).toBeTruthy();
-    expect(screen.getByTestId("recipient-compare-versions-button").textContent).toMatch(/Submit proposed update/i);
+    expect(screen.getByTestId("recipient-compare-versions-button").textContent).toMatch(/Review changes/i);
   });
 
   it("pasted revised draft from a personal link shows Schedule A before/after and attribution", async () => {
@@ -223,15 +223,24 @@ describe("AgreementRecipientReview review-first actions", () => {
     const paste = await screen.findByTestId("recipient-edit-draft-textarea");
     await userEvent.clear(paste);
     await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+    const livePreview = await screen.findByTestId("recipient-review-proposed-update-preview");
+    expect(within(livePreview).getByText(/Changes detected/i)).toBeTruthy();
+    expect(within(livePreview).getByText(/Everyone will review these wording changes before approval./i)).toBeTruthy();
+    expect(within(livePreview).getByText(/Ready to submit/i)).toBeTruthy();
+    expect(within(livePreview).getByText(/Previous wording/i)).toBeTruthy();
+    expect(within(livePreview).getByText(/Updated wording/i)).toBeTruthy();
+    expect(within(livePreview).getByText(/Updated by Bob/i)).toBeTruthy();
     const submit = screen.getByTestId("recipient-compare-versions-button");
     expect(submit).toHaveProperty("disabled", false);
     await userEvent.click(submit);
 
-    expect(await screen.findByText("Changes proposed")).toBeTruthy();
+    expect((await screen.findByTestId("recipient-preview-summary-heading")).textContent).toBe(
+      "Changes detected",
+    );
     const summary = screen.getByTestId("recipient-review-change-visibility-summary");
-    expect(within(summary).getByText(/Previous/i)).toBeTruthy();
-    expect(within(summary).getByText(/Proposed/i)).toBeTruthy();
-    expect(within(summary).getByText(/Suggested change by Bob/i)).toBeTruthy();
+    expect(within(summary).getByText(/Previous wording/i)).toBeTruthy();
+    expect(within(summary).getByText(/Updated wording/i)).toBeTruthy();
+    expect(within(summary).getByText(/Updated by Bob/i)).toBeTruthy();
     expect(within(summary).getByText(/Specific compensation mechanics will be completed in Schedule A before execution/i)).toBeTruthy();
     expect(within(summary).getByText(/Total project fee: \$120,000 USD/i)).toBeTruthy();
     expect(within(summary).getByText(/\$72,000 build\/configuration due kickoff/i)).toBeTruthy();
@@ -270,10 +279,57 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
     expect((await screen.findByTestId("recipient-review-personal-link-required")).textContent).toContain(
-      "Open the personal review link the sender gave you so LawDog can attribute your proposed update.",
+      "Open your personal review link to send this update.",
     );
     const paste = await screen.findByTestId("recipient-edit-draft-textarea");
     await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+    expect((await screen.findByTestId("recipient-review-proposed-update-state")).textContent).toContain(
+      "Open your personal review link to send this update.",
+    );
+    expect(screen.getByTestId("recipient-compare-versions-button")).toHaveProperty("disabled", true);
+  });
+
+  it("no-change revised draft disables submit and shows a no-change state", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (init?.method || (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({ rendered_html: `<article><pre>${reviewFirstDraft.purpose}</pre></article>` });
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({ draft: reviewFirstDraft });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview
+          agreementId={agreementId}
+          recipientAccessToken="tok_test"
+          participantPartyId="p-bob"
+        />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading agreement/i)).toBeNull();
+    });
+
+    await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
+    const paste = await screen.findByTestId("recipient-edit-draft-textarea");
+    fireEvent.change(paste, { target: { value: reviewFirstDraft.purpose } });
+
+    expect((await screen.findByTestId("recipient-review-proposed-update-state")).textContent).toContain(
+      "No changes detected",
+    );
     expect(screen.getByTestId("recipient-compare-versions-button")).toHaveProperty("disabled", true);
   });
 });

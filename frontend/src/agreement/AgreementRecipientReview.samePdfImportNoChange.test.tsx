@@ -47,7 +47,7 @@ function makeDraft(id: string) {
   };
 }
 
-describe("AgreementRecipientReview same-PDF import (no material change)", () => {
+describe("AgreementRecipientReview same-text import (no material change)", () => {
   beforeEach(() => {
     extractMock.mockReset();
     Object.defineProperty(Element.prototype, "scrollIntoView", {
@@ -104,7 +104,7 @@ describe("AgreementRecipientReview same-PDF import (no material change)", () => 
     expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
 
     const fileInput = await screen.findByTestId("recipient-import-draft-file-input");
-    fireEvent.change(fileInput, { target: { files: [new File(["dummy"], "same.pdf", { type: "application/pdf" })] } });
+    fireEvent.change(fileInput, { target: { files: [new File(["dummy"], "same.txt", { type: "text/plain" })] } });
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-import-no-change-panel")).toBeTruthy();
@@ -131,7 +131,7 @@ describe("AgreementRecipientReview same-PDF import (no material change)", () => 
     await userEvent.click(screen.getByTestId("recipient-import-no-change-continue-editing"));
     await waitFor(() => expect(screen.queryByTestId("recipient-import-no-change-panel")).toBeNull());
 
-    fireEvent.change(fileInput, { target: { files: [new File(["y"], "rev.pdf", { type: "application/pdf" })] } });
+    fireEvent.change(fileInput, { target: { files: [new File(["y"], "rev.txt", { type: "text/plain" })] } });
 
     await waitFor(
       () => {
@@ -183,7 +183,7 @@ describe("AgreementRecipientReview same-PDF import (no material change)", () => 
     expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
 
     const fileInput = await screen.findByTestId("recipient-import-draft-file-input");
-    fireEvent.change(fileInput, { target: { files: [new File(["a"], "changed.pdf", { type: "application/pdf" })] } });
+    fireEvent.change(fileInput, { target: { files: [new File(["a"], "changed.txt", { type: "text/plain" })] } });
 
     await waitFor(
       () => {
@@ -202,7 +202,7 @@ describe("AgreementRecipientReview same-PDF import (no material change)", () => 
       pdfThinSanitizeUsedRaw: false,
     });
 
-    fireEvent.change(fileInput, { target: { files: [new File(["b"], "same-as-draft.pdf", { type: "application/pdf" })] } });
+    fireEvent.change(fileInput, { target: { files: [new File(["b"], "same-as-draft.txt", { type: "text/plain" })] } });
 
     await waitFor(() => {
       expect(screen.getByTestId("recipient-import-no-change-panel")).toBeTruthy();

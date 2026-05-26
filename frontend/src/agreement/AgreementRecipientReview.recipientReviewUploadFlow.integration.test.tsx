@@ -115,7 +115,7 @@ describe("AgreementRecipientReview revised upload → compare (regression guard)
     );
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
-    expect(within(panel).getByTestId("recipient-preview-summary-heading").textContent).toBe("Changes proposed");
+    expect(within(panel).getByTestId("recipient-preview-summary-heading").textContent).toBe("Changes detected");
     expect(within(panel).getByRole("button", { name: RECIPIENT_BTN_CONTINUE_EDITING })).toBeTruthy();
   }, 30_000);
 

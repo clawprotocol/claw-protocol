@@ -6,7 +6,7 @@ import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { openRecipientReviseUploadPickMethod } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 import { RECIPIENT_BTN_CONTINUE_EDITING } from "./portableReviewCopy";
-import { REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
+const REVIEW_FIRST_REVISED_DRAFT_FILE_ACCEPT = ".txt,.md,text/plain,text/markdown,text/x-markdown";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -115,9 +115,9 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
 
     await openRecipientReviseUploadPickMethod(user);
     const workspaceImport = screen.getByTestId("recipient-import-draft-file-input");
-    expect(workspaceImport.getAttribute("accept")).toBe(REVISED_DRAFT_FILE_INPUT_ACCEPT);
-    expect(workspaceImport.getAttribute("accept")).toContain(".pdf");
-    expect(workspaceImport.getAttribute("accept")).toContain("application/pdf");
+    expect(workspaceImport.getAttribute("accept")).toBe(REVIEW_FIRST_REVISED_DRAFT_FILE_ACCEPT);
+    expect(workspaceImport.getAttribute("accept")).not.toContain(".pdf");
+    expect(workspaceImport.getAttribute("accept")).not.toContain("application/pdf");
 
     const importedRevisedBody = [
       "Master Services Agreement (Revised)",

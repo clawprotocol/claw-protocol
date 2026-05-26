@@ -483,6 +483,9 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
   await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("recipient-review-propose-updated-draft").click();
   await expect(page.getByTestId("recipient-edit-draft-textarea")).toBeVisible({ timeout: 15_000 });
+  const entryControls = page.getByTestId("recipient-manual-propose-controls");
+  await expect(entryControls.getByRole("heading", { name: "Update agreement" })).toBeVisible();
+  await expect(entryControls.getByText("Edit the agreement anywhere, then paste the updated wording below.")).toBeVisible();
   await expect(page.getByTestId("recipient-review-personal-link-required")).toHaveCount(0);
   await page.screenshot({
     path: join(artifactDir, "review-first-propose-update-clean.png"),
@@ -493,21 +496,36 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
     path: join(artifactDir, "propose-updated-draft-no-ai-controls-mobile.png"),
     fullPage: true,
   });
+  await page.screenshot({
+    path: join(artifactDir, "revised-draft-minimal-entry-mobile.png"),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 1440, height: 1100 });
   await expect(page.getByTestId("recipient-revision-voice-field")).toHaveCount(0);
   await expect(page.getByTestId("recipient-compose-tablist")).toHaveCount(0);
   await page.getByTestId("recipient-edit-draft-textarea").fill(updatedBody);
+  await expect(page.getByTestId("recipient-review-proposed-update-preview")).toBeVisible();
+  await expect(page.getByTestId("recipient-review-proposed-update-state")).toContainText("Ready to submit");
+  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toContainText("Previous wording");
+  await expect(page.getByTestId("recipient-review-proposed-update-before-after")).toContainText("Updated wording");
+  await page.setViewportSize({ width: 376, height: 782 });
+  await page.getByTestId("recipient-review-proposed-update-preview").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: join(artifactDir, "revised-draft-changes-detected-mobile.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1100 });
   await expect(page.getByTestId("recipient-compare-versions-button")).toBeEnabled();
   await page.getByTestId("recipient-compare-versions-button").click();
 
-  await expect(page.getByTestId("recipient-preview-summary-heading")).toHaveText("Changes proposed", {
+  await expect(page.getByTestId("recipient-preview-summary-heading")).toHaveText("Changes detected", {
     timeout: 20_000,
   });
   const changeSummary = page.getByTestId("recipient-review-change-visibility-summary");
   await expect(changeSummary).toBeVisible();
-  await expect(changeSummary.getByText("Previous", { exact: true })).toBeVisible();
-  await expect(changeSummary.getByText("Proposed", { exact: true })).toBeVisible();
-  await expect(changeSummary).toContainText(/Suggested change by Client LLC/i);
+  await expect(changeSummary.getByText("Previous wording", { exact: true })).toBeVisible();
+  await expect(changeSummary.getByText("Updated wording", { exact: true })).toBeVisible();
+  await expect(changeSummary).toContainText(/Updated by Client LLC/i);
   await expect(changeSummary).toContainText(/Specific compensation mechanics will be completed in Schedule A before execution/i);
   await expect(changeSummary).toContainText(/Total project fee: \$120,000 USD/i);
   await expect(changeSummary).toContainText(/\$72,000 build\/configuration due kickoff/i);
@@ -521,6 +539,13 @@ test("propose updated draft shows Schedule A before/after blocks", async ({ page
     path: join(artifactDir, "review-first-schedule-a-before-after.png"),
     fullPage: true,
   });
+  await page.setViewportSize({ width: 376, height: 782 });
+  await changeSummary.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: join(artifactDir, "revised-draft-submit-ready-mobile.png"),
+    fullPage: true,
+  });
+
 });
 
 test("review-first missing token shows attribution message before revised draft editor", async ({ page }) => {
@@ -549,9 +574,12 @@ test("review-first missing token shows attribution message before revised draft 
   await expect(page.getByRole("heading", { name: "Review agreement" })).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("recipient-review-propose-updated-draft").click();
   await expect(page.getByTestId("recipient-review-personal-link-required")).toContainText(
-    "Open the personal review link the sender gave you so LawDog can attribute your proposed update.",
+    "Open your personal review link to send this update.",
   );
   await page.getByTestId("recipient-edit-draft-textarea").fill(`AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+  await expect(page.getByTestId("recipient-review-proposed-update-state")).toContainText(
+    "Open your personal review link to send this update.",
+  );
   await expect(page.getByTestId("recipient-compare-versions-button")).toBeDisabled();
   await page.screenshot({
     path: join(artifactDir, "review-first-missing-token-attribution-message.png"),

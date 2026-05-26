@@ -10,7 +10,8 @@ import {
   RECIPIENT_CLAUSE_SUGGESTIONS_TITLE,
   RECIPIENT_UPLOAD_NOTES_ONLY_CARD_TITLE,
 } from "./portableReviewCopy";
-import { REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
+
+const REVIEW_FIRST_REVISED_DRAFT_FILE_ACCEPT = ".txt,.md,text/plain,text/markdown,text/x-markdown";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -190,7 +191,7 @@ describe("AgreementRecipientReview upload classification", () => {
       }),
     );
     expect(screen.getByTestId("recipient-import-draft-file-input").getAttribute("accept")).toBe(
-      REVISED_DRAFT_FILE_INPUT_ACCEPT,
+      REVIEW_FIRST_REVISED_DRAFT_FILE_ACCEPT,
     );
   }, 25_000);
 });

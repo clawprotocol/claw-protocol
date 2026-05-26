@@ -110,7 +110,7 @@ describe("AgreementRecipientReview whole-doc redline vs identical HTML", () => {
 
     const panel = screen.getByTestId("recipient-suggested-changes-panel");
     expect(within(panel).getByTestId("recipient-preview-summary-heading").textContent).toBe(
-      "Changes proposed",
+      "Changes detected",
     );
     expect(within(panel).getByText(/Nothing is signed yet/i)).toBeTruthy();
 

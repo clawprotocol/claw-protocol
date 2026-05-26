@@ -10,7 +10,7 @@ import {
 } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 import { computeRecipientDraftTextareaMaxPx } from "../hooks/useRecipientDraftTextareaMaxPx";
-import { REVISED_DRAFT_FILE_INPUT_ACCEPT } from "./recipientRevisedDraftImportText";
+const REVIEW_FIRST_REVISED_DRAFT_FILE_ACCEPT = ".txt,.md,text/plain,text/markdown,text/x-markdown";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -79,8 +79,8 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
     expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
     expect(screen.getByTestId("recipient-manual-propose-controls")).toBeTruthy();
-    expect(screen.getAllByText("Propose an updated draft").length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Paste revised agreement text or upload a revised file/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Update agreement").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Edit the agreement anywhere, then paste the updated wording/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
   });
 
@@ -208,9 +208,9 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     await openRecipientReviseUploadPickMethod();
 
     const importDraftInput = screen.getByTestId("recipient-import-draft-file-input");
-    expect(importDraftInput.getAttribute("accept")).toBe(REVISED_DRAFT_FILE_INPUT_ACCEPT);
-    expect(importDraftInput.getAttribute("accept")).toContain(".pdf");
-    expect(importDraftInput.getAttribute("accept")).toContain("application/pdf");
+    expect(importDraftInput.getAttribute("accept")).toBe(REVIEW_FIRST_REVISED_DRAFT_FILE_ACCEPT);
+    expect(importDraftInput.getAttribute("accept")).not.toContain(".pdf");
+    expect(importDraftInput.getAttribute("accept")).not.toContain("application/pdf");
 
     const scoped = within(screen.getByTestId("recipient-propose-update-standard-panel"));
     await userEvent.click(screen.getByTestId("recipient-intake-mode-edit-draft"));
@@ -219,7 +219,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     });
     const paste = "x".repeat(2500);
     fireEvent.change(scoped.getByTestId("recipient-edit-draft-textarea"), { target: { value: paste } });
-    expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Submit proposed update/i);
+    expect(screen.getAllByTestId("recipient-compare-versions-button")[0]!.textContent).toMatch(/Review changes/i);
     await userEvent.click(screen.getAllByTestId("recipient-compare-versions-button")[0]!);
 
     await waitFor(() => {
@@ -256,7 +256,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     const big = "THIS AGREEMENT\n\n".repeat(200);
     fireEvent.change(screen.getByTestId("recipient-edit-draft-textarea"), { target: { value: big } });
     const previewBtn = screen.getByTestId("recipient-compare-versions-button") as HTMLButtonElement;
-    expect(previewBtn.textContent).toMatch(/Submit proposed update/i);
+    expect(previewBtn.textContent).toMatch(/Review changes/i);
     expect(previewBtn.disabled).toBe(false);
   });
 
