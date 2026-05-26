@@ -13,6 +13,23 @@ const CANONICAL_EXCLUDES: Record<string, readonly string[]> = {
   total_fee_confirmation: ["project_fee_phase_confirmation"],
 };
 
+const SEMANTIC_INTENT_CLUSTERS: Record<string, string> = {
+  governing_law_notice: "governing_law_and_venue",
+  governing_venue: "governing_law_and_venue",
+  project_fee_phase_confirmation: "payment_structure",
+  total_fee_confirmation: "payment_structure",
+  phase_payment_allocation: "payment_structure",
+  payment_structure: "payment_structure",
+  milestone_schedule: "payment_structure",
+  ip_ownership: "ownership_and_ip",
+  ip_allocation: "ownership_and_ip",
+  license_background_tools: "ownership_and_ip",
+  saas_sla: "support_expectations",
+  support_obligations: "support_expectations",
+  renewal_notice: "termination_notice",
+  termination: "termination_notice",
+};
+
 export type BuildStableGuidedQueueArgs = {
   variables: readonly DealVariable[];
   answered?: Readonly<Record<string, string>>;
@@ -33,12 +50,62 @@ function isResolved(id: string, answered?: Readonly<Record<string, string>>, ski
   return a.length > 0;
 }
 
-export function buildStableGuidedQuestionQueue(args: BuildStableGuidedQueueArgs): StableGuidedQueueResult {
-  const max = args.maxQuestions ?? MAX_GUIDED_QUEUE;
-  const prioritized = prioritizeDealVariables(args.variables);
-  const seen = new Set<string>();
+function semanticIntentForVariable(v: DealVariable): string {
+  const explicit = SEMANTIC_INTENT_CLUSTERS[v.id];
+  if (explicit) return explicit;
+  const blob = `${v.id} ${v.category} ${v.label} ${v.question}`.toLowerCase();
+  if (/\bgoverning|venue|jurisdiction\b/i.test(blob)) return "governing_law_and_venue";
+  if (/\bpayment|fee|milestone|phase|compensation\b/i.test(blob)) return "payment_structure";
+  if (/\bownership|work product|intellectual|license|background tools?\b/i.test(blob)) return "ownership_and_ip";
+  if (/\bsupport|uptime|sla|service level|maintenance\b/i.test(blob)) return "support_expectations";
+  if (/\btermination|renewal|notice\b/i.test(blob)) return "termination_notice";
+  return v.id;
+}
+
+export function dedupeGuidedQuestionsBySemanticIntent(args: {
+  variables: readonly DealVariable[];
+  answered?: Readonly<Record<string, string>>;
+  skipped?: ReadonlySet<string>;
+}): { variables: DealVariable[]; removedIds: string[]; blockedRepeatIds: string[] } {
+  const intentByAnswered = new Set<string>();
+  for (const v of args.variables) {
+    if (isResolved(v.id, args.answered, args.skipped)) intentByAnswered.add(semanticIntentForVariable(v));
+  }
+  const seenIntent = new Set<string>();
+  const variables: DealVariable[] = [];
   const removedIds: string[] = [];
   const blockedRepeatIds: string[] = [];
+  for (const v of args.variables) {
+    const intent = semanticIntentForVariable(v);
+    if (isResolved(v.id, args.answered, args.skipped)) {
+      blockedRepeatIds.push(v.id);
+      continue;
+    }
+    if (intentByAnswered.has(intent)) {
+      blockedRepeatIds.push(v.id);
+      continue;
+    }
+    if (seenIntent.has(intent)) {
+      removedIds.push(v.id);
+      continue;
+    }
+    seenIntent.add(intent);
+    variables.push(v);
+  }
+  return { variables, removedIds, blockedRepeatIds };
+}
+
+export function buildStableGuidedQuestionQueue(args: BuildStableGuidedQueueArgs): StableGuidedQueueResult {
+  const max = args.maxQuestions ?? MAX_GUIDED_QUEUE;
+  const semanticDedupe = dedupeGuidedQuestionsBySemanticIntent({
+    variables: prioritizeDealVariables(args.variables),
+    answered: args.answered,
+    skipped: args.skipped,
+  });
+  const prioritized = semanticDedupe.variables;
+  const seen = new Set<string>();
+  const removedIds: string[] = [...semanticDedupe.removedIds];
+  const blockedRepeatIds: string[] = [...semanticDedupe.blockedRepeatIds];
   const queue: string[] = [];
   const variables: DealVariable[] = [];
 

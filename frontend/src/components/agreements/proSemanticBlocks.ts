@@ -225,6 +225,22 @@ export function extractProtectedCommercialClusters(
         source: sourceFor(intakeText, draftText, aiMilestones),
       }),
     );
+  } else if (/\b(?:even thirds|one[-\s]?third|evenly across build|build-heavy)\b/i.test(blob)) {
+    const phrases = /\bbuild-heavy\b/i.test(blob)
+      ? ["build-heavy fee allocation"]
+      : ["evenly across build, rollout, and support/acceptance phases"];
+    pushBlock(
+      blocks,
+      block({
+        id: "milestone_block",
+        archetype,
+        ownerSection: "fees",
+        requiredPhrases: phrases,
+        forbiddenSections: ["purpose", "support", "misc"],
+        renderPriority: 30,
+        source: sourceFor(intakeText, draftText, phrases),
+      }),
+    );
   } else if (/\b(?:3|three)\s+milestones\b|\b(?:4|four)\s+months\b/i.test(blob)) {
     pushBlock(
       blocks,
@@ -375,8 +391,13 @@ export function renderSemanticBlock(block: ProSemanticBlock): string {
     if (block.requiredPhrases.some((phrase) => /^40\s*%/i.test(phrase))) {
       return "The project milestone allocation is (a) 40% build/configuration; (b) 30% rollout/onboarding; and (c) 30% support/acceptance.";
     }
+    if (block.requiredPhrases.some((phrase) => /evenly across build|even thirds|one-third|build-heavy/i.test(phrase))) {
+      return block.requiredPhrases.some((phrase) => /build-heavy/i.test(phrase))
+        ? "The project fee allocation is build-heavy, with the larger share tied to build/configuration work and the remaining payments allocated to launch, support handoff, and acceptance milestones."
+        : "The project fee is allocated evenly across build, rollout, and support/acceptance phases, approximately one-third each.";
+    }
     if (block.requiredPhrases.some((phrase) => /\$18,?000/i.test(phrase))) {
-      return "Client will pay $18,000 total across 3 milestones over the 4-month engagement term.";
+      return "Client will pay $18,000 total across 3 milestones over the 4-month engagement term (three milestones over four months).";
     }
     return `The project milestones are ${phraseList(block.requiredPhrases)}.`;
   }
@@ -393,7 +414,7 @@ export function renderSemanticBlock(block: ProSemanticBlock): string {
     return `The commercial terms include ${phraseList(block.requiredPhrases)}.`;
   }
   if (block.id === "ownership_block") {
-    return "Client owns the project deliverables created for the engagement, and Service Provider retains its pre-existing tools, templates, know-how, and background materials.";
+    return "Client owns the project deliverables and custom deliverables created for the engagement, and Service Provider retains its pre-existing tools, templates, know-how, and background materials.";
   }
   if (block.id === "termination_block") {
     return `Either Party may terminate this Agreement on ${block.requiredPhrases[0]}.`;

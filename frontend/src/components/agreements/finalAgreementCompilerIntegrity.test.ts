@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   finalAgreementHasEmptySubsectionShell,
   finalAgreementHasExecutionContamination,
+  semanticPayloadOwnerMap,
   stabilizeFinalAgreementCompilerOutput,
+  validateCanonicalFactParity,
+  validateInternalReferences,
+  validateSectionContracts,
 } from "./finalAgreementCompilerIntegrity";
 
 const AI_INTAKE = `
@@ -11,6 +15,63 @@ $120,000 total project fee. 40% build/configuration, 30% rollout/onboarding, 30%
 `.trim();
 
 describe("finalAgreementCompilerIntegrity", () => {
+  it("enforces single-owner payload rendering and rejects duplicate payloads", () => {
+    expect(semanticPayloadOwnerMap.services_scope_list).toBe("purpose");
+    expect(semanticPayloadOwnerMap.milestone_schedule).toBe("fees");
+    expect(semanticPayloadOwnerMap.governing_law).toBe("misc");
+    const result = stabilizeFinalAgreementCompilerOutput(
+      `
+Agreement
+
+1. Purpose and Scope
+- AI workflow implementation.
+- Dashboard setup.
+- AI workflow implementation.
+This Agreement is governed by Oklahoma law.
+
+2. Fees and Payment
+- 40% is due for build/configuration.
+- 40% is due for build/configuration.
+
+3. Miscellaneous
+This Agreement is governed by Oklahoma law.
+`.trim(),
+      { intakeText: AI_INTAKE, surface: "test_single_owner_payloads" },
+    );
+    expect(result.repairs).toContain("duplicate_payload_rejected:services_scope_list");
+    expect(result.repairs).toContain("duplicate_payload_rejected:milestone_schedule");
+    expect(result.repairs).toContain("section_contract:relocated:governing_law:misc");
+    expect((result.text.match(/AI workflow implementation/gi) ?? []).length).toBe(1);
+    expect((result.text.match(/40% is due for build\/configuration/gi) ?? []).length).toBe(1);
+    expect((result.text.match(/governed by Oklahoma law/gi) ?? []).length).toBe(1);
+  });
+
+  it("validates section contracts by relocating forbidden payloads to owners", () => {
+    const result = validateSectionContracts(
+      `
+Agreement
+
+1. Support Expectations
+Client owns the project deliverables.
+This Agreement is governed by Oklahoma law.
+Provider will provide support expectations stated in this Agreement.
+
+2. Ownership and Work Product
+
+3. Miscellaneous
+`.trim(),
+      { surface: "test_section_contracts" },
+    );
+    expect(result.repairs).toContain("section_contract:relocated:ownership_terms:ownership");
+    expect(result.repairs).toContain("section_contract:relocated:governing_law:misc");
+    const support = result.text.match(/1\. Support Expectations[\s\S]*?(?=\n\n2\. Ownership)/i)?.[0] ?? "";
+    const ownership = result.text.match(/2\. Ownership and Work Product[\s\S]*?(?=\n+3\. Miscellaneous)/i)?.[0] ?? "";
+    const misc = result.text.match(/3\. Miscellaneous[\s\S]*/i)?.[0] ?? "";
+    expect(support).not.toMatch(/owns the project deliverables|governed by/i);
+    expect(ownership).toMatch(/owns the project deliverables/i);
+    expect(misc).toMatch(/governed by Oklahoma law/i);
+  });
+
   it("repairs empty milestone and services subsection shells", () => {
     const result = stabilizeFinalAgreementCompilerOutput(
       `
@@ -92,6 +153,22 @@ The obligations in Section 4.3 survive termination.
     expect(result.text).toMatch(/2\. Fees and Payment[\s\S]*2\.1 Payment Milestones/i);
     expect(result.text).toMatch(/3\. Term and Termination[\s\S]*Section 2\.1 survive/i);
     expect(result.text).not.toMatch(/4\.3 Payment Milestones|Section 7/);
+    expect(validateInternalReferences(result.text).ok).toBe(true);
+  });
+
+  it("rewrites missing reference targets generically", () => {
+    const result = stabilizeFinalAgreementCompilerOutput(
+      `
+Agreement
+
+1. Purpose and Scope
+Services are performed under Section 8.
+`.trim(),
+      { surface: "test_missing_reference" },
+    );
+    expect(result.repairs).toContain("reference_reconciled");
+    expect(result.text).toMatch(/under this Agreement/i);
+    expect(result.text).not.toMatch(/Section 8/i);
   });
 
   it("keeps end-to-end signing output coherent for multi-party AI services", () => {
@@ -140,5 +217,19 @@ Name:
     expect(result.text).toMatch(/1\.1 Project Services[\s\S]*Dashboard setup/i);
     expect(result.text).toMatch(/2\.1 Payment Milestones[\s\S]*30% is due for support\/acceptance/i);
     expect(result.text).toMatch(/CLIENT:\s*\nABC LLC/i);
+  });
+
+  it("validates free/pro canonical fact parity without blocking Pro detail expansion", () => {
+    const ok = validateCanonicalFactParity(
+      "Free draft: Oklahoma law. 30 days written notice. Client owns deliverables.",
+      "Pro draft: This Agreement is governed by Oklahoma law. Either Party may terminate on 30 days written notice. Client owns the project deliverables and Provider retains tools.",
+    );
+    expect(ok.ok).toBe(true);
+    const bad = validateCanonicalFactParity(
+      "Free draft: Oklahoma law. 30 days written notice.",
+      "Pro draft: This Agreement is governed by Texas law. Either Party may terminate on 15 days written notice.",
+    );
+    expect(bad.defects).toContain("canonical_fact_parity:governing_law");
+    expect(bad.defects).toContain("canonical_fact_parity:termination_structure");
   });
 });

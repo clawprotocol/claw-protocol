@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildStableGuidedQuestionQueue,
+  dedupeGuidedQuestionsBySemanticIntent,
   logGuidedQuestionDedupe,
   logGuidedQuestionQueueBuilt,
   logGuidedQuestionQueueFreezeHit,
@@ -87,5 +88,26 @@ describe("buildStableGuidedQuestionQueue", () => {
     const result = buildStableGuidedQuestionQueue({ variables: vars, skipped });
     expect(result.queue).not.toContain("saas_sla");
     expect(result.queue[0]).toBe("ip_ownership");
+  });
+
+  it("dedupes guided questions by semantic intent clusters", () => {
+    const vars = [
+      varStub("governing_law_notice", "Governing law", "Which state's law governs?"),
+      varStub("governing_venue", "Venue", "Which courts or venue should apply?"),
+      varStub("phase_payment_allocation", "Phase allocation", "How should milestone payments be allocated?"),
+      varStub("total_fee_confirmation", "Total fee", "What total fee applies?"),
+    ];
+    const deduped = dedupeGuidedQuestionsBySemanticIntent({ variables: vars });
+    expect(deduped.variables.map((v) => v.id)).toContain("governing_law_notice");
+    expect(deduped.variables.map((v) => v.id)).not.toContain("governing_venue");
+    expect(deduped.variables.map((v) => v.id)).toContain("phase_payment_allocation");
+    expect(deduped.variables.map((v) => v.id)).not.toContain("total_fee_confirmation");
+
+    const answered = buildStableGuidedQuestionQueue({
+      variables: vars,
+      answered: { governing_law_notice: "Oklahoma law" },
+    });
+    expect(answered.queue).not.toContain("governing_venue");
+    expect(answered.blockedRepeatIds).toContain("governing_venue");
   });
 });

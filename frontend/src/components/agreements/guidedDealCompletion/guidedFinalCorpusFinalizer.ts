@@ -646,6 +646,7 @@ export function finalizeGuidedProAgreementCorpus(
   }
   const stabilizedForSigning = stabilizeFinalAgreementCompilerOutput(body, {
     intakeText: args.originalIntake,
+    freeText: args.freeBasicDraftPlain,
     signerIdentities: args.signerIdentities,
     surface: "guided_final_corpus_finalizer_post_signature",
   });
@@ -714,6 +715,7 @@ export function finalizeGuidedProAgreementCorpus(
         diagnostics.repairs.push(...recoveredCanonical.repairs.map((r) => `working_draft_recovery_canonical:${r}`));
         const recoveredStabilized = stabilizeFinalAgreementCompilerOutput(recoveredBody, {
           intakeText: args.originalIntake,
+          freeText: args.freeBasicDraftPlain,
           signerIdentities: args.signerIdentities,
           surface: "guided_final_corpus_finalizer_recovery",
         });
