@@ -19,6 +19,12 @@ export type DealVariableCategory =
   | "general";
 
 export type DealVariableSeverity = "critical" | "important" | "optional";
+export type GuidedQuestionType =
+  | "REQUIRED_COMPLETION"
+  | "CLARIFICATION"
+  | "OPTIMIZATION"
+  | "RISK_ALLOCATION"
+  | "OPTIONAL_ENHANCEMENT";
 
 export type DealVariableUiControl = "pills" | "text" | "select";
 
@@ -44,6 +50,8 @@ export type DealVariable = {
   currentValue: string | null;
   confidence: number;
   affectsSections: string[];
+  questionType?: GuidedQuestionType;
+  semanticIntent?: string;
   /** Pill id to visually highlight from intake analysis. */
   recommendedPillId?: string;
   /** Short label shown on the recommended pill, e.g. "Recommended from your intake". */

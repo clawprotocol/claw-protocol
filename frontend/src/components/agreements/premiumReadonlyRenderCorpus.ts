@@ -5,6 +5,10 @@ import {
 } from "./agreementPreviewFromDraft";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
+  logPaidProStarterCloneBlocked,
+  resolvePaidProReviewRenderSurface,
+} from "./paidProRenderSurface";
+import {
   emitPremiumRenderResolveLog,
   isAuthoritativePremiumPipelineRenderSource,
   resolvePremiumRenderSource,
@@ -277,6 +281,72 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   }
   const nonThin =
     finalizedPlain.length >= 1200 || premiumReadonlyCorpusSignalHits(finalizedPlain) >= 3;
+
+  if (args.premiumCheckoutCompleted) {
+    const surface = resolvePaidProReviewRenderSurface({
+      pickedPlain: finalizedPlain,
+      pickedSource: res.premium_render_source,
+      draft: args.draft,
+      intakeText: args.intakeText,
+      premiumCheckoutCompleted: true,
+      paidAuthoritativeFallback: paidFallback,
+      pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
+      allowLocalDeterministicFallback: true,
+    });
+    if (surface.mode === "premium_unavailable_retry") {
+      logPaidProStarterCloneBlocked({
+        stage: "pickPremiumPaidReadonlyPlainText",
+        ...surface,
+      });
+      return {
+        plainText: "",
+        sourceUsed: "none",
+        audit: {
+          selected: "none",
+          forcedPremiumSource: false,
+          candidates: [
+            {
+              source: res.premium_render_source,
+              len: finalizedPlain.length,
+              nonThin,
+              eligible: false,
+              reason: surface.reason,
+            },
+          ],
+        },
+      };
+    }
+    const authoritativePlain = surface.plainText;
+    const authoritativeSource = surface.sourceUsed;
+    const authNonThin =
+      authoritativePlain.length >= 1200 || premiumReadonlyCorpusSignalHits(authoritativePlain) >= 3;
+    if (surface.usedLocalDeterministicFallback && import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[paid-pro-local-fallback]", {
+        len: authoritativePlain.length,
+        intakeLen: (args.intakeText || "").length,
+      });
+    }
+    return {
+      plainText: authoritativePlain,
+      sourceUsed: authoritativeSource,
+      audit: {
+        selected: authoritativeSource,
+        forcedPremiumSource: Boolean(surface.usedLocalDeterministicFallback),
+        candidates: [
+          {
+            source: authoritativeSource,
+            len: authoritativePlain.length,
+            nonThin: authNonThin,
+            eligible: true,
+            reason: surface.usedLocalDeterministicFallback
+              ? "local_deterministic_fallback"
+              : res.premium_render_reason,
+          },
+        ],
+      },
+    };
+  }
 
   return {
     plainText: finalizedPlain,

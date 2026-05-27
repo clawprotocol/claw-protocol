@@ -317,7 +317,7 @@ export function GuidedDealCompletionPanel({
     return (
       <div
         data-guided-completion-panel="true"
-        className={`rounded-xl border border-amber-200/80 bg-amber-50/40 shadow-sm ring-1 ring-stone-200/60 ${compact ? "p-2.5 pb-28 sm:pb-4" : "p-3 pb-28 sm:p-4 sm:pb-8"}`}
+        className={`rounded-2xl border border-amber-200/80 bg-amber-50/50 shadow-sm ring-1 ring-stone-200/60 ${compact ? "p-4 pb-28 sm:pb-5" : "p-5 pb-28 sm:p-6 sm:pb-8"}`}
       >
         <GuidedReviewFlowBanner guidedActive phase={phase} className="mb-2.5" />
         {applying || bulkApplyBusy ? (
@@ -360,21 +360,21 @@ export function GuidedDealCompletionPanel({
   return (
     <div
       data-guided-completion-panel="true"
-      className={`rounded-xl border-2 border-stone-400/50 bg-white shadow-md ring-2 ring-stone-300/40 ${compact ? "p-2 pb-24 sm:pb-3" : "p-2.5 pb-24 sm:p-3 sm:pb-6"}`}
+      className={`rounded-2xl border border-stone-300/90 bg-white shadow-[0_10px_34px_-24px_rgba(28,25,23,0.55)] ring-1 ring-stone-200/80 ${compact ? "p-4 pb-24 sm:pb-5" : "p-5 pb-24 sm:p-6 sm:pb-6"}`}
       role="region"
       aria-label={GUIDED_COMPLETION_HEADING}
     >
-      <GuidedReviewFlowBanner guidedActive phase={phase} className="mb-2" />
-      <p className="text-sm font-semibold text-stone-900">{GUIDED_COMPLETION_HEADING}</p>
-      <p className="mt-0.5 text-[11px] leading-snug text-stone-500">{GUIDED_COMPLETION_SUBHEADING}</p>
-      <p className="mt-2 text-[11px] text-stone-500">{intro.subline}</p>
+      <GuidedReviewFlowBanner guidedActive phase={phase} className="mb-3" />
+      <p className="text-base font-semibold tracking-tight text-stone-950">{GUIDED_COMPLETION_HEADING}</p>
+      <p className="mt-1.5 text-xs leading-relaxed text-stone-600 sm:text-[13px]">{GUIDED_COMPLETION_SUBHEADING}</p>
+      <p className="mt-2 text-xs leading-relaxed text-stone-500">{intro.subline}</p>
 
-      <div className="mt-2.5 flex items-baseline justify-between gap-2">
+      <div className="mt-4 flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold tabular-nums text-stone-800" data-testid="guided-progress-count">
           {formatGuidedProgressLabel(accounting)}
         </span>
       </div>
-      <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-stone-200/90">
+      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-stone-200/90">
         <div
           className="h-full rounded-full bg-emerald-600 transition-[width] duration-500 ease-out"
           style={{ width: `${Math.max(progressPct, resolvedVisibleQuestionCount > 0 ? 8 : 0)}%` }}
@@ -383,11 +383,11 @@ export function GuidedDealCompletionPanel({
       </div>
 
       {collecting && displayQuestion ? (
-        <div className="mt-3 space-y-2">
+        <div className="mt-5 space-y-3 rounded-xl border border-stone-200/90 bg-stone-50/80 p-4 shadow-inner shadow-stone-200/30">
           <p className="text-[10px] font-bold uppercase tracking-widest text-stone-400">
             {displayQuestionHeader}
           </p>
-          <p className="text-[15px] font-semibold leading-snug text-stone-900">{displayQuestion.question}</p>
+          <p className="text-[15px] font-semibold leading-snug text-stone-950 sm:text-base">{displayQuestion.question}</p>
 
           {clauseUpdates.length > 0 ? (
             <div

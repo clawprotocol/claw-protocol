@@ -36,6 +36,8 @@ export type ResolveProReviewFooterStateArgs = {
   canProceedWithPaidProDocument?: boolean;
   recoveryPanelMounted?: boolean;
   bodyUsable?: boolean;
+  /** When false, suppress guided questions (starter clone / premium unavailable). */
+  paidProAuthoritativeCorpusReady?: boolean;
 };
 
 export type ProReviewFooterState = {
@@ -95,6 +97,7 @@ export function resolveProReviewFooterState(args: ResolveProReviewFooterStateArg
     guidedSession: session,
     panelMountedSurface: panelSurface,
     bodyUsable,
+    paidProAuthoritativeCorpusReady: args.paidProAuthoritativeCorpusReady,
     draftState: isSourceComparisonReviewMode(reviewMode) ? "source_comparison" : "paid_pro",
   });
 

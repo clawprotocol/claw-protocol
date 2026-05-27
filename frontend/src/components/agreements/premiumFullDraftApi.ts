@@ -23,6 +23,7 @@ import { logDevPostPremiumFullDraftHttp } from "./premiumFullDraftPostResponseTr
 import { rejectPremiumDegradedFiller } from "./premiumFullDraftClientAcceptance";
 import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGuard";
 import { enrichPremiumContextWithOperationalSynthesis } from "./proOperationalSynthesis";
+import type { ProAgreementIntelligencePacket } from "./proAgreementIntelligence";
 
 const MAX_CONTEXT_CHARS = 22_000;
 
@@ -82,6 +83,7 @@ export type PremiumFullDraftResult = {
   generation_ok?: boolean;
   /** Client may retry premium-full-draft without losing checkout or free draft. */
   retryable?: boolean;
+  pro_intelligence_packet?: Partial<ProAgreementIntelligencePacket>;
 };
 
 export type PremiumFullDraftFailureKind = "network" | "http" | "exception" | "generation";

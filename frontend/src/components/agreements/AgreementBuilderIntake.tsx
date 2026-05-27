@@ -548,6 +548,13 @@ import {
   isPaidProFinishedAgreement,
   validatePaidProOutput,
 } from "./paidProCorpusAcceptance";
+import {
+  buildFreeStarterBaselinePlain,
+  isAuthoritativePaidProCorpusForGuided,
+  isFreeStarterCloneOnPaidPro,
+  PAID_PRO_UNAVAILABLE_RETRY_BODY,
+  PAID_PRO_UNAVAILABLE_RETRY_HEADLINE,
+} from "./paidProRenderSurface";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
 import { logDevPostPremiumFullDraftApplySuccess } from "./premiumFullDraftPostResponseTrace";
 import {
@@ -721,6 +728,7 @@ import {
   isGuidedQueueRebuildBlocked,
   mergeGuidedSessionWhenRebuildBlocked,
 } from "./guidedDealCompletion/guidedCompletionFreeze";
+import { buildGuidedPendingUpdateIndicators } from "./guidedDealCompletion/guidedPendingUpdateIndicators";
 import { GuidedUpdatedAgreementReadyCard } from "./guidedDealCompletion/GuidedUpdatedAgreementReadyCard";
 import { GuidedSignerSetupBeforeReviewCard } from "./guidedDealCompletion/GuidedSignerSetupBeforeReviewCard";
 import {
@@ -2118,9 +2126,6 @@ function CreateFlowSendRecipientsPanel({
 }
 
 const CLAW_PREMIUM_PREPARING_AGREEMENT_COPY = "Building your Pro agreement…";
-
-const PAID_PREMIUM_CONNECTION_RECOVERY_COPY =
-  "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.";
 
 const PREMIUM_NETWORK_MODAL_TITLE = "Connection interrupted";
 const PREMIUM_NETWORK_MODAL_BODY =
@@ -12059,14 +12064,70 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumTruthPipelineSource,
   ]);
 
+  const paidProStarterBaselinePlain = useMemo(
+    () => buildFreeStarterBaselinePlain(draft),
+    [draft, reviewDocRefreshTick, premiumSurfaceGateTick],
+  );
+
+  const premiumPaidUnavailableRetry = useMemo(() => {
+    if (!premiumPaidDocumentSurface || proUpgradeUseStarterView || authoritativePremiumUiCommitted) {
+      return false;
+    }
+    const picked = (premiumPaidReadonlyPick.plainText || "").trim();
+    const source = (premiumPaidReadonlyPick.sourceUsed || "").trim();
+    if (
+      picked.length >= 500 &&
+      isAuthoritativePaidProCorpusForGuided({
+        corpusPlain: picked,
+        freeBaselinePlain: paidProStarterBaselinePlain,
+        renderSource: source,
+        pipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+      })
+    ) {
+      return false;
+    }
+    return (
+      source === "none" ||
+      !picked ||
+      isFreeStarterCloneOnPaidPro({
+        candidatePlain: picked || agreementDocumentText,
+        freeBaselinePlain: paidProStarterBaselinePlain,
+        renderSource: source,
+      })
+    );
+  }, [
+    premiumPaidDocumentSurface,
+    proUpgradeUseStarterView,
+    authoritativePremiumUiCommitted,
+    premiumPaidReadonlyPick.plainText,
+    premiumPaidReadonlyPick.sourceUsed,
+    paidProStarterBaselinePlain,
+    agreementDocumentText,
+    premiumTruthPipelineSource,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+  ]);
+
   useEffect(() => {
+    if (premiumPaidUnavailableRetry) return;
     const corpus =
       premiumPaidReadonlyPick.plainText ||
       hydratedPremiumBodyRef.current ||
       lastPremiumWinningCorpusRef.current ||
-      agreementDocumentText;
-    updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, corpus, "readonly_corpus_sync");
-  }, [premiumPaidReadonlyPick.plainText, agreementDocumentText, reviewDocRefreshTick, premiumSurfaceGateTick]);
+      "";
+    if (!corpus.trim()) return;
+    updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, corpus, "readonly_corpus_sync", {
+      paidProFlow: true,
+      freeBaselinePlain: paidProStarterBaselinePlain,
+    });
+  }, [
+    premiumPaidReadonlyPick.plainText,
+    agreementDocumentText,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+    premiumPaidUnavailableRetry,
+    paidProStarterBaselinePlain,
+  ]);
 
   const authoritativePickForSendUi = useMemo(() => pickAuthoritativePlainForSendHandoff(draft), [draft]);
 
@@ -12321,14 +12382,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (authoritativePremiumUiCommitted) return true;
     if (!premiumPaidDocumentSurface) return true;
     if (proUpgradeUseStarterView) return false;
+    if (premiumPaidUnavailableRetry) return false;
     const t = (premiumPaidReadonlyPick.plainText || "").trim();
     if (t.length < 500) return false;
+    if (
+      isFreeStarterCloneOnPaidPro({
+        candidatePlain: t,
+        freeBaselinePlain: paidProStarterBaselinePlain,
+        renderSource: premiumPaidReadonlyPick.sourceUsed,
+      })
+    ) {
+      return false;
+    }
     return proTruthIsPremiumDocumentReady(premiumProTruthSnapshot);
   }, [
     authoritativePremiumUiCommitted,
     premiumPaidDocumentSurface,
     proUpgradeUseStarterView,
+    premiumPaidUnavailableRetry,
     premiumPaidReadonlyPick.plainText,
+    premiumPaidReadonlyPick.sourceUsed,
+    paidProStarterBaselinePlain,
     premiumProTruthSnapshot,
   ]);
 
@@ -12666,14 +12740,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       renderedText: corpus,
       partiesLine: displayLivePreviewModel.partiesLine,
     });
-    const referralEconomicsPrompt = /\b(\d{1,2}\s*%|commission|referral|realtor|lead|source(?:d)?\b)\b/i.test(intakeCombined);
+    const explicitProjectEconomicsPrompt =
+      /\$[\d,]+|\d{1,2}\s*%\s*(?:upfront|kickoff|milestone)|(?:50|25)\s*\/\s*(?:25|50)|\/mo\b|per month/i.test(
+        intakeCombined,
+      );
+    const referralEconomicsPrompt = /\b(commission|referral fee|referral agreement|channel partner|realtor lead)\b/i.test(
+      intakeCombined,
+    );
     const genericPaymentInRender = /\b(to be agreed|to be specified|payment schedule to be agreed)\b/i.test(corpus);
     const titleNow = (rd?.title || "").trim();
     const badReferralTitle = referralEconomicsPrompt && /^payment plan agreement$/i.test(titleNow);
+    if (import.meta.env.DEV && explicitProjectEconomicsPrompt && genericPaymentInRender && !referralEconomicsPrompt) {
+      console.error("[premium-live-trace] hard_assert_failed", {
+        stage: "rendered_body_source",
+        reason: "generic_payment_with_explicit_project_economics",
+        source_id: premiumPaidReadonlyPick.sourceUsed,
+        title: titleNow,
+      });
+      console.assert(
+        false,
+        "[premium-live-trace] rendered payment_terms cannot be generic when explicit project fee/milestone economics exist in intake",
+      );
+    }
     if (import.meta.env.DEV && referralEconomicsPrompt && genericPaymentInRender) {
       console.error("[premium-live-trace] hard_assert_failed", {
         stage: "rendered_body_source",
-        reason: "generic_payment_with_explicit_economics",
+        reason: "generic_payment_with_explicit_referral_economics",
         source_id: premiumPaidReadonlyPick.sourceUsed,
         title: titleNow,
       });
@@ -12695,10 +12787,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ? buildAgreementPreviewText(freeBaselineDraft, { starterPreview: true })
         : "";
       if (freeBaseline.trim() && liveTraceHash(corpus) === liveTraceHash(freeBaseline)) {
-        console.warn("[premium-picker-audit] selected_hash_matches_free_basic_draft", {
+        console.error("[premium-picker-audit] selected_hash_matches_free_basic_draft", {
           source_used: premiumPaidReadonlyPick.sourceUsed,
           hash: liveTraceHash(corpus),
+          paid_pro_ui_guard: premiumPaidUnavailableRetry,
         });
+        console.assert(
+          !premiumPaidDocumentSurface || premiumPaidUnavailableRetry,
+          "[premium-picker-audit] paid Pro must not accept free starter hash as authoritative corpus",
+        );
       }
       console.info("[premium-render]", {
         timestamp: new Date().toISOString(),
@@ -14584,20 +14681,69 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const blockedPreviewRenderSource =
     (premiumTruthPipelineSource || premiumPaidReadonlyPick.sourceUsed || lastPremiumPipelineRenderSourceRef.current || "").trim();
   const paidBodyForGuidedCompletion = useMemo(() => {
+    if (premiumPaidUnavailableRetry) return "";
     const snap = readPremiumCompletionSnapshot();
-    return (
-      premiumPaidReadonlyPick.plainText ||
-      agreementDocumentText ||
-      snap?.premiumWinningBodyText ||
-      ""
-    ).trim();
+    const pick = (premiumPaidReadonlyPick.plainText || "").trim();
+    if (
+      pick &&
+      isAuthoritativePaidProCorpusForGuided({
+        corpusPlain: pick,
+        freeBaselinePlain: paidProStarterBaselinePlain,
+        renderSource: premiumPaidReadonlyPick.sourceUsed,
+        pipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+      })
+    ) {
+      return pick;
+    }
+    const snapWin = (snap?.premiumWinningBodyText || "").trim();
+    if (
+      snapWin &&
+      isAuthoritativePaidProCorpusForGuided({
+        corpusPlain: snapWin,
+        freeBaselinePlain: paidProStarterBaselinePlain,
+        renderSource: snap?.premiumRenderResolveSource ?? snap?.premiumPipelineRenderSource ?? "",
+        pipelineSource: snap?.premiumPipelineRenderSource ?? null,
+      })
+    ) {
+      return snapWin;
+    }
+    return "";
   }, [
+    premiumPaidUnavailableRetry,
     premiumPaidReadonlyPick.plainText,
+    premiumPaidReadonlyPick.sourceUsed,
+    paidProStarterBaselinePlain,
     agreementDocumentText,
     premiumSurfaceGateTick,
     reviewDocRefreshTick,
     authoritativePremiumUiCommitted,
+    premiumTruthPipelineSource,
   ]);
+
+  const paidProGuidedCorpusReady = useMemo(
+    () =>
+      Boolean(
+        premiumPaidDocumentSurface &&
+          !proUpgradeUseStarterView &&
+          !premiumPaidUnavailableRetry &&
+          paidBodyForGuidedCompletion.length >= 500 &&
+          isAuthoritativePaidProCorpusForGuided({
+            corpusPlain: paidBodyForGuidedCompletion,
+            freeBaselinePlain: paidProStarterBaselinePlain,
+            renderSource: premiumPaidReadonlyPick.sourceUsed,
+            pipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+          }),
+      ),
+    [
+      premiumPaidDocumentSurface,
+      proUpgradeUseStarterView,
+      premiumPaidUnavailableRetry,
+      paidBodyForGuidedCompletion,
+      paidProStarterBaselinePlain,
+      premiumPaidReadonlyPick.sourceUsed,
+      premiumTruthPipelineSource,
+    ],
+  );
   const guidedQueueRebuildBlocked = isGuidedQueueRebuildBlocked({
     completionFrozen: guidedCompletionFrozen,
     frozenAfterApplyRef: guidedFrozenAfterApplyRef.current,
@@ -14608,14 +14754,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   });
   const guidedCompletionSessionBase = useMemo(() => {
     if (guidedQueueRebuildBlocked) return null;
-    if (!premiumPaidDocumentSurface || paidBodyForGuidedCompletion.length < 200) return null;
+    if (!paidProGuidedCorpusReady || paidBodyForGuidedCompletion.length < 200) return null;
     return buildGuidedSessionFromAgreement({
       intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
       body: paidBodyForGuidedCompletion,
     });
   }, [
     guidedQueueRebuildBlocked,
-    premiumPaidDocumentSurface,
+    paidProGuidedCorpusReady,
     paidBodyForGuidedCompletion,
     currentPremiumMergedIntakeKey,
     intakeCombined,
@@ -16509,6 +16655,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedBodyUsable = Boolean(
     premiumPaidDocumentSurface &&
       !proUpgradeUseStarterView &&
+      paidProGuidedCorpusReady &&
       (paidBodyForGuidedCompletion.length >= 500 || hasUsablePaidBody || authoritativePremiumUiCommitted),
   );
   const guidedSessionRenderable = Boolean(
@@ -16520,6 +16667,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         guidedSession: activeGuidedCompletionSession,
         panelMountedSurface: null,
+        paidProAuthoritativeCorpusReady: paidProGuidedCorpusReady,
       }).sessionHasRenderableQueue,
   );
   const premiumReturnWaitActive = Boolean(
@@ -16543,9 +16691,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         guidedSession: activeGuidedCompletionSession,
         agreementReviewMode,
         proReviewSurfaceActive: Boolean(premiumPaidDocumentSurface && showProLawdogRefineAndFinalize),
-        canProceedWithPaidProDocument: true,
+        canProceedWithPaidProDocument,
         recoveryPanelMounted: false,
         bodyUsable: guidedBodyUsable,
+        paidProAuthoritativeCorpusReady: paidProGuidedCorpusReady,
       }),
     [
       paidBodyForGuidedCompletion,
@@ -16555,6 +16704,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementReviewMode,
       premiumPaidDocumentSurface,
       showProLawdogRefineAndFinalize,
+      canProceedWithPaidProDocument,
+      paidProGuidedCorpusReady,
       guidedBodyUsable,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
@@ -16587,12 +16738,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         canProceedWithPaidProDocument,
         recoveryPanelMounted: showGuidedCompletionRecovery,
         bodyUsable: guidedBodyUsable,
+        paidProAuthoritativeCorpusReady: paidProGuidedCorpusReady,
       }),
     [
       paidBodyForGuidedCompletion,
       currentPremiumMergedIntakeKey,
       intakeCombined,
       activeGuidedCompletionSession,
+      paidProGuidedCorpusReady,
       agreementReviewMode,
       premiumPaidDocumentSurface,
       showProLawdogRefineAndFinalize,
@@ -16667,6 +16820,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedStickyBottomBarVisibleForSignerCta = Boolean(
     simpleCreateStickyBottomBarVisibleBaseGated &&
       !(premiumPaidDocumentSurface && guidedProUxShowsQuestionPanel(guidedProUxState)),
+  );
+  const guidedPendingUpdateIndicators = useMemo(
+    () => buildGuidedPendingUpdateIndicators(activeGuidedCompletionSession, 3),
+    [activeGuidedCompletionSession],
   );
   const guidedFinalReviewCtaPlacement = useMemo(
     () =>
@@ -17353,12 +17510,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   const canDisplayPaidProAgreementDocument = useMemo(
     () =>
+      !premiumPaidUnavailableRetry &&
       canDisplayPaidProAgreementDuringGuided({
         canProceedWithPaidProDocument,
         guidedCompletionActive,
         renderDocument: guidedCompletionRenderDocument,
       }),
-    [canProceedWithPaidProDocument, guidedCompletionActive, guidedCompletionRenderDocument],
+    [
+      premiumPaidUnavailableRetry,
+      canProceedWithPaidProDocument,
+      guidedCompletionActive,
+      guidedCompletionRenderDocument,
+    ],
   );
   const blockProEmptyDocumentFallback = shouldBlockProEmptyDocumentFallback(guidedCompletionRenderDocument);
   /** Upper “Want to adjust…” card — hidden when guided completion owns gap UX. */
@@ -17585,11 +17748,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPaidDocumentSurface &&
       !authoritativePremiumUiCommitted &&
       !proUpgradeUseStarterView &&
-      !canProceedWithPaidProDocument &&
+      (premiumPaidUnavailableRetry || !canProceedWithPaidProDocument) &&
       !premiumReturnWaitActive &&
       !showGuidedCompletionRecovery &&
       !showPremiumNetworkRecoverablePanel,
   );
+  const proAmberRecoveryHeadline = premiumPaidUnavailableRetry
+    ? PAID_PRO_UNAVAILABLE_RETRY_HEADLINE
+    : sanitizeProUserMessage(proFullDraftCustomGateMessage) || PREMIUM_NETWORK_RECOVERABLE_HEADLINE;
+  const proAmberRecoveryBody = premiumPaidUnavailableRetry
+    ? PAID_PRO_UNAVAILABLE_RETRY_BODY
+    : sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
+      guidedCompletionFriendlyCopy.body ||
+      "Your intake is still available. Add or clarify details, retry a full Pro draft, or work from your starter version.";
   const showRetryAsPrimaryCta = Boolean(
     simpleCreateUnifiedBottomCta &&
       createProductionTwoPane &&
@@ -21831,20 +22002,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-4 py-5 sm:px-6 sm:py-6"
                                         role="status"
                                         aria-live="polite"
+                                        data-testid={
+                                          premiumPaidUnavailableRetry
+                                            ? "premium-unavailable-retry-panel"
+                                            : "pro-amber-recovery-panel"
+                                        }
                                       >
                                         <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
-                                          {hasPaidPremiumCompletionSession()
-                                            ? sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
-                                              guidedCompletionFriendlyCopy.body ||
-                                              PAID_PREMIUM_CONNECTION_RECOVERY_COPY
-                                            : sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
-                                              guidedCompletionFriendlyCopy.body ||
-                                              "Use the document below to review and edit when it appears. Nothing is sent from this step."}
+                                          {proAmberRecoveryHeadline}
                                         </p>
                                         <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
-                                          {hasPaidPremiumCompletionSession()
-                                            ? "No additional checkout — retry uses your existing LawDog Pro purchase."
-                                            : "Nothing is sent from this step until you choose to continue."}
+                                          {proAmberRecoveryBody}
                                         </p>
                                         {import.meta.env.DEV ? (
                                           <p className="mt-2 text-[10px] font-mono text-amber-200/80">
@@ -21858,9 +22026,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25 sm:w-auto"
                                             onClick={handleRetryProFullDraft}
                                           >
-                                            {hasPaidPremiumCompletionSession()
-                                              ? PREMIUM_RETURN_RETRY_GENERATION_LABEL
-                                              : "Retry Pro draft"}
+                                            {PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL}
                                           </button>
                                           {hasPaidPremiumCompletionSession() ? (
                                             <button
@@ -21882,16 +22048,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         aria-live="polite"
                                       >
                                         <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
-                                          {sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
-                                            guidedCompletionFriendlyCopy.body ||
-                                            (hasPaidPremiumCompletionSession()
-                                              ? "We couldn’t safely finalize the Pro version. Your current draft is still here."
-                                              : "We couldn’t safely finalize the Pro version. Your current draft is still here.")}
+                                          {proAmberRecoveryHeadline}
                                         </p>
                                         <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
-                                          {hasPaidPremiumCompletionSession()
-                                            ? "No additional checkout — retry uses your existing LawDog Pro purchase."
-                                            : "Your intake is still available. Add or clarify details, retry a full Pro draft, or work from your starter version."}
+                                          {proAmberRecoveryBody}
                                         </p>
                                         <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:flex-wrap sm:items-stretch sm:gap-2">
                                           <button
@@ -22456,12 +22616,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         {showPrimaryGuidedCompletion && activeGuidedCompletionSession ? (
                                           <div
                                             id="guided-deal-completion-primary"
-                                            className="mb-3 border-b-2 border-stone-400/35 bg-[#e8e2d6] px-[clamp(1.35rem,4.5vw,2.65rem)] py-3 sm:py-4"
+                                            className="mb-4 border-b border-stone-300/70 bg-gradient-to-b from-[#f4ecdc] to-[#ebe3d7] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4 shadow-[inset_0_-1px_0_rgba(120,113,108,0.16)] sm:py-5"
                                           >
                                             <ProReviewStepIndicator
                                               activeStep={proReviewActiveStep}
                                               className="mb-3 border-b border-stone-200/80 pb-3"
                                             />
+                                            <div className="mb-4 rounded-xl border border-amber-300/70 bg-amber-50/80 px-4 py-3 text-stone-900 shadow-sm">
+                                              <p className="text-sm font-semibold tracking-tight">
+                                                Finalizing your agreement
+                                              </p>
+                                              <p className="mt-1 text-xs leading-relaxed text-stone-700 sm:text-[13px]">
+                                                We found {guidedPendingUpdateIndicators.length || "a few"} business decision{guidedPendingUpdateIndicators.length === 1 ? "" : "s"} still needed before signing.
+                                                {" "}Your agreement draft is complete. These answers will be applied in one clean final update before signature preparation.
+                                              </p>
+                                            </div>
                                             <GuidedDealCompletionPanel
                                               session={activeGuidedCompletionSession}
                                               intakeRaw={currentPremiumMergedIntakeKey || intakeCombined}
@@ -22488,11 +22657,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             />
                                           </div>
                                         ) : null}
+                                        {showPrimaryGuidedCompletion && guidedPendingUpdateIndicators.length > 0 ? (
+                                          <div className="mx-[clamp(1.35rem,4.5vw,2.65rem)] mb-3 rounded-xl border border-sky-200/80 bg-sky-50/75 px-3.5 py-3 shadow-sm">
+                                            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-800/80">
+                                              Pending updates
+                                            </p>
+                                            <div className="mt-2 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
+                                              {guidedPendingUpdateIndicators.map((item) => (
+                                                <span
+                                                  key={item.id}
+                                                  className="inline-flex items-center rounded-full border border-amber-200/90 bg-amber-50 px-2.5 py-1 text-[11px] font-medium leading-snug text-amber-900 shadow-sm"
+                                                >
+                                                  {item.label}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        ) : null}
                                         <div
                                           className={
                                             showPrimaryGuidedCompletion
-                                              ? "rounded-lg border-2 border-stone-400/45 bg-white shadow-sm ring-1 ring-stone-300/60"
+                                              ? "min-h-[min(68vh,44rem)] rounded-lg border-2 border-stone-300/70 bg-white shadow-sm ring-1 ring-stone-300/60"
                                               : ""
+                                          }
+                                          data-guided-authoritative-preview={
+                                            showPrimaryGuidedCompletion ? "locked" : undefined
                                           }
                                         >
                                           <PremiumAgreementReadonlyView

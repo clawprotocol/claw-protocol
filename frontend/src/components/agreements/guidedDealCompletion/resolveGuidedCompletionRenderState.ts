@@ -43,6 +43,8 @@ export type ResolveGuidedCompletionRenderStateArgs = {
   draftState?: string;
   bodyUsable?: boolean;
   rawReadiness?: FinalizeReadiness;
+  /** When false, guided questions must not mount (e.g. paid Pro showing starter clone / retry only). */
+  paidProAuthoritativeCorpusReady?: boolean;
 };
 
 export function countUnresolvedRenderableVariables(session: GuidedCompletionSession | null | undefined): number {
@@ -124,7 +126,9 @@ export function resolveGuidedCompletionRenderState(
   let reason = "neutral_review";
   let canRenderGuidedQuestions = false;
 
-  if (!bodyUsable) {
+  if (args.paidProAuthoritativeCorpusReady === false) {
+    reason = "paid_pro_authoritative_corpus_missing";
+  } else if (!bodyUsable) {
     reason = "body_not_usable";
   } else if (!session || session.queue.length === 0) {
     reason = "empty_guided_queue";

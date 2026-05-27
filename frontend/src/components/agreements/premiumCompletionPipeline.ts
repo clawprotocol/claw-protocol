@@ -89,6 +89,7 @@ import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } 
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import { repairProCopyQualityWithOpenAI } from "./proCopyQualityRepair";
+import { adaptPremiumFullDraftToProIntelligencePacket } from "./proAgreementIntelligence";
 import {
   buildMaterialMissingItems,
   isCatastrophicStructuralFailure,
@@ -1438,6 +1439,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       }
     } else {
       const full = fullResp.result;
+      adaptPremiumFullDraftToProIntelligencePacket(full);
       if (tierAEnabled) {
         tierADiag.backendReturnedDocumentText = Boolean((full.document_text || "").trim());
         tierADiag.backendDocumentTextLen = (full.document_text || "").trim().length;

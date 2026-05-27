@@ -35,11 +35,11 @@ export function GuidedQuestionOptionCard({
       type="button"
       disabled={disabled}
       onClick={onSelect}
-      className={`w-full rounded-lg border px-2 py-1.5 text-left transition active:scale-[0.99] disabled:opacity-40 ${
+      className={`w-full rounded-xl border px-3 py-2.5 text-left shadow-sm transition active:scale-[0.995] disabled:opacity-40 ${
         selected
-          ? "border-emerald-600 bg-emerald-50/95 ring-2 ring-emerald-500/35"
+          ? "border-emerald-600 bg-emerald-50/95 ring-2 ring-emerald-500/35 shadow-emerald-900/10"
           : recommended
-            ? "border-emerald-400/70 bg-emerald-50/70 hover:border-emerald-500"
+            ? "border-emerald-400/70 bg-emerald-50/75 hover:border-emerald-500"
             : "border-stone-200/90 bg-white hover:border-stone-350 hover:bg-stone-50/90"
       }`}
       data-testid={recommended ? "guided-option-recommended" : "guided-option"}
@@ -47,7 +47,7 @@ export function GuidedQuestionOptionCard({
     >
       <div className="flex items-center gap-2">
         <span
-          className={`min-w-0 flex-1 text-[13px] font-semibold leading-tight ${
+          className={`min-w-0 flex-1 text-[13px] font-semibold leading-snug ${
             recommended || selected ? "text-emerald-950" : "text-stone-900"
           }`}
         >

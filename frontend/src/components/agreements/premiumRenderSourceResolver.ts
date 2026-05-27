@@ -167,7 +167,16 @@ export function validatePremiumRenderBody(
     opts.mode === "server" &&
     strictKnown &&
     (sigHits >= 3 || headings >= 3 || (paras >= 4 && t.length >= 900));
-  if (!multiSection && !strictKnownServerSectionOk) reasons.push("insufficient_sections");
+  /** Canonicalizer may compress headings; long server bodies still qualify. */
+  const longStructuredServerOk =
+    opts.mode === "server" &&
+    t.length >= 3_500 &&
+    sigHits >= 3 &&
+    headings >= 3 &&
+    paras >= 3;
+  if (!multiSection && !strictKnownServerSectionOk && !longStructuredServerOk) {
+    reasons.push("insufficient_sections");
+  }
 
   if (probe.length >= 18) {
     const kws = extractScenarioKeywords(probe);

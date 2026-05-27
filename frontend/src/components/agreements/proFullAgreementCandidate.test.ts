@@ -8,6 +8,10 @@ import {
   validateProCopyQuality,
 } from "./proCopyQualityRepair";
 import {
+  recomputeGuidedQuestionsFromAuthoritativeCorpus,
+  type ProAgreementIntelligencePacket,
+} from "./proAgreementIntelligence";
+import {
   PRO_AGREEMENT_VALIDATED_READY_MESSAGE,
   repairProFullAgreementCandidateSurgically,
   validateProAgreementConfidenceGate,
@@ -493,5 +497,179 @@ Date: _________________________
     expect(
       fingerprintAgreementBody(result.body.replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "").trim()),
     ).toBe(preWitnessHash);
+  });
+
+  it("test107 treats complete Pro intelligence as non-blocking optional improvement context", () => {
+    const intake = [
+      "Texas governing law.",
+      "$95,000 total fee.",
+      "Milestones: 50% kickoff/build, 25% rollout, 25% acceptance.",
+      "$4,500/month optional support.",
+      "No third-party uptime guarantee.",
+      "Confidentiality required.",
+      "Client owns deliverables after payment; provider keeps pre-existing tools.",
+      "Email notices.",
+      "30-day termination.",
+    ].join(" ");
+    const draft = `
+AI Automation Services Agreement
+This Agreement is between Lone Star Robotics LLC ("Client") and Atlas Automation Studio LLC ("Service Provider").
+
+1. Purpose and Scope
+Service Provider will provide AI workflow implementation, dashboard setup, automation support, onboarding assistance, and light ongoing maintenance for Client.
+
+2. Fees and Payment
+Client will pay Service Provider a total project fee of $95,000 for the services described in this Agreement. The project fee is allocated 50% to kickoff and build, 25% to rollout, and 25% to acceptance. Client may elect optional post-launch support for $4,500/month.
+
+3. Ownership and Work Product
+Client will own the deliverables and custom work product created specifically for Client under this Agreement once Client has paid all amounts due for those deliverables. Service Provider retains its pre-existing tools, templates, know-how, methods, reusable code, workflow patterns, and background materials.
+
+4. Confidentiality
+Each receiving Party will protect confidential information using reasonable care and use it only for this Agreement.
+
+5. Support Expectations
+Service Provider does not guarantee the uptime, availability, compatibility, or continued operation of third-party AI platforms or services outside Service Provider's control.
+
+6. Term and Termination
+Either Party may terminate this Agreement by giving 30 days written notice.
+
+7. Notices
+Notices under this Agreement must be sent by email to the contacts designated by the Parties in writing.
+
+8. Miscellaneous
+This Agreement is governed by Texas law.
+
+9. Electronic Signatures
+The Parties may sign this Agreement electronically and in counterparts.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+Lone Star Robotics LLC
+By: __________________________
+Name: ________________________
+Date: _________________________
+
+SERVICE PROVIDER:
+Atlas Automation Studio LLC
+By: __________________________
+Name: ________________________
+Date: _________________________
+`.trim();
+    const packet: ProAgreementIntelligencePacket = {
+      draftText: draft,
+      semanticFacts: {
+        parties: ["Lone Star Robotics LLC", "Atlas Automation Studio LLC"],
+        scope: ["AI workflow implementation", "dashboard setup", "automation support"],
+        payment: ["$95,000", "50/25/25", "$4,500/month optional support"],
+        ownership: ["Client owns deliverables after payment"],
+        confidentiality: true,
+        termination: ["30-day termination"],
+        governingLaw: "Texas",
+        notices: "email notices",
+        support: ["no third-party uptime guarantee"],
+      },
+      refinementOpportunities: [
+        {
+          id: "governing-law-confirm",
+          type: "CLARIFICATION",
+          semanticIntent: "governing_law",
+          question: "Which state governs this agreement?",
+          reason: "Confirm governing law.",
+          priority: "high",
+          ownerSection: "Miscellaneous",
+        },
+        {
+          id: "liability-cap",
+          type: "RISK_ALLOCATION",
+          semanticIntent: "liability_cap",
+          question: "Would you like to add a liability cap tied to fees paid?",
+          reason: "Can allocate downside risk.",
+          suggestedAnswer: "Cap liability at fees paid in the prior 12 months.",
+          priority: "high",
+          ownerSection: "Miscellaneous",
+        },
+        {
+          id: "acceptance-process",
+          type: "OPTIMIZATION",
+          semanticIntent: "acceptance_process",
+          question: "Would you like a short acceptance process for milestone signoff?",
+          reason: "Can reduce disputes over milestone completion.",
+          suggestedAnswer: "Client has five business days to approve or identify issues.",
+          priority: "medium",
+          ownerSection: "Fees and Payment",
+        },
+      ],
+      riskSpots: [
+        {
+          id: "liability-risk",
+          issue: "No liability cap is stated.",
+          severity: "medium",
+          recommendedFix: "Consider adding a fee-based liability cap.",
+          ownerSection: "Miscellaneous",
+        },
+      ],
+      confidence: {
+        draftCompleteness: 96,
+        commercialSpecificity: 98,
+        legalCoherence: 95,
+      },
+    };
+
+    expect(validateProAgreementConfidenceGate(draft, {
+      intakeText: intake,
+      canonicalPartyNames: ["Lone Star Robotics LLC", "Atlas Automation Studio LLC"],
+    }).ok).toBe(true);
+    expect(extractDealVariables({ intakeRaw: intake, body: draft })).toEqual([]);
+    const governed = recomputeGuidedQuestionsFromAuthoritativeCorpus({
+      packet,
+      intakeText: intake,
+      corpusText: draft,
+    });
+    expect(governed.requiredComplete).toBe(true);
+    expect(governed.variables.some((v) => v.questionType === "REQUIRED_COMPLETION")).toBe(false);
+    expect(governed.variables.map((v) => v.question).join("\n")).not.toMatch(/Which state governs/i);
+    expect(governed.variables.length).toBeLessThanOrEqual(2);
+    expect(governed.variables.every((v) => v.requiredForExecution === false)).toBe(true);
+    expect(governed.variables.every((v) => v.questionType === "OPTIMIZATION" || v.questionType === "RISK_ALLOCATION")).toBe(true);
+
+    const preWitnessHash = fingerprintAgreementBody(draft.replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "").trim());
+    const result = finalizeGuidedProAgreementCorpus({
+      candidates: [{ source: "hydrated_premium", body: draft, paid: true }],
+      guidedSession: null,
+      signerIdentities: [
+        {
+          index: 0,
+          partyDisplayName: "Lone Star Robotics LLC",
+          email: "client@example.com",
+          representativeName: "Casey Client",
+          title: "CEO",
+          blockHeading: "CLIENT",
+          isIndividual: false,
+        },
+        {
+          index: 1,
+          partyDisplayName: "Atlas Automation Studio LLC",
+          email: "provider@example.com",
+          representativeName: "Taylor Atlas",
+          title: "Managing Member",
+          blockHeading: "SERVICE PROVIDER",
+          isIndividual: false,
+        },
+      ],
+      signerManifest: null,
+      originalIntake: intake,
+      freeBasicDraftPlain: null,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.appliedAnswerIds).toEqual([]);
+    expect(result.diagnostics.repairs).toContain("confidence_gate:ready_for_signatures");
+    expect(result.diagnostics.repairs.some((repair) => /semantic_reconstruct|canonical:semantic|structure:|section_merge/.test(repair))).toBe(false);
+    expect(result.body).toContain("$95,000");
+    expect(result.body).toContain("50% to kickoff and build, 25% to rollout, and 25% to acceptance");
+    expect(result.body).toContain("$4,500/month");
+    expect(result.body).toContain("Texas law");
+    expect(result.body).not.toMatch(/Schedule A/i);
+    expect(fingerprintAgreementBody(result.body.replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "").trim())).toBe(preWitnessHash);
   });
 });

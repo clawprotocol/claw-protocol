@@ -22,6 +22,7 @@ describe("resolveGuidedCompletionRenderDocument", () => {
     expect(r.source).toBe("authoritative_hydrated_premium");
     expect(r.plainText).toBe(LONG_AUTH);
     expect(r.blockedEmptyState).toBe(true);
+    expect(r.downgradeBlocked).toBe(true);
   });
 
   it("uses lastKnownGood when picker and hydrated are empty during guided apply race", () => {
@@ -44,6 +45,17 @@ describe("resolveGuidedCompletionRenderDocument", () => {
       renderedPreviewPlain: LONG_PREVIEW + "z".repeat(2000),
     });
     expect(r.source).toBe("last_known_good_authoritative");
+    expect(r.downgradeBlocked).toBe(false);
+  });
+
+  it("marks downgrade attempt when guided completion has authority and preview is shorter", () => {
+    const r = resolveGuidedCompletionRenderDocument({
+      guidedCompletionActive: true,
+      lastKnownGoodPlain: LONG_AUTH + " authoritative",
+      renderedPreviewPlain: "short preview " + "x".repeat(260),
+    });
+    expect(r.source).toBe("last_known_good_authoritative");
+    expect(r.downgradeBlocked).toBe(true);
   });
 
   it("blocks empty state when authoritative length exists", () => {

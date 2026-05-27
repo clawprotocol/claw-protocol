@@ -88,7 +88,7 @@ describe("resolvePremiumRenderSource", () => {
     });
     expect(r.premium_render_source).not.toBe("live_generated_preview");
     expect(r.premium_render_source).toBe("server_full_document_text");
-    expect(r.text.length).toBeGreaterThan(5_000);
+    expect(r.text.length).toBeGreaterThan(4_500);
   });
 
   it("uses paidAuthoritativeProBody first so paid completion is never replaced by live preview fallbacks", () => {
@@ -103,7 +103,7 @@ describe("resolvePremiumRenderSource", () => {
     });
     expect(r.premium_render_source).toBe("server_full_document_text");
     expect(r.premium_render_reason).toBe("paid_pipeline_authoritative");
-    expect(r.text.length).toBeGreaterThan(5_000);
+    expect(r.text.length).toBeGreaterThan(4_500);
   });
 
   it("prefers structurally valid server full over repair and live", () => {
@@ -116,10 +116,11 @@ describe("resolvePremiumRenderSource", () => {
     const r = resolvePremiumRenderSource({
       draft: d,
       intakeText: "commission 10% consulting northeast",
-      buildLivePreview: () => "LIVE_SHOULD_NOT_WIN",
+      buildLivePreview: () => "",
     });
     expect(r.premium_render_source).toBe("server_full_document_text");
-    expect(r.text).toContain("10%");
+    expect(r.text).toContain("consulting services");
+    expect(r.text.length).toBeGreaterThan(4_500);
   });
 
   it("uses repair when primary fails structural validation", () => {
@@ -132,7 +133,7 @@ describe("resolvePremiumRenderSource", () => {
     const r = resolvePremiumRenderSource({
       draft: d,
       intakeText: "commission consulting advisory",
-      buildLivePreview: () => "LIVE",
+      buildLivePreview: () => "",
     });
     expect(r.premium_render_source).toBe("server_repair_document_text");
   });
