@@ -57,6 +57,10 @@ from backend.agreements.premium_agreement_validation import (
     AgreementValidationResult,
     validatePremiumAgreementDraft,
 )
+from backend.agreements.premium_agreement_finalization import (
+    PremiumFinalizationResult,
+    finalize_premium_agreement_if_needed,
+)
 from backend.agreements.premium_full_draft_quality_gate import (
     build_free_reference_blob,
     build_premium_full_draft_repair_user_payload,
@@ -770,6 +774,35 @@ class PremiumFullDraftResponse(BaseModel):
     generation_ok: bool = True
     """True when the client may retry premium-full-draft without a new free draft."""
     retryable: bool = False
+
+
+class PremiumFinalizationClarificationAnswer(BaseModel):
+    question_id: Optional[str] = None
+    question: str = Field(..., min_length=1, max_length=4000)
+    answer: str = Field(..., min_length=1, max_length=12000)
+
+    @field_validator("question_id", "question", "answer", mode="before")
+    @classmethod
+    def _strip_optional_text(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+
+class PremiumFinalizationRequest(BaseModel):
+    original_intake: str = Field(..., min_length=1, max_length=120_000)
+    first_draft: str = Field(..., min_length=1, max_length=200_000)
+    agreement_intelligence: Optional[AgreementIntelligence] = None
+    agreement_validation: Optional[AgreementValidationResult] = None
+    clarification_answers: List[PremiumFinalizationClarificationAnswer] = Field(default_factory=list, max_length=50)
+    force_finalize: bool = False
+
+    @field_validator("original_intake", "first_draft", mode="before")
+    @classmethod
+    def _strip_required_text(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
@@ -4269,6 +4302,61 @@ def build_premium_full_draft_user_payload_for_airlock(
             "Delaware or swap states without intake support), notices, counterparts, e-sign, and full signature blocks."
         )
     return user_payload, ctx_dict
+
+
+def _premium_finalization_clarification_payload(
+    answers: List[PremiumFinalizationClarificationAnswer],
+) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for answer in answers[:50]:
+        out.append(
+            {
+                "question_id": (answer.question_id or "").strip(),
+                "question": answer.question.strip(),
+                "answer": answer.answer.strip(),
+            }
+        )
+    return out
+
+
+@router.post("/premium/finalize", response_model=PremiumFinalizationResult)
+def premium_finalize(request: Request, body: PremiumFinalizationRequest) -> PremiumFinalizationResult:
+    """
+    Explicit Phase 4 Pro finalization/repair route.
+
+    This route never runs from first-pass generation automatically. The client must
+    call it deliberately after material clarification answers or a repair-needed state.
+    """
+    require_claw_org_id_header(request)
+    ok_txt, msg_txt = validate_negotiate_text(body.original_intake, "owner")
+    if not ok_txt:
+        raise HTTPException(status_code=400, detail=msg_txt)
+    first_draft = (body.first_draft or "").strip()
+    if not first_draft:
+        raise HTTPException(status_code=400, detail="first_draft is required")
+    answers_json = json.dumps([a.model_dump(mode="json") for a in body.clarification_answers], ensure_ascii=False)
+    payload_size = len(body.original_intake.encode("utf-8")) + len(first_draft.encode("utf-8")) + len(answers_json)
+    if payload_size > 330_000:
+        raise HTTPException(status_code=400, detail="Input too large for premium finalization")
+
+    intelligence = body.agreement_intelligence or AgreementIntelligence()
+    result = finalize_premium_agreement_if_needed(
+        original_intake=body.original_intake,
+        first_draft=first_draft,
+        agreement_intelligence=intelligence,
+        agreement_validation=body.agreement_validation,
+        clarification_answers=_premium_finalization_clarification_payload(body.clarification_answers),
+        force_finalize=body.force_finalize,
+    )
+    log.info(
+        "[premium-finalize-route] finalized=%s reason=%s model_call_count=%s repair_attempted=%s repair_succeeded=%s",
+        result.finalized,
+        result.reason,
+        result.model_call_count,
+        result.repair_attempted,
+        result.repair_succeeded,
+    )
+    return result
 
 
 @router.post("/premium-full-draft", response_model=PremiumFullDraftResponse)

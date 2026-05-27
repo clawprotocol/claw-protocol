@@ -539,7 +539,11 @@ import {
   resolvePremiumProWaitVisualPhase,
   shouldLogPremiumReturnLateSuccess,
 } from "../../lib/premiumPostCheckoutReturnUx";
-import { buildPremiumFullDraftContextWithIntentMapping } from "./premiumFullDraftApi";
+import {
+  buildPremiumFullDraftContextWithIntentMapping,
+  finalizePremiumAgreement,
+  logPremiumFinalizationEvent,
+} from "./premiumFullDraftApi";
 import { preflightPremiumBackendHealth } from "./premiumBackendHealth";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumRetryPreservedContext } from "./premiumGenerationRetryable";
@@ -672,6 +676,11 @@ import {
   resolveProClarificationRouting,
   shouldUseProIntelligenceClarificationRouting,
 } from "./proClarificationRouting";
+import {
+  PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE,
+  premiumFinalizationAllowsSigning,
+  resolvePremiumFinalizationDecision,
+} from "./premiumFinalizationFlow";
 import { resolveImplementationPreview } from "./guidedDealCompletion/guidedImplementationPreview";
 import {
   buildConsolidatedGuidedRegenerationPrompt,
@@ -2763,6 +2772,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const lastGuidedAnswerVariableIdRef = useRef<string | null>(null);
   const guidedBulkApplyingRef = useRef(false);
   const guidedApplyInFlightRef = useRef(false);
+  const premiumFinalizationInFlightRef = useRef(false);
+  const premiumFinalizationLastSignatureRef = useRef<string | null>(null);
   const guidedAnswerApplyStatusRef = useRef<GuidedAnswerApplyStatus>("idle");
   const guidedPendingAutoApplyRef = useRef(false);
   const guidedApplyStartedAtRef = useRef<number | null>(null);
@@ -5956,6 +5967,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           serverGenerationDegraded: result.serverGenerationDegraded ?? null,
           materialMissingItems: result.materialMissingItems,
           structuralCatastrophic: result.structuralCatastrophic,
+          agreementIntelligence: result.agreementIntelligence ?? null,
+          agreementValidation: result.agreementValidation ?? null,
         });
         if (usePaidAuthoritativeBody) {
           bumpPremiumSurfaceGateTick();
@@ -17039,6 +17052,182 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const ensurePremiumFinalizationBeforeGuidedHandoff = React.useCallback(async (): Promise<boolean> => {
+    if (premiumFinalizationInFlightRef.current) return false;
+    const snap = readPremiumCompletionSnapshot();
+    const intakeRaw = (
+      (proRefineIntakeTextForProPanelsRef.current || "").trim() ||
+      currentPremiumMergedIntakeKey ||
+      intakeCombined
+    ).trim();
+    const firstDraft = pickBestAuthoritativeCorpusPlain([
+      lastKnownGoodAuthoritativeDraftRef.current,
+      hydratedPremiumBodyRef.current,
+      authoritativeAgreementSnapshotRef.current,
+      acceptedReviewCorpusRef.current,
+      lastPremiumWinningCorpusRef.current,
+      paidBodyForGuidedCompletion,
+      snap?.premiumWinningBodyText,
+      snap?.premiumReadonlyPlainText,
+    ]);
+    const routing = resolveProClarificationRouting({
+      agreementIntelligence: snap?.agreementIntelligence ?? null,
+      agreementValidation: snap?.agreementValidation ?? null,
+      intakeText: intakeRaw,
+      allowLegacyFallback: true,
+    });
+    const previousSignature =
+      premiumFinalizationLastSignatureRef.current || snap?.premiumFinalizationInputSignature || null;
+    const decision = resolvePremiumFinalizationDecision({
+      routing,
+      agreementValidation: snap?.agreementValidation ?? null,
+      session: guidedCompletionSessionRef.current,
+      firstDraft,
+      previousSignature,
+    });
+
+    if (!decision.shouldFinalize) {
+      logPremiumFinalizationEvent(
+        decision.reason === "loop_guard" ? "finalization_failed" : "finalization_skipped_not_needed",
+        {
+          finalization_reason: decision.reason,
+          signature: decision.signature,
+          repair_succeeded: snap?.premiumFinalization?.repair_succeeded ?? null,
+          document_text_len: firstDraft.length,
+        },
+      );
+      if (decision.reason === "loop_guard" && snap?.premiumFinalization?.repair_attempted) {
+        return snap.premiumFinalization.repair_succeeded === true;
+      }
+      if (decision.reason === "loop_guard") {
+        setGuidedFinalizeModalBlockedMessage(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+        setGuidedFinalizeModalStage("blocked");
+        setHardError(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+        return false;
+      }
+      return true;
+    }
+
+    if (!firstDraft || firstDraft.length < 200) {
+      setGuidedFinalizeModalBlockedMessage(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      setGuidedFinalizeModalStage("blocked");
+      setHardError(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      return false;
+    }
+
+    premiumFinalizationInFlightRef.current = true;
+    premiumFinalizationLastSignatureRef.current = decision.signature;
+    setGuidedFinalizeModalStage("finalizing_agreement");
+    logPremiumFinalizationEvent("finalization_started", {
+      finalization_reason: decision.reason,
+      signature: decision.signature,
+      document_text_len: firstDraft.length,
+    });
+
+    try {
+      const result = await finalizePremiumAgreement({
+        original_intake: intakeRaw,
+        first_draft: firstDraft,
+        agreement_intelligence: snap?.agreementIntelligence ?? null,
+        agreement_validation: snap?.agreementValidation ?? null,
+        clarification_answers: decision.clarificationAnswers,
+      });
+      const finalText = (result.document_text || "").trim();
+      const succeeded = premiumFinalizationAllowsSigning(result);
+      const cur = readPremiumCompletionSnapshot() ?? snap;
+      if (cur) {
+        persistPremiumCompletionSnapshot({
+          ...cur,
+          premiumFinalization: result,
+          premiumFinalizationInputSignature: decision.signature,
+          agreementIntelligence: result.agreement_intelligence ?? cur.agreementIntelligence ?? null,
+          agreementValidation: result.agreement_validation ?? cur.agreementValidation ?? null,
+          ...(succeeded
+            ? {
+                premiumWinningBodyText: finalText,
+                premiumReadonlyPlainText: finalText,
+                premiumAccepted: true,
+              }
+            : {}),
+        });
+      }
+      if (succeeded) {
+        hydratedPremiumBodyRef.current = finalText;
+        premiumPipelineOutputBodyRef.current = finalText;
+        acceptedReviewCorpusRef.current = finalText;
+        authoritativeAgreementSnapshotRef.current = finalText;
+        updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, finalText, "premium_finalization", {
+          paidProFlow: true,
+          freeBaselinePlain: paidProStarterPreviewPlain,
+          source: "premium_finalization",
+        });
+        setAgreementDocumentText(finalText);
+        bumpAuthoritativeAgreementVersion(finalText.length, persistedPremiumReviewTitle || draft?.title || "");
+        setGuidedAuthVersionNonce((n) => n + 1);
+        bumpPremiumSurfaceGateTick();
+        setReviewDocRefreshTick((n) => n + 1);
+        setHardError(null);
+        logPremiumFinalizationEvent("finalization_succeeded", {
+          finalization_reason: result.reason,
+          model_call_count: result.model_call_count,
+          repair_attempted: result.repair_attempted,
+          repair_succeeded: result.repair_succeeded,
+          signature: decision.signature,
+          document_text_len: finalText.length,
+        });
+        return true;
+      }
+      setGuidedFinalizeModalBlockedMessage(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      setGuidedFinalizeModalBlockedPresentation(
+        resolveGuidedFinalizeModalBlockedPresentation({
+          reason: "apply_not_complete",
+          workingDraftLen: finalText.length || firstDraft.length,
+        }),
+      );
+      setGuidedFinalizeModalStage("blocked");
+      setGuidedBulkApplyError(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      setReviewRefineUserMessage(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      setHardError(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      logPremiumFinalizationEvent("finalization_failed", {
+        finalization_reason: result.reason,
+        model_call_count: result.model_call_count,
+        repair_attempted: result.repair_attempted,
+        repair_succeeded: result.repair_succeeded,
+        signature: decision.signature,
+        document_text_len: finalText.length || firstDraft.length,
+      });
+      return false;
+    } catch {
+      setGuidedFinalizeModalBlockedMessage(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      setGuidedFinalizeModalBlockedPresentation(
+        resolveGuidedFinalizeModalBlockedPresentation({
+          reason: "apply_not_complete",
+          workingDraftLen: firstDraft.length,
+        }),
+      );
+      setGuidedFinalizeModalStage("blocked");
+      setGuidedBulkApplyError(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      setReviewRefineUserMessage(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      setHardError(PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE);
+      logPremiumFinalizationEvent("finalization_failed", {
+        finalization_reason: decision.reason,
+        signature: decision.signature,
+        document_text_len: firstDraft.length,
+      });
+      return false;
+    } finally {
+      premiumFinalizationInFlightRef.current = false;
+    }
+  }, [
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    paidBodyForGuidedCompletion,
+    paidProStarterPreviewPlain,
+    persistedPremiumReviewTitle,
+    draft?.title,
+    resolveGuidedFinalizeModalBlockedPresentation,
+  ]);
+
   const continueGuidedSignerSetupToFinalReview = React.useCallback(
     async (route: GuidedFinalReviewCtaRoute) => {
       if (guidedFinalReviewTransitionPromiseRef.current) {
@@ -17248,6 +17437,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setCreateFlowPhase("finalizing_final_review");
           setGuidedFinalizeModalStage("preparing_final_agreement");
           logGuidedFinalizeModalStage("preparing_final_agreement");
+          const finalized = await ensurePremiumFinalizationBeforeGuidedHandoff();
+          if (!finalized) {
+            logGuidedFinalReviewTransitionBlocked("apply_not_complete", {
+              route,
+              path: "premium_finalization",
+            });
+            logGuidedFinalReviewTransitionFailure({
+              reason: "apply_not_complete",
+              route,
+              phase: createFlowPhase,
+            });
+            return;
+          }
           const opened = handleGuidedOpenFinalReview({ modalAlreadyActive: true });
           if (!opened) {
             return;
@@ -17307,6 +17509,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       handleGuidedOpenFinalReview,
       handleGuidedBulkApply,
       commitGuidedApplyFromExistingCorpus,
+      ensurePremiumFinalizationBeforeGuidedHandoff,
       simpleProFinalReviewCorpus.plainText.length,
       guidedFinalReviewAuthoritativeResolution.finalizedHash,
     ],

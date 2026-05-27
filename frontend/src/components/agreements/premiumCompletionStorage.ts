@@ -1,6 +1,10 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PremiumRecipientCandidate } from "./premiumCompletionPipeline";
-import type { AgreementIntelligence, AgreementValidationResult } from "./premiumFullDraftApi";
+import type {
+  AgreementIntelligence,
+  AgreementValidationResult,
+  PremiumFinalizationResult,
+} from "./premiumFullDraftApi";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
@@ -160,6 +164,10 @@ export type PremiumCompletionSnapshot = {
   agreementIntelligence?: AgreementIntelligence | null;
   /** Deterministic draft validation result. Passive routing input. */
   agreementValidation?: AgreementValidationResult | null;
+  /** Explicit Phase 4 premium finalization result, written only when the route is called. */
+  premiumFinalization?: PremiumFinalizationResult | null;
+  /** Idempotency guard for the last premium finalization input. */
+  premiumFinalizationInputSignature?: string | null;
 };
 
 export function persistPremiumCompletionSnapshot(snap: Omit<PremiumCompletionSnapshot, "savedAt">): void {

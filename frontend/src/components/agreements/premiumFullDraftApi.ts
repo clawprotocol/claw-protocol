@@ -226,6 +226,39 @@ export type PremiumFullDraftResult = {
   pro_intelligence_packet?: Partial<ProAgreementIntelligencePacket>;
 };
 
+export type PremiumFinalizationClarificationAnswer = {
+  question_id?: string | null;
+  question: string;
+  answer: string;
+};
+
+export type PremiumFinalizationRequest = {
+  original_intake: string;
+  first_draft: string;
+  agreement_intelligence?: AgreementIntelligence | null;
+  agreement_validation?: AgreementValidationResult | null;
+  clarification_answers?: PremiumFinalizationClarificationAnswer[];
+  force_finalize?: boolean;
+};
+
+export type PremiumFinalizationReason =
+  | "not_needed"
+  | "validation_failed"
+  | "clarifications_answered"
+  | "conflicts_or_ambiguities"
+  | "forced";
+
+export type PremiumFinalizationResult = {
+  finalized: boolean;
+  reason: PremiumFinalizationReason;
+  document_text: string;
+  agreement_validation: AgreementValidationResult;
+  agreement_intelligence: AgreementIntelligence;
+  model_call_count: number;
+  repair_attempted: boolean;
+  repair_succeeded: boolean;
+};
+
 export type PremiumFullDraftFailureKind = "network" | "http" | "exception" | "generation";
 
 export type PremiumFullDraftNetworkErrorCode = "network_changed" | "network_error";
@@ -345,6 +378,75 @@ export function logAgreementValidationResult(result: Partial<PremiumFullDraftRes
     warningCount: validation.summary.warning_count,
     failureCodes: validation.failures.map((f) => f.code).slice(0, 16),
   });
+}
+
+function isPremiumFinalizationResult(value: unknown): value is PremiumFinalizationResult {
+  const obj = value as Partial<PremiumFinalizationResult> | null;
+  return Boolean(
+    obj &&
+      typeof obj.finalized === "boolean" &&
+      typeof obj.reason === "string" &&
+      typeof obj.document_text === "string" &&
+      typeof obj.agreement_validation?.passed === "boolean" &&
+      typeof obj.model_call_count === "number" &&
+      typeof obj.repair_attempted === "boolean" &&
+      typeof obj.repair_succeeded === "boolean",
+  );
+}
+
+export function logPremiumFinalizationEvent(
+  event:
+    | "finalization_started"
+    | "finalization_skipped_not_needed"
+    | "finalization_succeeded"
+    | "finalization_failed",
+  details: {
+    finalization_reason?: PremiumFinalizationReason | string | null;
+    model_call_count?: number | null;
+    repair_attempted?: boolean | null;
+    repair_succeeded?: boolean | null;
+    signature?: string | null;
+    document_text_len?: number | null;
+  } = {},
+): void {
+  if (import.meta.env.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-finalization]", {
+    event,
+    finalization_reason: details.finalization_reason ?? null,
+    model_call_count: details.model_call_count ?? null,
+    repair_attempted: details.repair_attempted ?? null,
+    repair_succeeded: details.repair_succeeded ?? null,
+    signature: details.signature ? details.signature.slice(0, 24) : null,
+    document_text_len: details.document_text_len ?? null,
+  });
+}
+
+export async function finalizePremiumAgreement(
+  request: PremiumFinalizationRequest,
+  options?: { signal?: AbortSignal },
+): Promise<PremiumFinalizationResult> {
+  const res = await fetch(apiUrl("/api/agreements/premium/finalize"), {
+    method: "POST",
+    headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(request),
+    signal: options?.signal,
+  });
+  const bodyText = await res.text();
+  let parsed: unknown = null;
+  try {
+    parsed = bodyText ? JSON.parse(bodyText) : null;
+  } catch {
+    parsed = null;
+  }
+  if (!res.ok) {
+    const detail = (parsed as { detail?: { message?: string } } | null)?.detail;
+    throw new Error(detail?.message || `premium_finalization_http_${res.status}`);
+  }
+  if (!isPremiumFinalizationResult(parsed)) {
+    throw new Error("premium_finalization_malformed_response");
+  }
+  return parsed;
 }
 
 /** @deprecated Use agreementId + agreementGenerationId on logPremiumNetworkError. */
