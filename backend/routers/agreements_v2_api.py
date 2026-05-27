@@ -53,6 +53,10 @@ from backend.agreements.premium_dev_context_leak import (
     serialize_context_clean,
 )
 from backend.agreements.premium_generation_intelligence import build_premium_generation_intelligence_brief
+from backend.agreements.premium_agreement_validation import (
+    AgreementValidationResult,
+    validatePremiumAgreementDraft,
+)
 from backend.agreements.premium_full_draft_quality_gate import (
     build_free_reference_blob,
     build_premium_full_draft_repair_user_payload,
@@ -624,10 +628,134 @@ class PremiumFullDraftRequest(BaseModel):
     similarity_regeneration: bool = False
 
 
+class ExtractedParty(BaseModel):
+    name: str = ""
+    role: str = ""
+
+
+class ExtractedPartyRole(BaseModel):
+    party_name: str = ""
+    role: str = ""
+
+
+class PaymentMilestone(BaseModel):
+    label: str = ""
+    amount: Optional[str] = None
+    percentage: Optional[str] = None
+    trigger: Optional[str] = None
+
+
+class RecurringSupportTerms(BaseModel):
+    amount: Optional[str] = None
+    cadence: Optional[str] = None
+    renewal: Optional[str] = None
+
+
+class AgreementPaymentTerms(BaseModel):
+    total_amount: Optional[str] = None
+    currency: Optional[str] = None
+    milestones: List[PaymentMilestone] = Field(default_factory=list)
+    recurring_support: Optional[RecurringSupportTerms] = None
+
+
+class AgreementOwnershipTerms(BaseModel):
+    deliverable_ownership: Optional[str] = None
+    retained_materials: Optional[str] = None
+
+
+class AgreementTerminationTerms(BaseModel):
+    convenience_termination: Optional[bool] = None
+    breach_termination: Optional[bool] = None
+    notice_period: Optional[str] = None
+
+
+class AgreementConfidentialityTerms(BaseModel):
+    included: bool = False
+    survival: Optional[str] = None
+
+
+class AgreementNoticesTerms(BaseModel):
+    method: Optional[str] = None
+
+
+class AgreementSupportTerms(BaseModel):
+    included: Optional[bool] = None
+    standard: Optional[str] = None
+
+
+class AgreementThirdPartyDependencyTerms(BaseModel):
+    included: Optional[bool] = None
+    uptime_disclaimer: Optional[bool] = None
+
+
+class AgreementExtractedTerms(BaseModel):
+    parties: List[ExtractedParty] = Field(default_factory=list)
+    party_roles: List[ExtractedPartyRole] = Field(default_factory=list)
+    governing_law: Optional[str] = None
+    payment_terms: Optional[AgreementPaymentTerms] = None
+    ownership_terms: Optional[AgreementOwnershipTerms] = None
+    termination_terms: Optional[AgreementTerminationTerms] = None
+    confidentiality: Optional[AgreementConfidentialityTerms] = None
+    notices: Optional[AgreementNoticesTerms] = None
+    support_terms: Optional[AgreementSupportTerms] = None
+    third_party_dependency_terms: Optional[AgreementThirdPartyDependencyTerms] = None
+    electronic_signatures: Optional[bool] = None
+
+
+class AgreementAmbiguity(BaseModel):
+    id: str = ""
+    topic: str = ""
+    description: str = ""
+    severity: Literal["low", "medium", "high"] = "medium"
+    source: Optional[str] = None
+
+
+class AgreementConflict(BaseModel):
+    id: str = ""
+    topic: str = ""
+    description: str = ""
+    conflicting_values: List[str] = Field(default_factory=list)
+    severity: Literal["low", "medium", "high"] = "medium"
+
+
+class MissingMaterialTerm(BaseModel):
+    id: str = ""
+    topic: str = ""
+    reason: str = ""
+    severity: Literal["low", "medium", "high"] = "medium"
+
+
+class RecommendedQuestion(BaseModel):
+    id: str = ""
+    topic: str = ""
+    question: str = ""
+    reason: str = ""
+    priority: Literal["low", "medium", "high"] = "medium"
+
+
+class AgreementQualityFlag(BaseModel):
+    id: str = ""
+    topic: str = ""
+    description: str = ""
+    severity: Literal["low", "medium", "high"] = "medium"
+
+
+class AgreementIntelligence(BaseModel):
+    extracted_terms: AgreementExtractedTerms = Field(default_factory=AgreementExtractedTerms)
+    ambiguities: List[AgreementAmbiguity] = Field(default_factory=list)
+    conflicts: List[AgreementConflict] = Field(default_factory=list)
+    missing_material_terms: List[MissingMaterialTerm] = Field(default_factory=list)
+    recommended_questions: List[RecommendedQuestion] = Field(default_factory=list)
+    quality_flags: List[AgreementQualityFlag] = Field(default_factory=list)
+
+
 class PremiumFullDraftResponse(BaseModel):
     title: str = ""
     agreement_family: str = ""
     document_text: str = ""
+    authoritative_draft: str = ""
+    agreement_intelligence: AgreementIntelligence = Field(default_factory=AgreementIntelligence)
+    agreement_validation: Optional[AgreementValidationResult] = None
     server_full_document_text: str = ""
     server_repair_document_text: str = ""
     key_terms_found: List[str] = Field(default_factory=list)
@@ -768,10 +896,20 @@ def _premium_full_draft_degraded_response(
         log.info("[CLAW] premium degraded fallback_document failure_code=%s", failure_code)
     srv_full = "" if suppress_body else (primary_full or "")
     srv_repair = "" if suppress_body else (repair_body or "")
+    empty_intelligence = AgreementIntelligence()
+    agreement_validation = _validate_and_log_premium_agreement_draft(
+        authoritative_draft=doc,
+        agreement_intelligence=empty_intelligence,
+        original_intake=intake_s,
+        stage=f"degraded:{failure_code}",
+    )
     return PremiumFullDraftResponse(
         title=str((ctx_dict or {}).get("title") or "").strip() or "Agreement",
         agreement_family=fam,
         document_text=doc,
+        authoritative_draft=doc,
+        agreement_intelligence=empty_intelligence,
+        agreement_validation=agreement_validation,
         server_full_document_text=srv_full,
         server_repair_document_text=srv_repair,
         key_terms_found=[],
@@ -1058,9 +1196,30 @@ def _detect_premium_scenario_category(intake: str, agreement_family: str = "") -
 def _normalize_premium_full_draft_result(raw: Dict[str, Any]) -> PremiumFullDraftResponse:
     title = str(raw.get("title") or "").strip()
     fam = str(raw.get("agreement_family") or "").strip()
-    doc = str(raw.get("document_text") or "").strip()
+    authoritative = str(raw.get("authoritative_draft") or "").strip()
+    doc = authoritative or str(raw.get("document_text") or "").strip()
     if len(doc) > 200_000:
         doc = doc[:200_000]
+    intel_raw = raw.get("agreement_intelligence")
+    intelligence_parse_ok = isinstance(intel_raw, dict)
+    if intelligence_parse_ok:
+        try:
+            agreement_intelligence = AgreementIntelligence.model_validate(intel_raw)
+        except Exception as exc:
+            intelligence_parse_ok = False
+            agreement_intelligence = AgreementIntelligence()
+            log.warning(
+                "[agreement-intelligence] event=parse_failure exc_type=%s keys=%s",
+                type(exc).__name__,
+                sorted(str(k) for k in intel_raw.keys())[:24] if isinstance(intel_raw, dict) else [],
+            )
+    else:
+        agreement_intelligence = AgreementIntelligence()
+        if intel_raw is not None:
+            log.warning(
+                "[agreement-intelligence] event=parse_failure exc_type=non_object raw_type=%s",
+                type(intel_raw).__name__,
+            )
     ktf: List[str] = []
     ma = raw.get("key_terms_found")
     if isinstance(ma, list):
@@ -1079,9 +1238,112 @@ def _normalize_premium_full_draft_result(raw: Dict[str, Any]) -> PremiumFullDraf
         title=title,
         agreement_family=fam,
         document_text=doc,
+        authoritative_draft=doc,
+        agreement_intelligence=agreement_intelligence,
         key_terms_found=ktf,
         missing_material_info=miss,
     )
+
+
+def _log_agreement_intelligence_summary(
+    intelligence: AgreementIntelligence,
+    *,
+    stage: str,
+    elapsed_ms: Optional[float] = None,
+) -> None:
+    terms = intelligence.extracted_terms
+    payment = terms.payment_terms
+    log.info(
+        "[agreement-intelligence] event=extracted stage=%s elapsed_ms=%s parties=%s governing_law=%s "
+        "payment_total=%s milestones=%s ambiguities=%s conflicts=%s missing_terms=%s recommended_questions=%s quality_flags=%s",
+        stage,
+        round(elapsed_ms, 2) if elapsed_ms is not None else None,
+        len(terms.parties),
+        1 if terms.governing_law else 0,
+        1 if payment and payment.total_amount else 0,
+        len(payment.milestones) if payment else 0,
+        len(intelligence.ambiguities),
+        len(intelligence.conflicts),
+        len(intelligence.missing_material_terms),
+        len(intelligence.recommended_questions),
+        len(intelligence.quality_flags),
+    )
+    if intelligence.ambiguities:
+        log.info(
+            "[agreement-intelligence] event=ambiguities stage=%s items=%s",
+            stage,
+            [
+                {
+                    "id": a.id,
+                    "topic": a.topic,
+                    "severity": a.severity,
+                }
+                for a in intelligence.ambiguities[:8]
+            ],
+        )
+    if intelligence.conflicts:
+        log.info(
+            "[agreement-intelligence] event=conflicts stage=%s items=%s",
+            stage,
+            [
+                {
+                    "id": c.id,
+                    "topic": c.topic,
+                    "severity": c.severity,
+                    "values": c.conflicting_values[:4],
+                }
+                for c in intelligence.conflicts[:8]
+            ],
+        )
+    if intelligence.missing_material_terms:
+        log.info(
+            "[agreement-intelligence] event=missing_material_terms stage=%s items=%s",
+            stage,
+            [
+                {
+                    "id": m.id,
+                    "topic": m.topic,
+                    "severity": m.severity,
+                }
+                for m in intelligence.missing_material_terms[:8]
+            ],
+        )
+    if intelligence.recommended_questions:
+        log.info(
+            "[agreement-intelligence] event=recommended_questions stage=%s items=%s",
+            stage,
+            [
+                {
+                    "id": q.id,
+                    "topic": q.topic,
+                    "priority": q.priority,
+                }
+                for q in intelligence.recommended_questions[:8]
+            ],
+        )
+
+
+def _validate_and_log_premium_agreement_draft(
+    *,
+    authoritative_draft: str,
+    agreement_intelligence: AgreementIntelligence,
+    original_intake: str,
+    stage: str,
+) -> AgreementValidationResult:
+    result = validatePremiumAgreementDraft(
+        authoritativeDraft=authoritative_draft,
+        agreementIntelligence=agreement_intelligence,
+        originalIntake=original_intake,
+    )
+    log.info(
+        "[agreement-validation] event=result stage=%s passed=%s failure_count=%s warning_count=%s failure_codes=%s",
+        stage,
+        int(result.passed),
+        result.summary.failure_count,
+        result.summary.warning_count,
+        [f.code for f in result.failures[:16]],
+    )
+    return result
 
 
 def _premium_full_draft_system_prompt() -> str:
@@ -1210,11 +1472,31 @@ def _premium_full_draft_system_prompt() -> str:
         "19) Miscellaneous: **entire agreement; order of precedence (if needed);** amendments; **survival;** severability; waiver; **counterparts;** **electronic signatures** and valid digital execution\n"
         "20) Signature blocks for all parties and dates\n"
         "Output ONLY a single JSON object (no markdown, no code fences) with EXACT keys:\n"
-        '{ "title": string, "agreement_family": string, "document_text": string, "key_terms_found": string array, "missing_material_info": string array }\n'
-        "- `document_text` is the full agreement in plain text, not a summary. This must be a complete first-pass draft a user can review.\n"
+        '{ "title": string, "agreement_family": string, "authoritative_draft": string, "agreement_intelligence": object, "key_terms_found": string array, "missing_material_info": string array }\n'
+        "- `authoritative_draft` is the full agreement in plain text, not a summary. This must be a complete first-pass draft a user can review. "
+        "For backward compatibility you may also include `document_text` with the exact same value, but `authoritative_draft` is required.\n"
         "- `key_terms_found`: 6–20 short labels for the major commercial points you actually included (including key standard protections you added).\n"
         "- `missing_material_info`: only material items still unknown after a fair read of the user materials, else [].\n"
         "- `agreement_family`: short human label of deal type, e.g. 'Marketing services retainer' or 'Referral commission'—use it to calibrate which standard clauses to emphasize.\n"
+        "- `agreement_intelligence` is internal LawDog system intelligence. Extract only facts clearly supplied or reasonably inferable from the intake. "
+        "Do not invent governing law, payment amounts, milestone schedules, signers, notice methods, ownership transfers, support obligations, or uptime promises. "
+        "If uncertain, leave the extracted field null/empty and use `ambiguities` or `missing_material_terms`.\n"
+        "- `agreement_intelligence` shape: { \"extracted_terms\": { \"parties\": [{\"name\": string, \"role\": string}], \"party_roles\": [{\"party_name\": string, \"role\": string}], "
+        "\"governing_law\": string|null, \"payment_terms\": {\"total_amount\": string|null, \"currency\": string|null, \"milestones\": [{\"label\": string, \"amount\": string|null, \"percentage\": string|null, \"trigger\": string|null}], "
+        "\"recurring_support\": {\"amount\": string|null, \"cadence\": string|null, \"renewal\": string|null}|null}|null, "
+        "\"ownership_terms\": {\"deliverable_ownership\": string|null, \"retained_materials\": string|null}|null, "
+        "\"termination_terms\": {\"convenience_termination\": boolean|null, \"breach_termination\": boolean|null, \"notice_period\": string|null}|null, "
+        "\"confidentiality\": {\"included\": boolean, \"survival\": string|null}|null, \"notices\": {\"method\": string|null}|null, "
+        "\"support_terms\": {\"included\": boolean|null, \"standard\": string|null}|null, "
+        "\"third_party_dependency_terms\": {\"included\": boolean|null, \"uptime_disclaimer\": boolean|null}|null, \"electronic_signatures\": boolean|null }, "
+        "\"ambiguities\": [{\"id\": string, \"topic\": string, \"description\": string, \"severity\": \"low\"|\"medium\"|\"high\", \"source\": string|null}], "
+        "\"conflicts\": [{\"id\": string, \"topic\": string, \"description\": string, \"conflicting_values\": string[], \"severity\": \"low\"|\"medium\"|\"high\"}], "
+        "\"missing_material_terms\": [{\"id\": string, \"topic\": string, \"reason\": string, \"severity\": \"low\"|\"medium\"|\"high\"}], "
+        "\"recommended_questions\": [{\"id\": string, \"topic\": string, \"question\": string, \"reason\": string, \"priority\": \"low\"|\"medium\"|\"high\"}], "
+        "\"quality_flags\": [{\"id\": string, \"topic\": string, \"description\": string, \"severity\": \"low\"|\"medium\"|\"high\"}] }.\n"
+        "- Recommended questions must be sparse and high-signal. Duplicate or unnecessary clarification questions are harmful UX. "
+        "Do NOT ask about governing law, payment structure, or ownership when already clearly supplied. Ask only if information is genuinely missing, materially ambiguous, conflicting, "
+        "or would substantially improve specificity/enforceability (for example unclear venue, undefined acceptance criteria, ambiguous support renewal, conflicting milestone schedules).\n"
     )
 
 
@@ -4090,8 +4372,14 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             len((llm_text or "").strip()),
             (llm_model or ""),
         )
+        intelligence_parse_start = time.perf_counter()
         parsed = _extract_json_object(llm_text)
         out_primary = _normalize_premium_full_draft_result(parsed)
+        _log_agreement_intelligence_summary(
+            out_primary.agreement_intelligence,
+            stage="primary",
+            elapsed_ms=(time.perf_counter() - intelligence_parse_start) * 1000,
+        )
         log.info(
             "claw_premium route=premium_full_draft parse_ok=1 primary_doc_len=%s title_len=%s",
             len((out_primary.document_text or "").strip()),
@@ -4162,8 +4450,14 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 airlock_profile="agreement_outbound",
                 airlock_log_context="premium_full_draft:repair",
             )
+            intelligence_parse_start = time.perf_counter()
             parsed_repair = _extract_json_object(llm_repair)
             out = _normalize_premium_full_draft_result(parsed_repair)
+            _log_agreement_intelligence_summary(
+                out.agreement_intelligence,
+                stage="repair",
+                elapsed_ms=(time.perf_counter() - intelligence_parse_start) * 1000,
+            )
             _safe_record_ai_call(request, request_ip)
             repair_used = True
             repair_body = (out.document_text or "").strip()
@@ -4202,8 +4496,14 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 airlock_profile="agreement_outbound",
                 airlock_log_context="premium_full_draft:sanitized_retry",
             )
+            intelligence_parse_start = time.perf_counter()
             parsed_c = _extract_json_object(llm_clean)
             out_clean = _normalize_premium_full_draft_result(parsed_c)
+            _log_agreement_intelligence_summary(
+                out_clean.agreement_intelligence,
+                stage="sanitized_retry",
+                elapsed_ms=(time.perf_counter() - intelligence_parse_start) * 1000,
+            )
             _safe_record_ai_call(request, request_ip)
             doc_c = (out_clean.document_text or "").strip()
             has_leak2, leak_h2 = premium_document_text_has_dev_context_leak(doc_c)
@@ -4289,12 +4589,21 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 type(jsum_e).__name__,
             )
         primary_full = (out_primary.document_text or "").strip()
+        agreement_validation = _validate_and_log_premium_agreement_draft(
+            authoritative_draft=doc,
+            agreement_intelligence=out.agreement_intelligence,
+            original_intake=intake_s,
+            stage="final",
+        )
         ok_model = PremiumFullDraftResponse(
             title=out.title,
             agreement_family=out.agreement_family,
             document_text=doc,
             server_full_document_text=primary_full,
             server_repair_document_text=repair_body,
+            authoritative_draft=doc,
+            agreement_intelligence=out.agreement_intelligence,
+            agreement_validation=agreement_validation,
             key_terms_found=out.key_terms_found,
             missing_material_info=out.missing_material_info,
             generation_outcome=generation_outcome,

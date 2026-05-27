@@ -58,10 +58,150 @@ export type PremiumFullDraftContextPayload = {
   intent_contract?: AgreementIntentContractApi;
 };
 
+export type ExtractedParty = {
+  name: string;
+  role: string;
+};
+
+export type ExtractedPartyRole = {
+  party_name: string;
+  role: string;
+};
+
+export type PaymentMilestone = {
+  label: string;
+  amount?: string | null;
+  percentage?: string | null;
+  trigger?: string | null;
+};
+
+export type RecurringSupportTerms = {
+  amount?: string | null;
+  cadence?: string | null;
+  renewal?: string | null;
+};
+
+export type AgreementAmbiguity = {
+  id: string;
+  topic: string;
+  description: string;
+  severity: "low" | "medium" | "high";
+  source?: string | null;
+};
+
+export type AgreementConflict = {
+  id: string;
+  topic: string;
+  description: string;
+  conflicting_values: string[];
+  severity: "low" | "medium" | "high";
+};
+
+export type MissingMaterialTerm = {
+  id: string;
+  topic: string;
+  reason: string;
+  severity: "low" | "medium" | "high";
+};
+
+export type RecommendedQuestion = {
+  id: string;
+  topic: string;
+  question: string;
+  reason: string;
+  priority: "low" | "medium" | "high";
+};
+
+export type AgreementQualityFlag = {
+  id: string;
+  topic: string;
+  description: string;
+  severity: "low" | "medium" | "high";
+};
+
+export type AgreementIntelligence = {
+  extracted_terms: {
+    parties: ExtractedParty[];
+    party_roles: ExtractedPartyRole[];
+    governing_law?: string | null;
+    payment_terms?: {
+      total_amount?: string | null;
+      currency?: string | null;
+      milestones?: PaymentMilestone[];
+      recurring_support?: RecurringSupportTerms | null;
+    } | null;
+    ownership_terms?: {
+      deliverable_ownership?: string | null;
+      retained_materials?: string | null;
+    } | null;
+    termination_terms?: {
+      convenience_termination?: boolean | null;
+      breach_termination?: boolean | null;
+      notice_period?: string | null;
+    } | null;
+    confidentiality?: {
+      included: boolean;
+      survival?: string | null;
+    } | null;
+    notices?: {
+      method?: string | null;
+    } | null;
+    support_terms?: {
+      included?: boolean | null;
+      standard?: string | null;
+    } | null;
+    third_party_dependency_terms?: {
+      included?: boolean | null;
+      uptime_disclaimer?: boolean | null;
+    } | null;
+    electronic_signatures?: boolean | null;
+  };
+  ambiguities: AgreementAmbiguity[];
+  conflicts: AgreementConflict[];
+  missing_material_terms: MissingMaterialTerm[];
+  recommended_questions: RecommendedQuestion[];
+  quality_flags: AgreementQualityFlag[];
+};
+
+export type AgreementValidationFailure = {
+  code: string;
+  message: string;
+  severity: "low" | "medium" | "high";
+  section?: string | null;
+};
+
+export type AgreementValidationWarning = {
+  code: string;
+  message: string;
+  severity: "low" | "medium" | "high";
+  section?: string | null;
+};
+
+export type AgreementValidationResult = {
+  passed: boolean;
+  failures: AgreementValidationFailure[];
+  warnings: AgreementValidationWarning[];
+  minimum_contract_elements: {
+    identifiable_parties: boolean;
+    agreement_purpose_or_scope: boolean;
+    exchange_of_value_or_consideration: boolean;
+    obligations_or_performance: boolean;
+    execution_or_acceptance_mechanism: boolean;
+  };
+  summary: {
+    failure_count: number;
+    warning_count: number;
+    checked_at: string;
+  };
+};
+
 export type PremiumFullDraftResult = {
   title: string;
   agreement_family: string;
   document_text: string;
+  authoritative_draft?: string;
+  agreement_intelligence?: AgreementIntelligence;
+  agreement_validation?: AgreementValidationResult | null;
   server_full_document_text?: string;
   server_repair_document_text?: string;
   key_terms_found: string[];
@@ -169,6 +309,41 @@ export function logPremiumNetworkError(args: {
     browserErrorMessage: (args.browserErrorMessage ?? "").slice(0, 160) || null,
     retryable: args.retryable,
     error_code: args.errorCode,
+  });
+}
+
+export function logAgreementIntelligenceExtraction(result: Partial<PremiumFullDraftResult>): void {
+  if (import.meta.env.MODE === "test") return;
+  const intel = result.agreement_intelligence;
+  if (!intel) {
+    // eslint-disable-next-line no-console
+    console.info("[agreement-intelligence] frontend_received", { hasIntelligence: false });
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.info("[agreement-intelligence] frontend_received", {
+    hasIntelligence: true,
+    parties: intel.extracted_terms?.parties?.length ?? 0,
+    governingLaw: Boolean(intel.extracted_terms?.governing_law),
+    paymentTotal: Boolean(intel.extracted_terms?.payment_terms?.total_amount),
+    ambiguities: intel.ambiguities?.length ?? 0,
+    conflicts: intel.conflicts?.length ?? 0,
+    missingMaterialTerms: intel.missing_material_terms?.length ?? 0,
+    recommendedQuestions: intel.recommended_questions?.length ?? 0,
+    qualityFlags: intel.quality_flags?.length ?? 0,
+  });
+}
+
+export function logAgreementValidationResult(result: Partial<PremiumFullDraftResult>): void {
+  if (import.meta.env.MODE === "test") return;
+  const validation = result.agreement_validation;
+  if (!validation) return;
+  // eslint-disable-next-line no-console
+  console.info("[agreement-validation] frontend_received", {
+    passed: validation.passed,
+    failureCount: validation.summary.failure_count,
+    warningCount: validation.summary.warning_count,
+    failureCodes: validation.failures.map((f) => f.code).slice(0, 16),
   });
 }
 
@@ -427,6 +602,8 @@ export async function postPremiumFullDraftOnce(args: {
     throw new Error((msg as string) || "premium_full_draft_failed");
   }
   const wire = parsed as PremiumFullDraftResult;
+  logAgreementIntelligenceExtraction(wire);
+  logAgreementValidationResult(wire);
   const genRetry = classifyPremiumFullDraftGenerationRetryable(wire);
   if (genRetry.retryable) {
     logPremiumGenerationRetryableFailure({

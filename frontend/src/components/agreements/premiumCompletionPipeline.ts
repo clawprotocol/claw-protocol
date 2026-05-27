@@ -50,6 +50,8 @@ import {
   buildSanitizedPremiumFullDraftContext,
   postPremiumFullDraftOnce,
   postPremiumFullDraftWithRetry,
+  type AgreementIntelligence,
+  type AgreementValidationResult,
   type PremiumFullDraftResult,
 } from "./premiumFullDraftApi";
 import {
@@ -206,6 +208,10 @@ export type PremiumCompletionResult = {
   structuralCatastrophic?: boolean;
   /** Structured material questions for Ask LawDog to revise. */
   materialMissingItems?: MaterialMissingItem[];
+  /** First-stage OpenAI semantic extraction; passive for now. */
+  agreementIntelligence?: AgreementIntelligence | null;
+  /** Deterministic validation; passive for now. */
+  agreementValidation?: AgreementValidationResult | null;
 };
 
 /** @deprecated — positive stitched body is built in {@link buildPremiumPostCheckoutStitchedBody}. */
@@ -1335,6 +1341,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   let serverGenerationDegraded: { code: string; message: string } | null = null;
   let premiumCompletionOutcome: PremiumCompletionOutcome | null = null;
   let recommendedClarifications: RecommendedClarifications | null = null;
+  let agreementIntelligence: AgreementIntelligence | null = null;
+  let agreementValidation: AgreementValidationResult | null = null;
   let structuralCatastrophic = false;
   let materialMissingItems: MaterialMissingItem[] = [];
   const intentContract = resolveAgreementIntentContract(rawForSoT || rawIntake);
@@ -1439,6 +1447,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       }
     } else {
       const full = fullResp.result;
+      agreementIntelligence = full.agreement_intelligence ?? null;
+      agreementValidation = full.agreement_validation ?? null;
       adaptPremiumFullDraftToProIntelligencePacket(full);
       if (tierAEnabled) {
         tierADiag.backendReturnedDocumentText = Boolean((full.document_text || "").trim());
@@ -2382,5 +2392,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     recommendedClarifications,
     structuralCatastrophic,
     materialMissingItems: materialMissingItems.length ? materialMissingItems : undefined,
+    agreementIntelligence,
+    agreementValidation,
   };
 }

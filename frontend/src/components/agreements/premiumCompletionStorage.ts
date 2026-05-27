@@ -1,5 +1,6 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PremiumRecipientCandidate } from "./premiumCompletionPipeline";
+import type { AgreementIntelligence, AgreementValidationResult } from "./premiumFullDraftApi";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
@@ -155,6 +156,10 @@ export type PremiumCompletionSnapshot = {
   uploadedSourceDocumentText?: string | null;
   /** Malformed/empty pipeline failure — distinct from advisory material gaps. */
   structuralCatastrophic?: boolean;
+  /** First-stage OpenAI semantic extraction. Passive routing input. */
+  agreementIntelligence?: AgreementIntelligence | null;
+  /** Deterministic draft validation result. Passive routing input. */
+  agreementValidation?: AgreementValidationResult | null;
 };
 
 export function persistPremiumCompletionSnapshot(snap: Omit<PremiumCompletionSnapshot, "savedAt">): void {

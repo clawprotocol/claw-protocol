@@ -627,6 +627,7 @@ import {
   withGuidedDraftProgress,
   buildGuidedSessionFromAgreement,
   buildGuidedSessionKey,
+  createGuidedCompletionSession,
   friendlyLowConfidenceCopy,
   lockGuidedSession,
   mergeGuidedSessionOnBaseRefresh,
@@ -666,6 +667,11 @@ import {
   logGuidedAuthoritativePreviewSync,
 } from "./guidedDealCompletion/guidedSectionAwareMerge";
 import { compressLawDogWill } from "./guidedDealCompletion/guidedCopyCompress";
+import {
+  logProClarificationRoutingState,
+  resolveProClarificationRouting,
+  shouldUseProIntelligenceClarificationRouting,
+} from "./proClarificationRouting";
 import { resolveImplementationPreview } from "./guidedDealCompletion/guidedImplementationPreview";
 import {
   buildConsolidatedGuidedRegenerationPrompt,
@@ -14785,8 +14791,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedCompletionSessionBase = useMemo(() => {
     if (guidedQueueRebuildBlocked) return null;
     if (!paidProGuidedCorpusReady || paidBodyForGuidedCompletion.length < 200) return null;
+    const intakeRaw = currentPremiumMergedIntakeKey || intakeCombined;
+    const snap = readPremiumCompletionSnapshot();
+    const routingContext = {
+      agreementIntelligence: snap?.agreementIntelligence ?? null,
+      agreementValidation: snap?.agreementValidation ?? null,
+    };
+    if (shouldUseProIntelligenceClarificationRouting(routingContext)) {
+      const routing = resolveProClarificationRouting({
+        ...routingContext,
+        intakeText: intakeRaw,
+        allowLegacyFallback: true,
+      });
+      logProClarificationRoutingState(routing);
+      if (routing.mode === "no_questions") return null;
+      if (routing.mode === "validation_repair_needed" || routing.mode === "material_questions") {
+        if (!routing.questions.length) return null;
+        return createGuidedCompletionSession({
+          variables: routing.questions,
+          agreementFamily: "generic_business_agreement",
+          bodyLen: paidBodyForGuidedCompletion.length,
+        });
+      }
+    }
     return buildGuidedSessionFromAgreement({
-      intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
+      intakeRaw,
       body: paidBodyForGuidedCompletion,
     });
   }, [
