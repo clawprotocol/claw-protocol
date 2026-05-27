@@ -4,6 +4,10 @@ import { finalizeGuidedProAgreementCorpus } from "./guidedDealCompletion/guidedF
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 import {
+  repairProCopyQualityWithOpenAI,
+  validateProCopyQuality,
+} from "./proCopyQualityRepair";
+import {
   PRO_AGREEMENT_VALIDATED_READY_MESSAGE,
   repairProFullAgreementCandidateSurgically,
   validateProAgreementConfidenceGate,
@@ -311,6 +315,181 @@ Date: _________________________
     expect(result.body).not.toMatch(/Specific compensation mechanics will be completed in Schedule A|SCHEDULE A/i);
     expect(result.body.match(/Client will own the deliverables and custom work product/gi)?.length ?? 0).toBe(1);
     expect(result.body.match(/40% to build and configuration/gi)?.length ?? 0).toBe(1);
+    expect(
+      fingerprintAgreementBody(result.body.replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "").trim()),
+    ).toBe(preWitnessHash);
+  });
+
+  it("test106 repairs OpenAI copy defects before freeze and preserves signer-only hydration", async () => {
+    const defective = `
+AI Automation Services Agreement
+This Agreement is between ABC LLC ("Client") and Jordan Lee Consulting ("Service Provider").
+
+1. Purpose and Scope
+Service Provider will provide:
+- AI workflow implementation
+- dashboard setup
+- automation support
+and
+
+2. Fees and Payment
+Client will pay Service Provider a total project fee of total fee for the services described in this Agreement. The project fee is allocated 40% to build and configuration, 30% to rollout and onboarding, and 30% to support and acceptance. Specific compensation mechanics will be completed in Schedule A before execution.
+
+3. Project Administration
+- AI workflow implementation
+- dashboard setup
+- automation support
+The applicable Party will coordinate project access.
+
+4. Confidentiality
+
+5. Support Expectations
+Service Provider does not guarantee the uptime, availability, compatibility, or continued operation of third-party AI platforms or services outside Service Provider's control.
+
+6. Term and Termination
+Either Party may end this Agreement on 30-day termination.
+
+7. Notices
+Notices under this Agreement must be sent by email or courier to the contacts designated by the Parties in writing.
+
+8. Miscellaneous
+This Agreement is governed by Oklahoma law. Each receiving Party will protect confidential information using reasonable care and use it only for this Agreement.
+
+9. Electronic Signatures
+The Parties may sign this Agreement electronically and in counterparts.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+ABC LLC
+By: __________________________
+Name: ________________________
+Date: _________________________
+
+SERVICE PROVIDER:
+Jordan Lee Consulting
+By: __________________________
+Name: ________________________
+Date: _________________________
+`.trim();
+
+    const defects = validateProCopyQuality(defective);
+    expect(defects.map((d) => d.code)).toEqual(expect.arrayContaining([
+      "unresolved_semantic_token",
+      "dangling_conjunction",
+      "orphan_schedule_a_reference",
+      "repeated_scope_bullet",
+      "empty_heading",
+      "malformed_termination_phrase",
+      "confidentiality_outside_section",
+      "generic_applicable_party",
+    ]));
+
+    const repairedText = `
+AI Automation Services Agreement
+This Agreement is between ABC LLC ("Client") and Jordan Lee Consulting ("Service Provider").
+
+1. Purpose and Scope
+Service Provider will provide AI workflow implementation, dashboard setup, and automation support for Client.
+
+2. Fees and Payment
+Client will pay Service Provider a total project fee of $120,000 for the services described in this Agreement. The project fee is allocated 40% to build and configuration, 30% to rollout and onboarding, and 30% to support and acceptance.
+
+3. Ownership and Work Product
+Client will own the deliverables and custom work product created specifically for Client under this Agreement once Client has paid all amounts due for those deliverables. Service Provider retains its pre-existing tools, templates, know-how, methods, reusable code, workflow patterns, and background materials.
+
+4. Confidentiality
+Each receiving Party will protect confidential information using reasonable care and use it only for this Agreement.
+
+5. Support Expectations
+Service Provider does not guarantee the uptime, availability, compatibility, or continued operation of third-party AI platforms or services outside Service Provider's control.
+
+6. Term and Termination
+Either Party may terminate this Agreement by giving 30 days written notice.
+
+7. Notices
+Notices under this Agreement must be sent by email or courier to the contacts designated by the Parties in writing.
+
+8. Miscellaneous
+This Agreement is governed by Oklahoma law.
+
+9. Electronic Signatures
+The Parties may sign this Agreement electronically and in counterparts.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+ABC LLC
+By: __________________________
+Name: ________________________
+Date: _________________________
+
+SERVICE PROVIDER:
+Jordan Lee Consulting
+By: __________________________
+Name: ________________________
+Date: _________________________
+`.trim();
+
+    const repaired = await repairProCopyQualityWithOpenAI({
+      text: defective,
+      intakeText: `${INTAKE} $120,000 total project fee. 40% build and configuration, 30% rollout and onboarding, 30% support and acceptance.`,
+      context: {
+        intakeText: `${INTAKE} $120,000 total project fee. 40% build and configuration, 30% rollout and onboarding, 30% support and acceptance.`,
+        canonicalPartyNames: ["ABC LLC", "Jordan Lee Consulting"],
+      },
+      repairClient: async () => ({
+        updated_document_text: repairedText,
+        summary_changes: ["Fixed listed copy defects only."],
+        readiness_score: 100,
+        suggested_next_step: "send",
+      }),
+    });
+
+    expect(repaired.source).toBe("openai");
+    expect(validateProCopyQuality(repaired.text)).toEqual([]);
+    expect(validateProAgreementConfidenceGate(repaired.text, {
+      intakeText: INTAKE,
+      canonicalPartyNames: ["ABC LLC", "Jordan Lee Consulting"],
+    }).ok).toBe(true);
+    expect(extractDealVariables({ intakeRaw: INTAKE, body: repaired.text })).toEqual([]);
+
+    const preWitnessHash = fingerprintAgreementBody(
+      repaired.text.replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "").trim(),
+    );
+    const result = finalizeGuidedProAgreementCorpus({
+      candidates: [{ source: "hydrated_premium", body: repaired.text, paid: true }],
+      guidedSession: null,
+      signerIdentities: [
+        {
+          index: 0,
+          partyDisplayName: "ABC LLC",
+          email: "client@example.com",
+          representativeName: "Avery Client",
+          title: "CEO",
+          blockHeading: "CLIENT",
+          isIndividual: false,
+        },
+        {
+          index: 1,
+          partyDisplayName: "Jordan Lee Consulting",
+          email: "provider@example.com",
+          representativeName: "Jordan Lee",
+          title: "Owner",
+          blockHeading: "SERVICE PROVIDER",
+          isIndividual: false,
+        },
+      ],
+      signerManifest: null,
+      originalIntake: INTAKE,
+      freeBasicDraftPlain: null,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.diagnostics.repairs).toContain("confidence_gate:ready_for_signatures");
+    expect(result.body).toContain("total project fee of $120,000");
+    expect(result.body).toContain("40% to build and configuration, 30% to rollout and onboarding, and 30% to support and acceptance");
+    expect(result.body).not.toMatch(/Schedule A|total fee|applicable Party|30-day termination/i);
     expect(
       fingerprintAgreementBody(result.body.replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "").trim()),
     ).toBe(preWitnessHash);

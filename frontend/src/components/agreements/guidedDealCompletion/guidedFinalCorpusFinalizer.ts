@@ -51,6 +51,7 @@ import {
   repairFinalGradeGuidedCorpus,
 } from "./guidedFinalGradeCorpus";
 import { canonicalizeProAgreementText } from "../proAgreementCanonicalizer";
+import { validateProCopyQuality } from "../proCopyQualityRepair";
 import {
   repairProFullAgreementCandidateSurgically,
   validateProAgreementConfidenceGate,
@@ -393,7 +394,10 @@ function selectValidatedFullDraftPrimary(args: FinalizeGuidedProAgreementCorpusA
       semanticFacts,
       canonicalPartyNames,
     };
-    const direct = validateProAgreementConfidenceGate(candidate.body, context);
+    const copyDefects = validateProCopyQuality(candidate.body);
+    const direct = copyDefects.length === 0
+      ? validateProAgreementConfidenceGate(candidate.body, context)
+      : { ok: false, defects: copyDefects.map((d) => d.code), readyMessage: null };
     if (direct.ok) {
       return {
         source: candidate.source,
@@ -403,7 +407,10 @@ function selectValidatedFullDraftPrimary(args: FinalizeGuidedProAgreementCorpusA
     }
     const repaired = repairProFullAgreementCandidateSurgically(candidate.body, context);
     if (!repaired.repairs.length) continue;
-    const repairedValidation = validateProAgreementConfidenceGate(repaired.text, context);
+    const repairedCopyDefects = validateProCopyQuality(repaired.text);
+    const repairedValidation = repairedCopyDefects.length === 0
+      ? validateProAgreementConfidenceGate(repaired.text, context)
+      : { ok: false, defects: repairedCopyDefects.map((d) => d.code), readyMessage: null };
     if (repairedValidation.ok) {
       return {
         source: candidate.source,

@@ -88,6 +88,7 @@ import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryab
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
+import { repairProCopyQualityWithOpenAI } from "./proCopyQualityRepair";
 import {
   buildMaterialMissingItems,
   isCatastrophicStructuralFailure,
@@ -1452,6 +1453,18 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         doc = applyPaidProRenderPolish(doc, preGateIntake, premiumRejectCtx.partyNames, {
           surface: "premium_completion_pipeline_pre_gate",
         }).text;
+        const copyRepair = await repairProCopyQualityWithOpenAI({
+          text: doc,
+          intakeText: preGateIntake,
+          context: {
+            intakeText: preGateIntake,
+            canonicalPartyNames: premiumRejectCtx.partyNames ?? [],
+          },
+          surface: "premium_completion_pipeline_pre_gate",
+        });
+        if (copyRepair.source === "openai" || copyRepair.source === "deterministic") {
+          doc = copyRepair.text;
+        }
         const completenessCtx = {
           intakeRaw: preGateIntake,
           partyNames: premiumRejectCtx.partyNames ?? undefined,
