@@ -18,6 +18,7 @@ import {
   textRetainsSemanticBlock,
   type ProSemanticBlock,
 } from "./proSemanticBlocks";
+import { renderPaymentSection, renderSupportSection } from "./proCommercialProseRenderer";
 
 export type CommercialSpecificityPreservationResult = {
   text: string;
@@ -441,13 +442,13 @@ function insertSemanticBlockIntoOwningSection(text: string, block: ProSemanticBl
 }
 
 function sentenceForFact(fact: ProtectedCommercialFact): string {
-  if (fact.category === "payment_structure") return `The commercial terms include a ${fact.canonical}.`;
+  if (fact.category === "payment_structure") return renderPaymentSection({ amount: fact.canonical });
   if (fact.category === "support_model" && /[$]\d|\/month/i.test(fact.canonical)) {
-    return `The commercial terms include ${fact.canonical}.`;
+    return renderPaymentSection({ amount: fact.canonical, paymentDescriptor: "for support services" });
   }
   if (fact.category === "phase") return `The project phase allocation includes ${fact.canonical}.`;
-  if (fact.category === "operational_constraint") return `The support model includes ${fact.canonical}.`;
-  if (fact.category === "support_model") return `The support model includes ${fact.canonical}.`;
+  if (fact.category === "operational_constraint") return renderSupportSection({ supportDescription: fact.canonical });
+  if (fact.category === "support_model") return renderSupportSection({ supportDescription: fact.canonical });
   return `The services include ${fact.canonical}.`;
 }
 

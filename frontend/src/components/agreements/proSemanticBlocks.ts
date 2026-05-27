@@ -1,3 +1,13 @@
+import {
+  renderESignatureSection,
+  renderNoticesSection,
+  renderOwnershipSection,
+  renderPaymentSection,
+  renderSupportSection,
+  renderTerminationSection,
+  type ProCommercialProseContext,
+} from "./proCommercialProseRenderer";
+
 export type ProSemanticBlockId =
   | "scope_block"
   | "payment_block"
@@ -383,7 +393,12 @@ function phraseList(phrases: readonly string[]): string {
   return `${phrases.slice(0, -1).join(", ")}, and ${phrases[phrases.length - 1]}`;
 }
 
-export function renderSemanticBlock(block: ProSemanticBlock): string {
+function normalizeAmount(phrase: string): string {
+  const amount = phrase.match(/\$[\d,]+(?:\.\d{2})?(?:\s*\/\s*month|\s*\/month)?/i)?.[0];
+  return amount ?? phrase;
+}
+
+export function renderSemanticBlock(block: ProSemanticBlock, context: ProCommercialProseContext = {}): string {
   if (block.id === "scope_block") {
     return `Service Provider will provide ${phraseList(block.requiredPhrases)} for Client.`;
   }
@@ -403,21 +418,21 @@ export function renderSemanticBlock(block: ProSemanticBlock): string {
   }
   if (block.id === "monthly_fee_block") {
     if (block.requiredPhrases.some((phrase) => /\$4,?500/i.test(phrase))) {
-      return "Client will pay Service Provider $4,500/month on a month-to-month basis.";
+      return renderPaymentSection({ ...context, amount: "$4,500/month", paymentDescriptor: "on a month-to-month basis" });
     }
-    return `Client will pay Service Provider ${block.requiredPhrases[0]} as optional monthly support.`;
+    return renderPaymentSection({ ...context, amount: normalizeAmount(block.requiredPhrases[0]), paymentDescriptor: "as optional monthly support" });
   }
   if (block.id === "support_block") {
-    return `The support model includes ${phraseList(block.requiredPhrases)}.`;
+    return renderSupportSection({ ...context, supportDescription: phraseList(block.requiredPhrases) });
   }
   if (block.id === "payment_block") {
-    return `The commercial terms include ${phraseList(block.requiredPhrases)}.`;
+    return renderPaymentSection({ ...context, amount: normalizeAmount(block.requiredPhrases[0]) });
   }
   if (block.id === "ownership_block") {
-    return "Client owns the project deliverables and custom deliverables created for the engagement, and Service Provider retains its pre-existing tools, templates, know-how, and background materials.";
+    return renderOwnershipSection(context);
   }
   if (block.id === "termination_block") {
-    return `Either Party may terminate this Agreement on ${block.requiredPhrases[0]}.`;
+    return renderTerminationSection({ ...context, terminationNotice: block.requiredPhrases[0] });
   }
   if (block.id === "governing_law_block") {
     const state = block.requiredPhrases[0].match(/\b(Oklahoma|Texas|Delaware|California|New York)\b/i)?.[1];
@@ -426,10 +441,10 @@ export function renderSemanticBlock(block: ProSemanticBlock): string {
       : `This Agreement is governed by ${block.requiredPhrases[0]}.`;
   }
   if (block.id === "notices_block") {
-    return "Formal notices may be delivered by email to the addresses on file.";
+    return renderNoticesSection({ ...context, noticesMethod: "email to the addresses on file" });
   }
   if (block.id === "e_signature_block") {
-    return "Electronic signatures and counterparts are permitted and have the same effect as originals.";
+    return renderESignatureSection(context);
   }
   return phraseList(block.requiredPhrases);
 }
@@ -492,6 +507,7 @@ function malformedFragment(line: string, owner: SemanticOwnerSection | "unknown"
   if (/\b15\s+days?\s+written\s+notice'\s+notice\b/i.test(t)) return true;
   if (/Each Party represents that it has authority Services are/i.test(t)) return true;
   if (/\b(?:scope (?:is\s+)?(?:as\s+)?set forth below|operative sections and schedules below|services are as applicable|services as applicable)\b/i.test(t)) return true;
+  if (/\b(?:the commercial terms include|the applicable Party|applicable deliverables|applicable Party retained materials)\b/i.test(t)) return true;
   if (/\bproject phase allocation includes 3 milestones\b/i.test(t)) return true;
   if (owner === "confidentiality" && /^\d+\.\d+\s+Taxes\b/i.test(t)) return true;
   if (owner === "fees" && /^\d+\.\d+\s+Client Approvals\b/i.test(t)) return true;
@@ -549,7 +565,7 @@ export function reconstructProSectionsFromSemanticBlocks(
     const ownerBlocks = byOwner.get(owner) ?? [];
     const shouldEmit = ownerBlocks.length > 0 || existing.some((section) => section.body.some((line) => line.trim())) || owner === "confidentiality" || owner === "esign";
     if (!shouldEmit) continue;
-    const rendered = ownerBlocks.map(renderSemanticBlock);
+    const rendered = ownerBlocks.map((block) => renderSemanticBlock(block));
     const preserved: string[] = [];
     for (const section of existing) {
       for (const line of section.body) {
