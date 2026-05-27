@@ -11960,18 +11960,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const adtHasPremiumMarkers = /\b(lawdog pro|commercial safeguards|raw-intent premium protections|execution\s+—\s+signatures|signatures)\b/i.test(
       adt,
     );
-    const pipelineSrcForAuth =
-      (!snapBindInvalid && snapObj?.premiumPipelineRenderSource) || lastPremiumPipelineRenderSourceRef.current || null;
-    let paidReadonlyAuthBody: string | null = null;
-    if (isAuthoritativePremiumPipelineRenderSource(pipelineSrcForAuth)) {
-      const explicitAuthoritative =
-        (lastPremiumWinningCorpusRef.current || "").trim() ||
-        winner ||
-        snap ||
-        pipelineBody ||
-        hydratedBody;
-      if (explicitAuthoritative.length >= 500) paidReadonlyAuthBody = explicitAuthoritative;
-    }
+    const explicitAuthoritative =
+      (lastKnownGoodAuthoritativeDraftRef.current || "").trim() ||
+      (lastPremiumWinningCorpusRef.current || "").trim() ||
+      winner ||
+      snap ||
+      pipelineBody ||
+      hydratedBody;
+    const paidReadonlyAuthBody =
+      explicitAuthoritative.length >= 500 ? explicitAuthoritative : null;
     const pick = pickPremiumPaidReadonlyPlainText({
       premiumWinningBodyText: winner,
       premiumReadonlySnapshotText: snap,
@@ -11985,6 +11982,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidAuthoritativeProBody: paidReadonlyAuthBody,
       authoritativeHydratedPlainText: hydratedPremiumBodyRef.current,
       lastPremiumPipelineRenderSource: lastPremiumPipelineRenderSourceRef.current,
+      stickyAuthoritativePlainText:
+        lastKnownGoodAuthoritativeDraftRef.current.trim() ||
+        hydratedPremiumBodyRef.current.trim() ||
+        explicitAuthoritative,
     });
     if (import.meta.env.DEV) {
       console.info("[premium-picker-audit]", {
@@ -12010,6 +12011,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           Boolean(snapObj?.premiumAccepted) &&
           isAuthoritativePremiumPipelineRenderSource(String(snapObj?.premiumPipelineRenderSource || "")) &&
           snapWin.length >= 500;
+        const stickyWin = (lastKnownGoodAuthoritativeDraftRef.current || hydratedPremiumBodyRef.current || "").trim();
+        const authorityStillUsable =
+          pick.plainText.trim().length >= 500 &&
+          isAuthoritativePaidProCorpusForGuided({
+            corpusPlain: pick.plainText,
+            freeBaselinePlain: buildFreeStarterBaselinePlain(draft),
+            renderSource: pick.sourceUsed,
+            pipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+            intakeText: intakeProbe,
+            draft: draft ?? null,
+          });
         if (snapAuthoritative) {
           return {
             ...pick,
@@ -12017,6 +12029,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             sourceUsed:
               (snapObj?.premiumRenderResolveSource as PremiumRenderResolveSource) || "server_full_document_text",
             audit: { ...pick.audit, selected: "server_full_document_text" },
+          };
+        }
+        if (authorityStillUsable) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[premium-readonly] fact gate soft-fail but authority corpus retained", {
+              reasons: vPick.reasons,
+              len: pick.plainText.length,
+            });
+          }
+          return pick;
+        }
+        if (stickyWin.length >= 500) {
+          return {
+            ...pick,
+            plainText: stickyWin,
+            sourceUsed: "server_full_document_text",
+            audit: { ...pick.audit, selected: "server_full_document_text", forcedPremiumSource: true },
           };
         }
         if (import.meta.env.DEV) {

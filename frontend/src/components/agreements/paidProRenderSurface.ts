@@ -2,9 +2,15 @@ import { buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { corpusMatchesFreeBasicDraft, hashPlainTextCorpus } from "./premiumReadonlyRenderCorpus";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
-import { isUnacceptableReadonlyProSource } from "./paidProCorpusAcceptance";
-import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
-import { tryBuildPaidProLocalDeterministicFallback } from "./paidProLocalDeterministicFallback";
+import {
+  authorityTierToRenderSource,
+  isNeverAuthoritativePaidProSource,
+  isPaidProCorpusAuthoritativeForUi,
+  mapRenderSourceToAuthorityTier,
+  resolvePaidProCorpusAuthority,
+  type PaidProCorpusAuthorityCandidate,
+  type PaidProCorpusAuthorityTier,
+} from "./paidProCorpusAuthority";
 
 export const PAID_PRO_UNAVAILABLE_RETRY_HEADLINE =
   "We couldn't finish the Pro rewrite. Your starter draft is safe.";
@@ -14,7 +20,6 @@ export const PAID_PRO_UNAVAILABLE_RETRY_BODY =
 /** Sources that must never drive paid Pro review when checkout completed. */
 export const PAID_PRO_FORBIDDEN_DISPLAY_SOURCES = new Set<string>([
   "none",
-  "live_generated_preview",
   "free_starter",
   "rendered_preview",
   "starter_review_preview",
@@ -25,6 +30,7 @@ export type PaidProReviewRenderSurface =
       mode: "authoritative_pro";
       plainText: string;
       sourceUsed: PremiumRenderResolveSource;
+      authorityTier: PaidProCorpusAuthorityTier;
       usedLocalDeterministicFallback?: boolean;
     }
   | {
@@ -41,9 +47,7 @@ export function buildFreeStarterBaselinePlain(draft: ParsedDraftShape | null): s
 }
 
 export function isPaidProForbiddenDisplaySource(source: string | null | undefined): boolean {
-  const s = (source || "").trim();
-  if (!s) return true;
-  return PAID_PRO_FORBIDDEN_DISPLAY_SOURCES.has(s);
+  return isNeverAuthoritativePaidProSource(source);
 }
 
 /**
@@ -71,28 +75,25 @@ export function isAuthoritativePaidProCorpusForGuided(args: {
   freeBaselinePlain: string;
   renderSource?: string | null;
   pipelineSource?: string | null;
+  authorityTier?: PaidProCorpusAuthorityTier | null;
   minLen?: number;
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
 }): boolean {
-  const t = (args.corpusPlain || "").trim();
-  const minLen = args.minLen ?? 500;
-  if (t.length < minLen) return false;
-  if (
-    isFreeStarterCloneOnPaidPro({
-      candidatePlain: args.corpusPlain,
-      freeBaselinePlain: args.freeBaselinePlain,
+  const tier =
+    args.authorityTier ??
+    mapRenderSourceToAuthorityTier({
       renderSource: args.renderSource,
-    })
-  ) {
-    return false;
-  }
-  const src = (args.renderSource || "").trim();
-  if (isUnacceptableReadonlyProSource(src as PremiumRenderResolveSource)) return false;
-  if (isPaidProForbiddenDisplaySource(src)) return false;
-  const pipe = (args.pipelineSource || "").trim();
-  if (pipe && !isAuthoritativePremiumPipelineRenderSource(pipe)) {
-    if (t.length < 1_200) return false;
-  }
-  return true;
+      pipelineSource: args.pipelineSource,
+    });
+  return isPaidProCorpusAuthoritativeForUi({
+    plainText: args.corpusPlain,
+    tier,
+    freeBaselinePlain: args.freeBaselinePlain,
+    intakeText: args.intakeText,
+    draft: args.draft,
+    pipelineSource: args.pipelineSource,
+  });
 }
 
 export function logPaidProStarterCloneBlocked(payload: Record<string, unknown>): void {
@@ -110,74 +111,93 @@ export function resolvePaidProReviewRenderSurface(args: {
   paidAuthoritativeFallback?: string | null;
   pipelineSource?: string | null;
   allowLocalDeterministicFallback?: boolean;
+  /** Extra locally persisted / hydrated candidates (tier 1–2). */
+  extraCandidates?: PaidProCorpusAuthorityCandidate[];
+  stickyPlainText?: string | null;
+  stickyTier?: PaidProCorpusAuthorityTier | null;
 }): PaidProReviewRenderSurface {
-  const freeBaseline = buildFreeStarterBaselinePlain(args.draft);
   const picked = (args.pickedPlain || "").trim();
-  const source = (args.pickedSource || "none").trim() as PremiumRenderResolveSource;
+  const source = (args.pickedSource || "none").trim();
 
   if (!args.premiumCheckoutCompleted) {
-    return { mode: "authoritative_pro", plainText: picked, sourceUsed: source };
-  }
-
-  const paidFallback = (args.paidAuthoritativeFallback || "").trim();
-  if (
-    picked &&
-    !isFreeStarterCloneOnPaidPro({
-      candidatePlain: picked,
-      freeBaselinePlain: freeBaseline,
-      renderSource: source,
-    }) &&
-    !isPaidProForbiddenDisplaySource(source)
-  ) {
-    return { mode: "authoritative_pro", plainText: picked, sourceUsed: source };
-  }
-
-  if (
-    paidFallback.length >= 500 &&
-    !isFreeStarterCloneOnPaidPro({
-      candidatePlain: paidFallback,
-      freeBaselinePlain: freeBaseline,
-      renderSource: "server_full_document_text",
-    })
-  ) {
     return {
       mode: "authoritative_pro",
-      plainText: paidFallback,
-      sourceUsed: "server_full_document_text",
+      plainText: picked,
+      sourceUsed: source as PremiumRenderResolveSource,
+      authorityTier: mapRenderSourceToAuthorityTier({
+        renderSource: source,
+        pipelineSource: args.pipelineSource,
+      }),
     };
   }
 
-  if (args.allowLocalDeterministicFallback !== false && args.intakeText) {
-    const local = tryBuildPaidProLocalDeterministicFallback(args.intakeText, args.draft);
-    if (
-      local &&
-      !isFreeStarterCloneOnPaidPro({
-        candidatePlain: local,
-        freeBaselinePlain: freeBaseline,
+  const freeBaseline = buildFreeStarterBaselinePlain(args.draft);
+  const candidates: PaidProCorpusAuthorityCandidate[] = [...(args.extraCandidates ?? [])];
+
+  const paidFallback = (args.paidAuthoritativeFallback || "").trim();
+  if (paidFallback.length >= 500) {
+    candidates.push({
+      plainText: paidFallback,
+      tier: mapRenderSourceToAuthorityTier({
         renderSource: "server_full_document_text",
-      })
-    ) {
-      return {
-        mode: "authoritative_pro",
-        plainText: local,
-        sourceUsed: "server_full_document_text",
-        usedLocalDeterministicFallback: true,
-      };
+        pipelineSource: args.pipelineSource,
+      }),
+      sourceLabel: "paid_authoritative_fallback",
+      pipelineSource: args.pipelineSource,
+      sticky: true,
+    });
+  }
+
+  if (picked.length >= 200 && !isNeverAuthoritativePaidProSource(source)) {
+    candidates.push({
+      plainText: picked,
+      tier: mapRenderSourceToAuthorityTier({ renderSource: source, pipelineSource: args.pipelineSource }),
+      sourceLabel: source,
+      pipelineSource: args.pipelineSource,
+    });
+  }
+
+  const resolution = resolvePaidProCorpusAuthority({
+    candidates,
+    draft: args.draft,
+    intakeText: args.intakeText,
+    freeBaselinePlain: freeBaseline,
+    stickyPlainText: args.stickyPlainText,
+    stickyTier: args.stickyTier,
+    allowDeterministicFallback: args.allowLocalDeterministicFallback !== false,
+  });
+
+  if (resolution.mode === "authoritative") {
+    if (import.meta.env.DEV && resolution.usedLocalDeterministicFallback) {
+      // eslint-disable-next-line no-console
+      console.info("[paid-pro-local-fallback]", {
+        len: resolution.plainText.length,
+        tier: resolution.tier,
+        intakeLen: (args.intakeText || "").length,
+      });
     }
+    return {
+      mode: "authoritative_pro",
+      plainText: resolution.plainText,
+      sourceUsed: authorityTierToRenderSource(resolution.tier),
+      authorityTier: resolution.tier,
+      usedLocalDeterministicFallback: resolution.usedLocalDeterministicFallback,
+    };
   }
 
   logPaidProStarterCloneBlocked({
-    reason: "premium_unavailable_retry",
+    reason: resolution.reason,
     attemptedSource: source,
     attemptedLen: picked.length,
     freeBaselineLen: freeBaseline.length,
     hashMatchesFree: picked && freeBaseline ? corpusMatchesFreeBasicDraft(picked, freeBaseline) : false,
     pipelineSource: args.pipelineSource ?? null,
+    failedCandidates: resolution.failedCandidates,
   });
 
   return {
     mode: "premium_unavailable_retry",
-    reason: "free_starter_clone_or_missing_authoritative_pro",
+    reason: resolution.reason,
     starterBaselinePlain: freeBaseline,
     attemptedSource: source,
     attemptedLen: picked.length,

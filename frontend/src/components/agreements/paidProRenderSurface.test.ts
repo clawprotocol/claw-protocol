@@ -70,7 +70,7 @@ describe("paid Pro render surface guards", () => {
     expect(surface.mode).toBe("premium_unavailable_retry");
     if (surface.mode === "premium_unavailable_retry") {
       expect(surface.attemptedLen).toBe(starter.length);
-      expect(surface.reason).toContain("free_starter");
+      expect(surface.reason).toMatch(/free_starter|all_authority_candidates_failed/);
     }
   });
 

@@ -5,6 +5,10 @@ import {
 } from "./agreementPreviewFromDraft";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
+  mapRenderSourceToAuthorityTier,
+  type PaidProCorpusAuthorityCandidate,
+} from "./paidProCorpusAuthority";
+import {
   logPaidProStarterCloneBlocked,
   resolvePaidProReviewRenderSurface,
 } from "./paidProRenderSurface";
@@ -165,6 +169,8 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   authoritativeHydratedPlainText?: string | null;
   /** Latest pipeline render source (e.g. `server_full_draft`) — pairs with `authoritativeHydratedPlainText`. */
   lastPremiumPipelineRenderSource?: string | null;
+  /** Sticky accepted corpus — never downgrade below this when still valid. */
+  stickyAuthoritativePlainText?: string | null;
 }): PremiumPaidReadonlyPickResult {
   const pipeSrc = (args.lastPremiumPipelineRenderSource || "").trim();
   const authHydr = (args.authoritativeHydratedPlainText || "").trim();
@@ -283,6 +289,45 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     finalizedPlain.length >= 1200 || premiumReadonlyCorpusSignalHits(finalizedPlain) >= 3;
 
   if (args.premiumCheckoutCompleted) {
+    const extraCandidates: PaidProCorpusAuthorityCandidate[] = [];
+    const hydrated = (args.authoritativeHydratedPlainText || "").trim();
+    if (hydrated.length >= 500) {
+      extraCandidates.push({
+        plainText: hydrated,
+        tier: mapRenderSourceToAuthorityTier({
+          renderSource: "server_full_document_text",
+          pipelineSource: args.lastPremiumPipelineRenderSource,
+        }),
+        sourceLabel: "hydrated_authoritative",
+        pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
+        sticky: true,
+      });
+    }
+    const sticky = (args.stickyAuthoritativePlainText || "").trim();
+    if (sticky.length >= 500 && sticky !== hydrated) {
+      extraCandidates.push({
+        plainText: sticky,
+        tier: mapRenderSourceToAuthorityTier({
+          renderSource: "server_full_document_text",
+          pipelineSource: args.lastPremiumPipelineRenderSource,
+        }),
+        sourceLabel: "sticky_authoritative",
+        pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
+        sticky: true,
+      });
+    }
+    const legacy = (legacySnap || "").trim();
+    if (legacy.length >= 500 && legacy !== paidFallback && legacy !== hydrated) {
+      extraCandidates.push({
+        plainText: legacy,
+        tier: mapRenderSourceToAuthorityTier({
+          renderSource: "legacy_snapshot",
+          pipelineSource: args.lastPremiumPipelineRenderSource,
+        }),
+        sourceLabel: "legacy_snapshot",
+        pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
+      });
+    }
     const surface = resolvePaidProReviewRenderSurface({
       pickedPlain: finalizedPlain,
       pickedSource: res.premium_render_source,
@@ -292,6 +337,12 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       paidAuthoritativeFallback: paidFallback,
       pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
       allowLocalDeterministicFallback: true,
+      extraCandidates,
+      stickyPlainText: sticky || hydrated || paidFallback,
+      stickyTier: mapRenderSourceToAuthorityTier({
+        renderSource: "server_full_document_text",
+        pipelineSource: args.lastPremiumPipelineRenderSource,
+      }),
     });
     if (surface.mode === "premium_unavailable_retry") {
       logPaidProStarterCloneBlocked({
@@ -340,8 +391,8 @@ export function pickPremiumPaidReadonlyPlainText(args: {
             nonThin: authNonThin,
             eligible: true,
             reason: surface.usedLocalDeterministicFallback
-              ? "local_deterministic_fallback"
-              : res.premium_render_reason,
+              ? `local_deterministic_fallback:${surface.authorityTier}`
+              : `${surface.authorityTier}:${res.premium_render_reason}`,
           },
         ],
       },
