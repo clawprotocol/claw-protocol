@@ -17,6 +17,10 @@ export type ProFullAgreementCandidateValidation = {
   defects: string[];
 };
 
+export type ProAgreementConfidenceGate = ProFullAgreementCandidateValidation & {
+  readyMessage: string | null;
+};
+
 export type ProFullAgreementCandidateRepair = {
   text: string;
   repairs: string[];
@@ -35,6 +39,7 @@ const SCHEDULE_A_STUB_RE =
 const AWKWARD_AI_UPTIME_RE = /\bService Provider will provide no guaranteed third-party AI uptime\.?/gi;
 const POLISHED_AI_UPTIME =
   "Service Provider does not guarantee the uptime, availability, compatibility, or continued operation of third-party AI platforms or services outside Service Provider's control.";
+export const PRO_AGREEMENT_VALIDATED_READY_MESSAGE = "Agreement validated and ready for signatures.";
 
 function normalize(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -166,6 +171,53 @@ export function validateProFullAgreementCandidate(
   const refs = validateInternalReferences(body);
   if (!refs.ok) defects.push(...refs.defects);
   return { ok: defects.length === 0, defects: [...new Set(defects)] };
+}
+
+function hasPaymentStructure(text: string): boolean {
+  return /\$[\d,]+|\b(?:net\s*\d+|due\s+(?:within|on|upon)|invoice|milestone|retainer|monthly|project fee|payment)\b/i.test(text);
+}
+
+function hasOwnershipTerms(text: string): boolean {
+  return /\b(?:own|ownership|assign|work product|deliverables?)\b[\s\S]{0,220}\b(?:pre-existing|background|retains?|license|tools?|templates?|know-how|materials?)\b/i.test(text);
+}
+
+function hasTerminationTerms(text: string): boolean {
+  return /\bterminat(?:e|ion)\b[\s\S]{0,180}\b(?:notice|days?|cause|convenience|effective)\b/i.test(text);
+}
+
+function hasNoticesTerms(text: string): boolean {
+  return /\bnotices?\b[\s\S]{0,220}\b(?:email|mail|courier|delivery|address|contacts?|writing|written)\b/i.test(text);
+}
+
+function hasValidExecutionStructure(text: string): boolean {
+  if (!/\bIN WITNESS WHEREOF\b/i.test(text)) return false;
+  if (signatureBlockMalformed(text)) return false;
+  const tail = text.slice(text.search(/\bIN WITNESS WHEREOF\b/i));
+  const signerHeadings = (tail.match(/^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+|PROVIDER|COMPANY)\s*:/gim) ?? []).length;
+  const byLines = (tail.match(/^\s*(?:By|Signature)\s*:/gim) ?? []).length;
+  return signerHeadings >= 2 && byLines >= 2;
+}
+
+export function validateProAgreementConfidenceGate(
+  text: string,
+  context: ProFullAgreementCandidateValidationContext = {},
+): ProAgreementConfidenceGate {
+  const base = validateProFullAgreementCandidate(text, context);
+  const defects = [...base.defects];
+  const body = (text || "").trim();
+  if (!GOVERNING_LAW_RE.test(body)) defects.push("missing_governing_law");
+  if (!/\bconfidential/i.test(body)) defects.push("missing_confidentiality");
+  if (!hasPaymentStructure(body)) defects.push("missing_payment_structure");
+  if (!hasOwnershipTerms(body)) defects.push("missing_ownership");
+  if (!hasTerminationTerms(body)) defects.push("missing_termination");
+  if (!hasNoticesTerms(body)) defects.push("missing_notices");
+  if (!hasValidExecutionStructure(body)) defects.push("missing_signer_ready_execution");
+  const unique = [...new Set(defects)];
+  return {
+    ok: unique.length === 0,
+    defects: unique,
+    readyMessage: unique.length === 0 ? PRO_AGREEMENT_VALIDATED_READY_MESSAGE : null,
+  };
 }
 
 export function repairProFullAgreementCandidateSurgically(

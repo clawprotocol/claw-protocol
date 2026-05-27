@@ -4,7 +4,9 @@ import { finalizeGuidedProAgreementCorpus } from "./guidedDealCompletion/guidedF
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 import {
+  PRO_AGREEMENT_VALIDATED_READY_MESSAGE,
   repairProFullAgreementCandidateSurgically,
+  validateProAgreementConfidenceGate,
   validateProFullAgreementCandidate,
 } from "./proFullAgreementCandidate";
 
@@ -208,6 +210,107 @@ Date: _________________________
     expect(result.body.match(/Client will own the deliverables and custom work product/gi)?.length ?? 0).toBe(1);
     expect(result.body).toMatch(/CLIENT:\nABC LLC\nBy: _+\nName: Avery Client\nTitle: CEO\nDate: _+/);
     expect(result.body).toMatch(/SERVICE PROVIDER:\nJordan Lee Consulting\nBy: _+\nName: Jordan Lee\nTitle: Owner\nDate: _+/);
+    expect(
+      fingerprintAgreementBody(result.body.replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "").trim()),
+    ).toBe(preWitnessHash);
+  });
+
+  it("confidence-gates complete OpenAI drafts with no Q&A, reconstruction, or commercial mutation", () => {
+    const completeDraft = `
+AI Automation Services Agreement
+This Agreement is between ABC LLC ("Client") and Jordan Lee Consulting ("Service Provider").
+
+1. Purpose and Scope
+Service Provider will provide AI workflow implementation, dashboard setup, automation support, onboarding assistance, documentation, and light ongoing maintenance for Client. Service Provider will coordinate with Client's team to configure workflows, hand off admin guidance, and support the implementation described in this Agreement.
+
+2. Fees and Payment
+Client will pay Service Provider a total project fee of $120,000 for the services described in this Agreement. The project fee is allocated 40% to build and configuration, 30% to rollout and onboarding, and 30% to support and acceptance. Invoices are due Net 30 from receipt unless the Parties sign a written change order stating otherwise.
+
+3. Ownership and Work Product
+Client will own the deliverables and custom work product created specifically for Client under this Agreement once Client has paid all amounts due for those deliverables. Service Provider retains its pre-existing tools, templates, know-how, methods, reusable code, workflow patterns, and background materials.
+
+4. Confidentiality
+Each Party may receive confidential business, technical, operational, or customer information from the other Party. Each receiving Party will protect that information using reasonable care, use it only to perform or receive services under this Agreement, and disclose it only to personnel or advisors who need to know it for this Agreement and are bound by confidentiality obligations.
+
+5. Support Expectations
+Service Provider does not guarantee the uptime, availability, compatibility, or continued operation of third-party AI platforms or services outside Service Provider's control. Service Provider will provide onboarding assistance, configuration support, and reasonable troubleshooting for workflows it configures.
+
+6. Term and Termination
+This Agreement begins on the effective date and continues until completion of the services unless terminated earlier. Either Party may terminate this Agreement by giving 30 days written notice. Client will pay for services performed and approved expenses incurred through the effective termination date.
+
+7. Notices
+Notices under this Agreement must be sent by email, personal delivery, or nationally recognized courier to the notice contacts the Parties use for the project or later designate in writing. Email notices are effective when sent unless the sender receives an automated delivery failure notice.
+
+8. Miscellaneous
+This Agreement is governed by Oklahoma law. The Parties are independent contractors. Neither Party may assign this Agreement without the other Party's written consent except in connection with a merger, reorganization, or sale of substantially all assets. This Agreement is the entire agreement for the services and may be amended only in a writing signed by both Parties.
+
+9. Electronic Signatures
+The Parties may sign this Agreement electronically and in counterparts. Electronic signatures and counterpart copies will have the same legal effect as original signatures.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+ABC LLC
+By: __________________________
+Name: ________________________
+Date: _________________________
+
+SERVICE PROVIDER:
+Jordan Lee Consulting
+By: __________________________
+Name: ________________________
+Date: _________________________
+`.trim();
+
+    const confidence = validateProAgreementConfidenceGate(completeDraft, {
+      intakeText: INTAKE,
+      canonicalPartyNames: ["ABC LLC", "Jordan Lee Consulting"],
+    });
+    expect(confidence.ok).toBe(true);
+    expect(confidence.readyMessage).toBe(PRO_AGREEMENT_VALIDATED_READY_MESSAGE);
+    expect(extractDealVariables({ intakeRaw: INTAKE, body: completeDraft })).toEqual([]);
+
+    const paymentSentence =
+      "Client will pay Service Provider a total project fee of $120,000 for the services described in this Agreement.";
+    const preWitnessHash = fingerprintAgreementBody(
+      completeDraft.replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "").trim(),
+    );
+    const result = finalizeGuidedProAgreementCorpus({
+      candidates: [{ source: "hydrated_premium", body: completeDraft, paid: true }],
+      guidedSession: null,
+      signerIdentities: [
+        {
+          index: 0,
+          partyDisplayName: "ABC LLC",
+          email: "client@example.com",
+          representativeName: "Avery Client",
+          title: "CEO",
+          blockHeading: "CLIENT",
+          isIndividual: false,
+        },
+        {
+          index: 1,
+          partyDisplayName: "Jordan Lee Consulting",
+          email: "provider@example.com",
+          representativeName: "Jordan Lee",
+          title: "Owner",
+          blockHeading: "SERVICE PROVIDER",
+          isIndividual: false,
+        },
+      ],
+      signerManifest: null,
+      originalIntake: INTAKE,
+      freeBasicDraftPlain: null,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.appliedAnswerIds).toEqual([]);
+    expect(result.diagnostics.repairs).toContain("confidence_gate:ready_for_signatures");
+    expect(result.diagnostics.repairs.some((repair) => /semantic_reconstruct|canonical:semantic|structure:|section_merge/.test(repair))).toBe(false);
+    expect(result.body).toContain(paymentSentence);
+    expect(result.body).not.toMatch(/Specific compensation mechanics will be completed in Schedule A|SCHEDULE A/i);
+    expect(result.body.match(/Client will own the deliverables and custom work product/gi)?.length ?? 0).toBe(1);
+    expect(result.body.match(/40% to build and configuration/gi)?.length ?? 0).toBe(1);
     expect(
       fingerprintAgreementBody(result.body.replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "").trim()),
     ).toBe(preWitnessHash);

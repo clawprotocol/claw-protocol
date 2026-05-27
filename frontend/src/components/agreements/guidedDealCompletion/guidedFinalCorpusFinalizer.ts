@@ -53,7 +53,7 @@ import {
 import { canonicalizeProAgreementText } from "../proAgreementCanonicalizer";
 import {
   repairProFullAgreementCandidateSurgically,
-  validateProFullAgreementCandidate,
+  validateProAgreementConfidenceGate,
 } from "../proFullAgreementCandidate";
 import {
   buildCanonicalAgreementSnapshot,
@@ -393,18 +393,26 @@ function selectValidatedFullDraftPrimary(args: FinalizeGuidedProAgreementCorpusA
       semanticFacts,
       canonicalPartyNames,
     };
-    const direct = validateProFullAgreementCandidate(candidate.body, context);
+    const direct = validateProAgreementConfidenceGate(candidate.body, context);
     if (direct.ok) {
-      return { source: candidate.source, body: candidate.body, repairs: ["full_candidate:validated_primary"] };
+      return {
+        source: candidate.source,
+        body: candidate.body,
+        repairs: ["confidence_gate:ready_for_signatures", "full_candidate:validated_primary"],
+      };
     }
     const repaired = repairProFullAgreementCandidateSurgically(candidate.body, context);
     if (!repaired.repairs.length) continue;
-    const repairedValidation = validateProFullAgreementCandidate(repaired.text, context);
+    const repairedValidation = validateProAgreementConfidenceGate(repaired.text, context);
     if (repairedValidation.ok) {
       return {
         source: candidate.source,
         body: repaired.text,
-        repairs: ["full_candidate:validated_after_surgical_repair", ...repaired.repairs.map((r) => `full_candidate_repair:${r}`)],
+        repairs: [
+          "confidence_gate:ready_for_signatures",
+          "full_candidate:validated_after_surgical_repair",
+          ...repaired.repairs.map((r) => `full_candidate_repair:${r}`),
+        ],
       };
     }
   }

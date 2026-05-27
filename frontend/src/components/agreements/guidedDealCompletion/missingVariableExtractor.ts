@@ -4,6 +4,7 @@
 
 import { buildMaterialMissingItems } from "../proAgreementCompleteness/revisionQuestionEngine";
 import type { MaterialMissingItem, MaterialSeverity } from "../proAgreementCompleteness/types";
+import { validateProAgreementConfidenceGate } from "../proFullAgreementCandidate";
 import { scanBodyMaterialPlaceholders } from "./bodyMaterialPlaceholderScanner";
 import { isConsultingDevIntake } from "./consultingGuidedIntake";
 import { isContractorDeveloperIntake } from "./contractorGuidedIntake";
@@ -652,6 +653,10 @@ function hasCorePaidProTermsAlreadyCovered(intakeRaw: string, body: string): boo
   );
 }
 
+function intakeHasUnresolvedMaterialMarkers(intakeRaw: string): boolean {
+  return /\b(?:TBD|to be confirmed|to be determined|unknown|not sure|\?\?\?|maybe)\b/i.test(intakeRaw);
+}
+
 export function extractDealVariables(args: {
   intakeRaw?: string | null;
   body?: string;
@@ -660,9 +665,17 @@ export function extractDealVariables(args: {
   serverMissing?: readonly string[];
 }): DealVariable[] {
   const explicitMaterial = Boolean(args.materialItems && args.materialItems.length > 0);
-  const material = resolveMaterialItemsForExtraction(args);
   const intake = (args.intakeRaw || "").trim();
   const body = (args.body ?? "").trim();
+  if (
+    !explicitMaterial &&
+    !intakeHasUnresolvedMaterialMarkers(intake) &&
+    body.length >= 500 &&
+    validateProAgreementConfidenceGate(body, { intakeText: intake }).ok
+  ) {
+    return [];
+  }
+  const material = resolveMaterialItemsForExtraction(args);
   const family = material[0]?.agreementFamily ?? "generic_business_agreement";
   let vars = dedupeVariables(material.map((m) => materialItemToDealVariable(m, intake)));
   if (isAutomationServicesIntake(intake, body)) {
