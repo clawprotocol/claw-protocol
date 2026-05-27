@@ -35,9 +35,6 @@ const SUBSTANTIVE_MIN = 40;
 const ORPHAN_BODY_RE =
   /^(?:for\s+indirect|to\s+enter\s+into|unless\s+a\s+different|fees\s+and\s+payment\s+timing)/i;
 
-const SCHEDULE_A_STUB =
-  "Specific compensation mechanics will be completed in Schedule A before execution.";
-
 const SCHEDULE_A_HEADER = "SCHEDULE A — Phase, Payment, and Support Terms";
 
 const MUTUAL_CONFIDENTIALITY_FALLBACK =
@@ -302,7 +299,7 @@ function wrapLoosePhaseBlockBeforeSignatures(text: string): { text: string; repa
 }
 
 /** Normalize loose Schedule bullets into a headed block or replace with stub reference. */
-export function normalizeScheduleAContent(text: string, ctx: ProCompletenessContext): { text: string; repairs: string[] } {
+export function normalizeScheduleAContent(text: string, _ctx: ProCompletenessContext): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   let working = text;
 
@@ -314,8 +311,8 @@ export function normalizeScheduleAContent(text: string, ctx: ProCompletenessCont
     /\n\s*[-•]\s+(?:compensation|revenue\s+share|referral\s+fee|payout|protected)[^\n]*(?:\n\s*[-•]\s+[^\n]+){0,8}/gi;
   if (looseScheduleBullets.test(working) && !/\bSCHEDULE\s+A\b/i.test(working)) {
     looseScheduleBullets.lastIndex = 0;
-    working = working.replace(looseScheduleBullets, `\n\n${SCHEDULE_A_STUB}\n`);
-    repairs.push("loose_schedule_bullets→stub");
+    working = working.replace(looseScheduleBullets, "\n");
+    repairs.push("loose_schedule_bullets_removed_without_schedule_a");
   }
 
   if (/\bSCHEDULE\s+A\b/i.test(working)) {
@@ -325,12 +322,6 @@ export function normalizeScheduleAContent(text: string, ctx: ProCompletenessCont
       working = working.replace(/\bSCHEDULE\s+A\b/i, SCHEDULE_A_HEADER);
       repairs.push("schedule_a_header_normalized");
     }
-  } else if (
-    (isReferralChannelIntake(ctx.intakeRaw) || isServicesMigrationIntake(ctx.intakeRaw, working)) &&
-    !working.includes(SCHEDULE_A_STUB)
-  ) {
-    working = `${working.trim()}\n\n${SCHEDULE_A_HEADER}\n\n${SCHEDULE_A_STUB}\n`;
-    repairs.push("schedule_a_stub_appended");
   }
 
   return { text: working.replace(/\n{3,}/g, "\n\n"), repairs };

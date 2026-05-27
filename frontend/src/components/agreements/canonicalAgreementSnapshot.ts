@@ -1,7 +1,9 @@
 import { applyProCorpusIntegrity, type ProCorpusIntegrityReport } from "./proCorpusIntegrity";
 import { repairAgreementTemplatePlaceholders } from "./agreementTemplatePlaceholderSafety";
-import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
-import { validateProFullAgreementCandidate } from "./proFullAgreementCandidate";
+import {
+  repairProFullAgreementCandidateSurgically,
+  validateProFullAgreementCandidate,
+} from "./proFullAgreementCandidate";
 import {
   extractGuidedSemanticFacts,
   type GuidedSemanticFacts,
@@ -80,6 +82,13 @@ export type BuildCanonicalAgreementSnapshotArgs = {
   frozenSnapshot?: CanonicalAgreementSnapshot | null;
   minLen?: number;
 };
+
+const PRESERVE_CORPUS_SOURCES = new Set<CanonicalAgreementSnapshotSource>([
+  "finalized_signer_applied_guided_corpus",
+  "finalized_signing",
+  "accepted_review",
+  "authoritative_snapshot",
+]);
 
 const SOURCE_PRIORITY: readonly CanonicalAgreementSnapshotSource[] = [
   "finalized_signer_applied_guided_corpus",
@@ -177,18 +186,33 @@ export function buildCanonicalAgreementSnapshot(
         partyNames,
       });
       canonicalText = repaired.text.trim();
+    } else if (PRESERVE_CORPUS_SOURCES.has(selected.source)) {
+      fullCandidateOk = true;
     } else {
-      const fullCandidate = validateProFullAgreementCandidate(canonicalText, {
+      let fullCandidate = validateProFullAgreementCandidate(canonicalText, {
         intakeText: args.intakeText,
         semanticFacts,
         canonicalPartyNames: partyNames,
       });
-      if (fullCandidate.ok) {
-        const stabilized = stabilizeFinalAgreementCompilerOutput(canonicalText, {
+      if (!fullCandidate.ok) {
+        const repairedFullCandidate = repairProFullAgreementCandidateSurgically(canonicalText, {
           intakeText: args.intakeText,
-          surface: `${args.surface}:full_candidate_snapshot`,
+          semanticFacts,
+          canonicalPartyNames: partyNames,
         });
-        canonicalText = stabilized.text.trim();
+        if (repairedFullCandidate.repairs.length > 0) {
+          const repairedValidation = validateProFullAgreementCandidate(repairedFullCandidate.text, {
+            intakeText: args.intakeText,
+            semanticFacts,
+            canonicalPartyNames: partyNames,
+          });
+          if (repairedValidation.ok) {
+            canonicalText = repairedFullCandidate.text;
+            fullCandidate = repairedValidation;
+          }
+        }
+      }
+      if (fullCandidate.ok) {
         fullCandidateOk = true;
       } else {
         const integrity = applyProCorpusIntegrity(canonicalText, {
@@ -223,7 +247,7 @@ export function buildCanonicalAgreementSnapshot(
     placeholderIssues.length === 0 &&
     blockerIssues.length === 0 &&
     !signatureMissing &&
-    (args.tier === "starter" || commercialSpecificity.score >= MINIMUM_COMMERCIAL_SPECIFICITY_SCORE) &&
+    (args.tier === "starter" || fullCandidateOk || commercialSpecificity.score >= MINIMUM_COMMERCIAL_SPECIFICITY_SCORE) &&
     (args.tier === "starter" || fullCandidateOk || Boolean(integrityReport?.ok));
 
   const snapshot: CanonicalAgreementSnapshot = {

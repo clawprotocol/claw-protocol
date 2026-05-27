@@ -391,6 +391,17 @@ export function reconcileGuidedSemanticCorpus(
     return { text: sk.text, repairs: sk.repairs.map((r) => `semantic_${r}`) };
   });
 
+  if (semantic.milestoneSplit === "build_heavy" && !/\bbuild-heavy\b/i.test(out)) {
+    const clause =
+      "Schedule A phase allocation is build-heavy: the larger share is tied to build/configuration work, with remaining payments allocated to launch, support handoff, and acceptance milestones.";
+    const feeMatch = out.match(/^\s*2\.\s+.*(?:FEES|PAYMENT|COMPENSATION)/im);
+    if (feeMatch?.index != null) {
+      const insertAt = feeMatch.index + feeMatch[0].length;
+      out = `${out.slice(0, insertAt)}\n${clause}${out.slice(insertAt)}`.replace(/\n{3,}/g, "\n\n");
+      repairs.push("semantic_insert_build_heavy_phase_allocation");
+    }
+  }
+
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test" && repairs.length) {
     // eslint-disable-next-line no-console
     console.info("[guided-semantic-reconcile]", {

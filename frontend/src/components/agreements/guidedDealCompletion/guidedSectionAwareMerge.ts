@@ -429,13 +429,20 @@ export function mergeAllGuidedAnswersIntoCorpus(
     if (!spec) continue;
     const target = resolveGuidedQuestionTarget(questionId);
     const clause = spec.clause((session?.answered[questionId] ?? "").trim()).trim();
-    if (!clause || !spec.evidence.test(out)) continue;
-    const removed = removeExactClauseEverywhere(out, clause);
-    if (!removed.removed && clauseAlreadyPresentInTargetSection(out, target, spec)) continue;
-    const inserted = insertClauseBySectionNumber(removed.body, target, clause);
+    if (!clause) continue;
+    if (clauseAlreadyPresentInTargetSection(out, target, spec)) continue;
+    let workingBody = out;
+    let relocated = false;
+    if (spec.evidence.test(out)) {
+      const removed = removeExactClauseEverywhere(workingBody, clause);
+      workingBody = removed.body;
+      relocated = removed.removed;
+      if (!relocated && clauseAlreadyPresentInTargetSection(workingBody, target, spec)) continue;
+    }
+    const inserted = insertClauseBySectionNumber(workingBody, target, clause);
     if (inserted.inserted) {
       out = inserted.body;
-      allRepairs.push(`section_normalize:${questionId}${removed.removed ? ":relocated" : ""}`);
+      allRepairs.push(`section_normalize:${questionId}${relocated ? ":relocated" : ":inserted"}`);
       allMerges.push({
         questionId,
         action: inserted.createdSection ? "created_section" : "merged",

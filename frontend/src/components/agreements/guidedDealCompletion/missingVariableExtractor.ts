@@ -638,6 +638,20 @@ function resolveMaterialItemsForExtraction(args: {
   return built;
 }
 
+function hasCorePaidProTermsAlreadyCovered(intakeRaw: string, body: string): boolean {
+  const text = `${intakeRaw}\n${body}`.toLowerCase();
+  return (
+    /\b(?:scope|services?|deliverables?|provide|perform)\b/.test(text) &&
+    /\b(?:payment|fees?|compensation|invoice|\$[\d,]+)\b/.test(text) &&
+    /\b(?:own|ownership|work product|deliverables|pre-existing|background)\b/.test(text) &&
+    /\bconfidential/.test(text) &&
+    /\b(?:terminat|notice)\b/.test(text) &&
+    /\b(?:oklahoma|texas|delaware|california|new york)\s+law\b/.test(text) &&
+    /\bnotices?\b/.test(text) &&
+    /\b(?:electronic signature|e-signature|counterparts?)\b/.test(text)
+  );
+}
+
 export function extractDealVariables(args: {
   intakeRaw?: string | null;
   body?: string;
@@ -668,7 +682,7 @@ export function extractDealVariables(args: {
     }
     vars = dedupeVariables(vars);
   }
-  if (!vars.length && body.length >= 400 && hasSemanticMaterialGaps(body, intake)) {
+  if (!vars.length && body.length >= 400 && hasSemanticMaterialGaps(body, intake) && !hasCorePaidProTermsAlreadyCovered(intake, body)) {
     const familyHint = family;
     const fallbackItems = semanticGapsToMaterialItems(
       detectSemanticContractGaps({ body, intakeRaw: intake, agreementFamily: familyHint }),
@@ -703,6 +717,7 @@ export function ensureRenderableGuidedVariables(
   family: MaterialMissingItem["agreementFamily"],
 ): DealVariable[] {
   if (variables.some((v) => variableHasSelectableAnswerPath(v))) return variables;
+  if (hasCorePaidProTermsAlreadyCovered(intake, body)) return variables;
   if (!hasSemanticMaterialGaps(body, intake) && body.length < 400) return variables;
   const fallback: MaterialMissingItem = {
     id: "deal_terms_confirmation",

@@ -383,7 +383,8 @@ function detectOperationalIncompleteness(
   }
   if (
     (/\b(?:support|sla|uptime)\b/i.test(intakeLow) || /\b(?:support|sla)\b/i.test(low)) &&
-    !/\b\d+\s*%|\b\d+\s*(?:hour|business day)/i.test(low)
+    !/\b\d+\s*%|\b\d+\s*(?:hour|business day)/i.test(low) &&
+    !/\bdoes not guarantee\b[\s\S]{0,120}\bthird-party\b[\s\S]{0,120}\b(?:platforms?|services?|uptime|availability)\b/i.test(low)
   ) {
     add("saas_sla");
   }

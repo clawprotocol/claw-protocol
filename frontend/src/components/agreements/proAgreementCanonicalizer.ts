@@ -16,7 +16,10 @@ import {
 import { applyProCorpusIntegrity } from "./proCorpusIntegrity";
 import type { GuidedSemanticFacts } from "./guidedDealCompletion/guidedAnswerSemanticMerger";
 import { logCommercialSpecificityScore, scoreCommercialSpecificity } from "./commercialSpecificity";
-import { validateProFullAgreementCandidate } from "./proFullAgreementCandidate";
+import {
+  repairProFullAgreementCandidateSurgically,
+  validateProFullAgreementCandidate,
+} from "./proFullAgreementCandidate";
 import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
 
 export type ProAgreementCanonicalizationOptions = {
@@ -447,7 +450,26 @@ export function canonicalizeProAgreementText(
     canonicalPartyNames: opts?.canonicalPartyNames,
     semanticFacts: opts?.semanticFacts,
   });
-  if (fullCandidateValidation.ok) {
+  if (!fullCandidateValidation.ok) {
+    const repairedFullCandidate = repairProFullAgreementCandidateSurgically(out, {
+      intakeText: opts?.intakeText,
+      canonicalPartyNames: opts?.canonicalPartyNames,
+      semanticFacts: opts?.semanticFacts,
+    });
+    if (repairedFullCandidate.repairs.length > 0) {
+      const repairedValidation = validateProFullAgreementCandidate(repairedFullCandidate.text, {
+        intakeText: opts?.intakeText,
+        canonicalPartyNames: opts?.canonicalPartyNames,
+        semanticFacts: opts?.semanticFacts,
+      });
+      if (repairedValidation.ok) {
+        out = repairedFullCandidate.text;
+        repairs.push(...repairedFullCandidate.repairs.map((repair) => `full_candidate_repair:${repair}`));
+        fullCandidateValidation.defects.length = 0;
+      }
+    }
+  }
+  if (fullCandidateValidation.ok || fullCandidateValidation.defects.length === 0) {
     const stabilized = stabilizeFinalAgreementCompilerOutput(out, {
       intakeText: opts?.intakeText,
       surface: opts?.surface ?? "pro_agreement_canonicalizer_full_candidate",

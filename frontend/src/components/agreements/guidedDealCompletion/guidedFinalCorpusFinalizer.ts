@@ -52,6 +52,10 @@ import {
 } from "./guidedFinalGradeCorpus";
 import { canonicalizeProAgreementText } from "../proAgreementCanonicalizer";
 import {
+  repairProFullAgreementCandidateSurgically,
+  validateProFullAgreementCandidate,
+} from "../proFullAgreementCandidate";
+import {
   buildCanonicalAgreementSnapshot,
   freezeCanonicalAgreementSnapshot,
 } from "../canonicalAgreementSnapshot";
@@ -65,6 +69,13 @@ import { filterManifestMissingWithSemanticEvidence } from "./guidedSemanticManif
 import { MINIMUM_COMMERCIAL_SPECIFICITY_SCORE } from "../commercialSpecificity";
 
 export const GUIDED_FINAL_CORPUS_MIN_LEN = 1500;
+
+const OPENAI_FULL_DRAFT_PRIMARY_SOURCES = new Set<GuidedFinalCorpusCandidateSource>([
+  "hydrated_premium",
+  "hydrated_premium_with_signers",
+  "server_full_document_text",
+  "last_accepted_premium_candidate",
+]);
 
 export type GuidedFinalCorpusCandidateSource =
   | "canonical_working_draft"
@@ -150,6 +161,25 @@ function guidedTerminationNoticeDays(session: GuidedCompletionSession | null | u
     if (word === "fifteen") return "15";
   }
   return null;
+}
+
+function ensureBuildHeavyPhaseAllocationAnswered(
+  body: string,
+  session: GuidedCompletionSession | null | undefined,
+): { text: string; repairs: string[] } {
+  const answer = session?.answered?.phase_payment_allocation ?? "";
+  if (!/\bbuild[-\s]?heavy\b/i.test(answer) || /\bbuild-heavy\b/i.test(body)) {
+    return { text: body, repairs: [] };
+  }
+  const clause =
+    "Schedule A phase allocation is build-heavy: the larger share is tied to build/configuration work, with remaining payments allocated to launch, support handoff, and acceptance milestones.";
+  const feeMatch = body.match(/^\s*2\.\s+.*(?:FEES|PAYMENT|COMPENSATION)/im);
+  if (feeMatch?.index == null) return { text: body, repairs: [] };
+  const insertAt = feeMatch.index + feeMatch[0].length;
+  return {
+    text: `${body.slice(0, insertAt)}\n${clause}${body.slice(insertAt)}`.replace(/\n{3,}/g, "\n\n"),
+    repairs: ["phase_allocation:build_heavy_answer_preserved"],
+  };
 }
 
 function hashText(text: string): string {
@@ -349,6 +379,38 @@ function eligiblePaidCandidates(
   );
 }
 
+function selectValidatedFullDraftPrimary(args: FinalizeGuidedProAgreementCorpusArgs): {
+  source: GuidedFinalCorpusCandidateSource;
+  body: string;
+  repairs: string[];
+} | null {
+  const semanticFacts = extractGuidedSemanticFacts(args.guidedSession, args.originalIntake);
+  const canonicalPartyNames = args.signerIdentities.map((id) => id.partyDisplayName).filter(Boolean);
+  for (const candidate of eligiblePaidCandidates(args)) {
+    if (!OPENAI_FULL_DRAFT_PRIMARY_SOURCES.has(candidate.source)) continue;
+    const context = {
+      intakeText: args.originalIntake,
+      semanticFacts,
+      canonicalPartyNames,
+    };
+    const direct = validateProFullAgreementCandidate(candidate.body, context);
+    if (direct.ok) {
+      return { source: candidate.source, body: candidate.body, repairs: ["full_candidate:validated_primary"] };
+    }
+    const repaired = repairProFullAgreementCandidateSurgically(candidate.body, context);
+    if (!repaired.repairs.length) continue;
+    const repairedValidation = validateProFullAgreementCandidate(repaired.text, context);
+    if (repairedValidation.ok) {
+      return {
+        source: candidate.source,
+        body: repaired.text,
+        repairs: ["full_candidate:validated_after_surgical_repair", ...repaired.repairs.map((r) => `full_candidate_repair:${r}`)],
+      };
+    }
+  }
+  return null;
+}
+
 export function logGuidedFinalCorpusBlockedPlaceholderIdentityMismatch(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
@@ -390,11 +452,109 @@ export function finalizeGuidedProAgreementCorpus(
     commercialSpecificityScore: 100,
   };
 
+  const fullDraftPrimary = selectValidatedFullDraftPrimary(args);
+  if (fullDraftPrimary) {
+    diagnostics.selectedSource = fullDraftPrimary.source;
+    diagnostics.selectedLen = fullDraftPrimary.body.length;
+    diagnostics.repairs.push(...fullDraftPrimary.repairs);
+    let body = normalizePartyNameSpacingInCorpus(fullDraftPrimary.body);
+    if (args.signerIdentities.length >= 2) {
+      const rebuilt = rebuildSignatureBlocksWithPartyIdentities(body, args.signerIdentities);
+      if (!shouldRejectSignerIdentityCorpusShrink(body.length, rebuilt.text.length)) {
+        body = rebuilt.text;
+        diagnostics.signaturePolishCount = rebuilt.count;
+        diagnostics.signatureRebuilt = rebuilt.count > 0;
+        if (rebuilt.count > 0) diagnostics.repairs.push("signature:full_candidate_tail_rebuilt");
+      }
+    }
+    const finalSemanticFacts = extractGuidedSemanticFacts(args.guidedSession, args.originalIntake);
+    const canonicalSnapshot = buildCanonicalAgreementSnapshot({
+      surface: "guided_final_corpus_finalizer_full_candidate",
+      tier: "pro",
+      candidates: [{ source: fullDraftPrimary.source, text: body }],
+      intakeText: args.originalIntake,
+      guidedSession: args.guidedSession,
+      semanticFacts: finalSemanticFacts,
+      parties: args.signerIdentities.map((id) => ({
+        name: id.partyDisplayName,
+        role: id.blockHeading,
+        email: id.email,
+      })),
+      signerState: {
+        complete: args.signerIdentities.length >= 2,
+        signerCount: args.signerIdentities.length,
+        requireSignerBlocks: args.signerIdentities.length >= 2 || Boolean(args.signerManifest),
+      },
+      minLen: GUIDED_FINAL_CORPUS_MIN_LEN,
+    });
+    body = canonicalSnapshot.canonicalText;
+    diagnostics.commercialSpecificityScore = canonicalSnapshot.commercialSpecificity.score;
+    diagnostics.finalHash = canonicalSnapshot.hash;
+    diagnostics.repairs.push(
+      ...canonicalSnapshot.placeholderIssues.map((p) => `canonical_snapshot_placeholder:${p}`),
+      ...canonicalSnapshot.blockerIssues.map((b) => `canonical_snapshot_blocker:${b}`),
+    );
+    if (canonicalSnapshot.integrityOk) {
+      freezeCanonicalAgreementSnapshot(canonicalSnapshot, "finalized_signer_applied_guided_corpus");
+    } else {
+      diagnostics.validationMissing = [
+        ...canonicalSnapshot.placeholderIssues,
+        ...canonicalSnapshot.blockerIssues,
+        ...(canonicalSnapshot.commercialSpecificity.score < MINIMUM_COMMERCIAL_SPECIFICITY_SCORE
+          ? ["commercial_specificity_below_threshold"]
+          : []),
+        ...(canonicalSnapshot.len < GUIDED_FINAL_CORPUS_MIN_LEN ? ["canonical_corpus_missing"] : []),
+      ].filter((value, index, arr) => arr.indexOf(value) === index);
+    }
+    const partyManifest = buildPartyManifestFromIdentities(args.signerIdentities, args.partyManifest);
+    const fatalScan =
+      args.signerIdentities.length > 0 || Boolean(args.signerManifest)
+        ? scanFatalPartyPlaceholdersAfterManifestApply({ body, manifest: partyManifest })
+        : { ok: true, fatalPlaceholders: [] as string[], missingPartyReason: null };
+    const unresolvedPlaceholders = fatalScan.missingPartyReason
+      ? [fatalScan.missingPartyReason, ...fatalScan.fatalPlaceholders]
+      : fatalScan.fatalPlaceholders;
+    const ok =
+      canonicalSnapshot.integrityOk &&
+      body.length >= GUIDED_FINAL_CORPUS_MIN_LEN &&
+      diagnostics.validationMissing.length === 0 &&
+      fatalScan.ok;
+    if (ok) {
+      logGuidedFinalCorpusFinalized({
+        ok,
+        bodyLen: body.length,
+        selectedSource: diagnostics.selectedSource,
+        finalHash: diagnostics.finalHash,
+        signatureRebuilt: diagnostics.signatureRebuilt,
+        repairs: diagnostics.repairs,
+      });
+      return {
+        ok,
+        body,
+        signerManifest: args.signerManifest,
+        appliedAnswerIds: [],
+        unresolvedPlaceholders,
+        diagnostics,
+      };
+    }
+    diagnostics.selectedSource = "none";
+    diagnostics.selectedLen = 0;
+    diagnostics.appliedAnswerIds = [];
+    diagnostics.signaturePolishCount = 0;
+    diagnostics.signatureRebuilt = false;
+    diagnostics.signerIdentityRejected = false;
+    diagnostics.validationMissing = [];
+    diagnostics.validationContradictions = [];
+    diagnostics.structureDefects = [];
+    diagnostics.finalHash = "";
+    diagnostics.repairs = [];
+  }
+
   const workingSeed = args.candidates
     .map((c) => norm(c.body))
     .filter((body) => body.length >= 500)
     .sort((a, b) => b.length - a.length)[0];
-  const augmentedCandidates: GuidedFinalCorpusCandidate[] = [...args.candidates];
+  const augmentedCandidates: GuidedFinalCorpusCandidate[] = args.candidates.map((candidate) => ({ ...candidate }));
   if (workingSeed) {
     const prepared = prepareCanonicalWorkingDraftForFinalization({
       body: workingSeed,
@@ -402,11 +562,20 @@ export function finalizeGuidedProAgreementCorpus(
       originalIntake: args.originalIntake,
     });
     if (prepared.body.length >= 500) {
-      augmentedCandidates.unshift({
-        source: "canonical_working_draft",
-        body: prepared.body,
-        paid: true,
-      });
+      let upgraded = false;
+      for (const candidate of augmentedCandidates) {
+        if (candidate.source !== "canonical_working_draft") continue;
+        candidate.body = prepared.body;
+        candidate.paid = true;
+        upgraded = true;
+      }
+      if (!upgraded) {
+        augmentedCandidates.unshift({
+          source: "canonical_working_draft",
+          body: prepared.body,
+          paid: true,
+        });
+      }
       diagnostics.repairs.push(...prepared.repairs.map((r) => `canonical_working_draft:${r}`));
     }
   }
@@ -565,6 +734,9 @@ export function finalizeGuidedProAgreementCorpus(
     surface: "guided_final_corpus_finalizer",
   });
   body = canonicalized.text;
+  const buildHeavy = ensureBuildHeavyPhaseAllocationAnswered(body, args.guidedSession);
+  body = buildHeavy.text;
+  diagnostics.repairs.push(...buildHeavy.repairs);
   diagnostics.commercialSpecificityScore = canonicalized.commercialSpecificity?.score ?? 100;
   diagnostics.repairs.push(...canonicalized.repairs.map((r) => `canonical:${r}`));
   diagnostics.repairs.push(...canonicalized.warnings.map((w) => `canonical_warning:${w}`));
@@ -588,6 +760,9 @@ export function finalizeGuidedProAgreementCorpus(
     minLen: GUIDED_FINAL_CORPUS_MIN_LEN,
   });
   body = canonicalSnapshot.canonicalText;
+  const buildHeavyAfterSnapshot = ensureBuildHeavyPhaseAllocationAnswered(body, args.guidedSession);
+  body = buildHeavyAfterSnapshot.text;
+  diagnostics.repairs.push(...buildHeavyAfterSnapshot.repairs);
   diagnostics.commercialSpecificityScore = canonicalSnapshot.commercialSpecificity.score;
   diagnostics.finalHash = canonicalSnapshot.hash;
   diagnostics.repairs.push(
