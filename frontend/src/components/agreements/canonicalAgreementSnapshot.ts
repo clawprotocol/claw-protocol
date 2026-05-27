@@ -1,5 +1,7 @@
 import { applyProCorpusIntegrity, type ProCorpusIntegrityReport } from "./proCorpusIntegrity";
 import { repairAgreementTemplatePlaceholders } from "./agreementTemplatePlaceholderSafety";
+import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
+import { validateProFullAgreementCandidate } from "./proFullAgreementCandidate";
 import {
   extractGuidedSemanticFacts,
   type GuidedSemanticFacts,
@@ -167,6 +169,7 @@ export function buildCanonicalAgreementSnapshot(
 
   let canonicalText = selected.text || "";
   let integrityReport: ProCorpusIntegrityReport | null = null;
+  let fullCandidateOk = false;
   if (canonicalText) {
     if (args.tier === "starter") {
       const repaired = repairAgreementTemplatePlaceholders(canonicalText, {
@@ -175,14 +178,28 @@ export function buildCanonicalAgreementSnapshot(
       });
       canonicalText = repaired.text.trim();
     } else {
-      const integrity = applyProCorpusIntegrity(canonicalText, {
+      const fullCandidate = validateProFullAgreementCandidate(canonicalText, {
         intakeText: args.intakeText,
         semanticFacts,
         canonicalPartyNames: partyNames,
-        surface: args.surface,
       });
-      canonicalText = integrity.text.trim();
-      integrityReport = integrity.report;
+      if (fullCandidate.ok) {
+        const stabilized = stabilizeFinalAgreementCompilerOutput(canonicalText, {
+          intakeText: args.intakeText,
+          surface: `${args.surface}:full_candidate_snapshot`,
+        });
+        canonicalText = stabilized.text.trim();
+        fullCandidateOk = true;
+      } else {
+        const integrity = applyProCorpusIntegrity(canonicalText, {
+          intakeText: args.intakeText,
+          semanticFacts,
+          canonicalPartyNames: partyNames,
+          surface: args.surface,
+        });
+        canonicalText = integrity.text.trim();
+        integrityReport = integrity.report;
+      }
     }
   }
 
@@ -207,7 +224,7 @@ export function buildCanonicalAgreementSnapshot(
     blockerIssues.length === 0 &&
     !signatureMissing &&
     (args.tier === "starter" || commercialSpecificity.score >= MINIMUM_COMMERCIAL_SPECIFICITY_SCORE) &&
-    (args.tier === "starter" || Boolean(integrityReport?.ok));
+    (args.tier === "starter" || fullCandidateOk || Boolean(integrityReport?.ok));
 
   const snapshot: CanonicalAgreementSnapshot = {
     archetype: integrityReport?.archetype ?? "starter",

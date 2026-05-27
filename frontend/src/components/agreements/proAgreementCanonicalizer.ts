@@ -16,6 +16,8 @@ import {
 import { applyProCorpusIntegrity } from "./proCorpusIntegrity";
 import type { GuidedSemanticFacts } from "./guidedDealCompletion/guidedAnswerSemanticMerger";
 import { logCommercialSpecificityScore, scoreCommercialSpecificity } from "./commercialSpecificity";
+import { validateProFullAgreementCandidate } from "./proFullAgreementCandidate";
+import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
 
 export type ProAgreementCanonicalizationOptions = {
   canonicalPartyNames?: readonly string[];
@@ -439,6 +441,35 @@ export function canonicalizeProAgreementText(
   const finalOrphans = stripOrphanFragments(out);
   out = finalOrphans.text;
   repairs.push(...finalOrphans.repairs);
+
+  const fullCandidateValidation = validateProFullAgreementCandidate(out, {
+    intakeText: opts?.intakeText,
+    canonicalPartyNames: opts?.canonicalPartyNames,
+    semanticFacts: opts?.semanticFacts,
+  });
+  if (fullCandidateValidation.ok) {
+    const stabilized = stabilizeFinalAgreementCompilerOutput(out, {
+      intakeText: opts?.intakeText,
+      surface: opts?.surface ?? "pro_agreement_canonicalizer_full_candidate",
+    });
+    out = stabilized.text;
+    repairs.push("full_candidate:validated_primary");
+    repairs.push(...stabilized.repairs.map((repair) => `full_candidate:${repair}`));
+    const commercialSpecificity = scoreCommercialSpecificity(
+      `${opts?.intakeText ?? ""}\n${Object.values(opts?.semanticFacts?.facts ?? {}).join("\n")}`,
+      out,
+    );
+    const uniqueRepairs = [...new Set(repairs)];
+    const uniqueWarnings = [...new Set(warnings)];
+    logCommercialSpecificityScore({
+      score: commercialSpecificity,
+      normalizationMode: "soft",
+      surface: opts?.surface ?? "pro_agreement_canonicalizer",
+    });
+    logProCorpusSafetyGate(safetyGatePayload(uniqueRepairs, uniqueWarnings, out.length));
+    return { text: out, repairs: uniqueRepairs, warnings: uniqueWarnings, commercialSpecificity };
+  }
+  warnings.push(...fullCandidateValidation.defects.map((defect) => `full_candidate:${defect}`));
 
   const integrity = applyProCorpusIntegrity(out, {
     intakeText: opts?.intakeText,
