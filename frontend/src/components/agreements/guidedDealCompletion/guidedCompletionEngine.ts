@@ -18,6 +18,7 @@ import {
   type GuidedVisibleQuestionAccounting,
 } from "./guidedVisibleQuestionAccounting";
 import { variableHasSelectableAnswerPath } from "./shouldRenderGuidedCompletionPanel";
+import { shouldShowGuidedSessionIntro } from "./userAnswerableGuidedQuestion";
 
 export function buildGuidedSessionFromAgreement(args: {
   intakeRaw?: string | null;
@@ -42,6 +43,7 @@ export function buildGuidedSessionFromAgreement(args: {
     agreementFamily: family,
     bodyLen: (args.body || "").trim().length,
   });
+  if (!session) return null;
   session = applyIntakePrefillToSession(session, intake);
   session = reconcileSessionAnswersWithIntake(session, intake);
   const rebuilt = buildStableGuidedQuestionQueue({
@@ -85,7 +87,8 @@ export function resolveGuidedCurrentIndex(session: GuidedCompletionSession): num
   return session.queue.length;
 }
 
-export function getCurrentVariable(session: GuidedCompletionSession): DealVariable | null {
+export function getCurrentVariable(session: GuidedCompletionSession | null | undefined): DealVariable | null {
+  if (!session?.queue?.length) return null;
   const idx = resolveGuidedCurrentIndex(session);
   if (idx >= session.queue.length) return null;
   const id = session.queue[idx];
@@ -232,11 +235,15 @@ export function withGuidedDraftProgress(session: GuidedCompletionSession): Guide
   };
 }
 
-export function guidedSessionIntro(session: GuidedCompletionSession) {
+export function guidedSessionIntro(
+  session: GuidedCompletionSession | null | undefined,
+): ReturnType<typeof buildGuidedCompletionIntro> {
+  if (!shouldShowGuidedSessionIntro(session)) return null;
   return buildGuidedCompletionIntro(session);
 }
 
-export function importantVariableCount(session: GuidedCompletionSession): number {
+export function importantVariableCount(session: GuidedCompletionSession | null | undefined): number {
+  if (!session?.queue?.length) return 0;
   return session.queue.filter((id) => {
     const v = session.variables.find((x) => x.id === id);
     return v && (v.severity === "critical" || v.severity === "important");

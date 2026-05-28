@@ -14,6 +14,10 @@ import {
   applyMilestoneTableGeneration,
   mergePartyRolesFromResponsibilities,
 } from "./milestoneTableGeneration";
+import {
+  buildCommercialFactGraph,
+  commercialFactGraphToGuidanceLines,
+} from "./commercialFactGraph";
 
 export { applyMilestoneTableGeneration } from "./milestoneTableGeneration";
 import { applyEnterpriseReadabilityPass } from "./enterpriseReadabilityPass";
@@ -26,10 +30,20 @@ export type { ProOperationalSynthesisResult, ProOperationalSynthesisPassLog } fr
 export { extractPartyResponsibilities } from "./responsibilityExtraction";
 export { classifyDealDna } from "./dealDnaClassifier";
 export { parseAgreementSections, applySectionPurityPass } from "./sectionPurityValidator";
+export {
+  buildCommercialFactGraph,
+  commercialFactGraphToGuidanceLines,
+  aiWorkflowPremiumQualitySignals,
+  extractJointVentureEconomicsAnchors,
+  isJointVentureEconomicsIntake,
+} from "./commercialFactGraph";
 
 const SYNTHESIS_MARKER = "LawDog Pro operational synthesis (internal guidance — not boilerplate to paste verbatim):";
 
-function formatModelGuidanceBlock(result: Omit<ProOperationalSynthesisResult, "modelGuidanceBlock">): string {
+function formatModelGuidanceBlock(
+  result: Omit<ProOperationalSynthesisResult, "modelGuidanceBlock">,
+  rawIntake: string,
+): string {
   const lines: string[] = [
     SYNTHESIS_MARKER,
     `Deal archetype: ${result.dealDna.archetype} (${result.dealDna.confidence} confidence).`,
@@ -42,6 +56,10 @@ function formatModelGuidanceBlock(result: Omit<ProOperationalSynthesisResult, "m
     lines.push(
       `- ${p.party} (${p.shortName}, ${p.inferredRole}): ${p.responsibilities.slice(0, 4).join("; ") || "operational duties per intake"}`,
     );
+  }
+  const factLines = commercialFactGraphToGuidanceLines(result.commercialFactGraph, rawIntake);
+  if (factLines.length) {
+    lines.push(...factLines.map((line) => `- ${line}`));
   }
   return lines.join("\n");
 }
@@ -60,6 +78,7 @@ export function buildProOperationalSynthesis(
     agreementFamily: opts?.agreementFamily ?? (draft.agreement_family as AgreementFamily | undefined) ?? null,
     partyCount: responsibilities.length || partyNames.length,
   });
+  const commercialFactGraph = buildCommercialFactGraph(rawIntake, draft);
 
   const materialAskLines: string[] = [];
   if (dealDna.archetype !== "generic_commercial") {
@@ -76,11 +95,12 @@ export function buildProOperationalSynthesis(
   if (/\bmilestones?\b/i.test(rawIntake)) {
     materialAskLines.push("Include milestone schedule, acceptance criteria, and implementation dependencies.");
   }
+  materialAskLines.push(...commercialFactGraphToGuidanceLines(commercialFactGraph, rawIntake));
 
-  const base = { responsibilities, dealDna, materialAskLines };
+  const base = { responsibilities, dealDna, commercialFactGraph, materialAskLines };
   return {
     ...base,
-    modelGuidanceBlock: formatModelGuidanceBlock(base),
+    modelGuidanceBlock: formatModelGuidanceBlock(base, rawIntake),
   };
 }
 

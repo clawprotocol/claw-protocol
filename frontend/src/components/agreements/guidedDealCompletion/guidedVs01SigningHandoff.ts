@@ -99,9 +99,6 @@ export function assertGuidedProVs01BridgeCorpusReady(
   if (source !== "finalized_signer_applied_guided_corpus") {
     return { ok: false, reason: "corpus_source_not_finalized_signer_applied", diagnostics };
   }
-  if (!/\bIN WITNESS WHEREOF\b/i.test(corpusText)) {
-    return { ok: false, reason: "missing_witness_block", diagnostics };
-  }
   if (!/\b(?:By|Signature)\s*:\s*_{2,}/im.test(corpusText)) {
     return { ok: false, reason: "missing_by_or_signature_lines", diagnostics };
   }

@@ -1,6 +1,7 @@
 import type { MaterialMissingItem } from "../proAgreementCompleteness/types";
 import { resolveGuidedCompletionRenderState } from "./resolveGuidedCompletionRenderState";
 import type { DealVariable, GuidedCompletionSession } from "./types";
+import { isUserAnswerableGuidedQuestion } from "./userAnswerableGuidedQuestion";
 
 export {
   computeCanRenderGuidedQuestions,
@@ -27,12 +28,7 @@ export type ShouldRenderGuidedCompletionPanelArgs = {
 
 /** At least one pill (or custom path) can apply an answer. */
 export function variableHasSelectableAnswerPath(variable: DealVariable): boolean {
-  if (variable.uiControlType !== "pills") return variable.question.trim().length > 8;
-  const pills = variable.suggestedDefaults.filter((p) => p.id !== "recommend");
-  return (
-    pills.some((p) => p.id === "custom") ||
-    pills.some((p) => (p.value || p.label).trim().length > 0)
-  );
+  return isUserAnswerableGuidedQuestion(variable);
 }
 
 /** True only when the guided panel can show a real, actionable question (session capability; not mount truth). */

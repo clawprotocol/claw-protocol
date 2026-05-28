@@ -124,7 +124,7 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     const actions = screen.getByTestId("recipient-review-first-actions");
     expect(within(actions).getByRole("button", { name: /Approve draft/i })).toBeTruthy();
-    expect(within(actions).getByRole("button", { name: /Propose updated agreement/i })).toBeTruthy();
+    expect(within(actions).getByRole("button", { name: /Suggest revision/i })).toBeTruthy();
     expect(within(actions).getByRole("button", { name: /^Download$/i })).toBeTruthy();
     expect(screen.queryByLabelText(/Requested change/i)).toBeNull();
     expect(within(actions).queryByRole("button", { name: /Paste updated wording/i })).toBeNull();

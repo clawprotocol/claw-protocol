@@ -98,6 +98,14 @@ describe("agreementIntentContract (LawDog Pro universal)", () => {
     expect(v1.ok).toBe(true);
   });
 
+  it("does not classify modal will pay as estate (minimal services prompt)", () => {
+    const intake =
+      "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC. Red Mesa will pay Harbor Peak $5,000. Texas law.";
+    const c = resolveAgreementIntentContract(intake);
+    expect(c.intent_id).not.toBe("estate_family_admin");
+    expect(c.intent_id).toBe("consulting_services");
+  });
+
   it("estate / family: reject founder vesting bleed", () => {
     const c = resolveAgreementIntentContract("My siblings and I need rules for dad’s estate and executor duties tonight.");
     expect(c.intent_id).toBe("estate_family_admin");

@@ -10,6 +10,7 @@ import {
 import type { GuidedCompletionSession } from "./types";
 import { isGuidedCompletionComplete } from "./guidedCompletionEngine";
 import { resolveGuidedBackgroundApplyOutcome } from "./guidedApplyOutcome";
+import { pickAuthoritativeSigningHandoffCorpus } from "../authoritativeHandoffCorpusResolver";
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "../simpleProFinalReviewCorpus";
 
 export type GuidedFinalReviewApplyReadinessStatus =
@@ -121,11 +122,33 @@ export function resolveGuidedFinalReviewApplyReadiness(
   };
 }
 
-export function pickBestAuthoritativeCorpusPlain(candidates: readonly (string | null | undefined)[]): string {
+export type PickBestAuthoritativeCorpusOpts = {
+  acceptedAuthoritativeBody?: string | null;
+  premiumAccepted?: boolean;
+  pipelineSource?: string | null;
+};
+
+export function pickBestAuthoritativeCorpusPlain(
+  candidates: readonly (string | null | undefined)[],
+  opts?: PickBestAuthoritativeCorpusOpts,
+): string {
+  const mapped = candidates
+    .map((raw, index) => ({ text: (raw || "").trim(), source: `corpus_${index}` }))
+    .filter((c) => c.text.length > 0);
+  if (
+    opts?.acceptedAuthoritativeBody &&
+    opts.acceptedAuthoritativeBody.trim().length >= 500
+  ) {
+    return pickAuthoritativeSigningHandoffCorpus({
+      candidates: mapped,
+      acceptedAuthoritativeBody: opts.acceptedAuthoritativeBody,
+      premiumAccepted: opts.premiumAccepted,
+      pipelineSource: opts.pipelineSource,
+    }).text;
+  }
   let best = "";
-  for (const raw of candidates) {
-    const t = (raw || "").trim();
-    if (t.length > best.length) best = t;
+  for (const c of mapped) {
+    if (c.text.length > best.length) best = c.text;
   }
   return best;
 }

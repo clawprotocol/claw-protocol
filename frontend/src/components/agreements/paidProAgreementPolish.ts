@@ -9,6 +9,7 @@ import {
   isDisallowedPartyPhrase,
   resolveAuthoritativePartiesForRecitalPolish,
 } from "./paidProPartyNamePreserve";
+import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolver";
 import { resolvePaidProPolishPartyNamesFromIdentities } from "./guidedDealCompletion/signerPartyIdentity";
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import {
@@ -729,6 +730,14 @@ export function polishPaidProAgreementText(
   );
   working = milestoneFinal.text;
   working = softenProDocumentTone(working);
+
+  const partyIdentity = repairFullAgreementPartyIdentity({
+    text: working,
+    intakeRaw,
+    partyNames: authoritativeFullNames,
+    signerIdentities: opts?.signerPartyIdentities,
+  });
+  working = partyIdentity.text;
 
   const log: PaidProAgreementPolishLog = {
     recital: recital.log,

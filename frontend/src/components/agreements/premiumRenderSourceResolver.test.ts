@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { isAuthoritativePremiumPipelineRenderSource, resolvePremiumRenderSource } from "./premiumRenderSourceResolver";
+import { clearAcceptedPremiumCanonicalCorpus } from "./acceptedPremiumCanonicalCorpus";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: true };
+
+afterEach(() => {
+  clearAcceptedPremiumCanonicalCorpus();
+});
 
 function baseDraft(over: Partial<ParsedDraftShape> = {}): ParsedDraftShape {
   return {

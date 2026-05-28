@@ -61,7 +61,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(s).toContain('"Confirm and send for signature"');
     expect(s).toContain("Add at least one recipient email to create review links.");
     expect(s).toContain("Add at least one signer email to continue.");
-    expect(s).toContain("Sign first before sending");
+    expect(s).toContain("I&apos;ll sign first");
   });
 
   it("paid Pro durable send intent: ref + session keys + handoff resolution + dev trace", () => {
@@ -373,7 +373,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("sign-first control is gated to paid signature recipients (not review mode)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toMatch(
-      /\(createUiStage === CreateUiStage\.RECIPIENTS \|\| paidProRecipientSetupOnDraft\)[\s\S]*?effectivePremiumSendMode === "signature"\s*\?[\s\S]*?Sign first before sending/,
+      /\(createUiStage === CreateUiStage\.RECIPIENTS \|\| paidProRecipientSetupOnDraft\)[\s\S]*?effectivePremiumSendMode === "signature"[\s\S]*?I&apos;ll sign first/,
     );
   });
 
@@ -671,7 +671,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(routeBlock).toContain("continueGuidedFinalReviewToSigning");
     expect(routeBlock).not.toContain("advancePaidProToRecipientSetup");
     expect(routeBlock).not.toContain("handOffProductionDraftToRecipients");
-    expect(intake).toContain('reviewSecondaryLabel="Send for review first"');
+    expect(intake).toContain('reviewSecondaryLabel="Send for review / compare edits"');
   });
 
   it("test20: answer apply waits for signer setup continue; explicit continue CTA only", () => {
@@ -845,8 +845,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(screen).not.toContain("Describe a change");
     expect(screen).not.toContain("Add recipient emails");
     expect(screen).not.toContain("textarea");
-    expect(intake).toContain('signaturePrimaryLabel="Create signing links"');
-    expect(intake).toContain('reviewSecondaryLabel="Send for review first"');
+    expect(intake).toContain("Add signers / prepare signature links");
+    expect(intake).toContain('reviewSecondaryLabel="Send for review / compare edits"');
     expect(intake).toContain("onChangeSigningOrder");
     expect(screen).toContain("Back to final review");
     const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
@@ -856,6 +856,45 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("logGuidedFinalizeModalEnter");
     expect(intake).toContain("preparing_final_signing_version");
     expect(intake).toContain("ready_to_sign");
+  });
+
+  it("paid Pro signature path uses signer setup copy and fields", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("Add signers / prepare signature links");
+    expect(intake).toContain("Party 1 legal entity");
+    expect(intake).toContain("Party 2 legal entity");
+    expect(intake).toContain("Signer name");
+    expect(intake).toContain("Signer title");
+    expect(intake).toContain("Signer 1 email");
+    expect(intake).toContain("Signer 2 email");
+    expect(intake).toContain("I&apos;ll sign first");
+    const panel = readFileSync(join(__dirname, "ProReviewSigningFlowPanel.tsx"), "utf8");
+    expect(panel).toContain("showReviewComparisonActions");
+    expect(panel).toContain("Upload/compare is available from the review track");
+  });
+
+  it("paid Pro source-of-truth branch renders HTML without polish or fallback pickers", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const htmlIdx = intake.indexOf("const premiumReadonlyAgreementHtml = useMemo");
+    const htmlBlock = intake.slice(htmlIdx, htmlIdx + 1800);
+    expect(htmlBlock).toContain('getPaidProDocumentForSurface("display"');
+    expect(htmlBlock).toContain("return buildPremiumAgreementReadonlyHtml(corpus");
+    const sotBranch = htmlBlock.slice(
+      htmlBlock.indexOf('getPaidProDocumentForSurface("display"'),
+      htmlBlock.indexOf("const session = guidedCompletionSessionRef.current"),
+    );
+    expect(sotBranch).not.toContain("polishProAgreementDisplayLayer");
+    expect(sotBranch).not.toContain("resolveGuidedCompletionRenderDocument");
+    expect(sotBranch).not.toContain("premiumPaidReadonlyPick");
+    expect(sotBranch).not.toContain("agreementDocumentText");
+  });
+
+  it("paid Pro direct edits establish explicit source-of-truth revisions", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("const commitPaidProUserApprovedRevision = React.useCallback");
+    expect(intake).toContain("establishPaidProSourceOfTruth");
+    expect(intake).toContain('commitPaidProUserApprovedRevision(finalText, "paid_pro_card_edit_revision")');
+    expect(intake).toContain('commitPaidProUserApprovedRevision(raw, "pro_final_review_plain_edit_revision")');
   });
 
   it("test26: signer party identity applied before final review", () => {

@@ -83,6 +83,29 @@ Date: _________________________
     expect(html).not.toContain("claw-premium-signature-section");
   });
 
+  it("strips embedded signature region when external signer UI owns execution", () => {
+    const plain = `
+SERVICES AGREEMENT
+
+1. SCOPE
+Provider performs services.
+
+IN WITNESS WHEREOF, the Parties execute.
+
+CLIENT:
+Acme LLC
+By: __________________________
+`.trim();
+    const html = buildPremiumAgreementReadonlyHtml(plain, {
+      signatureSectionMode: "execution",
+      partyNames: ["Acme LLC", "Beta LLC"],
+      suppressCorpusEmbeddedSignatureForDisplay: true,
+    });
+    expect(html).not.toMatch(/IN WITNESS WHEREOF/i);
+    expect(html).not.toContain("claw-premium-signature-section");
+    expect(html).toContain("SCOPE");
+  });
+
   it("renders decorative signature card only when corpus lacks execution block", () => {
     const html = buildPremiumAgreementReadonlyHtml("SERVICES AGREEMENT\n\n1. SCOPE\nThe parties agree.", {
       signatureSectionMode: "execution",

@@ -85,6 +85,14 @@ export function snapshotReadyForPostCheckoutUnlock(args: {
   });
 }
 
+/** Safe to hydrate on mount / payment return without blocking a fresh premium-full-draft pass. */
+export function isAuthoritativePremiumSnapshotHydratable(
+  snapshot: PremiumCompletionSnapshot | null,
+  intakeFingerprint: string,
+): boolean {
+  return snapshotReadyForPostCheckoutUnlock({ snapshot, intakeFingerprint });
+}
+
 /** True when checkout modal can exit using persisted authoritative snapshot (no new ensure call). */
 export function shouldResolvePostCheckoutFromAuthoritativeSnapshot(args: {
   postCheckoutPhase: string | null;

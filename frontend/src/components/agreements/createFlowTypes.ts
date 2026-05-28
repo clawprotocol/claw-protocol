@@ -52,7 +52,7 @@ export function createFlowPrimaryCtaLabel(phase: CreateFlowProductionPhase): str
     case "guided_final_review":
       return "Continue to signing";
     case "recipient_setup_required":
-      return "Continue to send";
+      return "Add signers / prepare signature links";
     case "ready_to_send":
       return "Send";
   }

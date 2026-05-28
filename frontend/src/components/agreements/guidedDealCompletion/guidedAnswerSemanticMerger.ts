@@ -7,6 +7,7 @@ import type { GuidedCompletionSession } from "./types";
 import { listGuidedAnsweredVariableIds } from "./guidedAnswerApplyOrchestration";
 import { repairBareProSkeletonClauses } from "../proCorpusSkeletonSafety";
 import { dedupeRepeatingSentenceLines } from "./guidedCorpusLineRepairs";
+import { intakeSpecifiesSimpleFixedFee, stripIrrelevantFixedFeeBoilerplate } from "../canonicalPartyIdentityResolver";
 import { stripForbiddenSemanticFactsFromText } from "../proSemanticBlocks";
 
 export type GuidedSemanticFactKey =
@@ -50,6 +51,7 @@ const ORPHAN_BOILERPLATE_LINE_RES: readonly RegExp[] = [
   /^\s*Except\s+as\s+expressly\s+stated,\s+neither\s+Party\s+is\s+liable\b/i,
   /^\s*Neither\s+party\s+shall\s+be\s+liable\s+for\s+indirect\b/i,
   /^\s*Provider\s+shall\s+invoice\s+Client\s+within\s+fifteen\s*\(15\)\s+days\s+of\s+milestone\s+acceptance\b/i,
+  /^\s*[-•*]?\s*service\s+provider\s+will\s+provide\s+the\s+services\s+and\s+deliverables\s+described\s+in\s+this\s+agreement\.?\s*$/i,
 ];
 
 const CONFLICTING_PAYMENT_LINE_RES: Readonly<
@@ -386,10 +388,23 @@ export function reconcileGuidedSemanticCorpus(
   run((t) => fixBrokenTerminationNoticeDays(t, semantic.terminationDays));
   run((t) => dedupeNet30Lines(t));
   run((t) => dedupeGenericBoilerplate(t));
+  run((t) => stripIrrelevantFixedFeeBoilerplate(t, _intakeRaw));
   run((t) => {
     const sk = repairBareProSkeletonClauses(t);
     return { text: sk.text, repairs: sk.repairs.map((r) => `semantic_${r}`) };
   });
+  if (intakeSpecifiesSimpleFixedFee(_intakeRaw, out)) {
+    run((t) => {
+      const stripped = t.replace(
+        /\bPayments?\s+are\s+due\s+according\s+to\s+the\s+milestone[\s\S]{0,80}Schedule\s+A\.?/gi,
+        "Payment is due as stated in the Fees section.",
+      );
+      return {
+        text: stripped,
+        repairs: stripped !== t ? ["semantic_strip_schedule_a_fixed_fee"] : [],
+      };
+    });
+  }
 
   if (semantic.milestoneSplit === "build_heavy" && !/\bbuild-heavy\b/i.test(out)) {
     const clause =

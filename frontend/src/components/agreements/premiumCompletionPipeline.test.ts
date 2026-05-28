@@ -58,7 +58,7 @@ describe("extractCleanPremiumParties", () => {
     expect(out[1].name).toBe("Party B");
   });
 
-  it("never surfaces intake prose as party names when the draft cells are polluted", () => {
+  it("uses Service Provider / Client fallbacks for polluted contractor services cells", () => {
     const draft: ParsedDraftShape = {
       title: "Agreement",
       jurisdiction: "Delaware",

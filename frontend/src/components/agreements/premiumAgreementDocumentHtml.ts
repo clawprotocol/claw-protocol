@@ -3,6 +3,7 @@
  */
 
 import type { PremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
+import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion/signatureRegion";
 
 export function escapeHtml(s: string): string {
@@ -133,7 +134,25 @@ export type BuildPremiumAgreementReadonlyHtmlOpts = {
   renderHints?: PremiumDocumentRenderHints | null;
   /** Guided Pro final review: never append decorative signature cards when corpus was rebuilt. */
   forceEmbeddedCorpusSignature?: boolean;
+  /**
+   * Canonical Pro review: signer cards / VS01 own execution — strip inline signature tails from the
+   * readonly body and do not render embedded or decorative signature blocks in the document.
+   */
+  suppressCorpusEmbeddedSignatureForDisplay?: boolean;
 };
+
+/** Remove signature tails when external signer UI owns execution blocks. */
+export function stripCorpusSignatureRegionForExternalSignerUi(plain: string): string {
+  const raw = (plain || "").replace(/\r\n/g, "\n").trimEnd();
+  if (!raw) return "";
+  const start = findSignatureRegionStart(raw);
+  let body = start >= 0 ? raw.slice(0, start).trimEnd() : raw;
+  body = body
+    .replace(/\n\s*[^\n]{0,120}\bas of the\s*$/i, "")
+    .replace(/\n\s*(?:By|Name|Title|Date|Email|Signature)\s*:\s*_{2,}\s*$/gim, "")
+    .trimEnd();
+  return body;
+}
 
 export type PremiumSignaturePreviewMode =
   | "embedded_corpus_signature_block"
@@ -190,7 +209,10 @@ export function buildPremiumAgreementReadonlyHtml(
 ): string {
   if (!(plain || "").trim()) return "";
   const hints = opts.renderHints ?? null;
-  const raw = stripStarterPreviewDisclaimerFromPlainText((plain || "").replace(/\r\n/g, "\n")).trimEnd();
+  let raw = stripStarterPreviewDisclaimerFromPlainText((plain || "").replace(/\r\n/g, "\n")).trimEnd();
+  if (opts.suppressCorpusEmbeddedSignatureForDisplay) {
+    raw = stripCorpusSignatureRegionForExternalSignerUi(raw);
+  }
   const chunks = raw.split(/\n\n+/);
   const out: string[] = [];
 
@@ -235,6 +257,14 @@ export function buildPremiumAgreementReadonlyHtml(
       /(<p>[\s\S]*?)(To be selected in review\.)/i,
       (_m, before, mid) => `${before}${mid}${premiumCalloutInline("Select jurisdiction before signing.")}`,
     );
+  }
+  if (opts.suppressCorpusEmbeddedSignatureForDisplay) {
+    logSignaturePreviewMode({
+      mode: "decorative_fallback_signature_card",
+      hasCorpusSignatureBlock: false,
+      signerCount: opts.partyNames.length,
+    });
+    return html;
   }
   const previewMode = resolvePremiumSignaturePreviewMode(raw, opts.partyNames.length, {
     forceEmbeddedCorpusSignature: opts.forceEmbeddedCorpusSignature,

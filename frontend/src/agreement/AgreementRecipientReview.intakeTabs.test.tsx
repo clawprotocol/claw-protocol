@@ -79,7 +79,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(screen.getAllByTestId("recipient-revised-version-panel")[0]).toBeTruthy();
     expect(screen.queryByTestId("recipient-quick-change-panel")).toBeNull();
     expect(screen.queryByTestId("recipient-manual-propose-controls")).toBeNull();
-    expect(screen.getAllByText("Propose updated agreement").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Suggest revision").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Edit your agreement in any software you prefer/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/LawDog will compare the wording and show all material changes before submission/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();

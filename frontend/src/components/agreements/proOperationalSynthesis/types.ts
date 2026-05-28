@@ -1,4 +1,5 @@
 /** Internal structures for Pro operational agreement synthesis (client-side). */
+import type { CommercialFactGraph } from "./commercialFactGraph";
 
 export type PartyResponsibilityProfile = {
   party: string;
@@ -61,6 +62,7 @@ export type SectionPurityIssue = {
 export type ProOperationalSynthesisResult = {
   responsibilities: PartyResponsibilityProfile[];
   dealDna: DealDnaProfile;
+  commercialFactGraph: CommercialFactGraph;
   materialAskLines: string[];
   modelGuidanceBlock: string;
 };

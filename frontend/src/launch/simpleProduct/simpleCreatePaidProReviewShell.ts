@@ -12,7 +12,7 @@ export const SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE = "Review your Pro agreement";
 export { PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID } from "../../lib/premiumPostCheckoutReturnUx";
 
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE =
-  "Your agreement is ready. Edit it, send it for review, or start signatures.";
+  "Nothing is sent or signed until you choose the next step.";
 
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE = AGREEMENT_LIFECYCLE_CONTROL_LINE;
 
@@ -29,10 +29,10 @@ export const SIMPLE_CREATE_STARTER_HERO_SUBHEAD =
 export const SIMPLE_CREATE_STARTER_CONTROL_LINE =
   "You control the next step — review, improve, share, sign, or stop.";
 
-export const PRO_REVIEW_DOCUMENT_PANEL_HEADING = "Review your draft";
+export const PRO_REVIEW_DOCUMENT_PANEL_HEADING = "Review your Pro agreement";
 
 export const PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY =
-  "Built from your deal terms — share for comments, or move to signatures when it reads right.";
+  "Nothing is sent or signed until you choose the next step.";
 
 /**
  * `/app/create` shell chrome: suppress generic “Create an agreement in minutes” marketing while authoritative

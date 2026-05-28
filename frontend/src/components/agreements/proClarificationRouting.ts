@@ -10,7 +10,7 @@ export type ProIntelligenceClarificationRoutingContext = {
   agreementValidation?: AgreementValidationResult | null;
 };
 
-function hasCredibleAgreementValidation(
+export function hasCredibleAgreementValidation(
   validation: AgreementValidationResult | null | undefined,
 ): validation is AgreementValidationResult {
   if (!validation || typeof validation.passed !== "boolean") return false;
@@ -170,28 +170,6 @@ function recommendedQuestionToVariable(q: RecommendedQuestion): DealVariable {
   };
 }
 
-function repairNeededVariable(failureCodes: string[]): DealVariable {
-  return {
-    id: "agreement_validation_repair_needed",
-    category: "general",
-    label: "Quality pass required",
-    question: "This draft needs a quality pass before signing.",
-    severity: "important",
-    suggestedDefaults: [],
-    agreementImpact: failureCodes.length
-      ? `Validation failures: ${failureCodes.slice(0, 4).join(", ")}`
-      : "The draft did not pass deterministic quality checks.",
-    requiredForExecution: true,
-    applicableAgreementFamilies: ["generic_business_agreement"],
-    uiControlType: "text",
-    currentValue: null,
-    confidence: 1,
-    affectsSections: [],
-    questionType: "REQUIRED_COMPLETION",
-    semanticIntent: "validation_repair_needed",
-  };
-}
-
 export function resolveProClarificationRouting(args: {
   agreementIntelligence?: AgreementIntelligence | null;
   agreementValidation?: AgreementValidationResult | null;
@@ -223,7 +201,7 @@ export function resolveProClarificationRouting(args: {
     return {
       mode: "validation_repair_needed",
       message: "This draft needs a quality pass before signing.",
-      questions: [repairNeededVariable(failureCodes)],
+      questions: [],
       failureCodes,
       skippedStaticFallback: true,
     };

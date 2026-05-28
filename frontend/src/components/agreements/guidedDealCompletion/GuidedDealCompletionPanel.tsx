@@ -5,6 +5,7 @@ import {
   getCurrentVariable,
   guidedSessionIntro,
 } from "./guidedCompletionEngine";
+import { shouldShowGuidedSessionIntro } from "./userAnswerableGuidedQuestion";
 import {
   computeGuidedVisibleQuestionAccounting,
   formatGuidedProgressLabel,
@@ -81,7 +82,8 @@ export function GuidedDealCompletionPanel({
   compact = false,
   suppressFreeformBranching = false,
 }: GuidedDealCompletionPanelProps) {
-  const intro = useMemo(() => guidedSessionIntro(session), [session]);
+  const showSessionIntro = shouldShowGuidedSessionIntro(session);
+  const intro = useMemo(() => (showSessionIntro ? guidedSessionIntro(session) : null), [session, showSessionIntro]);
   const current = getCurrentVariable(session);
   const collecting = phase === "collecting_answers";
   const readyToApply = phase === "ready_to_apply" || phase === "failed";
@@ -312,6 +314,8 @@ export function GuidedDealCompletionPanel({
   const showSavedOnQuestion = savedPulse && holdQuestionId === displayQuestion?.id;
   const showSkippedOnQuestion = skipFlash && holdQuestionId === displayQuestion?.id;
 
+  if (!showSessionIntro) return null;
+
   if (readyToApply || applying) {
     const failed = phase === "failed";
     return (
@@ -367,7 +371,9 @@ export function GuidedDealCompletionPanel({
       <GuidedReviewFlowBanner guidedActive phase={phase} className="mb-3" />
       <p className="text-base font-semibold tracking-tight text-stone-950">{GUIDED_COMPLETION_HEADING}</p>
       <p className="mt-1.5 text-xs leading-relaxed text-stone-600 sm:text-[13px]">{GUIDED_COMPLETION_SUBHEADING}</p>
-      <p className="mt-2 text-xs leading-relaxed text-stone-500">{intro.subline}</p>
+      {intro?.subline ? (
+        <p className="mt-2 text-xs leading-relaxed text-stone-500">{intro.subline}</p>
+      ) : null}
 
       <div className="mt-4 flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold tabular-nums text-stone-800" data-testid="guided-progress-count">

@@ -20,6 +20,10 @@ import {
 } from "./agreementPreviewPlaceholderTransientGate";
 import { formatStarterPreviewForDisplay } from "./starterPreviewFormatting";
 import { repairMoneyCommaBracketPlaceholderCorruption } from "./agreementMoneyPlaceholderRepair";
+import {
+  isHarmlessEntityMetadataBracketToken,
+  neutralizeHarmlessEntityMetadataPlaceholders,
+} from "./harmlessEntityMetadataPlaceholders";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -830,6 +834,9 @@ export function classifyTemplateFragment(
 
   if (token.startsWith("[") && token.endsWith("]")) {
     const inner = bracketInner(token);
+    if (isHarmlessEntityMetadataBracketToken(token)) {
+      return { ...base, category: "soft_field_label", fatal: false };
+    }
     if (inExec && isSignatureFieldLabel(inner)) {
       return { ...base, category: "soft_field_label", fatal: false };
     }
@@ -930,6 +937,11 @@ export function repairAgreementTemplatePlaceholders(
   if (moneyRepair.repairs.length) {
     out = moneyRepair.text;
     repaired.push(...moneyRepair.repairs);
+  }
+  const entityNeutral = neutralizeHarmlessEntityMetadataPlaceholders(out);
+  if (entityNeutral.repairs.length) {
+    out = entityNeutral.text;
+    repaired.push(...entityNeutral.repairs);
   }
   const resolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
   const names = resolution.names;
@@ -1138,6 +1150,11 @@ export function finalizeUserVisibleAgreementPlainText(
   );
   if (isCanonicalCommittedText(prepared)) {
     prepared = stripCanonicalCommitMarker(prepared);
+  } else if (
+    ctx.surface === "premium_completion_pipeline" &&
+    prepared.trim().length >= 1_500
+  ) {
+    // Accepted server_full_draft already ran applyAcceptedProCorpusSafeDisplay — avoid re-polish shrink.
   } else {
     const polish = applyPaidProRenderPolish(prepared, intakeRaw, partyResolution.names, {
       surface: ctx.surface,

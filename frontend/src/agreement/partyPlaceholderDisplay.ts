@@ -11,7 +11,7 @@
 
 import { extractBetweenPartyNameList } from "../components/agreements/partyBetweenParse";
 
-const ENTITY_SUFFIX = /(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|PC|P\.C\.)/i;
+const ENTITY_SUFFIX = /(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|PC|P\.C\.|Co\.?|Company)/i;
 
 function pushUnique(out: string[], seen: Set<string>, raw: string) {
   const t = raw.replace(/\s+/g, " ").trim();
@@ -50,7 +50,7 @@ export function extractAgreementEntityCandidates(context: string): string[] {
   }
 
   for (const m of text.matchAll(
-    /\b([A-Z][\w.&'’\-]+(?:\s+[A-Z][\w.&'’\-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?|LLP|PLLC))\b/g,
+    /\b([A-Z][\w.&'’\-]+(?:\s+[A-Z][\w.&'’\-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\b/g,
   )) {
     pushUnique(out, seen, m[1]);
   }

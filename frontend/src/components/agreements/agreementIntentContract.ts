@@ -12,7 +12,9 @@ import { extractIntakePayment, hasExplicitPerInstallmentAmountInIntake, normaliz
 import { isLikelyFiveSectionStarterShellPro } from "./premiumFullDraftClientAcceptance";
 
 const FOUNDRY_CUES = /\b(60\s*\/\s*40|40\s*\/\s*60|vesting|founder equity|cap table|four-?year|cliff|accelerat)/i;
-const ESTATE_CUES = /\b(estate|sibling|inherit|probate|will|executor|heir|dad|mom|parent|descendent)\b/i;
+/** Estate/family context only — exclude modal “will” (e.g. “Party A will pay”). */
+const ESTATE_CUES =
+  /\b(estate|sibling|inherit|probate|(?:last|living)\s+will|testament|executor|heir|dad|mom|parent|descendent)\b/i;
 const FOUNDRY_LIKELY = /\b(vest|founder|60\s*\/\s*40|startup equity|reprice|s\d{1}\b|seeds?\s+round)/i;
 
 /** Same rules as `rejectCrossPromptContamination` in paid-pro (duplicated to avoid an import cycle). */
@@ -63,7 +65,10 @@ export type AgreementIntentContract = {
   user_fact_summary: string;
 };
 
-const ESTATE = /\b(estate|sibling|inherit|probate|will|executor|heir|dad|mom|parent|descendent|funeral|caregiving|elder)\b/i;
+const ESTATE =
+  /\b(estate|sibling|inherit|probate|(?:last|living)\s+will|testament|executor|heir|dad|mom|parent|descendent|funeral|caregiving|elder)\b/i;
+const SERVICES_AGREEMENT =
+  /\b(?:simple\s+)?services?\s+agreement\b|\bprofessional\s+services?\s+agreement\b|\bmaster\s+services?\s+agreement\b/i;
 const RENT = /\b(roommate|sublet|lease|landlord|tenant|rent|utilities?|security\s+deposit|hoa|premises|unit)\b/i;
 const NDA = /\b(nda|non[-\s]?disclosure|confidentiality\s+agreement|confidential\s+information|trade\s+secret)\b/i;
 const SETTLE = /\b(settlement|mutual\s+release|release\s+of\s+claims|dispute\s+settled|dismiss(ing|ed)?\s+with\s+prejudice)\b/i;
@@ -71,7 +76,8 @@ const EMP = /\b(employment|w-2|w2|at-?will|employee|salary|payroll|offer\s+lette
 const C1099 = /\b(1099|independent\s+contractor|freelance|consulting\s+agreement|sow|retainer|hourly\s+rate)\b/i;
 const CONSULT = /\b(consult|advisory|retainer|msa|master\s+service|sow|deliverables|statement\s+of\s+work)\b/i;
 const LOAN = /\b(loan|lent|borrow|lend|repay|installment|promissory|principal|interest|apr|iou)\b/i;
-const WEB = /\b(website|web\s*site|web\s+app|saas|api|software\s+develop|devops|hosting|cms|web\s+build|reseller|white[-\s]?label|workflow\s+automation)\b/i;
+const WEB =
+  /\b(website|web\s*site|web\s+app|saas|api|software\s+develop|devops|hosting|cms|web\s+build|reseller|white[-\s]?label|workflow\s+automation|ai\s+workflow|workflow\s+setup)\b/i;
 const DESIGN = /\b(logo|brand|graphic\s+design|illustrat|creative\s+direct|design\s+services|branding)\b/i;
 
 function collapse(s: string): string {
@@ -280,6 +286,82 @@ function contractConsulting(raw: string): AgreementIntentContract {
   };
 }
 
+/** True when intake describes a B2B/commercial services deal (not family estate administration). */
+export function isCommercialServicesIntake(raw: string | null | undefined): boolean {
+  const t = collapse((raw || "").replace(/\r\n/g, "\n"));
+  if (!t) return false;
+  const low = t.toLowerCase();
+  if (intakeHasEstateFamilyContext(t)) return false;
+  if (SERVICES_AGREEMENT.test(t)) return true;
+  if (
+    /\b(LLC|L\.L\.C\.|Inc\.|Corp\.|Corporation|Ltd\.)\b/i.test(t) &&
+    /\$|(?:\d{1,3}(?:,\d{3})+)\s*(?:usd|dollars?)?/i.test(t) &&
+    /\b(services?|scope|workflow|setup|deliver|project|agreement between)\b/i.test(low)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function intakeHasEstateFamilyContext(raw: string | null | undefined): boolean {
+  return ESTATE.test(collapse((raw || "").replace(/\r\n/g, "\n")));
+}
+
+type ValidationMinimumElementsInput = {
+  passed?: boolean;
+  minimum_contract_elements?: {
+    identifiable_parties?: boolean;
+    agreement_purpose_or_scope?: boolean;
+    exchange_of_value_or_consideration?: boolean;
+    obligations_or_performance?: boolean;
+    execution_or_acceptance_mechanism?: boolean;
+  };
+};
+
+export function validationMinimumContractElementsSatisfied(
+  validation: ValidationMinimumElementsInput | null | undefined,
+): boolean {
+  if (!validation || validation.passed !== true) return false;
+  const m = validation.minimum_contract_elements;
+  if (!m) return false;
+  return Boolean(
+    m.identifiable_parties &&
+      m.agreement_purpose_or_scope &&
+      m.exchange_of_value_or_consideration &&
+      m.obligations_or_performance &&
+      m.execution_or_acceptance_mechanism,
+  );
+}
+
+/**
+ * Paid Pro validation intent: fixes modal-“will” estate misroutes and prefers commercial services
+ * when backend validation confirms minimum contract elements.
+ */
+export function resolvePaidProIntentContract(args: {
+  rawIntake: string | null | undefined;
+  draftFamily?: string | null;
+  agreementValidation?: ValidationMinimumElementsInput | null;
+}): AgreementIntentContract {
+  const raw = collapse((args.rawIntake || "").replace(/\r\n/g, "\n"));
+  let contract = resolveAgreementIntentContract(raw);
+  const family = (args.draftFamily || "").toLowerCase();
+  const validationOk = validationMinimumContractElementsSatisfied(args.agreementValidation);
+
+  if (contract.intent_id === "estate_family_admin" && isCommercialServicesIntake(raw)) {
+    contract = contractConsulting(raw);
+  } else if (validationOk && contract.intent_id === "estate_family_admin") {
+    contract = contractConsulting(raw);
+  } else if (
+    validationOk &&
+    /services|consult|professional|software|web|generic_business/i.test(family) &&
+    contract.intent_id === "estate_family_admin"
+  ) {
+    contract = contractConsulting(raw);
+  }
+
+  return contract;
+}
+
 function contractUnknown(summary: string, len: number): AgreementIntentContract {
   const longEnough = len >= 36;
   return {
@@ -350,7 +432,10 @@ export function resolveAgreementIntentContract(rawIntake: string | null | undefi
       raw,
     );
   }
-  if (ESTATE.test(raw) && !/b2b|invoice|saas|vendor|msa|enterprise|logo contract/i.test(raw)) {
+  if (SERVICES_AGREEMENT.test(raw) && isCommercialServicesIntake(raw)) {
+    return contractConsulting(raw);
+  }
+  if (intakeHasEstateFamilyContext(raw) && !/b2b|invoice|saas|vendor|msa|enterprise|logo contract/i.test(raw)) {
     return contractEstate(raw);
   }
   if (NDA.test(raw)) {
@@ -598,6 +683,8 @@ export function validateIntentContractForPaidProOutput(args: {
    * Softens only **title stem vs. intent_id** mismatch — never cross-intake, loan, or design title rules.
    */
   authoritativeProPipelineAccepted?: boolean;
+  /** When backend validation passed with minimum contract elements, allows minimalist commercial Pro bodies. */
+  agreementValidation?: ValidationMinimumElementsInput | null;
 }): { ok: boolean; reasons: string[] } {
   const c = args.contract;
   const authoritative = Boolean(args.authoritativeProPipelineAccepted);
@@ -681,6 +768,15 @@ export function validateIntentContractForPaidProOutput(args: {
     if (hit < Math.min(2, needed)) {
       if (docLen >= 10_000 && hasOperativeProDepth(hay, docLen)) {
         /* Long, operative Pro pass — do not fail on 1–2 synonym swaps vs. stem list */
+      } else if (
+        validationMinimumContractElementsSatisfied(args.agreementValidation) &&
+        (c.intent_id === "consulting_services" ||
+          c.intent_id === "software_web_dev" ||
+          c.intent_id === "employment_contractor") &&
+        docLen >= 500 &&
+        hasOperativeProDepth(hay, docLen, 2_500)
+      ) {
+        /* Validation-backed minimalist commercial services / software Pro */
       } else {
         return { ok: false, reasons: [`intent:insufficient_operative_substance:${c.intent_id}`] };
       }

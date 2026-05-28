@@ -3,6 +3,10 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { corpusMatchesFreeBasicDraft, premiumReadonlyCorpusSignalHits } from "./premiumReadonlyRenderCorpus";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { tryBuildPaidProLocalDeterministicFallback } from "./paidProLocalDeterministicFallback";
+import {
+  isPremiumGenerationApiUnavailablePipelineSource,
+  MIN_PAID_PRO_AUTHORITY_LEN,
+} from "./premiumGenerationApiAvailability";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
@@ -131,6 +135,15 @@ export function validatePaidProCorpusCandidate(args: {
     };
   }
 
+  if (isPremiumGenerationApiUnavailablePipelineSource(args.pipelineSource)) {
+    if (args.tier === "deterministic_paid_pro_fallback") {
+      reasons.push("api_unavailable_local_fallback_blocked");
+    }
+    if (args.tier === "locally_generated_paid_pro" && t.length < MIN_PAID_PRO_AUTHORITY_LEN) {
+      reasons.push("api_unavailable_short_live_preview_blocked");
+    }
+  }
+
   if (!t) reasons.push("empty_body");
   if (t.length < minLen) reasons.push(`too_short:${t.length}`);
   if (isTruncatedOrPlaceholderCorpus(t)) reasons.push("truncated_or_placeholder");
@@ -252,7 +265,10 @@ export function resolvePaidProCorpusAuthority(args: {
     });
   }
 
-  if (args.allowDeterministicFallback !== false && args.intakeText) {
+  const apiUnavailable = args.candidates.some((c) =>
+    isPremiumGenerationApiUnavailablePipelineSource(c.pipelineSource),
+  );
+  if (args.allowDeterministicFallback !== false && !apiUnavailable && args.intakeText) {
     const local = tryBuildPaidProLocalDeterministicFallback(args.intakeText, args.draft);
     if (local) {
       const validation = validatePaidProCorpusCandidate({

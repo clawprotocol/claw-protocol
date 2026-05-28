@@ -59,7 +59,6 @@ export function isHighConfidencePartyNameForAutoPopulation(name: string): boolea
 export function getSafeFallbackPartyLabels(agreementFamily?: string | null): [string, string] {
   switch (agreementFamily) {
     case "independent_contractor_agreement":
-      return ["Company", "Contractor"];
     case "consulting_agreement":
     case "services_agreement":
       return ["Service Provider", "Client"];

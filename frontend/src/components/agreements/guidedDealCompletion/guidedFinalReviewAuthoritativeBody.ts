@@ -11,7 +11,11 @@ import {
   buildCanonicalFinalPartyManifestFromIdentities,
   type CanonicalFinalPartyManifest,
 } from "./canonicalFinalPartyManifest";
-import { buildCanonicalAgreementSnapshot } from "../canonicalAgreementSnapshot";
+import {
+  buildCanonicalAgreementSnapshot,
+  readCanonicalAgreementCorpusForSurface,
+} from "../canonicalAgreementSnapshot";
+import { getPaidProDocumentForSurface } from "../paidProSourceOfTruth";
 
 export const GUIDED_FINAL_REVIEW_AUTHORITATIVE_MIN_LEN = 1500;
 
@@ -90,7 +94,7 @@ export type GuidedFinalReviewAuthoritativeCandidate = {
 
 export type GuidedFinalReviewAuthoritativeBodyResolution = {
   body: string;
-  source: GuidedFinalCorpusCandidateSource | "none";
+  source: GuidedFinalCorpusCandidateSource | "paidProSourceOfTruth" | "none";
   len: number;
   hasSignerHydration: boolean;
   finalizedHash: string;
@@ -137,6 +141,30 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
   const identities = args.signerIdentities ?? [];
   const hasSignerHydration = identities.filter((p) => p.partyDisplayName.trim().length >= 2).length >= 2;
   const signingReady = args.signingCorpusReady ?? false;
+  const canonical = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
+  if (canonical) {
+    const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
+      body: canonical.canonicalText,
+      source: "paidProSourceOfTruth",
+      len: canonical.len,
+      hasSignerHydration,
+      finalizedHash: canonical.hash,
+    };
+    logGuidedFinalReviewAuthoritativeBody(resolution);
+    return resolution;
+  }
+  const paidPro = getPaidProDocumentForSurface("review");
+  if (paidPro) {
+    const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
+      body: paidPro.text,
+      source: "paidProSourceOfTruth",
+      len: paidPro.text.length,
+      hasSignerHydration,
+      finalizedHash: paidPro.hash,
+    };
+    logGuidedFinalReviewAuthoritativeBody(resolution);
+    return resolution;
+  }
 
   const pinned = args.pinnedFinalizedSignerCorpus;
   if (pinned && pinned.body.length >= minLen) {

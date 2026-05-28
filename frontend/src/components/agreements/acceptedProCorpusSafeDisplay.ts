@@ -1,0 +1,105 @@
+/**
+ * Emergency-only formatting for accepted paid Pro `server_full_draft` corpus.
+ * No renumbering, dedupe, canonical reconstruction, or enterprise polish.
+ */
+
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  intakeHasFullLegalEntityParties,
+  resolveCanonicalPartyIdentitiesFromIntake,
+} from "./canonicalPartyIdentityResolver";
+import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
+import { neutralizeHarmlessEntityMetadataPlaceholders } from "./harmlessEntityMetadataPlaceholders";
+
+export type AcceptedProCorpusSafeDisplayOpts = {
+  draft?: ParsedDraftShape | null;
+  intakeText?: string | null;
+  /** When true, append execution/signature block only if missing (VS01 signing). */
+  appendExecutionBlockIfMissing?: boolean;
+};
+
+export type AcceptedProCorpusSafeDisplayResult = {
+  text: string;
+  repairs: string[];
+};
+
+function wouldMateriallyShrinkAcceptedCorpus(before: number, after: number): boolean {
+  return before >= 1_500 && after < before * 0.8;
+}
+
+export function basicAcceptedProCorpusNormalize(text: string): string {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\s+$/g, "");
+}
+
+/** Strip markdown heading/bold artifacts without restructuring clauses. */
+export function stripAcceptedProMarkdownArtifacts(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = text;
+  const before = out;
+  out = out.replace(/^\s{0,3}#{1,6}\s+/gm, "");
+  out = out.replace(/\*\*([^*\n]+)\*\*/g, "$1");
+  out = out.replace(/__([^_\n]+)__/g, "$1");
+  if (out !== before) repairs.push("safe:strip_markdown_artifacts");
+  return { text: out, repairs };
+}
+
+function canonicalPartyNamesFromDraft(draft: ParsedDraftShape | null | undefined): string[] {
+  return (draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((name) => name.length >= 2)
+    .slice(0, 2);
+}
+
+/**
+ * Deterministic safe display for accepted Pro corpus — must not materially change body length or structure.
+ */
+export function applyAcceptedProCorpusSafeDisplay(
+  raw: string,
+  opts?: AcceptedProCorpusSafeDisplayOpts,
+): AcceptedProCorpusSafeDisplayResult {
+  const input = String(raw || "").replace(/\s+$/g, "");
+  if (!input.trim()) return { text: "", repairs: [] };
+  const repairs: string[] = [];
+  let out = basicAcceptedProCorpusNormalize(input);
+
+  const md = stripAcceptedProMarkdownArtifacts(out);
+  out = md.text;
+  repairs.push(...md.repairs);
+
+  const entityNeutral = neutralizeHarmlessEntityMetadataPlaceholders(out);
+  out = entityNeutral.text;
+  repairs.push(...entityNeutral.repairs);
+
+  const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
+  const intakeRaw = opts?.intakeText ?? null;
+  const hasFullLegal = intakeHasFullLegalEntityParties(intakeRaw, partyNames);
+  const records = hasFullLegal ? resolveCanonicalPartyIdentitiesFromIntake(intakeRaw, partyNames) : [];
+
+  if (opts?.appendExecutionBlockIfMissing && records.length >= 2) {
+    const exec = appendProExecutionBlockIfMissing(out, records);
+    if (exec.text !== out) {
+      out = exec.text;
+      repairs.push("safe:append_execution_block");
+    }
+  }
+
+  if (wouldMateriallyShrinkAcceptedCorpus(input.length, out.length)) {
+    return {
+      text: input,
+      repairs: [...repairs, "safe:shrink_blocked"],
+    };
+  }
+
+  return { text: out, repairs: [...new Set(repairs)] };
+}
+
+/** VS01 may differ from review display only by a safely appended execution block. */
+export function applyAcceptedProCorpusForVs01Signing(
+  raw: string,
+  opts?: AcceptedProCorpusSafeDisplayOpts,
+): AcceptedProCorpusSafeDisplayResult {
+  return applyAcceptedProCorpusSafeDisplay(raw, { ...opts, appendExecutionBlockIfMissing: true });
+}

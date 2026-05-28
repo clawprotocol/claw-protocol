@@ -2,6 +2,7 @@
  * AI migration / tech services / SaaS-MSA intake signals for guided deal completion.
  */
 
+import { intakeHasFullLegalEntityParties, intakeSpecifiesSimpleFixedFee } from "../canonicalPartyIdentityResolver";
 import { bodyHasLoosePhaseScheduleBeforeSignatures } from "./bodyMaterialPlaceholderScanner";
 
 export type ServicesMigrationIntakeSignals = {
@@ -44,20 +45,26 @@ export function analyzeServicesMigrationIntake(
       (migration && services) ||
       /\b(?:ai\s+migration|cloud\s+migration|software\s+integration)\b/.test(combined),
     mentionsPhases:
-      /\b(?:phase|build|rollout|support\s+phase|milestone)\b/.test(combined) ||
-      bodyHasLoosePhaseScheduleBeforeSignatures(body || ""),
+      intakeSpecifiesSimpleFixedFee(intakeRaw)
+        ? false
+        : /\b(?:phase|build|rollout|support\s+phase|milestone|schedule\s+a)\b/.test(combined) ||
+          bodyHasLoosePhaseScheduleBeforeSignatures(body || ""),
     vagueFee:
-      /\b(?:maybe|approximately|about|roughly|probably)\s*\$?\s*[\d,]+/i.test(intake) ||
-      /\b(?:maybe|probably)\s+[\d,]+k?\b/i.test(intake) ||
-      /\b(?:TBD|\?\?\?)\b/.test(intake) ||
-      /\bto be confirmed\b/i.test(bodyLow) ||
-      /\bamount\s+to\s+be\s+agreed\b/i.test(bodyLow) ||
-      /\bestimated\s+only\b/i.test(bodyLow) ||
-      !/\$\s*[\d,]{3,}/.test(bodyLow),
+      intakeSpecifiesSimpleFixedFee(intakeRaw)
+        ? false
+        : /\b(?:maybe|approximately|about|roughly|probably)\s*\$?\s*[\d,]+/i.test(intake) ||
+          /\b(?:maybe|probably)\s+[\d,]+k?\b/i.test(intake) ||
+          /\b(?:TBD|\?\?\?)\b/.test(intake) ||
+          /\bto be confirmed\b/i.test(bodyLow) ||
+          /\bamount\s+to\s+be\s+agreed\b/i.test(bodyLow) ||
+          /\bestimated\s+only\b/i.test(bodyLow) ||
+          (!/\$\s*[\d,]{3,}/.test(bodyLow) && !/\$\s*[\d,]{3,}/.test(intake)),
     informalParties:
-      (lighthouseArchetype && !/\b(?:LLC|Inc\.|Corp\.|L\.P\.|LP)\b/i.test(bodyLow.slice(0, 1500))) ||
-      (/\b(?:between|among)\s+[A-Za-z][^.]{0,40}\s+and\s+[A-Za-z][^.]{0,40}\b/i.test(intake) &&
-        !/\b(?:LLC|Inc\.|Corp\.|L\.P\.|LP)\b/i.test(intake.slice(0, 400))),
+      intakeHasFullLegalEntityParties(intakeRaw)
+        ? false
+        : (lighthouseArchetype && !/\b(?:LLC|Inc\.|Corp\.|L\.P\.|LP)\b/i.test(bodyLow.slice(0, 1500))) ||
+          (/\b(?:between|among)\s+[A-Za-z][^.]{0,40}\s+and\s+[A-Za-z][^.]{0,40}\b/i.test(intake) &&
+            !/\b(?:LLC|Inc\.|Corp\.|L\.P\.|LP)\b/i.test(intake.slice(0, 400))),
     mentionsSupport: /\b(?:support|maintenance|handoff|hypercare)\b/.test(combined),
     mentionsSla: /\b(?:sla|uptime|availability|response\s+time)\b/.test(combined),
     mentionsSecurity: /\b(?:security|cyber|data\s+protection|privacy)\b/.test(combined),

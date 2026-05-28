@@ -104,14 +104,15 @@ export function resolveGuidedCompletionRenderState(
   const bodyUsable = args.bodyUsable ?? bodyText.length >= 500;
 
   const session =
-    args.guidedSession ??
-    (bodyText.length >= 200
-      ? buildGuidedSessionFromAgreement({
-          intakeRaw: intakeText || null,
-          body: bodyText,
-          materialItems: args.materialMissingItems,
-        })
-      : null);
+    args.guidedSession !== undefined
+      ? args.guidedSession
+      : bodyText.length >= 200
+        ? buildGuidedSessionFromAgreement({
+            intakeRaw: intakeText || null,
+            body: bodyText,
+            materialItems: args.materialMissingItems,
+          })
+        : null;
 
   const unresolvedRenderableCount = countUnresolvedRenderableVariables(session);
   const current = args.currentVariable ?? (session ? getCurrentVariable(session) : null);

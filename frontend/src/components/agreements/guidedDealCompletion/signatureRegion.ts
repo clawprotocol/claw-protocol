@@ -113,8 +113,11 @@ export function countSignatureByLinesInTail(text: string): number {
 
 export function corpusHasVisibleSignatureExecutionLines(text: string): boolean {
   const trimmed = (text || "").trim();
-  if (!/\bIN WITNESS WHEREOF\b/i.test(trimmed)) return false;
-  return /^\s*(?:By|Signature)\s*:/im.test(trimmed);
+  return countSignatureExecutionLinesInTail(trimmed) > 0;
+}
+
+export function corpusHasWitnessBlock(text: string): boolean {
+  return /\bIN WITNESS WHEREOF\b/i.test((text || "").trim());
 }
 
 export function corpusSignatureBlocksHaveRequiredByLines(

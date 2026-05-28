@@ -1,10 +1,15 @@
 import type {
+  AgreementIntelligence,
   AgreementValidationResult,
   PremiumFinalizationClarificationAnswer,
   PremiumFinalizationReason,
   PremiumFinalizationResult,
 } from "./premiumFullDraftApi";
-import type { ProClarificationRoutingState } from "./proClarificationRouting";
+import {
+  hasCredibleAgreementValidation,
+  shouldUseProIntelligenceClarificationRouting,
+  type ProClarificationRoutingState,
+} from "./proClarificationRouting";
 import type { GuidedCompletionSession } from "./guidedDealCompletion/types";
 
 export const PREMIUM_FINALIZATION_REPAIR_NEEDED_MESSAGE =
@@ -85,6 +90,7 @@ export function buildPremiumFinalizationInputSignature(args: {
 
 export function resolvePremiumFinalizationDecision(args: {
   routing: ProClarificationRoutingState | null;
+  agreementIntelligence?: AgreementIntelligence | null;
   agreementValidation?: AgreementValidationResult | null;
   session?: GuidedCompletionSession | null;
   firstDraft: string;
@@ -106,12 +112,30 @@ export function resolvePremiumFinalizationDecision(args: {
     return { shouldFinalize: true, reason: "forced", signature, clarificationAnswers };
   }
   if (args.agreementValidation?.passed === false) {
+    if (!hasCredibleAgreementValidation(args.agreementValidation)) {
+      return { shouldFinalize: false, reason: "not_needed", signature, clarificationAnswers };
+    }
     return { shouldFinalize: true, reason: "validation_failed", signature, clarificationAnswers };
   }
   if (clarificationAnswers.length > 0 && args.routing?.mode === "material_questions") {
+    if (
+      !shouldUseProIntelligenceClarificationRouting({
+        agreementIntelligence: args.agreementIntelligence,
+        agreementValidation: args.agreementValidation,
+      })
+    ) {
+      return { shouldFinalize: false, reason: "not_needed", signature, clarificationAnswers };
+    }
     return { shouldFinalize: true, reason: "clarifications_answered", signature, clarificationAnswers };
   }
   return { shouldFinalize: false, reason: "not_needed", signature, clarificationAnswers };
+}
+
+/** Block recipient/signer advance when silent validation repair failed. */
+export function proValidationRepairBlocksRecipientAdvance(
+  repairUx: "idle" | "finalizing" | "blocked" | "clear",
+): boolean {
+  return repairUx === "blocked";
 }
 
 export function premiumFinalizationAllowsSigning(result: PremiumFinalizationResult): boolean {

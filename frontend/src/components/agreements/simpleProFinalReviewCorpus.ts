@@ -3,6 +3,8 @@
  */
 
 import { GUIDED_MIN_AUTHORITATIVE_BODY_LEN } from "./guidedDealCompletion/guidedCompletionRenderAuthority";
+import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
+import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
 
 /** Final review requires a full Pro agreement — not a signature-only fragment. */
 export const GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN = 1500;
@@ -58,6 +60,28 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   /** Immutable pinned signer-applied body — never compete with picker/server length. */
   pinnedFinalizedSignerPlain?: string | null;
 }): SimpleProFinalReviewCorpusResolution {
+  const canonical = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
+  if (canonical) {
+    return {
+      plainText: canonical.canonicalText,
+      source: "authoritative_hydrated",
+      authoritativeLen: canonical.len,
+      renderedLen: norm(args.renderedPreviewPlain).length,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
+  const paidPro = getPaidProDocumentForSurface("review");
+  if (paidPro) {
+    return {
+      plainText: paidPro.text,
+      source: "authoritative_hydrated",
+      authoritativeLen: paidPro.text.length,
+      renderedLen: norm(args.renderedPreviewPlain).length,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
   const pinned = norm(args.pinnedFinalizedSignerPlain);
   if (pinned.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
     return {

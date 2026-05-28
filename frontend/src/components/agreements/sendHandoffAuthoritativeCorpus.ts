@@ -4,6 +4,9 @@ import { corpusHasVisibleSignatureExecutionLines } from "./guidedDealCompletion/
 import { resolvePaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { escapeHtml } from "./premiumAgreementDocumentHtml";
+import { getAcceptedPremiumCanonicalText } from "./acceptedPremiumCanonicalCorpus";
+import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
+import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 
 /** Minimum length to treat plain text as authoritative Pro/full-draft handoff (not starter stub). */
@@ -213,6 +216,18 @@ export function bypassSimpleHomeWatermarkSendGate(
 }
 
 export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | null | undefined): SendHandoffCorpusPick | null {
+  const canonical = readCanonicalAgreementCorpusForSurface("handoff");
+  if (canonical) {
+    return { field: "premium_server_full_document_text", text: canonical.canonicalText };
+  }
+  const paidPro = getPaidProDocumentForSurface("signer_setup");
+  if (paidPro) {
+    return { field: "premium_server_full_document_text", text: paidPro.text };
+  }
+  const acceptedCanonical = getAcceptedPremiumCanonicalText();
+  if (acceptedCanonical.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
+    return { field: "premium_server_full_document_text", text: acceptedCanonical };
+  }
   if (!draft) return null;
   const candidates: [SendHandoffCorpusPick["field"], string][] = [
     ["premium_full_document_text", String(draft.premium_full_document_text ?? "").trim()],

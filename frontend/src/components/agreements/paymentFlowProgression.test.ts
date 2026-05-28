@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   corpusIntegrityFromStructureDefects,
+  isAuthoritativePremiumSnapshotHydratable,
   shouldResolvePostCheckoutFromAuthoritativeSnapshot,
   snapshotReadyForPostCheckoutUnlock,
   withSigningPrepareTimeout,
@@ -53,6 +54,29 @@ describe("paymentFlowProgression", () => {
         snapshot: snap({ intakeTextFingerprint: "other" }),
         intakeFingerprint: "fp-test",
       }),
+    ).toBe(false);
+  });
+
+  it("hydratable snapshot tolerates missing finalization fields", () => {
+    expect(
+      isAuthoritativePremiumSnapshotHydratable(
+        snap({
+          premiumFinalization: undefined,
+          premiumFinalizationInputSignature: undefined,
+          agreementIntelligence: undefined,
+          agreementValidation: undefined,
+        }),
+        "fp-test",
+      ),
+    ).toBe(true);
+  });
+
+  it("non-authoritative short snapshot is not hydratable on payment return", () => {
+    expect(
+      isAuthoritativePremiumSnapshotHydratable(
+        snap({ premiumWinningBodyText: "short", premiumReadonlyPlainText: "short", premiumAccepted: false }),
+        "fp-test",
+      ),
     ).toBe(false);
   });
 

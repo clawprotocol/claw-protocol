@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProReviewSigningFlowPanel } from "./ProReviewSigningFlowPanel";
@@ -21,23 +21,55 @@ const baseFlow = resolveProReviewSigningFlowState({
 });
 
 describe("ProReviewSigningFlowPanel", () => {
-  it("post-recipient flow shows continue and upload edited version", () => {
+  it("final review moment shows Read agreement and Add signers controls", () => {
+    const onContinueToSigning = vi.fn();
+    const onReadAgreement = vi.fn();
     render(
       <ProReviewSigningFlowPanel
         flowState={baseFlow}
         uploadedSource={null}
-        onContinueToSigning={vi.fn()}
+        finalReviewMoment
+        onContinueToSigning={onContinueToSigning}
+        onReadAgreement={onReadAgreement}
+        onUploadFile={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("pro-review-read-agreement")).toBeTruthy();
+    expect(screen.getByTestId("pro-review-continue-to-signing").textContent).toContain(
+      "Add signers / prepare signature links",
+    );
+    fireEvent.click(screen.getByTestId("pro-review-read-agreement"));
+    expect(onReadAgreement).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("pro-review-continue-to-signing"));
+    expect(onContinueToSigning).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
+  it("post-recipient flow shows clear signer prep CTA and hides upload by default", () => {
+    const onContinueToSigning = vi.fn();
+    render(
+      <ProReviewSigningFlowPanel
+        flowState={baseFlow}
+        uploadedSource={null}
+        onContinueToSigning={onContinueToSigning}
         onUploadFile={vi.fn()}
       />,
     );
     expect(screen.getByTestId("pro-review-continue-to-signing")).toBeTruthy();
-    expect(screen.getByTestId("pro-review-upload-edited-version")).toBeTruthy();
+    expect(screen.getByTestId("pro-review-continue-to-signing").textContent).toContain(
+      "Add signers / prepare signature links",
+    );
+    expect(screen.queryByTestId("pro-review-upload-edited-version")).toBeNull();
+    expect(screen.queryByTestId("pro-review-upload-revised-document")).toBeNull();
+    fireEvent.click(screen.getByTestId("pro-review-continue-to-signing"));
+    expect(onContinueToSigning).toHaveBeenCalledTimes(1);
     cleanup();
   });
 
-  it("source includes continue to signing", () => {
+  it("source includes signer-prep copy", () => {
     const src = readFileSync(join(__dirname, "ProReviewSigningFlowPanel.tsx"), "utf8");
-    expect(src).toContain("Continue to signing");
+    expect(src).toContain("Add signers / prepare signature links");
+    expect(src).toContain("showReviewComparisonActions");
   });
 
   it("resolveProReviewSigningFlowState returns final_review by default", () => {

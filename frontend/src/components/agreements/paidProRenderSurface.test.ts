@@ -74,7 +74,7 @@ describe("paid Pro render surface guards", () => {
     }
   });
 
-  it("pickPremiumPaidReadonlyPlainText never surfaces starter hash as paid Pro after checkout", () => {
+  it("pickPremiumPaidReadonlyPlainText does not treat live preview as paid Pro when API is unavailable", () => {
     const draft = redMesaStarterDraft();
     const starter = buildAgreementPreviewTextCore(draft, { starterPreview: true });
     const pick = pickPremiumPaidReadonlyPlainText({
@@ -89,16 +89,9 @@ describe("paid Pro render surface guards", () => {
       authoritativeHydratedPlainText: "",
       lastPremiumPipelineRenderSource: "premium_network_retryable",
     });
-    expect(pick.plainText.length).toBeGreaterThan(1_200);
-    expect(pick.plainText).toContain("$95,000");
-    expect(
-      isFreeStarterCloneOnPaidPro({
-        candidatePlain: pick.plainText,
-        freeBaselinePlain: starter,
-        renderSource: pick.sourceUsed,
-      }),
-    ).toBe(false);
-    expect(pick.sourceUsed).not.toBe("live_generated_preview");
+    expect(pick.plainText).toBe("");
+    expect(pick.sourceUsed).toBe("none");
+    expect(pick.audit.candidates[0]?.reason).toBe("premium_generation_api_unavailable");
   });
 
   it("uses deterministic local Pro fallback with Red Mesa intake economics when premium empty", () => {

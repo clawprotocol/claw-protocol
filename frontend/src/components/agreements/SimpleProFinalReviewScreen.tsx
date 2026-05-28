@@ -402,7 +402,7 @@ export function SimpleProFinalReviewScreen({
                 {exportError}
               </p>
             ) : null}
-            {canEditAgreementText ? (
+            {canEditAgreementText && !suppressPostReviewEditUx ? (
               <button
                 type="button"
                 className="self-start text-[11px] font-medium text-stone-600 underline decoration-stone-400/70 underline-offset-2 hover:text-stone-800"

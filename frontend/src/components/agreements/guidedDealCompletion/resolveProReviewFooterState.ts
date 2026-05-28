@@ -57,7 +57,7 @@ export type ProReviewFooterState = {
 };
 
 function sessionForFooter(args: ResolveProReviewFooterStateArgs): GuidedCompletionSession | null {
-  if (args.guidedSession) return args.guidedSession;
+  if (args.guidedSession !== undefined) return args.guidedSession;
   const body = (args.bodyText || "").trim();
   if (body.length < 200) return null;
   return buildGuidedSessionFromAgreement({

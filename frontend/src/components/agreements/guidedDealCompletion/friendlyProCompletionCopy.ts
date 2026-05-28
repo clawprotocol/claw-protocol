@@ -5,6 +5,7 @@ import {
 import type { GuidedCompletionRenderState } from "./resolveGuidedCompletionRenderState";
 import type { GuidedCompletionSession } from "./types";
 import { guidedSessionIntro, importantVariableCount } from "./guidedCompletionEngine";
+import { shouldShowGuidedSessionIntro } from "./userAnswerableGuidedQuestion";
 
 /** User-facing copy — never expose internal QA / model critique language. */
 const INTERNAL_QA_RE =
@@ -43,20 +44,21 @@ export function friendlyLowConfidenceCopy(
 } {
   const canRender =
     typeof renderState === "boolean" ? renderState : renderState.canRenderGuidedQuestions;
-  if (!canRender) {
+  if (!canRender || !shouldShowGuidedSessionIntro(session)) {
     return {
       title: GUIDED_NEUTRAL_REVIEW_TITLE,
       body: GUIDED_NEUTRAL_REVIEW_COPY,
     };
   }
-  const intro = guidedSessionIntro(session!);
-  const n = importantVariableCount(session!);
+  const intro = guidedSessionIntro(session);
+  const n = importantVariableCount(session);
+  const subline = intro?.subline ?? GUIDED_NEUTRAL_REVIEW_COPY;
   return {
     title: "We're almost done.",
     body:
       n > 0
-        ? `We need ${n} more business decision${n === 1 ? "" : "s"} to finish your agreement. ${intro.subline}`
-        : intro.subline,
+        ? `We need ${n} more business decision${n === 1 ? "" : "s"} to finish your agreement. ${subline}`
+        : subline,
   };
 }
 

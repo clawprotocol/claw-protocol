@@ -8,6 +8,7 @@
  * (includes server-coherent readonly overrides). That function shares the same validators underneath.
  */
 import type { AgreementIntentContract } from "./agreementIntentContract";
+import type { AgreementValidationResult } from "./premiumFullDraftApi";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PipelineProSourceString } from "./paidProCorpusAcceptance";
@@ -94,6 +95,7 @@ export function validateProTruthReadonlyText(
     intentContract: AgreementIntentContract;
     draft: ParsedDraftShape | null;
     premiumPipelineSource?: PipelineProSourceString | string | null;
+    agreementValidation?: AgreementValidationResult | null;
   },
 ): { ok: boolean; reasons: string[] } {
   return validatePaidProOutput(args);

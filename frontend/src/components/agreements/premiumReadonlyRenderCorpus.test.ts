@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as proAgreementCanonicalizer from "./proAgreementCanonicalizer";
+import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   buildPremiumDeliverablePlainTextFromDraft,
@@ -59,6 +61,28 @@ describe("buildPremiumDeliverablePlainTextFromDraft", () => {
 });
 
 describe("pickPremiumPaidReadonlyPlainText", () => {
+  afterEach(() => {
+    clearPaidProSourceOfTruth();
+  });
+
+  it("hard-stops to paidProSourceOfTruth without calling canonicalizer after acceptance", () => {
+    const source = "Accepted paid Pro agreement body. ".repeat(180);
+    establishPaidProSourceOfTruth({ text: source });
+    const spy = vi.spyOn(proAgreementCanonicalizer, "canonicalizeProAgreementText");
+    const out = pickPremiumPaidReadonlyPlainText({
+      premiumReadonlySnapshotText: "x".repeat(624),
+      premiumWinningBodyText: "y".repeat(653),
+      agreementDocumentText: "z".repeat(835),
+      draft: richConsultingDraft(),
+      premiumCheckoutCompleted: true,
+      intakeText: "Consulting agreement between Acme LLC and Beta LLC.",
+    });
+    expect(out.plainText).toBe(source.trim());
+    expect(out.audit.candidates[0]?.reason).toBe("paidProSourceOfTruth");
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it("prefers completion snapshot over thin agreementDocumentText when snapshot is richer", () => {
     const draft = richConsultingDraft();
     const snap = buildPremiumDeliverablePlainTextFromDraft(draft);

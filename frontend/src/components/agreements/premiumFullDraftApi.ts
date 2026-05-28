@@ -294,7 +294,13 @@ export function isPremiumFullDraftNetworkFailure(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
   const name = error instanceof Error ? error.name : "";
   if (/ERR_NETWORK_CHANGED|network changed/i.test(msg)) return true;
-  if (/ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NAME_NOT_RESOLVED|ERR_TIMED_OUT/i.test(msg)) return true;
+  if (
+    /ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NAME_NOT_RESOLVED|ERR_TIMED_OUT/i.test(
+      msg,
+    )
+  ) {
+    return true;
+  }
   if (/Failed to fetch|NetworkError|Load failed|ERR_INTERNET_DISCONNECTED|net::ERR_/i.test(msg)) return true;
   if (/network error|connection.*(lost|reset|closed|aborted)/i.test(msg)) return true;
   if (/browser offline/i.test(msg)) return true;

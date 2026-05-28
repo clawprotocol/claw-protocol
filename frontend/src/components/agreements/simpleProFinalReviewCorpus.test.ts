@@ -1,10 +1,29 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import {
   GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN,
   resolveSimpleProFinalReviewCorpus,
 } from "./simpleProFinalReviewCorpus";
 
 describe("simpleProFinalReviewCorpus (test28)", () => {
+  afterEach(() => {
+    clearPaidProSourceOfTruth();
+  });
+
+  it("hard-stops to paidProSourceOfTruth instead of 624/653 fallback after acceptance", () => {
+    const source = "Accepted paid Pro agreement body. ".repeat(180);
+    establishPaidProSourceOfTruth({ text: source });
+    const out = resolveSimpleProFinalReviewCorpus({
+      authoritativePlain: "x".repeat(624),
+      pickerPlain: "y".repeat(653),
+      agreementDocumentPlain: "z".repeat(835),
+      renderedPreviewPlain: "p".repeat(773),
+      finalReviewAuthorityOnly: true,
+    });
+    expect(out.plainText).toBe(source.trim());
+    expect(out.source).toBe("authoritative_hydrated");
+  });
+
   it("recovers final review display when display corpus empty but recovery snapshot is full", () => {
     const out = resolveSimpleProFinalReviewCorpus({
       authoritativePlain: "",

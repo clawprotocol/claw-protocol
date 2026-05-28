@@ -1,5 +1,6 @@
 import type { DealVariable, DealVariableSeverity, GuidedCompletionIntro, GuidedCompletionSession } from "./types";
 import { buildStableGuidedQuestionQueue } from "./guidedQuestionQueue";
+import { filterUserAnswerableGuidedVariables } from "./userAnswerableGuidedQuestion";
 
 const SEVERITY_RANK: Record<DealVariableSeverity, number> = {
   critical: 0,
@@ -82,7 +83,10 @@ export function computeCompletenessPercent(args: {
   return Math.min(98, Math.round(base + bodyBoost));
 }
 
-export function buildGuidedCompletionIntro(session: GuidedCompletionSession): GuidedCompletionIntro {
+export function buildGuidedCompletionIntro(
+  session: GuidedCompletionSession | null | undefined,
+): GuidedCompletionIntro | null {
+  if (!session?.queue?.length) return null;
   const remaining = session.queue
     .filter((id) => !session.answered[id] && !session.skipped.has(id))
     .map((id) => session.variables.find((v) => v.id === id)?.label)
@@ -113,14 +117,16 @@ export function createGuidedCompletionSession(args: {
   variables: DealVariable[];
   agreementFamily: DealVariable["applicableAgreementFamilies"][0];
   bodyLen?: number;
-}): GuidedCompletionSession {
+}): GuidedCompletionSession | null {
+  const answerable = filterUserAnswerableGuidedVariables(args.variables);
+  if (!answerable.length) return null;
   const built = buildStableGuidedQuestionQueue({
-    variables: args.variables,
+    variables: answerable,
     maxQuestions: MAX_GUIDED_QUEUE,
   });
   const queue = built.queue;
   return {
-    variables: built.variables.length ? built.variables : args.variables,
+    variables: built.variables.length ? built.variables : answerable,
     queue,
     answered: {},
     skipped: new Set(),

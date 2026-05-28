@@ -11,6 +11,10 @@ import { extractPremiumAskTargets } from "./premiumIntakeAskCoverage";
 import { parseDeterministicCompensation } from "./premiumPaymentTermsElevate";
 import { buildPremiumDeliverablePlainTextFromDraft } from "./premiumReadonlyRenderCorpus";
 import { detectPremiumScenarioCategory, premiumScenarioPrefersLeanPacks } from "./premiumScenarioCategory";
+import {
+  buildCommercialFactGraph,
+  commercialFactGraphToGuidanceLines,
+} from "./proOperationalSynthesis";
 
 /** Explicit review placeholder — never substitute marketing/category labels as law. */
 export const PREMIUM_JURISDICTION_PLACEHOLDER = "To be selected in review.";
@@ -147,6 +151,7 @@ export function synthesizePremiumScopeAndOperativeFields(parsed: ParsedDraftShap
   if (parsed.agreement_family === "operating_agreement") return parsed;
 
   const structured = parseIntakeToStructuredAgreement(rawIntake.trim());
+  const factGraph = buildCommercialFactGraph(rawIntake, parsed);
   const fam = parsed.agreement_family;
   const purposeWas = nz(parsed.purpose);
   const dump = purposeReadsAsRawIntakeDump(purposeWas, rawIntake);
@@ -195,6 +200,17 @@ export function synthesizePremiumScopeAndOperativeFields(parsed: ParsedDraftShap
       ...operative.map((b, i) => `${i + 1}. ${b}`),
     ].join("\n");
     add = add ? `${add}\n\n${block}` : block;
+  }
+  const factGuidance = commercialFactGraphToGuidanceLines(factGraph, rawIntake);
+  if (factGuidance.length) {
+    const graphHead =
+      factGraph.agreementKind === "joint_venture_economics"
+        ? "Commercial fact graph for premium joint venture economics synthesis:"
+        : "Commercial fact graph for premium services synthesis:";
+    const graphBlock = [graphHead, "", ...factGuidance.map((line, i) => `${i + 1}. ${line}`)].join("\n");
+    if (!add.toLowerCase().includes("commercial fact graph for premium")) {
+      add = add ? `${add}\n\n${graphBlock}` : graphBlock;
+    }
   }
 
   return { ...parsed, purpose, additional_terms: add || null };

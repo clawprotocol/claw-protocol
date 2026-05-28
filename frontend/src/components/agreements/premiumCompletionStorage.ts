@@ -15,6 +15,7 @@ import {
   clearPaidProStarterSignatureSendFromCreateFlow,
   clearPremiumSendIntent,
 } from "../../launch/simpleProduct/premiumSendIntent";
+import { clearAcceptedPremiumCanonicalCorpus } from "./acceptedPremiumCanonicalCorpus";
 
 const KEY = "claw_premium_completion_snapshot_v1";
 
@@ -150,6 +151,15 @@ export type PremiumCompletionSnapshot = {
   premiumRenderResolveSource?: string;
   /** True once the paid pipeline committed an accepted Pro document into this snapshot. */
   premiumAccepted?: boolean;
+  /** Immutable accepted Pro corpus — display/copy/final review/VS01 must match this after acceptance. */
+  acceptedPremiumCanonicalText?: string;
+  acceptedPremiumCanonicalHash?: string;
+  acceptedPremiumCanonicalPipelineSource?: string;
+  /** Product-level alias: the paid Pro lifecycle source of truth after server_full_draft acceptance. */
+  paidProSourceOfTruthText?: string;
+  paidProSourceOfTruthHash?: string;
+  paidProSourceOfTruthAcceptedAt?: number;
+  paidProSourceOfTruthSource?: "server_full_draft";
   /** Set when the server used a non-model structured fallback (LawDog Pro checkout still valid). */
   serverGenerationDegraded?: { code: string; message: string } | null;
   /** Structured Ask LawDog material questions (not shown in agreement body). */
@@ -192,6 +202,7 @@ export function readPremiumCompletionSnapshot(): PremiumCompletionSnapshot | nul
 }
 
 export function clearPremiumCompletionSnapshot(): void {
+  clearAcceptedPremiumCanonicalCorpus();
   try {
     sessionStorage.removeItem(KEY);
     sessionStorage.removeItem(REVEAL_DISMISSED_KEY);

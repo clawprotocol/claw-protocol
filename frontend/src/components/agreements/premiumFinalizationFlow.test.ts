@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { AgreementValidationResult } from "./premiumFullDraftApi";
+import type { AgreementIntelligence, AgreementValidationResult } from "./premiumFullDraftApi";
 import {
   buildPremiumFinalizationClarificationAnswers,
   premiumFinalizationAllowsSigning,
+  proValidationRepairBlocksRecipientAdvance,
   resolvePremiumFinalizationDecision,
 } from "./premiumFinalizationFlow";
+import { acceptedProDraftSafeDespiteFinalizationFailure } from "./premiumAuthoritativeBodyPreservation";
 import type { ProClarificationRoutingState } from "./proClarificationRouting";
 import type { GuidedCompletionSession } from "./guidedDealCompletion/types";
 
@@ -41,6 +43,28 @@ const materialQuestions: ProClarificationRoutingState = {
   mode: "material_questions",
   skippedStaticFallback: true,
   questions: [],
+};
+
+const credibleIntelligence: AgreementIntelligence = {
+  extracted_terms: {
+    parties: [{ name: "Red Mesa Logistics LLC", role: "Client" }],
+    party_roles: [],
+    payment_terms: { total_amount: "$5,000", currency: "USD", milestones: [], recurring_support: null },
+    governing_law: "Texas",
+  },
+  ambiguities: [],
+  conflicts: [],
+  missing_material_terms: [],
+  recommended_questions: [
+    {
+      id: "agreement_intelligence_q_payment",
+      topic: "payment",
+      question: "Should invoices be Net 15 or Net 30?",
+      reason: "Clarifies payment timing.",
+      priority: "high",
+    },
+  ],
+  quality_flags: [],
 };
 
 function session(answer = "Net 30 after invoice"): GuidedCompletionSession {
@@ -87,6 +111,7 @@ describe("premium finalization flow", () => {
   it("material questions answered triggers finalization once per new signature", () => {
     const first = resolvePremiumFinalizationDecision({
       routing: materialQuestions,
+      agreementIntelligence: credibleIntelligence,
       agreementValidation: validation(true),
       session: session(),
       firstDraft: "complete draft",
@@ -96,6 +121,7 @@ describe("premium finalization flow", () => {
 
     const second = resolvePremiumFinalizationDecision({
       routing: materialQuestions,
+      agreementIntelligence: credibleIntelligence,
       agreementValidation: validation(true),
       session: session(),
       firstDraft: "complete draft",
@@ -103,6 +129,12 @@ describe("premium finalization flow", () => {
     });
     expect(second.shouldFinalize).toBe(false);
     expect(second.reason).toBe("loop_guard");
+  });
+
+  it("failed silent validation repair blocks recipient advance without guided Q&A", () => {
+    expect(proValidationRepairBlocksRecipientAdvance("blocked")).toBe(true);
+    expect(proValidationRepairBlocksRecipientAdvance("finalizing")).toBe(false);
+    expect(proValidationRepairBlocksRecipientAdvance("clear")).toBe(false);
   });
 
   it("validation_repair_needed triggers before signer handoff", () => {
@@ -126,12 +158,14 @@ describe("premium finalization flow", () => {
   it("same snapshot/answers but changed draft gets a new signature", () => {
     const first = resolvePremiumFinalizationDecision({
       routing: materialQuestions,
+      agreementIntelligence: credibleIntelligence,
       agreementValidation: validation(true),
       session: session("Net 30"),
       firstDraft: "draft one",
     });
     const second = resolvePremiumFinalizationDecision({
       routing: materialQuestions,
+      agreementIntelligence: credibleIntelligence,
       agreementValidation: validation(true),
       session: session("Net 30"),
       firstDraft: "draft two",
@@ -151,6 +185,34 @@ describe("premium finalization flow", () => {
         answer: "Net 15",
       },
     ]);
+  });
+
+  it("skips finalization when validation failure payload is not credible", () => {
+    const decision = resolvePremiumFinalizationDecision({
+      routing: noQuestions,
+      agreementValidation: { passed: false, failures: [], warnings: [], minimum_contract_elements: validation(true).minimum_contract_elements, summary: { failure_count: 0, warning_count: 0, checked_at: "" } },
+      session: null,
+      firstDraft: "draft",
+    });
+    expect(decision.shouldFinalize).toBe(false);
+    expect(decision.reason).toBe("not_needed");
+  });
+
+  it("acceptedProDraftSafeDespiteFinalizationFailure keeps long accepted server_full_draft on failed repair", () => {
+    expect(
+      acceptedProDraftSafeDespiteFinalizationFailure({
+        firstDraftLen: 2_696,
+        premiumAccepted: true,
+        pipelineSource: "server_full_draft",
+      }),
+    ).toBe(true);
+    expect(
+      acceptedProDraftSafeDespiteFinalizationFailure({
+        firstDraftLen: 880,
+        premiumAccepted: true,
+        pipelineSource: "server_full_draft",
+      }),
+    ).toBe(false);
   });
 
   it("blocks signing when finalization repair did not succeed", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   collectActionableGuidedAuthoritativePlaceholders,
   GUIDED_FINAL_REVIEW_REJECTED_SOURCES,
@@ -11,6 +11,7 @@ import {
   scanFatalPartyPlaceholdersAfterManifestApply,
 } from "./canonicalFinalPartyManifest";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
+import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "../paidProSourceOfTruth";
 
 const LONG_HYDRATED = "Hydrated guided corpus. ".repeat(120);
 const LONG_STALE = "Stale starter with [Your Company Name] and Service Provider Name. ".repeat(120);
@@ -37,7 +38,24 @@ const identities: CanonicalPartyIdentity[] = [
   },
 ];
 
+afterEach(() => {
+  clearPaidProSourceOfTruth();
+});
+
 describe("guidedFinalReviewAuthoritativeBody", () => {
+  it("hard-stops to paidProSourceOfTruth instead of source none after acceptance", () => {
+    const source = "Accepted paid Pro guided final review body. ".repeat(120);
+    const record = establishPaidProSourceOfTruth({ text: source });
+    const resolved = resolveGuidedFinalReviewAuthoritativeBody({
+      candidates: [{ source: "rendered_preview", body: "" }],
+      signerIdentities: identities,
+      signingCorpusReady: false,
+    });
+    expect(resolved.source).toBe("paidProSourceOfTruth");
+    expect(resolved.body).toBe(record.text);
+    expect(resolved.len).toBe(record.text.length);
+  });
+
   it("prefers hydrated premium over stale last_accepted candidate when signing-ready", () => {
     const resolved = resolveGuidedFinalReviewAuthoritativeBody({
       candidates: [

@@ -115,8 +115,11 @@ describe("contractorDeveloperContradictionGuidedCompletion", () => {
     }
   });
 
-  it("uses Company and Contractor party fallbacks for contractor family", () => {
-    expect(getSafeFallbackPartyLabels("independent_contractor_agreement")).toEqual(["Company", "Contractor"]);
+  it("uses Service Provider and Client party fallbacks for contractor family", () => {
+    expect(getSafeFallbackPartyLabels("independent_contractor_agreement")).toEqual([
+      "Service Provider",
+      "Client",
+    ]);
   });
 
   it("integrity gate removes repeated compensation boilerplate outside compensation sections", () => {

@@ -8,7 +8,7 @@ import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
 
 const ENTITY_SUFFIX =
-  /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP)\.?$/i;
+  /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)\.?$/i;
 
 export const PREAMBLE_MAX_LEN = 4_500;
 
@@ -79,13 +79,18 @@ export function resolveFullLegalPartiesFromIntake(
   partyNames: readonly string[] | null | undefined,
   intakeRaw: string | null | undefined,
 ): string[] {
+  const intake = String(intakeRaw || "").trim();
+  const fromBetween = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
+  if (fromBetween.length >= 2) return fromBetween;
+  const fromIntakeEntities = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
+  if (fromIntakeEntities.length >= 2) return fromIntakeEntities;
   const fromArgs = (partyNames || [])
     .map((n) => String(n || "").replace(/\s+/g, " ").trim())
     .filter((n) => n.length >= 3);
+  const authoritativeArgs = fromArgs.filter(isAuthoritativeLegalEntityName);
+  if (authoritativeArgs.length >= 2) return authoritativeArgs;
   if (fromArgs.length >= 2) return fromArgs;
-  const fromBetween = extractBetweenPartyNameList(String(intakeRaw || ""));
-  if (fromBetween.length >= 2) return fromBetween;
-  return extractAgreementEntityCandidates(String(intakeRaw || ""));
+  return extractAgreementEntityCandidates(intake);
 }
 
 /**

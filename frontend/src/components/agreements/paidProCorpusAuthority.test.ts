@@ -155,7 +155,7 @@ describe("paid Pro corpus authority", () => {
     }
   });
 
-  it("deterministic fallback renders as authoritative when premium empty", () => {
+  it("deterministic fallback renders as authoritative when premium empty and API is reachable", () => {
     const draft = redMesaDraft();
     const local = tryBuildPaidProLocalDeterministicFallback(RED_MESA_INTAKE, draft);
     expect(local).not.toBeNull();
@@ -165,7 +165,7 @@ describe("paid Pro corpus authority", () => {
       draft,
       intakeText: RED_MESA_INTAKE,
       premiumCheckoutCompleted: true,
-      pipelineSource: "premium_network_retryable",
+      pipelineSource: null,
       allowLocalDeterministicFallback: true,
     });
     expect(surface.mode).toBe("authoritative_pro");
@@ -173,6 +173,20 @@ describe("paid Pro corpus authority", () => {
       expect(surface.authorityTier).toBe("deterministic_paid_pro_fallback");
       expect(surface.plainText).toContain("$4,500");
     }
+  });
+
+  it("does not use deterministic fallback as authority when generation API is unavailable", () => {
+    const draft = redMesaDraft();
+    const surface = resolvePaidProReviewRenderSurface({
+      pickedPlain: "",
+      pickedSource: "none",
+      draft,
+      intakeText: RED_MESA_INTAKE,
+      premiumCheckoutCompleted: true,
+      pipelineSource: "premium_network_retryable",
+      allowLocalDeterministicFallback: true,
+    });
+    expect(surface.mode).toBe("premium_unavailable_retry");
   });
 
   it("retry panel only when all authority candidates fail", () => {

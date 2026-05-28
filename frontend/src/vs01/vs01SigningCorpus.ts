@@ -11,6 +11,7 @@ import {
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "../components/agreements/simpleProFinalReviewCorpus";
 import { stripStaleExecutionPlacementCorpusCopy } from "../components/agreements/guidedDealCompletion/guidedCorpusLineRepairs";
 import {
+  corpusHasWitnessBlock,
   corpusHasVisibleSignatureExecutionLines,
   corpusSignatureBlocksHaveRequiredByLines,
 } from "../components/agreements/guidedDealCompletion/signatureRegion";
@@ -26,6 +27,17 @@ import {
   GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE,
 } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
 import { applyProCorpusIntegrity } from "../components/agreements/proCorpusIntegrity";
+import {
+  AUTHORITATIVE_BODY_PRESERVE_DOWNGRADE_RATIO,
+  pickAuthoritativeSigningHandoffCorpus,
+} from "../components/agreements/authoritativeHandoffCorpusResolver";
+import { resolvePremiumSignaturePreviewMode } from "../components/agreements/premiumAgreementDocumentHtml";
+import {
+  getAcceptedPremiumCanonicalCorpus,
+  getAcceptedPremiumCorpusForVs01Signing,
+} from "../components/agreements/acceptedPremiumCanonicalCorpus";
+import { readCanonicalAgreementCorpusForSurface } from "../components/agreements/canonicalAgreementSnapshot";
+import { getPaidProDocumentForSurface } from "../components/agreements/paidProSourceOfTruth";
 
 export const VS01_SIGNING_CORPUS_MIN_LEN = GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 /** Preferred final guided Pro corpus length (test59 / full premium snapshot). */
@@ -50,6 +62,7 @@ export const VS01_BLOCKED_PREVIEW_SOURCES = new Set([
 export type FinalVs01CorpusSource =
   | "handoff_corpus"
   | "finalized_signer_applied_guided_corpus"
+  | "paidProSourceOfTruth"
   | "premium_pipeline"
   | "hydrated_premium"
   | "draft_authoritative"
@@ -72,6 +85,9 @@ export type FinalVs01CorpusResolution = {
   /** @deprecated Use matchesFreeHash */
   isFreeHashMatch: boolean;
   hasWitnessBlock: boolean;
+  requiresSignatureBlock: boolean;
+  requiresWitness: boolean;
+  witnessReason: string | null;
   hasBySignatureLines: boolean;
   /** @deprecated Use hasBySignatureLines */
   hasByOrSignatureLines: boolean;
@@ -213,6 +229,18 @@ export type ResolveFinalVs01CorpusOrBlockArgs = {
   premiumInProgress?: boolean;
   premiumComplete?: boolean;
   signatureRebuilt?: boolean;
+  /** Accepted paid Pro snapshot — wins over short handoff/starter when materially longer. */
+  acceptedAuthoritativePlain?: string | null;
+  premiumAccepted?: boolean;
+  premiumPipelineRenderSource?: string | null;
+  intakeText?: string | null;
+  /** When true, decorative HTML signature cards satisfy witness gate for long accepted Pro bodies. */
+  allowDecorativeEsignCardMode?: boolean;
+};
+
+export type Vs01WitnessRequirement = {
+  requiresWitness: boolean;
+  witnessReason: string | null;
 };
 
 function mapHandoffSourceToFinalSource(
@@ -233,7 +261,16 @@ function mapHandoffSourceToFinalSource(
 function buildCorpusGateBlockedLogPayload(args: {
   resolution: Pick<
     FinalVs01CorpusResolution,
-    "allowed" | "source" | "len" | "hash" | "hasWitnessBlock" | "hasBySignatureLines" | "blockReason"
+    | "allowed"
+    | "source"
+    | "len"
+    | "hash"
+    | "hasWitnessBlock"
+    | "hasBySignatureLines"
+    | "requiresSignatureBlock"
+    | "requiresWitness"
+    | "witnessReason"
+    | "blockReason"
   >;
   guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
   draftPlain?: string;
@@ -254,7 +291,10 @@ function buildCorpusGateBlockedLogPayload(args: {
     source: args.resolution.source,
     len: args.resolution.len,
     hash: args.resolution.hash,
-    missingWitnessBlock: !args.resolution.hasWitnessBlock,
+    missingWitnessBlock: args.resolution.requiresWitness && !args.resolution.hasWitnessBlock,
+    requiresSignatureBlock: args.resolution.requiresSignatureBlock,
+    requiresWitness: args.resolution.requiresWitness,
+    witnessReason: args.resolution.witnessReason,
     missingByOrSignatureLines: !args.resolution.hasBySignatureLines,
     hasFinalizedGuidedHash: Boolean(handoff?.corpusHash),
     expectedHash: args.expectedHash ?? handoff?.corpusHash ?? null,
@@ -266,6 +306,36 @@ function buildCorpusGateBlockedLogPayload(args: {
 }
 
 type CorpusCandidate = { text: string; source: FinalVs01CorpusSource };
+
+export function resolveVs01WitnessRequirement(args: {
+  corpusText?: string | null;
+  intakeText?: string | null;
+  draft?: AgreementDraft | null;
+}): Vs01WitnessRequirement {
+  const text = `${args.intakeText ?? ""}\n${args.corpusText ?? ""}`.toLowerCase();
+  if (/\b(?:must|shall|required|requires?|need(?:s|ed)?)\s+(?:be\s+)?(?:witnessed|notari[sz]ed)\b/.test(text)) {
+    return { requiresWitness: true, witnessReason: "explicit_witness_or_notary_requirement" };
+  }
+  if (/\b(?:witness|notary|notari[sz]ation)\s+(?:is\s+)?(?:required|needed|mandatory)\b/.test(text)) {
+    return { requiresWitness: true, witnessReason: "explicit_witness_or_notary_requirement" };
+  }
+  const family = String((args.draft as { agreement_family?: string | null } | null)?.agreement_family ?? "").toLowerCase();
+  if (/\b(deed|will|power_of_attorney|power-of-attorney)\b/.test(family)) {
+    return { requiresWitness: true, witnessReason: `agreement_family:${family}` };
+  }
+  return { requiresWitness: false, witnessReason: null };
+}
+
+function logVs01Eligibility(payload: {
+  requiresSignatureBlock: boolean;
+  requiresWitness: boolean;
+  witnessReason: string | null;
+  allowed: boolean;
+}): void {
+  if (!shouldLogVs01Corpus()) return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-eligibility]", payload);
+}
 
 /**
  * Single authoritative VS01 corpus resolver for paid/guided Pro signing.
@@ -281,12 +351,133 @@ export function resolveFinalVs01CorpusOrBlock(
     2,
     1 + (args.bridge?.counterparties?.length ?? args.draft?.parties?.length ?? 1),
   );
+  const canonical = guidedPro
+    ? readCanonicalAgreementCorpusForSurface("vs01", { tier: "pro" })
+    : readCanonicalAgreementCorpusForSurface("vs01");
+  if (canonical) {
+    const corpus = canonical.canonicalText;
+    const witnessRequirement = resolveVs01WitnessRequirement({
+      corpusText: corpus,
+      intakeText: args.intakeText,
+      draft: args.draft ?? null,
+    });
+    const hasWitnessBlock = corpusHasWitnessBlock(corpus);
+    const hasSignatureBlock = corpusHasVisibleSignatureExecutionLines(corpus);
+    const hasBySignatureLines = corpusSignatureBlocksHaveRequiredByLines(corpus, signerCount);
+    const allowed =
+      !premiumInProgress &&
+      corpus.length >= VS01_SIGNING_CORPUS_MIN_LEN &&
+      hasSignatureBlock &&
+      (!witnessRequirement.requiresWitness || hasWitnessBlock) &&
+      hasBySignatureLines;
+    logVs01Eligibility({
+      requiresSignatureBlock: true,
+      requiresWitness: witnessRequirement.requiresWitness,
+      witnessReason: witnessRequirement.witnessReason,
+      allowed,
+    });
+    return {
+      corpus,
+      source: "paidProSourceOfTruth",
+      len: corpus.length,
+      hash: canonical.hash,
+      matchesFreeHash: false,
+      isFreeHashMatch: false,
+      hasWitnessBlock,
+      requiresSignatureBlock: true,
+      requiresWitness: witnessRequirement.requiresWitness,
+      witnessReason: witnessRequirement.witnessReason,
+      hasBySignatureLines,
+      hasByOrSignatureLines: hasBySignatureLines,
+      signerCount,
+      allowed,
+      blockReason: allowed
+        ? undefined
+        : !hasSignatureBlock
+          ? "missing_signature_block"
+          : witnessRequirement.requiresWitness && !hasWitnessBlock
+            ? "missing_witness_block"
+            : !hasBySignatureLines
+              ? "missing_by_or_signature_lines"
+              : "canonical_corpus_not_ready_for_vs01",
+      premiumInProgress,
+      premiumComplete,
+      userMessage: allowed ? undefined : VS01_CORPUS_GATE_USER_MESSAGE,
+    };
+  }
 
   const handoff = args.guidedSigningHandoff;
+  const paidProVs01 = getPaidProDocumentForSurface("vs01", { draft: (args.draft ?? null) as never });
+  const acceptedCanonical = getAcceptedPremiumCanonicalCorpus();
+  const acceptedAuthoritative = paidProVs01?.text ?? (
+    acceptedCanonical
+      ? getAcceptedPremiumCorpusForVs01Signing({ draft: (args.draft ?? null) as never }).trim()
+      : (args.acceptedAuthoritativePlain ?? "").trim()
+  );
+  if (paidProVs01 && acceptedAuthoritative.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
+    const hash = fingerprintAgreementBody(acceptedAuthoritative);
+    const witnessRequirement = resolveVs01WitnessRequirement({
+      corpusText: acceptedAuthoritative,
+      intakeText: args.intakeText,
+      draft: args.draft ?? null,
+    });
+    const hasWitnessBlock = corpusHasWitnessBlock(acceptedAuthoritative);
+    const hasSignatureBlock = corpusHasVisibleSignatureExecutionLines(acceptedAuthoritative);
+    const hasBySignatureLines = corpusSignatureBlocksHaveRequiredByLines(acceptedAuthoritative, signerCount);
+    const allowed =
+      hasSignatureBlock &&
+      (!witnessRequirement.requiresWitness || hasWitnessBlock) &&
+      hasBySignatureLines;
+    logVs01Eligibility({
+      requiresSignatureBlock: true,
+      requiresWitness: witnessRequirement.requiresWitness,
+      witnessReason: witnessRequirement.witnessReason,
+      allowed,
+    });
+    const resolution: FinalVs01CorpusResolution = {
+      corpus: acceptedAuthoritative,
+      source: "paidProSourceOfTruth",
+      len: acceptedAuthoritative.length,
+      hash,
+      matchesFreeHash: false,
+      isFreeHashMatch: false,
+      hasWitnessBlock,
+      requiresSignatureBlock: true,
+      requiresWitness: witnessRequirement.requiresWitness,
+      witnessReason: witnessRequirement.witnessReason,
+      hasBySignatureLines,
+      hasByOrSignatureLines: hasBySignatureLines,
+      signerCount,
+      allowed,
+      blockReason: allowed
+        ? undefined
+        : !hasSignatureBlock
+          ? "missing_signature_block"
+          : witnessRequirement.requiresWitness && !hasWitnessBlock
+            ? "missing_witness_block"
+            : "accepted_paid_pro_missing_execution_block",
+      premiumInProgress,
+      premiumComplete,
+      userMessage: allowed ? undefined : VS01_CORPUS_GATE_USER_MESSAGE,
+    };
+    logVs01CorpusGateSelectedFinal({
+      source: "paidProSourceOfTruth",
+      len: resolution.len,
+      hash: resolution.hash,
+      allowed: resolution.allowed,
+      skippedRebuild: true,
+      skippedIntegrityRepair: true,
+    });
+    return resolution;
+  }
   const handoffTrusted =
     handoff &&
     GUIDED_VS01_HANDOFF_ALLOWED_SOURCES.has(handoff.source) &&
-    handoff.corpusText.trim().length >= VS01_SIGNING_CORPUS_MIN_LEN;
+    handoff.corpusText.trim().length >= VS01_SIGNING_CORPUS_MIN_LEN &&
+    !(
+      acceptedAuthoritative.length >= VS01_SIGNING_CORPUS_MIN_LEN &&
+      handoff.corpusText.trim().length < acceptedAuthoritative.length * AUTHORITATIVE_BODY_PRESERVE_DOWNGRADE_RATIO
+    );
 
   const draftPlain = pickDraftSigningCorpusPlain(args.draft ?? null);
   const previewSource = (args.renderedPreviewSource ?? "rendered_preview").trim();
@@ -305,6 +496,9 @@ export function resolveFinalVs01CorpusOrBlock(
       source: mapHandoffSourceToFinalSource(handoff!.source),
     };
   } else {
+    if (acceptedAuthoritative.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
+      push(acceptedAuthoritative, "premium_pipeline");
+    }
     push(args.agreementCorpusText, "handoff_corpus");
     push(args.premiumPipelinePlain, "premium_pipeline");
     push(args.hydratedPremiumPlain, "hydrated_premium");
@@ -346,7 +540,21 @@ export function resolveFinalVs01CorpusOrBlock(
       if (byPriority !== 0) return byPriority;
       return b.text.length - a.text.length;
     });
-    best = sorted[0] ?? best;
+    const picked = pickAuthoritativeSigningHandoffCorpus({
+      candidates,
+      acceptedAuthoritativeBody: acceptedAuthoritative,
+      premiumAccepted: args.premiumAccepted,
+      pipelineSource: args.premiumPipelineRenderSource,
+    });
+    if (picked.text.length > 0) {
+      const mappedSource: FinalVs01CorpusSource =
+        picked.source === "accepted_server_full_draft" || picked.source === "server_full_draft"
+          ? "premium_pipeline"
+          : (picked.source as FinalVs01CorpusSource);
+      best = { text: picked.text, source: mappedSource };
+    } else {
+      best = sorted[0] ?? best;
+    }
 
     if (
       guidedPro &&
@@ -363,12 +571,30 @@ export function resolveFinalVs01CorpusOrBlock(
     bridge: handoffTrusted ? null : args.bridge ?? null,
     signerCount,
   });
-  const integrity = applyProCorpusIntegrity(witness.corpus, {
-    canonicalPartyNames: args.bridge
-      ? [args.bridge.creatorName, ...args.bridge.counterparties.map((cp) => cp.name)].filter(Boolean)
-      : (args.draft?.parties ?? []).map((party) => String(party?.name ?? "")).filter(Boolean),
-    surface: "vs01_signing_corpus",
+  const bestWitnessRequirement = resolveVs01WitnessRequirement({
+    corpusText: best.text,
+    intakeText: args.intakeText,
+    draft: args.draft ?? null,
   });
+  const bestSignatureIntact =
+    corpusHasVisibleSignatureExecutionLines(best.text) &&
+    corpusSignatureBlocksHaveRequiredByLines(best.text, signerCount) &&
+    (!bestWitnessRequirement.requiresWitness || corpusHasWitnessBlock(best.text));
+  const handoffFrozenIntact =
+    handoffTrusted &&
+    !witness.rebuilt &&
+    corpusHasVisibleSignatureExecutionLines(best.text) &&
+    corpusSignatureBlocksHaveRequiredByLines(best.text, signerCount);
+  const integrity = handoffFrozenIntact
+    ? { text: best.text, repairs: [] as string[] }
+    : bestSignatureIntact
+    ? { text: best.text, repairs: [] as string[] }
+    : applyProCorpusIntegrity(witness.corpus, {
+        canonicalPartyNames: args.bridge
+          ? [args.bridge.creatorName, ...args.bridge.counterparties.map((cp) => cp.name)].filter(Boolean)
+          : (args.draft?.parties ?? []).map((party) => String(party?.name ?? "")).filter(Boolean),
+        surface: "vs01_signing_corpus",
+      });
   const corpus = integrity.text;
   let source: FinalVs01CorpusSource = witness.rebuilt ? "rebuilt_witness_block" : best.source;
   if (witness.rebuilt) {
@@ -386,8 +612,20 @@ export function resolveFinalVs01CorpusOrBlock(
     ? fingerprintAgreementBody(args.freeBaselinePlain!)
     : "";
   const matchesFreeHash = Boolean(freeHash && hash === freeHash);
-  const hasWitnessBlock = corpusHasVisibleSignatureExecutionLines(corpus);
+  const witnessRequirement = resolveVs01WitnessRequirement({
+    corpusText: corpus,
+    intakeText: args.intakeText,
+    draft: args.draft ?? null,
+  });
+  const hasWitnessBlock = corpusHasWitnessBlock(corpus);
+  const hasSignatureBlock = corpusHasVisibleSignatureExecutionLines(corpus);
   const hasBySignatureLines = corpusSignatureBlocksHaveRequiredByLines(corpus, signerCount);
+  const signaturePreview = resolvePremiumSignaturePreviewMode(corpus, signerCount);
+  const decorativeEsignValid =
+    Boolean(args.allowDecorativeEsignCardMode) &&
+    signaturePreview.mode === "decorative_fallback_signature_card" &&
+    corpus.length >= VS01_SIGNING_CORPUS_MIN_LEN &&
+    acceptedAuthoritative.length >= VS01_SIGNING_CORPUS_MIN_LEN;
 
   const previewRejected =
     guidedPro &&
@@ -410,9 +648,11 @@ export function resolveFinalVs01CorpusOrBlock(
     blockReason = "free_basic_hash_match";
   } else if (guidedPro && previewRejected) {
     blockReason = "rendered_preview_stale";
-  } else if (!hasWitnessBlock) {
+  } else if (!hasSignatureBlock && !decorativeEsignValid) {
+    blockReason = "missing_signature_block";
+  } else if (witnessRequirement.requiresWitness && !hasWitnessBlock && !decorativeEsignValid) {
     blockReason = "missing_witness_block";
-  } else if (!hasBySignatureLines) {
+  } else if (!hasBySignatureLines && !decorativeEsignValid) {
     blockReason = "missing_by_or_signature_lines";
   } else if (guidedPro && handoffTrusted && witness.rebuilt) {
     blockReason = "finalized_corpus_witness_rebuild_rejected";
@@ -424,6 +664,13 @@ export function resolveFinalVs01CorpusOrBlock(
     allowed = true;
   }
 
+  logVs01Eligibility({
+    requiresSignatureBlock: true,
+    requiresWitness: witnessRequirement.requiresWitness,
+    witnessReason: witnessRequirement.witnessReason,
+    allowed,
+  });
+
   const resolution: FinalVs01CorpusResolution = {
     corpus,
     source,
@@ -432,6 +679,9 @@ export function resolveFinalVs01CorpusOrBlock(
     matchesFreeHash,
     isFreeHashMatch: matchesFreeHash,
     hasWitnessBlock,
+    requiresSignatureBlock: true,
+    requiresWitness: witnessRequirement.requiresWitness,
+    witnessReason: witnessRequirement.witnessReason,
     hasBySignatureLines,
     hasByOrSignatureLines: hasBySignatureLines,
     signerCount,

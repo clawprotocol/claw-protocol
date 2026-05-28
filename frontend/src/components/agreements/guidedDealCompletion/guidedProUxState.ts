@@ -41,6 +41,8 @@ export type GuidedProStickyCta = {
 export type ResolveGuidedProUxStateArgs = {
   premiumPaidDocumentSurface: boolean;
   hasGuidedSession: boolean;
+  /** Accepted paid Pro corpus (e.g. paidProSourceOfTruth) — signer setup does not require guided Q&A. */
+  paidProAcceptedCorpusReady?: boolean;
   guidedCompletionPhase: GuidedCompletionPhase;
   createFlowPhase: CreateFlowProductionPhase;
   premiumRecipientUxActive: boolean;
@@ -91,9 +93,26 @@ export function guidedProUxBlocksRecipientSetup(args: {
 
 export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): GuidedProUxState {
   if (!args.premiumPaidDocumentSurface) return "inactive";
-  if (args.guidedCompletionPhase === "inactive") return "inactive";
+  if (args.guidedCompletionPhase === "inactive" && !args.paidProAcceptedCorpusReady) return "inactive";
 
   if (args.signingPacketSetupActive) return "signing_packet_setup";
+
+  if (
+    args.paidProAcceptedCorpusReady &&
+    args.createFlowPhase === "signer_setup_required" &&
+    !args.finalReviewExplicitlyOpened &&
+    args.guidedCompletionPhase !== "applying_all"
+  ) {
+    return "signer_setup_required";
+  }
+
+  if (
+    args.paidProAcceptedCorpusReady &&
+    args.guidedCompletionPhase === "ready_to_apply" &&
+    !args.finalReviewExplicitlyOpened
+  ) {
+    return "signer_setup_required";
+  }
 
   /** Explicit unlock milestone — only path to final review render state. */
   if (

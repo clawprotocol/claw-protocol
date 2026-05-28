@@ -211,6 +211,18 @@ describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
     ).toBe(false);
   });
 
+  it("paid accepted corpus: signer_setup_required without guided session", () => {
+    expect(
+      resolveGuidedProUxState({
+        ...BASE,
+        hasGuidedSession: false,
+        paidProAcceptedCorpusReady: true,
+        guidedCompletionPhase: "applied",
+        createFlowPhase: "signer_setup_required",
+      }),
+    ).toBe("signer_setup_required");
+  });
+
   it("test24: signer_setup_required does not reclaim after explicit unlock", () => {
     expect(
       resolveGuidedProUxState({

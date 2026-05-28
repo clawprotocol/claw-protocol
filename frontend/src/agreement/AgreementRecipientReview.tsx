@@ -279,7 +279,7 @@ const REVIEW_FIRST_TITLE = "Review agreement";
 const REVIEW_FIRST_HELPER =
   "Read the agreement, approve it, or propose an updated version. Nothing is signed until everyone approves the same version.";
 const REVIEW_FIRST_APPROVE_LABEL = "Approve draft";
-const REVIEW_FIRST_PROPOSE_UPDATED_LABEL = "Propose updated agreement";
+const REVIEW_FIRST_PROPOSE_UPDATED_LABEL = "Suggest revision";
 const REVIEW_FIRST_SAVE_UPDATED_LABEL = "Submit proposed update";
 const REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE =
   "Open your personal review link to send this update.";
@@ -290,7 +290,7 @@ const REVIEW_FIRST_PERSONAL_LINK_SUBMIT_STAGE_MESSAGE =
 const REVIEW_FIRST_REVISED_DRAFT_FILE_TYPES = "Or upload a .txt file instead";
 const REVIEW_FIRST_REVISED_DRAFT_FILE_ACCEPT = ".txt,.md,text/plain,text/markdown,text/x-markdown";
 const REVIEW_FIRST_UNSUPPORTED_REVISED_DRAFT_FILE =
-  "Upload a .txt file, or paste the full updated agreement below.";
+  "Upload a .txt file, or edit the agreement inline below.";
 
 function isSupportedReviewFirstRevisedDraftFile(file: File): boolean {
   const name = file.name.toLowerCase();
@@ -4829,7 +4829,7 @@ export function AgreementRecipientReview({
               {false && !recipientPreview ? (
                 <section className="space-y-3" data-testid="recipient-manual-propose-controls">
                   <div>
-                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">Propose updated agreement</h2>
+                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">Suggest revision</h2>
                     <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
                       Edit your agreement in any software you prefer.
                     </p>
@@ -5093,7 +5093,7 @@ export function AgreementRecipientReview({
                   {revisedIntakePhase === "pick-method" ? (
                     <div className="space-y-3">
                       <div>
-                        <h3 className="text-base font-semibold text-slate-950">Propose updated agreement</h3>
+                        <h3 className="text-base font-semibold text-slate-950">Suggest revision</h3>
                         <div className="mt-1.5 space-y-2 text-sm leading-relaxed text-slate-600">
                           <p>Edit your agreement in any software you prefer.</p>
                           <p>When finished, paste the FULL updated agreement below.</p>
@@ -5149,7 +5149,7 @@ export function AgreementRecipientReview({
                     <>
                   {!revisedUploadAnalyzing && !recipientPostUploadSurface ? (
                     <div>
-                      <h3 className="text-base font-semibold text-slate-950">Propose updated agreement</h3>
+                      <h3 className="text-base font-semibold text-slate-950">Suggest revision</h3>
                       <div className="mt-1.5 space-y-2 text-sm leading-relaxed text-slate-600">
                       <p>Edit your agreement in any software you prefer.</p>
                         <p>When finished, paste the FULL updated agreement below.</p>

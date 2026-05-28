@@ -8,6 +8,7 @@ import {
   mapRenderSourceToAuthorityTier,
   type PaidProCorpusAuthorityCandidate,
 } from "./paidProCorpusAuthority";
+import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import {
   logPaidProStarterCloneBlocked,
   resolvePaidProReviewRenderSurface,
@@ -18,6 +19,14 @@ import {
   resolvePremiumRenderSource,
 } from "./premiumRenderSourceResolver";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
+import {
+  isPremiumGenerationApiUnavailablePipelineSource,
+  logPremiumGenerationApiUnavailable,
+  MIN_PAID_PRO_AUTHORITY_LEN,
+  PREMIUM_GENERATION_DRAFT_API_PATH,
+} from "./premiumGenerationApiAvailability";
+import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
+import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 
 /** @deprecated Use PremiumRenderResolveSource — kept as alias for gradual migration. */
@@ -68,15 +77,9 @@ export function scorePremiumReadonlyCorpusCandidate(text: string): number {
   return trimmed.length + premiumReadonlyCorpusSignalHits(trimmed) * 220;
 }
 
-/** FNV-1a 32-bit — stable compare for free-vs-paid corpus audit. */
+/** Canonical corpus hash used across review, readonly, handoff, VS01, and export surfaces. */
 export function hashPlainTextCorpus(text: string): string {
-  let h = 2166136261;
-  const s = text || "";
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return String(h >>> 0);
+  return fingerprintAgreementBody(text || "");
 }
 
 export function corpusMatchesFreeBasicDraft(
@@ -172,8 +175,91 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   /** Sticky accepted corpus — never downgrade below this when still valid. */
   stickyAuthoritativePlainText?: string | null;
 }): PremiumPaidReadonlyPickResult {
+  const canonical = readCanonicalAgreementCorpusForSurface("readonly", { tier: "pro" });
+  if (canonical) {
+    const display = canonical.canonicalText;
+    const nonThin = display.length >= 1200 || premiumReadonlyCorpusSignalHits(display) >= 3;
+    return {
+      plainText: display,
+      sourceUsed: "server_full_document_text",
+      audit: {
+        selected: "server_full_document_text",
+        forcedPremiumSource: true,
+        candidates: [
+          {
+            source: "server_full_document_text",
+            len: display.length,
+            nonThin,
+            eligible: true,
+            reason: "paidProSourceOfTruth",
+          },
+        ],
+      },
+    };
+  }
+  const paidPro = getPaidProDocumentForSurface("display", {
+    draft: args.draft,
+    intakeText: args.intakeText,
+  });
+  if (paidPro) {
+    const display = paidPro.text;
+    const nonThin =
+      display.length >= 1200 || premiumReadonlyCorpusSignalHits(display) >= 3;
+    return {
+      plainText: display,
+      sourceUsed: "server_full_document_text",
+      audit: {
+        selected: "server_full_document_text",
+        forcedPremiumSource: true,
+        candidates: [
+          {
+            source: "server_full_document_text",
+            len: display.length,
+            nonThin,
+            eligible: true,
+            reason: "paidProSourceOfTruth",
+          },
+        ],
+      },
+    };
+  }
+
   const pipeSrc = (args.lastPremiumPipelineRenderSource || "").trim();
   const authHydr = (args.authoritativeHydratedPlainText || "").trim();
+  if (args.premiumCheckoutCompleted && isPremiumGenerationApiUnavailablePipelineSource(pipeSrc)) {
+    const priorServerBodies = [
+      authHydr,
+      (args.stickyAuthoritativePlainText || "").trim(),
+      (args.paidAuthoritativeProBody || "").trim(),
+      (args.premiumWinningBodyText || "").trim(),
+    ];
+    const hasPriorFullServerDraft = priorServerBodies.some((t) => t.length >= MIN_PAID_PRO_AUTHORITY_LEN);
+    if (!hasPriorFullServerDraft) {
+      logPremiumGenerationApiUnavailable({
+        endpoint: PREMIUM_GENERATION_DRAFT_API_PATH,
+        stage: "pickPremiumPaidReadonlyPlainText",
+        fallbackBlocked: true,
+        pipelineSource: pipeSrc,
+      });
+      return {
+        plainText: "",
+        sourceUsed: "none",
+        audit: {
+          selected: "none",
+          forcedPremiumSource: false,
+          candidates: [
+            {
+              source: "none",
+              len: 0,
+              nonThin: false,
+              eligible: false,
+              reason: "premium_generation_api_unavailable",
+            },
+          ],
+        },
+      };
+    }
+  }
   if (authHydr.length >= 500 && isAuthoritativePremiumPipelineRenderSource(pipeSrc)) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
@@ -183,16 +269,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
         pipelineSource: pipeSrc,
       });
     }
-    const finalizedRaw =
-      args.draft && authHydr.trim()
-        ? hydrateIdentityPlaceholdersInAgreementPreviewPlain(authHydr, args.draft, args.intakeText ?? null)
-        : authHydr;
-    const finalized = canonicalizeProAgreementText(finalizedRaw, {
-      canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
-      canonicalRoles: ["Client", "Service Provider"],
-      intakeText: args.intakeText,
-      surface: "premium_readonly_hydrated_authoritative",
-    }).text;
+    const finalized = authHydr;
     const nonThin =
       finalized.length >= 1200 || premiumReadonlyCorpusSignalHits(finalized) >= 3;
     return {
@@ -336,7 +413,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       premiumCheckoutCompleted: true,
       paidAuthoritativeFallback: paidFallback,
       pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
-      allowLocalDeterministicFallback: true,
+      allowLocalDeterministicFallback: !isPremiumGenerationApiUnavailablePipelineSource(pipeSrc),
       extraCandidates,
       stickyPlainText: sticky || hydrated || paidFallback,
       stickyTier: mapRenderSourceToAuthorityTier({

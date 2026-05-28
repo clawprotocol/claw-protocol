@@ -2,6 +2,7 @@
  * Deterministic guided Q&A intake fact extraction, pre-answers, and contradiction guards.
  */
 
+import { intakeHasFullLegalEntityParties } from "../canonicalPartyIdentityResolver";
 import type { DealVariable, DealVariableDefault } from "./types";
 
 function parseGoverningLawFromIntake(intake: string): string | null {
@@ -176,6 +177,8 @@ export function isGuidedVariableSatisfiedByIntake(variableId: string, intakeRaw 
       return facts.confidentialityRequested;
     case "payment_timing":
       return /\bnet\s*\d+\b/i.test(intakeRaw) || /\bon\s+receipt\b/i.test(intakeRaw);
+    case "party_legal_names":
+      return intakeHasFullLegalEntityParties(intakeRaw);
     default:
       return false;
   }

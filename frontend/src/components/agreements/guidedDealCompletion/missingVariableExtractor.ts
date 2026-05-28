@@ -2,6 +2,7 @@
  * Structured deal-variable extraction — converts material signals into actionable variables.
  */
 
+import { shouldSuppressPartyLegalNamesGuidedQuestion } from "../canonicalPartyIdentityResolver";
 import { buildMaterialMissingItems } from "../proAgreementCompleteness/revisionQuestionEngine";
 import type { MaterialMissingItem, MaterialSeverity } from "../proAgreementCompleteness/types";
 import { validateProAgreementConfidenceGate } from "../proFullAgreementCandidate";
@@ -456,7 +457,11 @@ function inferServicesMigrationVariablesFromIntake(
     inferred.push({ ...item, agreementFamily: family });
   };
 
-  if (signals.informalParties && !/\b(?:LLC|Inc\.|Corp\.)\b/i.test(body.slice(0, 1200))) {
+  if (
+    signals.informalParties &&
+    !shouldSuppressPartyLegalNamesGuidedQuestion(intakeRaw, body) &&
+    !/\b(?:LLC|Inc\.|Corp\.)\b/i.test(body.slice(0, 1200))
+  ) {
     push({
       id: "party_legal_names",
       severity: "material",

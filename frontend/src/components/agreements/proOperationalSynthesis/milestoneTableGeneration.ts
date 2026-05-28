@@ -2,6 +2,7 @@
  * Synthesize implementation milestone table shells when intake mentions milestones/payments.
  */
 
+import { intakeSpecifiesSimpleFixedFee } from "../canonicalPartyIdentityResolver";
 import { definedShortNameFromLegalEntity } from "../paidProAgreementPolish";
 import type { PartyResponsibilityProfile } from "./types";
 
@@ -12,6 +13,7 @@ const EXISTING_TABLE_RE = /\|\s*milestone\s*\|/i;
 const EXISTING_SECTION_RE = /\bIMPLEMENTATION\s+MILESTONES\b/i;
 
 function intakeHasMilestones(intake: string, paymentTerms: string): boolean {
+  if (intakeSpecifiesSimpleFixedFee(intake, paymentTerms)) return false;
   return MILESTONE_INTAKE_RE.test(intake) || MILESTONE_INTAKE_RE.test(paymentTerms);
 }
 

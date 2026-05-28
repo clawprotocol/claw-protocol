@@ -55,6 +55,10 @@ import {
   type PremiumFullDraftResult,
 } from "./premiumFullDraftApi";
 import {
+  logPremiumGenerationApiUnavailable,
+  PREMIUM_GENERATION_DRAFT_API_PATH,
+} from "./premiumGenerationApiAvailability";
+import {
   buildFounderTitleRetryIntake,
   FOUNDER_AGREEMENT_DETAILS_USER_MESSAGE,
   getResolvedTitleForFounderGating,
@@ -89,9 +93,12 @@ import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryable";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
-import { applyPaidProRenderPolish } from "./paidProRenderPolish";
-import { repairProCopyQualityWithOpenAI } from "./proCopyQualityRepair";
+import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import { adaptPremiumFullDraftToProIntelligencePacket } from "./proAgreementIntelligence";
+import {
+  extractJointVentureEconomicsAnchors,
+  isJointVentureEconomicsIntake,
+} from "./proOperationalSynthesis";
 import {
   buildMaterialMissingItems,
   isCatastrophicStructuralFailure,
@@ -565,15 +572,57 @@ function protectionSignalsPresent(text: string): number {
 }
 
 function extractEconomicAnchors(rawIntake: string): string[] {
-  const raw = (rawIntake || "").replace(/\r\n/g, "\n");
-  const lines = raw.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const raw = (rawIntake || "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return [];
+  const units = raw.includes("\n")
+    ? raw.split(/\n+/).map((l) => l.trim()).filter(Boolean)
+    : raw.split(/(?<=[.!?])\s+/).map((l) => l.trim()).filter(Boolean);
   const out: string[] = [];
-  for (const line of lines) {
-    if (/\$|%\s*(?:of\s+)?(?:sales|revenue|net|gross)|commission|retainer|monthly|milestone|net[-\s]?\d+/i.test(line)) {
-      out.push(line);
+  const seen = new Set<string>();
+  for (const line of units) {
+    if (
+      !/\$|%\s*(?:of\s+)?(?:sales|revenue|net|gross)|commission|retainer|monthly|milestone|net[-\s]?\d+|profit\s+split|waterfall|preferred\s+return|capital\s+calls?/i.test(
+        line,
+      )
+    ) {
+      continue;
+    }
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(line.length > 320 ? `${line.slice(0, 317)}…` : line);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+function applyJointVentureEconomicsExpansion(parsed: ParsedDraftShape, rawIntake: string): ParsedDraftShape {
+  if (!isJointVentureEconomicsIntake(rawIntake)) return parsed;
+  const anchors = extractJointVentureEconomicsAnchors(rawIntake);
+  if (!anchors.length) return parsed;
+  const marker = "Joint venture economics carried forward from intake";
+  let next = { ...parsed };
+  const add = nz(next.additional_terms);
+  if (!add.toLowerCase().includes(marker.toLowerCase())) {
+    const block = [`${marker} (edit before send):`, "", ...anchors.map((a, i) => `${i + 1}. ${a}`)].join("\n");
+    next = { ...next, additional_terms: add ? `${add}\n\n${block}` : block };
+  }
+  const pay = nz(next.payment_terms);
+  if (
+    !/\bprofit\s+split|waterfall|preferred\s+return|capital\s+calls?|50\s*\/\s*50\b/i.test(pay) ||
+    /\beconomics to be agreed\b/i.test(pay)
+  ) {
+    const econ = anchors.filter((a) =>
+      /\bprofit\s+split|waterfall|preferred\s+return|pref(?:erred)?\s+equity|\$\d|capital\s+calls?|50\s*\/\s*50\b/i.test(a),
+    );
+    if (econ.length) {
+      next = {
+        ...next,
+        payment_terms: `Joint venture economics (confirm in Schedule A): ${econ.join(" ")}`,
+      };
     }
   }
-  return out.slice(0, 4);
+  return next;
 }
 
 /**
@@ -613,11 +662,20 @@ function enforceEconomicsSafety(draft: ParsedDraftShape, rawIntake: string): Par
 }
 
 function applyRawIntentPremiumBoost(draft: ParsedDraftShape, rawIntake: string): ParsedDraftShape {
+  let next = draft;
+  if (isJointVentureEconomicsIntake(rawIntake)) {
+    next = applyJointVentureEconomicsExpansion(next, rawIntake);
+  }
   const signals = detectPremiumCommercialSignals(rawIntake);
   const blocks: string[] = [];
   const anchors = extractEconomicAnchors(rawIntake);
   if (anchors.length) {
     blocks.push(`Economics preserved from intake (confirm in Schedule A):\n${anchors.map((a) => `- ${a}`).join("\n")}`);
+  }
+  if (isJointVentureEconomicsIntake(rawIntake)) {
+    blocks.push(
+      "Joint venture / profit-share structure: preserve waterfall, preferred return, profit split, capital call notice/cure, deadlock resolution, and confidentiality on underwriting materials without inventing new fund mechanics.",
+    );
   }
   if (signals.ownershipData) {
     blocks.push(
@@ -647,10 +705,10 @@ function applyRawIntentPremiumBoost(draft: ParsedDraftShape, rawIntake: string):
   if (signals.disputeArbitration || signals.confidentiality) {
     blocks.push("Dispute and remedies: confidentiality misuse supports equitable relief, and disputes proceed in the agreed venue/jurisdiction after good-faith escalation.");
   }
-  if (!blocks.length) return draft;
-  const add = nz(draft.additional_terms);
+  if (!blocks.length) return next;
+  const add = nz(next.additional_terms);
   const boosted = `Raw-intent premium protections\n\n${blocks.map((b) => `• ${b}`).join("\n")}`;
-  return { ...draft, additional_terms: add ? `${add}\n\n${boosted}` : boosted };
+  return { ...next, additional_terms: add ? `${add}\n\n${boosted}` : boosted };
 }
 
 function scorePremiumCandidate(
@@ -909,6 +967,7 @@ function amplifyPremiumMaterialityRepair(
   priorPremiumBody: string,
 ): ParsedDraftShape {
   let x = { ...draft };
+  x = applyJointVentureEconomicsExpansion(x, rawSoT);
   const add0 = nz(x.additional_terms);
   const carry = buildIntakeCarryForwardBlock(rawSoT, priorPremiumBody);
   if (carry && !add0.includes("Commercial detail carried forward from user notes")) {
@@ -1021,6 +1080,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   merged = normalizeParsedDraftLegalConcepts(merged, rawIntake);
   merged = ensurePremiumDraftMeetsReviewGate(merged, rawIntake);
   merged = elevatePremiumPaymentTermsFromIntake(merged, rawIntake);
+  merged = applyJointVentureEconomicsExpansion(merged, rawForSoT || rawIntake);
   merged = enrichPremiumTerminationFromContext(merged, rawIntake);
   merged = reinforcePremiumSignalPersistence(merged, rawIntake);
   merged = applySparseDefaultExpansion(merged, rawIntake);
@@ -1401,6 +1461,13 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     }
     if (!fullResp.ok) {
       if (fullResp.failure_kind === "network" && fullResp.retryable) {
+        logPremiumGenerationApiUnavailable({
+          endpoint: PREMIUM_GENERATION_DRAFT_API_PATH,
+          error: fullResp.error_code ?? fullResp.browserErrorMessage ?? "network_error",
+          fallbackBlocked: true,
+          stage: "premiumCompletionPipeline",
+          pipelineSource: "premium_network_retryable",
+        });
         logPremiumCompletionDebug({
           stage: "premium_full_draft_network_retryable",
           intakeLen: soT.length,
@@ -1462,21 +1529,10 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         const preGateIntake = (rawForSoT || rawIntake).trim();
         const postProcessStartedAt =
           typeof performance !== "undefined" ? performance.now() : Date.now();
-        doc = applyPaidProRenderPolish(doc, preGateIntake, premiumRejectCtx.partyNames, {
-          surface: "premium_completion_pipeline_pre_gate",
-        }).text;
-        const copyRepair = await repairProCopyQualityWithOpenAI({
-          text: doc,
+        doc = applyAcceptedProCorpusSafeDisplay(doc, {
+          draft: mergedForApi,
           intakeText: preGateIntake,
-          context: {
-            intakeText: preGateIntake,
-            canonicalPartyNames: premiumRejectCtx.partyNames ?? [],
-          },
-          surface: "premium_completion_pipeline_pre_gate",
-        });
-        if (copyRepair.source === "openai" || copyRepair.source === "deterministic") {
-          doc = copyRepair.text;
-        }
+        }).text;
         const completenessCtx = {
           intakeRaw: preGateIntake,
           partyNames: premiumRejectCtx.partyNames ?? undefined,
@@ -2241,6 +2297,13 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   const finalWinning = (winningPremiumBodyText || "").trim();
   if (premiumRenderSource === "premium_network_retryable") {
     if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
+    logPremiumGenerationApiUnavailable({
+      endpoint: PREMIUM_GENERATION_DRAFT_API_PATH,
+      error: "network_retryable",
+      fallbackBlocked: true,
+      stage: "pipeline_return_premium_network_retryable",
+      pipelineSource: premiumRenderSource,
+    });
     logPremiumCompletionDebug({
       stage: "pipeline_return_premium_network_retryable",
       accepted: false,

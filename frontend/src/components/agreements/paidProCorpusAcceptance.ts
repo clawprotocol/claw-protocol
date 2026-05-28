@@ -1,6 +1,10 @@
 import { detectAgreementFamily } from "./agreementFamilyRouter";
 import type { AgreementIntentContract } from "./agreementIntentContract";
-import { validateIntentContractForPaidProOutput } from "./agreementIntentContract";
+import {
+  resolvePaidProIntentContract,
+  validateIntentContractForPaidProOutput,
+} from "./agreementIntentContract";
+import type { AgreementValidationResult } from "./premiumFullDraftApi";
 import { canShowPremiumSuccess, logPremiumTruthTelemetry } from "./premiumSuccessGate";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
@@ -184,6 +188,8 @@ export function validatePaidProOutput(args: {
    * See {@link isAuthoritativePremiumPipelineProvenance}; does not relax source-fact, cross-category, or shell checks.
    */
   premiumPipelineSource?: PipelineProSourceString | null;
+  /** Backend deterministic validation — contextualizes intent routing for minimalist valid deals. */
+  agreementValidation?: AgreementValidationResult | null;
 }): { ok: boolean; reasons: string[] } {
   const t = args.text || "";
   const rawI = String(args.rawIntake || "");
@@ -258,13 +264,20 @@ export function validatePaidProOutput(args: {
   if (args.intentContractMode === "base_only") {
     return { ok: true, reasons: [] };
   }
-  if (args.intentContract) {
+  const resolvedIntentContract = resolvePaidProIntentContract({
+    rawIntake: rawI,
+    draftFamily: args.draft?.agreement_family ?? null,
+    agreementValidation: args.agreementValidation ?? null,
+  });
+  const intentContractForValidation = resolvedIntentContract;
+  if (intentContractForValidation) {
     const vi = validateIntentContractForPaidProOutput({
-      contract: args.intentContract,
+      contract: intentContractForValidation,
       text: t,
       rawIntake: args.rawIntake,
       draftTitle: args.draft?.title,
       authoritativeProPipelineAccepted: isAuthoritativePremiumPipelineProvenance(args.premiumPipelineSource),
+      agreementValidation: args.agreementValidation ?? null,
     });
     if (!vi.ok) {
       logVpaidDevFail(vi.reasons);

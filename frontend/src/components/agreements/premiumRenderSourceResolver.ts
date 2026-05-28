@@ -1,6 +1,11 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { rejectPremiumBodyForProRender, rejectProUpgradeSourceFactDrift } from "./premiumFullDraftClientAcceptance";
 import { isAcceptablePremiumFullDocumentText } from "./premiumFullDraftQuality";
+import {
+  establishAcceptedPremiumCanonicalCorpus,
+  getAcceptedPremiumCanonicalText,
+} from "./acceptedPremiumCanonicalCorpus";
+import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 
 const SECTION_SIGNAL_RES = [
@@ -289,21 +294,65 @@ function devWarnLiveWhileAuthoritativeCorpusExists(
  * Single deterministic premium plain-text resolver.
  * Order: (A) structurally valid server full → (B) valid repair → (C) live preview → (D) legacy snapshot.
  */
+function preferLongerAuthoritativeServerBody(
+  primary: string,
+  winningFallback: string,
+  draft?: ParsedDraftShape | null,
+  intakeText?: string | null,
+): string {
+  const a = trim(primary);
+  const b = trim(winningFallback);
+  if (b.length > a.length && b.length >= 500) {
+    const established =
+      getAcceptedPremiumCanonicalText().length >= 500
+        ? getAcceptedPremiumCanonicalText()
+        : establishAcceptedPremiumCanonicalCorpus({
+            rawAcceptedBody: b,
+            draft,
+            intakeText,
+            pipelineSource: "server_full_draft",
+          }).text;
+    return established;
+  }
+  return a;
+}
+
 export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs): PremiumRenderResolveResult {
+  const paidPro = getPaidProDocumentForSurface("display", {
+    draft: args.draft,
+    intakeText: args.intakeText,
+  });
+  if (paidPro) {
+    return {
+      text: paidPro.text,
+      premium_render_source: "server_full_document_text",
+      premium_render_reason: "paidProSourceOfTruth",
+      premium_validation_result: { ok: true, reasons: ["paidProSourceOfTruth"] },
+    };
+  }
   const paidAuthoritative = trim(args.paidAuthoritativeProBody);
   if (paidAuthoritative.length >= 500) {
-    const canonicalPaidAuthoritative = canonicalProText(paidAuthoritative, args.draft);
+    const authoritativePaid =
+      getAcceptedPremiumCanonicalText().length >= 500
+        ? getAcceptedPremiumCanonicalText()
+        : establishAcceptedPremiumCanonicalCorpus({
+            rawAcceptedBody: paidAuthoritative,
+            draft: args.draft,
+            intakeText: args.intakeText,
+            pipelineSource: "server_full_draft",
+          }).text;
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.info("[premium-success-hydrate]", {
         phase: "authoritative_body_short_circuit",
-        bodyLen: canonicalPaidAuthoritative.length,
+        bodyLen: authoritativePaid.length,
+        inputLen: paidAuthoritative.length,
         reason: "paid_pipeline_authoritative",
         premium_render_source: "server_full_document_text" as const,
       });
     }
     return {
-      text: canonicalPaidAuthoritative,
+      text: authoritativePaid,
       premium_render_source: "server_full_document_text",
       premium_render_reason: "paid_pipeline_authoritative",
       premium_validation_result: { ok: true, reasons: [] },
@@ -312,16 +361,24 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
 
   const draft = args.draft;
   const intakeProbe = intakeProbeText(draft, args.intakeText);
+  const winningFallbackRaw = trim(args.premiumWinningCorpusFallback);
 
   const fromDraftFull = draft ? canonicalProText(draft.premium_server_full_document_text, draft) : "";
   const fromDraftRepair = draft ? canonicalProText(draft.premium_server_repair_document_text, draft) : "";
   const legacySingleFull = draft ? canonicalProText(draft.premium_full_document_text, draft) : "";
 
-  const serverFull =
+  const serverFullPrimary =
     canonicalProText(args.serverFullDocumentText, draft) ||
     fromDraftFull ||
     (!fromDraftRepair && legacySingleFull ? legacySingleFull : "") ||
-    canonicalProText(args.premiumWinningCorpusFallback, draft);
+    canonicalProText(winningFallbackRaw, draft);
+
+  const serverFull = preferLongerAuthoritativeServerBody(
+    serverFullPrimary,
+    winningFallbackRaw,
+    draft,
+    args.intakeText,
+  );
 
   const serverRepair = canonicalProText(args.serverRepairDocumentText, draft) || fromDraftRepair;
 
@@ -342,6 +399,36 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
 
   const b = tryServer(serverRepair, "server_repair_document_text");
   if (b) return b;
+
+  if (winningFallbackRaw.length >= 500) {
+    const establishedWin =
+      getAcceptedPremiumCanonicalText().length >= 500
+        ? getAcceptedPremiumCanonicalText()
+        : establishAcceptedPremiumCanonicalCorpus({
+            rawAcceptedBody: winningFallbackRaw,
+            draft,
+            intakeText: args.intakeText,
+            pipelineSource: "server_full_draft",
+          }).text;
+    const winTry = tryServer(establishedWin, "server_full_document_text");
+    if (winTry) {
+      return {
+        ...winTry,
+        premium_render_reason: "winning_corpus_authoritative_after_server_tiers_failed",
+      };
+    }
+    if (establishedWin.length >= 1_500) {
+      return {
+        text: establishedWin,
+        premium_render_source: "server_full_document_text",
+        premium_render_reason: "winning_corpus_preserved_without_structural_revalidation",
+        premium_validation_result: {
+          ok: true,
+          reasons: ["winning_corpus_preserved_without_structural_revalidation"],
+        },
+      };
+    }
+  }
 
   const liveRaw = (() => {
     try {

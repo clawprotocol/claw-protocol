@@ -11,6 +11,11 @@ import {
 import { stripGuidedInstructionLeakLines } from "./guidedCorpusLineRepairs";
 import { stripDuplicatePreWitnessIdentityFragment } from "./guidedFinalReviewToSigning";
 import { rebuildCanonicalGuidedCorpusFromClauses } from "./guidedCanonicalCorpusRebuild";
+import {
+  canonicalPartyRecordsFromSignerIdentities,
+  repairCanonicalPartyIdentityInCorpus,
+  resolveCanonicalPartyIdentitiesFromIntake,
+} from "../canonicalPartyIdentityResolver";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
 
 export type FinalGradeCorpusDefect =
@@ -570,6 +575,16 @@ export function repairFinalGradeGuidedCorpus(
   });
   out = definedTerms.text;
   repairs.push(...definedTerms.repairs);
+
+  const partyRecords =
+    opts?.signerIdentities && opts.signerIdentities.length >= 2
+      ? canonicalPartyRecordsFromSignerIdentities(opts.signerIdentities)
+      : resolveCanonicalPartyIdentitiesFromIntake(null, opts?.authoritativePartyNames);
+  if (partyRecords.length >= 2) {
+    const partyRepair = repairCanonicalPartyIdentityInCorpus(out, partyRecords);
+    out = partyRepair.text;
+    repairs.push(...partyRepair.repairs);
+  }
 
   const emptySubsections = stripEmptySubsectionHeadings(out);
   out = emptySubsections.text;

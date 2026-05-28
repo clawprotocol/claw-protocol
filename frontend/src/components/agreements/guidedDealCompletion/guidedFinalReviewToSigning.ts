@@ -672,7 +672,7 @@ export function assertGuidedVs01SigningHandoffReady(args: {
     return { ok: false, reason: "corpus_too_short" };
   }
   if (!corpusHasVisibleSignatureExecutionLines(body)) {
-    return { ok: false, reason: "missing_witness_block" };
+    return { ok: false, reason: "missing_signature_block" };
   }
   const partyCount = Math.max(2, parties.length);
   if (!corpusSignatureBlocksHaveRequiredByLines(body, partyCount)) {

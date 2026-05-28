@@ -1,3 +1,4 @@
+import { shouldSuppressPartyLegalNamesGuidedQuestion } from "../canonicalPartyIdentityResolver";
 import { detectAgreementFamily, type AgreementFamily } from "../agreementFamilyRouter";
 import { scanBodyMaterialPlaceholders } from "../guidedDealCompletion/bodyMaterialPlaceholderScanner";
 import {
@@ -390,6 +391,7 @@ function familyQuestions(
   if (isServicesMigrationIntake(intake, body)) {
     if (
       /\b(?:between|among)\s+[A-Za-z]/i.test(intake) &&
+      !shouldSuppressPartyLegalNamesGuidedQuestion(intake, body) &&
       !/\b(?:LLC|Inc\.|Corp\.|L\.P\.)\b/i.test(body.slice(0, 800))
     ) {
       pushItem(

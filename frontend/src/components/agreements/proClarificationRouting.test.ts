@@ -214,8 +214,10 @@ describe("resolveProClarificationRouting", () => {
     });
 
     expect(state.mode).toBe("validation_repair_needed");
-    expect(state.questions).toHaveLength(1);
-    expect(state.questions[0].question).toBe("This draft needs a quality pass before signing.");
+    expect(state.questions).toHaveLength(0);
+    if (state.mode !== "validation_repair_needed") return;
+    expect(state.failureCodes.length).toBeGreaterThan(0);
+    expect(state.message).toBe("This draft needs a quality pass before signing.");
   });
 
   it("prevents static governing-law fallback when law supplied", () => {

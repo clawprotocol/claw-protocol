@@ -4,6 +4,7 @@
 
 import type { DealVariable } from "./types";
 import { prioritizeDealVariables } from "./variablePrioritizationLayer";
+import { filterUserAnswerableGuidedVariables } from "./userAnswerableGuidedQuestion";
 
 const MAX_GUIDED_QUEUE = 5;
 
@@ -98,7 +99,7 @@ export function dedupeGuidedQuestionsBySemanticIntent(args: {
 export function buildStableGuidedQuestionQueue(args: BuildStableGuidedQueueArgs): StableGuidedQueueResult {
   const max = args.maxQuestions ?? MAX_GUIDED_QUEUE;
   const semanticDedupe = dedupeGuidedQuestionsBySemanticIntent({
-    variables: prioritizeDealVariables(args.variables),
+    variables: prioritizeDealVariables(filterUserAnswerableGuidedVariables(args.variables)),
     answered: args.answered,
     skipped: args.skipped,
   });

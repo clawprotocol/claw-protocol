@@ -24,6 +24,7 @@ describe("isPremiumFullDraftNetworkFailure", () => {
   it("classifies TypeError Failed to fetch and ERR_NETWORK_CHANGED", () => {
     expect(isPremiumFullDraftNetworkFailure(new TypeError("Failed to fetch"))).toBe(true);
     expect(isPremiumFullDraftNetworkFailure(new Error("net::ERR_NETWORK_CHANGED"))).toBe(true);
+    expect(isPremiumFullDraftNetworkFailure(new Error("net::ERR_CONNECTION_REFUSED"))).toBe(true);
     expect(premiumFullDraftNetworkErrorCode(new Error("net::ERR_NETWORK_CHANGED"))).toBe("network_changed");
     expect(isPremiumFullDraftNetworkFailure(new Error("premium_full_draft_failed"))).toBe(false);
   });

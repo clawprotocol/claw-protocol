@@ -11,6 +11,11 @@ import {
   type PaidProCorpusAuthorityCandidate,
   type PaidProCorpusAuthorityTier,
 } from "./paidProCorpusAuthority";
+import {
+  isPremiumGenerationApiUnavailablePipelineSource,
+  shouldBlockLivePreviewAsPaidProAuthority,
+} from "./premiumGenerationApiAvailability";
+import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
 
 export const PAID_PRO_UNAVAILABLE_RETRY_HEADLINE =
   "We couldn't finish the Pro rewrite. Your starter draft is safe.";
@@ -116,6 +121,15 @@ export function resolvePaidProReviewRenderSurface(args: {
   stickyPlainText?: string | null;
   stickyTier?: PaidProCorpusAuthorityTier | null;
 }): PaidProReviewRenderSurface {
+  const canonical = readCanonicalAgreementCorpusForSurface("readonly", { tier: "pro" });
+  if (canonical) {
+    return {
+      mode: "authoritative_pro",
+      plainText: canonical.canonicalText,
+      sourceUsed: "server_full_document_text",
+      authorityTier: "server_authoritative_paid_pro",
+    };
+  }
   const picked = (args.pickedPlain || "").trim();
   const source = (args.pickedSource || "none").trim();
 
@@ -132,6 +146,7 @@ export function resolvePaidProReviewRenderSurface(args: {
   }
 
   const freeBaseline = buildFreeStarterBaselinePlain(args.draft);
+  const pipelineUnavailable = isPremiumGenerationApiUnavailablePipelineSource(args.pipelineSource);
   const candidates: PaidProCorpusAuthorityCandidate[] = [...(args.extraCandidates ?? [])];
 
   const paidFallback = (args.paidAuthoritativeFallback || "").trim();
@@ -148,7 +163,11 @@ export function resolvePaidProReviewRenderSurface(args: {
     });
   }
 
-  if (picked.length >= 200 && !isNeverAuthoritativePaidProSource(source)) {
+  if (
+    picked.length >= 200 &&
+    !isNeverAuthoritativePaidProSource(source) &&
+    !shouldBlockLivePreviewAsPaidProAuthority({ pipelineSource: args.pipelineSource, previewLen: picked.length })
+  ) {
     candidates.push({
       plainText: picked,
       tier: mapRenderSourceToAuthorityTier({ renderSource: source, pipelineSource: args.pipelineSource }),
@@ -164,7 +183,8 @@ export function resolvePaidProReviewRenderSurface(args: {
     freeBaselinePlain: freeBaseline,
     stickyPlainText: args.stickyPlainText,
     stickyTier: args.stickyTier,
-    allowDeterministicFallback: args.allowLocalDeterministicFallback !== false,
+    allowDeterministicFallback:
+      args.allowLocalDeterministicFallback !== false && !pipelineUnavailable,
   });
 
   if (resolution.mode === "authoritative") {
