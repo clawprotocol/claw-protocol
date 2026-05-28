@@ -24,6 +24,7 @@ import {
   wouldMateriallyShrinkAuthoritativeBody,
 } from "./premiumAuthoritativeBodyPreservation";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 
 export type PolishProAgreementDisplayLayerOpts = {
@@ -341,7 +342,16 @@ export function logProReviewDisplaySanityBlocked(payload: {
   source: string;
   hash: string;
 }): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "pro-review-display-sanity-blocked",
+      surface: payload.source,
+      hash: payload.hash,
+      source: payload.reason,
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.warn("[pro-review-display-sanity-blocked]", payload);
 }

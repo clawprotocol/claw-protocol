@@ -16,6 +16,7 @@ import {
   PAID_PRO_REVIEW_SHELL_TITLE,
 } from "./authoritativePaidProReview";
 import type { FreeReviewSurfaceSource } from "./freeStreamlineDraftReview";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 export const FREE_STARTER_REVIEW_TITLE = "Review your draft";
@@ -152,6 +153,19 @@ export function logPaidReviewShellResolved(args: {
   isGuidedCompletion: boolean;
   title: string;
 }): void {
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent(
+      {
+        event: "paid-review-shell-resolved",
+        surface: args.surface,
+        hash: args.title,
+        source: args.source,
+      },
+      { dev: true },
+    )
+  ) {
+    return;
+  }
   console.info("[paid-review-shell-resolved]", args);
 }
 

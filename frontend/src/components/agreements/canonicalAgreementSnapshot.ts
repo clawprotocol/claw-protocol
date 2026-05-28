@@ -9,6 +9,7 @@ import {
   type GuidedSemanticFacts,
 } from "./guidedDealCompletion/guidedAnswerSemanticMerger";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import type { GuidedCompletionSession } from "./guidedDealCompletion/types";
 import {
   MINIMUM_COMMERCIAL_SPECIFICITY_SCORE,
@@ -492,12 +493,22 @@ export function assertPostCanonicalSurfaceUsesFrozenCorpus(args: {
 }
 
 export function logCanonicalSurfaceRead(surface: CanonicalAgreementSurface | string, snapshot: CanonicalAgreementSnapshot): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const source = snapshot.sourceLabel || snapshot.source;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "canonical-surface-read",
+      surface: String(surface),
+      hash: snapshot.hash,
+      source,
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[canonical-surface-read]", {
     surface,
     hash: snapshot.hash,
-    source: snapshot.sourceLabel || snapshot.source,
+    source,
   });
 }
 
@@ -521,7 +532,17 @@ export function logAuthoritativeCorpusInvariant(args?: {
     canonicalHash,
     invariantOk,
   };
-  if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
+  if (
+    shouldLogPaidProAuthoritySurfaceEvent(
+      {
+        event: "authoritative-corpus-invariant",
+        surface: "canonical_corpus",
+        hash: canonicalHash ?? "missing",
+        source: invariantOk ? "invariant_ok" : "invariant_failed",
+      },
+      { dev: true },
+    )
+  ) {
     // eslint-disable-next-line no-console
     console.info("[authoritative-corpus-invariant]", payload);
   }

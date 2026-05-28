@@ -32,6 +32,7 @@ import {
   establishAuthoritativeAgreementDocument,
   hydrateAuthoritativeAgreementDocument,
 } from "./authoritativeAgreementDocument";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -356,7 +357,16 @@ function logPaidProSurface(payload: {
   hash: string;
   source: "paidProSourceOfTruth";
 }): void {
-  if (!import.meta.env.DEV) return;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "paid-pro-surface",
+      surface: payload.surface,
+      hash: payload.hash,
+      source: payload.source,
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[paid-pro-surface]", payload);
 }

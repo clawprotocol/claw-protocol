@@ -4,6 +4,7 @@
  */
 
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { AUTHORITATIVE_BODY_PRESERVE_MIN_WINNING_LEN } from "./premiumAuthoritativeBodyPreservation";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
@@ -61,7 +62,16 @@ export function logProCorpusSourceMap(payload: ProCorpusSourceMapPayload): void 
   const text = trim(payload.text);
   const hash =
     payload.hash ?? (text ? hashProCorpusSourceText(text) : payload.len > 0 ? `len:${payload.len}` : "");
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "pro-corpus-source-map",
+      surface: payload.stage,
+      hash,
+      source: payload.source,
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[pro-corpus-source-map]", {
     stage: payload.stage,

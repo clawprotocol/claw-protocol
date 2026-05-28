@@ -80,7 +80,8 @@ describe("Pro delivery track UI wiring", () => {
       fieldsBlock.indexOf("{signaturePrepMode ? ("),
       fieldsBlock.indexOf("{signaturePrepMode ? (") + 2800,
     );
-    expect(signatureOnlyBlock).toContain("Signer name (optional)");
+    expect(signatureOnlyBlock).toContain('Signer name{signaturePrepMode ? "" : " (optional)"}');
+    expect(signatureOnlyBlock).toContain("Required before signature links are prepared.");
     expect(signatureOnlyBlock).toContain("Signer title (optional)");
     expect(signatureOnlyBlock).toContain("Party address (optional)");
   });

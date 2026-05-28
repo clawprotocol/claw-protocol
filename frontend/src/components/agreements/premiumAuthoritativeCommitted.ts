@@ -5,6 +5,7 @@
 
 import type { PremiumCompletionResult } from "./premiumCompletionPipeline";
 import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import {
   isAuthoritativePremiumPipelineRenderSource,
   type PremiumRenderResolveSource,
@@ -103,6 +104,19 @@ export function logPremiumAuthoritativeCommit(args: {
   source: string | null;
   generationOutcome: string | null;
 }): void {
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent(
+      {
+        event: "premium-authoritative-commit",
+        surface: args.generationOutcome ?? "unknown",
+        hash: String(args.bodyLen),
+        source: args.source ?? "unknown",
+      },
+      { dev: true },
+    )
+  ) {
+    return;
+  }
   console.info("[premium-authoritative-commit]", {
     bodyLen: args.bodyLen,
     source: args.source,

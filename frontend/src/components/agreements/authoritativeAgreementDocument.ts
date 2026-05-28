@@ -1,5 +1,6 @@
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import type { CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapshot";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 
 export type AuthoritativeAgreementDocument = {
   fullCorpusText: string;
@@ -356,7 +357,14 @@ export function returnAuthoritativeTextForIllegalPostAcceptanceGeneration(args: 
 export function authoritativeDocumentForSurface(surface: string): AuthoritativeAgreementDocument | null {
   const doc = authoritativeAgreementDocument;
   if (!doc) return null;
-  if (!isTestMode()) {
+  if (
+    shouldLogPaidProAuthoritySurfaceEvent({
+      event: "authoritative-agreement-document-surface",
+      surface,
+      hash: doc.authoritativeHash,
+      source: doc.generationMetadata.source,
+    })
+  ) {
     // eslint-disable-next-line no-console
     console.info("[authoritative-agreement-document-surface]", {
       surface,
