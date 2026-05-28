@@ -332,11 +332,16 @@ export function SimpleProFinalReviewScreen({
             <PremiumAgreementReadonlyView
               html={effectiveAgreementHtml}
               suppressEmptyFallback={suppressEmptyFallback}
+              fullDocumentFlow={canonicalPaidProReview}
               visibleProPaperTrace={visibleProPaperTrace}
             />
           ) : (
             <div
-              className="premium-readonly-doc max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left"
+              className={`premium-readonly-doc px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left ${
+                canonicalPaidProReview
+                  ? "min-h-0 overflow-visible"
+                  : "max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto"
+              }`}
               data-testid="simple-pro-final-review-paid-plain-fallback"
             >
               <pre className="whitespace-pre-wrap font-serif text-[15px] leading-[1.75] text-stone-800">

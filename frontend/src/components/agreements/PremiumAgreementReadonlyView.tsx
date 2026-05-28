@@ -27,6 +27,8 @@ type Props = {
   emptyFallback?: string;
   /** When true, never show empty placeholder (guided completion keeps last-known-good visible). */
   suppressEmptyFallback?: boolean;
+  /** Canonical paid review renders in normal document flow, not a nested scroll viewport. */
+  fullDocumentFlow?: boolean;
   /** Paid Pro final DOM boundary diagnostics (dev-only logs). */
   visibleProPaperTrace?: {
     declaredSource: string;
@@ -43,6 +45,7 @@ export function PremiumAgreementReadonlyView({
   html,
   emptyFallback,
   suppressEmptyFallback = false,
+  fullDocumentFlow = false,
   visibleProPaperTrace,
 }: Props) {
   const sid = useId().replace(/:/g, "");
@@ -75,7 +78,12 @@ export function PremiumAgreementReadonlyView({
       <div
         role="article"
         aria-label="Agreement document preview"
-        className="premium-readonly-doc max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left [font-feature-settings:'kern'_1,'liga'_1,'onum'_1]"
+        data-testid="premium-agreement-readonly-article"
+        className={`premium-readonly-doc px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left [font-feature-settings:'kern'_1,'liga'_1,'onum'_1] ${
+          fullDocumentFlow
+            ? "min-h-0 overflow-visible"
+            : "max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto"
+        }`}
       >
         {safe ? (
           <div className="premium-doc-body" dangerouslySetInnerHTML={{ __html: safe }} />

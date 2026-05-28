@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE } from "../../launch/simpleProduct/reviewFirstSendSurface";
 import { SimpleProFinalReviewScreen } from "./SimpleProFinalReviewScreen";
 
@@ -53,6 +53,53 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(screen.getByTestId("simple-pro-final-review-signers-ready").textContent).toContain(
       "Signer/reviewer details ready",
     );
+    cleanup();
+  });
+
+  it("paid Pro final review does not clip long SoT corpus", () => {
+    const longBodyHtml = [
+      "<h1>This AI Workflow Setup Services Agreement</h1>",
+      "<p>Opening paid Pro body text.</p>",
+      `<p>${"Commercial terms and implementation details. ".repeat(180)}</p>`,
+      "<h2>Limitation of Liability</h2>",
+      "<p>Liability terms remain visible in the middle of the agreement.</p>",
+      `<p>${"Additional paid Pro clauses. ".repeat(180)}</p>`,
+      "<h2>Signatures</h2>",
+      "<p>IN WITNESS WHEREOF, the parties have executed this Agreement.</p>",
+    ].join("");
+
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml={longBodyHtml}
+        canonicalPaidProReview
+        paidReviewPlain={[
+          "This AI Workflow Setup Services Agreement",
+          "Limitation of Liability",
+          "IN WITNESS WHEREOF",
+          "x".repeat(11_500),
+        ].join("\n")}
+        signaturePrimaryLabel="Add signers / prepare signature links"
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+
+    const documentShell = screen.getByTestId("simple-pro-final-review-document");
+    expect(within(documentShell).getByText("This AI Workflow Setup Services Agreement")).toBeTruthy();
+    expect(within(documentShell).getByText("Limitation of Liability")).toBeTruthy();
+    expect(within(documentShell).getByText(/IN WITNESS WHEREOF/)).toBeTruthy();
+    expect(screen.queryByText(/Agreement preview is not available/i)).toBeNull();
+    expect(screen.queryByText(/Finalizing secure agreement version/i)).toBeNull();
+
+    const article = screen.getByTestId("premium-agreement-readonly-article");
+    expect(article.className).toContain("overflow-visible");
+    expect(article.className).not.toContain("max-h-[");
+    expect(article.className).not.toContain("overflow-y-auto");
+    const actions = screen.getByTestId("simple-pro-final-review-actions");
+    expect(documentShell.contains(actions)).toBe(false);
+    expect(actions.textContent).toContain("Add signers / prepare signature links");
     cleanup();
   });
 
