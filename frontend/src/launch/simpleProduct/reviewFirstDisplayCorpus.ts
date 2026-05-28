@@ -3,6 +3,7 @@ import {
   authoritativeDocumentForSurface,
   logIllegalPostAcceptanceMutationAttempt,
 } from "../../components/agreements/authoritativeAgreementDocument";
+import { getPaidProDocumentForSurface } from "../../components/agreements/paidProSourceOfTruth";
 
 export type ReviewFirstDisplayCorpusSource =
   | "review_first_final_corpus"
@@ -60,6 +61,14 @@ function reviewRouteHashInvariant(args: {
 
 export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): ReviewFirstDisplayCorpus | null {
   if (!draft) return null;
+  const paidPro = getPaidProDocumentForSurface("review");
+  if (paidPro && paidPro.text.trim().length >= 500) {
+    return {
+      text: paidPro.text,
+      source: "authoritative_agreement_document",
+      hash: paidPro.hash,
+    };
+  }
   const authoritative = authoritativeDocumentForSurface("review_route");
   if (authoritative?.fullCorpusText) {
     reviewRouteHashInvariant({

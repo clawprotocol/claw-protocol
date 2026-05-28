@@ -14,6 +14,8 @@ export function resolveSimpleProFinalReviewActive(args: {
   premiumRecipientUxActive: boolean;
   createFlowPhase: CreateFlowProductionPhase;
   guidedCompletionPhase: GuidedCompletionPhase;
+  /** Frozen paid SoT after checkout — canonical final review without guided Q&A first. */
+  acceptedPaidProAuthority?: boolean;
   /** User explicitly opened final review — never auto-open from apply alone. */
   finalReviewExplicitlyOpened?: boolean;
   /** Guided signing confirmation replaces final review document surface. */
@@ -22,8 +24,17 @@ export function resolveSimpleProFinalReviewActive(args: {
   pinnedFinalizedSignerCorpusHash?: string | null;
   guidedSignatureTrackInFlight?: boolean;
 }): boolean {
-  if (!args.paidProAuthoritative || !args.premiumPaidDocumentSurface) return false;
+  if (!args.premiumPaidDocumentSurface) return false;
   if (args.premiumRecipientUxActive) return false;
+  if (args.acceptedPaidProAuthority) {
+    return (
+      args.createFlowPhase === "draft_ready_for_review" ||
+      isGuidedFinalReviewPhase(args.createFlowPhase) ||
+      args.createFlowPhase === "ready_to_send" ||
+      args.guidedCompletionPhase === "applied"
+    );
+  }
+  if (!args.paidProAuthoritative) return false;
   if (!args.finalReviewExplicitlyOpened) return false;
   if (args.signingConfirmationActive) return false;
   if (args.guidedCompletionPhase !== "applied") return false;

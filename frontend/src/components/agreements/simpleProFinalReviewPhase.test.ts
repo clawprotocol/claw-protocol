@@ -28,6 +28,34 @@ describe("resolveSimpleProFinalReviewActive", () => {
     ).toBe(false);
   });
 
+  it("is true when acceptedPaidProAuthority after checkout without explicit open", () => {
+    expect(
+      resolveSimpleProFinalReviewActive({
+        paidProAuthoritative: true,
+        premiumPaidDocumentSurface: true,
+        premiumRecipientUxActive: false,
+        createFlowPhase: "draft_ready_for_review",
+        guidedCompletionPhase: "collecting_answers",
+        acceptedPaidProAuthority: true,
+        finalReviewExplicitlyOpened: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("is true when acceptedPaidProAuthority even if paidProAuthoritative is not yet on draft", () => {
+    expect(
+      resolveSimpleProFinalReviewActive({
+        paidProAuthoritative: false,
+        premiumPaidDocumentSurface: true,
+        premiumRecipientUxActive: false,
+        createFlowPhase: "draft_ready_for_review",
+        guidedCompletionPhase: "collecting_answers",
+        acceptedPaidProAuthority: true,
+        finalReviewExplicitlyOpened: false,
+      }),
+    ).toBe(true);
+  });
+
   it("is false when recipient UX is active", () => {
     expect(
       resolveSimpleProFinalReviewActive({

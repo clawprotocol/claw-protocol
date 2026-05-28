@@ -5,6 +5,7 @@
  * → updated_agreement_ready → guided_final_review → send_intent_selected → recipient_setup
  */
 
+import { hasAcceptedPaidProAuthority } from "../authoritativePaidProReview";
 import type { CreateFlowProductionPhase } from "../createFlowTypes";
 import { isFinalizingFinalReviewPhase, isGuidedFinalReviewPhase, isUpdatedAgreementReadyPhase } from "../createFlowTypes";
 import type { GuidedCompletionPhase } from "./guidedCompletionPhase";
@@ -100,6 +101,16 @@ export function guidedProUxBlocksRecipientSetup(args: {
 export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): GuidedProUxState {
   if (!args.premiumPaidDocumentSurface) return "inactive";
   if (args.guidedCompletionPhase === "inactive" && !args.paidProAcceptedCorpusReady) return "inactive";
+
+  if (hasAcceptedPaidProAuthority()) {
+    if (
+      args.finalReviewExplicitlyOpened &&
+      (isGuidedFinalReviewPhase(args.createFlowPhase) || args.guidedCompletionPhase === "applied")
+    ) {
+      return "guided_final_review";
+    }
+    return "paid_pro_draft";
+  }
 
   if (args.signingPacketSetupActive) return "signing_packet_setup";
 

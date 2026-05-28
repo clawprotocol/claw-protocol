@@ -379,6 +379,7 @@ import {
   shouldSkipHomeAutoGenerateForStoredReview,
 } from "./createReviewRefreshRestore";
 import {
+  hasAcceptedPaidProAuthority,
   isAuthoritativePaidProReview,
   PAID_PRO_REVIEW_BADGE,
   PAID_PRO_REVIEW_CHIP_STATE,
@@ -388,6 +389,7 @@ import {
   resolveAuthoritativePaidProReviewPlain,
   starterPlainLooksStaleVersusPaidAuthority,
 } from "./authoritativePaidProReview";
+import { commitPaidProAcceptanceStorageHygiene } from "./paidProAcceptanceRouting";
 import {
   buildCreateReturnToWithStarterReviewRestore,
   logCheckoutBackRegenerationSkipped,
@@ -6216,6 +6218,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               draft: mergedDraftPersist,
               intakeText: mergedIntake,
             });
+            commitPaidProAcceptanceStorageHygiene();
+            bumpPremiumSurfaceGateTick();
+            setGuidedCompletionPhase("applied");
+            setGuidedFinalReviewExplicitlyOpened(true);
+            guidedFinalReviewExplicitlyUnlockedRef.current = true;
+            setDisplayPhase("review");
+            setCreateFlowPhaseGuarded("draft_ready_for_review");
+            setPreviewPaneRevealed(true);
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[paid-pro-acceptance-routing]", {
+                premiumRenderSource: result.premiumRenderSource,
+                acceptedBodyLen: snapshotPlain.length,
+                guidedPhase: "applied",
+                finalReviewOpened: true,
+              });
+            }
           } catch (establishErr) {
             if (import.meta.env.DEV) {
               // eslint-disable-next-line no-console
@@ -9396,7 +9415,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumPersistedFlowActive,
         premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
       }),
-    [draft, tier, reviewAgreementId, premiumSendPathUnlocked, premiumPersistedFlowActive, reviewDocRefreshTick],
+    [
+      draft,
+      tier,
+      reviewAgreementId,
+      premiumSendPathUnlocked,
+      premiumPersistedFlowActive,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
   );
   useLayoutEffect(() => {
     paidProAuthoritativeRef.current = paidProAuthoritative;
@@ -11895,6 +11922,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumRecipientUxActive,
         createFlowPhase,
         guidedCompletionPhase,
+        acceptedPaidProAuthority: hasAcceptedPaidProAuthority({
+          draft: draft ?? null,
+          intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        }),
         finalReviewExplicitlyOpened: guidedFinalReviewExplicitlyOpened,
         signingConfirmationActive: guidedSigningConfirmationActive,
         pinnedFinalizedSignerCorpusHash: pinnedFinalizedSignerCorpusHashRef.current,
@@ -12748,10 +12779,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProAwaitingRuntimeAuthority =
     premiumPaidDocumentSurface && paidProRuntimeAuthority.showFinalizingOnly;
 
-  const simpleProFinalReviewShellActive = useMemo(
-    () => simpleProFinalReviewActive && paidProRuntimeAuthority.canRenderProReviewShell,
-    [simpleProFinalReviewActive, paidProRuntimeAuthority.canRenderProReviewShell],
+  const acceptedPaidProAuthorityActive = useMemo(
+    () =>
+      hasAcceptedPaidProAuthority({
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      }),
+    [draft, currentPremiumMergedIntakeKey, intakeCombined, premiumSurfaceGateTick, reviewDocRefreshTick],
   );
+
+  const simpleProFinalReviewShellActive = useMemo(() => {
+    if (
+      acceptedPaidProAuthorityActive &&
+      premiumPaidDocumentSurface &&
+      !premiumRecipientUxActive &&
+      createUiStage === CreateUiStage.DRAFT
+    ) {
+      return true;
+    }
+    return simpleProFinalReviewActive && paidProRuntimeAuthority.canRenderProReviewShell;
+  }, [
+    acceptedPaidProAuthorityActive,
+    premiumPaidDocumentSurface,
+    premiumRecipientUxActive,
+    createUiStage,
+    simpleProFinalReviewActive,
+    paidProRuntimeAuthority.canRenderProReviewShell,
+  ]);
 
   const premiumPaidUnavailableRetry = useMemo(() => {
     if (!premiumPaidDocumentSurface || proUpgradeUseStarterView || authoritativePremiumUiCommitted) {
@@ -13497,7 +13551,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const session = guidedCompletionSessionRef.current;
     const guidedActive = Boolean(
-      premiumPaidDocumentSurface &&
+      !hasAcceptedPaidProAuthority() &&
+        premiumPaidDocumentSurface &&
         !proUpgradeUseStarterView &&
         !shouldGateGuidedRenderAuthorityForFreeReview({
           isFreeStreamlineDraftReview,
@@ -18083,7 +18138,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }).sessionHasRenderableQueue,
   );
   const showPrimaryGuidedCompletion = Boolean(
-    !simpleProFinalReviewActive &&
+    !hasAcceptedPaidProAuthority({
+      draft: draft ?? null,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+    }) &&
+      !simpleProFinalReviewActive &&
       premiumPaidDocumentSurface &&
       !proUpgradeUseStarterView &&
       guidedBodyUsable &&
@@ -19082,7 +19141,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const guidedCompletionActive = Boolean(
-    premiumPaidDocumentSurface &&
+    !hasAcceptedPaidProAuthority({
+      draft: draft ?? null,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+    }) &&
+      premiumPaidDocumentSurface &&
       !proUpgradeUseStarterView &&
       guidedBodyUsable &&
       canProceedWithPaidProDocument &&
@@ -24219,20 +24282,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           agreementHtml={simpleProFinalReviewHtml}
                                           visibleProPaperTrace={visibleProPaperTrace}
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}
-                                          appliedChecklist={guidedAppliedSummaryChecklist}
-                                          appliedAnswerCount={
-                                            Object.keys(
-                                              (guidedCompletionSession ?? guidedCompletionSessionRef.current)
-                                                ?.answered ?? {},
-                                            ).filter((id) =>
-                                              (
-                                                (guidedCompletionSession ?? guidedCompletionSessionRef.current)
-                                                  ?.answered[id] || ""
-                                              ).trim(),
-                                            ).length || guidedAuthoritativeSummaryVariableIds.length
+                                          canonicalPaidProReview={acceptedPaidProAuthorityActive}
+                                          appliedChecklist={
+                                            acceptedPaidProAuthorityActive ? [] : guidedAppliedSummaryChecklist
                                           }
-                                          appliedAreas={guidedAuthoritativeSummaryAreas}
-                                          appliedVariableIds={guidedAuthoritativeSummaryVariableIds}
+                                          appliedAnswerCount={
+                                            acceptedPaidProAuthorityActive
+                                              ? 0
+                                              : Object.keys(
+                                                    (guidedCompletionSession ?? guidedCompletionSessionRef.current)
+                                                      ?.answered ?? {},
+                                                  ).filter((id) =>
+                                                    (
+                                                      (guidedCompletionSession ?? guidedCompletionSessionRef.current)
+                                                        ?.answered[id] || ""
+                                                    ).trim(),
+                                                  ).length || guidedAuthoritativeSummaryVariableIds.length
+                                          }
+                                          appliedAreas={
+                                            acceptedPaidProAuthorityActive ? [] : guidedAuthoritativeSummaryAreas
+                                          }
+                                          appliedVariableIds={
+                                            acceptedPaidProAuthorityActive
+                                              ? []
+                                              : guidedAuthoritativeSummaryVariableIds
+                                          }
                                           bulkApplyBusy={guidedCompletionPhase === "applying_all"}
                                           bulkApplyError={guidedBulkApplyError}
                                           packetStale={guidedSigningPacketStale}
@@ -24571,7 +24645,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             </p>
                                           </div>
                                         ) : null}
-                                        {showPrimaryGuidedCompletion && activeGuidedCompletionSession ? (
+                                        {showPrimaryGuidedCompletion &&
+                                        activeGuidedCompletionSession &&
+                                        !acceptedPaidProAuthorityActive ? (
                                           <div
                                             id="guided-deal-completion-primary"
                                             className="mb-4 border-b border-stone-300/70 bg-gradient-to-b from-[#f4ecdc] to-[#ebe3d7] px-[clamp(1.35rem,4.5vw,2.65rem)] py-4 shadow-[inset_0_-1px_0_rgba(120,113,108,0.16)] sm:py-5"

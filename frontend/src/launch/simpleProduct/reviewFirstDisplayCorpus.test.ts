@@ -6,6 +6,10 @@ import {
   establishAuthoritativeAgreementDocument,
 } from "../../components/agreements/authoritativeAgreementDocument";
 import * as proAgreementCanonicalizer from "../../components/agreements/proAgreementCanonicalizer";
+import {
+  clearPaidProSourceOfTruth,
+  establishPaidProSourceOfTruth,
+} from "../../components/agreements/paidProSourceOfTruth";
 import { resolveReviewFirstDisplayCorpus } from "./reviewFirstDisplayCorpus";
 
 function draft(overrides: Partial<AgreementDraft>): AgreementDraft {
@@ -30,7 +34,23 @@ function draft(overrides: Partial<AgreementDraft>): AgreementDraft {
 describe("reviewFirstDisplayCorpus", () => {
   afterEach(() => {
     clearAuthoritativeAgreementDocument();
+    clearPaidProSourceOfTruth();
     vi.restoreAllMocks();
+  });
+
+  it("prefers paid Pro SoT over starter purpose and short preview fields", () => {
+    const paid = `PAID ROUTE CORPUS. ${"x".repeat(12_000)}`;
+    establishPaidProSourceOfTruth({ text: paid, source: "server_full_draft" });
+    const resolved = resolveReviewFirstDisplayCorpus(
+      draft({
+        purpose: "short starter purpose",
+        premium_render_source: "live_generated_preview",
+        server_full_document_text: "short preview",
+      }),
+    );
+    expect(resolved?.text.length).toBeGreaterThan(10_000);
+    expect(resolved?.text).toBe(paid.trim());
+    expect(resolved?.text).not.toContain("short starter");
   });
 
   it("prefers stored review-first final corpus over rebuilt draft fields", () => {

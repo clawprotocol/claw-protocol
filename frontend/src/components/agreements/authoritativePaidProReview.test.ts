@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  hasAcceptedPaidProAuthority,
   isAuthoritativePaidProReview,
   PAID_PRO_REVIEW_BADGE,
   PAID_PRO_REVIEW_CHIP_STATE,
@@ -7,6 +8,7 @@ import {
   PAID_PRO_REVIEW_SHELL_TITLE,
   paidProAuthorityBlocksStarterReviewRestore,
   resolveAuthoritativePaidProReviewPlain,
+  resolvePaidProAcceptanceRoutingMarkers,
   starterPlainLooksStaleVersusPaidAuthority,
 } from "./authoritativePaidProReview";
 import { shouldRestoreStoredCreateReviewDraftSnapshot } from "./createReviewRefreshRestore";
@@ -110,6 +112,18 @@ describe("authoritativePaidProReview", () => {
     establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
     expect(paidProAuthorityBlocksStarterReviewRestore()).toBe(true);
     expect(shouldRestoreStoredCreateReviewDraftSnapshot()).toBe(false);
+  });
+
+  it("hasAcceptedPaidProAuthority for long server acceptance", () => {
+    const body = "x".repeat(16_000);
+    establishPaidProSourceOfTruth({ text: body, source: "server_full_draft" });
+    expect(hasAcceptedPaidProAuthority()).toBe(true);
+    expect(
+      resolvePaidProAcceptanceRoutingMarkers({
+        premiumRenderSource: "server_full_draft",
+        acceptedBodyLen: body.length,
+      }).suppressGuidedQuestionPanel,
+    ).toBe(true);
   });
 
   it("exports paid review chip labels distinct from starter", () => {

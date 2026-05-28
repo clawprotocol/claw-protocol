@@ -4,6 +4,7 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import {
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruthText,
@@ -48,6 +49,43 @@ export function isAuthoritativePaidProReview(input?: AuthoritativePaidProReviewI
   if (input?.isPaidPro === false) return false;
   if (!hasPaidProSourceOfTruth()) return false;
   return resolveAuthoritativePaidProReviewPlain(input).length >= PAID_PRO_AUTHORITY_MIN_LEN;
+}
+
+/** Single authority predicate — wins over guided Q&A, starter restore, and preview fallbacks. */
+export function hasAcceptedPaidProAuthority(input?: AuthoritativePaidProReviewInput): boolean {
+  return isAuthoritativePaidProReview(input);
+}
+
+export function shouldSuppressGuidedQuestionPanelForPaidAuthority(
+  input?: AuthoritativePaidProReviewInput,
+): boolean {
+  return hasAcceptedPaidProAuthority(input);
+}
+
+export type PaidProAcceptanceRoutingMarkers = {
+  clearStarterDraftReadyMarker: boolean;
+  suppressGuidedQuestionPanel: boolean;
+  openCanonicalFinalReview: boolean;
+  setGuidedPhaseApplied: boolean;
+};
+
+/** After server_full_draft acceptance, UI must hard-route to canonical paid review (not guided Q&A / starter). */
+export function resolvePaidProAcceptanceRoutingMarkers(args: {
+  premiumRenderSource?: string | null;
+  acceptedBodyLen: number;
+}): PaidProAcceptanceRoutingMarkers {
+  const len = Math.max(0, args.acceptedBodyLen);
+  const pipelineAuthoritative =
+    isAuthoritativePremiumPipelineRenderSource(args.premiumRenderSource) &&
+    len >= PAID_PRO_AUTHORITY_MIN_LEN;
+  const sotActive = hasAcceptedPaidProAuthority();
+  const active = sotActive || pipelineAuthoritative;
+  return {
+    clearStarterDraftReadyMarker: active,
+    suppressGuidedQuestionPanel: active,
+    openCanonicalFinalReview: active,
+    setGuidedPhaseApplied: active,
+  };
 }
 
 /** Block restoring stored free starter snapshot into visible paid review. */

@@ -5,6 +5,10 @@ import type { ProVisiblePaperCandidate } from "./visibleProPaperRenderBoundary";
 import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload";
 import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSection } from "./guidedDealCompletion/guidedSectionScroll";
 import {
+  PAID_PRO_REVIEW_SHELL_SUBTITLE,
+  PAID_PRO_REVIEW_SHELL_TITLE,
+} from "./authoritativePaidProReview";
+import {
   SIMPLE_PRO_FINAL_REVIEW_HEADLINE,
   SIMPLE_PRO_FINAL_REVIEW_SUBCOPY,
 } from "./guidedDealCompletion/guidedFinalReviewTransition";
@@ -40,6 +44,8 @@ export type SimpleProFinalReviewScreenProps = {
   corpusRecoveryMessage?: string | null;
   /** When false, checklist shows without broken jump links (DOM anchors missing). */
   enableSectionJump?: boolean;
+  /** Post-checkout paid SoT — canonical Pro review shell (no guided Q&A chrome). */
+  canonicalPaidProReview?: boolean;
   signaturePrimaryLabel?: string;
   signatureSecondaryLabel?: string;
   reviewSecondaryLabel?: string;
@@ -101,6 +107,7 @@ export function SimpleProFinalReviewScreen({
   suppressPostReviewEditUx = false,
   corpusRecoveryMessage = null,
   enableSectionJump = true,
+  canonicalPaidProReview = false,
   signaturePrimaryLabel = "Send for signature",
   signatureSecondaryLabel = "Change signing order",
   reviewSecondaryLabel = "Send for review",
@@ -140,10 +147,16 @@ export function SimpleProFinalReviewScreen({
     Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
   const canEditAgreementText = canDirectEditPlainText || canSuggestEdits;
   const showDocument = agreementHtml.trim().length > 0 && !corpusRecoveryMessage;
-  const answerCount = appliedAnswerCount > 0 ? appliedAnswerCount : appliedVariableIds.length;
+  const reviewHeadline = canonicalPaidProReview ? PAID_PRO_REVIEW_SHELL_TITLE : SIMPLE_PRO_FINAL_REVIEW_HEADLINE;
+  const reviewSubcopy = canonicalPaidProReview ? PAID_PRO_REVIEW_SHELL_SUBTITLE : SIMPLE_PRO_FINAL_REVIEW_SUBCOPY;
+  const answerCount = canonicalPaidProReview
+    ? 0
+    : appliedAnswerCount > 0
+      ? appliedAnswerCount
+      : appliedVariableIds.length;
 
   useEffect(() => {
-    if (!appliedVariableIds.length || !agreementHtml.trim()) return;
+    if (canonicalPaidProReview || !appliedVariableIds.length || !agreementHtml.trim()) return;
     const timer = window.setTimeout(() => {
       highlightAllGuidedChangedSections(appliedVariableIds);
     }, 150);
@@ -169,15 +182,31 @@ export function SimpleProFinalReviewScreen({
       className={`flex flex-col gap-3 ${className}`}
       data-testid="simple-pro-final-review-screen"
       role="region"
-      aria-label={SIMPLE_PRO_FINAL_REVIEW_HEADLINE}
+      aria-label={reviewHeadline}
     >
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">LawDog Pro</p>
+        {canonicalPaidProReview ? (
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span
+              className="rounded-full border border-emerald-300/80 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-900"
+              data-testid="canonical-paid-pro-review-badge"
+            >
+              Pro agreement
+            </span>
+            <span
+              className="rounded-full border border-stone-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-700"
+              data-testid="canonical-paid-pro-review-chip-state"
+            >
+              Ready for review
+            </span>
+          </div>
+        ) : null}
         <h2
           className="mt-1 font-serif text-lg font-semibold tracking-tight text-stone-900 sm:text-xl"
           data-testid="simple-pro-final-review-headline"
         >
-          {SIMPLE_PRO_FINAL_REVIEW_HEADLINE}
+          {reviewHeadline}
         </h2>
         {answerCount > 0 ? (
           <p className="mt-1 text-xs font-medium text-emerald-900/95" data-testid="simple-pro-final-review-trust-line">
@@ -195,7 +224,7 @@ export function SimpleProFinalReviewScreen({
         <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600" data-testid="simple-pro-final-review-send-trust">
           This is the version that will be sent.
         </p>
-        {appliedChecklist.length > 0 && !bulkApplyBusy ? (
+        {!canonicalPaidProReview && appliedChecklist.length > 0 && !bulkApplyBusy ? (
           <div
             className="mt-2.5 rounded-md border border-emerald-200/80 bg-emerald-50/60 px-2.5 py-2"
             data-testid="simple-pro-applied-updates-card"
@@ -224,7 +253,7 @@ export function SimpleProFinalReviewScreen({
               ))}
             </ul>
           </div>
-        ) : appliedAreas.length > 0 && !bulkApplyBusy ? (
+        ) : !canonicalPaidProReview && appliedAreas.length > 0 && !bulkApplyBusy ? (
           <p className="mt-2 text-[11px] leading-relaxed text-emerald-900/90">
             Updated: {appliedAreas.slice(0, 4).join(" · ")}
             {appliedAreas.length > 4 ? ` (+${appliedAreas.length - 4} more)` : ""}
@@ -234,7 +263,7 @@ export function SimpleProFinalReviewScreen({
           className="mt-2 text-xs leading-relaxed text-stone-600 sm:text-sm"
           data-testid="simple-pro-final-review-subcopy"
         >
-          {SIMPLE_PRO_FINAL_REVIEW_SUBCOPY}
+          {reviewSubcopy}
         </p>
         {onBackToSignerDetails ? (
           <button

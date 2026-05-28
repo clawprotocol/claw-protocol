@@ -45,6 +45,14 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(intake).toContain("if (reviewFirstHandoffError && simpleProFinalReviewActive) return null;");
   });
 
+  it("canonical paid Pro review uses paid shell title and suppresses guided checklist", () => {
+    const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
+    expect(screen).toContain("canonicalPaidProReview");
+    expect(screen).toContain("PAID_PRO_REVIEW_SHELL_TITLE");
+    expect(screen).toContain('data-testid="canonical-paid-pro-review-badge"');
+    expect(screen).toContain("Ready for review");
+  });
+
   it("SimpleProFinalReviewScreen renders review-first error in final review actions region", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain('data-testid="simple-pro-final-review-actions"');
