@@ -70,6 +70,15 @@ export function logCanonicalPartySourceCandidates(args: {
   selected: readonly string[];
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (typeof import.meta !== "undefined" && !import.meta.env?.DEV) return;
+  const key = JSON.stringify({
+    rawIntakeNames: args.rawIntakeNames,
+    generatedBodyNames: args.generatedBodyNames,
+    starterNames: args.starterNames,
+    selected: args.selected,
+  });
+  if (loggedCanonicalPartySourceCandidates.has(key)) return;
+  loggedCanonicalPartySourceCandidates.add(key);
   // eslint-disable-next-line no-console
   console.info("[canonical-party-source-candidates]", {
     rawIntakeNames: args.rawIntakeNames,
@@ -78,6 +87,8 @@ export function logCanonicalPartySourceCandidates(args: {
     selected: args.selected,
   });
 }
+
+const loggedCanonicalPartySourceCandidates = new Set<string>();
 
 export function logCanonicalPartyIdentityUpgraded(args: {
   from: string;

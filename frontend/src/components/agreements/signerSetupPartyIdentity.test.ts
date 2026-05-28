@@ -19,6 +19,7 @@ import {
   hydrateLegalEntityNameFromHandoff,
   isShortPrefixOfFullLegal,
   resolveEditableSignerLegalEntityForSlot,
+  resolvePaidProSignerDetailsGate,
   resolveLegalEntityNameForHandoffSlot,
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
@@ -89,6 +90,45 @@ describe("signerSetupPartyIdentity", () => {
     expect(p1.legalEntityName).toBe("Harbor Peak Automation LLC");
     expect(p0.source).toBe("authoritative_manifest");
     expect(p1.source).toBe("authoritative_manifest");
+  });
+
+  it("paid Pro signer details gate pre-fills legal names but requires signer names and emails", () => {
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [{ name: "Red Mesa Logistics LLC" }, { name: "Harbor Peak Automation LLC" }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    const gate = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      signerSetupPartyIdentities: identities,
+      draftPartyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      partySignerNames: ["", ""],
+      recipient1Name: "Red Mesa Logistics LLC",
+      recipient2Name: "Harbor Peak Automation LLC",
+      recipient1Email: "",
+      recipient2Email: "",
+      extraPartyReviewEmails: [],
+    });
+    expect(gate.complete).toBe(false);
+    expect(gate.legalEntityNames).toEqual(["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"]);
+    expect(gate.blockers.some((b) => b.field === "signer_name")).toBe(true);
+    expect(gate.blockers.some((b) => b.field === "email")).toBe(true);
+    expect(gate.blockerMessage).toMatch(/signer name|signer email/i);
+  });
+
+  it("paid Pro signer details gate completes when signer names and emails are present", () => {
+    const gate = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      draftPartyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      partySignerNames: ["Alex Client", "Priya Provider"],
+      recipient1Name: "Red Mesa Logistics LLC",
+      recipient2Name: "Harbor Peak Automation LLC",
+      recipient1Email: "alex@redmesa.test",
+      recipient2Email: "priya@harborpeak.test",
+      extraPartyReviewEmails: [],
+    });
+    expect(gate.complete).toBe(true);
+    expect(gate.blockers).toEqual([]);
   });
 
   it("uses compact display names only as displayName, not legalEntityName", () => {

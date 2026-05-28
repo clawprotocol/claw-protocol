@@ -5,12 +5,18 @@ import {
   PAID_PRO_REVIEW_CHIP_STATE,
   PAID_PRO_REVIEW_CHIP_VERSION,
   resolvePaidProAcceptanceRoutingMarkers,
+  resolvePaidProFinalReviewVisiblePlain,
 } from "./authoritativePaidProReview";
 import {
   commitPaidProAcceptanceStorageHygiene,
   planPaidProAcceptanceUiRouting,
 } from "./paidProAcceptanceRouting";
-import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  clearPaidProSourceOfTruth,
+  establishPaidProSourceOfTruth,
+  getPaidProDocumentForSurface,
+} from "./paidProSourceOfTruth";
+import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { resolveGuidedProUxState } from "./guidedDealCompletion/guidedProUxState";
 import { resolveSimpleProFinalReviewActive } from "./simpleProFinalReviewPhase";
 import { pickAuthoritativePlainForSendHandoff } from "./sendHandoffAuthoritativeCorpus";
@@ -105,6 +111,26 @@ describe("paidProAcceptanceRouting", () => {
     const pick = pickAuthoritativePlainForSendHandoff(draft);
     expect((pick?.text || "").length).toBeGreaterThan(10_000);
     expect(pick?.field).not.toBe("purpose");
+  });
+
+  it("final review visible plain resolves from SoT when boundary empty", () => {
+    establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+    expect(
+      resolvePaidProFinalReviewVisiblePlain({
+        boundaryPlain: "",
+        displayCandidatePlain: "",
+      }).length,
+    ).toBeGreaterThan(10_000);
+  });
+
+  it("copy agreement returns same SoT hash and length as visible paid Pro corpus", () => {
+    const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+    const review = getPaidProDocumentForSurface("review");
+    const copy = getPaidProDocumentForSurface("copy");
+    expect(review?.text.length).toBe(record.text.length);
+    expect(copy?.text.length).toBe(record.text.length);
+    expect(fingerprintAgreementBody(copy?.text ?? "")).toBe(fingerprintAgreementBody(review?.text ?? ""));
+    expect(copy?.text).toBe(review?.text);
   });
 
   it("paid shell chip copy constants", () => {

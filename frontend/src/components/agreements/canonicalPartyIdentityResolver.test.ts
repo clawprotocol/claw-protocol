@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   canonicalPartyIdentitiesFromRecords,
@@ -13,10 +15,10 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import { extractDealVariables } from "./guidedDealCompletion/missingVariableExtractor";
 import { isGuidedVariableSatisfiedByIntake } from "./guidedDealCompletion/guidedIntakeFactPrefill";
-import { MINIMAL_SERVICES_INTAKE } from "./paidProMinimalServicesAcceptance.test";
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
 
-const INTAKE = MINIMAL_SERVICES_INTAKE;
+const INTAKE =
+  "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC for AI workflow setup services. Red Mesa will pay Harbor Peak $5,000. Texas law. Electronic signatures allowed.";
 
 describe("canonicalPartyIdentityResolver", () => {
   it("extracts full legal names from minimal services intake", () => {
@@ -25,6 +27,15 @@ describe("canonicalPartyIdentityResolver", () => {
     expect(records[0]?.fullLegalName).toBe("Red Mesa Logistics LLC");
     expect(records[1]?.fullLegalName).toBe("Harbor Peak Automation LLC");
     expect(intakeHasFullLegalEntityParties(INTAKE)).toBe(true);
+  });
+
+  it("does not unconditionally spam canonical party source candidates in production", () => {
+    const source = readFileSync(join(__dirname, "canonicalPartyIdentityResolver.ts"), "utf8");
+    const fnIdx = source.indexOf("export function logCanonicalPartySourceCandidates");
+    const block = source.slice(fnIdx, fnIdx + 900);
+    expect(block).toContain("!import.meta.env?.DEV");
+    expect(block).toContain("loggedCanonicalPartySourceCandidates.has(key)");
+    expect(block).toContain("loggedCanonicalPartySourceCandidates.add(key)");
   });
 
   it("raw intake full legal entities override shortened starter party labels", () => {

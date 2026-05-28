@@ -53,6 +53,43 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(screen).toContain("Ready for review");
   });
 
+  it("canonical paid review renders paidReviewPlain before unavailable preview", () => {
+    const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
+    expect(screen).toContain("paidReviewPlain");
+    expect(screen).toContain("hasCanonicalPaidReviewBody");
+    expect(screen).toContain("simple-pro-final-review-paid-plain-fallback");
+    const unavailableIdx = screen.indexOf("simple-pro-final-review-document-empty");
+    const paidFallbackIdx = screen.indexOf("simple-pro-final-review-paid-plain-fallback");
+    expect(paidFallbackIdx).toBeGreaterThan(-1);
+    expect(screen).toContain("showPreviewUnavailable");
+    expect(screen.indexOf("showPreviewUnavailable")).toBeLessThan(unavailableIdx);
+  });
+
+  it("AgreementBuilderIntake passes paidReviewPlain and suppresses finalizing when SoT exists", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("paidReviewPlain={authoritativePaidProReviewPlain}");
+    expect(intake).toContain("suppressPaidProFinalReviewFinalizingState");
+    expect(intake).toContain("resolvePaidProFinalReviewVisiblePlain");
+  });
+
+  it("AgreementBuilderIntake routes missing paid Pro signer metadata to signer details before signature prep", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("resolvePaidProSignerDetailsGate");
+    expect(intake).toContain("paidProSignatureDetailsReady");
+    expect(intake).toContain('enterFinalReviewRecipientSetup("signature")');
+    expect(intake).toContain('"Add signer details"');
+    expect(intake).toContain('"Prepare signature links"');
+  });
+
+  it("canonical paid review enables full document flow and keeps actions outside document", () => {
+    const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
+    const viewIdx = screen.indexOf("<PremiumAgreementReadonlyView");
+    const actionsIdx = screen.indexOf('data-testid="simple-pro-final-review-actions"');
+    expect(screen).toContain("fullDocumentFlow={canonicalPaidProReview}");
+    expect(viewIdx).toBeGreaterThan(-1);
+    expect(actionsIdx).toBeGreaterThan(viewIdx);
+  });
+
   it("SimpleProFinalReviewScreen renders review-first error in final review actions region", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain('data-testid="simple-pro-final-review-actions"');

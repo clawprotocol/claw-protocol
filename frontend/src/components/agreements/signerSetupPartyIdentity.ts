@@ -9,6 +9,7 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
+import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { isRecipientHandoffSeedDisposable } from "./reviewPlaceholderGuard";
 
 export type SignerIdentitySource =
@@ -58,6 +59,20 @@ export type SignerSetupRenderSlot = {
   };
 };
 
+export type PaidProSignerDetailsBlocker = {
+  partyIndex: number;
+  field: "legal_entity" | "signer_name" | "email";
+  reason: "missing" | "invalid_email";
+};
+
+export type PaidProSignerDetailsGate = {
+  complete: boolean;
+  requiredCount: number;
+  legalEntityNames: string[];
+  blockers: PaidProSignerDetailsBlocker[];
+  blockerMessage: string;
+};
+
 function norm(s: string): string {
   let t = s.replace(/\s+/g, " ").trim();
   if (/\.+$/.test(t) && PARTY_ENTITY_SUFFIX_RE.test(t.replace(/\.+$/, ""))) {
@@ -97,6 +112,78 @@ export function compactDisplayNameFromLegalEntity(legalEntityName: string): stri
   const words = full.split(/\s+/).filter(Boolean);
   if (words.length >= 2) return `${words[0]} ${words[1]}`;
   return full;
+}
+
+function paidProEmailForIndex(args: ResolvePaidProSignerDetailsGateArgs, index: number): string {
+  if (index === 0) return stripRecipientEmailNoise(args.recipient1Email);
+  if (index === 1) return stripRecipientEmailNoise(args.recipient2Email);
+  return stripRecipientEmailNoise(args.extraPartyReviewEmails[index - 2] ?? "");
+}
+
+function paidProLegalEntityForIndex(args: ResolvePaidProSignerDetailsGateArgs, index: number): string {
+  const fromIdentity = norm(args.signerSetupPartyIdentities?.[index]?.legalEntityName ?? "");
+  if (fromIdentity) return fromIdentity;
+  const fromDraft = norm(args.draftPartyNames[index] ?? "");
+  if (fromDraft) return fromDraft;
+  if (index === 0) return norm(args.recipient1Name);
+  if (index === 1) return norm(args.recipient2Name);
+  return "";
+}
+
+function formatPaidProSignerDetailsBlockerMessage(blockers: readonly PaidProSignerDetailsBlocker[]): string {
+  if (!blockers.length) return "";
+  const first = blockers[0]!;
+  const partyLabel = `Party ${first.partyIndex + 1}`;
+  if (first.field === "legal_entity") return `${partyLabel}: confirm the party legal name before preparing signature links.`;
+  if (first.field === "signer_name") return `${partyLabel}: add the signer name before preparing signature links.`;
+  if (first.reason === "invalid_email") return `${partyLabel}: enter a valid signer email address.`;
+  return `${partyLabel}: add the signer email before preparing signature links.`;
+}
+
+export type ResolvePaidProSignerDetailsGateArgs = {
+  partyCount: number;
+  signerSetupPartyIdentities?: readonly SignerSetupPartyIdentity[];
+  draftPartyNames: readonly string[];
+  partySignerNames: readonly string[];
+  recipient1Name: string;
+  recipient2Name: string;
+  recipient1Email: string;
+  recipient2Email: string;
+  extraPartyReviewEmails: readonly string[];
+};
+
+/**
+ * Paid Pro signature prep requires human signer metadata; legal entity names are prefilled
+ * from canonical party identity and do not count as signer names.
+ */
+export function resolvePaidProSignerDetailsGate(
+  args: ResolvePaidProSignerDetailsGateArgs,
+): PaidProSignerDetailsGate {
+  const requiredCount = Math.max(args.partyCount, 2);
+  const legalEntityNames: string[] = [];
+  const blockers: PaidProSignerDetailsBlocker[] = [];
+
+  for (let i = 0; i < requiredCount; i++) {
+    const legal = paidProLegalEntityForIndex(args, i);
+    legalEntityNames.push(legal);
+    const signerName = norm(args.partySignerNames[i] ?? "");
+    const email = paidProEmailForIndex(args, i);
+    if (!legal) blockers.push({ partyIndex: i, field: "legal_entity", reason: "missing" });
+    if (!signerName) blockers.push({ partyIndex: i, field: "signer_name", reason: "missing" });
+    if (!email) {
+      blockers.push({ partyIndex: i, field: "email", reason: "missing" });
+    } else if (!looksLikeEmail(email)) {
+      blockers.push({ partyIndex: i, field: "email", reason: "invalid_email" });
+    }
+  }
+
+  return {
+    complete: blockers.length === 0,
+    requiredCount,
+    legalEntityNames,
+    blockers,
+    blockerMessage: formatPaidProSignerDetailsBlockerMessage(blockers),
+  };
 }
 
 export function logSignerIdentitySource(args: {

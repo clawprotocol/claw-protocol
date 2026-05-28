@@ -276,6 +276,7 @@ import { getAuthoritativeAgreementText } from "./authoritativeAgreementDocument"
 import {
   assertSignerSlotLegalEntityForPersist,
   hydrateLegalEntityNameFromHandoff,
+  resolvePaidProSignerDetailsGate,
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
   shouldUpgradeRecipientNameToLegalEntity,
@@ -2017,10 +2018,10 @@ function CreateFlowSendRecipientsPanel({
             {signaturePrepMode ? (
               <>
                 <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
-                  <span className="block">Signer name (optional)</span>
+                  <span className="block">Signer name{signaturePrepMode ? "" : " (optional)"}</span>
                   <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
-                    For entity parties, this is the human who will sign. If blank, the signer can enter it from their
-                    private link.
+                    For entity parties, this is the human who will sign.
+                    {signaturePrepMode ? " Required before signature links are prepared." : " If blank, the signer can enter it from their private link."}
                   </span>
                   <input
                     type="text"
@@ -12350,9 +12351,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProInlineSignersReady = Boolean(
     guidedPreReviewSignerSlots.complete && !createFlowRecipientPrimaryHelper,
   );
+  const paidProSignerDetailsGate = useMemo(
+    () =>
+      resolvePaidProSignerDetailsGate({
+        partyCount: draft?.parties?.length ?? 2,
+        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+        partySignerNames,
+        recipient1Name,
+        recipient2Name,
+        recipient1Email,
+        recipient2Email,
+        extraPartyReviewEmails,
+      }),
+    [
+      draft?.parties,
+      partySignerNames,
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails,
+    ],
+  );
+  const paidProSignatureDetailsReady = Boolean(
+    paidProSignerDetailsGate.complete && !createFlowRecipientPrimaryHelper,
+  );
   /** While missing/invalid emails, keep recipient inputs surfaced (no dead-end collapsed card). */
   const paidProRecipientBlockForceExpanded = Boolean(
-    paidProRecipientSetupOnDraft && !paidProInlineSignersReady,
+    paidProRecipientSetupOnDraft && !paidProSignatureDetailsReady,
   );
   const premiumRecipientPanelSendLabelOverride =
     paidProRecipientSetupOnDraft &&
@@ -20996,7 +21022,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const enterFinalReviewRecipientSetup = React.useCallback(
     (intent: FinalReviewSendIntent) => {
-      if (canProceedGuidedFinalReviewToSigning) {
+      if (
+        canProceedGuidedFinalReviewToSigning &&
+        (intent !== "signature" || paidProSignatureDetailsReady)
+      ) {
         continueGuidedFinalReviewToSigning({ intent });
         return;
       }
@@ -21030,12 +21059,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       advancePaidProToRecipientSetup();
       markPremiumRecipientsSurfaceReleased();
       setPremiumRecipientUxActive(true);
+      setCreateFlowSendRecipientEditorOpen(true);
       guidedFinalReviewContinueArmedRef.current = false;
       bumpPremiumSurfaceGateTick();
       void handlePremiumReviewFirstContinueToSigners({ telemetryMode: sendMode });
     },
     [
       canProceedGuidedFinalReviewToSigning,
+      paidProSignatureDetailsReady,
       continueGuidedFinalReviewToSigning,
       handlePremiumSendModePick,
       draft,
@@ -21066,20 +21097,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProAuthoritative,
     });
     logSimpleProFinalReviewContinueToSigning({ bodyLen: bodyPlain.length });
-    if (canProceedGuidedFinalReviewToSigning && paidProInlineSignersReady) {
+    if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
+      enterFinalReviewRecipientSetup("signature");
+      return;
+    }
+    if (canProceedGuidedFinalReviewToSigning && paidProSignatureDetailsReady) {
       continueGuidedFinalReviewToSigning({ intent: "signature" });
       return;
     }
     enterFinalReviewRecipientSetup("signature");
   }, [
     canProceedGuidedFinalReviewToSigning,
+    acceptedPaidProAuthorityActive,
+    paidProSignatureDetailsReady,
     continueGuidedFinalReviewToSigning,
     guidedCompletionRenderDocument.source,
     simpleProFinalReviewCorpus.plainText,
     reviewAgreementId,
     premiumPaidReadonlyPick.sourceUsed,
     paidProAuthoritative,
-    paidProInlineSignersReady,
     guidedAuthoritativeBodyPlain,
     enterFinalReviewRecipientSetup,
   ]);
@@ -24336,9 +24372,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           exportBusy={proFinalReviewExportBusy}
                                           exportError={proFinalReviewExportError}
                                           signaturePrimaryLabel={
-                                            paidProInlineSignersReady
-                                              ? "Create signing links"
-                                              : "Add signers / prepare signature links"
+                                            paidProSignatureDetailsReady
+                                              ? "Prepare signature links"
+                                              : "Add signer details"
                                           }
                                           signatureSecondaryLabel="Change signing order"
                                           reviewSecondaryLabel="Send for review / compare edits"
@@ -24376,7 +24412,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           }
                                           onCopyAgreement={handleSimpleProFinalReviewCopy}
                                           onExportAgreement={() => void handleSimpleProFinalReviewExport()}
-                                          suppressPostReviewEditUx={paidProInlineSignersReady}
+                                          suppressPostReviewEditUx={paidProSignatureDetailsReady}
                                           corpusRecoveryMessage={
                                             suppressPaidProFinalReviewFinalizingState({
                                               draft: draft ?? null,
@@ -24408,7 +24444,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           onUseUploadedForSigning={handleUseUploadedVersionForSigning}
                                           onKeepLawDogVersion={handleKeepLawDogVersionAfterUpload}
                                           onBackToSignerDetails={handleGuidedBackToSignerDetailsFromFinalReview}
-                                          signersReady={paidProInlineSignersReady}
+                                          signersReady={paidProSignatureDetailsReady}
                                           enableSectionJump={false}
                                           sendDisabled={
                                             guidedFinalizeModalActive ||
