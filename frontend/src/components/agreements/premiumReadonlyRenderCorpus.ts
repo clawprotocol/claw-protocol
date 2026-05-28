@@ -28,6 +28,14 @@ import {
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
 import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  enforceAuthoritativeProCorpusDisplay,
+  logProCorpusSourceMap,
+  shouldPreserveAcceptedServerFullDraftText,
+} from "./proCorpusSourcePath";
+import { requireAuthoritativeCorpusForSurface } from "./authoritativeAgreementDocument";
+import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 
 /** @deprecated Use PremiumRenderResolveSource — kept as alias for gradual migration. */
 export type PremiumPaidReadonlySourceUsed = PremiumRenderResolveSource;
@@ -63,6 +71,87 @@ function canonicalPartyNamesFromDraft(draft: ParsedDraftShape | null | undefined
     .map((p) => String(p?.name ?? "").trim())
     .filter((name) => name.length >= 2)
     .slice(0, 2);
+}
+
+function isAiWorkflowServicesFallback(draft: ParsedDraftShape | null | undefined, intakeText?: string): boolean {
+  const blob = [
+    draft?.agreement_family,
+    draft?.title,
+    draft?.purpose,
+    draft?.additional_terms,
+    intakeText,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return /\b(?:services?|provider|consulting|contractor)\b/i.test(blob) &&
+    /\b(?:ai|artificial intelligence|workflow|automation|setup|implementation|integration)\b/i.test(blob);
+}
+
+function nextSectionNumber(text: string): number {
+  const nums = [...text.matchAll(/^\s*(\d{1,2})\.\s+/gm)]
+    .map((m) => Number(m[1]))
+    .filter((n) => Number.isFinite(n));
+  return nums.length ? Math.max(...nums) + 1 : 1;
+}
+
+function insertBeforeExecutionTail(text: string, insertion: string): string {
+  const marker = text.search(/\n\s*IN WITNESS WHEREOF\b/i);
+  if (marker < 0) return `${text.trimEnd()}\n\n${insertion.trim()}`.trim();
+  return `${text.slice(0, marker).trimEnd()}\n\n${insertion.trim()}\n\n${text.slice(marker).trimStart()}`.trim();
+}
+
+export function applyAiWorkflowServicesQualityFloorToFallback(
+  text: string,
+  draft: ParsedDraftShape | null | undefined,
+  intakeText?: string,
+): string {
+  const base = (text || "")
+    .replace(/\[Not yet specified\]/gi, "The services begin on the effective date and continue until completed or terminated under this Agreement.")
+    .trim();
+  if (!base || !isAiWorkflowServicesFallback(draft, intakeText)) return base;
+  const parties = draft?.parties ?? [];
+  const client = String(parties[0]?.name || "Client").trim() || "Client";
+  const provider = String(parties[1]?.name || "Service Provider").trim() || "Service Provider";
+  let n = nextSectionNumber(base);
+  const sections: string[] = [];
+  if (!/\bacceptance\b|\bdemonstration review\b/i.test(base)) {
+    sections.push(
+      `${n++}. ACCEPTANCE AND DEMONSTRATION REVIEW\n${provider} will provide a practical demonstration or review of the configured AI workflow setup services. ${client} will review the delivered setup in good faith and identify any material nonconformity with the agreed scope within a reasonable review period.`,
+    );
+  }
+  if (!/\bownership\b|\bwork product\b/i.test(base)) {
+    sections.push(
+      `${n++}. OWNERSHIP AND WORK PRODUCT\n${client} owns final custom work product and deliverables created for ${client} after payment of amounts due. ${provider} retains pre-existing tools, templates, know-how, background materials, and reusable processes, and ${client} receives a license to use those retained materials as needed to use the delivered workflow setup.`,
+    );
+  }
+  if (!/\bconfidential/i.test(base)) {
+    sections.push(
+      `${n++}. CONFIDENTIALITY\nEach Party shall protect the other Party's Confidential Information using commercially reasonable measures and use it only for purposes of this Agreement.`,
+    );
+  }
+  if (!/\bterminat/i.test(base)) {
+    sections.push(
+      `${n++}. TERMINATION\nEither Party may terminate this Agreement for material breach if the breach is not cured within a commercially reasonable notice period. Termination does not affect payment obligations accrued before termination or provisions intended to survive.`,
+    );
+  }
+  if (!/\bthird[-\s]?party|\bsupport\b|\bplatform\b|\bdependency\b/i.test(base)) {
+    sections.push(
+      `${n++}. THIRD-PARTY TOOLS AND OPTIONAL SUPPORT\nProvider is not responsible for outages, changes, or limitations of third-party AI platforms, software, or services outside Provider's control. Any post-delivery support is provided only if separately agreed in writing.`,
+    );
+  }
+  if (!/\bgoverning law\b|\bgoverned by the laws\b/i.test(base)) {
+    const law = String(draft?.jurisdiction || "").trim() || "the jurisdiction selected by the Parties";
+    sections.push(
+      `${n++}. GOVERNING LAW\nThis Agreement shall be governed by the laws of ${law}, without regard to conflict-of-law principles.`,
+    );
+  }
+  if (!/\belectronic signatures\b|\be-sign\b/i.test(base)) {
+    sections.push(
+      `${n++}. ELECTRONIC SIGNATURES\nThis Agreement may be executed electronically through LawDog or comparable e-sign platforms, with the same effect as original signatures.`,
+    );
+  }
+  if (!sections.length) return base;
+  return insertBeforeExecutionTail(base, sections.join("\n\n"));
 }
 
 /** Counts discrete commercial concepts present in the paper body (used to prefer richer corpus). */
@@ -226,6 +315,37 @@ export function pickPremiumPaidReadonlyPlainText(args: {
 
   const pipeSrc = (args.lastPremiumPipelineRenderSource || "").trim();
   const authHydr = (args.authoritativeHydratedPlainText || "").trim();
+  const hasAcceptedCandidate =
+    authHydr.length >= 500 ||
+    (args.stickyAuthoritativePlainText || "").trim().length >= 500 ||
+    (args.paidAuthoritativeProBody || "").trim().length >= 500 ||
+    (args.premiumWinningBodyText || "").trim().length >= MIN_PAID_PRO_AUTHORITY_LEN;
+  const lockedReviewCorpus = requireAuthoritativeCorpusForSurface({
+    surface: "pro_review",
+    source: "premium_readonly_pick",
+    renderedText: "",
+    paidProAccepted: Boolean(args.premiumCheckoutCompleted && !hasAcceptedCandidate),
+    minLen: 500,
+  });
+  if (args.premiumCheckoutCompleted && !hasAcceptedCandidate && !lockedReviewCorpus.ok) {
+    return {
+      plainText: "",
+      sourceUsed: "none",
+      audit: {
+        selected: "none",
+        forcedPremiumSource: true,
+        candidates: [
+          {
+            source: "none",
+            len: 0,
+            nonThin: false,
+            eligible: false,
+            reason: lockedReviewCorpus.reason,
+          },
+        ],
+      },
+    };
+  }
   if (args.premiumCheckoutCompleted && isPremiumGenerationApiUnavailablePipelineSource(pipeSrc)) {
     const priorServerBodies = [
       authHydr,
@@ -308,6 +428,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     legacySnapshotText: legacySnap || undefined,
     paidAuthoritativeProBody: args.paidAuthoritativeProBody,
     hydratedAuthoritativeBodyHint: hydratedHintForResolver.length ? hydratedHintForResolver : undefined,
+    postCheckoutProLocked: Boolean(args.premiumCheckoutCompleted),
     buildLivePreview: () =>
       args.draft
         ? buildAgreementPreviewTextCore(args.draft, {
@@ -326,15 +447,54 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   });
   if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
 
+  if (args.premiumCheckoutCompleted && res.premium_render_source === "live_generated_preview") {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("[premium-render-source-blocked]", {
+        reason: "live_generated_preview_after_checkout",
+        len: (res.text || "").length,
+      });
+    }
+    return {
+      plainText: "",
+      sourceUsed: "none",
+      audit: {
+        selected: "none",
+        forcedPremiumSource: true,
+        candidates: [
+          {
+            source: "live_generated_preview",
+            len: (res.text || "").length,
+            nonThin: false,
+            eligible: false,
+            reason: "live_generated_preview_after_checkout_blocked",
+          },
+        ],
+      },
+    };
+  }
+
   const plain = (res.text || "").trim();
+  const stickyBodies = [
+    (args.authoritativeHydratedPlainText || "").trim(),
+    (args.stickyAuthoritativePlainText || "").trim(),
+    (args.paidAuthoritativeProBody || "").trim(),
+  ];
+  const hasStickyAuthoritative = stickyBodies.some((t) => t.length >= MIN_PAID_PRO_AUTHORITY_LEN);
+  const skipDestructiveCanonicalize =
+    hasPaidProSourceOfTruth() ||
+    hasStickyAuthoritative ||
+    (args.premiumCheckoutCompleted && isAuthoritativePremiumPipelineRenderSource(pipeSrc));
   let finalizedPlain =
     args.draft && plain ? hydrateIdentityPlaceholdersInAgreementPreviewPlain(plain, args.draft, args.intakeText ?? null) : plain;
-  finalizedPlain = canonicalizeProAgreementText(finalizedPlain, {
-    canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
-    canonicalRoles: ["Client", "Service Provider"],
-    intakeText: args.intakeText,
-    surface: "premium_readonly_pick",
-  }).text;
+  if (!skipDestructiveCanonicalize) {
+    finalizedPlain = canonicalizeProAgreementText(finalizedPlain, {
+      canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
+      canonicalRoles: ["Client", "Service Provider"],
+      intakeText: args.intakeText,
+      surface: "premium_readonly_pick",
+    }).text;
+  }
   const freeBaseline =
     args.draft && args.premiumCheckoutCompleted
       ? buildAgreementPreviewTextCore(args.draft, { starterPreview: true })
@@ -355,13 +515,19 @@ export function pickPremiumPaidReadonlyPlainText(args: {
         fallbackLen: paidFallback.length,
       });
     }
-    finalizedPlain = canonicalizeProAgreementText(paidFallback, {
-      canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
-      canonicalRoles: ["Client", "Service Provider"],
-      intakeText: args.intakeText,
-      surface: "premium_readonly_paid_fallback",
-    }).text;
+    finalizedPlain = shouldPreserveAcceptedServerFullDraftText({
+      text: paidFallback,
+      pipelineSource: args.lastPremiumPipelineRenderSource,
+    })
+      ? paidFallback
+      : canonicalizeProAgreementText(paidFallback, {
+          canonicalPartyNames: canonicalPartyNamesFromDraft(args.draft),
+          canonicalRoles: ["Client", "Service Provider"],
+          intakeText: args.intakeText,
+          surface: "premium_readonly_paid_fallback",
+        }).text;
   }
+  finalizedPlain = applyAiWorkflowServicesQualityFloorToFallback(finalizedPlain, args.draft, args.intakeText);
   const nonThin =
     finalizedPlain.length >= 1200 || premiumReadonlyCorpusSignalHits(finalizedPlain) >= 3;
 
@@ -444,8 +610,34 @@ export function pickPremiumPaidReadonlyPlainText(args: {
         },
       };
     }
-    const authoritativePlain = surface.plainText;
+    const authoritativeBase = (args.paidAuthoritativeProBody || sticky || hydrated || "").trim();
+    const driftGuard = authoritativeBase
+      ? enforceAuthoritativeProCorpusDisplay({
+          authoritativeText: authoritativeBase,
+          displayText: surface.plainText,
+          source: surface.sourceUsed,
+          surface: "premium_readonly_pick",
+        })
+      : { ok: true, blocked: false, displayText: surface.plainText };
+    const authoritativePlain = driftGuard.displayText;
     const authoritativeSource = surface.sourceUsed;
+    logLawdogOutputPathMap({
+      stage: "premium_readonly_pick",
+      source: authoritativeSource,
+      text: authoritativePlain,
+      canMutateBody: false,
+      canRejectBody: true,
+      canFallback: false,
+      reason: driftGuard.blocked ? "authority_drift_blocked" : "paid_readonly_pick",
+    });
+    logProCorpusSourceMap({
+      stage: "pro_review_display",
+      source: authoritativeSource,
+      len: authoritativePlain.length,
+      text: authoritativePlain,
+      allowedToOverride: false,
+      reason: driftGuard.blocked ? "authority_drift_blocked" : surface.usedLocalDeterministicFallback ? "local_fallback" : "paid_readonly_pick",
+    });
     const authNonThin =
       authoritativePlain.length >= 1200 || premiumReadonlyCorpusSignalHits(authoritativePlain) >= 3;
     if (surface.usedLocalDeterministicFallback && import.meta.env.DEV) {
@@ -500,10 +692,11 @@ export function buildPremiumDeliverablePlainTextFromDraft(
   draft: ParsedDraftShape,
   opts?: { intakeText?: string; legacySnapshotText?: string },
 ): string {
-  return buildAgreementPreviewText(draft, {
+  const built = buildAgreementPreviewText(draft, {
     starterPreview: false,
     premiumDeliverablePreview: true,
     intakeText: opts?.intakeText,
     legacyPremiumSnapshotText: opts?.legacySnapshotText,
   });
+  return applyAiWorkflowServicesQualityFloorToFallback(built, draft, opts?.intakeText);
 }

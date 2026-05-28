@@ -48,6 +48,27 @@ describe("Pro delivery track UI wiring", () => {
     expect(chooserBlock).not.toContain("Add recipient emails");
   });
 
+  it("signer setup legal entity inputs prefer canonical party names over display labels", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("signerSetupPartyIdentities");
+    expect(intake).toContain("legalEntityFieldValue");
+    expect(intake).toContain("resolveSignerSetupPartyIdentities");
+    expect(intake).toContain("resolveSignerSetupRenderSlot");
+    const fieldsStart = intake.indexOf("const recipientFields = (");
+    const fieldsBlock = intake.slice(fieldsStart, fieldsStart + 7600);
+    expect(fieldsBlock).toContain("canonicalLegalEntity");
+    expect(fieldsBlock).toContain("value={legalEntityFieldValue}");
+    expect(fieldsBlock).not.toContain("resolveEditableSignerLegalEntityForSlot");
+    const identityModule = readFileSync(join(__dirname, "signerSetupPartyIdentity.ts"), "utf8");
+    expect(identityModule).toContain("[signer-identity-source]");
+    expect(identityModule).toContain("[illegal-signer-render-binding-blocked]");
+    const chooserBlock = intake.slice(
+      intake.indexOf('data-testid="pro-delivery-track-chooser"'),
+      intake.indexOf('data-testid="pro-delivery-track-chooser"') + 2400,
+    );
+    expect(chooserBlock).not.toContain("Add signers / prepare signature links");
+  });
+
   it("review mode does not request signer title or address, while signature prep does", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const fieldsStart = intake.indexOf("const recipientFields = (");

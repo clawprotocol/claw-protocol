@@ -21,6 +21,7 @@ import {
   validateProFullAgreementCandidate,
 } from "./proFullAgreementCandidate";
 import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
+import { assertNoPostAcceptanceStructuralMutation } from "./authoritativeAgreementDocument";
 
 export type ProAgreementCanonicalizationOptions = {
   canonicalPartyNames?: readonly string[];
@@ -488,6 +489,12 @@ export function canonicalizeProAgreementText(
       normalizationMode: "soft",
       surface: opts?.surface ?? "pro_agreement_canonicalizer",
     });
+    assertNoPostAcceptanceStructuralMutation({
+      surface: opts?.surface ?? "pro_agreement_canonicalizer",
+      mutation: "canonicalizer_full_candidate_repair",
+      inputText: text,
+      outputText: out,
+    });
     logProCorpusSafetyGate(safetyGatePayload(uniqueRepairs, uniqueWarnings, out.length));
     return { text: out, repairs: uniqueRepairs, warnings: uniqueWarnings, commercialSpecificity };
   }
@@ -522,6 +529,12 @@ export function canonicalizeProAgreementText(
     score: commercialSpecificity,
     normalizationMode: "soft",
     surface: opts?.surface ?? "pro_agreement_canonicalizer",
+  });
+  assertNoPostAcceptanceStructuralMutation({
+    surface: opts?.surface ?? "pro_agreement_canonicalizer",
+    mutation: "canonicalizer_integrity_repair",
+    inputText: text,
+    outputText: out,
   });
   logProCorpusSafetyGate(safetyGatePayload(uniqueRepairs, uniqueWarnings, out.length));
   return { text: out, repairs: uniqueRepairs, warnings: uniqueWarnings, commercialSpecificity };

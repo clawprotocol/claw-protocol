@@ -1,4 +1,9 @@
-import { useId } from "react";
+import { useId, useLayoutEffect } from "react";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  emitVisibleProPaperBoundaryDiagnostics,
+  type ProVisiblePaperCandidate,
+} from "./visibleProPaperRenderBoundary";
 
 const DOC_STYLES = `
 .premium-readonly-doc{font-family:ui-serif,Georgia,Cambria,"Times New Roman",Times,serif;color:#1c1917;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
@@ -22,11 +27,48 @@ type Props = {
   emptyFallback?: string;
   /** When true, never show empty placeholder (guided completion keeps last-known-good visible). */
   suppressEmptyFallback?: boolean;
+  /** Paid Pro final DOM boundary diagnostics (dev-only logs). */
+  visibleProPaperTrace?: {
+    declaredSource: string;
+    candidates: readonly ProVisiblePaperCandidate[];
+    intakeText?: string | null;
+    draft?: ParsedDraftShape | null;
+    paidProReviewSurface?: boolean;
+    isAuthoritative?: boolean;
+    isFreeBodyMatch?: boolean;
+  };
 };
 
-export function PremiumAgreementReadonlyView({ html, emptyFallback, suppressEmptyFallback = false }: Props) {
+export function PremiumAgreementReadonlyView({
+  html,
+  emptyFallback,
+  suppressEmptyFallback = false,
+  visibleProPaperTrace,
+}: Props) {
   const sid = useId().replace(/:/g, "");
   const safe = html.trim();
+
+  useLayoutEffect(() => {
+    if (!visibleProPaperTrace || !safe) return;
+    emitVisibleProPaperBoundaryDiagnostics({
+      html: safe,
+      declaredSource: visibleProPaperTrace.declaredSource,
+      candidates: visibleProPaperTrace.candidates,
+      intakeText: visibleProPaperTrace.intakeText,
+      draft: visibleProPaperTrace.draft,
+      paidProReviewSurface: visibleProPaperTrace.paidProReviewSurface,
+      isAuthoritative: visibleProPaperTrace.isAuthoritative,
+      isFreeBodyMatch: visibleProPaperTrace.isFreeBodyMatch,
+    });
+  }, [
+    safe,
+    visibleProPaperTrace?.declaredSource,
+    visibleProPaperTrace?.candidates,
+    visibleProPaperTrace?.intakeText,
+    visibleProPaperTrace?.paidProReviewSurface,
+    visibleProPaperTrace?.isAuthoritative,
+    visibleProPaperTrace?.isFreeBodyMatch,
+  ]);
   return (
     <>
       <style id={`premium-doc-styles-${sid}`}>{DOC_STYLES}</style>

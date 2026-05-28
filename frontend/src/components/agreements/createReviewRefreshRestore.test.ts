@@ -8,8 +8,10 @@ import {
   writeCreateReviewDraftReadyMarker,
 } from "./agreementIntakeStorage";
 import { persistStarterReviewBeforeCheckout } from "./checkoutBackRestore";
+import { establishPaidProSourceOfTruth, clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import {
   logReviewRefreshRegenerationSkipped,
+  shouldRestoreStoredCreateReviewDraftSnapshot,
   shouldSkipHomeAutoGenerateForStoredReview,
 } from "./createReviewRefreshRestore";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -22,6 +24,7 @@ describe("createReviewRefreshRestore", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    clearPaidProSourceOfTruth();
     clearCreateReviewAgreementResumeId();
     clearCreateReviewDraftReadyMarker();
     sessionStorage.removeItem("claw_checkout_back_starter_review_v1");
@@ -73,5 +76,26 @@ describe("createReviewRefreshRestore", () => {
     expect(console.info).toHaveBeenCalledWith("[review-refresh-regeneration-skipped]", {
       reason: "draft_already_ready",
     });
+  });
+
+  it("shouldRestoreStoredCreateReviewDraftSnapshot is false when paid SoT exists", () => {
+    writeCreateReviewDraftReadyMarker();
+    establishPaidProSourceOfTruth({
+      text: `Paid agreement. ${"x".repeat(600)}`,
+      source: "server_full_draft",
+    });
+    expect(shouldRestoreStoredCreateReviewDraftSnapshot()).toBe(false);
+    expect(console.info).toHaveBeenCalledWith("[review-refresh-regeneration-skipped]", {
+      reason: "paid_pro_authority_blocks_starter_restore",
+    });
+  });
+
+  it("shouldSkipHomeAutoGenerateForStoredReview is false when paid SoT blocks starter downgrade", () => {
+    writeCreateReviewDraftReadyMarker();
+    establishPaidProSourceOfTruth({
+      text: `Paid agreement. ${"x".repeat(600)}`,
+      source: "server_full_draft",
+    });
+    expect(shouldSkipHomeAutoGenerateForStoredReview()).toBe(false);
   });
 });

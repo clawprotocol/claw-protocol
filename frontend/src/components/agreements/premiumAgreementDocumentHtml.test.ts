@@ -106,6 +106,57 @@ By: __________________________
     expect(html).toContain("SCOPE");
   });
 
+  it("Pro review html sanitizes fused opening and signature below in plain corpus", () => {
+    const plain =
+      'This AI Workflow Setup Services Agreement ("Agreement") is This Agreement is between Red Mesa Logistics LLC ("Client") and Harbor Peak Automation LLC ("Service Provider").signature below.\n\n1. SCOPE\nServices.';
+    const html = buildPremiumAgreementReadonlyHtml(plain, {
+      signatureSectionMode: "collaboration",
+      partyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      suppressCorpusEmbeddedSignatureForDisplay: true,
+    });
+    expect(html).not.toMatch(/is This Agreement is between/i);
+    expect(html).not.toMatch(/signature below|\.signature/i);
+    expect(html).toContain("Red Mesa Logistics LLC");
+    expect(html).toContain("SCOPE");
+  });
+
+  it("Pro review display removes embedded execution fields completely", () => {
+    const plain = `
+SERVICES AGREEMENT
+
+1. SCOPE
+Provider performs AI workflow setup.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+Red Mesa Logistics LLC
+By: __________________________
+Name: ________________________
+Title: _______________________
+Date: ________________________
+
+SERVICE PROVIDER:
+Harbor Peak Automation LLC
+By: __________________________
+Name: ________________________
+Title: _______________________
+Date: ________________________
+`.trim();
+    const html = buildPremiumAgreementReadonlyHtml(plain, {
+      signatureSectionMode: "collaboration",
+      partyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      suppressCorpusEmbeddedSignatureForDisplay: true,
+    });
+    expect(html).not.toMatch(/IN WITNESS WHEREOF/i);
+    expect(html).not.toMatch(/\bBy\s*:/i);
+    expect(html).not.toMatch(/\bName\s*:/i);
+    expect(html).not.toMatch(/\bTitle\s*:/i);
+    expect(html).not.toMatch(/\bDate\s*:/i);
+    expect(html).not.toMatch(/_{3,}/);
+    expect(html).not.toContain("claw-premium-signature-section");
+  });
+
   it("renders decorative signature card only when corpus lacks execution block", () => {
     const html = buildPremiumAgreementReadonlyHtml("SERVICES AGREEMENT\n\n1. SCOPE\nThe parties agree.", {
       signatureSectionMode: "execution",

@@ -46,6 +46,33 @@ describe("resolveGuidedProUxState — GTM sequence (test19/test20)", () => {
     });
   }
 
+  it("collecting with material Pro corpus and only optional questions uses paid_pro_draft", () => {
+    expect(
+      resolveGuidedProUxState({
+        ...BASE,
+        guidedCompletionPhase: "collecting_answers",
+        createFlowPhase: "draft_ready_for_review",
+        questionGate: {
+          blocked: false,
+          fatalCount: 0,
+          optionalCount: 2,
+          materialReviewAllowed: true,
+        },
+      }),
+    ).toBe("paid_pro_draft");
+  });
+
+  it("resolveGuidedProStickyCta returns null when only optional questions block review", () => {
+    expect(
+      resolveGuidedProStickyCta("guided_questions_active", 2, false, "idle", {
+        blocked: false,
+        fatalCount: 0,
+        optionalCount: 2,
+        materialReviewAllowed: true,
+      }),
+    ).toBeNull();
+  });
+
   it("ready_to_apply always maps to signer_setup_required (test20 — no paid_pro_draft regression)", () => {
     expect(
       resolveGuidedProUxState({

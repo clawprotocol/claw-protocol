@@ -34,13 +34,13 @@ describe("resolveFreeStarterReviewShellActive", () => {
 });
 
 describe("resolveReviewShellChrome", () => {
-  it("home_create_submit starter_review uses free title not Pro", () => {
+  it("home_create_submit starter_review uses free title not Pro when no SoT", () => {
     const chrome = resolveReviewShellChrome({
       isFreeStreamlineDraftReview: true,
       isFreeStarterReviewSurface: true,
       premiumPaidDocumentSurface: false,
-      paidProAuthoritative: true,
-      paidProReviewReadyBase: true,
+      paidProAuthoritative: false,
+      paidProReviewReadyBase: false,
       guidedCompletionActive: false,
     });
     expect(chrome.title).toBe(FREE_STARTER_REVIEW_TITLE);

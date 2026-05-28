@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
 import {
+  definedOpeningLine,
+  definedServicesAgreementOpeningLine,
+  repairDuplicateAgreementOpening,
+} from "./canonicalPartyIdentityResolver";
+import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import {
+  detectProReviewDisplaySanityViolations,
+  normalizeAgreementOpeningStructure,
   polishProAgreementDisplayLayer,
   polishedAuthoritativeProPlainForCopy,
+  sanitizeProReviewDisplayText,
   stripFixedFeeDisplayBoilerplateLines,
+  stripMalformedProReviewDisplayArtifacts,
 } from "./polishProAgreementDisplayLayer";
 import { normalizeProAgreementSectionContinuity } from "./normalizeProAgreementSectionContinuity";
 
@@ -140,6 +149,144 @@ describe("polishProAgreementDisplayLayer", () => {
       minLen: 1_500,
     });
     expect(out.length).toBeGreaterThanOrEqual(1_500);
+  });
+
+  it("strips .signature. residue and duplicate Services opening in review display mode", () => {
+    const broken =
+      'This Services Agreement ("Agreement") is This Agreement is between Red Mesa Logistics LLC and Harbor Peak Automation LLC ("Service Provider").signature.';
+    const { text: stripped } = stripMalformedProReviewDisplayArtifacts(broken);
+    expect(stripped).not.toMatch(/\.signature\./i);
+    expect(stripped).not.toMatch(/is This Agreement is between/i);
+    const { text } = polishProAgreementDisplayLayer(broken, {
+      draft: servicesDraft,
+      intakeText: MINIMAL_INTAKE,
+      reviewDisplayMode: true,
+    });
+    expect(text).not.toMatch(/\.signature\./i);
+    expect(text).not.toMatch(/is This Agreement is between/i);
+  });
+
+  it("omits optional address phrases when party addresses are missing", () => {
+    const line = definedServicesAgreementOpeningLine(records[0]!, records[1]!);
+    expect(line).toContain('Red Mesa Logistics LLC ("Client")');
+    expect(line).toContain('Harbor Peak Automation LLC ("Service Provider")');
+    expect(line).not.toMatch(/with its|principal place of business/i);
+  });
+
+  it("includes party address only when partyAddress is present", () => {
+    const withAddress = [
+      { ...records[0]!, partyAddress: "100 Mesa Drive, Austin, Texas" },
+      records[1]!,
+    ] as const;
+    const line = definedOpeningLine(withAddress[0], withAddress[1]);
+    expect(line).toContain(
+      'Red Mesa Logistics LLC ("Client"), with its principal place of business at 100 Mesa Drive, Austin, Texas',
+    );
+    expect(line).toContain('Harbor Peak Automation LLC ("Service Provider").');
+    expect(line).not.toMatch(/Harbor Peak Automation LLC[\s\S]*with its/i);
+  });
+
+  it("removes dangling party metadata fragments from Pro review opening", () => {
+    const broken =
+      'This Services Agreement ("Agreement") is entered into as of the effective date of electronic signature, by and between Red Mesa Logistics LLC ("Client"), with its and Harbor Peak Automation LLC ("Service Provider"), with its .';
+    const { text } = polishProAgreementDisplayLayer(broken, {
+      draft: servicesDraft,
+      intakeText: MINIMAL_INTAKE,
+      reviewDisplayMode: true,
+    });
+    expect(text).not.toMatch(/with its/i);
+    expect(text).not.toMatch(/with its\s*\./i);
+    expect(text).not.toMatch(/principal place of business at\s*(?:\.|and|$)/i);
+    expect(text).not.toMatch(/\.signature\./i);
+  });
+
+  it("normalizes agreement opening phases structurally and strips review execution phase", () => {
+    const malformed = [
+      "SERVICES AGREEMENT",
+      "This Agreement is entered into as of May 1, 2026. This Agreement is between Red Mesa Logistics LLC and Harbor Peak Automation LLC.",
+      "This Agreement is between Red Mesa Logistics LLC and Harbor Peak Automation LLC.",
+      "1. Scope. Harbor Peak will provide AI workflow setup services for Red Mesa.",
+      "IN WITNESS WHEREOF, the parties execute this Agreement.",
+      "By: ____________________.signature.",
+    ].join("\n\n");
+    const { text, repairs } = normalizeAgreementOpeningStructure(malformed, {
+      records,
+      reviewDisplayMode: true,
+    });
+    expect(repairs).toContain("opening:collapse_entered_into_between_duplicate");
+    expect(repairs).toContain("opening:remove_duplicate_opening_phase");
+    expect(text).toMatch(/^SERVICES AGREEMENT\n\nThis Agreement is between/m);
+    expect(text).not.toMatch(/This Agreement is entered into as of[\s\S]*This Agreement is between/i);
+    expect(text).not.toMatch(/IN WITNESS WHEREOF|By:|\.signature\./i);
+  });
+
+  it("review display mode does not append execution signature blocks", () => {
+    const body = [
+      "SERVICES AGREEMENT",
+      "This Agreement is between Red Mesa Logistics LLC and Harbor Peak Automation LLC.",
+      "1. Scope. Services.",
+      "6. Governing Law. Texas.",
+    ].join("\n\n");
+    const { text } = polishProAgreementDisplayLayer(body, {
+      draft: servicesDraft,
+      intakeText: MINIMAL_INTAKE,
+      reviewDisplayMode: true,
+    });
+    expect(text).not.toMatch(/IN WITNESS WHEREOF/i);
+  });
+
+  it("sanitizeProReviewDisplayText repairs Red Mesa fused opening and signature below", () => {
+    const broken =
+      'This AI Workflow Setup Services Agreement ("Agreement") is This Agreement is between Red Mesa Logistics LLC ("Client") and Harbor Peak Automation LLC ("Service Provider").signature below.';
+    const inputHash = fingerprintAgreementBody(broken);
+    const { text, sanityBlocked, outputHash } = sanitizeProReviewDisplayText(broken, {
+      records,
+      source: "test_red_mesa_pro_review",
+    });
+    expect(text).not.toMatch(/is This Agreement is between/i);
+    expect(text).not.toMatch(/\.signature|signature below/i);
+    expect(text).toContain('Red Mesa Logistics LLC ("Client")');
+    expect(text).toContain('Harbor Peak Automation LLC ("Service Provider")');
+    expect(broken).toContain("signature below");
+    expect(text).not.toContain("signature below");
+    expect(sanityBlocked).toBe(true);
+    expect(inputHash).not.toBe(outputHash);
+    expect(detectProReviewDisplaySanityViolations(text)).toEqual([]);
+  });
+
+  it("Pro review sanitizer does not mutate authoritative input hash storage contract", () => {
+    const authoritative =
+      'This AI Workflow Setup Services Agreement ("Agreement") is This Agreement is between Red Mesa Logistics LLC ("Client") and Harbor Peak Automation LLC ("Service Provider").signature below.\n\n1. Scope.\n\nIN WITNESS WHEREOF.\nBy: ____________________';
+    const storedHash = fingerprintAgreementBody(authoritative);
+    const { text: display } = sanitizeProReviewDisplayText(authoritative, { records });
+    expect(fingerprintAgreementBody(authoritative)).toBe(storedHash);
+    expect(display).not.toMatch(/IN WITNESS WHEREOF|By:|signature below|\.signature/i);
+    expect(display).toContain("1. Scope");
+  });
+
+  it("Pro review removes execution lines but signing polish may retain execution block", () => {
+    const reviewBody = [
+      "SERVICES AGREEMENT",
+      'This Agreement is between Red Mesa Logistics LLC and Harbor Peak Automation LLC.',
+      "1. Scope. Services.",
+      "IN WITNESS WHEREOF, the parties execute.",
+      "By: ____________________",
+      "Name: ____________________",
+      "Title: ____________________",
+      "Date: ____________________",
+    ].join("\n\n");
+    const review = polishProAgreementDisplayLayer(reviewBody, {
+      draft: servicesDraft,
+      intakeText: MINIMAL_INTAKE,
+      reviewDisplayMode: true,
+    });
+    expect(review.text).not.toMatch(/IN WITNESS WHEREOF|^\s*By:/im);
+    const signing = polishProAgreementDisplayLayer(reviewBody, {
+      draft: servicesDraft,
+      intakeText: MINIMAL_INTAKE,
+      reviewDisplayMode: false,
+    });
+    expect(signing.text.length).toBeGreaterThanOrEqual(review.text.length);
   });
 
   it("removes unsupplied corporation and address placeholders", () => {

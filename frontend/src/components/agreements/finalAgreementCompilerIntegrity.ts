@@ -1,4 +1,5 @@
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
+import { assertNoPostAcceptanceStructuralMutation } from "./authoritativeAgreementDocument";
 
 type CompilerSignerIdentity = {
   partyDisplayName: string;
@@ -733,6 +734,12 @@ export function stabilizeFinalAgreementCompilerOutput(
   const parity = context.freeText ? validateCanonicalFactParity(context.freeText, out) : { ok: true, defects: [] };
   defects.push(...parity.defects);
   if (repairs.length) {
+    assertNoPostAcceptanceStructuralMutation({
+      surface: context.surface ?? "final_agreement_compiler_integrity",
+      mutation: "integrity-auto-repair",
+      inputText: text,
+      outputText: out,
+    });
     logCompilerRepair("integrity-auto-repair", {
       repairs: [...new Set(repairs)],
       defects: [...new Set(defects)],

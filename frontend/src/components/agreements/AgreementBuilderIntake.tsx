@@ -263,7 +263,6 @@ import { isLikelyCategoryOrTradeLabel } from "./premiumDraftTransform";
 import {
   buildPartyIndexSlotsFromPartiesAndCandidates,
   hydrateEmailFromHandoff,
-  hydrateNameFromHandoff,
   linearPremiumRecipientSlots,
   persistPremiumRecipientHandoff,
   readPremiumRecipientHandoff,
@@ -273,6 +272,15 @@ import {
   MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
   type PremiumRecipientHandoffSlot,
 } from "./premiumPartyNamesHandoff";
+import { getAuthoritativeAgreementText } from "./authoritativeAgreementDocument";
+import {
+  assertSignerSlotLegalEntityForPersist,
+  hydrateLegalEntityNameFromHandoff,
+  resolveSignerSetupRenderSlot,
+  resolveSignerSetupPartyIdentities,
+  shouldUpgradeRecipientNameToLegalEntity,
+  type SignerSetupPartyIdentity,
+} from "./signerSetupPartyIdentity";
 import { ensurePremiumCompletion } from "./premiumCompletionEnsure";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import {
@@ -352,7 +360,6 @@ import {
   clearAgreementCreatorIntakeStorage,
   clearCreateReviewAgreementResumeId,
   clearCreateReviewAgreementResumeIdOnly,
-  readCreateReviewDraftReadyMarker,
   readCreateReviewDraftSnapshot,
   readFullDraftUpgradeMarkerAgreementId,
   writeFullDraftUpgradeMarkerAgreementId,
@@ -368,8 +375,19 @@ import {
   agreementIdShort,
   logReviewRefreshRegenerationSkipped,
   logReviewRefreshRestore,
+  shouldRestoreStoredCreateReviewDraftSnapshot,
   shouldSkipHomeAutoGenerateForStoredReview,
 } from "./createReviewRefreshRestore";
+import {
+  isAuthoritativePaidProReview,
+  PAID_PRO_REVIEW_BADGE,
+  PAID_PRO_REVIEW_CHIP_STATE,
+  PAID_PRO_REVIEW_CHIP_VERSION,
+  PAID_PRO_REVIEW_SHELL_SUBTITLE,
+  PAID_PRO_REVIEW_SHELL_TITLE,
+  resolveAuthoritativePaidProReviewPlain,
+  starterPlainLooksStaleVersusPaidAuthority,
+} from "./authoritativePaidProReview";
 import {
   buildCreateReturnToWithStarterReviewRestore,
   logCheckoutBackRegenerationSkipped,
@@ -462,6 +480,7 @@ import {
   buildSimpleSendHandoff,
   clearPersistedSimpleSendPhase,
 } from "../../launch/simpleProduct/simpleSendHandoff";
+
 import {
   clearPremiumCollaborateFirstDefaultPrimed,
   clearPremiumForkUserSendMode,
@@ -490,6 +509,7 @@ import { PremiumAgreementCopyButton } from "./PremiumAgreementCopyButton";
 import {
   polishedAuthoritativeProPlainForCopy,
   polishProAgreementDisplayLayer,
+  sanitizeProReviewDisplayText,
 } from "./polishProAgreementDisplayLayer";
 import { FinalizeYourAgreementPanel } from "./FinalizeYourAgreementPanel";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
@@ -518,6 +538,19 @@ import {
   getPaidProDocumentForSurface,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import {
+  hasPaidProChromeAuthority,
+  mergePremiumDraftWithServerCorpusFields,
+} from "./premiumApiHandoff";
+import {
+  buildDefaultProVisiblePaperCandidates,
+  PAID_PRO_VISIBLE_PAPER_FINALIZING_MESSAGE,
+  resolveVisibleProPaperBoundary,
+} from "./visibleProPaperRenderBoundary";
+import {
+  assessPaidProRuntimeAuthority,
+  normalizePaidProCorpusSourceLabel,
+} from "./paidProRuntimeAuthorityEstablishment";
 import {
   hasFrozenCanonicalAgreementCorpus,
   logAuthoritativeCorpusInvariant,
@@ -895,6 +928,11 @@ import {
   guidedProUxBlocksRecipientSetup,
   guidedProUxShowsSigningConfirmation,
 } from "./guidedDealCompletion/guidedProUxState";
+import {
+  GUIDED_OPTIONAL_IMPROVE_LABEL,
+  logGuidedQuestionGateDecision,
+  resolveGuidedQuestionGateDecision,
+} from "./guidedDealCompletion/guidedQuestionGate";
 import { shouldBypassGuidedSendCtaBlockForPaidProSignerSetup } from "./paidProReviewSigningRoute";
 import {
   evaluateGuidedSigningPacketGate,
@@ -1630,6 +1668,7 @@ type CreateFlowSendRecipientsPanelProps = {
   /** Guided Pro: e-sign trust / stale packet messaging near recipient setup. */
   guidedSigningTrustSlot?: React.ReactNode;
   partyDisplaySlots?: readonly import("../../agreement/resolvedPartyDisplayModel").ResolvedPartyDisplaySlot[];
+  signerSetupPartyIdentities?: readonly SignerSetupPartyIdentity[];
   partyLabelsFinalizeHint?: boolean;
   finalReviewSendIntent?: FinalReviewSendIntent | null;
   stripRecipientEmailNoise: (s: string) => string;
@@ -1680,6 +1719,7 @@ function CreateFlowSendRecipientsPanel({
   primaryCtaHelperText,
   guidedSigningTrustSlot = null,
   partyDisplaySlots = [],
+  signerSetupPartyIdentities = [],
   partyLabelsFinalizeHint = false,
   finalReviewSendIntent = null,
   stripRecipientEmailNoise,
@@ -1768,13 +1808,36 @@ function CreateFlowSendRecipientsPanel({
         </p>
       ) : null}
       {cappedParties.map((party, idx) => {
+        const identity = signerSetupPartyIdentities[idx];
         const resolvedLine = partyDisplaySlots[idx]?.displayName?.trim();
         const partyLine =
+          identity?.displayName?.trim() ||
           resolvedLine ||
+          identity?.legalEntityName?.trim() ||
           String((party as { name?: string }).name ?? "").trim() ||
           `Party ${idx + 1}`;
+        const legalEntityValue =
+          idx === 0
+            ? recipient1Name
+            : idx === 1
+              ? recipient2Name
+              : "";
         const emailVal =
           idx === 0 ? recipient1Email : idx === 1 ? recipient2Email : extraPartyReviewEmails[idx - 2] ?? "";
+        const signerRenderSlot =
+          idx === 0 || idx === 1
+            ? resolveSignerSetupRenderSlot({
+                slotIndex: idx,
+                currentLegalEntityValue: legalEntityValue,
+                slotIdentities: signerSetupPartyIdentities,
+                email: emailVal,
+                signerName: partySignerNames[idx],
+                signerTitle: partySignerTitles[idx],
+                partyAddress: partyAddresses[idx],
+                source: "signer_setup_input_render",
+              })
+            : null;
+        const legalEntityFieldValue = signerRenderSlot?.canonicalLegalEntity ?? "";
         const onEmailChange =
           idx === 0
             ? (v: string) => setRecipient1Email(v)
@@ -1892,7 +1955,7 @@ function CreateFlowSendRecipientsPanel({
                 <input
                   type="text"
                   data-claw-recipient-field="r1-name"
-                  value={recipient1Name}
+                  value={legalEntityFieldValue}
                   onChange={(e) => setRecipient1Name(e.target.value)}
                   className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
                   autoComplete="organization"
@@ -1905,7 +1968,7 @@ function CreateFlowSendRecipientsPanel({
                 <input
                   type="text"
                   data-claw-recipient-field="r2-name"
-                  value={recipient2Name}
+                  value={legalEntityFieldValue}
                   onChange={(e) => setRecipient2Name(e.target.value)}
                   className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
                 />
@@ -3088,15 +3151,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!premiumSendConfirmOpen) return;
     const ho = readPremiumRecipientHandoff();
     if (!ho) return;
-    setRecipient1Name((p) => hydrateNameFromHandoff(p, ho.party1.name));
-    setRecipient2Name((p) => hydrateNameFromHandoff(p, ho.party2.name));
+    const partiesSnap = draftSnapshotRef.current?.parties ?? [];
+    const intakeText = intakeCombinedRef.current || "";
+    const agreementBodyText =
+      getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "";
+    const partiesLen = Math.min(partiesSnap.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+    const slots = linearPremiumRecipientSlots(ho, Math.max(partiesLen, 2));
+    const slotIdentities = resolveSignerSetupPartyIdentities({
+      parties: partiesSnap,
+      intakeText,
+      agreementBodyText,
+      handoffSlots: slots,
+    });
+    setRecipient1Name((p) =>
+      hydrateLegalEntityNameFromHandoff(
+        p,
+        ho.party1.name,
+        slotIdentities[0]?.legalEntityName,
+        slotIdentities,
+        0,
+      ),
+    );
+    setRecipient2Name((p) =>
+      hydrateLegalEntityNameFromHandoff(
+        p,
+        ho.party2.name,
+        slotIdentities[1]?.legalEntityName,
+        slotIdentities,
+        1,
+      ),
+    );
     setRecipient1Email((p) => hydrateEmailFromHandoff(p, ho.party1.email));
     setRecipient2Email((p) => hydrateEmailFromHandoff(p, ho.party2.email));
-    const partiesLen = Math.min(
-      (draftSnapshotRef.current?.parties ?? []).length,
-      MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
-    );
-    const slots = linearPremiumRecipientSlots(ho, Math.max(partiesLen, 2));
     if (partiesLen > 2) {
       setExtraPartyReviewEmails(slots.slice(2).map((s) => String(s.email ?? "").trim()));
     } else {
@@ -3114,15 +3200,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!(premiumRecipientUxActive || premiumPersistedFlowActive || premiumSendPathUnlocked)) return;
     const ho = readPremiumRecipientHandoff();
     if (!ho) return;
-    setRecipient1Name((p) => hydrateNameFromHandoff(p, ho.party1.name));
-    setRecipient2Name((p) => hydrateNameFromHandoff(p, ho.party2.name));
+    const partiesSnap = draftSnapshotRef.current?.parties ?? [];
+    const intakeText = intakeCombinedRef.current || "";
+    const agreementBodyText =
+      getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "";
+    const partiesLen = Math.min(partiesSnap.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+    const slots = linearPremiumRecipientSlots(ho, Math.max(partiesLen, 2));
+    const slotIdentities = resolveSignerSetupPartyIdentities({
+      parties: partiesSnap,
+      intakeText,
+      agreementBodyText,
+      handoffSlots: slots,
+    });
+    setRecipient1Name((p) =>
+      hydrateLegalEntityNameFromHandoff(
+        p,
+        ho.party1.name,
+        slotIdentities[0]?.legalEntityName,
+        slotIdentities,
+        0,
+      ),
+    );
+    setRecipient2Name((p) =>
+      hydrateLegalEntityNameFromHandoff(
+        p,
+        ho.party2.name,
+        slotIdentities[1]?.legalEntityName,
+        slotIdentities,
+        1,
+      ),
+    );
     setRecipient1Email((p) => hydrateEmailFromHandoff(p, ho.party1.email));
     setRecipient2Email((p) => hydrateEmailFromHandoff(p, ho.party2.email));
-    const partiesLen = Math.min(
-      (draftSnapshotRef.current?.parties ?? []).length,
-      MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
-    );
-    const slots = linearPremiumRecipientSlots(ho, Math.max(partiesLen, 2));
     if (partiesLen > 2) {
       setExtraPartyReviewEmails(slots.slice(2).map((s) => String(s.email ?? "").trim()));
     } else {
@@ -4464,16 +4573,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const extraRef = extraPartyReviewEmailsRef.current;
       const signerNamesRef = partySignerNamesRef.current;
       const signerTitlesRef = partySignerTitlesRef.current;
+      const intakeText = intakeCombinedRef.current || "";
+      const agreementBodyText =
+        getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "";
+      const slotIdentities = resolveSignerSetupPartyIdentities({
+        parties,
+        intakeText,
+        agreementBodyText,
+      });
       for (let i = 0; i < n; i++) {
         const p = parties[i]!;
         const draftEm = partyEmailAtIndex(d.parties, i);
         const signerName = partySignerMetaAtIndex(d.parties, i, signerNamesRef, signerTitlesRef, "signerName");
         const signerTitle = partySignerMetaAtIndex(d.parties, i, signerNamesRef, signerTitlesRef, "signerTitle");
         if (i === 0) {
-          const n1 =
-            (opts?.displayName1 ?? "").trim() ||
-            (recipient1NameRef.current || "").trim() ||
-            String(p?.name || "").trim();
+          const n1 = assertSignerSlotLegalEntityForPersist({
+            slotIndex: 0,
+            attemptedValue:
+              (opts?.displayName1 ?? "").trim() ||
+              (recipient1NameRef.current || "").trim() ||
+              String(p?.name || "").trim(),
+            slotIdentities,
+            source: "persist_handoff_slot_0",
+          });
           const ui1 = stripRecipientEmailNoise(recipient1EmailRef.current);
           const e1 = looksLikeEmail(ui1) ? ui1 : draftEm || "";
           slots.push({
@@ -4487,10 +4609,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         if (i === 1) {
           const p1 = parties[1]!;
-          const n2 =
-            (opts?.displayName2 ?? "").trim() ||
-            (recipient2NameRef.current || "").trim() ||
-            String(p1?.name || "").trim();
+          const n2 = assertSignerSlotLegalEntityForPersist({
+            slotIndex: 1,
+            attemptedValue:
+              (opts?.displayName2 ?? "").trim() ||
+              (recipient2NameRef.current || "").trim() ||
+              String(p1?.name || "").trim(),
+            slotIdentities,
+            source: "persist_handoff_slot_1",
+          });
           const ui2 = stripRecipientEmailNoise(recipient2EmailRef.current);
           const e2 = looksLikeEmail(ui2) ? ui2 : draftEm || "";
           slots.push({
@@ -5720,14 +5847,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (createProductionTwoPane && simpleProductFlow) {
             setDisplayPhase("review");
           }
-          if (hasPaidPremiumCompletionSession()) {
-            setPremiumPersistedFlowActive(true);
-            setPremiumSendPathUnlocked(true);
-          }
+          setPremiumPersistedFlowActive(false);
+          setPremiumSendPathUnlocked(false);
           agreementDocumentDirtyRef.current = false;
           setAgreementDocumentText("");
           setReviewDocRefreshTick((n) => n + 1);
-          setPremiumPostCheckoutPhase(null);
+          setPremiumPostCheckoutPhase("processing");
+          setProFullDraftQualityRetry(true);
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
             console.info("[founder_intent] UI gate; custom message", { message: result.founderDetailsGateMessage });
@@ -5833,6 +5959,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumWinningCorpusFallback: winning,
           paidAuthoritativeProBody: usePaidAuthoritativeBody ? winning : null,
           hydratedAuthoritativeBodyHint: usePaidAuthoritativeBody ? winning : undefined,
+          postCheckoutProLocked: paidCheckoutCompletedRef.current,
           buildLivePreview: () =>
             buildAgreementPreviewTextCore(merged.draft, {
               starterPreview: false,
@@ -5862,6 +5989,45 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             usePaidAuthoritativeBody,
             pendingPaidProFinishedGate: hasFullDraftAccess,
           });
+        }
+        if (hasFullDraftAccessRef.current && !authoritativePremiumPipelineResultForUiApply(result)) {
+          setPremiumServerGenerationDegraded(result.serverGenerationDegraded ?? null);
+          setProFullDraftQualityRetry(true);
+          setHardError(null);
+          setProFullDraftCustomGateMessage(
+            result.proIntentGateMessage ||
+              "LawDog is finalizing your secure Pro agreement. Tap **Retry Pro draft** if this does not finish shortly.",
+          );
+          clearPremiumForkUserSendMode();
+          paidProPremiumSendIntentRef.current = null;
+          clearPremiumSendIntent();
+          setPremiumSendModeUserChoice(null);
+          setPremiumSendModeTouched(false);
+          premiumPipelineOutputBodyRef.current = "";
+          setPremiumRefineReview(null);
+          setPremiumFinalizeAudit(null);
+          setPremiumReviewRoute(null);
+          setPremiumPersistedFlowActive(false);
+          setPremiumSendPathUnlocked(false);
+          commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft), {
+            forceReviewDisplay: true,
+          });
+          if (createProductionTwoPane && simpleProductFlow) {
+            setDisplayPhase("review");
+          }
+          agreementDocumentDirtyRef.current = false;
+          setAgreementDocumentText("");
+          setReviewDocRefreshTick((n) => n + 1);
+          setPremiumPostCheckoutPhase("processing");
+          logPremiumCompletionDebug({
+            stage: "ui_apply_blocked_no_server_authority",
+            snapshotWritten: false,
+            accepted: false,
+            premiumRenderSource: result.premiumRenderSource,
+            winningLen: winning.length,
+            resolvedSource: resolvedPersist.premium_render_source,
+          });
+          return;
         }
         if (import.meta.env.DEV && result.tierADiagnostic?.enabled) {
           // eslint-disable-next-line no-console
@@ -5985,14 +6151,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             if (createProductionTwoPane && simpleProductFlow) {
               setDisplayPhase("review");
             }
-            if (hasPaidPremiumCompletionSession()) {
-              setPremiumPersistedFlowActive(true);
-              setPremiumSendPathUnlocked(true);
-            }
+            setPremiumPersistedFlowActive(false);
+            setPremiumSendPathUnlocked(false);
             agreementDocumentDirtyRef.current = false;
-            setAgreementDocumentText("Review and edit the document below when it appears. Nothing is sent from this step.");
+            setAgreementDocumentText("");
             setReviewDocRefreshTick((n) => n + 1);
-            setPremiumPostCheckoutPhase(null);
+            setPremiumPostCheckoutPhase("processing");
             emitPaidFunnelEvent("premium_checkout_completed", {
               extra: {
                 premium_generation_outcome: "needs_details",
@@ -6035,14 +6199,44 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             readonly_render: resolvedPersist.premium_render_source,
           });
         }
-        const mergedDraftPersist =
-          usePaidAuthoritativeBody && snapshotPlain.trim().length >= 500
-            ? {
-                ...merged.draft,
-                premium_full_document_text: snapshotPlain,
-                premium_server_full_document_text: snapshotPlain,
-              }
-            : merged.draft;
+        let mergedDraftPersist = merged.draft;
+        if (usePaidAuthoritativeBody && snapshotPlain.trim().length >= 500) {
+          mergedDraftPersist = mergePremiumDraftWithServerCorpusFields(merged.draft, {
+            authoritativePlain: snapshotPlain,
+            serverFullFromApi: String(merged.draft.premium_server_full_document_text ?? "").trim() || snapshotPlain,
+            premiumRenderSource:
+              resolvedPersist.premium_render_source === "server_full_document_text"
+                ? "server_full_document_text"
+                : result.premiumRenderSource,
+          });
+          try {
+            establishPaidProSourceOfTruth({
+              text: snapshotPlain,
+              source: "server_full_draft",
+              draft: mergedDraftPersist,
+              intakeText: mergedIntake,
+            });
+          } catch (establishErr) {
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.warn("[premium-handoff] establishPaidProSourceOfTruth blocked", establishErr);
+            }
+            setProFullDraftQualityRetry(true);
+            setPremiumPersistedFlowActive(false);
+            setPremiumSendPathUnlocked(false);
+            setPremiumPostCheckoutPhase("processing");
+            setProFullDraftCustomGateMessage(
+              "LawDog could not lock your Pro agreement for review. Tap **Retry Pro draft** to regenerate.",
+            );
+            logPremiumCompletionDebug({
+              stage: "ui_apply_blocked_sot_establish_failed",
+              snapshotWritten: false,
+              accepted: false,
+              premiumRenderSource: result.premiumRenderSource,
+            });
+            return;
+          }
+        }
         const finalDoc = collapseDuplicateEsignNoticesInFullPreview(snapshotPlain);
         const icCommitGate = resolveAgreementIntentContract(mergedIntake);
         const vCommitGate = validatePaidProOutput({
@@ -10228,6 +10422,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showUpgradeToFullDraftOnReview = useMemo(() => {
     if (suppressIntakePremiumUpsell) return false;
+    if (hasPaidProSourceOfTruth()) return false;
     if (premiumPersistedFlowActive || premiumSendPathUnlocked) return false;
     // Universal P0 starter party-count gate: 13+ parties always force the Pro upgrade CTA
     // on the review surface so free continuation never proceeds. We do NOT mutate the
@@ -10305,14 +10500,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const chromeEligible =
       proAgreementEntitled || (hasFullDraftAccess && !showUpgradeToFullDraftOnReview);
     if (!chromeEligible) return false;
+    const chromeAuthority = hasPaidProChromeAuthority({ draft });
     if (!tierAllowsAdvancedFullDraftReveal(tier)) {
       // CRITICAL INVARIANT:
       // Starter/free users must NEVER see Pro-paid document surfaces
       // unless premiumCompletion session or active premium flow is present.
       // Do NOT add heuristic signals here.
-      return Boolean(hasPaidPremiumCompletionSession() || premiumPersistedFlowActive);
+      return Boolean(
+        (hasPaidPremiumCompletionSession() || premiumPersistedFlowActive) && chromeAuthority,
+      );
     }
-    return true;
+    return chromeAuthority;
   }, [
     productionDraftPrimaryReviewSurface,
     createUiStage,
@@ -10321,8 +10519,85 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     showUpgradeToFullDraftOnReview,
     tier,
     premiumPersistedFlowActive,
+    draft,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
   ]);
   premiumPaidDocumentSurfaceRef.current = premiumPaidDocumentSurface;
+
+  const isAuthoritativePaidProReviewActive = useMemo(
+    () =>
+      isAuthoritativePaidProReview({
+        isPaidPro: paidProAuthoritative || hasPaidProSourceOfTruth(),
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      }),
+    [
+      paidProAuthoritative,
+      draft,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
+  );
+
+  const authoritativePaidProReviewPlain = useMemo(
+    () =>
+      isAuthoritativePaidProReviewActive
+        ? resolveAuthoritativePaidProReviewPlain({
+            draft: draft ?? null,
+            intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+          })
+        : "",
+    [
+      isAuthoritativePaidProReviewActive,
+      draft,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
+  );
+
+  const visibleAgreementDocumentForReview = useMemo(() => {
+    if (!isAuthoritativePaidProReviewActive || !authoritativePaidProReviewPlain) {
+      return agreementDocumentText;
+    }
+    const current = agreementDocumentText.trim();
+    if (
+      agreementDocumentDirtyRef.current &&
+      current.length >= authoritativePaidProReviewPlain.length * 0.9
+    ) {
+      return agreementDocumentText;
+    }
+    if (starterPlainLooksStaleVersusPaidAuthority(current, authoritativePaidProReviewPlain)) {
+      return authoritativePaidProReviewPlain;
+    }
+    return current.length >= authoritativePaidProReviewPlain.length
+      ? agreementDocumentText
+      : authoritativePaidProReviewPlain;
+  }, [
+    isAuthoritativePaidProReviewActive,
+    authoritativePaidProReviewPlain,
+    agreementDocumentText,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!isAuthoritativePaidProReviewActive || !authoritativePaidProReviewPlain) return;
+    if (agreementDocumentDirtyRef.current) return;
+    const current = agreementDocumentTextRef.current.trim();
+    if (!starterPlainLooksStaleVersusPaidAuthority(current, authoritativePaidProReviewPlain)) return;
+    setAgreementDocumentText(authoritativePaidProReviewPlain);
+    scheduleAgreementDocSync(authoritativePaidProReviewPlain);
+    bumpPremiumSurfaceGateTick();
+  }, [
+    isAuthoritativePaidProReviewActive,
+    authoritativePaidProReviewPlain,
+    scheduleAgreementDocSync,
+  ]);
 
   const authoritativePremiumUiCommitted = useMemo(() => {
     const snap = readPremiumCompletionSnapshot();
@@ -10379,6 +10654,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    * `hasFullDraftAccess` / draft heuristics alone cannot surface paid Pro chrome without a checkout/session flag.
    */
   const isFreeStarterReviewSurface = useMemo(() => {
+    if (hasPaidProSourceOfTruth() || isAuthoritativePaidProReviewActive) return false;
     if (hasPaidPremiumCompletionSession()) return false;
     if (authoritativePremiumUiCommitted) return false;
     if (paidProAuthoritative) return false;
@@ -10408,6 +10684,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
     paidProAuthoritative,
     authoritativePremiumUiCommitted,
+    isAuthoritativePaidProReviewActive,
   ]);
   isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
 
@@ -10582,7 +10859,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const useStarterDocumentPaperSurface = Boolean(
-    isFreeStreamlineDraftReview && createUiStage === CreateUiStage.DRAFT,
+    isFreeStreamlineDraftReview && createUiStage === CreateUiStage.DRAFT && !isAuthoritativePaidProReviewActive,
   );
 
   const freeStarterReviewShellActive = useMemo(
@@ -11309,7 +11586,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (freeReviewSnapshotHydratedRef.current || productionResumeHydratedRef.current) return;
     if (checkoutBackRestoreActive) return;
     if (readCreateReviewAgreementResumeId()) return;
-    if (!readCreateReviewDraftReadyMarker()) return;
+    if (!shouldRestoreStoredCreateReviewDraftSnapshot()) return;
     const snap = readCreateReviewDraftSnapshot<ParsedDraftShape>();
     if (!snap) return;
     freeReviewSnapshotHydratedRef.current = true;
@@ -11660,6 +11937,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [guidedAuthVersionNonce, premiumSurfaceGateTick],
   );
 
+  const guidedQuestionGateDecision = useMemo(() => {
+    const session = stripNonAnswerableFromGuidedSession(
+      guidedCompletionSession ?? guidedCompletionSessionRef.current,
+    );
+    const corpusLen = Math.max(
+      agreementDocumentText.trim().length,
+      lastKnownGoodAuthoritativeDraftRef.current.trim().length,
+      hydratedPremiumBodyRef.current.trim().length,
+      lastPremiumWinningCorpusRef.current.trim().length,
+    );
+    return resolveGuidedQuestionGateDecision({
+      session,
+      corpusLen,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      bodyText: agreementDocumentText || lastKnownGoodAuthoritativeDraftRef.current,
+      draft: (reviewDraft ?? draft) as ParsedDraftShape | null,
+    });
+  }, [
+    guidedCompletionSession,
+    agreementDocumentText,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    reviewDraft,
+    draft,
+    guidedAuthVersionNonce,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
+
+  useEffect(() => {
+    if (!premiumPaidDocumentSurface) return;
+    logGuidedQuestionGateDecision(guidedQuestionGateDecision);
+  }, [premiumPaidDocumentSurface, guidedQuestionGateDecision]);
+
   const guidedProUxState = useMemo(() => {
     const state = resolveGuidedProUxState({
       premiumPaidDocumentSurface,
@@ -11677,6 +11988,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signingPacketSetupActive: guidedSigningConfirmationActive,
       guidedBulkApplying: guidedBulkApplyingActive,
       guidedAnswerApplyStatus: resolvedGuidedAnswerApplyStatus,
+      questionGate: guidedQuestionGateDecision,
     });
     logGuidedProUxStateResolved(state, guidedCompletionPhase);
     return state;
@@ -11692,6 +12004,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedSendIntentSelected,
     resolvedGuidedAnswerApplyStatus,
     paidProAcceptedCorpusReady,
+    guidedQuestionGateDecision,
   ]);
 
   const suppressGuidedFreeformUx = guidedProUxSuppressesFreeform(guidedProUxState);
@@ -11721,7 +12034,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
   const suppressProDocumentEmbeddedSignatures = useMemo(
-    () => Boolean(paidProAuthoritative && hasFrozenCanonicalAgreementCorpus() && !paidProRecipientSetupOnDraft),
+    () => Boolean(paidProAuthoritative && !paidProRecipientSetupOnDraft),
     [paidProAuthoritative, paidProRecipientSetupOnDraft],
   );
   const productionReadyForPersist = Boolean(
@@ -12414,6 +12727,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [draft, reviewDocRefreshTick, premiumSurfaceGateTick],
   );
 
+  const paidProRuntimeAuthority = useMemo(
+    () =>
+      assessPaidProRuntimeAuthority({
+        draft: (reviewDraft ?? draft) as import("./intakeSmartDefaults").ParsedDraftShape | null,
+        premiumRenderSourceResolved: premiumPaidReadonlyPick.sourceUsed,
+        premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+      }),
+    [
+      reviewDraft,
+      draft,
+      premiumPaidReadonlyPick.sourceUsed,
+      premiumTruthPipelineSource,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+      guidedAuthVersionNonce,
+    ],
+  );
+
+  const paidProAwaitingRuntimeAuthority =
+    premiumPaidDocumentSurface && paidProRuntimeAuthority.showFinalizingOnly;
+
+  const simpleProFinalReviewShellActive = useMemo(
+    () => simpleProFinalReviewActive && paidProRuntimeAuthority.canRenderProReviewShell,
+    [simpleProFinalReviewActive, paidProRuntimeAuthority.canRenderProReviewShell],
+  );
+
   const premiumPaidUnavailableRetry = useMemo(() => {
     if (!premiumPaidDocumentSurface || proUpgradeUseStarterView || authoritativePremiumUiCommitted) {
       return false;
@@ -12749,8 +13088,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const canProceedWithPaidProDocument = useMemo(() => {
-    if (authoritativePremiumUiCommitted) return true;
     if (!premiumPaidDocumentSurface) return true;
+    if (!paidProRuntimeAuthority.established || !paidProRuntimeAuthority.canRenderProReviewShell) return false;
     if (proUpgradeUseStarterView) return false;
     if (premiumPaidUnavailableRetry) return false;
     const t = (premiumPaidReadonlyPick.plainText || "").trim();
@@ -12774,6 +13113,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPaidReadonlyPick.sourceUsed,
     paidProStarterBaselinePlain,
     premiumProTruthSnapshot,
+    paidProRuntimeAuthority.established,
+    paidProRuntimeAuthority.canRenderProReviewShell,
   ]);
 
   /** “Continue to reviewer / signer” after checkout while still on DRAFT (before recipients). */
@@ -12914,8 +13255,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
+    if (isAuthoritativePaidProReviewActive) {
+      return { version: PAID_PRO_REVIEW_CHIP_VERSION, state: PAID_PRO_REVIEW_CHIP_STATE };
+    }
     if (premiumPaidDocumentSurface) {
-      const paidBodyForChip = (premiumPaidReadonlyPick.plainText || agreementDocumentText || "").trim();
+      const paidBodyForChip = (
+        authoritativePaidProReviewPlain ||
+        premiumPaidReadonlyPick.plainText ||
+        agreementDocumentText ||
+        ""
+      ).trim();
       const guidedSessionForChip = buildGuidedSessionFromAgreement({
         intakeRaw: currentPremiumMergedIntakeKey || intakeCombined,
         body: paidBodyForChip,
@@ -12972,6 +13321,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     createUiStage,
     draft,
+    isAuthoritativePaidProReviewActive,
+    authoritativePaidProReviewPlain,
     premiumPaidDocumentSurface,
     premiumProTruthGate,
     isFreeStreamlineDraftReview,
@@ -13095,12 +13446,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumReadonlyAgreementHtml = useMemo(() => {
     if (!premiumPaidDocumentSurface) return "";
     if (shouldShowPaidRetry) return "";
+    const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const paidProDisplay = getPaidProDocumentForSurface("display", {
       draft: (reviewDraft ?? draft) ?? null,
-      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      intakeText: intakeForPolish,
     });
+    if (hasPaidProSourceOfTruth() && !paidProDisplay?.text?.trim()) {
+      return "";
+    }
     if (paidProDisplay) {
-      const corpus = paidProDisplay.text;
+      const rdForCandidates = reviewDraft ?? draft;
+      const serverFullDocumentText = (
+        (rdForCandidates as { server_full_document_text?: string | null } | null)?.server_full_document_text ||
+        (rdForCandidates as { premium_server_full_document_text?: string | null } | null)?.premium_server_full_document_text ||
+        ""
+      ).trim();
+      const displayPaperCandidates = buildDefaultProVisiblePaperCandidates({
+        serverFullDocumentText,
+        acceptedReviewText: latestAcceptedCorpus,
+        reviewDraftText: agreementDocumentText,
+        renderedAgreementPreviewText: renderedAgreementPreview,
+        freeStarterText: "",
+        premiumReadonlyRenderCorpusText: premiumPaidReadonlyPick.plainText,
+        premiumReadonlyRenderCorpusSource: premiumPaidReadonlyPick.sourceUsed,
+      });
+      const boundary = resolveVisibleProPaperBoundary({
+        visiblePlain: paidProDisplay.text,
+        declaredSource: "paid_pro_display_surface",
+        candidates: displayPaperCandidates,
+        intakeText: intakeForPolish,
+        draft: rdForCandidates ?? null,
+        paidProReviewSurface: true,
+      });
+      if (boundary.blocked || !boundary.plain.trim()) return "";
+      const corpus = boundary.plain;
       const rd = reviewDraft ?? draft;
       const signaturePartyNames = extractAgreementParties({
         parties: rd?.parties,
@@ -13108,11 +13487,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         renderedText: corpus,
         partiesLine: displayLivePreviewModel.partiesLine,
       });
-      const renderHints = computePremiumDocumentRenderHints(
-        rd,
-        corpus,
-        (currentPremiumMergedIntakeKey || intakeCombined || "").trim(),
-      );
+      const renderHints = computePremiumDocumentRenderHints(rd, corpus, intakeForPolish);
       return buildPremiumAgreementReadonlyHtml(corpus, {
         signatureSectionMode: effectivePremiumSendMode === "signature" ? "execution" : "collaboration",
         partyNames: signaturePartyNames,
@@ -13154,10 +13529,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           hydratedPremiumBodyRef.current ||
           agreementDocumentText
         : displayPolishedPaidProPlain || premiumPaidReadonlyPick.plainText);
-    const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const corpus =
       corpusRaw.length >= 200
-        ? polishProAgreementDisplayLayer(corpusRaw, { draft: rd ?? null, intakeText: intakeForPolish }).text
+        ? polishProAgreementDisplayLayer(corpusRaw, {
+            draft: rd ?? null,
+            intakeText: intakeForPolish,
+            reviewDisplayMode: suppressProDocumentEmbeddedSignatures,
+          }).text
         : corpusRaw;
     const signaturePartyNames = extractAgreementParties({
       parties: rd?.parties,
@@ -13268,6 +13646,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
     guidedFinalReviewActive,
     guidedCompletionPhase,
+    latestAcceptedCorpus,
+    premiumPersistedFlowActive,
   ]);
 
   const preSendTrustLayer = useMemo(
@@ -14179,6 +14559,65 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }, 4200);
   }, []);
 
+  const signerSetupPartyIdentities = useMemo((): SignerSetupPartyIdentity[] => {
+    if (!draft?.parties?.length) return [];
+    const intakeText = currentPremiumMergedIntakeKey || intakeCombined;
+    const agreementBodyText =
+      getAuthoritativeAgreementText() ||
+      paidProCardEditDraft ||
+      agreementDocumentTextRef.current ||
+      "";
+    const handoff = readPremiumRecipientHandoffMemo();
+    const ho = handoff ? linearPremiumRecipientSlots(handoff, draft.parties.length) : [];
+    return resolveSignerSetupPartyIdentities({
+      parties: draft.parties,
+      intakeText,
+      agreementBodyText,
+      handoffSlots: ho,
+    });
+  }, [draft?.parties, currentPremiumMergedIntakeKey, intakeCombined, paidProCardEditDraft]);
+
+  useEffect(() => {
+    if (signerSetupPartyIdentities.length < 1) return;
+    const corrected0 = resolveSignerSetupRenderSlot({
+      slotIndex: 0,
+      currentLegalEntityValue: recipient1Name,
+      slotIdentities: signerSetupPartyIdentities,
+      source: "auto_correct",
+    }).canonicalLegalEntity;
+    const corrected1 =
+      signerSetupPartyIdentities.length > 1
+        ? resolveSignerSetupRenderSlot({
+            slotIndex: 1,
+            currentLegalEntityValue: recipient2Name,
+            slotIdentities: signerSetupPartyIdentities,
+            source: "auto_correct",
+          }).canonicalLegalEntity
+        : "";
+    if (corrected0 && corrected0 !== recipient1Name.trim()) {
+      setRecipient1Name(corrected0);
+    } else if (
+      signerSetupPartyIdentities[0]?.legalEntityName &&
+      shouldUpgradeRecipientNameToLegalEntity(
+        recipient1Name,
+        signerSetupPartyIdentities[0].legalEntityName,
+      )
+    ) {
+      setRecipient1Name(signerSetupPartyIdentities[0].legalEntityName);
+    }
+    if (corrected1 && corrected1 !== recipient2Name.trim()) {
+      setRecipient2Name(corrected1);
+    } else if (
+      signerSetupPartyIdentities[1]?.legalEntityName &&
+      shouldUpgradeRecipientNameToLegalEntity(
+        recipient2Name,
+        signerSetupPartyIdentities[1].legalEntityName,
+      )
+    ) {
+      setRecipient2Name(signerSetupPartyIdentities[1].legalEntityName);
+    }
+  }, [signerSetupPartyIdentities, recipient1Name, recipient2Name]);
+
   const resolvedPartyDisplaySlots = useMemo(() => {
     if (!draft?.parties?.length) return [];
     const emails = [
@@ -14199,6 +14638,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipientEmails: emails,
       recipientSignerNames: signerNames,
       recipientDisplayNames: [recipient1Name, recipient2Name, ...extraPartyReviewEmails.map(() => "")],
+      canonicalLegalEntityNames: signerSetupPartyIdentities.map((id) => id.legalEntityName),
     });
   }, [
     draft?.parties,
@@ -14210,6 +14650,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     partySignerNames,
     currentPremiumMergedIntakeKey,
     intakeCombined,
+    signerSetupPartyIdentities,
   ]);
 
   const partyLabelsFinalizeHint = useMemo(
@@ -14532,6 +14973,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           pendingEarly,
           guidedPreReviewSignerSlots.complete,
           resolvedGuidedAnswerApplyStatus,
+          guidedQuestionGateDecision,
         );
         if (
           guidedEarlySticky &&
@@ -14684,6 +15126,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             pending,
             guidedPreReviewSignerSlots.complete,
             resolvedGuidedAnswerApplyStatus,
+            guidedQuestionGateDecision,
           );
           if (guidedSticky) return guidedSticky;
         }
@@ -14718,7 +15161,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   ? "Connection interrupted"
                   : premiumPostCheckoutPhase === "generation_retry"
                     ? "Pro build paused"
-                    : "Finalizing upgrade…",
+                    : "Finalizing secure agreement version…",
             action: "continue_to_recipients",
             disabled: true,
             reason: "draft_pre_commit",
@@ -14825,10 +15268,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         const premiumForkSurfaceActive =
           premiumSendPathUnlocked || premiumPersistedFlowActive || premiumRecipientUxActive;
+        const proDeliveryTrackChooserActive = Boolean(
+          paidProAuthoritative &&
+            hasFrozenCanonicalAgreementCorpus() &&
+            canChooseProDeliveryTrack({
+              isPaidPro: Boolean(paidProAuthoritative && hasPaidProSourceOfTruth()),
+              createFlowPhase,
+              hasCanonicalCorpus: hasFrozenCanonicalAgreementCorpus(),
+            }) &&
+            !premiumSendModeTouched &&
+            !premiumSignersSurfaceReady &&
+            !paidProRecipientSetupOnDraft,
+        );
+        if (proDeliveryTrackChooserActive) {
+          return {
+            label: "",
+            action: "continue_to_recipients",
+            disabled: true,
+            reason: "pro_delivery_track_chooser_active",
+          };
+        }
         const streamlineContinueLabel =
-          streamlineFirstRunReviewUi && premiumForkSurfaceActive
+          streamlineFirstRunReviewUi && premiumForkSurfaceActive && !paidProAuthoritative
             ? "Add signers / prepare signature links"
-            : streamlineFirstRunReviewUi
+            : streamlineFirstRunReviewUi && !paidProAuthoritative
               ? "Add signers / prepare signature links"
               : "Continue";
         if (!showUpgradeToFullDraftOnReview && premiumPersistedFlowActive && !peekPremiumRecipientsSurfaceReleased()) {
@@ -14845,6 +15308,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           const proTruthBlocksPaidContinue =
             shouldShowPaidRetry || !proCheckoutRecipientStageAdvanceAllowed || missingPaidAuthority;
+          if (proDeliveryTrackChooserActive) {
+            return {
+              label: "",
+              action: "continue_to_recipients",
+              disabled: true,
+              reason: "pro_delivery_track_chooser_active",
+            };
+          }
           return {
             label: reviewPath ? "Send for review / compare edits" : "Add signers / prepare signature links",
             action: "premium_continue_to_signers",
@@ -14956,6 +15427,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     proCheckoutRecipientStageAdvanceAllowed,
     displayPhase,
     paidProRecipientSetupOnDraft,
+    paidProAuthoritative,
+    premiumSendModeTouched,
+    premiumSignersSurfaceReady,
+    createFlowPhase,
     starterPartyCountRequiresPro,
     freeTrackBlocksRecipientAdvance,
     showStarterProRefineUpsell,
@@ -15969,10 +16444,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draft: draft ?? null,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
     });
-    if (paidProReview) {
+    if (paidProReview?.text && paidProReview.text.trim().length >= 500) {
       return {
         body: paidProReview.text,
-        source: "accepted_review" as const,
+        source: "paidProSourceOfTruth" as const,
         len: paidProReview.text.length,
         hasSignerHydration: false,
         finalizedHash: paidProReview.hash,
@@ -16118,11 +16593,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedAuthoritativeBodyPlain;
     return resolveSimpleProFinalReviewCorpus({
       authoritativePlain,
-      renderedPreviewPlain: renderedAgreementPreview,
-      pickerPlain: premiumPaidReadonlyPick.plainText,
-      agreementDocumentPlain: agreementDocumentText,
+      renderedPreviewPlain: isAuthoritativePaidProReviewActive ? "" : renderedAgreementPreview,
+      pickerPlain: premiumPaidReadonlyPick.plainText || authoritativePaidProReviewPlain,
+      agreementDocumentPlain: visibleAgreementDocumentForReview,
       appliedAnswerCount: answeredCount,
-      finalReviewAuthorityOnly: simpleProFinalReviewActive,
+      finalReviewAuthorityOnly: simpleProFinalReviewActive || isAuthoritativePaidProReviewActive,
       recoveryAuthoritativePlain: guidedPreIdentityAuthoritativeRef.current,
       pinnedFinalizedSignerPlain: pinnedFinalizedSignerCorpusRef.current,
     });
@@ -16138,50 +16613,203 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedAuthVersionNonce,
     simpleProFinalReviewActive,
     acceptedPremiumCorpusPickOpts,
+    isAuthoritativePaidProReviewActive,
+    authoritativePaidProReviewPlain,
+    visibleAgreementDocumentForReview,
+  ]);
+
+  const proVisiblePaperCandidates = useMemo(() => {
+    const rd = reviewDraft ?? draft;
+    const serverFullDocumentText = (
+      (rd as { server_full_document_text?: string | null } | null)?.server_full_document_text ||
+      (rd as { premium_server_full_document_text?: string | null } | null)?.premium_server_full_document_text ||
+      (draft as { server_full_document_text?: string | null } | null)?.server_full_document_text ||
+      (draft as { premium_server_full_document_text?: string | null } | null)?.premium_server_full_document_text ||
+      ""
+    ).trim();
+    let freeStarterText = paidProStarterPreviewPlain;
+    if (!freeStarterText.trim() && rd) {
+      try {
+        freeStarterText = buildAgreementPreviewText(rd as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
+          starterPreview: true,
+          freeStarterReviewPreview: true,
+          intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        }).trim();
+      } catch {
+        freeStarterText = "";
+      }
+    }
+    return buildDefaultProVisiblePaperCandidates({
+      serverFullDocumentText,
+      acceptedReviewText: latestAcceptedCorpus || acceptedReviewCorpusRef.current,
+      reviewDraftText: agreementDocumentText,
+      renderedAgreementPreviewText: renderedAgreementPreview,
+      freeStarterText,
+      simpleProFinalReviewCorpusText: simpleProFinalReviewCorpus.plainText,
+      premiumReadonlyRenderCorpusText: premiumPaidReadonlyPick.plainText,
+      premiumReadonlyRenderCorpusSource: premiumPaidReadonlyPick.sourceUsed,
+    });
+  }, [
+    reviewDraft,
+    draft,
+    paidProStarterPreviewPlain,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    latestAcceptedCorpus,
+    agreementDocumentText,
+    renderedAgreementPreview,
+    simpleProFinalReviewCorpus.plainText,
+    premiumPaidReadonlyPick.plainText,
+    premiumPaidReadonlyPick.sourceUsed,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
   ]);
 
   const displayPolishedPaidProPlain = useMemo(() => {
+    const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const paidProDisplay = getPaidProDocumentForSurface("display", {
       draft: draft ?? null,
-      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      intakeText: intakeForPolish,
     });
-    if (paidProDisplay) {
-      return paidProDisplay.text;
-    }
-    if (hasPaidProSourceOfTruth()) return "";
-    const raw = (premiumPaidReadonlyPick.plainText || "").trim();
+    const raw = (
+      paidProDisplay?.text ||
+      (hasPaidProSourceOfTruth() ? "" : (premiumPaidReadonlyPick.plainText || "").trim())
+    ).trim();
     if (!raw || raw.length < 200) return raw;
-    const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    return polishProAgreementDisplayLayer(raw, { draft: draft ?? null, intakeText: intakeForPolish }).text;
+    const polished = polishProAgreementDisplayLayer(raw, {
+      draft: draft ?? null,
+      intakeText: intakeForPolish,
+      reviewDisplayMode: suppressProDocumentEmbeddedSignatures,
+    }).text;
+    if (!suppressProDocumentEmbeddedSignatures) {
+      const boundary = resolveVisibleProPaperBoundary({
+        visiblePlain: polished,
+        declaredSource: paidProDisplay ? "paid_pro_display_surface" : premiumPaidReadonlyPick.sourceUsed,
+        candidates: proVisiblePaperCandidates,
+        intakeText: intakeForPolish,
+        draft: draft ?? null,
+        paidProReviewSurface: premiumPaidDocumentSurface,
+      });
+      return boundary.plain;
+    }
+    const sanitized = sanitizeProReviewDisplayText(polished, {
+      source: paidProDisplay ? "paid_pro_display_surface" : "premium_readonly_display",
+    }).text;
+    const boundary = resolveVisibleProPaperBoundary({
+      visiblePlain: sanitized,
+      declaredSource: paidProDisplay ? "paid_pro_display_surface" : premiumPaidReadonlyPick.sourceUsed,
+      candidates: proVisiblePaperCandidates,
+      intakeText: intakeForPolish,
+      draft: draft ?? null,
+      paidProReviewSurface: premiumPaidDocumentSurface,
+    });
+    return boundary.plain;
   }, [
+    proVisiblePaperCandidates,
     premiumPaidReadonlyPick.plainText,
+    premiumPaidReadonlyPick.sourceUsed,
+    premiumPaidDocumentSurface,
     draft,
     currentPremiumMergedIntakeKey,
     intakeCombined,
     premiumSurfaceGateTick,
     reviewDocRefreshTick,
+    suppressProDocumentEmbeddedSignatures,
   ]);
 
   const simpleProFinalReviewDisplayPlain = useMemo(() => {
+    const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const paidProReview = getPaidProDocumentForSurface("review", {
       draft: draft ?? null,
-      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      intakeText: intakeForPolish,
     });
-    if (paidProReview) {
-      return paidProReview.text;
-    }
-    if (hasPaidProSourceOfTruth()) return "";
-    const raw = (simpleProFinalReviewCorpus.plainText || "").trim();
+    const raw = (
+      paidProReview?.text ||
+      (hasPaidProSourceOfTruth() ? "" : (simpleProFinalReviewCorpus.plainText || "").trim())
+    ).trim();
     if (!raw) return "";
-    const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    return polishProAgreementDisplayLayer(raw, { draft: draft ?? null, intakeText: intakeForPolish }).text;
+    const polished = polishProAgreementDisplayLayer(raw, {
+      draft: draft ?? null,
+      intakeText: intakeForPolish,
+      reviewDisplayMode: true,
+    }).text;
+    const sanitized = sanitizeProReviewDisplayText(polished, {
+      source: paidProReview ? "paid_pro_review_surface" : "simple_pro_final_review",
+    }).text;
+    const boundary = resolveVisibleProPaperBoundary({
+      visiblePlain: sanitized,
+      declaredSource: paidProReview ? "paid_pro_review_surface" : simpleProFinalReviewCorpus.source,
+      candidates: proVisiblePaperCandidates,
+      intakeText: intakeForPolish,
+      draft: draft ?? null,
+      paidProReviewSurface: simpleProFinalReviewActive || premiumPaidDocumentSurface,
+    });
+    return boundary.plain;
   }, [
+    proVisiblePaperCandidates,
     simpleProFinalReviewCorpus.plainText,
+    simpleProFinalReviewCorpus.source,
+    simpleProFinalReviewActive,
+    premiumPaidDocumentSurface,
     draft,
     currentPremiumMergedIntakeKey,
     intakeCombined,
     guidedAuthVersionNonce,
     reviewDocRefreshTick,
+  ]);
+
+  const visibleProPaperBoundaryState = useMemo(() => {
+    const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const paidProReview = getPaidProDocumentForSurface("review", {
+      draft: draft ?? null,
+      intakeText: intakeForPolish,
+    });
+    const declaredSource = paidProReview
+      ? "paid_pro_review_surface"
+      : simpleProFinalReviewCorpus.source || premiumPaidReadonlyPick.sourceUsed;
+    return resolveVisibleProPaperBoundary({
+      visiblePlain: simpleProFinalReviewDisplayPlain || displayPolishedPaidProPlain,
+      declaredSource,
+      candidates: proVisiblePaperCandidates,
+      intakeText: intakeForPolish,
+      draft: draft ?? null,
+      paidProReviewSurface: simpleProFinalReviewActive || premiumPaidDocumentSurface,
+    });
+  }, [
+    simpleProFinalReviewDisplayPlain,
+    displayPolishedPaidProPlain,
+    proVisiblePaperCandidates,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    draft,
+    simpleProFinalReviewActive,
+    premiumPaidDocumentSurface,
+    simpleProFinalReviewCorpus.source,
+    premiumPaidReadonlyPick.sourceUsed,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+  ]);
+
+  const visibleProPaperTrace = useMemo(() => {
+    if (!premiumPaidDocumentSurface && !simpleProFinalReviewActive) return undefined;
+    return {
+      declaredSource: visibleProPaperBoundaryState.source,
+      candidates: proVisiblePaperCandidates,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      draft: (reviewDraft ?? draft) ?? null,
+      paidProReviewSurface: true,
+      isAuthoritative: visibleProPaperBoundaryState.isAuthoritative,
+      isFreeBodyMatch: visibleProPaperBoundaryState.isFreeBodyMatch,
+    };
+  }, [
+    premiumPaidDocumentSurface,
+    simpleProFinalReviewActive,
+    visibleProPaperBoundaryState,
+    proVisiblePaperCandidates,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    reviewDraft,
+    draft,
   ]);
 
   const syncReviewContinuityState = React.useCallback((next: ReviewContinuityState) => {
@@ -17459,10 +18087,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPaidDocumentSurface &&
       !proUpgradeUseStarterView &&
       guidedBodyUsable &&
-      canProceedWithPaidProDocument &&
-      guidedProUxShowsQuestionPanel(guidedProUxState) &&
+      (canProceedWithPaidProDocument || guidedQuestionGateDecision.materialReviewAllowed) &&
       activeGuidedCompletionSession &&
       guidedSessionQueueRenderable &&
+      (guidedProUxShowsQuestionPanel(guidedProUxState) ||
+        (guidedQuestionGateDecision.optionalCount > 0 && guidedQuestionGateDecision.materialReviewAllowed)) &&
       !freeStarterReviewShellActive,
   );
 
@@ -18589,9 +19218,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !guidedPreReviewSignerSetupActive &&
       premiumPaidDocumentSurface &&
       paidProAuthoritative &&
-      hasPaidProSourceOfTruth() &&
+      (paidProRuntimeAuthority.established || guidedQuestionGateDecision.materialReviewAllowed) &&
+      (paidProRuntimeAuthority.canShowProCtas || guidedQuestionGateDecision.materialReviewAllowed) &&
       !premiumGenerationApiUnavailable &&
-      canProceedWithPaidProDocument &&
+      (canProceedWithPaidProDocument || guidedQuestionGateDecision.materialReviewAllowed) &&
       !showStrictRetryNeedsDetailsPanel &&
       !isSourceComparisonReviewMode(agreementReviewMode) &&
       !guidedPhaseSuppressesSendCta(guidedCompletionPhase) &&
@@ -18621,6 +19251,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const showProDeliveryTrackChooser = Boolean(
+    paidProRuntimeAuthority.canShowProCtas &&
     proDeliveryTrackBaseReady &&
       canChooseProDeliveryTrackFlag &&
       !premiumSendModeTouched &&
@@ -19248,7 +19879,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         (premiumPersistedFlowActive && peekPremiumRecipientsSurfaceReleased()));
     if (guidedSigningConfirmationActive) return;
     if (
-      guidedProUxSuppressesProductionSendCta(guidedProUxState) ||
+      guidedProUxSuppressesProductionSendCta(guidedProUxState, guidedQuestionGateDecision) ||
       guidedProUxShowsQuestionPanel(guidedProUxState) ||
       guidedProUxShowsSignerSetup(guidedProUxState) ||
       guidedProUxShowsSigningConfirmation(guidedProUxState) ||
@@ -20089,7 +20720,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     if (
       !paidProSignerSetupFromReview &&
-      (guidedProUxSuppressesProductionSendCta(guidedProUxState) ||
+      (guidedProUxSuppressesProductionSendCta(guidedProUxState, guidedQuestionGateDecision) ||
         guidedProUxShowsQuestionPanel(guidedProUxState) ||
         guidedProUxShowsSignerSetup(guidedProUxState) ||
         guidedProUxShowsSigningConfirmation(guidedProUxState) ||
@@ -20286,7 +20917,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       if (
-        guidedProUxSuppressesProductionSendCta(guidedProUxState) ||
+        guidedProUxSuppressesProductionSendCta(guidedProUxState, guidedQuestionGateDecision) ||
         guidedProUxShowsQuestionPanel(guidedProUxState)
       ) {
         logGuidedSendCtaBlocked("enterFinalReviewRecipientSetup", guidedProUxState, intent);
@@ -20722,7 +21353,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (
           (cta.action === "continue_to_recipients" || cta.action === "premium_continue_to_signers") &&
           !paidProSignerSetupFromReview &&
-          (guidedProUxSuppressesProductionSendCta(guidedProUxState) ||
+          (guidedProUxSuppressesProductionSendCta(guidedProUxState, guidedQuestionGateDecision) ||
             guidedProUxShowsQuestionPanel(guidedProUxState) ||
             guidedProUxShowsSignerSetup(guidedProUxState))
         ) {
@@ -21501,6 +22132,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPrimarySendLabelOverride={premiumRecipientPanelSendLabelOverride}
           guidedSigningTrustSlot={guidedSigningTrustSlot}
           partyDisplaySlots={resolvedPartyDisplaySlots}
+          signerSetupPartyIdentities={signerSetupPartyIdentities}
           partyLabelsFinalizeHint={partyLabelsFinalizeHint}
           finalReviewSendIntent={finalReviewSendIntentRef.current}
           primaryCtaHelperText={premiumRecipientSendHelper ?? createFlowRecipientPrimaryHelper}
@@ -22729,6 +23361,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   </span>
                                 ) : null}
                               </>
+                            ) : isAuthoritativePaidProReviewActive || paidProReviewReady ? (
+                              <>
+                                <span className="rounded-full border border-emerald-500/35 bg-emerald-950/30 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-100/90 sm:text-[11px]">
+                                  {PAID_PRO_REVIEW_BADGE}
+                                </span>
+                                <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
+                                  {PAID_PRO_REVIEW_SHELL_TITLE}
+                                </h2>
+                                <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
+                                  {PAID_PRO_REVIEW_SHELL_SUBTITLE}
+                                </p>
+                              </>
                             ) : isFreeStreamlineDraftReview ? (
                               <>
                                 <span className="rounded-full border border-slate-600/70 bg-slate-900/80 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 sm:text-[11px]">
@@ -23419,6 +24063,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             sendRequiresConfirmStep={false}
                                             recipientBlockForceExpanded
                                             partyDisplaySlots={resolvedPartyDisplaySlots}
+                                            signerSetupPartyIdentities={signerSetupPartyIdentities}
                                             partyLabelsFinalizeHint={partyLabelsFinalizeHint}
                                             stripRecipientEmailNoise={stripRecipientEmailNoise}
                                             looksLikeEmail={looksLikeEmail}
@@ -23453,6 +24098,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           <PremiumAgreementReadonlyView
                                             html={premiumReadonlyAgreementHtml}
                                             suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                            visibleProPaperTrace={visibleProPaperTrace}
                                           />
                                         </div>
                                       </div>
@@ -23511,6 +24157,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           <PremiumAgreementReadonlyView
                                             html={premiumReadonlyAgreementHtml}
                                             suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                            visibleProPaperTrace={visibleProPaperTrace}
                                           />
                                         </div>
                                       </div>
@@ -23551,10 +24198,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           }
                                         />
                                       </div>
-                                    ) : simpleProFinalReviewActive ? (
+                                    ) : paidProAwaitingRuntimeAuthority ? (
+                                      <div
+                                        className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-8 sm:py-10"
+                                        role="status"
+                                        aria-live="polite"
+                                        data-testid="paid-pro-runtime-authority-finalizing"
+                                      >
+                                        <p className="text-center text-sm font-semibold tracking-tight text-stone-900 sm:text-base">
+                                          {PAID_PRO_VISIBLE_PAPER_FINALIZING_MESSAGE}
+                                        </p>
+                                        <p className="mt-2 text-center text-xs leading-relaxed text-stone-600 sm:text-sm">
+                                          LawDog is securing your Pro agreement from the server. Review and signing
+                                          options will appear when the full document is ready.
+                                        </p>
+                                      </div>
+                                    ) : simpleProFinalReviewShellActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         <SimpleProFinalReviewScreen
                                           agreementHtml={simpleProFinalReviewHtml}
+                                          visibleProPaperTrace={visibleProPaperTrace}
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}
                                           appliedChecklist={guidedAppliedSummaryChecklist}
                                           appliedAnswerCount={
@@ -23619,11 +24282,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           onExportAgreement={() => void handleSimpleProFinalReviewExport()}
                                           suppressPostReviewEditUx={paidProInlineSignersReady}
                                           corpusRecoveryMessage={
-                                            simpleProFinalReviewCorpus.corpusBlocked
-                                              ? "Your full agreement could not be displayed safely after saving signer details. Go back to signer details and open final review again, or use Copy agreement if the text is available."
-                                              : simpleProFinalReviewCorpus.corpusRecovered
-                                                ? "LawDog recovered the full agreement from the frozen authoritative snapshot before rendering final review."
-                                              : null
+                                            visibleProPaperBoundaryState.showFinalizing
+                                              ? PAID_PRO_VISIBLE_PAPER_FINALIZING_MESSAGE
+                                              : simpleProFinalReviewCorpus.corpusBlocked
+                                                ? "Your full agreement could not be displayed safely after saving signer details. Go back to signer details and open final review again, or use Copy agreement if the text is available."
+                                                : simpleProFinalReviewCorpus.corpusRecovered
+                                                  ? "LawDog recovered the full agreement from the frozen authoritative snapshot before rendering final review."
+                                                  : null
                                           }
                                           editablePlainText={proFinalReviewEditPlain}
                                           onEditablePlainTextChange={setProFinalReviewEditPlain}
@@ -23798,7 +24463,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               </button>
                                             </>
                                           )}
-                                          {!guidedProUxSuppressesProductionSendCta(guidedProUxState) &&
+                                          {!guidedProUxSuppressesProductionSendCta(guidedProUxState, guidedQuestionGateDecision) &&
                                           !guidedPhaseSuppressesSendCta(guidedCompletionPhase) &&
                                           !guidedSuppressSecondaryDocActions &&
                                           !guidedPacketSendBlocked ? (
@@ -23885,7 +24550,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             data-testid="pro-validation-repair-finalizing"
                                           >
                                             <p className="text-sm font-semibold tracking-tight">
-                                              Finalizing your agreement…
+                                              Finalizing secure agreement version…
                                             </p>
                                             <p className="mt-1 text-xs leading-relaxed text-stone-700 sm:text-[13px]">
                                               LawDog is running a quick quality pass on your Pro draft before signing.
@@ -23917,11 +24582,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             />
                                             <div className="mb-4 rounded-xl border border-amber-300/70 bg-amber-50/80 px-4 py-3 text-stone-900 shadow-sm">
                                               <p className="text-sm font-semibold tracking-tight">
-                                                Finalizing your agreement
+                                                {guidedQuestionGateDecision.fatalCount === 0 &&
+                                                guidedQuestionGateDecision.optionalCount > 0
+                                                  ? GUIDED_OPTIONAL_IMPROVE_LABEL
+                                                  : "Finalizing your agreement"}
                                               </p>
                                               <p className="mt-1 text-xs leading-relaxed text-stone-700 sm:text-[13px]">
-                                                We found {guidedPendingUpdateIndicators.length || "a few"} business decision{guidedPendingUpdateIndicators.length === 1 ? "" : "s"} still needed before signing.
-                                                {" "}Your agreement draft is complete. These answers will be applied in one clean final update before signature preparation.
+                                                {guidedQuestionGateDecision.fatalCount === 0 &&
+                                                guidedQuestionGateDecision.materialReviewAllowed
+                                                  ? `Your Pro agreement is ready to review below. Answer ${guidedQuestionGateDecision.optionalCount} optional question${guidedQuestionGateDecision.optionalCount === 1 ? "" : "s"} if you want to refine terms before signing.`
+                                                  : `We found ${guidedPendingUpdateIndicators.length || "a few"} business decision${guidedPendingUpdateIndicators.length === 1 ? "" : "s"} still needed before signing. Your agreement draft is complete. These answers will be applied in one clean final update before signature preparation.`}
                                               </p>
                                             </div>
                                             <GuidedDealCompletionPanel
@@ -23967,6 +24637,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             </div>
                                           </div>
                                         ) : null}
+                                        {paidProAwaitingRuntimeAuthority ? (
+                                          <div
+                                            className="mx-[clamp(1.35rem,4.5vw,2.65rem)] mb-3 rounded-xl border border-sky-200/90 bg-sky-50/90 px-4 py-3 text-stone-900 shadow-sm"
+                                            role="status"
+                                            aria-live="polite"
+                                            data-testid="paid-pro-runtime-authority-finalizing-inline"
+                                          >
+                                            <p className="text-sm font-semibold tracking-tight">
+                                              {PAID_PRO_VISIBLE_PAPER_FINALIZING_MESSAGE}
+                                            </p>
+                                          </div>
+                                        ) : null}
                                         {premiumPaidDocumentSurface &&
                                         canProceedWithPaidProDocument &&
                                         !simpleProFinalReviewActive ? (
@@ -23996,6 +24678,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           <PremiumAgreementReadonlyView
                                             html={premiumReadonlyAgreementHtml}
                                             suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                            visibleProPaperTrace={visibleProPaperTrace}
                                           />
                                         </div>
                                       </>
@@ -24109,7 +24792,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     if (deliverableReading) return paidDeliverable;
                                     return freeCompact;
                                   })()}
-                                  value={agreementDocumentText}
+                                  value={visibleAgreementDocumentForReview}
                                   onChange={(e) => {
                                     agreementDocumentDirtyRef.current = true;
                                     setAgreementDocumentText(e.target.value);
@@ -24390,6 +25073,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       primaryCtaHelperText={premiumRecipientSendHelper ?? createFlowRecipientPrimaryHelper}
                                       guidedSigningTrustSlot={guidedSigningTrustSlot}
                                       partyDisplaySlots={resolvedPartyDisplaySlots}
+          signerSetupPartyIdentities={signerSetupPartyIdentities}
                                       partyLabelsFinalizeHint={partyLabelsFinalizeHint}
                                       finalReviewSendIntent={finalReviewSendIntentRef.current}
                                       stripRecipientEmailNoise={stripRecipientEmailNoise}
@@ -24687,6 +25371,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         primaryCtaHelperText={premiumRecipientSendHelper ?? createFlowRecipientPrimaryHelper}
                         guidedSigningTrustSlot={guidedSigningTrustSlot}
                         partyDisplaySlots={resolvedPartyDisplaySlots}
+          signerSetupPartyIdentities={signerSetupPartyIdentities}
                         partyLabelsFinalizeHint={partyLabelsFinalizeHint}
                         finalReviewSendIntent={finalReviewSendIntentRef.current}
                         stripRecipientEmailNoise={stripRecipientEmailNoise}
@@ -24783,11 +25468,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 </div>
                 <div>
                   finalCorpusSource:{" "}
-                  {guidedFinalReviewAuthoritativeResolution.source === "none"
-                    ? guidedAuthoritativeBodyPlain.length >= 1500
-                      ? "canonical_working_draft"
-                      : "none"
-                    : guidedFinalReviewAuthoritativeResolution.source}
+                  {normalizePaidProCorpusSourceLabel({
+                    source:
+                      guidedFinalReviewAuthoritativeResolution.source === "none"
+                        ? guidedAuthoritativeBodyPlain.length >= 1500
+                          ? "canonical_working_draft"
+                          : "none"
+                        : guidedFinalReviewAuthoritativeResolution.source,
+                    corpusLen: guidedFinalReviewAuthoritativeResolution.len || guidedAuthoritativeBodyPlain.length,
+                  })}
                 </div>
                 <div>
                   authoritativeLen: {Math.max(guidedFinalReviewAuthoritativeResolution.len, guidedAuthoritativeBodyPlain.length)}

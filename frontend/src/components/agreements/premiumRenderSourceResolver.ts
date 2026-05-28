@@ -7,6 +7,9 @@ import {
 } from "./acceptedPremiumCanonicalCorpus";
 import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
+import { shouldPreserveAcceptedServerFullDraftText } from "./proCorpusSourcePath";
+import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
+import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 
 const SECTION_SIGNAL_RES = [
   /\bterminat/i,
@@ -130,7 +133,8 @@ export function validatePremiumRenderBody(
     intakeText: opts.intakeText ?? null,
     partyNames: opts.draft?.parties?.map((p) => p.name) ?? null,
   });
-  const serverAcceptableFallback = opts.mode === "server" && isAcceptablePremiumFullDocumentText(t);
+  const serverAcceptableFallback =
+    opts.mode === "server" && isAcceptablePremiumFullDocumentText(t, { rawIntake: probe });
   if (!acc.ok && !serverAcceptableFallback) {
     return { ok: false, reasons: acc.reasons.length ? acc.reasons : ["rejected_by_client_acceptance"] };
   }
@@ -192,6 +196,23 @@ export function validatePremiumRenderBody(
     }
   }
 
+  const concise = assessConciseCommercialServicesProQuality({
+    text: t,
+    rawIntake: probe,
+    draft: opts.draft ?? null,
+  });
+  if (concise.applies && concise.ok && opts.mode === "server") {
+    const kept = reasons.filter(
+      (r) =>
+        !r.startsWith("too_short:") &&
+        r !== "insufficient_sections" &&
+        r !== "missing_title",
+    );
+    if (kept.length === 0 && t.length >= 400) {
+      return { ok: true, reasons: ["concise_commercial_services_structural_pass"] };
+    }
+  }
+
   const uniq = [...new Set(reasons)];
   return { ok: uniq.length === 0, reasons: uniq };
 }
@@ -248,6 +269,8 @@ export type ResolvePremiumRenderSourceArgs = {
    * over a thinner live rebuild from a degraded draft.
    */
   preferLegacySnapshotOverLive?: (live: string, snapshot: string) => boolean;
+  /** After checkout: never downgrade to live_generated_preview / thin local preview. */
+  postCheckoutProLocked?: boolean;
 };
 
 function trim(s: string | null | undefined): string {
@@ -263,12 +286,14 @@ function canonicalPartyNamesFromDraft(draft: ParsedDraftShape | null | undefined
 
 function canonicalProText(s: string | null | undefined, draft?: ParsedDraftShape | null): string {
   const t = trim(s);
-  return t
-    ? canonicalizeProAgreementText(t, {
-        canonicalPartyNames: canonicalPartyNamesFromDraft(draft),
-        canonicalRoles: ["Client", "Service Provider"],
-      }).text
-    : "";
+  if (!t) return "";
+  if (shouldPreserveAcceptedServerFullDraftText({ text: t, source: "server_full_document_text" })) {
+    return t;
+  }
+  return canonicalizeProAgreementText(t, {
+    canonicalPartyNames: canonicalPartyNamesFromDraft(draft),
+    canonicalRoles: ["Client", "Service Provider"],
+  }).text;
 }
 
 function devWarnLiveWhileAuthoritativeCorpusExists(
@@ -394,11 +419,35 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
     };
   };
 
+  const tryConciseServerPass = (body: string, tier: PremiumRenderResolveSource): PremiumRenderResolveResult | null => {
+    if (!body || body.length < 400) return null;
+    const concise = assessConciseCommercialServicesProQuality({
+      text: body,
+      rawIntake: intakeProbe,
+      draft,
+    });
+    if (!concise.applies || !concise.ok) return null;
+    return {
+      text: body,
+      premium_render_source: tier,
+      premium_render_reason: `${tier}_concise_commercial_services_pass`,
+      premium_validation_result: {
+        ok: true,
+        reasons: ["concise_commercial_services_pass"],
+        tier_attempted: tier,
+      },
+    };
+  };
+
   const a = tryServer(serverFull, "server_full_document_text");
   if (a) return a;
+  const aConcise = tryConciseServerPass(serverFull, "server_full_document_text");
+  if (aConcise) return aConcise;
 
   const b = tryServer(serverRepair, "server_repair_document_text");
   if (b) return b;
+  const bConcise = tryConciseServerPass(serverRepair, "server_repair_document_text");
+  if (bConcise) return bConcise;
 
   if (winningFallbackRaw.length >= 500) {
     const establishedWin =
@@ -438,6 +487,19 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
     }
   })();
   const snap = canonicalProText(args.legacySnapshotText, draft);
+
+  if (args.postCheckoutProLocked) {
+    return {
+      text: "",
+      premium_render_source: "none",
+      premium_render_reason: "post_checkout_live_preview_blocked",
+      premium_validation_result: {
+        ok: false,
+        reasons: ["post_checkout_live_preview_blocked"],
+        tier_attempted: "none",
+      },
+    };
+  }
 
   if (liveRaw) {
     const vLive = validatePremiumRenderBody(liveRaw, { intakeText: intakeProbe, draft, mode: "live" });
@@ -526,5 +588,14 @@ export function emitPremiumRenderResolveLog(res: PremiumRenderResolveResult): vo
     premium_render_source: res.premium_render_source,
     premium_render_reason: res.premium_render_reason,
     premium_validation_result: res.premium_validation_result,
+  });
+  logLawdogOutputPathMap({
+    stage: "premium_render_source",
+    source: res.premium_render_source,
+    text: res.text,
+    canMutateBody: res.premium_render_source !== "server_full_document_text",
+    canRejectBody: true,
+    canFallback: res.premium_render_source === "live_generated_preview" || res.premium_render_source === "legacy_snapshot",
+    reason: res.premium_render_reason,
   });
 }

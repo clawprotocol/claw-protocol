@@ -20,6 +20,7 @@ import {
   logCanonicalPartyIdentityPreserved,
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
+import { AUTHORITATIVE_BODY_PRESERVE_MIN_WINNING_LEN } from "./premiumAuthoritativeBodyPreservation";
 
 export type CanonicalAgreementSnapshotSource =
   | "free_starter"
@@ -301,7 +302,12 @@ export function buildCanonicalAgreementSnapshot(
         partyNames,
       });
       canonicalText = repaired.text.trim();
-    } else if (PRESERVE_CORPUS_SOURCES.has(selected.source)) {
+    } else if (
+      PRESERVE_CORPUS_SOURCES.has(selected.source) ||
+      (args.tier === "pro" &&
+        selected.source === "server_full_document_text" &&
+        canonicalText.length >= AUTHORITATIVE_BODY_PRESERVE_MIN_WINNING_LEN)
+    ) {
       fullCandidateOk = true;
     } else {
       let fullCandidate = validateProFullAgreementCandidate(canonicalText, {

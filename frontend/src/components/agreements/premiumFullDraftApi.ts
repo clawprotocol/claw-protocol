@@ -19,6 +19,7 @@ import {
 import { applyDeterministicIntentToPremiumFullDraftContext } from "./deterministicIntentTitleMapper";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
+import { logPremiumApiResultFromWire } from "./premiumApiHandoff";
 import { logDevPostPremiumFullDraftHttp } from "./premiumFullDraftPostResponseTrace";
 import { rejectPremiumDegradedFiller } from "./premiumFullDraftClientAcceptance";
 import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGuard";
@@ -673,6 +674,14 @@ export async function postPremiumFullDraftOnce(args: {
   });
   if (!res.ok) {
     const wire = parsed as PremiumFullDraftResult;
+    logPremiumApiResultFromWire({
+      ok: false,
+      status: res.status,
+      wire,
+      error: typeof (parsed as { detail?: { message?: string } })?.detail === "object"
+        ? String((parsed as { detail?: { message?: string } }).detail?.message ?? "")
+        : "http_error",
+    });
     const genRetry503 = classifyPremiumFullDraftGenerationRetryable(wire);
     if (genRetry503.retryable) {
       logPremiumGenerationRetryableFailure({
@@ -710,6 +719,7 @@ export async function postPremiumFullDraftOnce(args: {
     throw new Error((msg as string) || "premium_full_draft_failed");
   }
   const wire = parsed as PremiumFullDraftResult;
+  logPremiumApiResultFromWire({ ok: true, status: res.status, wire });
   logAgreementIntelligenceExtraction(wire);
   logAgreementValidationResult(wire);
   const genRetry = classifyPremiumFullDraftGenerationRetryable(wire);

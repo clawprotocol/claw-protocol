@@ -1,14 +1,17 @@
+import { paidProAuthorityBlocksStarterReviewRestore } from "./authoritativePaidProReview";
 import { hasCheckoutBackRestoreSnapshot } from "./checkoutBackRestore";
 import {
   hasStoredCreateReviewState,
   readCreateReviewAgreementResumeId,
+  readCreateReviewDraftReadyMarker,
 } from "./agreementIntakeStorage";
 
 export type ReviewRefreshRegenerationSkipReason =
   | "stored_agreement_resume_id"
   | "stored_draft_ready_marker"
   | "draft_already_ready"
-  | "auto_generate_already_consumed";
+  | "auto_generate_already_consumed"
+  | "paid_pro_authority_blocks_starter_restore";
 
 export function agreementIdShort(agreementId: string | null | undefined): string | null {
   const hid = (agreementId || "").trim();
@@ -28,8 +31,20 @@ export function logReviewRefreshRegenerationSkipped(reason: ReviewRefreshRegener
   console.info("[review-refresh-regeneration-skipped]", { reason });
 }
 
+/** Do not hydrate stored free starter snapshot when paid SoT already exists. */
+export function shouldRestoreStoredCreateReviewDraftSnapshot(): boolean {
+  if (paidProAuthorityBlocksStarterReviewRestore()) {
+    logReviewRefreshRegenerationSkipped("paid_pro_authority_blocks_starter_restore");
+    return false;
+  }
+  return readCreateReviewDraftReadyMarker() || hasStoredCreateReviewState();
+}
+
 /** Skip home hero auto-generate when an in-tab review draft can be restored. */
 export function shouldSkipHomeAutoGenerateForStoredReview(): boolean {
+  if (paidProAuthorityBlocksStarterReviewRestore()) {
+    return false;
+  }
   if (hasCheckoutBackRestoreSnapshot()) {
     logReviewRefreshRegenerationSkipped("stored_draft_ready_marker");
     return true;

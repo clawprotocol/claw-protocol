@@ -5,9 +5,11 @@ import { validatePaidProCorpusCandidate } from "./paidProCorpusAuthority";
 import {
   isPremiumGenerationApiUnavailableForUi,
   isPremiumGenerationApiUnavailablePipelineSource,
+  logPremiumGenerationApiUnavailable,
   MIN_PAID_PRO_AUTHORITY_LEN,
   PAID_PRO_API_UNAVAILABLE_BODY,
   PAID_PRO_API_UNAVAILABLE_HEADLINE,
+  PREMIUM_GENERATION_DRAFT_API_PATH,
   shouldBlockLivePreviewAsPaidProAuthority,
 } from "./premiumGenerationApiAvailability";
 import { pickPremiumPaidReadonlyPlainText } from "./premiumReadonlyRenderCorpus";
@@ -133,9 +135,8 @@ describe("premiumGenerationApiAvailability", () => {
 
   it("validatePaidProCorpusCandidate rejects short live preview when pipeline unavailable", () => {
     const draft = redMesaStarterDraft();
-    const live = buildAgreementPreviewTextCore(draft, { premiumDeliverablePreview: true });
     const v = validatePaidProCorpusCandidate({
-      plainText: live,
+      plainText: "x".repeat(200),
       tier: "locally_generated_paid_pro",
       freeBaselinePlain: buildAgreementPreviewTextCore(draft, { starterPreview: true }),
       intakeText: RED_MESA_INTAKE,
@@ -190,13 +191,11 @@ describe("premiumGenerationApiAvailability", () => {
   it("logs premium_generation_api_unavailable in dev", () => {
     vi.stubEnv("DEV", true);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    pickPremiumPaidReadonlyPlainText({
-      premiumReadonlySnapshotText: "",
-      draft: redMesaStarterDraft(),
-      agreementDocumentText: "",
-      premiumCheckoutCompleted: true,
-      intakeText: RED_MESA_INTAKE,
-      lastPremiumPipelineRenderSource: "premium_network_retryable",
+    logPremiumGenerationApiUnavailable({
+      endpoint: PREMIUM_GENERATION_DRAFT_API_PATH,
+      stage: "pickPremiumPaidReadonlyPlainText",
+      fallbackBlocked: true,
+      pipelineSource: "premium_network_retryable",
     });
     expect(warn).toHaveBeenCalledWith(
       "[premium_generation_api_unavailable]",

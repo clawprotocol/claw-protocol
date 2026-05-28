@@ -23,6 +23,17 @@ curl -s -X POST "http://127.0.0.1:8000/api/agreements/<id>/render"
 ```
 # Developer Guide
 
+## Paid Pro local smoke (frontend)
+
+Before exercising **Paid Pro** on the Vite dev server (`http://localhost:5173`), start the backend API so premium generation can reach:
+
+- `http://127.0.0.1:8000/health`
+- `http://127.0.0.1:8000/api/agreements/premium-full-draft` (and related `/api/agreements/*` routes)
+
+If the API is down, checkout may succeed but the UI will show **API unreachable** messaging and **Retry Pro draft** — not a finished Pro agreement or signer setup.
+
+Point the frontend at your API with `VITE_API_URL` when not using the default local backend.
+
 ## Quick links
 - `docs/QUICKSTART.md`
 - `docs/PRODUCT_BOUNDARY.md`

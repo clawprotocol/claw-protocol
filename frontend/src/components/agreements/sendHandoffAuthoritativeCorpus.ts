@@ -6,11 +6,26 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { escapeHtml } from "./premiumAgreementDocumentHtml";
 import { getAcceptedPremiumCanonicalText } from "./acceptedPremiumCanonicalCorpus";
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
-import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
+import { getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
+import { shouldPreserveAcceptedServerFullDraftText } from "./proCorpusSourcePath";
+import { requireAuthoritativeCorpusForSurface } from "./authoritativeAgreementDocument";
+import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
+import {
+  hasMaterialPremiumPipelineCorpus,
+  materialPremiumPipelineCorpusMaxLen,
+  SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+} from "./paidProAuthorityConstants";
+import {
+  assertPremiumPurposeHandoffBlocked,
+  draftServerFullDocumentExists,
+} from "./paidProRuntimeAuthorityEstablishment";
 
-/** Minimum length to treat plain text as authoritative Pro/full-draft handoff (not starter stub). */
-export const SEND_HANDOFF_AUTHORITATIVE_MIN_LEN = 500;
+export {
+  hasMaterialPremiumPipelineCorpus,
+  materialPremiumPipelineCorpusMaxLen,
+  SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+} from "./paidProAuthorityConstants";
 
 export type SendHandoffCorpusPick = {
   /** Which draft field supplied the winning text (for DEV traces). */
@@ -46,7 +61,16 @@ function canonicalPartyNamesFromDraft(draft: CorpusDraftLike | null | undefined)
 }
 
 function canonicalizeHandoffCorpus(text: string, draft: CorpusDraftLike | null | undefined): string {
-  return canonicalizeProAgreementText(text, {
+  const trimmed = (text || "").trim();
+  if (
+    shouldPreserveAcceptedServerFullDraftText({
+      text: trimmed,
+      source: String(draft?.premium_render_source ?? "server_full_document_text"),
+    })
+  ) {
+    return trimmed;
+  }
+  return canonicalizeProAgreementText(trimmed, {
     canonicalPartyNames: canonicalPartyNamesFromDraft(draft),
     canonicalRoles: ["Client", "Service Provider"],
   }).text;
@@ -70,21 +94,6 @@ export type PaidProSendBranchMeta = {
  * RECIPIENTS / send setup: hide structured summary + v1 advanced accordions when the user already has a
  * full Pro/agreement body (not a thin summary / purpose-only blob).
  */
-/** Any premium/server full body field at or above handoff threshold (paid pipeline material). */
-export function materialPremiumPipelineCorpusMaxLen(draft: CorpusDraftLike | null | undefined): number {
-  if (!draft) return 0;
-  const xs = [
-    String(draft.premium_full_document_text ?? "").trim(),
-    String(draft.premium_server_full_document_text ?? "").trim(),
-    String(draft.server_full_document_text ?? "").trim(),
-  ];
-  return xs.reduce((m, t) => (t.length > m ? t.length : m), 0);
-}
-
-export function hasMaterialPremiumPipelineCorpus(draft: CorpusDraftLike | null | undefined): boolean {
-  return materialPremiumPipelineCorpusMaxLen(draft) >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN;
-}
-
 const AUTHORITATIVE_PREMIUM_RENDER_SOURCES = new Set(["server_full_document_text", "server_repair_document_text"]);
 
 /**
@@ -229,6 +238,9 @@ export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | nu
     return { field: "premium_server_full_document_text", text: acceptedCanonical };
   }
   if (!draft) return null;
+  const premiumish =
+    Boolean(String(draft.premium_render_source ?? "").trim()) ||
+    hasMaterialPremiumPipelineCorpus(draft);
   const candidates: [SendHandoffCorpusPick["field"], string][] = [
     ["premium_full_document_text", String(draft.premium_full_document_text ?? "").trim()],
     ["premium_server_full_document_text", String(draft.premium_server_full_document_text ?? "").trim()],
@@ -241,20 +253,66 @@ export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | nu
   let best: SendHandoffCorpusPick | null = null;
   for (const [field, text] of nonPurpose) {
     if (text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN && (!best || text.length > best.text.length)) {
-      best = { field, text: canonicalizeHandoffCorpus(text, draft) };
+      best = { field, text: premiumish ? text : canonicalizeHandoffCorpus(text, draft) };
     }
   }
-  if (best) return best;
+  if (best) {
+    logLawdogOutputPathMap({
+      stage: "send_handoff",
+      source: best.field,
+      text: best.text,
+      canMutateBody: !premiumish,
+      canRejectBody: true,
+      canFallback: false,
+      reason: premiumish ? "premium_nonpurpose_authoritative" : "free_nonpurpose_handoff",
+    });
+    return best;
+  }
+  if (premiumish) {
+    requireAuthoritativeCorpusForSurface({
+      surface: "send_route",
+      source: "send_handoff_no_authoritative_corpus",
+      renderedText: String(draft.purpose ?? "").trim(),
+      paidProAccepted: true,
+      minLen: SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+    });
+    return null;
+  }
   for (const [field, text] of candidates) {
     if (text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN && (!best || text.length > best.text.length)) {
       best = { field, text: canonicalizeHandoffCorpus(text, draft) };
     }
   }
   if (best) return best;
+  const premiumRoute =
+    premiumish ||
+    hasPaidProSourceOfTruth() ||
+    draftServerFullDocumentExists(draft);
+  if (premiumRoute) {
+    assertPremiumPurposeHandoffBlocked({
+      draft,
+      field: "purpose",
+      text: String(draft.purpose ?? "").trim(),
+      surface: "send_handoff_premium_no_authoritative_corpus",
+    });
+    return null;
+  }
   for (const [field, text] of candidates) {
+    if (field === "purpose") continue;
     if (text.length > 0 && (!best || text.length > best.text.length)) {
       best = { field, text: canonicalizeHandoffCorpus(text, draft) };
     }
+  }
+  if (best) {
+    logLawdogOutputPathMap({
+      stage: "send_handoff",
+      source: best.field,
+      text: best.text,
+      canMutateBody: true,
+      canRejectBody: false,
+      canFallback: false,
+      reason: "free_nonpurpose_handoff",
+    });
   }
   return best;
 }

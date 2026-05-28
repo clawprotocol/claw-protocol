@@ -1,3 +1,5 @@
+import { isAuthoritativePaidProReview } from "./authoritativePaidProReview";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { CreateUiStage } from "./createUiStage";
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
 
@@ -34,6 +36,9 @@ export type ResolveIsFreeStreamlineDraftReviewInput = {
 export function resolveIsFreeStreamlineDraftReview(input: ResolveIsFreeStreamlineDraftReviewInput): boolean {
   if (!input.simpleProductFlow || !input.liveWorkspaceTwoPane || !input.createProductionTwoPane) return false;
   if (input.createUiStage !== CreateUiStage.DRAFT || !input.hasDraft) return false;
+  if (hasPaidProSourceOfTruth() || isAuthoritativePaidProReview({ isPaidPro: input.paidProAuthoritative })) {
+    return false;
+  }
   if (input.paidProAuthoritative || input.premiumPaidDocumentSurface) return false;
   if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return false;
   if (input.hasPaidPremiumCompletionSession()) return false;

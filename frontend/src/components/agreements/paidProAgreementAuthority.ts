@@ -6,6 +6,7 @@ import {
   peekPremiumCompletionDoneInLocalStorage,
 } from "./premiumCompletionStorage";
 import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 /** Minimum plain length to treat premium/server fields as authoritative Pro (aligns with send handoff). */
 export const PAID_PRO_AUTHORITY_MIN_LEN = 500;
@@ -126,5 +127,6 @@ export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuth
  * routed through free starter upsells, intake reset, or professional-send paywall.
  */
 export function isPaidProAgreementAuthoritative(input: PaidProAgreementAuthorityInput): boolean {
+  if (hasPaidProSourceOfTruth()) return true;
   return resolvePaidProAgreementAuthoritative(input).authoritative;
 }

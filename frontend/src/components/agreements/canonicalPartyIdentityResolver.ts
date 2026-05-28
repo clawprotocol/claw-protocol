@@ -315,9 +315,9 @@ export function definedOpeningLine(
   client: CanonicalPartyIdentityRecord,
   provider: CanonicalPartyIdentityRecord,
 ): string {
-  const clientAddress = client.partyAddress ? `, with notice address at ${client.partyAddress}` : "";
-  const providerAddress = provider.partyAddress ? `, with notice address at ${provider.partyAddress}` : "";
-  return `This Agreement is between ${client.fullLegalName}${clientAddress} ("${client.roleLabel}") and ${provider.fullLegalName}${providerAddress} ("${provider.roleLabel}").`;
+  const clientAddress = optionalPartyAddressPhrase(client.partyAddress);
+  const providerAddress = optionalPartyAddressPhrase(provider.partyAddress);
+  return `This Agreement is between ${client.fullLegalName} ("${client.roleLabel}")${clientAddress} and ${provider.fullLegalName} ("${provider.roleLabel}")${providerAddress}.`;
 }
 
 /** Services-style defined opening with explicit "entered into" phrasing. */
@@ -325,28 +325,65 @@ export function definedServicesAgreementOpeningLine(
   client: CanonicalPartyIdentityRecord,
   provider: CanonicalPartyIdentityRecord,
 ): string {
-  const clientAddress = client.partyAddress ? `, with notice address at ${client.partyAddress}` : "";
-  const providerAddress = provider.partyAddress ? `, with notice address at ${provider.partyAddress}` : "";
-  return `This Services Agreement (the "Agreement") is entered into by and between ${client.fullLegalName}${clientAddress} ("${client.roleLabel}") and ${provider.fullLegalName}${providerAddress} ("${provider.roleLabel}").`;
+  const clientAddress = optionalPartyAddressPhrase(client.partyAddress);
+  const providerAddress = optionalPartyAddressPhrase(provider.partyAddress);
+  return `This Services Agreement (the "Agreement") is entered into by and between ${client.fullLegalName} ("${client.roleLabel}")${clientAddress} and ${provider.fullLegalName} ("${provider.roleLabel}")${providerAddress}.`;
+}
+
+function optionalPartyAddressPhrase(address: string | null | undefined): string {
+  const clean = String(address ?? "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  if (/^\[.*\]$/.test(clean)) return "";
+  if (/^(?:address|client address|service provider address|principal place of business|principal office|notice address|mailing address|n\/a|none|tbd|not supplied)$/i.test(clean)) {
+    return "";
+  }
+  if (!/[A-Za-z0-9]/.test(clean)) return "";
+  return `, with its principal place of business at ${clean}`;
+}
+
+export function stripDanglingPartyMetadataFragments(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let next = text;
+  const replace = (pattern: RegExp, replacement: string, repair: string) => {
+    if (pattern.test(next)) {
+      pattern.lastIndex = 0;
+      next = next.replace(pattern, replacement);
+      repairs.push(repair);
+    }
+  };
+  replace(/,\s*with\s+its\s*(?=(?:and\b|\.|,|\n|$))/gi, "", "party_address:strip_dangling_with_its");
+  replace(/\s+with\s+its\s*(?=(?:and\b|\.|,|\n|$))/gi, " ", "party_address:strip_dangling_with_its");
+  replace(/,\s*with\s+(?:its\s+)?principal\s+place\s+of\s+business\s+at\s*(?=(?:and\b|\.|,|\n|$))/gi, "", "party_address:strip_empty_principal_place");
+  replace(/\s+with\s+(?:its\s+)?principal\s+place\s+of\s+business\s+at\s*(?=(?:and\b|\.|,|\n|$))/gi, " ", "party_address:strip_empty_principal_place");
+  next = next
+    .replace(/\s+,/g, ",")
+    .replace(/,\s+and\b/gi, " and")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ \./g, ".")
+    .trim();
+  return { text: next, repairs: [...new Set(repairs)] };
 }
 
 function stripUnsuppliedAddressPlaceholders(text: string): { text: string; repairs: string[] } {
-  const next = text
+  const stripped = text
     .replace(ADDRESS_PLACEHOLDER_LINE_RE, "")
     .replace(/,\s*with\s*(?=,|\.)/gi, "")
+    .replace(/,\s*with\s+its\s*(?=and\b|\.|,)/gi, "")
     .replace(/\s+with\s+(?=and\b)/gi, " ")
     .replace(/\s*,\s*,/g, ",")
     .replace(/,\s+and\b/gi, " and")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  const dangling = stripDanglingPartyMetadataFragments(stripped);
+  const next = dangling.text;
   return next === text ? { text, repairs: [] } : { text: next, repairs: ["party_address:strip_unsupplied_placeholder"] };
 }
 
 const DUPLICATE_OPENING_DETECT =
-  /This\s+([A-Za-z][A-Za-z\s]*?)\s+AGREEMENT\s*\(\s*(?:the\s+)?['"]Agreement['"]\s*\)\s+is\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/i;
+  /This\s+[\w\s]+Agreement\s*\(\s*(?:the\s+)?['"]Agreement['"]\s*\)\s+is\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/i;
 const DUPLICATE_OPENING_REPLACE =
-  /This\s+([A-Za-z][A-Za-z\s]*?)\s+AGREEMENT\s*\(\s*(?:the\s+)?['"]Agreement['"]\s*\)\s+is\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/gi;
+  /This\s+[\w\s]+Agreement\s*\(\s*(?:the\s+)?['"]Agreement['"]\s*\)\s+is\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/gi;
 const GENERIC_DUPLICATE_OPENING_DETECT =
   /This\s+Agreement\b[\s\S]{0,220}?\bis\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/i;
 const GENERIC_DUPLICATE_OPENING_REPLACE =
@@ -507,6 +544,9 @@ export function repairCanonicalPartyIdentityInCorpus(
       const insertAt = titleMatch.index + titleMatch[0].length;
       head = `${head.slice(0, insertAt)}\n\n${openingLine}${head.slice(insertAt)}`;
       repairs.push("party_identity:insert_defined_opening");
+    } else {
+      head = `${openingLine}\n\n${head}`;
+      repairs.push("party_identity:prepend_defined_opening");
     }
   }
   out = head + rest;

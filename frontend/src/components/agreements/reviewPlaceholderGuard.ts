@@ -14,6 +14,7 @@ import {
   isProsePollutedPartyName,
 } from "./partyNameConfidence";
 import { readPremiumPartyNamesHandoff } from "./premiumPartyNamesHandoff";
+import { resolveSignerSetupPartyIdentity } from "./signerSetupPartyIdentity";
 import { textContainsUnresolvedIdentityPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import { sanitizePartiesInput, splitTwoPartiesFromJoinedLine, type StructuredTwoParties } from "./partyIntakeNormalize";
 
@@ -231,7 +232,8 @@ export function mergePremiumDraftPartiesWithRecipientPriority(
   const p0prior = priorDraft?.parties?.[0]?.name;
   const p1prior = priorDraft?.parties?.[1]?.name;
   const fam = premiumDraft.agreement_family ?? null;
-  const displayName1 = mergePremiumRecipientDisplayName(
+  const partyNames = (premiumDraft.parties ?? []).map((party) => party?.name);
+  const legacyDisplayName1 = mergePremiumRecipientDisplayName(
     ho1,
     modalParty1,
     savedRecipient1,
@@ -240,7 +242,7 @@ export function mergePremiumDraftPartiesWithRecipientPriority(
     snapName1 ?? undefined,
     { partySlot: 0, agreementFamily: fam },
   );
-  const displayName2 = mergePremiumRecipientDisplayName(
+  const legacyDisplayName2 = mergePremiumRecipientDisplayName(
     ho2,
     modalParty2,
     savedRecipient2,
@@ -249,6 +251,24 @@ export function mergePremiumDraftPartiesWithRecipientPriority(
     snapName2 ?? undefined,
     { partySlot: 1, agreementFamily: fam },
   );
+  const displayName1 =
+    resolveSignerSetupPartyIdentity({
+      partyIndex: 0,
+      draftPartyName: p0 ?? p0prior,
+      recipientDisplayName: savedRecipient1,
+      handoffName: ho1,
+      draftPartyNames: partyNames,
+      log: false,
+    }).legalEntityName || legacyDisplayName1;
+  const displayName2 =
+    resolveSignerSetupPartyIdentity({
+      partyIndex: 1,
+      draftPartyName: p1 ?? p1prior,
+      recipientDisplayName: savedRecipient2,
+      handoffName: ho2,
+      draftPartyNames: partyNames,
+      log: false,
+    }).legalEntityName || legacyDisplayName2;
   const parties = [...(premiumDraft.parties || [])];
   if (parties[0]) parties[0] = { ...parties[0], name: displayName1 };
   else if (displayName1) parties[0] = { name: displayName1, role: "party" };

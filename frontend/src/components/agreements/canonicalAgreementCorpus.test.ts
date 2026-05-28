@@ -16,6 +16,13 @@ import { resolveFinalVs01CorpusOrBlock } from "../../vs01/vs01SigningCorpus";
 import { resolveGuidedFinalReviewAuthoritativeBody } from "./guidedDealCompletion/guidedFinalReviewAuthoritativeBody";
 import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
 import { resolvePaidProReviewRenderSurface } from "./paidProRenderSurface";
+import {
+  assertNoPostAcceptanceStructuralMutation,
+  authoritativeDocumentForSurface,
+  getAuthoritativeAgreementDocument,
+} from "./authoritativeAgreementDocument";
+import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
+import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: true };
 
@@ -75,6 +82,7 @@ afterEach(() => {
   clearPaidProSourceOfTruth();
   clearFrozenCanonicalAgreementCorpus();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("CanonicalAgreementCorpus convergence", () => {
@@ -188,5 +196,89 @@ describe("CanonicalAgreementCorpus convergence", () => {
     expect(guided.body).toBe(record.text);
     expect(guided.finalizedHash).toBe(record.hash);
     expect(simple.plainText).toBe(record.text);
+  });
+
+  it("authoritativeAgreementDocument is the immutable source for review, reviewer, signer, and VS01", () => {
+    const d = draft();
+    const record = establishPaidProSourceOfTruth({ text: canonicalBody(), draft: d });
+    const authoritative = getAuthoritativeAgreementDocument();
+    expect(authoritative?.fullCorpusText).toBe(record.text);
+    expect(authoritative?.authoritativeHash).toBe(record.hash);
+    expect(authoritative?.canonicalPartyManifest[0]?.name).toBe("Red Mesa Logistics LLC");
+    expect(authoritative?.canonicalPartyManifest[1]?.name).toBe("Harbor Peak Automation LLC");
+
+    const review = getPaidProDocumentForSurface("review");
+    const reviewer = authoritativeDocumentForSurface("reviewer");
+    const signer = getPaidProDocumentForSurface("signer_setup");
+    const vs01 = resolveFinalVs01CorpusOrBlock({ draft: d as never, guidedPro: true });
+
+    expect(review?.hash).toBe(record.hash);
+    expect(reviewer?.authoritativeHash).toBe(record.hash);
+    expect(signer?.hash).toBe(record.hash);
+    expect(vs01.hash).toBe(record.hash);
+  });
+
+  it("blocks structural mutation and independent rendering after premium acceptance", () => {
+    const d = draft();
+    const structurallyBrokenAccepted = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Services Agreement is between Red Mesa Logistics LLC and Harbor Peak Automation LLC.",
+      "",
+      "1. Scope. Service Provider will deliver AI workflow implementation.",
+      "1.1",
+      "2. Fees. Client will pay $95,000.",
+      "2.1",
+      "3. Governing Law. Texas law governs.",
+      "",
+      "Commercial implementation details. ".repeat(120),
+    ].join("\n");
+    const record = establishPaidProSourceOfTruth({ text: structurallyBrokenAccepted, draft: d });
+    stabilizeFinalAgreementCompilerOutput(record.text, {
+      surface: "post_acceptance_test_noop",
+    });
+    expect(() =>
+      assertNoPostAcceptanceStructuralMutation({
+        surface: "post_acceptance_test",
+        mutation: "numbering_rebuilt",
+        inputText: record.text,
+        outputText: `${record.text}\n\n9. Rebuilt numbering.`,
+      }),
+    ).toThrow(/\[illegal-post-acceptance-mutation-attempt\]/);
+    const independentlyRequestedPreview = buildAgreementPreviewText(
+      { ...d, purpose: "Independently rebuilt preview.", payment_terms: "$1" },
+      { starterPreview: true, intakeText: "Independent render attempt." },
+    );
+    expect(independentlyRequestedPreview).toBe(record.text);
+    expect(getAuthoritativeAgreementDocument()?.authoritativeHash).toBe(record.hash);
+  });
+
+  it("logs and recovers instead of throwing for browser-route post-acceptance mutation attempts", () => {
+    const d = draft();
+    const record = establishPaidProSourceOfTruth({ text: canonicalBody(), draft: d });
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("document", {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(() =>
+      assertNoPostAcceptanceStructuralMutation({
+        surface: "review_route",
+        mutation: "canonicalizer_integrity_repair",
+        inputText: record.text,
+        outputText: `${record.text}\n\n9. Mutated after acceptance.`,
+      }),
+    ).not.toThrow();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[illegal-post-acceptance-mutation-attempt]",
+      expect.objectContaining({
+        surface: "review_route",
+        mutation: "canonicalizer_integrity_repair",
+      }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[illegal-post-acceptance-mutation-route-fallback]",
+      expect.objectContaining({ surface: "review_route" }),
+    );
   });
 });

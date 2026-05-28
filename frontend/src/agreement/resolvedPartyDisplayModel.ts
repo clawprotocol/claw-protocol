@@ -10,6 +10,7 @@ import { participantDisplayName } from "./participantModel";
 import { stripRecipientEmailNoise } from "../components/agreements/recipientEmailValidation";
 import { isPlausibleEmail } from "../vs01/detailsStepValidation";
 import { readPremiumRecipientHandoff, linearPremiumRecipientSlots } from "../components/agreements/premiumPartyNamesHandoff";
+import { compactDisplayNameFromLegalEntity } from "../components/agreements/signerSetupPartyIdentity";
 import { isGenericOrEmptyTitle, resolveCanonicalAgreementTitle } from "../components/agreements/canonicalAgreementTitle";
 import type { AgreementFamily } from "../components/agreements/agreementFamilyRouter";
 
@@ -56,6 +57,7 @@ function pickDisplayName(args: {
   signerName?: string;
   recipientName?: string;
   entityName?: string;
+  canonicalLegalEntityName?: string;
   email?: string;
   intakeText?: string | null;
   partyIndex?: number;
@@ -63,7 +65,16 @@ function pickDisplayName(args: {
   const signer = (args.signerName || "").trim();
   const recipient = (args.recipientName || "").trim();
   const entity = (args.entityName || "").trim();
+  const canonicalLegal = (args.canonicalLegalEntityName || "").trim();
   const email = stripRecipientEmailNoise(args.email || "");
+
+  if (canonicalLegal && !isSemanticPartyPlaceholder(canonicalLegal)) {
+    const compact = compactDisplayNameFromLegalEntity(canonicalLegal);
+    return {
+      displayName: finalizePartyDisplayNameForUserFacing(compact || canonicalLegal, args.intakeText),
+      source: "draft",
+    };
+  }
 
   const entityCandidate = recipient || entity;
   if (
@@ -98,6 +109,8 @@ export function buildResolvedPartyDisplayModel(args: {
   recipientEmails?: readonly (string | null | undefined)[];
   recipientSignerNames?: readonly (string | null | undefined)[];
   recipientDisplayNames?: readonly (string | null | undefined)[];
+  /** Full legal entity names for compact UI chips (signer setup headers). */
+  canonicalLegalEntityNames?: readonly (string | null | undefined)[];
 }): ResolvedPartyDisplaySlot[] {
   const parties = (args.parties ?? []) as AgreementParty[];
   const handoff = readPremiumRecipientHandoff();
@@ -117,6 +130,7 @@ export function buildResolvedPartyDisplayModel(args: {
       signerName,
       recipientName,
       entityName: entity,
+      canonicalLegalEntityName: (args.canonicalLegalEntityNames?.[i] ?? "").trim() || undefined,
       email,
       intakeText: args.intakeText,
       partyIndex: i,

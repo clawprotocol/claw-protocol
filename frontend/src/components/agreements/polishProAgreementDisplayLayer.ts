@@ -5,9 +5,11 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
+  type CanonicalPartyIdentityRecord,
   repairCanonicalPartyIdentityInCorpus,
   repairDuplicateAgreementOpening,
   resolveCanonicalPartyIdentitiesFromIntake,
+  stripDanglingPartyMetadataFragments,
   stripIrrelevantFixedFeeBoilerplate,
   intakeSpecifiesSimpleFixedFee,
 } from "./canonicalPartyIdentityResolver";
@@ -21,10 +23,14 @@ import {
   coalesceAuthoritativePremiumBody,
   wouldMateriallyShrinkAuthoritativeBody,
 } from "./premiumAuthoritativeBodyPreservation";
+import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 
 export type PolishProAgreementDisplayLayerOpts = {
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
+  /** Review/share surfaces: strip execution residue and skip appending signature blocks. */
+  reviewDisplayMode?: boolean;
 };
 
 export type PolishProAgreementDisplayLayerResult = {
@@ -143,6 +149,319 @@ export function stripUnsuppliedPartyAddressPlaceholders(
   return { text: kept.join("\n").replace(/\n{3,}/g, "\n\n").trim(), repairs };
 }
 
+const SERVICES_DUPLICATE_OPENING_RE =
+  /This\s+Services\s+Agreement\s*\(\s*(?:the\s+)?["']Agreement["']\s*\)\s+is\s+This\s+Agreement\s+is\s+between/gi;
+
+/** Title + Agreement") is This Agreement is between — any descriptive title prefix. */
+const FUSED_TITLE_OPENING_RE =
+  /(\bThis\s+[\w\s]+Agreement\s*\(\s*(?:the\s+)?["']Agreement["']\s*\))\s+is\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/gi;
+
+const PRO_REVIEW_SANITY_PATTERNS: ReadonlyArray<{ reason: string; re: RegExp }> = [
+  { reason: "signature_dot", re: /\.signature\b/i },
+  { reason: "signature_below", re: /\bsignature\s+below\b/i },
+  { reason: "witness", re: /\bIN WITNESS WHEREOF\b/i },
+  { reason: "duplicate_opening", re: /Agreement["']?\s*\)\s+is\s+This\s+Agreement\s+is\s+between/i },
+  { reason: "with_its_dot", re: /with its\s*\./i },
+  { reason: "execution_by_line", re: /^\s*By:\s*_{2,}/im },
+  { reason: "execution_name_line", re: /^\s*Name:\s*_{2,}/im },
+  { reason: "execution_title_line", re: /^\s*Title:\s*_{2,}/im },
+  { reason: "execution_date_line", re: /^\s*Date:\s*_{2,}/im },
+];
+
+function isAgreementTitleParagraph(part: string): boolean {
+  const t = part.trim();
+  return t.length <= 90 && /\bAGREEMENT\b/i.test(t) && !/[.!?]$/.test(t);
+}
+
+function isOpeningParagraph(part: string): boolean {
+  return /\bThis\s+(?:Services\s+)?Agreement\b/i.test(part) && /\bbetween\b/i.test(part);
+}
+
+function isBodySectionParagraph(part: string): boolean {
+  return /^(?:#{1,3}\s+)?(?:\d+(?:\.\d+)?\.?\s+|[A-Z][A-Za-z\s]{2,60}:)/.test(part.trim());
+}
+
+function isExecutionParagraph(part: string): boolean {
+  return /\b(?:IN\s+WITNESS\s+WHEREOF|EXECUTION|SIGNATURES?|By:\s*_{2,}|Name:\s*_{2,}|Title:\s*_{2,})\b/i.test(part);
+}
+
+function normalizedOpeningParagraph(
+  part: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = part.trim();
+  const duplicate = repairDuplicateAgreementOpening(out, records);
+  out = duplicate.text;
+  repairs.push(...duplicate.repairs);
+  if (/\bThis\s+Agreement\s+is\s+entered\s+into\b[\s\S]{0,180}?\bThis\s+Agreement\s+is\s+between\b/i.test(out)) {
+    out = out.replace(
+      /\bThis\s+Agreement\s+is\s+entered\s+into\b[\s\S]{0,180}?\bThis\s+Agreement\s+is\s+between\b/i,
+      "This Agreement is between",
+    );
+    repairs.push("opening:collapse_entered_into_between_duplicate");
+  }
+  if (SERVICES_DUPLICATE_OPENING_RE.test(out)) {
+    SERVICES_DUPLICATE_OPENING_RE.lastIndex = 0;
+    out = out.replace(
+      SERVICES_DUPLICATE_OPENING_RE,
+      'This Services Agreement (the "Agreement") is entered into by and between',
+    );
+    repairs.push("opening:collapse_services_duplicate");
+  }
+  return { text: out.trim(), repairs };
+}
+
+export function normalizeAgreementOpeningStructure(
+  text: string,
+  opts?: {
+    records?: readonly CanonicalPartyIdentityRecord[];
+    reviewDisplayMode?: boolean;
+  },
+): { text: string; repairs: string[] } {
+  const input = basicNormalize(text);
+  if (!input) return { text: "", repairs: [] };
+  const repairs: string[] = [];
+  const parts = input.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length <= 1) return { text: input, repairs };
+
+  const records = opts?.records ?? [];
+  let title = "";
+  let start = 0;
+  if (isAgreementTitleParagraph(parts[0]!)) {
+    title = parts[0]!;
+    start = 1;
+  }
+
+  const body: string[] = [];
+  const execution: string[] = [];
+  let opening = "";
+  let inExecution = false;
+
+  for (let i = start; i < parts.length; i += 1) {
+    const part = parts[i]!;
+    if (isExecutionParagraph(part)) {
+      inExecution = true;
+    }
+    if (inExecution) {
+      execution.push(part);
+      continue;
+    }
+    if (isOpeningParagraph(part)) {
+      const normalized = normalizedOpeningParagraph(part, records);
+      repairs.push(...normalized.repairs);
+      if (!opening) {
+        opening = normalized.text;
+      } else {
+        repairs.push("opening:remove_duplicate_opening_phase");
+      }
+      continue;
+    }
+    if (opening && !isBodySectionParagraph(part) && isOpeningParagraph(part)) {
+      repairs.push("opening:remove_duplicate_opening_fragment");
+      continue;
+    }
+    body.push(part);
+  }
+
+  if (opts?.reviewDisplayMode && execution.length > 0) {
+    repairs.push("display:strip_execution_phase_for_review");
+  }
+
+  const outputParts = [
+    title,
+    opening,
+    ...body,
+    ...(opts?.reviewDisplayMode ? [] : execution),
+  ].filter(Boolean);
+  const out = outputParts.join("\n\n").replace(/\.signature\./gi, "").trim();
+  if (out !== outputParts.join("\n\n").trim()) repairs.push("display:strip_signature_residue");
+  return { text: out, repairs: [...new Set(repairs)] };
+}
+
+/** Display-only cleanup for malformed Pro review openings and signature residue. */
+export function stripMalformedProReviewDisplayArtifacts(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = text;
+  if (FUSED_TITLE_OPENING_RE.test(out)) {
+    FUSED_TITLE_OPENING_RE.lastIndex = 0;
+    out = out.replace(FUSED_TITLE_OPENING_RE, "$1 is between");
+    repairs.push("display:collapse_fused_title_opening");
+  }
+  if (/entered\s+into\s+as\s+of\s+the\s+effective\s+date\s+This\s+Agreement\s+is\s+between/i.test(out)) {
+    out = out.replace(
+      /entered\s+into\s+as\s+of\s+the\s+effective\s+date\s+This\s+Agreement\s+is\s+between/gi,
+      "is between",
+    );
+    repairs.push("display:collapse_effective_date_duplicate_opening");
+  }
+  if (SERVICES_DUPLICATE_OPENING_RE.test(out)) {
+    SERVICES_DUPLICATE_OPENING_RE.lastIndex = 0;
+    out = out.replace(
+      SERVICES_DUPLICATE_OPENING_RE,
+      'This Services Agreement (the "Agreement") is entered into by and between',
+    );
+    repairs.push("display:repair_services_duplicate_opening");
+  }
+  if (/\.signature\./i.test(out)) {
+    out = out.replace(/\.signature\./gi, "");
+    repairs.push("display:strip_signature_residue");
+  }
+  if (/\)\.signature\s+below\.?/i.test(out)) {
+    out = out.replace(/\)\.signature\s+below\.?/gi, ").");
+    repairs.push("display:strip_signature_below_paren");
+  }
+  if (/\.signature\s+below\.?/i.test(out)) {
+    out = out.replace(/\.signature\s+below\.?/gi, ".");
+    repairs.push("display:strip_signature_below");
+  }
+  if (/\bsignature\s+below\b/i.test(out)) {
+    out = out.replace(/\bsignature\s+below\b\.?/gi, "");
+    repairs.push("display:strip_signature_below_phrase");
+  }
+  if (/\)\.signature\.?/i.test(out)) {
+    out = out.replace(/\)\.signature\.?/gi, ")");
+    repairs.push("display:strip_signature_paren_residue");
+  }
+  if (/\("Service Provider"\)\.signature/i.test(out)) {
+    out = out.replace(/\("Service Provider"\)\.signature[\s.]*(?:below)?\.?/gi, '("Service Provider").');
+    repairs.push("display:strip_service_provider_signature_residue");
+  }
+  return { text: out.trim(), repairs };
+}
+
+export function detectProReviewDisplaySanityViolations(text: string): string[] {
+  const t = (text || "").trim();
+  if (!t) return [];
+  return PRO_REVIEW_SANITY_PATTERNS.filter(({ re }) => re.test(t)).map(({ reason }) => reason);
+}
+
+export function logProReviewDisplaySanityBlocked(payload: {
+  reason: string;
+  source: string;
+  hash: string;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[pro-review-display-sanity-blocked]", payload);
+}
+
+export type SanitizeProReviewDisplayTextOpts = {
+  records?: readonly CanonicalPartyIdentityRecord[];
+  /** Diagnostic label for sanity-block logging. */
+  source?: string;
+};
+
+export type SanitizeProReviewDisplayTextResult = {
+  text: string;
+  repairs: string[];
+  sanityBlocked: boolean;
+  inputHash: string;
+  outputHash: string;
+};
+
+/**
+ * Final display-only sanitizer for Pro review surfaces. Never mutates authoritative storage.
+ * Strips execution phase, collapses fused openings, and removes signature residue.
+ */
+export function sanitizeProReviewDisplayText(
+  raw: string,
+  opts?: SanitizeProReviewDisplayTextOpts,
+): SanitizeProReviewDisplayTextResult {
+  const input = trim(raw);
+  const inputHash = fingerprintAgreementBody(input);
+  if (!input) {
+    return { text: "", repairs: [], sanityBlocked: false, inputHash, outputHash: inputHash };
+  }
+  const inputViolations = detectProReviewDisplaySanityViolations(input);
+  const source = opts?.source ?? "pro_review_display";
+  let sanityBlocked = inputViolations.length > 0;
+  if (sanityBlocked) {
+    for (const reason of inputViolations) {
+      logProReviewDisplaySanityBlocked({ reason, source, hash: inputHash });
+    }
+  }
+  const repairs: string[] = [];
+  let out = basicNormalize(input);
+
+  const artifacts = stripMalformedProReviewDisplayArtifacts(out);
+  out = artifacts.text;
+  repairs.push(...artifacts.repairs);
+
+  const structured = normalizeAgreementOpeningStructure(out, {
+    records: opts?.records,
+    reviewDisplayMode: true,
+  });
+  out = structured.text;
+  repairs.push(...structured.repairs);
+
+  const opening = repairDuplicateAgreementOpening(out, opts?.records);
+  out = opening.text;
+  repairs.push(...opening.repairs);
+
+  const witnessIdx = findSignatureRegionStart(out);
+  if (witnessIdx >= 0) {
+    out = out.slice(0, witnessIdx).trimEnd();
+    repairs.push("display:strip_witness_execution_region");
+  }
+
+  const withoutExecLines = out
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      if (!t) return true;
+      if (/^\s*(?:By|Name|Title|Date|Email|Signature)\s*:\s*_{2,}/i.test(t)) {
+        repairs.push("display:strip_execution_field_line");
+        return false;
+      }
+      if (/^\s*(?:CLIENT|SERVICE PROVIDER|PROVIDER|COMPANY|CONTRACTOR)\s*:/i.test(t) && t.length < 80) {
+        repairs.push("display:strip_execution_party_header");
+        return false;
+      }
+      return true;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (withoutExecLines !== out) out = withoutExecLines;
+
+  const tailArtifacts = stripMalformedProReviewDisplayArtifacts(out);
+  out = tailArtifacts.text;
+  repairs.push(...tailArtifacts.repairs);
+
+  const dangling = stripDanglingPartyMetadataFragments(out);
+  out = dangling.text;
+  repairs.push(...dangling.repairs);
+
+  let violations = detectProReviewDisplaySanityViolations(out);
+  if (violations.length > 0) {
+    sanityBlocked = true;
+    for (const reason of violations) {
+      logProReviewDisplaySanityBlocked({ reason, source, hash: inputHash });
+    }
+    out = out
+      .replace(FUSED_TITLE_OPENING_RE, "$1 is between")
+      .replace(/\.signature[\s.]*(?:below)?\.?/gi, ".")
+      .replace(/\bsignature\s+below\b\.?/gi, "")
+      .replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "")
+      .replace(/^\s*(?:By|Name|Title|Date|Email|Signature)\s*:\s*.*$/gim, "")
+      .trim();
+    violations = detectProReviewDisplaySanityViolations(out);
+    if (violations.length > 0) {
+      repairs.push("display:sanity_aggressive_fallback");
+    }
+  }
+
+  const outputHash = fingerprintAgreementBody(out);
+  return {
+    text: out,
+    repairs: [...new Set(repairs)],
+    sanityBlocked,
+    inputHash,
+    outputHash,
+  };
+}
+
 /**
  * Polish authoritative Pro text for display, copy, and signing without material shrink.
  */
@@ -157,6 +476,13 @@ export function polishProAgreementDisplayLayer(
 
   const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
   const records = resolveCanonicalPartyIdentitiesFromIntake(opts?.intakeText ?? null, partyNames);
+
+  const structuredOpening = normalizeAgreementOpeningStructure(out, {
+    records,
+    reviewDisplayMode: opts?.reviewDisplayMode,
+  });
+  out = structuredOpening.text;
+  repairs.push(...structuredOpening.repairs);
 
   const opening = repairDuplicateAgreementOpening(out, records);
   out = opening.text;
@@ -174,6 +500,16 @@ export function polishProAgreementDisplayLayer(
   const opening2 = repairDuplicateAgreementOpening(out, records);
   out = opening2.text;
   repairs.push(...opening2.repairs);
+
+  if (opts?.reviewDisplayMode) {
+    const reviewArtifacts = stripMalformedProReviewDisplayArtifacts(out);
+    out = reviewArtifacts.text;
+    repairs.push(...reviewArtifacts.repairs);
+  }
+
+  const danglingPartyMeta = stripDanglingPartyMetadataFragments(out);
+  out = danglingPartyMeta.text;
+  repairs.push(...danglingPartyMeta.repairs);
 
   const placeholders = stripUnsuppliedPartyAddressPlaceholders(out, opts?.intakeText ?? null);
   out = placeholders.text;
@@ -194,8 +530,18 @@ export function polishProAgreementDisplayLayer(
   out = sections.text;
   repairs.push(...sections.repairs);
 
-  if (records.length >= 2) {
+  if (records.length >= 2 && !opts?.reviewDisplayMode) {
     out = appendProExecutionBlockIfMissing(out, records).text;
+  }
+
+  if (opts?.reviewDisplayMode) {
+    const sanitized = sanitizeProReviewDisplayText(out, {
+      records,
+      source: "polishProAgreementDisplayLayer",
+    });
+    out = sanitized.text;
+    repairs.push(...sanitized.repairs);
+    if (sanitized.sanityBlocked) repairs.push("display:pro_review_sanity_guard");
   }
 
   if (wouldMateriallyShrinkAuthoritativeBody(input.length, out.length)) {

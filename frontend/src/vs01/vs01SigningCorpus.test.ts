@@ -218,6 +218,21 @@ describe("vs01SigningCorpus", () => {
     expect(resolution.len).toBeGreaterThan(SHORT_FALLBACK.length * 2);
   });
 
+  it("blocks VS01 fallback when paid Pro is accepted but authoritative corpus is unavailable", () => {
+    const resolution = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: "short free fallback",
+      guidedPro: true,
+      acceptedAuthoritativePlain: "",
+      premiumAccepted: true,
+      premiumPipelineRenderSource: "server_full_draft",
+      bridge,
+    });
+    expect(resolution.allowed).toBe(false);
+    expect(resolution.source).toBe("blocked_short_preview");
+    expect(resolution.blockReason).toBe("authoritative_corpus_unavailable");
+    expect(resolution.corpus).toBe("");
+  });
+
   it("rebuilds witness block when operative body is long but signature lines are missing", () => {
     const bodyOnly = longOperativePad();
     expect(bodyOnly.length).toBeGreaterThanOrEqual(GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN);
@@ -340,6 +355,8 @@ describe("vs01SigningCorpus", () => {
     });
     expect(resolution.source).toBe("paidProSourceOfTruth");
     expect(resolution.corpus).toBe(expected);
+    expect(resolution.corpus).toContain("Red Mesa Logistics LLC");
+    expect(resolution.corpus).toContain("Harbor Peak Automation LLC");
     expect(resolution.hash).toBe(fingerprintAgreementBody(expected));
     expect(resolution.len).toBeGreaterThan(SHORT_FALLBACK.length * 2);
   });

@@ -25,9 +25,28 @@ export function isPremiumGenerationApiUnavailablePipelineSource(
 export function shouldBlockLivePreviewAsPaidProAuthority(args: {
   pipelineSource?: string | null;
   previewLen: number;
+  premiumCheckoutCompleted?: boolean;
+  renderSource?: string | null;
 }): boolean {
+  if (args.premiumCheckoutCompleted && args.renderSource === "live_generated_preview") return true;
   if (!isPremiumGenerationApiUnavailablePipelineSource(args.pipelineSource)) return false;
   return args.previewLen < MIN_PAID_PRO_AUTHORITY_LEN;
+}
+
+/** Never show LawDog Pro chrome over live preview / free starter after checkout. */
+export function isForbiddenPaidProDisplayRenderSource(source: string | null | undefined): boolean {
+  const s = String(source || "").trim();
+  return (
+    s === "live_generated_preview" ||
+    s === "none" ||
+    s === "free_starter" ||
+    s === "free_starter_paid_pro_baseline" ||
+    s === "rendered_preview" ||
+    s === "renderedAgreementPreview" ||
+    s === "accepted_review" ||
+    s === "reviewDraft" ||
+    s === "review_draft"
+  );
 }
 
 export function isPremiumGenerationApiUnavailableForUi(args: {

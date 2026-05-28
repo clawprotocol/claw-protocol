@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import type { ProVisiblePaperCandidate } from "./visibleProPaperRenderBoundary";
 import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload";
 import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSection } from "./guidedDealCompletion/guidedSectionScroll";
 import {
@@ -65,6 +67,15 @@ export type SimpleProFinalReviewScreenProps = {
   onKeepLawDogVersion?: () => void;
   onBackToSignerDetails?: () => void;
   className?: string;
+  visibleProPaperTrace?: {
+    declaredSource: string;
+    candidates: readonly ProVisiblePaperCandidate[];
+    intakeText?: string | null;
+    draft?: ParsedDraftShape | null;
+    paidProReviewSurface?: boolean;
+    isAuthoritative?: boolean;
+    isFreeBodyMatch?: boolean;
+  };
 };
 
 export function SimpleProFinalReviewScreen({
@@ -116,6 +127,7 @@ export function SimpleProFinalReviewScreen({
   onKeepLawDogVersion,
   onBackToSignerDetails,
   className = "",
+  visibleProPaperTrace,
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const reviewFirstErrorRef = useRef<HTMLDivElement>(null);
@@ -269,7 +281,11 @@ export function SimpleProFinalReviewScreen({
         data-testid="simple-pro-final-review-document"
       >
         {showDocument ? (
-          <PremiumAgreementReadonlyView html={agreementHtml} suppressEmptyFallback={suppressEmptyFallback} />
+          <PremiumAgreementReadonlyView
+            html={agreementHtml}
+            suppressEmptyFallback={suppressEmptyFallback}
+            visibleProPaperTrace={visibleProPaperTrace}
+          />
         ) : (
           <p
             className="px-4 py-8 text-center text-sm leading-relaxed text-stone-600"

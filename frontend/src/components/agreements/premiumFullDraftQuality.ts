@@ -11,11 +11,21 @@ const SECTION_SIGNALS = [
   /\b(?:notices?|notice\s+address)\b/i,
 ];
 
+import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
+
 /**
  * Reject too-thin or outline-like "full draft" so we always fall back to the legacy premium section builder.
  */
-export function isAcceptablePremiumFullDocumentText(text: string | null | undefined): boolean {
+export function isAcceptablePremiumFullDocumentText(
+  text: string | null | undefined,
+  opts?: { rawIntake?: string | null },
+): boolean {
   const t = (text || "").replace(/\r\n/g, "\n").trim();
+  const concise = assessConciseCommercialServicesProQuality({
+    text: t,
+    rawIntake: opts?.rawIntake ?? "",
+  });
+  if (concise.applies && concise.ok && t.length >= 400) return true;
   if (t.length < 1600) return false;
   let hits = 0;
   for (const re of SECTION_SIGNALS) {

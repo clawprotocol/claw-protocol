@@ -9,7 +9,14 @@ import {
   clearPremiumCompletionSnapshot,
   hasPaidPremiumCompletionSession,
 } from "./premiumCompletionStorage";
+import {
+  isAuthoritativePaidProReview,
+  PAID_PRO_REVIEW_BADGE,
+  PAID_PRO_REVIEW_SHELL_SUBTITLE,
+  PAID_PRO_REVIEW_SHELL_TITLE,
+} from "./authoritativePaidProReview";
 import type { FreeReviewSurfaceSource } from "./freeStreamlineDraftReview";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 export const FREE_STARTER_REVIEW_TITLE = "Review your draft";
 export const FREE_STARTER_REVIEW_SUBTITLE =
@@ -33,7 +40,9 @@ export function resolveFreeStarterReviewShellActive(input: {
   premiumPaidDocumentSurface: boolean;
   paidProAuthoritative: boolean;
 }): boolean {
-  if (input.isFreeStreamlineDraftReview) return true;
+  if (hasPaidProSourceOfTruth() || isAuthoritativePaidProReview({ isPaidPro: input.paidProAuthoritative })) {
+    return false;
+  }
   if (
     input.premiumPaidDocumentSurface ||
     input.paidProAuthoritative ||
@@ -41,6 +50,7 @@ export function resolveFreeStarterReviewShellActive(input: {
   ) {
     return false;
   }
+  if (input.isFreeStreamlineDraftReview) return true;
   return input.isFreeStarterReviewSurface;
 }
 
@@ -71,12 +81,12 @@ export function resolveReviewShellChrome(input: ResolveReviewShellChromeInput): 
     };
   }
 
-  if (paidProReviewReady) {
+  if (paidProReviewReady || isAuthoritativePaidProReview({ isPaidPro: input.paidProAuthoritative })) {
     return {
       kind: "paid_pro",
-      title: "Review your Pro agreement",
-      subtitle: "Your agreement is ready. Edit it, send it for review, or start signatures.",
-      badge: null,
+      title: PAID_PRO_REVIEW_SHELL_TITLE,
+      subtitle: PAID_PRO_REVIEW_SHELL_SUBTITLE,
+      badge: PAID_PRO_REVIEW_BADGE,
       paidProReviewReady: true,
       blockPaidProShell: false,
     };

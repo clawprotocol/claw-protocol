@@ -8,6 +8,7 @@ import {
 } from "./commercialSpecificity";
 import { forbiddenSemanticFactForLine, reconstructProSectionsFromSemanticBlocks } from "./proSemanticBlocks";
 import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
+import { assertNoPostAcceptanceStructuralMutation } from "./authoritativeAgreementDocument";
 
 export type ProCorpusArchetype =
   | "monthly_consulting"
@@ -788,6 +789,12 @@ export function applyProCorpusIntegrity(
   });
   out = stabilized.text;
   repairs.push(...stabilized.repairs.map((r) => `compiler:${r}`));
+  assertNoPostAcceptanceStructuralMutation({
+    surface: context.surface ?? "pro_corpus_integrity",
+    mutation: "integrity_repair_mutation",
+    inputText: text,
+    outputText: out,
+  });
   if (finalSpecificity.score.score < MINIMUM_COMMERCIAL_SPECIFICITY_SCORE) {
     const hardSpecificityFallback = preserveProtectedCommercialFacts({
       text: softNormalizationInput,

@@ -1,5 +1,11 @@
 # React + TypeScript + Vite
 
+## Paid Pro local smoke
+
+Run the backend on `http://127.0.0.1:8000` (or set `VITE_API_URL`) before testing Paid Pro checkout on `npm run dev` (`localhost:5173`). See [`docs/DEV.md`](../docs/DEV.md).
+
+---
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

@@ -4,7 +4,7 @@
 
 import { GUIDED_MIN_AUTHORITATIVE_BODY_LEN } from "./guidedDealCompletion/guidedCompletionRenderAuthority";
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
-import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
+import { getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 /** Final review requires a full Pro agreement — not a signature-only fragment. */
 export const GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN = 1500;
@@ -147,7 +147,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     });
   }
 
-  if (!authorityOnly) {
+  if (!authorityOnly && !hasPaidProSourceOfTruth()) {
     if (
       plainText.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
       rendered.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&

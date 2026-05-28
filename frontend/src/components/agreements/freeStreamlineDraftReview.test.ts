@@ -3,6 +3,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CreateUiStage } from "./createUiStage";
 import {
+  buildStarterAgreementPreviewForReview,
+} from "./agreementPreviewFromDraft";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
   buildCommitFreeDraftForReviewPatch,
   resolveIsFreeStreamlineDraftReview,
 } from "./freeStreamlineDraftReview";
@@ -83,5 +87,65 @@ describe("free streamline draft review wiring (static)", () => {
   it("commit patch normalizes review display phase", () => {
     expect(buildCommitFreeDraftForReviewPatch().displayPhase).toBe("review");
     expect(buildCommitFreeDraftForReviewPatch().createFlowPhase).toBe("draft_ready_for_review");
+  });
+});
+
+describe("free starter services output", () => {
+  const intake = [
+    "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC for AI workflow setup.",
+    "Red Mesa will pay Harbor Peak $5,000. Texas law. Electronic signatures allowed.",
+  ].join(" ");
+
+  const draft: ParsedDraftShape = {
+    title: "Services Agreement",
+    jurisdiction: "Texas",
+    agreement_family: "services_agreement",
+    parties: [
+      { name: "Red Mesa", role: "Client" },
+      { name: "Harbor Peak", role: "Service Provider" },
+    ],
+    purpose: "Red Mesa will pay Harbor Peak $5,000.",
+    payment_terms: "$5,000",
+    duration: null,
+    due_date: null,
+    effective_date: null,
+    payment: { amount: 5000, cadence: null, valid: true },
+  };
+
+  it("preserves full legal names in the Free opening paragraph", () => {
+    const text = buildStarterAgreementPreviewForReview(draft, { intakeText: intake });
+    expect(text).toContain("Red Mesa Logistics LLC");
+    expect(text).toContain("Harbor Peak Automation LLC");
+  });
+
+  it("has no duplicate opening or unresolved placeholders for AI workflow setup", () => {
+    const text = buildStarterAgreementPreviewForReview(draft, { intakeText: intake });
+    expect(text).not.toMatch(/This Agreement is\s+This Agreement is between/i);
+    expect(text).not.toMatch(/\[Not yet specified\]/i);
+    expect(text).toMatch(
+      /Harbor Peak Automation LLC will provide AI workflow setup services for Red Mesa Logistics LLC/i,
+    );
+  });
+
+  it("puts extracted AI workflow setup in Scope and keeps payment in Payment Terms", () => {
+    const text = buildStarterAgreementPreviewForReview(draft, { intakeText: intake });
+    const scope = text.slice(text.indexOf("1. Scope"), text.indexOf("2. Payment Terms"));
+    const payment = text.slice(text.indexOf("2. Payment Terms"), text.indexOf("3. Services Term"));
+    expect(scope).toMatch(/Harbor Peak Automation LLC will provide AI workflow setup services for Red Mesa Logistics LLC/i);
+    expect(scope).not.toMatch(/\bpay\b|\$5,000/i);
+    expect(payment).toMatch(/\$5,000/);
+  });
+
+  it("extracts Free services scope from intake even when the draft family is generic", () => {
+    const genericDraft: ParsedDraftShape = {
+      ...draft,
+      agreement_family: "generic_business_agreement",
+      purpose: "Red Mesa will pay Harbor Peak $5,000.",
+    };
+    const text = buildStarterAgreementPreviewForReview(genericDraft, { intakeText: intake });
+    const scope = text.slice(text.indexOf("1. Scope"), text.indexOf("2. Payment Terms"));
+    expect(scope).toMatch(/Harbor Peak Automation LLC will provide AI workflow setup services for Red Mesa Logistics LLC/i);
+    expect(scope).not.toContain("[Not yet specified]");
+    expect(scope).not.toMatch(/\$5,000/);
   });
 });

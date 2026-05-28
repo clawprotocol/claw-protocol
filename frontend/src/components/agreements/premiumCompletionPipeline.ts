@@ -82,10 +82,20 @@ import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
+import {
+  extractPremiumApiServerCorpusText,
+  logPremiumApiResultFromWire,
+  premiumApiResultHasAuthoritativeServerCorpus,
+} from "./premiumApiHandoff";
 import { logDevPostPremiumFullDraftPipelineReturn } from "./premiumFullDraftPostResponseTrace";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
+import {
+  isCommercialServicesIntake,
+} from "./agreementIntentContract";
+import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
@@ -220,9 +230,6 @@ export type PremiumCompletionResult = {
   /** Deterministic validation; passive for now. */
   agreementValidation?: AgreementValidationResult | null;
 };
-
-/** @deprecated — positive stitched body is built in {@link buildPremiumPostCheckoutStitchedBody}. */
-const PRO_FALLBACK_HEADER = "";
 
 const dualTrackStats: { A: number; B: number } = { A: 0, B: 0 };
 
@@ -1514,6 +1521,15 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       }
     } else {
       const full = fullResp.result;
+      logPremiumApiResultFromWire({ ok: true, status: 200, wire: full });
+      if (!premiumApiResultHasAuthoritativeServerCorpus(full) && import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn("[premium-api-handoff] server_full_document_text missing or short after HTTP ok", {
+          serverLen: String(full.server_full_document_text ?? "").trim().length,
+          documentLen: String(full.document_text ?? "").trim().length,
+          generationOutcome: full.generation_outcome,
+        });
+      }
       agreementIntelligence = full.agreement_intelligence ?? null;
       agreementValidation = full.agreement_validation ?? null;
       adaptPremiumFullDraftToProIntelligencePacket(full);
@@ -1533,6 +1549,9 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           draft: mergedForApi,
           intakeText: preGateIntake,
         }).text;
+        if (isCommercialServicesIntake(preGateIntake) && doc.length < 2_500) {
+          doc = preparePaidProServerDocumentForAcceptance(doc, mergedForApi, preGateIntake).text;
+        }
         const completenessCtx = {
           intakeRaw: preGateIntake,
           partyNames: premiumRejectCtx.partyNames ?? undefined,
@@ -1982,12 +2001,15 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       }
       if ((acc.ok && vPaid.ok && placeholderClientOk) || longAdvisoryAccept) {
         const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
-        const srvFull = (effectiveFull.server_full_document_text || "").trim();
+        const srvFull =
+          (effectiveFull.server_full_document_text || "").trim() ||
+          extractPremiumApiServerCorpusText(effectiveFull) ||
+          doc;
         const srvRepair = (effectiveFull.server_repair_document_text || "").trim();
         outMerged = stripClientPremiumArtifactBlocksFromDraft({
           ...merged,
           premium_full_document_text: doc,
-          premium_server_full_document_text: srvFull || null,
+          premium_server_full_document_text: srvFull.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN ? srvFull : doc,
           premium_server_repair_document_text: srvRepair || null,
           premium_full_draft_key_terms: effectiveFull.key_terms_found,
           premium_full_draft_missing_info: effectiveFull.missing_material_info,
@@ -2217,8 +2239,19 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       winningPremiumBodyText = fb;
       premiumRenderSource = "fallback_preview";
     } else {
-      winningPremiumBodyText = fb.trim() ? PRO_FALLBACK_HEADER + fb : "";
-      premiumRenderSource = "fallback_preview_error";
+      winningPremiumBodyText = "";
+      premiumRenderSource = "rejected_paid_corpus";
+      if (!proIntentGateMessage) {
+        proIntentGateMessage =
+          "LawDog could not establish a secure Pro agreement from the server. Tap **Retry Pro draft** to try again.";
+      }
+      logPremiumCompletionDebug({
+        stage: "post_checkout_fallback_preview_blocked",
+        accepted: false,
+        rejectedReason: "no_server_full_document_after_checkout",
+        fbLen,
+        candidateLen,
+      });
     }
   }
 

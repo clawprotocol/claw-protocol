@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearPaidPremiumCompletionSession, markPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import {
-  SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
   authoritativeProBypassSimpleSendPaywall,
   bypassSimpleHomeWatermarkSendGate,
   buildSendRouteReadonlyHtmlFromPlain,
@@ -15,6 +15,7 @@ import {
   shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 function minimalParsed(overrides: Partial<ParsedDraftShape> = {}): ParsedDraftShape {
   return {
@@ -32,6 +33,10 @@ function minimalParsed(overrides: Partial<ParsedDraftShape> = {}): ParsedDraftSh
 }
 
 describe("sendHandoffAuthoritativeCorpus", () => {
+  afterEach(() => {
+    clearPaidProSourceOfTruth();
+  });
+
   it("pickAuthoritativePlainForSendHandoff prefers premium_full_document_text over short purpose", () => {
     const body = "y".repeat(15_000);
     const d: AgreementDraft = {
@@ -81,6 +86,59 @@ describe("sendHandoffAuthoritativeCorpus", () => {
     const pick = pickAuthoritativePlainForSendHandoff(d);
     expect(pick?.text).toBe(accepted);
     expect(pick?.field).toBe("premium_full_document_text");
+  });
+
+  it("blocks purpose-derived send handoff for paid Pro routes without authoritative corpus", () => {
+    const d: AgreementDraft = {
+      id: "r2",
+      title: "T",
+      jurisdiction: "DE",
+      parties: [{ name: "A", role: "party" }],
+      purpose: "short purpose only",
+      payment_terms: "pay",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      created_at: "",
+      updated_at: "",
+      versions: [],
+      audit_log: [],
+      premium_render_source: "live_generated_preview",
+    };
+    const pick = pickAuthoritativePlainForSendHandoff(d);
+    expect(pick).toBeNull();
+  });
+
+  it("review link payload uses canonical full legal names from paid Pro source of truth", () => {
+    const intake =
+      "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC for AI workflow setup.";
+    const body = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Agreement is between Red Mesa and Harbor Peak.",
+      "",
+      "1. Scope. Harbor Peak will provide AI workflow setup services.",
+      "2. Payment. Red Mesa will pay Harbor Peak $5,000.",
+      "3. Texas law.",
+      "4. Electronic signatures allowed.",
+      "",
+      "Commercial terms. ".repeat(180),
+    ].join("\n");
+    const draft = minimalParsed({
+      title: "Services Agreement",
+      jurisdiction: "Texas",
+      agreement_family: "services_agreement",
+      parties: [
+        { name: "Red Mesa", role: "Client" },
+        { name: "Harbor Peak", role: "Service Provider" },
+      ],
+    });
+    const record = establishPaidProSourceOfTruth({ text: body, draft, intakeText: intake });
+    const pick = pickAuthoritativePlainForSendHandoff(draft);
+    expect(pick?.text).toBe(record.text);
+    expect(pick?.text).toContain("Red Mesa Logistics LLC");
+    expect(pick?.text).toContain("Harbor Peak Automation LLC");
+    expect(pick?.text).not.toMatch(/\bbetween Red Mesa and Harbor Peak\b/i);
   });
 
   it("longestPlainForAgreementPersist chooses longest premium / editor / purpose", () => {

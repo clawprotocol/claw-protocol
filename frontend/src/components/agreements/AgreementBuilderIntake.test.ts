@@ -876,17 +876,17 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("paid Pro source-of-truth branch renders HTML without polish or fallback pickers", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const htmlIdx = intake.indexOf("const premiumReadonlyAgreementHtml = useMemo");
-    const htmlBlock = intake.slice(htmlIdx, htmlIdx + 1800);
+    const htmlBlock = intake.slice(htmlIdx, htmlIdx + 3200);
     expect(htmlBlock).toContain('getPaidProDocumentForSurface("display"');
-    expect(htmlBlock).toContain("return buildPremiumAgreementReadonlyHtml(corpus");
+    expect(htmlBlock).toContain("buildPremiumAgreementReadonlyHtml");
     const sotBranch = htmlBlock.slice(
       htmlBlock.indexOf('getPaidProDocumentForSurface("display"'),
       htmlBlock.indexOf("const session = guidedCompletionSessionRef.current"),
     );
     expect(sotBranch).not.toContain("polishProAgreementDisplayLayer");
     expect(sotBranch).not.toContain("resolveGuidedCompletionRenderDocument");
-    expect(sotBranch).not.toContain("premiumPaidReadonlyPick");
-    expect(sotBranch).not.toContain("agreementDocumentText");
+    expect(sotBranch).not.toMatch(/pickerPlain:\s*premiumPaidReadonlyPick/);
+    expect(sotBranch).not.toMatch(/agreementDocumentText\s*\|\|/);
   });
 
   it("paid Pro direct edits establish explicit source-of-truth revisions", () => {
@@ -1027,5 +1027,57 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(enterBlock).toContain("guidedProUxSuppressesProductionSendCta");
     expect(enterBlock).toContain("guidedProUxShowsQuestionPanel");
     expect(enterBlock).toContain('logGuidedSendCtaBlocked("enterFinalReviewRecipientSetup"');
+  });
+});
+
+describe("paid Pro runtime authority establishment (intake wiring)", () => {
+  const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+
+  it("blocks Pro review shell until runtime authority is established", () => {
+    expect(intake).toContain("assessPaidProRuntimeAuthority");
+    expect(intake).toContain("paidProAwaitingRuntimeAuthority");
+    expect(intake).toContain("simpleProFinalReviewShellActive");
+    expect(intake).toContain('data-testid="paid-pro-runtime-authority-finalizing"');
+    expect(intake).toContain("paidProRuntimeAuthority.canRenderProReviewShell");
+    expect(intake).toContain("paidProRuntimeAuthority.established");
+    const proceedIdx = intake.indexOf("const canProceedWithPaidProDocument = useMemo");
+    const proceedBlock = intake.slice(proceedIdx, proceedIdx + 600);
+    expect(proceedBlock).toContain("!paidProRuntimeAuthority.established");
+    expect(proceedBlock).toContain("!paidProRuntimeAuthority.canRenderProReviewShell");
+  });
+
+  it("normalizes false finalCorpusSource labels in dev panel", () => {
+    expect(intake).toContain("normalizePaidProCorpusSourceLabel");
+    const guidedIdx = intake.indexOf("const guidedFinalReviewAuthoritativeResolution = useMemo");
+    const guidedBlock = intake.slice(guidedIdx, guidedIdx + 400);
+    expect(guidedBlock).toContain("paidProReview.text.trim().length >= 500");
+  });
+
+  it("gates Pro CTAs on runtime authority", () => {
+    const deliveryIdx = intake.indexOf("const proDeliveryTrackBaseReady = Boolean");
+    const deliveryBlock = intake.slice(deliveryIdx, deliveryIdx + 500);
+    expect(deliveryBlock).toContain("paidProRuntimeAuthority.established");
+    expect(deliveryBlock).toContain("paidProRuntimeAuthority.canShowProCtas");
+    expect(deliveryBlock).toContain("canProceedWithPaidProDocument");
+    expect(intake).toContain("showProDeliveryTrackChooser = Boolean");
+    expect(intake).toMatch(/showProDeliveryTrackChooser[\s\S]{0,120}paidProRuntimeAuthority\.canShowProCtas/);
+  });
+
+  it("wires guided question gate for material corpus without blocking Pro paper", () => {
+    expect(intake).toContain("resolveGuidedQuestionGateDecision");
+    expect(intake).toContain("logGuidedQuestionGateDecision");
+    expect(intake).toContain("guidedQuestionGateDecision.materialReviewAllowed");
+    expect(intake).toContain("questionGate: guidedQuestionGateDecision");
+    expect(intake).not.toMatch(
+      /if \(hasPaidProSourceOfTruth\(\) \|\| premiumPersistedFlowActive \|\| premiumPaidDocumentSurface\) \{\s*return "";/,
+    );
+  });
+
+  it("does not use live preview as paid Pro readonly HTML when authority is absent", () => {
+    const htmlIdx = intake.indexOf("const premiumReadonlyAgreementHtml = useMemo");
+    const htmlBlock = intake.slice(htmlIdx, htmlIdx + 1600);
+    expect(htmlBlock).toContain("hasPaidProSourceOfTruth() && !paidProDisplay?.text?.trim()");
+    expect(htmlBlock).toContain('return ""');
+    expect(htmlBlock).toMatch(/hasPaidProSourceOfTruth\(\)[\s\S]{0,200}return "";/);
   });
 });

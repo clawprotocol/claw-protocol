@@ -1,5 +1,8 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import { canonicalizeProAgreementText } from "../../components/agreements/proAgreementCanonicalizer";
+import {
+  authoritativeDocumentForSurface,
+  logIllegalPostAcceptanceMutationAttempt,
+} from "../../components/agreements/authoritativeAgreementDocument";
 
 export type ReviewFirstDisplayCorpusSource =
   | "review_first_final_corpus"
@@ -8,6 +11,7 @@ export type ReviewFirstDisplayCorpusSource =
   | "premium_full_document_text"
   | "document_text"
   | "rendered_document_text"
+  | "authoritative_agreement_document"
   | "none";
 
 export type ReviewFirstDisplayCorpus = {
@@ -31,29 +35,52 @@ function stringField(draft: AgreementDraft, key: keyof AgreementDraft): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
-function canonicalPartyNamesFromDraft(draft: AgreementDraft): string[] {
-  return (draft.parties ?? [])
-    .map((p) => String(p?.name ?? "").trim())
-    .filter((name) => name.length >= 2)
-    .slice(0, 2);
-}
-
-function canonicalizeReviewFirstCorpus(text: string, draft: AgreementDraft): string {
-  return canonicalizeProAgreementText(text, {
-    canonicalPartyNames: canonicalPartyNamesFromDraft(draft),
-    canonicalRoles: ["Client", "Service Provider"],
-  }).text;
+function reviewRouteHashInvariant(args: {
+  text: string;
+  hash: string;
+  authoritativeHash: string;
+  userEdited?: boolean;
+}): void {
+  if (args.userEdited) return;
+  if (args.hash === args.authoritativeHash) return;
+  logIllegalPostAcceptanceMutationAttempt({
+    surface: "review_route",
+    mutation: "review_route_hash_mismatch",
+    attemptedHash: args.hash,
+    authoritativeHash: args.authoritativeHash,
+    attemptedLen: args.text.length,
+  });
+  const isTest = typeof import.meta !== "undefined" && import.meta.env?.MODE === "test";
+  const isDev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+  const isBrowser = typeof window !== "undefined";
+  if ((isTest || isDev) && !isBrowser) {
+    throw new Error("[review-route-authoritative-hash-mismatch]");
+  }
 }
 
 export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): ReviewFirstDisplayCorpus | null {
   if (!draft) return null;
+  const authoritative = authoritativeDocumentForSurface("review_route");
+  if (authoritative?.fullCorpusText) {
+    reviewRouteHashInvariant({
+      text: authoritative.fullCorpusText,
+      hash: authoritative.authoritativeHash,
+      authoritativeHash: authoritative.authoritativeHash,
+      userEdited: authoritative.explicitUserEditState.edited,
+    });
+    return {
+      text: authoritative.fullCorpusText,
+      source: "authoritative_agreement_document",
+      hash: authoritative.authoritativeHash,
+    };
+  }
   const pr = draft.pro_redline_v1;
   const rf =
     pr && typeof pr === "object" && !Array.isArray(pr)
       ? (pr as Record<string, unknown>).review_first_final_corpus
       : null;
   if (rf && typeof rf === "object" && !Array.isArray(rf)) {
-    const text = canonicalizeReviewFirstCorpus(String((rf as Record<string, unknown>).text ?? "").trim(), draft);
+    const text = String((rf as Record<string, unknown>).text ?? "").trim();
     if (text) return { text, source: "review_first_final_corpus", hash: corpusHash(text) };
   }
 
@@ -66,7 +93,7 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
     "document_text",
     "rendered_document_text",
   ] as const) {
-    const text = canonicalizeReviewFirstCorpus(stringField(draft, source).trim(), draft);
+    const text = stringField(draft, source).trim();
     if (text) return { text, source, hash: corpusHash(text) };
   }
   return null;

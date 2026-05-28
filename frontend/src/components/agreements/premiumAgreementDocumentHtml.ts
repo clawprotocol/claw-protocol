@@ -5,6 +5,7 @@
 import type { PremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion/signatureRegion";
+import { sanitizeProReviewDisplayText } from "./polishProAgreementDisplayLayer";
 
 export function escapeHtml(s: string): string {
   return (s || "")
@@ -212,6 +213,9 @@ export function buildPremiumAgreementReadonlyHtml(
   let raw = stripStarterPreviewDisclaimerFromPlainText((plain || "").replace(/\r\n/g, "\n")).trimEnd();
   if (opts.suppressCorpusEmbeddedSignatureForDisplay) {
     raw = stripCorpusSignatureRegionForExternalSignerUi(raw);
+    raw = sanitizeProReviewDisplayText(raw, {
+      source: "premium_agreement_readonly_html",
+    }).text;
   }
   const chunks = raw.split(/\n\n+/);
   const out: string[] = [];

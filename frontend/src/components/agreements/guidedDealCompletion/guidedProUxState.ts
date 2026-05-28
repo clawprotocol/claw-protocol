@@ -18,6 +18,7 @@ import {
   canProceedFromGuidedFinalReviewToSigning,
   GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN,
 } from "./guidedReviewSigningContinuity";
+import type { GuidedQuestionGateDecision } from "./guidedQuestionGate";
 
 export type GuidedProUxState =
   | "inactive"
@@ -57,6 +58,11 @@ export type ResolveGuidedProUxStateArgs = {
   guidedBulkApplying?: boolean;
   /** Split apply status — signer setup can proceed while background apply runs. */
   guidedAnswerApplyStatus?: GuidedAnswerApplyStatus;
+  /** Precomputed fatal vs optional gate — keeps material Pro review visible when only optional questions remain. */
+  questionGate?: Pick<
+    GuidedQuestionGateDecision,
+    "blocked" | "fatalCount" | "optionalCount" | "materialReviewAllowed"
+  > | null;
 };
 
 /** Guided phases where post–final-review recipient/signing UI must stay hidden. */
@@ -199,6 +205,10 @@ export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): Guid
     (args.guidedCompletionPhase === "collecting_answers" ||
       args.guidedCompletionPhase === "failed")
   ) {
+    const gate = args.questionGate;
+    if (gate?.materialReviewAllowed && gate.fatalCount === 0) {
+      return "paid_pro_draft";
+    }
     return "guided_questions_active";
   }
 
@@ -247,7 +257,16 @@ export function guidedProUxShowsSigningConfirmation(state: GuidedProUxState): bo
 }
 
 /** Hide production send / continue-to-recipient CTAs until explicit final-review send intent. */
-export function guidedProUxSuppressesProductionSendCta(state: GuidedProUxState): boolean {
+export function guidedProUxSuppressesProductionSendCta(
+  state: GuidedProUxState,
+  gate?: Pick<GuidedQuestionGateDecision, "materialReviewAllowed" | "fatalCount"> | null,
+): boolean {
+  if (gate?.materialReviewAllowed && gate.fatalCount === 0) {
+    if (state === "signer_setup_required" || state === "guided_applying_updates" || state === "updated_agreement_ready" || state === "send_intent_selected") {
+      return true;
+    }
+    return false;
+  }
   return (
     state === "guided_questions_active" ||
     state === "signer_setup_required" ||
@@ -293,7 +312,14 @@ export function resolveGuidedProStickyCta(
   pendingQuestions: number,
   signerSlotsComplete = false,
   applyStatus: GuidedAnswerApplyStatus = "idle",
+  gate?: Pick<
+    GuidedQuestionGateDecision,
+    "blocked" | "fatalCount" | "optionalCount" | "materialReviewAllowed"
+  > | null,
 ): GuidedProStickyCta | null {
+  if (gate?.materialReviewAllowed && gate.fatalCount === 0) {
+    return null;
+  }
   switch (state) {
     case "guided_questions_active":
       return {

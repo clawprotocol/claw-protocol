@@ -65,6 +65,12 @@ import {
   PLACEHOLDER_SAFETY_PREVIEW_BLOCKED,
   type PlaceholderSafetyContext,
 } from "./agreementTemplatePlaceholderSafety";
+import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolver";
+import {
+  getAuthoritativeAgreementDocument,
+  returnAuthoritativeTextForIllegalPostAcceptanceGeneration,
+} from "./authoritativeAgreementDocument";
+import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 
 const MISSING = "[Not yet specified]";
 /**
@@ -125,6 +131,14 @@ export function collapseDuplicateEsignNoticesInFullPreview(text: string): string
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd();
   return `${without}\n\n${line}\n`;
+}
+
+function stripManualExecutionBlockPreservePreviewNotice(text: string): string {
+  const raw = (text || "").replace(/\r\n/g, "\n").trimEnd();
+  const start = raw.search(/\n\s*IN WITNESS WHEREOF\b/i);
+  if (start < 0) return raw;
+  const head = raw.slice(0, start).trimEnd();
+  return collapseDuplicateEsignNoticesInFullPreview(`${head}\n\n${AGREEMENT_PREVIEW_ESIGN_NOTICE}\n`);
 }
 
 /** Remove internal expansion marker and duplicate e-sign line from free-text blocks. */
@@ -262,6 +276,95 @@ function buildTermAndScheduleSection(draft: ParsedDraftShape): string {
   if (due) parts.push(`${labels.keyDateLabel}: ${formatScheduleFragment(due)}`);
   if (!parts.length) return MISSING;
   return parts.join("\n");
+}
+
+function looksLikePaymentOnlyScope(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return false;
+  return /\b(?:pay|pays|paid|payment|fee|fees|\$\s?\d|usd|dollars?)\b/i.test(t) && !/\b(?:service|services|scope|setup|implement|workflow|deliver|provide|perform)\b/i.test(t);
+}
+
+function extractServiceDescriptionFromIntake(intakeText: string | null | undefined): string {
+  const intake = (intakeText || "").replace(/\s+/g, " ").trim();
+  if (!intake) return "";
+  const betweenMatch = intake.match(/\bbetween\b[\s\S]{0,220}?\bfor\s+([^.!?;]+)(?:[.!?;]|$)/i);
+  const candidate = (betweenMatch?.[1] || "").trim();
+  if (!candidate || looksLikePaymentOnlyScope(candidate)) return "";
+  return candidate.replace(/\bservices?\s*$/i, "").trim();
+}
+
+function isServicesAgreementLikeDraft(
+  draft: ParsedDraftShape,
+  intakeText: string | null | undefined,
+): boolean {
+  const family = String(draft.agreement_family || "").toLowerCase();
+  if (["services_agreement", "consulting_agreement", "independent_contractor_agreement"].includes(family)) {
+    return true;
+  }
+  const blob = [draft.title, draft.purpose, intakeText].filter(Boolean).join(" ");
+  return /\b(?:services?\s+agreement|consulting|contractor|provider|will\s+provide|perform|setup|implementation|workflow)\b/i.test(blob);
+}
+
+function buildStarterServicesScopeFromIntake(
+  draft: ParsedDraftShape,
+  intakeText: string | null | undefined,
+): string {
+  if (!isServicesAgreementLikeDraft(draft, intakeText)) return "";
+  const parties = draft.parties ?? [];
+  const client = (parties[0]?.name || "").trim();
+  const provider = (parties[1]?.name || "").trim();
+  const serviceDescription = extractServiceDescriptionFromIntake(intakeText);
+  if (!client || !provider || !serviceDescription) return "";
+  return `${provider} will provide ${serviceDescription} services for ${client}.`;
+}
+
+function isAiWorkflowServicesAgreement(
+  draft: ParsedDraftShape,
+  intakeText: string | null | undefined,
+): boolean {
+  if (!isServicesAgreementLikeDraft(draft, intakeText)) return false;
+  const blob = [draft.title, draft.purpose, draft.additional_terms, intakeText].filter(Boolean).join(" ");
+  return /\b(?:ai|artificial intelligence|workflow|automation|setup|implementation|integration)\b/i.test(blob);
+}
+
+function buildProServicesQualityFloorSections(args: {
+  draft: ParsedDraftShape;
+  intakeText: string | null | undefined;
+  sectionNum: number;
+  premiumDeliverable: boolean;
+}): { lines: string[]; nextSectionNum: number } {
+  if (!isAiWorkflowServicesAgreement(args.draft, args.intakeText)) {
+    return { lines: [], nextSectionNum: args.sectionNum };
+  }
+  const parties = args.draft.parties ?? [];
+  const client = finalizePartyDisplayNameForUserFacing((parties[0]?.name || "").trim(), args.intakeText ?? null) || "Client";
+  const provider =
+    finalizePartyDisplayNameForUserFacing((parties[1]?.name || "").trim(), args.intakeText ?? null) ||
+    "Service Provider";
+  const scope =
+    extractServiceDescriptionFromIntake(args.intakeText) ||
+    compressProseForStarterScope(args.draft.purpose) ||
+    "AI workflow setup";
+  let n = args.sectionNum;
+  const lines = [
+    premiumSectionHeading(n++, "Acceptance and Demonstration Review", args.premiumDeliverable),
+    `${provider} will provide a practical demonstration or review of the configured ${scope} services. ${client} will review the delivered setup in good faith and identify any material nonconformity with the agreed scope within a reasonable review period.`,
+    "",
+    premiumSectionHeading(n++, "Ownership and Work Product", args.premiumDeliverable),
+    `${client} owns final work product and deliverables specifically created for ${client} after payment of amounts due, except that ${provider} retains pre-existing tools, templates, know-how, background materials, and reusable processes. ${client} receives a license to use those retained materials as needed to use the delivered workflow setup.`,
+    "",
+    premiumSectionHeading(n++, "Confidentiality", args.premiumDeliverable),
+    renderClausePrimitive("confidentiality_basic", {}),
+    "",
+  ];
+  if (/\b(?:third[- ]party|crm|api|integration|software|platform|system|automation)\b/i.test([scope, args.intakeText].join(" "))) {
+    lines.push(
+      premiumSectionHeading(n++, "Support and Third-Party Dependencies", args.premiumDeliverable),
+      `${provider} is responsible for commercially reasonable setup support for the agreed workflow, but is not responsible for outages, permission limits, pricing changes, or feature changes in third-party systems outside ${provider}'s control. Material integrations require access, credentials, and approvals supplied by ${client}.`,
+      "",
+    );
+  }
+  return { lines, nextSectionNum: n };
 }
 
 /**
@@ -408,6 +511,8 @@ function airLongPaymentTerms(pay: string, premiumDeliverable: boolean): string {
 export type AgreementPreviewBuildOptions = {
   /** When true, compress scope text and soften weak inferred fields for the free/basic review shell. */
   starterPreview?: boolean;
+  /** Free streamline review: build starter preview even when authoritative Pro exists. */
+  freeStarterReviewPreview?: boolean;
   /**
    * Paid / full-draft path: stronger intro, extra air between major blocks, upgraded tone
    * (not used when `starterPreview` is true).
@@ -434,8 +539,9 @@ function buildOperatingAgreementPreviewText(draft: ParsedDraftShape, options?: A
   const company = operatingCompanyLabel(draft);
   const law = starterPreview ? sanitizeJurisdictionForStarterGoverningLaw(draft.jurisdiction) : nz(draft.jurisdiction);
   const purposeRaw = (draft.purpose || "").trim();
+  const starterServicesScope = starterPreview ? buildStarterServicesScopeFromIntake(draft, options?.intakeText) : "";
   const purpose = starterPreview
-    ? compressProseForStarterScope(purposeRaw) || MISSING
+    ? starterServicesScope || (looksLikePaymentOnlyScope(purposeRaw) ? "" : compressProseForStarterScope(purposeRaw)) || MISSING
     : nz(draft.purpose);
   const management = nz(draft.management_structure);
   const members = nz(draft.members_ownership_summary);
@@ -521,11 +627,12 @@ export function buildAgreementPreviewTextCore(
   const title = resolveStarterDisplayTitle(draft, options);
   const partiesBlock = partiesPreambleBlock(draft, starterPreview, options?.intakeText);
   const purposeRaw = (draft.purpose || "").trim();
+  const starterServicesScope = starterPreview ? buildStarterServicesScopeFromIntake(draft, options?.intakeText) : "";
   const purposePrepared = premiumDeliverable
     ? applyPremiumDeliverableWeakPhraseReplacements(stripPreviewEsignNoticeLines(purposeRaw))
     : purposeRaw;
   const purpose = starterPreview
-    ? compressProseForStarterScope(purposeRaw) || MISSING
+    ? starterServicesScope || (looksLikePaymentOnlyScope(purposeRaw) ? "" : compressProseForStarterScope(purposeRaw)) || MISSING
     : premiumDeliverable
       ? purposePrepared || MISSING
       : nz(draft.purpose);
@@ -622,6 +729,18 @@ export function buildAgreementPreviewTextCore(
     "",
   );
   let sectionNum = 4;
+  const proServicesQualityFloor = premiumDeliverable
+    ? buildProServicesQualityFloorSections({
+        draft,
+        intakeText: options?.intakeText,
+        sectionNum,
+        premiumDeliverable,
+      })
+    : { lines: [], nextSectionNum: sectionNum };
+  if (proServicesQualityFloor.lines.length > 0) {
+    lines.push(...proServicesQualityFloor.lines);
+    sectionNum = proServicesQualityFloor.nextSectionNum;
+  }
   if (starterMultiParty) {
     const primitiveIds = selectClausePrimitivesForIntake(options!.intakeText!, partyCount);
     if (primitiveIds.includes("confidentiality_basic")) {
@@ -655,7 +774,13 @@ export function buildAgreementPreviewTextCore(
     termNotice,
     "",
   );
-  if (starterMultiParty) {
+  if (premiumDeliverable && proServicesQualityFloor.lines.length > 0) {
+    lines.push(
+      premiumSectionHeading(sectionNum++, "Electronic Signatures", true),
+      renderClausePrimitive("electronic_signatures", {}),
+      "",
+    );
+  } else if (starterMultiParty) {
     lines.push(
       premiumSectionHeading(sectionNum++, "Electronic Signatures", false),
       renderClausePrimitive("electronic_signatures", {}),
@@ -771,12 +896,23 @@ function applyAgreementPreviewPlaceholderGate(
     }
     return display;
   }
+  const repairedIdentity = repairFullAgreementPartyIdentity({
+    text: display,
+    intakeRaw: options?.intakeText ?? null,
+    partyNames: (draft.parties || []).map((p) => p.name),
+    roleLabels: (draft.parties || []).map((p) => p.role || ""),
+  });
+  display = repairedIdentity.text;
   const gate = finalizeUserVisibleAgreementPlainText(display, placeholderCtx);
   if (!gate.ok) return PLACEHOLDER_SAFETY_PREVIEW_BLOCKED;
-  if (tier === "starter" && !starterPreviewHasParagraphSectionBreaks(gate.text)) {
-    return formatStarterPreviewForDisplay(gate.text);
+  const signatureStripped =
+    surface === "preview_structured" || surface === "preview_starter"
+      ? stripManualExecutionBlockPreservePreviewNotice(gate.text)
+      : gate.text;
+  if (tier === "starter" && !starterPreviewHasParagraphSectionBreaks(signatureStripped)) {
+    return formatStarterPreviewForDisplay(signatureStripped);
   }
-  return gate.text;
+  return signatureStripped;
 }
 
 /** Production review UI entry for free/starter tier — always paragraph-preserving. */
@@ -790,8 +926,27 @@ export function buildStarterAgreementPreviewForReview(
       : draft;
   return buildAgreementPreviewText(
     { ...draftForBuild },
-    { ...options, starterPreview: true, premiumDeliverablePreview: false },
+    { ...options, starterPreview: true, premiumDeliverablePreview: false, freeStarterReviewPreview: true },
   );
+}
+
+function repairStarterCommercialReadinessDisplay(
+  text: string,
+  draft: ParsedDraftShape,
+  options?: AgreementPreviewBuildOptions,
+): string {
+  let out = (text || "").trim();
+  out = out.replace(
+    /This Agreement\s*\((["“])Agreement(["”])\)\s+is\s+This Agreement is between/gi,
+    "This Agreement ($1Agreement$2) is between",
+  );
+  if (isServicesAgreementLikeDraft(draft, options?.intakeText)) {
+    out = out.replace(
+      /\[Not yet specified\]/gi,
+      "The services begin on the effective date and continue until completed or terminated under this Agreement.",
+    );
+  }
+  return out;
 }
 
 /**
@@ -803,6 +958,14 @@ export function buildAgreementPreviewText(
   options?: AgreementPreviewBuildOptions,
 ): string {
   const starterPreview = Boolean(options?.starterPreview);
+  const freeStarterReviewPreview = Boolean(options?.freeStarterReviewPreview);
+  const authoritative = getAuthoritativeAgreementDocument();
+  if (authoritative?.fullCorpusText && !starterPreview) {
+    return authoritative.fullCorpusText;
+  }
+  if (authoritative?.fullCorpusText && starterPreview && !freeStarterReviewPreview) {
+    return authoritative.fullCorpusText;
+  }
   const premiumDeliverable = Boolean(options?.premiumDeliverablePreview) && !starterPreview;
   const draftForBuild =
     starterPreview && (options?.intakeText || "").trim().length > 0
@@ -821,14 +984,51 @@ export function buildAgreementPreviewText(
     if (import.meta.env.DEV) emitPremiumRenderResolveLog(res);
     let collapsed = collapseDuplicateEsignNoticesInFullPreview(stripCanonicalCommitMarker(res.text));
     collapsed = stripDuplicateSignatureBlocksForPreview(collapsed).text;
+    collapsed = collapseDuplicateEsignNoticesInFullPreview(`${collapsed}\n\n${AGREEMENT_PREVIEW_ESIGN_NOTICE}\n`);
     const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(collapsed, draftForBuild, options?.intakeText ?? null);
-    return applyAgreementPreviewPlaceholderGate(hydrated, draftForBuild, options, "preview_premium_deliverable");
+    let display = applyAgreementPreviewPlaceholderGate(hydrated, draftForBuild, options, "preview_premium_deliverable");
+    if (!display.includes(AGREEMENT_PREVIEW_ESIGN_NOTICE)) {
+      display = collapseDuplicateEsignNoticesInFullPreview(`${display}\n\n${AGREEMENT_PREVIEW_ESIGN_NOTICE}\n`);
+    }
+    return returnAuthoritativeTextForIllegalPostAcceptanceGeneration({
+      surface: "preview_premium_deliverable",
+      builder: "buildAgreementPreviewText",
+      generatedText: display,
+    });
   }
   const core = buildAgreementPreviewTextCore(draftForBuild, options);
-  if (starterPreview) return applyAgreementPreviewPlaceholderGate(core, draftForBuild, options, "preview_starter");
+  if (starterPreview) {
+    const gated = applyAgreementPreviewPlaceholderGate(core, draftForBuild, options, "preview_starter");
+    const display = repairStarterCommercialReadinessDisplay(gated, draftForBuild, options);
+    logLawdogOutputPathMap({
+      stage: "free_preview",
+      source: "starter_preview",
+      text: display,
+      canMutateBody: true,
+      canRejectBody: true,
+      canFallback: false,
+      reason: "free_starter_review_display",
+    });
+    return returnAuthoritativeTextForIllegalPostAcceptanceGeneration({
+      surface: "preview_starter",
+      builder: "buildAgreementPreviewText",
+      generatedText: display,
+      allowBeforeAcceptance: false,
+    });
+  }
   if (textContainsUnresolvedIdentityPlaceholders(core)) {
     const hydrated = hydrateIdentityPlaceholdersInAgreementPreviewPlain(core, draftForBuild, options?.intakeText ?? null);
-    return applyAgreementPreviewPlaceholderGate(hydrated, draftForBuild, options, "preview_structured_hydrated");
+    const display = applyAgreementPreviewPlaceholderGate(hydrated, draftForBuild, options, "preview_structured_hydrated");
+    return returnAuthoritativeTextForIllegalPostAcceptanceGeneration({
+      surface: "preview_structured_hydrated",
+      builder: "buildAgreementPreviewText",
+      generatedText: display,
+    });
   }
-  return applyAgreementPreviewPlaceholderGate(core, draftForBuild, options, "preview_structured");
+  const display = applyAgreementPreviewPlaceholderGate(core, draftForBuild, options, "preview_structured");
+  return returnAuthoritativeTextForIllegalPostAcceptanceGeneration({
+    surface: "preview_structured",
+    builder: "buildAgreementPreviewText",
+    generatedText: display,
+  });
 }

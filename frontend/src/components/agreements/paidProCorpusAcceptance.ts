@@ -21,6 +21,11 @@ import {
 import { rejectDevContextLeakInPremiumBody } from "./premiumOutputDevContextGuard";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
 import { isLongCommerciallyUsablePremiumBody } from "./premiumAcceptancePolicy";
+import {
+  assessConciseCommercialServicesProQuality,
+  logPaidProValidationDecision,
+  validateProMinimumSubstance,
+} from "./paidProConciseServicesQuality";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -193,6 +198,25 @@ export function validatePaidProOutput(args: {
 }): { ok: boolean; reasons: string[] } {
   const t = args.text || "";
   const rawI = String(args.rawIntake || "");
+  const pipelineSource = args.premiumPipelineSource ?? null;
+  const serverFullDocExists = isAuthoritativePremiumPipelineProvenance(pipelineSource);
+  const conciseQuality = assessConciseCommercialServicesProQuality({
+    text: t,
+    rawIntake: rawI,
+    draft: args.draft ?? null,
+    agreementValidation: args.agreementValidation ?? null,
+  });
+  const logDecision = (accepted: boolean, reasons: string[]) => {
+    logPaidProValidationDecision({
+      accepted,
+      reasons,
+      docLen: t.length,
+      source: pipelineSource,
+      serverFullDocExists,
+      requiredFactsFound: conciseQuality.requiredFactsFound,
+      requiredFactsMissing: conciseQuality.requiredFactsMissing,
+    });
+  };
   logPremiumValidationSource({
     originalIntake: rawI,
     paidDocText: t,
@@ -239,9 +263,24 @@ export function validatePaidProOutput(args: {
   const dcl = rejectDevContextLeakInPremiumBody(t);
   if (!dcl.ok) {
     logVpaidDevFail(dcl.reasons);
+    logDecision(false, dcl.reasons);
     return dcl;
   }
   const intakeLower = rawI.toLowerCase();
+  const minimumSubstance = validateProMinimumSubstance({
+    text: t,
+    rawIntake: rawI,
+    draft: args.draft ?? null,
+    source: pipelineSource,
+  });
+  if (minimumSubstance.applies && !minimumSubstance.ok) {
+    const reasons = minimumSubstance.missingSections.length
+      ? minimumSubstance.missingSections.map((s) => `minimum_substance_missing:${s}`)
+      : ["minimum_substance_failed"];
+    logVpaidDevFail(reasons);
+    logDecision(false, reasons);
+    return { ok: false, reasons };
+  }
   const acc = rejectPremiumBodyForProRender(t, {
     intakeLower,
     intakeText: args.rawIntake,
@@ -249,19 +288,27 @@ export function validatePaidProOutput(args: {
   });
   if (!acc.ok) {
     logVpaidDevFail(acc.reasons);
+    logDecision(false, acc.reasons);
     return acc;
   }
   const s = rejectPaidProStitchedOrThinShell(t, intakeLower);
   if (!s.ok) {
-    logVpaidDevFail(s.reasons);
-    return s;
+    if (conciseQuality.applies && conciseQuality.ok && serverFullDocExists) {
+      /* concise commercial services server body — not a stitched starter shell */
+    } else {
+      logVpaidDevFail(s.reasons);
+      logDecision(false, s.reasons);
+      return s;
+    }
   }
   const drift = rejectProUpgradeSourceFactDrift(t, { intakeLower });
   if (!drift.ok) {
     logVpaidDevFail(drift.reasons);
+    logDecision(false, drift.reasons);
     return drift;
   }
   if (args.intentContractMode === "base_only") {
+    logDecision(true, []);
     return { ok: true, reasons: [] };
   }
   const resolvedIntentContract = resolvePaidProIntentContract({
@@ -280,7 +327,12 @@ export function validatePaidProOutput(args: {
       agreementValidation: args.agreementValidation ?? null,
     });
     if (!vi.ok) {
+      if (conciseQuality.applies && conciseQuality.ok && serverFullDocExists) {
+        logDecision(true, ["concise_commercial_services_override"]);
+        return { ok: true, reasons: [] };
+      }
       logVpaidDevFail(vi.reasons);
+      logDecision(false, vi.reasons);
       return { ok: false, reasons: vi.reasons };
     }
   } else if (import.meta.env.MODE !== "test" && !args.skipFounderTitleCheck && isFounderEquityVestingIntent(args.rawIntake)) {
@@ -290,9 +342,17 @@ export function validatePaidProOutput(args: {
     );
     if (!hasRequiredFounderPremiumTitle(titleG, t)) {
       logVpaidDevFail(["founder_premium_title_phrase_required"]);
+      logDecision(false, ["founder_premium_title_phrase_required"]);
       return { ok: false, reasons: ["founder_premium_title_phrase_required"] };
     }
   }
+  if (conciseQuality.malformedOpening) {
+    const reasons = ["concise_services_malformed_opening"];
+    logVpaidDevFail(reasons);
+    logDecision(false, reasons);
+    return { ok: false, reasons };
+  }
+  logDecision(true, conciseQuality.applies && conciseQuality.ok ? ["concise_commercial_services"] : []);
   return { ok: true, reasons: [] };
 }
 

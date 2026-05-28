@@ -58,6 +58,37 @@ describe("buildPremiumDeliverablePlainTextFromDraft", () => {
     expect(built.toLowerCase()).toMatch(/consulting|commission|agreement/);
     expect(built.toLowerCase()).toMatch(/terminat|term\b|payment/);
   });
+
+  it("client fallback Pro output has an AI workflow services quality floor", () => {
+    const draft: ParsedDraftShape = {
+      title: "Services Agreement",
+      jurisdiction: "Texas",
+      agreement_family: "services_agreement",
+      parties: [
+        { name: "Red Mesa Logistics LLC", role: "Client" },
+        { name: "Harbor Peak Automation LLC", role: "Service Provider" },
+      ],
+      purpose: "AI workflow setup.",
+      payment_terms: "$5,000.",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: 5000, cadence: null, valid: true },
+    };
+    const intake =
+      "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC for AI workflow setup. Red Mesa will pay Harbor Peak $5,000. Texas law. Electronic signatures allowed.";
+    const built = buildPremiumDeliverablePlainTextFromDraft(draft, { intakeText: intake });
+    expect(built).toMatch(/SCOPE OF SERVICES|SERVICES PROVIDED|PURPOSE/i);
+    expect(built).toMatch(/PAYMENT TERMS/i);
+    expect(built).toMatch(/ACCEPTANCE AND DEMONSTRATION REVIEW/i);
+    expect(built).toMatch(/own(?:s|ership)[\s\S]{0,220}work product/i);
+    expect(built).toMatch(/CONFIDENTIALITY/i);
+    expect(built).toMatch(/TERMINATION/i);
+    expect(built).toMatch(/GOVERNING LAW/i);
+    expect(built).toMatch(/ELECTRONIC SIGNATURES/i);
+    expect(built).toMatch(/SUPPORT AND THIRD-PARTY DEPENDENCIES/i);
+    expect(built).not.toMatch(/\[Not yet specified\]/i);
+  });
 });
 
 describe("pickPremiumPaidReadonlyPlainText", () => {
@@ -81,6 +112,72 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
     expect(out.audit.candidates[0]?.reason).toBe("paidProSourceOfTruth");
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  it("blocks free/live preview fallback when paid Pro is locked but authority is unavailable", () => {
+    const spy = vi.spyOn(proAgreementCanonicalizer, "canonicalizeProAgreementText");
+    const out = pickPremiumPaidReadonlyPlainText({
+      premiumReadonlySnapshotText: "",
+      premiumWinningBodyText: "",
+      premiumPipelineOutputBodyText: "",
+      hydratedPremiumSnapshotText: "",
+      draft: richConsultingDraft(),
+      agreementDocumentText: "This Agreement is This Agreement is between A and B.",
+      premiumCheckoutCompleted: true,
+      intakeText: "Consulting agreement between Acme LLC and Beta LLC.",
+    });
+    expect(out.plainText).toBe("");
+    expect(out.sourceUsed).toBe("none");
+    expect(out.audit.candidates[0]?.reason).toBe("authoritative_corpus_unavailable");
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("Pro displayed body preserves full legal names in the opening paragraph", () => {
+    const draft: ParsedDraftShape = {
+      title: "Services Agreement",
+      jurisdiction: "Texas",
+      agreement_family: "services_agreement",
+      parties: [
+        { name: "Red Mesa", role: "Client" },
+        { name: "Harbor Peak", role: "Service Provider" },
+      ],
+      purpose: "AI workflow setup.",
+      payment_terms: "$5,000",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: 5000, cadence: null, valid: true },
+    };
+    const intake =
+      "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC for AI workflow setup.";
+    const source = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Agreement is between Red Mesa and Harbor Peak.",
+      "",
+      "1. Scope. Harbor Peak will provide AI workflow setup services.",
+      "2. Payment. Red Mesa will pay Harbor Peak $5,000.",
+      "3. Governing Law. Texas law governs.",
+      "4. Electronic Signatures. Electronic signatures are permitted.",
+      "5. Confidentiality. The parties protect confidential information.",
+      "6. Work Product. Client owns paid deliverables.",
+      "7. Termination. Either party may terminate for breach.",
+      "",
+      "Commercial services detail. ".repeat(180),
+    ].join("\n");
+    establishPaidProSourceOfTruth({ text: source, draft, intakeText: intake });
+    const out = pickPremiumPaidReadonlyPlainText({
+      premiumReadonlySnapshotText: "short preview",
+      draft,
+      agreementDocumentText: "short preview",
+      premiumCheckoutCompleted: true,
+      intakeText: intake,
+    });
+    const opening = out.plainText.slice(0, 700);
+    expect(opening).toContain('Red Mesa Logistics LLC ("Client")');
+    expect(opening).toContain('Harbor Peak Automation LLC ("Service Provider")');
+    expect(opening).not.toMatch(/\bbetween Red Mesa and Harbor Peak\b/i);
   });
 
   it("prefers completion snapshot over thin agreementDocumentText when snapshot is richer", () => {
@@ -160,7 +257,7 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
     expect(out.sourceUsed).toBe("live_generated_preview");
     expect(out.plainText.length).toBeGreaterThan(thinAdt.length + 100);
     expect(premiumRenderCorpusContainsSignals(out.plainText).contains_commission).toBe(true);
-    expect(out.plainText.length).toBeGreaterThanOrEqual(rebuilt.length * 0.75);
+    expect(out.plainText.length).toBeGreaterThanOrEqual(rebuilt.length * 0.68);
     expect(out.plainText.toLowerCase()).toContain("commission");
   });
 

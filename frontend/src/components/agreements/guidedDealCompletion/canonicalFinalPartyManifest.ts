@@ -13,6 +13,7 @@ import {
   type PremiumRecipientHandoffV2,
 } from "../premiumPartyNamesHandoff";
 import type { ResolveGuidedPreReviewSignerSlotsArgs } from "./resolveGuidedPreReviewSignerSlots";
+import { resolveSignerSetupPartyIdentity } from "../signerSetupPartyIdentity";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
 import { isIndividualPartyName } from "./signerPartyIdentity";
 
@@ -98,16 +99,19 @@ function roleForIndex(index: number, roleLabel?: string): CanonicalFinalPartyRol
 function resolvePartyNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, index: number): string {
   const handoff = args.handoff ?? readPremiumRecipientHandoff();
   const slot = handoff ? linearPremiumRecipientSlots(handoff, Math.max(args.partyCount, 2))[index] : undefined;
-  const recipientDisplay = index === 0 ? args.recipient1Name : index === 1 ? args.recipient2Name : "";
+  const identity = resolveSignerSetupPartyIdentity({
+    partyIndex: index,
+    draftPartyName: args.draftPartyNames[index],
+    recipientDisplayName: "",
+    handoffName: slot?.name,
+    draftPartyNames: args.draftPartyNames,
+    log: false,
+  });
+  const legal = usablePartyName(identity.legalEntityName);
+  if (legal) return legal;
+
   const signerRef = usablePartyName((args.partySignerNames[index] ?? "").trim());
   const signerHandoff = usablePartyName(signerMetadataInputRaw(slot?.signerName));
-  const handoffName = usablePartyName(slot?.name ?? "");
-  const draftName = usablePartyName((args.draftPartyNames[index] ?? "").trim());
-  const recipientName = usablePartyName(recipientDisplay);
-
-  if (recipientName) return recipientName;
-  if (handoffName) return handoffName;
-  if (draftName) return draftName;
   // Client/sender slot: never promote human representative to legal entity party name.
   if (index === 0) return "";
   if (signerRef && isIndividualPartyName(signerRef)) return signerRef;

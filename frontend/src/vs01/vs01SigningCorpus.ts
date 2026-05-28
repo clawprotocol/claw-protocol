@@ -4,10 +4,8 @@
 
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
-import {
-  pickAuthoritativePlainForSendHandoff,
-  SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
-} from "../components/agreements/sendHandoffAuthoritativeCorpus";
+import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "../components/agreements/paidProAuthorityConstants";
+import { pickAuthoritativePlainForSendHandoff } from "../components/agreements/sendHandoffAuthoritativeCorpus";
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "../components/agreements/simpleProFinalReviewCorpus";
 import { stripStaleExecutionPlacementCorpusCopy } from "../components/agreements/guidedDealCompletion/guidedCorpusLineRepairs";
 import {
@@ -38,6 +36,8 @@ import {
 } from "../components/agreements/acceptedPremiumCanonicalCorpus";
 import { readCanonicalAgreementCorpusForSurface } from "../components/agreements/canonicalAgreementSnapshot";
 import { getPaidProDocumentForSurface } from "../components/agreements/paidProSourceOfTruth";
+import { requireAuthoritativeCorpusForSurface } from "../components/agreements/authoritativeAgreementDocument";
+import { logLawdogOutputPathMap } from "../components/agreements/lawdogOutputPathMap";
 
 export const VS01_SIGNING_CORPUS_MIN_LEN = GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 /** Preferred final guided Pro corpus length (test59 / full premium snapshot). */
@@ -414,7 +414,7 @@ export function resolveFinalVs01CorpusOrBlock(
       ? getAcceptedPremiumCorpusForVs01Signing({ draft: (args.draft ?? null) as never }).trim()
       : (args.acceptedAuthoritativePlain ?? "").trim()
   );
-  if (paidProVs01 && acceptedAuthoritative.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
+  if ((paidProVs01 || args.premiumAccepted) && acceptedAuthoritative.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
     const hash = fingerprintAgreementBody(acceptedAuthoritative);
     const witnessRequirement = resolveVs01WitnessRequirement({
       corpusText: acceptedAuthoritative,
@@ -436,7 +436,7 @@ export function resolveFinalVs01CorpusOrBlock(
     });
     const resolution: FinalVs01CorpusResolution = {
       corpus: acceptedAuthoritative,
-      source: "paidProSourceOfTruth",
+      source: paidProVs01 ? "paidProSourceOfTruth" : "premium_pipeline",
       len: acceptedAuthoritative.length,
       hash,
       matchesFreeHash: false,
@@ -461,7 +461,7 @@ export function resolveFinalVs01CorpusOrBlock(
       userMessage: allowed ? undefined : VS01_CORPUS_GATE_USER_MESSAGE,
     };
     logVs01CorpusGateSelectedFinal({
-      source: "paidProSourceOfTruth",
+      source: resolution.source,
       len: resolution.len,
       hash: resolution.hash,
       allowed: resolution.allowed,
@@ -469,6 +469,35 @@ export function resolveFinalVs01CorpusOrBlock(
       skippedIntegrityRepair: true,
     });
     return resolution;
+  }
+  if (args.premiumAccepted) {
+    requireAuthoritativeCorpusForSurface({
+      surface: "vs01_signing",
+      source: "vs01_signing_corpus",
+      renderedText: acceptedAuthoritative,
+      paidProAccepted: true,
+      minLen: VS01_SIGNING_CORPUS_MIN_LEN,
+    });
+    return {
+      corpus: "",
+      source: "blocked_short_preview",
+      len: 0,
+      hash: "",
+      matchesFreeHash: false,
+      isFreeHashMatch: false,
+      hasWitnessBlock: false,
+      requiresSignatureBlock: true,
+      requiresWitness: false,
+      witnessReason: null,
+      hasBySignatureLines: false,
+      hasByOrSignatureLines: false,
+      signerCount,
+      allowed: false,
+      blockReason: "authoritative_corpus_unavailable",
+      premiumInProgress,
+      premiumComplete: false,
+      userMessage: VS01_CORPUS_GATE_USER_MESSAGE,
+    };
   }
   const handoffTrusted =
     handoff &&
@@ -713,6 +742,16 @@ export function resolveFinalVs01CorpusOrBlock(
   } else {
     logVs01CorpusGateBlocked(gatePayload);
   }
+
+  logLawdogOutputPathMap({
+    stage: "vs01_signing",
+    source,
+    text: corpus,
+    canMutateBody: false,
+    canRejectBody: true,
+    canFallback: false,
+    reason: allowed ? "vs01_authoritative_corpus_allowed" : blockReason ?? "vs01_blocked",
+  });
 
   return resolution;
 }

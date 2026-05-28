@@ -10,6 +10,7 @@ import {
 } from "./founderIntentRouter";
 import { extractIntakePayment, hasExplicitPerInstallmentAmountInIntake, normalizeCurrency } from "./intakeCurrencyParse";
 import { isLikelyFiveSectionStarterShellPro } from "./premiumFullDraftClientAcceptance";
+import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
 
 const FOUNDRY_CUES = /\b(60\s*\/\s*40|40\s*\/\s*60|vesting|founder equity|cap table|four-?year|cliff|accelerat)/i;
 /** Estate/family context only — exclude modal “will” (e.g. “Party A will pay”). */
@@ -307,7 +308,7 @@ export function intakeHasEstateFamilyContext(raw: string | null | undefined): bo
   return ESTATE.test(collapse((raw || "").replace(/\r\n/g, "\n")));
 }
 
-type ValidationMinimumElementsInput = {
+export type ValidationMinimumElementsInput = {
   passed?: boolean;
   minimum_contract_elements?: {
     identifiable_parties?: boolean;
@@ -777,6 +778,14 @@ export function validateIntentContractForPaidProOutput(args: {
         hasOperativeProDepth(hay, docLen, 2_500)
       ) {
         /* Validation-backed minimalist commercial services / software Pro */
+      } else if (
+        assessConciseCommercialServicesProQuality({
+          text,
+          rawIntake: args.rawIntake,
+          agreementValidation: args.agreementValidation ?? null,
+        }).ok
+      ) {
+        /* Concise commercial services with required deal facts (Red Mesa-class) */
       } else {
         return { ok: false, reasons: [`intent:insufficient_operative_substance:${c.intent_id}`] };
       }

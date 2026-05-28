@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import { assertNoBareProSkeletonClauses, SUE_LEE_QA_BAD_CORPUS } from "../../components/agreements/proCorpusSkeletonSafety";
+import { SUE_LEE_QA_BAD_CORPUS } from "../../components/agreements/proCorpusSkeletonSafety";
+import {
+  clearAuthoritativeAgreementDocument,
+  establishAuthoritativeAgreementDocument,
+} from "../../components/agreements/authoritativeAgreementDocument";
+import * as proAgreementCanonicalizer from "../../components/agreements/proAgreementCanonicalizer";
 import { resolveReviewFirstDisplayCorpus } from "./reviewFirstDisplayCorpus";
 
 function draft(overrides: Partial<AgreementDraft>): AgreementDraft {
@@ -23,6 +28,11 @@ function draft(overrides: Partial<AgreementDraft>): AgreementDraft {
 }
 
 describe("reviewFirstDisplayCorpus", () => {
+  afterEach(() => {
+    clearAuthoritativeAgreementDocument();
+    vi.restoreAllMocks();
+  });
+
   it("prefers stored review-first final corpus over rebuilt draft fields", () => {
     const resolved = resolveReviewFirstDisplayCorpus(
       draft({
@@ -53,7 +63,8 @@ describe("reviewFirstDisplayCorpus", () => {
     ).toBe("server_full_document_text");
   });
 
-  it("canonicalizes review-first display corpus with no bare skeleton clauses", () => {
+  it("renders review-first display corpus unchanged without structural canonicalization", () => {
+    const spy = vi.spyOn(proAgreementCanonicalizer, "canonicalizeProAgreementText");
     const resolved = resolveReviewFirstDisplayCorpus(
       draft({
         parties: [
@@ -68,6 +79,32 @@ describe("reviewFirstDisplayCorpus", () => {
       }),
     );
     expect(resolved?.text).toBeTruthy();
-    expect(assertNoBareProSkeletonClauses(resolved?.text ?? "").ok).toBe(true);
+    expect(resolved?.text).toBe(SUE_LEE_QA_BAD_CORPUS.trim());
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("post-acceptance review route renders authoritative corpus unchanged", () => {
+    const authoritative = "AUTHORITATIVE ACCEPTED PRO BODY. ".repeat(40);
+    const record = establishAuthoritativeAgreementDocument({
+      fullCorpusText: authoritative,
+      canonicalPartyManifest: [
+        { name: "Red Mesa Logistics LLC", role: "Client" },
+        { name: "Harbor Peak Automation LLC", role: "Service Provider" },
+      ],
+    });
+    const spy = vi.spyOn(proAgreementCanonicalizer, "canonicalizeProAgreementText");
+    const resolved = resolveReviewFirstDisplayCorpus(
+      draft({
+        premium_render_source: "review_first_final_corpus",
+        server_full_document_text: "MUTATED SERVER FALLBACK",
+        pro_redline_v1: {
+          review_first_final_corpus: { text: "MUTATED REVIEW FALLBACK" },
+        },
+      }),
+    );
+    expect(resolved?.source).toBe("authoritative_agreement_document");
+    expect(resolved?.text).toBe(record.fullCorpusText);
+    expect(resolved?.hash).toBe(record.authoritativeHash);
+    expect(spy).not.toHaveBeenCalled();
   });
 });

@@ -10,6 +10,10 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   applyAcceptedProCorpusSafeDisplay,
 } from "./acceptedProCorpusSafeDisplay";
+import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
+import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import { logFalseProAuthorityBlocked } from "./paidProRuntimeAuthorityEstablishment";
+import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 import {
   buildCanonicalAgreementSnapshot,
   clearFrozenCanonicalAgreementCorpus,
@@ -18,6 +22,16 @@ import {
   type CanonicalAgreementSnapshotParty,
 } from "./canonicalAgreementSnapshot";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import {
+  enforceAuthoritativeProCorpusDisplay,
+  logProCorpusSourceMap,
+} from "./proCorpusSourcePath";
+import {
+  authoritativeDocumentForSurface,
+  clearAuthoritativeAgreementDocument,
+  establishAuthoritativeAgreementDocument,
+  hydrateAuthoritativeAgreementDocument,
+} from "./authoritativeAgreementDocument";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -76,6 +90,7 @@ export function hashPaidProCorpus(text: string): string {
 
 export function clearPaidProSourceOfTruth(): void {
   paidProSourceOfTruth = null;
+  clearAuthoritativeAgreementDocument();
   clearFrozenCanonicalAgreementCorpus();
 }
 
@@ -99,10 +114,40 @@ export function establishPaidProSourceOfTruth(args: {
   intakeText?: string | null;
   reviewSessionId?: string | null;
 }): PaidProSourceOfTruth {
+  logProCorpusSourceMap({
+    stage: "server_full_draft_received",
+    source: args.source ?? "server_full_draft",
+    len: trim(args.text).length,
+    text: args.text,
+    allowedToOverride: false,
+    reason: "establish_paid_pro_source_of_truth",
+  });
   const safe = applyAcceptedProCorpusSafeDisplay(args.text, {
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
   }).text;
+  const minimumSubstance = validateProMinimumSubstance({
+    text: args.text,
+    rawIntake: args.intakeText ?? "",
+    draft: args.draft ?? null,
+    source: args.source ?? "server_full_draft",
+  });
+  const intakeHasConcreteServicesFacts =
+    /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.intakeText ?? "") &&
+    /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.draft?.purpose ?? "");
+  if (minimumSubstance.applies && !minimumSubstance.ok && intakeHasConcreteServicesFacts) {
+    throw new Error(
+      `[pro-minimum-substance-blocked] missingSections=${minimumSubstance.missingSections.join(",") || "unknown"}`,
+    );
+  }
+  logProCorpusSourceMap({
+    stage: "client_gates_passed",
+    source: args.source ?? "server_full_draft",
+    len: safe.length,
+    text: safe,
+    allowedToOverride: false,
+    reason: "accepted_pro_corpus_safe_display",
+  });
   const parties: CanonicalAgreementSnapshotParty[] = (args.draft?.parties ?? [])
     .map((p) => ({
       name: String(p?.name ?? "").trim(),
@@ -124,15 +169,56 @@ export function establishPaidProSourceOfTruth(args: {
     reviewSessionId: args.reviewSessionId,
   });
   const frozen = freezeCanonicalAgreementSnapshot(snapshot, "server_full_document_text");
+  const frozenText = frozen?.canonicalText ?? safe;
+  const driftGuard = enforceAuthoritativeProCorpusDisplay({
+    authoritativeText: safe,
+    displayText: frozenText,
+    source: "canonical_freeze",
+    surface: "paid_pro_source_of_truth_establish",
+  });
+  logProCorpusSourceMap({
+    stage: "authoritative_pro_freeze",
+    source: "server_full_draft",
+    len: driftGuard.displayText.length,
+    text: driftGuard.displayText,
+    hash: frozen?.hash ?? hashPaidProCorpus(driftGuard.displayText),
+    allowedToOverride: false,
+    reason: driftGuard.blocked ? "drift_blocked_used_authoritative" : "canonical_freeze",
+  });
   const record: PaidProSourceOfTruth = {
-    text: frozen?.canonicalText ?? safe,
-    hash: frozen?.hash ?? hashPaidProCorpus(safe),
+    text: driftGuard.displayText,
+    hash: hashPaidProCorpus(driftGuard.displayText),
     accepted_at: args.accepted_at ?? Date.now(),
     source: args.source ?? "server_full_draft",
     reviewSessionId: frozen?.reviewSessionId,
     signerManifestHash: frozen?.signerManifestHash,
   };
+  logLawdogOutputPathMap({
+    stage: "paid_pro_freeze",
+    source: record.source,
+    text: record.text,
+    canMutateBody: false,
+    canRejectBody: true,
+    canFallback: false,
+    reason: "authoritative_source_of_truth_established",
+  });
   paidProSourceOfTruth = record;
+  establishAuthoritativeAgreementDocument({
+    fullCorpusText: record.text,
+    canonicalPartyManifest: frozen?.signerManifest ?? parties,
+    agreementMetadata: {
+      title: args.draft?.title ?? null,
+      agreementFamily: args.draft?.agreement_family ?? null,
+      jurisdiction: args.draft?.jurisdiction ?? null,
+      reviewSessionId: record.reviewSessionId ?? null,
+    },
+    generationMetadata: {
+      source: "server_full_draft",
+      acceptedAt: record.accepted_at,
+      pipelineSource: args.source ?? "server_full_draft",
+      rawAcceptedLen: trim(args.text).length,
+    },
+  });
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
     console.info("[paid-pro-source-of-truth]", {
@@ -172,6 +258,15 @@ export function hydratePaidProSourceOfTruth(args: {
     signerManifestHash: frozen?.signerManifestHash,
   };
   paidProSourceOfTruth = record;
+  hydrateAuthoritativeAgreementDocument({
+    fullCorpusText: record.text,
+    authoritativeHash: record.hash,
+    canonicalPartyManifest: frozen?.signerManifest ?? [],
+    agreementMetadata: {
+      reviewSessionId: record.reviewSessionId ?? null,
+    },
+    acceptedAt: record.accepted_at,
+  });
   return record;
 }
 
@@ -193,11 +288,46 @@ export function getPaidProDocumentForSurface(
 ): PaidProDocumentForSurface | null {
   const source = getPaidProSourceOfTruth();
   if (!source) return null;
+  const authoritative = authoritativeDocumentForSurface(surface);
   const canonical = readCanonicalAgreementCorpusForSurface(surface === "signer_setup" ? "handoff" : surface, {
     required: true,
   });
-  const text = canonical?.canonicalText ?? source.text;
-  const hash = canonical?.hash ?? hashPaidProCorpus(text);
+  let text = authoritative?.fullCorpusText ?? canonical?.canonicalText ?? source.text;
+  const driftGuard = enforceAuthoritativeProCorpusDisplay({
+    authoritativeText: source.text,
+    displayText: text,
+    source: canonical?.sourceLabel ?? "canonical_surface_read",
+    surface,
+  });
+  text = driftGuard.displayText;
+  if (text.length < PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
+    logFalseProAuthorityBlocked({
+      source: "paidProSourceOfTruth",
+      corpusLen: text.length,
+      surface: `paid_pro_surface:${surface}`,
+    });
+    return null;
+  }
+  const hash = hashPaidProCorpus(text);
+  const stage =
+    surface === "review"
+      ? "pro_review_display"
+      : surface === "signer_setup"
+        ? "signature_prep_base"
+        : surface === "vs01"
+          ? "vs01_base"
+          : surface === "copy"
+            ? "review_link_payload"
+            : "pro_review_display";
+  logProCorpusSourceMap({
+    stage,
+    source: "paidProSourceOfTruth",
+    len: text.length,
+    text,
+    hash,
+    allowedToOverride: false,
+    reason: `surface:${surface}`,
+  });
   const executionBlockAppended = false;
   assertPaidProSurfaceCorpus({
     surface,

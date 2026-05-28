@@ -10,6 +10,7 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import { neutralizeHarmlessEntityMetadataPlaceholders } from "./harmlessEntityMetadataPlaceholders";
+import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolver";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -77,6 +78,18 @@ export function applyAcceptedProCorpusSafeDisplay(
   const intakeRaw = opts?.intakeText ?? null;
   const hasFullLegal = intakeHasFullLegalEntityParties(intakeRaw, partyNames);
   const records = hasFullLegal ? resolveCanonicalPartyIdentitiesFromIntake(intakeRaw, partyNames) : [];
+
+  if (hasFullLegal && records.length >= 2) {
+    const partyRepair = repairFullAgreementPartyIdentity({
+      text: out,
+      intakeRaw,
+      partyNames: records.map((r) => r.fullLegalName),
+    });
+    if (partyRepair.text !== out) {
+      out = partyRepair.text;
+      repairs.push(...partyRepair.repairs);
+    }
+  }
 
   if (opts?.appendExecutionBlockIfMissing && records.length >= 2) {
     const exec = appendProExecutionBlockIfMissing(out, records);

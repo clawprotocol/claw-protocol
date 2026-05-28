@@ -12,6 +12,7 @@ import {
   type PaidProCorpusAuthorityTier,
 } from "./paidProCorpusAuthority";
 import {
+  isForbiddenPaidProDisplayRenderSource,
   isPremiumGenerationApiUnavailablePipelineSource,
   shouldBlockLivePreviewAsPaidProAuthority,
 } from "./premiumGenerationApiAvailability";
@@ -166,7 +167,13 @@ export function resolvePaidProReviewRenderSurface(args: {
   if (
     picked.length >= 200 &&
     !isNeverAuthoritativePaidProSource(source) &&
-    !shouldBlockLivePreviewAsPaidProAuthority({ pipelineSource: args.pipelineSource, previewLen: picked.length })
+    !isForbiddenPaidProDisplayRenderSource(source) &&
+    !shouldBlockLivePreviewAsPaidProAuthority({
+      pipelineSource: args.pipelineSource,
+      previewLen: picked.length,
+      premiumCheckoutCompleted: args.premiumCheckoutCompleted,
+      renderSource: source,
+    })
   ) {
     candidates.push({
       plainText: picked,
