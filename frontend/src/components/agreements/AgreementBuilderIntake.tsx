@@ -12836,6 +12836,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProRuntimeAuthority.canRenderProReviewShell,
   ]);
 
+  const paidProSignerSetupRequiredBeforeDelivery = Boolean(
+    acceptedPaidProAuthorityActive &&
+      premiumPaidDocumentSurface &&
+      !paidProSignatureDetailsReady,
+  );
+
+  useEffect(() => {
+    if (!paidProSignerSetupRequiredBeforeDelivery || !createProductionTwoPane || !draft) return;
+    if (
+      premiumRecipientUxActive &&
+      createFlowPhase === "recipient_setup_required" &&
+      createFlowSendRecipientEditorOpen
+    ) {
+      return;
+    }
+    markPremiumRecipientsSurfaceReleased();
+    setPremiumRecipientUxActive(true);
+    setDisplayPhase("review");
+    setCreateFlowPhase("recipient_setup_required");
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setCreateFlowSendRecipientEditorOpen(true);
+    setMobileWorkspacePane("preview");
+    bumpPremiumSurfaceGateTick();
+  }, [
+    paidProSignerSetupRequiredBeforeDelivery,
+    createProductionTwoPane,
+    draft,
+    premiumRecipientUxActive,
+    createFlowPhase,
+    createFlowSendRecipientEditorOpen,
+    bumpPremiumSurfaceGateTick,
+  ]);
+
   const premiumPaidUnavailableRetry = useMemo(() => {
     if (!premiumPaidDocumentSurface || proUpgradeUseStarterView || authoritativePremiumUiCommitted) {
       return false;
@@ -19362,7 +19395,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showProDeliveryTrackChooser = Boolean(
     paidProRuntimeAuthority.canShowProCtas &&
-    proDeliveryTrackBaseReady &&
+      paidProSignatureDetailsReady &&
+      proDeliveryTrackBaseReady &&
       canChooseProDeliveryTrackFlag &&
       !premiumSendModeTouched &&
       !premiumSignersSurfaceReady &&
@@ -19371,6 +19405,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showSimplifiedProReviewSigningFlow = Boolean(
     proDeliveryTrackBaseReady &&
+      paidProSignatureDetailsReady &&
       !showProDeliveryTrackChooser &&
       effectivePremiumSendMode === "signature" &&
       (premiumSendModeTouched || premiumSignersSurfaceReady) &&
@@ -19379,6 +19414,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showProReviewTrackActions = Boolean(
     proDeliveryTrackBaseReady &&
+      paidProSignatureDetailsReady &&
       !showProDeliveryTrackChooser &&
       !showSimplifiedProReviewSigningFlow &&
       effectivePremiumSendMode === "review" &&
@@ -21022,6 +21058,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const enterFinalReviewRecipientSetup = React.useCallback(
     (intent: FinalReviewSendIntent) => {
+      if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
+        setHardError("Add signer details before continuing.");
+        setDisplayPhase("review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        advancePaidProToRecipientSetup();
+        markPremiumRecipientsSurfaceReleased();
+        setPremiumRecipientUxActive(true);
+        setCreateFlowSendRecipientEditorOpen(true);
+        bumpPremiumSurfaceGateTick();
+        return;
+      }
       if (
         canProceedGuidedFinalReviewToSigning &&
         (intent !== "signature" || paidProSignatureDetailsReady)
@@ -21065,6 +21112,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       void handlePremiumReviewFirstContinueToSigners({ telemetryMode: sendMode });
     },
     [
+      acceptedPaidProAuthorityActive,
       canProceedGuidedFinalReviewToSigning,
       paidProSignatureDetailsReady,
       continueGuidedFinalReviewToSigning,
@@ -21143,6 +21191,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         source: guidedCompletionRenderDocument.source,
       });
     }
+    if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
+      enterFinalReviewRecipientSetup("review_only");
+      return;
+    }
     if (canProceedGuidedFinalReviewToSigning) {
       void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review");
       return;
@@ -21155,6 +21207,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionActive,
     guidedCompletionRenderDocument.source,
     simpleProFinalReviewCorpus.plainText,
+    acceptedPaidProAuthorityActive,
+    paidProSignatureDetailsReady,
     enterFinalReviewRecipientSetup,
   ]);
 
@@ -21167,6 +21221,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           bodyLen: guidedCompletionRenderDocument.plainText.length,
           source: guidedCompletionRenderDocument.source,
         });
+      }
+      if (paidProAuthoritative && !paidProSignatureDetailsReady && (mode === "review" || mode === "signature")) {
+        enterFinalReviewRecipientSetup(mode === "review" ? "review_only" : "signature");
+        return;
       }
       if (mode === "signature" && paidProAuthoritative) {
         void handleProSendForSignature();
@@ -21194,9 +21252,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       handlePremiumSendModePick,
       handlePremiumReviewFirstContinueToSigners,
       paidProAuthoritative,
+      paidProSignatureDetailsReady,
       canProceedGuidedFinalReviewToSigning,
       continueGuidedFinalReviewToSigning,
       handleProSendForSignature,
+      enterFinalReviewRecipientSetup,
       completeGuidedPaidProReviewFirstHandoff,
       guidedCompletionActive,
       guidedCompletionRenderDocument.plainText,
@@ -24600,7 +24660,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               </button>
                                             </>
                                           )}
-                                          {!guidedProUxSuppressesProductionSendCta(guidedProUxState, guidedQuestionGateDecision) &&
+                                          {paidProSignerSetupRequiredBeforeDelivery ? (
+                                            <button
+                                              type="button"
+                                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
+                                              onClick={() => enterFinalReviewRecipientSetup("signature")}
+                                              data-testid="pro-review-add-signer-details"
+                                            >
+                                              Add signer details
+                                            </button>
+                                          ) : !guidedProUxSuppressesProductionSendCta(guidedProUxState, guidedQuestionGateDecision) &&
                                           !guidedPhaseSuppressesSendCta(guidedCompletionPhase) &&
                                           !guidedSuppressSecondaryDocActions &&
                                           !guidedPacketSendBlocked ? (

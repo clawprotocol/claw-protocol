@@ -4,6 +4,7 @@
  */
 
 import type { ParsedDraftShape } from "../intakeSmartDefaults";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "../paidProAuthoritySurfaceLog";
 import { validateProMinimumSubstance } from "../paidProConciseServicesQuality";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "../paidProAuthorityConstants";
 import type { DealVariable, DealVariableCategory, GuidedCompletionSession } from "./types";
@@ -172,7 +173,21 @@ export function resolveGuidedQuestionGateDecision(args: {
 }
 
 export function logGuidedQuestionGateDecision(decision: GuidedQuestionGateDecision): void {
-  if (import.meta.env.MODE === "test") return;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "guided-question-gate-decision",
+      surface: decision.blocked ? "blocked" : "allowed",
+      hash: String(decision.corpusLen),
+      source: decision.materialReviewAllowed ? "material_review_allowed" : "question_gate",
+      payloadSignature: JSON.stringify({
+        fatalCount: decision.fatalCount,
+        optionalCount: decision.optionalCount,
+        reasons: decision.reasons,
+      }),
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[guided-question-gate-decision]", {
     blocked: decision.blocked,

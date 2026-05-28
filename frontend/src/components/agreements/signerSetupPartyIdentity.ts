@@ -8,6 +8,7 @@ import {
   PARTY_ENTITY_SUFFIX_RE,
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { isRecipientHandoffSeedDisposable } from "./reviewPlaceholderGuard";
@@ -204,7 +205,20 @@ export function logSignerSlotContaminationBlocked(args: {
   source: string;
   reason?: string;
 }): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "signer-slot-contamination-blocked",
+      surface: `slot:${args.slot}`,
+      hash: args.correctedValue,
+      source: args.source,
+      payloadSignature: JSON.stringify({
+        attemptedValue: args.attemptedValue,
+        reason: args.reason ?? null,
+      }),
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[signer-slot-contamination-blocked]", args);
 }

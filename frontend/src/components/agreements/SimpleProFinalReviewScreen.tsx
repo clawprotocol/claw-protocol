@@ -154,6 +154,7 @@ export function SimpleProFinalReviewScreen({
   const paidReviewBodyLen = paidReviewPlain.trim().length;
   const hasCanonicalPaidReviewBody =
     canonicalPaidProReview && paidReviewBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN;
+  const signerSetupRequired = canonicalPaidProReview && !signersReady;
   const suppressFinalizingForPaidAuthority =
     hasCanonicalPaidReviewBody || suppressPaidProFinalReviewFinalizingState();
   const effectiveCorpusRecoveryMessage =
@@ -237,6 +238,13 @@ export function SimpleProFinalReviewScreen({
             data-testid="simple-pro-final-review-signers-ready"
           >
             Signer/reviewer details ready
+          </p>
+        ) : signerSetupRequired ? (
+          <p
+            className="mt-1 text-xs font-medium text-amber-900"
+            data-testid="simple-pro-final-review-signers-required"
+          >
+            Add signer details before continuing.
           </p>
         ) : null}
         <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600" data-testid="simple-pro-final-review-send-trust">
@@ -436,8 +444,17 @@ export function SimpleProFinalReviewScreen({
             >
               {signaturePrimaryLabel}
             </button>
+            {signerSetupRequired ? (
+              <p
+                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-950"
+                role="note"
+                data-testid="simple-pro-signer-details-required-note"
+              >
+                Add signer details before continuing.
+              </p>
+            ) : null}
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              {onChangeSigningOrder ? (
+              {onChangeSigningOrder && !signerSetupRequired ? (
                 <button
                   type="button"
                   className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
@@ -448,15 +465,17 @@ export function SimpleProFinalReviewScreen({
                   {signatureSecondaryLabel}
                 </button>
               ) : null}
-              <button
-                type="button"
-                className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-                disabled={sendDisabled || packetStale || bulkApplyBusy || reviewFirstHandoffBusy}
-                onClick={onSendForReview}
-                data-testid="simple-pro-send-for-review"
-              >
-                {reviewFirstHandoffBusy ? "Creating review links…" : reviewSecondaryLabel}
-              </button>
+              {!signerSetupRequired ? (
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+                  disabled={sendDisabled || packetStale || bulkApplyBusy || reviewFirstHandoffBusy}
+                  onClick={onSendForReview}
+                  data-testid="simple-pro-send-for-review"
+                >
+                  {reviewFirstHandoffBusy ? "Creating review links…" : reviewSecondaryLabel}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"

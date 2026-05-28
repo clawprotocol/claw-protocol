@@ -97,6 +97,19 @@ describe("Pro delivery track UI wiring", () => {
     expect(reviewBlock).not.toContain("advancePaidProToRecipientSetup");
   });
 
+  it("requires paid Pro signer details before exposing delivery tracks", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const chooserBlock = intake.slice(
+      intake.indexOf("const showProDeliveryTrackChooser = Boolean("),
+      intake.indexOf("const showProReviewTrackActions = Boolean(") + 520,
+    );
+    expect(chooserBlock).toContain("paidProSignatureDetailsReady");
+    expect(intake).toContain("paidProSignerSetupRequiredBeforeDelivery");
+    expect(intake).toContain("Add signer details before continuing.");
+    expect(intake).toContain('data-testid="pro-review-add-signer-details"');
+    expect(intake).toContain('enterFinalReviewRecipientSetup(mode === "review" ? "review_only" : "signature")');
+  });
+
   it("canonical hash is unchanged when reading review vs handoff surfaces", () => {
     const draft: ParsedDraftShape = {
       title: "Services Agreement",

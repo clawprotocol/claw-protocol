@@ -1,5 +1,5 @@
 /**
- * Quality floor for concise but complete commercial services Pro bodies (e.g. Red Mesa AI workflow).
+ * Quality floor for concise but complete commercial services Pro bodies.
  * Prevents rejecting valid server output solely for length/section-count vs. stitched live preview.
  */
 
@@ -14,6 +14,7 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { stripMalformedProReviewDisplayArtifacts } from "./polishProAgreementDisplayLayer";
 
 export type ConciseCommercialServicesFactId =
@@ -230,7 +231,21 @@ export function logPaidProValidationDecision(payload: {
   requiredFactsFound?: string[];
   requiredFactsMissing?: string[];
 }): void {
-  if (import.meta.env.MODE === "test") return;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "paid-pro-validation-decision",
+      surface: payload.source ?? "unknown",
+      hash: String(payload.docLen),
+      source: payload.accepted ? "accepted" : "blocked",
+      payloadSignature: JSON.stringify({
+        reasons: payload.reasons,
+        serverFullDocExists: Boolean(payload.serverFullDocExists),
+        requiredFactsMissing: payload.requiredFactsMissing ?? [],
+      }),
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[paid-pro-validation-decision]", payload);
 }

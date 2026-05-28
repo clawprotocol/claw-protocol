@@ -422,7 +422,18 @@ export function freezeCanonicalAgreementSnapshot(
     sectionGraph: snapshot.sectionGraph.length ? snapshot.sectionGraph : collectSectionGraph(snapshot.canonicalText),
   };
   frozenCanonicalAgreementCorpus = frozen;
-  if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
+  if (
+    shouldLogPaidProAuthoritySurfaceEvent({
+      event: "canonical-corpus-freeze",
+      surface: frozen.source,
+      hash: frozen.hash,
+      source: frozen.source,
+      payloadSignature: JSON.stringify({
+        len: frozen.len,
+        reviewSessionId: frozen.reviewSessionId ?? null,
+      }),
+    })
+  ) {
     // eslint-disable-next-line no-console
     console.info("[canonical-corpus-freeze]", {
       hash: frozen.hash,
@@ -550,7 +561,20 @@ export function logAuthoritativeCorpusInvariant(args?: {
 }
 
 export function logCanonicalSnapshotSelected(snapshot: CanonicalAgreementSnapshot, surface: string): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "canonical-snapshot-selected",
+      surface,
+      hash: snapshot.hash,
+      source: snapshot.source,
+      payloadSignature: JSON.stringify({
+        len: snapshot.len,
+        integrityOk: snapshot.integrityOk,
+      }),
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[canonical-snapshot-selected]", {
     source: snapshot.source,

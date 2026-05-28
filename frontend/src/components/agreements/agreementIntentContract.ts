@@ -785,7 +785,7 @@ export function validateIntentContractForPaidProOutput(args: {
           agreementValidation: args.agreementValidation ?? null,
         }).ok
       ) {
-        /* Concise commercial services with required deal facts (Red Mesa-class) */
+        /* Concise commercial services with required deal facts. */
       } else {
         return { ok: false, reasons: [`intent:insufficient_operative_substance:${c.intent_id}`] };
       }

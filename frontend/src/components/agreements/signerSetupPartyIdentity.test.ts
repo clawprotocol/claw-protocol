@@ -291,6 +291,53 @@ describe("signerSetupPartyIdentity", () => {
     }
   });
 
+  it("preserves three canonical slots even when the body repeats one entity", () => {
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [
+        { name: "Alpha Services LLC" },
+        { name: "Beta Operations LLC" },
+        { name: "Gamma Holdings LLC" },
+      ],
+      intakeText: "Services agreement among Alpha Services LLC, Beta Operations LLC, and Gamma Holdings LLC.",
+      agreementBodyText: [
+        "Alpha Services LLC appoints Beta Operations LLC as implementation provider.",
+        "Alpha Services LLC will coordinate approvals with Gamma Holdings LLC.",
+        "Alpha Services LLC appears several times but remains only Party 1.",
+      ].join(" "),
+    });
+    expect(identities.map((id) => id.legalEntityName)).toEqual([
+      "Alpha Services LLC",
+      "Beta Operations LLC",
+      "Gamma Holdings LLC",
+    ]);
+    expect(new Set(identities.map((id) => id.legalEntityName)).size).toBe(3);
+  });
+
+  it("keeps signer metadata attached to canonical slots after refresh-style hydration", () => {
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [{ name: "Alpha Services LLC" }, { name: "Beta Operations LLC" }],
+      intakeText: "Agreement between Alpha Services LLC and Beta Operations LLC.",
+      agreementBodyText: "Alpha Services LLC retains Beta Operations LLC for implementation services.",
+    });
+    const hydratedSlot = resolveSignerSetupRenderSlot({
+      slotIndex: 1,
+      currentLegalEntityValue: "Beta",
+      slotIdentities: identities,
+      email: "signer.beta@example.test",
+      signerName: "Jordan Beta",
+      signerTitle: "COO",
+      partyAddress: "2 Main Street",
+      source: "refresh_hydration",
+    });
+    expect(hydratedSlot.canonicalLegalEntity).toBe("Beta Operations LLC");
+    expect(hydratedSlot.persistedSignerMetadata).toMatchObject({
+      email: "signer.beta@example.test",
+      signerName: "Jordan Beta",
+      signerTitle: "COO",
+      partyAddress: "2 Main Street",
+    });
+  });
+
   it("isolates same-leading-token entities", () => {
     const identities = resolveSignerSetupPartyIdentities({
       parties: [{ name: "Red Mesa Logistics LLC" }, { name: "Red Mesa Automation LLC" }],

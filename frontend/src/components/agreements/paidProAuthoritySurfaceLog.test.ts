@@ -36,11 +36,20 @@ describe("paidProAuthoritySurfaceLog", () => {
         { dev: true, test: false },
       ),
     ).toBe(true);
+    expect(
+      shouldLogPaidProAuthoritySurfaceEvent(
+        { ...EVENT, payloadSignature: "changed-payload" },
+        { dev: true, test: false },
+      ),
+    ).toBe(true);
   });
 
   it("keys by event surface hash and source", () => {
     expect(paidProAuthoritySurfaceLogKey(EVENT)).toBe(
-      "paid-pro-surface:review:12885:37c1c2dd:paidProSourceOfTruth",
+      "paid-pro-surface:review:12885:37c1c2dd:paidProSourceOfTruth:",
+    );
+    expect(paidProAuthoritySurfaceLogKey({ ...EVENT, payloadSignature: "stable-payload" })).toBe(
+      "paid-pro-surface:review:12885:37c1c2dd:paidProSourceOfTruth:stable-payload",
     );
   });
 });

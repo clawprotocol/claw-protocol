@@ -3,6 +3,7 @@ export type PaidProAuthoritySurfaceLogEvent = {
   surface: string;
   hash: string;
   source: string;
+  payloadSignature?: string;
 };
 
 const loggedAuthoritySurfaceEvents = new Set<string>();
@@ -16,7 +17,7 @@ function runtimeTest(): boolean {
 }
 
 export function paidProAuthoritySurfaceLogKey(event: PaidProAuthoritySurfaceLogEvent): string {
-  return `${event.event}:${event.surface}:${event.hash}:${event.source}`;
+  return `${event.event}:${event.surface}:${event.hash}:${event.source}:${event.payloadSignature ?? ""}`;
 }
 
 export function shouldLogPaidProAuthoritySurfaceEvent(

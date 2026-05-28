@@ -102,6 +102,11 @@ describe("SimpleProFinalReviewScreen", () => {
     const actions = screen.getByTestId("simple-pro-final-review-actions");
     expect(documentShell.contains(actions)).toBe(false);
     expect(actions.textContent).toContain("Add signer details");
+    expect(screen.getByTestId("simple-pro-final-review-signers-required").textContent).toContain(
+      "Add signer details before continuing.",
+    );
+    expect(screen.queryByTestId("simple-pro-send-for-review")).toBeNull();
+    expect(screen.queryByTestId("simple-pro-change-signing-order")).toBeNull();
     cleanup();
   });
 
