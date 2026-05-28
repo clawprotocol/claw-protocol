@@ -38,6 +38,15 @@ describe("canonicalPartyIdentityResolver", () => {
     expect(block).toContain("loggedCanonicalPartySourceCandidates.add(key)");
   });
 
+  it("does not repeat canonical party preserved logs on every render", () => {
+    const source = readFileSync(join(__dirname, "canonicalPartyIdentityResolver.ts"), "utf8");
+    const fnIdx = source.indexOf("export function logCanonicalPartyIdentityPreserved");
+    const block = source.slice(fnIdx, fnIdx + 900);
+    expect(block).toContain("!import.meta.env?.DEV");
+    expect(block).toContain("loggedCanonicalPartyIdentityPreserved.has(key)");
+    expect(block).toContain("loggedCanonicalPartyIdentityPreserved.add(key)");
+  });
+
   it("raw intake full legal entities override shortened starter party labels", () => {
     const records = resolveCanonicalPartyIdentitiesFromIntake(
       INTAKE,

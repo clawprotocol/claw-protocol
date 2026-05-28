@@ -1,14 +1,16 @@
 /** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render } from "@testing-library/react";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 
 const componentSrc = readFileSync(join(__dirname, "PremiumAgreementReadonlyView.tsx"), "utf8");
 const htmlSrc = readFileSync(join(__dirname, "premiumAgreementDocumentHtml.ts"), "utf8");
 
 describe("PremiumAgreementReadonlyView mobile readability", () => {
+  afterEach(() => cleanup());
+
   it("does not use text-align justify on contract paragraphs", () => {
     expect(componentSrc).not.toMatch(/text-align:\s*justify/);
     expect(componentSrc).not.toContain("text-justify");
@@ -27,5 +29,15 @@ describe("PremiumAgreementReadonlyView mobile readability", () => {
     expect(container.querySelector(".text-justify")).toBeNull();
     const style = container.querySelector("style");
     expect(style?.textContent ?? "").not.toMatch(/text-align:\s*justify/);
+  });
+
+  it("fullDocumentFlow removes nested scroll clipping from readonly article", () => {
+    const { getByTestId } = render(
+      <PremiumAgreementReadonlyView html="<p>Full paid Pro body.</p>" fullDocumentFlow />,
+    );
+    const article = getByTestId("premium-agreement-readonly-article");
+    expect(article.className).toContain("overflow-visible");
+    expect(article.className).not.toContain("overflow-y-auto");
+    expect(article.className).not.toContain("max-h-[");
   });
 });

@@ -328,27 +328,26 @@ export function SimpleProFinalReviewScreen({
         data-testid="simple-pro-final-review-document"
       >
         {showDocument ? (
-          effectiveAgreementHtml.length > 0 ? (
+          hasCanonicalPaidReviewBody ? (
+            <article
+              aria-label="Agreement document preview"
+              className="premium-readonly-doc min-h-0 overflow-visible px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left"
+              data-testid="premium-agreement-readonly-article"
+              data-paid-pro-authoritative-source="paidProSourceOfTruth"
+            >
+              <pre
+                className="whitespace-pre-wrap font-serif text-[15px] leading-[1.75] text-stone-800"
+                data-testid="simple-pro-final-review-paid-sot-body"
+              >{paidReviewPlain.trim()}</pre>
+            </article>
+          ) : effectiveAgreementHtml.length > 0 ? (
             <PremiumAgreementReadonlyView
               html={effectiveAgreementHtml}
               suppressEmptyFallback={suppressEmptyFallback}
-              fullDocumentFlow={canonicalPaidProReview}
+              fullDocumentFlow={false}
               visibleProPaperTrace={visibleProPaperTrace}
             />
-          ) : (
-            <div
-              className={`premium-readonly-doc px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left ${
-                canonicalPaidProReview
-                  ? "min-h-0 overflow-visible"
-                  : "max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto"
-              }`}
-              data-testid="simple-pro-final-review-paid-plain-fallback"
-            >
-              <pre className="whitespace-pre-wrap font-serif text-[15px] leading-[1.75] text-stone-800">
-                {paidReviewPlain.trim()}
-              </pre>
-            </div>
-          )
+          ) : null
         ) : showPreviewUnavailable ? (
           <p
             className="px-4 py-8 text-center text-sm leading-relaxed text-stone-600"

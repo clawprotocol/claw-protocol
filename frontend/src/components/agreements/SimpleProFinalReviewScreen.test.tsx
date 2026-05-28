@@ -1,10 +1,12 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE } from "../../launch/simpleProduct/reviewFirstSendSurface";
 import { SimpleProFinalReviewScreen } from "./SimpleProFinalReviewScreen";
 
 describe("SimpleProFinalReviewScreen", () => {
+  afterEach(() => cleanup());
+
   it("shows applied trust copy and checklist when DOM mutation markers are absent", () => {
     render(
       <SimpleProFinalReviewScreen
@@ -78,7 +80,7 @@ describe("SimpleProFinalReviewScreen", () => {
           "IN WITNESS WHEREOF",
           "x".repeat(11_500),
         ].join("\n")}
-        signaturePrimaryLabel="Add signers / prepare signature links"
+        signaturePrimaryLabel="Add signer details"
         onSendForSignature={vi.fn()}
         onSendForReview={vi.fn()}
         onCopyAgreement={vi.fn()}
@@ -87,8 +89,8 @@ describe("SimpleProFinalReviewScreen", () => {
     );
 
     const documentShell = screen.getByTestId("simple-pro-final-review-document");
-    expect(within(documentShell).getByText("This AI Workflow Setup Services Agreement")).toBeTruthy();
-    expect(within(documentShell).getByText("Limitation of Liability")).toBeTruthy();
+    expect(within(documentShell).getByText(/This AI Workflow Setup Services Agreement/)).toBeTruthy();
+    expect(within(documentShell).getByText(/Limitation of Liability/)).toBeTruthy();
     expect(within(documentShell).getByText(/IN WITNESS WHEREOF/)).toBeTruthy();
     expect(screen.queryByText(/Agreement preview is not available/i)).toBeNull();
     expect(screen.queryByText(/Finalizing secure agreement version/i)).toBeNull();
@@ -99,7 +101,7 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(article.className).not.toContain("overflow-y-auto");
     const actions = screen.getByTestId("simple-pro-final-review-actions");
     expect(documentShell.contains(actions)).toBe(false);
-    expect(actions.textContent).toContain("Add signers / prepare signature links");
+    expect(actions.textContent).toContain("Add signer details");
     cleanup();
   });
 

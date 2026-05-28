@@ -54,6 +54,15 @@ export function logCanonicalPartyIdentityPreserved(args: {
   surface: string;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (typeof import.meta !== "undefined" && !import.meta.env?.DEV) return;
+  const key = JSON.stringify({
+    canonicalLegalName: args.canonicalLegalName,
+    shortDisplayName: args.shortDisplayName || null,
+    source: args.source,
+    surface: args.surface,
+  });
+  if (loggedCanonicalPartyIdentityPreserved.has(key)) return;
+  loggedCanonicalPartyIdentityPreserved.add(key);
   // eslint-disable-next-line no-console
   console.info("[canonical-party-identity-preserved]", {
     canonicalLegalName: args.canonicalLegalName,
@@ -62,6 +71,8 @@ export function logCanonicalPartyIdentityPreserved(args: {
     surface: args.surface,
   });
 }
+
+const loggedCanonicalPartyIdentityPreserved = new Set<string>();
 
 export function logCanonicalPartySourceCandidates(args: {
   rawIntakeNames: readonly string[];

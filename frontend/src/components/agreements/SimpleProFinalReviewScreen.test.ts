@@ -57,10 +57,11 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain("paidReviewPlain");
     expect(screen).toContain("hasCanonicalPaidReviewBody");
-    expect(screen).toContain("simple-pro-final-review-paid-plain-fallback");
+    expect(screen).toContain("simple-pro-final-review-paid-sot-body");
+    expect(screen).toContain('data-paid-pro-authoritative-source="paidProSourceOfTruth"');
     const unavailableIdx = screen.indexOf("simple-pro-final-review-document-empty");
-    const paidFallbackIdx = screen.indexOf("simple-pro-final-review-paid-plain-fallback");
-    expect(paidFallbackIdx).toBeGreaterThan(-1);
+    const paidBodyIdx = screen.indexOf("simple-pro-final-review-paid-sot-body");
+    expect(paidBodyIdx).toBeGreaterThan(-1);
     expect(screen).toContain("showPreviewUnavailable");
     expect(screen.indexOf("showPreviewUnavailable")).toBeLessThan(unavailableIdx);
   });
@@ -81,13 +82,13 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(intake).toContain('"Prepare signature links"');
   });
 
-  it("canonical paid review enables full document flow and keeps actions outside document", () => {
+  it("canonical paid review renders one SoT document body and keeps actions outside document", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
-    const viewIdx = screen.indexOf("<PremiumAgreementReadonlyView");
+    const bodyIdx = screen.indexOf('data-testid="simple-pro-final-review-paid-sot-body"');
     const actionsIdx = screen.indexOf('data-testid="simple-pro-final-review-actions"');
-    expect(screen).toContain("fullDocumentFlow={canonicalPaidProReview}");
-    expect(viewIdx).toBeGreaterThan(-1);
-    expect(actionsIdx).toBeGreaterThan(viewIdx);
+    expect(screen).toContain("hasCanonicalPaidReviewBody ? (");
+    expect(bodyIdx).toBeGreaterThan(-1);
+    expect(actionsIdx).toBeGreaterThan(bodyIdx);
   });
 
   it("SimpleProFinalReviewScreen renders review-first error in final review actions region", () => {
