@@ -93,6 +93,36 @@ export function paidProAuthorityBlocksStarterReviewRestore(): boolean {
   return isAuthoritativePaidProReview();
 }
 
+/**
+ * Final review visible plain: never drop paid SoT when boundary/preview layers return empty.
+ */
+export function resolvePaidProFinalReviewVisiblePlain(args: {
+  draft?: ParsedDraftShape | null;
+  intakeText?: string | null;
+  boundaryPlain?: string | null;
+  displayCandidatePlain?: string | null;
+}): string {
+  const authoritative = resolveAuthoritativePaidProReviewPlain({
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+  });
+  if (authoritative.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+    return (args.boundaryPlain || args.displayCandidatePlain || "").trim();
+  }
+  const boundary = (args.boundaryPlain || "").trim();
+  if (boundary.length >= PAID_PRO_AUTHORITY_MIN_LEN) return boundary;
+  const display = (args.displayCandidatePlain || "").trim();
+  if (display.length >= PAID_PRO_AUTHORITY_MIN_LEN) return display;
+  return authoritative;
+}
+
+/** Paid SoT present — do not show finalizing/unavailable preview chrome on final review. */
+export function suppressPaidProFinalReviewFinalizingState(
+  input?: AuthoritativePaidProReviewInput,
+): boolean {
+  return hasAcceptedPaidProAuthority(input);
+}
+
 export function starterPlainLooksStaleVersusPaidAuthority(
   starterPlain: string,
   paidPlain: string,

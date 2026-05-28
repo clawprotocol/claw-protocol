@@ -7,7 +7,9 @@ import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSectio
 import {
   PAID_PRO_REVIEW_SHELL_SUBTITLE,
   PAID_PRO_REVIEW_SHELL_TITLE,
+  suppressPaidProFinalReviewFinalizingState,
 } from "./authoritativePaidProReview";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   SIMPLE_PRO_FINAL_REVIEW_HEADLINE,
   SIMPLE_PRO_FINAL_REVIEW_SUBCOPY,
@@ -46,6 +48,8 @@ export type SimpleProFinalReviewScreenProps = {
   enableSectionJump?: boolean;
   /** Post-checkout paid SoT — canonical Pro review shell (no guided Q&A chrome). */
   canonicalPaidProReview?: boolean;
+  /** Frozen paid SoT plain — renders when HTML prop is still empty after acceptance. */
+  paidReviewPlain?: string;
   signaturePrimaryLabel?: string;
   signatureSecondaryLabel?: string;
   reviewSecondaryLabel?: string;
@@ -108,6 +112,7 @@ export function SimpleProFinalReviewScreen({
   corpusRecoveryMessage = null,
   enableSectionJump = true,
   canonicalPaidProReview = false,
+  paidReviewPlain = "",
   signaturePrimaryLabel = "Send for signature",
   signatureSecondaryLabel = "Change signing order",
   reviewSecondaryLabel = "Send for review",
@@ -146,7 +151,20 @@ export function SimpleProFinalReviewScreen({
     !suppressPostReviewEditUx &&
     Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
   const canEditAgreementText = canDirectEditPlainText || canSuggestEdits;
-  const showDocument = agreementHtml.trim().length > 0 && !corpusRecoveryMessage;
+  const paidReviewBodyLen = paidReviewPlain.trim().length;
+  const hasCanonicalPaidReviewBody =
+    canonicalPaidProReview && paidReviewBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN;
+  const suppressFinalizingForPaidAuthority =
+    hasCanonicalPaidReviewBody || suppressPaidProFinalReviewFinalizingState();
+  const effectiveCorpusRecoveryMessage =
+    suppressFinalizingForPaidAuthority && hasCanonicalPaidReviewBody ? null : corpusRecoveryMessage;
+  const effectiveAgreementHtml = agreementHtml.trim();
+  const showDocument =
+    (effectiveAgreementHtml.length > 0 || hasCanonicalPaidReviewBody) && !effectiveCorpusRecoveryMessage;
+  const showPreviewUnavailable =
+    !showDocument &&
+    !hasCanonicalPaidReviewBody &&
+    !suppressFinalizingForPaidAuthority;
   const reviewHeadline = canonicalPaidProReview ? PAID_PRO_REVIEW_SHELL_TITLE : SIMPLE_PRO_FINAL_REVIEW_HEADLINE;
   const reviewSubcopy = canonicalPaidProReview ? PAID_PRO_REVIEW_SHELL_SUBTITLE : SIMPLE_PRO_FINAL_REVIEW_SUBCOPY;
   const answerCount = canonicalPaidProReview
@@ -296,13 +314,13 @@ export function SimpleProFinalReviewScreen({
         </p>
       ) : null}
 
-      {corpusRecoveryMessage ? (
+      {effectiveCorpusRecoveryMessage ? (
         <div
           className="rounded-md border border-amber-300/90 bg-amber-50 px-3 py-3 text-sm leading-relaxed text-amber-950"
           role="alert"
           data-testid="simple-pro-final-review-corpus-recovery"
         >
-          {corpusRecoveryMessage}
+          {effectiveCorpusRecoveryMessage}
         </div>
       ) : null}
       <div
@@ -310,19 +328,30 @@ export function SimpleProFinalReviewScreen({
         data-testid="simple-pro-final-review-document"
       >
         {showDocument ? (
-          <PremiumAgreementReadonlyView
-            html={agreementHtml}
-            suppressEmptyFallback={suppressEmptyFallback}
-            visibleProPaperTrace={visibleProPaperTrace}
-          />
-        ) : (
+          effectiveAgreementHtml.length > 0 ? (
+            <PremiumAgreementReadonlyView
+              html={effectiveAgreementHtml}
+              suppressEmptyFallback={suppressEmptyFallback}
+              visibleProPaperTrace={visibleProPaperTrace}
+            />
+          ) : (
+            <div
+              className="premium-readonly-doc max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left"
+              data-testid="simple-pro-final-review-paid-plain-fallback"
+            >
+              <pre className="whitespace-pre-wrap font-serif text-[15px] leading-[1.75] text-stone-800">
+                {paidReviewPlain.trim()}
+              </pre>
+            </div>
+          )
+        ) : showPreviewUnavailable ? (
           <p
             className="px-4 py-8 text-center text-sm leading-relaxed text-stone-600"
             data-testid="simple-pro-final-review-document-empty"
           >
             Agreement preview is not available. Use Back to signer details, then continue to final review again.
           </p>
-        )}
+        ) : null}
       </div>
       {signersReady ? (
         <p

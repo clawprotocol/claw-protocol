@@ -9,6 +9,8 @@ import {
   paidProAuthorityBlocksStarterReviewRestore,
   resolveAuthoritativePaidProReviewPlain,
   resolvePaidProAcceptanceRoutingMarkers,
+  resolvePaidProFinalReviewVisiblePlain,
+  suppressPaidProFinalReviewFinalizingState,
   starterPlainLooksStaleVersusPaidAuthority,
 } from "./authoritativePaidProReview";
 import { shouldRestoreStoredCreateReviewDraftSnapshot } from "./createReviewRefreshRestore";
@@ -124,6 +126,33 @@ describe("authoritativePaidProReview", () => {
         acceptedBodyLen: body.length,
       }).suppressGuidedQuestionPanel,
     ).toBe(true);
+  });
+
+  it("resolvePaidProFinalReviewVisiblePlain uses SoT when boundary is empty", () => {
+    const body = "x".repeat(12_384);
+    establishPaidProSourceOfTruth({ text: body, source: "server_full_draft" });
+    const visible = resolvePaidProFinalReviewVisiblePlain({
+      boundaryPlain: "",
+      displayCandidatePlain: "",
+    });
+    expect(visible.length).toBeGreaterThan(10_000);
+    expect(visible.length).toBeGreaterThanOrEqual(500);
+  });
+
+  it("resolvePaidProFinalReviewVisiblePlain uses SoT when stale preview is empty", () => {
+    const body = "x".repeat(12_384);
+    establishPaidProSourceOfTruth({ text: body, source: "server_full_draft" });
+    expect(
+      resolvePaidProFinalReviewVisiblePlain({
+        boundaryPlain: "",
+        displayCandidatePlain: "",
+      }).length,
+    ).toBe(12_384);
+  });
+
+  it("suppressPaidProFinalReviewFinalizingState when paid authority exists", () => {
+    establishPaidProSourceOfTruth({ text: "x".repeat(12_384), source: "server_full_draft" });
+    expect(suppressPaidProFinalReviewFinalizingState()).toBe(true);
   });
 
   it("exports paid review chip labels distinct from starter", () => {

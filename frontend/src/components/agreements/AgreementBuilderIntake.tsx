@@ -387,6 +387,8 @@ import {
   PAID_PRO_REVIEW_SHELL_SUBTITLE,
   PAID_PRO_REVIEW_SHELL_TITLE,
   resolveAuthoritativePaidProReviewPlain,
+  resolvePaidProFinalReviewVisiblePlain,
+  suppressPaidProFinalReviewFinalizingState,
   starterPlainLooksStaleVersusPaidAuthority,
 } from "./authoritativePaidProReview";
 import { commitPaidProAcceptanceStorageHygiene } from "./paidProAcceptanceRouting";
@@ -538,6 +540,7 @@ import {
 import {
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
+  getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
@@ -16696,6 +16699,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     return buildDefaultProVisiblePaperCandidates({
       serverFullDocumentText,
+      paidProSourceOfTruthText: getPaidProSourceOfTruthText(),
       acceptedReviewText: latestAcceptedCorpus || acceptedReviewCorpusRef.current,
       reviewDraftText: agreementDocumentText,
       renderedAgreementPreviewText: renderedAgreementPreview,
@@ -16774,13 +16778,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const simpleProFinalReviewDisplayPlain = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const paidReviewAuthorityPlain = resolveAuthoritativePaidProReviewPlain({
+      draft: draft ?? null,
+      intakeText: intakeForPolish,
+    });
     const paidProReview = getPaidProDocumentForSurface("review", {
       draft: draft ?? null,
       intakeText: intakeForPolish,
     });
     const raw = (
       paidProReview?.text ||
-      (hasPaidProSourceOfTruth() ? "" : (simpleProFinalReviewCorpus.plainText || "").trim())
+      paidReviewAuthorityPlain ||
+      simpleProFinalReviewCorpus.plainText ||
+      ""
     ).trim();
     if (!raw) return "";
     const polished = polishProAgreementDisplayLayer(raw, {
@@ -16799,7 +16809,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draft: draft ?? null,
       paidProReviewSurface: simpleProFinalReviewActive || premiumPaidDocumentSurface,
     });
-    return boundary.plain;
+    return resolvePaidProFinalReviewVisiblePlain({
+      draft: draft ?? null,
+      intakeText: intakeForPolish,
+      boundaryPlain: boundary.plain,
+      displayCandidatePlain: sanitized,
+    });
   }, [
     proVisiblePaperCandidates,
     simpleProFinalReviewCorpus.plainText,
@@ -16811,6 +16826,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeCombined,
     guidedAuthVersionNonce,
     reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+    authoritativePaidProReviewPlain,
   ]);
 
   const visibleProPaperBoundaryState = useMemo(() => {
@@ -17670,7 +17687,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const simpleProFinalReviewHtml = useMemo(() => {
-    const corpus = simpleProFinalReviewDisplayPlain;
+    const corpus =
+      simpleProFinalReviewDisplayPlain.trim() ||
+      (acceptedPaidProAuthorityActive ? authoritativePaidProReviewPlain : "");
     if (!corpus.trim()) return "";
     const rd = reviewDraft ?? draft;
     const canonicalNames = guidedSignerCanonicalIdentities
@@ -17697,6 +17716,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
   }, [
     simpleProFinalReviewDisplayPlain,
+    acceptedPaidProAuthorityActive,
+    authoritativePaidProReviewPlain,
     reviewDraft,
     draft,
     intakeCombined,
@@ -24280,6 +24301,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         <SimpleProFinalReviewScreen
                                           agreementHtml={simpleProFinalReviewHtml}
+                                          paidReviewPlain={authoritativePaidProReviewPlain}
                                           visibleProPaperTrace={visibleProPaperTrace}
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}
                                           canonicalPaidProReview={acceptedPaidProAuthorityActive}
@@ -24356,13 +24378,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           onExportAgreement={() => void handleSimpleProFinalReviewExport()}
                                           suppressPostReviewEditUx={paidProInlineSignersReady}
                                           corpusRecoveryMessage={
-                                            visibleProPaperBoundaryState.showFinalizing
-                                              ? PAID_PRO_VISIBLE_PAPER_FINALIZING_MESSAGE
-                                              : simpleProFinalReviewCorpus.corpusBlocked
-                                                ? "Your full agreement could not be displayed safely after saving signer details. Go back to signer details and open final review again, or use Copy agreement if the text is available."
-                                                : simpleProFinalReviewCorpus.corpusRecovered
-                                                  ? "LawDog recovered the full agreement from the frozen authoritative snapshot before rendering final review."
-                                                  : null
+                                            suppressPaidProFinalReviewFinalizingState({
+                                              draft: draft ?? null,
+                                              intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+                                            })
+                                              ? null
+                                              : visibleProPaperBoundaryState.showFinalizing
+                                                ? PAID_PRO_VISIBLE_PAPER_FINALIZING_MESSAGE
+                                                : simpleProFinalReviewCorpus.corpusBlocked
+                                                  ? "Your full agreement could not be displayed safely after saving signer details. Go back to signer details and open final review again, or use Copy agreement if the text is available."
+                                                  : simpleProFinalReviewCorpus.corpusRecovered
+                                                    ? "LawDog recovered the full agreement from the frozen authoritative snapshot before rendering final review."
+                                                    : null
                                           }
                                           editablePlainText={proFinalReviewEditPlain}
                                           onEditablePlainTextChange={setProFinalReviewEditPlain}
