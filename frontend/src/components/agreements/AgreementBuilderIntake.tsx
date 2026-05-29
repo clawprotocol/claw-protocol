@@ -577,6 +577,7 @@ import {
   collectPaidProQaInvariantViolations,
   logPaidProQaInvariantViolations,
   logPaidProReviewStateTelemetry,
+  paidProSignerSetupSuppressesGuidedAndStarter,
   resolvePaidProReviewState,
 } from "./paidProReviewStateMachine";
 import {
@@ -16006,6 +16007,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   });
   const guidedCompletionSessionBase = useMemo(() => {
     if (guidedQueueRebuildBlocked) return null;
+    // Signer-setup isolation: once a paid SoT is accepted and the user is entering signer metadata,
+    // typing must never rebuild the guided question queue (no guided_continue / guided-question-queue
+    // re-entry, no starter refresh). Signer edits update signer metadata state only.
+    if (
+      paidProSignerSetupSuppressesGuidedAndStarter({
+        signerSetupActive: paidProRecipientSetupOnDraft,
+        hasPaidProSourceOfTruth: hasPaidProSourceOfTruth(),
+      })
+    ) {
+      return null;
+    }
     if (!paidProGuidedCorpusReady || paidBodyForGuidedCompletion.length < 200) return null;
     const intakeRaw = currentPremiumMergedIntakeKey || intakeCombined;
     const snap = readPremiumCompletionSnapshot();
@@ -16036,6 +16048,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
   }, [
     guidedQueueRebuildBlocked,
+    paidProRecipientSetupOnDraft,
     paidProGuidedCorpusReady,
     paidBodyForGuidedCompletion,
     currentPremiumMergedIntakeKey,
@@ -21220,7 +21233,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText: intakeForCopy,
       });
       logAcceptedPremiumCorpusInstrumentation({
-        displayed: paidProCopy?.text ?? displayPolishedPaidProPlain,
+        // The displayed surface MUST derive from the accepted SoT, never the decorated/clipped display
+        // layer (which can collapse to a tiny signature-card shell and trip a false displayed_len drift
+        // / paid-pro-corpus-invariant-violation). Fall back to the SoT body, not the chrome.
+        displayed:
+          paidProCopy?.text ??
+          (hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : displayPolishedPaidProPlain),
         copied: text,
         finalReview: reviewSurface?.text ?? finalizedSurface?.text ?? text,
       });

@@ -88,6 +88,45 @@ export function isFailedPremiumCorpusState(state: PaidProReviewState): boolean {
   return state === "FAILED_PREMIUM_CORPUS";
 }
 
+/**
+ * Paid Pro signer-setup isolation.
+ *
+ * Once an accepted paid SoT exists and the user is entering signer (recipient) metadata, the
+ * surface must be fully isolated from the discovery surfaces: typing a signer name/email may only
+ * update signer metadata state. It must NEVER re-trigger guided question-queue rebuilds, the free
+ * starter refresh, Pro regeneration, or VS01/handoff corpus recomputation. The accepted SoT body /
+ * hash / length stay frozen until the user explicitly advances ("Prepare signature links").
+ */
+export type PaidProSignerSetupIsolationArgs = {
+  /** Paid Pro signer (recipient) setup surface is active. */
+  signerSetupActive: boolean;
+  /** A committed paid Pro Source of Truth exists. */
+  hasPaidProSourceOfTruth: boolean;
+};
+
+/**
+ * While signer setup is active over an accepted SoT, the guided question queue must not be rebuilt
+ * and the free starter surface must not refresh. Returns true when those recomputations are
+ * suppressed (signer metadata edits are isolated).
+ */
+export function paidProSignerSetupSuppressesGuidedAndStarter(
+  args: PaidProSignerSetupIsolationArgs,
+): boolean {
+  return Boolean(args.signerSetupActive && args.hasPaidProSourceOfTruth);
+}
+
+/**
+ * The VS01 / handoff signing corpus must not be (re)computed during signer metadata entry — it is
+ * only built when the user explicitly clicks "Prepare signature links". Returns true when handoff
+ * recomputation must be deferred.
+ */
+export function paidProSignerSetupDefersHandoffRecompute(
+  args: PaidProSignerSetupIsolationArgs & { prepareSignatureLinksRequested: boolean },
+): boolean {
+  if (args.prepareSignatureLinksRequested) return false;
+  return Boolean(args.signerSetupActive && args.hasPaidProSourceOfTruth);
+}
+
 export type PaidProQaInvariantInput = {
   state: PaidProReviewState;
   authoritativeBodySource: string | null | undefined;

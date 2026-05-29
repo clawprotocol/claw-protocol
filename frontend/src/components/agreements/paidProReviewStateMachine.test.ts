@@ -7,6 +7,8 @@ import {
   paidProReviewStateBlocksReviewRender,
   paidProReviewStateBlocksStarterSurface,
   paidProReviewStateForbidsProUpsellCta,
+  paidProSignerSetupDefersHandoffRecompute,
+  paidProSignerSetupSuppressesGuidedAndStarter,
   resolvePaidProReviewState,
 } from "./paidProReviewStateMachine";
 
@@ -308,5 +310,54 @@ describe("collectPaidProQaInvariantViolations", () => {
     expect(v).not.toContain("authoritative_body_source_none");
     expect(v).not.toContain("authoritative_len_zero");
     expect(v).toEqual([]);
+  });
+});
+
+describe("paid Pro signer-setup isolation", () => {
+  it("suppresses guided queue + starter refresh while signer setup is active over an accepted SoT", () => {
+    expect(
+      paidProSignerSetupSuppressesGuidedAndStarter({
+        signerSetupActive: true,
+        hasPaidProSourceOfTruth: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("does NOT suppress guided/starter before an accepted SoT exists (pre-acceptance discovery flow)", () => {
+    expect(
+      paidProSignerSetupSuppressesGuidedAndStarter({
+        signerSetupActive: true,
+        hasPaidProSourceOfTruth: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does NOT suppress guided/starter when signer setup is not the active surface", () => {
+    expect(
+      paidProSignerSetupSuppressesGuidedAndStarter({
+        signerSetupActive: false,
+        hasPaidProSourceOfTruth: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("defers VS01/handoff recompute during signer metadata entry (no Prepare click yet)", () => {
+    expect(
+      paidProSignerSetupDefersHandoffRecompute({
+        signerSetupActive: true,
+        hasPaidProSourceOfTruth: true,
+        prepareSignatureLinksRequested: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("allows VS01/handoff recompute once the user clicks Prepare signature links", () => {
+    expect(
+      paidProSignerSetupDefersHandoffRecompute({
+        signerSetupActive: true,
+        hasPaidProSourceOfTruth: true,
+        prepareSignatureLinksRequested: true,
+      }),
+    ).toBe(false);
   });
 });

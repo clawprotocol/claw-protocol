@@ -40,6 +40,27 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
+  it("'Edit signer details' is actionable and invokes the signer-setup handler", () => {
+    const onBackToSignerDetails = vi.fn();
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml=""
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT body. ${"Substantive clause. ".repeat(900)}`}
+        onBackToSignerDetails={onBackToSignerDetails}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const editBtn = screen.getByTestId("simple-pro-back-to-signer-details");
+    expect(editBtn.textContent).toContain("Edit signer details");
+    fireEvent.click(editBtn);
+    expect(onBackToSignerDetails).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
   it("shows signer/reviewer ready trust line when signersReady", () => {
     render(
       <SimpleProFinalReviewScreen
@@ -107,6 +128,63 @@ describe("SimpleProFinalReviewScreen", () => {
     );
     expect(screen.queryByTestId("simple-pro-send-for-review")).toBeNull();
     expect(screen.queryByTestId("simple-pro-change-signing-order")).toBeNull();
+    cleanup();
+  });
+
+  it("canonical paid Pro review never renders a guided 'Draft ready to review' refine block", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml={`<p>${"Paid Pro authoritative clause. ".repeat(200)}</p>`}
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT body. ${"Substantive clause. ".repeat(900)}`}
+        appliedChecklist={[]}
+        appliedAnswerCount={0}
+        signaturePrimaryLabel="Add signer details"
+        onBackToSignerDetails={vi.fn()}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    // No guided/free refinement surface may leak onto the paid Pro review.
+    expect(screen.queryByText(/Draft ready to review/i)).toBeNull();
+    expect(screen.queryByText(/Ready to create links/i)).toBeNull();
+    expect(screen.queryByTestId("simple-pro-applied-updates-card")).toBeNull();
+    expect(screen.queryByText(/Finalizing secure agreement version/i)).toBeNull();
+    // Signers incomplete: CTA stays "Add signer details", not a links/continue prompt.
+    expect(screen.getByTestId("simple-pro-final-review-actions").textContent).toContain(
+      "Add signer details",
+    );
+    cleanup();
+  });
+
+  it("signer-setup typing surface: canonical paid Pro review shows the SoT body, no guided/free/starter mounts", () => {
+    // Decorative chrome (tiny HTML) must never become the document body; the SoT plain wins.
+    const sotPlain = `PRO AGREEMENT body. ${"Substantive operative clause. ".repeat(600)}`;
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>e-sign card</p>"
+        canonicalPaidProReview
+        paidReviewPlain={sotPlain}
+        signaturePrimaryLabel="Add signer details"
+        onBackToSignerDetails={vi.fn()}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const documentShell = screen.getByTestId("simple-pro-final-review-document");
+    // Full SoT body is rendered (not the ~28-char decorative card).
+    expect(documentShell.textContent || "").toContain("Substantive operative clause.");
+    expect((documentShell.textContent || "").length).toBeGreaterThan(5_000);
+    // No guided / free / starter surfaces leak onto the paid Pro signer-setup review.
+    expect(screen.queryByText(/Draft ready to review/i)).toBeNull();
+    expect(screen.queryByText(/Ready to create links/i)).toBeNull();
+    expect(screen.queryByTestId("simple-pro-applied-updates-card")).toBeNull();
+    expect(screen.queryByText(/STARTER DRAFT/i)).toBeNull();
+    expect(screen.queryByText(/Continue with Pro/i)).toBeNull();
     cleanup();
   });
 

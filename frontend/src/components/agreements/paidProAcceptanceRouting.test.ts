@@ -532,4 +532,53 @@ describe("paidProAcceptanceRouting", () => {
       expect(review?.hash).toBe(record.hash);
     });
   });
+
+  describe("signer-setup metadata edits keep the paid SoT frozen", () => {
+    function signerMetadataState() {
+      return {
+        party1: { legalEntity: "Blue Canyon Analytics LLC", signerName: "", signerEmail: "" },
+        party2: { legalEntity: "Iron Vale Systems Inc", signerName: "", signerEmail: "" },
+      };
+    }
+
+    it("typing Party 2 signer name/email does not change the paid SoT hash/len", () => {
+      const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      const beforeHash = record.hash;
+      const beforeLen = record.text.length;
+
+      // Simulate signer metadata typing: only signer metadata state changes.
+      const meta = signerMetadataState();
+      meta.party2.signerName = "Dana Vale";
+      meta.party2.signerEmail = "dana@ironvale.com";
+
+      const after = getPaidProSourceOfTruth();
+      expect(after?.hash).toBe(beforeHash);
+      expect(after?.text.length).toBe(beforeLen);
+      // The legal entity slots are untouched by signer-name/email typing.
+      expect(meta.party1.legalEntity).toBe("Blue Canyon Analytics LLC");
+      expect(meta.party2.legalEntity).toBe("Iron Vale Systems Inc");
+    });
+
+    it("no paid-pro-corpus-invariant-violation while typing signer metadata (surfaces stay SoT-derived)", () => {
+      establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      const meta = signerMetadataState();
+      meta.party2.signerName = "Dana Vale";
+      meta.party2.signerEmail = "dana@ironvale.com";
+
+      // Every paid surface resolves from the SoT; a decorative chrome string is never the body.
+      const displayed = getPaidProDocumentForSurface("display")!.text;
+      const copied = getPaidProDocumentForSurface("copy")!.text;
+      const review = getPaidProDocumentForSurface("review")!.text;
+      const finalized = getPaidProDocumentForSurface("finalized")!.text;
+      const invariant = logPaidProCorpusInvariant({ displayed, copied, review, finalized });
+      const violations = [
+        invariant?.displayed_matches,
+        invariant?.copied_matches,
+        invariant?.review_matches,
+        invariant?.finalized_matches,
+      ];
+      expect(violations.every(Boolean)).toBe(true);
+      expect(invariant?.displayed_len).toBe(invariant?.copied_len);
+    });
+  });
 });

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as proAgreementCanonicalizer from "./proAgreementCanonicalizer";
-import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  clearPaidProSourceOfTruth,
+  establishPaidProSourceOfTruth,
+  getPaidProDocumentForSurface,
+  logPaidProCorpusInvariant,
+} from "./paidProSourceOfTruth";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   buildPremiumDeliverablePlainTextFromDraft,
@@ -289,5 +294,34 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
         paidAuthoritativeFallback: paid,
       }),
     ).toBe(true);
+  });
+});
+
+describe("paid Pro displayed surface resolves to the SoT body, not decorative chrome", () => {
+  afterEach(() => clearPaidProSourceOfTruth());
+
+  it("the display surface length equals the accepted SoT length (decorative HTML/chrome is never the body)", () => {
+    const source = "Accepted paid Pro agreement body with substantive clauses. ".repeat(120);
+    const record = establishPaidProSourceOfTruth({ text: source, source: "server_full_draft" });
+    const display = getPaidProDocumentForSurface("display");
+    expect(display?.text.length).toBe(record.text.length);
+    expect(display?.hash).toBe(record.hash);
+    // A tiny decorative signature card (~28 chars) must never be reported as the document body.
+    expect(display!.text.length).toBeGreaterThan(1_000);
+  });
+
+  it("no paid-pro-corpus-invariant-violation when display/copy/review/finalized derive from the SoT", () => {
+    const source = "Accepted paid Pro agreement body with substantive clauses. ".repeat(120);
+    establishPaidProSourceOfTruth({ text: source, source: "server_full_draft" });
+    const displayed = getPaidProDocumentForSurface("display")!.text;
+    const copied = getPaidProDocumentForSurface("copy")!.text;
+    const review = getPaidProDocumentForSurface("review")!.text;
+    const finalized = getPaidProDocumentForSurface("finalized")!.text;
+    const invariant = logPaidProCorpusInvariant({ displayed, copied, review, finalized });
+    expect(invariant?.displayed_matches).toBe(true);
+    expect(invariant?.copied_matches).toBe(true);
+    expect(invariant?.review_matches).toBe(true);
+    expect(invariant?.finalized_matches).toBe(true);
+    expect(invariant?.displayed_len).toBe(invariant?.copied_len);
   });
 });

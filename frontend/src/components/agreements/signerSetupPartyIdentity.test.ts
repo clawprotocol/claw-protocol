@@ -863,4 +863,45 @@ describe("signer slot canonical mapping (Defect — Party 2 duplicates Party 1)"
     expect(ids[0].legalEntityName).toBe("Red Mesa Logistics LLC");
     expect(ids[1].legalEntityName).toBe("Harbor Peak Automation LLC");
   });
+
+  it("typing Party 2 signer name/email flips only the gate — legal entity slots stay isolated", () => {
+    establishTwoPartyManifest();
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_2 }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+
+    // Before any signer metadata: gate is incomplete, slots already correct + distinct.
+    const before = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      signerSetupPartyIdentities: ids,
+      draftPartyNames: [PARTY_1, PARTY_2],
+      partySignerNames: ["", ""],
+      recipient1Name: "",
+      recipient2Name: "",
+      recipient1Email: "",
+      recipient2Email: "",
+      extraPartyReviewEmails: [],
+    });
+    expect(before.complete).toBe(false);
+    expect(before.legalEntityNames).toEqual(["Blue Canyon Analytics LLC", "Iron Vale Systems Inc"]);
+
+    // Typing Party 2 signer name/email only advances completeness; legal entity slots are unchanged.
+    const after = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      signerSetupPartyIdentities: ids,
+      draftPartyNames: [PARTY_1, PARTY_2],
+      partySignerNames: ["Sam Canyon", "Dana Vale"],
+      recipient1Name: "Sam Canyon",
+      recipient2Name: "Dana Vale",
+      recipient1Email: "sam@bluecanyon.com",
+      recipient2Email: "dana@ironvale.com",
+      extraPartyReviewEmails: [],
+    });
+    expect(after.complete).toBe(true);
+    expect(after.legalEntityNames).toEqual(before.legalEntityNames);
+    expect(after.legalEntityNames[1]).toBe("Iron Vale Systems Inc");
+    expect(after.legalEntityNames[1]).not.toMatch(/Blue Canyon/i);
+  });
 });
