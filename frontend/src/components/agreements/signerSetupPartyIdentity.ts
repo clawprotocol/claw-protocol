@@ -472,8 +472,16 @@ export function resolveSignerSetupPartyIdentity(
   const candidates: { name: string; source: SignerIdentitySource }[] = [];
 
   const authoritative = getAuthoritativeAgreementDocument();
-  const manifestName = norm(authoritative?.canonicalPartyManifest?.[index]?.name ?? "");
+  const manifestEntries = authoritative?.canonicalPartyManifest ?? [];
+  const manifestName = norm(manifestEntries[index]?.name ?? "");
   if (manifestName) candidates.push({ name: manifestName, source: "authoritative_manifest" });
+  // A stale/compact frozen manifest can duplicate one party across both slots. Detect duplication so
+  // a distinct per-slot extraction can override it (never collapse two real parties into one).
+  const manifestNameDuplicatedAcrossSlots =
+    manifestName.length > 0 &&
+    manifestEntries.some(
+      (p, j) => j !== index && norm(String(p?.name ?? "")).toLowerCase() === manifestName.toLowerCase(),
+    );
 
   const intakeText = String(args.intakeText ?? "").trim();
   const bodyText = String(args.agreementBodyText ?? "").trim();
@@ -517,6 +525,32 @@ export function resolveSignerSetupPartyIdentity(
     const slotDraft = norm(String(args.draftPartyNames?.[index] ?? args.draftPartyName ?? ""));
     legalEntityName =
       slotDraft && !candidateContainsMultipleEntities(slotDraft) ? slotDraft : "";
+  }
+  // Authoritative manifest wins per-slot. pickBestLegalCandidate ranks by suffix+length only, so a
+  // longer wrong candidate (e.g. a draft/handoff/recipient slot that duplicated another party's
+  // entity) could otherwise override the canonical slot entity and collapse two parties into one.
+  // Only a fuller form of the SAME manifest entity may upgrade it (e.g. "Red Mesa" → "Red Mesa
+  // Logistics LLC"); a different entity never replaces the canonical slot.
+  //
+  // EXCEPTION: when the frozen manifest is stale and duplicates this slot's entity across slots
+  // (e.g. manifest=[Blue Canyon, Blue Canyon]) while the per-slot canonical extraction yields a
+  // DISTINCT real entity (e.g. Iron Vale Systems Inc), trust the distinct extraction so we never
+  // collapse two genuinely different parties into Party 1.
+  const canonicalSlotEntity =
+    record?.fullLegalName && !candidateContainsMultipleEntities(record.fullLegalName)
+      ? norm(record.fullLegalName)
+      : "";
+  const canonicalEntityIsDistinctFromManifest =
+    canonicalSlotEntity.length > 0 &&
+    hasLegalEntitySuffix(canonicalSlotEntity) &&
+    canonicalSlotEntity.toLowerCase() !== manifestName.toLowerCase();
+  if (manifestName && !candidateContainsMultipleEntities(manifestName)) {
+    const current = norm(legalEntityName);
+    if (manifestNameDuplicatedAcrossSlots && canonicalEntityIsDistinctFromManifest) {
+      legalEntityName = canonicalSlotEntity;
+    } else if (!current || !isShortPrefixOfFullLegal(manifestName, current)) {
+      legalEntityName = manifestName;
+    }
   }
   const displayName = legalEntityName
     ? compactDisplayNameFromLegalEntity(legalEntityName)

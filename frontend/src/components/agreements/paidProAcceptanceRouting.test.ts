@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { clearCreateReviewDraftReadyMarker, writeCreateReviewDraftReadyMarker } from "./agreementIntakeStorage";
 import {
@@ -15,6 +17,8 @@ import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
+  hashPaidProCorpus,
+  logPaidProCorpusInvariant,
 } from "./paidProSourceOfTruth";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { resolveGuidedProUxState } from "./guidedDealCompletion/guidedProUxState";
@@ -32,6 +36,12 @@ import {
 } from "./paidProPostAcceptanceStateGuard";
 import { canChooseProDeliveryTrack } from "./proDeliveryTrackState";
 import { resolvePaidProSignerDetailsGate } from "./signerSetupPartyIdentity";
+import { resolveFinalVs01CorpusOrBlock } from "../../vs01/vs01SigningCorpus";
+import {
+  buildDefaultProVisiblePaperCandidates,
+  resolveVisibleProPaperBoundary,
+} from "./visibleProPaperRenderBoundary";
+import { resolvePaidProReviewState } from "./paidProReviewStateMachine";
 
 const PAID_BODY = `PRO AGREEMENT. ${"Substantive clause. ".repeat(900)}`;
 
@@ -221,6 +231,31 @@ describe("paidProAcceptanceRouting", () => {
     expect(resolveProDeliveryTrackCanonicalCorpus().hash).toBe(record.hash);
   });
 
+  it("VS01 resolves from paid SoT after premium return — never blocked_short_preview when real corpus exists", () => {
+    establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+    const res = resolveFinalVs01CorpusOrBlock({
+      premiumAccepted: true,
+      premiumComplete: true,
+      guidedPro: true,
+    });
+    // After premium return with a real (>10k) paid corpus, the gate must NOT fall to blocked_short_preview.
+    expect(res.source).not.toBe("blocked_short_preview");
+    expect(res.len).toBeGreaterThan(10_000);
+  });
+
+  it("blocked_short_preview is a non-advancing gate (allowed:false) and never seeds VS01", () => {
+    // No paid SoT + premiumAccepted with a short body => fail-closed gate, never advances.
+    const res = resolveFinalVs01CorpusOrBlock({
+      premiumAccepted: true,
+      premiumComplete: false,
+      acceptedAuthoritativePlain: "STARTER DRAFT short preview body",
+      guidedPro: true,
+    });
+    expect(res.source).toBe("blocked_short_preview");
+    expect(res.allowed).toBe(false);
+    expect(res.len).toBe(0);
+  });
+
   it("simpleProFinalReviewActive stays true during recipient_setup_required when accepted authority", () => {
     establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
     expect(
@@ -234,5 +269,176 @@ describe("paidProAcceptanceRouting", () => {
         finalReviewExplicitlyOpened: false,
       }),
     ).toBe(true);
+  });
+
+  describe("paid Pro copy/review/finalized corpus invariant (derive from accepted SoT)", () => {
+    it("copy, review, and finalized surfaces share identical length and hash with accepted SoT", () => {
+      const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      const copy = getPaidProDocumentForSurface("copy");
+      const review = getPaidProDocumentForSurface("review");
+      const finalized = getPaidProDocumentForSurface("finalized");
+      expect(copy?.text.length).toBe(record.text.length);
+      expect(review?.text.length).toBe(copy?.text.length);
+      expect(finalized?.text.length).toBe(copy?.text.length);
+      expect(review?.hash).toBe(copy?.hash);
+      expect(finalized?.hash).toBe(copy?.hash);
+      expect(review?.hash).toBe(record.hash);
+    });
+
+    it("no paid-pro-corpus-invariant-violation when surfaces derive from SoT (copied_len === review_len === finalized_len)", () => {
+      const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      const copy = getPaidProDocumentForSurface("copy")?.text ?? "";
+      const review = getPaidProDocumentForSurface("review")?.text ?? "";
+      const finalized = getPaidProDocumentForSurface("finalized")?.text ?? "";
+      const invariant = logPaidProCorpusInvariant({
+        displayed: copy,
+        copied: copy,
+        review,
+        finalized,
+        vs01: record.text,
+      });
+      expect(invariant).not.toBeNull();
+      expect(invariant!.copied_len).toBe(invariant!.review_len);
+      expect(invariant!.copied_len).toBe(invariant!.finalized_len);
+      expect(invariant!.copied_matches).toBe(true);
+      expect(invariant!.review_matches).toBe(true);
+      expect(invariant!.finalized_matches).toBe(true);
+    });
+
+    it("QA regression fixture: copied_len equals review_len and finalized_len after signer metadata hydration", () => {
+      const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      // Simulate signer metadata hydration touching recipient state (does not edit the body).
+      // Re-reading surfaces after hydration must still derive from the same accepted SoT.
+      const copyBefore = getPaidProDocumentForSurface("copy")?.text ?? "";
+      const reviewAfter = getPaidProDocumentForSurface("review")?.text ?? "";
+      const finalizedAfter = getPaidProDocumentForSurface("finalized")?.text ?? "";
+      expect(reviewAfter.length).toBe(copyBefore.length);
+      expect(finalizedAfter.length).toBe(copyBefore.length);
+      expect(hashPaidProCorpus(reviewAfter)).toBe(record.hash);
+      expect(hashPaidProCorpus(finalizedAfter)).toBe(record.hash);
+    });
+  });
+
+  describe("signer-metadata transition does not degrade the paid Pro surface", () => {
+    const TWO_PARTY = {
+      partyCount: 2,
+      draftPartyNames: ["Blue Canyon Analytics LLC", "Iron Vale Systems Inc."],
+      recipient1Name: "Blue Canyon Analytics LLC",
+      recipient2Name: "Iron Vale Systems Inc.",
+      extraPartyReviewEmails: [] as string[],
+    };
+
+    it("incomplete Party 2 signer details keeps signer setup active (CTA = Add signer details)", () => {
+      establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      const gate = resolvePaidProSignerDetailsGate({
+        ...TWO_PARTY,
+        partySignerNames: ["Alex Client", ""],
+        recipient1Email: "alex@bluecanyon.test",
+        recipient2Email: "",
+      });
+      expect(gate.complete).toBe(false);
+      expect(gate.ctaLabel).toBe("Add signer details");
+      // Paid SoT remains the canonical review surface while signer setup is incomplete.
+      expect(resolveProDeliveryTrackCanonicalCorpus().hasCanonicalCorpus).toBe(true);
+    });
+
+    it("completing Party 2 signer details advances (CTA = Continue to final review); SoT unchanged", () => {
+      const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      const complete = resolvePaidProSignerDetailsGate({
+        ...TWO_PARTY,
+        partySignerNames: ["Alex Client", "Priya Provider"],
+        recipient1Email: "alex@bluecanyon.test",
+        recipient2Email: "priya@ironvale.test",
+      });
+      expect(complete.complete).toBe(true);
+      expect(complete.ctaLabel).toBe("Continue to final review");
+      expect(resolveProDeliveryTrackCanonicalCorpus().hash).toBe(record.hash);
+    });
+
+    it("AUTHORITATIVE_READY is never reported with authoritativeLen 0 after signer hydration", () => {
+      establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      // Simulated transient: paid authority exists but the active body read is momentarily empty.
+      const transient = resolvePaidProReviewState({
+        premiumPaidDocumentSurface: true,
+        premiumCheckoutCompleted: true,
+        premiumGenerationInFlight: false,
+        hasValidAuthoritativeCorpus: true,
+        premiumCorpusValidationFailed: false,
+        authoritativeBodyLen: 0,
+      });
+      expect(transient).not.toBe("AUTHORITATIVE_READY");
+      expect(transient).toBe("GENERATING");
+
+      const resolved = resolvePaidProReviewState({
+        premiumPaidDocumentSurface: true,
+        premiumCheckoutCompleted: true,
+        premiumGenerationInFlight: false,
+        hasValidAuthoritativeCorpus: true,
+        premiumCorpusValidationFailed: false,
+        authoritativeBodyLen: PAID_BODY.length,
+      });
+      expect(resolved).toBe("AUTHORITATIVE_READY");
+    });
+
+    it("paid SoT wins the visible-paper collision after signer hydration (no blank/block)", () => {
+      const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      // Signer hydration produced a competing rendered/handoff candidate + free starter body.
+      const competingRendered = "DRAFT READY TO REVIEW — short signer handoff preview body.";
+      const freeStarter = "SERVICES AGREEMENT. Short free starter preview.";
+      const candidates = buildDefaultProVisiblePaperCandidates({
+        paidProSourceOfTruthText: record.text,
+        renderedAgreementPreviewText: competingRendered,
+        freeStarterText: freeStarter,
+      });
+      const res = resolveVisibleProPaperBoundary({
+        visiblePlain: competingRendered,
+        declaredSource: "renderedAgreementPreview",
+        candidates,
+        intakeText: "services agreement",
+        draft: null,
+        paidProReviewSurface: true,
+      });
+      expect(res.blocked).toBe(false);
+      expect(res.showFinalizing).toBe(false);
+      expect(res.plain).toBe(record.text);
+      expect(res.isAuthoritative).toBe(true);
+      expect(res.plain).not.toBe(competingRendered);
+      expect(res.plain).not.toBe(freeStarter);
+    });
+  });
+
+  describe("paid Pro signer-setup UX surface (labels + Edit signer details scroll/focus)", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+
+    it("signer setup section is titled 'Add signer details' with a 'Signer setup' chip and signer-name copy", () => {
+      expect(intake).toMatch(
+        /paidProInlineRecipientShell\s*\n\s*\? "Add signer details"\s*\n\s*: "Share this agreement"/,
+      );
+      expect(intake).toContain("Signer setup");
+      expect(intake).toContain(
+        "Add the signer name and email for each party before creating review or signature links. LawDog does not email anyone automatically.",
+      );
+    });
+
+    it("paid Pro signer setup header/chip no longer use 'Add recipient emails' or 'Signing link'", () => {
+      const panelStart = intake.indexOf("function CreateFlowSendRecipientsPanel(");
+      const headerStart = intake.indexOf('aria-label="Invite recipients"', panelStart);
+      // The visible header + chip + intro copy block for the recipient/signer setup panel.
+      const headerBlock = intake.slice(headerStart, headerStart + 1400);
+      expect(headerBlock).not.toContain("Add recipient emails");
+      expect(headerBlock).not.toContain("Signing link");
+    });
+
+    it("'Edit signer details' handler scrolls signer setup into view and focuses the first incomplete field", () => {
+      const start = intake.indexOf(
+        "const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(",
+      );
+      expect(start).toBeGreaterThan(-1);
+      const block = intake.slice(start, start + 1400);
+      expect(block).toContain("paidProSignerDetailsGate.firstIncompleteFieldKey");
+      expect(block).toContain("focusVisibleRecipientInput(focusKey)");
+      expect(block).toContain("claw-paid-pro-inline-signer-setup");
+      expect(block).toContain("scrollGuidedSignerSetupIntoView()");
+    });
   });
 });

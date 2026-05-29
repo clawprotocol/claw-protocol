@@ -2115,26 +2115,24 @@ function CreateFlowSendRecipientsPanel({
         {minimalProSendRecipientChrome ? "Recipient setup" : "Recipient invite"}
       </p>
       <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl">
-        {paidProInlineRecipientShell && effectivePremiumSendMode === "review"
-          ? "Send for review"
-          : paidProInlineRecipientShell
-            ? "Add recipient emails"
-            : "Share this agreement"}
+        {paidProInlineRecipientShell
+          ? "Add signer details"
+          : "Share this agreement"}
       </h2>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        {paidProInlineRecipientShell && effectivePremiumSendMode === "review" ? null : (
+        {paidProInlineRecipientShell ? (
+          <span className="rounded-full border border-emerald-700/45 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-100/95">
+            Signer setup
+          </span>
+        ) : (
           <span className="rounded-full border border-emerald-700/45 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-100/95">
             {modeLinkLabel}
           </span>
         )}
       </div>
       <p className="mt-3 text-sm leading-relaxed text-slate-300">
-        {paidProInlineRecipientShell && effectivePremiumSendMode === "review" ? (
-          <>
-            {partyCount > 2
-              ? "Add review-link emails next to each agreement party as needed. At least one valid email unlocks continue — all fields are optional except where you enter text."
-              : "Add the other party&apos;s email. They&apos;ll get a private review link where they can suggest changes. Nothing is signed yet."}
-          </>
+        {paidProInlineRecipientShell ? (
+          "Add the signer name and email for each party before creating review or signature links. LawDog does not email anyone automatically."
         ) : (
           <>
             {modeExplain}
@@ -10665,7 +10663,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const authoritativePaidProReviewPlain = useMemo(
     () =>
-      isAuthoritativePaidProReviewActive
+      // Paid SoT fallback: when checkout is latched and a real SoT exists, resolve the body even if
+      // the active review predicate is transiently false (e.g. signer hydration mutated the draft so
+      // the draft-validated surface read briefly fails). The resolver still returns "" when no real
+      // SoT/authoritative corpus is available, so this never fabricates a body during generation.
+      isAuthoritativePaidProReviewActive || (premiumCheckoutCompleted && hasPaidProSourceOfTruth())
         ? resolveAuthoritativePaidProReviewPlain({
             draft: draft ?? null,
             intakeText: currentPremiumMergedIntakeKey || intakeCombined,
@@ -10673,6 +10675,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         : "",
     [
       isAuthoritativePaidProReviewActive,
+      premiumCheckoutCompleted,
       draft,
       currentPremiumMergedIntakeKey,
       intakeCombined,
@@ -10680,6 +10683,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSurfaceGateTick,
     ],
   );
+
+  /**
+   * Length of the authoritative paid body for state/invariant reporting. When the active review
+   * predicate is transiently false (e.g. signer hydration mutated the draft), fall back to the paid
+   * SoT corpus so the authoritative length is never reported as 0 while paid authority exists.
+   */
+  const paidProAuthoritativeBodyLen = useMemo(() => {
+    const fromActive = authoritativePaidProReviewPlain.trim().length;
+    if (fromActive > 0) return fromActive;
+    if (premiumCheckoutCompleted) return getPaidProSourceOfTruthText().trim().length;
+    return 0;
+  }, [authoritativePaidProReviewPlain, premiumCheckoutCompleted, reviewDocRefreshTick, premiumSurfaceGateTick]);
 
   const visibleAgreementDocumentForReview = useMemo(() => {
     if (!isAuthoritativePaidProReviewActive || !authoritativePaidProReviewPlain) {
@@ -12492,7 +12507,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProRecipientSetupOnDraft &&
     !recipientsDeferred &&
     (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)
-      ? "Add recipient emails"
+      ? "Add signer details"
       : null;
 
   useEffect(() => {
@@ -15124,6 +15139,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           authoritativePremiumUiCommitted ||
           canProceedWithPaidProDocument,
         premiumCorpusValidationFailed: premiumPaidUnavailableRetry,
+        authoritativeBodyLen: paidProAuthoritativeBodyLen,
       }),
     [
       premiumPaidDocumentSurface,
@@ -15136,6 +15152,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       authoritativePremiumUiCommitted,
       canProceedWithPaidProDocument,
       premiumPaidUnavailableRetry,
+      paidProAuthoritativeBodyLen,
     ],
   );
   const failedPremiumCorpusActive = paidProReviewState === "FAILED_PREMIUM_CORPUS";
@@ -15348,7 +15365,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               : paidProRecipientSetupOnDraft &&
                   !recipientsDeferred &&
                   (!hasAnyValidRecipientEmail || recipientEmailsHaveValidationErrors)
-                ? "Add recipient emails"
+                ? "Add signer details"
                 : premiumSendConfirmGateActive
                   ? paidProAuthoritative
                     ? effectivePremiumSendMode === "signature"
@@ -19214,11 +19231,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setDisplayPhase("review");
     setPremiumRecipientUxActive(false);
     setCreateFlowSendRecipientEditorOpen(true);
-    window.requestAnimationFrame(() => scrollGuidedSignerSetupIntoView());
+    // "Edit signer details" must never no-op: scroll the inline signer setup into view and focus the
+    // first incomplete required signer field. Falls back to scrolling the section anchors if no
+    // focusable field is visible yet (e.g. before the panel finishes mounting).
+    window.requestAnimationFrame(() => {
+      const focusKey = paidProSignerDetailsGate.firstIncompleteFieldKey;
+      const focused = focusKey ? focusVisibleRecipientInput(focusKey) : false;
+      if (!focused) {
+        scrollGuidedSignerSetupIntoView();
+        document
+          .getElementById("claw-paid-pro-inline-signer-setup")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
   }, [
     scrollGuidedSignerSetupIntoView,
     paidProAcceptedCorpusReady,
     guidedCompletionPhase,
+    paidProSignerDetailsGate,
   ]);
 
   React.useEffect(() => {
@@ -19843,17 +19873,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       : simpleCreateBottomPrimaryLabel;
     const violations = collectPaidProQaInvariantViolations({
       state: paidProReviewState,
-      authoritativeBodySource: isAuthoritativePaidProReviewActive
-        ? "paid_pro_source_of_truth"
-        : premiumPaidReadonlyPick.sourceUsed,
-      authoritativeLen: authoritativePaidProReviewPlain.trim().length,
+      authoritativeBodySource:
+        isAuthoritativePaidProReviewActive || (paidProAuthoritativeBodyLen > 0 && hasPaidProSourceOfTruth())
+          ? "paid_pro_source_of_truth"
+          : premiumPaidReadonlyPick.sourceUsed,
+      authoritativeLen: paidProAuthoritativeBodyLen,
       freeStarterShellResolved: freeStarterReviewShellActive,
       ctaLabel: effectiveCtaLabel,
       starterLabelRendered: freeStarterReviewShellActive || reviewShellChrome.kind === "free_starter",
     });
     logPaidProReviewStateTelemetry({
       state: paidProReviewState,
-      authoritativeLen: authoritativePaidProReviewPlain.trim().length,
+      authoritativeLen: paidProAuthoritativeBodyLen,
       premiumCorpusValidationFailed: failedPremiumCorpusActive,
     });
     logPaidProQaInvariantViolations(violations);
@@ -19864,7 +19895,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleCreateBottomPrimaryLabel,
     isAuthoritativePaidProReviewActive,
     premiumPaidReadonlyPick.sourceUsed,
-    authoritativePaidProReviewPlain,
+    paidProAuthoritativeBodyLen,
     freeStarterReviewShellActive,
     reviewShellChrome.kind,
   ]);
@@ -21176,10 +21207,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         );
     if (!text || !navigator.clipboard?.writeText) return;
     if (import.meta.env.DEV) {
+      // Corpus invariant compares document SURFACES, which must all derive from the accepted SoT.
+      // The visible display/final-review plains are a separate (decorated/clipped) render layer and
+      // must never be reported as the review/finalized corpus, or copy(=SoT) vs review(=display)
+      // length/hash drift would trip a false paid-pro-corpus-invariant-violation after signer edits.
+      const reviewSurface = getPaidProDocumentForSurface("review", {
+        draft: draft ?? null,
+        intakeText: intakeForCopy,
+      });
+      const finalizedSurface = getPaidProDocumentForSurface("finalized", {
+        draft: draft ?? null,
+        intakeText: intakeForCopy,
+      });
       logAcceptedPremiumCorpusInstrumentation({
-        displayed: displayPolishedPaidProPlain,
+        displayed: paidProCopy?.text ?? displayPolishedPaidProPlain,
         copied: text,
-        finalReview: simpleProFinalReviewDisplayPlain,
+        finalReview: reviewSurface?.text ?? finalizedSurface?.text ?? text,
       });
       // eslint-disable-next-line no-console
       console.info("[guided-final-copy-source]", {

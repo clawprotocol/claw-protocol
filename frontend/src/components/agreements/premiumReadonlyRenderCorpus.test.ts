@@ -114,6 +114,22 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
     spy.mockRestore();
   });
 
+  it("readonly display corpus matches the accepted SoT length (display surface not truncated vs copy)", () => {
+    const source = "Accepted paid Pro agreement body with substantive clauses. ".repeat(120);
+    const record = establishPaidProSourceOfTruth({ text: source });
+    const out = pickPremiumPaidReadonlyPlainText({
+      // A shorter rendered/display candidate must never replace the accepted SoT body.
+      premiumReadonlySnapshotText: "x".repeat(1_613),
+      agreementDocumentText: "x".repeat(1_613),
+      draft: richConsultingDraft(),
+      premiumCheckoutCompleted: true,
+      intakeText: "Consulting agreement between Acme LLC and Beta LLC.",
+    });
+    expect(out.plainText).toBe(record.text);
+    expect(out.plainText.length).toBe(record.text.length);
+    expect(out.plainText.length).toBeGreaterThan(1_613);
+  });
+
   it("blocks free/live preview fallback when paid Pro is locked but authority is unavailable", () => {
     const spy = vi.spyOn(proAgreementCanonicalizer, "canonicalizeProAgreementText");
     const out = pickPremiumPaidReadonlyPlainText({

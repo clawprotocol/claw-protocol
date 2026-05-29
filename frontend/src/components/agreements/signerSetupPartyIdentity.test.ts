@@ -672,3 +672,195 @@ describe("signer entity slot isolation (Defect #1 — no cross-slot concatenatio
     }
   });
 });
+
+describe("signer slot canonical mapping (Defect — Party 2 duplicates Party 1)", () => {
+  const PARTY_1 = "Blue Canyon Analytics LLC";
+  const PARTY_2 = "Iron Vale Systems Inc.";
+  const INTAKE = `Services agreement between ${PARTY_1} and ${PARTY_2} for data work. Texas law.`;
+  const BODY = `SERVICES AGREEMENT between ${PARTY_1} ("Client") and ${PARTY_2} ("Service Provider"). ${"Substantive operative clause. ".repeat(600)}`;
+
+  function establishTwoPartyManifest() {
+    establishAuthoritativeAgreementDocument({
+      fullCorpusText: BODY,
+      canonicalPartyManifest: [
+        { name: PARTY_1, role: "Client" } as never,
+        { name: PARTY_2, role: "Service Provider" } as never,
+      ],
+    });
+  }
+
+  afterEach(() => clearAuthoritativeAgreementDocument());
+
+  it("renders two distinct canonical parties from a 2-party manifest", () => {
+    establishTwoPartyManifest();
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_2 }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    expect(ids).toHaveLength(2);
+    expect(ids[0].legalEntityName).toBe("Blue Canyon Analytics LLC");
+    expect(ids[1].legalEntityName).toBe("Iron Vale Systems Inc");
+    expect(ids[0].legalEntityName).not.toBe(ids[1].legalEntityName);
+  });
+
+  it("Party 2 stays Iron Vale even when a duplicated draft slot leaks Party 1's (longer) entity", () => {
+    // Root cause: pickBestLegalCandidate ranked by length, so the longer duplicated draft name for
+    // slot 1 used to override the canonical manifest entity and collapse both parties into Party 1.
+    establishTwoPartyManifest();
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_1 }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    expect(ids[1].legalEntityName).toBe("Iron Vale Systems Inc");
+    expect(ids[1].legalEntityName).not.toMatch(/Blue Canyon/i);
+  });
+
+  it("Party 2 stays Iron Vale even when handoff slots both seed Party 1's entity", () => {
+    establishTwoPartyManifest();
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_2 }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+      handoffSlots: [{ name: PARTY_1 }, { name: PARTY_1 }],
+    });
+    expect(ids[1].legalEntityName).toBe("Iron Vale Systems Inc");
+    expect(ids[1].legalEntityName).not.toMatch(/Blue Canyon/i);
+  });
+
+  it("render slots map Party 1 → Blue Canyon, Party 2 → Iron Vale (never the same entity)", () => {
+    establishTwoPartyManifest();
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_1 }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    const slot0 = resolveSignerSetupRenderSlot({ slotIndex: 0, slotIdentities: ids });
+    const slot1 = resolveSignerSetupRenderSlot({ slotIndex: 1, slotIdentities: ids });
+    expect(slot0.canonicalLegalEntity).toBe("Blue Canyon Analytics LLC");
+    expect(slot1.canonicalLegalEntity).toBe("Iron Vale Systems Inc");
+    expect(slot0.canonicalLegalEntity).not.toBe(slot1.canonicalLegalEntity);
+  });
+
+  it("agreement-parties summary renders both parties distinctly", () => {
+    establishTwoPartyManifest();
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_1 }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    const model = buildResolvedPartyDisplayModel({
+      parties: [
+        { name: PARTY_1, role: "Client" },
+        { name: PARTY_2, role: "Service Provider" },
+      ],
+      intakeText: INTAKE,
+      recipientEmails: ["", ""],
+      recipientSignerNames: ["", ""],
+      recipientDisplayNames: ["", ""],
+      canonicalLegalEntityNames: ids.map((i) => i.legalEntityName),
+    });
+    expect(model[0].displayName).toMatch(/Blue Canyon/i);
+    expect(model[1].displayName).toMatch(/Iron Vale/i);
+    expect(model[0].displayName).not.toBe(model[1].displayName);
+  });
+
+  it("entering Party 2 signer metadata advances the gate without contaminating its canonical entity", () => {
+    establishTwoPartyManifest();
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_2 }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    // Party 1 already filled, Party 2 still blank → stay on signer setup (CTA = Add signer details).
+    const beforeParty2 = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      signerSetupPartyIdentities: ids,
+      draftPartyNames: [PARTY_1, PARTY_2],
+      partySignerNames: ["Avery Client", ""],
+      recipient1Name: PARTY_1,
+      recipient2Name: PARTY_2,
+      recipient1Email: "avery@bluecanyon.test",
+      recipient2Email: "",
+      extraPartyReviewEmails: [],
+    });
+    expect(beforeParty2.complete).toBe(false);
+    expect(beforeParty2.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA);
+    expect(beforeParty2.firstIncompleteFieldKey).toBe("r2-signer-name");
+
+    // Completing Party 2 advances to final review; Party 2's entity stays Iron Vale (no merge/dupe).
+    const afterParty2 = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      signerSetupPartyIdentities: ids,
+      draftPartyNames: [PARTY_1, PARTY_2],
+      partySignerNames: ["Avery Client", "Morgan Provider"],
+      recipient1Name: PARTY_1,
+      recipient2Name: PARTY_2,
+      recipient1Email: "avery@bluecanyon.test",
+      recipient2Email: "morgan@ironvale.test",
+      extraPartyReviewEmails: [],
+    });
+    expect(afterParty2.complete).toBe(true);
+    expect(afterParty2.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA);
+    expect(ids[1].legalEntityName).toBe("Iron Vale Systems Inc");
+    expect(ids[1].legalEntityName).not.toMatch(/Blue Canyon/i);
+  });
+
+  it("QA: stale manifest duplicating Party 1 across both slots still renders slot 1 as Iron Vale", () => {
+    // Reproduce the QA: a frozen/compact manifest that duplicated Party 1 into slot 1, while the
+    // intake/body clearly contain two DISTINCT entities. Canonical extraction must win for slot 1.
+    establishAuthoritativeAgreementDocument({
+      fullCorpusText: BODY,
+      canonicalPartyManifest: [
+        { name: PARTY_1, role: "Client" } as never,
+        { name: PARTY_1, role: "Service Provider" } as never,
+      ],
+    });
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_1 }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    expect(ids[0].legalEntityName).toBe("Blue Canyon Analytics LLC");
+    expect(ids[1].legalEntityName).toBe("Iron Vale Systems Inc");
+    expect(ids[1].legalEntityName).not.toMatch(/Blue Canyon/i);
+    // Render slots and editable fields must also be slot-isolated and distinct.
+    const slot1 = resolveSignerSetupRenderSlot({ slotIndex: 1, slotIdentities: ids });
+    expect(slot1.canonicalLegalEntity).toBe("Iron Vale Systems Inc");
+  });
+
+  it("metadata legalEntity conflict cannot overwrite the canonical slot legalEntity", () => {
+    establishTwoPartyManifest();
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_2 }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    // Stale recipient metadata tries to set slot 1's legal entity to Party 1's entity.
+    const editedSlot1 = resolveEditableSignerLegalEntityForSlot({
+      slotIndex: 1,
+      currentInputValue: "Blue Canyon Analytics LLC",
+      slotIdentities: ids,
+    });
+    expect(editedSlot1).toBe("Iron Vale Systems Inc");
+    expect(editedSlot1).not.toMatch(/Blue Canyon/i);
+  });
+
+  it("a fuller form of the SAME manifest entity may still upgrade the short canonical (no regression)", () => {
+    establishAuthoritativeAgreementDocument({
+      fullCorpusText: BODY,
+      canonicalPartyManifest: [
+        { name: "Red Mesa", role: "Client" } as never,
+        { name: "Harbor Peak", role: "Provider" } as never,
+      ],
+    });
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: "Red Mesa Logistics LLC" }, { name: "Harbor Peak Automation LLC" }],
+      intakeText: "between Red Mesa Logistics LLC and Harbor Peak Automation LLC",
+      agreementBodyText: BODY,
+    });
+    expect(ids[0].legalEntityName).toBe("Red Mesa Logistics LLC");
+    expect(ids[1].legalEntityName).toBe("Harbor Peak Automation LLC");
+  });
+});
