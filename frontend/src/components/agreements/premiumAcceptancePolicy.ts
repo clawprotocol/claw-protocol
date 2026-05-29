@@ -57,6 +57,25 @@ export function isNonfatalGenerationFailureCode(code: string | null | undefined)
  */
 export const PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN = 4_000;
 
+/**
+ * A server `server_full_document_text` at/above this length (after a successful HTTP 200) is the
+ * authoritative paid corpus and MUST win over client structural soft gates. Client heuristics
+ * (similarity, anchor, length-shape) may not reject a validated full server document — doing so
+ * strands the paid user on "Retry Pro draft" and lets a short fallback masquerade as the SoT.
+ */
+export const SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN = 10_000;
+
+export function serverFullDocumentWinsOverClientGates(args: {
+  serverFullDocumentLen: number;
+  httpOk: boolean;
+  /** Hard failures (airlock / dev-context leak) still block; only soft structural gates are bypassed. */
+  hardStructuralFailure: boolean;
+}): boolean {
+  if (!args.httpOk) return false;
+  if (args.hardStructuralFailure) return false;
+  return args.serverFullDocumentLen >= SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN;
+}
+
 /** A paid body has the required commercial sections (services/IP/term/governing-law/signature). */
 export function premiumBodyHasRequiredPaidSections(args: {
   text: string;

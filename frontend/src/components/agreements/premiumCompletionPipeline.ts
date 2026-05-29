@@ -136,6 +136,7 @@ import {
   logPremiumAcceptanceDecision,
   premiumBodyHasRequiredPaidSections,
   resolvePremiumBodyAgainstSessionFreeze,
+  serverFullDocumentWinsOverClientGates,
   shouldPreserveLongPremiumDespiteSoftGateFailure,
   shouldSuppressShortFallbackOverLongCandidate,
 } from "./premiumAcceptancePolicy";
@@ -1946,6 +1947,32 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         docLen: (doc || "").length,
         effGen: (effectiveFull.generation_outcome || "").trim(),
       };
+      // A long, validated server_full_document_text is the authoritative paid corpus: it must win
+      // over client structural soft gates (similarity / anchor / length-shape). Adopt it as the body
+      // and clear soft structural rejections so a complete server document is never dropped to
+      // "Retry Pro draft" (which let a short fallback masquerade as the SoT). Fatal placeholders and
+      // dev-context leaks are still enforced (hard failure codes + the finalize pass below).
+      const serverFullDoc =
+        (effectiveFull.server_full_document_text || "").trim() ||
+        extractPremiumApiServerCorpusText(effectiveFull);
+      const serverFailureCodeForWin = (effectiveFull.server_generation_failure_code || "").trim();
+      const serverHardFailureForWin =
+        serverFailureCodeForWin === "airlock_blocked" || serverFailureCodeForWin === "dev_context_leak";
+      const serverFullDocumentAuthoritative = serverFullDocumentWinsOverClientGates({
+        serverFullDocumentLen: serverFullDoc.length,
+        httpOk: true,
+        hardStructuralFailure: serverHardFailureForWin,
+      });
+      if (serverFullDocumentAuthoritative) {
+        const adoptedServerFull = applyAcceptedProCorpusSafeDisplay(serverFullDoc, {
+          draft: mergedForApi,
+          intakeText: rawForSoT || rawIntake,
+        }).text.trim();
+        if (adoptedServerFull.length >= (doc || "").length) {
+          doc = adoptedServerFull;
+        }
+        acc = { ok: true, reasons: [] };
+      }
       let placeholderClientOk = true;
       let fatalPlaceholderCount = 0;
       if (acc.ok) {
@@ -2002,10 +2029,12 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
             draft: mergedForApi,
           }),
         });
-      const advisoryAccept = longAdvisoryAccept || jsonParseNonfatalAccept;
+      // A validated long server_full_document_text wins over soft vPaid failures too.
+      const serverFullDocumentWins = serverFullDocumentAuthoritative && placeholderClientOk;
+      const advisoryAccept = longAdvisoryAccept || jsonParseNonfatalAccept || serverFullDocumentWins;
       if (advisoryAccept && (!vPaid.ok || !placeholderClientOk)) {
-        if (jsonParseNonfatalAccept) {
-          // The body is authoritative; only the intelligence metadata degraded. Override any
+        if (jsonParseNonfatalAccept || serverFullDocumentWins) {
+          // The body is authoritative; only the intelligence metadata / soft gate failed. Override any
           // earlier "degraded" classification so the surface treats this as a complete paid draft.
           premiumCompletionOutcome = "authoritative_draft_complete_with_recommended_clarifications";
         } else if (!premiumCompletionOutcome) {
@@ -2074,11 +2103,13 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         );
         logPremiumAcceptanceDecision({
           accepted: true,
-          reason: jsonParseNonfatalAccept
-            ? "json_parse_nonfatal_body_authoritative"
-            : longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
-              ? "long_body_advisory_accept"
-              : "client_gates_passed",
+          reason: serverFullDocumentWins && (!vPaid.ok || !acc.ok)
+            ? "server_full_document_authoritative"
+            : jsonParseNonfatalAccept
+              ? "json_parse_nonfatal_body_authoritative"
+              : longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
+                ? "long_body_advisory_accept"
+                : "client_gates_passed",
           bodyLen: doc.length,
           fatalPlaceholderCount,
           structuralFatalCount,

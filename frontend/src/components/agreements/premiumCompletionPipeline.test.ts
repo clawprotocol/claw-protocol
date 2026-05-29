@@ -1155,6 +1155,68 @@ describe("runPremiumCompletion json_parse degraded acceptance", () => {
   });
 });
 
+describe("runPremiumCompletion server_full_document_text authority", () => {
+  function runWithServerFullDocument(args: {
+    documentTextLen: number;
+    serverFullDocumentLen: number;
+    forceValidateFail: boolean;
+  }) {
+    premiumApiMock.forceValidateFail = args.forceValidateFail;
+    const documentText = buildMediumServicesBody(args.documentTextLen);
+    const serverFull = buildMediumServicesBody(args.serverFullDocumentLen);
+    premiumApiMock.mockResponses = [
+      {
+        title: "Professional Services Agreement",
+        agreement_family: "services_agreement",
+        document_text: documentText,
+        server_full_document_text: serverFull,
+        key_terms_found: ["payment", "governing_law"],
+        missing_material_info: [],
+        generation_outcome: "ok",
+        agreement_validation: { valid: true } as never,
+      },
+    ];
+    return runPremiumCompletion({
+      intakeText: MEDIUM_BODY_INTAKE,
+      originalUserIntakeRawForMerge: MEDIUM_BODY_INTAKE,
+      structuredDraft: mediumServicesStructured(),
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      agreementGenerationId: `gen-server-full-${args.serverFullDocumentLen}-${args.forceValidateFail}`,
+      premiumRequestIntakeFingerprint: "fp-server-full",
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => mediumServicesStructured(),
+    });
+  }
+
+  it("a long (>10k) validated server_full_document_text is accepted even when client gates fail", async () => {
+    // document_text is shorter and the paid quality gate soft-fails, but the authoritative server
+    // full document (>10k) must win over the client structural soft gates — not be rejected.
+    const out = await runWithServerFullDocument({
+      documentTextLen: 6_000,
+      serverFullDocumentLen: 12_000,
+      forceValidateFail: true,
+    });
+    expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThanOrEqual(10_000);
+    expect(out.premiumCompletionOutcome).toBe(
+      "authoritative_draft_complete_with_recommended_clarifications",
+    );
+  });
+
+  it("server_full_document_text wins even when document_text would otherwise be rejected", async () => {
+    const out = await runWithServerFullDocument({
+      documentTextLen: 5_000,
+      serverFullDocumentLen: 18_582,
+      forceValidateFail: true,
+    });
+    expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThanOrEqual(15_000);
+  });
+});
+
 describe("nonfatal parse-failure acceptance policy", () => {
   const longSectionedBody = buildMediumServicesBody(8_999);
 

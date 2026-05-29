@@ -107,14 +107,34 @@ export function hasPaidProSourceOfTruth(): boolean {
   return Boolean(paidProSourceOfTruth?.text && paidProSourceOfTruth.text.length >= 500);
 }
 
+/**
+ * Pipeline render sources that represent a rejected / unusable / recoverable corpus. None of these
+ * may ever be committed as the paid Pro Source of Truth — doing so lets a short rejected/fallback
+ * body masquerade as the authoritative agreement and leaks guided/starter surfaces back in.
+ */
+const FORBIDDEN_PAID_PRO_SOT_SOURCES: ReadonlySet<string> = new Set([
+  "rejected_paid_corpus",
+  "premium_network_retryable",
+  "premium_generation_retryable",
+  "fallback_preview",
+  "fallback_preview_error",
+  "stale_intake",
+]);
+
 export function establishPaidProSourceOfTruth(args: {
   text: string;
-  source?: "server_full_draft";
+  source?: string;
   accepted_at?: number;
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
   reviewSessionId?: string | null;
 }): PaidProSourceOfTruth {
+  const requestedSource = (args.source ?? "server_full_draft").trim();
+  // Minimum commit gate: a rejected/recoverable/fallback corpus must never become the SoT, no matter
+  // how long its body is — this is the last line of defense against a short rejected corpus leaking in.
+  if (FORBIDDEN_PAID_PRO_SOT_SOURCES.has(requestedSource)) {
+    throw new Error(`[paid-pro-sot-commit-blocked] forbidden source: ${requestedSource}`);
+  }
   logProCorpusSourceMap({
     stage: "server_full_draft_received",
     source: args.source ?? "server_full_draft",
@@ -190,7 +210,7 @@ export function establishPaidProSourceOfTruth(args: {
     text: driftGuard.displayText,
     hash: hashPaidProCorpus(driftGuard.displayText),
     accepted_at: args.accepted_at ?? Date.now(),
-    source: args.source ?? "server_full_draft",
+    source: "server_full_draft",
     reviewSessionId: frozen?.reviewSessionId,
     signerManifestHash: frozen?.signerManifestHash,
   };

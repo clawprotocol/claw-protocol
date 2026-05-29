@@ -17,6 +17,7 @@ import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
+  getPaidProSourceOfTruth,
   hashPaidProCorpus,
   logPaidProCorpusInvariant,
 } from "./paidProSourceOfTruth";
@@ -481,6 +482,54 @@ describe("paidProAcceptanceRouting", () => {
         /usePaidAuthoritativeBody\s*=\s*isAuthoritativePremiumPipelineRenderSource\(result\.premiumRenderSource\)\s*&&\s*winning\.length\s*>=\s*500/,
       );
       expect(src).toMatch(/usePaidAuthoritativeBody && snapshotPlain\.trim\(\)\.length >= 500/);
+    });
+
+    it("the SoT commit gate throws for a rejected_paid_corpus source and never writes a SoT", () => {
+      expect(() =>
+        establishPaidProSourceOfTruth({ text: PAID_BODY, source: "rejected_paid_corpus" }),
+      ).toThrow(/forbidden source/);
+      expect(getPaidProSourceOfTruth()).toBeNull();
+      expect(getPaidProDocumentForSurface("review")).toBeNull();
+    });
+
+    it("a short rejected corpus (~1162 chars) cannot become the paid Pro Source of Truth", () => {
+      const shortRejected = "x".repeat(1_162);
+      expect(() =>
+        establishPaidProSourceOfTruth({ text: shortRejected, source: "rejected_paid_corpus" }),
+      ).toThrow(/forbidden source/);
+      expect(getPaidProSourceOfTruth()).toBeNull();
+    });
+
+    it("recoverable/fallback render sources are also blocked from committing a SoT", () => {
+      for (const source of [
+        "premium_network_retryable",
+        "premium_generation_retryable",
+        "fallback_preview",
+        "stale_intake",
+      ]) {
+        expect(() =>
+          establishPaidProSourceOfTruth({ text: PAID_BODY, source }),
+        ).toThrow(/forbidden source/);
+      }
+      expect(getPaidProSourceOfTruth()).toBeNull();
+    });
+  });
+
+  describe("accepted full server document routes to paid Pro review", () => {
+    it("an accepted long server_full_draft opens the canonical final review and suppresses guided Q&A", () => {
+      const markers = resolvePaidProAcceptanceRoutingMarkers({
+        premiumRenderSource: "server_full_draft",
+        acceptedBodyLen: 12_000,
+      });
+      expect(markers.openCanonicalFinalReview).toBe(true);
+      expect(markers.suppressGuidedQuestionPanel).toBe(true);
+    });
+
+    it("a committed long server SoT yields a non-null review surface (routes to paid Pro review)", () => {
+      const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+      const review = getPaidProDocumentForSurface("review");
+      expect(review?.text.length).toBe(record.text.length);
+      expect(review?.hash).toBe(record.hash);
     });
   });
 });
