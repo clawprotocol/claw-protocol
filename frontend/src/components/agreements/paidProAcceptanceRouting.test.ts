@@ -180,6 +180,47 @@ describe("paidProAcceptanceRouting", () => {
     expect(resolveProDeliveryTrackCanonicalCorpus().hasCanonicalCorpus).toBe(true);
   });
 
+  it("both delivery tracks are blocked until signer metadata is complete; paid SoT is unchanged across edits", () => {
+    const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+
+    // Tracks are choosable (corpus ready) but cannot send while signer metadata is incomplete.
+    expect(
+      canChooseProDeliveryTrack({ isPaidPro: true, createFlowPhase: "draft_ready_for_review" }),
+    ).toBe(true);
+
+    const incompleteArgs = {
+      partyCount: 2,
+      draftPartyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      recipient1Name: "Red Mesa Logistics LLC",
+      recipient2Name: "Harbor Peak Automation LLC",
+      extraPartyReviewEmails: [],
+    };
+    const reviewIncomplete = resolvePaidProSignerDetailsGate({
+      ...incompleteArgs,
+      partySignerNames: ["", ""],
+      recipient1Email: "",
+      recipient2Email: "",
+    });
+    const signatureIncomplete = resolvePaidProSignerDetailsGate({
+      ...incompleteArgs,
+      partySignerNames: ["Alex Client", ""],
+      recipient1Email: "alex@redmesa.test",
+      recipient2Email: "",
+    });
+    expect(reviewIncomplete.complete).toBe(false);
+    expect(signatureIncomplete.complete).toBe(false);
+
+    // Completing signer metadata unblocks both tracks; SoT corpus hash never changes.
+    const complete = resolvePaidProSignerDetailsGate({
+      ...incompleteArgs,
+      partySignerNames: ["Alex Client", "Priya Provider"],
+      recipient1Email: "alex@redmesa.test",
+      recipient2Email: "priya@harborpeak.test",
+    });
+    expect(complete.complete).toBe(true);
+    expect(resolveProDeliveryTrackCanonicalCorpus().hash).toBe(record.hash);
+  });
+
   it("simpleProFinalReviewActive stays true during recipient_setup_required when accepted authority", () => {
     establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
     expect(

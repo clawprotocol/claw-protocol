@@ -18,6 +18,8 @@ import {
   detectSignerSlotContamination,
   hydrateLegalEntityNameFromHandoff,
   isShortPrefixOfFullLegal,
+  PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
+  PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
   resolveEditableSignerLegalEntityForSlot,
   resolvePaidProSignerDetailsGate,
   resolveLegalEntityNameForHandoffSlot,
@@ -25,7 +27,10 @@ import {
   resolveSignerSetupPartyIdentities,
   resolveSignerSetupPartyIdentity,
   shouldUpgradeRecipientNameToLegalEntity,
+  signerDetailsFieldKey,
 } from "./signerSetupPartyIdentity";
+import { buildResolvedPartyDisplayModel } from "../../agreement/resolvedPartyDisplayModel";
+import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const baseDraft = (parties: ParsedDraftShape["parties"]): ParsedDraftShape => ({
@@ -471,6 +476,105 @@ describe("signerSetupPartyIdentity", () => {
     expect(
       detectSignerSlotContamination(0, "A LLC B LLC", identities).contaminated,
     ).toBe(true);
+  });
+
+  it("signer details gate blocker copy names the full legal entity and combines name + email", () => {
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [{ name: "Red Mesa Logistics LLC" }, { name: "Harbor Peak Automation LLC" }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    const gate = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      signerSetupPartyIdentities: identities,
+      draftPartyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      partySignerNames: ["", ""],
+      recipient1Name: "Red Mesa Logistics LLC",
+      recipient2Name: "Harbor Peak Automation LLC",
+      recipient1Email: "",
+      recipient2Email: "",
+      extraPartyReviewEmails: [],
+    });
+    expect(gate.blockerMessage).toBe("Add signer name and email for Red Mesa Logistics LLC.");
+    expect(gate.firstIncompleteFieldKey).toBe("r1-signer-name");
+    expect(gate.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA);
+  });
+
+  it("signer details gate advances Party 2 copy once Party 1 is complete", () => {
+    const gate = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      draftPartyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      partySignerNames: ["Alex Client", ""],
+      recipient1Name: "Red Mesa Logistics LLC",
+      recipient2Name: "Harbor Peak Automation LLC",
+      recipient1Email: "alex@redmesa.test",
+      recipient2Email: "",
+      extraPartyReviewEmails: [],
+    });
+    expect(gate.complete).toBe(false);
+    expect(gate.blockerMessage).toBe("Add signer name and email for Harbor Peak Automation LLC.");
+    expect(gate.firstIncompleteFieldKey).toBe("r2-signer-name");
+  });
+
+  it("signer details gate CTA becomes Continue to final review once complete", () => {
+    const gate = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      draftPartyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      partySignerNames: ["Alex Client", "Priya Provider"],
+      recipient1Name: "Red Mesa Logistics LLC",
+      recipient2Name: "Harbor Peak Automation LLC",
+      recipient1Email: "alex@redmesa.test",
+      recipient2Email: "priya@harborpeak.test",
+      extraPartyReviewEmails: [],
+    });
+    expect(gate.complete).toBe(true);
+    expect(gate.blockerMessage).toBe("");
+    expect(gate.firstIncompleteFieldKey).toBeNull();
+    expect(gate.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA);
+  });
+
+  it("signerDetailsFieldKey maps party + field to recipient input keys", () => {
+    expect(signerDetailsFieldKey(0, "email")).toBe("r1-email");
+    expect(signerDetailsFieldKey(1, "signer_name")).toBe("r2-signer-name");
+    expect(signerDetailsFieldKey(0, "legal_entity")).toBe("r1-name");
+    expect(signerDetailsFieldKey(2, "email")).toBe("party-2-email");
+  });
+
+  it("resolved party display model keeps full legal names for both parties (no truncation)", () => {
+    const slots = buildResolvedPartyDisplayModel({
+      parties: [
+        { name: "Red Mesa Logistics LLC", role: "Client" },
+        { name: "Harbor Peak Automation LLC", role: "Service Provider" },
+      ],
+      intakeText: INTAKE,
+      recipientEmails: ["", ""],
+      recipientSignerNames: ["", ""],
+      recipientDisplayNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      canonicalLegalEntityNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+    });
+    expect(slots).toHaveLength(2);
+    expect(slots[0]?.displayName).toBe("Red Mesa Logistics LLC");
+    expect(slots[1]?.displayName).toBe("Harbor Peak Automation LLC");
+  });
+
+  it("free starter preview preserves full legal party names from intake", () => {
+    const intake =
+      "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC for AI workflow setup services. Red Mesa will pay Harbor Peak $5,000. Texas law.";
+    const text = buildStarterAgreementPreviewForReview(
+      {
+        ...baseDraft([
+          { name: "Red Mesa", role: "Client" },
+          { name: "Harbor Peak", role: "Service Provider" },
+        ]),
+        title: "AI Workflow Setup Services Agreement",
+        purpose: "AI workflow setup services",
+        payment_terms: "$5,000",
+        agreement_family: "services_agreement",
+      },
+      { intakeText: intake },
+    );
+    expect(text).toContain("Red Mesa Logistics LLC");
+    expect(text).toContain("Harbor Peak Automation LLC");
   });
 
   it("review-link handoff merge does not overwrite full legal names with short recipient labels", () => {

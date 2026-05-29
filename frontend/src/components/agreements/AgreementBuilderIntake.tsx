@@ -1756,7 +1756,17 @@ function CreateFlowSendRecipientsPanel({
   const r2e = stripRecipientEmailNoise(recipient2Email);
   const cappedParties = (draft?.parties ?? []).slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
   const partyCount = cappedParties.length;
-  const primaryName = (recipient1Name || "").trim() || "Recipient";
+  const primaryName =
+    partyDisplaySlots[0]?.displayName?.trim() ||
+    (recipient1Name || "").trim() ||
+    "Recipient";
+  const secondPartyName =
+    partyCount >= 2
+      ? partyDisplaySlots[1]?.displayName?.trim() ||
+        (recipient2Name || "").trim() ||
+        String((cappedParties[1] as { name?: string } | undefined)?.name ?? "").trim() ||
+        "Party 2"
+      : "";
   const r1Invalid = r1e.length > 0 && !looksLikeEmail(r1e);
   const r2Invalid = r2e.length > 0 && !looksLikeEmail(r2e);
   const extraInvalidIdx = extraPartyReviewEmails.findIndex((raw) => {
@@ -1827,11 +1837,12 @@ function CreateFlowSendRecipientsPanel({
       {cappedParties.map((party, idx) => {
         const identity = signerSetupPartyIdentities[idx];
         const resolvedLine = partyDisplaySlots[idx]?.displayName?.trim();
+        // Legal-entity line must be the FULL canonical name, never the compact nickname.
         const partyLine =
-          identity?.displayName?.trim() ||
-          resolvedLine ||
           identity?.legalEntityName?.trim() ||
+          resolvedLine ||
           String((party as { name?: string }).name ?? "").trim() ||
+          identity?.displayName?.trim() ||
           `Party ${idx + 1}`;
         const legalEntityValue =
           idx === 0
@@ -2151,6 +2162,14 @@ function CreateFlowSendRecipientsPanel({
           <>
             <p className="mt-2 text-lg font-medium tracking-tight text-slate-100">{primaryName}</p>
             <p className={`mt-1 text-sm ${looksLikeEmail(r1e) ? "text-slate-300" : "text-amber-200/90"}`}>{primaryEmailLine}</p>
+            {secondPartyName ? (
+              <>
+                <p className="mt-3 text-lg font-medium tracking-tight text-slate-100">{secondPartyName}</p>
+                <p className={`mt-1 text-sm ${looksLikeEmail(r2e) ? "text-slate-300" : "text-slate-500"}`}>
+                  {looksLikeEmail(r2e) ? r2e : "Add this party’s email (optional for labeling)"}
+                </p>
+              </>
+            ) : null}
           </>
         )}
         {r2Invalid ? (
@@ -21733,10 +21752,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               setDisplayPhase("review");
               setCreateUiStage(CreateUiStage.DRAFT);
               setCreateFlowSendRecipientEditorOpen(true);
+              const focusKey = paidProSignerDetailsGate.firstIncompleteFieldKey;
               window.requestAnimationFrame(() => {
-                document
-                  .getElementById("claw-paid-pro-inline-signer-setup")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                const focused = focusKey ? focusVisibleRecipientInput(focusKey) : false;
+                if (!focused) {
+                  document
+                    .getElementById("claw-paid-pro-inline-signer-setup")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }
               });
               return;
             }
@@ -24907,14 +24930,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             </>
                                           )}
                                           {paidProSignerSetupRequiredBeforeDelivery ? (
-                                            <button
-                                              type="button"
-                                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
-                                              onClick={() => enterFinalReviewRecipientSetup("signature")}
-                                              data-testid="pro-review-add-signer-details"
-                                            >
-                                              Add signer details
-                                            </button>
+                                            <>
+                                              <button
+                                                type="button"
+                                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
+                                                onClick={() => enterFinalReviewRecipientSetup("signature")}
+                                                data-testid="pro-review-add-signer-details"
+                                              >
+                                                {paidProSignerDetailsGate.ctaLabel}
+                                              </button>
+                                              <p className="basis-full text-xs leading-snug text-amber-700">
+                                                {paidProSignerDetailsGate.blockerMessage ||
+                                                  "Add signer details before continuing."}
+                                              </p>
+                                            </>
                                           ) : !guidedProUxSuppressesProductionSendCta(guidedProUxState, guidedQuestionGateDecision) &&
                                           !guidedPhaseSuppressesSendCta(guidedCompletionPhase) &&
                                           !guidedSuppressSecondaryDocActions &&

@@ -72,7 +72,14 @@ export type PaidProSignerDetailsGate = {
   legalEntityNames: string[];
   blockers: PaidProSignerDetailsBlocker[];
   blockerMessage: string;
+  /** `data-claw-recipient-field` key of the first incomplete required signer field. */
+  firstIncompleteFieldKey: string | null;
+  /** Primary CTA label: "Continue to final review" when complete, else "Add signer details". */
+  ctaLabel: string;
 };
+
+export const PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA = "Continue to final review";
+export const PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA = "Add signer details";
 
 function norm(s: string): string {
   let t = s.replace(/\s+/g, " ").trim();
@@ -131,14 +138,47 @@ function paidProLegalEntityForIndex(args: ResolvePaidProSignerDetailsGateArgs, i
   return "";
 }
 
-function formatPaidProSignerDetailsBlockerMessage(blockers: readonly PaidProSignerDetailsBlocker[]): string {
+function partyLabelForBlocker(
+  partyIndex: number,
+  legalEntityNames: readonly string[],
+): string {
+  const legal = norm(legalEntityNames[partyIndex] ?? "");
+  return legal || `Party ${partyIndex + 1}`;
+}
+
+/** `data-claw-recipient-field` key for a given party slot + signer field. */
+export function signerDetailsFieldKey(
+  partyIndex: number,
+  field: PaidProSignerDetailsBlocker["field"],
+): string {
+  const fieldSuffix =
+    field === "legal_entity" ? "name" : field === "signer_name" ? "signer-name" : "email";
+  if (partyIndex === 0) return `r1-${fieldSuffix}`;
+  if (partyIndex === 1) return `r2-${fieldSuffix}`;
+  return `party-${partyIndex}-${fieldSuffix === "name" ? "name" : fieldSuffix}`;
+}
+
+function formatPaidProSignerDetailsBlockerMessage(
+  blockers: readonly PaidProSignerDetailsBlocker[],
+  legalEntityNames: readonly string[],
+): string {
   if (!blockers.length) return "";
   const first = blockers[0]!;
-  const partyLabel = `Party ${first.partyIndex + 1}`;
-  if (first.field === "legal_entity") return `${partyLabel}: confirm the party legal name before preparing signature links.`;
-  if (first.field === "signer_name") return `${partyLabel}: add the signer name before preparing signature links.`;
-  if (first.reason === "invalid_email") return `${partyLabel}: enter a valid signer email address.`;
-  return `${partyLabel}: add the signer email before preparing signature links.`;
+  const partyIndex = first.partyIndex;
+  const label = partyLabelForBlocker(partyIndex, legalEntityNames);
+  const partyBlockers = blockers.filter((b) => b.partyIndex === partyIndex);
+  const hasInvalidEmail = partyBlockers.some((b) => b.field === "email" && b.reason === "invalid_email");
+  if (first.field === "legal_entity") {
+    return `Confirm the legal name for Party ${partyIndex + 1} before adding signer details.`;
+  }
+  if (hasInvalidEmail) {
+    return `Enter a valid signer email for ${label}.`;
+  }
+  const needsName = partyBlockers.some((b) => b.field === "signer_name");
+  const needsEmail = partyBlockers.some((b) => b.field === "email");
+  if (needsName && needsEmail) return `Add signer name and email for ${label}.`;
+  if (needsName) return `Add a signer name for ${label}.`;
+  return `Add a signer email for ${label}.`;
 }
 
 export type ResolvePaidProSignerDetailsGateArgs = {
@@ -178,12 +218,20 @@ export function resolvePaidProSignerDetailsGate(
     }
   }
 
+  const complete = blockers.length === 0;
+  const firstBlocker = blockers[0] ?? null;
   return {
-    complete: blockers.length === 0,
+    complete,
     requiredCount,
     legalEntityNames,
     blockers,
-    blockerMessage: formatPaidProSignerDetailsBlockerMessage(blockers),
+    blockerMessage: formatPaidProSignerDetailsBlockerMessage(blockers, legalEntityNames),
+    firstIncompleteFieldKey: firstBlocker
+      ? signerDetailsFieldKey(firstBlocker.partyIndex, firstBlocker.field)
+      : null,
+    ctaLabel: complete
+      ? PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA
+      : PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
   };
 }
 

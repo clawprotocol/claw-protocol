@@ -10,7 +10,6 @@ import { participantDisplayName } from "./participantModel";
 import { stripRecipientEmailNoise } from "../components/agreements/recipientEmailValidation";
 import { isPlausibleEmail } from "../vs01/detailsStepValidation";
 import { readPremiumRecipientHandoff, linearPremiumRecipientSlots } from "../components/agreements/premiumPartyNamesHandoff";
-import { compactDisplayNameFromLegalEntity } from "../components/agreements/signerSetupPartyIdentity";
 import { isGenericOrEmptyTitle, resolveCanonicalAgreementTitle } from "../components/agreements/canonicalAgreementTitle";
 import type { AgreementFamily } from "../components/agreements/agreementFamilyRouter";
 
@@ -69,9 +68,11 @@ function pickDisplayName(args: {
   const email = stripRecipientEmailNoise(args.email || "");
 
   if (canonicalLegal && !isSemanticPartyPlaceholder(canonicalLegal)) {
-    const compact = compactDisplayNameFromLegalEntity(canonicalLegal);
+    // Legal display surfaces (party cards, headline) preserve the FULL legal entity name.
+    // Short forms ("Red Mesa") are nickname-only labels and must never replace the canonical
+    // legal value here — that truncation was the QA regression for entity parties.
     return {
-      displayName: finalizePartyDisplayNameForUserFacing(compact || canonicalLegal, args.intakeText),
+      displayName: finalizePartyDisplayNameForUserFacing(canonicalLegal, args.intakeText),
       source: "draft",
     };
   }
