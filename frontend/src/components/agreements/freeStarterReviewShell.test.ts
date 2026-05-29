@@ -9,6 +9,7 @@ import {
   shouldGateGuidedRenderAuthorityForFreeReview,
 } from "./freeStarterReviewShell";
 import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
+import { writeAgreementCreatorIntakeStorage } from "./agreementIntakeStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const RED_MESA_INTAKE =
@@ -123,6 +124,9 @@ describe("free starter review preserves full legal party names", () => {
     // Short forms may appear as scope/nickname references, but the legal recital line is full.
     const recital = text.slice(0, text.toLowerCase().indexOf("scope") >= 0 ? text.toLowerCase().indexOf("scope") : 600);
     expect(recital).toMatch(/Red Mesa Logistics LLC[\s\S]*Harbor Peak Automation LLC/);
+    // Must NOT be compact-only: every "Red Mesa" / "Harbor Peak" is followed by its full suffix.
+    expect(text).not.toMatch(/\bRed Mesa\b(?!\s+Logistics)/);
+    expect(text).not.toMatch(/\bHarbor Peak\b(?!\s+Automation)/);
   });
 
   it("restore=starterReview cannot truncate party names (short stored draft + full intake)", () => {
@@ -136,6 +140,41 @@ describe("free starter review preserves full legal party names", () => {
     );
     expect(text).toContain("Red Mesa Logistics LLC");
     expect(text).toContain("Harbor Peak Automation LLC");
+    expect(text).not.toMatch(/\bRed Mesa\b(?!\s+Logistics)/);
+    expect(text).not.toMatch(/\bHarbor Peak\b(?!\s+Automation)/);
+  });
+
+  it("restore=starterReview preserves full names when intake is only in storage (no intakeText threaded)", () => {
+    // Real QA regression: after refresh the React intake buffer is empty so the caller passes no
+    // intakeText, but the persisted creator intake still holds the full legal entities. The starter
+    // builder must fall back to it instead of rendering "Red Mesa and Harbor Peak (collectively...)".
+    const store = new Map<string, string>();
+    const had = "localStorage" in globalThis;
+    (globalThis as unknown as { localStorage: Storage }).localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+      key: () => null,
+      length: 0,
+    } as Storage;
+    try {
+      writeAgreementCreatorIntakeStorage(RED_MESA_INTAKE);
+      const text = buildStarterAgreementPreviewForReview(
+        starterDraft([
+          { name: "Red Mesa", role: "Client" },
+          { name: "Harbor Peak", role: "Service Provider" },
+        ]),
+        // No intakeText: simulates the post-refresh restore render path.
+      );
+      expect(text).toContain("Red Mesa Logistics LLC");
+      expect(text).toContain("Harbor Peak Automation LLC");
+      expect(text).not.toMatch(/Red Mesa and Harbor Peak \(collectively/);
+      expect(text).not.toMatch(/\bRed Mesa\b(?!\s+Logistics)/);
+      expect(text).not.toMatch(/\bHarbor Peak\b(?!\s+Automation)/);
+    } finally {
+      if (!had) delete (globalThis as unknown as { localStorage?: Storage }).localStorage;
+    }
   });
 });
 

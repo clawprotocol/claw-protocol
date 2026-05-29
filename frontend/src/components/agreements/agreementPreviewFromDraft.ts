@@ -40,6 +40,7 @@ import {
   sanitizeStarterPreviewProse,
 } from "./starterPreviewProseSanitize";
 import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
+import { readAgreementCreatorIntakeStorage } from "./agreementIntakeStorage";
 import {
   substitutePartyPlaceholdersInUserFacingText,
   textContainsUnresolvedIdentityPlaceholders,
@@ -920,13 +921,22 @@ export function buildStarterAgreementPreviewForReview(
   draft: ParsedDraftShape,
   options?: AgreementPreviewBuildOptions,
 ): string {
+  // Free/starter recitals must keep full legal entity names. When the caller does not thread
+  // intake through (e.g. restore=starterReview after refresh, where draft.parties may carry the
+  // short parse form "Red Mesa"), fall back to the persisted creator intake so short party names
+  // are expanded back to "Red Mesa Logistics LLC" instead of rendering a truncated preamble.
+  const intakeText = (options?.intakeText || "").trim() || readAgreementCreatorIntakeStorage().trim();
   const draftForBuild =
-    (options?.intakeText || "").trim().length > 0
-      ? enrichStarterPreviewPartiesFromIntake(draft, options?.intakeText)
-      : draft;
+    intakeText.length > 0 ? enrichStarterPreviewPartiesFromIntake(draft, intakeText) : draft;
   return buildAgreementPreviewText(
     { ...draftForBuild },
-    { ...options, starterPreview: true, premiumDeliverablePreview: false, freeStarterReviewPreview: true },
+    {
+      ...options,
+      intakeText: intakeText || options?.intakeText,
+      starterPreview: true,
+      premiumDeliverablePreview: false,
+      freeStarterReviewPreview: true,
+    },
   );
 }
 
