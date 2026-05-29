@@ -14,6 +14,7 @@ import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValida
 import { isRecipientHandoffSeedDisposable } from "./reviewPlaceholderGuard";
 
 export type SignerIdentitySource =
+  | "sot_signature_block"
   | "authoritative_manifest"
   | "canonical_resolver"
   | "intake_extract"
@@ -409,6 +410,68 @@ export function detectSignerSlotContamination(
   return { contaminated: false, correctedValue: current || canonical };
 }
 
+const SIG_ROLE_HEADING_RE =
+  /^(?:CLIENT|SERVICE\s+PROVIDER|PROVIDER|CONTRACTOR|CONSULTANT|COMPANY|VENDOR|CUSTOMER|SUPPLIER|LICENSOR|LICENSEE|DISCLOSING\s+PARTY|RECEIVING\s+PARTY|EMPLOYER|EMPLOYEE|LANDLORD|TENANT|BUYER|SELLER|PARTY(?:\s+(?:\d+|[A-Z]|ONE|TWO|THREE|FOUR|FIVE))?)\s*:?\s*$/i;
+const SIG_FIELD_RE =
+  /^(?:By|Name|Printed?\s*Name|Print\s*Name|Title|Date|Email|E-?mail|Signature|Signed|Address)\s*[:_]|^_{3,}|^[_\s]+$/i;
+const SIG_ROLE_TAG_TAIL_RE =
+  /\s*\(\s*["“]?(?:the\s+)?(?:client|service\s+provider|provider|contractor|consultant|company|vendor|customer|supplier|licensor|licensee|disclosing\s+party|receiving\s+party|employer|employee|landlord|tenant|buyer|seller|party(?:\s+\w+)?)["”]?\s*\)\s*$/i;
+
+/**
+ * Extract canonical signer legal entities, in slot order, from the accepted paid Pro SoT signature
+ * block (the region at/after "IN WITNESS WHEREOF" or a CLIENT:/SERVICE PROVIDER: heading). This is
+ * the authoritative source for signer setup slots: it reflects exactly which parties the Pro document
+ * binds, so a stale/duplicated party manifest, draft, or recipient hydration can never collapse
+ * Party 2 into Party 1. Returns [] when no real signature region exists (callers then fall back to
+ * the manifest, then intake).
+ */
+export function extractSignerEntitiesFromSignatureBlock(
+  bodyText: string | null | undefined,
+): string[] {
+  const body = String(bodyText ?? "").trim();
+  if (body.length < 80) return [];
+  const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
+  const headingIdx = body.search(/\n\s*(?:CLIENT|SERVICE\s+PROVIDER)\s*:?\s*(?:\n|$)/i);
+  let start = -1;
+  if (witnessIdx >= 0) start = witnessIdx;
+  else if (headingIdx >= 0) start = headingIdx;
+  if (start < 0) return [];
+
+  const lines = body.slice(start).split("\n");
+  const entities: string[] = [];
+  const seen = new Set<string>();
+  let afterRoleHeading = false;
+  for (const raw of lines) {
+    const line = norm(String(raw).replace(/^\s*[•\-*]\s*/, "").replace(/^\s*\d+[.)]\s*/, ""));
+    if (!line) continue;
+    if (/^IN WITNESS WHEREOF\b/i.test(line)) {
+      afterRoleHeading = false;
+      continue;
+    }
+    if (SIG_ROLE_HEADING_RE.test(line)) {
+      afterRoleHeading = true;
+      continue;
+    }
+    if (SIG_FIELD_RE.test(line)) {
+      afterRoleHeading = false;
+      continue;
+    }
+    const candidate = norm(line.replace(SIG_ROLE_TAG_TAIL_RE, ""));
+    const isEntity =
+      candidate.length >= 2 &&
+      candidate.length <= 90 &&
+      !candidateContainsMultipleEntities(candidate) &&
+      (hasLegalEntitySuffix(candidate) || afterRoleHeading);
+    afterRoleHeading = false;
+    if (!isEntity) continue;
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entities.push(candidate);
+  }
+  return entities;
+}
+
 /** Isolated resolver batch — never feeds editable UI state back into canonical resolution. */
 export function resolveSignerSetupPartyIdentities(args: {
   parties: readonly { name?: string | null }[];
@@ -552,10 +615,29 @@ export function resolveSignerSetupPartyIdentity(
       legalEntityName = manifestName;
     }
   }
+
+  // CORE RULE: the accepted paid Pro SoT signature block is the AUTHORITATIVE source for signer slot
+  // legal entities. When the SoT binds distinct parties in its signature block, it wins over every
+  // other source — a stale/duplicated manifest, draft party, guided state, or recipient hydration can
+  // never collapse Party 2 into Party 1 once the document itself names them distinctly.
+  const signatureEntities = extractSignerEntitiesFromSignatureBlock(bodyText);
+  const signatureSlotEntity = norm(signatureEntities[index] ?? "");
+  const signatureBlockAuthoritative =
+    signatureEntities.length > index &&
+    signatureSlotEntity.length >= 2 &&
+    hasLegalEntitySuffix(signatureSlotEntity) &&
+    !candidateContainsMultipleEntities(signatureSlotEntity) &&
+    new Set(signatureEntities.map((e) => e.toLowerCase())).size >= Math.min(2, signatureEntities.length);
+  if (signatureBlockAuthoritative) {
+    legalEntityName = signatureSlotEntity;
+  }
+
   const displayName = legalEntityName
     ? compactDisplayNameFromLegalEntity(legalEntityName)
     : recipientName || handoffName || draftName || `Party ${index + 1}`;
-  const source: SignerIdentitySource = picked?.source ?? "display_fallback";
+  const source: SignerIdentitySource = signatureBlockAuthoritative
+    ? "sot_signature_block"
+    : picked?.source ?? "display_fallback";
 
   if (args.log !== false) {
     logSignerIdentitySource({
