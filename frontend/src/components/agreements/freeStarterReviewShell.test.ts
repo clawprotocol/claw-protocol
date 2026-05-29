@@ -8,6 +8,24 @@ import {
   resolveReviewShellChrome,
   shouldGateGuidedRenderAuthorityForFreeReview,
 } from "./freeStarterReviewShell";
+import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+
+const RED_MESA_INTAKE =
+  "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC for AI workflow setup. Red Mesa will pay Harbor Peak $5,000. Texas law. Electronic signatures allowed.";
+
+const starterDraft = (parties: ParsedDraftShape["parties"]): ParsedDraftShape => ({
+  title: "AI Workflow Setup Services Agreement",
+  jurisdiction: "Texas",
+  parties,
+  purpose: "AI workflow setup services",
+  payment_terms: "$5,000",
+  duration: null,
+  due_date: null,
+  effective_date: null,
+  payment: { amount: 5000, cadence: null, valid: true },
+  agreement_family: "services_agreement",
+});
 
 describe("resolveFreeStarterReviewShellActive", () => {
   it("is true for free streamline review", () => {
@@ -91,6 +109,36 @@ describe("resolveReviewShellChrome", () => {
   });
 });
 
+describe("free starter review preserves full legal party names", () => {
+  it("legal recital body keeps full LLC names (not Red Mesa / Harbor Peak)", () => {
+    const text = buildStarterAgreementPreviewForReview(
+      starterDraft([
+        { name: "Red Mesa Logistics LLC", role: "Client" },
+        { name: "Harbor Peak Automation LLC", role: "Service Provider" },
+      ]),
+      { intakeText: RED_MESA_INTAKE },
+    );
+    expect(text).toContain("Red Mesa Logistics LLC");
+    expect(text).toContain("Harbor Peak Automation LLC");
+    // Short forms may appear as scope/nickname references, but the legal recital line is full.
+    const recital = text.slice(0, text.toLowerCase().indexOf("scope") >= 0 ? text.toLowerCase().indexOf("scope") : 600);
+    expect(recital).toMatch(/Red Mesa Logistics LLC[\s\S]*Harbor Peak Automation LLC/);
+  });
+
+  it("restore=starterReview cannot truncate party names (short stored draft + full intake)", () => {
+    // Restored snapshot may carry collapsed short labels; intake still has the full legal entities.
+    const text = buildStarterAgreementPreviewForReview(
+      starterDraft([
+        { name: "Red Mesa", role: "Client" },
+        { name: "Harbor Peak", role: "Service Provider" },
+      ]),
+      { intakeText: RED_MESA_INTAKE },
+    );
+    expect(text).toContain("Red Mesa Logistics LLC");
+    expect(text).toContain("Harbor Peak Automation LLC");
+  });
+});
+
 describe("shouldGateGuidedRenderAuthorityForFreeReview", () => {
   it("gates guided authority on free starter surfaces", () => {
     expect(
@@ -121,5 +169,32 @@ describe("AgreementBuilderIntake free starter shell wiring", () => {
     expect(intake).not.toMatch(
       /isFreeStreamlineDraftReview\s*\?[\s\S]{0,200}SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE/,
     );
+  });
+
+  // Regression: post-checkout crash "Cannot access X before initialization" was a temporal
+  // dead zone — unifiedPrimaryCta (a render-time useMemo) read failedPremiumCorpusActive before
+  // it was declared. Every paid-review-state input must be declared before the CTA consumes it.
+  it("paid review state machine is declared before unifiedPrimaryCta consumes it (TDZ guard)", () => {
+    const idxReturnWait = intake.indexOf("const premiumReturnWaitActive = Boolean(");
+    const idxNetworkPanel = intake.indexOf("const showPremiumNetworkRecoverablePanel = Boolean(");
+    const idxReviewState = intake.indexOf("const paidProReviewState = useMemo(");
+    const idxFailedActive = intake.indexOf("const failedPremiumCorpusActive =");
+    const idxUnifiedCta = intake.indexOf("const unifiedPrimaryCta = useMemo(");
+
+    for (const idx of [idxReturnWait, idxNetworkPanel, idxReviewState, idxFailedActive, idxUnifiedCta]) {
+      expect(idx).toBeGreaterThan(-1);
+    }
+    // Inputs declared before the state machine memo.
+    expect(idxReturnWait).toBeLessThan(idxReviewState);
+    expect(idxNetworkPanel).toBeLessThan(idxReviewState);
+    // State + derived flag declared before the CTA memo that reads them.
+    expect(idxReviewState).toBeLessThan(idxUnifiedCta);
+    expect(idxFailedActive).toBeLessThan(idxUnifiedCta);
+    // And there is exactly one declaration of each relocated binding (no duplicate after move).
+    expect(intake.indexOf("const paidProReviewState = useMemo(", idxReviewState + 1)).toBe(-1);
+    expect(intake.indexOf("const premiumReturnWaitActive = Boolean(", idxReturnWait + 1)).toBe(-1);
+    expect(
+      intake.indexOf("const showPremiumNetworkRecoverablePanel = Boolean(", idxNetworkPanel + 1),
+    ).toBe(-1);
   });
 });

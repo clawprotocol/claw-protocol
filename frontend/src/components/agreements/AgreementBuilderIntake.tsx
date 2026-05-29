@@ -15091,6 +15091,55 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
   ]);
 
+  // Declared ahead of unifiedPrimaryCta (and every other render-time consumer) so the paid Pro
+  // review state machine and its inputs are initialized before use — prevents the post-checkout
+  // "cannot access X before initialization" temporal-dead-zone crash in the CTA useMemo.
+  const premiumReturnWaitActive = Boolean(
+    (premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable") ||
+      premiumAuthoritativeRequestInFlightUi ||
+      premiumReturnPatienceExtended,
+  );
+  const showPremiumNetworkRecoverablePanel = Boolean(
+    premiumPaidDocumentSurface &&
+      (hasPaidPremiumCompletionSession() || premiumPersistedFlowActive) &&
+      (premiumPostCheckoutPhase === "premium_network_recoverable" ||
+        premiumPostCheckoutPhase === "network_retry" ||
+        premiumTruthPipelineSource === "premium_network_retryable") &&
+      !authoritativePremiumUiCommitted &&
+      !canProceedWithPaidProDocument,
+  );
+  /** Canonical paid Pro review state — fail closed into FAILED_PREMIUM_CORPUS, never starter degrade. */
+  const paidProReviewState = useMemo(
+    () =>
+      resolvePaidProReviewState({
+        premiumPaidDocumentSurface,
+        premiumCheckoutCompleted,
+        premiumGenerationInFlight:
+          premiumReturnWaitActive ||
+          premiumAuthoritativeRequestInFlightUi ||
+          showPremiumNetworkRecoverablePanel ||
+          premiumGenerationApiUnavailable,
+        hasValidAuthoritativeCorpus:
+          isAuthoritativePaidProReviewActive ||
+          authoritativePremiumUiCommitted ||
+          canProceedWithPaidProDocument,
+        premiumCorpusValidationFailed: premiumPaidUnavailableRetry,
+      }),
+    [
+      premiumPaidDocumentSurface,
+      premiumCheckoutCompleted,
+      premiumReturnWaitActive,
+      premiumAuthoritativeRequestInFlightUi,
+      showPremiumNetworkRecoverablePanel,
+      premiumGenerationApiUnavailable,
+      isAuthoritativePaidProReviewActive,
+      authoritativePremiumUiCommitted,
+      canProceedWithPaidProDocument,
+      premiumPaidUnavailableRetry,
+    ],
+  );
+  const failedPremiumCorpusActive = paidProReviewState === "FAILED_PREMIUM_CORPUS";
+
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
     const premiumCorpusStillProcessing =
       !authoritativePremiumUiCommitted &&
@@ -18219,20 +18268,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidProAuthoritativeCorpusReady: paidProGuidedCorpusReady,
       }).sessionHasRenderableQueue,
   );
-  const premiumReturnWaitActive = Boolean(
-    (premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable") ||
-      premiumAuthoritativeRequestInFlightUi ||
-      premiumReturnPatienceExtended,
-  );
-  const showPremiumNetworkRecoverablePanel = Boolean(
-    premiumPaidDocumentSurface &&
-      (hasPaidPremiumCompletionSession() || premiumPersistedFlowActive) &&
-      (premiumPostCheckoutPhase === "premium_network_recoverable" ||
-        premiumPostCheckoutPhase === "network_retry" ||
-        premiumTruthPipelineSource === "premium_network_retryable") &&
-      !authoritativePremiumUiCommitted &&
-      !canProceedWithPaidProDocument,
-  );
   const primaryGuidedFooter = useMemo(
     () =>
       resolveProReviewFooterState({
@@ -19799,38 +19834,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumGenerationApiUnavailable ||
         showPremiumNetworkRecoverablePanel),
   );
-
-  /** Canonical paid Pro review state — fail closed into FAILED_PREMIUM_CORPUS, never starter degrade. */
-  const paidProReviewState = useMemo(
-    () =>
-      resolvePaidProReviewState({
-        premiumPaidDocumentSurface,
-        premiumCheckoutCompleted,
-        premiumGenerationInFlight:
-          premiumReturnWaitActive ||
-          premiumAuthoritativeRequestInFlightUi ||
-          showPremiumNetworkRecoverablePanel ||
-          premiumGenerationApiUnavailable,
-        hasValidAuthoritativeCorpus:
-          isAuthoritativePaidProReviewActive ||
-          authoritativePremiumUiCommitted ||
-          canProceedWithPaidProDocument,
-        premiumCorpusValidationFailed: premiumPaidUnavailableRetry,
-      }),
-    [
-      premiumPaidDocumentSurface,
-      premiumCheckoutCompleted,
-      premiumReturnWaitActive,
-      premiumAuthoritativeRequestInFlightUi,
-      showPremiumNetworkRecoverablePanel,
-      premiumGenerationApiUnavailable,
-      isAuthoritativePaidProReviewActive,
-      authoritativePremiumUiCommitted,
-      canProceedWithPaidProDocument,
-      premiumPaidUnavailableRetry,
-    ],
-  );
-  const failedPremiumCorpusActive = paidProReviewState === "FAILED_PREMIUM_CORPUS";
 
   /** QA invariants: paid review must never silently degrade into starter / empty / Pro-upsell state. */
   useEffect(() => {

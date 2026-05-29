@@ -80,6 +80,45 @@ describe("resolvePaidProReviewState", () => {
     expect(paidProReviewStateBlocksStarterSurface(state)).toBe(true);
   });
 
+  it("premium_network_retryable during paid checkout is a recovery state, never starter/guided", () => {
+    // Network retry in flight: a paid recovery state (GENERATING), not a starter degrade.
+    const retrying = resolvePaidProReviewState({
+      premiumPaidDocumentSurface: true,
+      premiumCheckoutCompleted: true,
+      premiumGenerationInFlight: true, // premium_network_retryable in flight
+      hasValidAuthoritativeCorpus: false,
+      premiumCorpusValidationFailed: false,
+    });
+    expect(retrying).toBe("GENERATING");
+    expect(paidProReviewStateBlocksStarterSurface(retrying)).toBe(true);
+    expect(paidProReviewStateBlocksReviewRender(retrying)).toBe(true);
+
+    // Retries exhausted with no valid corpus: fail closed to recovery, not starter/guided Q&A.
+    const exhausted = resolvePaidProReviewState({
+      premiumPaidDocumentSurface: true,
+      premiumCheckoutCompleted: true,
+      premiumGenerationInFlight: false,
+      hasValidAuthoritativeCorpus: false,
+      premiumCorpusValidationFailed: true,
+    });
+    expect(exhausted).toBe("FAILED_PREMIUM_CORPUS");
+    expect(paidProReviewStateBlocksStarterSurface(exhausted)).toBe(true);
+  });
+
+  it("short guided/starter corpus after checkout never reads as authoritative paid body", () => {
+    // docLen ~725/791/946 short corpus is rejected upstream => hasValidAuthoritativeCorpus false.
+    const state = resolvePaidProReviewState({
+      premiumPaidDocumentSurface: true,
+      premiumCheckoutCompleted: true,
+      premiumGenerationInFlight: false,
+      hasValidAuthoritativeCorpus: false,
+      premiumCorpusValidationFailed: false,
+    });
+    expect(state).toBe("FAILED_PREMIUM_CORPUS");
+    expect(state).not.toBe("AUTHORITATIVE_READY");
+    expect(paidProReviewStateAllowsRecipientSetup(state)).toBe(false);
+  });
+
   it("refresh during failed premium state stays FAILED_PREMIUM_CORPUS (deterministic)", () => {
     const args = {
       premiumPaidDocumentSurface: true,
@@ -165,6 +204,31 @@ describe("collectPaidProQaInvariantViolations", () => {
     expect(v).toContain("free_starter_shell_resolved_after_paid");
     expect(v).toContain("starter_label_rendered_after_paid");
     expect(v).toContain("continue_with_pro_cta_after_paid");
+  });
+
+  it("source none / len 0 is a violation only when the paid final review claims AUTHORITATIVE_READY", () => {
+    // After checkout, a "ready" review must never log source:none / authoritativeLen:0 ...
+    const ready = collectPaidProQaInvariantViolations({
+      state: "AUTHORITATIVE_READY",
+      authoritativeBodySource: "none",
+      authoritativeLen: 0,
+      freeStarterShellResolved: false,
+      ctaLabel: "Continue to recipients",
+      starterLabelRendered: false,
+    });
+    expect(ready).toContain("authoritative_body_source_none");
+    expect(ready).toContain("authoritative_len_zero");
+
+    // ... unless it is the explicit FAILED_PREMIUM_CORPUS recovery state, which has no body yet.
+    const recovery = collectPaidProQaInvariantViolations({
+      state: "FAILED_PREMIUM_CORPUS",
+      authoritativeBodySource: "none",
+      authoritativeLen: 0,
+      freeStarterShellResolved: false,
+      ctaLabel: "Retry Pro draft",
+      starterLabelRendered: false,
+    });
+    expect(recovery).toEqual([]);
   });
 
   it("does not require authoritative body in failed state (recovery only)", () => {
