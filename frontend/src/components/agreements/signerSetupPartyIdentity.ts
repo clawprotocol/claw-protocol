@@ -290,10 +290,37 @@ function looksLikeJoinedPartyList(name: string): boolean {
   return suffixHits >= 2 || t.length > 72;
 }
 
+/**
+ * A strong corporate suffix (LLC / Inc / Corp / Ltd / LP / LLP / PLLC) sitting in the INTERIOR of a
+ * value (i.e. followed by more words) means two entities were concatenated, e.g.
+ * "Blue Canyon Analytics LLC Iron Vale Systems Inc". The shared {@link PARTY_ENTITY_SUFFIX_RE} is
+ * `$`-anchored, so `countLegalEntitySuffixes` alone cannot see the leading entity's suffix — this is
+ * the actual source of the signer-slot contamination. Weak tokens (Co/Company/Foundation/Trust/
+ * Limited) are intentionally excluded to avoid flagging legitimate single names.
+ */
+const INTERIOR_STRONG_ENTITY_SUFFIX_RE =
+  /\s(?:LLC|L\.L\.C\.|Inc|Incorporated|Corp|Corporation|Ltd|LP|L\.P\.|LLP|PLLC)\.?\s+\S/i;
+
+function hasInteriorLegalEntitySuffix(name: string): boolean {
+  return INTERIOR_STRONG_ENTITY_SUFFIX_RE.test(norm(name));
+}
+
+/** First single legal entity from a possibly-concatenated value (cuts after the first suffix token). */
+const FIRST_LEGAL_ENTITY_RE =
+  /^.*?\b(?:LLC|L\.L\.C\.|Inc|Incorporated|Corp|Corporation|Ltd|Limited|LP|L\.P\.|LLP|PLLC|Co|Company|Foundation|Trust)\.?(?=\s|$)/i;
+
+function firstSingleLegalEntity(name: string): string {
+  const t = norm(name);
+  if (!t) return "";
+  const m = t.match(FIRST_LEGAL_ENTITY_RE);
+  return m ? norm(m[0]) : t;
+}
+
 function candidateContainsMultipleEntities(name: string): boolean {
   const t = norm(name);
   if (!t) return false;
   if (looksLikeJoinedPartyList(t)) return true;
+  if (hasInteriorLegalEntitySuffix(t)) return true;
   return countLegalEntitySuffixes(t) >= 2;
 }
 
@@ -328,12 +355,40 @@ export function containsOtherSlotCanonicalLegalEntity(
   return false;
 }
 
+/**
+ * Strictly slot-isolated canonical entity for a slot. Hard invariant: the returned value can never
+ * contain another slot's canonical entity, and can never be a concatenation of two entities. If the
+ * slot identity leaked an adjacent slot's entity, that substring is removed (not merged); if it is
+ * still multi-entity, only the first single entity is kept. Never combines / stitches entities.
+ */
+export function slotIsolatedCanonicalEntity(
+  slotIndex: number,
+  slotIdentities: readonly SignerSetupPartyIdentity[],
+): string {
+  let canonical = norm(slotIdentities[slotIndex]?.legalEntityName ?? "");
+  if (!canonical) return "";
+  for (let i = 0; i < slotIdentities.length; i++) {
+    if (i === slotIndex) continue;
+    const other = norm(slotIdentities[i]?.legalEntityName ?? "");
+    if (other.length < 3 || candidateContainsMultipleEntities(other)) continue;
+    if (canonical.toLowerCase() === other.toLowerCase()) continue;
+    if (canonical.toLowerCase().includes(other.toLowerCase())) {
+      const re = new RegExp(other.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig");
+      canonical = norm(canonical.replace(re, " "));
+    }
+  }
+  if (candidateContainsMultipleEntities(canonical)) {
+    canonical = firstSingleLegalEntity(canonical);
+  }
+  return canonical;
+}
+
 export function detectSignerSlotContamination(
   slotIndex: number,
   attemptedValue: string,
   slotIdentities: readonly SignerSetupPartyIdentity[],
 ): SignerSlotContaminationResult {
-  const canonical = norm(slotIdentities[slotIndex]?.legalEntityName ?? "");
+  const canonical = slotIsolatedCanonicalEntity(slotIndex, slotIdentities);
   const current = norm(attemptedValue);
   if (!current) {
     return { contaminated: false, correctedValue: canonical };
@@ -487,8 +542,7 @@ export function resolveEditableSignerLegalEntityForSlot(args: {
   slotIdentities: readonly SignerSetupPartyIdentity[];
   source?: string;
 }): string {
-  const identity = args.slotIdentities[args.slotIndex];
-  const canonical = norm(identity?.legalEntityName ?? "");
+  const canonical = slotIsolatedCanonicalEntity(args.slotIndex, args.slotIdentities);
   const contamination = detectSignerSlotContamination(
     args.slotIndex,
     args.currentInputValue,
@@ -537,7 +591,9 @@ export function resolveSignerSetupRenderSlot(args: {
   source?: string;
 }): SignerSetupRenderSlot {
   const identity = args.slotIdentities[args.slotIndex];
-  const canonical = norm(identity?.legalEntityName ?? "");
+  // Hard invariant: the rendered legal entity is always the strictly slot-isolated canonical — it can
+  // never be another slot's entity or a concatenation, regardless of what the identity/field carried.
+  const canonical = slotIsolatedCanonicalEntity(args.slotIndex, args.slotIdentities);
   const current = norm(String(args.currentLegalEntityValue ?? ""));
   if (canonical && current && current !== canonical) {
     const contamination = detectSignerSlotContamination(
@@ -560,7 +616,8 @@ export function resolveSignerSetupRenderSlot(args: {
   }
   return {
     canonicalLegalEntity: canonical,
-    compactDisplayLabel: identity?.displayName?.trim() || compactDisplayNameFromLegalEntity(canonical),
+    compactDisplayLabel:
+      (canonical && compactDisplayNameFromLegalEntity(canonical)) || identity?.displayName?.trim() || "",
     persistedSignerMetadata: {
       email: norm(String(args.email ?? "")) || undefined,
       signerName: norm(String(args.signerName ?? "")) || undefined,
@@ -576,7 +633,7 @@ export function assertEditableSignerRenderValueInvariant(args: {
   slotIdentities: readonly SignerSetupPartyIdentity[];
   source: string;
 }): void {
-  const canonical = norm(args.slotIdentities[args.slotIndex]?.legalEntityName ?? "");
+  const canonical = slotIsolatedCanonicalEntity(args.slotIndex, args.slotIdentities);
   const rendered = norm(args.renderedValue);
   if (canonical && rendered !== canonical) {
     throw new Error(

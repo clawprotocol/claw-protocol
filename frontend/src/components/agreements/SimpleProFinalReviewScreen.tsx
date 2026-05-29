@@ -5,6 +5,8 @@ import type { ProVisiblePaperCandidate } from "./visibleProPaperRenderBoundary";
 import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload";
 import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSection } from "./guidedDealCompletion/guidedSectionScroll";
 import {
+  PAID_PRO_REVIEW_CHIP_STATE,
+  PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL,
   PAID_PRO_REVIEW_SHELL_SUBTITLE,
   PAID_PRO_REVIEW_SHELL_TITLE,
   suppressPaidProFinalReviewFinalizingState,
@@ -204,29 +206,35 @@ export function SimpleProFinalReviewScreen({
       aria-label={reviewHeadline}
     >
       <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">LawDog Pro</p>
         {canonicalPaidProReview ? (
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <span
-              className="rounded-full border border-emerald-300/80 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-900"
-              data-testid="canonical-paid-pro-review-badge"
+          <>
+            {/* Enterprise paid Pro header: one primary title, one status chip, one sentence. */}
+            <h2
+              className="font-serif text-lg font-semibold uppercase tracking-[0.14em] text-stone-900 sm:text-xl"
+              data-testid="simple-pro-final-review-headline"
             >
-              Pro agreement
-            </span>
-            <span
-              className="rounded-full border border-stone-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-700"
-              data-testid="canonical-paid-pro-review-chip-state"
+              {reviewHeadline}
+            </h2>
+            <div className="mt-1.5">
+              <span
+                className="rounded-full border border-emerald-300/80 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-900"
+                data-testid="canonical-paid-pro-review-chip-state"
+              >
+                {PAID_PRO_REVIEW_CHIP_STATE}
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-500">LawDog Pro</p>
+            <h2
+              className="mt-1 font-serif text-lg font-semibold tracking-tight text-stone-900 sm:text-xl"
+              data-testid="simple-pro-final-review-headline"
             >
-              Ready for review
-            </span>
-          </div>
-        ) : null}
-        <h2
-          className="mt-1 font-serif text-lg font-semibold tracking-tight text-stone-900 sm:text-xl"
-          data-testid="simple-pro-final-review-headline"
-        >
-          {reviewHeadline}
-        </h2>
+              {reviewHeadline}
+            </h2>
+          </>
+        )}
         {answerCount > 0 ? (
           <p className="mt-1 text-xs font-medium text-emerald-900/95" data-testid="simple-pro-final-review-trust-line">
             {answerCount} answer{answerCount === 1 ? "" : "s"} applied to this version
@@ -247,9 +255,11 @@ export function SimpleProFinalReviewScreen({
             Add signer details before continuing.
           </p>
         ) : null}
-        <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600" data-testid="simple-pro-final-review-send-trust">
-          This is the version that will be sent.
-        </p>
+        {!canonicalPaidProReview ? (
+          <p className="mt-0.5 text-[11px] leading-relaxed text-stone-600" data-testid="simple-pro-final-review-send-trust">
+            This is the version that will be sent.
+          </p>
+        ) : null}
         {!canonicalPaidProReview && appliedChecklist.length > 0 && !bulkApplyBusy ? (
           <div
             className="mt-2.5 rounded-md border border-emerald-200/80 bg-emerald-50/60 px-2.5 py-2"
@@ -298,7 +308,7 @@ export function SimpleProFinalReviewScreen({
             onClick={onBackToSignerDetails}
             data-testid="simple-pro-back-to-signer-details"
           >
-            Back to signer details
+            {PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL}
           </button>
         ) : null}
         {bulkApplyBusy ? (
@@ -361,7 +371,7 @@ export function SimpleProFinalReviewScreen({
             className="px-4 py-8 text-center text-sm leading-relaxed text-stone-600"
             data-testid="simple-pro-final-review-document-empty"
           >
-            Agreement preview is not available. Use Back to signer details, then continue to final review again.
+            Agreement preview is not available. Use Edit signer details, then continue to final review again.
           </p>
         ) : null}
       </div>

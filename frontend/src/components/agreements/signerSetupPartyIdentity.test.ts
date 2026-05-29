@@ -28,6 +28,8 @@ import {
   resolveSignerSetupPartyIdentity,
   shouldUpgradeRecipientNameToLegalEntity,
   signerDetailsFieldKey,
+  slotIsolatedCanonicalEntity,
+  type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
 import { buildResolvedPartyDisplayModel } from "../../agreement/resolvedPartyDisplayModel";
 import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
@@ -594,5 +596,79 @@ describe("signerSetupPartyIdentity", () => {
     expect(displayName2).toBe("Harbor Peak Automation LLC");
     expect(draft.parties?.[0]?.name).toBe("Red Mesa Logistics LLC");
     expect(draft.parties?.[1]?.name).toBe("Harbor Peak Automation LLC");
+  });
+});
+
+describe("signer entity slot isolation (Defect #1 — no cross-slot concatenation)", () => {
+  const identity = (legalEntityName: string): SignerSetupPartyIdentity => ({
+    legalEntityName,
+    displayName: compactDisplayNameFromLegalEntity(legalEntityName),
+    source: "authoritative_manifest",
+  });
+
+  // Reproduces the QA bug: slot 0 identity already carries slot 1's entity concatenated.
+  const contaminatedSlots: SignerSetupPartyIdentity[] = [
+    identity("Blue Canyon Analytics LLC Iron Vale Systems Inc"),
+    identity("Iron Vale Systems Inc."),
+  ];
+  const cleanSlots: SignerSetupPartyIdentity[] = [
+    identity("Blue Canyon Analytics LLC"),
+    identity("Iron Vale Systems Inc."),
+  ];
+
+  it("a concatenated two-entity value is detected as multiple entities (the $-anchored count bug)", () => {
+    const r = detectSignerSlotContamination(
+      0,
+      "Blue Canyon Analytics LLC Iron Vale Systems Inc",
+      cleanSlots,
+    );
+    expect(r.contaminated).toBe(true);
+    expect(r.reason).toBe("multiple_entities");
+  });
+
+  it("correctedValue is the clean slot entity — never the concatenation", () => {
+    const r = detectSignerSlotContamination(
+      0,
+      "Blue Canyon Analytics LLC Iron Vale Systems Inc",
+      cleanSlots,
+    );
+    expect(r.correctedValue).toBe("Blue Canyon Analytics LLC");
+    expect(r.correctedValue).not.toContain("Iron Vale");
+  });
+
+  it("slot 0 render never contains slot 1 entity, even when the slot identity itself is contaminated", () => {
+    const slot0 = resolveSignerSetupRenderSlot({ slotIndex: 0, slotIdentities: contaminatedSlots });
+    expect(slot0.canonicalLegalEntity).toBe("Blue Canyon Analytics LLC");
+    expect(slot0.canonicalLegalEntity).not.toMatch(/Iron Vale/i);
+    expect(slot0.compactDisplayLabel).not.toMatch(/Iron Vale/i);
+  });
+
+  it("slot 1 render never contains slot 0 entity", () => {
+    const slot1 = resolveSignerSetupRenderSlot({ slotIndex: 1, slotIdentities: contaminatedSlots });
+    expect(slot1.canonicalLegalEntity).not.toMatch(/Blue Canyon/i);
+    expect(slot1.canonicalLegalEntity).toBe("Iron Vale Systems Inc");
+  });
+
+  it("slotIsolatedCanonicalEntity strips a leaked adjacent entity (no merge recovery)", () => {
+    expect(slotIsolatedCanonicalEntity(0, contaminatedSlots)).toBe("Blue Canyon Analytics LLC");
+    expect(slotIsolatedCanonicalEntity(1, contaminatedSlots)).toBe("Iron Vale Systems Inc");
+  });
+
+  it("editable field keeps a clean slot value and is never 'corrected' into a concatenation", () => {
+    const value = resolveEditableSignerLegalEntityForSlot({
+      slotIndex: 0,
+      currentInputValue: "Blue Canyon Analytics LLC",
+      slotIdentities: cleanSlots,
+    });
+    expect(value).toBe("Blue Canyon Analytics LLC");
+    expect(value).not.toMatch(/Iron Vale/i);
+  });
+
+  it("no concatenated entity render possible from either slot", () => {
+    for (const slotIndex of [0, 1]) {
+      const slot = resolveSignerSetupRenderSlot({ slotIndex, slotIdentities: contaminatedSlots });
+      // A rendered slot value must be a single entity (no second corporate suffix in the interior).
+      expect(slot.canonicalLegalEntity).not.toMatch(/\b(?:LLC|Inc|Corp|Ltd)\b\.?\s+\S/i);
+    }
   });
 });

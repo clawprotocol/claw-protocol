@@ -11,12 +11,14 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 
-export const PAID_PRO_REVIEW_SHELL_TITLE = "Review your Pro agreement";
+export const PAID_PRO_REVIEW_SHELL_TITLE = "PRO AGREEMENT";
 export const PAID_PRO_REVIEW_SHELL_SUBTITLE =
-  "Your agreement is ready. Edit it, send it for review, or start signatures.";
+  "This is the final agreement version prepared for review and signing.";
 export const PAID_PRO_REVIEW_BADGE = "Pro agreement";
 export const PAID_PRO_REVIEW_CHIP_VERSION = "Pro agreement";
-export const PAID_PRO_REVIEW_CHIP_STATE = "Ready for review";
+export const PAID_PRO_REVIEW_CHIP_STATE = "Ready for signature";
+/** Subtle secondary action on the paid Pro review shell. */
+export const PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL = "Edit signer details";
 
 export type AuthoritativePaidProReviewInput = {
   /** When explicitly false, do not treat as paid review (rare). */

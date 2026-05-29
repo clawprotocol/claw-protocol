@@ -105,7 +105,7 @@ describe("resolveReviewShellChrome", () => {
       paidProReviewReadyBase: true,
       guidedCompletionActive: true,
     });
-    expect(chrome.title).toBe("Review your Pro agreement");
+    expect(chrome.title).toBe("PRO AGREEMENT");
     expect(chrome.paidProReviewReady).toBe(true);
   });
 });
