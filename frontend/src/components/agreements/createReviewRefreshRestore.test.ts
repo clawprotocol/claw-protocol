@@ -90,12 +90,15 @@ describe("createReviewRefreshRestore", () => {
     });
   });
 
-  it("shouldSkipHomeAutoGenerateForStoredReview is false when paid SoT blocks starter downgrade", () => {
+  it("shouldSkipHomeAutoGenerateForStoredReview is true when paid SoT blocks starter downgrade", () => {
     writeCreateReviewDraftReadyMarker();
     establishPaidProSourceOfTruth({
       text: `Paid agreement. ${"x".repeat(600)}`,
       source: "server_full_draft",
     });
-    expect(shouldSkipHomeAutoGenerateForStoredReview()).toBe(false);
+    expect(shouldSkipHomeAutoGenerateForStoredReview()).toBe(true);
+    expect(console.info).toHaveBeenCalledWith("[review-refresh-regeneration-skipped]", {
+      reason: "paid_pro_authority_blocks_starter_restore",
+    });
   });
 });

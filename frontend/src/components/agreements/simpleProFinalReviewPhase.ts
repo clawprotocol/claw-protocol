@@ -29,6 +29,7 @@ export function resolveSimpleProFinalReviewActive(args: {
   if (args.acceptedPaidProAuthority) {
     return (
       args.createFlowPhase === "draft_ready_for_review" ||
+      args.createFlowPhase === "recipient_setup_required" ||
       isGuidedFinalReviewPhase(args.createFlowPhase) ||
       args.createFlowPhase === "ready_to_send" ||
       args.guidedCompletionPhase === "applied"

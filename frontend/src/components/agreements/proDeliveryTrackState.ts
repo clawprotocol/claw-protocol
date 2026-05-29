@@ -1,7 +1,4 @@
-import {
-  getFrozenCanonicalAgreementCorpus,
-  hasFrozenCanonicalAgreementCorpus,
-} from "./canonicalAgreementSnapshot";
+import { resolveProDeliveryTrackCanonicalCorpus } from "./paidProPostAcceptanceStateGuard";
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 
@@ -13,9 +10,16 @@ export function canChooseProDeliveryTrack(args: {
   hasCanonicalCorpus?: boolean;
 }): boolean {
   if (!args.isPaidPro) return false;
-  if (args.createFlowPhase !== "draft_ready_for_review") return false;
-  if (typeof args.hasCanonicalCorpus === "boolean") return args.hasCanonicalCorpus;
-  return hasFrozenCanonicalAgreementCorpus();
+  const corpus =
+    typeof args.hasCanonicalCorpus === "boolean"
+      ? { hasCanonicalCorpus: args.hasCanonicalCorpus, hash: null, source: "none" as const }
+      : resolveProDeliveryTrackCanonicalCorpus();
+  if (!corpus.hasCanonicalCorpus) return false;
+  return (
+    args.createFlowPhase === "draft_ready_for_review" ||
+    args.createFlowPhase === "recipient_setup_required" ||
+    args.createFlowPhase === "ready_to_send"
+  );
 }
 
 export function resolveProDeliveryTrackSelected(args: {
@@ -63,5 +67,9 @@ export function logAgreementFlowStep(args: {
 }
 
 export function frozenCanonicalCorpusHashForDeliveryTrack(): string | null {
-  return getFrozenCanonicalAgreementCorpus()?.hash ?? null;
+  return resolveProDeliveryTrackCanonicalCorpus().hash;
+}
+
+export function hasCanonicalCorpusForProDeliveryTrack(): boolean {
+  return resolveProDeliveryTrackCanonicalCorpus().hasCanonicalCorpus;
 }

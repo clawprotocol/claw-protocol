@@ -563,11 +563,22 @@ import {
 } from "./canonicalAgreementSnapshot";
 import {
   canChooseProDeliveryTrack,
-  frozenCanonicalCorpusHashForDeliveryTrack,
+  hasCanonicalCorpusForProDeliveryTrack,
   logAgreementFlowStep,
   logProDeliveryTrackState,
   resolveProDeliveryTrackSelected,
 } from "./proDeliveryTrackState";
+import {
+  resolveProDeliveryTrackCanonicalCorpus,
+  shouldBlockStarterRegenerationAfterPaidAuthority,
+  shouldSuppressPremiumProcessingModalAfterPaidAuthority,
+} from "./paidProPostAcceptanceStateGuard";
+import {
+  collectPaidProQaInvariantViolations,
+  logPaidProQaInvariantViolations,
+  logPaidProReviewStateTelemetry,
+  resolvePaidProReviewState,
+} from "./paidProReviewStateMachine";
 import {
   isPremiumGenerationApiUnavailableForUi,
   PAID_PRO_API_UNAVAILABLE_BODY,
@@ -7692,6 +7703,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const beginStarterDraftGeneration = React.useCallback(() => {
+    if (
+      shouldBlockStarterRegenerationAfterPaidAuthority({
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      })
+    ) {
+      return;
+    }
     setHardError(null);
     setGuidedCompletionPhase(GUIDED_COMPLETION_PHASE_INACTIVE);
     setGuidedCompletionSession(null);
@@ -7703,7 +7722,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setCreateUiStage(CreateUiStage.DRAFT);
     setLoading(true);
     setPreviewPaneRevealed(true);
-  }, []);
+  }, [draft, currentPremiumMergedIntakeKey, intakeCombined]);
 
   const commitFreeDraftForReview = React.useCallback(
     (opts: { source: FreeReviewSurfaceSource; fromHomeAutoGenerate?: boolean }) => {
@@ -7737,6 +7756,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const handoffSource = opts?.handoffSource ?? "runProductionLocalDraftParse";
     const fromHomeHandoff =
       handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
+    if (
+      shouldBlockStarterRegenerationAfterPaidAuthority({
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      })
+    ) {
+      if (fromHomeHandoff) {
+        logHomeAutoGenerateSkipped("paid_pro_authority_active");
+        homeAutoGenerateConsumedRef.current = true;
+      }
+      return true;
+    }
     if (fromHomeHandoff) {
       resetStalePaidReviewShellForFreeStarter("home_create_submit");
       lastKnownGoodAuthoritativeDraftRef.current = "";
@@ -7899,6 +7930,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     homeHeroAutoGenerate,
     commitFreeDraftForReview,
     beginStarterDraftGeneration,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
   ]);
 
   useLayoutEffect(() => {
@@ -7947,6 +7980,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
+    if (
+      shouldBlockStarterRegenerationAfterPaidAuthority({
+        draft: draft ?? null,
+        intakeText: (initialIntakeText ?? intakeStepBufferRef.current ?? "").trim() || intakeCombined,
+      })
+    ) {
+      homeAutoGenerateConsumedRef.current = true;
+      logHomeAutoGenerateSkipped("paid_pro_authority_active");
+      return;
+    }
     if (shouldSkipHomeAutoGenerateForStoredReview()) {
       homeAutoGenerateConsumedRef.current = true;
       return;
@@ -9640,7 +9683,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         displayPhase === "preparing_review")) ||
     productionCreateWorkspaceShellActive ||
     Boolean(
-      premiumPostCheckoutPhase && liveWorkspaceTwoPane && simpleProductFlow && createProductionTwoPane,
+      premiumPostCheckoutPhase &&
+        liveWorkspaceTwoPane &&
+        simpleProductFlow &&
+        createProductionTwoPane &&
+        !shouldSuppressPremiumProcessingModalAfterPaidAuthority({
+          draft: draft ?? null,
+          intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        }),
     );
 
   useEffect(() => {
@@ -9666,6 +9716,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }
 
   const isGenerating =
+    !shouldBlockStarterRegenerationAfterPaidAuthority({
+      draft: draft ?? null,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+    }) &&
     guidedCompletionPhase !== "collecting_answers" &&
     guidedCompletionPhase !== "ready_to_apply" &&
     (displayPhase === "generating_draft" ||
@@ -10454,6 +10508,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const showUpgradeToFullDraftOnReview = useMemo(() => {
     if (suppressIntakePremiumUpsell) return false;
     if (hasPaidProSourceOfTruth()) return false;
+    // HARD INVARIANT: paid checkout / QA bypass latched => never show a Pro upsell CTA.
+    if (hasPaidPremiumCompletionSession()) return false;
     if (premiumPersistedFlowActive || premiumSendPathUnlocked) return false;
     // Universal P0 starter party-count gate: 13+ parties always force the Pro upgrade CTA
     // on the review surface so free continuation never proceeds. We do NOT mutate the
@@ -10510,6 +10566,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    */
   const premiumPaidDocumentSurface = useMemo(() => {
     if (!productionDraftPrimaryReviewSurface || createUiStage !== CreateUiStage.DRAFT) return false;
+    // HARD INVARIANT (fail closed): latched paid checkout / QA bypass keeps the paid surface on even when corpus validation fails (routes to FAILED_PREMIUM_CORPUS recovery, never a starter degrade).
+    if (hasPaidProSourceOfTruth() || hasPaidPremiumCompletionSession()) return true;
     if (
       resolveIsFreeStreamlineDraftReview({
         simpleProductFlow: Boolean(simpleProductFlow),
@@ -10550,11 +10608,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     showUpgradeToFullDraftOnReview,
     tier,
     premiumPersistedFlowActive,
+    premiumSendPathUnlocked,
     draft,
     reviewDocRefreshTick,
     premiumSurfaceGateTick,
   ]);
   premiumPaidDocumentSurfaceRef.current = premiumPaidDocumentSurface;
+
+  /** Latched paid completion: checkout return, stored paid session, persisted premium flow, or SoT. */
+  const premiumCheckoutCompleted = useMemo(
+    () =>
+      Boolean(
+        hasPaidProSourceOfTruth() ||
+          hasPaidPremiumCompletionSession() ||
+          premiumPersistedFlowActive ||
+          premiumSendPathUnlocked,
+      ),
+    [premiumPersistedFlowActive, premiumSendPathUnlocked, reviewDocRefreshTick, premiumSurfaceGateTick],
+  );
 
   const isAuthoritativePaidProReviewActive = useMemo(
     () =>
@@ -10685,6 +10756,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    * `hasFullDraftAccess` / draft heuristics alone cannot surface paid Pro chrome without a checkout/session flag.
    */
   const isFreeStarterReviewSurface = useMemo(() => {
+    // HARD INVARIANT: paid checkout / QA bypass latched => starter surface is impossible.
+    if (premiumCheckoutCompleted) return false;
     if (hasPaidProSourceOfTruth() || isAuthoritativePaidProReviewActive) return false;
     if (hasPaidPremiumCompletionSession()) return false;
     if (authoritativePremiumUiCommitted) return false;
@@ -10716,6 +10789,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProAuthoritative,
     authoritativePremiumUiCommitted,
     isAuthoritativePaidProReviewActive,
+    premiumCheckoutCompleted,
   ]);
   isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
 
@@ -10900,12 +10974,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         isFreeStarterReviewSurface,
         premiumPaidDocumentSurface,
         paidProAuthoritative,
+        premiumCheckoutCompleted,
       }),
     [
       isFreeStreamlineDraftReview,
       isFreeStarterReviewSurface,
       premiumPaidDocumentSurface,
       paidProAuthoritative,
+      premiumCheckoutCompleted,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
     ],
@@ -10920,6 +10996,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidProAuthoritative,
         paidProReviewReadyBase,
         guidedCompletionActive: false,
+        premiumCheckoutCompleted,
       }),
     [
       isFreeStreamlineDraftReview,
@@ -10927,6 +11004,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPaidDocumentSurface,
       paidProAuthoritative,
       paidProReviewReadyBase,
+      premiumCheckoutCompleted,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
     ],
@@ -12376,9 +12454,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProSignatureDetailsReady = Boolean(
     paidProSignerDetailsGate.complete && !createFlowRecipientPrimaryHelper,
   );
+  const paidProCanonicalReviewSignerSetupActive = Boolean(
+    hasAcceptedPaidProAuthority({
+      draft: draft ?? null,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+    }) &&
+      premiumPaidDocumentSurface &&
+      !premiumRecipientUxActive &&
+      createUiStage === CreateUiStage.DRAFT &&
+      !paidProSignatureDetailsReady,
+  );
   /** While missing/invalid emails, keep recipient inputs surfaced (no dead-end collapsed card). */
   const paidProRecipientBlockForceExpanded = Boolean(
-    paidProRecipientSetupOnDraft && !paidProSignatureDetailsReady,
+    paidProCanonicalReviewSignerSetupActive ||
+    (paidProRecipientSetupOnDraft && !paidProSignatureDetailsReady),
   );
   const premiumRecipientPanelSendLabelOverride =
     paidProRecipientSetupOnDraft &&
@@ -12843,30 +12932,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   useEffect(() => {
-    if (!paidProSignerSetupRequiredBeforeDelivery || !createProductionTwoPane || !draft) return;
-    if (
-      premiumRecipientUxActive &&
-      createFlowPhase === "recipient_setup_required" &&
-      createFlowSendRecipientEditorOpen
-    ) {
-      return;
+    if (!paidProSignerSetupRequiredBeforeDelivery || !simpleProFinalReviewShellActive) return;
+    if (!createFlowSendRecipientEditorOpen) {
+      setCreateFlowSendRecipientEditorOpen(true);
     }
-    markPremiumRecipientsSurfaceReleased();
-    setPremiumRecipientUxActive(true);
-    setDisplayPhase("review");
-    setCreateFlowPhase("recipient_setup_required");
-    setCreateUiStage(CreateUiStage.DRAFT);
-    setCreateFlowSendRecipientEditorOpen(true);
-    setMobileWorkspacePane("preview");
-    bumpPremiumSurfaceGateTick();
   }, [
     paidProSignerSetupRequiredBeforeDelivery,
-    createProductionTwoPane,
-    draft,
-    premiumRecipientUxActive,
-    createFlowPhase,
+    simpleProFinalReviewShellActive,
     createFlowSendRecipientEditorOpen,
-    bumpPremiumSurfaceGateTick,
   ]);
 
   const premiumPaidUnavailableRetry = useMemo(() => {
@@ -15001,10 +15074,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
     const premiumCorpusStillProcessing =
-      premiumPostCheckoutPhase === "processing" ||
-      premiumPostCheckoutPhase === "awaiting_gaps" ||
-      premiumPostCheckoutPhase === "network_retry" ||
-      premiumPostCheckoutPhase === "generation_retry";
+      !authoritativePremiumUiCommitted &&
+      !hasPaidProSourceOfTruth() &&
+      (premiumPostCheckoutPhase === "processing" ||
+        premiumPostCheckoutPhase === "awaiting_gaps" ||
+        premiumPostCheckoutPhase === "network_retry" ||
+        premiumPostCheckoutPhase === "generation_retry");
     const maxPaidAuthoritativeCorpusLen = Math.max(
       finalizedSigningCorpusRef.current.trim().length,
       hydratedPremiumBodyRef.current.trim().length,
@@ -15026,6 +15101,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         action: "guided_continue",
         disabled: true,
         reason: "guided_final_review_hidden",
+      };
+    }
+    if (
+      acceptedPaidProAuthorityActive &&
+      simpleProFinalReviewShellActive &&
+      !paidProSignatureDetailsReady
+    ) {
+      return {
+        label: "Add signer details",
+        action: "complete_recipient_details",
+        disabled: false,
+        reason: "paid_pro_signer_details_required",
+      };
+    }
+    // FAILED_PREMIUM_CORPUS: paid surface must offer recovery, never a Pro upsell or empty review CTA.
+    // The sticky CTA is replaced with an explicit "Retry Pro draft" recovery button
+    // (showRetryAsPrimaryCta); this guarded label is the fallback for any inline CTA usage.
+    if (premiumPaidDocumentSurface && failedPremiumCorpusActive) {
+      return {
+        label: PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL,
+        action: "guided_continue",
+        disabled: true,
+        reason: "failed_premium_corpus_recover",
       };
     }
     if (isGenerating || intakeDictationPhase === "processing") {
@@ -15265,10 +15363,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           };
         }
         if (
-          premiumPostCheckoutPhase === "awaiting_gaps" ||
-          premiumPostCheckoutPhase === "processing" ||
-          premiumPostCheckoutPhase === "network_retry" ||
-          premiumPostCheckoutPhase === "generation_retry"
+          !authoritativePremiumUiCommitted &&
+          !hasPaidProSourceOfTruth() &&
+          (premiumPostCheckoutPhase === "awaiting_gaps" ||
+            premiumPostCheckoutPhase === "processing" ||
+            premiumPostCheckoutPhase === "network_retry" ||
+            premiumPostCheckoutPhase === "generation_retry")
         ) {
           return {
             label:
@@ -15387,11 +15487,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumSendPathUnlocked || premiumPersistedFlowActive || premiumRecipientUxActive;
         const proDeliveryTrackChooserActive = Boolean(
           paidProAuthoritative &&
-            hasFrozenCanonicalAgreementCorpus() &&
+            hasCanonicalCorpusForProDeliveryTrack() &&
             canChooseProDeliveryTrack({
               isPaidPro: Boolean(paidProAuthoritative && hasPaidProSourceOfTruth()),
               createFlowPhase,
-              hasCanonicalCorpus: hasFrozenCanonicalAgreementCorpus(),
+              hasCanonicalCorpus: hasCanonicalCorpusForProDeliveryTrack(),
             }) &&
             !premiumSendModeTouched &&
             !premiumSignersSurfaceReady &&
@@ -15559,6 +15659,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedPreReviewSignerSlots.complete,
     guidedBulkApplyingActive,
     resolvedGuidedAnswerApplyStatus,
+    acceptedPaidProAuthorityActive,
+    simpleProFinalReviewShellActive,
+    paidProSignatureDetailsReady,
+    authoritativePremiumUiCommitted,
+    guidedQuestionGateDecision,
+    simpleProFinalReviewActive,
   ]);
 
   useEffect(() => {
@@ -19425,9 +19531,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   React.useEffect(() => {
     if (!proDeliveryTrackBaseReady && !canChooseProDeliveryTrackFlag) return;
-    const canonicalHash = frozenCanonicalCorpusHashForDeliveryTrack();
+    const deliveryCanonical = resolveProDeliveryTrackCanonicalCorpus();
+    const canonicalHash = deliveryCanonical.hash;
     logProDeliveryTrackState({
-      hasCanonicalCorpus: hasFrozenCanonicalAgreementCorpus(),
+      hasCanonicalCorpus: deliveryCanonical.hasCanonicalCorpus,
       hash: canonicalHash,
       canChooseProDeliveryTrack: canChooseProDeliveryTrackFlag,
       selectedTrack: proDeliveryTrackSelected,
@@ -19436,7 +19543,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     logAgreementFlowStep({
       step: canChooseProDeliveryTrackFlag ? "review_ready" : createFlowPhase,
       selectedAction: proDeliveryTrackSelected,
-      hasCanonicalCorpus: hasFrozenCanonicalAgreementCorpus(),
+      hasCanonicalCorpus: deliveryCanonical.hasCanonicalCorpus,
       requiresPartyAddress: false,
     });
     logAuthoritativeCorpusInvariant({
@@ -19673,6 +19780,72 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumGenerationApiUnavailable ||
         showPremiumNetworkRecoverablePanel),
   );
+
+  /** Canonical paid Pro review state — fail closed into FAILED_PREMIUM_CORPUS, never starter degrade. */
+  const paidProReviewState = useMemo(
+    () =>
+      resolvePaidProReviewState({
+        premiumPaidDocumentSurface,
+        premiumCheckoutCompleted,
+        premiumGenerationInFlight:
+          premiumReturnWaitActive ||
+          premiumAuthoritativeRequestInFlightUi ||
+          showPremiumNetworkRecoverablePanel ||
+          premiumGenerationApiUnavailable,
+        hasValidAuthoritativeCorpus:
+          isAuthoritativePaidProReviewActive ||
+          authoritativePremiumUiCommitted ||
+          canProceedWithPaidProDocument,
+        premiumCorpusValidationFailed: premiumPaidUnavailableRetry,
+      }),
+    [
+      premiumPaidDocumentSurface,
+      premiumCheckoutCompleted,
+      premiumReturnWaitActive,
+      premiumAuthoritativeRequestInFlightUi,
+      showPremiumNetworkRecoverablePanel,
+      premiumGenerationApiUnavailable,
+      isAuthoritativePaidProReviewActive,
+      authoritativePremiumUiCommitted,
+      canProceedWithPaidProDocument,
+      premiumPaidUnavailableRetry,
+    ],
+  );
+  const failedPremiumCorpusActive = paidProReviewState === "FAILED_PREMIUM_CORPUS";
+
+  /** QA invariants: paid review must never silently degrade into starter / empty / Pro-upsell state. */
+  useEffect(() => {
+    if (paidProReviewState === "NOT_PAID") return;
+    const effectiveCtaLabel = showRetryAsPrimaryCta
+      ? PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL
+      : simpleCreateBottomPrimaryLabel;
+    const violations = collectPaidProQaInvariantViolations({
+      state: paidProReviewState,
+      authoritativeBodySource: isAuthoritativePaidProReviewActive
+        ? "paid_pro_source_of_truth"
+        : premiumPaidReadonlyPick.sourceUsed,
+      authoritativeLen: authoritativePaidProReviewPlain.trim().length,
+      freeStarterShellResolved: freeStarterReviewShellActive,
+      ctaLabel: effectiveCtaLabel,
+      starterLabelRendered: freeStarterReviewShellActive || reviewShellChrome.kind === "free_starter",
+    });
+    logPaidProReviewStateTelemetry({
+      state: paidProReviewState,
+      authoritativeLen: authoritativePaidProReviewPlain.trim().length,
+      premiumCorpusValidationFailed: failedPremiumCorpusActive,
+    });
+    logPaidProQaInvariantViolations(violations);
+  }, [
+    paidProReviewState,
+    failedPremiumCorpusActive,
+    showRetryAsPrimaryCta,
+    simpleCreateBottomPrimaryLabel,
+    isAuthoritativePaidProReviewActive,
+    premiumPaidReadonlyPick.sourceUsed,
+    authoritativePaidProReviewPlain,
+    freeStarterReviewShellActive,
+    reviewShellChrome.kind,
+  ]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !simpleProductFlow || !liveWorkspaceTwoPane || !showMainIntakeForm) return;
@@ -21059,13 +21232,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const enterFinalReviewRecipientSetup = React.useCallback(
     (intent: FinalReviewSendIntent) => {
       if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
-        setHardError("Add signer details before continuing.");
+        setHardError(null);
         setDisplayPhase("review");
         setCreateUiStage(CreateUiStage.DRAFT);
-        advancePaidProToRecipientSetup();
-        markPremiumRecipientsSurfaceReleased();
-        setPremiumRecipientUxActive(true);
         setCreateFlowSendRecipientEditorOpen(true);
+        window.requestAnimationFrame(() => {
+          document
+            .getElementById("claw-paid-pro-inline-signer-setup")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
         bumpPremiumSurfaceGateTick();
         return;
       }
@@ -21553,6 +21728,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           case "complete_recipient_details": {
+            if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
+              setHardError(null);
+              setDisplayPhase("review");
+              setCreateUiStage(CreateUiStage.DRAFT);
+              setCreateFlowSendRecipientEditorOpen(true);
+              window.requestAnimationFrame(() => {
+                document
+                  .getElementById("claw-paid-pro-inline-signer-setup")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+              return;
+            }
             setHardError(null);
             void finalizeIntakeCapture()
               .then(() => {
@@ -24393,7 +24580,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           options will appear when the full document is ready.
                                         </p>
                                       </div>
-                                    ) : simpleProFinalReviewShellActive ? (
+                                    ) : simpleProFinalReviewShellActive && !failedPremiumCorpusActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         <SimpleProFinalReviewScreen
                                           agreementHtml={simpleProFinalReviewHtml}
@@ -24516,6 +24703,65 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             reviewFirstHandoffBusy
                                           }
                                         />
+                                        {paidProCanonicalReviewSignerSetupActive ? (
+                                          <div
+                                            className="mt-5 w-full sm:pr-0 md:max-w-3xl"
+                                            id="claw-paid-pro-inline-signer-setup"
+                                            data-testid="paid-pro-inline-signer-setup"
+                                          >
+                                            <CreateFlowSendRecipientsPanel
+                                              variant="workspace"
+                                              paidProInlineRecipientShell
+                                              isPremiumRecipientSurface={false}
+                                              showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
+                                              productionReadyForPersist={productionReadyForPersist}
+                                              minimalProSendRecipientChrome={minimalProSendRecipientChrome}
+                                              draft={draft}
+                                              effectivePremiumSendMode={effectivePremiumSendMode}
+                                              onPremiumSendModePick={handlePremiumSendModePick}
+                                              recipient1Name={recipient1Name}
+                                              setRecipient1Name={setRecipient1Name}
+                                              recipient1Email={recipient1Email}
+                                              setRecipient1Email={setRecipient1Email}
+                                              recipient2Name={recipient2Name}
+                                              setRecipient2Name={setRecipient2Name}
+                                              recipient2Email={recipient2Email}
+                                              setRecipient2Email={setRecipient2Email}
+                                              extraPartyReviewEmails={extraPartyReviewEmails}
+                                              setExtraPartyReviewEmails={setExtraPartyReviewEmails}
+                                              partySignerNames={partySignerNames}
+                                              setPartySignerNames={setPartySignerNames}
+                                              partySignerTitles={partySignerTitles}
+                                              setPartySignerTitles={setPartySignerTitles}
+                                              recipientSignerLabels={recipientSignerLabels}
+                                              setRecipientSignerLabels={setRecipientSignerLabels}
+                                              reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
+                                              showStarterRecipientsReassurance={false}
+                                              editorOpen={createFlowSendRecipientEditorOpen}
+                                              setEditorOpen={setCreateFlowSendRecipientEditorOpen}
+                                              onDeferRecipients={() => {
+                                                setRecipientsDeferred(true);
+                                              }}
+                                              hideDeferOption
+                                              onSendClick={runPrimaryIntakeAction}
+                                              sendDisabled={effectivePrimaryCtaDisabled}
+                                              sendRequiresConfirmStep={false}
+                                              recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
+                                              premiumPrimarySendLabelOverride="Add signer details"
+                                              primaryCtaHelperText={paidProSignerDetailsGate.blockerMessage}
+                                              guidedSigningTrustSlot={guidedSigningTrustSlot}
+                                              partyDisplaySlots={resolvedPartyDisplaySlots}
+                                              signerSetupPartyIdentities={signerSetupPartyIdentities}
+                                              partyLabelsFinalizeHint={partyLabelsFinalizeHint}
+                                              finalReviewSendIntent={finalReviewSendIntentRef.current}
+                                              stripRecipientEmailNoise={stripRecipientEmailNoise}
+                                              looksLikeEmail={looksLikeEmail}
+                                              onRecipientMetadataPersist={() => {
+                                                if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
+                                              }}
+                                            />
+                                          </div>
+                                        ) : null}
                                       </div>
                                     ) : (
                                     <>

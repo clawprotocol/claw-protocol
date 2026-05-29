@@ -21,7 +21,17 @@ import { resolveGuidedProUxState } from "./guidedDealCompletion/guidedProUxState
 import { resolveSimpleProFinalReviewActive } from "./simpleProFinalReviewPhase";
 import { pickAuthoritativePlainForSendHandoff } from "./sendHandoffAuthoritativeCorpus";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { shouldRestoreStoredCreateReviewDraftSnapshot } from "./createReviewRefreshRestore";
+import {
+  shouldRestoreStoredCreateReviewDraftSnapshot,
+  shouldSkipHomeAutoGenerateForStoredReview,
+} from "./createReviewRefreshRestore";
+import {
+  resolveProDeliveryTrackCanonicalCorpus,
+  shouldBlockStarterRegenerationAfterPaidAuthority,
+  shouldSuppressPremiumProcessingModalAfterPaidAuthority,
+} from "./paidProPostAcceptanceStateGuard";
+import { canChooseProDeliveryTrack } from "./proDeliveryTrackState";
+import { resolvePaidProSignerDetailsGate } from "./signerSetupPartyIdentity";
 
 const PAID_BODY = `PRO AGREEMENT. ${"Substantive clause. ".repeat(900)}`;
 
@@ -136,5 +146,52 @@ describe("paidProAcceptanceRouting", () => {
   it("paid shell chip copy constants", () => {
     expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).toContain("pro");
     expect(PAID_PRO_REVIEW_CHIP_STATE.toLowerCase()).toContain("ready");
+  });
+
+  it("paid SoT accepted with incomplete signer metadata keeps canonical corpus and skips home regen", () => {
+    const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+    const gate = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      draftPartyNames: ["", ""],
+      partySignerNames: ["", ""],
+      recipient1Name: "",
+      recipient2Name: "",
+      recipient1Email: "",
+      recipient2Email: "",
+      extraPartyReviewEmails: [],
+    });
+    expect(gate.complete).toBe(false);
+    expect(shouldBlockStarterRegenerationAfterPaidAuthority()).toBe(true);
+    expect(shouldSkipHomeAutoGenerateForStoredReview()).toBe(true);
+    expect(shouldSuppressPremiumProcessingModalAfterPaidAuthority()).toBe(true);
+    const corpus = resolveProDeliveryTrackCanonicalCorpus();
+    expect(corpus.hasCanonicalCorpus).toBe(true);
+    expect(corpus.hash).toBe(record.hash);
+  });
+
+  it("recipient_setup_required phase keeps delivery-track canonical true from SoT", () => {
+    establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+    expect(
+      canChooseProDeliveryTrack({
+        isPaidPro: true,
+        createFlowPhase: "recipient_setup_required",
+      }),
+    ).toBe(true);
+    expect(resolveProDeliveryTrackCanonicalCorpus().hasCanonicalCorpus).toBe(true);
+  });
+
+  it("simpleProFinalReviewActive stays true during recipient_setup_required when accepted authority", () => {
+    establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+    expect(
+      resolveSimpleProFinalReviewActive({
+        paidProAuthoritative: true,
+        premiumPaidDocumentSurface: true,
+        premiumRecipientUxActive: false,
+        createFlowPhase: "recipient_setup_required",
+        guidedCompletionPhase: "collecting_answers",
+        acceptedPaidProAuthority: true,
+        finalReviewExplicitlyOpened: false,
+      }),
+    ).toBe(true);
   });
 });

@@ -43,7 +43,8 @@ export function shouldRestoreStoredCreateReviewDraftSnapshot(): boolean {
 /** Skip home hero auto-generate when an in-tab review draft can be restored. */
 export function shouldSkipHomeAutoGenerateForStoredReview(): boolean {
   if (paidProAuthorityBlocksStarterReviewRestore()) {
-    return false;
+    logReviewRefreshRegenerationSkipped("paid_pro_authority_blocks_starter_restore");
+    return true;
   }
   if (hasCheckoutBackRestoreSnapshot()) {
     logReviewRefreshRegenerationSkipped("stored_draft_ready_marker");

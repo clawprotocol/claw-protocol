@@ -31,6 +31,33 @@ describe("resolveFreeStarterReviewShellActive", () => {
       }),
     ).toBe(false);
   });
+
+  it("HARD INVARIANT: never mounts after paid checkout completed even if corpus failed validation", () => {
+    expect(
+      resolveFreeStarterReviewShellActive({
+        // Failed-corpus shape: starter signals would otherwise resolve true, but checkout completed.
+        isFreeStreamlineDraftReview: true,
+        isFreeStarterReviewSurface: true,
+        premiumPaidDocumentSurface: false,
+        paidProAuthoritative: false,
+        premiumCheckoutCompleted: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("review shell chrome never resolves free starter after paid checkout completed", () => {
+    const chrome = resolveReviewShellChrome({
+      isFreeStreamlineDraftReview: true,
+      isFreeStarterReviewSurface: true,
+      premiumPaidDocumentSurface: false,
+      paidProAuthoritative: false,
+      paidProReviewReadyBase: false,
+      guidedCompletionActive: false,
+      premiumCheckoutCompleted: true,
+    });
+    expect(chrome.blockPaidProShell).toBe(false);
+    expect(chrome.kind).not.toBe("free_starter");
+  });
 });
 
 describe("resolveReviewShellChrome", () => {

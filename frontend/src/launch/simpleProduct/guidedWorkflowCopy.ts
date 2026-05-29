@@ -78,7 +78,11 @@ export function logFreeSendGatedToPro(source: string): void {
   console.info("[free-send-gated-to-pro]", { source });
 }
 
-export type HomeAutoGenerateSkipReason = "draft_exists" | "already_consumed" | "phase_ready";
+export type HomeAutoGenerateSkipReason =
+  | "draft_exists"
+  | "already_consumed"
+  | "phase_ready"
+  | "paid_pro_authority_active";
 
 export function logHomeAutoGenerateSkipped(reason: HomeAutoGenerateSkipReason): void {
   console.info("[home-auto-generate-skipped]", { reason });

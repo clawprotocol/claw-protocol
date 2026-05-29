@@ -721,14 +721,17 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).not.toContain("deferDraftStageForFreshInput");
     const handoff = readFileSync(join(__dirname, "starterCreateHandoff.ts"), "utf8");
     expect(handoff).toContain('GUIDED_COMPLETION_PHASE_INACTIVE');
+    // Window allows for the paid-authority regeneration guard at the top of the callback
+    // (shouldBlockStarterRegenerationAfterPaidAuthority) while still asserting the synchronous
+    // generating_draft handoff that follows it.
     expect(intake).toMatch(
-      /beginStarterDraftGeneration[\s\S]{0,420}setCreateFlowPhase\("generating_draft"\)/,
+      /beginStarterDraftGeneration[\s\S]{0,700}setCreateFlowPhase\("generating_draft"\)/,
     );
     expect(intake).toMatch(
-      /beginStarterDraftGeneration[\s\S]{0,420}setDisplayPhase\("generating_draft"\)/,
+      /beginStarterDraftGeneration[\s\S]{0,700}setDisplayPhase\("generating_draft"\)/,
     );
     expect(intake).toMatch(
-      /beginStarterDraftGeneration[\s\S]{0,420}setCreateUiStage\(CreateUiStage\.DRAFT\)/,
+      /beginStarterDraftGeneration[\s\S]{0,700}setCreateUiStage\(CreateUiStage\.DRAFT\)/,
     );
     expect(intake).toContain('handoffSource: "home_create_submit"');
     expect(intake).toContain("commitFreeDraftForReview");

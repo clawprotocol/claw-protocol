@@ -18,6 +18,7 @@ import {
 import type { FreeReviewSurfaceSource } from "./freeStreamlineDraftReview";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { shouldBlockStarterRegenerationAfterPaidAuthority } from "./paidProPostAcceptanceStateGuard";
 
 export const FREE_STARTER_REVIEW_TITLE = "Review your draft";
 export const FREE_STARTER_REVIEW_SUBTITLE =
@@ -33,6 +34,7 @@ export type ResolveReviewShellChromeInput = {
   paidProAuthoritative: boolean;
   paidProReviewReadyBase: boolean;
   guidedCompletionActive: boolean;
+  premiumCheckoutCompleted?: boolean;
 };
 
 export function resolveFreeStarterReviewShellActive(input: {
@@ -40,8 +42,17 @@ export function resolveFreeStarterReviewShellActive(input: {
   isFreeStarterReviewSurface: boolean;
   premiumPaidDocumentSurface: boolean;
   paidProAuthoritative: boolean;
+  /** Hard invariant: any completed paid checkout / QA bypass forbids the starter shell. */
+  premiumCheckoutCompleted?: boolean;
 }): boolean {
-  if (hasPaidProSourceOfTruth() || isAuthoritativePaidProReview({ isPaidPro: input.paidProAuthoritative })) {
+  // HARD INVARIANT: isPaidPro === true (checkout completed) => free starter shell MUST NOT mount,
+  // even when the authoritative corpus failed validation. Paid surfaces fail closed into the
+  // explicit recovery state, never into a silent starter degrade.
+  if (
+    input.premiumCheckoutCompleted ||
+    hasPaidProSourceOfTruth() ||
+    isAuthoritativePaidProReview({ isPaidPro: input.paidProAuthoritative })
+  ) {
     return false;
   }
   if (
@@ -68,6 +79,7 @@ export function resolveReviewShellChrome(input: ResolveReviewShellChromeInput): 
     isFreeStarterReviewSurface: input.isFreeStarterReviewSurface,
     premiumPaidDocumentSurface: input.premiumPaidDocumentSurface,
     paidProAuthoritative: input.paidProAuthoritative,
+    premiumCheckoutCompleted: input.premiumCheckoutCompleted,
   });
   const paidProReviewReady = input.paidProReviewReadyBase && !blockPaidProShell;
 
@@ -124,6 +136,7 @@ export function preservePremiumCheckoutReturnInUrl(): boolean {
 
 /** Clear stale paid/guided shell state when starting a new free starter review (not checkout return). */
 export function resetStalePaidReviewShellForFreeStarter(source: FreeReviewSurfaceSource): void {
+  if (shouldBlockStarterRegenerationAfterPaidAuthority()) return;
   if (preservePremiumCheckoutReturnInUrl()) return;
   if (source !== "home_create_submit" && source !== "local_parse" && source !== "create_submit") {
     if (source !== "complexity_gate_starter" && source !== "api_hydrate" && source !== "api_late_merge") {
