@@ -7,6 +7,8 @@ import type { PremiumCompletionOutcome } from "./agreementOutputQuality/types";
 import { classifyPremiumCompletionOutcome } from "./agreementOutputQuality/premiumCompletionClassification";
 import { extractIntakeContacts, type IntakeContactRecord } from "./paidProIntakeContactSubstitution";
 import { resolveFullLegalPartiesFromIntake } from "./paidProPartyNamePreserve";
+import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 export type PremiumRecipientCandidate = { name: string; email: string; role: string };
 
 export type PremiumRenderSource =
@@ -28,6 +30,71 @@ export const LONG_PREMIUM_AUTHORITATIVE_MIN_LEN = 15_000;
 
 /** Fallback/stitched previews shorter than this must not replace a long candidate. */
 export const SHORT_PREMIUM_FALLBACK_MAX_LEN = 8_000;
+
+/**
+ * Server `generation_outcome: degraded` failure codes that only degrade intelligence/metadata
+ * (key terms, missing-material hints, structured JSON), NOT the full agreement body. A long,
+ * non-placeholder, section-complete HTTP-200 body must remain authoritative even when these fire —
+ * rejecting it solely for a JSON/schema parse error strands the paid user on "Retry Pro draft".
+ */
+export const NONFATAL_GENERATION_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "json_parse",
+  "json_decode",
+  "schema_parse",
+  "schema_validation",
+  "metadata_parse",
+  "intelligence_parse",
+]);
+
+export function isNonfatalGenerationFailureCode(code: string | null | undefined): boolean {
+  return NONFATAL_GENERATION_FAILURE_CODES.has((code || "").trim().toLowerCase());
+}
+
+/**
+ * Minimum body length a parse-degraded paid body must clear (in addition to placeholder/section
+ * checks) to remain authoritative. Well below {@link LONG_PREMIUM_AUTHORITATIVE_MIN_LEN}: a complete
+ * commercial services agreement is routinely 4k–12k chars, far longer than any stitched fallback.
+ */
+export const PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN = 4_000;
+
+/** A paid body has the required commercial sections (services/IP/term/governing-law/signature). */
+export function premiumBodyHasRequiredPaidSections(args: {
+  text: string;
+  rawIntake: string;
+  draft?: ParsedDraftShape | null;
+}): boolean {
+  const t = (args.text || "").trim();
+  if (t.length < 1_500) return false;
+  const assessment = assessConciseCommercialServicesProQuality({
+    text: t,
+    rawIntake: args.rawIntake,
+    draft: args.draft ?? null,
+  });
+  if (assessment.applies) return assessment.ok && !assessment.malformedOpening;
+  return /\b(?:ownership|work\s+product|confidential|terminat|electronic\s+signatures?|e-?sign|governing\s+law|payment|compensation)\b/i.test(
+    t,
+  );
+}
+
+/**
+ * A `degraded` HTTP-200 body whose only failure is a nonfatal parse error stays authoritative when
+ * it is long enough, has zero fatal placeholders, passes the structural gate, and contains the
+ * required paid sections. Intelligence metadata degrades; the body does NOT get rejected.
+ */
+export function isNonfatalParseDegradedPaidAccept(args: {
+  failureCode: string | null | undefined;
+  bodyLen: number;
+  fatalPlaceholderCount: number;
+  structuralOk: boolean;
+  hasRequiredSections: boolean;
+}): boolean {
+  if (!isNonfatalGenerationFailureCode(args.failureCode)) return false;
+  if (!args.structuralOk) return false;
+  if (args.fatalPlaceholderCount > 0) return false;
+  if (!args.hasRequiredSections) return false;
+  if (args.bodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
+  return true;
+}
 
 export type PremiumAcceptanceDecisionLog = {
   accepted: boolean;

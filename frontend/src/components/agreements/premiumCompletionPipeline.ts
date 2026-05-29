@@ -132,7 +132,9 @@ import {
   freezeAcceptedPremiumBodyForSession,
   getFrozenPremiumBodyForSession,
   isLongCommerciallyUsablePremiumBody,
+  isNonfatalParseDegradedPaidAccept,
   logPremiumAcceptanceDecision,
+  premiumBodyHasRequiredPaidSections,
   resolvePremiumBodyAgainstSessionFreeze,
   shouldPreserveLongPremiumDespiteSoftGateFailure,
   shouldSuppressShortFallbackOverLongCandidate,
@@ -1979,8 +1981,34 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         structuralFatalCount,
         httpOk: true,
       });
-      if (longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)) {
-        if (!premiumCompletionOutcome) {
+      // A `degraded` HTTP-200 body whose only failure is a nonfatal parse error (e.g. json_parse)
+      // must NOT be rejected when it is long, placeholder-clean, structurally sound and has the
+      // required paid sections. Only the intelligence metadata degrades — the agreement body stays
+      // authoritative. Without this a complete ~9k draft is wrongly dropped to "Retry Pro draft".
+      const standardClientGatesPass = acc.ok && vPaid.ok && placeholderClientOk;
+      const jsonParseNonfatalAccept =
+        !standardClientGatesPass &&
+        !longAdvisoryAccept &&
+        acc.ok &&
+        placeholderClientOk &&
+        isNonfatalParseDegradedPaidAccept({
+          failureCode: (effectiveFull.server_generation_failure_code || "").trim(),
+          bodyLen: (doc || "").length,
+          fatalPlaceholderCount,
+          structuralOk: acc.ok && placeholderClientOk,
+          hasRequiredSections: premiumBodyHasRequiredPaidSections({
+            text: doc,
+            rawIntake: rawForSoT || rawIntake,
+            draft: mergedForApi,
+          }),
+        });
+      const advisoryAccept = longAdvisoryAccept || jsonParseNonfatalAccept;
+      if (advisoryAccept && (!vPaid.ok || !placeholderClientOk)) {
+        if (jsonParseNonfatalAccept) {
+          // The body is authoritative; only the intelligence metadata degraded. Override any
+          // earlier "degraded" classification so the surface treats this as a complete paid draft.
+          premiumCompletionOutcome = "authoritative_draft_complete_with_recommended_clarifications";
+        } else if (!premiumCompletionOutcome) {
           premiumCompletionOutcome = classifyLongPremiumHttpOutcome({
             documentText: doc,
             missingMaterial: effectiveFull.missing_material_info,
@@ -1999,7 +2027,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, vPaid.reasons.slice(0, 6));
         }
       }
-      if ((acc.ok && vPaid.ok && placeholderClientOk) || longAdvisoryAccept) {
+      if (standardClientGatesPass || advisoryAccept) {
         const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
         const srvFull =
           (effectiveFull.server_full_document_text || "").trim() ||
@@ -2046,9 +2074,11 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         );
         logPremiumAcceptanceDecision({
           accepted: true,
-          reason: longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
-            ? "long_body_advisory_accept"
-            : "client_gates_passed",
+          reason: jsonParseNonfatalAccept
+            ? "json_parse_nonfatal_body_authoritative"
+            : longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
+              ? "long_body_advisory_accept"
+              : "client_gates_passed",
           bodyLen: doc.length,
           fatalPlaceholderCount,
           structuralFatalCount,
@@ -2061,9 +2091,12 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           placeholder_fatal_count: fatalPlaceholderCount,
           generationOutcome: (effectiveFull.generation_outcome || "").trim(),
           degraded: serverGenDegraded,
-          failureCode: serverGenDegraded ? (effectiveFull.server_generation_failure_code || "").trim() : undefined,
+          failureCode:
+            serverGenDegraded || jsonParseNonfatalAccept
+              ? (effectiveFull.server_generation_failure_code || "").trim()
+              : undefined,
           accepted: true,
-          advisoryOnly: longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk),
+          advisoryOnly: advisoryAccept && (!vPaid.ok || !placeholderClientOk),
         });
       } else {
         const intakeSForGate = (rawForSoT || rawIntake) || "";

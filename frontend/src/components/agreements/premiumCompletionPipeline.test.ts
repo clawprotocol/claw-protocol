@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import { FULL_DRAFT_EXPANSION_MARKER } from "./fullDraftUpgradeEnrich";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -13,8 +13,75 @@ import {
   stripPremiumInternalArtifacts,
   stripPremiumUserNotesFromMergedIntake,
 } from "./premiumCompletionPipeline";
+import {
+  clearFrozenPremiumSessionBodiesForTests,
+  isNonfatalGenerationFailureCode,
+  isNonfatalParseDegradedPaidAccept,
+  PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+  premiumBodyHasRequiredPaidSections,
+} from "./premiumAcceptancePolicy";
+import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
+
+// Mutable mock state for the premium server API. Default (no queued response) returns the same
+// `test_mode_skipped` failure the real API returns under Vitest, so existing no-mock tests below are
+// behaviourally unchanged; only tests that queue `h.mockResponses` exercise a server body.
+const premiumApiMock = vi.hoisted(() => ({
+  mockResponses: [] as PremiumFullDraftResult[],
+  callIndex: 0,
+  forceValidateFail: false,
+}));
+
+vi.mock("./premiumFullDraftApi", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./premiumFullDraftApi")>();
+  return {
+    ...mod,
+    postPremiumFullDraftWithRetry: () => {
+      const r =
+        premiumApiMock.mockResponses[premiumApiMock.callIndex] ??
+        premiumApiMock.mockResponses[premiumApiMock.mockResponses.length - 1];
+      premiumApiMock.callIndex += 1;
+      return r
+        ? Promise.resolve({ ok: true as const, result: r })
+        : Promise.resolve({
+            ok: false as const,
+            failure_kind: "http" as const,
+            retryable: false,
+            error_code: "test_mode_skipped",
+            document_text: "" as const,
+            attemptCount: 0,
+          });
+    },
+    postPremiumFullDraftOnce: () => {
+      const r =
+        premiumApiMock.mockResponses[premiumApiMock.callIndex] ??
+        premiumApiMock.mockResponses[premiumApiMock.mockResponses.length - 1];
+      premiumApiMock.callIndex += 1;
+      return r ? Promise.resolve(r) : Promise.reject(new Error("no_mock"));
+    },
+  };
+});
+
+vi.mock("./paidProCorpusAcceptance", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./paidProCorpusAcceptance")>();
+  return {
+    ...mod,
+    validatePaidProOutput: (...args: Parameters<typeof mod.validatePaidProOutput>) => {
+      if (premiumApiMock.forceValidateFail) {
+        return { ok: false, reasons: ["premium_truth_gate_soft_fail_test"] };
+      }
+      return mod.validatePaidProOutput(...args);
+    },
+  };
+});
+
+beforeEach(() => {
+  clearFrozenPremiumSessionBodiesForTests();
+  premiumApiMock.mockResponses = [];
+  premiumApiMock.callIndex = 0;
+  premiumApiMock.forceValidateFail = false;
+});
 
 describe("extractCleanPremiumParties", () => {
   it("pulls LLC names out of a prompt-like party cell", () => {
@@ -967,5 +1034,181 @@ describe("runPremiumCompletion", () => {
     expect(low).toMatch(/12%|twelve percent/);
     expect(low).toMatch(/non-circumvent|eighteen|18/);
     expect(low).toMatch(/true-?up|ledger|chargeback/);
+  });
+});
+
+const MEDIUM_BODY_INTAKE =
+  "Create a professional services agreement between Blue Canyon Analytics LLC and Iron Vale " +
+  "Systems Inc. for AI workflow setup. Client will pay $5,000. Texas law. Electronic signatures allowed.";
+
+function mediumServicesStructured(): ParsedDraftShape {
+  return {
+    title: "Professional Services Agreement",
+    jurisdiction: "Texas",
+    parties: [
+      { name: "Blue Canyon Analytics LLC", role: "Client" },
+      { name: "Iron Vale Systems Inc.", role: "Service Provider" },
+    ],
+    purpose: "AI workflow setup and integration services.",
+    payment_terms: "$5,000 payable within thirty (30) days of invoice.",
+    duration: "Until completion",
+    due_date: null,
+    effective_date: "Upon full execution",
+    payment: { amount: 5_000, cadence: null, valid: true },
+    agreement_family: "services_agreement",
+  };
+}
+
+/** Builds a clean, placeholder-free commercial services body sized between the paid floor and the
+ *  long-authoritative threshold so it exercises the json_parse acceptance path (not long-advisory). */
+function buildMediumServicesBody(targetLen: number): string {
+  const header = [
+    "PROFESSIONAL SERVICES AGREEMENT",
+    "",
+    'This Professional Services Agreement (the "Agreement") is entered into by and between ' +
+      'Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").',
+    "",
+    "1. Scope of Services. Service Provider shall perform the professional services described in this " +
+      "services agreement, including the AI workflow setup and integration tasks defined by the parties.",
+    "2. Payment. Client shall pay Service Provider $5,000 for the services, payable within thirty (30) days of invoice.",
+    "3. Acceptance Review. Client shall have a review period to evaluate each deliverable for material " +
+      "conformity and to report any nonconformity or defect during the acceptance review.",
+    "4. Ownership of Work Product. Upon full payment, Client owns all final deliverables and work product, " +
+      "and Service Provider assigns all related intellectual property to Client.",
+    "5. Confidentiality. Each party shall protect the other party's confidential and proprietary information and trade secrets.",
+    "6. Term and Termination. This Agreement continues until completion and is subject to termination for cause upon written notice.",
+    "7. Governing Law. This Agreement is governed by the laws of the State of Texas.",
+    "8. Electronic Signatures. The parties agree that electronic signatures and counterparts are valid and binding.",
+    "",
+  ].join("\n");
+  let body = header;
+  let i = 9;
+  while (body.length < targetLen) {
+    body +=
+      `\n${i}. Additional Provision. The parties acknowledge that the obligations under section ${i} are ` +
+      "commercially reasonable and shall be performed diligently, with each party bearing responsibility for its own " +
+      "personnel, equipment, records, insurance, and compliance with applicable law in connection with the engagement.";
+    i += 1;
+  }
+  return body;
+}
+
+function runJsonParseDegraded(args: { bodyLen: number; forceValidateFail: boolean }) {
+  premiumApiMock.forceValidateFail = args.forceValidateFail;
+  const body = buildMediumServicesBody(args.bodyLen);
+  premiumApiMock.mockResponses = [
+    {
+      title: "Professional Services Agreement",
+      agreement_family: "services_agreement",
+      document_text: body,
+      server_full_document_text: body,
+      // Intelligence metadata is absent because structured JSON failed to parse server-side.
+      key_terms_found: [],
+      missing_material_info: [],
+      generation_outcome: "degraded",
+      server_generation_failure_code: "json_parse",
+      server_generation_failure_message: "Structured intelligence JSON failed to parse.",
+    },
+  ];
+  return runPremiumCompletion({
+    intakeText: MEDIUM_BODY_INTAKE,
+    originalUserIntakeRawForMerge: MEDIUM_BODY_INTAKE,
+    structuredDraft: mediumServicesStructured(),
+    simpleProductFlow: true,
+    partyRoleLabels: defaultIntakePartyRoleLabels(),
+    userGapAnswers: null,
+    agreementGenerationId: `gen-json-parse-${args.bodyLen}-${args.forceValidateFail}`,
+    premiumRequestIntakeFingerprint: "fp-json-parse",
+    isPremiumRequestStillValid: () => true,
+    parseDraft: async () => mediumServicesStructured(),
+  });
+}
+
+describe("runPremiumCompletion json_parse degraded acceptance", () => {
+  it("http 200 + json_parse + 8k+ document_text accepts the paid corpus (does not reject)", async () => {
+    const out = await runJsonParseDegraded({ bodyLen: 8_999, forceValidateFail: true });
+    expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThanOrEqual(8_000);
+  });
+
+  it("json_parse does not reject the body when it passes the paid gates (vPaid soft-fail)", async () => {
+    // The paid quality gate soft-fails on the lost metadata, but a long, section-complete body with a
+    // json_parse failure code must NOT be dropped to "Retry Pro draft".
+    const out = await runJsonParseDegraded({ bodyLen: 8_999, forceValidateFail: true });
+    expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThanOrEqual(8_000);
+  });
+
+  it("premium acceptance reports an authoritative outcome for the degraded-but-valid body", async () => {
+    const out = await runJsonParseDegraded({ bodyLen: 8_999, forceValidateFail: true });
+    expect(out.premiumCompletionOutcome).toBe(
+      "authoritative_draft_complete_with_recommended_clarifications",
+    );
+  });
+
+  it("a short degraded body below the paid floor is rejected and never becomes an authoritative SoT", async () => {
+    const out = await runJsonParseDegraded({ bodyLen: 3_000, forceValidateFail: true });
+    expect(out.premiumRenderSource).not.toMatch(/server_full_draft/);
+    expect(out.winningPremiumBodyText.trim().length).toBe(0);
+  });
+});
+
+describe("nonfatal parse-failure acceptance policy", () => {
+  const longSectionedBody = buildMediumServicesBody(8_999);
+
+  it("treats json_parse / schema_parse as nonfatal metadata failures", () => {
+    expect(isNonfatalGenerationFailureCode("json_parse")).toBe(true);
+    expect(isNonfatalGenerationFailureCode("schema_parse")).toBe(true);
+    expect(isNonfatalGenerationFailureCode("airlock_blocked")).toBe(false);
+    expect(isNonfatalGenerationFailureCode("dev_context_leak")).toBe(false);
+    expect(isNonfatalGenerationFailureCode("")).toBe(false);
+  });
+
+  it("recognizes required paid sections in a long commercial body", () => {
+    expect(
+      premiumBodyHasRequiredPaidSections({
+        text: longSectionedBody,
+        rawIntake: MEDIUM_BODY_INTAKE,
+        draft: mediumServicesStructured(),
+      }),
+    ).toBe(true);
+    expect(
+      premiumBodyHasRequiredPaidSections({ text: "too short", rawIntake: "x", draft: null }),
+    ).toBe(false);
+  });
+
+  it("accepts json_parse only when length, placeholders, structure and sections all pass", () => {
+    const base = {
+      failureCode: "json_parse",
+      fatalPlaceholderCount: 0,
+      structuralOk: true,
+      hasRequiredSections: true,
+    };
+    expect(
+      isNonfatalParseDegradedPaidAccept({ ...base, bodyLen: PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN }),
+    ).toBe(true);
+    // Below the paid length threshold.
+    expect(
+      isNonfatalParseDegradedPaidAccept({
+        ...base,
+        bodyLen: PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN - 1,
+      }),
+    ).toBe(false);
+    // Fatal placeholder present.
+    expect(isNonfatalParseDegradedPaidAccept({ ...base, bodyLen: 9_000, fatalPlaceholderCount: 1 })).toBe(
+      false,
+    );
+    // Structural gate failed.
+    expect(isNonfatalParseDegradedPaidAccept({ ...base, bodyLen: 9_000, structuralOk: false })).toBe(false);
+    // Missing required sections.
+    expect(
+      isNonfatalParseDegradedPaidAccept({ ...base, bodyLen: 9_000, hasRequiredSections: false }),
+    ).toBe(false);
+    // Hard failure code never qualifies.
+    expect(
+      isNonfatalParseDegradedPaidAccept({ ...base, failureCode: "airlock_blocked", bodyLen: 9_000 }),
+    ).toBe(false);
   });
 });

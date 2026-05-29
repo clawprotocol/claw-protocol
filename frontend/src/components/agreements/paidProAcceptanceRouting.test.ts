@@ -42,6 +42,12 @@ import {
   resolveVisibleProPaperBoundary,
 } from "./visibleProPaperRenderBoundary";
 import { resolvePaidProReviewState } from "./paidProReviewStateMachine";
+import {
+  authoritativePremiumPipelineResultForUiApply,
+  hasUsablePremiumBodyText,
+} from "./premiumPostCheckoutApplyEligible";
+import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import type { PremiumCompletionResult } from "./premiumCompletionPipeline";
 
 const PAID_BODY = `PRO AGREEMENT. ${"Substantive clause. ".repeat(900)}`;
 
@@ -439,6 +445,42 @@ describe("paidProAcceptanceRouting", () => {
       expect(block).toContain("focusVisibleRecipientInput(focusKey)");
       expect(block).toContain("claw-paid-pro-inline-signer-setup");
       expect(block).toContain("scrollGuidedSignerSetupIntoView()");
+    });
+  });
+
+  describe("rejected paid corpus never becomes the paid Pro Source of Truth", () => {
+    function rejectedResult(body: string): PremiumCompletionResult {
+      return {
+        premiumRenderSource: "rejected_paid_corpus",
+        winningPremiumBodyText: body,
+        staleIntakeOrGeneration: false,
+      } as unknown as PremiumCompletionResult;
+    }
+
+    it("rejected_paid_corpus is not an authoritative pipeline render source", () => {
+      expect(isAuthoritativePremiumPipelineRenderSource("rejected_paid_corpus")).toBe(false);
+    });
+
+    it("a rejected_paid_corpus result (empty body) is never eligible to commit a SoT", () => {
+      expect(authoritativePremiumPipelineResultForUiApply(rejectedResult(""))).toBe(false);
+    });
+
+    it("a short rejected corpus (~1165 chars) cannot become an authoritative SoT", () => {
+      const shortBody = "x".repeat(1_165);
+      // The body length alone clears the usable-length floor...
+      expect(hasUsablePremiumBodyText(shortBody)).toBe(true);
+      // ...but a rejected render source still blocks the apply/commit path entirely.
+      expect(authoritativePremiumPipelineResultForUiApply(rejectedResult(shortBody))).toBe(false);
+    });
+
+    it("source guard: AgreementBuilderIntake only seeds the paid SoT for authoritative render sources", () => {
+      const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+      // The post-checkout auto-commit gate requires an authoritative pipeline render source + >=500 body
+      // before establishPaidProSourceOfTruth runs, so a rejected/short corpus can never be committed.
+      expect(src).toMatch(
+        /usePaidAuthoritativeBody\s*=\s*isAuthoritativePremiumPipelineRenderSource\(result\.premiumRenderSource\)\s*&&\s*winning\.length\s*>=\s*500/,
+      );
+      expect(src).toMatch(/usePaidAuthoritativeBody && snapshotPlain\.trim\(\)\.length >= 500/);
     });
   });
 });

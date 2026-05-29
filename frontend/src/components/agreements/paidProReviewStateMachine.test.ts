@@ -153,6 +153,37 @@ describe("resolvePaidProReviewState", () => {
     ).toBe("AUTHORITATIVE_READY");
   });
 
+  it("rejected/degraded paid corpus after checkout shows retry recovery, never a Pro review shell", () => {
+    // QA: HTTP 200 but generation_outcome degraded + json_parse rejected by client gates. No valid
+    // corpus was committed (rejected/short corpus must never become the SoT), so the surface must be
+    // a clean recovery — NOT an authoritative review render and NOT recipient/VS01 surfaces.
+    const state = resolvePaidProReviewState({
+      premiumPaidDocumentSurface: true,
+      premiumCheckoutCompleted: true,
+      premiumGenerationInFlight: false,
+      hasValidAuthoritativeCorpus: false,
+      premiumCorpusValidationFailed: true,
+      authoritativeBodyLen: 0,
+    });
+    expect(state).toBe("FAILED_PREMIUM_CORPUS");
+    expect(state).not.toBe("AUTHORITATIVE_READY");
+    expect(paidProReviewStateBlocksReviewRender(state)).toBe(true);
+    expect(paidProReviewStateBlocksStarterSurface(state)).toBe(true);
+    expect(paidProReviewStateAllowsRecipientSetup(state)).toBe(false);
+    expect(paidProReviewStateAllowsVs01(state)).toBe(false);
+    // The recovery surface shows "Retry Pro draft" and logs no invariant violation (no body yet).
+    expect(
+      collectPaidProQaInvariantViolations({
+        state,
+        authoritativeBodySource: "none",
+        authoritativeLen: 0,
+        freeStarterShellResolved: false,
+        ctaLabel: "Retry Pro draft",
+        starterLabelRendered: false,
+      }),
+    ).toEqual([]);
+  });
+
   it("refresh during failed premium state stays FAILED_PREMIUM_CORPUS (deterministic)", () => {
     const args = {
       premiumPaidDocumentSurface: true,
