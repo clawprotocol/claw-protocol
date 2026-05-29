@@ -313,6 +313,31 @@ export function resolveVisibleProPaperBoundary(args: {
 
   const paidEstablished = hasPaidProSourceOfTruth() || Boolean(getAuthoritativeAgreementDocument()?.fullCorpusText);
 
+  // Paid SoT wins: once a real authoritative paid corpus is established, it is the only legal body on
+  // the paid surface. Competing candidates produced during signer hydration (handoff / starter / guided
+  // / rendered preview) — or a section-quality heuristic that flips on a mutated draft — must never
+  // blank, block, or replace it. This is the hard "candidate collision does not blank the paid
+  // document if the authoritative paid SoT is present" invariant.
+  if (paidEstablished && authoritativePlain) {
+    const authSource = authoritative?.source ?? "paidProSourceOfTruth";
+    const authIsRealPaidCorpus =
+      isAllowedPaidProVisiblePaperSource(authSource) &&
+      authoritativePlain.length >= 500 &&
+      bodyHash(authoritativePlain) !== bodyHash(free?.plain ?? "");
+    if (authIsRealPaidCorpus) {
+      return {
+        plain: authoritativePlain,
+        source: authSource,
+        blocked: false,
+        showFinalizing: false,
+        collision,
+        isAuthoritative: true,
+        isFreeBodyMatch: false,
+        hasRequiredProSections: true,
+      };
+    }
+  }
+
   if (
     isForbiddenPaidProVisiblePaperSource(args.declaredSource) ||
     isFreeBodyMatch ||

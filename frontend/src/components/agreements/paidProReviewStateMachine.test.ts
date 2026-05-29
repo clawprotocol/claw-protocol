@@ -119,6 +119,40 @@ describe("resolvePaidProReviewState", () => {
     expect(paidProReviewStateAllowsRecipientSetup(state)).toBe(false);
   });
 
+  it("AUTHORITATIVE_READY requires a non-empty body — valid corpus with len 0 stays GENERATING", () => {
+    // QA: after signer hydration the active review predicate flips false so the visible body is
+    // momentarily empty while paid authority still exists. This must never report AUTHORITATIVE_READY
+    // (which would emit authoritativeLen:0); it recovers as GENERATING until the SoT body resolves.
+    const emptyBody = resolvePaidProReviewState({
+      ...baseArgs,
+      premiumPaidDocumentSurface: true,
+      premiumCheckoutCompleted: true,
+      hasValidAuthoritativeCorpus: true,
+      authoritativeBodyLen: 0,
+    });
+    expect(emptyBody).toBe("GENERATING");
+    expect(emptyBody).not.toBe("AUTHORITATIVE_READY");
+
+    const withBody = resolvePaidProReviewState({
+      ...baseArgs,
+      premiumPaidDocumentSurface: true,
+      premiumCheckoutCompleted: true,
+      hasValidAuthoritativeCorpus: true,
+      authoritativeBodyLen: 12_967,
+    });
+    expect(withBody).toBe("AUTHORITATIVE_READY");
+  });
+
+  it("omitting authoritativeBodyLen preserves legacy AUTHORITATIVE_READY behavior", () => {
+    expect(
+      resolvePaidProReviewState({
+        ...baseArgs,
+        premiumCheckoutCompleted: true,
+        hasValidAuthoritativeCorpus: true,
+      }),
+    ).toBe("AUTHORITATIVE_READY");
+  });
+
   it("refresh during failed premium state stays FAILED_PREMIUM_CORPUS (deterministic)", () => {
     const args = {
       premiumPaidDocumentSurface: true,

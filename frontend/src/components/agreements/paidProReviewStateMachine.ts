@@ -25,6 +25,13 @@ export type ResolvePaidProReviewStateArgs = {
   hasValidAuthoritativeCorpus: boolean;
   /** Authority candidates were evaluated and rejected (premium-unavailable-retry). */
   premiumCorpusValidationFailed: boolean;
+  /**
+   * Length of the authoritative body actually resolvable for render. When provided and zero while a
+   * corpus is otherwise "valid", the surface must NOT report AUTHORITATIVE_READY (which would emit an
+   * `authoritativeLen: 0` invariant violation): a transiently empty body — e.g. mid signer hydration —
+   * stays GENERATING/RECOVERING until the paid SoT body resolves again.
+   */
+  authoritativeBodyLen?: number;
 };
 
 /**
@@ -39,9 +46,15 @@ export function resolvePaidProReviewState(
 ): PaidProReviewState {
   const paid = args.premiumPaidDocumentSurface || args.premiumCheckoutCompleted;
   if (!paid) return "NOT_PAID";
-  if (args.hasValidAuthoritativeCorpus) return "AUTHORITATIVE_READY";
+  // AUTHORITATIVE_READY requires a non-empty body. A valid-but-empty body (e.g. the active review
+  // predicate transiently false during signer hydration) must never report ready with len 0.
+  const bodyKnownEmpty =
+    typeof args.authoritativeBodyLen === "number" && args.authoritativeBodyLen <= 0;
+  if (args.hasValidAuthoritativeCorpus && !bodyKnownEmpty) return "AUTHORITATIVE_READY";
   if (args.premiumCorpusValidationFailed) return "FAILED_PREMIUM_CORPUS";
   if (args.premiumGenerationInFlight) return "GENERATING";
+  // Paid authority exists but the body is momentarily empty: keep recovering, never fail/ready.
+  if (args.hasValidAuthoritativeCorpus && bodyKnownEmpty) return "GENERATING";
   // Checkout completed, generation finished, and no valid corpus exists: fail closed.
   if (args.premiumCheckoutCompleted) return "FAILED_PREMIUM_CORPUS";
   return "GENERATING";
