@@ -8,7 +8,10 @@ import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import {
   applySignerPartyIdentityToAuthoritativeAgreement,
+  rebuildSignatureBlocksWithPartyIdentities,
 } from "./guidedDealCompletion/signerPartyIdentity";
+import type { PaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
 import {
   getAuthoritativeSigningSnapshot,
   type AuthoritativeSigningSnapshot,
@@ -81,6 +84,53 @@ export function buildHydratedAuthoritativeSigningCorpus(args: {
     rejected: Boolean(identityApply.rejected),
     rejectReason: identityApply.rejectReason,
   };
+}
+
+/**
+ * Hydrate signing corpus from consumed signer metadata authority and repair missing execution blocks.
+ */
+export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
+  rawCorpus: string;
+  authority: PaidProSignerMetadataAuthority;
+  intakeRaw: string;
+  surface: string;
+}): HydratedAuthoritativeSigningCorpusResult {
+  const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties);
+  let result = buildHydratedAuthoritativeSigningCorpus({
+    rawCorpus: args.rawCorpus,
+    identities,
+    intakeRaw: args.intakeRaw,
+    surface: args.surface,
+  });
+  const signerCount = Math.max(2, identities.filter((id) => id.partyDisplayName.trim()).length);
+  const hasBlocks = corpusSignatureBlocksHaveRequiredByLines(result.corpus, signerCount);
+  if (!result.rejected && !hasBlocks) {
+    const rebuilt = rebuildSignatureBlocksWithPartyIdentities(result.corpus, identities);
+    if (
+      rebuilt.count > 0 &&
+      corpusSignatureBlocksHaveRequiredByLines(rebuilt.text, signerCount)
+    ) {
+      result = {
+        ...result,
+        corpus: rebuilt.text,
+        signaturePolishCount: result.signaturePolishCount + rebuilt.count,
+      };
+      logSignatureBlockSource({
+        surface: args.surface,
+        source: "authority_signature_block_rebuild",
+        hasFilledBlocks: true,
+        signerCount,
+      });
+    } else if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+      logSignerHydrationMismatch({
+        surface: args.surface,
+        reason: "post_finalize_missing_signature_block",
+        rawLen: result.corpus.length,
+        afterLen: rebuilt.text.length,
+      });
+    }
+  }
+  return result;
 }
 
 export function fingerprintSignerMetadataState(

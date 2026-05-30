@@ -35,6 +35,7 @@ import {
   getAcceptedPremiumCorpusForVs01Signing,
 } from "../components/agreements/acceptedPremiumCanonicalCorpus";
 import { readCanonicalAgreementCorpusForSurface } from "../components/agreements/canonicalAgreementSnapshot";
+import { getAuthoritativeSigningSnapshot } from "../components/agreements/authoritativeSigningSnapshot";
 import { getPaidProDocumentForSurface } from "../components/agreements/paidProSourceOfTruth";
 import { requireAuthoritativeCorpusForSurface } from "../components/agreements/authoritativeAgreementDocument";
 import { logLawdogOutputPathMap } from "../components/agreements/lawdogOutputPathMap";
@@ -351,6 +352,45 @@ export function resolveFinalVs01CorpusOrBlock(
     2,
     1 + (args.bridge?.counterparties?.length ?? args.draft?.parties?.length ?? 1),
   );
+  const signingSnapshot = getAuthoritativeSigningSnapshot();
+  const snapshotCorpus = signingSnapshot?.corpus?.trim() ?? "";
+  if (guidedPro && snapshotCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
+    const hash = fingerprintAgreementBody(snapshotCorpus);
+    const witnessRequirement = resolveVs01WitnessRequirement({
+      corpusText: snapshotCorpus,
+      intakeText: args.intakeText,
+      draft: args.draft ?? null,
+    });
+    const hasWitnessBlock = corpusHasWitnessBlock(snapshotCorpus);
+    const hasSignatureBlock = corpusHasVisibleSignatureExecutionLines(snapshotCorpus);
+    const hasBySignatureLines = corpusSignatureBlocksHaveRequiredByLines(snapshotCorpus, signerCount);
+    const allowed =
+      !premiumInProgress &&
+      hasSignatureBlock &&
+      (!witnessRequirement.requiresWitness || hasWitnessBlock) &&
+      hasBySignatureLines;
+    return {
+      corpus: snapshotCorpus,
+      source: "finalized_signing",
+      len: snapshotCorpus.length,
+      hash,
+      matchesFreeHash: false,
+      isFreeHashMatch: false,
+      hasWitnessBlock,
+      requiresSignatureBlock: true,
+      requiresWitness: witnessRequirement.requiresWitness,
+      witnessReason: witnessRequirement.witnessReason,
+      hasBySignatureLines,
+      hasByOrSignatureLines: hasBySignatureLines,
+      signerCount,
+      allowed,
+      blockReason: allowed ? undefined : "authoritative_signing_snapshot_not_ready",
+      premiumInProgress,
+      premiumComplete,
+      userMessage: allowed ? undefined : VS01_CORPUS_GATE_USER_MESSAGE,
+    };
+  }
+
   const canonical = guidedPro
     ? readCanonicalAgreementCorpusForSurface("vs01", { tier: "pro" })
     : readCanonicalAgreementCorpusForSurface("vs01");

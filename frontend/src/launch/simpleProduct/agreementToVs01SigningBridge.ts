@@ -24,6 +24,7 @@ import {
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
 } from "../../vs01/vs01SigningCorpus";
+import { readRecipientSetupArraysFromConsumedAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
 import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
 import type { Vs01Counterparty } from "../../vs01/types";
@@ -293,6 +294,14 @@ export function resolveRecipientSetupForVs01Bridge(
   draft: AgreementDraft | null,
   explicit?: RecipientSetupEmailInput | null,
 ): RecipientSetupEmailInput | null {
+  const fromAuthority = readRecipientSetupArraysFromConsumedAuthority();
+  if (fromAuthority) {
+    return {
+      recipientPartySignerNames: fromAuthority.recipientPartySignerNames,
+      recipientPartySignerTitles: fromAuthority.recipientPartySignerTitles,
+      recipientPartyEmails: fromAuthority.recipientPartyEmails,
+    };
+  }
   if (!draft) return explicit ?? null;
   const parties = (draft.parties ?? []) as AgreementParty[];
   const partyCount = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);

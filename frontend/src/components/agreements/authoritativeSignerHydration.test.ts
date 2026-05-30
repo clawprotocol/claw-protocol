@@ -4,11 +4,13 @@ import { resolveCanonicalPartyIdentitiesFromSignerSetup } from "./guidedDealComp
 import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion/signatureRegion";
 import {
   buildHydratedAuthoritativeSigningCorpus,
+  buildHydratedAuthoritativeSigningCorpusFromAuthority,
   fingerprintSignerMetadataState,
   readAuthoritativeSignerIdentitiesForSurfaces,
   resolveAuthoritativeSignerIdentitiesFromSnapshot,
   signerMetadataDriftedFromSnapshot,
 } from "./authoritativeSignerHydration";
+import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
   clearAuthoritativeSigningSnapshot,
   createAuthoritativeSigningSnapshot,
@@ -64,6 +66,31 @@ function signerArgs() {
 describe("authoritativeSignerHydration", () => {
   afterEach(() => {
     clearAuthoritativeSigningSnapshot();
+  });
+
+  it("hydrates distinct signer names per party from consumed authority", () => {
+    const authority = buildLivePaidProSignerMetadataAuthority({
+      partyCount: 2,
+      recipient1Name: BLUE_CANYON,
+      recipient2Name: IRON_VALE,
+      recipient1Email: "anthem@test.com",
+      recipient2Email: "ira@test.com",
+      extraPartyReviewEmails: [],
+      partySignerNames: ["Anthem H Blanchard", "Ira Vernon"],
+      partySignerTitles: ["Manager", "Manager"],
+      partyAddresses: ["", ""],
+    });
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: RAW_BODY,
+      authority,
+      intakeRaw: "",
+      surface: "party_isolation",
+    });
+    expect(hydrated.corpus).toMatch(/CLIENT:[\s\S]*Blue Canyon[\s\S]*Name:\s*Anthem H Blanchard/i);
+    expect(hydrated.corpus).toMatch(/SERVICE PROVIDER:[\s\S]*Iron Vale[\s\S]*Name:\s*Ira Vernon/i);
+    const ironBlock = hydrated.corpus.split(/SERVICE PROVIDER:/i)[1] ?? "";
+    expect(ironBlock).toMatch(/Name:\s*Ira Vernon/i);
+    expect(ironBlock).not.toMatch(/Anthem H Blanchard/);
   });
 
   it("hydrates Name/Title lines before snapshot creation", () => {

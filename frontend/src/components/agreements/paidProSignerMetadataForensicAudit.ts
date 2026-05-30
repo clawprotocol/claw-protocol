@@ -8,6 +8,8 @@ import {
 } from "./premiumPartyNamesHandoff";
 import {
   logSignerMetadataLifecycleEvent,
+  readConsumedPaidProSignerMetadataAuthority,
+  readPaidProSignerMetadataFieldFromConsumedAuthority,
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
 import {
@@ -207,32 +209,35 @@ export function collectSignerMetadataFieldLineage(
       break;
   }
 
-  let authoritativeValue: string | null = null;
-  if (field === "partyLegalName") {
-    authoritativeValue = norm(manifest?.partyName) ?? norm(slot?.name);
-  } else if (field === "signerEmail") {
-    authoritativeValue = norm(manifest?.email) ?? norm(slot?.email);
-  } else if (field === "signerName") {
-    authoritativeValue = norm(manifest?.signerName) ?? norm(slot?.signerName);
-  } else if (field === "signerTitle") {
-    authoritativeValue = norm(manifest?.signerTitle) ?? norm(slot?.signerTitle);
-  } else if (field === "partyAddress") {
-    authoritativeValue = norm(slot?.partyAddress) ?? norm((snap?.signerMetadata.partyAddresses ?? [])[idx]);
-  }
-
-  let reviewValue: string | null = null;
-  if (field === "partyLegalName") {
-    reviewValue = norm(args.reviewLegalEntity) ?? norm(manifest?.partyName);
-  } else if (snap?.corpus) {
-    if (field === "signerName") reviewValue = norm(manifest?.signerName);
-    else if (field === "signerTitle") reviewValue = norm(manifest?.signerTitle);
-    else if (field === "signerEmail") reviewValue = norm(manifest?.email);
-    else if (field === "partyAddress") {
-      reviewValue = norm((snap.signerMetadata.partyAddresses ?? [])[idx]);
+  const consumedField = readPaidProSignerMetadataFieldFromConsumedAuthority(idx, field);
+  let authoritativeValue: string | null = consumedField || null;
+  if (!authoritativeValue) {
+    if (field === "partyLegalName") {
+      authoritativeValue = norm(manifest?.partyName) ?? norm(slot?.name);
+    } else if (field === "signerEmail") {
+      authoritativeValue = norm(manifest?.email) ?? norm(slot?.email);
+    } else if (field === "signerName") {
+      authoritativeValue = norm(manifest?.signerName) ?? norm(slot?.signerName);
+    } else if (field === "signerTitle") {
+      authoritativeValue = norm(manifest?.signerTitle) ?? norm(slot?.signerTitle);
+    } else if (field === "partyAddress") {
+      authoritativeValue =
+        norm(slot?.partyAddress) ?? norm((snap?.signerMetadata.partyAddresses ?? [])[idx]);
     }
   }
+  if (!authoritativeValue && localValue) {
+    authoritativeValue = localValue;
+  }
 
-  const snapshotValue = snapshotMetaField(idx, field);
+  const consumedAuth = readConsumedPaidProSignerMetadataAuthority();
+  let reviewValue: string | null = null;
+  if (field === "partyLegalName") {
+    reviewValue = norm(args.reviewLegalEntity) || consumedField || norm(manifest?.partyName);
+  } else if (snap?.corpus || consumedAuth) {
+    reviewValue = consumedField || snapshotMetaField(idx, field);
+  }
+
+  const snapshotValue = snap ? snapshotMetaField(idx, field) : consumedField || null;
   const freezeValue = metadataSessionActive || signingCorpusFrozen ? localValue : localValue;
   const ctaValue = gateEvaluatedValue(args.gate, idx, field, args.local);
   const signingPayloadValue = signingPayloadForParty(args, field);

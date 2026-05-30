@@ -6,6 +6,11 @@ import {
   getAuthoritativeSigningSnapshot,
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
+import type { CanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
+import {
+  isIndividualPartyName,
+  type CanonicalPartyIdentity,
+} from "./guidedDealCompletion/signerPartyIdentity";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { stripRecipientEmailNoise } from "./recipientEmailValidation";
@@ -64,6 +69,8 @@ const LEGACY_PAID_PRO_SIGNER_CTA_REASONS = new Set([
   "premium_continue_to_signers",
   "guided_final_review_hidden",
 ]);
+
+let consumedLiveAuthority: PaidProSignerMetadataAuthority | null = null;
 
 function norm(v: string | null | undefined): string {
   return String(v ?? "").trim();
@@ -189,6 +196,137 @@ export function buildSnapshotPaidProSignerMetadataAuthority(): PaidProSignerMeta
     hash: hashPaidProSignerMetadataAuthority(parties),
     updatedAt: snap.frozenAt,
   };
+}
+
+/** Promote live UI edits into the consumed authority store (all downstream surfaces read this). */
+export function setConsumedPaidProSignerMetadataAuthority(
+  authority: PaidProSignerMetadataAuthority,
+): void {
+  consumedLiveAuthority = authority;
+}
+
+export function clearConsumedPaidProSignerMetadataAuthority(): void {
+  consumedLiveAuthority = null;
+}
+
+/** Snapshot wins after finalize; otherwise the last promoted live authority. */
+export function readConsumedPaidProSignerMetadataAuthority(): PaidProSignerMetadataAuthority | null {
+  return buildSnapshotPaidProSignerMetadataAuthority() ?? consumedLiveAuthority;
+}
+
+export function readPaidProSignerMetadataFieldFromConsumedAuthority(
+  partyIndex: number,
+  field: PaidProSignerMetadataField,
+): string {
+  const party = readConsumedPaidProSignerMetadataAuthority()?.parties[partyIndex];
+  if (!party) return "";
+  switch (field) {
+    case "partyLegalName":
+      return party.partyLegalName;
+    case "signerEmail":
+      return party.signerEmail;
+    case "signerName":
+      return party.signerName;
+    case "signerTitle":
+      return party.signerTitle;
+    case "partyAddress":
+      return party.partyAddress;
+    default:
+      return "";
+  }
+}
+
+export function authorityPartiesToCanonicalPartyIdentities(
+  parties: readonly PaidProSignerMetadataParty[],
+): CanonicalPartyIdentity[] {
+  return parties.map((p) => {
+    const legal = p.partyLegalName.trim();
+    const isIndividual = legal ? isIndividualPartyName(legal) : false;
+    return {
+      index: p.partyIndex,
+      partyDisplayName: legal,
+      email: p.signerEmail,
+      representativeName: p.signerName.trim() || null,
+      title: p.signerTitle.trim() || null,
+      blockHeading:
+        p.partyIndex === 0 ? "CLIENT" : p.partyIndex === 1 ? "SERVICE PROVIDER" : `PARTY ${p.partyIndex + 1}`,
+      isIndividual,
+    };
+  });
+}
+
+export function buildCanonicalFinalPartyManifestFromAuthority(
+  authority: PaidProSignerMetadataAuthority,
+): CanonicalFinalPartyManifest {
+  return {
+    parties: authority.parties.map((p) => {
+      const legal = p.partyLegalName.trim();
+      const isIndividual = legal ? isIndividualPartyName(legal) : false;
+      const role =
+        p.partyIndex === 0 ? ("client" as const) : p.partyIndex === 1 ? ("service_provider" as const) : (`party_${p.partyIndex + 1}` as const);
+      return {
+        index: p.partyIndex,
+        role,
+        partyName: legal,
+        email: p.signerEmail,
+        signerName: p.signerName.trim() || null,
+        signerTitle: p.signerTitle.trim() || null,
+        roleLabel:
+          role === "client" ? "Client" : role === "service_provider" ? "Service Provider" : `Party ${p.partyIndex + 1}`,
+        signerKind: isIndividual ? ("individual" as const) : ("entity_representative" as const),
+        isSenderSide: p.partyIndex === 0,
+        isIndividual,
+      };
+    }),
+  };
+}
+
+/** VS01 / draft merge input derived from consumed authority (never handoff inference). */
+export function readRecipientSetupArraysFromConsumedAuthority(): {
+  recipientPartySignerNames: string[];
+  recipientPartySignerTitles: string[];
+  recipientPartyEmails: string[];
+  recipientPartyAddresses: string[];
+} | null {
+  const auth = readConsumedPaidProSignerMetadataAuthority();
+  if (!auth?.parties.length) return null;
+  return {
+    recipientPartySignerNames: auth.parties.map((p) => p.signerName),
+    recipientPartySignerTitles: auth.parties.map((p) => p.signerTitle),
+    recipientPartyEmails: auth.parties.map((p) => p.signerEmail),
+    recipientPartyAddresses: auth.parties.map((p) => p.partyAddress),
+  };
+}
+
+export function paidProSignerMetadataForensicLineageEnabled(): boolean {
+  return (
+    typeof import.meta !== "undefined" &&
+    Boolean((import.meta.env as { VITE_PAID_PRO_SIGNER_METADATA_DEBUG?: string })?.VITE_PAID_PRO_SIGNER_METADATA_DEBUG)
+  );
+}
+
+export function assertPreFinalizeSignerMetadataAuthorityParity(
+  authority: PaidProSignerMetadataAuthority,
+): void {
+  if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") return;
+  for (const party of authority.parties) {
+    for (const field of PAID_PRO_SIGNER_METADATA_FIELDS) {
+      const v = readPaidProSignerMetadataFieldFromConsumedAuthority(party.partyIndex, field);
+      const expected =
+        field === "partyLegalName"
+          ? party.partyLegalName
+          : field === "signerEmail"
+            ? party.signerEmail
+            : field === "signerName"
+              ? party.signerName
+              : field === "signerTitle"
+                ? party.signerTitle
+                : party.partyAddress;
+      if (v !== expected) {
+        throw new Error(`[signer-authority-parity] party=${party.partyIndex} field=${field}`);
+      }
+    }
+  }
 }
 
 export function fingerprintPaidProSignerMetadataAuthority(

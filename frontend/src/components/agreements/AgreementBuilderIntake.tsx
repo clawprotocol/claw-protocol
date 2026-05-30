@@ -608,7 +608,7 @@ import {
   readAuthoritativeSigningCorpus,
 } from "./authoritativeSigningSnapshot";
 import {
-  buildHydratedAuthoritativeSigningCorpus,
+  buildHydratedAuthoritativeSigningCorpusFromAuthority,
   logSnapshotSignerState,
   readAuthoritativeSignerIdentitiesForSurfaces,
   signerMetadataDriftedFromSnapshot,
@@ -630,10 +630,15 @@ import {
 import {
   assertCanonicalPaidProSignerCtaReason,
   authorityPartiesToRecipientMetadata,
+  authorityPartiesToCanonicalPartyIdentities,
+  buildCanonicalFinalPartyManifestFromAuthority,
   buildLivePaidProSignerMetadataAuthority,
+  clearConsumedPaidProSignerMetadataAuthority,
   emitPaidProSignerMetadataAuthoritativeWrite,
   emitPaidProSignerMetadataCtaEvaluation,
   emitPaidProSignerMetadataFieldDiagnostics,
+  paidProSignerMetadataForensicLineageEnabled,
+  setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
 import {
@@ -12522,6 +12527,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  useEffect(() => {
+    if (!hasPaidProSourceOfTruth()) {
+      clearConsumedPaidProSignerMetadataAuthority();
+      return;
+    }
+    setConsumedPaidProSignerMetadataAuthority(
+      buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState),
+    );
+  }, [liveSignerMetadataUiState, premiumSurfaceGateTick]);
+
   const emitPaidProSignerMetadataFieldDiagnosticsCb = React.useCallback(
     (args: {
       partyIndex: number;
@@ -12763,61 +12778,47 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
-  const guidedSignerCanonicalIdentities = useMemo(
-    () => {
-      const fromSnapshot = readAuthoritativeSignerIdentitiesForSurfaces();
-      if (fromSnapshot?.length) {
-        return fromSnapshot;
-      }
-      if (
-        paidProSignerMetadataSessionActive &&
-        frozenSignerMetadataIdentitiesRef.current
-      ) {
-        return frozenSignerMetadataIdentitiesRef.current;
-      }
-      const live = resolveCanonicalPartyIdentitiesFromSignerSetup({
-        partyCount: guidedPreReviewSignerSlots.requiredCount,
-        partySignerNames,
-        partySignerTitles,
-        recipient1Name,
-        recipient2Name,
-        recipient1Email,
-        recipient2Email,
-        extraPartyReviewEmails,
-        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
-        draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
-        sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
-        recipientsDeferred,
-      });
-      if (paidProSignerMetadataSessionActive) {
-        frozenSignerMetadataIdentitiesRef.current = live;
-      } else {
-        frozenSignerMetadataIdentitiesRef.current = null;
-      }
-      return live;
-    },
-    [
-      paidProSignerMetadataSessionActive,
-      paidProPostSignerMetadataFreezeActive,
-      signaturePreparationRequested,
-      premiumSurfaceGateTick,
-      guidedPreReviewSignerSlots.requiredCount,
-      ...(paidProSignerMetadataSessionActive || paidProPostSignerMetadataFreezeActive
-        ? []
-        : [
-            partySignerNames,
-            partySignerTitles,
-            recipient1Name,
-            recipient2Name,
-            recipient1Email,
-            recipient2Email,
-            extraPartyReviewEmails,
-            draft?.parties,
-            effectivePremiumSendMode,
-            recipientsDeferred,
-          ]),
-    ],
-  );
+  const guidedSignerCanonicalIdentities = useMemo(() => {
+    const fromSnapshot = readAuthoritativeSignerIdentitiesForSurfaces();
+    if (fromSnapshot?.length) {
+      return fromSnapshot;
+    }
+    const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
+    if (hasPaidProSourceOfTruth()) {
+      return authorityPartiesToCanonicalPartyIdentities(authority.parties);
+    }
+    return resolveCanonicalPartyIdentitiesFromSignerSetup({
+      partyCount: guidedPreReviewSignerSlots.requiredCount,
+      partySignerNames,
+      partySignerTitles,
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+      draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
+      sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
+      recipientsDeferred,
+    });
+  }, [
+    liveSignerMetadataUiState,
+    paidProPostSignerMetadataFreezeActive,
+    signaturePreparationRequested,
+    premiumSurfaceGateTick,
+    guidedPreReviewSignerSlots.requiredCount,
+    partySignerNames,
+    partySignerTitles,
+    partyAddresses,
+    recipient1Name,
+    recipient2Name,
+    recipient1Email,
+    recipient2Email,
+    extraPartyReviewEmails,
+    draft?.parties,
+    effectivePremiumSendMode,
+    recipientsDeferred,
+  ]);
 
   useEffect(() => {
     const snap = getAuthoritativeSigningSnapshot();
@@ -12867,61 +12868,47 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [guidedSignerCanonicalIdentities, premiumSignatureSenderFirst],
   );
 
-  const guidedFinalPartyManifest = useMemo(
-    () => {
-      const signingSnapshot = getAuthoritativeSigningSnapshot();
-      if (signingSnapshot) {
-        return signingSnapshot.partyManifest;
-      }
-      if (
-        paidProSignerMetadataSessionActive &&
-        frozenSignerMetadataPartyManifestRef.current
-      ) {
-        return frozenSignerMetadataPartyManifestRef.current;
-      }
-      const live = resolveCanonicalFinalPartyManifest({
-        partyCount: guidedPreReviewSignerSlots.requiredCount,
-        partySignerNames,
-        partySignerTitles,
-        recipient1Name,
-        recipient2Name,
-        recipient1Email,
-        recipient2Email,
-        extraPartyReviewEmails,
-        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
-        draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
-        sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
-        recipientsDeferred,
-      });
-      if (paidProSignerMetadataSessionActive) {
-        frozenSignerMetadataPartyManifestRef.current = live;
-      } else {
-        frozenSignerMetadataPartyManifestRef.current = null;
-      }
-      return live;
-    },
-    [
-      paidProSignerMetadataSessionActive,
-      paidProPostSignerMetadataFreezeActive,
-      signaturePreparationRequested,
-      guidedPreReviewSignerSlots.requiredCount,
-      premiumSurfaceGateTick,
-      ...(paidProSignerMetadataSessionActive || paidProPostSignerMetadataFreezeActive
-        ? []
-        : [
-            partySignerNames,
-            partySignerTitles,
-            recipient1Name,
-            recipient2Name,
-            recipient1Email,
-            recipient2Email,
-            extraPartyReviewEmails,
-            draft?.parties,
-            effectivePremiumSendMode,
-            recipientsDeferred,
-          ]),
-    ],
-  );
+  const guidedFinalPartyManifest = useMemo(() => {
+    const signingSnapshot = getAuthoritativeSigningSnapshot();
+    if (signingSnapshot) {
+      return signingSnapshot.partyManifest;
+    }
+    const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
+    if (hasPaidProSourceOfTruth()) {
+      return buildCanonicalFinalPartyManifestFromAuthority(authority);
+    }
+    return resolveCanonicalFinalPartyManifest({
+      partyCount: guidedPreReviewSignerSlots.requiredCount,
+      partySignerNames,
+      partySignerTitles,
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+      draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
+      sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
+      recipientsDeferred,
+    });
+  }, [
+    liveSignerMetadataUiState,
+    paidProPostSignerMetadataFreezeActive,
+    signaturePreparationRequested,
+    guidedPreReviewSignerSlots.requiredCount,
+    premiumSurfaceGateTick,
+    partySignerNames,
+    partySignerTitles,
+    partyAddresses,
+    recipient1Name,
+    recipient2Name,
+    recipient1Email,
+    recipient2Email,
+    extraPartyReviewEmails,
+    draft?.parties,
+    effectivePremiumSendMode,
+    recipientsDeferred,
+  ]);
 
   useEffect(() => {
     if (!guidedPreReviewSignerSlots.complete) return;
@@ -13611,6 +13598,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!import.meta.env.DEV || !paidProSignerMetadataSessionActive) return;
+    if (!paidProSignerMetadataForensicLineageEnabled()) return;
     const matrix = collectSignerMetadataForensicMatrix({
       local: {
         recipient1Name,
@@ -21863,44 +21851,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     flushGuidedSignerMetadataBeforeFinalReview();
     const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    const partyManifest =
-      frozenSignerMetadataPartyManifestRef.current ??
-      resolveCanonicalFinalPartyManifest({
-        partyCount: guidedPreReviewSignerSlots.requiredCount,
-        partySignerNames,
-        partySignerTitles,
-        recipient1Name,
-        recipient2Name,
-        recipient1Email,
-        recipient2Email,
-        extraPartyReviewEmails,
-        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
-        draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
-        sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
-        recipientsDeferred,
-      });
-    const identities = resolveCanonicalPartyIdentitiesFromSignerSetup({
-      partyCount: guidedPreReviewSignerSlots.requiredCount,
-      partySignerNames,
-      partySignerTitles,
-      recipient1Name,
-      recipient2Name,
-      recipient1Email,
-      recipient2Email,
-      extraPartyReviewEmails,
-      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
-      draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
-      sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
-      recipientsDeferred,
-    });
+    const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
+    setConsumedPaidProSignerMetadataAuthority(authority);
+    const partyManifest = buildCanonicalFinalPartyManifestFromAuthority(authority);
     const rawCorpus = (
       getPaidProSourceOfTruthText() ||
       authoritativePaidProReviewPlain ||
       simpleProFinalReviewCorpus.plainText
     ).trim();
-    const hydrated = buildHydratedAuthoritativeSigningCorpus({
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
       rawCorpus,
-      identities,
+      authority,
       intakeRaw: intakeForHydration,
       surface: "finalize_paid_pro_signer_metadata",
     });
@@ -21908,10 +21869,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       identities: hydrated.identities,
       signFirst: premiumSignatureSenderFirst,
     });
-    const signerMetadata = authorityPartiesToRecipientMetadata(
-      buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState).parties,
-      [...extraPartyReviewEmails],
-    );
+    const signerMetadata = authorityPartiesToRecipientMetadata(authority.parties, [
+      ...extraPartyReviewEmails,
+    ]);
     createAuthoritativeSigningSnapshot({
       corpus: hydrated.corpus,
       signerMetadata,
@@ -21927,7 +21887,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       emitPaidProSignerMetadataAuthoritativeWrite({
         path: "finalizePaidProSignerMetadataAndOpenReviewDecision",
         hydratedLen: hydrated.corpus.length,
-        authorityHash: buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState).hash,
+        authorityHash: authority.hash,
       });
     }
     logSnapshotSignerState({

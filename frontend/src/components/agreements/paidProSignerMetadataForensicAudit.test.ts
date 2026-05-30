@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  buildLivePaidProSignerMetadataAuthority,
+  clearConsumedPaidProSignerMetadataAuthority,
+  setConsumedPaidProSignerMetadataAuthority,
+} from "./paidProSignerMetadataAuthority";
+import {
   buildCtaForensicEvaluation,
   collectSignerMetadataFieldLineage,
   collectSignerMetadataForensicMatrix,
@@ -29,6 +34,7 @@ function baseLocal() {
 describe("paidProSignerMetadataForensicAudit", () => {
   afterEach(() => {
     clearAuthoritativeSigningSnapshot();
+    clearConsumedPaidProSignerMetadataAuthority();
   });
 
   it("collects local vs snapshot divergence for signer name", () => {
@@ -106,6 +112,29 @@ describe("paidProSignerMetadataForensicAudit", () => {
     );
     expect(row.localValue).toBe("100 Main St");
     expect(row.snapshotValue).toBe("100 Main St");
+  });
+
+  it("authoritativeValue equals local when consumed authority is promoted", () => {
+    setConsumedPaidProSignerMetadataAuthority(
+      buildLivePaidProSignerMetadataAuthority({
+        partyCount: 2,
+        recipient1Name: BLUE,
+        recipient2Name: IRON,
+        recipient1Email: "a@test.com",
+        recipient2Email: "b@test.com",
+        extraPartyReviewEmails: [],
+        partySignerNames: ["Signer A", "Signer B"],
+        partySignerTitles: ["Mgr", "CEO"],
+        partyAddresses: ["100 Main St", "200 Oak"],
+      }),
+    );
+    const row = collectSignerMetadataFieldLineage(
+      { partyIndex: 1, local: baseLocal() },
+      "signerName",
+    );
+    expect(row.localValue).toBe("Signer B");
+    expect(row.authoritativeValue).toBe("Signer B");
+    expect(row.authoritativeValue).toBe(row.localValue);
   });
 
   it("matrix covers all five fields for two parties", () => {
