@@ -1,3 +1,5 @@
+import { isPostSignerMetadataFreezeActive } from "./authoritativeSigningSnapshot";
+
 /**
  * Canonical paid Pro review state machine.
  *
@@ -350,7 +352,23 @@ export function logPremiumSignerDetailsGate(payload: PremiumSignerDetailsGateLog
 export function paidProSignerMetadataSessionBlocksDocumentRecompute(
   args: PaidProSignerMetadataSessionArgs,
 ): boolean {
+  if (
+    isPostSignerMetadataFreezeActive({
+      signaturePreparationRequested: args.prepareSignatureLinksRequested,
+    })
+  ) {
+    return true;
+  }
   return paidProSignerMetadataSessionActive(args);
+}
+
+/** After signer metadata is finalized into an immutable snapshot, all authority recomputes stay blocked. */
+export function paidProPostSignerMetadataFreezeBlocksRecompute(args: {
+  prepareSignatureLinksRequested?: boolean;
+}): boolean {
+  return isPostSignerMetadataFreezeActive({
+    signaturePreparationRequested: args.prepareSignatureLinksRequested,
+  });
 }
 
 /**

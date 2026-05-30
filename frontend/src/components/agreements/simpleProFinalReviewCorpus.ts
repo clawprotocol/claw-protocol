@@ -4,6 +4,7 @@
 
 import { GUIDED_MIN_AUTHORITATIVE_BODY_LEN } from "./guidedDealCompletion/guidedCompletionRenderAuthority";
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
+import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 /** Final review requires a full Pro agreement — not a signature-only fragment. */
@@ -60,6 +61,17 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   /** Immutable pinned signer-applied body — never compete with picker/server length. */
   pinnedFinalizedSignerPlain?: string | null;
 }): SimpleProFinalReviewCorpusResolution {
+  const snapshotCorpus = readAuthoritativeSigningCorpus();
+  if (snapshotCorpus.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+    return {
+      plainText: snapshotCorpus,
+      source: "authoritative_hydrated",
+      authoritativeLen: snapshotCorpus.length,
+      renderedLen: norm(args.renderedPreviewPlain).length,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
   const canonical = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
   if (canonical) {
     return {

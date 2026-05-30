@@ -280,6 +280,7 @@ import {
   resolvePaidProSignerDetailsGate,
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
+  PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
   shouldArmPaidProInlineSignerSetupLatch,
@@ -593,7 +594,19 @@ import {
   resolveOrReuseFrozenForSignerEdit,
   resolvePaidProReviewState,
   resolvePaidProSignerMetadataEditGuard,
+  paidProPostSignerMetadataFreezeBlocksRecompute,
 } from "./paidProReviewStateMachine";
+import {
+  clearAuthoritativeSigningSnapshot,
+  createAuthoritativeSigningSnapshot,
+  getAuthoritativeSigningSnapshot,
+  hasAuthoritativeSigningSnapshot,
+  isPostSignerMetadataFreezeActive,
+  logIllegalDirectEsignRoute,
+  logIllegalPostFreezePreviewFallback,
+  markSigningPreparationRequested,
+  readAuthoritativeSigningCorpus,
+} from "./authoritativeSigningSnapshot";
 import {
   isPremiumGenerationApiUnavailableForUi,
   PAID_PRO_API_UNAVAILABLE_BODY,
@@ -2850,11 +2863,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Default false — synced in layout effect / signer-session memos; must exist before preview memos. */
   const paidProSignerMetadataSessionActiveRef = useRef(false);
   const paidProSignerMetadataEditGuardRef = useRef(false);
+  const paidProPostSignerMetadataFreezeRef = useRef(false);
 
   const buildPreviewForCurrentTier = React.useCallback(
     (d: ParsedDraftShape) => {
-      // Signer-metadata session: never rebuild starter/premium preview while typing over accepted SoT.
-      if (paidProSignerMetadataSessionActiveRef.current && hasPaidProSourceOfTruth()) {
+      // Signer-metadata session / post-freeze snapshot: never rebuild preview from reviewDraft.
+      if (
+        (paidProSignerMetadataSessionActiveRef.current || paidProPostSignerMetadataFreezeRef.current) &&
+        hasPaidProSourceOfTruth()
+      ) {
+        if (paidProPostSignerMetadataFreezeRef.current) {
+          logIllegalPostFreezePreviewFallback({ path: "buildPreviewForCurrentTier" });
+        }
         return "";
       }
       const starterPreview = !(
@@ -2914,7 +2934,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       // authoritative body is FROZEN. A recipient/handoff-triggered re-derivation here must never run
       // (it could otherwise collapse the paid body into a free/starter preview). Released only by the
       // explicit "Prepare signature links" click, which clears the guard.
-      if (paidProSignerMetadataEditGuardRef.current) return;
+      if (paidProSignerMetadataEditGuardRef.current || paidProPostSignerMetadataFreezeRef.current) return;
       try {
         const snapHandoff = readPremiumCompletionSnapshot();
         const authPlain = (snapHandoff?.premiumWinningBodyText || snapHandoff?.premiumReadonlyPlainText || "").trim();
@@ -2937,7 +2957,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const renderedAgreementPreview = useMemo(
     () => {
-      if (paidProSignerMetadataSessionActiveRef.current && hasPaidProSourceOfTruth()) {
+      if (
+        (paidProSignerMetadataSessionActiveRef.current || paidProPostSignerMetadataFreezeRef.current) &&
+        hasPaidProSourceOfTruth()
+      ) {
         return "";
       }
       return draft ? buildPreviewForCurrentTier(draft) : "";
@@ -12320,7 +12343,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSurfaceGateTick,
     ],
   );
-  const paidProSignerMetadataEditGuardActive = paidProSignerMetadataEditGuard.active;
+  const paidProPostSignerMetadataFreezeActive = isPostSignerMetadataFreezeActive({
+    signaturePreparationRequested,
+  });
+  const paidProSignerMetadataEditGuardActive =
+    paidProSignerMetadataEditGuard.active || paidProPostSignerMetadataFreezeActive;
   const paidProSignerMetadataSessionActive = useMemo(
     () =>
       paidProSignerMetadataSessionActive_({
@@ -12342,7 +12369,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     paidProSignerMetadataEditGuardRef.current = paidProSignerMetadataEditGuardActive;
     paidProSignerMetadataSessionActiveRef.current = paidProSignerMetadataSessionActive;
-  }, [paidProSignerMetadataEditGuardActive, paidProSignerMetadataSessionActive]);
+    paidProPostSignerMetadataFreezeRef.current = paidProPostSignerMetadataFreezeActive;
+  }, [
+    paidProSignerMetadataEditGuardActive,
+    paidProSignerMetadataSessionActive,
+    paidProPostSignerMetadataFreezeActive,
+  ]);
   const emitSignerMetadataFreezeDiagnostics = React.useCallback(
     (args: {
       partyIndex: number;
@@ -12627,6 +12659,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const guidedFinalPartyManifest = useMemo(
     () => {
+      const signingSnapshot = getAuthoritativeSigningSnapshot();
+      if (signingSnapshot) {
+        return signingSnapshot.partyManifest;
+      }
       if (
         paidProSignerMetadataSessionActive &&
         frozenSignerMetadataPartyManifestRef.current
@@ -12656,9 +12692,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     },
     [
       paidProSignerMetadataSessionActive,
+      paidProPostSignerMetadataFreezeActive,
       signaturePreparationRequested,
       guidedPreReviewSignerSlots.requiredCount,
-      ...(paidProSignerMetadataSessionActive
+      premiumSurfaceGateTick,
+      ...(paidProSignerMetadataSessionActive || paidProPostSignerMetadataFreezeActive
         ? []
         : [
             partySignerNames,
@@ -13222,10 +13260,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProRuntimeAuthority.canRenderProReviewShell,
   ]);
 
+  const paidProSignerMetadataFinalized = hasAuthoritativeSigningSnapshot();
   const paidProSignerSetupRequiredBeforeDelivery = Boolean(
     acceptedPaidProAuthorityActive &&
       premiumPaidDocumentSurface &&
-      !paidProSignatureDetailsReady,
+      !paidProSignatureDetailsReady &&
+      !paidProSignerMetadataFinalized,
   );
 
   useEffect(() => {
@@ -16318,7 +16358,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         signerSetupActive: paidProRecipientSetupOnDraft || guidedInlineSignerSetupActive,
         hasPaidProSourceOfTruth: hasPaidProSourceOfTruth(),
         signerSetupLatched: paidProInlineSignerSetupLatched,
-      })
+      }) ||
+      paidProPostSignerMetadataFreezeBlocksRecompute({ prepareSignatureLinksRequested })
     ) {
       return null;
     }
@@ -17908,6 +17949,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       compute: () =>
         resolveFinalVs01CorpusOrBlock({
           agreementCorpusText:
+            readAuthoritativeSigningCorpus() ||
             guidedVs01SigningHandoffRef.current?.corpusText ||
             finalizedSigningCorpusRef.current ||
             acceptedReviewCorpusRef.current ||
@@ -19593,6 +19635,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(() => {
+    clearAuthoritativeSigningSnapshot();
     setGuidedSigningConfirmationActive(false);
     setGuidedSigningConfirmationBlockMessage(null);
     guidedFinalReviewExplicitlyUnlockedRef.current = false;
@@ -19602,6 +19645,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     finalReviewSendPathChosenRef.current = false;
     setSignaturePreparationRequested(false);
     setPaidProInlineSignerSetupLatched(true);
+    frozenSignerMetadataPartyManifestRef.current = null;
     setGuidedCompletionPhase(
       paidProAcceptedCorpusReady && guidedCompletionPhase === "inactive"
         ? "applied"
@@ -21036,7 +21080,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (guidedSignatureTrackInFlightRef.current) return;
     guidedSignatureTrackInFlightRef.current = true;
     setGuidedFinalReviewTransitionInFlight(true);
-    // Real prepare-signature-links route started → release freeze and unmount inline signer setup.
+    markSigningPreparationRequested();
     setSignaturePreparationRequested(true);
     setPaidProInlineSignerSetupLatched(false);
     const trackStartedAt = Date.now();
@@ -21394,6 +21438,74 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback(() => {
+    if (!paidProSignerDetailsGate.complete) {
+      scrollGuidedSignerSetupIntoView();
+      return;
+    }
+    flushGuidedSignerMetadataBeforeFinalReview();
+    const corpus = (
+      getPaidProSourceOfTruthText() ||
+      authoritativePaidProReviewPlain ||
+      simpleProFinalReviewCorpus.plainText
+    ).trim();
+    createAuthoritativeSigningSnapshot({
+      corpus,
+      signerMetadata: {
+        partySignerNames: [...partySignerNames],
+        partySignerTitles: [...partySignerTitles],
+        recipient1Name,
+        recipient2Name,
+        recipient1Email,
+        recipient2Email,
+        extraPartyReviewEmails: [...extraPartyReviewEmails],
+      },
+      partyManifest:
+        frozenSignerMetadataPartyManifestRef.current ??
+        resolveCanonicalFinalPartyManifest({
+          partyCount: guidedPreReviewSignerSlots.requiredCount,
+          partySignerNames,
+          partySignerTitles,
+          recipient1Name,
+          recipient2Name,
+          recipient1Email,
+          recipient2Email,
+          extraPartyReviewEmails,
+          draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+          draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
+          sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
+          recipientsDeferred,
+        }),
+      signatureBlockModel: canonicalSignerManifest,
+    });
+    setPaidProInlineSignerSetupLatched(false);
+    setGuidedFinalReviewExplicitlyOpened(true);
+    guidedFinalReviewExplicitlyUnlockedRef.current = true;
+    setCreateFlowPhase("draft_ready_for_review");
+    setDisplayPhase("review");
+    setHardError(null);
+    setGuidedSigningConfirmationBlockMessage(null);
+    bumpPremiumSurfaceGateTick();
+  }, [
+    paidProSignerDetailsGate.complete,
+    scrollGuidedSignerSetupIntoView,
+    flushGuidedSignerMetadataBeforeFinalReview,
+    authoritativePaidProReviewPlain,
+    simpleProFinalReviewCorpus.plainText,
+    partySignerNames,
+    partySignerTitles,
+    recipient1Name,
+    recipient2Name,
+    recipient1Email,
+    recipient2Email,
+    extraPartyReviewEmails,
+    guidedPreReviewSignerSlots.requiredCount,
+    draft?.parties,
+    effectivePremiumSendMode,
+    recipientsDeferred,
+    canonicalSignerManifest,
+  ]);
+
   const continueGuidedFinalReviewToSigning = React.useCallback(
     (opts: { intent: FinalReviewSendIntent }) => {
       logGuidedContinueFinalReviewToSigning({
@@ -21410,7 +21522,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       if (opts.intent === "signature") {
-        // Real "Prepare signature links" proceed: release the signing-corpus freeze and unmount inline setup.
+        if (paidProInlineSignerSetupLatched && !hasAuthoritativeSigningSnapshot()) {
+          logIllegalDirectEsignRoute({
+            path: "continueGuidedFinalReviewToSigning",
+            reason: "signer_metadata_not_finalized",
+          });
+          finalizePaidProSignerMetadataAndOpenReviewDecision();
+          return;
+        }
+        // Explicit signing decision only: release freeze and enter e-sign preparation.
+        markSigningPreparationRequested();
         setSignaturePreparationRequested(true);
         setPaidProInlineSignerSetupLatched(false);
         const signFirst = peekPremiumSenderSignFirst() ?? true;
@@ -21440,6 +21561,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       handlePremiumSendModePick,
       enterGuidedSigningConfirmationFromFinalReview,
       enterGuidedSignatureTrackRoute,
+      finalizePaidProSignerMetadataAndOpenReviewDecision,
+      paidProSignerDetailsGate.complete,
+      paidProInlineSignerSetupLatched,
     ],
   );
 
@@ -21791,6 +21915,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       enterFinalReviewRecipientSetup("signature");
       return;
     }
+    if (
+      acceptedPaidProAuthorityActive &&
+      paidProSignatureDetailsReady &&
+      !hasAuthoritativeSigningSnapshot()
+    ) {
+      finalizePaidProSignerMetadataAndOpenReviewDecision();
+      return;
+    }
     if (canProceedGuidedFinalReviewToSigning && paidProSignatureDetailsReady) {
       continueGuidedFinalReviewToSigning({ intent: "signature" });
       return;
@@ -21800,6 +21932,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     canProceedGuidedFinalReviewToSigning,
     acceptedPaidProAuthorityActive,
     paidProSignatureDetailsReady,
+    finalizePaidProSignerMetadataAndOpenReviewDecision,
     continueGuidedFinalReviewToSigning,
     guidedCompletionRenderDocument.source,
     simpleProFinalReviewCorpus.plainText,
@@ -22350,7 +22483,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               paidProInlineSignerSetupLatched &&
               !signaturePreparationRequested
             ) {
-              continueGuidedFinalReviewToSigning({ intent: "signature" });
+              finalizePaidProSignerMetadataAndOpenReviewDecision();
               return;
             }
             if (
@@ -22499,7 +22632,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidProInlineSignerSetupLatched &&
         !signaturePreparationRequested
       ) {
-        continueGuidedFinalReviewToSigning({ intent: "signature" });
+        finalizePaidProSignerMetadataAndOpenReviewDecision();
         return;
       }
       if (
@@ -25109,9 +25242,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           exportBusy={proFinalReviewExportBusy}
                                           exportError={proFinalReviewExportError}
                                           signaturePrimaryLabel={
-                                            paidProSignatureDetailsReady
-                                              ? PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA
-                                              : PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA
+                                            paidProSignerMetadataFinalized
+                                              ? PAID_PRO_PREPARE_ESIGN_DECISION_CTA
+                                              : paidProSignatureDetailsReady
+                                                ? PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA
+                                                : PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA
                                           }
                                           signatureSecondaryLabel="Change signing order"
                                           reviewSecondaryLabel="Send for review / compare edits"

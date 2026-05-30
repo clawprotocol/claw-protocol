@@ -5,6 +5,7 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import {
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruthText,
@@ -30,6 +31,8 @@ export type AuthoritativePaidProReviewInput = {
 export function resolveAuthoritativePaidProReviewPlain(
   args?: AuthoritativePaidProReviewInput,
 ): string {
+  const fromSnapshot = readAuthoritativeSigningCorpus();
+  if (fromSnapshot.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromSnapshot;
   const review = getPaidProDocumentForSurface("review", {
     draft: args?.draft ?? null,
     intakeText: args?.intakeText ?? null,

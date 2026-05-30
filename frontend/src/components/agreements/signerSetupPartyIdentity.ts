@@ -80,7 +80,11 @@ export type PaidProSignerDetailsGate = {
 };
 
 export const PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA = "Complete signer details";
-export const PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA = "Prepare signature links";
+/** Green CTA on inline signer setup — finalizes metadata and opens review/decision, not e-sign placement. */
+export const PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA =
+  "Finalize signer details and continue to review decision";
+/** Explicit signing decision on the review/decision screen (sets signaturePreparationRequested). */
+export const PAID_PRO_PREPARE_ESIGN_DECISION_CTA = "Prepare for signing";
 
 function norm(s: string): string {
   let t = s.replace(/\s+/g, " ").trim();

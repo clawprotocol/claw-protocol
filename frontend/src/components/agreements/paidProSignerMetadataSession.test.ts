@@ -213,7 +213,7 @@ describe("runtime-like signer metadata session stability", () => {
     expect(result.gate.legalEntityNames[0]).not.toBe(result.gate.legalEntityNames[1]);
   });
 
-  it("gate completion keeps inline setup mounted and CTA on Prepare signature links", () => {
+  it("gate completion keeps inline setup mounted and CTA on review decision (not e-sign)", () => {
     const result = simulateSignerMetadataSession({
       partySignerNames: ["Sam Canyon", "Dana Vale"],
       recipient1Email: "sam@bluecanyon.com",

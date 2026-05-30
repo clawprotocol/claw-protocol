@@ -38,7 +38,10 @@ import {
 } from "./paidProPostAcceptanceStateGuard";
 import { resolveSignerSetupPartyIdentities } from "./signerSetupPartyIdentity";
 import { canChooseProDeliveryTrack } from "./proDeliveryTrackState";
-import { resolvePaidProSignerDetailsGate } from "./signerSetupPartyIdentity";
+import {
+  PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
+  resolvePaidProSignerDetailsGate,
+} from "./signerSetupPartyIdentity";
 import { resolveFinalVs01CorpusOrBlock } from "../../vs01/vs01SigningCorpus";
 import {
   buildDefaultProVisiblePaperCandidates,
@@ -351,7 +354,7 @@ describe("paidProAcceptanceRouting", () => {
       expect(resolveProDeliveryTrackCanonicalCorpus().hasCanonicalCorpus).toBe(true);
     });
 
-    it("completing Party 2 signer details advances (CTA = Prepare signature links); SoT unchanged", () => {
+    it("completing Party 2 signer details advances (CTA = review decision); SoT unchanged", () => {
       const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
       const complete = resolvePaidProSignerDetailsGate({
         ...TWO_PARTY,
@@ -360,7 +363,7 @@ describe("paidProAcceptanceRouting", () => {
         recipient2Email: "priya@ironvale.test",
       });
       expect(complete.complete).toBe(true);
-      expect(complete.ctaLabel).toBe("Prepare signature links");
+      expect(complete.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA);
       expect(resolveProDeliveryTrackCanonicalCorpus().hash).toBe(record.hash);
     });
 
@@ -869,7 +872,9 @@ describe("paidProAcceptanceRouting", () => {
       // Guided question queue rebuild is suppressed during signer setup over an accepted SoT.
       expect(src).toMatch(/paidProSignerSetupSuppressesGuidedAndStarter\(\{/);
       // Authoritative body is frozen: the recipient/handoff re-derivation no-ops while the guard is active.
-      expect(src).toMatch(/if \(paidProSignerMetadataEditGuardRef\.current\) return;/);
+      expect(src).toMatch(
+        /if \(paidProSignerMetadataEditGuardRef\.current \|\| paidProPostSignerMetadataFreezeRef\.current\) return;/,
+      );
       // VS01/handoff corpus gate is frozen during signer editing via the freeze helper + guard.
       expect(src).toMatch(/resolveOrReuseFrozenForSignerEdit\(\{[\s\S]*?editGuardActive:\s*paidProSignerMetadataEditGuardActive/);
       expect(src).toMatch(/frozen:\s*vs01FinalCorpusGateFrozenRef\.current/);
@@ -894,7 +899,12 @@ describe("paidProAcceptanceRouting", () => {
       );
       expect(ctaSlice).not.toMatch(/guidedSendIntentSelected[\s\S]{0,40}prepareSignatureLinksRequested/);
       expect(ctaSlice).not.toMatch(/finalReviewSendPathChosenRef[\s\S]{0,40}prepareSignatureLinksRequested/);
-      expect(src).toMatch(/paid_pro_signer_details_complete[\s\S]{0,400}continueGuidedFinalReviewToSigning\(\{ intent: "signature" \}\)/);
+      expect(src).toMatch(
+        /paid_pro_signer_details_complete[\s\S]{0,400}finalizePaidProSignerMetadataAndOpenReviewDecision\(\)/,
+      );
+      expect(src).not.toMatch(
+        /paid_pro_signer_details_complete[\s\S]{0,400}continueGuidedFinalReviewToSigning\(\{ intent: "signature" \}\)/,
+      );
       expect(src).toMatch(/logPremiumSignerDetailsGate/);
     });
 

@@ -550,7 +550,7 @@ describe("signerSetupPartyIdentity", () => {
     expect(gate.firstIncompleteFieldKey).toBe("r2-signer-name");
   });
 
-  it("signer details gate CTA becomes Prepare signature links once complete", () => {
+  it("signer details gate CTA becomes review-decision continue once complete", () => {
     const gate = resolvePaidProSignerDetailsGate({
       partyCount: 2,
       draftPartyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
