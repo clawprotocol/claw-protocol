@@ -84,6 +84,16 @@ describe("starter create page static contracts", () => {
     const prefill = intake.slice(intake.indexOf("const onPrefill"), intake.indexOf("const onPrefill") + 800);
     expect(prefill).toMatch(/freshSimpleCreateUx[\s\S]*setIntakeStepBuffer\(t\)/);
   });
+
+  it("SimpleCreatePage mounts AgreementBuilderIntake for homepage starter_review without paid Pro SoT", () => {
+    expect(page).toContain("AgreementBuilderIntake");
+    expect(page).toContain("homeHeroAutoGenerate");
+    expect(page).not.toMatch(/hasPaidProSourceOfTruth\(\)[\s\S]{0,80}homeHeroAutoGenerate/);
+    const decl = intake.indexOf("const paidProSignerMetadataSessionActiveRef = useRef(false)");
+    const previewMemo = intake.indexOf("const renderedAgreementPreview = useMemo");
+    expect(decl).toBeGreaterThan(-1);
+    expect(decl).toBeLessThan(previewMemo);
+  });
 });
 
 describe("logStarterCreateSubmit", () => {

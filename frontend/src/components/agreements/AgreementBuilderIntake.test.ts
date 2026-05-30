@@ -397,10 +397,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
       /\{paidProRecipientSetupOnDraft &&[\s\S]*?!guidedPreReviewSignerSetupActive \? \([\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
     );
     expect(intake).toMatch(
-      /paidProInlineRecipientShell && effectivePremiumSendMode === "review"\s*\n\s*\? "Send for review"/,
-    );
-    expect(intake).toMatch(
-      /paidProInlineRecipientShell\s*\n\s*\? "Add recipient emails"\s*\n\s*: "Share this agreement"/,
+      /paidProInlineRecipientShell\s*\n\s*\? "Add signer details"\s*\n\s*: "Share this agreement"/,
     );
   });
 
@@ -1082,5 +1079,32 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(htmlBlock).toContain("hasPaidProSourceOfTruth() && !paidProDisplay?.text?.trim()");
     expect(htmlBlock).toContain('return ""');
     expect(htmlBlock).toMatch(/hasPaidProSourceOfTruth\(\)[\s\S]{0,200}return "";/);
+  });
+});
+
+describe("homepage starter_review mount (no paid Pro SoT)", () => {
+  const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+
+  it("preview hooks read signer-session ref only after useRef(false) declaration", () => {
+    const decl = intake.indexOf("const paidProSignerMetadataSessionActiveRef = useRef(false)");
+    const previewMemo = intake.indexOf("const renderedAgreementPreview = useMemo");
+    const buildPreview = intake.indexOf("const buildPreviewForCurrentTier = React.useCallback");
+    expect(decl).toBeGreaterThan(-1);
+    expect(decl).toBeLessThan(buildPreview);
+    expect(decl).toBeLessThan(previewMemo);
+    const previewBlock = intake.slice(previewMemo, previewMemo + 400);
+    expect(previewBlock).toContain("paidProSignerMetadataSessionActiveRef.current");
+  });
+
+  it("free/starter path does not require paid Pro signer setup before first preview", () => {
+    expect(intake).toContain('handoffSource: "home_create_submit"');
+    expect(intake).toContain("commitFreeDraftForReview");
+    expect(intake).toContain("StarterDraftDocumentSurface");
+    const buildIdx = intake.indexOf("const buildPreviewForCurrentTier = React.useCallback");
+    const buildBlock = intake.slice(buildIdx, buildIdx + 1200);
+    expect(buildBlock).toMatch(
+      /if \(paidProSignerMetadataSessionActiveRef\.current && hasPaidProSourceOfTruth\(\)\)/,
+    );
+    expect(buildBlock).not.toMatch(/paidProInlineSignerSetupLatched/);
   });
 });

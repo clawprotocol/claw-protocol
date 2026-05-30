@@ -249,6 +249,16 @@ describe("signer metadata session blocks document recompute paths", () => {
     }
   });
 
+  it("declares paidProSignerMetadataSessionActiveRef before any .current read (no TDZ on mount)", () => {
+    const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const decl = src.indexOf("const paidProSignerMetadataSessionActiveRef = useRef(false)");
+    expect(decl).toBeGreaterThan(-1);
+    const firstRead = src.indexOf("paidProSignerMetadataSessionActiveRef.current");
+    expect(firstRead).toBeGreaterThan(decl);
+    const declCount = (src.match(/const paidProSignerMetadataSessionActiveRef = useRef/g) ?? []).length;
+    expect(declCount).toBe(1);
+  });
+
   it("AgreementBuilderIntake source: session latch wired into guard and manifest freeze", () => {
     const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(src).toMatch(/paidProSignerMetadataSessionActive/);

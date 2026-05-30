@@ -2845,6 +2845,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
   }, [tier, premiumSendPathUnlocked, premiumPersistedFlowActive]);
 
+  /** Default false — synced in layout effect / signer-session memos; must exist before preview memos. */
+  const paidProSignerMetadataSessionActiveRef = useRef(false);
+  const paidProSignerMetadataEditGuardRef = useRef(false);
+
   const buildPreviewForCurrentTier = React.useCallback(
     (d: ParsedDraftShape) => {
       // Signer-metadata session: never rebuild starter/premium preview while typing over accepted SoT.
@@ -3088,8 +3092,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const frozenSignerMetadataIdentitiesRef = useRef<
     ReturnType<typeof resolveCanonicalPartyIdentitiesFromSignerSetup> | null
   >(null);
-  const paidProSignerMetadataSessionActiveRef = useRef(false);
-  const paidProSignerMetadataEditGuardRef = useRef(false);
   useLayoutEffect(() => {
     paidProSignerMetadataSessionActiveRef.current = paidProSignerMetadataSessionActive_({
       hasPaidProSourceOfTruth: hasPaidProSourceOfTruth(),
