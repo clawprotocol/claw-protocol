@@ -5,6 +5,18 @@ import {
   buildFlowLineDescriptors,
   flowLinesForPage,
 } from "./vs01CanonicalTextLayout";
+import {
+  VS01_EXECUTION_LABEL_LINE_HEIGHT_FRAC,
+  VS01_EXECUTION_LABEL_MARGIN_TOP_EM,
+  VS01_EXECUTION_LABEL_ROW_MARGIN_TOP_EM,
+  VS01_EXECUTION_NAME_ROW_MARGIN_TOP_EM,
+  VS01_EXECUTION_SIGNATURE_MARGIN_BOTTOM_EM,
+  VS01_EXECUTION_SPACER_FRAC,
+  VS01_SIGNATURE_INK_BASELINE_BIAS_PX,
+  VS01_SIGNATURE_SIGNED_INK_BIAS_PX,
+  VS01_SIGNATURE_SIGNED_INK_FONT_PX,
+  VS01_SIGNATURE_SIGNED_INK_FONT_WEIGHT,
+} from "./vs01VisualConstants";
 
 export type Vs01CanonicalSigningPageProps = {
   page: Vs01SigningPacketPage;
@@ -43,6 +55,16 @@ export function Vs01CanonicalSigningPage({
     fontSize: `${fontSizePx}px`,
     lineHeight: `${lineHeightPx}px`,
     "--vs01-canonical-line-height": `${lineHeightPx}px`,
+    "--vs01-execution-label-line-height-frac": String(VS01_EXECUTION_LABEL_LINE_HEIGHT_FRAC),
+    "--vs01-execution-label-margin-top-em": String(VS01_EXECUTION_LABEL_MARGIN_TOP_EM),
+    "--vs01-execution-label-row-margin-top-em": String(VS01_EXECUTION_LABEL_ROW_MARGIN_TOP_EM),
+    "--vs01-execution-name-row-margin-top-em": String(VS01_EXECUTION_NAME_ROW_MARGIN_TOP_EM),
+    "--vs01-execution-signature-margin-bottom-em": String(VS01_EXECUTION_SIGNATURE_MARGIN_BOTTOM_EM),
+    "--vs01-execution-spacer-frac": String(VS01_EXECUTION_SPACER_FRAC),
+    "--vs01-signature-ink-bias": `${VS01_SIGNATURE_INK_BASELINE_BIAS_PX}px`,
+    "--vs01-signature-signed-ink-bias": `${VS01_SIGNATURE_SIGNED_INK_BIAS_PX}px`,
+    "--vs01-signature-signed-ink-font": `${VS01_SIGNATURE_SIGNED_INK_FONT_PX}px`,
+    "--vs01-signature-signed-ink-weight": String(VS01_SIGNATURE_SIGNED_INK_FONT_WEIGHT),
   } as CSSProperties;
 
   return (

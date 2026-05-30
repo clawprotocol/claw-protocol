@@ -33,6 +33,33 @@ import {
 } from "../src/vs01/vs01CanonicalPacketSeed";
 import { buildFullPacketManifestFromCanonicalModel } from "../src/vs01/vs01SigningPacketManifest";
 import { VS01_RECIPIENT_SIGN_QUERY } from "../src/vs01/StepReceipt";
+import { signatureFieldRectFromMeasuredUnderline } from "../src/vs01/vs01SignatureDomPlacement";
+import {
+  VS01_EXECUTION_LABEL_LINE_HEIGHT_FRAC,
+  VS01_EXECUTION_LABEL_MARGIN_TOP_EM,
+  VS01_EXECUTION_LABEL_ROW_MARGIN_TOP_EM,
+  VS01_EXECUTION_NAME_ROW_MARGIN_TOP_EM,
+  VS01_EXECUTION_MAX_LABEL_GAP_PX,
+  VS01_EXECUTION_SIGNATURE_MARGIN_BOTTOM_EM,
+  VS01_EXECUTION_SPACER_FRAC,
+  VS01_SIGNATURE_OPTICAL_OFFSET_NORM,
+  VS01_SIGNATURE_INK_BASELINE_BIAS_PX,
+  VS01_SIGNATURE_NAME_ROW_MIN_GAP_PX,
+  VS01_SIGNATURE_FIELD_WIDTH_MIN_FRAC,
+  VS01_SIGNATURE_FIELD_WIDTH_MAX_FRAC,
+  VS01_SIGNATURE_OPTICAL_OFFSET_PX,
+  VS01_SIGNATURE_OVERLAY_HEIGHT_NORM,
+  VS01_SIGNATURE_SHELL_MAX_HEIGHT_PX,
+  VS01_SIGNATURE_SHELL_MIN_HEIGHT_PX,
+  VS01_SIGNATURE_SIGNED_INK_BIAS_PX,
+  VS01_SIGNATURE_SIGNED_INK_FONT_PX,
+  VS01_SIGNATURE_SIGNED_INK_FONT_WEIGHT,
+  VS01_SIGNATURE_ACTIVE_SHELL_MAX_CLEARANCE_ABOVE_PX,
+  VS01_SIGNATURE_SIGNED_INK_MAX_CLEARANCE_ABOVE_PX,
+  VS01_SIGNATURE_SIGNED_INK_MAX_OVERLAP_BELOW_PX,
+  VS01_VISUAL_PAGE_HEIGHT_PT,
+  VS01_VISUAL_PAGE_WIDTH_PT,
+} from "../src/vs01/vs01VisualConstants";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ARTIFACT_DIR = join(__dirname, "artifacts", "vs01-canonical-visual");
@@ -412,27 +439,29 @@ function renderCanonicalPageHtml(
       const autoClass = field.autoInitials ? " vs01-sign-placement-box--auto-initials" : "";
       const signedValue = opts.signed ? completedSignatureText(field) : "";
       const initialsValue = completedInitialsText(field);
-      const signedStyle =
-        field.type === "signature" && signedValue
-          ? "display:flex;align-items:center;justify-content:center;font-family:'Brush Script MT','Segoe Script','Snell Roundhand',cursive;font-size:min(17px,13cqw);line-height:1;color:#111827;font-weight:500;letter-spacing:0.01em;white-space:nowrap;overflow:hidden;text-overflow:clip;"
-          : "";
+      const signedClass =
+        field.type === "signature" && signedValue ? " vs01-sign-placement-box--signed" : "";
       const initialsStyle =
         field.type === "initials" && initialsValue
           ? "display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:11px;line-height:1;color:#0f172a;font-weight:700;letter-spacing:0.05em;white-space:nowrap;overflow:hidden;text-overflow:clip;"
           : "";
       const signedMarkup = signedValue
-        ? `<span class="vs01-visual-completed-signature" data-vs01-visual-completed-signature="${field.assignedPartyIndex ?? ""}" style="display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:clip;">${escapeHtml(signedValue)}</span>`
+        ? `<span class="vs01-visual-completed-signature" data-vs01-visual-completed-signature="${field.assignedPartyIndex ?? ""}">${escapeHtml(signedValue)}</span>`
         : "";
       const initialsMarkup = initialsValue
         ? `<span class="vs01-visual-completed-initials" data-vs01-visual-completed-initials="${field.assignedPartyIndex ?? ""}">${escapeHtml(initialsValue)}</span>`
         : "";
-      return `<div class="vs01-sign-placement-box vs01-sign-placement-box--${field.type}${autoClass}" data-vs01-visual-field-type="${field.type}" data-vs01-visual-party-index="${field.assignedPartyIndex ?? ""}" style="position:absolute;left:${css.left};top:${css.top};width:${css.width};height:${css.height};${signedStyle}${initialsStyle}">${signedMarkup}${initialsMarkup}</div>`;
+      const boxFlexStyle =
+        field.type === "signature" && signedValue
+          ? "display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-start;"
+          : `${initialsStyle}display:flex;flex-direction:column;justify-content:flex-end;`;
+      return `<div class="vs01-sign-placement-box vs01-sign-placement-box--${field.type}${autoClass}${signedClass}" data-vs01-visual-field-type="${field.type}" data-vs01-visual-party-index="${field.assignedPartyIndex ?? ""}" style="position:absolute;left:${css.left};top:${css.top};width:${css.width};height:${css.height};${boxFlexStyle}">${signedMarkup}${initialsMarkup}</div>`;
     })
     .join("");
 
   return `<div class="vs01-sign-page-surface vs01-sign-page-surface--footer-safe vs01-sign-page-surface--canonical" style="width:${VS01_PACKET_PAGE_WIDTH_PT}px;height:${VS01_PACKET_PAGE_HEIGHT_PT}px;position:relative;">
   <div class="vs01-canonical-page-content" data-vs01-canonical-layout-mode="flow" aria-label="Canonical signing page ${page.pageIndex + 1}">
-    <div class="vs01-canonical-flow-body" style="left:${pct(contentRect.x)};top:${pct(contentRect.y)};width:${pct(contentRect.width)};height:${pct(contentRect.height)};font-size:${fontSizePx}px;line-height:${lineHeightPx}px;--vs01-canonical-line-height:${lineHeightPx}px;">
+    <div class="vs01-canonical-flow-body" style="left:${pct(contentRect.x)};top:${pct(contentRect.y)};width:${pct(contentRect.width)};height:${pct(contentRect.height)};font-size:${fontSizePx}px;line-height:${lineHeightPx}px;--vs01-canonical-line-height:${lineHeightPx}px;--vs01-execution-label-line-height-frac:${VS01_EXECUTION_LABEL_LINE_HEIGHT_FRAC};--vs01-execution-label-margin-top-em:${VS01_EXECUTION_LABEL_MARGIN_TOP_EM};--vs01-execution-label-row-margin-top-em:${VS01_EXECUTION_LABEL_ROW_MARGIN_TOP_EM};--vs01-execution-name-row-margin-top-em:${VS01_EXECUTION_NAME_ROW_MARGIN_TOP_EM};--vs01-execution-signature-margin-bottom-em:${VS01_EXECUTION_SIGNATURE_MARGIN_BOTTOM_EM};--vs01-execution-spacer-frac:${VS01_EXECUTION_SPACER_FRAC};--vs01-signature-ink-bias:${VS01_SIGNATURE_INK_BASELINE_BIAS_PX}px;--vs01-signature-signed-ink-bias:${VS01_SIGNATURE_SIGNED_INK_BIAS_PX}px;--vs01-signature-signed-ink-font:${VS01_SIGNATURE_SIGNED_INK_FONT_PX}px;--vs01-signature-signed-ink-weight:${VS01_SIGNATURE_SIGNED_INK_FONT_WEIGHT};">
       ${flowLinesHtml}
     </div>
     <div class="vs01-canonical-initials-band" aria-hidden="true" style="left:${pct(initialsBandRect.x)};top:${pct(initialsBandRect.y)};width:${pct(initialsBandRect.width)};height:${pct(initialsBandRect.height)};"></div>
@@ -1021,7 +1050,65 @@ async function expectVisualFieldsInsidePage(surface: Locator, selector = "[data-
   }
 }
 
+async function anchorWitnessSignatureOverlaysInBrowser(surface: Locator): Promise<void> {
+  const measured = await surface.evaluate(() => {
+    const page = document.querySelector(".vs01-sign-page-surface--canonical") as HTMLElement | null;
+    if (!page) return null;
+    const surfaceRect = page.getBoundingClientRect();
+    if (surfaceRect.width < 8 || surfaceRect.height < 8) return null;
+    const underlines: { partyIndex: number; x: number; y: number; width: number; height: number }[] = [];
+    page.querySelectorAll<HTMLElement>("[data-vs01-signature-execution-line]").forEach((lineEl) => {
+      const partyIndex = Number.parseInt(lineEl.getAttribute("data-vs01-signature-party") ?? "", 10);
+      if (!Number.isFinite(partyIndex)) return;
+      const underline = lineEl.querySelector<HTMLElement>(".vs01-canonical-signature-underline");
+      if (!underline) return;
+      const uRect = underline.getBoundingClientRect();
+      underlines.push({
+        partyIndex,
+        x: (uRect.left - surfaceRect.left) / surfaceRect.width,
+        y: (uRect.top - surfaceRect.top) / surfaceRect.height,
+        width: uRect.width / surfaceRect.width,
+        height: Math.max(uRect.height / surfaceRect.height, 0.001),
+      });
+    });
+    const parties = [...page.querySelectorAll<HTMLElement>("[data-vs01-visual-field-type='signature']")].map(
+      (sig) => Number.parseInt(sig.getAttribute("data-vs01-visual-party-index") ?? "", 10),
+    );
+    return { underlines, parties };
+  });
+  if (!measured) return;
+
+  const placements = measured.parties
+    .filter((partyIndex) => Number.isFinite(partyIndex))
+    .map((partyIndex) => {
+      const underline = measured.underlines.find((u) => u.partyIndex === partyIndex);
+      if (!underline) return null;
+      const field = signatureFieldRectFromMeasuredUnderline(underline);
+      return { partyIndex, field };
+    })
+    .filter((item): item is { partyIndex: number; field: ReturnType<typeof signatureFieldRectFromMeasuredUnderline> } =>
+      item != null,
+    );
+
+  await surface.evaluate((_, updates) => {
+    const page = document.querySelector(".vs01-sign-page-surface--canonical") as HTMLElement | null;
+    if (!page || !Array.isArray(updates)) return;
+    for (const { partyIndex, field } of updates) {
+      const sig = page.querySelector(
+        `[data-vs01-visual-field-type='signature'][data-vs01-visual-party-index="${partyIndex}"]`,
+      ) as HTMLElement | null;
+      if (!sig) continue;
+      sig.style.left = `${field.x * 100}%`;
+      sig.style.top = `${field.y * 100}%`;
+      sig.style.width = `${field.width * 100}%`;
+      sig.style.height = `${field.height * 100}%`;
+      sig.setAttribute("data-vs01-signature-dom-anchored", "1");
+    }
+  }, placements);
+}
+
 async function expectWitnessSignatureOverlayGeometry(surface: Locator, expectedCount: number): Promise<void> {
+  await anchorWitnessSignatureOverlaysInBrowser(surface);
   const metrics = await surface.evaluate(() => {
     const page = document.querySelector(".vs01-sign-page-surface--canonical") as HTMLElement | null;
     if (!page) return [];
@@ -1057,6 +1144,12 @@ async function expectWitnessSignatureOverlayGeometry(surface: Locator, expectedC
       const labelRect = label ? pxRect(label) : null;
       const labelEl = label as HTMLElement | null;
       const underlineRect = underline ? pxRect(underline) : null;
+      const topPct = Number.parseFloat(sig.style.top) / 100;
+      const heightPct = Number.parseFloat(sig.style.height) / 100;
+      const anchoredBottom =
+        Number.isFinite(topPct) && Number.isFinite(heightPct)
+          ? (topPct + heightPct) * pageRect.height
+          : field.bottom;
       const protectedText = [...page.querySelectorAll("[data-vs01-canonical-text]")]
         .filter((node) => node !== line)
         .filter((node) => /^(CLIENT|SERVICE PROVIDER|Name|Title|Date)\b|^(Acme LLC|Joe Brown)\b/i.test((node.textContent ?? "").trim()))
@@ -1069,6 +1162,8 @@ async function expectWitnessSignatureOverlayGeometry(surface: Locator, expectedC
         labelClipped: labelEl ? labelEl.scrollWidth > labelEl.clientWidth + 1 : true,
         underline: underlineRect,
         centerDelta: underlineRect ? field.centerY - underlineRect.centerY : null,
+        baselineDelta: underlineRect ? anchoredBottom - underlineRect.bottom : null,
+        layoutBottomDelta: underlineRect ? field.bottom - underlineRect.bottom : null,
         pageWidth: pageRect.width,
         pageHeight: pageRect.height,
         fieldIntersections: protectedText.filter((text) => intersects(field, text, 1.25)).length,
@@ -1081,15 +1176,164 @@ async function expectWitnessSignatureOverlayGeometry(surface: Locator, expectedC
     expect(item.underline).not.toBeNull();
     expect(item.field.left).toBeGreaterThanOrEqual(0);
     expect(item.field.top).toBeGreaterThanOrEqual(0);
-    expect(item.field.height).toBeGreaterThanOrEqual(18);
+    expect(item.field.height).toBeGreaterThanOrEqual(VS01_SIGNATURE_SHELL_MIN_HEIGHT_PX - 2);
+    expect(item.field.height).toBeLessThanOrEqual(VS01_SIGNATURE_SHELL_MAX_HEIGHT_PX + 2);
     expect(item.field.right).toBeLessThanOrEqual(item.pageWidth + 1);
     expect(item.field.bottom).toBeLessThanOrEqual(item.pageHeight + 1);
     expect(item.field.left).toBeGreaterThanOrEqual(item.underline!.left - 1);
-    expect(Math.abs(item.field.centerY - item.underline!.centerY), `party ${item.party} centerDelta=${item.centerDelta}`).toBeLessThanOrEqual(3);
+    expect(item.baselineDelta, `party ${item.party} baselineDelta=${item.baselineDelta}`).not.toBeNull();
+    expect(item.baselineDelta!, `party ${item.party} baselineDelta=${item.baselineDelta}`).toBeGreaterThanOrEqual(
+      -VS01_SIGNATURE_SIGNED_INK_MAX_OVERLAP_BELOW_PX,
+    );
+    expect(item.baselineDelta!).toBeLessThanOrEqual(VS01_SIGNATURE_ACTIVE_SHELL_MAX_CLEARANCE_ABOVE_PX);
+    expect(item.layoutBottomDelta ?? 0).toBeLessThanOrEqual(8);
     expect(item.labelText).toBe("Signature");
     expect(item.labelClipped).toBe(false);
     expect(item.fieldIntersections).toBe(0);
     expect(item.labelIntersections).toBe(0);
+  }
+}
+
+async function expectExecutionBlockDensity(surface: Locator): Promise<void> {
+  const metrics = await surface.evaluate((maxGapPx) => {
+    const page = document.querySelector(".vs01-sign-page-surface--canonical") as HTMLElement | null;
+    if (!page) return { gaps: [] as number[], maxGap: 0 };
+    const pxTop = (el: Element) => (el as HTMLElement).getBoundingClientRect().top;
+    const executionLines = [...page.querySelectorAll("[data-vs01-signature-execution-line]")] as HTMLElement[];
+    const gaps: number[] = [];
+    for (const line of executionLines) {
+      const lineTop = pxTop(line);
+      const labels = [...page.querySelectorAll(".vs01-canonical-flow-line--signature_label")] as HTMLElement[];
+      const stack = [
+        line,
+        ...labels.filter((node) => {
+          const top = pxTop(node);
+          return top > lineTop && top < lineTop + 120;
+        }).sort((a, b) => pxTop(a) - pxTop(b)),
+      ];
+      for (let i = 1; i < stack.length; i += 1) {
+        gaps.push(pxTop(stack[i]!) - pxTop(stack[i - 1]!));
+      }
+    }
+    return { gaps, maxGap: gaps.length ? Math.max(...gaps) : 0 };
+  }, VS01_EXECUTION_MAX_LABEL_GAP_PX);
+  expect(metrics.gaps.length).toBeGreaterThan(0);
+  expect(metrics.maxGap).toBeLessThanOrEqual(VS01_EXECUTION_MAX_LABEL_GAP_PX);
+}
+
+async function expectCanonicalPageLayoutStable(surface: Locator): Promise<void> {
+  const first = await collectBrowserPageLayoutMetrics(surface, "stability-pass-1", VS01_VISUAL_PAGE_WIDTH_PT);
+  await surface.page().waitForTimeout(120);
+  const second = await collectBrowserPageLayoutMetrics(surface, "stability-pass-2", VS01_VISUAL_PAGE_WIDTH_PT);
+  expectClosePx(first.contentLeft, second.contentLeft, 1);
+  expectClosePx(first.contentTop, second.contentTop, 1);
+  expectClosePx(first.pageWidth, second.pageWidth, 1);
+  expectClosePx(first.pageHeight, second.pageHeight, 1);
+  if (first.signatureFieldY != null && second.signatureFieldY != null) {
+    expectClosePx(first.signatureFieldY, second.signatureFieldY, 1);
+  }
+}
+
+async function expectSignedWitnessSignatureComposition(surface: Locator): Promise<void> {
+  await anchorWitnessSignatureOverlaysInBrowser(surface);
+  const metrics = await surface.evaluate(
+    (cfg) => {
+      const page = document.querySelector(".vs01-sign-page-surface--canonical") as HTMLElement | null;
+      if (!page) return [] as {
+        party: string;
+        shellHeight: number;
+        nameGap: number | null;
+        inkAboveUnderline: number | null;
+        inkIntersectsName: boolean;
+        underlineVisible: boolean;
+        inkWidthFrac: number | null;
+        inkTextWidthFrac: number | null;
+        inkLeftBiasPx: number | null;
+        inkFontPx: number;
+      }[];
+      const pageRect = page.getBoundingClientRect();
+      const rel = (el: Element) => {
+        const r = (el as HTMLElement).getBoundingClientRect();
+        return {
+          top: r.top - pageRect.top,
+          bottom: r.bottom - pageRect.top,
+          left: r.left - pageRect.left,
+          width: r.width,
+          height: r.height,
+        };
+      };
+      const inks = [...page.querySelectorAll("[data-vs01-visual-completed-signature]")] as HTMLElement[];
+      return inks.map((ink) => {
+        const box = ink.closest(".vs01-sign-placement-box") as HTMLElement | null;
+        const party = box?.getAttribute("data-vs01-visual-party-index") ?? "";
+        const lineEl = page.querySelector(
+          `[data-vs01-signature-execution-line][data-vs01-signature-party="${party}"]`,
+        );
+        const underline = lineEl?.querySelector(".vs01-canonical-signature-underline");
+        let nameRow: Element | null = null;
+        let cursor = lineEl?.nextElementSibling ?? null;
+        while (cursor) {
+          if (
+            cursor.classList.contains("vs01-canonical-flow-line--signature_label") &&
+            /^Name\s*:/i.test((cursor.textContent ?? "").trim())
+          ) {
+            nameRow = cursor;
+            break;
+          }
+          if (cursor.matches("[data-vs01-signature-execution-line]")) break;
+          cursor = cursor.nextElementSibling;
+        }
+        const inkRect = rel(ink);
+        const underlineRect = underline ? rel(underline) : null;
+        const nameRect = nameRow ? rel(nameRow) : null;
+        const boxRect = box ? rel(box) : null;
+        const underlineStyle = underline ? getComputedStyle(underline) : null;
+        const inkStyle = getComputedStyle(ink);
+        return {
+          party,
+          shellHeight: boxRect?.height ?? 0,
+          nameGap: nameRect ? nameRect.top - inkRect.bottom : null,
+          inkAboveUnderline: underlineRect ? underlineRect.bottom - inkRect.bottom : null,
+          inkIntersectsName: nameRect ? inkRect.bottom > nameRect.top + 0.5 : false,
+          underlineVisible: underlineStyle ? underlineStyle.borderBottomWidth !== "0px" : false,
+          inkWidthFrac: boxRect && underlineRect && underlineRect.width > 0 ? boxRect.width / underlineRect.width : null,
+          inkTextWidthFrac:
+            underlineRect && inkRect.width > 0 ? inkRect.width / underlineRect.width : null,
+          shellLeftBiasPx: boxRect && underlineRect ? boxRect.left - underlineRect.left : null,
+          inkLeftBiasPx: underlineRect ? inkRect.left - underlineRect.left : null,
+          inkFontPx: parseFloat(inkStyle.fontSize) || 0,
+        };
+      });
+    },
+    {
+      minWidthFrac: VS01_SIGNATURE_FIELD_WIDTH_MIN_FRAC,
+      maxWidthFrac: VS01_SIGNATURE_FIELD_WIDTH_MAX_FRAC,
+    },
+  );
+
+  expect(metrics.length).toBeGreaterThanOrEqual(1);
+  for (const item of metrics) {
+    expect(item.shellHeight, `party ${item.party} shell height`).toBeGreaterThanOrEqual(
+      VS01_SIGNATURE_SHELL_MIN_HEIGHT_PX - 2,
+    );
+    expect(item.shellHeight, `party ${item.party} shell height`).toBeLessThanOrEqual(
+      VS01_SIGNATURE_SHELL_MAX_HEIGHT_PX + 2,
+    );
+    expect(item.inkIntersectsName, `party ${item.party} ink/name collision`).toBe(false);
+    expect(item.nameGap, `party ${item.party} name gap`).not.toBeNull();
+    expect(item.nameGap!).toBeGreaterThanOrEqual(VS01_SIGNATURE_NAME_ROW_MIN_GAP_PX);
+    expect(item.inkAboveUnderline, `party ${item.party} ink baseline`).not.toBeNull();
+    expect(item.inkAboveUnderline!, `party ${item.party} ink kisses underline`).toBeGreaterThanOrEqual(
+      -VS01_SIGNATURE_SIGNED_INK_MAX_OVERLAP_BELOW_PX,
+    );
+    expect(item.inkAboveUnderline!, `party ${item.party} ink sits above line`).toBeLessThanOrEqual(
+      VS01_SIGNATURE_SIGNED_INK_MAX_CLEARANCE_ABOVE_PX,
+    );
+    expect(item.underlineVisible, `party ${item.party} underline visible`).toBe(true);
+    expect(item.inkWidthFrac, `party ${item.party} ink width`).not.toBeNull();
+    expect(item.inkWidthFrac!).toBeGreaterThanOrEqual(VS01_SIGNATURE_FIELD_WIDTH_MIN_FRAC - 0.08);
+    expect(item.inkWidthFrac!).toBeLessThanOrEqual(1.05);
+    expect(item.inkFontPx, `party ${item.party} ink font`).toBeGreaterThanOrEqual(16);
   }
 }
 
@@ -1260,6 +1504,7 @@ test.describe("VS01 canonical visual regression", () => {
 
   for (const viewport of [
     { width: 390, height: 844, label: "iphone-390" },
+    { width: 844, height: 390, label: "iphone-844-landscape" },
     { width: 1280, height: 800, label: "laptop-1280" },
     { width: 1440, height: 900, label: "desktop-1440" },
   ]) {
@@ -1286,6 +1531,9 @@ test.describe("VS01 canonical visual regression", () => {
         expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 4);
       }
 
+      await expectExecutionBlockDensity(surface);
+      await expectCanonicalPageLayoutStable(surface);
+
       await screenshotCanonicalSurface(page, surface, join(ARTIFACT_DIR, `vs01-prepare-witness-${viewport.label}.png`));
     });
 
@@ -1301,6 +1549,7 @@ test.describe("VS01 canonical visual regression", () => {
       await expect(surface.locator("[data-vs01-signature-execution-line]")).toHaveCount(2);
       await expect(surface.locator("[data-vs01-visual-completed-signature]")).toHaveCount(2);
       await expect(surface.locator("[data-vs01-visual-completed-signature='0']")).toHaveText("Anthem H Blanchard");
+      await expectSignedWitnessSignatureComposition(surface);
 
       const signatureFit = await surface
         .locator("[data-vs01-visual-completed-signature]")
@@ -2422,6 +2671,12 @@ async function assertTest79ActualOverlayGeometry(
         `[data-vs01-signature-execution-line][data-vs01-signature-party="${exp?.partyIndex ?? 0}"] .vs01-canonical-signature-underline`,
       );
       const underlineRect = underline ? pxRect(underline) : null;
+      const topPct = Number.parseFloat(el.style.top) / 100;
+      const heightPct = Number.parseFloat(el.style.height) / 100;
+      const anchoredBottom =
+        Number.isFinite(topPct) && Number.isFinite(heightPct)
+          ? (topPct + heightPct) * pageRect.height
+          : rect.bottom;
       const protectedText = bodyTextRects.filter((_, i) => {
         const node = page.querySelectorAll("[data-vs01-canonical-text]")[i];
         const text = (node?.textContent ?? "").trim();
@@ -2461,6 +2716,8 @@ async function assertTest79ActualOverlayGeometry(
           ? {
               leftDelta: rect.left - underlineRect.left,
               centerDelta: rect.centerY - underlineRect.centerY,
+              baselineDelta: anchoredBottom - underlineRect.bottom,
+              layoutBottomDelta: rect.bottom - underlineRect.bottom,
               protectedHits: protectedText.filter((text) => intersects(rect, text, 1.25)).length,
             }
           : null,
@@ -2497,18 +2754,24 @@ async function assertTest79ActualOverlayGeometry(
   for (const item of metrics.fields) {
     expect(item.expectedRect, `missing expected model rect for ${item.id}`).not.toBeNull();
     expect(item.insidePage, `${item.id} inside page`).toBe(true);
-    expect(item.expansion, `${item.id} expansion`).not.toBeNull();
-    expect(item.expansion!, `${item.id} expands beyond model rect`).toBeLessThanOrEqual(2);
+    if (item.type === "signature") {
+      expect(item.signature, `${item.id} has underline`).not.toBeNull();
+      expect(item.signature!.leftDelta, `${item.id} left edge vs underline`).toBeGreaterThanOrEqual(-2);
+      expect(item.signature!.baselineDelta, `${item.id} baseline`).not.toBeNull();
+      // Active recipient fields: shell placement bounds (not signed ink baseline).
+      expect(item.signature!.baselineDelta!).toBeGreaterThanOrEqual(-VS01_SIGNATURE_SIGNED_INK_MAX_OVERLAP_BELOW_PX);
+      expect(item.signature!.baselineDelta!).toBeLessThanOrEqual(
+        VS01_SIGNATURE_ACTIVE_SHELL_MAX_CLEARANCE_ABOVE_PX,
+      );
+      expect(item.signature!.protectedHits, `${item.id} protected text hits`).toBe(0);
+    } else {
+      expect(item.expansion, `${item.id} expansion`).not.toBeNull();
+      expect(item.expansion!, `${item.id} expands beyond model rect`).toBeLessThanOrEqual(2);
+    }
     expect(item.inputInside, `${item.id} input inside field`).toBe(true);
     const rgb = parseRgbForTest79(item.color);
     expect(rgb, `${item.id} readable color ${item.color}`).not.toBeNull();
     expect(Math.max(rgb!.r, rgb!.g, rgb!.b), `${item.id} text too close to white`).toBeLessThan(230);
-    if (item.type === "signature") {
-      expect(item.signature, `${item.id} has underline`).not.toBeNull();
-      expect(item.signature!.leftDelta, `${item.id} left edge vs underline`).toBeGreaterThanOrEqual(-2);
-      expect(Math.abs(item.signature!.centerDelta), `${item.id} centerline`).toBeLessThanOrEqual(3);
-      expect(item.signature!.protectedHits, `${item.id} protected text hits`).toBe(0);
-    }
     if (item.type === "initials") {
       expect(item.initials, `${item.id} initials band`).not.toBeNull();
       expect(item.initials!.belowBody, `${item.id} below body text`).toBe(true);
@@ -2616,6 +2879,76 @@ test.describe("VS01 test79 actual recipient signing path placement", () => {
       });
     });
   }
+});
+
+test.describe("VS01 visual stabilization matrix", () => {
+  test.beforeAll(() => {
+    mkdirSync(ARTIFACT_DIR, { recursive: true });
+  });
+
+  const matrixViewports = [
+    { width: 390, height: 844, label: "iphone-390" },
+    { width: 844, height: 390, label: "iphone-844-landscape" },
+    { width: 1280, height: 800, label: "laptop-1280" },
+    { width: 1440, height: 900, label: "desktop-1440" },
+  ] as const;
+
+  for (const viewport of matrixViewports) {
+    test(`prepare witness optical alignment (${viewport.label})`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.setContent(
+        buildTest77WorkspaceHtml({
+          initialsEnabled: true,
+          witness: true,
+          showInitials: false,
+          renderFields: true,
+          preparePlacementChrome: true,
+          testId: `vs01-matrix-prepare-${viewport.label}`,
+          workspaceLead: "Prepare signature links",
+        }),
+        { waitUntil: "domcontentloaded" },
+      );
+      const surface = page.locator(".vs01-sign-page-surface--canonical");
+      await expect(surface).toBeVisible();
+      await expectWitnessSignatureOverlayGeometry(surface, 2);
+      await expectExecutionBlockDensity(surface);
+      await expectCanonicalPageLayoutStable(surface);
+      await screenshotCanonicalSurface(
+        page,
+        surface,
+        join(ARTIFACT_DIR, `vs01-matrix-prepare-witness-${viewport.label}.png`),
+      );
+    });
+
+    test(`signed witness page density (${viewport.label})`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.setContent(buildPrepareWorkspaceHtml({ signed: true }), { waitUntil: "domcontentloaded" });
+      const surface = page.locator(".vs01-sign-page-surface--canonical");
+      await expect(surface).toBeVisible();
+      await expect(surface.locator("[data-vs01-visual-completed-signature]")).toHaveCount(2);
+      await expectSignedWitnessSignatureComposition(surface);
+      await expectExecutionBlockDensity(surface);
+      await expectCanonicalPageLayoutStable(surface);
+      await screenshotCanonicalSurface(
+        page,
+        surface,
+        join(ARTIFACT_DIR, `vs01-matrix-signed-witness-${viewport.label}.png`),
+      );
+    });
+  }
+
+  test("recipient signing witness optical alignment (laptop-1280)", async ({ page }) => {
+    await renderTest78RecipientArtifact(page, {
+      viewport: { width: 1280, height: 800, label: "laptop-1280" },
+      filename: "vs01-matrix-recipient-witness-laptop-1280.png",
+      lockedPartyIndex: 1,
+      witness: true,
+      signerName: "Counterparty",
+      signerEmail: "jb34@me.com",
+      actionLabel: "Sign witness page",
+      testId: "vs01-matrix-recipient-witness-laptop-1280",
+    });
+  });
 });
 
 test.describe("VS01 test74 repaired corpus visual", () => {
