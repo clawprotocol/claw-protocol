@@ -3,7 +3,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
+import { buildHydratedAuthoritativeSigningCorpus } from "./authoritativeSignerHydration";
 import { resolveCanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
+import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion/signatureRegion";
+import { resolveCanonicalPartyIdentitiesFromSignerSetup } from "./guidedDealCompletion/signerPartyIdentity";
 import { resolveAuthoritativePaidProReviewPlain } from "./authoritativePaidProReview";
 import { establishPaidProSourceOfTruth, getPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
@@ -31,6 +34,20 @@ const PRODUCTION_SOT_BODY = [
   ...Array.from({ length: 120 }, (_, i) => `Section ${i + 1}. Operative clause ${i + 1}.`),
   "",
   "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+  "",
+  "CLIENT:",
+  BLUE_CANYON,
+  "By: _________________________________",
+  "Name:",
+  "Title:",
+  "Date:",
+  "",
+  "SERVICE PROVIDER:",
+  IRON_VALE,
+  "By: _________________________________",
+  "Name:",
+  "Title:",
+  "Date:",
 ].join("\n");
 
 function armSession() {
@@ -38,7 +55,7 @@ function armSession() {
 }
 
 function buildSmokeSnapshot() {
-  const manifest = resolveCanonicalFinalPartyManifest({
+  const signerArgs = {
     partyCount: 2,
     partySignerNames: ["Anthem H Blanchard", "Jim Summit"],
     partySignerTitles: ["Manager", "CEO"],
@@ -48,11 +65,19 @@ function buildSmokeSnapshot() {
     recipient2Email: "anthemhayek@me.com",
     extraPartyReviewEmails: [],
     draftPartyNames: [BLUE_CANYON, IRON_VALE],
-    sendMode: "signature",
+    sendMode: "signature" as const,
     recipientsDeferred: false,
+  };
+  const manifest = resolveCanonicalFinalPartyManifest(signerArgs);
+  const identities = resolveCanonicalPartyIdentitiesFromSignerSetup(signerArgs);
+  const hydrated = buildHydratedAuthoritativeSigningCorpus({
+    rawCorpus: PRODUCTION_SOT_BODY,
+    identities,
+    intakeRaw: "Blue Canyon Analytics and Iron Vale Systems",
+    surface: "smoke_snapshot",
   });
   return createAuthoritativeSigningSnapshot({
-    corpus: PRODUCTION_SOT_BODY,
+    corpus: hydrated.corpus,
     signerMetadata: {
       partySignerNames: ["Anthem H Blanchard", "Jim Summit"],
       partySignerTitles: ["Manager", "CEO"],
@@ -76,7 +101,8 @@ describe("authoritativeSigningSnapshot", () => {
     armSession();
     const snap = buildSmokeSnapshot();
     expect(getPaidProSigningAuthorityPhase()).toBe("SIGNER_METADATA_FINALIZED");
-    expect(snap.hash).toBe(getPaidProSourceOfTruth()?.hash);
+    expect(snap.hash.length).toBeGreaterThan(0);
+    expect(snap.corpus).not.toBe(getPaidProSourceOfTruth()?.text);
     expect(hasAuthoritativeSigningSnapshot()).toBe(true);
     const again = buildSmokeSnapshot();
     expect(again.hash).toBe(snap.hash);
@@ -88,14 +114,14 @@ describe("authoritativeSigningSnapshot", () => {
     buildSmokeSnapshot();
     expect(isPostSignerMetadataFreezeActive({ signaturePreparationRequested: false })).toBe(true);
     const reviewPlain = resolveAuthoritativePaidProReviewPlain();
-    expect(reviewPlain).toBe(PRODUCTION_SOT_BODY);
+    expect(reviewPlain).toMatch(/Name:\s*Anthem H Blanchard/i);
     const corpus = resolveSimpleProFinalReviewCorpus({
       authoritativePlain: "short preview",
       renderedPreviewPlain: buildAgreementPreviewText({
         parties: [{ name: BLUE_CANYON }, { name: IRON_VALE }],
       } as Parameters<typeof buildAgreementPreviewText>[0]),
     });
-    expect(corpus.plainText).toBe(PRODUCTION_SOT_BODY);
+    expect(corpus.plainText).toMatch(/Name:\s*Anthem H Blanchard/i);
     expect(corpus.source).toBe("authoritative_hydrated");
   });
 
@@ -131,6 +157,8 @@ describe("authoritativeSigningSnapshot", () => {
     expect(snap.partyManifest.parties[1]?.partyName).toMatch(/Iron Vale/);
     expect(snap.signerMetadata.recipient1Email).toBe("anthemhayek@gmail.com");
     expect(snap.signerMetadata.recipient2Email).toBe("anthemhayek@me.com");
+    expect(snap.corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
+    expect(corpusSignatureBlocksHaveRequiredByLines(snap.corpus, 2)).toBe(true);
   });
 });
 
@@ -158,5 +186,8 @@ describe("AgreementBuilderIntake authority routing", () => {
     expect(intake).toContain("hasAuthoritativeSigningSnapshot");
     expect(intake).toContain("readAuthoritativeSigningCorpus");
     expect(intake).toContain("clearAuthoritativeSigningSnapshot");
+    expect(intake).toContain("buildHydratedAuthoritativeSigningCorpus");
+    expect(intake).toContain("retainSignatureExecutionBlock");
+    expect(intake).toContain("readAuthoritativeSignerIdentitiesForSurfaces");
   });
 });

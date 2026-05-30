@@ -32,6 +32,8 @@ export type PolishProAgreementDisplayLayerOpts = {
   intakeText?: string | null;
   /** Review/share surfaces: strip execution residue and skip appending signature blocks. */
   reviewDisplayMode?: boolean;
+  /** When true with reviewDisplayMode, keep signer execution blocks that were hydrated into the corpus. */
+  retainSignatureExecutionBlock?: boolean;
 };
 
 export type PolishProAgreementDisplayLayerResult = {
@@ -183,7 +185,9 @@ function isBodySectionParagraph(part: string): boolean {
 }
 
 function isExecutionParagraph(part: string): boolean {
-  return /\b(?:IN\s+WITNESS\s+WHEREOF|EXECUTION|SIGNATURES?|By:\s*_{2,}|Name:\s*_{2,}|Title:\s*_{2,})\b/i.test(part);
+  return /\b(?:IN\s+WITNESS\s+WHEREOF|EXECUTION|SIGNATURES?|By:\s*_{2,}|Name:\s*(?:_{2,}|\S)|Title:\s*(?:_{2,}|\S)|^CLIENT\s*:|^SERVICE\s+PROVIDER\s*:)\b/im.test(
+    part,
+  );
 }
 
 function normalizedOpeningParagraph(
@@ -218,6 +222,8 @@ export function normalizeAgreementOpeningStructure(
   opts?: {
     records?: readonly CanonicalPartyIdentityRecord[];
     reviewDisplayMode?: boolean;
+  /** When true with reviewDisplayMode, keep signer execution blocks that were hydrated into the corpus. */
+  retainSignatureExecutionBlock?: boolean;
   },
 ): { text: string; repairs: string[] } {
   const input = basicNormalize(text);
@@ -265,7 +271,9 @@ export function normalizeAgreementOpeningStructure(
     body.push(part);
   }
 
-  if (opts?.reviewDisplayMode && execution.length > 0) {
+  const stripExecutionForReview =
+    Boolean(opts?.reviewDisplayMode) && !opts?.retainSignatureExecutionBlock;
+  if (stripExecutionForReview && execution.length > 0) {
     repairs.push("display:strip_execution_phase_for_review");
   }
 
@@ -273,7 +281,7 @@ export function normalizeAgreementOpeningStructure(
     title,
     opening,
     ...body,
-    ...(opts?.reviewDisplayMode ? [] : execution),
+    ...(stripExecutionForReview ? [] : execution),
   ].filter(Boolean);
   const out = outputParts.join("\n\n").replace(/\.signature\./gi, "").trim();
   if (out !== outputParts.join("\n\n").trim()) repairs.push("display:strip_signature_residue");
@@ -360,6 +368,8 @@ export type SanitizeProReviewDisplayTextOpts = {
   records?: readonly CanonicalPartyIdentityRecord[];
   /** Diagnostic label for sanity-block logging. */
   source?: string;
+  /** Keep hydrated signer execution blocks (witness + signature lines) on final review. */
+  retainSignatureExecutionBlock?: boolean;
 };
 
 export type SanitizeProReviewDisplayTextResult = {
@@ -401,6 +411,7 @@ export function sanitizeProReviewDisplayText(
   const structured = normalizeAgreementOpeningStructure(out, {
     records: opts?.records,
     reviewDisplayMode: true,
+    retainSignatureExecutionBlock: opts?.retainSignatureExecutionBlock,
   });
   out = structured.text;
   repairs.push(...structured.repairs);
@@ -409,31 +420,33 @@ export function sanitizeProReviewDisplayText(
   out = opening.text;
   repairs.push(...opening.repairs);
 
-  const witnessIdx = findSignatureRegionStart(out);
-  if (witnessIdx >= 0) {
-    out = out.slice(0, witnessIdx).trimEnd();
-    repairs.push("display:strip_witness_execution_region");
-  }
+  if (!opts?.retainSignatureExecutionBlock) {
+    const witnessIdx = findSignatureRegionStart(out);
+    if (witnessIdx >= 0) {
+      out = out.slice(0, witnessIdx).trimEnd();
+      repairs.push("display:strip_witness_execution_region");
+    }
 
-  const withoutExecLines = out
-    .split("\n")
-    .filter((line) => {
-      const t = line.trim();
-      if (!t) return true;
-      if (/^\s*(?:By|Name|Title|Date|Email|Signature)\s*:\s*_{2,}/i.test(t)) {
-        repairs.push("display:strip_execution_field_line");
-        return false;
-      }
-      if (/^\s*(?:CLIENT|SERVICE PROVIDER|PROVIDER|COMPANY|CONTRACTOR)\s*:/i.test(t) && t.length < 80) {
-        repairs.push("display:strip_execution_party_header");
-        return false;
-      }
-      return true;
-    })
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  if (withoutExecLines !== out) out = withoutExecLines;
+    const withoutExecLines = out
+      .split("\n")
+      .filter((line) => {
+        const t = line.trim();
+        if (!t) return true;
+        if (/^\s*(?:By|Name|Title|Date|Email|Signature)\s*:\s*_{2,}/i.test(t)) {
+          repairs.push("display:strip_execution_field_line");
+          return false;
+        }
+        if (/^\s*(?:CLIENT|SERVICE PROVIDER|PROVIDER|COMPANY|CONTRACTOR)\s*:/i.test(t) && t.length < 80) {
+          repairs.push("display:strip_execution_party_header");
+          return false;
+        }
+        return true;
+      })
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (withoutExecLines !== out) out = withoutExecLines;
+  }
 
   const tailArtifacts = stripMalformedProReviewDisplayArtifacts(out);
   out = tailArtifacts.text;
@@ -444,7 +457,7 @@ export function sanitizeProReviewDisplayText(
   repairs.push(...dangling.repairs);
 
   let violations = detectProReviewDisplaySanityViolations(out);
-  if (violations.length > 0) {
+  if (violations.length > 0 && !opts?.retainSignatureExecutionBlock) {
     sanityBlocked = true;
     for (const reason of violations) {
       logProReviewDisplaySanityBlocked({ reason, source, hash: inputHash });
@@ -460,6 +473,8 @@ export function sanitizeProReviewDisplayText(
     if (violations.length > 0) {
       repairs.push("display:sanity_aggressive_fallback");
     }
+  } else if (violations.length > 0) {
+    repairs.push("display:sanity_violations_retained_signer_block");
   }
 
   const outputHash = fingerprintAgreementBody(out);
@@ -490,6 +505,7 @@ export function polishProAgreementDisplayLayer(
   const structuredOpening = normalizeAgreementOpeningStructure(out, {
     records,
     reviewDisplayMode: opts?.reviewDisplayMode,
+    retainSignatureExecutionBlock: opts?.retainSignatureExecutionBlock,
   });
   out = structuredOpening.text;
   repairs.push(...structuredOpening.repairs);
@@ -536,9 +552,11 @@ export function polishProAgreementDisplayLayer(
   out = conf.text;
   repairs.push(...conf.repairs);
 
-  const sections = normalizeProAgreementSectionContinuity(out);
-  out = sections.text;
-  repairs.push(...sections.repairs);
+  if (!opts?.retainSignatureExecutionBlock) {
+    const sections = normalizeProAgreementSectionContinuity(out);
+    out = sections.text;
+    repairs.push(...sections.repairs);
+  }
 
   if (records.length >= 2 && !opts?.reviewDisplayMode) {
     out = appendProExecutionBlockIfMissing(out, records).text;
@@ -548,13 +566,17 @@ export function polishProAgreementDisplayLayer(
     const sanitized = sanitizeProReviewDisplayText(out, {
       records,
       source: "polishProAgreementDisplayLayer",
+      retainSignatureExecutionBlock: opts?.retainSignatureExecutionBlock,
     });
     out = sanitized.text;
     repairs.push(...sanitized.repairs);
     if (sanitized.sanityBlocked) repairs.push("display:pro_review_sanity_guard");
   }
 
-  if (wouldMateriallyShrinkAuthoritativeBody(input.length, out.length)) {
+  if (
+    !opts?.retainSignatureExecutionBlock &&
+    wouldMateriallyShrinkAuthoritativeBody(input.length, out.length)
+  ) {
     const coalesced = coalesceAuthoritativePremiumBody({
       preservedBody: input,
       candidateBody: out,

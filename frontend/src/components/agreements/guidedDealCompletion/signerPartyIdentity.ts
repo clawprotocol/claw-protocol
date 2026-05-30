@@ -241,6 +241,18 @@ function fillSignatureNameUnderscoreLines(
         replacements += 1;
       }
     }
+
+    if (/^title\s*:/i.test(trimmed)) {
+      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
+      const id = identities[partyIndex];
+      const title = id?.title?.trim() ?? "";
+      if (!title) continue;
+      if (/_{4,}/.test(trimmed) || /^title\s*:\s*$/i.test(trimmed)) {
+        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+        lines[i] = `${indent}Title: ${title}`;
+        replacements += 1;
+      }
+    }
   }
 
   return { text: lines.join("\n"), count: replacements };

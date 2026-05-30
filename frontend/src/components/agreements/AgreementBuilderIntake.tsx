@@ -608,6 +608,12 @@ import {
   readAuthoritativeSigningCorpus,
 } from "./authoritativeSigningSnapshot";
 import {
+  buildHydratedAuthoritativeSigningCorpus,
+  logSnapshotSignerState,
+  readAuthoritativeSignerIdentitiesForSurfaces,
+  signerMetadataDriftedFromSnapshot,
+} from "./authoritativeSignerHydration";
+import {
   isPremiumGenerationApiUnavailableForUi,
   PAID_PRO_API_UNAVAILABLE_BODY,
   PAID_PRO_API_UNAVAILABLE_HEADLINE,
@@ -12595,6 +12601,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const guidedSignerCanonicalIdentities = useMemo(
     () => {
+      const fromSnapshot = readAuthoritativeSignerIdentitiesForSurfaces();
+      if (fromSnapshot?.length) {
+        return fromSnapshot;
+      }
       if (
         paidProSignerMetadataSessionActive &&
         frozenSignerMetadataIdentitiesRef.current
@@ -12624,9 +12634,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     },
     [
       paidProSignerMetadataSessionActive,
+      paidProPostSignerMetadataFreezeActive,
       signaturePreparationRequested,
+      premiumSurfaceGateTick,
       guidedPreReviewSignerSlots.requiredCount,
-      ...(paidProSignerMetadataSessionActive
+      ...(paidProSignerMetadataSessionActive || paidProPostSignerMetadataFreezeActive
         ? []
         : [
             partySignerNames,
@@ -12642,6 +12654,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ]),
     ],
   );
+
+  useEffect(() => {
+    const snap = getAuthoritativeSigningSnapshot();
+    if (!snap || signaturePreparationRequested) return;
+    const currentMeta = {
+      partySignerNames: [...partySignerNames],
+      partySignerTitles: [...partySignerTitles],
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails: [...extraPartyReviewEmails],
+    };
+    if (signerMetadataDriftedFromSnapshot(snap, currentMeta)) {
+      clearAuthoritativeSigningSnapshot();
+      frozenSignerMetadataPartyManifestRef.current = null;
+      frozenSignerMetadataIdentitiesRef.current = null;
+    }
+  }, [
+    partySignerNames,
+    partySignerTitles,
+    recipient1Name,
+    recipient2Name,
+    recipient1Email,
+    recipient2Email,
+    extraPartyReviewEmails,
+    signaturePreparationRequested,
+    premiumSurfaceGateTick,
+  ]);
 
   const guidedSignerFinalVersionLines = useMemo(() => {
     if (!guidedPreReviewSignerSlots.complete) return [];
@@ -17392,6 +17433,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const simpleProFinalReviewDisplayPlain = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const signingSnapshotActive = hasAuthoritativeSigningSnapshot();
     const paidReviewAuthorityPlain = resolveAuthoritativePaidProReviewPlain({
       draft: draft ?? null,
       intakeText: intakeForPolish,
@@ -17401,6 +17443,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText: intakeForPolish,
     });
     const raw = (
+      (signingSnapshotActive ? readAuthoritativeSigningCorpus() : "") ||
       paidProReview?.text ||
       paidReviewAuthorityPlain ||
       simpleProFinalReviewCorpus.plainText ||
@@ -17411,9 +17454,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draft: draft ?? null,
       intakeText: intakeForPolish,
       reviewDisplayMode: true,
+      retainSignatureExecutionBlock: signingSnapshotActive,
     }).text;
     const sanitized = sanitizeProReviewDisplayText(polished, {
       source: paidProReview ? "paid_pro_review_surface" : "simple_pro_final_review",
+      retainSignatureExecutionBlock: signingSnapshotActive,
     }).text;
     const boundary = resolveVisibleProPaperBoundary({
       visiblePlain: sanitized,
@@ -18376,11 +18421,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
     const intakeForHints = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const renderHints = computePremiumDocumentRenderHints(rd, corpus, intakeForHints);
+    const snapshotActive = hasAuthoritativeSigningSnapshot();
     return buildPremiumAgreementReadonlyHtml(corpus, {
       signatureSectionMode: "collaboration",
       partyNames: signaturePartyNames,
       renderHints,
       forceEmbeddedCorpusSignature:
+        snapshotActive ||
         guidedSignatureRebuiltRef.current ||
         guidedFinalReviewAuthoritativeResolution.source === "finalized_signer_applied_guided_corpus",
     });
@@ -19636,6 +19683,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(() => {
     clearAuthoritativeSigningSnapshot();
+    frozenSignerMetadataIdentitiesRef.current = null;
+    frozenSignerMetadataPartyManifestRef.current = null;
     setGuidedSigningConfirmationActive(false);
     setGuidedSigningConfirmationBlockMessage(null);
     guidedFinalReviewExplicitlyUnlockedRef.current = false;
@@ -21444,39 +21493,76 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     flushGuidedSignerMetadataBeforeFinalReview();
-    const corpus = (
-      getPaidProSourceOfTruthText() ||
-      authoritativePaidProReviewPlain ||
-      simpleProFinalReviewCorpus.plainText
-    ).trim();
-    createAuthoritativeSigningSnapshot({
-      corpus,
-      signerMetadata: {
-        partySignerNames: [...partySignerNames],
-        partySignerTitles: [...partySignerTitles],
+    const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const partyManifest =
+      frozenSignerMetadataPartyManifestRef.current ??
+      resolveCanonicalFinalPartyManifest({
+        partyCount: guidedPreReviewSignerSlots.requiredCount,
+        partySignerNames,
+        partySignerTitles,
         recipient1Name,
         recipient2Name,
         recipient1Email,
         recipient2Email,
-        extraPartyReviewEmails: [...extraPartyReviewEmails],
-      },
-      partyManifest:
-        frozenSignerMetadataPartyManifestRef.current ??
-        resolveCanonicalFinalPartyManifest({
-          partyCount: guidedPreReviewSignerSlots.requiredCount,
-          partySignerNames,
-          partySignerTitles,
-          recipient1Name,
-          recipient2Name,
-          recipient1Email,
-          recipient2Email,
-          extraPartyReviewEmails,
-          draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
-          draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
-          sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
-          recipientsDeferred,
-        }),
-      signatureBlockModel: canonicalSignerManifest,
+        extraPartyReviewEmails,
+        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+        draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
+        sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
+        recipientsDeferred,
+      });
+    const identities = resolveCanonicalPartyIdentitiesFromSignerSetup({
+      partyCount: guidedPreReviewSignerSlots.requiredCount,
+      partySignerNames,
+      partySignerTitles,
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+      draftPartyRoles: (draft?.parties ?? []).map((p) => String((p as { role?: string }).role ?? "")),
+      sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
+      recipientsDeferred,
+    });
+    const rawCorpus = (
+      getPaidProSourceOfTruthText() ||
+      authoritativePaidProReviewPlain ||
+      simpleProFinalReviewCorpus.plainText
+    ).trim();
+    const hydrated = buildHydratedAuthoritativeSigningCorpus({
+      rawCorpus,
+      identities,
+      intakeRaw: intakeForHydration,
+      surface: "finalize_paid_pro_signer_metadata",
+    });
+    const signatureBlockModel = buildCanonicalSignerManifest({
+      identities: hydrated.identities,
+      signFirst: premiumSignatureSenderFirst,
+    });
+    const signerMetadata = {
+      partySignerNames: [...partySignerNames],
+      partySignerTitles: [...partySignerTitles],
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails: [...extraPartyReviewEmails],
+    };
+    createAuthoritativeSigningSnapshot({
+      corpus: hydrated.corpus,
+      signerMetadata,
+      partyManifest,
+      signatureBlockModel,
+    });
+    logSnapshotSignerState({
+      partyCount: partyManifest.parties.length,
+      signerNames: signerMetadata.partySignerNames,
+      emails: [
+        signerMetadata.recipient1Email,
+        signerMetadata.recipient2Email,
+        ...signerMetadata.extraPartyReviewEmails,
+      ],
+      corpusHasFilledSignatureBlocks: hydrated.signaturePolishCount > 0,
     });
     setPaidProInlineSignerSetupLatched(false);
     setGuidedFinalReviewExplicitlyOpened(true);
@@ -21490,8 +21576,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProSignerDetailsGate.complete,
     scrollGuidedSignerSetupIntoView,
     flushGuidedSignerMetadataBeforeFinalReview,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
     authoritativePaidProReviewPlain,
     simpleProFinalReviewCorpus.plainText,
+    premiumSignatureSenderFirst,
     partySignerNames,
     partySignerTitles,
     recipient1Name,
@@ -21503,7 +21592,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft?.parties,
     effectivePremiumSendMode,
     recipientsDeferred,
-    canonicalSignerManifest,
   ]);
 
   const continueGuidedFinalReviewToSigning = React.useCallback(
