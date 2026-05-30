@@ -7,6 +7,7 @@ import {
   writeCreateReviewAgreementResumeId,
 } from "./agreementIntakeStorage";
 import { shouldKeepReviewDisplayAfterProHydrate } from "./sendHandoffAuthoritativeCorpus";
+import { PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA } from "./signerSetupPartyIdentity";
 
 describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   const sessionStore = new Map<string, string>();
@@ -154,17 +155,21 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const s = readFileSync(p, "utf8");
     const i = s.indexOf("const premiumPaidDocumentSurface = useMemo");
     expect(i).toBeGreaterThanOrEqual(0);
-    const frag = s.slice(i, i + 1600);
+    const frag = s.slice(i, i + 2000);
     expect(frag).toContain("resolveIsFreeStreamlineDraftReview");
+    expect(frag).toContain("hasPaidProSourceOfTruth()");
+    expect(frag).toContain("hasPaidPremiumCompletionSession()");
     expect(frag).toContain("CRITICAL INVARIANT:");
     expect(frag).toContain("!tierAllowsAdvancedFullDraftReveal(tier)");
-    expect(frag).toContain(
-      "return Boolean(hasPaidPremiumCompletionSession() || premiumPersistedFlowActive);",
+    expect(frag).toContain("hasPaidProChromeAuthority");
+    expect(frag).toMatch(
+      /\(hasPaidPremiumCompletionSession\(\) \|\| premiumPersistedFlowActive\) && chromeAuthority/,
     );
     expect(frag).not.toContain("peekAdvancedFullDraftCheckoutGrant()");
     const invariantIdx = frag.indexOf("CRITICAL INVARIANT:");
-    expect(frag.slice(invariantIdx)).not.toContain("premiumSendPathUnlocked");
-    expect(frag).toContain("return true");
+    const starterGateReturn = frag.slice(invariantIdx, frag.indexOf("return chromeAuthority;", invariantIdx));
+    expect(starterGateReturn).not.toContain("premiumSendPathUnlocked");
+    expect(frag).toMatch(/if \(hasPaidProSourceOfTruth\(\) \|\| hasPaidPremiumCompletionSession\(\)\) return true/);
   });
 
   it("premiumCompletion URL is honored via hasPaidPremiumCompletionSession (starter Pro surface path)", () => {
@@ -302,13 +307,16 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
   });
 
-  it("paid authoritative Pro hides top adjust card but keeps lower Finalize panel", () => {
+  it("paid authoritative Pro hides top adjust card and legacy finalize panel on canonical review", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("showTopProAdjustCard");
     expect(intake).toMatch(/showTopProAdjustCard\s*=\s*Boolean\([\s\S]*?!paidProAuthoritative/);
     expect(intake).toContain("Want to adjust this agreement?");
     expect(intake).toContain("{showTopProAdjustCard ?");
     expect(intake).toContain("FinalizeYourAgreementPanel");
+    expect(intake).toMatch(/showProLawdogRefineAndFinalize[\s\S]*!acceptedPaidProAuthorityActive/);
+    expect(intake).toContain("paidProCanonicalStickyCta");
+    expect(intake).toContain("resolvePaidProStickyCta");
     expect(intake).toContain("resolveProReviewFooterState");
     expect(intake).toContain("FREE_STARTER_REVIEW_TITLE");
     expect(intake).toContain("resetStalePaidReviewShellForFreeStarter");
@@ -391,14 +399,21 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("Create review link");
   });
 
-  it("paid Pro recipient fields mount below finalize with inline shell (not legacy Share headline constant)", () => {
+  it("paid Pro canonical review mounts inline signer shell (not legacy Share headline constant)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toMatch(
-      /\{paidProRecipientSetupOnDraft &&[\s\S]*?!guidedPreReviewSignerSetupActive \? \([\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
+      /\{paidProCanonicalReviewSignerSetupActive \? \([\s\S]*?id="claw-paid-pro-inline-signer-setup"[\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
     );
     expect(intake).toMatch(
-      /paidProInlineRecipientShell\s*\n\s*\? "Add signer details"\s*\n\s*: "Share this agreement"/,
+      new RegExp(
+        `paidProInlineRecipientShell\\s*\\n\\s*\\? PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA\\s*\\n\\s*: "Share this agreement"`,
+      ),
     );
+    expect(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA).toBe("Complete signer details");
+    expect(intake).not.toMatch(
+      /showProLawdogRefineAndFinalize[\s\S]{0,240}&&\s*acceptedPaidProAuthorityActive/,
+    );
+    expect(intake).toMatch(/showProLawdogRefineAndFinalize[\s\S]*!acceptedPaidProAuthorityActive/);
   });
 
   it("paid Pro recipient_setup_required: productionReadyForPersist tolerates missing emails; inputs forced + CTA nudge", () => {
@@ -829,13 +844,19 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("adding_signature_fields");
     expect(intake).toContain("signing_packet_ready");
     const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
-    const sendBlock = intake.slice(sendIdx, sendIdx + 2500);
+    const sendBlock = intake.slice(sendIdx, sendIdx + 2800);
     expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
     expect(sendBlock).toContain("canProceedGuidedFinalReviewToSigning");
-    const guidedBranch = sendBlock.slice(
-      sendBlock.indexOf("canProceedGuidedFinalReviewToSigning"),
-      sendBlock.indexOf('enterFinalReviewRecipientSetup("signature")'),
+    expect(sendBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    const guidedProceedIdx = sendBlock.indexOf(
+      "if (canProceedGuidedFinalReviewToSigning && paidProSignatureDetailsReady)",
     );
+    expect(guidedProceedIdx).toBeGreaterThan(-1);
+    const guidedBranch = sendBlock.slice(
+      guidedProceedIdx,
+      sendBlock.lastIndexOf('enterFinalReviewRecipientSetup("signature")'),
+    );
+    expect(guidedBranch).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
     expect(guidedBranch).toContain("return;");
     const screen = readFileSync(
       join(__dirname, "guidedDealCompletion/GuidedProSigningConfirmationScreen.tsx"),
@@ -850,7 +871,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("onChangeSigningOrder");
     expect(screen).toContain("Back to final review");
     const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
-    const enterBlock = intake.slice(enterIdx, enterIdx + 600);
+    const enterBlock = intake.slice(enterIdx, enterIdx + 2200);
     expect(enterBlock).toContain("continueGuidedFinalReviewToSigning({ intent })");
     expect(intake).toContain("GuidedFinalizeModal");
     expect(intake).toContain("logGuidedFinalizeModalEnter");
@@ -1023,10 +1044,13 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("test18: enterFinalReviewRecipientSetup blocked until post-ready send path", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
-    const enterBlock = intake.slice(enterIdx, enterIdx + 900);
+    const enterBlock = intake.slice(enterIdx, enterIdx + 2200);
+    expect(enterBlock).toContain("acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady");
+    expect(enterBlock).toContain("claw-paid-pro-inline-signer-setup");
     expect(enterBlock).toContain("guidedProUxSuppressesProductionSendCta");
     expect(enterBlock).toContain("guidedProUxShowsQuestionPanel");
     expect(enterBlock).toContain('logGuidedSendCtaBlocked("enterFinalReviewRecipientSetup"');
+    expect(enterBlock).toContain("continueGuidedFinalReviewToSigning({ intent })");
   });
 });
 
@@ -1101,10 +1125,15 @@ describe("homepage starter_review mount (no paid Pro SoT)", () => {
     expect(intake).toContain("commitFreeDraftForReview");
     expect(intake).toContain("StarterDraftDocumentSurface");
     const buildIdx = intake.indexOf("const buildPreviewForCurrentTier = React.useCallback");
-    const buildBlock = intake.slice(buildIdx, buildIdx + 1200);
+    const buildBlock = intake.slice(buildIdx, buildIdx + 1400);
     expect(buildBlock).toMatch(
-      /if \(paidProSignerMetadataSessionActiveRef\.current && hasPaidProSourceOfTruth\(\)\)/,
+      /\(paidProSignerMetadataSessionActiveRef\.current \|\| paidProPostSignerMetadataFreezeRef\.current\)/,
     );
+    expect(buildBlock).toContain("hasPaidProSourceOfTruth()");
+    expect(buildBlock).toContain('logIllegalPostFreezePreviewFallback({ path: "buildPreviewForCurrentTier" })');
     expect(buildBlock).not.toMatch(/paidProInlineSignerSetupLatched/);
+    const previewIdx = intake.indexOf("const renderedAgreementPreview = useMemo");
+    const previewBlock = intake.slice(previewIdx, previewIdx + 500);
+    expect(previewBlock).toContain("paidProPostSignerMetadataFreezeRef.current");
   });
 });
