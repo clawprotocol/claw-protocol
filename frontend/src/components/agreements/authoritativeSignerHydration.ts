@@ -14,7 +14,12 @@ import {
   type AuthoritativeSigningSnapshot,
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
-import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import {
+  buildLivePaidProSignerMetadataAuthority,
+  hashPaidProSignerMetadataAuthority,
+  recipientMetadataToAuthorityParties,
+  type LiveSignerMetadataUiState,
+} from "./paidProSignerMetadataAuthority";
 
 export type HydratedAuthoritativeSigningCorpusResult = {
   corpus: string;
@@ -81,15 +86,13 @@ export function buildHydratedAuthoritativeSigningCorpus(args: {
 export function fingerprintSignerMetadataState(
   meta: AuthoritativeSigningSnapshotRecipientMetadata,
 ): string {
-  return fingerprintAgreementBody(
-    JSON.stringify({
-      names: meta.partySignerNames,
-      titles: meta.partySignerTitles,
-      r1: meta.recipient1Email,
-      r2: meta.recipient2Email,
-      extra: meta.extraPartyReviewEmails,
-    }),
-  );
+  const parties = recipientMetadataToAuthorityParties(meta);
+  return hashPaidProSignerMetadataAuthority(parties);
+}
+
+/** Drift fingerprint from live UI state (all five signer authority fields). */
+export function fingerprintLiveSignerMetadataUi(ui: LiveSignerMetadataUiState): string {
+  return buildLivePaidProSignerMetadataAuthority(ui).hash;
 }
 
 export function signerMetadataDriftedFromSnapshot(

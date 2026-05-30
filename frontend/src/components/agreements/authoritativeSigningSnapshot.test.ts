@@ -81,6 +81,7 @@ function buildSmokeSnapshot() {
     signerMetadata: {
       partySignerNames: ["Anthem H Blanchard", "Jim Summit"],
       partySignerTitles: ["Manager", "CEO"],
+      partyAddresses: ["100 Mesa Drive", ""],
       recipient1Name: BLUE_CANYON,
       recipient2Name: IRON_VALE,
       recipient1Email: "anthemhayek@gmail.com",

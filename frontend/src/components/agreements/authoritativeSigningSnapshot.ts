@@ -19,6 +19,7 @@ export type PaidProSigningAuthorityPhase =
 export type AuthoritativeSigningSnapshotRecipientMetadata = {
   partySignerNames: readonly string[];
   partySignerTitles: readonly string[];
+  partyAddresses: readonly string[];
   recipient1Name: string;
   recipient2Name: string;
   recipient1Email: string;
@@ -95,10 +96,14 @@ export function createAuthoritativeSigningSnapshot(
   const corpus = (args.corpus || "").trim();
   const hash = hashPaidProCorpus(corpus);
   const frozenAt = Date.now();
+  const signerMetadata: AuthoritativeSigningSnapshotRecipientMetadata = {
+    ...args.signerMetadata,
+    partyAddresses: args.signerMetadata.partyAddresses ?? [],
+  };
   authoritativeSigningSnapshot = {
     corpus,
-    signerMetadata: { ...args.signerMetadata },
-    recipientMetadata: { ...args.signerMetadata },
+    signerMetadata,
+    recipientMetadata: { ...signerMetadata },
     partyManifest: args.partyManifest,
     signatureBlockModel: args.signatureBlockModel,
     source: "paid_pro_signer_metadata_finalize",
@@ -195,12 +200,17 @@ export function logIllegalDirectEsignRoute(payload: {
 export function fingerprintSigningSnapshot(snapshot: AuthoritativeSigningSnapshot): string {
   const meta = JSON.stringify({
     signerNames: snapshot.signerMetadata.partySignerNames,
+    addresses: snapshot.signerMetadata.partyAddresses ?? [],
     emails: [
       snapshot.signerMetadata.recipient1Email,
       snapshot.signerMetadata.recipient2Email,
       ...snapshot.signerMetadata.extraPartyReviewEmails,
     ],
     titles: snapshot.signerMetadata.partySignerTitles,
+    legalNames: [
+      snapshot.signerMetadata.recipient1Name,
+      snapshot.signerMetadata.recipient2Name,
+    ],
     parties: snapshot.partyManifest.parties.map((p) => ({
       name: p.partyName,
       signer: p.signerName,

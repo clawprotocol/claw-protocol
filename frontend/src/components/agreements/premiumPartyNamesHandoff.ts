@@ -22,6 +22,7 @@ export type PremiumRecipientHandoffSlot = {
   /** Human authorized signer (optional; never implied from entity {@link name}). */
   signerName?: string;
   signerTitle?: string;
+  partyAddress?: string;
 };
 
 export type PremiumRecipientHandoffV2 = {
@@ -36,7 +37,7 @@ export type PremiumRecipientHandoffV2 = {
 };
 
 function emptySlot(): PremiumRecipientHandoffSlot {
-  return { name: "", email: "", role: "", signerName: "", signerTitle: "" };
+  return { name: "", email: "", role: "", signerName: "", signerTitle: "", partyAddress: "" };
 }
 
 function readLegacyPartyNamesOnly(): { party1: string; party2: string } | null {
@@ -69,6 +70,7 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
               role: String((x as PremiumRecipientHandoffSlot).role || "").trim() || "party",
               signerName: String((x as PremiumRecipientHandoffSlot).signerName || "").trim(),
               signerTitle: String((x as PremiumRecipientHandoffSlot).signerTitle || "").trim(),
+              partyAddress: String((x as PremiumRecipientHandoffSlot).partyAddress || "").trim(),
             }));
           if (cleaned.length > 0) partyIndexSlots = cleaned;
         }
@@ -80,6 +82,7 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
             role: String(parsed.party1.role || "").trim(),
             signerName: signerMetadataInputRaw(parsed.party1.signerName),
             signerTitle: signerMetadataInputRaw(parsed.party1.signerTitle),
+            partyAddress: String(parsed.party1.partyAddress || "").trim(),
           },
           party2: {
             name: String(parsed.party2.name || "").trim(),
@@ -87,6 +90,7 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
             role: String(parsed.party2.role || "").trim(),
             signerName: signerMetadataInputRaw(parsed.party2.signerName),
             signerTitle: signerMetadataInputRaw(parsed.party2.signerTitle),
+            partyAddress: String(parsed.party2.partyAddress || "").trim(),
           },
           savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : Date.now(),
           ...(partyIndexSlots ? { partyIndexSlots } : {}),
@@ -117,7 +121,14 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
 
 function mergeSlot(
   prev: PremiumRecipientHandoffSlot,
-  patch: Partial<{ name: string; email: string; role: string; signerName: string; signerTitle: string }>,
+  patch: Partial<{
+    name: string;
+    email: string;
+    role: string;
+    signerName: string;
+    signerTitle: string;
+    partyAddress: string;
+  }>,
 ): PremiumRecipientHandoffSlot {
   const name = patch.name !== undefined ? String(patch.name || "").trim() || prev.name : prev.name;
   const email =
@@ -136,7 +147,11 @@ function mergeSlot(
     patch.signerTitle !== undefined
       ? normalizeSignerMetadataForSave(patch.signerTitle) ?? ""
       : signerMetadataInputRaw(prev.signerTitle);
-  return { name, email, role, signerName, signerTitle };
+  const partyAddress =
+    patch.partyAddress !== undefined
+      ? String(patch.partyAddress || "").trim()
+      : String(prev.partyAddress || "").trim();
+  return { name, email, role, signerName, signerTitle, partyAddress };
 }
 
 function logReviewLinkSignerMetadataHandoffRead(handoff: PremiumRecipientHandoffV2): void {
@@ -178,10 +193,33 @@ function logReviewLinkSignerMetadataHandoffWrite(payload: PremiumRecipientHandof
  * Emails: blank patch never clears a previously stored non-blank email.
  */
 export function persistPremiumRecipientHandoff(patch: {
-  party1?: Partial<{ name: string; email: string; role: string; signerName: string; signerTitle: string }>;
-  party2?: Partial<{ name: string; email: string; role: string; signerName: string; signerTitle: string }>;
+  party1?: Partial<{
+    name: string;
+    email: string;
+    role: string;
+    signerName: string;
+    signerTitle: string;
+    partyAddress: string;
+  }>;
+  party2?: Partial<{
+    name: string;
+    email: string;
+    role: string;
+    signerName: string;
+    signerTitle: string;
+    partyAddress: string;
+  }>;
   partyIndexSlots?: Array<
-    Partial<{ name: string; email: string; role: string; signerName: string; signerTitle: string }> | null | undefined
+    | Partial<{
+        name: string;
+        email: string;
+        role: string;
+        signerName: string;
+        signerTitle: string;
+        partyAddress: string;
+      }>
+    | null
+    | undefined
   >;
 }): void {
   const cur = readPremiumRecipientHandoff();
@@ -198,8 +236,18 @@ export function persistPremiumRecipientHandoff(patch: {
     });
     if (partyIndexSlots.length === 0) partyIndexSlots = undefined;
   }
-  const extraHasSignal = (partyIndexSlots ?? []).some((s) => s.name || s.email);
-  if (!party1.name && !party2.name && !party1.email && !party2.email && !extraHasSignal) return;
+  const extraHasSignal = (partyIndexSlots ?? []).some((s) => s.name || s.email || s.partyAddress);
+  if (
+    !party1.name &&
+    !party2.name &&
+    !party1.email &&
+    !party2.email &&
+    !party1.partyAddress &&
+    !party2.partyAddress &&
+    !extraHasSignal
+  ) {
+    return;
+  }
   try {
     const payload: PremiumRecipientHandoffV2 = {
       v: 2,

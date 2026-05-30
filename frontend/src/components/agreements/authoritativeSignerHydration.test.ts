@@ -96,6 +96,7 @@ describe("authoritativeSignerHydration", () => {
       signerMetadata: {
         partySignerNames: ["Anthem H Blanchard", "Jim Summit"],
         partySignerTitles: ["Manager", "CEO"],
+        partyAddresses: [],
         recipient1Name: BLUE_CANYON,
         recipient2Name: IRON_VALE,
         recipient1Email: "anthemhayek@gmail.com",
@@ -117,6 +118,7 @@ describe("authoritativeSignerHydration", () => {
     const meta = {
       partySignerNames: ["A", "B"],
       partySignerTitles: ["T1", "T2"],
+      partyAddresses: [] as string[],
       recipient1Name: BLUE_CANYON,
       recipient2Name: IRON_VALE,
       recipient1Email: "a@test.com",
@@ -154,6 +156,7 @@ describe("authoritativeSignerHydration", () => {
       signerMetadata: {
         partySignerNames: ["Anthem H Blanchard", "Jim Summit"],
         partySignerTitles: ["Manager", "CEO"],
+        partyAddresses: [],
         recipient1Name: BLUE_CANYON,
         recipient2Name: IRON_VALE,
         recipient1Email: "anthemhayek@gmail.com",
@@ -171,10 +174,26 @@ describe("authoritativeSignerHydration", () => {
     expect(readAuthoritativeSigningCorpus()).toBe(hydrated.corpus);
   });
 
+  it("legal entity edits trigger drift fingerprint", () => {
+    const before = {
+      partySignerNames: ["A", "B"],
+      partySignerTitles: ["", ""],
+      partyAddresses: [] as string[],
+      recipient1Name: BLUE_CANYON,
+      recipient2Name: IRON_VALE,
+      recipient1Email: "a@test.com",
+      recipient2Email: "b@test.com",
+      extraPartyReviewEmails: [] as string[],
+    };
+    const after = { ...before, recipient2Name: "New Legal Entity LLC" };
+    expect(fingerprintSignerMetadataState(before)).not.toBe(fingerprintSignerMetadataState(after));
+  });
+
   it("re-enter after delete: drift fingerprint detects metadata change", () => {
     const before = {
       partySignerNames: ["Sam", "Dana"],
       partySignerTitles: ["", ""],
+      partyAddresses: ["", ""] as string[],
       recipient1Name: BLUE_CANYON,
       recipient2Name: IRON_VALE,
       recipient1Email: "sam@test.com",

@@ -419,6 +419,33 @@ describe("paidProAcceptanceRouting", () => {
     });
   });
 
+  describe("canonical paid Pro review sticky CTA (single source)", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+
+    it("unified primary CTA defers to paidProCanonicalStickyCta before guided/finalize branches", () => {
+      const start = intake.indexOf("const unifiedPrimaryCta = useMemo");
+      expect(start).toBeGreaterThan(-1);
+      const stickyIdx = intake.indexOf("if (paidProCanonicalStickyCta)", start);
+      expect(stickyIdx).toBeGreaterThan(-1);
+      expect(intake.slice(stickyIdx, stickyIdx + 400)).toContain(
+        "mapPaidProStickyCtaToPrimaryCta(paidProCanonicalStickyCta)",
+      );
+      expect(intake.slice(stickyIdx, stickyIdx + 500)).toContain("assertCanonicalPaidProSignerCtaReason");
+      const canonicalReviewDecisionIdx = intake.indexOf(
+        "paid_pro_review_decision_on_card",
+        stickyIdx,
+      );
+      expect(canonicalReviewDecisionIdx).toBeGreaterThan(stickyIdx);
+      const legacyHiddenIdx = intake.indexOf('reason: "guided_final_review_hidden"', stickyIdx);
+      expect(legacyHiddenIdx).toBeGreaterThan(canonicalReviewDecisionIdx);
+    });
+
+    it("signer snapshot drift clears only while inline signer latch is armed", () => {
+      expect(intake).toContain("shouldClearSigningSnapshotOnSignerMetadataDrift");
+      expect(intake).toContain("inlineSignerSetupLatched: paidProInlineSignerSetupLatched");
+    });
+  });
+
   describe("paid Pro signer-setup UX surface (labels + Edit signer details scroll/focus)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 

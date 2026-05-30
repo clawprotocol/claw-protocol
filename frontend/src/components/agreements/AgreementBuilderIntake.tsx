@@ -614,6 +614,29 @@ import {
   signerMetadataDriftedFromSnapshot,
 } from "./authoritativeSignerHydration";
 import {
+  mapPaidProStickyCtaToPrimaryCta,
+  resolvePaidProStickyCta,
+  shouldClearSigningSnapshotOnSignerMetadataDrift,
+} from "./paidProStickyCta";
+import {
+  buildCtaForensicEvaluation,
+  collectSignerMetadataFieldLineage,
+  collectSignerMetadataForensicMatrix,
+  logCtaForensicEvaluation,
+  logSignerMetadataFieldLineage,
+  logSignerMetadataLifecycleEvent,
+  type SignerMetadataForensicField,
+} from "./paidProSignerMetadataForensicAudit";
+import {
+  assertCanonicalPaidProSignerCtaReason,
+  authorityPartiesToRecipientMetadata,
+  buildLivePaidProSignerMetadataAuthority,
+  emitPaidProSignerMetadataAuthoritativeWrite,
+  emitPaidProSignerMetadataCtaEvaluation,
+  emitPaidProSignerMetadataFieldDiagnostics,
+  type PaidProSignerMetadataField,
+} from "./paidProSignerMetadataAuthority";
+import {
   isPremiumGenerationApiUnavailableForUi,
   PAID_PRO_API_UNAVAILABLE_BODY,
   PAID_PRO_API_UNAVAILABLE_HEADLINE,
@@ -1697,6 +1720,8 @@ type CreateFlowSendRecipientsPanelProps = {
   setPartySignerNames: React.Dispatch<React.SetStateAction<string[]>>;
   partySignerTitles: string[];
   setPartySignerTitles: React.Dispatch<React.SetStateAction<string[]>>;
+  partyAddresses: string[];
+  setPartyAddresses: React.Dispatch<React.SetStateAction<string[]>>;
   recipientSignerLabels: string;
   setRecipientSignerLabels: React.Dispatch<React.SetStateAction<string>>;
   reviewHandoffAgreementEcho: string | null | undefined;
@@ -1735,6 +1760,20 @@ type CreateFlowSendRecipientsPanelProps = {
     field: string;
     inputEventKind: "change" | "input" | "blur" | "paste" | "autofill";
   }) => void;
+  /** DEV forensic audit: unified lifecycle log per signer field edit. */
+  onSignerMetadataForensicInput?: (args: {
+    partyIndex: number;
+    field: SignerMetadataForensicField;
+    raw: string;
+    inputEventKind: "change" | "blur";
+  }) => void;
+  /** Canonical authority path diagnostics for every signer metadata field. */
+  onPaidProSignerMetadataFieldDiagnostics?: (args: {
+    partyIndex: number;
+    field: PaidProSignerMetadataField;
+    raw: string;
+    inputEventKind: "change" | "blur";
+  }) => void;
 };
 
 function CreateFlowSendRecipientsPanel({
@@ -1760,6 +1799,8 @@ function CreateFlowSendRecipientsPanel({
   setPartySignerNames,
   partySignerTitles,
   setPartySignerTitles,
+  partyAddresses,
+  setPartyAddresses,
   recipientSignerLabels,
   setRecipientSignerLabels,
   reviewHandoffAgreementEcho,
@@ -1785,6 +1826,8 @@ function CreateFlowSendRecipientsPanel({
   onRecipientMetadataPersist,
   hidePrimarySendCta = false,
   onSignerMetadataSessionInput,
+  onSignerMetadataForensicInput,
+  onPaidProSignerMetadataFieldDiagnostics,
 }: CreateFlowSendRecipientsPanelProps) {
   const resolvedSendMode: PremiumSendIntent =
     finalReviewSendIntent === "review_only"
@@ -1793,7 +1836,15 @@ function CreateFlowSendRecipientsPanel({
         ? "signature"
         : effectivePremiumSendMode;
   const signaturePrepMode = resolvedSendMode === "signature";
-  const [partyAddresses, setPartyAddresses] = useState<string[]>([]);
+  const notifySignerMetadataFieldEdit = (args: {
+    partyIndex: number;
+    field: PaidProSignerMetadataField;
+    raw: string;
+    inputEventKind: "change" | "blur";
+  }) => {
+    onPaidProSignerMetadataFieldDiagnostics?.(args);
+    onSignerMetadataForensicInput?.(args);
+  };
   const r1e = stripRecipientEmailNoise(recipient1Email);
   const r2e = stripRecipientEmailNoise(recipient2Email);
   const cappedParties = (draft?.parties ?? []).slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
@@ -1910,9 +1961,25 @@ function CreateFlowSendRecipientsPanel({
         const legalEntityFieldValue = signerRenderSlot?.canonicalLegalEntity ?? "";
         const onEmailChange =
           idx === 0
-            ? (v: string) => setRecipient1Email(v)
+            ? (v: string) => {
+                notifySignerMetadataFieldEdit({
+                  partyIndex: idx,
+                  field: "signerEmail",
+                  raw: v,
+                  inputEventKind: "change",
+                });
+                setRecipient1Email(v);
+              }
             : idx === 1
-              ? (v: string) => setRecipient2Email(v)
+              ? (v: string) => {
+                  notifySignerMetadataFieldEdit({
+                    partyIndex: idx,
+                    field: "signerEmail",
+                    raw: v,
+                    inputEventKind: "change",
+                  });
+                  setRecipient2Email(v);
+                }
               : (v: string) =>
                   setExtraPartyReviewEmails((prev) => {
                     const next = [...prev];
@@ -1922,6 +1989,14 @@ function CreateFlowSendRecipientsPanel({
                   });
         const partyAddressVal = partyAddresses[idx] ?? "";
         const onPartyAddressChange = (v: string) => {
+          if (idx === 0 || idx === 1) {
+            notifySignerMetadataFieldEdit({
+              partyIndex: idx,
+              field: "partyAddress",
+              raw: v,
+              inputEventKind: "change",
+            });
+          }
           setPartyAddresses((prev) => {
             const next = [...prev];
             while (next.length <= idx) next.push("");
@@ -1944,6 +2019,12 @@ function CreateFlowSendRecipientsPanel({
             return;
           }
           logSignerMetadataInputChange({ surface: "recipient_setup", field: "signerName", partyIndex: idx, raw: v });
+          notifySignerMetadataFieldEdit({
+            partyIndex: idx,
+            field: "signerName",
+            raw: v,
+            inputEventKind: "change",
+          });
           onSignerMetadataSessionInput?.({ partyIndex: idx, field: "signerName", inputEventKind: "change" });
           setPartySignerNames((prev) => {
             const next = [...prev];
@@ -1985,6 +2066,12 @@ function CreateFlowSendRecipientsPanel({
             return;
           }
           logSignerMetadataInputChange({ surface: "recipient_setup", field: "signerTitle", partyIndex: idx, raw: v });
+          notifySignerMetadataFieldEdit({
+            partyIndex: idx,
+            field: "signerTitle",
+            raw: v,
+            inputEventKind: "change",
+          });
           onSignerMetadataSessionInput?.({ partyIndex: idx, field: "signerTitle", inputEventKind: "change" });
           setPartySignerTitles((prev) => {
             const next = [...prev];
@@ -2029,7 +2116,15 @@ function CreateFlowSendRecipientsPanel({
                   type="text"
                   data-claw-recipient-field="r1-name"
                   value={legalEntityFieldValue}
-                  onChange={(e) => setRecipient1Name(e.target.value)}
+                  onChange={(e) => {
+                    notifySignerMetadataFieldEdit({
+                      partyIndex: 0,
+                      field: "partyLegalName",
+                      raw: e.target.value,
+                      inputEventKind: "change",
+                    });
+                    setRecipient1Name(e.target.value);
+                  }}
                   className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
                   autoComplete="organization"
                   placeholder="e.g. Acme LLC"
@@ -2042,7 +2137,15 @@ function CreateFlowSendRecipientsPanel({
                   type="text"
                   data-claw-recipient-field="r2-name"
                   value={legalEntityFieldValue}
-                  onChange={(e) => setRecipient2Name(e.target.value)}
+                  onChange={(e) => {
+                    notifySignerMetadataFieldEdit({
+                      partyIndex: 1,
+                      field: "partyLegalName",
+                      raw: e.target.value,
+                      inputEventKind: "change",
+                    });
+                    setRecipient2Name(e.target.value);
+                  }}
                   className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
                 />
               </label>
@@ -2741,6 +2844,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [extraPartyReviewEmails, setExtraPartyReviewEmails] = useState<string[]>([]);
   const [partySignerNames, setPartySignerNames] = useState<string[]>([]);
   const [partySignerTitles, setPartySignerTitles] = useState<string[]>([]);
+  const [partyAddresses, setPartyAddresses] = useState<string[]>([]);
   const recipient1NameRef = useRef("");
   const recipient2NameRef = useRef("");
   const recipient1EmailRef = useRef("");
@@ -2748,6 +2852,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const extraPartyReviewEmailsRef = useRef<string[]>([]);
   const partySignerNamesRef = useRef<string[]>([]);
   const partySignerTitlesRef = useRef<string[]>([]);
+  const partyAddressesRef = useRef<string[]>([]);
   const recipientSignerLabelsRef = useRef("");
   const [recipientsDeferred, setRecipientsDeferred] = useState(false);
   const [agreementTypeAccepted, setAgreementTypeAccepted] = useState(false);
@@ -3221,6 +3326,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     resizeSignerRow(setPartySignerTitles, (pIdx) =>
       String((parties[pIdx] as { signerTitle?: string })?.signerTitle ?? ""),
     );
+    resizeSignerRow(setPartyAddresses, (pIdx) =>
+      String((parties[pIdx] as { partyAddress?: string })?.partyAddress ?? ""),
+    );
   }, [draft?.parties?.length]);
   const paidProAuthoritativeRef = useRef(false);
   useLayoutEffect(() => {
@@ -3244,6 +3352,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     partySignerTitlesRef.current = partySignerTitles;
   }, [partySignerTitles]);
+  useLayoutEffect(() => {
+    partyAddressesRef.current = partyAddresses;
+  }, [partyAddresses]);
   useLayoutEffect(() => {
     recipientSignerLabelsRef.current = recipientSignerLabels;
   }, [recipientSignerLabels]);
@@ -3321,6 +3432,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (partiesLen > 0) {
       setPartySignerNames(slots.slice(0, partiesLen).map((s) => String(s.signerName ?? "").trim()));
       setPartySignerTitles(slots.slice(0, partiesLen).map((s) => String(s.signerTitle ?? "").trim()));
+      setPartyAddresses(slots.slice(0, partiesLen).map((s) => String(s.partyAddress ?? "").trim()));
     }
   }, [premiumSendConfirmOpen]);
 
@@ -3370,6 +3482,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (partiesLen > 0) {
       setPartySignerNames(slots.slice(0, partiesLen).map((s) => String(s.signerName ?? "").trim()));
       setPartySignerTitles(slots.slice(0, partiesLen).map((s) => String(s.signerTitle ?? "").trim()));
+      setPartyAddresses(slots.slice(0, partiesLen).map((s) => String(s.partyAddress ?? "").trim()));
     }
   }, [
     createUiStage,
@@ -4703,6 +4816,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const extraRef = extraPartyReviewEmailsRef.current;
       const signerNamesRef = partySignerNamesRef.current;
       const signerTitlesRef = partySignerTitlesRef.current;
+      const addressesRef = partyAddressesRef.current;
       const intakeText = intakeCombinedRef.current || "";
       const agreementBodyText =
         getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "";
@@ -4734,6 +4848,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             role: String(p?.role || "party").trim() || "party",
             signerName,
             signerTitle,
+            partyAddress: (addressesRef[0] ?? "").trim(),
           });
           continue;
         }
@@ -4756,6 +4871,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             role: String(p1?.role || "party").trim() || "party",
             signerName,
             signerTitle,
+            partyAddress: (addressesRef[1] ?? "").trim(),
           });
           continue;
         }
@@ -12381,6 +12497,47 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProSignerMetadataSessionActive,
     paidProPostSignerMetadataFreezeActive,
   ]);
+  const liveSignerMetadataUiState = React.useMemo(
+    () => ({
+      partyCount: Math.max(draft?.parties?.length ?? 0, 2),
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails,
+      partySignerNames,
+      partySignerTitles,
+      partyAddresses,
+    }),
+    [
+      draft?.parties?.length,
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      extraPartyReviewEmails,
+      partySignerNames,
+      partySignerTitles,
+      partyAddresses,
+    ],
+  );
+
+  const emitPaidProSignerMetadataFieldDiagnosticsCb = React.useCallback(
+    (args: {
+      partyIndex: number;
+      field: PaidProSignerMetadataField;
+      raw: string;
+      inputEventKind: "change" | "blur";
+    }) => {
+      emitPaidProSignerMetadataFieldDiagnostics({
+        ...args,
+        surface: "agreement_builder_intake",
+        sessionActive: paidProSignerMetadataSessionActiveRef.current,
+      });
+    },
+    [],
+  );
+
   const emitSignerMetadataFreezeDiagnostics = React.useCallback(
     (args: {
       partyIndex: number;
@@ -12389,6 +12546,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }) => {
       if (!paidProSignerMetadataSessionActiveRef.current) return;
       const before = getPaidProSourceOfTruth();
+      if (import.meta.env.DEV) {
+        logSignerMetadataLifecycleEvent("metadata-freeze", {
+          partyIndex: args.partyIndex,
+          field: args.field,
+          inputEventKind: args.inputEventKind,
+        });
+      }
       logPremiumSignerMetadataFreeze({
         hasSot: Boolean(before),
         partyIndex: args.partyIndex,
@@ -12658,16 +12822,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     const snap = getAuthoritativeSigningSnapshot();
     if (!snap || signaturePreparationRequested) return;
-    const currentMeta = {
-      partySignerNames: [...partySignerNames],
-      partySignerTitles: [...partySignerTitles],
-      recipient1Name,
-      recipient2Name,
-      recipient1Email,
-      recipient2Email,
-      extraPartyReviewEmails: [...extraPartyReviewEmails],
-    };
-    if (signerMetadataDriftedFromSnapshot(snap, currentMeta)) {
+    const currentMeta = authorityPartiesToRecipientMetadata(
+      buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState).parties,
+      [...extraPartyReviewEmails],
+    );
+    const drifted = signerMetadataDriftedFromSnapshot(snap, currentMeta);
+    if (
+      shouldClearSigningSnapshotOnSignerMetadataDrift({
+        hasSnapshot: true,
+        drifted,
+        inlineSignerSetupLatched: paidProInlineSignerSetupLatched,
+        signaturePreparationRequested,
+      })
+    ) {
       clearAuthoritativeSigningSnapshot();
       frozenSignerMetadataPartyManifestRef.current = null;
       frozenSignerMetadataIdentitiesRef.current = null;
@@ -12675,13 +12842,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     partySignerNames,
     partySignerTitles,
+    partyAddresses,
     recipient1Name,
     recipient2Name,
     recipient1Email,
     recipient2Email,
     extraPartyReviewEmails,
     signaturePreparationRequested,
-    premiumSurfaceGateTick,
+    paidProInlineSignerSetupLatched,
+    liveSignerMetadataUiState,
   ]);
 
   const guidedSignerFinalVersionLines = useMemo(() => {
@@ -13339,6 +13508,173 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProInlineSignerSetupLatched,
   ]);
 
+  const paidProCanonicalStickyCta = useMemo(() => {
+    if (!acceptedPaidProAuthorityActive || !simpleProFinalReviewShellActive) return null;
+    return resolvePaidProStickyCta({
+      hasAuthoritativeSigningSnapshot: paidProSignerMetadataFinalized,
+      signerDetailsComplete: signerDetailsAreComplete,
+      inlineSignerSetupLatched: paidProInlineSignerSetupLatched,
+      signaturePreparationRequested,
+      sendSurfaceReady: Boolean(
+        paidProRecipientSetupOnDraft && productionReadyForPersist && signaturePreparationRequested,
+      ),
+    });
+  }, [
+    acceptedPaidProAuthorityActive,
+    simpleProFinalReviewShellActive,
+    paidProSignerMetadataFinalized,
+    signerDetailsAreComplete,
+    paidProInlineSignerSetupLatched,
+    signaturePreparationRequested,
+    paidProRecipientSetupOnDraft,
+    productionReadyForPersist,
+  ]);
+
+  const emitSignerMetadataForensicAudit = React.useCallback(
+    (args: {
+      partyIndex: number;
+      field: SignerMetadataForensicField;
+      raw: string;
+      inputEventKind: "change" | "blur";
+    }) => {
+      if (!import.meta.env.DEV) return;
+      logSignerMetadataLifecycleEvent("metadata-input-change", {
+        field: args.field,
+        partyIndex: args.partyIndex,
+        inputEventKind: args.inputEventKind,
+        rawLen: args.raw.length,
+      });
+      const partyIdx = (args.partyIndex === 1 ? 1 : 0) as 0 | 1;
+      const row = collectSignerMetadataFieldLineage(
+        {
+          partyIndex: partyIdx,
+          local: {
+            recipient1Name,
+            recipient2Name,
+            recipient1Email,
+            recipient2Email,
+            partySignerNames,
+            partySignerTitles,
+            partyAddresses,
+          },
+          gate: paidProSignerDetailsGate,
+          stickyCta: paidProCanonicalStickyCta,
+          sessionContext: {
+            signaturePreparationRequested,
+            signerSetupLatched: paidProInlineSignerSetupLatched,
+            signerSetupActive: paidProRecipientSetupOnDraft || guidedInlineSignerSetupActive,
+          },
+        },
+        args.field,
+      );
+      logSignerMetadataFieldLineage(`input:${args.inputEventKind}`, row);
+    },
+    [
+      recipient1Name,
+      recipient2Name,
+      recipient1Email,
+      recipient2Email,
+      partySignerNames,
+      partySignerTitles,
+      partyAddresses,
+      paidProSignerDetailsGate,
+      paidProCanonicalStickyCta,
+      signaturePreparationRequested,
+      paidProInlineSignerSetupLatched,
+      paidProRecipientSetupOnDraft,
+      guidedInlineSignerSetupActive,
+    ],
+  );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !paidProCanonicalStickyCta) return;
+    emitPaidProSignerMetadataCtaEvaluation(
+      buildCtaForensicEvaluation({
+        gate: paidProSignerDetailsGate,
+        stickyCta: paidProCanonicalStickyCta,
+        evaluatedValues: Object.fromEntries(
+          buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState).parties.flatMap((p) => [
+            [`party${p.partyIndex}_legal`, p.partyLegalName || null],
+            [`party${p.partyIndex}_email`, p.signerEmail || null],
+            [`party${p.partyIndex}_name`, p.signerName || null],
+            [`party${p.partyIndex}_title`, p.signerTitle || null],
+            [`party${p.partyIndex}_address`, p.partyAddress || null],
+          ]),
+        ),
+      }),
+    );
+  }, [
+    paidProCanonicalStickyCta,
+    paidProSignerDetailsGate,
+    liveSignerMetadataUiState,
+  ]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !paidProSignerMetadataSessionActive) return;
+    const matrix = collectSignerMetadataForensicMatrix({
+      local: {
+        recipient1Name,
+        recipient2Name,
+        recipient1Email,
+        recipient2Email,
+        partySignerNames,
+        partySignerTitles,
+        partyAddresses,
+      },
+      gate: paidProSignerDetailsGate,
+      stickyCta: paidProCanonicalStickyCta,
+      sessionContext: {
+        signaturePreparationRequested,
+        signerSetupLatched: paidProInlineSignerSetupLatched,
+        signerSetupActive: paidProRecipientSetupOnDraft || guidedInlineSignerSetupActive,
+      },
+    });
+    for (const row of matrix) {
+      logSignerMetadataFieldLineage("session-matrix", row);
+    }
+  }, [
+    paidProSignerMetadataSessionActive,
+    recipient1Name,
+    recipient2Name,
+    recipient1Email,
+    recipient2Email,
+    partySignerNames,
+    partySignerTitles,
+    partyAddresses,
+    paidProSignerDetailsGate,
+    paidProCanonicalStickyCta,
+    signaturePreparationRequested,
+    paidProInlineSignerSetupLatched,
+  ]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !acceptedPaidProAuthorityActive) return;
+    logCtaForensicEvaluation(
+      "sticky-or-gate",
+      buildCtaForensicEvaluation({
+        gate: paidProSignerDetailsGate,
+        stickyCta: paidProCanonicalStickyCta,
+        evaluatedValues: {
+          recipient1Name: recipient1Name.trim() || null,
+          recipient2Name: recipient2Name.trim() || null,
+          recipient1Email: recipient1Email.trim() || null,
+          recipient2Email: recipient2Email.trim() || null,
+          signer0: (partySignerNames[0] ?? "").trim() || null,
+          signer1: (partySignerNames[1] ?? "").trim() || null,
+        },
+      }),
+    );
+  }, [
+    acceptedPaidProAuthorityActive,
+    paidProSignerDetailsGate,
+    paidProCanonicalStickyCta,
+    recipient1Name,
+    recipient2Name,
+    recipient1Email,
+    recipient2Email,
+    partySignerNames,
+  ]);
+
   const premiumPaidUnavailableRetry = useMemo(() => {
     if (!premiumPaidDocumentSurface || proUpgradeUseStarterView || authoritativePremiumUiCommitted) {
       return false;
@@ -13802,6 +14138,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     () =>
       showFinalizeYourAgreement &&
       canProceedWithPaidProDocument &&
+      !acceptedPaidProAuthorityActive &&
       !proUpgradeUseStarterView &&
       !suppressGuidedFreeformUx &&
       guidedProUxState !== "guided_final_review" &&
@@ -13809,6 +14146,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [
       showFinalizeYourAgreement,
       canProceedWithPaidProDocument,
+      acceptedPaidProAuthorityActive,
       proUpgradeUseStarterView,
       suppressGuidedFreeformUx,
       guidedProUxState,
@@ -13816,9 +14154,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
-  /** Paid Pro: bottom sticky duplicates “Send for review / signature” on the finalize panel — hide until recipients. */
+  /** Paid Pro: bottom sticky duplicates legacy finalize panel — not used on canonical paid review shell. */
   const hideStickyForPaidProFinalizeDeliveryChoiceBase = Boolean(
     paidProAuthoritative &&
+      !acceptedPaidProAuthorityActive &&
       createProductionTwoPane &&
       createUiStage === CreateUiStage.DRAFT &&
       premiumPersistedFlowActive &&
@@ -13832,11 +14171,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     isFreeStreamlineDraftReview && freeTrackBlocksRecipientAdvance,
   );
 
+  const paidProCanonicalStickyBarVisible = Boolean(
+    paidProCanonicalStickyCta?.showStickyBar && acceptedPaidProAuthorityActive,
+  );
   const simpleCreateStickyBottomBarVisibleBaseGated =
     simpleCreateStickyBottomBarVisibleBase &&
     !hideStickyForPaidProFinalizeDeliveryChoiceBase &&
     !hideStickyForStarterProContinuation &&
-    !guidedFinalReviewActive;
+    (!guidedFinalReviewActive || paidProCanonicalStickyBarVisible);
 
 
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
@@ -15549,9 +15891,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reason: "unified_cta_inactive",
       };
     }
+    if (paidProCanonicalStickyCta) {
+      const mapped = mapPaidProStickyCtaToPrimaryCta(paidProCanonicalStickyCta);
+      return {
+        ...mapped,
+        reason: assertCanonicalPaidProSignerCtaReason({
+          reason: mapped.reason,
+          canonicalSignerFlowActive: Boolean(
+            acceptedPaidProAuthorityActive && simpleProFinalReviewShellActive,
+          ),
+        }),
+      };
+    }
+    if (
+      guidedFinalReviewActive &&
+      acceptedPaidProAuthorityActive &&
+      simpleProFinalReviewShellActive
+    ) {
+      if (paidProInlineSignerSetupLatched && !signaturePreparationRequested) {
+        return {
+          label: paidProSignerDetailsGate.ctaLabel,
+          action: signerDetailsAreComplete ? "guided_continue" : "complete_recipient_details",
+          disabled: false,
+          reason: signerDetailsAreComplete
+            ? "paid_pro_signer_details_complete"
+            : "paid_pro_signer_details_required",
+        };
+      }
+      return {
+        label: "",
+        action: "guided_continue",
+        disabled: true,
+        reason: "paid_pro_review_decision_on_card",
+      };
+    }
     if (guidedFinalReviewActive) {
-      // While inline signer setup is latched open, the sticky CTA must reflect signer-setup state —
-      // not hide behind guided_final_review_hidden (which made the debug panel look like a mode flip).
       if (paidProInlineSignerSetupLatched && !signaturePreparationRequested) {
         return {
           label: paidProSignerDetailsGate.ctaLabel,
@@ -15567,18 +15941,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         action: "guided_continue",
         disabled: true,
         reason: "guided_final_review_hidden",
-      };
-    }
-    if (
-      acceptedPaidProAuthorityActive &&
-      simpleProFinalReviewShellActive &&
-      !paidProSignatureDetailsReady
-    ) {
-      return {
-        label: PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
-        action: "complete_recipient_details",
-        disabled: false,
-        reason: "paid_pro_signer_details_required",
       };
     }
     // FAILED_PREMIUM_CORPUS: paid surface must offer recovery, never a Pro upsell or empty review CTA.
@@ -16135,6 +16497,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     authoritativePremiumUiCommitted,
     guidedQuestionGateDecision,
     simpleProFinalReviewActive,
+    paidProCanonicalStickyCta,
   ]);
 
   useEffect(() => {
@@ -19816,6 +20179,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [guidedUxFlags, guidedCompletionPhase]);
 
   const guidedSigningTrustSlot = useMemo(() => {
+    if (acceptedPaidProAuthorityActive) return null;
     if (!guidedUxFlags.guidedUpdated) return null;
     return (
       <GuidedSigningTrustStrip
@@ -19824,7 +20188,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         packetPreparedOnCurrentVersion={guidedSigningPacketPreparedCurrent}
       />
     );
-  }, [guidedUxFlags.guidedUpdated, guidedSigningPacketStale, guidedSigningPacketPreparedCurrent]);
+  }, [
+    acceptedPaidProAuthorityActive,
+    guidedUxFlags.guidedUpdated,
+    guidedSigningPacketStale,
+    guidedSigningPacketPreparedCurrent,
+  ]);
 
   const guidedSuppressSecondaryDocActions = Boolean(
     guidedUxFlags.guidedApplying ||
@@ -21539,21 +21908,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       identities: hydrated.identities,
       signFirst: premiumSignatureSenderFirst,
     });
-    const signerMetadata = {
-      partySignerNames: [...partySignerNames],
-      partySignerTitles: [...partySignerTitles],
-      recipient1Name,
-      recipient2Name,
-      recipient1Email,
-      recipient2Email,
-      extraPartyReviewEmails: [...extraPartyReviewEmails],
-    };
+    const signerMetadata = authorityPartiesToRecipientMetadata(
+      buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState).parties,
+      [...extraPartyReviewEmails],
+    );
     createAuthoritativeSigningSnapshot({
       corpus: hydrated.corpus,
       signerMetadata,
       partyManifest,
       signatureBlockModel,
     });
+    if (import.meta.env.DEV) {
+      logSignerMetadataLifecycleEvent("snapshot-write", {
+        hash: getAuthoritativeSigningSnapshot()?.hash ?? null,
+        signerMetadata,
+        partyManifestPartyNames: partyManifest.parties.map((p) => p.partyName),
+      });
+      emitPaidProSignerMetadataAuthoritativeWrite({
+        path: "finalizePaidProSignerMetadataAndOpenReviewDecision",
+        hydratedLen: hydrated.corpus.length,
+        authorityHash: buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState).hash,
+      });
+    }
     logSnapshotSignerState({
       partyCount: partyManifest.parties.length,
       signerNames: signerMetadata.partySignerNames,
@@ -21583,11 +21959,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSignatureSenderFirst,
     partySignerNames,
     partySignerTitles,
+    partyAddresses,
     recipient1Name,
     recipient2Name,
     recipient1Email,
     recipient2Email,
     extraPartyReviewEmails,
+    liveSignerMetadataUiState,
     guidedPreReviewSignerSlots.requiredCount,
     draft?.parties,
     effectivePremiumSendMode,
@@ -23194,6 +23572,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPartySignerNames={setPartySignerNames}
           partySignerTitles={partySignerTitles}
           setPartySignerTitles={setPartySignerTitles}
+          partyAddresses={partyAddresses}
+          setPartyAddresses={setPartyAddresses}
           recipientSignerLabels={recipientSignerLabels}
           setRecipientSignerLabels={setRecipientSignerLabels}
           reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
@@ -25127,6 +25507,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             setPartySignerNames={setPartySignerNames}
                                             partySignerTitles={partySignerTitles}
                                             setPartySignerTitles={setPartySignerTitles}
+                                            partyAddresses={partyAddresses}
+                                            setPartyAddresses={setPartyAddresses}
                                             recipientSignerLabels={recipientSignerLabels}
                                             setRecipientSignerLabels={setRecipientSignerLabels}
                                             reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
@@ -25152,6 +25534,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
                                             }}
                                             onSignerMetadataSessionInput={emitSignerMetadataFreezeDiagnostics}
+                                            onSignerMetadataForensicInput={emitSignerMetadataForensicAudit}
+                                            onPaidProSignerMetadataFieldDiagnostics={
+                                              emitPaidProSignerMetadataFieldDiagnosticsCb
+                                            }
                                           />
                                         </div>
                                         {showGuidedFinalReviewInlineCta ? (
@@ -25446,6 +25832,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               setPartySignerNames={setPartySignerNames}
                                               partySignerTitles={partySignerTitles}
                                               setPartySignerTitles={setPartySignerTitles}
+                                              partyAddresses={partyAddresses}
+                                              setPartyAddresses={setPartyAddresses}
                                               recipientSignerLabels={recipientSignerLabels}
                                               setRecipientSignerLabels={setRecipientSignerLabels}
                                               reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
@@ -25473,6 +25861,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                 if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
                                               }}
                                               onSignerMetadataSessionInput={emitSignerMetadataFreezeDiagnostics}
+                                              onSignerMetadataForensicInput={emitSignerMetadataForensicAudit}
+                                              onPaidProSignerMetadataFieldDiagnostics={
+                                                emitPaidProSignerMetadataFieldDiagnosticsCb
+                                              }
                                             />
                                           </div>
                                         ) : null}
@@ -26228,6 +26620,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       setPartySignerNames={setPartySignerNames}
                                       partySignerTitles={partySignerTitles}
                                       setPartySignerTitles={setPartySignerTitles}
+                                      partyAddresses={partyAddresses}
+                                      setPartyAddresses={setPartyAddresses}
                                       recipientSignerLabels={recipientSignerLabels}
                                       setRecipientSignerLabels={setRecipientSignerLabels}
                                       reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
@@ -26256,6 +26650,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
                                       }}
                                       onSignerMetadataSessionInput={emitSignerMetadataFreezeDiagnostics}
+                                      onSignerMetadataForensicInput={emitSignerMetadataForensicAudit}
+                                      onPaidProSignerMetadataFieldDiagnostics={
+                                        emitPaidProSignerMetadataFieldDiagnosticsCb
+                                      }
                                     />
                                   </div>
                                 ) : null}
@@ -26527,6 +26925,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         setPartySignerNames={setPartySignerNames}
                         partySignerTitles={partySignerTitles}
                         setPartySignerTitles={setPartySignerTitles}
+                        partyAddresses={partyAddresses}
+                        setPartyAddresses={setPartyAddresses}
                         recipientSignerLabels={recipientSignerLabels}
                         setRecipientSignerLabels={setRecipientSignerLabels}
                         reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
