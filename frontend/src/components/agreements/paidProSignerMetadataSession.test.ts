@@ -9,7 +9,9 @@ import { resolveFinalVs01CorpusOrBlock } from "../../vs01/vs01SigningCorpus";
 import {
   paidProSignerMetadataSessionActive,
   paidProSignerSetupSuppressesGuidedAndStarter,
+  paidProSigningCorpusFreezeActive,
   resolvePaidProReviewState,
+  resolvePremiumSignerDetailsGateDiagnostics,
 } from "./paidProReviewStateMachine";
 import {
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
@@ -223,6 +225,95 @@ describe("runtime-like signer metadata session stability", () => {
   });
 });
 
+describe("Party 2 signer typing: validation complete vs Prepare release", () => {
+  function renderVs01GateWhileSession(args: {
+    prepareRequested: boolean;
+    resolver: typeof resolveFinalVs01CorpusOrBlock;
+  }) {
+    if (
+      paidProSigningCorpusFreezeActive({
+        hasPaidProSourceOfTruth: true,
+        prepareSignatureLinksRequested: args.prepareRequested,
+      })
+    ) {
+      return { allowed: false, source: "deferred" as const };
+    }
+    return args.resolver({
+      agreementCorpusText: PRODUCTION_SOT_BODY,
+      guidedPro: true,
+    } as Parameters<typeof resolveFinalVs01CorpusOrBlock>[0]);
+  }
+
+  it("autofill Party 1, Party 2 email, then one-char Party 2 name storm: complete flips, release stays false", () => {
+    armProductionSession();
+    const spy = vi.fn(resolveFinalVs01CorpusOrBlock);
+    let prepareRequested = false;
+    const latch = true;
+
+    const party1Batch = simulateSignerMetadataSession({
+      partySignerNames: ["Anthem H Blanchard", ""],
+      recipient1Email: "anthemhayek@gmail.com",
+      recipient2Email: "anthemhayek@me.com",
+      latch,
+      prepareRequested,
+    });
+    expect(party1Batch.sessionActive).toBe(true);
+    expect(party1Batch.mounted).toBe(true);
+
+    const keystrokes = ["", "j", "ji", "jim", "Jim", "Jim ", "Jim S"];
+    let sawComplete = false;
+    for (const stroke of keystrokes) {
+      const r = simulateSignerMetadataSession({
+        partySignerNames: ["Anthem H Blanchard", stroke],
+        recipient1Email: "anthemhayek@gmail.com",
+        recipient2Email: "anthemhayek@me.com",
+        latch,
+        prepareRequested,
+      });
+      expect(r.sessionActive).toBe(true);
+      expect(r.mounted).toBe(true);
+      expect(r.reviewState).not.toBe("FAILED_PREMIUM_CORPUS");
+      if (r.gate.complete) sawComplete = true;
+      const diag = resolvePremiumSignerDetailsGateDiagnostics({
+        signerDetailsAreComplete: r.gate.complete,
+        signaturePreparationRequested: prepareRequested,
+        hasPaidProSourceOfTruth: true,
+        signerSetupLatched: latch,
+      });
+      expect(diag.signaturePreparationRequested).toBe(false);
+      expect(diag.metadataSessionActive).toBe(true);
+      expect(diag.signingCorpusFreezeActive).toBe(true);
+      expect(diag.blockedVs01Compute).toBe(true);
+      expect(diag.blockedHandoffCompute).toBe(true);
+      expect(diag.blockedReadonlyReplacement).toBe(true);
+      expect(diag.blockedFailedPremiumCorpus).toBe(true);
+      renderVs01GateWhileSession({ prepareRequested, resolver: spy });
+    }
+    expect(sawComplete).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(0);
+  });
+
+  it("resolveFinalVs01CorpusOrBlock runs exactly once after explicit Prepare (not during typing)", () => {
+    armProductionSession();
+    const spy = vi.fn(resolveFinalVs01CorpusOrBlock);
+    let prepareRequested = false;
+    simulateSignerMetadataSession({
+      partySignerNames: ["Anthem H Blanchard", "jim"],
+      recipient1Email: "anthemhayek@gmail.com",
+      recipient2Email: "anthemhayek@me.com",
+      latch: true,
+      prepareRequested,
+    });
+    for (const _ of ["j", "ji", "jim"]) {
+      renderVs01GateWhileSession({ prepareRequested, resolver: spy });
+    }
+    expect(spy).toHaveBeenCalledTimes(0);
+    prepareRequested = true;
+    renderVs01GateWhileSession({ prepareRequested, resolver: spy });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("signer metadata session blocks document recompute paths", () => {
   it("buildPreviewForCurrentTier guard returns empty while session ref is active", () => {
     armProductionSession();
@@ -247,6 +338,25 @@ describe("signer metadata session blocks document recompute paths", () => {
     if (sessionActive) {
       expect(spy).toHaveBeenCalledTimes(0);
     }
+  });
+
+  it("release derivation uses only signaturePreparationRequested, not validation-complete booleans", () => {
+    const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(src).toMatch(/const prepareSignatureLinksRequested\s*=\s*signaturePreparationRequested;/);
+    const prepareSlice = src.slice(
+      src.indexOf("const prepareSignatureLinksRequested ="),
+      src.indexOf("const prepareSignatureLinksRequested =") + 200,
+    );
+    expect(prepareSlice).not.toMatch(/paidProSignatureDetailsReady/);
+    expect(prepareSlice).not.toMatch(/signerDetailsAreComplete/);
+    expect(prepareSlice).not.toMatch(/guidedSendIntentSelected/);
+    expect(prepareSlice).not.toMatch(/finalReviewSendPathChosenRef/);
+    const freezeMemo = src.slice(
+      src.indexOf("const paidProSigningCorpusFreezeActive = useMemo"),
+      src.indexOf("const paidProSigningCorpusFreezeActive = useMemo") + 400,
+    );
+    expect(freezeMemo).toMatch(/prepareSignatureLinksRequested/);
+    expect(freezeMemo).not.toMatch(/paidProSignatureDetailsReady/);
   });
 
   it("declares paidProSignerMetadataSessionActiveRef before any .current read (no TDZ on mount)", () => {

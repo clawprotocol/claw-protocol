@@ -586,7 +586,9 @@ import {
   paidProSignerSetupSuppressesGuidedAndStarter,
   paidProSigningCorpusFreezeActive as paidProSigningCorpusFreezeActive_,
   logPremiumSignerFreeze,
+  logPremiumSignerDetailsGate,
   logPremiumSignerMetadataFreeze,
+  resolvePremiumSignerDetailsGateDiagnostics,
   paidProSignerMetadataSessionActive as paidProSignerMetadataSessionActive_,
   resolveOrReuseFrozenForSignerEdit,
   resolvePaidProReviewState,
@@ -12712,6 +12714,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProSignatureDetailsReady = Boolean(
     paidProSignerDetailsGate.complete && !createFlowRecipientPrimaryHelper,
   );
+  /** Validation-only: may flip true while typing; never releases corpus/session freezes. */
+  const signerDetailsAreComplete = paidProSignatureDetailsReady;
+  useEffect(() => {
+    if (!import.meta.env.DEV || !paidProSignerMetadataSessionActive) return;
+    logPremiumSignerDetailsGate(
+      resolvePremiumSignerDetailsGateDiagnostics({
+        signerDetailsAreComplete,
+        signaturePreparationRequested,
+        hasPaidProSourceOfTruth: hasPaidProSourceOfTruth(),
+        signerSetupLatched: paidProInlineSignerSetupLatched,
+        signerSetupActive: paidProRecipientSetupOnDraft || guidedInlineSignerSetupActive,
+      }),
+    );
+  }, [
+    paidProSignerMetadataSessionActive,
+    signerDetailsAreComplete,
+    signaturePreparationRequested,
+    paidProInlineSignerSetupLatched,
+    paidProRecipientSetupOnDraft,
+    guidedInlineSignerSetupActive,
+    premiumSurfaceGateTick,
+  ]);
   const paidProCanonicalReviewSignerSetupActive = useMemo(
     () =>
       resolvePaidProInlineSignerSetupMounted({
@@ -15450,9 +15474,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (paidProInlineSignerSetupLatched && !signaturePreparationRequested) {
         return {
           label: paidProSignerDetailsGate.ctaLabel,
-          action: paidProSignatureDetailsReady ? "guided_continue" : "complete_recipient_details",
+          action: signerDetailsAreComplete ? "guided_continue" : "complete_recipient_details",
           disabled: false,
-          reason: paidProSignatureDetailsReady
+          reason: signerDetailsAreComplete
             ? "paid_pro_signer_details_complete"
             : "paid_pro_signer_details_required",
         };
@@ -16023,6 +16047,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     acceptedPaidProAuthorityActive,
     simpleProFinalReviewShellActive,
     paidProSignatureDetailsReady,
+    signerDetailsAreComplete,
     paidProSignerDetailsGate.ctaLabel,
     paidProInlineSignerSetupLatched,
     signaturePreparationRequested,
@@ -19940,32 +19965,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showProDeliveryTrackChooser = Boolean(
     paidProRuntimeAuthority.canShowProCtas &&
-      paidProSignatureDetailsReady &&
+      signerDetailsAreComplete &&
+      signaturePreparationRequested &&
       proDeliveryTrackBaseReady &&
       canChooseProDeliveryTrackFlag &&
       !premiumSendModeTouched &&
       !premiumSignersSurfaceReady &&
-      !paidProRecipientSetupOnDraft,
+      !paidProRecipientSetupOnDraft &&
+      !paidProCanonicalReviewSignerSetupActive,
   );
 
   const showSimplifiedProReviewSigningFlow = Boolean(
     proDeliveryTrackBaseReady &&
-      paidProSignatureDetailsReady &&
+      signerDetailsAreComplete &&
+      signaturePreparationRequested &&
       !showProDeliveryTrackChooser &&
       effectivePremiumSendMode === "signature" &&
       (premiumSendModeTouched || premiumSignersSurfaceReady) &&
-      !paidProRecipientSetupOnDraft,
+      !paidProRecipientSetupOnDraft &&
+      !paidProCanonicalReviewSignerSetupActive,
   );
 
   const showProReviewTrackActions = Boolean(
     proDeliveryTrackBaseReady &&
-      paidProSignatureDetailsReady &&
+      signerDetailsAreComplete &&
+      signaturePreparationRequested &&
       !showProDeliveryTrackChooser &&
       !showSimplifiedProReviewSigningFlow &&
       effectivePremiumSendMode === "review" &&
       premiumSendModeTouched &&
       !premiumSignersSurfaceReady &&
-      !paidProRecipientSetupOnDraft,
+      !paidProRecipientSetupOnDraft &&
+      !paidProCanonicalReviewSignerSetupActive,
   );
 
   React.useEffect(() => {
@@ -22315,6 +22346,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           case "guided_continue": {
             if (
+              cta.reason === "paid_pro_signer_details_complete" &&
+              paidProInlineSignerSetupLatched &&
+              !signaturePreparationRequested
+            ) {
+              continueGuidedFinalReviewToSigning({ intent: "signature" });
+              return;
+            }
+            if (
               isGuidedSignerSetupContinueToFinalReviewReason(cta.reason) &&
               (createFlowPhase === "signer_setup_required" ||
                 createFlowPhase === "updated_agreement_ready" ||
@@ -22453,6 +22492,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     if (simpleCreateUnifiedBottomCta) {
       console.log("[CTA CLICK]", unifiedPrimaryCta);
+      if (
+        unifiedPrimaryCta.action === "guided_continue" &&
+        !unifiedPrimaryCta.disabled &&
+        unifiedPrimaryCta.reason === "paid_pro_signer_details_complete" &&
+        paidProInlineSignerSetupLatched &&
+        !signaturePreparationRequested
+      ) {
+        continueGuidedFinalReviewToSigning({ intent: "signature" });
+        return;
+      }
       if (
         unifiedPrimaryCta.action === "guided_continue" &&
         !unifiedPrimaryCta.disabled &&

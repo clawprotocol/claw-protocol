@@ -888,6 +888,14 @@ describe("paidProAcceptanceRouting", () => {
       const ctaSlice = src.slice(ctaIdx, ctaIdx + 2200);
       expect(ctaSlice).toMatch(/paidProInlineSignerSetupLatched && !signaturePreparationRequested/);
       expect(ctaSlice).toMatch(/paid_pro_signer_details_required/);
+      expect(ctaSlice).toMatch(/signerDetailsAreComplete/);
+      expect(ctaSlice).not.toMatch(
+        /const prepareSignatureLinksRequested\s*=\s*[\s\S]{0,120}paidProSignatureDetailsReady/,
+      );
+      expect(ctaSlice).not.toMatch(/guidedSendIntentSelected[\s\S]{0,40}prepareSignatureLinksRequested/);
+      expect(ctaSlice).not.toMatch(/finalReviewSendPathChosenRef[\s\S]{0,40}prepareSignatureLinksRequested/);
+      expect(src).toMatch(/paid_pro_signer_details_complete[\s\S]{0,400}continueGuidedFinalReviewToSigning\(\{ intent: "signature" \}\)/);
+      expect(src).toMatch(/logPremiumSignerDetailsGate/);
     });
 
     it("AgreementBuilderIntake hard-freezes VS01 via the mode-independent invariant before the resolver", () => {

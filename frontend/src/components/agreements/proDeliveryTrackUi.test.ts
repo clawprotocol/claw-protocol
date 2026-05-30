@@ -103,7 +103,9 @@ describe("Pro delivery track UI wiring", () => {
       intake.indexOf("const showProDeliveryTrackChooser = Boolean("),
       intake.indexOf("const showProReviewTrackActions = Boolean(") + 520,
     );
-    expect(chooserBlock).toContain("paidProSignatureDetailsReady");
+    expect(chooserBlock).toContain("signerDetailsAreComplete");
+    expect(chooserBlock).toContain("signaturePreparationRequested");
+    expect(chooserBlock).not.toMatch(/signerDetailsAreComplete[\s\S]{0,80}prepareSignatureLinksRequested\s*=/);
     expect(intake).toContain("paidProSignerSetupRequiredBeforeDelivery");
     expect(intake).toContain("Add signer details before continuing.");
     expect(intake).toContain('data-testid="pro-review-add-signer-details"');

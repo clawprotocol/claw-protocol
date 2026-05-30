@@ -286,6 +286,66 @@ export function logPremiumSignerMetadataFreeze(payload: PremiumSignerMetadataFre
   console.info("[premium-signer-metadata-freeze]", payload);
 }
 
+/** DEV-only: distinguishes validation-complete from explicit Prepare-signature-links release. */
+export type PremiumSignerDetailsGateLog = {
+  signerDetailsAreComplete: boolean;
+  signaturePreparationRequested: boolean;
+  metadataSessionActive: boolean;
+  signingCorpusFreezeActive: boolean;
+  inlineSignerSetupLatched: boolean;
+  blockedVs01Compute: boolean;
+  blockedHandoffCompute: boolean;
+  blockedReadonlyReplacement: boolean;
+  blockedFailedPremiumCorpus: boolean;
+  reason: string;
+};
+
+export function resolvePremiumSignerDetailsGateDiagnostics(args: {
+  signerDetailsAreComplete: boolean;
+  signaturePreparationRequested: boolean;
+  hasPaidProSourceOfTruth: boolean;
+  signerSetupLatched: boolean;
+  signerSetupActive?: boolean;
+}): PremiumSignerDetailsGateLog {
+  const metadataSessionActive = paidProSignerMetadataSessionActive({
+    hasPaidProSourceOfTruth: args.hasPaidProSourceOfTruth,
+    prepareSignatureLinksRequested: args.signaturePreparationRequested,
+    signerSetupActive: args.signerSetupActive ?? false,
+    signerSetupLatched: args.signerSetupLatched,
+  });
+  const signingCorpusFreezeActive = paidProSigningCorpusFreezeActive({
+    hasPaidProSourceOfTruth: args.hasPaidProSourceOfTruth,
+    prepareSignatureLinksRequested: args.signaturePreparationRequested,
+  });
+  const editGuard = resolvePaidProSignerMetadataEditGuard({
+    hasPaidProSourceOfTruth: args.hasPaidProSourceOfTruth,
+    prepareSignatureLinksRequested: args.signaturePreparationRequested,
+    signerSetupActive: args.signerSetupActive ?? false,
+    signerSetupLatched: args.signerSetupLatched,
+  });
+  return {
+    signerDetailsAreComplete: args.signerDetailsAreComplete,
+    signaturePreparationRequested: args.signaturePreparationRequested,
+    metadataSessionActive,
+    signingCorpusFreezeActive,
+    inlineSignerSetupLatched: args.signerSetupLatched,
+    blockedVs01Compute: signingCorpusFreezeActive,
+    blockedHandoffCompute: editGuard.suppressHandoffAndVs01Recompute,
+    blockedReadonlyReplacement: editGuard.suppressPremiumRenderSourceRecompute,
+    blockedFailedPremiumCorpus: editGuard.suppressFailedPremiumCorpusTransition,
+    reason: args.signerDetailsAreComplete
+      ? "validation_complete_prepare_not_clicked"
+      : "validation_incomplete",
+  };
+}
+
+export function logPremiumSignerDetailsGate(payload: PremiumSignerDetailsGateLog): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (typeof import.meta === "undefined" || !import.meta.env?.DEV) return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-signer-details-gate]", payload);
+}
+
 /** True when document/corpus/preview/manifest recompute paths must no-op during signer metadata entry. */
 export function paidProSignerMetadataSessionBlocksDocumentRecompute(
   args: PaidProSignerMetadataSessionArgs,
