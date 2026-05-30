@@ -32,6 +32,13 @@ export type ResolvePaidProReviewStateArgs = {
    * stays GENERATING/RECOVERING until the paid SoT body resolves again.
    */
   authoritativeBodyLen?: number;
+  /**
+   * Signer (recipient) metadata is actively being edited over an accepted paid SoT. While true the
+   * surface must NEVER downgrade to FAILED_PREMIUM_CORPUS (or a starter degrade): a transient recompute
+   * during typing — validation flip, momentarily empty body, render-source churn — must hold on the
+   * accepted corpus (AUTHORITATIVE_READY) or, at worst, recover (GENERATING), never fail.
+   */
+  signerMetadataEditActive?: boolean;
 };
 
 /**
@@ -51,6 +58,9 @@ export function resolvePaidProReviewState(
   const bodyKnownEmpty =
     typeof args.authoritativeBodyLen === "number" && args.authoritativeBodyLen <= 0;
   if (args.hasValidAuthoritativeCorpus && !bodyKnownEmpty) return "AUTHORITATIVE_READY";
+  // Signer-metadata-edit isolation: while editing signer metadata over a paid session, a transient
+  // recompute must never downgrade to FAILED_PREMIUM_CORPUS or a starter degrade. Hold/recover only.
+  if (args.signerMetadataEditActive) return "GENERATING";
   if (args.premiumCorpusValidationFailed) return "FAILED_PREMIUM_CORPUS";
   if (args.premiumGenerationInFlight) return "GENERATING";
   // Paid authority exists but the body is momentarily empty: keep recovering, never fail/ready.
@@ -102,7 +112,36 @@ export type PaidProSignerSetupIsolationArgs = {
   signerSetupActive: boolean;
   /** A committed paid Pro Source of Truth exists. */
   hasPaidProSourceOfTruth: boolean;
+  /**
+   * The user has explicitly clicked "Prepare signature links" (or otherwise chosen a send/sign path).
+   * This is the ONLY event that releases signer-metadata-edit isolation: once true the guard is no
+   * longer active and downstream recomputes (handoff, VS01, delivery) may run again.
+   */
+  prepareSignatureLinksRequested?: boolean;
+  /**
+   * Inline signer setup latch — stays true after the user opens signer details until Prepare signature
+   * links, even when the signer-details gate becomes complete mid-typing.
+   */
+  signerSetupLatched?: boolean;
 };
+
+export type PaidProSignerMetadataSessionArgs = PaidProSignerSetupIsolationArgs;
+
+/**
+ * Canonical paid Pro signer-metadata session — the single predicate for “typing/autofill in signer
+ * fields must not rebuild document/corpus/preview/manifest paths”.
+ *
+ *   accepted paid Pro SoT exists
+ *   AND (signer/recipient setup is active OR inline setup latch is armed)
+ *   AND Prepare signature links has NOT been clicked.
+ */
+export function paidProSignerMetadataSessionActive(
+  args: PaidProSignerMetadataSessionArgs,
+): boolean {
+  if (args.prepareSignatureLinksRequested) return false;
+  if (!args.hasPaidProSourceOfTruth) return false;
+  return Boolean(args.signerSetupActive || args.signerSetupLatched);
+}
 
 /**
  * While signer setup is active over an accepted SoT, the guided question queue must not be rebuilt
@@ -112,7 +151,7 @@ export type PaidProSignerSetupIsolationArgs = {
 export function paidProSignerSetupSuppressesGuidedAndStarter(
   args: PaidProSignerSetupIsolationArgs,
 ): boolean {
-  return Boolean(args.signerSetupActive && args.hasPaidProSourceOfTruth);
+  return paidProSignerMetadataSessionActive(args);
 }
 
 /**
@@ -124,7 +163,152 @@ export function paidProSignerSetupDefersHandoffRecompute(
   args: PaidProSignerSetupIsolationArgs & { prepareSignatureLinksRequested: boolean },
 ): boolean {
   if (args.prepareSignatureLinksRequested) return false;
-  return Boolean(args.signerSetupActive && args.hasPaidProSourceOfTruth);
+  return paidProSignerMetadataSessionActive(args);
+}
+
+/**
+ * Hard guard: paid Pro signer-metadata edit is active. This is the SINGLE canonical predicate every
+ * recompute path consults:
+ *
+ *   accepted paid Pro SoT exists
+ *   AND signer setup / recipient setup is active
+ *   AND "Prepare signature links" has NOT yet been clicked.
+ *
+ * When true the surface is frozen on the accepted SoT and every discovery/derivation recompute
+ * (guided queue, free starter refresh, handoff/VS01 corpus, premium render source, delivery flow,
+ * FAILED_PREMIUM_CORPUS transition) must be suppressed — signer edits update signer metadata only.
+ */
+export function paidProSignerMetadataEditActive(args: PaidProSignerSetupIsolationArgs): boolean {
+  return paidProSignerMetadataSessionActive(args);
+}
+
+export type PaidProSignerMetadataEditGuard = {
+  active: boolean;
+  /** Return the existing paid SoT for all Pro document surfaces (no re-derivation). */
+  returnFrozenSotForSurfaces: boolean;
+  /** Do not rebuild the guided question queue. */
+  suppressGuidedQuestionQueue: boolean;
+  /** Do not recompute the guided authoritative body. */
+  suppressGuidedAuthoritativeBodyRecompute: boolean;
+  /** Do not refresh the free starter preview. */
+  suppressFreeStarterPreviewRefresh: boolean;
+  /** Do not recompute the premium render source. */
+  suppressPremiumRenderSourceRecompute: boolean;
+  /** Do not recompute handoff / VS01 signing corpus (until "Prepare signature links"). */
+  suppressHandoffAndVs01Recompute: boolean;
+  /** Do not recompute the delivery / signing-preparation flow. */
+  suppressDeliveryFlowRecompute: boolean;
+  /** Do not transition into FAILED_PREMIUM_CORPUS. */
+  suppressFailedPremiumCorpusTransition: boolean;
+};
+
+/**
+ * Resolves the full set of recompute suppressions for the signer-metadata edit guard. Every
+ * suppression is keyed off the single canonical predicate `paidProSignerMetadataEditActive`, so the
+ * ONLY release event is the explicit "Prepare signature links" click (carried by
+ * `prepareSignatureLinksRequested`): once clicked the guard is fully inactive and all recomputes —
+ * including handoff, VS01, and delivery — are allowed to run again.
+ */
+export function resolvePaidProSignerMetadataEditGuard(
+  args: PaidProSignerSetupIsolationArgs,
+): PaidProSignerMetadataEditGuard {
+  const active = paidProSignerMetadataEditActive(args);
+  return {
+    active,
+    returnFrozenSotForSurfaces: active,
+    suppressGuidedQuestionQueue: active,
+    suppressGuidedAuthoritativeBodyRecompute: active,
+    suppressFreeStarterPreviewRefresh: active,
+    suppressPremiumRenderSourceRecompute: active,
+    suppressHandoffAndVs01Recompute: active,
+    suppressDeliveryFlowRecompute: active,
+    suppressFailedPremiumCorpusTransition: active,
+  };
+}
+
+/**
+ * Authoritative signing-corpus freeze — the SIMPLE, mode-independent invariant.
+ *
+ * Once an accepted paid Pro Source of Truth exists and the user has NOT yet clicked "Prepare
+ * signature links", the VS01 / handoff signing corpus must be treated as frozen. This deliberately
+ * does NOT depend on whether the app currently believes "signer setup" is active: the inline
+ * signer-details surface can render while `displayPhase` is still review/draft_ready_for_review, in
+ * which case the narrower signer-setup predicates are false and the old guard never engaged. The
+ * only thing that matters is: a paid SoT exists and signing has not been requested yet.
+ *
+ *   hasPaidProSourceOfTruth && !prepareSignatureLinksRequested
+ *
+ * While true, callers must NOT compute the VS01 corpus (no `resolveFinalVs01CorpusOrBlock`, no
+ * `source: handoff_corpus`, no `stage: vs01_signing`) and must NOT fail closed.
+ */
+export function paidProSigningCorpusFreezeActive(args: {
+  hasPaidProSourceOfTruth: boolean;
+  prepareSignatureLinksRequested: boolean;
+}): boolean {
+  return Boolean(args.hasPaidProSourceOfTruth && !args.prepareSignatureLinksRequested);
+}
+
+export function logPremiumSignerFreeze(payload: {
+  hasSot: boolean;
+  releaseRequested: boolean;
+  blockedVs01Compute: boolean;
+  blockedHandoffCompute: boolean;
+  blockedGuidedQueue: boolean;
+  blockedStarterPreview: boolean;
+  blockedReviewTransition: boolean;
+  reason: string;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (typeof import.meta === "undefined" || !import.meta.env?.DEV) return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-signer-freeze]", payload);
+}
+
+export type PremiumSignerMetadataFreezeLog = {
+  hasSot: boolean;
+  partyIndex?: number;
+  field?: string;
+  inputEventKind?: "change" | "input" | "blur" | "paste" | "autofill";
+  blockedPreviewRebuild: boolean;
+  blockedIntegrityRepair: boolean;
+  blockedCanonicalManifestRecompute: boolean;
+  blockedSignaturePreviewRecompute: boolean;
+  blockedVs01Compute: boolean;
+  signerSetupStillMounted: boolean;
+  sotHashBefore: string | null;
+  sotHashAfter: string | null;
+};
+
+export function logPremiumSignerMetadataFreeze(payload: PremiumSignerMetadataFreezeLog): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (typeof import.meta === "undefined" || !import.meta.env?.DEV) return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-signer-metadata-freeze]", payload);
+}
+
+/** True when document/corpus/preview/manifest recompute paths must no-op during signer metadata entry. */
+export function paidProSignerMetadataSessionBlocksDocumentRecompute(
+  args: PaidProSignerMetadataSessionArgs,
+): boolean {
+  return paidProSignerMetadataSessionActive(args);
+}
+
+/**
+ * Freeze-or-compute helper for signer-metadata-edit isolation. When the edit guard is active and a
+ * previously computed value is already frozen, the value is reused and `compute` is NEVER called —
+ * this is how the VS01/handoff signing-corpus resolver is prevented from running on every keystroke
+ * during signer setup. The first computation (at signer-setup entry) captures the frozen value; the
+ * guard release ("Prepare signature links") lets `compute` run again.
+ */
+export function resolveOrReuseFrozenForSignerEdit<T>(args: {
+  editGuardActive: boolean;
+  frozen: T | null | undefined;
+  compute: () => T;
+}): { value: T; computed: boolean } {
+  if (args.editGuardActive && args.frozen != null) {
+    return { value: args.frozen, computed: false };
+  }
+  return { value: args.compute(), computed: true };
 }
 
 export type PaidProQaInvariantInput = {

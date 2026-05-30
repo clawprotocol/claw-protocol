@@ -75,12 +75,12 @@ export type PaidProSignerDetailsGate = {
   blockerMessage: string;
   /** `data-claw-recipient-field` key of the first incomplete required signer field. */
   firstIncompleteFieldKey: string | null;
-  /** Primary CTA label: "Continue to final review" when complete, else "Add signer details". */
+  /** Primary CTA label describing the NEXT action (not the current screen). */
   ctaLabel: string;
 };
 
-export const PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA = "Continue to final review";
-export const PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA = "Add signer details";
+export const PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA = "Complete signer details";
+export const PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA = "Prepare signature links";
 
 function norm(s: string): string {
   let t = s.replace(/\s+/g, " ").trim();
@@ -234,6 +234,55 @@ export function resolvePaidProSignerDetailsGate(
       ? PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA
       : PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
   };
+}
+
+export type ResolvePaidProInlineSignerSetupMountedArgs = {
+  hasAcceptedPaidProAuthority: boolean;
+  premiumPaidDocumentSurface: boolean;
+  premiumRecipientUxActive: boolean;
+  createUiStageIsDraft: boolean;
+  /** Latched true when the user enters inline signer setup; stays true until Prepare signature links. */
+  signerSetupLatched: boolean;
+  signaturePreparationRequested: boolean;
+};
+
+/**
+ * Inline signer setup on the canonical paid Pro final-review shell. Visibility must NOT flip off when
+ * the signer-details gate becomes complete — only when the user explicitly proceeds to Prepare signature
+ * links (signaturePreparationRequested) or the latch is cleared on re-entry.
+ */
+export function resolvePaidProInlineSignerSetupMounted(
+  args: ResolvePaidProInlineSignerSetupMountedArgs,
+): boolean {
+  return Boolean(
+    args.hasAcceptedPaidProAuthority &&
+      args.premiumPaidDocumentSurface &&
+      !args.premiumRecipientUxActive &&
+      args.createUiStageIsDraft &&
+      args.signerSetupLatched &&
+      !args.signaturePreparationRequested,
+  );
+}
+
+/** Arm the inline signer-setup latch when setup is first shown (details incomplete on accepted SoT). */
+export function shouldArmPaidProInlineSignerSetupLatch(args: {
+  hasAcceptedPaidProAuthority: boolean;
+  premiumPaidDocumentSurface: boolean;
+  premiumRecipientUxActive: boolean;
+  createUiStageIsDraft: boolean;
+  simpleProFinalReviewShellActive: boolean;
+  paidProSignatureDetailsReady: boolean;
+  alreadyLatched: boolean;
+}): boolean {
+  if (args.alreadyLatched) return true;
+  return Boolean(
+    args.hasAcceptedPaidProAuthority &&
+      args.premiumPaidDocumentSurface &&
+      !args.premiumRecipientUxActive &&
+      args.createUiStageIsDraft &&
+      args.simpleProFinalReviewShellActive &&
+      !args.paidProSignatureDetailsReady,
+  );
 }
 
 export function logSignerIdentitySource(args: {

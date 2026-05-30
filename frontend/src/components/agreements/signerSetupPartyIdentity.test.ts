@@ -23,6 +23,8 @@ import {
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
   resolveEditableSignerLegalEntityForSlot,
   resolvePaidProSignerDetailsGate,
+  resolvePaidProInlineSignerSetupMounted,
+  shouldArmPaidProInlineSignerSetupLatch,
   resolveLegalEntityNameForHandoffSlot,
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
@@ -98,6 +100,35 @@ describe("signerSetupPartyIdentity", () => {
     expect(p1.legalEntityName).toBe("Harbor Peak Automation LLC");
     expect(p0.source).toBe("authoritative_manifest");
     expect(p1.source).toBe("authoritative_manifest");
+  });
+
+  it("receives Blue Canyon Analytics LLC and Iron Vale Systems Inc. from a party-placeholder-repaired body", () => {
+    // After the pipeline repairs [ORG_1]/[ORG_2] with the known parties, the accepted body carries the
+    // real names; signer setup must resolve the two distinct canonical parties from it.
+    const repairedIntake =
+      "Create a professional services agreement between Blue Canyon Analytics LLC and Iron Vale Systems Inc. for AI workflow setup.";
+    const repairedBody = [
+      'This Professional Services Agreement is entered into between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").',
+      "Blue Canyon Analytics LLC shall pay Iron Vale Systems Inc. for the services.",
+      "",
+      "IN WITNESS WHEREOF, the parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "Blue Canyon Analytics LLC",
+      "By: _________________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Iron Vale Systems Inc.",
+      "By: _________________________________",
+    ].join("\n");
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [{ name: "Blue Canyon Analytics LLC" }, { name: "Iron Vale Systems Inc." }],
+      intakeText: repairedIntake,
+      agreementBodyText: repairedBody,
+    });
+    expect(identities[0]?.legalEntityName).toBe("Blue Canyon Analytics LLC");
+    expect(identities[1]?.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
+    expect(identities[0]?.legalEntityName).not.toBe(identities[1]?.legalEntityName);
   });
 
   it("paid Pro signer details gate pre-fills legal names but requires signer names and emails", () => {
@@ -519,7 +550,7 @@ describe("signerSetupPartyIdentity", () => {
     expect(gate.firstIncompleteFieldKey).toBe("r2-signer-name");
   });
 
-  it("signer details gate CTA becomes Continue to final review once complete", () => {
+  it("signer details gate CTA becomes Prepare signature links once complete", () => {
     const gate = resolvePaidProSignerDetailsGate({
       partyCount: 2,
       draftPartyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
@@ -988,5 +1019,119 @@ describe("signer slot canonical mapping (Defect — Party 2 duplicates Party 1)"
     expect(after.legalEntityNames).toEqual(before.legalEntityNames);
     expect(after.legalEntityNames[1]).toBe("Iron Vale Systems Inc");
     expect(after.legalEntityNames[1]).not.toMatch(/Blue Canyon/i);
+  });
+});
+
+describe("paid Pro inline signer setup mount latch", () => {
+  const shellArgs = {
+    hasAcceptedPaidProAuthority: true,
+    premiumPaidDocumentSurface: true,
+    premiumRecipientUxActive: false,
+    createUiStageIsDraft: true,
+    simpleProFinalReviewShellActive: true,
+  };
+
+  it("arms the latch when signer details are incomplete on the canonical review shell", () => {
+    expect(
+      shouldArmPaidProInlineSignerSetupLatch({
+        ...shellArgs,
+        paidProSignatureDetailsReady: false,
+        alreadyLatched: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("typing Party 2 signer name completes the gate but the mount latch keeps inline setup visible", () => {
+    // Simulate: user opened Add signer details (latch armed), Party 1 complete, Party 2 email prefilled.
+    let latched = shouldArmPaidProInlineSignerSetupLatch({
+      ...shellArgs,
+      paidProSignatureDetailsReady: false,
+      alreadyLatched: false,
+    });
+    expect(latched).toBe(true);
+
+    const mountBefore = resolvePaidProInlineSignerSetupMounted({
+      ...shellArgs,
+      signerSetupLatched: latched,
+      signaturePreparationRequested: false,
+    });
+    expect(mountBefore).toBe(true);
+
+    // User types Party 2 signer name — gate becomes complete (would have unmounted under old !ready rule).
+    const gateAfterTyping = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      draftPartyNames: ["Blue Canyon Analytics LLC", "Iron Vale Systems Inc."],
+      partySignerNames: ["Anthem H Blanchard", "M"],
+      recipient1Name: "Blue Canyon Analytics LLC",
+      recipient2Name: "Iron Vale Systems Inc.",
+      recipient1Email: "anthemhayek@gmail.com",
+      recipient2Email: "anthemhayek@me.com",
+      extraPartyReviewEmails: [],
+    });
+    expect(gateAfterTyping.complete).toBe(true);
+    expect(gateAfterTyping.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA);
+
+    // Latch stays armed — inline signer setup must remain mounted.
+    latched = shouldArmPaidProInlineSignerSetupLatch({
+      ...shellArgs,
+      paidProSignatureDetailsReady: true,
+      alreadyLatched: latched,
+    });
+    expect(latched).toBe(true);
+
+    const mountAfterTyping = resolvePaidProInlineSignerSetupMounted({
+      ...shellArgs,
+      signerSetupLatched: latched,
+      signaturePreparationRequested: false,
+    });
+    expect(mountAfterTyping).toBe(true);
+  });
+
+  it("Prepare signature links is the only unmount: latch cleared releases inline setup", () => {
+    const mountWhileEditing = resolvePaidProInlineSignerSetupMounted({
+      ...shellArgs,
+      signerSetupLatched: true,
+      signaturePreparationRequested: false,
+    });
+    expect(mountWhileEditing).toBe(true);
+
+    const mountAfterPrepare = resolvePaidProInlineSignerSetupMounted({
+      ...shellArgs,
+      signerSetupLatched: false,
+      signaturePreparationRequested: true,
+    });
+    expect(mountAfterPrepare).toBe(false);
+  });
+
+  it("generic two-party fixture: gate complete after typing does not imply unmount while latched", () => {
+    const ids = resolveSignerSetupPartyIdentities({
+      parties: [{ name: "Maple Grove Holdings LLC" }, { name: "Summit Ridge Partners Inc." }],
+      intakeText: "Maple Grove and Summit Ridge services agreement.",
+      agreementBodyText: [
+        "CLIENT: Maple Grove Holdings LLC",
+        "SERVICE PROVIDER: Summit Ridge Partners Inc.",
+      ].join("\n"),
+    });
+    const gate = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      signerSetupPartyIdentities: ids,
+      draftPartyNames: ["Maple Grove Holdings LLC", "Summit Ridge Partners Inc."],
+      partySignerNames: ["Avery Cole", "Jordan Lee"],
+      recipient1Name: "Maple Grove Holdings LLC",
+      recipient2Name: "Summit Ridge Partners Inc.",
+      recipient1Email: "avery@maple.test",
+      recipient2Email: "jordan@summit.test",
+      extraPartyReviewEmails: [],
+    });
+    expect(gate.complete).toBe(true);
+    expect(ids[0].legalEntityName).not.toBe(ids[1].legalEntityName);
+
+    expect(
+      resolvePaidProInlineSignerSetupMounted({
+        ...shellArgs,
+        signerSetupLatched: true,
+        signaturePreparationRequested: false,
+      }),
+    ).toBe(true);
   });
 });

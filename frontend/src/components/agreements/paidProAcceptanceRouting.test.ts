@@ -33,8 +33,10 @@ import {
 import {
   resolveProDeliveryTrackCanonicalCorpus,
   shouldBlockStarterRegenerationAfterPaidAuthority,
+  shouldIgnoreLatePremiumPipelineResult,
   shouldSuppressPremiumProcessingModalAfterPaidAuthority,
 } from "./paidProPostAcceptanceStateGuard";
+import { resolveSignerSetupPartyIdentities } from "./signerSetupPartyIdentity";
 import { canChooseProDeliveryTrack } from "./proDeliveryTrackState";
 import { resolvePaidProSignerDetailsGate } from "./signerSetupPartyIdentity";
 import { resolveFinalVs01CorpusOrBlock } from "../../vs01/vs01SigningCorpus";
@@ -335,7 +337,7 @@ describe("paidProAcceptanceRouting", () => {
       extraPartyReviewEmails: [] as string[],
     };
 
-    it("incomplete Party 2 signer details keeps signer setup active (CTA = Add signer details)", () => {
+    it("incomplete Party 2 signer details keeps signer setup active (CTA = Complete signer details)", () => {
       establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
       const gate = resolvePaidProSignerDetailsGate({
         ...TWO_PARTY,
@@ -344,12 +346,12 @@ describe("paidProAcceptanceRouting", () => {
         recipient2Email: "",
       });
       expect(gate.complete).toBe(false);
-      expect(gate.ctaLabel).toBe("Add signer details");
+      expect(gate.ctaLabel).toBe("Complete signer details");
       // Paid SoT remains the canonical review surface while signer setup is incomplete.
       expect(resolveProDeliveryTrackCanonicalCorpus().hasCanonicalCorpus).toBe(true);
     });
 
-    it("completing Party 2 signer details advances (CTA = Continue to final review); SoT unchanged", () => {
+    it("completing Party 2 signer details advances (CTA = Prepare signature links); SoT unchanged", () => {
       const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
       const complete = resolvePaidProSignerDetailsGate({
         ...TWO_PARTY,
@@ -358,7 +360,7 @@ describe("paidProAcceptanceRouting", () => {
         recipient2Email: "priya@ironvale.test",
       });
       expect(complete.complete).toBe(true);
-      expect(complete.ctaLabel).toBe("Continue to final review");
+      expect(complete.ctaLabel).toBe("Prepare signature links");
       expect(resolveProDeliveryTrackCanonicalCorpus().hash).toBe(record.hash);
     });
 
@@ -417,9 +419,9 @@ describe("paidProAcceptanceRouting", () => {
   describe("paid Pro signer-setup UX surface (labels + Edit signer details scroll/focus)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 
-    it("signer setup section is titled 'Add signer details' with a 'Signer setup' chip and signer-name copy", () => {
+    it("signer setup section is titled 'Complete signer details' with a 'Signer setup' chip and signer-name copy", () => {
       expect(intake).toMatch(
-        /paidProInlineRecipientShell\s*\n\s*\? "Add signer details"\s*\n\s*: "Share this agreement"/,
+        /paidProInlineRecipientShell\s*\n\s*\? PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA\s*\n\s*: "Share this agreement"/,
       );
       expect(intake).toContain("Signer setup");
       expect(intake).toContain(
@@ -441,7 +443,7 @@ describe("paidProAcceptanceRouting", () => {
         "const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(",
       );
       expect(start).toBeGreaterThan(-1);
-      const block = intake.slice(start, start + 1400);
+      const block = intake.slice(start, start + 1800);
       expect(block).toContain("paidProSignerDetailsGate.firstIncompleteFieldKey");
       expect(block).toContain("focusVisibleRecipientInput(focusKey)");
       expect(block).toContain("claw-paid-pro-inline-signer-setup");
@@ -579,6 +581,342 @@ describe("paidProAcceptanceRouting", () => {
       ];
       expect(violations.every(Boolean)).toBe(true);
       expect(invariant?.displayed_len).toBe(invariant?.copied_len);
+    });
+  });
+
+  describe("duplicate premium-request race: first authoritative success wins", () => {
+    // A full server document that names two distinct signature-block parties.
+    const FULL_SERVER_DOC = [
+      "PROFESSIONAL SERVICES AGREEMENT",
+      "",
+      "This Agreement is entered into between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
+      "",
+      `1. Scope of Services. ${"Detailed operative commercial clause. ".repeat(220)}`,
+      "",
+      `2. Fees. ${"Payment terms clause. ".repeat(40)}`,
+      "",
+      "3. Governing Law. Texas law governs this Agreement.",
+      "",
+      "4. Electronic Signatures. Electronic signatures are permitted.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "CLIENT:",
+      "Blue Canyon Analytics LLC",
+      "By: _________________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Iron Vale Systems Inc.",
+      "By: _________________________________",
+    ].join("\n");
+
+    // The duplicate/degraded second response body (short json_parse rejected corpus).
+    const REJECTED_SECOND_BODY = "x".repeat(1_135);
+
+    it("first valid server full document is accepted; the second rejected_paid_corpus is ignored", () => {
+      // First response: valid, long server full document → committed exactly once.
+      const accepted = establishPaidProSourceOfTruth({ text: FULL_SERVER_DOC, source: "server_full_draft" });
+      expect(getPaidProSourceOfTruth()?.hash).toBe(accepted.hash);
+
+      // Second response (same session) is rejected — orchestration must ignore it.
+      expect(
+        shouldIgnoreLatePremiumPipelineResult({
+          hasAcceptedAuthoritativePaidCorpus: true,
+          incomingRenderSource: "rejected_paid_corpus",
+          incomingBodyLen: REJECTED_SECOND_BODY.length,
+          acceptedBodyLen: accepted.text.length,
+        }),
+      ).toBe(true);
+
+      // Defense-in-depth: even if the rejected body reached the commit gate, it throws and never writes.
+      expect(() =>
+        establishPaidProSourceOfTruth({ text: REJECTED_SECOND_BODY, source: "rejected_paid_corpus" }),
+      ).toThrow(/forbidden source/);
+      expect(getPaidProSourceOfTruth()?.hash).toBe(accepted.hash);
+    });
+
+    it("existing paid SoT cannot be overwritten by a shorter degraded second body", () => {
+      const accepted = establishPaidProSourceOfTruth({ text: FULL_SERVER_DOC, source: "server_full_draft" });
+      // Second degraded response: shorter body, even with a 'real' source name.
+      const result = establishPaidProSourceOfTruth({ text: "y".repeat(7_881), source: "server_full_draft" });
+      expect(result.hash).toBe(accepted.hash);
+      expect(getPaidProSourceOfTruth()?.text.length).toBe(accepted.text.length);
+    });
+
+    it("paidProSourceOfTruth keeps the full server doc length + hash after the second degraded response", () => {
+      const accepted = establishPaidProSourceOfTruth({ text: FULL_SERVER_DOC, source: "server_full_draft" });
+      const beforeLen = accepted.text.length;
+      const beforeHash = accepted.hash;
+      // Simulate late degraded arrival being applied at the commit chokepoint.
+      establishPaidProSourceOfTruth({ text: "z".repeat(2_000), source: "server_full_draft" });
+      const after = getPaidProSourceOfTruth();
+      expect(after?.text.length).toBe(beforeLen);
+      expect(after?.hash).toBe(beforeHash);
+      expect(fingerprintAgreementBody(after?.text ?? "")).toBe(fingerprintAgreementBody(accepted.text));
+    });
+
+    it("after authoritative success, guided/starter surfaces stay suppressed", () => {
+      establishPaidProSourceOfTruth({ text: FULL_SERVER_DOC, source: "server_full_draft" });
+      expect(shouldBlockStarterRegenerationAfterPaidAuthority()).toBe(true);
+      expect(shouldSuppressPremiumProcessingModalAfterPaidAuthority()).toBe(true);
+      const state = resolveGuidedProUxState({
+        premiumPaidDocumentSurface: true,
+        premiumRecipientUxActive: false,
+        sendIntentSelected: false,
+        guidedCompletionPhase: "collecting_answers",
+        createFlowPhase: "draft_ready_for_review",
+        hasGuidedSession: true,
+        paidProAcceptedCorpusReady: true,
+        finalReviewExplicitlyOpened: false,
+      });
+      expect(state).not.toBe("guided_questions_active");
+    });
+
+    it("the apply path drops late premium responses once authoritative success exists", () => {
+      const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+      // Orchestration calls the latch and returns before re-applying a late degraded/rejected result.
+      expect(src).toMatch(/shouldIgnoreLatePremiumPipelineResult\(\{/);
+      expect(src).toMatch(/late_premium_response_ignored_authoritative_success_wins/);
+    });
+
+    it("signer setup still receives the full accepted SoT and two distinct parties", () => {
+      const accepted = establishPaidProSourceOfTruth({ text: FULL_SERVER_DOC, source: "server_full_draft" });
+      const signerDoc = getPaidProDocumentForSurface("signer_setup");
+      expect(signerDoc?.text.length).toBe(accepted.text.length);
+
+      const ids = resolveSignerSetupPartyIdentities({
+        parties: [{ name: "Blue Canyon Analytics LLC" }, { name: "Blue Canyon Analytics LLC" }],
+        agreementBodyText: getPaidProSourceOfTruth()?.text,
+      });
+      expect(ids[0]?.legalEntityName).toBe("Blue Canyon Analytics LLC");
+      // The corpus normalizer strips a trailing period from the entity ("Inc." -> "Inc").
+      expect(ids[1]?.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
+      expect(ids[0]?.legalEntityName).not.toBe(ids[1]?.legalEntityName);
+    });
+  });
+
+  describe("signer-typing isolation: no document/guided/handoff recompute, no fail-closed", () => {
+    const SIGNER_SETUP_BODY = [
+      "PROFESSIONAL SERVICES AGREEMENT",
+      "",
+      "This Agreement is entered into between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
+      `1. Scope. ${"Operative commercial clause. ".repeat(120)}`,
+      "",
+      "IN WITNESS WHEREOF, the parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "Blue Canyon Analytics LLC",
+      "By: _________________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Iron Vale Systems Inc.",
+      "By: _________________________________",
+    ].join("\n");
+
+    it("the edit guard prevents FAILED_PREMIUM_CORPUS while editing signer metadata", () => {
+      establishPaidProSourceOfTruth({ text: SIGNER_SETUP_BODY, source: "server_full_draft" });
+      // Even if a transient recompute flips validation to failed during typing, the guard holds.
+      const state = resolvePaidProReviewState({
+        premiumPaidDocumentSurface: true,
+        premiumCheckoutCompleted: true,
+        premiumGenerationInFlight: false,
+        hasValidAuthoritativeCorpus: false,
+        premiumCorpusValidationFailed: true,
+        signerMetadataEditActive: true,
+      });
+      expect(state).not.toBe("FAILED_PREMIUM_CORPUS");
+    });
+
+    it("authoritative paid review stays AUTHORITATIVE_READY (mounted) during signer typing", () => {
+      establishPaidProSourceOfTruth({ text: SIGNER_SETUP_BODY, source: "server_full_draft" });
+      const state = resolvePaidProReviewState({
+        premiumPaidDocumentSurface: true,
+        premiumCheckoutCompleted: true,
+        premiumGenerationInFlight: false,
+        hasValidAuthoritativeCorpus: true,
+        premiumCorpusValidationFailed: false,
+        authoritativeBodyLen: SIGNER_SETUP_BODY.length,
+        signerMetadataEditActive: true,
+      });
+      expect(state).toBe("AUTHORITATIVE_READY");
+    });
+
+    type SignerMeta = { name: string; email: string; title: string; address: string };
+    function sotUnchangedAfterSignerEdit(mutate: (m: SignerMeta) => void) {
+      const record = establishPaidProSourceOfTruth({ text: SIGNER_SETUP_BODY, source: "server_full_draft" });
+      const beforeHash = record.hash;
+      const beforeLen = record.text.length;
+      // Signer metadata edits are metadata-only — they live entirely outside the SoT.
+      const meta: SignerMeta = { name: "", email: "", title: "", address: "" };
+      mutate(meta);
+      // Legal entity slots stay frozen on the canonical SoT signature block.
+      const ids = resolveSignerSetupPartyIdentities({
+        parties: [{ name: "Blue Canyon Analytics LLC" }, { name: "Iron Vale Systems Inc." }],
+        agreementBodyText: getPaidProSourceOfTruth()?.text,
+      });
+      const after = getPaidProSourceOfTruth();
+      expect(after?.hash).toBe(beforeHash);
+      expect(after?.text.length).toBe(beforeLen);
+      return ids;
+    }
+
+    it("typing Party 2 signer NAME does not change SoT hash/len; Party 2 stays Iron Vale", () => {
+      const ids = sotUnchangedAfterSignerEdit((m) => {
+        m.name = "Dana Vale";
+      });
+      expect(ids[0]?.legalEntityName).toBe("Blue Canyon Analytics LLC");
+      expect(ids[1]?.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
+      expect(ids[0]?.legalEntityName).not.toBe(ids[1]?.legalEntityName);
+    });
+
+    it("typing Party 2 signer EMAIL does not change SoT hash/len", () => {
+      const ids = sotUnchangedAfterSignerEdit((m) => {
+        m.email = "dana@ironvale.com";
+      });
+      expect(ids[1]?.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
+    });
+
+    it("typing Party 2 signer TITLE/ADDRESS does not change SoT hash/len", () => {
+      const ids = sotUnchangedAfterSignerEdit((m) => {
+        m.title = "Chief Executive Officer";
+        m.address = "500 Market Street, Suite 1200";
+      });
+      // Title/address never leak into the legal entity slots.
+      expect(ids[1]?.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
+      expect(ids[1]?.legalEntityName).not.toContain("Chief Executive");
+      expect(ids[1]?.legalEntityName).not.toContain("Market Street");
+    });
+
+    it("Party 2 legal entity remains isolated from Party 1 across repeated signer typing", () => {
+      establishPaidProSourceOfTruth({ text: SIGNER_SETUP_BODY, source: "server_full_draft" });
+      // Simulate progressive keystrokes of the Party 2 signer name. None may leak into the entity slot.
+      for (const _typed of ["D", "Da", "Dan", "Dana", "Dana Vale"]) {
+        const ids = resolveSignerSetupPartyIdentities({
+          parties: [{ name: "Blue Canyon Analytics LLC" }, { name: "Iron Vale Systems Inc." }],
+          agreementBodyText: getPaidProSourceOfTruth()?.text,
+        });
+        expect(ids[0]?.legalEntityName).toBe("Blue Canyon Analytics LLC");
+        expect(ids[1]?.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
+        // The keystroke value never collapses Party 2 into Party 1 nor leaks the signer name.
+        expect(ids[1]?.legalEntityName).not.toBe(ids[0]?.legalEntityName);
+        expect(ids[1]?.legalEntityName).not.toContain("Dana");
+      }
+    });
+
+    it("freezes legal entity slots generically for a NON Blue-Canyon/Iron-Vale two-party fixture", () => {
+      // Requirement: party freezing is generic, not hardcoded to the regression fixture.
+      const altBody = [
+        "MASTER SERVICES AGREEMENT",
+        "",
+        "This Agreement is entered into between Maple Grove Holdings LLC and Summit Ridge Partners Inc.",
+        `1. Services. ${"Operative commercial clause. ".repeat(120)}`,
+        "",
+        "IN WITNESS WHEREOF, the parties execute this Agreement.",
+        "",
+        "CLIENT:",
+        "Maple Grove Holdings LLC",
+        "By: _________________________________",
+        "",
+        "SERVICE PROVIDER:",
+        "Summit Ridge Partners Inc.",
+        "By: _________________________________",
+      ].join("\n");
+      const record = establishPaidProSourceOfTruth({ text: altBody, source: "server_full_draft" });
+      const beforeHash = record.hash;
+      const beforeLen = record.text.length;
+
+      for (const _typed of ["A", "Av", "Ave", "Avery", "Avery Cole"]) {
+        const ids = resolveSignerSetupPartyIdentities({
+          parties: [{ name: "Maple Grove Holdings LLC" }, { name: "Summit Ridge Partners Inc." }],
+          agreementBodyText: getPaidProSourceOfTruth()?.text,
+        });
+        expect(ids[0]?.legalEntityName).toBe("Maple Grove Holdings LLC");
+        expect(ids[1]?.legalEntityName).toMatch(/^Summit Ridge Partners Inc\.?$/);
+        expect(ids[1]?.legalEntityName).not.toBe(ids[0]?.legalEntityName);
+        expect(ids[1]?.legalEntityName).not.toContain("Avery");
+      }
+      const after = getPaidProSourceOfTruth();
+      expect(after?.hash).toBe(beforeHash);
+      expect(after?.text.length).toBe(beforeLen);
+    });
+
+    it("AgreementBuilderIntake wires the canonical signer-metadata-edit hard guard end to end", () => {
+      const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+      // Single canonical guard resolved from the state machine, including the prepare-links release.
+      expect(src).toMatch(/paidProSignerMetadataEditGuard\s*=\s*useMemo/);
+      expect(src).toMatch(/resolvePaidProSignerMetadataEditGuard\(\{/);
+      // Release signal must be the dedicated signaturePreparationRequested flag, NOT any
+      // "entered signer setup" boolean (guidedSendIntentSelected, finalReviewSendPathChosenRef,
+      // guidedSigningConfirmationActive) — all latch true while the signer form is still mounted and
+      // would defeat the freeze during typing (the recurring repro).
+      expect(src).toMatch(
+        /const prepareSignatureLinksRequested\s*=\s*signaturePreparationRequested;/,
+      );
+      const prepareDefIdx = src.indexOf("const prepareSignatureLinksRequested =");
+      const prepareDefSlice = src.slice(prepareDefIdx, prepareDefIdx + 120);
+      expect(prepareDefSlice).not.toMatch(/finalReviewSendPathChosenRef/);
+      expect(prepareDefSlice).not.toMatch(/guidedSendIntentSelected/);
+      expect(prepareDefSlice).not.toMatch(/guidedSigningConfirmationActive/);
+      // The flag is RELEASED only by the real proceed-to-signing action and RE-ARMED on entering setup.
+      expect(src).toMatch(/setSignaturePreparationRequested\(true\)/);
+      expect(src).toMatch(/setSignaturePreparationRequested\(false\)/);
+      // Entering inline signer setup re-arms the freeze (resets the release flag to false).
+      const enterSetupIdx = src.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
+      const enterSetupSlice = src.slice(enterSetupIdx, enterSetupIdx + 700);
+      expect(enterSetupSlice).toMatch(/setSignaturePreparationRequested\(false\)/);
+      // Fed into the paid review state machine (never fails closed during edit).
+      expect(src).toMatch(/signerMetadataEditActive:\s*paidProSignerMetadataEditGuardActive/);
+      // Guided question queue rebuild is suppressed during signer setup over an accepted SoT.
+      expect(src).toMatch(/paidProSignerSetupSuppressesGuidedAndStarter\(\{/);
+      // Authoritative body is frozen: the recipient/handoff re-derivation no-ops while the guard is active.
+      expect(src).toMatch(/if \(paidProSignerMetadataEditGuardRef\.current\) return;/);
+      // VS01/handoff corpus gate is frozen during signer editing via the freeze helper + guard.
+      expect(src).toMatch(/resolveOrReuseFrozenForSignerEdit\(\{[\s\S]*?editGuardActive:\s*paidProSignerMetadataEditGuardActive/);
+      expect(src).toMatch(/frozen:\s*vs01FinalCorpusGateFrozenRef\.current/);
+    });
+
+    it("inline signer setup stays mounted via latch when gate completes during typing", () => {
+      const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+      expect(src).toMatch(/paidProInlineSignerSetupLatched/);
+      expect(src).toMatch(/resolvePaidProInlineSignerSetupMounted\(\{/);
+      expect(src).toMatch(/shouldArmPaidProInlineSignerSetupLatch\(\{/);
+      const canonicalIdx = src.indexOf("const paidProCanonicalReviewSignerSetupActive = useMemo");
+      const canonicalSlice = src.slice(canonicalIdx, canonicalIdx + 500);
+      expect(canonicalSlice).toMatch(/resolvePaidProInlineSignerSetupMounted/);
+      expect(canonicalSlice).not.toMatch(/!paidProSignatureDetailsReady/);
+      const ctaIdx = src.indexOf("const unifiedPrimaryCta = useMemo");
+      const ctaSlice = src.slice(ctaIdx, ctaIdx + 2200);
+      expect(ctaSlice).toMatch(/paidProInlineSignerSetupLatched && !signaturePreparationRequested/);
+      expect(ctaSlice).toMatch(/paid_pro_signer_details_required/);
+    });
+
+    it("AgreementBuilderIntake hard-freezes VS01 via the mode-independent invariant before the resolver", () => {
+      const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+      // Simple invariant: SoT present + Prepare signature links not clicked, independent of signer mode.
+      expect(src).toMatch(/paidProSigningCorpusFreezeActive\s*=\s*useMemo/);
+      expect(src).toMatch(/prepareSignatureLinksRequested,/);
+      // The VS01 memo returns BEFORE calling resolveFinalVs01CorpusOrBlock while frozen.
+      const memoStart = src.indexOf("const vs01FinalCorpusGate = useMemo");
+      const memoSlice = src.slice(memoStart, memoStart + 1600);
+      expect(memoSlice).toMatch(/if \(paidProSigningCorpusFreezeActive\)\s*\{/);
+      const freezeReturnIdx = memoSlice.indexOf("if (paidProSigningCorpusFreezeActive)");
+      const resolverCallIdx = memoSlice.indexOf("resolveFinalVs01CorpusOrBlock(");
+      expect(freezeReturnIdx).toBeGreaterThanOrEqual(0);
+      expect(resolverCallIdx).toBeGreaterThan(freezeReturnIdx);
+      // Explicit [premium-signer-freeze] diagnostics for the freeze, including all blocked-path flags.
+      expect(src).toMatch(/logPremiumSignerFreeze\(\{[\s\S]*?blockedVs01Compute:\s*true/);
+      expect(src).toMatch(/logPremiumSignerFreeze\(\{[\s\S]*?blockedHandoffCompute:\s*true/);
+      expect(src).toMatch(/logPremiumSignerFreeze\(\{[\s\S]*?blockedGuidedQueue:\s*true/);
+      expect(src).toMatch(/logPremiumSignerFreeze\(\{[\s\S]*?blockedStarterPreview:\s*true/);
+      expect(src).toMatch(/logPremiumSignerFreeze\(\{[\s\S]*?blockedReviewTransition:\s*true/);
+      // Inline signer-details mode (displayPhase review) is also detected for the edit guard.
+      expect(src).toMatch(/guidedInlineSignerSetupActive\s*=\s*Boolean\(/);
+      expect(src).toMatch(/signerSetupLatched:\s*paidProInlineSignerSetupLatched/);
+      expect(src).toMatch(/paidProSignerMetadataSessionActive/);
+      expect(src).toMatch(/frozenSignerMetadataPartyManifestRef/);
+      expect(src).toMatch(/logPremiumSignerMetadataFreeze/);
+      // The freeze invariant also feeds the review state machine (no fail-closed at len 0).
+      expect(src).toMatch(/signerMetadataEditActive:\s*[\s\S]*?paidProSigningCorpusFreezeActive/);
     });
   });
 });
