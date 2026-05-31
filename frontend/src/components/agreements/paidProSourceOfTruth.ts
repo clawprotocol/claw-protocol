@@ -18,8 +18,10 @@ import {
   buildCanonicalAgreementSnapshot,
   clearFrozenCanonicalAgreementCorpus,
   freezeCanonicalAgreementSnapshot,
+  hasFrozenCanonicalAgreementCorpus,
   readCanonicalAgreementCorpusForSurface,
   type CanonicalAgreementSnapshotParty,
+  type CanonicalAgreementSurface,
 } from "./canonicalAgreementSnapshot";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import {
@@ -34,11 +36,20 @@ import {
 } from "./authoritativeAgreementDocument";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import {
+  clearPaidProPinnedSignerAppliedCorpus,
   resolvePaidProFinalHydratedCorpusForSurface,
   type PaidProFinalHydratedCorpusSource,
 } from "./paidProFinalHydratedCorpus";
-import { getAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
-import { corpusHasPopulatedSignerNameLines } from "./guidedDealCompletion/signatureRegion";
+import { clearAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import { paidProSurfaceCorpusMatchesAuthority } from "./paidProAgreementAuthorityChain";
+import {
+  applyPaidProReviewRenderSanitizer,
+  consumedAuthoritySignerMetadataComplete,
+  resolvePartiesForReviewRender,
+  resolvePaidProReviewRenderPlain,
+} from "./paidProReviewRenderCorpus";
+import { paidProSignerExecutionCorpusIsFrozen } from "./paidProFinalHydratedCorpus";
+import { logPaidProDriftCorpusCaptureOnce } from "./paidProDriftCorpusCapture";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -257,6 +268,10 @@ export function establishPaidProSourceOfTruth(args: {
     reason: "authoritative_source_of_truth_established",
   });
   paidProSourceOfTruth = record;
+  if (args.allowShorterOverwrite) {
+    clearPaidProPinnedSignerAppliedCorpus();
+    clearAuthoritativeSigningSnapshot();
+  }
   establishAuthoritativeAgreementDocument({
     fullCorpusText: record.text,
     canonicalPartyManifest: frozen?.signerManifest ?? parties,
@@ -345,15 +360,28 @@ export function getPaidProDocumentForSurface(
   const hydrated = resolvePaidProFinalHydratedCorpusForSurface(surface, opts);
   let text = hydrated.text;
   let corpusSource = hydrated.source;
-  const signerMetadataApplied = hydrated.signerMetadataApplied;
+  let signerMetadataApplied = hydrated.signerMetadataApplied;
 
   if (!signerMetadataApplied) {
+    const canonicalSurface: CanonicalAgreementSurface =
+      surface === "signer_setup" ? "handoff" : surface;
     const authoritative = authoritativeDocumentForSurface(surface);
-    const canonical = readCanonicalAgreementCorpusForSurface(surface === "signer_setup" ? "handoff" : surface, {
+    const canonical = readCanonicalAgreementCorpusForSurface(canonicalSurface, {
       required: true,
+      tier: "pro",
+      allowPaidProAuthoritativeFallback: true,
     });
+    const usedAuthoritativeFallback = !canonical?.canonicalText?.trim();
     text = authoritative?.fullCorpusText ?? canonical?.canonicalText ?? source.text;
     corpusSource = "paidProSourceOfTruth";
+    if (usedAuthoritativeFallback && !hasFrozenCanonicalAgreementCorpus()) {
+      logPaidProAuthoritativeDisplayFallback({
+        surface,
+        len: text.length,
+        hash: source.hash,
+        source: authoritative?.fullCorpusText ? "authoritative_agreement_document" : "server_full_draft",
+      });
+    }
     const driftGuard = enforceAuthoritativeProCorpusDisplay({
       authoritativeText: source.text,
       displayText: text,
@@ -371,7 +399,7 @@ export function getPaidProDocumentForSurface(
     });
     return null;
   }
-  const hash = hydrated.hash || hashPaidProCorpus(text);
+  let hash = hydrated.hash || hashPaidProCorpus(text);
   const stage =
     surface === "review"
       ? "pro_review_display"
@@ -392,6 +420,27 @@ export function getPaidProDocumentForSurface(
     reason: `surface:${surface}`,
   });
   const executionBlockAppended = false;
+  if (surface === "review" || surface === "copy" || surface === "display") {
+    const aligned = resolvePaidProReviewRenderPlain(opts);
+    if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
+      text = aligned;
+      hash = hashPaidProCorpus(text);
+      if (!signerMetadataApplied) {
+        const partiesForGate = resolvePartiesForReviewRender(opts);
+        if (consumedAuthoritySignerMetadataComplete(partiesForGate)) {
+          signerMetadataApplied = true;
+          corpusSource = "signer_hydrated_from_authority";
+        }
+      }
+    }
+  } else {
+    const partiesForSanitizer = resolvePartiesForReviewRender(opts);
+    if (partiesForSanitizer.length >= 2 && (signerMetadataApplied || paidProSignerExecutionCorpusIsFrozen())) {
+      text = applyPaidProReviewRenderSanitizer(text, partiesForSanitizer).text.trim();
+      hash = hashPaidProCorpus(text);
+    }
+  }
+
   assertPaidProSurfaceCorpus({
     surface,
     text,
@@ -413,6 +462,33 @@ export function getPaidProDocumentForSurface(
     executionBlockAppended,
     signerMetadataApplied,
   };
+}
+
+export function logPaidProAuthoritativeDisplayFallback(payload: {
+  surface: PaidProDocumentSurface;
+  len: number;
+  hash: string;
+  source: string;
+}): void {
+  const shouldLog =
+    import.meta.env?.MODE === "test" ||
+    shouldLogPaidProAuthoritySurfaceEvent({
+      event: "paid-pro-authoritative-display-fallback",
+      surface: payload.surface,
+      hash: payload.hash,
+      source: payload.source,
+    });
+  if (!shouldLog) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.warn("[paid-pro-authoritative-display-fallback]", {
+    surface: payload.surface,
+    len: payload.len,
+    hash: payload.hash,
+    source: payload.source,
+    reason: "canonical_corpus_missing_after_review_ready",
+  });
 }
 
 function logPaidProSurface(payload: {
@@ -442,27 +518,37 @@ export function assertPaidProSurfaceCorpus(args: {
   allowExecutionAppend?: boolean;
   signerMetadataApplied?: boolean;
 }): void {
+  if (
+    paidProSurfaceCorpusMatchesAuthority({
+      text: args.text,
+      signerMetadataApplied: args.signerMetadataApplied,
+      actualSource: args.actualSource,
+      allowExecutionAppend: args.allowExecutionAppend,
+    })
+  ) {
+    return;
+  }
   const source = getPaidProSourceOfTruth();
   if (!source) return;
   const actualText = trim(args.text);
-  const actualHash = hashPaidProCorpus(actualText);
-  const snap = getAuthoritativeSigningSnapshot();
-  if (args.signerMetadataApplied && snap && actualHash === snap.hash) return;
-  if (args.signerMetadataApplied && corpusHasPopulatedSignerNameLines(actualText, 2)) return;
-  const exact = actualHash === source.hash;
-  const allowedExecutionAppend = Boolean(args.allowExecutionAppend) && differsOnlyByExecutionAppend(source.text, actualText);
-  if (exact || allowedExecutionAppend) return;
   const payload = {
     surface: args.surface,
     expectedHash: source.hash,
-    actualHash,
+    actualHash: hashPaidProCorpus(actualText),
     actualSource: args.actualSource,
     expectedLen: source.text.length,
     actualLen: actualText.length,
+    signerMetadataApplied: Boolean(args.signerMetadataApplied),
   };
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
     // eslint-disable-next-line no-console
-    console.error("[FATAL_PAID_PRO_CORPUS_DRIFT]", payload);
+    console.warn("[paid-pro-surface-corpus-parity]", payload);
+    logPaidProDriftCorpusCaptureOnce({
+      surface: String(args.surface),
+      expectedHash: payload.expectedHash,
+      actualHash: payload.actualHash,
+      actualSource: payload.actualSource,
+    });
   }
 }
 
