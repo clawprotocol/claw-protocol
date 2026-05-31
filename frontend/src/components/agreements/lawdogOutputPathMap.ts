@@ -18,7 +18,7 @@ export function logLawdogOutputPathMap(payload: {
   canFallback: boolean;
   reason: string;
 }): void {
-  if (!import.meta.env.DEV || import.meta.env.MODE === "test") return;
+  if (typeof import.meta === "undefined" || !import.meta.env?.DEV || import.meta.env?.MODE === "test") return;
   const text = payload.text ?? "";
   const len = payload.len ?? text.length;
   // eslint-disable-next-line no-console

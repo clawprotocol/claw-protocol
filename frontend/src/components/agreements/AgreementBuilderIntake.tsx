@@ -615,6 +615,7 @@ import {
 } from "./authoritativeSignerHydration";
 import {
   mapPaidProStickyCtaToPrimaryCta,
+  resolvePaidProStickyBarHeadlines,
   resolvePaidProStickyCta,
   shouldClearSigningSnapshotOnSignerMetadataDrift,
 } from "./paidProStickyCta";
@@ -638,9 +639,14 @@ import {
   emitPaidProSignerMetadataCtaEvaluation,
   emitPaidProSignerMetadataFieldDiagnostics,
   paidProSignerMetadataForensicLineageEnabled,
+  readConsumedPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
+import {
+  resolvePaidProFinalHydratedCorpusForSurface,
+  setPaidProPinnedSignerAppliedCorpus,
+} from "./paidProFinalHydratedCorpus";
 import {
   isPremiumGenerationApiUnavailableForUi,
   PAID_PRO_API_UNAVAILABLE_BODY,
@@ -12537,6 +12543,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     );
   }, [liveSignerMetadataUiState, premiumSurfaceGateTick]);
 
+  const paidProSignerHydratedPreviewPlain = useMemo(() => {
+    const snapshotCorpus = readAuthoritativeSigningCorpus();
+    if (snapshotCorpus.length >= 500) return snapshotCorpus;
+    if (!hasPaidProSourceOfTruth()) return "";
+    const authority = readConsumedPaidProSignerMetadataAuthority();
+    if (!authority?.parties.some((p) => p.signerName.trim() && p.partyLegalName.trim())) {
+      return "";
+    }
+    const raw = (getPaidProSourceOfTruthText() || "").trim();
+    if (raw.length < 200) return "";
+    const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: raw,
+      authority,
+      intakeRaw: intakeForHydration,
+      surface: "paid_pro_signer_hydrated_preview",
+    });
+    return hydrated.rejected ? "" : hydrated.corpus;
+  }, [
+    liveSignerMetadataUiState,
+    premiumSurfaceGateTick,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    paidProPostSignerMetadataFreezeActive,
+  ]);
+
   const emitPaidProSignerMetadataFieldDiagnosticsCb = React.useCallback(
     (args: {
       partyIndex: number;
@@ -12585,10 +12617,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     },
     [signaturePreparationRequested, paidProInlineSignerSetupLatched],
   );
-  const suppressProDocumentEmbeddedSignatures = useMemo(
-    () => Boolean(paidProAuthoritative && !paidProRecipientSetupOnDraft),
-    [paidProAuthoritative, paidProRecipientSetupOnDraft],
-  );
+  const suppressProDocumentEmbeddedSignatures = useMemo(() => {
+    if (hasAuthoritativeSigningSnapshot()) return false;
+    if (paidProSignerMetadataSessionActive) return false;
+    if (guidedInlineSignerSetupActive) return false;
+    if (paidProPostSignerMetadataFreezeActive) return false;
+    return Boolean(paidProAuthoritative && !paidProRecipientSetupOnDraft);
+  }, [
+    paidProAuthoritative,
+    paidProRecipientSetupOnDraft,
+    paidProSignerMetadataSessionActive,
+    guidedInlineSignerSetupActive,
+    paidProPostSignerMetadataFreezeActive,
+    premiumSurfaceGateTick,
+  ]);
   const productionReadyForPersist = Boolean(
     createProductionTwoPane &&
       draft &&
@@ -13524,7 +13566,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       raw: string;
       inputEventKind: "change" | "blur";
     }) => {
-      if (!import.meta.env.DEV) return;
+      if (!paidProSignerMetadataForensicLineageEnabled()) return;
       logSignerMetadataLifecycleEvent("metadata-input-change", {
         field: args.field,
         partyIndex: args.partyIndex,
@@ -14395,7 +14437,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidProReviewSurface: true,
       });
       if (boundary.blocked || !boundary.plain.trim()) return "";
-      const corpus = boundary.plain;
+      const corpus = (paidProSignerHydratedPreviewPlain.trim() || boundary.plain).trim();
       const rd = reviewDraft ?? draft;
       const signaturePartyNames = extractAgreementParties({
         parties: rd?.parties,
@@ -14404,11 +14446,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         partiesLine: displayLivePreviewModel.partiesLine,
       });
       const renderHints = computePremiumDocumentRenderHints(rd, corpus, intakeForPolish);
+      const signerHydratedPreview = Boolean(paidProSignerHydratedPreviewPlain.trim());
       return buildPremiumAgreementReadonlyHtml(corpus, {
         signatureSectionMode: effectivePremiumSendMode === "signature" ? "execution" : "collaboration",
         partyNames: signaturePartyNames,
         renderHints,
         suppressCorpusEmbeddedSignatureForDisplay: suppressProDocumentEmbeddedSignatures,
+        forceEmbeddedCorpusSignature:
+          signerHydratedPreview ||
+          hasAuthoritativeSigningSnapshot() ||
+          guidedSignatureRebuiltRef.current,
       });
     }
     const session = guidedCompletionSessionRef.current;
@@ -14440,6 +14487,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!canProceedWithPaidProDocument && !blockEmpty) return "";
     const rd = reviewDraft ?? draft;
     const corpusRaw =
+      paidProSignerHydratedPreviewPlain.trim() ||
       renderDoc.plainText ||
       (postGuidedAuthoritativeReview
         ? lastKnownGoodAuthoritativeDraftRef.current ||
@@ -14452,6 +14500,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             draft: rd ?? null,
             intakeText: intakeForPolish,
             reviewDisplayMode: suppressProDocumentEmbeddedSignatures,
+            retainSignatureExecutionBlock:
+              Boolean(paidProSignerHydratedPreviewPlain.trim()) || hasAuthoritativeSigningSnapshot(),
           }).text
         : corpusRaw;
     const signaturePartyNames = extractAgreementParties({
@@ -14543,9 +14593,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       partyNames: signaturePartyNames,
       renderHints,
       suppressCorpusEmbeddedSignatureForDisplay: suppressProDocumentEmbeddedSignatures,
+      forceEmbeddedCorpusSignature:
+        Boolean(paidProSignerHydratedPreviewPlain.trim()) ||
+        hasAuthoritativeSigningSnapshot() ||
+        guidedSignatureRebuiltRef.current,
     });
   }, [
     premiumPaidDocumentSurface,
+    paidProSignerHydratedPreviewPlain,
     suppressProDocumentEmbeddedSignatures,
     canProceedWithPaidProDocument,
     premiumPaidReadonlyPick,
@@ -17914,6 +17969,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       pinnedFinalizedSignerCorpusRef.current = pinned.body;
       pinnedFinalizedSignerCorpusHashRef.current = pinned.hash;
+      setPaidProPinnedSignerAppliedCorpus(pinned.body);
       finalizedSigningCorpusRef.current = pinned.body;
       authoritativeAgreementSnapshotRef.current = pinned.body;
       acceptedReviewCorpusRef.current = pinned.body;
@@ -18773,16 +18829,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const intakeForHints = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const renderHints = computePremiumDocumentRenderHints(rd, corpus, intakeForHints);
     const snapshotActive = hasAuthoritativeSigningSnapshot();
+    const signerHydratedPreview = Boolean(paidProSignerHydratedPreviewPlain.trim());
     return buildPremiumAgreementReadonlyHtml(corpus, {
       signatureSectionMode: "collaboration",
       partyNames: signaturePartyNames,
       renderHints,
       forceEmbeddedCorpusSignature:
         snapshotActive ||
+        signerHydratedPreview ||
         guidedSignatureRebuiltRef.current ||
         guidedFinalReviewAuthoritativeResolution.source === "finalized_signer_applied_guided_corpus",
     });
   }, [
+    paidProSignerHydratedPreviewPlain,
     simpleProFinalReviewDisplayPlain,
     acceptedPaidProAuthorityActive,
     authoritativePaidProReviewPlain,
@@ -20794,9 +20853,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const simpleCreateBarCoolToneForBasicContinuePath = Boolean(upgradeLockActive);
 
   /** Hidden when optional upgrade compare is on-screen so we don’t imply “ready to send” before Continue. */
+  const paidProInlineStickyBarCopy = useMemo(() => {
+    if (!acceptedPaidProAuthorityActive || !paidProCanonicalStickyCta?.showStickyBar) {
+      return null;
+    }
+    return resolvePaidProStickyBarHeadlines(paidProCanonicalStickyCta.phase);
+  }, [acceptedPaidProAuthorityActive, paidProCanonicalStickyCta]);
+
   const productionReviewReadyToSendLine = Boolean(
     createProductionTwoPane &&
       createUiStage === CreateUiStage.DRAFT &&
+      !paidProInlineStickyBarCopy?.subline &&
       Boolean(draft) &&
       !isGenerating &&
       !draftPreCommitFreeze &&
@@ -21878,6 +21945,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       partyManifest,
       signatureBlockModel,
     });
+    pinFinalizedSignerAppliedCorpus(hydrated.corpus, "paid_pro_signer_metadata_finalize");
     if (import.meta.env.DEV) {
       logSignerMetadataLifecycleEvent("snapshot-write", {
         hash: getAuthoritativeSigningSnapshot()?.hash ?? null,
@@ -21930,6 +21998,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft?.parties,
     effectivePremiumSendMode,
     recipientsDeferred,
+    pinFinalizedSignerAppliedCorpus,
   ]);
 
   const continueGuidedFinalReviewToSigning = React.useCallback(
@@ -22122,10 +22191,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const handleSimpleProFinalReviewCopy = React.useCallback(() => {
     const intakeForCopy = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    const paidProCopy = getPaidProDocumentForSurface("copy", {
+    const hydratedCopy = resolvePaidProFinalHydratedCorpusForSurface("copy", {
       draft: draft ?? null,
       intakeText: intakeForCopy,
     });
+    const paidProCopy =
+      hydratedCopy.signerMetadataApplied && hydratedCopy.text.trim()
+        ? {
+            text: hydratedCopy.text,
+            source: hydratedCopy.source,
+          }
+        : (() => {
+            const surface = getPaidProDocumentForSurface("copy", {
+              draft: draft ?? null,
+              intakeText: intakeForCopy,
+            });
+            return surface ? { text: surface.text, source: surface.source } : null;
+          })();
     const finalized = paidProCopy ? null : finalizeAndFreezeGuidedFinalCorpus("guided_final_copy");
     const text = paidProCopy
       ? paidProCopy.text
@@ -22175,13 +22257,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       // eslint-disable-next-line no-console
       console.info("[guided-final-copy-source]", {
-        source: paidProCopy
-          ? "paidProSourceOfTruth"
-          : finalized?.ok
-            ? finalized.diagnostics.selectedSource
-            : "fallback",
+        source: paidProCopy?.source ?? (finalized?.ok ? finalized.diagnostics.selectedSource : "fallback"),
         bodyLen: text.length,
-        finalized: Boolean(finalized?.ok),
+        finalized: Boolean(finalized?.ok) || Boolean(hasAuthoritativeSigningSnapshot()),
         hash: liveTraceHash(text),
       });
     }
@@ -22204,6 +22282,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleSimpleProFinalReviewExport = React.useCallback(async () => {
+    const intakeForExport = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const hydratedExport = resolvePaidProFinalHydratedCorpusForSurface("finalized", {
+      draft: draft ?? null,
+      intakeText: intakeForExport,
+    });
+    if (hydratedExport.signerMetadataApplied && hydratedExport.text.trim()) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[guided-final-copy-source]", {
+          source: hydratedExport.source,
+          bodyLen: hydratedExport.text.length,
+          finalized: true,
+          hash: liveTraceHash(hydratedExport.text),
+        });
+      }
+      const blob = new Blob([hydratedExport.text], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(draft?.title || "lawdog-pro-agreement").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "lawdog-pro-agreement"}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
     const finalized = finalizeAndFreezeGuidedFinalCorpus("guided_final_export");
     if (finalized.ok && finalized.body.trim()) {
       if (import.meta.env.DEV) {
@@ -22241,7 +22345,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
     }
     setProFinalReviewExportBusy(false);
-  }, [agreementIdForReview, draft?.title, finalizeAndFreezeGuidedFinalCorpus]);
+  }, [
+    agreementIdForReview,
+    draft?.title,
+    draft,
+    finalizeAndFreezeGuidedFinalCorpus,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+  ]);
 
   const enterFinalReviewRecipientSetup = React.useCallback(
     (intent: FinalReviewSendIntent) => {
@@ -27111,41 +27222,55 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       </label>
                     </div>
                   ) : null}
-                  {productionReviewReadyToSendLine ? (
+                  {productionReviewReadyToSendLine || paidProInlineStickyBarCopy?.subline ? (
                     <div className="mb-2 text-center" role="status" aria-live="polite">
-                      <p
-                        className={
-                          simpleCreateBarCoolToneForBasicContinuePath
-                            ? "text-sm font-semibold text-slate-100 sm:text-[0.9375rem]"
-                            : "text-sm font-semibold text-emerald-50/95 sm:text-[0.9375rem]"
-                        }
-                      >
-                        {minimalProSendRecipientChrome && effectivePremiumSendMode === "review"
-                          ? premiumReviewMintStickyHeadline(
-                              paidProDistinctValidRecipientEmailCount,
-                              recipientEmailsHaveValidationErrors,
-                            )
-                          : minimalProSendRecipientChrome
-                            ? "Ready to create links"
-                            : "Ready for final send"}
-                      </p>
-                      <p
-                        className={
-                          simpleCreateBarCoolToneForBasicContinuePath
-                            ? "mt-0.5 text-[11px] leading-snug text-slate-400 sm:text-xs"
-                            : "mt-0.5 text-[11px] leading-snug text-emerald-100/75 sm:text-xs"
-                        }
-                      >
-                        {minimalProSendRecipientChrome && effectivePremiumSendMode === "review"
-                          ? recipientEmailsHaveValidationErrors || paidProDistinctValidRecipientEmailCount < 1
-                            ? "Add at least one valid recipient email, then create your private review link(s). Nothing is signed yet."
-                            : paidProDistinctValidRecipientEmailCount > 1
-                              ? "Tap Create review links below. Nothing is signed yet."
-                              : "Tap Create review link below. Nothing is signed yet."
-                          : minimalProSendRecipientChrome
-                            ? "Add recipients, then create a secure link. Nothing is emailed automatically."
-                            : "Add recipients next, then confirm before anything is sent."}
-                      </p>
+                      {paidProInlineStickyBarCopy?.subline ? (
+                        <p
+                          className={
+                            simpleCreateBarCoolToneForBasicContinuePath
+                              ? "text-[11px] leading-snug text-slate-400 sm:text-xs"
+                              : "text-[11px] leading-snug text-emerald-100/80 sm:text-xs"
+                          }
+                        >
+                          {paidProInlineStickyBarCopy.subline}
+                        </p>
+                      ) : (
+                        <>
+                          <p
+                            className={
+                              simpleCreateBarCoolToneForBasicContinuePath
+                                ? "text-sm font-semibold text-slate-100 sm:text-[0.9375rem]"
+                                : "text-sm font-semibold text-emerald-50/95 sm:text-[0.9375rem]"
+                            }
+                          >
+                            {minimalProSendRecipientChrome && effectivePremiumSendMode === "review"
+                              ? premiumReviewMintStickyHeadline(
+                                  paidProDistinctValidRecipientEmailCount,
+                                  recipientEmailsHaveValidationErrors,
+                                )
+                              : minimalProSendRecipientChrome
+                                ? "Ready to create links"
+                                : "Ready for final send"}
+                          </p>
+                          <p
+                            className={
+                              simpleCreateBarCoolToneForBasicContinuePath
+                                ? "mt-0.5 text-[11px] leading-snug text-slate-400 sm:text-xs"
+                                : "mt-0.5 text-[11px] leading-snug text-emerald-100/75 sm:text-xs"
+                            }
+                          >
+                            {minimalProSendRecipientChrome && effectivePremiumSendMode === "review"
+                              ? recipientEmailsHaveValidationErrors || paidProDistinctValidRecipientEmailCount < 1
+                                ? "Add at least one valid recipient email, then create your private review link(s). Nothing is signed yet."
+                                : paidProDistinctValidRecipientEmailCount > 1
+                                  ? "Tap Create review links below. Nothing is signed yet."
+                                  : "Tap Create review link below. Nothing is signed yet."
+                              : minimalProSendRecipientChrome
+                                ? "Add recipients, then create a secure link. Nothing is emailed automatically."
+                                : "Add recipients next, then confirm before anything is sent."}
+                          </p>
+                        </>
+                      )}
                     </div>
                   ) : null}
                   {simpleCreateReadyForSend && preSendTrustLayer ? (

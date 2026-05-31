@@ -176,6 +176,8 @@ export function resolvePartyIndexForSignatureLine(
   lineIndex: number,
   identities: readonly CanonicalPartyIdentity[],
 ): number {
+  const fullText = lines.join("\n");
+  const patchStart = signaturePatchStartIndex(fullText);
   for (let i = lineIndex; i >= 0; i--) {
     const trimmed = lines[i].trim();
     for (let p = 0; p < identities.length; p++) {
@@ -183,6 +185,23 @@ export function resolvePartyIndexForSignatureLine(
       if (!id.partyDisplayName) continue;
       const headingRe = new RegExp(`^${escapeRe(id.blockHeading)}\\s*:?\\s*$`, "i");
       if (headingRe.test(trimmed)) return p;
+      if (trimmed.toLowerCase() === id.partyDisplayName.toLowerCase()) return p;
+    }
+    if (/^by\s*:/i.test(trimmed)) {
+      let offset = 0;
+      let byIndex = -1;
+      for (let j = 0; j <= i; j++) {
+        if (offset < patchStart) {
+          offset += lines[j].length + 1;
+          continue;
+        }
+        if (/^by\s*:/i.test(lines[j].trim())) {
+          byIndex += 1;
+        }
+      }
+      if (byIndex >= 0) {
+        return Math.min(byIndex, Math.max(0, identities.length - 1));
+      }
     }
   }
   return 0;

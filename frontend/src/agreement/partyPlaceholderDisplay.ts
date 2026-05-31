@@ -129,15 +129,83 @@ export function substitutePartyPlaceholdersInUserFacingText(
   return out;
 }
 
+const PARTY_PLACEHOLDER_TOKEN_SOURCE =
+  "\\[\\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\\s\\-]+)?[1-9]\\d*\\s*\\]|\\(\\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\\s\\-]+)?[1-9]\\d*\\s*\\)|\\b(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\\s\\-]+)[1-9]\\d*\\b|\\b(?:ORG|PARTY|COMPANY)[1-9]\\d*\\b|\\borg(?:[_\\s\\-]+)[1-9]\\d*\\b|\\bparty(?:[_\\s\\-]+)[1-9]\\d*\\b|\\borg[1-9]\\d*\\b|\\bparty[1-9]\\d*\\b|\\{\\{\\s*(?:party|entity|organization)(?:[_\\s\\-]+)?[1-9]\\d*\\s*\\}\\}|\\b__(?:ORG|PERSON|PARTY|ENTITY)__(?:[_\\s\\-]+)?[1-9]\\d*\\b|\\b__(?:ORG|PERSON|PARTY|ENTITY)__\\b";
+
 function substitutePlaceholderTokensWithFn(text: string, replacer: (slot: number) => string): string {
-  const re =
-    /\[\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\]|\(\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\)|\b(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)[1-9]\d*\b|\b(?:ORG|PARTY|COMPANY)[1-9]\d*\b|\borg(?:[_\s\-]+)[1-9]\d*\b|\bparty(?:[_\s\-]+)[1-9]\d*\b|\borg[1-9]\d*\b|\bparty[1-9]\d*\b|\{\{\s*(?:party|entity|organization)(?:[_\s\-]+)?[1-9]\d*\s*\}\}|\b__(?:ORG|PERSON|PARTY|ENTITY)__(?:[_\s\-]+)?[1-9]\d*\b|\b__(?:ORG|PERSON|PARTY|ENTITY)__\b/gi;
+  const re = new RegExp(PARTY_PLACEHOLDER_TOKEN_SOURCE, "gi");
   return text.replace(re, (match, offset, whole) => {
     const num = match.match(/([1-9]\d*)/);
     const slot = num ? parseInt(num[1], 10) : 1;
     const replacement = replacer(Number.isFinite(slot) && slot > 0 ? slot : 1);
     return dedupeAmpersandPrefixBeforePlaceholder(whole.slice(0, offset), replacement);
   });
+}
+
+/** A candidate is a usable real party name (not blank, not another placeholder, not a generic word). */
+function isRealPartyName(name: string | null | undefined): boolean {
+  const t = String(name ?? "").replace(/\s+/g, " ").trim();
+  if (t.length < 2 || t.length > 160) return false;
+  if (textContainsUnresolvedIdentityPlaceholders(t)) return false;
+  if (/^(you|i|we|they|counterparty|party|parties|the|a|an)\b/i.test(t)) return false;
+  return true;
+}
+
+export type RepairKnownPartyPlaceholdersResult = {
+  text: string;
+  repaired: boolean;
+  repairedSlots: number[];
+  hasRemainingIdentityPlaceholder: boolean;
+};
+
+/**
+ * Deterministically replace ONLY party/identity placeholders ([ORG_1], "[ORG_2]", PARTY_2, …) whose
+ * slot maps to a KNOWN real party name. Unknown slots (no authoritative or context name) are left
+ * untouched so the hard-fail / dev-context-leak gates still trip on genuinely unresolved placeholders.
+ *
+ * Slot `n` (1-based) maps to `authoritativePartyNames[n-1]`, falling back to ordered entity candidates
+ * extracted from `context` (raw intake) for that same slot. Quoted variants and repeated occurrences
+ * are all replaced because every matching token is resolved by slot.
+ */
+export function repairKnownPartyPlaceholders(
+  text: string,
+  authoritativePartyNames?: readonly (string | null | undefined)[] | null,
+  context?: string | null,
+): RepairKnownPartyPlaceholdersResult {
+  const original = text || "";
+  if (!original.trim()) {
+    return { text: original, repaired: false, repairedSlots: [], hasRemainingIdentityPlaceholder: false };
+  }
+  const auth = (authoritativePartyNames || []).map((n) => String(n ?? "").replace(/\s+/g, " ").trim());
+  const candidates = context ? extractAgreementEntityCandidates(context) : [];
+  const repairedSlots = new Set<number>();
+
+  const resolveSlot = (slot: number): string | null => {
+    const idx = Math.max(0, slot - 1);
+    const a = auth[idx];
+    if (isRealPartyName(a)) return a;
+    const c = candidates[idx];
+    if (isRealPartyName(c)) return c;
+    return null;
+  };
+
+  const re = new RegExp(PARTY_PLACEHOLDER_TOKEN_SOURCE, "gi");
+  const out = original.replace(re, (match, offset, whole) => {
+    const num = match.match(/([1-9]\d*)/);
+    const slot = num ? parseInt(num[1], 10) : 1;
+    const normalizedSlot = Number.isFinite(slot) && slot > 0 ? slot : 1;
+    const replacement = resolveSlot(normalizedSlot);
+    if (replacement == null) return match;
+    repairedSlots.add(normalizedSlot);
+    return dedupeAmpersandPrefixBeforePlaceholder(whole.slice(0, offset), replacement);
+  });
+
+  return {
+    text: out,
+    repaired: repairedSlots.size > 0 && out !== original,
+    repairedSlots: [...repairedSlots].sort((a, b) => a - b),
+    hasRemainingIdentityPlaceholder: textContainsUnresolvedIdentityPlaceholders(out),
+  };
 }
 
 /**

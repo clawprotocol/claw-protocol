@@ -14,6 +14,7 @@ export type ProCorpusSourceMapStage =
   | "checkout_launch"
   | "premium_request"
   | "server_full_draft_received"
+  | "sot_overwrite_blocked_downgrade"
   | "client_gates_passed"
   | "authoritative_pro_freeze"
   | "pro_review_display"

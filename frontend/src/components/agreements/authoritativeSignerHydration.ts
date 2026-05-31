@@ -104,12 +104,13 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   });
   const signerCount = Math.max(2, identities.filter((id) => id.partyDisplayName.trim()).length);
   const hasBlocks = corpusSignatureBlocksHaveRequiredByLines(result.corpus, signerCount);
-  if (!result.rejected && !hasBlocks) {
+  const hasPopulatedNames = (() => {
+    const tail = result.corpus.slice(Math.floor(result.corpus.length * 0.72));
+    return (tail.match(/^name\s*:\s*(?!_{4,})(?!\s*$).+/gim) || []).length >= signerCount;
+  })();
+  if (!result.rejected && (!hasBlocks || !hasPopulatedNames)) {
     const rebuilt = rebuildSignatureBlocksWithPartyIdentities(result.corpus, identities);
-    if (
-      rebuilt.count > 0 &&
-      corpusSignatureBlocksHaveRequiredByLines(rebuilt.text, signerCount)
-    ) {
+    if (rebuilt.count > 0) {
       result = {
         ...result,
         corpus: rebuilt.text,
@@ -118,7 +119,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       logSignatureBlockSource({
         surface: args.surface,
         source: "authority_signature_block_rebuild",
-        hasFilledBlocks: true,
+        hasFilledBlocks: corpusSignatureBlocksHaveRequiredByLines(rebuilt.text, signerCount),
         signerCount,
       });
     } else if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {

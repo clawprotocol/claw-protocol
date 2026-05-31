@@ -8,6 +8,7 @@ import {
 } from "./premiumPartyNamesHandoff";
 import {
   logSignerMetadataLifecycleEvent,
+  paidProSignerMetadataForensicLineageEnabled,
   readConsumedPaidProSignerMetadataAuthority,
   readPaidProSignerMetadataFieldFromConsumedAuthority,
   type PaidProSignerMetadataField,
@@ -70,8 +71,7 @@ export type CollectSignerMetadataForensicArgs = {
 };
 
 function devAuditEnabled(): boolean {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return false;
-  return typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
+  return paidProSignerMetadataForensicLineageEnabled();
 }
 
 function norm(v: string | null | undefined): string | null {

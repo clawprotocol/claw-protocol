@@ -10,6 +10,7 @@ import type { CanonicalFinalPartyManifest } from "./guidedDealCompletion/canonic
 import type { CanonicalSignerManifest } from "./guidedDealCompletion/guidedReviewSigningContinuity";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { setPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
 
 export type PaidProSigningAuthorityPhase =
   | "SIGNER_METADATA_EDIT"
@@ -73,6 +74,7 @@ export function isPostSignerMetadataFreezeActive(args?: {
 export function clearAuthoritativeSigningSnapshot(): void {
   authoritativeSigningSnapshot = null;
   authorityPhase = "SIGNER_METADATA_EDIT";
+  setPaidProPinnedSignerAppliedCorpus("");
 }
 
 export type CreateAuthoritativeSigningSnapshotArgs = {
@@ -122,6 +124,7 @@ export function createAuthoritativeSigningSnapshot(
     partyCount: args.partyManifest.parties.length,
     frozenAt,
   });
+  setPaidProPinnedSignerAppliedCorpus(corpus);
   return authoritativeSigningSnapshot;
 }
 

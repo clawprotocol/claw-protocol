@@ -16,6 +16,7 @@ import {
   readCanonicalAgreementCorpusForSurface,
 } from "../canonicalAgreementSnapshot";
 import { getPaidProDocumentForSurface } from "../paidProSourceOfTruth";
+import { resolvePaidProFinalHydratedCorpusForSurface } from "../paidProFinalHydratedCorpus";
 
 export const GUIDED_FINAL_REVIEW_AUTHORITATIVE_MIN_LEN = 1500;
 
@@ -141,6 +142,26 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
   const identities = args.signerIdentities ?? [];
   const hasSignerHydration = identities.filter((p) => p.partyDisplayName.trim().length >= 2).length >= 2;
   const signingReady = args.signingCorpusReady ?? false;
+
+  const hydratedFinal = resolvePaidProFinalHydratedCorpusForSurface("review");
+  if (hydratedFinal.signerMetadataApplied && hydratedFinal.text.length >= minLen) {
+    const hydratedSource: GuidedFinalCorpusCandidateSource | "paidProSourceOfTruth" =
+      hydratedFinal.source === "authoritative_signing_snapshot"
+        ? "finalized_signing"
+        : hydratedFinal.source === "pinned_signer_applied_corpus"
+          ? "finalized_signer_applied_guided_corpus"
+          : "hydrated_premium_with_signers";
+    const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
+      body: hydratedFinal.text,
+      source: hydratedSource,
+      len: hydratedFinal.text.length,
+      hasSignerHydration: true,
+      finalizedHash: hydratedFinal.hash,
+    };
+    logGuidedFinalReviewAuthoritativeBody(resolution);
+    return resolution;
+  }
+
   const canonical = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
   if (canonical) {
     const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {

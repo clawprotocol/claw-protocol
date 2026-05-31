@@ -13,6 +13,8 @@ import {
   commitPaidProAcceptanceStorageHygiene,
   planPaidProAcceptanceUiRouting,
 } from "./paidProAcceptanceRouting";
+import { clearAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import { clearPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
@@ -21,6 +23,7 @@ import {
   hashPaidProCorpus,
   logPaidProCorpusInvariant,
 } from "./paidProSourceOfTruth";
+import { clearConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { resolveGuidedProUxState } from "./guidedDealCompletion/guidedProUxState";
 import { resolveSimpleProFinalReviewActive } from "./simpleProFinalReviewPhase";
@@ -61,6 +64,9 @@ describe("paidProAcceptanceRouting", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
     clearCreateReviewDraftReadyMarker();
+    clearAuthoritativeSigningSnapshot();
+    clearConsumedPaidProSignerMetadataAuthority();
+    clearPaidProPinnedSignerAppliedCorpus();
   });
 
   it("resolvePaidProAcceptanceRoutingMarkers active for server_full_draft over 10k", () => {

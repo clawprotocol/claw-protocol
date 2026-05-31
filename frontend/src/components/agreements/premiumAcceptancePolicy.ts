@@ -115,6 +115,35 @@ export function isNonfatalParseDegradedPaidAccept(args: {
   return true;
 }
 
+/**
+ * Minimum length for a deterministically party-placeholder-repaired body to be accepted as the paid
+ * corpus. Matches the substance floor in {@link premiumBodyHasRequiredPaidSections}; a repaired body
+ * still must clear the section/substance gate, so this is a lightweight lower bound.
+ */
+export const PARTY_PLACEHOLDER_REPAIR_PAID_MIN_LEN = 1_500;
+
+/**
+ * A paid server body that only failed because it still contained [ORG_1]/[ORG_2]-style PARTY
+ * placeholders becomes authoritative once those placeholders are deterministically repaired with the
+ * KNOWN canonical parties — provided no unknown identity placeholders remain, the structural gate
+ * passes, and the body has the required paid sections. This keeps a `needs_details` response from
+ * stranding the paid user (or spawning guided questions) when the only gap was a party name we know.
+ */
+export function partyPlaceholderRepairYieldsAuthoritativePaidBody(args: {
+  repaired: boolean;
+  hasRemainingIdentityPlaceholder: boolean;
+  structuralOk: boolean;
+  bodyLen: number;
+  hasRequiredSections: boolean;
+}): boolean {
+  if (!args.repaired) return false;
+  // Unknown placeholders (no canonical name) must still hard-fail — never accept an unrepaired body.
+  if (args.hasRemainingIdentityPlaceholder) return false;
+  if (!args.structuralOk) return false;
+  if (args.bodyLen < PARTY_PLACEHOLDER_REPAIR_PAID_MIN_LEN) return false;
+  return args.hasRequiredSections;
+}
+
 export type PremiumAcceptanceDecisionLog = {
   accepted: boolean;
   reason: string;

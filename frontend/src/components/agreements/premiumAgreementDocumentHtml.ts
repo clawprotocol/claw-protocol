@@ -4,7 +4,7 @@
 
 import type { PremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
-import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion/signatureRegion";
+import { corpusHasHydratedSignatureBlock } from "./guidedDealCompletion/signatureRegion";
 import { sanitizeProReviewDisplayText } from "./polishProAgreementDisplayLayer";
 
 export function escapeHtml(s: string): string {
@@ -165,7 +165,7 @@ export function resolvePremiumSignaturePreviewMode(
   opts?: { forceEmbeddedCorpusSignature?: boolean },
 ): { mode: PremiumSignaturePreviewMode; hasCorpusSignatureBlock: boolean; signerCount: number } {
   const count = Math.max(1, signerCount);
-  const hasCorpusSignatureBlock = corpusSignatureBlocksHaveRequiredByLines(plain, count);
+  const hasCorpusSignatureBlock = corpusHasHydratedSignatureBlock(plain, count);
   const forceEmbedded = Boolean(opts?.forceEmbeddedCorpusSignature);
   return {
     mode:

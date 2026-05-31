@@ -33,6 +33,12 @@ import {
   hydrateAuthoritativeAgreementDocument,
 } from "./authoritativeAgreementDocument";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
+import {
+  resolvePaidProFinalHydratedCorpusForSurface,
+  type PaidProFinalHydratedCorpusSource,
+} from "./paidProFinalHydratedCorpus";
+import { getAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import { corpusHasPopulatedSignerNameLines } from "./guidedDealCompletion/signatureRegion";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -51,12 +57,15 @@ export type PaidProDocumentSurface =
   | "signer_setup"
   | "vs01";
 
+export type PaidProDocumentCorpusSource = PaidProFinalHydratedCorpusSource;
+
 export type PaidProDocumentForSurface = {
   text: string;
   hash: string;
-  source: "paidProSourceOfTruth";
+  source: PaidProDocumentCorpusSource;
   surface: PaidProDocumentSurface;
   executionBlockAppended: boolean;
+  signerMetadataApplied: boolean;
 };
 
 export type PaidProCorpusInvariant = {
@@ -128,12 +137,36 @@ export function establishPaidProSourceOfTruth(args: {
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
   reviewSessionId?: string | null;
+  /** User-approved revisions may legitimately shorten the body; automated paths may not. Default false. */
+  allowShorterOverwrite?: boolean;
 }): PaidProSourceOfTruth {
   const requestedSource = (args.source ?? "server_full_draft").trim();
   // Minimum commit gate: a rejected/recoverable/fallback corpus must never become the SoT, no matter
   // how long its body is — this is the last line of defense against a short rejected corpus leaking in.
   if (FORBIDDEN_PAID_PRO_SOT_SOURCES.has(requestedSource)) {
     throw new Error(`[paid-pro-sot-commit-blocked] forbidden source: ${requestedSource}`);
+  }
+  // First-authoritative-success-wins latch: once a substantive SoT is committed, a later automated
+  // premium response (e.g. a duplicate request that came back degraded/json_parse) must never
+  // overwrite, downgrade, or shorten it. Equal/longer bodies (and execution-block appends) may proceed;
+  // genuine user-approved revisions opt in via `allowShorterOverwrite`.
+  const existingSot = paidProSourceOfTruth;
+  if (existingSot && !args.allowShorterOverwrite) {
+    const incomingLen = trim(args.text).length;
+    const sameOrLonger =
+      incomingLen >= existingSot.text.length ||
+      differsOnlyByExecutionAppend(existingSot.text, trim(args.text));
+    if (!sameOrLonger) {
+      logProCorpusSourceMap({
+        stage: "sot_overwrite_blocked_downgrade",
+        source: requestedSource,
+        len: incomingLen,
+        text: args.text,
+        allowedToOverride: false,
+        reason: "first_authoritative_success_wins",
+      });
+      return existingSot;
+    }
   }
   logProCorpusSourceMap({
     stage: "server_full_draft_received",
@@ -305,31 +338,40 @@ export function getPaidProVs01Text(opts?: {
 
 export function getPaidProDocumentForSurface(
   surface: PaidProDocumentSurface,
-  _opts?: { draft?: ParsedDraftShape | null; intakeText?: string | null },
+  opts?: { draft?: ParsedDraftShape | null; intakeText?: string | null },
 ): PaidProDocumentForSurface | null {
   const source = getPaidProSourceOfTruth();
   if (!source) return null;
-  const authoritative = authoritativeDocumentForSurface(surface);
-  const canonical = readCanonicalAgreementCorpusForSurface(surface === "signer_setup" ? "handoff" : surface, {
-    required: true,
-  });
-  let text = authoritative?.fullCorpusText ?? canonical?.canonicalText ?? source.text;
-  const driftGuard = enforceAuthoritativeProCorpusDisplay({
-    authoritativeText: source.text,
-    displayText: text,
-    source: canonical?.sourceLabel ?? "canonical_surface_read",
-    surface,
-  });
-  text = driftGuard.displayText;
+  const hydrated = resolvePaidProFinalHydratedCorpusForSurface(surface, opts);
+  let text = hydrated.text;
+  let corpusSource = hydrated.source;
+  const signerMetadataApplied = hydrated.signerMetadataApplied;
+
+  if (!signerMetadataApplied) {
+    const authoritative = authoritativeDocumentForSurface(surface);
+    const canonical = readCanonicalAgreementCorpusForSurface(surface === "signer_setup" ? "handoff" : surface, {
+      required: true,
+    });
+    text = authoritative?.fullCorpusText ?? canonical?.canonicalText ?? source.text;
+    corpusSource = "paidProSourceOfTruth";
+    const driftGuard = enforceAuthoritativeProCorpusDisplay({
+      authoritativeText: source.text,
+      displayText: text,
+      source: canonical?.sourceLabel ?? "canonical_surface_read",
+      surface,
+    });
+    text = driftGuard.displayText;
+  }
+
   if (text.length < PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
     logFalseProAuthorityBlocked({
-      source: "paidProSourceOfTruth",
+      source: corpusSource,
       corpusLen: text.length,
       surface: `paid_pro_surface:${surface}`,
     });
     return null;
   }
-  const hash = hashPaidProCorpus(text);
+  const hash = hydrated.hash || hashPaidProCorpus(text);
   const stage =
     surface === "review"
       ? "pro_review_display"
@@ -342,7 +384,7 @@ export function getPaidProDocumentForSurface(
             : "pro_review_display";
   logProCorpusSourceMap({
     stage,
-    source: "paidProSourceOfTruth",
+    source: corpusSource,
     len: text.length,
     text,
     hash,
@@ -353,21 +395,23 @@ export function getPaidProDocumentForSurface(
   assertPaidProSurfaceCorpus({
     surface,
     text,
-    actualSource: "paidProSourceOfTruth",
+    actualSource: corpusSource,
     allowExecutionAppend: surface === "vs01",
+    signerMetadataApplied,
   });
   logPaidProSurface({
     surface,
     len: text.length,
     hash,
-    source: "paidProSourceOfTruth",
+    source: corpusSource,
   });
   return {
     text,
     hash,
-    source: "paidProSourceOfTruth",
+    source: corpusSource,
     surface,
     executionBlockAppended,
+    signerMetadataApplied,
   };
 }
 
@@ -375,7 +419,7 @@ function logPaidProSurface(payload: {
   surface: PaidProDocumentSurface;
   len: number;
   hash: string;
-  source: "paidProSourceOfTruth";
+  source: PaidProDocumentCorpusSource;
 }): void {
   if (
     !shouldLogPaidProAuthoritySurfaceEvent({
@@ -396,11 +440,15 @@ export function assertPaidProSurfaceCorpus(args: {
   text: string;
   actualSource: string;
   allowExecutionAppend?: boolean;
+  signerMetadataApplied?: boolean;
 }): void {
   const source = getPaidProSourceOfTruth();
   if (!source) return;
   const actualText = trim(args.text);
   const actualHash = hashPaidProCorpus(actualText);
+  const snap = getAuthoritativeSigningSnapshot();
+  if (args.signerMetadataApplied && snap && actualHash === snap.hash) return;
+  if (args.signerMetadataApplied && corpusHasPopulatedSignerNameLines(actualText, 2)) return;
   const exact = actualHash === source.hash;
   const allowedExecutionAppend = Boolean(args.allowExecutionAppend) && differsOnlyByExecutionAppend(source.text, actualText);
   if (exact || allowedExecutionAppend) return;

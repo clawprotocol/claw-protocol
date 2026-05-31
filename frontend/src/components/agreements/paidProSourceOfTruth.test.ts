@@ -6,6 +6,7 @@ import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
+  getPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 
@@ -88,5 +89,54 @@ describe("paidProSourceOfTruth", () => {
       }),
     );
     spy.mockRestore();
+  });
+
+  describe("first-authoritative-success-wins overwrite protection", () => {
+    const shortRejectedBody = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Agreement is between Red Mesa Logistics LLC and Harbor Peak Automation LLC.",
+      "",
+      "1. Scope. Brief.",
+    ].join("\n");
+
+    it("a rejected_paid_corpus source can never overwrite an existing SoT (throws)", () => {
+      const accepted = establishPaidProSourceOfTruth({ text: sourceText });
+      expect(() =>
+        establishPaidProSourceOfTruth({ text: shortRejectedBody, source: "rejected_paid_corpus" }),
+      ).toThrow(/paid-pro-sot-commit-blocked/);
+      // The first authoritative SoT survives.
+      expect(getPaidProSourceOfTruth()?.text).toBe(accepted.text);
+      expect(getPaidProSourceOfTruth()?.hash).toBe(accepted.hash);
+    });
+
+    it("a later shorter degraded body cannot overwrite the accepted full-document SoT", () => {
+      const accepted = establishPaidProSourceOfTruth({ text: sourceText, source: "server_full_draft" });
+      // Duplicate-race second response: degraded/json_parse came back with a much shorter body.
+      const result = establishPaidProSourceOfTruth({ text: shortRejectedBody, source: "server_full_draft" });
+      // The overwrite is ignored; the first authoritative SoT is returned unchanged.
+      expect(result.text).toBe(accepted.text);
+      expect(result.hash).toBe(accepted.hash);
+      expect(getPaidProSourceOfTruth()?.text).toBe(accepted.text);
+      expect(getPaidProSourceOfTruth()?.text.length).toBe(accepted.text.length);
+    });
+
+    it("an equal or longer body may still re-establish (no false downgrade block)", () => {
+      const accepted = establishPaidProSourceOfTruth({ text: sourceText, source: "server_full_draft" });
+      const longer = `${sourceText}\n\n5. Additional commercial clause that extends the body. ${"x".repeat(200)}`;
+      const result = establishPaidProSourceOfTruth({ text: longer, source: "server_full_draft" });
+      expect(result.text.length).toBeGreaterThanOrEqual(accepted.text.length);
+    });
+
+    it("an explicit user-approved revision may legitimately shorten the body", () => {
+      establishPaidProSourceOfTruth({ text: sourceText, source: "server_full_draft" });
+      const result = establishPaidProSourceOfTruth({
+        text: shortRejectedBody,
+        source: "server_full_draft",
+        allowShorterOverwrite: true,
+      });
+      expect(result.text.length).toBeLessThan(sourceText.length);
+      expect(getPaidProSourceOfTruth()?.text).toBe(result.text);
+    });
   });
 });

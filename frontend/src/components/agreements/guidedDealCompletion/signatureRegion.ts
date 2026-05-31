@@ -129,3 +129,21 @@ export function corpusSignatureBlocksHaveRequiredByLines(
   if (headings > 0) return executionLines >= headings;
   return executionLines >= Math.min(2, Math.max(1, partyCount));
 }
+
+/** True when the signature tail has real signer names (not blank underscores). */
+export function corpusHasPopulatedSignerNameLines(text: string, partyCount: number): boolean {
+  const start = signaturePatchStartIndex(text);
+  const tail = start >= 0 ? text.slice(start) : text.slice(Math.floor(text.length * 0.72));
+  const filled = (tail.match(/^name\s*:\s*(?!_{4,})(?!\s*$).+/gim) || []).filter((ln) => {
+    const v = ln.replace(/^name\s*:\s*/i, "").trim();
+    return v.length >= 2 && !/^_{4,}$/.test(v);
+  });
+  return filled.length >= Math.min(2, Math.max(1, partyCount));
+}
+
+export function corpusHasHydratedSignatureBlock(text: string, partyCount: number): boolean {
+  return (
+    corpusSignatureBlocksHaveRequiredByLines(text, partyCount) ||
+    corpusHasPopulatedSignerNameLines(text, partyCount)
+  );
+}

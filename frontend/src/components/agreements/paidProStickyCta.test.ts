@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   mapPaidProStickyCtaToPrimaryCta,
+  PAID_PRO_SIGNER_COMPLETE_STICKY_HELPER,
+  PAID_PRO_SIGNER_SETUP_STICKY_HELPER,
   paidProStickyCtaShowsStickyBar,
+  resolvePaidProStickyBarHeadlines,
   resolvePaidProStickyCta,
   resolvePaidProStickyCtaPhase,
   shouldClearSigningSnapshotOnSignerMetadataDrift,
@@ -91,6 +94,17 @@ describe("paidProStickyCta", () => {
         sendSurfaceReady: false,
       }),
     ).toBe("prepare_signing");
+  });
+
+  it("sticky helper copy matches signer phase (no send-ready language during setup)", () => {
+    expect(resolvePaidProStickyBarHeadlines("signer_details_required").subline).toBe(
+      PAID_PRO_SIGNER_SETUP_STICKY_HELPER,
+    );
+    expect(resolvePaidProStickyBarHeadlines("signer_details_complete").subline).toBe(
+      PAID_PRO_SIGNER_COMPLETE_STICKY_HELPER,
+    );
+    expect(resolvePaidProStickyBarHeadlines("review_decision").subline).toBeNull();
+    expect(PAID_PRO_SIGNER_SETUP_STICKY_HELPER).not.toMatch(/ready to create links/i);
   });
 
   it("does not clear finalized snapshot on drift unless latch is armed", () => {

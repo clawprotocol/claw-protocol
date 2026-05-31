@@ -61,6 +61,44 @@ describe("signerPartyIdentity (test26)", () => {
     ]);
   });
 
+  it("hydrates distinct Name/Title per party when signature blocks use legal entity headings only", () => {
+    const body = [
+      "MASTER SERVICES AGREEMENT",
+      "",
+      "Between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
+      "",
+      ...Array.from({ length: 40 }, (_, i) => `Section ${i + 1}. Clause ${i + 1}.`),
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "Blue Canyon Analytics LLC",
+      "By: __________________________",
+      "Name: _________________________",
+      "Title: __________________________",
+      "Date: _________________________",
+      "",
+      "Iron Vale Systems Inc.",
+      "By: __________________________",
+      "Name: _________________________",
+      "Title: __________________________",
+      "Date: _________________________",
+    ].join("\n");
+    const ids = resolveCanonicalPartyIdentitiesFromSignerSetup({
+      ...signerArgs,
+      recipient1Name: "Blue Canyon Analytics LLC",
+      recipient2Name: "Iron Vale Systems Inc.",
+      partySignerNames: ["Anthem H Blanchard", "Jay Ive"],
+      partySignerTitles: ["Member", "Member"],
+      draftPartyNames: ["Blue Canyon Analytics LLC", "Iron Vale Systems Inc."],
+    });
+    const { text } = applySignerPartyIdentityToAuthoritativeAgreement(body, ids, "");
+    const ironTail = text.split(/Iron Vale Systems Inc\./i).pop() ?? "";
+    expect(text).toMatch(/Blue Canyon[\s\S]*Name:\s*Anthem H Blanchard/i);
+    expect(text).toMatch(/Title:\s*Member/i);
+    expect(ironTail).toMatch(/Name:\s*Jay Ive/i);
+    expect(ironTail).not.toMatch(/Anthem H Blanchard/);
+  });
+
   it("entity party 1 and individual party 2 get distinct signature Name lines (test30)", () => {
     const entityBody = `${PLACEHOLDER_BODY.replace("[Your Company Name]", "Acme LLC").replace("[Service Provider Name]", "Joe Smith")}`;
     const ids = resolveCanonicalPartyIdentitiesFromSignerSetup({

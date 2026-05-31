@@ -83,6 +83,10 @@ import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import {
+  repairKnownPartyPlaceholders,
+  textContainsUnresolvedIdentityPlaceholders,
+} from "../../agreement/partyPlaceholderDisplay";
+import {
   extractPremiumApiServerCorpusText,
   logPremiumApiResultFromWire,
   premiumApiResultHasAuthoritativeServerCorpus,
@@ -134,6 +138,7 @@ import {
   isLongCommerciallyUsablePremiumBody,
   isNonfatalParseDegradedPaidAccept,
   logPremiumAcceptanceDecision,
+  partyPlaceholderRepairYieldsAuthoritativePaidBody,
   premiumBodyHasRequiredPaidSections,
   resolvePremiumBodyAgainstSessionFreeze,
   serverFullDocumentWinsOverClientGates,
@@ -1544,6 +1549,10 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       }
       let effectiveFull: PremiumFullDraftResult = full;
       let doc = (effectiveFull.document_text || "").trim();
+      // Tracks deterministic known-party placeholder repair so a `needs_details`/soft-gate response
+      // whose only gap was a party name we already know is accepted rather than rejected.
+      let partyPlaceholderRepairApplied = false;
+      let partyPlaceholderRepairResolvesPaidBody = false;
       if (doc) {
         const preGateIntake = (rawForSoT || rawIntake).trim();
         const postProcessStartedAt =
@@ -1552,6 +1561,42 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           draft: mergedForApi,
           intakeText: preGateIntake,
         }).text;
+        // Deterministic known-party placeholder repair. A paid server body that still contains
+        // [ORG_1]/[ORG_2]-style PARTY placeholders must not be rejected when the canonical parties are
+        // already known (from the free draft / intake). Replace only slots with a real canonical name —
+        // unknown slots are left intact so genuine unresolved placeholders / dev-context leaks still
+        // hard-fail downstream. Runs before structural/placeholder/acceptance gates so the repaired body
+        // is what gets validated and (if clean) accepted as the paid SoT.
+        if (textContainsUnresolvedIdentityPlaceholders(doc)) {
+          const canonicalPartyNamesForRepair = (merged.parties || []).map((p) =>
+            String(p?.name ?? "").trim(),
+          );
+          const repair = repairKnownPartyPlaceholders(doc, canonicalPartyNamesForRepair, preGateIntake);
+          if (repair.repaired) {
+            doc = repair.text;
+            partyPlaceholderRepairApplied = true;
+            partyPlaceholderRepairResolvesPaidBody = partyPlaceholderRepairYieldsAuthoritativePaidBody({
+              repaired: true,
+              hasRemainingIdentityPlaceholder: repair.hasRemainingIdentityPlaceholder,
+              // Structural acceptance is re-run downstream; the substance/section gate is the decisive
+              // floor here. If a real structural defect exists, the body is still rejected by `acc`.
+              structuralOk: true,
+              bodyLen: doc.length,
+              hasRequiredSections: premiumBodyHasRequiredPaidSections({
+                text: doc,
+                rawIntake: preGateIntake,
+                draft: mergedForApi,
+              }),
+            });
+            logPremiumCompletionDebug({
+              stage: "pipeline_party_placeholder_repaired",
+              repairedSlots: repair.repairedSlots,
+              remainingIdentityPlaceholder: repair.hasRemainingIdentityPlaceholder,
+              resolvesPaidBody: partyPlaceholderRepairResolvesPaidBody,
+              currentDocLen: doc.length,
+            });
+          }
+        }
         if (isCommercialServicesIntake(preGateIntake) && doc.length < 2_500) {
           doc = preparePaidProServerDocumentForAcceptance(doc, mergedForApi, preGateIntake).text;
         }
@@ -1670,7 +1715,11 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         generationOutcome: effGenNarrow,
         missingMaterialInfo: effectiveFull.missing_material_info,
       });
-      if (serverSchemaNeedsDetails && !isLongCommerciallyUsablePremiumBody(doc.length)) {
+      if (
+        serverSchemaNeedsDetails &&
+        !isLongCommerciallyUsablePremiumBody(doc.length) &&
+        !partyPlaceholderRepairResolvesPaidBody
+      ) {
         const lines = (effectiveFull.schema_validation_reasons || []).filter(Boolean).slice(0, 8);
         const tierARecoveryAttempt = tierAEnabled && doc.length >= 900;
         if (!tierARecoveryAttempt) {
@@ -1696,7 +1745,11 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         if (lines.length > 0) {
           recommendedClarifications = buildRecommendedClarifications(lines, { advisoryOnly: true });
         }
-      } else if (tierBEarlyNeedsDetails && !isLongCommerciallyUsablePremiumBody(doc.length)) {
+      } else if (
+        tierBEarlyNeedsDetails &&
+        !isLongCommerciallyUsablePremiumBody(doc.length) &&
+        !partyPlaceholderRepairResolvesPaidBody
+      ) {
         const lines = (effectiveFull.missing_material_info || []).filter(Boolean).slice(0, 8);
         proIntentGateMessage =
           lines.length > 0
@@ -2031,9 +2084,28 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         });
       // A validated long server_full_document_text wins over soft vPaid failures too.
       const serverFullDocumentWins = serverFullDocumentAuthoritative && placeholderClientOk;
-      const advisoryAccept = longAdvisoryAccept || jsonParseNonfatalAccept || serverFullDocumentWins;
+      // A deterministically party-placeholder-repaired body (only gap was a known party name) is
+      // authoritative once it is structurally clean, placeholder-free, and section-complete. This
+      // accepts the repaired body even when vPaid soft-fails — without it the paid user is stranded.
+      const partyPlaceholderRepairAccept =
+        partyPlaceholderRepairResolvesPaidBody &&
+        acc.ok &&
+        placeholderClientOk &&
+        partyPlaceholderRepairYieldsAuthoritativePaidBody({
+          repaired: partyPlaceholderRepairApplied,
+          hasRemainingIdentityPlaceholder: !placeholderClientOk || fatalPlaceholderCount > 0,
+          structuralOk: acc.ok,
+          bodyLen: (doc || "").length,
+          hasRequiredSections: premiumBodyHasRequiredPaidSections({
+            text: doc,
+            rawIntake: rawForSoT || rawIntake,
+            draft: mergedForApi,
+          }),
+        });
+      const advisoryAccept =
+        longAdvisoryAccept || jsonParseNonfatalAccept || serverFullDocumentWins || partyPlaceholderRepairAccept;
       if (advisoryAccept && (!vPaid.ok || !placeholderClientOk)) {
-        if (jsonParseNonfatalAccept || serverFullDocumentWins) {
+        if (jsonParseNonfatalAccept || serverFullDocumentWins || partyPlaceholderRepairAccept) {
           // The body is authoritative; only the intelligence metadata / soft gate failed. Override any
           // earlier "degraded" classification so the surface treats this as a complete paid draft.
           premiumCompletionOutcome = "authoritative_draft_complete_with_recommended_clarifications";
@@ -2105,11 +2177,13 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           accepted: true,
           reason: serverFullDocumentWins && (!vPaid.ok || !acc.ok)
             ? "server_full_document_authoritative"
-            : jsonParseNonfatalAccept
-              ? "json_parse_nonfatal_body_authoritative"
-              : longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
-                ? "long_body_advisory_accept"
-                : "client_gates_passed",
+            : partyPlaceholderRepairAccept && (!vPaid.ok || !standardClientGatesPass)
+              ? "party_placeholder_repaired_authoritative"
+              : jsonParseNonfatalAccept
+                ? "json_parse_nonfatal_body_authoritative"
+                : longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
+                  ? "long_body_advisory_accept"
+                  : "client_gates_passed",
           bodyLen: doc.length,
           fatalPlaceholderCount,
           structuralFatalCount,

@@ -70,6 +70,34 @@ Date: _________________________
     expect(html).not.toMatch(/The lines below mirror a traditional signature page/i);
   });
 
+  it("uses embedded mode when signature tail has populated Name lines without decorative card", () => {
+    const plain = `
+AGREEMENT
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+Blue Canyon Analytics LLC
+By: __________________________
+Name: Anthem H Blanchard
+Title: Member
+
+Iron Vale Systems Inc.
+By: __________________________
+Name: Jay Ive
+Title: Member
+`.trim();
+    const mode = resolvePremiumSignaturePreviewMode(plain, 2);
+    expect(mode.mode).toBe("embedded_corpus_signature_block");
+    expect(mode.hasCorpusSignatureBlock).toBe(true);
+    const html = buildPremiumAgreementReadonlyHtml(plain, {
+      signatureSectionMode: "collaboration",
+      partyNames: ["Blue Canyon Analytics LLC", "Iron Vale Systems Inc."],
+    });
+    expect(html).not.toContain("claw-premium-signature-section");
+    expect(html).toMatch(/Anthem H Blanchard/);
+    expect(html).toMatch(/Jay Ive/);
+  });
+
   it("skips decorative signature card when forceEmbeddedCorpusSignature is set for guided final review", () => {
     const plain = "SERVICES AGREEMENT\n\n1. SCOPE\nThe parties agree.";
     expect(resolvePremiumSignaturePreviewMode(plain, 2, { forceEmbeddedCorpusSignature: true }).mode).toBe(

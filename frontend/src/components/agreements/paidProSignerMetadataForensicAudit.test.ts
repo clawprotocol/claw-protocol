@@ -9,6 +9,7 @@ import {
   collectSignerMetadataFieldLineage,
   collectSignerMetadataForensicMatrix,
 } from "./paidProSignerMetadataForensicAudit";
+import { clearPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
 import {
   clearAuthoritativeSigningSnapshot,
   createAuthoritativeSigningSnapshot,
@@ -35,6 +36,7 @@ describe("paidProSignerMetadataForensicAudit", () => {
   afterEach(() => {
     clearAuthoritativeSigningSnapshot();
     clearConsumedPaidProSignerMetadataAuthority();
+    clearPaidProPinnedSignerAppliedCorpus();
   });
 
   it("collects local vs snapshot divergence for signer name", () => {

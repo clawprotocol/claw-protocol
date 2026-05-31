@@ -18,8 +18,10 @@ import {
   isNonfatalGenerationFailureCode,
   isNonfatalParseDegradedPaidAccept,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+  partyPlaceholderRepairYieldsAuthoritativePaidBody,
   premiumBodyHasRequiredPaidSections,
 } from "./premiumAcceptancePolicy";
+import { repairKnownPartyPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
@@ -1272,5 +1274,176 @@ describe("nonfatal parse-failure acceptance policy", () => {
     expect(
       isNonfatalParseDegradedPaidAccept({ ...base, failureCode: "airlock_blocked", bodyLen: 9_000 }),
     ).toBe(false);
+  });
+});
+
+/**
+ * Builds a placeholder-containing commercial services body where the party slots are [ORG_1]/[ORG_2]
+ * (with repeated [ORG_2] occurrences) instead of the real names — mirroring the needs_details QA body.
+ */
+function buildPlaceholderPartyServicesBody(targetLen: number): string {
+  const header = [
+    "PROFESSIONAL SERVICES AGREEMENT",
+    "",
+    'This Professional Services Agreement (the "Agreement") is entered into by and between ' +
+      '[ORG_1] ("Client") and [ORG_2] ("Service Provider").',
+    "",
+    "1. Scope of Services. [ORG_2] shall perform the professional services described in this services " +
+      "agreement, including the AI workflow setup and integration tasks defined by the parties.",
+    "2. Payment. [ORG_1] shall pay [ORG_2] $5,000 for the services, payable within thirty (30) days of invoice.",
+    "3. Acceptance Review. [ORG_1] shall have a review period to evaluate each deliverable for material " +
+      "conformity and to report any nonconformity or defect during the acceptance review.",
+    "4. Ownership of Work Product. Upon full payment, [ORG_1] owns all final deliverables and work product, " +
+      "and [ORG_2] assigns all related intellectual property to [ORG_1].",
+    "5. Confidentiality. Each party shall protect the other party's confidential and proprietary information and trade secrets.",
+    "6. Term and Termination. This Agreement continues until completion and is subject to termination for cause upon written notice.",
+    "7. Governing Law. This Agreement is governed by the laws of the State of Texas.",
+    "8. Electronic Signatures. The parties agree that electronic signatures and counterparts are valid and binding.",
+    "",
+  ].join("\n");
+  let body = header;
+  let i = 9;
+  while (body.length < targetLen) {
+    body +=
+      `\n${i}. Additional Provision. The parties acknowledge that the obligations under section ${i} are ` +
+      "commercially reasonable and shall be performed diligently, with each party bearing responsibility for its own " +
+      "personnel, equipment, records, insurance, and compliance with applicable law in connection with the engagement.";
+    i += 1;
+  }
+  return body;
+}
+
+function runNeedsDetailsWithPartyPlaceholders(args: {
+  bodyLen: number;
+  forceValidateFail: boolean;
+  devContextLeak?: boolean;
+}) {
+  premiumApiMock.forceValidateFail = args.forceValidateFail;
+  let body = buildPlaceholderPartyServicesBody(args.bodyLen);
+  if (args.devContextLeak) {
+    // A genuine dev-context leak must still hard-fail even though the party placeholders are
+    // repairable — the known-party repair must not paper over real unknown-content hard failures.
+    body += "\n\n9. Notice. Submit deliverables to http://localhost:5173/frontend for review.";
+  }
+  premiumApiMock.mockResponses = [
+    {
+      title: "Professional Services Agreement",
+      agreement_family: "services_agreement",
+      document_text: body,
+      server_full_document_text: body,
+      key_terms_found: [],
+      missing_material_info: [],
+      generation_outcome: "needs_details",
+      schema_validation_reasons: ["Party identities not fully resolved in the structured output."],
+    },
+  ];
+  return runPremiumCompletion({
+    intakeText: MEDIUM_BODY_INTAKE,
+    originalUserIntakeRawForMerge: MEDIUM_BODY_INTAKE,
+    structuredDraft: mediumServicesStructured(),
+    simpleProductFlow: true,
+    partyRoleLabels: defaultIntakePartyRoleLabels(),
+    userGapAnswers: null,
+    agreementGenerationId: `gen-needs-details-ph-${args.bodyLen}-${args.forceValidateFail}-${args.devContextLeak ? "u" : "k"}`,
+    premiumRequestIntakeFingerprint: "fp-needs-details-ph",
+    isPremiumRequestStillValid: () => true,
+    parseDraft: async () => mediumServicesStructured(),
+  });
+}
+
+describe("repairKnownPartyPlaceholders (deterministic known-party repair)", () => {
+  const NAMES = ["Blue Canyon Analytics LLC", "Iron Vale Systems Inc."];
+
+  it("replaces [ORG_1]/[ORG_2] (and quoted + repeated variants) with the canonical parties", () => {
+    const text =
+      'Between [ORG_1] ("Client") and [ORG_2] ("Service Provider"). [ORG_2] shall perform; [ORG_1] shall pay [ORG_2].';
+    const out = repairKnownPartyPlaceholders(text, NAMES, MEDIUM_BODY_INTAKE);
+    expect(out.repaired).toBe(true);
+    expect(out.hasRemainingIdentityPlaceholder).toBe(false);
+    expect(out.text).toContain("Blue Canyon Analytics LLC");
+    expect(out.text).toContain("Iron Vale Systems Inc.");
+    expect(out.text).not.toMatch(/\[ORG_1\]|\[ORG_2\]/);
+    // All repeated [ORG_2] instances replaced.
+    expect(out.text.match(/Iron Vale Systems Inc\./g)?.length).toBeGreaterThanOrEqual(3);
+    expect(out.repairedSlots).toEqual([1, 2]);
+  });
+
+  it("leaves unknown placeholder slots intact (no Party A/B masking)", () => {
+    const text = "Between [ORG_1] and [ORG_2] and also [ORG_7].";
+    const out = repairKnownPartyPlaceholders(text, NAMES, MEDIUM_BODY_INTAKE);
+    expect(out.text).toContain("Blue Canyon Analytics LLC");
+    expect(out.text).toContain("Iron Vale Systems Inc.");
+    // Slot 7 has no known name: the placeholder must remain so hard-fail still triggers.
+    expect(out.text).toContain("[ORG_7]");
+    expect(out.hasRemainingIdentityPlaceholder).toBe(true);
+  });
+
+  it("policy: a repaired, clean, section-complete body is authoritative", () => {
+    expect(
+      partyPlaceholderRepairYieldsAuthoritativePaidBody({
+        repaired: true,
+        hasRemainingIdentityPlaceholder: false,
+        structuralOk: true,
+        bodyLen: 3_000,
+        hasRequiredSections: true,
+      }),
+    ).toBe(true);
+    // Remaining unknown placeholder blocks acceptance.
+    expect(
+      partyPlaceholderRepairYieldsAuthoritativePaidBody({
+        repaired: true,
+        hasRemainingIdentityPlaceholder: true,
+        structuralOk: true,
+        bodyLen: 3_000,
+        hasRequiredSections: true,
+      }),
+    ).toBe(false);
+    // Missing sections blocks acceptance.
+    expect(
+      partyPlaceholderRepairYieldsAuthoritativePaidBody({
+        repaired: true,
+        hasRemainingIdentityPlaceholder: false,
+        structuralOk: true,
+        bodyLen: 3_000,
+        hasRequiredSections: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("runPremiumCompletion needs_details party-placeholder repair", () => {
+  it("repairs [ORG_1]/[ORG_2] with known parties and accepts (no failed premium recovery)", async () => {
+    const out = await runNeedsDetailsWithPartyPlaceholders({ bodyLen: 3_000, forceValidateFail: false });
+    expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    const body = out.winningPremiumBodyText;
+    expect(body).toContain("Blue Canyon Analytics LLC");
+    expect(body).toContain("Iron Vale Systems Inc.");
+    expect(body).not.toMatch(/\[ORG_1\]|\[ORG_2\]/);
+  });
+
+  it("replaces every repeated [ORG_2] instance in the accepted body", async () => {
+    const out = await runNeedsDetailsWithPartyPlaceholders({ bodyLen: 3_000, forceValidateFail: false });
+    expect(out.winningPremiumBodyText).not.toContain("[ORG_2]");
+    expect(out.winningPremiumBodyText.match(/Iron Vale Systems Inc\./g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("accepts the repaired body even when the paid quality gate soft-fails (advisory accept)", async () => {
+    const out = await runNeedsDetailsWithPartyPlaceholders({ bodyLen: 3_000, forceValidateFail: true });
+    expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    expect(out.premiumCompletionOutcome).toBe(
+      "authoritative_draft_complete_with_recommended_clarifications",
+    );
+  });
+
+  it("preserves hard-fail for a dev-context leak even when party placeholders are repairable", async () => {
+    const out = await runNeedsDetailsWithPartyPlaceholders({
+      bodyLen: 3_000,
+      forceValidateFail: false,
+      devContextLeak: true,
+    });
+    expect(out.premiumRenderSource).not.toMatch(/server_full_draft/);
+    expect(out.winningPremiumBodyText.trim().length).toBe(0);
   });
 });

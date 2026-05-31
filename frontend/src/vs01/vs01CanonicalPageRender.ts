@@ -57,6 +57,12 @@ export function logVs01SignatureLineDomAnchor(payload: Record<string, unknown>):
   console.info("[vs01-signature-line-dom-anchor]", payload);
 }
 
+export function logVs01SignatureOpticalOffset(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-signature-optical-offset]", payload);
+}
+
 export function signingPacketHasVisibleText(pages: readonly Vs01SigningPacketPage[]): boolean {
   return pages.some(
     (p) =>

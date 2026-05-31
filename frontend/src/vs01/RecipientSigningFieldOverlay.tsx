@@ -12,6 +12,7 @@ import {
 import { LawDogSigningField } from "./LawDogSigningField";
 import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
 import { Vs01InitialsDomFieldShell } from "./Vs01InitialsDomFieldShell";
+import { Vs01SignatureDomFieldShell } from "./Vs01SignatureDomFieldShell";
 
 function logVs01SigningFieldRender(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
@@ -203,7 +204,7 @@ export function RecipientSigningFieldOverlay({
 
   if (canonicalCompact && field.type === "signature") {
     const hasSig = displayVal.trim().length > 0;
-    return (
+    const signatureBody = (
       <LawDogSigningField
         key={field.id}
         fieldType={field.type}
@@ -215,7 +216,9 @@ export function RecipientSigningFieldOverlay({
         data-field-id={field.id}
         className={boxClass}
         style={{
-          ...staticStyle,
+          position: "relative",
+          width: "100%",
+          height: "100%",
           zIndex: isMine ? 4 : 2,
           pointerEvents: editable ? "auto" : "none",
         }}
@@ -253,6 +256,21 @@ export function RecipientSigningFieldOverlay({
           </>
         )}
       </LawDogSigningField>
+    );
+    return (
+      <Vs01SignatureDomFieldShell
+        enabled
+        partyIndex={field.assignedPartyIndex ?? 0}
+        normalizedFallback={field}
+        styleExtras={{
+          zIndex: isMine ? 4 : 2,
+          pointerEvents: editable ? "auto" : "none",
+        }}
+        data-field-id={field.id}
+        data-vs01-signature-field-party={String(field.assignedPartyIndex ?? 0)}
+      >
+        {signatureBody}
+      </Vs01SignatureDomFieldShell>
     );
   }
 

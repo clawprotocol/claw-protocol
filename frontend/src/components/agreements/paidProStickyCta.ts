@@ -63,6 +63,24 @@ export function paidProStickyCtaShowsStickyBar(phase: PaidProStickyCtaPhase): bo
   return phase !== "review_decision";
 }
 
+export const PAID_PRO_SIGNER_SETUP_STICKY_HELPER =
+  "Add signer name and email for each party before creating signature links.";
+
+export const PAID_PRO_SIGNER_COMPLETE_STICKY_HELPER = "Nothing is sent until you confirm.";
+
+export function resolvePaidProStickyBarHeadlines(phase: PaidProStickyCtaPhase): {
+  headline: string | null;
+  subline: string | null;
+} {
+  if (phase === "signer_details_required") {
+    return { headline: null, subline: PAID_PRO_SIGNER_SETUP_STICKY_HELPER };
+  }
+  if (phase === "signer_details_complete") {
+    return { headline: null, subline: PAID_PRO_SIGNER_COMPLETE_STICKY_HELPER };
+  }
+  return { headline: null, subline: null };
+}
+
 export type ResolvePaidProStickyCtaArgs = ResolvePaidProStickyCtaPhaseArgs & {
   sendLabel?: string;
   sendDisabled?: boolean;

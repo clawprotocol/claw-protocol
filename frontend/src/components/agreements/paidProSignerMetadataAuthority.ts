@@ -360,8 +360,7 @@ export function assertCanonicalPaidProSignerCtaReason(args: {
 }
 
 function devLifecycleLogEnabled(): boolean {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return false;
-  return typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
+  return paidProSignerMetadataForensicLineageEnabled();
 }
 
 export function logSignerMetadataLifecycleEvent(

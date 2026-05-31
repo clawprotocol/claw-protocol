@@ -45,12 +45,16 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(intake).toContain("if (reviewFirstHandoffError && simpleProFinalReviewActive) return null;");
   });
 
-  it("canonical paid Pro review uses paid shell title and suppresses guided checklist", () => {
+  it("canonical paid Pro review uses single enterprise header (one title + one status chip)", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain("canonicalPaidProReview");
     expect(screen).toContain("PAID_PRO_REVIEW_SHELL_TITLE");
-    expect(screen).toContain('data-testid="canonical-paid-pro-review-badge"');
-    expect(screen).toContain("Ready for review");
+    expect(screen).toContain('data-testid="canonical-paid-pro-review-chip-state"');
+    expect(screen).toContain("PAID_PRO_REVIEW_CHIP_STATE");
+    // Legacy noisy header surfaces are gone.
+    expect(screen).not.toContain('data-testid="canonical-paid-pro-review-badge"');
+    expect(screen).not.toContain("Ready for review");
+    expect(screen).not.toContain("Back to signer details");
   });
 
   it("canonical paid review renders paidReviewPlain before unavailable preview", () => {
@@ -78,8 +82,8 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(intake).toContain("resolvePaidProSignerDetailsGate");
     expect(intake).toContain("paidProSignatureDetailsReady");
     expect(intake).toContain('enterFinalReviewRecipientSetup("signature")');
-    expect(intake).toContain('"Add signer details"');
-    expect(intake).toContain('"Prepare signature links"');
+    expect(intake).toContain("PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA");
+    expect(intake).toContain("PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA");
   });
 
   it("canonical paid review renders one SoT document body and keeps actions outside document", () => {

@@ -126,6 +126,7 @@ import {
   VS01_PACKET_PAGE_WIDTH_PT,
 } from "./buildVs01SigningPacketModel";
 import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
+import { Vs01SignatureDomFieldShell } from "./Vs01SignatureDomFieldShell";
 import { signingPacketHasVisibleText } from "./vs01CanonicalPageRender";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
 import {
@@ -1898,36 +1899,11 @@ export function StepPrepareSignature({
                                 const label = field.autoInitials
                                   ? "Initials"
                                   : prepareTemplateCornerLabel(field.type, fieldRole, field.textPurpose);
-                                return (
-                                  <div
-                                    key={field.id}
-                                    className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
-                                      field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
-                                    }`}
-                                    style={{
-                                      position: "absolute",
-                                      left: cssRect.left,
-                                      top: cssRect.top,
-                                      width: cssRect.width,
-                                      height: cssRect.height,
-                                      zIndex: 3,
-                                    }}
-                                    data-field-id={field.id}
-                                    data-testid={
-                                      field.type === "initials"
-                                        ? `vs01-canonical-initials-field-${field.assignedPartyIndex ?? 0}-p${page.pageIndex}`
-                                        : field.type === "signature"
-                                          ? `vs01-canonical-signature-field-p${page.pageIndex}`
-                                          : undefined
-                                    }
-                                    {...(field.type === "signature"
-                                      ? {
-                                          "data-vs01-signature-field-party": String(
-                                            field.assignedPartyIndex ?? fieldRole?.partyIndex ?? 0,
-                                          ),
-                                        }
-                                      : {})}
-                                  >
+                                const partyIndex = field.assignedPartyIndex ?? fieldRole?.partyIndex ?? 0;
+                                const useDomSignatureAnchor =
+                                  agreementBridgePlacementCopy && field.type === "signature";
+                                const boxInner = (
+                                  <>
                                     <span className="vs01-sign-placement-label">{label}</span>
                                     <PrepareSigningFieldBody
                                       field={field}
@@ -1950,6 +1926,46 @@ export function StepPrepareSignature({
                                         })
                                       }
                                     />
+                                  </>
+                                );
+                                if (useDomSignatureAnchor) {
+                                  return (
+                                    <Vs01SignatureDomFieldShell
+                                      key={field.id}
+                                      enabled
+                                      partyIndex={partyIndex}
+                                      normalizedFallback={field}
+                                      className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}`}
+                                      data-field-id={field.id}
+                                      data-testid={`vs01-canonical-signature-field-p${page.pageIndex}`}
+                                      data-vs01-signature-field-party={String(partyIndex)}
+                                    >
+                                      {boxInner}
+                                    </Vs01SignatureDomFieldShell>
+                                  );
+                                }
+                                return (
+                                  <div
+                                    key={field.id}
+                                    className={`vs01-sign-placement-box vs01-sign-placement-box--${field.type}${
+                                      field.autoInitials ? " vs01-sign-placement-box--auto-initials" : ""
+                                    }`}
+                                    style={{
+                                      position: "absolute",
+                                      left: cssRect.left,
+                                      top: cssRect.top,
+                                      width: cssRect.width,
+                                      height: cssRect.height,
+                                      zIndex: 3,
+                                    }}
+                                    data-field-id={field.id}
+                                    data-testid={
+                                      field.type === "initials"
+                                        ? `vs01-canonical-initials-field-${field.assignedPartyIndex ?? 0}-p${page.pageIndex}`
+                                        : undefined
+                                    }
+                                  >
+                                    {boxInner}
                                   </div>
                                 );
                               })}

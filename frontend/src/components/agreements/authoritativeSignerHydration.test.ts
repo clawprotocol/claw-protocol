@@ -68,6 +68,49 @@ describe("authoritativeSignerHydration", () => {
     clearAuthoritativeSigningSnapshot();
   });
 
+  it("hydrates entity-heading signature blocks without CLIENT/SERVICE PROVIDER labels", () => {
+    const entityBody = [
+      "AGREEMENT",
+      "",
+      "Between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
+      "",
+      ...Array.from({ length: 60 }, (_, i) => `Clause ${i + 1}.`),
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "Blue Canyon Analytics LLC",
+      "By: __________________________",
+      "Name: _________________________",
+      "Title: __________________________",
+      "",
+      "Iron Vale Systems Inc.",
+      "By: __________________________",
+      "Name: _________________________",
+      "Title: __________________________",
+    ].join("\n");
+    const authority = buildLivePaidProSignerMetadataAuthority({
+      partyCount: 2,
+      recipient1Name: BLUE_CANYON,
+      recipient2Name: IRON_VALE,
+      recipient1Email: "anthem@test.com",
+      recipient2Email: "jay@test.com",
+      extraPartyReviewEmails: [],
+      partySignerNames: ["Anthem H Blanchard", "Jay Ive"],
+      partySignerTitles: ["Member", "Member"],
+      partyAddresses: ["", ""],
+    });
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: entityBody,
+      authority,
+      intakeRaw: "",
+      surface: "entity_heading_blocks",
+    });
+    expect(hydrated.corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
+    expect(hydrated.corpus).toMatch(/Name:\s*Jay Ive/i);
+    const ironTail = hydrated.corpus.split(/Iron Vale/i).pop() ?? "";
+    expect(ironTail).not.toMatch(/Anthem H Blanchard/);
+  });
+
   it("hydrates distinct signer names per party from consumed authority", () => {
     const authority = buildLivePaidProSignerMetadataAuthority({
       partyCount: 2,
