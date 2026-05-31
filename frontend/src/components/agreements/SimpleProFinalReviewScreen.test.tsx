@@ -61,6 +61,27 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
+  it("shows Edit agreement text alongside copy and export actions", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        signersReady
+        editablePlainText="Agreement plain"
+        onEditablePlainTextChange={vi.fn()}
+        onSavePlainTextEdits={vi.fn()}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const actions = screen.getByTestId("simple-pro-final-review-actions");
+    expect(within(actions).getByTestId("simple-pro-copy-agreement")).toBeTruthy();
+    expect(within(actions).getByTestId("simple-pro-export-agreement")).toBeTruthy();
+    expect(within(actions).getByTestId("simple-pro-edit-agreement-text-toggle")).toBeTruthy();
+    cleanup();
+  });
+
   it("shows signer/reviewer ready trust line when signersReady", () => {
     render(
       <SimpleProFinalReviewScreen

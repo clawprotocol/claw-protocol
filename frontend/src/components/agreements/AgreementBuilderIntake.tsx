@@ -307,7 +307,10 @@ import {
   stripPremiumCompletionQueryParam,
   type PremiumCompletionSnapshot,
 } from "./premiumCompletionStorage";
-import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
+import {
+  isPaidProAgreementAuthoritative,
+  PAID_PRO_AUTHORITY_MIN_LEN,
+} from "./paidProAgreementAuthority";
 import {
   computeSimpleCreatePaidProReviewReady,
   logProReviewSendSignatureClick,
@@ -397,6 +400,15 @@ import {
   suppressPaidProFinalReviewFinalizingState,
   starterPlainLooksStaleVersusPaidAuthority,
 } from "./authoritativePaidProReview";
+import {
+  applyCanonicalPartyLegalNamesToSigningCorpus,
+} from "./canonicalPartyLegalNameSanitizer";
+import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
+import {
+  guardPaidProReviewRenderCorpus,
+  resolvePaidProReviewRenderPlain,
+  syncConsumedAuthoritySignerTitlesFromCorpus,
+} from "./paidProReviewRenderCorpus";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { commitPaidProAcceptanceStorageHygiene } from "./paidProAcceptanceRouting";
 import {
@@ -17833,6 +17845,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const simpleProFinalReviewDisplayPlain = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const signingSnapshotActive = hasAuthoritativeSigningSnapshot();
+    if (
+      hasPaidProSourceOfTruth() ||
+      signingSnapshotActive ||
+      Boolean(paidProSignerHydratedPreviewPlain.trim())
+    ) {
+      const renderPlain = resolvePaidProReviewRenderPlain({
+        draft: draft ?? null,
+        intakeText: intakeForPolish,
+      });
+      if (renderPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) return renderPlain;
+    }
     const paidReviewAuthorityPlain = resolveAuthoritativePaidProReviewPlain({
       draft: draft ?? null,
       intakeText: intakeForPolish,
@@ -18812,7 +18835,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const simpleProFinalReviewHtml = useMemo(() => {
+    const intakeForHtml = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const corpus =
+      resolvePaidProReviewRenderPlain({ draft: draft ?? null, intakeText: intakeForHtml }).trim() ||
       simpleProFinalReviewDisplayPlain.trim() ||
       (acceptedPaidProAuthorityActive ? authoritativePaidProReviewPlain : "");
     if (!corpus.trim()) return "";
@@ -20567,16 +20592,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   React.useEffect(() => {
     if (!simpleProFinalReviewActive) return;
-    setProFinalReviewEditPlain(simpleProFinalReviewCorpus.plainText);
-  }, [simpleProFinalReviewActive, simpleProFinalReviewCorpus.plainText]);
+    const intakeForEdit = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const renderPlain =
+      resolvePaidProReviewRenderPlain({ draft: draft ?? null, intakeText: intakeForEdit }) ||
+      simpleProFinalReviewDisplayPlain ||
+      simpleProFinalReviewCorpus.plainText;
+    setProFinalReviewEditPlain(renderPlain);
+  }, [
+    simpleProFinalReviewActive,
+    simpleProFinalReviewCorpus.plainText,
+    simpleProFinalReviewDisplayPlain,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    draft,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
 
   const handleSaveProFinalReviewPlainEdits = React.useCallback(() => {
-    const raw = proFinalReviewEditPlain.trim();
+    let raw = proFinalReviewEditPlain.trim();
     if (!raw) return;
+    const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
+    if (parties && parties.length >= 2) {
+      raw = applyCanonicalPartyLegalNamesToSigningCorpus(raw, parties).text;
+      raw = repairMalformedPaidProAgreementRecital(raw, parties).text;
+      raw = guardPaidProReviewRenderCorpus(raw, parties).text.trim();
+    }
     setProFinalReviewSaveBusy(true);
     setProFinalReviewSaveAck(false);
     if (hasPaidProSourceOfTruth()) {
       const stable = commitPaidProUserApprovedRevision(raw, "pro_final_review_plain_edit_revision");
+      syncConsumedAuthoritySignerTitlesFromCorpus(stable);
+      setPaidProPinnedSignerAppliedCorpus(stable);
       setProFinalReviewEditPlain(stable);
       proFinalReviewUserEditedRef.current = true;
       setProFinalReviewSaveBusy(false);
@@ -20589,6 +20636,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       authoritativePartyNames: guidedSignerCanonicalIdentities.map((p) => p.partyDisplayName).filter(Boolean),
     });
     pinFinalizedSignerAppliedCorpus(repaired.text, "pro_final_review_plain_edit");
+    setPaidProPinnedSignerAppliedCorpus(repaired.text);
     setProFinalReviewEditPlain(repaired.text);
     setProFinalReviewSaveBusy(false);
     setProFinalReviewSaveAck(true);

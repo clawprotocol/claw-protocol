@@ -9,6 +9,11 @@ import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { resolvePaidProFinalHydratedCorpusForSurface } from "./paidProFinalHydratedCorpus";
+import {
+  guardPaidProReviewRenderCorpus,
+  resolvePaidProReviewRenderPlain,
+} from "./paidProReviewRenderCorpus";
+import { QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE } from "./canonicalPartyLegalNameSanitizer";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
   getPaidProDocumentForSurface,
@@ -133,6 +138,13 @@ export function resolvePaidProFinalReviewVisiblePlain(args: {
   boundaryPlain?: string | null;
   displayCandidatePlain?: string | null;
 }): string {
+  const renderPlain = resolvePaidProReviewRenderPlain({
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+  });
+  if (renderPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return renderPlain;
+  }
   const authoritative = resolveAuthoritativePaidProReviewPlain({
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
@@ -141,9 +153,19 @@ export function resolvePaidProFinalReviewVisiblePlain(args: {
     return (args.boundaryPlain || args.displayCandidatePlain || "").trim();
   }
   const boundary = (args.boundaryPlain || "").trim();
-  if (boundary.length >= PAID_PRO_AUTHORITY_MIN_LEN) return boundary;
+  if (
+    boundary.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+    !boundary.includes(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE)
+  ) {
+    return guardPaidProReviewRenderCorpus(boundary).text;
+  }
   const display = (args.displayCandidatePlain || "").trim();
-  if (display.length >= PAID_PRO_AUTHORITY_MIN_LEN) return display;
+  if (
+    display.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+    !display.includes(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE)
+  ) {
+    return guardPaidProReviewRenderCorpus(display).text;
+  }
   return authoritative;
 }
 

@@ -516,22 +516,22 @@ export function SimpleProFinalReviewScreen({
               >
                 {exportBusy ? "Preparing export…" : "Download / export"}
               </button>
+              {canEditAgreementText && !suppressPostReviewEditUx ? (
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+                  aria-expanded={editAgreementTextOpen}
+                  onClick={() => setEditAgreementTextOpen((v) => !v)}
+                  data-testid="simple-pro-edit-agreement-text-toggle"
+                >
+                  {editAgreementTextOpen ? "Hide agreement text editor" : "Edit agreement text"}
+                </button>
+              ) : null}
             </div>
             {exportError ? (
               <p className="text-[11px] font-medium text-amber-800" role="alert">
                 {exportError}
               </p>
-            ) : null}
-            {canEditAgreementText && !suppressPostReviewEditUx ? (
-              <button
-                type="button"
-                className="self-start text-[11px] font-medium text-stone-600 underline decoration-stone-400/70 underline-offset-2 hover:text-stone-800"
-                aria-expanded={editAgreementTextOpen}
-                onClick={() => setEditAgreementTextOpen((v) => !v)}
-                data-testid="simple-pro-edit-agreement-text-toggle"
-              >
-                {editAgreementTextOpen ? "Hide edit options" : "Edit agreement text"}
-              </button>
             ) : null}
           </>
         )}
