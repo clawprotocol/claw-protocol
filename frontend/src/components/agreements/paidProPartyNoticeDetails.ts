@@ -3,9 +3,13 @@
  * Idempotent insert near Notices (Section 11) or before signature blocks.
  */
 
-import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
-import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { findSignatureRegionStart, signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
+import {
+  authorityPartiesToCanonicalPartyIdentities,
+  type PaidProSignerMetadataParty,
+} from "./paidProSignerMetadataAuthority";
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
+import { resolvePartyIndexForSignatureLine } from "./guidedDealCompletion/signerPartyIdentity";
 
 export const PARTY_NOTICE_DETAILS_HEADING = "Party Notice Details:";
 
@@ -166,5 +170,65 @@ export function applyPartyNoticeDetailsToCorpus(
     text: merged.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n",
     applied: true,
     replaced,
+  };
+}
+
+const BLANK_SIGNATURE_NOTICE_EMAIL_RE = /email\s+for\s+notices?\s*:\s*_{4,}/i;
+const BLANK_SIGNATURE_NOTICE_ADDRESS_RE = /address\s+for\s+notices?\s*:\s*_{4,}/i;
+
+export function corpusHasBlankSignatureNoticePlaceholders(corpus: string): boolean {
+  return (
+    BLANK_SIGNATURE_NOTICE_EMAIL_RE.test(corpus || "") ||
+    BLANK_SIGNATURE_NOTICE_ADDRESS_RE.test(corpus || "")
+  );
+}
+
+/**
+ * Fill signature-block Email/Address for Notice lines from signer metadata authority.
+ */
+export function applySignatureNoticeContactFieldsToCorpus(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+): { text: string; applied: boolean; replacements: number } {
+  const hasContact = parties.some((p) => p.signerEmail.trim() || p.partyAddress.trim());
+  if (!hasContact) {
+    return { text: corpus, applied: false, replacements: 0 };
+  }
+  const identities = authorityPartiesToCanonicalPartyIdentities(parties);
+  const marker = signaturePatchStartIndex(corpus);
+  const lines = corpus.replace(/\r\n/g, "\n").split("\n");
+  let replacements = 0;
+  let offset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (offset < marker) {
+      offset += lines[i].length + 1;
+      continue;
+    }
+    const trimmed = lines[i].trim();
+    if (/^email\s+for\s+notices?\s*:/i.test(trimmed)) {
+      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
+      const email = identities[partyIndex]?.email?.trim() ?? "";
+      if (email && (/_{4,}/.test(trimmed) || /^email\s+for\s+notices?\s*:\s*$/i.test(trimmed))) {
+        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+        const label = /^email\s+for\s+notices\s*:/i.test(trimmed) ? "Email for Notices" : "Email for Notice";
+        lines[i] = `${indent}${label}: ${email}`;
+        replacements += 1;
+      }
+    }
+    if (/^address\s+for\s+notices?\s*:/i.test(trimmed)) {
+      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
+      const address = identities[partyIndex]?.partyAddress?.trim() ?? "";
+      if (address && (/_{4,}/.test(trimmed) || /^address\s+for\s+notices?\s*:\s*$/i.test(trimmed))) {
+        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+        const label = /^address\s+for\s+notices\s*:/i.test(trimmed) ? "Address for Notices" : "Address for Notice";
+        lines[i] = `${indent}${label}: ${address}`;
+        replacements += 1;
+      }
+    }
+  }
+  return {
+    text: lines.join("\n"),
+    applied: replacements > 0,
+    replacements,
   };
 }

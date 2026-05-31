@@ -19,6 +19,12 @@ import {
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
 } from "./paidProSourceOfTruth";
+import {
+  buildLivePaidProSignerMetadataAuthority,
+  clearConsumedPaidProSignerMetadataAuthority,
+  setConsumedPaidProSignerMetadataAuthority,
+} from "./paidProSignerMetadataAuthority";
+import { clearPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
 import { resolveFreeStarterReviewShellActive, resolveReviewShellChrome } from "./freeStarterReviewShell";
 import { resolveIsFreeStreamlineDraftReview } from "./freeStreamlineDraftReview";
 import { CreateUiStage } from "./createUiStage";
@@ -30,6 +36,8 @@ const PAID_BODY = `PRO AGREEMENT BODY. ${"Section with substantive terms. ".repe
 describe("authoritativePaidProReview", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
+    clearConsumedPaidProSignerMetadataAuthority();
+    clearPaidProPinnedSignerAppliedCorpus();
   });
 
   it("isAuthoritativePaidProReview is true after establishPaidProSourceOfTruth", () => {
@@ -153,6 +161,57 @@ describe("authoritativePaidProReview", () => {
   it("suppressPaidProFinalReviewFinalizingState when paid authority exists", () => {
     establishPaidProSourceOfTruth({ text: "x".repeat(12_384), source: "server_full_draft" });
     expect(suppressPaidProFinalReviewFinalizingState()).toBe(true);
+  });
+
+  it("resolveAuthoritativePaidProReviewPlain hydrates signature notice fields when authority exists", () => {
+    const body = [
+      "MUTUAL CONSULTING AGREEMENT",
+      "",
+      'This Mutual Consulting and Implementation Agreement ("Agreement") is This Agreement is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").execution by both parties.',
+      "",
+      ...Array.from({ length: 30 }, (_, i) => `Clause ${i + 1}.`),
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "Blue Canyon Analytics LLC",
+      "Name: _________________________",
+      "Email for Notice: __________________________",
+      "Address for Notice: ________________________",
+      "Date: May 30, 2026",
+      "",
+      "SERVICE PROVIDER:",
+      "Iron Vale Systems Inc.",
+      "Name: _________________________",
+      "Email for Notice: __________________________",
+      "Address for Notice: ________________________",
+      "Date: May 30, 2026",
+    ].join("\n");
+    establishPaidProSourceOfTruth({ text: body, source: "server_full_draft" });
+    const authority = buildLivePaidProSignerMetadataAuthority({
+      partyCount: 2,
+      recipient1Name: "Blue Canyon Analytics LLC",
+      recipient2Name: "Iron Vale Systems Inc.",
+      recipient1Email: "anthemhayek@gmail.com",
+      recipient2Email: "irenev34@gmail.com",
+      extraPartyReviewEmails: [],
+      partySignerNames: ["Anthem H Blanchard", "Irene Vail"],
+      partySignerTitles: ["Member", "Manager"],
+      partyAddresses: [
+        "1027 S. Rainbow Blvd., #124, Las Vegas, NV 89132",
+        "149 First St., Smithville, AR 75023",
+      ],
+    });
+    setConsumedPaidProSignerMetadataAuthority(authority);
+    const plain = resolveAuthoritativePaidProReviewPlain();
+    expect(plain).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+    expect(plain).toMatch(/Email for Notice:\s*irenev34@gmail\.com/i);
+    expect(plain).not.toMatch(/is This Agreement is between/i);
+    expect(plain).not.toMatch(/Date:\s*May\s+30,\s*2026/i);
+    expect(plain).not.toMatch(/Email for Notice:\s*_{4,}/i);
+    const review = getPaidProDocumentForSurface("review");
+    expect(review?.signerMetadataApplied).toBe(true);
+    expect(review?.text).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
   });
 
   it("exports paid review chip labels distinct from starter", () => {

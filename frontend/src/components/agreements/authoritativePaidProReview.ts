@@ -6,6 +6,9 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
+import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
+import { resolvePaidProFinalHydratedCorpusForSurface } from "./paidProFinalHydratedCorpus";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruthText,
@@ -28,11 +31,28 @@ export type AuthoritativePaidProReviewInput = {
   intakeText?: string | null;
 };
 
+function finalizeAuthoritativePaidProReviewPlain(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length < PAID_PRO_AUTHORITY_MIN_LEN) return trimmed;
+  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
+  return repairMalformedPaidProAgreementRecital(trimmed, parties).text.trim();
+}
+
 export function resolveAuthoritativePaidProReviewPlain(
   args?: AuthoritativePaidProReviewInput,
 ): string {
+  const hydrated = resolvePaidProFinalHydratedCorpusForSurface("review", {
+    draft: args?.draft ?? null,
+    intakeText: args?.intakeText ?? null,
+  });
+  if (hydrated.signerMetadataApplied && hydrated.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return finalizeAuthoritativePaidProReviewPlain(hydrated.text);
+  }
+
   const fromSnapshot = readAuthoritativeSigningCorpus();
-  if (fromSnapshot.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromSnapshot;
+  if (fromSnapshot.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return finalizeAuthoritativePaidProReviewPlain(fromSnapshot);
+  }
   const review = getPaidProDocumentForSurface("review", {
     draft: args?.draft ?? null,
     intakeText: args?.intakeText ?? null,
@@ -42,9 +62,13 @@ export function resolveAuthoritativePaidProReviewPlain(
     intakeText: args?.intakeText ?? null,
   });
   const fromSurfaces = (review?.text || display?.text || "").trim();
-  if (fromSurfaces.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromSurfaces;
+  if (fromSurfaces.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return finalizeAuthoritativePaidProReviewPlain(fromSurfaces);
+  }
   const sot = getPaidProSourceOfTruthText().trim();
-  return sot.length >= PAID_PRO_AUTHORITY_MIN_LEN ? sot : fromSurfaces;
+  return sot.length >= PAID_PRO_AUTHORITY_MIN_LEN
+    ? finalizeAuthoritativePaidProReviewPlain(sot)
+    : fromSurfaces;
 }
 
 /**

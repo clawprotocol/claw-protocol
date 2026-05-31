@@ -39,11 +39,15 @@ export type CanonicalPartyIdentity = {
   index: number;
   partyDisplayName: string;
   email: string;
+  partyAddress?: string | null;
   representativeName: string | null;
   title: string | null;
   blockHeading: string;
   isIndividual: boolean;
 };
+
+/** Signature execution date line — blank until e-sign execution, never prefilled at review. */
+export const SIGNATURE_DATE_BLANK_LINE = "Date: _____________________________";
 
 export type ResolveCanonicalPartyIdentitiesArgs = ResolveGuidedPreReviewSignerSlotsArgs & {
   draftPartyRoles?: readonly string[];
@@ -274,6 +278,42 @@ function fillSignatureNameUnderscoreLines(
         replacements += 1;
       }
     }
+
+    if (/^email\s+for\s+notices?\s*:/i.test(trimmed)) {
+      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
+      const email = identities[partyIndex]?.email?.trim() ?? "";
+      if (!email) continue;
+      if (/_{4,}/.test(trimmed) || /^email\s+for\s+notices?\s*:\s*$/i.test(trimmed)) {
+        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+        const label = /^email\s+for\s+notices\s*:/i.test(trimmed) ? "Email for Notices" : "Email for Notice";
+        lines[i] = `${indent}${label}: ${email}`;
+        replacements += 1;
+      }
+    }
+
+    if (/^address\s+for\s+notices?\s*:/i.test(trimmed)) {
+      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
+      const address = identities[partyIndex]?.partyAddress?.trim() ?? "";
+      if (!address) continue;
+      if (/_{4,}/.test(trimmed) || /^address\s+for\s+notices?\s*:\s*$/i.test(trimmed)) {
+        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+        const label = /^address\s+for\s+notices\s*:/i.test(trimmed) ? "Address for Notices" : "Address for Notice";
+        lines[i] = `${indent}${label}: ${address}`;
+        replacements += 1;
+      }
+    }
+
+    if (/^date\s*:/i.test(trimmed)) {
+      const value = trimmed.replace(/^date\s*:\s*/i, "").trim();
+      const hasCalendarDate =
+        /\d{1,2}[\/\-]|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b|\b20\d{2}\b/i.test(value);
+      const notBlankField = value.length > 0 && !/_{4,}/.test(value);
+      if (hasCalendarDate || notBlankField) {
+        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+        lines[i] = `${indent}${SIGNATURE_DATE_BLANK_LINE}`;
+        replacements += 1;
+      }
+    }
   }
 
   return { text: lines.join("\n"), count: replacements };
@@ -295,7 +335,19 @@ function buildSignatureBlocks(identities: readonly CanonicalPartyIdentity[]): {
     if (!id.isIndividual || id.title?.trim()) {
       lines.push(`Title: ${id.title?.trim() || "_________________________"}`);
     }
-    lines.push("Date: _________________________");
+    const email = id.email?.trim();
+    if (email) {
+      lines.push(`Email for Notice: ${email}`);
+    } else {
+      lines.push("Email for Notice: __________________________");
+    }
+    const address = id.partyAddress?.trim();
+    if (address) {
+      lines.push(`Address for Notice: ${address}`);
+    } else {
+      lines.push("Address for Notice: ________________________");
+    }
+    lines.push(SIGNATURE_DATE_BLANK_LINE);
     blocks.push(lines.join("\n"));
     count += 1;
   }

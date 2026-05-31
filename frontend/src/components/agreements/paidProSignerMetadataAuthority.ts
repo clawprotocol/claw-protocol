@@ -246,6 +246,7 @@ export function authorityPartiesToCanonicalPartyIdentities(
       index: p.partyIndex,
       partyDisplayName: legal,
       email: p.signerEmail,
+      partyAddress: p.partyAddress.trim() || null,
       representativeName: p.signerName.trim() || null,
       title: p.signerTitle.trim() || null,
       blockHeading:

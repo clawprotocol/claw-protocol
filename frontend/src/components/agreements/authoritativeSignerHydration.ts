@@ -17,7 +17,12 @@ import {
   type AuthoritativeSigningSnapshot,
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
-import { applyPartyNoticeDetailsToCorpus, logPartyNoticeDetailsHydration } from "./paidProPartyNoticeDetails";
+import {
+  applyPartyNoticeDetailsToCorpus,
+  applySignatureNoticeContactFieldsToCorpus,
+  logPartyNoticeDetailsHydration,
+} from "./paidProPartyNoticeDetails";
+import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import {
   buildLivePaidProSignerMetadataAuthority,
   hashPaidProSignerMetadataAuthority,
@@ -98,9 +103,14 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   intakeRaw: string;
   surface: string;
 }): HydratedAuthoritativeSigningCorpusResult {
+  const recitalRepair = repairMalformedPaidProAgreementRecital(
+    args.rawCorpus,
+    args.authority.parties,
+  );
+  const rawCorpus = recitalRepair.text;
   const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties);
   let result = buildHydratedAuthoritativeSigningCorpus({
-    rawCorpus: args.rawCorpus,
+    rawCorpus,
     identities,
     intakeRaw: args.intakeRaw,
     surface: args.surface,
@@ -149,6 +159,16 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
         corpusLen: noticeApply.text.length,
         partyCount: args.authority.parties.length,
       });
+    }
+    const signatureNoticeApply = applySignatureNoticeContactFieldsToCorpus(
+      result.corpus,
+      args.authority.parties,
+    );
+    if (signatureNoticeApply.applied) {
+      result = {
+        ...result,
+        corpus: signatureNoticeApply.text,
+      };
     }
   }
 

@@ -308,7 +308,7 @@ export function canonicalPartyRecordsFromSignerIdentities(
         displayAlias: definedShortNameFromLegalEntity(fullLegalName),
         signerName: id.representativeName?.trim() || null,
         signerTitle: id.title?.trim() || null,
-        partyAddress: null,
+        partyAddress: id.partyAddress?.trim() || null,
       };
     })
     .filter((r): r is CanonicalPartyIdentityRecord => r != null);
@@ -350,6 +350,32 @@ export function definedServicesAgreementOpeningLine(
   const clientAddress = optionalPartyAddressPhrase(client.partyAddress);
   const providerAddress = optionalPartyAddressPhrase(provider.partyAddress);
   return `This Services Agreement (the "Agreement") is entered into by and between ${client.fullLegalName} ("${client.roleLabel}")${clientAddress} and ${provider.fullLegalName} ("${provider.roleLabel}")${providerAddress}.`;
+}
+
+/** Mutual consulting opening with Effective Date defined at full execution. */
+export function definedMutualConsultingAgreementOpeningLine(
+  client: CanonicalPartyIdentityRecord,
+  provider: CanonicalPartyIdentityRecord,
+): string {
+  return `This Mutual Consulting and Implementation Agreement ("Agreement") is entered into as of the Effective Date by and between ${client.fullLegalName} ("Client") and ${provider.fullLegalName} ("Service Provider"). The "Effective Date" is the date on which the Agreement has been fully executed by both parties.`;
+}
+
+const FUSED_EXECUTION_RECITAL_RE =
+  /\)\.execution\s+by\s+both\s+parties\.?/gi;
+
+/** Repair fused ").execution by both parties" after the party clause in malformed openers. */
+export function repairFusedExecutionRecitalClause(text: string): { text: string; repairs: string[] } {
+  if (!FUSED_EXECUTION_RECITAL_RE.test(text)) {
+    return { text, repairs: [] };
+  }
+  FUSED_EXECUTION_RECITAL_RE.lastIndex = 0;
+  return {
+    text: text.replace(
+      FUSED_EXECUTION_RECITAL_RE,
+      '). The "Effective Date" is the date on which the Agreement has been fully executed by both parties.',
+    ),
+    repairs: ["recital:repair_fused_execution_clause"],
+  };
 }
 
 function optionalPartyAddressPhrase(address: string | null | undefined): string {
@@ -426,7 +452,10 @@ export function repairDuplicateAgreementOpening(
   const repairs: string[] = [];
   const replaceAll = (input: string): string => {
     if (records && records.length >= 2) {
-      const replacement = definedServicesAgreementOpeningLine(records[0]!, records[1]!);
+      const useMutualConsulting = /Mutual\s+Consulting/i.test(input.slice(0, 2_000));
+      const replacement = useMutualConsulting
+        ? definedMutualConsultingAgreementOpeningLine(records[0]!, records[1]!)
+        : definedServicesAgreementOpeningLine(records[0]!, records[1]!);
       let next = input.replace(DUPLICATE_OPENING_REPLACE, () => {
         repairs.push("opening:duplicate_services_agreement_phrase");
         return replacement;

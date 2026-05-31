@@ -52,6 +52,8 @@ export type SimpleProFinalReviewScreenProps = {
   canonicalPaidProReview?: boolean;
   /** Frozen paid SoT plain — renders when HTML prop is still empty after acceptance. */
   paidReviewPlain?: string;
+  /** Corpus authority label for diagnostics (hydrated vs raw SoT). */
+  paidReviewAuthoritativeSource?: string;
   signaturePrimaryLabel?: string;
   signatureSecondaryLabel?: string;
   reviewSecondaryLabel?: string;
@@ -115,6 +117,7 @@ export function SimpleProFinalReviewScreen({
   enableSectionJump = true,
   canonicalPaidProReview = false,
   paidReviewPlain = "",
+  paidReviewAuthoritativeSource = "paidProSourceOfTruth",
   signaturePrimaryLabel = "Send for signature",
   signatureSecondaryLabel = "Change signing order",
   reviewSecondaryLabel = "Send for review",
@@ -162,6 +165,9 @@ export function SimpleProFinalReviewScreen({
   const effectiveCorpusRecoveryMessage =
     suppressFinalizingForPaidAuthority && hasCanonicalPaidReviewBody ? null : corpusRecoveryMessage;
   const effectiveAgreementHtml = agreementHtml.trim();
+  const preferHydratedReviewHtml =
+    canonicalPaidProReview && signersReady && effectiveAgreementHtml.length > 0;
+  const showCanonicalPaidPre = hasCanonicalPaidReviewBody && !preferHydratedReviewHtml;
   const showDocument =
     (effectiveAgreementHtml.length > 0 || hasCanonicalPaidReviewBody) && !effectiveCorpusRecoveryMessage;
   const showPreviewUnavailable =
@@ -346,12 +352,19 @@ export function SimpleProFinalReviewScreen({
         data-testid="simple-pro-final-review-document"
       >
         {showDocument ? (
-          hasCanonicalPaidReviewBody ? (
+          preferHydratedReviewHtml ? (
+            <PremiumAgreementReadonlyView
+              html={effectiveAgreementHtml}
+              suppressEmptyFallback={suppressEmptyFallback}
+              fullDocumentFlow={false}
+              visibleProPaperTrace={visibleProPaperTrace}
+            />
+          ) : showCanonicalPaidPre ? (
             <article
               aria-label="Agreement document preview"
               className="premium-readonly-doc min-h-0 overflow-visible px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left"
               data-testid="premium-agreement-readonly-article"
-              data-paid-pro-authoritative-source="paidProSourceOfTruth"
+              data-paid-pro-authoritative-source={paidReviewAuthoritativeSource}
             >
               <pre
                 className="whitespace-pre-wrap font-serif text-[15px] leading-[1.75] text-stone-800"

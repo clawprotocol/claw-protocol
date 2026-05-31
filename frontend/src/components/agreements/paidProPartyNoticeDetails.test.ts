@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyPartyNoticeDetailsToCorpus,
+  applySignatureNoticeContactFieldsToCorpus,
   buildPartyNoticeDetailsBlock,
   corpusHasPartyNoticeDetails,
 } from "./paidProPartyNoticeDetails";
@@ -40,6 +41,8 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
+  "Email for Notice: __________________________",
+  "Address for Notice: ________________________",
   "Date:",
   "",
   "SERVICE PROVIDER:",
@@ -47,6 +50,8 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
+  "Email for Notice: __________________________",
+  "Address for Notice: ________________________",
   "Date:",
 ].join("\n");
 
@@ -96,6 +101,15 @@ describe("paidProPartyNoticeDetails", () => {
     expect(spSection).not.toMatch(/\nAddress:/i);
   });
 
+  it("applySignatureNoticeContactFieldsToCorpus fills signature notice lines", () => {
+    const parties = authority().parties;
+    const withLines = applySignatureNoticeContactFieldsToCorpus(RAW_BODY, parties);
+    expect(withLines.applied).toBe(true);
+    expect(withLines.text).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+    expect(withLines.text).toMatch(/Address for Notice:\s*1027 S\. Rainbow/i);
+    expect(withLines.text).not.toMatch(/Email for Notice:\s*_{4,}/i);
+  });
+
   it("applyPartyNoticeDetailsToCorpus is idempotent", () => {
     const parties = authority().parties;
     const first = applyPartyNoticeDetailsToCorpus(RAW_BODY, parties);
@@ -123,6 +137,9 @@ describe("paidProPartyNoticeDetails", () => {
     expect(hydrated.corpus).toMatch(/Email:\s*jn789@me\.com/i);
     expect(hydrated.corpus).toMatch(/Address:\s*1027 S\. Rainbow/i);
     expect(hydrated.corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
+    expect(hydrated.corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+    expect(hydrated.corpus).toMatch(/Email for Notice:\s*jn789@me\.com/i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:\s*_{4,}/i);
 
     const manifest = resolveCanonicalFinalPartyManifest({
       partyCount: 2,

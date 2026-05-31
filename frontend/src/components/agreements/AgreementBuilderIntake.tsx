@@ -12548,7 +12548,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (snapshotCorpus.length >= 500) return snapshotCorpus;
     if (!hasPaidProSourceOfTruth()) return "";
     const authority = readConsumedPaidProSignerMetadataAuthority();
-    if (!authority?.parties.some((p) => p.signerName.trim() && p.partyLegalName.trim())) {
+    if (
+      !authority?.parties.some((p) => {
+        const legal = p.partyLegalName.trim();
+        return legal && (p.signerName.trim() || p.signerEmail.trim());
+      })
+    ) {
       return "";
     }
     const raw = (getPaidProSourceOfTruthText() || "").trim();
@@ -17849,6 +17854,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText: intakeForPolish,
     });
     const raw = (
+      paidProSignerHydratedPreviewPlain.trim() ||
       (signingSnapshotActive ? readAuthoritativeSigningCorpus() : "") ||
       paidProReview?.text ||
       paidReviewAuthorityPlain ||
@@ -17893,6 +17899,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewDocRefreshTick,
     premiumSurfaceGateTick,
     authoritativePaidProReviewPlain,
+    paidProSignerHydratedPreviewPlain,
   ]);
 
   const visibleProPaperBoundaryState = useMemo(() => {
@@ -17959,8 +17966,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const pinFinalizedSignerAppliedCorpus = React.useCallback(
     (body: string, source: string) => {
+      const pinSignerHydratedBodyDirectly =
+        source === "paid_pro_signer_metadata_finalize" ||
+        source === "continue_to_signing" ||
+        source === "finalize_paid_pro_signer_metadata";
       const paidProFinalized =
-        source === "pro_final_review_plain_edit" ? null : getPaidProDocumentForSurface("finalized");
+        source === "pro_final_review_plain_edit" || pinSignerHydratedBodyDirectly
+          ? null
+          : getPaidProDocumentForSurface("finalized");
       const bodyToPin = paidProFinalized?.text ?? body;
       const pinned = buildPinnedFinalizedSignerCorpus(bodyToPin);
       if (!pinned) return;
@@ -25752,7 +25765,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         <SimpleProFinalReviewScreen
                                           agreementHtml={simpleProFinalReviewHtml}
-                                          paidReviewPlain={authoritativePaidProReviewPlain}
+                                          paidReviewPlain={
+                                            simpleProFinalReviewDisplayPlain.trim() ||
+                                            authoritativePaidProReviewPlain
+                                          }
+                                          paidReviewAuthoritativeSource={
+                                            paidProSignerHydratedPreviewPlain.trim() ||
+                                            hasAuthoritativeSigningSnapshot()
+                                              ? "signer_hydrated_corpus"
+                                              : "paidProSourceOfTruth"
+                                          }
                                           visibleProPaperTrace={visibleProPaperTrace}
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}
                                           canonicalPaidProReview={acceptedPaidProAuthorityActive}

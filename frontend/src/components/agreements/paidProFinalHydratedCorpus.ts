@@ -56,7 +56,11 @@ export function clearPaidProPinnedSignerAppliedCorpus(): void {
 function authorityHasSignerMetadata(): boolean {
   const auth = readConsumedPaidProSignerMetadataAuthority();
   if (!auth?.parties.length) return false;
-  return auth.parties.some((p) => p.signerName.trim() && p.partyLegalName.trim());
+  return auth.parties.some((p) => {
+    const legal = p.partyLegalName.trim();
+    if (!legal) return false;
+    return Boolean(p.signerName.trim() || p.signerEmail.trim());
+  });
 }
 
 function hydrateFromConsumedAuthority(rawCorpus: string, intakeRaw: string): string {
@@ -168,6 +172,12 @@ export function assertPaidProFinalCorpusParity(args: {
   }
   if (!/Party Notice Details:/i.test(copy) && /Email:\s*\S+@/i.test(review)) {
     mismatches.push("copy_missing_party_notice_details");
+  }
+  if (/email\s+for\s+notices?\s*:\s*_{4,}/i.test(copy) && /email\s+for\s+notices?\s*:\s*\S+@/i.test(review)) {
+    mismatches.push("copy_blank_signature_notice_email");
+  }
+  if (/address\s+for\s+notices?\s*:\s*_{4,}/i.test(copy) && /address\s+for\s+notices?\s*:\s*\S/i.test(review)) {
+    mismatches.push("copy_blank_signature_notice_address");
   }
   return { ok: mismatches.length === 0, mismatches };
 }

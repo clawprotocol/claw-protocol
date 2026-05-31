@@ -162,8 +162,20 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
     return resolution;
   }
 
+  const paidPro = getPaidProDocumentForSurface("review");
+  if (paidPro?.signerMetadataApplied) {
+    const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
+      body: paidPro.text,
+      source: "hydrated_premium_with_signers",
+      len: paidPro.text.length,
+      hasSignerHydration: true,
+      finalizedHash: paidPro.hash,
+    };
+    logGuidedFinalReviewAuthoritativeBody(resolution);
+    return resolution;
+  }
   const canonical = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
-  if (canonical) {
+  if (canonical && !hasSignerHydration) {
     const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
       body: canonical.canonicalText,
       source: "paidProSourceOfTruth",
@@ -174,13 +186,12 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
     logGuidedFinalReviewAuthoritativeBody(resolution);
     return resolution;
   }
-  const paidPro = getPaidProDocumentForSurface("review");
   if (paidPro) {
     const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
       body: paidPro.text,
-      source: "paidProSourceOfTruth",
+      source: paidPro.signerMetadataApplied ? "hydrated_premium_with_signers" : "paidProSourceOfTruth",
       len: paidPro.text.length,
-      hasSignerHydration,
+      hasSignerHydration: paidPro.signerMetadataApplied || hasSignerHydration,
       finalizedHash: paidPro.hash,
     };
     logGuidedFinalReviewAuthoritativeBody(resolution);
