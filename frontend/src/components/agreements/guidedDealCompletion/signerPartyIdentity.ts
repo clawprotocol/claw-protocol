@@ -10,12 +10,14 @@ import {
 import { isPlaceholderPartyName } from "../starterPartyLimits";
 import type { PremiumRecipientHandoffV2 } from "../premiumPartyNamesHandoff";
 import type { ResolveGuidedPreReviewSignerSlotsArgs } from "./resolveGuidedPreReviewSignerSlots";
+import { paidProSignerMetadataForensicLineageEnabled } from "../paidProSignerMetadataAuthority";
 import {
   findSignatureRegionEnd,
   findSignatureRegionStart,
   isSafeSignatureTailReplacement,
   signaturePatchStartIndex,
 } from "./signatureRegion";
+import { fingerprintAgreementBody } from "./guidedSigningPacketVersion";
 import {
   applyCanonicalManifestPlaceholdersToCorpus,
   buildCanonicalFinalPartyManifestFromIdentities,
@@ -445,24 +447,46 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
   const signaturePolishCount =
     openingPatch.count + slotPatch.count + sigFill.count + blockPolish.count + headings.log.replacedCount;
 
-  if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
-    // eslint-disable-next-line no-console
-    console.info("[signer-party-identity-applied-to-corpus]", {
-      bodyLenBefore,
-      bodyLenAfter: out.length,
-      partyNames,
-      signaturePolishCount,
-      repaired: repair.repaired.length,
-    });
-    if (signaturePolishCount > 0) {
-      // eslint-disable-next-line no-console
-      console.info("[signature-block-party-polish-applied]", {
-        replacedCount: signaturePolishCount,
-      });
-    }
-  }
+  logSignerPartyIdentityAppliedOnce({
+    bodyLenBefore,
+    bodyLenAfter: out.length,
+    partyNames,
+    signaturePolishCount,
+    repairedCount: repair.repaired.length,
+    corpusHash: fingerprintAgreementBody(out),
+  });
 
   return { text: out, partyNames, signaturePolishCount, repaired: repair.repaired };
+}
+
+let lastSignerPartyIdentityLogHash = "";
+
+function logSignerPartyIdentityAppliedOnce(payload: {
+  bodyLenBefore: number;
+  bodyLenAfter: number;
+  partyNames: string[];
+  signaturePolishCount: number;
+  repairedCount: number;
+  corpusHash: string;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (!paidProSignerMetadataForensicLineageEnabled()) return;
+  if (payload.corpusHash === lastSignerPartyIdentityLogHash) return;
+  lastSignerPartyIdentityLogHash = payload.corpusHash;
+  // eslint-disable-next-line no-console
+  console.info("[signer-party-identity-applied-to-corpus]", {
+    bodyLenBefore: payload.bodyLenBefore,
+    bodyLenAfter: payload.bodyLenAfter,
+    partyNames: payload.partyNames,
+    signaturePolishCount: payload.signaturePolishCount,
+    repaired: payload.repairedCount,
+  });
+  if (payload.signaturePolishCount > 0) {
+    // eslint-disable-next-line no-console
+    console.info("[signature-block-party-polish-applied]", {
+      replacedCount: payload.signaturePolishCount,
+    });
+  }
 }
 
 export function agreementHasUnresolvedPartyPlaceholdersAfterSignerSetup(

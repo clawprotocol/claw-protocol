@@ -111,6 +111,40 @@ describe("authoritativeSignerHydration", () => {
     expect(ironTail).not.toMatch(/Anthem H Blanchard/);
   });
 
+  it("hydrates Party Notice Details with signer emails and addresses", () => {
+    const authority = buildLivePaidProSignerMetadataAuthority({
+      partyCount: 2,
+      recipient1Name: BLUE_CANYON,
+      recipient2Name: IRON_VALE,
+      recipient1Email: "anthem@test.com",
+      recipient2Email: "ira@test.com",
+      extraPartyReviewEmails: [],
+      partySignerNames: ["Anthem H Blanchard", "Ira Vernon"],
+      partySignerTitles: ["Manager", "Manager"],
+      partyAddresses: ["100 Main St", ""],
+    });
+    const body = [
+      ...RAW_BODY.split("\n").slice(0, RAW_BODY.indexOf("IN WITNESS")),
+      "11. Notices and Dispute Terms.",
+      "11.1 Notices. Any notice under this Agreement must be in writing and may be delivered by email or courier to the notice details below, unless a party updates those details by written notice to the other party.",
+      "",
+      RAW_BODY.slice(RAW_BODY.indexOf("IN WITNESS")),
+    ].join("\n");
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: body,
+      authority,
+      intakeRaw: "",
+      surface: "party_notice",
+    });
+    expect(hydrated.partyNoticeApplied).toBe(true);
+    expect(hydrated.corpus).toMatch(/Email:\s*anthem@test\.com/i);
+    expect(hydrated.corpus).toMatch(/Email:\s*ira@test\.com/i);
+    expect(hydrated.corpus).toMatch(/Address:\s*100 Main St/i);
+    const noticeTail = hydrated.corpus.split(/Party Notice Details:/i)[1]?.split(/IN WITNESS WHEREOF/i)[0] ?? "";
+    const spNotice = noticeTail.split(/Service Provider:/i)[1] ?? "";
+    expect(spNotice).not.toMatch(/\nAddress:/i);
+  });
+
   it("hydrates distinct signer names per party from consumed authority", () => {
     const authority = buildLivePaidProSignerMetadataAuthority({
       partyCount: 2,
@@ -131,9 +165,10 @@ describe("authoritativeSignerHydration", () => {
     });
     expect(hydrated.corpus).toMatch(/CLIENT:[\s\S]*Blue Canyon[\s\S]*Name:\s*Anthem H Blanchard/i);
     expect(hydrated.corpus).toMatch(/SERVICE PROVIDER:[\s\S]*Iron Vale[\s\S]*Name:\s*Ira Vernon/i);
-    const ironBlock = hydrated.corpus.split(/SERVICE PROVIDER:/i)[1] ?? "";
-    expect(ironBlock).toMatch(/Name:\s*Ira Vernon/i);
-    expect(ironBlock).not.toMatch(/Anthem H Blanchard/);
+    const sigTail = hydrated.corpus.split(/IN WITNESS WHEREOF/i)[1] ?? "";
+    const ironSig = sigTail.split(/SERVICE PROVIDER:/i)[1] ?? "";
+    expect(ironSig).toMatch(/Name:\s*Ira Vernon/i);
+    expect(ironSig).not.toMatch(/Anthem H Blanchard/);
   });
 
   it("hydrates Name/Title lines before snapshot creation", () => {

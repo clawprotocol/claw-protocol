@@ -30,7 +30,12 @@ const RAW_BODY = [
   "",
   `Between ${BLUE} and ${IRON}.`,
   "",
-  ...Array.from({ length: 80 }, (_, i) => `Section ${i + 1}. Operative clause ${i + 1}.`),
+  ...Array.from({ length: 40 }, (_, i) => `Section ${i + 1}. Operative clause ${i + 1}.`),
+  "",
+  "11. Notices and Dispute Terms.",
+  "11.1 Notices. Any notice under this Agreement must be in writing and may be delivered by email or courier to the notice details below, unless a party updates those details by written notice to the other party.",
+  "",
+  "12. Miscellaneous.",
   "",
   "IN WITNESS WHEREOF, the Parties execute this Agreement.",
   "",
@@ -124,6 +129,9 @@ describe("paidProFinalHydratedCorpus", () => {
       expect(corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
       expect(corpus).toMatch(/Name:\s*Jay Nine/i);
       expect(corpus).toMatch(/Title:\s*Member/i);
+      expect(corpus).toMatch(/Email:\s*anthemhayek@gmail\.com/i);
+      expect(corpus).toMatch(/Email:\s*jn789@me\.com/i);
+      expect(corpus).toMatch(/Address:\s*1027 S\. Rainbow/i);
       expect(corpus).not.toMatch(/Name:\s*_{4,}/i);
       expect(corpus).not.toMatch(/Title:\s*_{4,}/i);
     }

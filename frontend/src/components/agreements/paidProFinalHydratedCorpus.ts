@@ -166,6 +166,9 @@ export function assertPaidProFinalCorpusParity(args: {
   if (/title\s*:\s*_{4,}/i.test(copy)) {
     mismatches.push("copy_blank_signer_title");
   }
+  if (!/Party Notice Details:/i.test(copy) && /Email:\s*\S+@/i.test(review)) {
+    mismatches.push("copy_missing_party_notice_details");
+  }
   return { ok: mismatches.length === 0, mismatches };
 }
 

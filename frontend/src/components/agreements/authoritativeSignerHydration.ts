@@ -17,6 +17,7 @@ import {
   type AuthoritativeSigningSnapshot,
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
+import { applyPartyNoticeDetailsToCorpus, logPartyNoticeDetailsHydration } from "./paidProPartyNoticeDetails";
 import {
   buildLivePaidProSignerMetadataAuthority,
   hashPaidProSignerMetadataAuthority,
@@ -28,6 +29,7 @@ export type HydratedAuthoritativeSigningCorpusResult = {
   corpus: string;
   identities: CanonicalPartyIdentity[];
   signaturePolishCount: number;
+  partyNoticeApplied: boolean;
   rejected: boolean;
   rejectReason?: "corpus_shrink";
 };
@@ -81,6 +83,7 @@ export function buildHydratedAuthoritativeSigningCorpus(args: {
     corpus,
     identities: [...args.identities],
     signaturePolishCount: identityApply.signaturePolishCount,
+    partyNoticeApplied: false,
     rejected: Boolean(identityApply.rejected),
     rejectReason: identityApply.rejectReason,
   };
@@ -131,6 +134,24 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       });
     }
   }
+
+  if (!result.rejected) {
+    const noticeApply = applyPartyNoticeDetailsToCorpus(result.corpus, args.authority.parties);
+    if (noticeApply.applied) {
+      result = {
+        ...result,
+        corpus: noticeApply.text,
+        partyNoticeApplied: true,
+      };
+      logPartyNoticeDetailsHydration({
+        surface: args.surface,
+        inserted: true,
+        corpusLen: noticeApply.text.length,
+        partyCount: args.authority.parties.length,
+      });
+    }
+  }
+
   return result;
 }
 
