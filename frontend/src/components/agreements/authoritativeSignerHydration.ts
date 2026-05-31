@@ -11,17 +11,17 @@ import {
   rebuildSignatureBlocksWithPartyIdentities,
 } from "./guidedDealCompletion/signerPartyIdentity";
 import type { PaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
-import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
+import {
+  authorityPartiesToCanonicalPartyIdentities,
+  paidProSignerMetadataForensicLineageEnabled,
+} from "./paidProSignerMetadataAuthority";
 import {
   getAuthoritativeSigningSnapshot,
   type AuthoritativeSigningSnapshot,
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
-import {
-  applyPartyNoticeDetailsToCorpus,
-  applySignatureNoticeContactFieldsToCorpus,
-  logPartyNoticeDetailsHydration,
-} from "./paidProPartyNoticeDetails";
+import { logPartyNoticeDetailsHydration } from "./paidProPartyNoticeDetails";
+import { applyCanonicalPartyLegalNamesToSigningCorpus } from "./canonicalPartyLegalNameSanitizer";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import {
   buildLivePaidProSignerMetadataAuthority,
@@ -145,30 +145,30 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     }
   }
 
-  if (!result.rejected) {
-    const noticeApply = applyPartyNoticeDetailsToCorpus(result.corpus, args.authority.parties);
-    if (noticeApply.applied) {
-      result = {
-        ...result,
-        corpus: noticeApply.text,
-        partyNoticeApplied: true,
-      };
-      logPartyNoticeDetailsHydration({
-        surface: args.surface,
-        inserted: true,
-        corpusLen: noticeApply.text.length,
-        partyCount: args.authority.parties.length,
-      });
-    }
-    const signatureNoticeApply = applySignatureNoticeContactFieldsToCorpus(
+  if (!result.rejected && signerCount >= 2) {
+    const canonicalParties = applyCanonicalPartyLegalNamesToSigningCorpus(
       result.corpus,
       args.authority.parties,
     );
-    if (signatureNoticeApply.applied) {
-      result = {
-        ...result,
-        corpus: signatureNoticeApply.text,
-      };
+    result = {
+      ...result,
+      corpus: canonicalParties.text,
+      signaturePolishCount: result.signaturePolishCount + (canonicalParties.repaired ? 1 : 0),
+      partyNoticeApplied: /Party Notice Details:/i.test(canonicalParties.text),
+    };
+    if (canonicalParties.repaired) {
+      logSignatureBlockSource({
+        surface: args.surface,
+        source: "canonical_party_legal_name_repair",
+        hasFilledBlocks: corpusSignatureBlocksHaveRequiredByLines(canonicalParties.text, signerCount),
+        signerCount,
+      });
+      logPartyNoticeDetailsHydration({
+        surface: args.surface,
+        inserted: true,
+        corpusLen: canonicalParties.text.length,
+        partyCount: args.authority.parties.length,
+      });
     }
   }
 
@@ -217,7 +217,7 @@ export function logAuthoritativeSignerHydration(payload: {
   rejectReason: string | null;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
-  if (typeof import.meta === "undefined" || !import.meta.env?.DEV) return;
+  if (!paidProSignerMetadataForensicLineageEnabled()) return;
   // eslint-disable-next-line no-console
   console.info("[authoritative-signer-hydration]", payload);
 }

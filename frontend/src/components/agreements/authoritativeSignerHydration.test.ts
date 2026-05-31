@@ -276,7 +276,9 @@ describe("authoritativeSignerHydration", () => {
     const fromReader = readAuthoritativeSignerIdentitiesForSurfaces()!;
     expect(fromReader[0]?.representativeName).toBe(fromSnap[0]?.representativeName);
     expect(fromReader[1]?.representativeName).toBe(fromSnap[1]?.representativeName);
-    expect(readAuthoritativeSigningCorpus()).toBe(hydrated.corpus);
+    expect(readAuthoritativeSigningCorpus()).toBe(snap.corpus);
+    expect(snap.corpus).not.toContain("Iron Vale Systems Inc Analytics LLC");
+    expect(snap.corpus).toMatch(/Party Notice Details:/);
   });
 
   it("legal entity edits trigger drift fingerprint", () => {

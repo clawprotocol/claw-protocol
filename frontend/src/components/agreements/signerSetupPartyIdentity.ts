@@ -378,7 +378,15 @@ export function sanitizeAuthorityPartyLegalName(name: string): string {
   return firstSingleLegalEntity(t);
 }
 
-function candidateContainsMultipleEntities(name: string): boolean {
+/** True when a line looks like two+ legal entities fused (QA: Blue Canyon…LLC Iron Vale…Inc Analytics LLC). */
+export function isFusedOrConcatenatedPartyLegalName(name: string): boolean {
+  return candidateContainsMultipleEntities(norm(name));
+}
+
+export const QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE =
+  "Blue Canyon Analytics LLC Iron Vale Systems Inc Analytics LLC";
+
+export function candidateContainsMultipleEntities(name: string): boolean {
   const t = norm(name);
   if (!t) return false;
   if (looksLikeJoinedPartyList(t)) return true;

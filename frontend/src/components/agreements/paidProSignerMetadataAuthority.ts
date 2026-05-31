@@ -11,7 +11,11 @@ import {
   isIndividualPartyName,
   type CanonicalPartyIdentity,
 } from "./guidedDealCompletion/signerPartyIdentity";
-import { sanitizeAuthorityPartyLegalName } from "./signerSetupPartyIdentity";
+import {
+  sanitizeAuthorityPartyLegalName,
+  slotIsolatedCanonicalEntity,
+  type SignerSetupPartyIdentity,
+} from "./signerSetupPartyIdentity";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { stripRecipientEmailNoise } from "./recipientEmailValidation";
@@ -93,11 +97,19 @@ export function buildPaidProSignerMetadataParties(
   ui: LiveSignerMetadataUiState,
 ): PaidProSignerMetadataParty[] {
   const count = Math.max(ui.partyCount, 2);
+  const slots: SignerSetupPartyIdentity[] = [];
+  for (let i = 0; i < count; i++) {
+    slots.push({
+      legalEntityName: partyLegalNameForIndex(ui, i),
+      displayName: partyLegalNameForIndex(ui, i),
+      source: "authoritative_manifest",
+    });
+  }
   const parties: PaidProSignerMetadataParty[] = [];
   for (let i = 0; i < count; i++) {
     parties.push({
       partyIndex: i,
-      partyLegalName: partyLegalNameForIndex(ui, i),
+      partyLegalName: slotIsolatedCanonicalEntity(i, slots),
       signerEmail: signerEmailForIndex(ui, i),
       signerName: norm(ui.partySignerNames[i]),
       signerTitle: norm(ui.partySignerTitles[i]),
@@ -240,8 +252,13 @@ export function readPaidProSignerMetadataFieldFromConsumedAuthority(
 export function authorityPartiesToCanonicalPartyIdentities(
   parties: readonly PaidProSignerMetadataParty[],
 ): CanonicalPartyIdentity[] {
+  const slots: SignerSetupPartyIdentity[] = parties.map((p) => ({
+    legalEntityName: p.partyLegalName,
+    displayName: p.partyLegalName,
+    source: "authoritative_manifest",
+  }));
   return parties.map((p) => {
-    const legal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
+    const legal = slotIsolatedCanonicalEntity(p.partyIndex, slots);
     const isIndividual = legal ? isIndividualPartyName(legal) : false;
     return {
       index: p.partyIndex,

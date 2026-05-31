@@ -10,7 +10,15 @@ import type { CanonicalFinalPartyManifest } from "./guidedDealCompletion/canonic
 import type { CanonicalSignerManifest } from "./guidedDealCompletion/guidedReviewSigningContinuity";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import {
+  applyCanonicalPartyLegalNamesToSigningCorpus,
+  corpusContainsFusedPartyLegalName,
+} from "./canonicalPartyLegalNameSanitizer";
 import { setPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
+import {
+  readConsumedPaidProSignerMetadataAuthority,
+  recipientMetadataToAuthorityParties,
+} from "./paidProSignerMetadataAuthority";
 
 export type PaidProSigningAuthorityPhase =
   | "SIGNER_METADATA_EDIT"
@@ -55,7 +63,17 @@ export function getAuthoritativeSigningSnapshot(): AuthoritativeSigningSnapshot 
 }
 
 export function readAuthoritativeSigningCorpus(): string {
-  return authoritativeSigningSnapshot?.corpus?.trim() ?? "";
+  const raw = authoritativeSigningSnapshot?.corpus?.trim() ?? "";
+  if (!raw) return "";
+  // Frozen snapshot corpus is canonicalized at create; only re-repair legacy fused bodies.
+  if (!corpusContainsFusedPartyLegalName(raw)) return raw;
+  const parties =
+    readConsumedPaidProSignerMetadataAuthority()?.parties ??
+    (authoritativeSigningSnapshot
+      ? recipientMetadataToAuthorityParties(authoritativeSigningSnapshot.signerMetadata)
+      : []);
+  if (!parties.length) return raw;
+  return applyCanonicalPartyLegalNamesToSigningCorpus(raw, parties).text.trim();
 }
 
 export function readAuthoritativeSigningSnapshotHash(): string | null {
@@ -95,7 +113,16 @@ export function createAuthoritativeSigningSnapshot(
     logSnapshotConsumed({ reason: "create_called_after_freeze", hash: authoritativeSigningSnapshot.hash });
     return authoritativeSigningSnapshot;
   }
-  const corpus = (args.corpus || "").trim();
+  const parties =
+    readConsumedPaidProSignerMetadataAuthority()?.parties ??
+    recipientMetadataToAuthorityParties({
+      ...args.signerMetadata,
+      partyAddresses: args.signerMetadata.partyAddresses ?? [],
+    });
+  const corpus = applyCanonicalPartyLegalNamesToSigningCorpus(
+    (args.corpus || "").trim(),
+    parties,
+  ).text.trim();
   const hash = hashPaidProCorpus(corpus);
   const frozenAt = Date.now();
   const signerMetadata: AuthoritativeSigningSnapshotRecipientMetadata = {

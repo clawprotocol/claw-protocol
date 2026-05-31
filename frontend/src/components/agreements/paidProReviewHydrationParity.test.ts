@@ -15,6 +15,10 @@ import { resolvePaidProFinalHydratedCorpusForSurface } from "./paidProFinalHydra
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import { computePremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
 import { resolveGuidedFinalReviewAuthoritativeBody } from "./guidedDealCompletion/guidedFinalReviewAuthoritativeBody";
+import {
+  applyCanonicalPartyLegalNamesToSigningCorpus,
+  QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE,
+} from "./canonicalPartyLegalNameSanitizer";
 
 const RAW = [
   "CONSULTING AND IMPLEMENTATION AGREEMENT",
@@ -96,6 +100,22 @@ describe("paidProReviewHydrationParity", () => {
     });
     expect(resolution.source).not.toBe("paidProSourceOfTruth");
     expect(resolution.hasSignerHydration).toBe(true);
+  });
+
+  it("never emits QA fused party legal name in review copy or HTML paths", () => {
+    establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
+    const auth = authority();
+    setConsumedPaidProSignerMetadataAuthority(auth);
+    const fusedRaw = RAW.replace(
+      /Between Blue Canyon/i,
+      `IN WITNESS WHEREOF\n\n${QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE}\nBy: ___\nName: ___\n\nIron Vale`,
+    );
+    const repaired = applyCanonicalPartyLegalNamesToSigningCorpus(fusedRaw, auth.parties);
+    const reviewPlain = resolveAuthoritativePaidProReviewPlain();
+    const copy = getPaidProDocumentForSurface("copy")!.text;
+    expect(repaired.text).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
+    expect(reviewPlain).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
+    expect(copy).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
   });
 
   it("sanitizes concatenated party legal names in hydrated signature blocks", () => {
