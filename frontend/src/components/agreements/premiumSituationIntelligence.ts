@@ -25,7 +25,7 @@ export type PremiumSituationProfile = {
   situationLabel: string;
 };
 
-const CONTRADICTION_DOC_NOTES: Record<IntakeContradictionKind, string> = {
+export const CONTRADICTION_DOC_NOTES: Record<IntakeContradictionKind, string> = {
   exclusive_scope:
     "Your instructions mentioned both exclusive and non-exclusive rights — this draft uses one clear grant; adjust the usage section if needed.",
   refund_policy:

@@ -360,6 +360,39 @@ export function definedMutualConsultingAgreementOpeningLine(
   return `This Mutual Consulting and Implementation Agreement ("Agreement") is entered into as of the Effective Date by and between ${client.fullLegalName} ("Client") and ${provider.fullLegalName} ("Service Provider"). The "Effective Date" is the date on which the Agreement has been fully executed by both parties.`;
 }
 
+/** Consulting and implementation opening (non-mutual title variant). */
+export function definedConsultingAgreementOpeningLine(
+  client: CanonicalPartyIdentityRecord,
+  provider: CanonicalPartyIdentityRecord,
+): string {
+  return `This Consulting and Implementation Agreement (the "Agreement") is entered into as of the Effective Date by and between ${client.fullLegalName} ("Client") and ${provider.fullLegalName} ("Service Provider"). The "Effective Date" is the date on which the Agreement has been fully executed by both parties.`;
+}
+
+const EFFECTIVE_DATE_DUPLICATE_OPENING_RE =
+  /(?:entered\s+into\s+as\s+of\s+the\s+)?Effective\s+Date\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/gi;
+
+const IS_IS_BETWEEN_RE = /\bis\s+is\s+between/gi;
+
+/** Repair fused "Effective Date This Agreement is between" and duplicate "is is between". */
+export function repairMalformedAgreementOpeningPhrases(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = text;
+  if (EFFECTIVE_DATE_DUPLICATE_OPENING_RE.test(out)) {
+    EFFECTIVE_DATE_DUPLICATE_OPENING_RE.lastIndex = 0;
+    out = out.replace(
+      EFFECTIVE_DATE_DUPLICATE_OPENING_RE,
+      "is entered into as of the Effective Date by and between",
+    );
+    repairs.push("opening:repair_effective_date_duplicate_phrase");
+  }
+  if (IS_IS_BETWEEN_RE.test(out)) {
+    IS_IS_BETWEEN_RE.lastIndex = 0;
+    out = out.replace(IS_IS_BETWEEN_RE, "is between");
+    repairs.push("opening:repair_duplicate_is_between");
+  }
+  return { text: out, repairs };
+}
+
 const FUSED_EXECUTION_RECITAL_RE =
   /\)\.execution\s+by\s+both\s+parties\.?/gi;
 
@@ -452,10 +485,14 @@ export function repairDuplicateAgreementOpening(
   const repairs: string[] = [];
   const replaceAll = (input: string): string => {
     if (records && records.length >= 2) {
-      const useMutualConsulting = /Mutual\s+Consulting/i.test(input.slice(0, 2_000));
+      const head = input.slice(0, 2_000);
+      const useMutualConsulting = /Mutual\s+Consulting/i.test(head);
+      const useConsulting = /Consulting\s+and\s+Implementation/i.test(head);
       const replacement = useMutualConsulting
         ? definedMutualConsultingAgreementOpeningLine(records[0]!, records[1]!)
-        : definedServicesAgreementOpeningLine(records[0]!, records[1]!);
+        : useConsulting
+          ? definedConsultingAgreementOpeningLine(records[0]!, records[1]!)
+          : definedServicesAgreementOpeningLine(records[0]!, records[1]!);
       let next = input.replace(DUPLICATE_OPENING_REPLACE, () => {
         repairs.push("opening:duplicate_services_agreement_phrase");
         return replacement;

@@ -370,6 +370,14 @@ function firstSingleLegalEntity(name: string): string {
   return m ? norm(m[0]) : t;
 }
 
+/** Never write concatenated multi-entity names into paid Pro signing corpus. */
+export function sanitizeAuthorityPartyLegalName(name: string): string {
+  const t = norm(name);
+  if (!t) return "";
+  if (!candidateContainsMultipleEntities(t)) return t;
+  return firstSingleLegalEntity(t);
+}
+
 function candidateContainsMultipleEntities(name: string): boolean {
   const t = norm(name);
   if (!t) return false;

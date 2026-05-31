@@ -6,7 +6,9 @@ import {
   canonicalPartyRecordsFromSignerIdentities,
   repairDuplicateAgreementOpening,
   repairFusedExecutionRecitalClause,
+  repairMalformedAgreementOpeningPhrases,
 } from "./canonicalPartyIdentityResolver";
+import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
 
@@ -27,6 +29,12 @@ export function repairMalformedPaidProAgreementRecital(
   const dup = repairDuplicateAgreementOpening(out, records);
   out = dup.text;
   repairs.push(...dup.repairs);
+
+  const phrases = repairMalformedAgreementOpeningPhrases(out);
+  out = phrases.text;
+  repairs.push(...phrases.repairs);
+
+  out = stripPremiumIntelligenceCalloutsFromCorpus(out);
 
   return { text: out, repairs };
 }

@@ -27,6 +27,15 @@ const parties = [
 ] as const;
 
 describe("paidProAgreementRecitalRepair", () => {
+  it("repairs consulting opener with Effective Date duplicate phrase", () => {
+    const malformed =
+      'This Consulting and Implementation Agreement (the "Agreement") is entered into as of the Effective Date This Agreement is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").';
+    const { text } = repairMalformedPaidProAgreementRecital(malformed, parties);
+    expect(text).not.toMatch(/Effective Date\s+This Agreement is between/i);
+    expect(text).not.toMatch(/\bis\s+is\s+between/i);
+    expect(text).toContain("is entered into as of the Effective Date by and between");
+  });
+
   it("repairs exact QA malformed mutual consulting opener", () => {
     const { text, repairs } = repairMalformedPaidProAgreementRecital(QA_MALFORMED_RECITAL, parties);
     expect(repairs.length).toBeGreaterThan(0);

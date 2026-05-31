@@ -397,6 +397,7 @@ import {
   suppressPaidProFinalReviewFinalizingState,
   starterPlainLooksStaleVersusPaidAuthority,
 } from "./authoritativePaidProReview";
+import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { commitPaidProAcceptanceStorageHygiene } from "./paidProAcceptanceRouting";
 import {
   buildCreateReturnToWithStarterReviewRestore,
@@ -17560,19 +17561,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const guidedFinalReviewAuthoritativeResolution = useMemo(() => {
-    const paidProReview = getPaidProDocumentForSurface("review", {
-      draft: draft ?? null,
-      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
-    });
-    if (paidProReview?.text && paidProReview.text.trim().length >= 500) {
-      return {
-        body: paidProReview.text,
-        source: "paidProSourceOfTruth" as const,
-        len: paidProReview.text.length,
-        hasSignerHydration: false,
-        finalizedHash: paidProReview.hash,
-      };
-    }
     const rd = reviewDraft ?? draft;
     const serverFullDocumentText = (
       (rd as { server_full_document_text?: string | null } | null)?.server_full_document_text ||
@@ -17868,10 +17856,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       reviewDisplayMode: true,
       retainSignatureExecutionBlock: signingSnapshotActive,
     }).text;
-    const sanitized = sanitizeProReviewDisplayText(polished, {
-      source: paidProReview ? "paid_pro_review_surface" : "simple_pro_final_review",
-      retainSignatureExecutionBlock: signingSnapshotActive,
-    }).text;
+    const sanitized = stripPremiumIntelligenceCalloutsFromCorpus(
+      sanitizeProReviewDisplayText(polished, {
+        source: paidProReview ? "paid_pro_review_surface" : "simple_pro_final_review",
+        retainSignatureExecutionBlock: signingSnapshotActive,
+      }).text,
+    );
     const boundary = resolveVisibleProPaperBoundary({
       visiblePlain: sanitized,
       declaredSource: paidProReview ? "paid_pro_review_surface" : simpleProFinalReviewCorpus.source,
@@ -18847,11 +18837,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signatureSectionMode: "collaboration",
       partyNames: signaturePartyNames,
       renderHints,
+      suppressDocumentIntelligenceCallouts:
+        acceptedPaidProAuthorityActive || Boolean(paidProSignerHydratedPreviewPlain.trim()),
       forceEmbeddedCorpusSignature:
         snapshotActive ||
         signerHydratedPreview ||
         guidedSignatureRebuiltRef.current ||
-        guidedFinalReviewAuthoritativeResolution.source === "finalized_signer_applied_guided_corpus",
+        guidedFinalReviewAuthoritativeResolution.source === "finalized_signer_applied_guided_corpus" ||
+        guidedFinalReviewAuthoritativeResolution.source === "hydrated_premium_with_signers",
     });
   }, [
     paidProSignerHydratedPreviewPlain,

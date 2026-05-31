@@ -57,6 +57,15 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(screen).not.toContain("Back to signer details");
   });
 
+  it("guided final review resolution does not short-circuit to paidProSourceOfTruth label", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const block = intake.slice(
+      intake.indexOf("const guidedFinalReviewAuthoritativeResolution = useMemo"),
+      intake.indexOf("const guidedAuthoritativeBodyPlain = useMemo"),
+    );
+    expect(block).not.toMatch(/source:\s*["']paidProSourceOfTruth["']\s+as const/);
+  });
+
   it("canonical paid review renders paidReviewPlain before unavailable preview", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain("paidReviewPlain");

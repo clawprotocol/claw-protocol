@@ -10,6 +10,7 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
 import { resolvePartyIndexForSignatureLine } from "./guidedDealCompletion/signerPartyIdentity";
+import { sanitizeAuthorityPartyLegalName } from "./signerSetupPartyIdentity";
 
 export const PARTY_NOTICE_DETAILS_HEADING = "Party Notice Details:";
 
@@ -31,7 +32,7 @@ export function buildPartyNoticeDetailsBlock(
   const lines: string[] = [PARTY_NOTICE_DETAILS_HEADING, ""];
   let wroteParty = false;
   for (const party of parties) {
-    const legal = party.partyLegalName.trim();
+    const legal = sanitizeAuthorityPartyLegalName(party.partyLegalName);
     const email = party.signerEmail.trim();
     if (!legal) continue;
     lines.push(`${partyRoleLabelForIndex(party.partyIndex)}:`);

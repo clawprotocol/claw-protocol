@@ -11,6 +11,7 @@ import {
   isIndividualPartyName,
   type CanonicalPartyIdentity,
 } from "./guidedDealCompletion/signerPartyIdentity";
+import { sanitizeAuthorityPartyLegalName } from "./signerSetupPartyIdentity";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { stripRecipientEmailNoise } from "./recipientEmailValidation";
@@ -240,7 +241,7 @@ export function authorityPartiesToCanonicalPartyIdentities(
   parties: readonly PaidProSignerMetadataParty[],
 ): CanonicalPartyIdentity[] {
   return parties.map((p) => {
-    const legal = p.partyLegalName.trim();
+    const legal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
     const isIndividual = legal ? isIndividualPartyName(legal) : false;
     return {
       index: p.partyIndex,
@@ -261,7 +262,7 @@ export function buildCanonicalFinalPartyManifestFromAuthority(
 ): CanonicalFinalPartyManifest {
   return {
     parties: authority.parties.map((p) => {
-      const legal = p.partyLegalName.trim();
+      const legal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
       const isIndividual = legal ? isIndividualPartyName(legal) : false;
       const role =
         p.partyIndex === 0 ? ("client" as const) : p.partyIndex === 1 ? ("service_provider" as const) : (`party_${p.partyIndex + 1}` as const);

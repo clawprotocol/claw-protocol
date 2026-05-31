@@ -7,6 +7,7 @@ import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
+import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { resolvePaidProFinalHydratedCorpusForSurface } from "./paidProFinalHydratedCorpus";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
@@ -35,7 +36,8 @@ function finalizeAuthoritativePaidProReviewPlain(text: string): string {
   const trimmed = text.trim();
   if (trimmed.length < PAID_PRO_AUTHORITY_MIN_LEN) return trimmed;
   const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
-  return repairMalformedPaidProAgreementRecital(trimmed, parties).text.trim();
+  const repaired = repairMalformedPaidProAgreementRecital(trimmed, parties).text.trim();
+  return stripPremiumIntelligenceCalloutsFromCorpus(repaired);
 }
 
 export function resolveAuthoritativePaidProReviewPlain(

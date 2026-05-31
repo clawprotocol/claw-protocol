@@ -6,6 +6,7 @@ import type { PremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { corpusHasHydratedSignatureBlock } from "./guidedDealCompletion/signatureRegion";
 import { sanitizeProReviewDisplayText } from "./polishProAgreementDisplayLayer";
+import { premiumRenderHintsWithoutDocumentCallouts } from "./premiumDocumentIntelligenceStrip";
 
 export function escapeHtml(s: string): string {
   return (s || "")
@@ -140,6 +141,8 @@ export type BuildPremiumAgreementReadonlyHtmlOpts = {
    * readonly body and do not render embedded or decorative signature blocks in the document.
    */
   suppressCorpusEmbeddedSignatureForDisplay?: boolean;
+  /** Final paid Pro review: omit situation-intelligence callouts from the agreement paper. */
+  suppressDocumentIntelligenceCallouts?: boolean;
 };
 
 /** Remove signature tails when external signer UI owns execution blocks. */
@@ -209,7 +212,9 @@ export function buildPremiumAgreementReadonlyHtml(
   opts: BuildPremiumAgreementReadonlyHtmlOpts,
 ): string {
   if (!(plain || "").trim()) return "";
-  const hints = opts.renderHints ?? null;
+  const hints = opts.suppressDocumentIntelligenceCallouts
+    ? premiumRenderHintsWithoutDocumentCallouts(opts.renderHints)
+    : (opts.renderHints ?? null);
   let raw = stripStarterPreviewDisclaimerFromPlainText((plain || "").replace(/\r\n/g, "\n")).trimEnd();
   if (opts.suppressCorpusEmbeddedSignatureForDisplay) {
     raw = stripCorpusSignatureRegionForExternalSignerUi(raw);
