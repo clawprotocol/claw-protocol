@@ -32,6 +32,7 @@ export type CanonicalAgreementSnapshotSource =
   | "accepted_review"
   | "authoritative_snapshot"
   | "hydrated_premium_with_signers"
+  | "paid_pro_review_render"
   | "hydrated_premium"
   | "server_full_document_text"
   | "last_known_good_authoritative"
@@ -143,6 +144,7 @@ const SOURCE_PRIORITY: readonly CanonicalAgreementSnapshotSource[] = [
   "authoritative_snapshot",
   "canonical_working_draft",
   "hydrated_premium_with_signers",
+  "paid_pro_review_render",
   "finalized_guided_corpus",
   "hydrated_premium",
   "last_known_good_authoritative",

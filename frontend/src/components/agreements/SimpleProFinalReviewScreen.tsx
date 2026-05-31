@@ -166,8 +166,9 @@ export function SimpleProFinalReviewScreen({
     suppressFinalizingForPaidAuthority && hasCanonicalPaidReviewBody ? null : corpusRecoveryMessage;
   const effectiveAgreementHtml = agreementHtml.trim();
   const preferHydratedReviewHtml =
-    canonicalPaidProReview && signersReady && effectiveAgreementHtml.length > 0;
-  const showCanonicalPaidPre = hasCanonicalPaidReviewBody && !preferHydratedReviewHtml;
+    canonicalPaidProReview && effectiveAgreementHtml.length >= PAID_PRO_AUTHORITY_MIN_LEN;
+  const showCanonicalPaidPre =
+    hasCanonicalPaidReviewBody && !preferHydratedReviewHtml && paidReviewPlain.trim().length > 0;
   const showDocument =
     (effectiveAgreementHtml.length > 0 || hasCanonicalPaidReviewBody) && !effectiveCorpusRecoveryMessage;
   const showPreviewUnavailable =
@@ -356,7 +357,7 @@ export function SimpleProFinalReviewScreen({
             <PremiumAgreementReadonlyView
               html={effectiveAgreementHtml}
               suppressEmptyFallback={suppressEmptyFallback}
-              fullDocumentFlow={false}
+              fullDocumentFlow={canonicalPaidProReview}
               visibleProPaperTrace={visibleProPaperTrace}
             />
           ) : showCanonicalPaidPre ? (

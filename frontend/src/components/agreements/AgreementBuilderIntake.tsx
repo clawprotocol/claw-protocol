@@ -401,12 +401,9 @@ import {
   starterPlainLooksStaleVersusPaidAuthority,
 } from "./authoritativePaidProReview";
 import {
-  applyCanonicalPartyLegalNamesToSigningCorpus,
-} from "./canonicalPartyLegalNameSanitizer";
-import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
-import {
-  guardPaidProReviewRenderCorpus,
+  applyPaidProReviewRenderSanitizer,
   resolvePaidProReviewRenderPlain,
+  resolvePaidProReviewRenderSource,
   syncConsumedAuthoritySignerTitlesFromCorpus,
 } from "./paidProReviewRenderCorpus";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
@@ -17844,18 +17841,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const simpleProFinalReviewDisplayPlain = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    const signingSnapshotActive = hasAuthoritativeSigningSnapshot();
-    if (
-      hasPaidProSourceOfTruth() ||
-      signingSnapshotActive ||
-      Boolean(paidProSignerHydratedPreviewPlain.trim())
-    ) {
+    if (hasPaidProSourceOfTruth() || hasAuthoritativeSigningSnapshot()) {
       const renderPlain = resolvePaidProReviewRenderPlain({
         draft: draft ?? null,
         intakeText: intakeForPolish,
       });
       if (renderPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) return renderPlain;
     }
+    const signingSnapshotActive = hasAuthoritativeSigningSnapshot();
     const paidReviewAuthorityPlain = resolveAuthoritativePaidProReviewPlain({
       draft: draft ?? null,
       intakeText: intakeForPolish,
@@ -18921,10 +18914,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedApplied: guidedCompletionPhase === "applied",
       recipientUxActive: premiumRecipientUxActive,
     });
+    const renderMeta = resolvePaidProReviewRenderSource({
+      draft: draft ?? null,
+      intakeText: (currentPremiumMergedIntakeKey || intakeCombined || "").trim(),
+    });
     logGuidedFinalReviewRender({
-      source: guidedFinalReviewAuthoritativeResolution.source,
-      hash: guidedFinalReviewAuthoritativeResolution.finalizedHash,
-      len: simpleProFinalReviewCorpus.plainText.length,
+      source: renderMeta.source,
+      hash: renderMeta.hash || guidedFinalReviewAuthoritativeResolution.finalizedHash,
+      len: simpleProFinalReviewDisplayPlain.length,
     });
     if (premiumRecipientUxActive && !finalReviewSendPathChosenRef.current) {
       logSimpleProFinalReviewHiddenRecipientUi();
@@ -20614,9 +20611,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!raw) return;
     const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
     if (parties && parties.length >= 2) {
-      raw = applyCanonicalPartyLegalNamesToSigningCorpus(raw, parties).text;
-      raw = repairMalformedPaidProAgreementRecital(raw, parties).text;
-      raw = guardPaidProReviewRenderCorpus(raw, parties).text.trim();
+      raw = applyPaidProReviewRenderSanitizer(raw, parties).text.trim();
     }
     setProFinalReviewSaveBusy(true);
     setProFinalReviewSaveAck(false);
@@ -25811,10 +25806,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             authoritativePaidProReviewPlain
                                           }
                                           paidReviewAuthoritativeSource={
-                                            paidProSignerHydratedPreviewPlain.trim() ||
-                                            hasAuthoritativeSigningSnapshot()
-                                              ? "signer_hydrated_corpus"
-                                              : "paidProSourceOfTruth"
+                                            resolvePaidProReviewRenderSource({
+                                              draft: draft ?? null,
+                                              intakeText: (
+                                                currentPremiumMergedIntakeKey || intakeCombined || ""
+                                              ).trim(),
+                                            }).source
                                           }
                                           visibleProPaperTrace={visibleProPaperTrace}
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}

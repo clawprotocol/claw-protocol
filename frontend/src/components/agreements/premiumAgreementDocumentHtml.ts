@@ -7,8 +7,11 @@ import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion
 import { corpusHasHydratedSignatureBlock } from "./guidedDealCompletion/signatureRegion";
 import { sanitizeProReviewDisplayText } from "./polishProAgreementDisplayLayer";
 import { premiumRenderHintsWithoutDocumentCallouts } from "./premiumDocumentIntelligenceStrip";
-import { guardPaidProReviewRenderCorpus } from "./paidProReviewRenderCorpus";
-import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import {
+  applyPaidProReviewRenderSanitizer,
+  resolvePartiesForReviewRender,
+} from "./paidProReviewRenderCorpus";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 export function escapeHtml(s: string): string {
   return (s || "")
@@ -218,13 +221,14 @@ export function buildPremiumAgreementReadonlyHtml(
     ? premiumRenderHintsWithoutDocumentCallouts(opts.renderHints)
     : (opts.renderHints ?? null);
   let raw = stripStarterPreviewDisclaimerFromPlainText((plain || "").replace(/\r\n/g, "\n")).trimEnd();
-  const renderGuardParties = readConsumedPaidProSignerMetadataAuthority()?.parties;
   if (
-    renderGuardParties &&
-    renderGuardParties.length >= 2 &&
+    hasPaidProSourceOfTruth() &&
     (opts.forceEmbeddedCorpusSignature || opts.suppressDocumentIntelligenceCallouts)
   ) {
-    raw = guardPaidProReviewRenderCorpus(raw, renderGuardParties).text;
+    const parties = resolvePartiesForReviewRender();
+    if (parties.length >= 2) {
+      raw = applyPaidProReviewRenderSanitizer(raw, parties).text;
+    }
   }
   if (opts.suppressCorpusEmbeddedSignatureForDisplay) {
     raw = stripCorpusSignatureRegionForExternalSignerUi(raw);

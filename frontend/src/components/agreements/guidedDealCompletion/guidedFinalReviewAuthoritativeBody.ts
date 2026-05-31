@@ -15,8 +15,9 @@ import {
   buildCanonicalAgreementSnapshot,
   readCanonicalAgreementCorpusForSurface,
 } from "../canonicalAgreementSnapshot";
-import { getPaidProDocumentForSurface } from "../paidProSourceOfTruth";
+import { getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "../paidProSourceOfTruth";
 import { resolvePaidProFinalHydratedCorpusForSurface } from "../paidProFinalHydratedCorpus";
+import { resolvePaidProReviewRenderPlain, resolvePaidProReviewRenderSource } from "../paidProReviewRenderCorpus";
 
 export const GUIDED_FINAL_REVIEW_AUTHORITATIVE_MIN_LEN = 1500;
 
@@ -76,6 +77,7 @@ export const GUIDED_FINAL_REVIEW_SOURCE_PRIORITY: readonly GuidedFinalCorpusCand
   "finalized_signer_applied_guided_corpus",
   "canonical_working_draft",
   "hydrated_premium_with_signers",
+  "paid_pro_review_render",
   "finalized_guided_corpus",
   "finalized_signing",
   "accepted_review",
@@ -142,6 +144,30 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
   const identities = args.signerIdentities ?? [];
   const hasSignerHydration = identities.filter((p) => p.partyDisplayName.trim().length >= 2).length >= 2;
   const signingReady = args.signingCorpusReady ?? false;
+
+  if (hasPaidProSourceOfTruth()) {
+    const renderMeta = resolvePaidProReviewRenderSource();
+    const renderPlain = resolvePaidProReviewRenderPlain();
+    if (renderPlain.length >= minLen) {
+      const renderSource: GuidedFinalCorpusCandidateSource =
+        renderMeta.signerMetadataApplied
+          ? renderMeta.source === "authoritative_signing_snapshot"
+            ? "finalized_signing"
+            : renderMeta.source === "pinned_signer_applied_corpus"
+              ? "finalized_signer_applied_guided_corpus"
+              : "hydrated_premium_with_signers"
+          : "paid_pro_review_render";
+      const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
+        body: renderPlain,
+        source: renderSource,
+        len: renderPlain.length,
+        hasSignerHydration: renderMeta.signerMetadataApplied || hasSignerHydration,
+        finalizedHash: renderMeta.hash,
+      };
+      logGuidedFinalReviewAuthoritativeBody(resolution);
+      return resolution;
+    }
+  }
 
   const hydratedFinal = resolvePaidProFinalHydratedCorpusForSurface("review");
   if (hydratedFinal.signerMetadataApplied && hydratedFinal.text.length >= minLen) {

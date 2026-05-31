@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import {
+  applyPaidProReviewRenderSanitizer,
   guardPaidProReviewRenderCorpus,
+  repairSignatureNameLinesUsingLegalEntity,
   resolvePaidProReviewRenderPlain,
+  stripStrayStandalonePartyEntityLinesBeforeRecital,
   syncConsumedAuthoritySignerTitlesFromCorpus,
 } from "./paidProReviewRenderCorpus";
+import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE } from "./canonicalPartyLegalNameSanitizer";
 import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
@@ -117,6 +122,68 @@ describe("paidProReviewRenderCorpus", () => {
     expect(renderPlain).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     expect(renderPlain).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
     expect(renderPlain).toMatch(/SERVICE PROVIDER:\s*\n\s*Iron Vale Systems Inc/i);
+  });
+
+  it("strips stray standalone party entity line before opening recital", () => {
+    const corrupted = [
+      "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+      "",
+      "Blue Canyon Analytics LLC",
+      "",
+      'This Agreement is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").',
+      "",
+      "1. Services",
+    ].join("\n");
+    const stripped = stripStrayStandalonePartyEntityLinesBeforeRecital(corrupted, [
+      "Blue Canyon Analytics LLC",
+      "Iron Vale Systems Inc",
+    ]);
+    expect(stripped.removed).toBe(1);
+    expect(stripped.text).not.toMatch(
+      /^MUTUAL[\s\S]*?\n\nBlue Canyon Analytics LLC\n\nThis Agreement is between/m,
+    );
+    expect(stripped.text).toMatch(/This Agreement is between Blue Canyon Analytics LLC/i);
+  });
+
+  it("pre-signer review does not use party legal names as signature Name lines", () => {
+    const preSigner = [
+      "SIGNATURES",
+      "",
+      "CLIENT:",
+      "Blue Canyon Analytics LLC",
+      "By: __________________________",
+      "Name: Blue Canyon Analytics LLC",
+      "Title: __________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Iron Vale Systems Inc",
+      "By: __________________________",
+      "Name: Iron Vale Systems Inc",
+      "Title: __________________________",
+    ].join("\n");
+    const parties = authority().parties.map((p) => ({ ...p, signerName: "", signerTitle: "" }));
+    const identities = authorityPartiesToCanonicalPartyIdentities(parties);
+    const repaired = repairSignatureNameLinesUsingLegalEntity(preSigner, identities);
+    expect(repaired.repairs).toBeGreaterThanOrEqual(2);
+    expect(repaired.text).toMatch(/Name:\s*_{4,}/i);
+    expect(repaired.text).not.toMatch(/Name:\s*Blue Canyon Analytics LLC/i);
+    expect(repaired.text).not.toMatch(/Name:\s*Iron Vale Systems Inc/i);
+  });
+
+  it("review and copy surfaces stay equivalent when only SoT is established", () => {
+    const clean = RAW.replace(/IN WITNESS WHEREOF[\s\S]*/i, "SIGNATURES\n\nEnd.");
+    establishPaidProSourceOfTruth({ text: clean, source: "server_full_draft" });
+    setConsumedPaidProSignerMetadataAuthority(authority());
+    const review = resolvePaidProReviewRenderPlain();
+    const copy = getPaidProDocumentForSurface("copy")!.text;
+    expect(hasPaidProSourceOfTruth()).toBe(true);
+    expect(review.length).toBeGreaterThan(400);
+    expect(copy.length).toBeGreaterThan(400);
+    expect(review).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
+    expect(copy).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
+    const sanitizedReview = applyPaidProReviewRenderSanitizer(review, authority().parties).text;
+    expect(sanitizedReview).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
+    expect(sanitizedReview).toMatch(/SERVICE PROVIDER:\s*\n\s*Iron Vale Systems Inc/i);
   });
 
   it("direct text edit Membe to Member persists in render and copy paths", () => {

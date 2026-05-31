@@ -1,5 +1,5 @@
 /**
- * Paid Pro final review render corpus — same sanitized body as copy/export, plus render-time fused-name guard.
+ * Paid Pro final review render corpus — same sanitized body as copy/export, plus render-time guards.
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -8,22 +8,52 @@ import {
   corpusContainsFusedPartyLegalName,
   QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE,
 } from "./canonicalPartyLegalNameSanitizer";
+import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
+import { canonicalPartyRecordsFromSignerIdentities } from "./canonicalPartyIdentityResolver";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
-import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
+import {
+  authorityPartiesToCanonicalPartyIdentities,
+  type PaidProSignerMetadataParty,
+} from "./paidProSignerMetadataAuthority";
 import {
   readConsumedPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataAuthority,
-  type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
-import { resolvePaidProFinalHydratedCorpusForSurface } from "./paidProFinalHydratedCorpus";
-import { resolveAuthoritativePaidProReviewPlain } from "./authoritativePaidProReview";
+import {
+  resolvePaidProFinalHydratedCorpusForSurface,
+  type PaidProFinalHydratedCorpusSource,
+} from "./paidProFinalHydratedCorpus";
+import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
+import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
+import {
+  resolvePartyIndexForSignatureLine,
+  SIGNATURE_DATE_BLANK_LINE,
+} from "./guidedDealCompletion/signerPartyIdentity";
 import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity";
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
+import {
+  getPaidProDocumentForSurface,
+  getPaidProSourceOfTruthText,
+  hasPaidProSourceOfTruth,
+  hashPaidProCorpus,
+} from "./paidProSourceOfTruth";
 
 const LABELED_SIGNATURE_BLOCK_START =
   /^(?:CLIENT|SERVICE PROVIDER|PROVIDER|CONTRACTOR|COMPANY|PARTY\s+\d+)\s*:/i;
+
+const ENTITY_SUFFIX_LINE_RE =
+  /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
+
+const RECITAL_LINE_RE =
+  /^(?:this\s+(?:agreement|mutual|consulting)|between\s+.+\s+and\s+)/i;
+
+export type PaidProReviewRenderSource =
+  | PaidProFinalHydratedCorpusSource
+  | "paid_pro_review_render"
+  | "paidProSourceOfTruth"
+  | "none";
 
 export function logPaidProReviewRenderFusedPartyWarning(payload: {
   repaired: boolean;
@@ -36,9 +66,117 @@ export function logPaidProReviewRenderFusedPartyWarning(payload: {
   console.warn("[paid-pro-review-render-fused-party-repair]", payload);
 }
 
-/**
- * Remove unlabeled entity-heading signature blocks when authoritative CLIENT / SERVICE PROVIDER blocks exist.
- */
+function normLegalNames(parties: readonly PaidProSignerMetadataParty[]): string[] {
+  return authorityPartiesToCanonicalPartyIdentities(parties)
+    .map((id) => id.partyDisplayName.trim())
+    .filter((n) => n.length >= 2);
+}
+
+/** Remove a lone legal-entity line between the title and the opening recital. */
+export function stripStrayStandalonePartyEntityLinesBeforeRecital(
+  corpus: string,
+  legalNames: readonly string[],
+): { text: string; removed: number } {
+  const legalLower = new Set(legalNames.map((n) => n.trim().toLowerCase()).filter(Boolean));
+  if (!legalLower.size) return { text: corpus, removed: 0 };
+
+  const lines = (corpus || "").replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let removed = 0;
+  let seenRecital = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+    if (RECITAL_LINE_RE.test(trimmed) || /^\d+\.\s+\w/.test(trimmed)) {
+      seenRecital = true;
+    }
+    if (
+      !seenRecital &&
+      trimmed.length >= 4 &&
+      trimmed.length < 140 &&
+      ENTITY_SUFFIX_LINE_RE.test(trimmed) &&
+      legalLower.has(trimmed.toLowerCase()) &&
+      !RECITAL_LINE_RE.test(trimmed)
+    ) {
+      const nextMeaningful = lines.slice(i + 1).find((l) => l.trim().length > 0)?.trim() ?? "";
+      if (
+        RECITAL_LINE_RE.test(nextMeaningful) ||
+        /^MUTUAL\s+/i.test(nextMeaningful) ||
+        /^THIS\s+/i.test(nextMeaningful)
+      ) {
+        removed += 1;
+        continue;
+      }
+    }
+    out.push(line);
+  }
+
+  if (removed === 0) return { text: corpus, removed: 0 };
+  return { text: out.join("\n").replace(/\n{3,}/g, "\n\n"), removed };
+}
+
+/** Never show a party legal entity in a signature Name: line before signer metadata exists. */
+export function repairSignatureNameLinesUsingLegalEntity(
+  corpus: string,
+  identities: readonly CanonicalPartyIdentity[],
+): { text: string; repairs: number } {
+  const legalLower = identities
+    .map((id) => id.partyDisplayName.trim().toLowerCase())
+    .filter((n) => n.length >= 2);
+  if (!legalLower.length) return { text: corpus, repairs: 0 };
+
+  const lines = (corpus || "").replace(/\r\n/g, "\n").split("\n");
+  let repairs = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const match = line.match(/^(\s*)Name:\s*(.+)$/i);
+    if (!match) continue;
+    const value = match[2].trim();
+    if (!value || /_{4,}/.test(value)) continue;
+    const valueLower = value.toLowerCase();
+    const isLegalEntityValue = legalLower.some(
+      (legal) => valueLower === legal || (legal.length >= 8 && valueLower.includes(legal)),
+    );
+    if (!isLegalEntityValue) continue;
+
+    const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
+    const signerName = identities[partyIndex]?.representativeName?.trim() ?? "";
+    const indent = match[1] ?? "";
+    if (signerName && !legalLower.includes(signerName.toLowerCase())) {
+      lines[i] = `${indent}Name: ${signerName}`;
+    } else {
+      lines[i] = `${indent}Name: __________________________`;
+    }
+    repairs += 1;
+  }
+
+  return { text: lines.join("\n"), repairs };
+}
+
+/** Force signature Date lines blank for review (execution-time population only). */
+export function ensureSignatureDateLinesBlank(corpus: string): { text: string; repairs: number } {
+  let repairs = 0;
+  const text = (corpus || "").replace(/\r\n/g, "\n").replace(
+    /^(\s*)Date:\s*(?!_{4,})(.+)$/gim,
+    (_m, indent, value) => {
+      const trimmed = value.trim();
+      const hasCalendar =
+        /\d{1,2}[\/\-]|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b|\b20\d{2}\b/i.test(
+          trimmed,
+        );
+      if (!trimmed || /_{4,}/.test(trimmed)) return _m;
+      if (hasCalendar || trimmed.length > 0) {
+        repairs += 1;
+        return `${indent}${SIGNATURE_DATE_BLANK_LINE}`;
+      }
+      return _m;
+    },
+  );
+  return { text, repairs };
+}
+
 export function stripDuplicateLegacySignatureBlocksAfterAuthoritative(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
@@ -101,6 +239,89 @@ export function stripDuplicateLegacySignatureBlocksAfterAuthoritative(
 
   const rebuiltTail = `${witnessLine}\n\n${kept.join("\n\n")}\n`;
   return { text: `${before}\n\n${rebuiltTail}`, removed };
+}
+
+export function resolvePartiesForReviewRender(args?: {
+  draft?: ParsedDraftShape | null;
+  intakeText?: string | null;
+}): PaidProSignerMetadataParty[] {
+  const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
+  if (consumed && consumed.length >= 2) return consumed;
+
+  const intakeRaw = (args?.intakeText ?? "").trim();
+  const records = resolveCanonicalPartyIdentitiesFromIntake(
+    intakeRaw || null,
+    args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+  );
+  if (records.length < 2) return consumed ?? [];
+
+  return records.slice(0, 12).map((record, partyIndex) => ({
+    partyIndex,
+    partyLegalName: record.fullLegalName,
+    signerEmail: "",
+    signerName: "",
+    signerTitle: "",
+    partyAddress: "",
+  }));
+}
+
+export function applyPaidProReviewRenderSanitizer(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+): { text: string; repaired: boolean } {
+  const identities = authorityPartiesToCanonicalPartyIdentities(parties);
+  const legalNames = normLegalNames(parties);
+  let text = (corpus || "").replace(/\r\n/g, "\n").trimEnd();
+  let repaired = false;
+
+  if (legalNames.length >= 2) {
+    const stray = stripStrayStandalonePartyEntityLinesBeforeRecital(text, legalNames);
+    if (stray.removed > 0) {
+      text = stray.text;
+      repaired = true;
+    }
+    const records = canonicalPartyRecordsFromSignerIdentities(identities);
+    const dupOpen = repairDuplicateAgreementOpening(text, records);
+    if (dupOpen.repairs.length > 0) {
+      text = dupOpen.text;
+      repaired = true;
+    }
+    const recital = repairMalformedPaidProAgreementRecital(text, parties);
+    if (recital.repairs.length > 0) {
+      text = recital.text;
+      repaired = true;
+    }
+  }
+
+  if (parties.length >= 2) {
+    const canonical = applyCanonicalPartyLegalNamesToSigningCorpus(text, parties);
+    if (canonical.repaired) {
+      text = canonical.text;
+      repaired = true;
+    }
+    const dedupe = stripDuplicateLegacySignatureBlocksAfterAuthoritative(text, parties);
+    if (dedupe.removed > 0) {
+      text = dedupe.text;
+      repaired = true;
+    }
+  }
+
+  if (identities.length >= 2) {
+    const nameRepair = repairSignatureNameLinesUsingLegalEntity(text, identities);
+    if (nameRepair.repairs > 0) {
+      text = nameRepair.text;
+      repaired = true;
+    }
+  }
+
+  const dates = ensureSignatureDateLinesBlank(text);
+  if (dates.repairs > 0) {
+    text = dates.text;
+    repaired = true;
+  }
+
+  const guarded = guardPaidProReviewRenderCorpus(text, parties);
+  return { text: guarded.text.trimEnd() + (guarded.text.endsWith("\n") ? "" : "\n"), repaired: repaired || guarded.repaired };
 }
 
 /** Hard render-time guard: repair fused party legal names before review HTML/display. */
@@ -199,8 +420,44 @@ export type ResolvePaidProReviewRenderPlainArgs = {
   intakeText?: string | null;
 };
 
+export function resolvePaidProReviewRenderSource(
+  args?: ResolvePaidProReviewRenderPlainArgs,
+): { source: PaidProReviewRenderSource; hash: string; signerMetadataApplied: boolean } {
+  const hydrated = resolvePaidProFinalHydratedCorpusForSurface("review", {
+    draft: args?.draft ?? null,
+    intakeText: args?.intakeText ?? null,
+  });
+  if (hydrated.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return {
+      source: hydrated.source,
+      hash: hydrated.hash,
+      signerMetadataApplied: hydrated.signerMetadataApplied,
+    };
+  }
+  const review = getPaidProDocumentForSurface("review", {
+    draft: args?.draft ?? null,
+    intakeText: args?.intakeText ?? null,
+  });
+  if (review && review.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return {
+      source: review.signerMetadataApplied ? review.source : "paid_pro_review_render",
+      hash: review.hash,
+      signerMetadataApplied: review.signerMetadataApplied,
+    };
+  }
+  if (hasPaidProSourceOfTruth()) {
+    const raw = getPaidProSourceOfTruthText();
+    return {
+      source: "paidProSourceOfTruth",
+      hash: hashPaidProCorpus(raw),
+      signerMetadataApplied: false,
+    };
+  }
+  return { source: "none", hash: "", signerMetadataApplied: false };
+}
+
 /**
- * Canonical plain corpus for review HTML — aligned with copy/export hydrated resolution + slot-isolated legal names.
+ * Canonical plain corpus for review HTML — same resolver path as Copy Agreement + render guards.
  */
 export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
@@ -210,23 +467,41 @@ export function resolvePaidProReviewRenderPlain(
     intakeText: args?.intakeText ?? null,
   });
 
-  let text = (
-    hydrated.signerMetadataApplied && hydrated.text.length >= PAID_PRO_AUTHORITY_MIN_LEN
-      ? hydrated.text
-      : resolveAuthoritativePaidProReviewPlain({
-          draft: args?.draft ?? null,
-          intakeText: args?.intakeText ?? null,
-        })
-  ).trim();
+  let text = "";
+  if (hydrated.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    text = hydrated.text;
+  } else if (hasPaidProSourceOfTruth()) {
+    const reviewDoc = getPaidProDocumentForSurface("review", {
+      draft: args?.draft ?? null,
+      intakeText: args?.intakeText ?? null,
+    });
+    text = (reviewDoc?.text || getPaidProSourceOfTruthText()).trim();
+  }
 
   if (text.length < PAID_PRO_AUTHORITY_MIN_LEN) return "";
 
-  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
-  if (parties && parties.length >= 2) {
-    text = applyCanonicalPartyLegalNamesToSigningCorpus(text, parties).text;
-    text = repairMalformedPaidProAgreementRecital(text, parties).text;
-    text = stripDuplicateLegacySignatureBlocksAfterAuthoritative(text, parties).text;
+  const parties = resolvePartiesForReviewRender(args);
+  if (parties.length >= 2) {
+    return applyPaidProReviewRenderSanitizer(text, parties).text.trim();
   }
 
   return guardPaidProReviewRenderCorpus(text, parties).text.trim();
+}
+
+export function assertPaidProReviewRenderParity(args: {
+  reviewPlain: string;
+  copyPlain: string;
+}): void {
+  const review = args.reviewPlain.trim();
+  const copy = args.copyPlain.trim();
+  if (!review || !copy) return;
+  if (review === copy) return;
+  if (corpusContainsFusedPartyLegalName(review) || corpusContainsFusedPartyLegalName(copy)) {
+    throw new Error("fused_party_legal_name_in_review_or_copy");
+  }
+  const reviewHash = hashPaidProCorpus(review);
+  const copyHash = hashPaidProCorpus(copy);
+  if (reviewHash !== copyHash && Math.abs(review.length - copy.length) > 48) {
+    throw new Error(`review_copy_corpus_drift review=${review.length} copy=${copy.length}`);
+  }
 }

@@ -48,6 +48,16 @@ function finalizeAuthoritativePaidProReviewPlain(text: string): string {
 export function resolveAuthoritativePaidProReviewPlain(
   args?: AuthoritativePaidProReviewInput,
 ): string {
+  if (hasPaidProSourceOfTruth()) {
+    const renderPlain = resolvePaidProReviewRenderPlain({
+      draft: args?.draft ?? null,
+      intakeText: args?.intakeText ?? null,
+    });
+    if (renderPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      return renderPlain;
+    }
+  }
+
   const hydrated = resolvePaidProFinalHydratedCorpusForSurface("review", {
     draft: args?.draft ?? null,
     intakeText: args?.intakeText ?? null,

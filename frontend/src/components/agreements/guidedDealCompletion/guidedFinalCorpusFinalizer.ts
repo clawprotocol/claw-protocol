@@ -82,6 +82,7 @@ export type GuidedFinalCorpusCandidateSource =
   | "canonical_working_draft"
   | "finalized_signer_applied_guided_corpus"
   | "hydrated_premium_with_signers"
+  | "paid_pro_review_render"
   | "finalized_guided_corpus"
   | "finalized_signing"
   | "accepted_review"
