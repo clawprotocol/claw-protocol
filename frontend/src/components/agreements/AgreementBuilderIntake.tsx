@@ -634,6 +634,10 @@ import {
   shouldClearSigningSnapshotOnSignerMetadataDrift,
 } from "./paidProStickyCta";
 import {
+  isPaidProReviewDecisionScrollReason,
+  scrollPaidProReviewDecisionIntoView,
+} from "./paidProSignerFinalizeRouting";
+import {
   PAID_PRO_REVIEW_STICKY_BAR_SHELL_CLASS,
   PAID_PRO_REVIEW_STICKY_FOCUS_REVEAL_CLASS,
   PAID_PRO_REVIEW_STICKY_HELPER_CLASS,
@@ -16259,14 +16263,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : "paid_pro_signer_details_required",
         };
       }
-      if (paidProSignerMetadataFinalized && !signaturePreparationRequested) {
-        return {
-          label: PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
-          action: "guided_continue",
-          disabled: false,
-          reason: "paid_pro_review_decision_prepare_signing",
-        };
-      }
       return {
         label: "",
         action: "guided_continue",
@@ -18819,6 +18815,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidProAuthoritative,
         acceptedPaidProAuthority: acceptedPaidProAuthorityActive,
         hasAuthoritativeSigningSnapshot: hasAuthoritativeSigningSnapshot(),
+        signaturePreparationRequested,
         guidedCompletionPhase,
         finalReviewExplicitlyOpened:
           guidedFinalReviewExplicitlyOpened || guidedFinalReviewExplicitlyUnlockedRef.current,
@@ -18833,6 +18830,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [
       paidProAuthoritative,
       acceptedPaidProAuthorityActive,
+      signaturePreparationRequested,
       guidedCompletionPhase,
       guidedFinalReviewExplicitlyOpened,
       createFlowPhase,
@@ -22441,11 +22439,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setHardError(null);
     setGuidedSigningConfirmationBlockMessage(null);
     bumpPremiumSurfaceGateTick();
-    window.requestAnimationFrame(() => {
-      document
-        .getElementById("simple-pro-final-review-actions")
-        ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
+    scrollPaidProReviewDecisionIntoView();
   }, [
     paidProSignerDetailsGate.complete,
     scrollGuidedSignerSetupIntoView,
@@ -22930,6 +22924,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalizePaidProSignerMetadataAndOpenReviewDecision();
       return;
     }
+    if (
+      acceptedPaidProAuthorityActive &&
+      paidProSignatureDetailsReady &&
+      hasAuthoritativeSigningSnapshot()
+    ) {
+      markSigningPreparationRequested();
+      setSignaturePreparationRequested(true);
+      setPaidProInlineSignerSetupLatched(false);
+      finalReviewSendIntentRef.current = "signature";
+      handlePremiumSendModePick("signature");
+      const signFirst = peekPremiumSenderSignFirst() ?? true;
+      setPremiumSignatureSenderFirst(signFirst);
+      writePremiumSenderSignFirst(signFirst);
+      setPremiumSendConfirmSignFirst(signFirst);
+      if (signFirst) {
+        void enterGuidedSignatureTrackRoute();
+        return;
+      }
+      ensureGuidedSigningCorpusReady();
+      completeGuidedSigningHandoff("signature", { openConfirmModal: true });
+      return;
+    }
     if (canProceedGuidedFinalReviewToSigning && paidProSignatureDetailsReady) {
       continueGuidedFinalReviewToSigning({ intent: "signature" });
       return;
@@ -22941,6 +22957,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProSignatureDetailsReady,
     finalizePaidProSignerMetadataAndOpenReviewDecision,
     continueGuidedFinalReviewToSigning,
+    enterGuidedSignatureTrackRoute,
+    completeGuidedSigningHandoff,
+    ensureGuidedSigningCorpusReady,
+    handlePremiumSendModePick,
     guidedCompletionRenderDocument.source,
     simpleProFinalReviewCorpus.plainText,
     reviewAgreementId,
@@ -23493,11 +23513,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               finalizePaidProSignerMetadataAndOpenReviewDecision();
               return;
             }
-            if (
-              cta.reason === "paid_pro_review_decision_prepare_signing" &&
-              !cta.disabled
-            ) {
-              void handleProSendForSignature();
+            if (isPaidProReviewDecisionScrollReason(cta.reason) && !cta.disabled) {
+              scrollPaidProReviewDecisionIntoView();
               return;
             }
             if (
@@ -23652,9 +23669,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (
         unifiedPrimaryCta.action === "guided_continue" &&
         !unifiedPrimaryCta.disabled &&
-        unifiedPrimaryCta.reason === "paid_pro_review_decision_prepare_signing"
+        isPaidProReviewDecisionScrollReason(unifiedPrimaryCta.reason)
       ) {
-        void handleProSendForSignature();
+        scrollPaidProReviewDecisionIntoView();
         return;
       }
       if (
@@ -26388,6 +26405,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             <CreateFlowSendRecipientsPanel
                                               variant="workspace"
                                               paidProInlineRecipientShell
+                                              hidePrimarySendCta={Boolean(
+                                                paidProCanonicalStickyCta?.showStickyBar,
+                                              )}
                                               isPremiumRecipientSurface={false}
                                               showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
                                               productionReadyForPersist={productionReadyForPersist}

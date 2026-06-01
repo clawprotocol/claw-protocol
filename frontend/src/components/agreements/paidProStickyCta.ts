@@ -6,7 +6,10 @@
  */
 
 import {
-  PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
+  PAID_PRO_REVIEW_DECISION_SCROLL_CTA,
+  PAID_PRO_REVIEW_DECISION_SCROLL_REASON,
+} from "./paidProSignerFinalizeRouting";
+import {
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
 } from "./signerSetupPartyIdentity";
@@ -61,7 +64,7 @@ export function resolvePaidProStickyCtaPhase(
 }
 
 export function paidProStickyCtaShowsStickyBar(phase: PaidProStickyCtaPhase): boolean {
-  return phase !== "prepare_signing";
+  return phase !== "review_decision" && phase !== "prepare_signing";
 }
 
 export const PAID_PRO_SIGNER_SETUP_STICKY_HELPER =
@@ -121,10 +124,10 @@ export function resolvePaidProStickyCta(args: ResolvePaidProStickyCtaArgs): Paid
     return {
       phase,
       showStickyBar,
-      label: PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
+      label: PAID_PRO_REVIEW_DECISION_SCROLL_CTA,
       action: "guided_continue",
       disabled: false,
-      reason: "paid_pro_review_decision_prepare_signing",
+      reason: PAID_PRO_REVIEW_DECISION_SCROLL_REASON,
     };
   }
 

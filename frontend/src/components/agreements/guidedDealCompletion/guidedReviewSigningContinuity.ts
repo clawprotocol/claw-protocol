@@ -194,15 +194,17 @@ export function canProceedFromGuidedFinalReviewToSigning(args: {
   signersComplete: boolean;
   refineInFlight?: boolean;
   minAuthoritativeLen?: number;
-  /** Post–signer-finalize paid Pro: signing snapshot is the authority boundary. */
+  /** Post–signer-finalize paid Pro: explicit Prepare signature links only. */
   hasAuthoritativeSigningSnapshot?: boolean;
   acceptedPaidProAuthority?: boolean;
+  signaturePreparationRequested?: boolean;
 }): boolean {
   if (
     args.acceptedPaidProAuthority &&
     args.hasAuthoritativeSigningSnapshot &&
     args.signersComplete
   ) {
+    if (!args.signaturePreparationRequested) return false;
     if (args.refineInFlight) return false;
     const minLen = args.minAuthoritativeLen ?? GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN;
     if (args.authoritativeCorpusLen < minLen) return false;

@@ -115,24 +115,26 @@ describe("guidedReviewSigningContinuity", () => {
     ).toBe(false);
   });
 
-  it("canProceedFromGuidedFinalReviewToSigning allows paid Pro signing snapshot without guided apply", () => {
+  it("canProceedFromGuidedFinalReviewToSigning requires explicit prepare for paid Pro snapshot", () => {
     expect(
       canProceedFromGuidedFinalReviewToSigning({
         paidProAuthoritative: true,
         acceptedPaidProAuthority: true,
         hasAuthoritativeSigningSnapshot: true,
+        signaturePreparationRequested: false,
         guidedCompletionPhase: "inactive",
         finalReviewExplicitlyOpened: true,
         createFlowPhase: "draft_ready_for_review",
         authoritativeCorpusLen: LONG_CORPUS.length,
         signersComplete: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       canProceedFromGuidedFinalReviewToSigning({
-        paidProAuthoritative: false,
+        paidProAuthoritative: true,
         acceptedPaidProAuthority: true,
         hasAuthoritativeSigningSnapshot: true,
+        signaturePreparationRequested: true,
         guidedCompletionPhase: "inactive",
         finalReviewExplicitlyOpened: true,
         createFlowPhase: "draft_ready_for_review",
