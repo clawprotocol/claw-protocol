@@ -561,6 +561,10 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
+  armPaidProMutationTraceReviewReady,
+  tracePaidProCorpusMutation,
+} from "./paidProMutationTrace";
+import {
   hasPaidProChromeAuthority,
   mergePremiumDraftWithServerCorpusFields,
 } from "./premiumApiHandoff";
@@ -11400,6 +11404,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     (text: string, reason: string): string => {
       const raw = text.trim();
       if (!raw) return "";
+      const docTextBefore = agreementDocumentText;
+      const acceptedBefore = acceptedReviewCorpusRef.current ?? "";
+      const finalizedBefore = finalizedSigningCorpusRef.current ?? "";
       const record = establishPaidProSourceOfTruth({
         text: raw,
         draft: draft ?? null,
@@ -11420,6 +11427,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       agreementDocumentDirtyRef.current = true;
       setAgreementDocumentText(stable);
+      tracePaidProCorpusMutation({
+        store: "acceptedReviewCorpusRef",
+        caller: "commitPaidProUserApprovedRevision",
+        stage: reason,
+        oldText: acceptedBefore,
+        newText: stable,
+        sourceAfter: "accepted_review",
+      });
+      tracePaidProCorpusMutation({
+        store: "finalizedSigningCorpusRef",
+        caller: "commitPaidProUserApprovedRevision",
+        stage: reason,
+        oldText: finalizedBefore,
+        newText: stable,
+        sourceAfter: "finalized_signing",
+      });
+      tracePaidProCorpusMutation({
+        store: "agreementDocumentText",
+        caller: "commitPaidProUserApprovedRevision",
+        stage: reason,
+        oldText: docTextBefore,
+        newText: stable,
+        sourceAfter: record.source,
+      });
       scheduleAgreementDocSync(stable);
       setGuidedAuthVersionNonce((n) => n + 1);
       bumpPremiumSurfaceGateTick();
@@ -11433,6 +11464,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       scheduleAgreementDocSync,
       bumpPremiumSurfaceGateTick,
       setAgreementDocumentText,
+      agreementDocumentText,
     ],
   );
 
@@ -12342,6 +12374,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [guidedAuthVersionNonce, premiumSurfaceGateTick],
   );
 
+  useEffect(() => {
+    if (createFlowPhase !== "draft_ready_for_review") return;
+    if (!paidProAcceptedCorpusReady) return;
+    const sot = getPaidProSourceOfTruth();
+    if (!sot?.text || sot.text.length < 500) return;
+    armPaidProMutationTraceReviewReady({
+      phase: createFlowPhase,
+      corpusLen: sot.text.length,
+      corpusHash: sot.hash,
+    });
+  }, [createFlowPhase, paidProAcceptedCorpusReady, guidedAuthVersionNonce, premiumSurfaceGateTick]);
+
   const guidedQuestionGateDecision = useMemo(() => {
     const session = stripNonAnswerableFromGuidedSession(
       guidedCompletionSession ?? guidedCompletionSessionRef.current,
@@ -12552,37 +12596,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState),
     );
   }, [liveSignerMetadataUiState, premiumSurfaceGateTick]);
-
-  const paidProSignerHydratedPreviewPlain = useMemo(() => {
-    const snapshotCorpus = readAuthoritativeSigningCorpus();
-    if (snapshotCorpus.length >= 500) return snapshotCorpus;
-    if (!hasPaidProSourceOfTruth()) return "";
-    const authority = readConsumedPaidProSignerMetadataAuthority();
-    if (
-      !authority?.parties.some((p) => {
-        const legal = p.partyLegalName.trim();
-        return legal && (p.signerName.trim() || p.signerEmail.trim());
-      })
-    ) {
-      return "";
-    }
-    const raw = (getPaidProSourceOfTruthText() || "").trim();
-    if (raw.length < 200) return "";
-    const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
-      rawCorpus: raw,
-      authority,
-      intakeRaw: intakeForHydration,
-      surface: "paid_pro_signer_hydrated_preview",
-    });
-    return hydrated.rejected ? "" : hydrated.corpus;
-  }, [
-    liveSignerMetadataUiState,
-    premiumSurfaceGateTick,
-    currentPremiumMergedIntakeKey,
-    intakeCombined,
-    paidProPostSignerMetadataFreezeActive,
-  ]);
 
   const emitPaidProSignerMetadataFieldDiagnosticsCb = React.useCallback(
     (args: {
@@ -13008,6 +13021,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   /** Validation-only: may flip true while typing; never releases corpus/session freezes. */
   const signerDetailsAreComplete = paidProSignatureDetailsReady;
+
+  const paidProSignerHydratedPreviewPlain = useMemo(() => {
+    const snapshotCorpus = readAuthoritativeSigningCorpus();
+    if (snapshotCorpus.length >= 500) return snapshotCorpus;
+    if (!paidProSignerDetailsGate.complete) return "";
+    if (!hasPaidProSourceOfTruth()) return "";
+    const authority = readConsumedPaidProSignerMetadataAuthority();
+    if (!authority?.parties.length) return "";
+    const raw = (getPaidProSourceOfTruthText() || "").trim();
+    if (raw.length < 200) return "";
+    const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: raw,
+      authority,
+      intakeRaw: intakeForHydration,
+      surface: "paid_pro_signer_hydrated_preview",
+      signatureRegionOnly: true,
+      repairRecital: false,
+    });
+    return hydrated.rejected ? "" : hydrated.corpus;
+  }, [
+    paidProSignerDetailsGate.complete,
+    premiumSurfaceGateTick,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    paidProPostSignerMetadataFreezeActive,
+  ]);
   useEffect(() => {
     if (!import.meta.env.DEV || !paidProSignerMetadataSessionActive) return;
     logPremiumSignerDetailsGate(
@@ -17972,6 +18012,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const pinFinalizedSignerAppliedCorpus = React.useCallback(
     (body: string, source: string) => {
+      const docTextBefore = agreementDocumentText;
+      const acceptedBefore = acceptedReviewCorpusRef.current ?? "";
+      const finalizedBefore = finalizedSigningCorpusRef.current ?? "";
       const pinSignerHydratedBodyDirectly =
         source === "paid_pro_signer_metadata_finalize" ||
         source === "continue_to_signing" ||
@@ -18002,10 +18045,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       );
       agreementDocumentDirtyRef.current = false;
       setAgreementDocumentText(pinned.body);
+      tracePaidProCorpusMutation({
+        store: "finalizedSigningCorpusRef",
+        caller: "pinFinalizedSignerAppliedCorpus",
+        stage: source,
+        oldText: finalizedBefore,
+        newText: pinned.body,
+        sourceAfter: "finalized_signer_applied_guided_corpus",
+      });
+      tracePaidProCorpusMutation({
+        store: "acceptedReviewCorpusRef",
+        caller: "pinFinalizedSignerAppliedCorpus",
+        stage: source,
+        oldText: acceptedBefore,
+        newText: pinned.body,
+        sourceAfter: "accepted_review",
+      });
+      tracePaidProCorpusMutation({
+        store: "agreementDocumentText",
+        caller: "pinFinalizedSignerAppliedCorpus",
+        stage: source,
+        oldText: docTextBefore,
+        newText: pinned.body,
+        sourceAfter: source,
+      });
       setGuidedAuthVersionNonce((n) => n + 1);
       logGuidedFinalCorpusPinned({ hash: pinned.hash, bodyLen: pinned.body.length, source });
     },
-    [setAgreementDocumentText],
+    [setAgreementDocumentText, agreementDocumentText],
   );
 
   const restorePinnedFinalizedSignerCorpus = React.useCallback(
@@ -18050,9 +18117,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const freezeGuidedAuthoritativeCorpusSnapshot = React.useCallback((corpus: string, source: string) => {
     const stable = corpus.trim();
     if (!stable) return;
+    const acceptedBefore = acceptedReviewCorpusRef.current ?? "";
     authoritativeAgreementSnapshotRef.current = stable;
     if (!acceptedReviewCorpusRef.current) {
       acceptedReviewCorpusRef.current = stable;
+      tracePaidProCorpusMutation({
+        store: "acceptedReviewCorpusRef",
+        caller: "freezeGuidedAuthoritativeCorpusSnapshot",
+        stage: source,
+        oldText: acceptedBefore,
+        newText: stable,
+        sourceAfter: "review_agreement_corpus",
+      });
       syncReviewContinuityState(createInitialReviewContinuityState(stable));
     }
     logAuthoritativeCorpusFrozen({ bodyLen: stable.length, source });
@@ -18062,8 +18138,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const paidProReview = getPaidProDocumentForSurface("review");
     const stable = (paidProReview?.text ?? corpus).trim();
     if (!stable) return false;
+    const acceptedBefore = acceptedReviewCorpusRef.current ?? "";
+    const docTextBefore = agreementDocumentText;
     acceptedReviewCorpusRef.current = stable;
+    tracePaidProCorpusMutation({
+      store: "acceptedReviewCorpusRef",
+      caller: "acceptGuidedReviewCorpus",
+      stage: action,
+      oldText: acceptedBefore,
+      newText: stable,
+      sourceAfter: paidProReview?.source ?? "accepted_review",
+    });
     setAgreementDocumentText(stable);
+    tracePaidProCorpusMutation({
+      store: "agreementDocumentText",
+      caller: "acceptGuidedReviewCorpus",
+      stage: action,
+      oldText: docTextBefore,
+      newText: stable,
+      sourceAfter: paidProReview?.source ?? "accepted_review",
+    });
     updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, stable, "accept_guided_review", {
       paidProFlow: true,
       freeBaselinePlain: paidProStarterPreviewPlain,
@@ -21980,6 +22074,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       authority,
       intakeRaw: intakeForHydration,
       surface: "finalize_paid_pro_signer_metadata",
+      signatureRegionOnly: true,
+      repairRecital: false,
     });
     const signatureBlockModel = buildCanonicalSignerManifest({
       identities: hydrated.identities,

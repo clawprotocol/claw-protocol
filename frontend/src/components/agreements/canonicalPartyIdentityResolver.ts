@@ -371,12 +371,21 @@ export function definedConsultingAgreementOpeningLine(
 const EFFECTIVE_DATE_DUPLICATE_OPENING_RE =
   /(?:entered\s+into\s+as\s+of\s+the\s+)?Effective\s+Date\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/gi;
 
+/** Fused recital after party repair: keep "entered into as of the Effective Date", drop redundant "This Agreement is". */
+const FUSED_EFFECTIVE_DATE_REDUNDANT_THIS_AGREEMENT_RE =
+  /\bEffective\s+Date\s+This\s+Agreement\s+is\s+between\b/gi;
+
 const IS_IS_BETWEEN_RE = /\bis\s+is\s+between/gi;
 
 /** Repair fused "Effective Date This Agreement is between" and duplicate "is is between". */
 export function repairMalformedAgreementOpeningPhrases(text: string): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   let out = text;
+  if (FUSED_EFFECTIVE_DATE_REDUNDANT_THIS_AGREEMENT_RE.test(out)) {
+    FUSED_EFFECTIVE_DATE_REDUNDANT_THIS_AGREEMENT_RE.lastIndex = 0;
+    out = out.replace(FUSED_EFFECTIVE_DATE_REDUNDANT_THIS_AGREEMENT_RE, "Effective Date by and between");
+    repairs.push("opening:repair_fused_effective_date_this_agreement");
+  }
   if (EFFECTIVE_DATE_DUPLICATE_OPENING_RE.test(out)) {
     EFFECTIVE_DATE_DUPLICATE_OPENING_RE.lastIndex = 0;
     out = out.replace(
@@ -581,6 +590,32 @@ export function replaceTruncatedPartyRefsWithRoleLabels(
   return { text: body + tail, repairs };
 }
 
+/** Paid Pro mutual consulting recitals must never be replaced with generic definedOpeningLine(). */
+function shouldPreservePaidProMutualConsultingOpening(
+  head: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+): boolean {
+  if (records.length < 2) return false;
+  if (/MUTUAL\s+CONSULTING\s+AND\s+IMPLEMENTATION\s+AGREEMENT/i.test(head)) return true;
+  if (
+    /This\s+Mutual\s+Consulting[\s\S]{0,160}Agreement/i.test(head) &&
+    /entered\s+into\s+as\s+of/i.test(head)
+  ) {
+    return true;
+  }
+  const client = records[0]!.fullLegalName.trim();
+  const provider = records[1]!.fullLegalName.trim();
+  if (
+    /entered\s+into\s+as\s+of/i.test(head) &&
+    /by\s+and\s+between/i.test(head) &&
+    head.includes(client) &&
+    head.includes(provider)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function repairCanonicalPartyIdentityInCorpus(
   text: string,
   records: readonly CanonicalPartyIdentityRecord[],
@@ -621,12 +656,16 @@ export function repairCanonicalPartyIdentityInCorpus(
   const openingLine = definedOpeningLine(client, provider);
   const openingRe =
     /(?:this\s+agreement\s+is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]{0,400}?(?=\n\n|\n\s*\d+\.|\n[A-Z][A-Z\s]{6,}|$)/i;
-  if (openingRe.test(head)) {
+  const preservePaidProOpening = shouldPreservePaidProMutualConsultingOpening(head, records);
+  if (!preservePaidProOpening && openingRe.test(head)) {
     head = head.replace(openingRe, () => {
       repairs.push("party_identity:defined_opening");
       return openingLine;
     });
-  } else if (!head.includes(client.fullLegalName) || !head.includes(provider.fullLegalName)) {
+  } else if (
+    !preservePaidProOpening &&
+    (!head.includes(client.fullLegalName) || !head.includes(provider.fullLegalName))
+  ) {
     const titleMatch = head.match(/^[\s\S]{0,800}?(?:AGREEMENT|CONTRACT)\s*$/im);
     if (titleMatch?.index != null) {
       const insertAt = titleMatch.index + titleMatch[0].length;

@@ -119,6 +119,22 @@ describe("canonicalPartyIdentityResolver", () => {
     expect(text).not.toMatch(/\bRed Mesa will pay Harbor Peak\b/i);
   });
 
+  it("does not replace paid Pro mutual consulting by-and-between recital with definedOpeningLine", () => {
+    const records = resolveCanonicalPartyIdentitiesFromIntake(INTAKE)!;
+    const draft = [
+      "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+      "",
+      `This Mutual Consulting and Implementation Agreement (this "Agreement") is entered into as of the Effective Date by and between ${records[0]!.fullLegalName} ("Client") and ${records[1]!.fullLegalName} ("Service Provider"). Client and Service Provider may be referred to individually as a "Party" and collectively as the "Parties."`,
+      "",
+      "1. Services",
+    ].join("\n");
+    const { text, repairs } = repairCanonicalPartyIdentityInCorpus(draft, records, { intakeRaw: INTAKE });
+    expect(repairs).not.toContain("party_identity:defined_opening");
+    expect(text).toMatch(/by and between/i);
+    expect(text).not.toMatch(/Effective Date This Agreement is between/i);
+    expect(text).toMatch(/collectively as the ["']Parties/i);
+  });
+
   it("repairs opening and expands shorts to full legal names in corpus", () => {
     const records = resolveCanonicalPartyIdentitiesFromIntake(INTAKE)!;
     const draft = [

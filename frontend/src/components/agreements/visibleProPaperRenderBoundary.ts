@@ -8,6 +8,7 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { getAuthoritativeAgreementDocument, getAuthoritativeAgreementText } from "./authoritativeAgreementDocument";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
+import { resolvePaidProUnifiedSurfaceCorpus } from "./paidProAgreementAuthorityChain";
 import {
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruth,
@@ -247,6 +248,10 @@ function pickAuthoritativePlainForPaidPro(candidates: readonly ProVisiblePaperCa
   const auth = getAuthoritativeAgreementDocument()?.fullCorpusText;
   if (auth && auth.length >= minAuthoritativeLen) {
     return { plain: auth, source: "authoritativeAgreementDocument" };
+  }
+  const unified = resolvePaidProUnifiedSurfaceCorpus();
+  if (unified?.text && unified.text.length >= minAuthoritativeLen) {
+    return { plain: unified.text, source: unified.source };
   }
   const source = getPaidProSourceOfTruth();
   if (source?.text && source.text.length >= minAuthoritativeLen) {

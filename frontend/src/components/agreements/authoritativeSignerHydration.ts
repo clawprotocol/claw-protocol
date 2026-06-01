@@ -23,6 +23,7 @@ import {
 import { logPartyNoticeDetailsHydration } from "./paidProPartyNoticeDetails";
 import { applyCanonicalPartyLegalNamesToSigningCorpus } from "./canonicalPartyLegalNameSanitizer";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
+import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import {
   buildLivePaidProSignerMetadataAuthority,
   hashPaidProSignerMetadataAuthority,
@@ -50,12 +51,14 @@ export function buildHydratedAuthoritativeSigningCorpus(args: {
   identities: readonly CanonicalPartyIdentity[];
   intakeRaw: string;
   surface: string;
+  signatureRegionOnly?: boolean;
 }): HydratedAuthoritativeSigningCorpusResult {
   const raw = (args.rawCorpus || "").trim();
   const identityApply = applySignerPartyIdentityToAuthoritativeAgreement(
     raw,
     args.identities,
     args.intakeRaw,
+    { signatureRegionOnly: args.signatureRegionOnly !== false },
   );
   const corpus = identityApply.rejected ? raw : identityApply.text;
   const signerCount = args.identities.filter((id) => id.partyDisplayName.trim()).length;
@@ -84,7 +87,7 @@ export function buildHydratedAuthoritativeSigningCorpus(args: {
       afterLen: corpus.length,
     });
   }
-  return {
+  const result = {
     corpus,
     identities: [...args.identities],
     signaturePolishCount: identityApply.signaturePolishCount,
@@ -92,6 +95,7 @@ export function buildHydratedAuthoritativeSigningCorpus(args: {
     rejected: Boolean(identityApply.rejected),
     rejectReason: identityApply.rejectReason,
   };
+  return result;
 }
 
 /**
@@ -102,18 +106,22 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   authority: PaidProSignerMetadataAuthority;
   intakeRaw: string;
   surface: string;
+  /** When true (default), only signature/notice tail is hydrated — opening recitals are preserved. */
+  signatureRegionOnly?: boolean;
+  /** When true, run recital repair before hydration (finalize only — never during signer typing). */
+  repairRecital?: boolean;
 }): HydratedAuthoritativeSigningCorpusResult {
-  const recitalRepair = repairMalformedPaidProAgreementRecital(
-    args.rawCorpus,
-    args.authority.parties,
-  );
-  const rawCorpus = recitalRepair.text;
+  let rawCorpus = (args.rawCorpus || "").trim();
+  if (args.repairRecital) {
+    rawCorpus = repairMalformedPaidProAgreementRecital(rawCorpus, args.authority.parties).text;
+  }
   const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties);
   let result = buildHydratedAuthoritativeSigningCorpus({
     rawCorpus,
     identities,
     intakeRaw: args.intakeRaw,
     surface: args.surface,
+    signatureRegionOnly: args.signatureRegionOnly !== false,
   });
   const signerCount = Math.max(2, identities.filter((id) => id.partyDisplayName.trim()).length);
   const hasBlocks = corpusSignatureBlocksHaveRequiredByLines(result.corpus, signerCount);
@@ -170,6 +178,13 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
         partyCount: args.authority.parties.length,
       });
     }
+  }
+
+  if (!result.rejected && result.corpus) {
+    result = {
+      ...result,
+      corpus: stripPremiumIntelligenceCalloutsFromCorpus(result.corpus),
+    };
   }
 
   return result;

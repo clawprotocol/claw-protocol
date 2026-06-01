@@ -1,6 +1,7 @@
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import type { CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapshot";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
+import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 
 export type AuthoritativeAgreementDocument = {
   fullCorpusText: string;
@@ -76,6 +77,7 @@ export function establishAuthoritativeAgreementDocument(args: {
   agreementMetadata?: AuthoritativeAgreementDocument["agreementMetadata"];
   generationMetadata?: Partial<AuthoritativeAgreementDocument["generationMetadata"]>;
 }): AuthoritativeAgreementDocument {
+  const oldText = authoritativeAgreementDocument?.fullCorpusText ?? "";
   const text = trim(args.fullCorpusText);
   const doc: AuthoritativeAgreementDocument = {
     fullCorpusText: text,
@@ -94,6 +96,15 @@ export function establishAuthoritativeAgreementDocument(args: {
     explicitUserEditState: { edited: false },
   };
   authoritativeAgreementDocument = doc;
+  tracePaidProCorpusMutation({
+    store: "authoritativeAgreementDocument",
+    caller: "establishAuthoritativeAgreementDocument",
+    stage: "establish",
+    surface: doc.generationMetadata.pipelineSource ?? "server_full_draft",
+    oldText,
+    newText: doc.fullCorpusText,
+    sourceAfter: doc.generationMetadata.source,
+  });
   if (isDevOrTest() && !isTestMode()) {
     // eslint-disable-next-line no-console
     console.info("[authoritative-agreement-document-established]", {

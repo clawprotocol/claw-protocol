@@ -23,6 +23,8 @@ import {
 } from "./paidProSourceOfTruth";
 import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer";
 import { resolvePaidProFinalReviewVisiblePlain } from "./authoritativePaidProReview";
+import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import { PAID_PRO_MUTUAL_CONSULTING_TITLE } from "./paidProOpeningRecitalGuard";
 
 const RAW = [
   "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
@@ -122,6 +124,37 @@ describe("paidProReviewRenderCorpus", () => {
     expect(renderPlain).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     expect(renderPlain).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
     expect(renderPlain).toMatch(/SERVICE PROVIDER:\s*\n\s*Iron Vale Systems Inc/i);
+  });
+
+  it("repairs naked party-name-only Pro head at acceptance before review and copy", () => {
+    const intake =
+      "Services between Blue Canyon Analytics LLC and Iron Vale Systems Inc for internal automation tooling and AI-assisted reporting workflows $8500 50% upfront 50% completion Delaware";
+    const malformed = [
+      "Blue Canyon Analytics LLC",
+      "1. Scope of Services",
+      "Provider delivers AI-assisted reporting workflows.",
+      "Total $8,500 with 50% upfront and 50% on completion.",
+      "Delaware law governs.",
+      ...Array.from({ length: 30 }, (_, i) => `Operative clause ${i + 1} for minimum length.`),
+    ].join("\n");
+    const draft = {
+      title: "Consulting Agreement",
+      parties: [
+        { name: "Blue Canyon Analytics LLC", role: "Client" },
+        { name: "Iron Vale Systems Inc", role: "Service Provider" },
+      ],
+    } as import("./intakeSmartDefaults").ParsedDraftShape;
+    const safe = applyAcceptedProCorpusSafeDisplay(malformed, { draft, intakeText: intake });
+    establishPaidProSourceOfTruth({ text: safe.text, draft, intakeText: intake, source: "server_full_draft" });
+    const review = resolvePaidProReviewRenderPlain({ draft, intakeText: intake });
+    const copy = getPaidProDocumentForSurface("copy", { draft, intakeText: intake })!.text;
+    expect(review).toContain(PAID_PRO_MUTUAL_CONSULTING_TITLE);
+    expect(review).toMatch(/entered\s+into\s+as\s+of/i);
+    expect(copy).toContain('Blue Canyon Analytics LLC ("Client")');
+    expect(review).not.toMatch(/^Blue Canyon Analytics LLC\s*\n\s*1\./m);
+    const sec1Review = review.search(/^\s*1\.\s+/m);
+    const titleReview = review.indexOf(PAID_PRO_MUTUAL_CONSULTING_TITLE);
+    expect(sec1Review).toBeGreaterThan(titleReview);
   });
 
   it("strips stray standalone party entity line before opening recital", () => {

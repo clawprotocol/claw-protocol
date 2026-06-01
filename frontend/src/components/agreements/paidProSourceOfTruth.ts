@@ -50,6 +50,12 @@ import {
 } from "./paidProReviewRenderCorpus";
 import { paidProSignerExecutionCorpusIsFrozen } from "./paidProFinalHydratedCorpus";
 import { logPaidProDriftCorpusCaptureOnce } from "./paidProDriftCorpusCapture";
+import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
+import {
+  intakeHasFullLegalEntityParties,
+  resolveCanonicalPartyIdentitiesFromIntake,
+} from "./canonicalPartyIdentityResolver";
+import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -110,9 +116,19 @@ export function hashPaidProCorpus(text: string): string {
 }
 
 export function clearPaidProSourceOfTruth(): void {
+  const oldText = paidProSourceOfTruth?.text ?? "";
   paidProSourceOfTruth = null;
   clearAuthoritativeAgreementDocument();
   clearFrozenCanonicalAgreementCorpus();
+  tracePaidProCorpusMutation({
+    store: "paidProSourceOfTruth",
+    caller: "clearPaidProSourceOfTruth",
+    stage: "clear",
+    oldText,
+    newText: "",
+    sourceBefore: "server_full_draft",
+    sourceAfter: null,
+  });
 }
 
 export function getPaidProSourceOfTruth(): PaidProSourceOfTruth | null {
@@ -151,6 +167,8 @@ export function establishPaidProSourceOfTruth(args: {
   /** User-approved revisions may legitimately shorten the body; automated paths may not. Default false. */
   allowShorterOverwrite?: boolean;
 }): PaidProSourceOfTruth {
+  const sotBefore = paidProSourceOfTruth?.text ?? "";
+  const sourceBefore = paidProSourceOfTruth?.source ?? null;
   const requestedSource = (args.source ?? "server_full_draft").trim();
   // Minimum commit gate: a rejected/recoverable/fallback corpus must never become the SoT, no matter
   // how long its body is — this is the last line of defense against a short rejected corpus leaking in.
@@ -175,6 +193,16 @@ export function establishPaidProSourceOfTruth(args: {
         text: args.text,
         allowedToOverride: false,
         reason: "first_authoritative_success_wins",
+      });
+      tracePaidProCorpusMutation({
+        store: "paidProSourceOfTruth",
+        caller: "establishPaidProSourceOfTruth",
+        stage: "sot_overwrite_blocked_downgrade",
+        surface: requestedSource,
+        oldText: sotBefore,
+        newText: existingSot.text,
+        sourceBefore,
+        sourceAfter: existingSot.source,
       });
       return existingSot;
     }
@@ -250,9 +278,17 @@ export function establishPaidProSourceOfTruth(args: {
     allowedToOverride: false,
     reason: driftGuard.blocked ? "drift_blocked_used_authoritative" : "canonical_freeze",
   });
+  let acceptedCorpusText = driftGuard.displayText;
+  const partyNameList = parties.map((p) => p.name);
+  if (intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList)) {
+    const identityRecords = resolveCanonicalPartyIdentitiesFromIntake(args.intakeText ?? "", partyNameList);
+    if (identityRecords.length >= 2) {
+      acceptedCorpusText = ensurePaidProServicesAgreementOpening(acceptedCorpusText, identityRecords).text;
+    }
+  }
   const record: PaidProSourceOfTruth = {
-    text: driftGuard.displayText,
-    hash: hashPaidProCorpus(driftGuard.displayText),
+    text: acceptedCorpusText,
+    hash: hashPaidProCorpus(acceptedCorpusText),
     accepted_at: args.accepted_at ?? Date.now(),
     source: "server_full_draft",
     reviewSessionId: frozen?.reviewSessionId,
@@ -273,7 +309,7 @@ export function establishPaidProSourceOfTruth(args: {
     clearAuthoritativeSigningSnapshot();
   }
   establishAuthoritativeAgreementDocument({
-    fullCorpusText: record.text,
+    fullCorpusText: acceptedCorpusText,
     canonicalPartyManifest: frozen?.signerManifest ?? parties,
     agreementMetadata: {
       title: args.draft?.title ?? null,
@@ -297,6 +333,16 @@ export function establishPaidProSourceOfTruth(args: {
       source: record.source,
     });
   }
+  tracePaidProCorpusMutation({
+    store: "paidProSourceOfTruth",
+    caller: "establishPaidProSourceOfTruth",
+    stage: "establish",
+    surface: requestedSource,
+    oldText: sotBefore,
+    newText: record.text,
+    sourceBefore,
+    sourceAfter: record.source,
+  });
   return record;
 }
 
@@ -326,6 +372,7 @@ export function hydratePaidProSourceOfTruth(args: {
     reviewSessionId: frozen?.reviewSessionId,
     signerManifestHash: frozen?.signerManifestHash,
   };
+  const hydrateBefore = paidProSourceOfTruth?.text ?? "";
   paidProSourceOfTruth = record;
   hydrateAuthoritativeAgreementDocument({
     fullCorpusText: record.text,
@@ -335,6 +382,16 @@ export function hydratePaidProSourceOfTruth(args: {
       reviewSessionId: record.reviewSessionId ?? null,
     },
     acceptedAt: record.accepted_at,
+  });
+  tracePaidProCorpusMutation({
+    store: "paidProSourceOfTruth",
+    caller: "hydratePaidProSourceOfTruth",
+    stage: "hydrate",
+    surface: args.source ?? "server_full_draft",
+    oldText: hydrateBefore,
+    newText: record.text,
+    sourceBefore: null,
+    sourceAfter: record.source,
   });
   return record;
 }
@@ -420,7 +477,7 @@ export function getPaidProDocumentForSurface(
     reason: `surface:${surface}`,
   });
   const executionBlockAppended = false;
-  if (surface === "review" || surface === "copy" || surface === "display") {
+  if (surface === "review" || surface === "copy" || surface === "display" || surface === "signer_setup") {
     const aligned = resolvePaidProReviewRenderPlain(opts);
     if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
       text = aligned;

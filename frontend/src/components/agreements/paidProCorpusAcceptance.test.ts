@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
+import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import {
+  detectPaidProMalformedServicesOpening,
+  PAID_PRO_MUTUAL_CONSULTING_TITLE,
+} from "./paidProOpeningRecitalGuard";
+import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 import {
   isPaidProFinishedAgreement,
   isUnacceptablePipelineProSource,
@@ -7,6 +13,7 @@ import {
   rejectPaidProStitchedOrThinShell,
   validatePaidProOutput,
 } from "./paidProCorpusAcceptance";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const WEB_INTAKE = `
   SaaS website API work for CryptoSpaces.net. Client Anthem Blanchard, developer Sarah Collins, Oklahoma.
@@ -22,7 +29,53 @@ function padProBody(core: string, minLen: number): string {
   return t;
 }
 
+const BLUE_CANYON_QA = "Blue Canyon Analytics LLC";
+const IRON_VALE_QA = "Iron Vale Systems Inc";
+
+const QA_SERVICES_INTAKE = [
+  "Professional services agreement between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
+  "Scope: internal automation tooling and AI-assisted reporting workflows.",
+  "Fee $8,500 total with 50% upfront and 50% on completion.",
+  "Delaware law governs. Electronic signatures acceptable.",
+].join(" ");
+
 describe("paid pro corpus acceptance", () => {
+  it("rejects malformed naked party-name opening before repair; accepts after safe display guard", () => {
+    const malformed = [
+      BLUE_CANYON_QA,
+      "1. Scope of Services",
+      "AI workflow and automation deliverables.",
+      "Fee $8,500: 50% upfront, 50% on completion.",
+      "Governing law: Delaware.",
+      "Termination, confidentiality, and electronic signatures apply.",
+      "x".repeat(2_500),
+    ].join("\n");
+    const draft = {
+      parties: [
+        { name: BLUE_CANYON_QA, role: "Client" },
+        { name: IRON_VALE_QA, role: "Service Provider" },
+      ],
+    } as ParsedDraftShape;
+    const contract = resolveAgreementIntentContract(QA_SERVICES_INTAKE);
+    const records = resolveCanonicalPartyIdentitiesFromIntake(QA_SERVICES_INTAKE, [
+      BLUE_CANYON_QA,
+      IRON_VALE_QA,
+    ]);
+    expect(detectPaidProMalformedServicesOpening(malformed, records)).toBe(true);
+
+    const safe = applyAcceptedProCorpusSafeDisplay(malformed, { draft, intakeText: QA_SERVICES_INTAKE });
+    expect(safe.text).toContain(PAID_PRO_MUTUAL_CONSULTING_TITLE);
+    expect(safe.text).not.toMatch(new RegExp(`^${BLUE_CANYON_QA.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n`, "m"));
+    const accepted = validatePaidProOutput({
+      text: safe.text,
+      rawIntake: QA_SERVICES_INTAKE,
+      intentContract: contract,
+      draft,
+      premiumPipelineSource: "server_full_draft",
+    });
+    expect(accepted.ok, accepted.reasons.join(", ")).toBe(true);
+  });
+
   it("rejects estate intake with founder/vesting/60-40 body (cross-prompt)", () => {
     const rawIntake = "My siblings need rules for dad's estate tonight.";
     const t =

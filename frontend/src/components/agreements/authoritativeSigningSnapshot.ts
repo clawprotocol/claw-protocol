@@ -15,6 +15,7 @@ import {
   corpusContainsFusedPartyLegalName,
 } from "./canonicalPartyLegalNameSanitizer";
 import { setPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
+import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import {
   readConsumedPaidProSignerMetadataAuthority,
   recipientMetadataToAuthorityParties,
@@ -73,7 +74,8 @@ export function readAuthoritativeSigningCorpus(): string {
       ? recipientMetadataToAuthorityParties(authoritativeSigningSnapshot.signerMetadata)
       : []);
   if (!parties.length) return raw;
-  return applyCanonicalPartyLegalNamesToSigningCorpus(raw, parties).text.trim();
+  const repaired = applyCanonicalPartyLegalNamesToSigningCorpus(raw, parties).text.trim();
+  return repaired;
 }
 
 export function readAuthoritativeSigningSnapshotHash(): string | null {
@@ -90,9 +92,17 @@ export function isPostSignerMetadataFreezeActive(args?: {
 }
 
 export function clearAuthoritativeSigningSnapshot(): void {
+  const oldText = authoritativeSigningSnapshot?.corpus ?? "";
   authoritativeSigningSnapshot = null;
   authorityPhase = "SIGNER_METADATA_EDIT";
   setPaidProPinnedSignerAppliedCorpus("");
+  tracePaidProCorpusMutation({
+    store: "authoritative_signing_snapshot",
+    caller: "clearAuthoritativeSigningSnapshot",
+    stage: "clear",
+    oldText,
+    newText: "",
+  });
 }
 
 export type CreateAuthoritativeSigningSnapshotArgs = {
@@ -152,6 +162,15 @@ export function createAuthoritativeSigningSnapshot(
     frozenAt,
   });
   setPaidProPinnedSignerAppliedCorpus(corpus);
+  tracePaidProCorpusMutation({
+    store: "authoritative_signing_snapshot",
+    caller: "createAuthoritativeSigningSnapshot",
+    stage: "signing_handoff",
+    surface: "paid_pro_signer_metadata_finalize",
+    oldText: (args.corpus || "").trim(),
+    newText: corpus,
+    sourceAfter: authoritativeSigningSnapshot.source,
+  });
   return authoritativeSigningSnapshot;
 }
 

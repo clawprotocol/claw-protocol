@@ -3,12 +3,17 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   assertPostCanonicalSurfaceUsesFrozenCorpus,
   clearFrozenCanonicalAgreementCorpus,
+  getFrozenCanonicalAgreementCorpus,
+  hasFrozenCanonicalAgreementCorpus,
   readCanonicalAgreementCorpusForSurface,
 } from "./canonicalAgreementSnapshot";
+import { buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
+  getPaidProSourceOfTruth,
+  hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { pickPremiumPaidReadonlyPlainText } from "./premiumReadonlyRenderCorpus";
 import { pickAuthoritativePlainForSendHandoff } from "./sendHandoffAuthoritativeCorpus";
@@ -146,6 +151,46 @@ describe("CanonicalAgreementCorpus convergence", () => {
     expect(frozen?.signerManifest[0]?.name).toBe("Northstar Robotics Inc.");
     expect(frozen?.signerManifest[1]?.name).toBe("Prairie Signal Holdings LP");
     expect(JSON.stringify(frozen?.signerManifest)).not.toMatch(/Northstar"|"Prairie Signal"/);
+  });
+
+  it("display surface does not throw when SoT exists but frozen canonical corpus is late", () => {
+    const body = canonicalBody();
+    establishPaidProSourceOfTruth({ text: body, draft: draft() });
+    clearFrozenCanonicalAgreementCorpus();
+    expect(hasPaidProSourceOfTruth()).toBe(true);
+    expect(hasFrozenCanonicalAgreementCorpus()).toBe(false);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const display = getPaidProDocumentForSurface("display", { draft: draft() });
+    expect(display?.text.length).toBeGreaterThan(5000);
+    expect(display?.text).toBe(getPaidProSourceOfTruth()?.text);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[paid-pro-authoritative-display-fallback]",
+      expect.objectContaining({
+        surface: "display",
+        reason: "canonical_corpus_missing_after_review_ready",
+        len: expect.any(Number),
+        hash: expect.any(String),
+      }),
+    );
+    const starterPreview = buildAgreementPreviewTextCore(draft(), { starterPreview: true });
+    expect(display?.text).not.toBe(starterPreview.trim());
+    warnSpy.mockRestore();
+  });
+
+  it("display surface uses frozen canonical corpus when present", () => {
+    const record = establishPaidProSourceOfTruth({ text: canonicalBody(), draft: draft() });
+    expect(hasFrozenCanonicalAgreementCorpus()).toBe(true);
+    const frozen = getFrozenCanonicalAgreementCorpus();
+    const display = getPaidProDocumentForSurface("display", { draft: draft() });
+    expect(display?.hash).toBe(record.hash);
+    expect(display?.text).toBe(frozen?.canonicalText);
+  });
+
+  it("readCanonical with required still throws when no paid Pro authoritative body and no freeze", () => {
+    expect(() => readCanonicalAgreementCorpusForSurface("display", { required: true, tier: "pro" })).toThrow(
+      /Canonical agreement corpus is missing for display/,
+    );
   });
 
   it("refuses fallback/live/generated preview paths after canonical freeze", () => {

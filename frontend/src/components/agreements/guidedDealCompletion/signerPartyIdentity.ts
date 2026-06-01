@@ -216,7 +216,7 @@ export function resolvePartyIndexForSignatureLine(
 /** Name line on signature block: individual uses party name; entity uses representative when set. */
 export function signatureNameForIdentity(id: CanonicalPartyIdentity): string {
   if (id.isIndividual) return id.partyDisplayName;
-  return (id.representativeName?.trim() || id.partyDisplayName).trim();
+  return id.representativeName?.trim() ?? "";
 }
 
 function fillSignatureNameUnderscoreLines(
@@ -331,7 +331,7 @@ function buildSignatureBlocks(identities: readonly CanonicalPartyIdentity[]): {
     lines.push(id.partyDisplayName);
     lines.push("By: __________________________");
     const signName = signatureNameForIdentity(id);
-    lines.push(`Name: ${signName}`);
+    lines.push(signName ? `Name: ${signName}` : "Name: __________________________");
     if (!id.isIndividual || id.title?.trim()) {
       lines.push(`Title: ${id.title?.trim() || "_________________________"}`);
     }
@@ -441,6 +441,7 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
   body: string,
   identities: readonly CanonicalPartyIdentity[],
   intakeRaw: string,
+  options?: { signatureRegionOnly?: boolean },
 ): {
   text: string;
   partyNames: string[];
@@ -452,6 +453,27 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
   const partyNames = resolvePaidProPolishPartyNamesFromIdentities(identities);
   if (partyNames.length < 2) {
     return { text: body, partyNames, signaturePolishCount: 0, repaired: [] };
+  }
+
+  if (options?.signatureRegionOnly !== false) {
+    const marker = signaturePatchStartIndex(body);
+    if (marker >= 0 && marker < body.length - 80) {
+      const prefix = body.slice(0, marker);
+      const tail = body.slice(marker);
+      const tailApply = applySignerPartyIdentityToAuthoritativeAgreement(tail, identities, intakeRaw, {
+        signatureRegionOnly: false,
+      });
+      if (tailApply.rejected) {
+        return { text: body, partyNames, signaturePolishCount: 0, repaired: [], rejected: true, rejectReason: "corpus_shrink" };
+      }
+      const merged = `${prefix}${tailApply.text}`;
+      return {
+        text: merged,
+        partyNames: tailApply.partyNames,
+        signaturePolishCount: tailApply.signaturePolishCount,
+        repaired: tailApply.repaired,
+      };
+    }
   }
 
   const bodyLenBefore = body.length;

@@ -460,9 +460,19 @@ export function hasFrozenCanonicalAgreementCorpus(): boolean {
   return Boolean(frozenCanonicalAgreementCorpus?.frozen && frozenCanonicalAgreementCorpus.canonicalText.trim());
 }
 
+export type ReadCanonicalAgreementCorpusOptions = {
+  required?: boolean;
+  tier?: "starter" | "pro";
+  /**
+   * When true, a missing frozen corpus must not throw — paid Pro authoritative SoT
+   * will be used by the caller (post-checkout before canonical freeze is available).
+   */
+  allowPaidProAuthoritativeFallback?: boolean;
+};
+
 export function readCanonicalAgreementCorpusForSurface(
   surface: CanonicalAgreementSurface,
-  opts?: { required?: boolean; tier?: "starter" | "pro" },
+  opts?: ReadCanonicalAgreementCorpusOptions,
 ): CanonicalAgreementSnapshot | null {
   const corpus = getFrozenCanonicalAgreementCorpus();
   if (corpus?.frozen && corpus.canonicalText.trim() && (!opts?.tier || corpus.tier === opts.tier)) {
@@ -474,6 +484,9 @@ export function readCanonicalAgreementCorpusForSurface(
       surface,
       error: "canonical_corpus_missing_after_review_ready",
     };
+    if (opts.allowPaidProAuthoritativeFallback && opts.tier !== "starter") {
+      return null;
+    }
     // eslint-disable-next-line no-console
     console.error("[canonical-corpus-missing]", payload);
     throw new Error(`Canonical agreement corpus is missing for ${surface}`);

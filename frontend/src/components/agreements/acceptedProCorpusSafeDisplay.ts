@@ -11,6 +11,8 @@ import {
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import { neutralizeHarmlessEntityMetadataPlaceholders } from "./harmlessEntityMetadataPlaceholders";
 import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolver";
+import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import { stripTrailingLegacyEntitySignatureLines } from "./paidProReviewRenderCorpus";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -104,6 +106,20 @@ export function applyAcceptedProCorpusSafeDisplay(
       text: input,
       repairs: [...repairs, "safe:shrink_blocked"],
     };
+  }
+
+  if (hasFullLegal && records.length >= 2) {
+    const openingGuard = ensurePaidProServicesAgreementOpening(out, records);
+    if (openingGuard.text !== out) {
+      out = openingGuard.text;
+      repairs.push(...openingGuard.repairs);
+    }
+  }
+
+  const legacySig = stripTrailingLegacyEntitySignatureLines(out);
+  if (legacySig.removed > 0) {
+    out = legacySig.text;
+    repairs.push("safe:strip_legacy_entity_signature_lines");
   }
 
   return { text: out, repairs: [...new Set(repairs)] };

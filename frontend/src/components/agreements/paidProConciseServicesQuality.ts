@@ -13,6 +13,7 @@ import {
   repairDuplicateAgreementOpening,
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
+import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { stripMalformedProReviewDisplayArtifacts } from "./polishProAgreementDisplayLayer";
@@ -136,7 +137,11 @@ export function assessConciseCommercialServicesProQuality(args: {
     };
   }
 
-  const malformedOpening = MALFORMED_OPENING_RES.some((re) => re.test(text));
+  const openingRecords = resolveCanonicalPartyIdentitiesFromIntake(rawIntake, parties);
+  const structuralMalformedOpening =
+    openingRecords.length >= 2 && detectPaidProMalformedServicesOpening(text, openingRecords);
+  const malformedOpening =
+    MALFORMED_OPENING_RES.some((re) => re.test(text)) || structuralMalformedOpening;
 
   const partyOk = parties.every((p) => partyNameInBody(bodyLow, p));
   (partyOk ? requiredFactsFound : requiredFactsMissing).push("party_names");

@@ -1,0 +1,48 @@
+MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT
+
+This Mutual Consulting and Implementation Agreement (this "Agreement") is entered into as of the Effective Date This Agreement is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").execution by both parties.
+
+Professional services shape — scope, acceptance, and how payment ties to deliverables or milestones.
+
+1. Scope of Services. Service Provider will deliver automation tooling, AI-assisted reporting workflows, and implementation support as described in any Statement of Work executed under this Agreement.
+
+2. Fees and Payment. Client will pay Service Provider a total fee of $8,500, with fifty percent due on commencement and fifty percent due on completion of the deliverables, unless otherwise stated in a Statement of Work.
+
+3. Term. This Agreement begins on the Effective Date and continues until the services are completed or either Party terminates as provided herein.
+
+4. Confidentiality. Each Party will protect the other Party's confidential information using reasonable care and use it only to perform under this Agreement.
+
+5. Intellectual Property. Client will own deliverables created specifically for Client under this Agreement once Client has paid all amounts due for those deliverables. Service Provider retains pre-existing tools, templates, and background materials.
+
+6. Limitation of Liability. Neither Party is liable for indirect or consequential damages except as required by law.
+
+7. Governing Law. This Agreement is governed by the laws of the State of Delaware.
+
+8. Notices. Notices may be sent by email to the addresses provided in Party Notice Details or the signature blocks.
+
+9. Electronic Signatures. Electronic signatures and counterparts are permitted and have the same effect as originals.
+
+10. Entire Agreement. This Agreement is the entire agreement between the Parties regarding its subject matter.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+Blue Canyon Analytics LLC
+By: __________________________
+Name: Blue Canyon Analytics LLC
+Title: __________________________
+Email for Notice: __________________________
+Address for Notice: ________________________
+Date: May 30, 2026
+
+SERVICE PROVIDER:
+Iron Vale Systems Inc.
+By: __________________________
+Name: Iron Vale Systems Inc.
+Title: __________________________
+Email for Notice: __________________________
+Address for Notice: ________________________
+Date: May 30, 2026
+
+Blue Canyon Analytics LLC Signature: ___________________ Date: ____
+Iron Vale Systems Inc. Signature: ___________________ Date: ____

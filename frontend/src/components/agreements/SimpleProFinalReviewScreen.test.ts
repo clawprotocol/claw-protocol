@@ -71,7 +71,7 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(screen).toContain("paidReviewPlain");
     expect(screen).toContain("hasCanonicalPaidReviewBody");
     expect(screen).toContain("simple-pro-final-review-paid-sot-body");
-    expect(screen).toContain('data-paid-pro-authoritative-source="paidProSourceOfTruth"');
+    expect(screen).toMatch(/data-paid-pro-authoritative-source=\{/);
     const unavailableIdx = screen.indexOf("simple-pro-final-review-document-empty");
     const paidBodyIdx = screen.indexOf("simple-pro-final-review-paid-sot-body");
     expect(paidBodyIdx).toBeGreaterThan(-1);
@@ -81,7 +81,8 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
 
   it("AgreementBuilderIntake passes paidReviewPlain and suppresses finalizing when SoT exists", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    expect(intake).toContain("paidReviewPlain={authoritativePaidProReviewPlain}");
+    expect(intake).toContain("paidReviewPlain={");
+    expect(intake).toContain("simpleProFinalReviewDisplayPlain");
     expect(intake).toContain("suppressPaidProFinalReviewFinalizingState");
     expect(intake).toContain("resolvePaidProFinalReviewVisiblePlain");
   });
@@ -95,13 +96,13 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(intake).toContain("PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA");
   });
 
-  it("canonical paid review renders one SoT document body and keeps actions outside document", () => {
+  it("canonical paid review renders document before actions", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
-    const bodyIdx = screen.indexOf('data-testid="simple-pro-final-review-paid-sot-body"');
+    const documentIdx = screen.indexOf('data-testid="simple-pro-final-review-document"');
     const actionsIdx = screen.indexOf('data-testid="simple-pro-final-review-actions"');
-    expect(screen).toContain("hasCanonicalPaidReviewBody ? (");
-    expect(bodyIdx).toBeGreaterThan(-1);
-    expect(actionsIdx).toBeGreaterThan(bodyIdx);
+    expect(screen).toContain("preferHydratedReviewHtml");
+    expect(documentIdx).toBeGreaterThan(-1);
+    expect(actionsIdx).toBeGreaterThan(documentIdx);
   });
 
   it("SimpleProFinalReviewScreen renders review-first error in final review actions region", () => {

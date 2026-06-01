@@ -22,6 +22,8 @@ import {
   hashPaidProCorpus,
   type PaidProDocumentSurface,
 } from "./paidProSourceOfTruth";
+import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
+import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 
 export const PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN = 500;
 
@@ -42,7 +44,17 @@ export type PaidProFinalHydratedCorpusResolution = {
 let pinnedSignerAppliedCorpus = "";
 
 export function setPaidProPinnedSignerAppliedCorpus(body: string): void {
-  pinnedSignerAppliedCorpus = (body || "").trim();
+  const oldText = pinnedSignerAppliedCorpus;
+  const next = (body || "").trim();
+  pinnedSignerAppliedCorpus = next;
+  tracePaidProCorpusMutation({
+    store: "pinned_signer_applied_corpus",
+    caller: "setPaidProPinnedSignerAppliedCorpus",
+    stage: "pin_write",
+    oldText,
+    newText: next,
+    sourceAfter: next ? "pinned_signer_applied_corpus" : null,
+  });
 }
 
 export function readPaidProPinnedSignerAppliedCorpus(): string {
@@ -50,7 +62,21 @@ export function readPaidProPinnedSignerAppliedCorpus(): string {
 }
 
 export function clearPaidProPinnedSignerAppliedCorpus(): void {
+  const oldText = pinnedSignerAppliedCorpus;
   pinnedSignerAppliedCorpus = "";
+  tracePaidProCorpusMutation({
+    store: "pinned_signer_applied_corpus",
+    caller: "clearPaidProPinnedSignerAppliedCorpus",
+    stage: "clear",
+    oldText,
+    newText: "",
+  });
+}
+
+/** Live signer hydration runs only after finalize snapshot or pinned execution corpus exists. */
+export function paidProSignerExecutionCorpusIsFrozen(): boolean {
+  if (hasAuthoritativeSigningSnapshot()) return true;
+  return readPaidProPinnedSignerAppliedCorpus().length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN;
 }
 
 function authorityHasSignerMetadata(): boolean {
@@ -63,9 +89,25 @@ function authorityHasSignerMetadata(): boolean {
   });
 }
 
+function consumedAuthoritySignerMetadataComplete(
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  if (parties.length < 2) return false;
+  return parties.every((p) => {
+    const legal = p.partyLegalName.trim();
+    return legal.length >= 2 && p.signerName.trim().length >= 1 && p.signerEmail.trim().length >= 3;
+  });
+}
+
 function hydrateFromConsumedAuthority(rawCorpus: string, intakeRaw: string): string {
   const authority = readConsumedPaidProSignerMetadataAuthority();
   if (!authority || !authorityHasSignerMetadata()) return "";
+  if (
+    !paidProSignerExecutionCorpusIsFrozen() &&
+    !consumedAuthoritySignerMetadataComplete(authority.parties)
+  ) {
+    return "";
+  }
   const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
     rawCorpus,
     authority,
@@ -85,53 +127,55 @@ export function resolvePaidProFinalHydratedCorpusForSurface(
 ): PaidProFinalHydratedCorpusResolution {
   void surface;
   const intakeRaw = (opts?.intakeText ?? "").trim();
+  let resolution: PaidProFinalHydratedCorpusResolution;
   const snapshotCorpus = readAuthoritativeSigningCorpus();
   if (snapshotCorpus.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
-    return {
+    resolution = {
       text: snapshotCorpus,
       hash: getAuthoritativeSigningSnapshot()?.hash ?? hashPaidProCorpus(snapshotCorpus),
       source: "authoritative_signing_snapshot",
       signerMetadataApplied: true,
     };
+  } else {
+    const pinned = readPaidProPinnedSignerAppliedCorpus();
+    if (pinned.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+      resolution = {
+        text: pinned,
+        hash: hashPaidProCorpus(pinned),
+        source: "pinned_signer_applied_corpus",
+        signerMetadataApplied: true,
+      };
+    } else {
+      const raw = getPaidProSourceOfTruthText();
+      if (!raw || raw.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+        resolution = {
+          text: "",
+          hash: "",
+          source: "paidProSourceOfTruth",
+          signerMetadataApplied: false,
+        };
+      } else {
+        const hydrated = hydrateFromConsumedAuthority(raw, intakeRaw);
+        if (hydrated.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+          resolution = {
+            text: hydrated,
+            hash: hashPaidProCorpus(hydrated),
+            source: "signer_hydrated_from_authority",
+            signerMetadataApplied: true,
+          };
+        } else {
+          const sot = getPaidProSourceOfTruth();
+          resolution = {
+            text: raw,
+            hash: sot?.hash ?? hashPaidProCorpus(raw),
+            source: "paidProSourceOfTruth",
+            signerMetadataApplied: false,
+          };
+        }
+      }
+    }
   }
-
-  const pinned = readPaidProPinnedSignerAppliedCorpus();
-  if (pinned.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
-    return {
-      text: pinned,
-      hash: hashPaidProCorpus(pinned),
-      source: "pinned_signer_applied_corpus",
-      signerMetadataApplied: true,
-    };
-  }
-
-  const raw = getPaidProSourceOfTruthText();
-  if (!raw || raw.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
-    return {
-      text: "",
-      hash: "",
-      source: "paidProSourceOfTruth",
-      signerMetadataApplied: false,
-    };
-  }
-
-  const hydrated = hydrateFromConsumedAuthority(raw, intakeRaw);
-  if (hydrated.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
-    return {
-      text: hydrated,
-      hash: hashPaidProCorpus(hydrated),
-      source: "signer_hydrated_from_authority",
-      signerMetadataApplied: true,
-    };
-  }
-
-  const sot = getPaidProSourceOfTruth();
-  return {
-    text: raw,
-    hash: sot?.hash ?? hashPaidProCorpus(raw),
-    source: "paidProSourceOfTruth",
-    signerMetadataApplied: false,
-  };
+  return resolution;
 }
 
 /** Surfaces must not report raw SoT when a finalized snapshot or hydrated preview exists. */

@@ -382,13 +382,19 @@ describe("signer metadata session blocks document recompute paths", () => {
     );
   });
 
-  it("manifest resolver is not fed live partySignerNames deps while session is frozen", () => {
+  it("guidedFinalPartyManifest uses signing snapshot then authority manifest when paid SoT is active", () => {
     const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const manifestIdx = src.indexOf("const guidedFinalPartyManifest = useMemo");
-    const slice = src.slice(manifestIdx, manifestIdx + 1200);
-    expect(slice).toMatch(/paidProSignerMetadataSessionActive/);
-    expect(slice).toMatch(/frozenSignerMetadataPartyManifestRef/);
-    expect(slice).toMatch(/\?\s*\[\s*\]/);
+    expect(manifestIdx).toBeGreaterThan(-1);
+    const slice = src.slice(manifestIdx, manifestIdx + 1600);
+    expect(slice).toMatch(/getAuthoritativeSigningSnapshot\(\)/);
+    expect(slice).toMatch(/signingSnapshot\.partyManifest/);
+    expect(slice).toMatch(/buildLivePaidProSignerMetadataAuthority/);
+    expect(slice).toMatch(/hasPaidProSourceOfTruth\(\)/);
+    expect(slice).toMatch(/buildCanonicalFinalPartyManifestFromAuthority/);
+    expect(slice).not.toMatch(
+      /paidProSignerMetadataSessionActiveRef\.current\s*\?\s*\(\s*frozenSignerMetadataPartyManifestRef/,
+    );
   });
 });
 

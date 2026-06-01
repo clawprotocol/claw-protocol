@@ -8,20 +8,26 @@ import {
   corpusContainsFusedPartyLegalName,
   QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE,
 } from "./canonicalPartyLegalNameSanitizer";
+import {
+  canonicalPartyRecordsFromSignerIdentities,
+} from "./canonicalPartyIdentityResolver";
+import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
-import { canonicalPartyRecordsFromSignerIdentities } from "./canonicalPartyIdentityResolver";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   authorityPartiesToCanonicalPartyIdentities,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
+import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "./authoritativeSignerHydration";
 import {
   readConsumedPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
+import { resolvePaidProUnifiedSurfaceCorpus } from "./paidProAgreementAuthorityChain";
 import {
+  paidProSignerExecutionCorpusIsFrozen,
   resolvePaidProFinalHydratedCorpusForSurface,
   type PaidProFinalHydratedCorpusSource,
 } from "./paidProFinalHydratedCorpus";
@@ -34,7 +40,6 @@ import {
 import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity";
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import {
-  getPaidProDocumentForSurface,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
@@ -77,6 +82,9 @@ export function stripStrayStandalonePartyEntityLinesBeforeRecital(
   corpus: string,
   legalNames: readonly string[],
 ): { text: string; removed: number } {
+  if (/MUTUAL\s+CONSULTING[\s\S]{0,1_600}entered\s+into\s+as\s+of/i.test(corpus || "")) {
+    return { text: corpus, removed: 0 };
+  }
   const legalLower = new Set(legalNames.map((n) => n.trim().toLowerCase()).filter(Boolean));
   if (!legalLower.size) return { text: corpus, removed: 0 };
 
@@ -88,7 +96,11 @@ export function stripStrayStandalonePartyEntityLinesBeforeRecital(
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     const trimmed = line.trim();
-    if (RECITAL_LINE_RE.test(trimmed) || /^\d+\.\s+\w/.test(trimmed)) {
+    if (
+      RECITAL_LINE_RE.test(trimmed) ||
+      /^\d+\.\s+\w/.test(trimmed) ||
+      /entered\s+into\s+as\s+of/i.test(trimmed)
+    ) {
       seenRecital = true;
     }
     if (
@@ -177,6 +189,38 @@ export function ensureSignatureDateLinesBlank(corpus: string): { text: string; r
   return { text, repairs };
 }
 
+function isLegacyEntityInlineSignatureLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 220) return false;
+  if (/^(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:/i.test(trimmed)) return false;
+  return /(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?|Limited)\s+Signature:\s*_{1,}\s*Date:\s*_{1,}\s*$/i.test(
+    trimmed,
+  );
+}
+
+/** Strip free/simple trailing "Entity LLC Signature: ___ Date: ___" lines after authoritative blocks. */
+export function stripTrailingLegacyEntitySignatureLines(corpus: string): { text: string; removed: number } {
+  const witnessIdx = corpus.search(/\bIN WITNESS WHEREOF\b/i);
+  const patchIdx = signaturePatchStartIndex(corpus);
+  const tailStart = witnessIdx >= 0 ? witnessIdx : patchIdx >= 0 ? patchIdx : -1;
+  if (tailStart < 0) return { text: corpus, removed: 0 };
+
+  const prefix = corpus.slice(0, tailStart);
+  const tailLines = corpus.slice(tailStart).split("\n");
+  let removed = 0;
+  const kept: string[] = [];
+  for (const line of tailLines) {
+    if (isLegacyEntityInlineSignatureLine(line)) {
+      removed += 1;
+      continue;
+    }
+    kept.push(line);
+  }
+  if (removed === 0) return { text: corpus, removed: 0 };
+  const tail = kept.join("\n").replace(/\n{3,}/g, "\n\n");
+  return { text: `${prefix}${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), removed };
+}
+
 export function stripDuplicateLegacySignatureBlocksAfterAuthoritative(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
@@ -241,6 +285,35 @@ export function stripDuplicateLegacySignatureBlocksAfterAuthoritative(
   return { text: `${before}\n\n${rebuiltTail}`, removed };
 }
 
+function hydrateTextWhenSignerMetadataComplete(
+  text: string,
+  parties: readonly PaidProSignerMetadataParty[],
+  intakeText: string,
+): string {
+  if (!consumedAuthoritySignerMetadataComplete(parties)) return text;
+  const authority = readConsumedPaidProSignerMetadataAuthority();
+  if (!authority) return text;
+  const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+    rawCorpus: text,
+    authority,
+    intakeRaw: intakeText,
+    surface: "paid_pro_review_render_hydrate",
+    signatureRegionOnly: true,
+    repairRecital: false,
+  });
+  return hydrated.rejected ? text : hydrated.corpus;
+}
+
+export function consumedAuthoritySignerMetadataComplete(
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  if (parties.length < 2) return false;
+  return parties.every((p) => {
+    const legal = p.partyLegalName.trim();
+    return legal.length >= 2 && p.signerName.trim().length >= 1 && p.signerEmail.trim().length >= 3;
+  });
+}
+
 export function resolvePartiesForReviewRender(args?: {
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
@@ -299,6 +372,11 @@ export function applyPaidProReviewRenderSanitizer(
       text = canonical.text;
       repaired = true;
     }
+    const legacySig = stripTrailingLegacyEntitySignatureLines(text);
+    if (legacySig.removed > 0) {
+      text = legacySig.text;
+      repaired = true;
+    }
     const dedupe = stripDuplicateLegacySignatureBlocksAfterAuthoritative(text, parties);
     if (dedupe.removed > 0) {
       text = dedupe.text;
@@ -321,7 +399,17 @@ export function applyPaidProReviewRenderSanitizer(
   }
 
   const guarded = guardPaidProReviewRenderCorpus(text, parties);
-  return { text: guarded.text.trimEnd() + (guarded.text.endsWith("\n") ? "" : "\n"), repaired: repaired || guarded.repaired };
+  let out = guarded.text.trimEnd() + (guarded.text.endsWith("\n") ? "" : "\n");
+  if (parties.length >= 2) {
+    const records = canonicalPartyRecordsFromSignerIdentities(identities);
+    if (records.length >= 2) {
+      out = ensurePaidProServicesAgreementOpening(out, records).text;
+    }
+  }
+  return {
+    text: out,
+    repaired: repaired || guarded.repaired,
+  };
 }
 
 /** Hard render-time guard: repair fused party legal names before review HTML/display. */
@@ -347,6 +435,9 @@ export function guardPaidProReviewRenderCorpus(
     const recital = repairMalformedPaidProAgreementRecital(text, authParties);
     text = recital.text;
     repaired = recital.repairs.length > 0 || repaired;
+    const legacySig = stripTrailingLegacyEntitySignatureLines(text);
+    text = legacySig.text;
+    repaired = legacySig.removed > 0 || repaired;
     const dedupe = stripDuplicateLegacySignatureBlocksAfterAuthoritative(text, authParties);
     text = dedupe.text;
     repaired = dedupe.removed > 0 || repaired;
@@ -434,24 +525,15 @@ export function resolvePaidProReviewRenderSource(
       signerMetadataApplied: hydrated.signerMetadataApplied,
     };
   }
-  const review = getPaidProDocumentForSurface("review", {
-    draft: args?.draft ?? null,
-    intakeText: args?.intakeText ?? null,
-  });
-  if (review && review.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    return {
-      source: review.signerMetadataApplied ? review.source : "paid_pro_review_render",
-      hash: review.hash,
-      signerMetadataApplied: review.signerMetadataApplied,
-    };
-  }
   if (hasPaidProSourceOfTruth()) {
     const raw = getPaidProSourceOfTruthText();
-    return {
-      source: "paidProSourceOfTruth",
-      hash: hashPaidProCorpus(raw),
-      signerMetadataApplied: false,
-    };
+    if (raw.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      return {
+        source: "paid_pro_review_render",
+        hash: hashPaidProCorpus(raw),
+        signerMetadataApplied: false,
+      };
+    }
   }
   return { source: "none", hash: "", signerMetadataApplied: false };
 }
@@ -459,9 +541,51 @@ export function resolvePaidProReviewRenderSource(
 /**
  * Canonical plain corpus for review HTML — same resolver path as Copy Agreement + render guards.
  */
+function finalizePaidProReviewRenderPlain(
+  text: string,
+  args?: ResolvePaidProReviewRenderPlainArgs,
+): string {
+  const parties = resolvePartiesForReviewRender(args);
+  if (parties.length < 2) return text.trim();
+  const records = canonicalPartyRecordsFromSignerIdentities(
+    authorityPartiesToCanonicalPartyIdentities(parties),
+  );
+  if (records.length < 2) return text.trim();
+  let out = text;
+  if (parties.length >= 2) {
+    out = stripTrailingLegacyEntitySignatureLines(out).text;
+  }
+  return ensurePaidProServicesAgreementOpening(out, records).text.trim();
+}
+
 export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
+  return finalizePaidProReviewRenderPlain(resolvePaidProReviewRenderPlainInner(args), args);
+}
+
+function resolvePaidProReviewRenderPlainInner(
+  args?: ResolvePaidProReviewRenderPlainArgs,
+): string {
+  const unified = resolvePaidProUnifiedSurfaceCorpus();
+  if (unified && unified.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    const parties = resolvePartiesForReviewRender(args);
+    const shouldSanitize =
+      parties.length >= 2 &&
+      (unified.layer === "execution" ||
+        paidProSignerExecutionCorpusIsFrozen() ||
+        consumedAuthoritySignerMetadataComplete(parties));
+    if (shouldSanitize) {
+      const intakeText = (args?.intakeText ?? "").trim();
+      const hydratedBase = hydrateTextWhenSignerMetadataComplete(unified.text, parties, intakeText);
+      return applyPaidProReviewRenderSanitizer(hydratedBase, parties).text.trim();
+    }
+    if (parties.length >= 2) {
+      return guardPaidProReviewRenderCorpus(unified.text, parties).text.trim();
+    }
+    return unified.text.trim();
+  }
+
   const hydrated = resolvePaidProFinalHydratedCorpusForSurface("review", {
     draft: args?.draft ?? null,
     intakeText: args?.intakeText ?? null,
@@ -471,21 +595,27 @@ export function resolvePaidProReviewRenderPlain(
   if (hydrated.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
     text = hydrated.text;
   } else if (hasPaidProSourceOfTruth()) {
-    const reviewDoc = getPaidProDocumentForSurface("review", {
-      draft: args?.draft ?? null,
-      intakeText: args?.intakeText ?? null,
-    });
-    text = (reviewDoc?.text || getPaidProSourceOfTruthText()).trim();
+    text = getPaidProSourceOfTruthText().trim();
   }
 
   if (text.length < PAID_PRO_AUTHORITY_MIN_LEN) return "";
 
   const parties = resolvePartiesForReviewRender(args);
+  const shouldSanitize =
+    parties.length >= 2 &&
+    (paidProSignerExecutionCorpusIsFrozen() || consumedAuthoritySignerMetadataComplete(parties));
+  if (shouldSanitize) {
+    const intakeText = (args?.intakeText ?? "").trim();
+    const hydratedBase = hydrateTextWhenSignerMetadataComplete(text, parties, intakeText);
+    return applyPaidProReviewRenderSanitizer(hydratedBase, parties).text.trim();
+  }
   if (parties.length >= 2) {
-    return applyPaidProReviewRenderSanitizer(text, parties).text.trim();
+    const legacy = stripTrailingLegacyEntitySignatureLines(text);
+    text = legacy.text;
+    return guardPaidProReviewRenderCorpus(text, parties).text.trim();
   }
 
-  return guardPaidProReviewRenderCorpus(text, parties).text.trim();
+  return text.trim();
 }
 
 export function assertPaidProReviewRenderParity(args: {
