@@ -57,6 +57,12 @@ export const PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL = "Retry Pro draft";
 export const PREMIUM_NETWORK_RECOVERABLE_STARTER_LABEL = "Continue with starter draft";
 export const PREMIUM_NETWORK_RECOVERABLE_COPY_DEBUG_LABEL = "Copy debug info";
 
+export const PREMIUM_DEGRADED_SERVER_RECOVERABLE_HEADLINE =
+  "Your payment is confirmed. The Pro draft from our server could not be finalized.";
+export const PREMIUM_DEGRADED_SERVER_RECOVERABLE_BODY =
+  "We saved a review-ready Pro draft from your intake on this device. Retry Pro draft to request a fresh server version — no additional checkout.";
+export const PREMIUM_DEGRADED_SERVER_RECOVERABLE_RETRY_LABEL = "Retry Pro draft";
+
 export type PremiumNetworkRecoverableDebugPayload = {
   sessionGenerationId?: string | null;
   intakeFingerprint?: string | null;

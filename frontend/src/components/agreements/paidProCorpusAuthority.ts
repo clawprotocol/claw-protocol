@@ -78,6 +78,7 @@ export function mapRenderSourceToAuthorityTier(args: {
   if (args.usedLocalDeterministicFallback) return "deterministic_paid_pro_fallback";
   const pipe = String(args.pipelineSource || "").trim();
   if (pipe === "premium_network_local_recovery") return "deterministic_paid_pro_fallback";
+  if (pipe === "premium_degraded_server_local_recovery") return "deterministic_paid_pro_fallback";
   if (isAuthoritativePremiumPipelineRenderSource(pipe)) return "server_authoritative_paid_pro";
   const src = String(args.renderSource || "").trim();
   if (NEVER_AUTHORITATIVE_SOURCES.has(src)) return "starter_preview_only";

@@ -102,7 +102,8 @@ import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourc
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
 import {
-  buildPremiumNetworkRecoveryLocalProDraft,
+  buildPremiumPostCheckoutLocalRecoveryProDraft,
+  PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
@@ -187,6 +188,7 @@ export type PremiumRenderSource =
   | "rejected_paid_corpus"
   | "premium_network_retryable"
   | "premium_network_local_recovery"
+  | "premium_degraded_server_local_recovery"
   | "premium_generation_retryable";
 
 export type PremiumCompletionResult = {
@@ -231,6 +233,10 @@ export type PremiumCompletionResult = {
   premiumNetworkRetryable?: boolean;
   /** Local stitched Pro draft shown after network failure until server retry succeeds. */
   premiumNetworkLocalRecovery?: boolean;
+  /** HTTP 200 degraded/rejected server corpus — retry Pro draft without re-checkout. */
+  premiumDegradedServerRecoverable?: boolean;
+  /** Local stitched Pro draft after rejected degraded server corpus until server retry succeeds. */
+  premiumDegradedServerLocalRecovery?: boolean;
   /** Recoverable server generation failure (e.g. airlock_blocked with empty document) — retry in modal. */
   premiumGenerationRetryable?: boolean;
   /** Client classification after output-quality pipeline (authoritative vs advisory clarifications). */
@@ -1422,6 +1428,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   let founderDetailsGateMessage: string | null = null;
   let proIntentGateMessage: string | null = null;
   let serverGenerationDegraded: { code: string; message: string } | null = null;
+  /** Preserves HTTP degraded metadata for local recovery when client gates reject the server body. */
+  let serverDegradedHttpMetaForRecovery: { code: string; message: string } | null = null;
   let premiumCompletionOutcome: PremiumCompletionOutcome | null = null;
   let recommendedClarifications: RecommendedClarifications | null = null;
   let agreementIntelligence: AgreementIntelligence | null = null;
@@ -1556,6 +1564,14 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         tierADiag.schemaValidationReasons = (full.schema_validation_reasons || []).filter(Boolean).slice(0, 8);
       }
       let effectiveFull: PremiumFullDraftResult = full;
+      if ((full.generation_outcome || "").trim() === "degraded") {
+        const fcRecover = (full.server_generation_failure_code || "").trim();
+        const msgRecover = (full.server_generation_failure_message || "").trim();
+        serverDegradedHttpMetaForRecovery = {
+          code: fcRecover || "unknown",
+          message: msgRecover || "Your agreement is ready. You can refine any wording below.",
+        };
+      }
       let doc = (effectiveFull.document_text || "").trim();
       // Tracks deterministic known-party placeholder repair so a `needs_details`/soft-gate response
       // whose only gap was a party name we already know is accepted rather than rejected.
@@ -2475,10 +2491,11 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
 
   const finalWinning = (winningPremiumBodyText || "").trim();
   if (premiumRenderSource === "premium_network_retryable") {
-    const localRecovery = buildPremiumNetworkRecoveryLocalProDraft({
+    const localRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
       draft: outMerged,
       rawIntake: rawForSoT || rawIntake,
       intakeLower: intakeLowerGlobal,
+      recoverySurface: PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
     });
     if (localRecovery.ok && localRecovery.body.length >= PREMIUM_USABLE_BODY_MIN_LEN) {
       const recoverySource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
@@ -2577,6 +2594,47 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
     };
   }
   if (premiumRenderSource === "rejected_paid_corpus") {
+    const localRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
+      draft: outMerged,
+      rawIntake: rawForSoT || rawIntake,
+      intakeLower: intakeLowerGlobal,
+      recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+    });
+    if (localRecovery.ok && localRecovery.body.length >= PREMIUM_USABLE_BODY_MIN_LEN) {
+      const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+      if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+      logPremiumCompletionDebug({
+        stage: "premium_degraded_server_local_recovery",
+        accepted: true,
+        rejectedReason: undefined,
+        premiumRenderSource: recoverySource,
+        bodyLen: localRecovery.body.length,
+        lastClientGate: lastClientGateTrace,
+      });
+      outMerged = stripClientPremiumArtifactBlocksFromDraft({
+        ...outMerged,
+        premium_full_document_text: localRecovery.body,
+      });
+      return {
+        premiumDraft: outMerged,
+        premiumParties,
+        recipientCandidates,
+        winningPremiumBodyText: localRecovery.body,
+        premiumRenderSource: recoverySource,
+        premiumReview,
+        premiumFinalizeAudit,
+        premiumReviewRoute,
+        staleIntakeOrGeneration: false,
+        agreementGenerationId: input.agreementGenerationId,
+        premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+        founderDetailsGateMessage: null,
+        proIntentGateMessage: null,
+        serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+        premiumDegradedServerRecoverable: true,
+        premiumDegradedServerLocalRecovery: true,
+        tierADiagnostic: tierADiag,
+      };
+    }
     if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
     logPremiumCompletionDebug({
       stage: "pipeline_return_rejected_paid_corpus",
@@ -2584,11 +2642,14 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       rejectedReason: "rejected_paid_corpus",
       premiumRenderSource: "rejected_paid_corpus",
       lastClientGate: lastClientGateTrace,
+      localRecoveryAttempted: true,
+      localRecoveryOk: localRecovery.ok,
     });
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.info("[paid-pro-gate] rejected; omitting fallback stitched body", {
         premiumRenderSource,
+        localRecoveryOk: localRecovery.ok,
       });
     }
     return {
@@ -2607,7 +2668,8 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       proIntentGateMessage:
         proIntentGateMessage ||
         "We couldn’t complete the Pro upgrade with your terms yet. Tap **Retry Pro draft** to try again, or add more deal detail to your intake first.",
-      serverGenerationDegraded: null,
+      serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+      premiumDegradedServerRecoverable: true,
       tierADiagnostic: tierADiag,
     };
   }

@@ -16,6 +16,7 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
   it("defines paid connection recovery copy for amber panel and custom gate", () => {
     expect(src).toContain(PAID_RECOVERY_USER_COPY);
     expect(src).toContain("premium_network_local_recovery");
+    expect(src).toContain("premium_degraded_server_local_recovery");
   });
 
   it("starter Pro refine upsell is suppressed when paid completion session is active", () => {
@@ -81,6 +82,15 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
   it("paid Pro upgrade failure copy remains available for real paid recovery panels", () => {
     expect(src).toContain("PREMIUM_NETWORK_RECOVERABLE_HEADLINE");
     expect(src).toContain("PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL");
+    expect(src).toContain("PREMIUM_DEGRADED_SERVER_RECOVERABLE_HEADLINE");
+    expect(src).toContain("applySuccess_degraded_server_local_recovery");
+  });
+
+  it("paid checkout applySuccess handles degraded server local recovery before authoritative apply", () => {
+    expect(src).toContain("isPremiumDegradedServerRetryablePipelineResult(result)");
+    expect(src).toContain("applySuccess_degraded_server_local_recovery");
+    expect(src).toContain("premium_degraded_server_local_recovery");
+    expect(src).toContain("premiumAccepted: false");
   });
 
   it("suppresses amber recovery while premium return wait is active (patience / in-flight)", () => {

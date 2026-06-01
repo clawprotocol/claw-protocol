@@ -26,6 +26,26 @@ export function isPremiumNetworkLocalRecoveryResult(
   );
 }
 
+export function isPremiumDegradedServerRecoverableResult(
+  result: PremiumCompletionResult | null | undefined,
+): boolean {
+  if (!result) return false;
+  return (
+    Boolean(result.premiumDegradedServerRecoverable) ||
+    result.premiumRenderSource === "premium_degraded_server_local_recovery"
+  );
+}
+
+export function isPremiumDegradedServerLocalRecoveryResult(
+  result: PremiumCompletionResult | null | undefined,
+): boolean {
+  if (!result) return false;
+  return (
+    Boolean(result.premiumDegradedServerLocalRecovery) ||
+    result.premiumRenderSource === "premium_degraded_server_local_recovery"
+  );
+}
+
 export function isPremiumGenerationRecoverableResult(
   result: PremiumCompletionResult | null | undefined,
 ): boolean {
@@ -39,7 +59,33 @@ export function isPremiumGenerationRecoverableResult(
 export function isPremiumRecoverablePipelineResult(
   result: PremiumCompletionResult | null | undefined,
 ): boolean {
-  return isPremiumNetworkRecoverableResult(result) || isPremiumGenerationRecoverableResult(result);
+  return (
+    isPremiumNetworkRecoverableResult(result) ||
+    isPremiumDegradedServerRecoverableResult(result) ||
+    isPremiumGenerationRecoverableResult(result)
+  );
+}
+
+/**
+ * Paid checkout completion must land in an authoritative draft, a visible local recovery draft, or an
+ * explicit recoverable/retry panel — never a silent empty failed review.
+ */
+export function paidProCheckoutCompletionHasVisibleOutcome(
+  result: PremiumCompletionResult | null | undefined,
+): boolean {
+  if (!result || result.staleIntakeOrGeneration) return false;
+  if (authoritativePremiumPipelineResultForUiApply(result)) return true;
+  if (isPremiumNetworkLocalRecoveryResult(result) && hasUsablePremiumBodyText(result.winningPremiumBodyText)) {
+    return true;
+  }
+  if (isPremiumDegradedServerLocalRecoveryResult(result) && hasUsablePremiumBodyText(result.winningPremiumBodyText)) {
+    return true;
+  }
+  if (isPremiumRecoverablePipelineResult(result)) return true;
+  if ((result.proIntentGateMessage || result.founderDetailsGateMessage) && !hasUsablePremiumBodyText(result.winningPremiumBodyText)) {
+    return true;
+  }
+  return false;
 }
 
 /** True only when pipeline produced an authoritative Pro body eligible for success UI. */
@@ -82,4 +128,3 @@ export function authoritativePremiumCompletionMatchesSession(
   if (!sessionGenForPass.trim()) return false;
   return String(result.agreementGenerationId ?? "") === String(sessionGenForPass);
 }
-

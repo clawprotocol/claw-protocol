@@ -10,6 +10,12 @@ import { assessPaidProMutualConsultingProfessionalStructure } from "./paidProMut
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
 
 export const PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE = "premium_network_local_recovery" as const;
+export const PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE =
+  "premium_degraded_server_local_recovery" as const;
+
+export type PremiumPostCheckoutLocalRecoverySurface =
+  | typeof PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE
+  | typeof PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
 
 export type PremiumNetworkLocalRecoveryBuildResult = {
   ok: boolean;
@@ -18,13 +24,14 @@ export type PremiumNetworkLocalRecoveryBuildResult = {
 };
 
 /**
- * Deterministic Pro draft when premium-full-draft fails with a transient network error.
+ * Deterministic Pro draft when premium-full-draft cannot be shown (network or rejected server corpus).
  * Does not establish server SoT — display/recovery only until the user retries the API.
  */
-export function buildPremiumNetworkRecoveryLocalProDraft(args: {
+export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
   draft: ParsedDraftShape;
   rawIntake: string;
   intakeLower?: string;
+  recoverySurface: PremiumPostCheckoutLocalRecoverySurface;
 }): PremiumNetworkLocalRecoveryBuildResult {
   const rawIntake = (args.rawIntake || "").trim();
   const stripped = stripClientPremiumArtifactBlocksFromDraft(args.draft);
@@ -35,7 +42,7 @@ export function buildPremiumNetworkRecoveryLocalProDraft(args: {
     intakeRaw: rawIntake,
     partyNames,
     agreementFamily: stripped.agreement_family ?? null,
-    surface: "premium_network_local_recovery",
+    surface: args.recoverySurface,
   });
   if (!ph.ok) {
     return { ok: false, body: "", reasons: ["placeholder_blocked", ...ph.remaining] };
@@ -77,4 +84,16 @@ export function buildPremiumNetworkRecoveryLocalProDraft(args: {
   }
 
   return { ok: true, body: body.trim(), reasons: prepared.repairs };
+}
+
+/** @deprecated Use {@link buildPremiumPostCheckoutLocalRecoveryProDraft} with an explicit recovery surface. */
+export function buildPremiumNetworkRecoveryLocalProDraft(args: {
+  draft: ParsedDraftShape;
+  rawIntake: string;
+  intakeLower?: string;
+}): PremiumNetworkLocalRecoveryBuildResult {
+  return buildPremiumPostCheckoutLocalRecoveryProDraft({
+    ...args,
+    recoverySurface: PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
+  });
 }
