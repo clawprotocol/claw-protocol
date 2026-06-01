@@ -29,6 +29,8 @@ type Props = {
   suppressEmptyFallback?: boolean;
   /** Canonical paid review renders in normal document flow, not a nested scroll viewport. */
   fullDocumentFlow?: boolean;
+  /** Extra padding below document body when a bottom sticky CTA is visible (px). */
+  bottomScrollInsetPx?: number;
   /** Paid Pro final DOM boundary diagnostics (dev-only logs). */
   visibleProPaperTrace?: {
     declaredSource: string;
@@ -46,6 +48,7 @@ export function PremiumAgreementReadonlyView({
   emptyFallback,
   suppressEmptyFallback = false,
   fullDocumentFlow = false,
+  bottomScrollInsetPx = 0,
   visibleProPaperTrace,
 }: Props) {
   const sid = useId().replace(/:/g, "");
@@ -79,11 +82,16 @@ export function PremiumAgreementReadonlyView({
         role="article"
         aria-label="Agreement document preview"
         data-testid="premium-agreement-readonly-article"
-        className={`premium-readonly-doc px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left [font-feature-settings:'kern'_1,'liga'_1,'onum'_1] ${
+        className={`premium-readonly-doc px-[clamp(1.85rem,6.5vw,3.5rem)] pt-11 text-left [font-feature-settings:'kern'_1,'liga'_1,'onum'_1] ${
           fullDocumentFlow
-            ? "min-h-0 overflow-visible"
-            : "max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto"
+            ? "min-h-0 overflow-visible pb-16"
+            : `max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto${bottomScrollInsetPx > 0 ? "" : " pb-16"}`
         }`}
+        style={
+          !fullDocumentFlow && bottomScrollInsetPx > 0
+            ? { paddingBottom: `${bottomScrollInsetPx}px` }
+            : undefined
+        }
       >
         {safe ? (
           <div className="premium-doc-body" dangerouslySetInnerHTML={{ __html: safe }} />

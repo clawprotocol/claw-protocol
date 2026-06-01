@@ -20443,8 +20443,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const simpleCreateStickyBottomBarVisible =
     simpleCreateStickyBottomBarVisibleBaseGated && !hideStickyForGuidedInProgress;
 
-  const stickyBottomScrollInsetPx = usePaidProStickyBottomInset(
-    simpleCreateActionBarRef,
+  const [stickyBottomScrollInsetPx, attachPaidProStickyBar] = usePaidProStickyBottomInset(
     simpleCreateStickyBottomBarVisible,
   );
 
@@ -24234,9 +24233,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   : `mx-auto w-full ${simpleCreateWorkspaceOuterMaxClass} motion-safe:transition-[max-width] motion-safe:duration-200`)}
               style={
                 simpleCreateStickyBottomBarVisible && stickyBottomScrollInsetPx > 0
-                  ? {
-                      paddingBottom: `calc(${stickyBottomScrollInsetPx}px + env(safe-area-inset-bottom, 0px))`,
-                    }
+                  ? { paddingBottom: `${stickyBottomScrollInsetPx}px` }
                   : undefined
               }
               >
@@ -24725,6 +24722,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               {showWorkspacePreview ? (
                 <div
                   id="claw-simple-create-preview"
+                  style={
+                    simpleCreateStickyBottomBarVisible && stickyBottomScrollInsetPx > 0
+                      ? { paddingBottom: `${stickyBottomScrollInsetPx}px` }
+                      : undefined
+                  }
                   className={
                     (complexityGateActive
                       ? `mt-4 block w-full min-w-0 lg:mt-0 motion-safe:opacity-100 motion-safe:transition-opacity motion-safe:duration-150${continuitySourcePanel ? " simple-flow-preview-continuity-fade" : ""}`
@@ -25879,6 +25881,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     ) : simpleProFinalReviewShellActive && !failedPremiumCorpusActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         <SimpleProFinalReviewScreen
+                                          stickyBottomScrollInsetPx={
+                                            simpleCreateStickyBottomBarVisible
+                                              ? stickyBottomScrollInsetPx
+                                              : 0
+                                          }
                                           agreementHtml={simpleProFinalReviewHtml}
                                           paidReviewPlain={
                                             simpleProFinalReviewDisplayPlain.trim() ||
@@ -26554,6 +26561,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 <textarea
                                   ref={agreementPreviewEditorRef}
                                   id="claw-agreement-preview-editor"
+                                  style={
+                                    simpleCreateStickyBottomBarVisible &&
+                                    stickyBottomScrollInsetPx > 0 &&
+                                    hasFullDraftAccess
+                                      ? { paddingBottom: `${stickyBottomScrollInsetPx}px` }
+                                      : undefined
+                                  }
                                   className={(() => {
                                     const teaseReading =
                                       showUpgradeToFullDraftOnReview && createUiStage === CreateUiStage.DRAFT;
@@ -27283,7 +27297,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
             {simpleCreateStickyBottomBarVisible ? (
               <div
-                ref={simpleCreateActionBarRef}
+                ref={(el) => {
+                  simpleCreateActionBarRef.current = el;
+                  attachPaidProStickyBar(el);
+                }}
+                data-testid="paid-pro-sticky-cta-bar"
                 className={`fixed inset-x-0 bottom-0 z-40 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-[box-shadow] duration-300 motion-safe:transition-all ${
                   simpleCreateBarCoolToneForBasicContinuePath
                     ? "border-t border-slate-700/70 bg-gradient-to-t from-slate-950 via-slate-900/98 to-slate-900/90 shadow-md shadow-black/35"

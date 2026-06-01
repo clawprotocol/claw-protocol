@@ -1,9 +1,13 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it } from "vitest";
-import { measureStickyBottomInsetPx } from "./paidProStickyBottomInset";
+import {
+  PAID_PRO_STICKY_CTA_BUFFER_PX,
+  computePaidProReviewScrollPaddingPx,
+  measureStickyBottomInsetPx,
+} from "./paidProStickyBottomInset";
 
 describe("paidProStickyBottomInset", () => {
-  it("measures bar height plus buffer without hardcoded 180px", () => {
+  it("measures bar height plus 48px buffer and safe-area without hardcoded 180px", () => {
     const bar = document.createElement("div");
     bar.getBoundingClientRect = () =>
       ({
@@ -18,7 +22,10 @@ describe("paidProStickyBottomInset", () => {
         toJSON: () => ({}),
       }) as DOMRect;
     const inset = measureStickyBottomInsetPx(bar);
-    expect(inset).toBeGreaterThanOrEqual(96 + 24);
+    expect(inset).toBe(96 + PAID_PRO_STICKY_CTA_BUFFER_PX);
+    expect(inset).toBe(
+      computePaidProReviewScrollPaddingPx({ ctaHeightPx: 96, safeAreaInsetBottomPx: 0 }),
+    );
     expect(inset).toBeLessThan(200);
   });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { PaidProReviewStickyScrollSpacer } from "./paidProStickyBottomInset";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { ProVisiblePaperCandidate } from "./visibleProPaperRenderBoundary";
@@ -80,6 +81,8 @@ export type SimpleProFinalReviewScreenProps = {
   onUseUploadedForSigning?: () => void;
   onKeepLawDogVersion?: () => void;
   onBackToSignerDetails?: () => void;
+  /** Measured sticky CTA clearance — spacer after execution block (px). */
+  stickyBottomScrollInsetPx?: number;
   className?: string;
   visibleProPaperTrace?: {
     declaredSource: string;
@@ -143,6 +146,7 @@ export function SimpleProFinalReviewScreen({
   onUseUploadedForSigning,
   onKeepLawDogVersion,
   onBackToSignerDetails,
+  stickyBottomScrollInsetPx = 0,
   className = "",
   visibleProPaperTrace,
 }: SimpleProFinalReviewScreenProps) {
@@ -358,6 +362,7 @@ export function SimpleProFinalReviewScreen({
               html={effectiveAgreementHtml}
               suppressEmptyFallback={suppressEmptyFallback}
               fullDocumentFlow={canonicalPaidProReview}
+              bottomScrollInsetPx={canonicalPaidProReview ? 0 : stickyBottomScrollInsetPx}
               visibleProPaperTrace={visibleProPaperTrace}
             />
           ) : showCanonicalPaidPre ? (
@@ -387,6 +392,9 @@ export function SimpleProFinalReviewScreen({
           >
             Agreement preview is not available. Use Edit signer details, then continue to final review again.
           </p>
+        ) : null}
+        {stickyBottomScrollInsetPx > 0 ? (
+          <PaidProReviewStickyScrollSpacer heightPx={stickyBottomScrollInsetPx} />
         ) : null}
       </div>
       {signersReady ? (
