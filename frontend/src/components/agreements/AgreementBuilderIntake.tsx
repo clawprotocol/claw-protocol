@@ -678,6 +678,8 @@ import {
 import {
   authoritativePremiumCompletionMatchesSession,
   authoritativePremiumPipelineResultForUiApply,
+  hasUsablePremiumBodyText,
+  isPremiumNetworkLocalRecoveryResult,
   isPremiumNetworkRecoverableResult,
   isPremiumPipelineRewriteSucceeded,
   isPremiumRecoverablePipelineResult,
@@ -5982,8 +5984,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (!premiumGapBaseIntakeRef.current.trim()) {
             premiumGapBaseIntakeRef.current = mergedIntake;
           }
+          const localWinning = (result.winningPremiumBodyText || "").trim();
+          const hasLocalRecovery =
+            isPremiumNetworkLocalRecoveryResult(result) && hasUsablePremiumBodyText(localWinning);
           logPremiumSessionConsistency({
-            context: "applySuccess_network_retryable",
+            context: hasLocalRecovery
+              ? "applySuccess_network_local_recovery"
+              : "applySuccess_network_retryable",
             agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
             agreementGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
             intakeFingerprint: shortIntakeFingerprint(mergedIntake),
@@ -5993,11 +6000,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             intakeFingerprint: shortIntakeFingerprint(mergedIntake),
             agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
             renderSource: result.premiumRenderSource,
-            phase: "premium_network_recoverable",
+            phase: hasLocalRecovery ? "premium_network_local_recovery" : "premium_network_recoverable",
           });
           setPremiumServerGenerationDegraded(null);
           setHardError(null);
-          setProFullDraftCustomGateMessage(PREMIUM_NETWORK_RECOVERABLE_HEADLINE);
+          setProFullDraftCustomGateMessage(
+            hasLocalRecovery
+              ? `${PREMIUM_NETWORK_RECOVERABLE_HEADLINE}\n\n${PREMIUM_NETWORK_RECOVERABLE_BODY}`
+              : PREMIUM_NETWORK_RECOVERABLE_HEADLINE,
+          );
           setProFullDraftQualityRetry(true);
           clearPremiumForkUserSendMode();
           paidProPremiumSendIntentRef.current = null;
@@ -6007,7 +6018,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
           lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
           setPremiumTruthPipelineSource(result.premiumRenderSource);
-          premiumPipelineOutputBodyRef.current = "";
           setPremiumRefineReview(null);
           setPremiumFinalizeAudit(null);
           setPremiumReviewRoute(null);
@@ -6016,6 +6026,66 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumReturnPatienceExtended(false);
           premiumPostCheckoutModalHardFailopenRef.current = false;
           setPremiumAuthoritativeRequestInFlight(false);
+          if (hasLocalRecovery) {
+            paidCheckoutCompletedRef.current = true;
+            premiumPipelineOutputBodyRef.current = localWinning;
+            hydratedPremiumBodyRef.current = localWinning;
+            lastPremiumWinningCorpusRef.current = localWinning;
+            updateLastKnownGoodAuthoritativeDraftRef(
+              lastKnownGoodAuthoritativeDraftRef,
+              localWinning,
+              "premium_network_local_recovery",
+              { paidProFlow: true, freeBaselinePlain: paidProStarterBaselinePlain },
+            );
+            const priorForMerge =
+              draftSnapshotRef.current ?? readCreateComplexityResume()?.pending ?? prior ?? null;
+            const mergedLocal = mergePremiumDraftPartiesWithRecipientPriority(
+              result.premiumDraft,
+              priorForMerge,
+              recipient1NameRef.current,
+              recipient2NameRef.current,
+              result.recipientCandidates[0]?.name,
+              result.recipientCandidates[1]?.name,
+              modalParty1NameRef.current,
+              modalParty2NameRef.current,
+            );
+            const rc0 = result.recipientCandidates[0] ?? { name: "", email: "", role: "Party" };
+            const rc1 = result.recipientCandidates[1] ?? { name: "", email: "", role: "Party" };
+            const recipientCandidates = [
+              { ...rc0, name: mergedLocal.displayName1 },
+              { ...rc1, name: mergedLocal.displayName2 },
+            ];
+            persistPremiumCompletionSnapshot({
+              premiumDraft: {
+                ...mergedLocal.draft,
+                premium_full_document_text: localWinning,
+              },
+              premiumParties: result.premiumParties,
+              recipientCandidates,
+              premiumWinningBodyText: localWinning,
+              premiumReadonlyPlainText: localWinning,
+              premiumReview: null,
+              premiumFinalizeAudit: null,
+              premiumReviewRoute: null,
+              agreementGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
+              intakeTextFingerprint: shortIntakeFingerprint(mergedIntake),
+              premiumPipelineRenderSource: result.premiumRenderSource,
+              premiumAccepted: false,
+            });
+            applyFailureFallback(localWinning, { paidCheckoutRecovery: true });
+            setPremiumPostCheckoutPhase(null);
+            setPremiumPipelineUserMessage(null);
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[premium-modal-stage]", {
+                to: "premium_network_local_recovery",
+                bodyLen: localWinning.length,
+                ts: new Date().toISOString(),
+              });
+            }
+            return;
+          }
+          premiumPipelineOutputBodyRef.current = "";
           applyFailureFallback(undefined, { paidCheckoutRecovery: true });
           setPremiumPostCheckoutPhase("premium_network_recoverable");
           setPremiumPipelineUserMessage(null);
@@ -7068,11 +7138,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           markPremiumCompletionDoneInLocalStorage();
         } else {
           const recoverySnap = readPremiumCompletionSnapshot();
-          const recoveryBody = readAuthoritativeSnapshotBody(recoverySnap);
+          const recoveryBody =
+            (winningBodyText || "").trim() || readAuthoritativeSnapshotBody(recoverySnap);
           if (recoveryBody.length >= 500) {
             hydratedPremiumBodyRef.current = recoveryBody;
             lastPremiumWinningCorpusRef.current = recoveryBody;
             premiumPipelineOutputBodyRef.current = recoveryBody;
+            if ((winningBodyText || "").trim().length >= 500) {
+              const parties = extractCleanPremiumParties(mergedIntake, prior!);
+              const recipientCandidates = parties.map((p) => ({ name: p.name, email: "", role: "Party" }));
+              persistPremiumCompletionSnapshot({
+                premiumDraft: merged.draft,
+                premiumParties: parties,
+                recipientCandidates,
+                premiumWinningBodyText: recoveryBody,
+                premiumReadonlyPlainText: recoveryBody,
+                premiumReview: null,
+                premiumFinalizeAudit: null,
+                premiumReviewRoute: null,
+                agreementGenerationId: getOrInitSessionAgreementGenerationId(),
+                intakeTextFingerprint: shortIntakeFingerprint(mergedIntake),
+                premiumPipelineRenderSource:
+                  lastPremiumPipelineRenderSourceRef.current || "premium_network_local_recovery",
+                premiumAccepted: false,
+              });
+            }
           } else {
             premiumPipelineOutputBodyRef.current = "";
           }
@@ -7104,7 +7194,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setAgreementDocumentText("");
           }
         } else {
-          const recoveryBodyForDisplay = readAuthoritativeSnapshotBody(readPremiumCompletionSnapshot());
+          const recoveryBodyForDisplay =
+            (winningBodyText || "").trim() ||
+            readAuthoritativeSnapshotBody(readPremiumCompletionSnapshot());
           if (recoveryBodyForDisplay.length >= 500) {
             setAgreementDocumentText(recoveryBodyForDisplay);
           } else {
@@ -10954,7 +11046,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProAuthoritativeBodyLen = useMemo(() => {
     const fromActive = authoritativePaidProReviewPlain.trim().length;
     if (fromActive > 0) return fromActive;
-    if (premiumCheckoutCompleted) return getPaidProSourceOfTruthText().trim().length;
+    if (premiumCheckoutCompleted) {
+      const sotLen = getPaidProSourceOfTruthText().trim().length;
+      if (sotLen > 0) return sotLen;
+      return Math.max(
+        premiumPipelineOutputBodyRef.current.trim().length,
+        hydratedPremiumBodyRef.current.trim().length,
+        lastPremiumWinningCorpusRef.current.trim().length,
+      );
+    }
     return 0;
   }, [authoritativePaidProReviewPlain, premiumCheckoutCompleted, reviewDocRefreshTick, premiumSurfaceGateTick]);
 
@@ -13747,7 +13847,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPostCheckoutPhase === "premium_network_recoverable" ||
       premiumPostCheckoutPhase === "network_retry" ||
       premiumTruthPipelineSource === "premium_network_retryable" ||
-      lastPremiumPipelineRenderSourceRef.current === "premium_network_retryable"
+      premiumTruthPipelineSource === "premium_network_local_recovery" ||
+      lastPremiumPipelineRenderSourceRef.current === "premium_network_retryable" ||
+      lastPremiumPipelineRenderSourceRef.current === "premium_network_local_recovery"
     ) {
       return false;
     }
@@ -15919,7 +16021,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hasValidAuthoritativeCorpus:
           isAuthoritativePaidProReviewActive ||
           authoritativePremiumUiCommitted ||
-          canProceedWithPaidProDocument,
+          canProceedWithPaidProDocument ||
+          (premiumTruthPipelineSource === "premium_network_local_recovery" &&
+            paidProAuthoritativeBodyLen >= 500),
         premiumCorpusValidationFailed: premiumPaidUnavailableRetry,
         authoritativeBodyLen: paidProAuthoritativeBodyLen,
         // Never fail closed while a paid SoT exists and signing has not been requested — even if the

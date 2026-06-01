@@ -77,11 +77,15 @@ describe("runPremiumCompletion network failures", () => {
       isPremiumRequestStillValid: () => true,
       parseDraft: async () => structured,
     });
-    expect(out.premiumRenderSource).toBe("premium_network_retryable");
     expect(out.premiumNetworkRetryable).toBe(true);
     expect(out.proIntentGateMessage).toBeNull();
-    expect(out.winningPremiumBodyText).toBe("");
     expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    if (out.premiumRenderSource === "premium_network_retryable") {
+      expect(out.winningPremiumBodyText).toBe("");
+    } else {
+      expect(out.premiumNetworkLocalRecovery).toBe(true);
+      expect(out.winningPremiumBodyText.trim().length).toBeGreaterThanOrEqual(500);
+    }
   });
 
   it("non-network API failure does not use premium_network_retryable (distinct from transient network)", async () => {

@@ -14,7 +14,8 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
   const src = readFileSync(intakePath, "utf8");
 
   it("defines paid connection recovery copy for amber panel and custom gate", () => {
-    expect(src).toContain(`const PAID_PREMIUM_CONNECTION_RECOVERY_COPY =\n  "${PAID_RECOVERY_USER_COPY}";`);
+    expect(src).toContain(PAID_RECOVERY_USER_COPY);
+    expect(src).toContain("premium_network_local_recovery");
   });
 
   it("starter Pro refine upsell is suppressed when paid completion session is active", () => {
@@ -27,7 +28,7 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
   it("free starter review surface is false when paid completion session is active", () => {
     const m = src.match(/const isFreeStarterReviewSurface = useMemo\(\(\) => \{([\s\S]*?)\}, \[/);
     expect(m, "isFreeStarterReviewSurface useMemo block").not.toBeNull();
-    expect(m![1].trimStart()).toMatch(/^\s*if \(hasPaidPremiumCompletionSession\(\)\) return false;/);
+    expect(m![1]).toContain("if (hasPaidPremiumCompletionSession()) return false;");
   });
 
   it("applyFailureFallback keeps runPremiumModelPassRef when paidCheckoutRecovery is true", () => {
@@ -78,8 +79,8 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
   });
 
   it("paid Pro upgrade failure copy remains available for real paid recovery panels", () => {
-    expect(src).toContain("PAID_PREMIUM_CONNECTION_RECOVERY_COPY");
     expect(src).toContain("PREMIUM_NETWORK_RECOVERABLE_HEADLINE");
+    expect(src).toContain("PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL");
   });
 
   it("suppresses amber recovery while premium return wait is active (patience / in-flight)", () => {

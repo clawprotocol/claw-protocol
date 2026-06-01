@@ -101,6 +101,11 @@ import { canShowPremiumSuccess } from "./premiumSuccessGate";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
+import {
+  buildPremiumNetworkRecoveryLocalProDraft,
+  PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
+} from "./premiumNetworkRecoveryLocalDraft";
+import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
@@ -181,6 +186,7 @@ export type PremiumRenderSource =
   | "stale_intake"
   | "rejected_paid_corpus"
   | "premium_network_retryable"
+  | "premium_network_local_recovery"
   | "premium_generation_retryable";
 
 export type PremiumCompletionResult = {
@@ -223,6 +229,8 @@ export type PremiumCompletionResult = {
   serverGenerationDegraded?: { code: string; message: string } | null;
   /** Transient browser/network failure during premium-full-draft — free draft must stay visible; retry in modal. */
   premiumNetworkRetryable?: boolean;
+  /** Local stitched Pro draft shown after network failure until server retry succeeds. */
+  premiumNetworkLocalRecovery?: boolean;
   /** Recoverable server generation failure (e.g. airlock_blocked with empty document) — retry in modal. */
   premiumGenerationRetryable?: boolean;
   /** Client classification after output-quality pipeline (authoritative vs advisory clarifications). */
@@ -2467,19 +2475,60 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
 
   const finalWinning = (winningPremiumBodyText || "").trim();
   if (premiumRenderSource === "premium_network_retryable") {
+    const localRecovery = buildPremiumNetworkRecoveryLocalProDraft({
+      draft: outMerged,
+      rawIntake: rawForSoT || rawIntake,
+      intakeLower: intakeLowerGlobal,
+    });
+    if (localRecovery.ok && localRecovery.body.length >= PREMIUM_USABLE_BODY_MIN_LEN) {
+      const recoverySource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
+      if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+      logPremiumCompletionDebug({
+        stage: "premium_network_local_recovery",
+        accepted: true,
+        rejectedReason: undefined,
+        premiumRenderSource: recoverySource,
+        bodyLen: localRecovery.body.length,
+      });
+      outMerged = stripClientPremiumArtifactBlocksFromDraft({
+        ...outMerged,
+        premium_full_document_text: localRecovery.body,
+      });
+      return {
+        premiumDraft: outMerged,
+        premiumParties,
+        recipientCandidates,
+        winningPremiumBodyText: localRecovery.body,
+        premiumRenderSource: recoverySource,
+        premiumReview,
+        premiumFinalizeAudit,
+        premiumReviewRoute,
+        staleIntakeOrGeneration: false,
+        agreementGenerationId: input.agreementGenerationId,
+        premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+        founderDetailsGateMessage: null,
+        proIntentGateMessage: null,
+        serverGenerationDegraded: null,
+        premiumNetworkRetryable: true,
+        premiumNetworkLocalRecovery: true,
+        tierADiagnostic: tierADiag,
+      };
+    }
     if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
     logPremiumGenerationApiUnavailable({
       endpoint: PREMIUM_GENERATION_DRAFT_API_PATH,
       error: "network_retryable",
-      fallbackBlocked: true,
+      fallbackBlocked: !localRecovery.ok,
       stage: "pipeline_return_premium_network_retryable",
       pipelineSource: premiumRenderSource,
     });
     logPremiumCompletionDebug({
       stage: "pipeline_return_premium_network_retryable",
       accepted: false,
-      rejectedReason: "network_retryable",
+      rejectedReason: localRecovery.ok ? "network_retryable" : localRecovery.reasons.join(","),
       premiumRenderSource: "premium_network_retryable",
+      localRecoveryAttempted: true,
+      localRecoveryOk: localRecovery.ok,
     });
     return {
       premiumDraft: outMerged,

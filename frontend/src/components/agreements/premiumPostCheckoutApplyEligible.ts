@@ -11,7 +11,18 @@ export function isPremiumNetworkRecoverableResult(
   if (!result) return false;
   return (
     Boolean(result.premiumNetworkRetryable) ||
-    result.premiumRenderSource === "premium_network_retryable"
+    result.premiumRenderSource === "premium_network_retryable" ||
+    result.premiumRenderSource === "premium_network_local_recovery"
+  );
+}
+
+export function isPremiumNetworkLocalRecoveryResult(
+  result: PremiumCompletionResult | null | undefined,
+): boolean {
+  if (!result) return false;
+  return (
+    Boolean(result.premiumNetworkLocalRecovery) ||
+    result.premiumRenderSource === "premium_network_local_recovery"
   );
 }
 

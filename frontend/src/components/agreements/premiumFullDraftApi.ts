@@ -287,14 +287,18 @@ export type PremiumFullDraftApiResult = PremiumFullDraftApiSuccess | PremiumFull
 /** Transient browser errors (e.g. ERR_NETWORK_CHANGED): retry twice with backoff. */
 export const PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS = 2;
 
+/** Client ceiling aligned with common Railway/proxy limits (~150s) before ERR_CONNECTION_RESET. */
+export const PREMIUM_FULL_DRAFT_FETCH_TIMEOUT_MS = 150_000;
+
 export function isPremiumFullDraftNetworkFailure(error: unknown): boolean {
   if (error == null) return false;
   if (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") {
-    return false;
+    return /premium_full_draft_fetch_timeout/i.test(error.message);
   }
   const msg = error instanceof Error ? error.message : String(error);
   const name = error instanceof Error ? error.name : "";
   if (/ERR_NETWORK_CHANGED|network changed/i.test(msg)) return true;
+  if (/premium_full_draft_fetch_timeout/i.test(msg)) return true;
   if (
     /ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NAME_NOT_RESOLVED|ERR_TIMED_OUT/i.test(
       msg,
@@ -824,12 +828,26 @@ export async function postPremiumFullDraftWithRetry(
       }
     }
     totalAttempts += 1;
+    const fetchTimeoutController = new AbortController();
+    const fetchTimeoutId = window.setTimeout(() => {
+      fetchTimeoutController.abort(
+        new DOMException("premium_full_draft_fetch_timeout", "AbortError"),
+      );
+    }, PREMIUM_FULL_DRAFT_FETCH_TIMEOUT_MS);
+    const fetchSignal = args.signal
+      ? (() => {
+          if (typeof AbortSignal !== "undefined" && "any" in AbortSignal) {
+            return AbortSignal.any([args.signal, fetchTimeoutController.signal]);
+          }
+          return args.signal;
+        })()
+      : fetchTimeoutController.signal;
     try {
       const result = await postPremiumFullDraftOnce({
         intakeText: args.intakeText,
         context: args.context,
         userGapAnswers: args.userGapAnswers,
-        signal: args.signal,
+        signal: fetchSignal,
         agreementGenerationId,
         intakeFingerprint: shortIntakeFingerprint(args.intakeText),
         agreementId,
@@ -892,6 +910,8 @@ export async function postPremiumFullDraftWithRetry(
       if (networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS) {
         await sleepMs(premiumRetryBackoffMs(networkAttempt - 1));
       }
+    } finally {
+      window.clearTimeout(fetchTimeoutId);
     }
   }
 

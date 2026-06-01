@@ -97,7 +97,10 @@ describe("runPremiumCompletion network then success retry", () => {
       isPremiumRequestStillValid: () => true,
       parseDraft: async () => structured,
     });
-    expect(first.premiumRenderSource).toBe("premium_network_retryable");
+    expect(first.premiumNetworkRetryable).toBe(true);
+    expect(first.premiumNetworkLocalRecovery).toBe(true);
+    expect(first.premiumRenderSource).toBe("premium_network_local_recovery");
+    expect(first.winningPremiumBodyText.trim().length).toBeGreaterThan(500);
 
     const second = await runPremiumCompletion({
       intakeText: WEB_INTAKE,

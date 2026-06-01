@@ -19,6 +19,7 @@ export function isPremiumGenerationApiUnavailablePipelineSource(
   source: string | null | undefined,
 ): boolean {
   const s = String(source || "").trim();
+  if (s === "premium_network_local_recovery") return false;
   return API_UNAVAILABLE_PIPELINE_SOURCES.has(s);
 }
 
@@ -55,6 +56,7 @@ export function isPremiumGenerationApiUnavailableForUi(args: {
   hasPaidProSourceOfTruth?: boolean;
 }): boolean {
   if (args.hasPaidProSourceOfTruth) return false;
+  if (String(args.pipelineSource || "").trim() === "premium_network_local_recovery") return false;
   const phase = String(args.premiumPostCheckoutPhase || "").trim();
   if (
     phase === "premium_network_recoverable" ||
