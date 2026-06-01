@@ -66,6 +66,9 @@ describe("paidProStickyCta", () => {
     expect(state.phase).toBe("review_decision");
     expect(paidProStickyCtaShowsStickyBar(state.phase)).toBe(false);
     expect(state.reason).toBe(PAID_PRO_REVIEW_DECISION_SCROLL_REASON);
+    expect(state.label).toBe("");
+    expect(state.disabled).toBe(true);
+    expect(state.showStickyBar).toBe(false);
   });
 
   it("signer_details_complete maps to a single finalize CTA reason", () => {

@@ -5,10 +5,7 @@
  * (DRAFT-stage Pro intake continues to use legacy production CTAs outside this resolver.)
  */
 
-import {
-  PAID_PRO_REVIEW_DECISION_SCROLL_CTA,
-  PAID_PRO_REVIEW_DECISION_SCROLL_REASON,
-} from "./paidProSignerFinalizeRouting";
+import { PAID_PRO_REVIEW_DECISION_SCROLL_REASON } from "./paidProSignerFinalizeRouting";
 import {
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
@@ -124,9 +121,9 @@ export function resolvePaidProStickyCta(args: ResolvePaidProStickyCtaArgs): Paid
     return {
       phase,
       showStickyBar,
-      label: PAID_PRO_REVIEW_DECISION_SCROLL_CTA,
+      label: "",
       action: "guided_continue",
-      disabled: false,
+      disabled: true,
       reason: PAID_PRO_REVIEW_DECISION_SCROLL_REASON,
     };
   }

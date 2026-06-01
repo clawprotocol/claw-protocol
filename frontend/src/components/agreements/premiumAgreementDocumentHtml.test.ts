@@ -185,7 +185,7 @@ Date: ________________________
     expect(html).not.toContain("claw-premium-signature-section");
   });
 
-  it("adds display-only signature region classes and highlights hydrated signer names", () => {
+  it("adds display-only signature region classes with uniform field weight (no hydrated-value bold)", () => {
     const plain = [
       "SERVICES AGREEMENT",
       "",
@@ -196,9 +196,14 @@ Date: ________________________
       "",
       "CLIENT:",
       "",
+      "Blue Canyon Analytics LLC",
+      "",
+      "By: __________________",
       "Name: Anthem H Blanchard",
-      "Title: CEO",
-      "Email for Notices: signer@example.com",
+      "Title: Member",
+      "Date: __________________",
+      "Email for Notices: anthemhayek@gmail.com",
+      "Address for Notices: 1027 S. Rainbow Blvd., #124, Las Vegas, NV 89146",
     ].join("\n");
     const html = buildPremiumAgreementReadonlyHtml(plain, {
       signatureSectionMode: "collaboration",
@@ -206,9 +211,34 @@ Date: ________________________
       forceEmbeddedCorpusSignature: true,
     });
     expect(html).toContain('class="premium-doc-signature-party-start"');
-    expect(html).toContain('class="premium-doc-hydrated-value">Anthem H Blanchard</span>');
-    expect(html).toContain('class="premium-doc-signature-party-start"');
-    expect(html).toContain("CLIENT:");
+    expect(html).toContain('class="premium-doc-signature-entity-name"');
+    expect(html).toContain('class="premium-doc-signature-field"');
+    expect(html).toContain("Name: Anthem H Blanchard");
+    expect(html).not.toContain("premium-doc-hydrated-value");
+    expect(html).not.toContain("<strong>");
+  });
+
+  it("does not mutate source plain when building readonly HTML", () => {
+    const plain = [
+      "SERVICES AGREEMENT",
+      "",
+      "IN WITNESS WHEREOF, the parties execute.",
+      "",
+      "CLIENT:",
+      "",
+      "Blue Canyon Analytics LLC",
+      "Name: Anthem H Blanchard",
+      "Title: Member",
+      "Date: __________________",
+      "Email for Notices: signer@example.com",
+    ].join("\n");
+    const frozen = plain;
+    buildPremiumAgreementReadonlyHtml(plain, {
+      signatureSectionMode: "collaboration",
+      partyNames: ["Blue Canyon Analytics LLC", "Iron Vale Systems Inc."],
+      forceEmbeddedCorpusSignature: true,
+    });
+    expect(plain).toBe(frozen);
   });
 
   it("renders decorative signature card only when corpus lacks execution block", () => {

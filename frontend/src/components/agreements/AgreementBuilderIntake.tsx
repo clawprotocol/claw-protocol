@@ -680,7 +680,11 @@ import {
   setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
-import { shouldStagePaidProSignerMetadataLocally } from "./paidProSignerMetadataCommitPolicy";
+import {
+  partyAddressForSignerMetadataStaging,
+  shouldDeferPaidProReviewRenderSignerRepair,
+  shouldStagePaidProSignerMetadataLocally,
+} from "./paidProSignerMetadataCommitPolicy";
 import {
   resolvePaidProFinalHydratedCorpusForSurface,
   setPaidProPinnedSignerAppliedCorpus,
@@ -3387,8 +3391,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     resizeSignerRow(setPartySignerTitles, (pIdx) =>
       String((parties[pIdx] as { signerTitle?: string })?.signerTitle ?? ""),
     );
+    const snap = getAuthoritativeSigningSnapshot();
+    const stagingAddresses =
+      paidProSignerMetadataSessionActiveRef.current && !snap;
     resizeSignerRow(setPartyAddresses, (pIdx) =>
-      String((parties[pIdx] as { partyAddress?: string })?.partyAddress ?? ""),
+      stagingAddresses
+        ? ""
+        : partyAddressForSignerMetadataStaging({
+            stagedAddress: String((parties[pIdx] as { partyAddress?: string })?.partyAddress ?? ""),
+            hasFinalizedSigningSnapshot: Boolean(snap),
+            snapshotAddress: snap?.signerMetadata.partyAddresses?.[pIdx],
+          }),
     );
   }, [draft?.parties?.length]);
   const paidProAuthoritativeRef = useRef(false);
@@ -12797,6 +12810,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSurfaceGateTick,
     ],
   );
+  const deferPaidProReviewRenderSignerRepair = shouldDeferPaidProReviewRenderSignerRepair({
+    signerMetadataSessionActive: paidProSignerMetadataSessionActive,
+  });
+  const paidProPartyRoleContext = useMemo(
+    () => ({
+      intakeText: (currentPremiumMergedIntakeKey || intakeCombined || "").trim(),
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+    }),
+    [currentPremiumMergedIntakeKey, intakeCombined, draft?.parties],
+  );
+  const clearedSignerStagingAddressesRef = useRef(false);
+  useEffect(() => {
+    if (!paidProSignerMetadataSessionActive || hasAuthoritativeSigningSnapshot()) {
+      if (!paidProSignerMetadataSessionActive) clearedSignerStagingAddressesRef.current = false;
+      return;
+    }
+    if (clearedSignerStagingAddressesRef.current) return;
+    clearedSignerStagingAddressesRef.current = true;
+    setPartyAddresses((prev) => prev.map(() => ""));
+  }, [paidProSignerMetadataSessionActive, premiumSurfaceGateTick]);
   // Mirror into refs so imperative callbacks (body rebuilds, handoff applies) can consult the guard
   // without re-binding: signer-metadata edits must never overwrite the authoritative body.
   useEffect(() => {
@@ -13113,7 +13146,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
     if (hasPaidProSourceOfTruth()) {
-      return authorityPartiesToCanonicalPartyIdentities(authority.parties);
+      return authorityPartiesToCanonicalPartyIdentities(authority.parties, paidProPartyRoleContext);
     }
     return resolveCanonicalPartyIdentitiesFromSignerSetup({
       partyCount: guidedPreReviewSignerSlots.requiredCount,
@@ -13203,7 +13236,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
     if (hasPaidProSourceOfTruth()) {
-      return buildCanonicalFinalPartyManifestFromAuthority(authority);
+      return buildCanonicalFinalPartyManifestFromAuthority(authority, paidProPartyRoleContext);
     }
     return resolveCanonicalFinalPartyManifest({
       partyCount: guidedPreReviewSignerSlots.requiredCount,
@@ -16237,6 +16270,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       };
     }
     if (paidProCanonicalStickyCta) {
+      if (!paidProCanonicalStickyCta.showStickyBar) {
+        return {
+          label: "",
+          action: "guided_continue",
+          disabled: true,
+          reason:
+            paidProCanonicalStickyCta.phase === "review_decision"
+              ? "paid_pro_review_decision_on_card"
+              : "paid_pro_sticky_bar_hidden",
+        };
+      }
       const mapped = mapPaidProStickyCtaToPrimaryCta(paidProCanonicalStickyCta);
       return {
         ...mapped,
@@ -18132,6 +18176,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const renderPlain = resolvePaidProReviewRenderPlain({
         draft: draft ?? null,
         intakeText: intakeForPolish,
+        deferSignerMetadataRepair: deferPaidProReviewRenderSignerRepair,
       });
       if (renderPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) return renderPlain;
     }
@@ -18193,6 +18238,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
     authoritativePaidProReviewPlain,
     paidProSignerHydratedPreviewPlain,
+    deferPaidProReviewRenderSignerRepair,
   ]);
 
   const visibleProPaperBoundaryState = useMemo(() => {
@@ -19174,56 +19220,66 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     logGuidedFinalReviewTransitionBlocked,
   ]);
 
-  const simpleProFinalReviewHtml = useMemo(() => {
+  const simpleProFinalReviewHtmlSourcePlain = useMemo(() => {
     const intakeForHtml = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    const corpus =
-      resolvePaidProReviewRenderPlain({ draft: draft ?? null, intakeText: intakeForHtml }).trim() ||
+    return (
+      resolvePaidProReviewRenderPlain({
+        draft: draft ?? null,
+        intakeText: intakeForHtml,
+        deferSignerMetadataRepair: deferPaidProReviewRenderSignerRepair,
+      }).trim() ||
       simpleProFinalReviewDisplayPlain.trim() ||
-      (acceptedPaidProAuthorityActive ? authoritativePaidProReviewPlain : "");
+      (acceptedPaidProAuthorityActive ? authoritativePaidProReviewPlain : "")
+    );
+  }, [
+    simpleProFinalReviewDisplayPlain,
+    acceptedPaidProAuthorityActive,
+    authoritativePaidProReviewPlain,
+    draft,
+    intakeCombined,
+    currentPremiumMergedIntakeKey,
+    premiumSurfaceGateTick,
+    paidProSignerHydratedPreviewPlain,
+    deferPaidProReviewRenderSignerRepair,
+  ]);
+
+  const simpleProFinalReviewHtml = useMemo(() => {
+    const corpus = simpleProFinalReviewHtmlSourcePlain;
     if (!corpus.trim()) return "";
     const rd = reviewDraft ?? draft;
-    const canonicalNames = guidedSignerCanonicalIdentities
-      .map((p) => p.partyDisplayName)
-      .filter((n) => n.length >= 2);
-    const signaturePartyNames =
-      canonicalNames.length >= 2
-        ? canonicalNames
-        : extractAgreementParties({
-            parties: rd?.parties,
-            intakeText: intakeCombined,
-            renderedText: corpus,
-            partiesLine: displayLivePreviewModel.partiesLine,
-          });
+    const signaturePartyNames = extractAgreementParties({
+      parties: rd?.parties,
+      intakeText: intakeCombined,
+      renderedText: corpus,
+      partiesLine: displayLivePreviewModel.partiesLine,
+    });
     const intakeForHints = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const renderHints = computePremiumDocumentRenderHints(rd, corpus, intakeForHints);
     const snapshotActive = hasAuthoritativeSigningSnapshot();
     const signerHydratedPreview = Boolean(paidProSignerHydratedPreviewPlain.trim());
+    const forceEmbedded =
+      snapshotActive ||
+      signerHydratedPreview ||
+      guidedSignatureRebuiltRef.current ||
+      (acceptedPaidProAuthorityActive && hasPaidProSourceOfTruth());
     return buildPremiumAgreementReadonlyHtml(corpus, {
       signatureSectionMode: "collaboration",
       partyNames: signaturePartyNames,
       renderHints,
       suppressDocumentIntelligenceCallouts:
         acceptedPaidProAuthorityActive || Boolean(paidProSignerHydratedPreviewPlain.trim()),
-      forceEmbeddedCorpusSignature:
-        snapshotActive ||
-        signerHydratedPreview ||
-        guidedSignatureRebuiltRef.current ||
-        guidedFinalReviewAuthoritativeResolution.source === "finalized_signer_applied_guided_corpus" ||
-        guidedFinalReviewAuthoritativeResolution.source === "hydrated_premium_with_signers",
+      forceEmbeddedCorpusSignature: forceEmbedded,
     });
   }, [
+    simpleProFinalReviewHtmlSourcePlain,
     paidProSignerHydratedPreviewPlain,
-    simpleProFinalReviewDisplayPlain,
     acceptedPaidProAuthorityActive,
-    authoritativePaidProReviewPlain,
     reviewDraft,
     draft,
     intakeCombined,
     currentPremiumMergedIntakeKey,
     displayLivePreviewModel.partiesLine,
-    guidedSignerCanonicalIdentities,
-    guidedFinalReviewAuthoritativeResolution.source,
-    guidedAuthVersionNonce,
+    premiumSurfaceGateTick,
   ]);
 
   React.useEffect(() => {
@@ -20942,7 +20998,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!simpleProFinalReviewActive) return;
     const intakeForEdit = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const renderPlain =
-      resolvePaidProReviewRenderPlain({ draft: draft ?? null, intakeText: intakeForEdit }) ||
+      resolvePaidProReviewRenderPlain({
+        draft: draft ?? null,
+        intakeText: intakeForEdit,
+        deferSignerMetadataRepair: deferPaidProReviewRenderSignerRepair,
+      }) ||
       simpleProFinalReviewDisplayPlain ||
       simpleProFinalReviewCorpus.plainText;
     setProFinalReviewEditPlain(renderPlain);
@@ -22381,7 +22441,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
     setConsumedPaidProSignerMetadataAuthority(authority);
-    const partyManifest = buildCanonicalFinalPartyManifestFromAuthority(authority);
+    const partyManifest = buildCanonicalFinalPartyManifestFromAuthority(authority, {
+      intakeText: intakeForHydration,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+    });
     const rawCorpus = (
       getPaidProSourceOfTruthText() ||
       authoritativePaidProReviewPlain ||

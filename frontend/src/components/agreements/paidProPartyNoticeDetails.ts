@@ -6,6 +6,8 @@
 import { findSignatureRegionStart, signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import {
   authorityPartiesToCanonicalPartyIdentities,
+  partyDisplayRoleLabelForAuthorityParty,
+  type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
@@ -28,6 +30,7 @@ export function partyRoleLabelForIndex(partyIndex: number): string {
 
 export function buildPartyNoticeDetailsBlock(
   parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
 ): string {
   const lines: string[] = [PARTY_NOTICE_DETAILS_HEADING, ""];
   let wroteParty = false;
@@ -35,7 +38,7 @@ export function buildPartyNoticeDetailsBlock(
     const legal = resolveCanonicalPartyLegalNameForIndex(party.partyIndex, parties);
     const email = party.signerEmail.trim();
     if (!legal) continue;
-    lines.push(`${partyRoleLabelForIndex(party.partyIndex)}:`);
+    lines.push(`${partyDisplayRoleLabelForAuthorityParty(party, roleContext)}:`);
     lines.push(legal);
     const name = party.signerName.trim();
     const title = party.signerTitle.trim();
@@ -139,8 +142,9 @@ export function logPartyNoticeDetailsHydration(payload: {
 export function applyPartyNoticeDetailsToCorpus(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; applied: boolean; replaced: boolean } {
-  const block = buildPartyNoticeDetailsBlock(parties);
+  const block = buildPartyNoticeDetailsBlock(parties, roleContext);
   if (!block.trim()) {
     return { text: corpus, applied: false, replaced: false };
   }
@@ -190,12 +194,13 @@ export function corpusHasBlankSignatureNoticePlaceholders(corpus: string): boole
 export function applySignatureNoticeContactFieldsToCorpus(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; applied: boolean; replacements: number } {
   const hasContact = parties.some((p) => p.signerEmail.trim() || p.partyAddress.trim());
   if (!hasContact) {
     return { text: corpus, applied: false, replacements: 0 };
   }
-  const identities = authorityPartiesToCanonicalPartyIdentities(parties);
+  const identities = authorityPartiesToCanonicalPartyIdentities(parties, roleContext);
   const marker = signaturePatchStartIndex(corpus);
   const lines = corpus.replace(/\r\n/g, "\n").split("\n");
   let replacements = 0;

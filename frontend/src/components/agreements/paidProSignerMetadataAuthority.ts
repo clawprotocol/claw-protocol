@@ -19,6 +19,78 @@ import {
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { stripRecipientEmailNoise } from "./recipientEmailValidation";
+import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
+
+export type PaidProPartyRoleContext = {
+  intakeText?: string | null;
+  draftPartyNames?: readonly string[] | null;
+};
+
+function normalizedLegalNameKey(name: string): string {
+  return name
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/[.,;:]+$/g, "");
+}
+
+function partyLegalNamesMatch(a: string, b: string): boolean {
+  const na = normalizedLegalNameKey(a);
+  const nb = normalizedLegalNameKey(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.startsWith(nb) || nb.startsWith(na)) return true;
+  return na.startsWith(`${nb} `) || nb.startsWith(`${na} `);
+}
+
+function resolveIntakeRoleLabelForLegalName(
+  legalName: string,
+  context?: PaidProPartyRoleContext | null,
+): string | null {
+  const intake = (context?.intakeText ?? "").trim();
+  if (!intake) return null;
+  const records = resolveCanonicalPartyIdentitiesFromIntake(intake, context?.draftPartyNames ?? null);
+  const hit = records.find((rec) => partyLegalNamesMatch(legalName, rec.fullLegalName));
+  return hit?.roleLabel?.trim() || null;
+}
+
+function blockHeadingFromRoleLabel(roleLabel: string, partyIndex: number): string {
+  const r = roleLabel.trim().toLowerCase();
+  if (r === "client") return "CLIENT";
+  if (r.includes("service") && r.includes("provider")) return "SERVICE PROVIDER";
+  if (partyIndex === 0) return "CLIENT";
+  if (partyIndex === 1) return "SERVICE PROVIDER";
+  return `PARTY ${partyIndex + 1}`;
+}
+
+function manifestRoleFromRoleLabel(
+  roleLabel: string,
+  partyIndex: number,
+): "client" | "service_provider" | `party_${number}` {
+  const r = roleLabel.trim().toLowerCase();
+  if (r === "client") return "client";
+  if (r.includes("service") && r.includes("provider")) return "service_provider";
+  return partyIndex === 0 ? "client" : partyIndex === 1 ? "service_provider" : (`party_${partyIndex + 1}` as const);
+}
+
+function displayRoleLabelFromRoleLabel(roleLabel: string, partyIndex: number): string {
+  const r = roleLabel.trim().toLowerCase();
+  if (r === "client") return "Client";
+  if (r.includes("service") && r.includes("provider")) return "Service Provider";
+  return roleLabel.trim() || `Party ${partyIndex + 1}`;
+}
+
+/** Role label for notice blocks — intake/recital wins over recipient slot index. */
+export function partyDisplayRoleLabelForAuthorityParty(
+  party: PaidProSignerMetadataParty,
+  roleContext?: PaidProPartyRoleContext | null,
+): string {
+  const legal = sanitizeAuthorityPartyLegalName(party.partyLegalName);
+  const intakeRoleLabel = resolveIntakeRoleLabelForLegalName(legal, roleContext);
+  return intakeRoleLabel
+    ? displayRoleLabelFromRoleLabel(intakeRoleLabel, party.partyIndex)
+    : displayRoleLabelFromRoleLabel("", party.partyIndex);
+}
 
 export const PAID_PRO_SIGNER_METADATA_FIELDS = [
   "partyLegalName",
@@ -251,6 +323,7 @@ export function readPaidProSignerMetadataFieldFromConsumedAuthority(
 
 export function authorityPartiesToCanonicalPartyIdentities(
   parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
 ): CanonicalPartyIdentity[] {
   const slots: SignerSetupPartyIdentity[] = parties.map((p) => ({
     legalEntityName: p.partyLegalName,
@@ -260,6 +333,10 @@ export function authorityPartiesToCanonicalPartyIdentities(
   return parties.map((p) => {
     const legal = slotIsolatedCanonicalEntity(p.partyIndex, slots);
     const isIndividual = legal ? isIndividualPartyName(legal) : false;
+    const intakeRoleLabel = resolveIntakeRoleLabelForLegalName(legal, roleContext);
+    const blockHeading = intakeRoleLabel
+      ? blockHeadingFromRoleLabel(intakeRoleLabel, p.partyIndex)
+      : blockHeadingFromRoleLabel("", p.partyIndex);
     return {
       index: p.partyIndex,
       partyDisplayName: legal,
@@ -267,8 +344,7 @@ export function authorityPartiesToCanonicalPartyIdentities(
       partyAddress: p.partyAddress.trim() || null,
       representativeName: p.signerName.trim() || null,
       title: p.signerTitle.trim() || null,
-      blockHeading:
-        p.partyIndex === 0 ? "CLIENT" : p.partyIndex === 1 ? "SERVICE PROVIDER" : `PARTY ${p.partyIndex + 1}`,
+      blockHeading,
       isIndividual,
     };
   });
@@ -276,13 +352,19 @@ export function authorityPartiesToCanonicalPartyIdentities(
 
 export function buildCanonicalFinalPartyManifestFromAuthority(
   authority: PaidProSignerMetadataAuthority,
+  roleContext?: PaidProPartyRoleContext | null,
 ): CanonicalFinalPartyManifest {
   return {
     parties: authority.parties.map((p) => {
       const legal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
       const isIndividual = legal ? isIndividualPartyName(legal) : false;
-      const role =
-        p.partyIndex === 0 ? ("client" as const) : p.partyIndex === 1 ? ("service_provider" as const) : (`party_${p.partyIndex + 1}` as const);
+      const intakeRoleLabel = resolveIntakeRoleLabelForLegalName(legal, roleContext);
+      const role = intakeRoleLabel
+        ? manifestRoleFromRoleLabel(intakeRoleLabel, p.partyIndex)
+        : manifestRoleFromRoleLabel("", p.partyIndex);
+      const roleLabel = intakeRoleLabel
+        ? displayRoleLabelFromRoleLabel(intakeRoleLabel, p.partyIndex)
+        : displayRoleLabelFromRoleLabel("", p.partyIndex);
       return {
         index: p.partyIndex,
         role,
@@ -290,10 +372,9 @@ export function buildCanonicalFinalPartyManifestFromAuthority(
         email: p.signerEmail,
         signerName: p.signerName.trim() || null,
         signerTitle: p.signerTitle.trim() || null,
-        roleLabel:
-          role === "client" ? "Client" : role === "service_provider" ? "Service Provider" : `Party ${p.partyIndex + 1}`,
+        roleLabel,
         signerKind: isIndividual ? ("individual" as const) : ("entity_representative" as const),
-        isSenderSide: p.partyIndex === 0,
+        isSenderSide: role === "client",
         isIndividual,
       };
     }),

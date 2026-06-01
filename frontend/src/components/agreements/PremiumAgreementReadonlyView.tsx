@@ -19,12 +19,12 @@ const DOC_STYLES = `
 .premium-readonly-doc p + h2{margin-top:0.25rem}
 .premium-readonly-doc .premium-doc-callout{font-size:11px;line-height:1.5;color:#57534d;font-style:italic;margin:0.4rem 0 1.15rem;padding:0.55rem 0.65rem 0.55rem 0.75rem;border-left:3px solid rgba(180,83,9,0.38);background:rgba(254,243,199,0.42);border-radius:0 5px 5px 0;max-width:36rem}
 .premium-readonly-doc .premium-doc-callout-inline{display:block;margin-top:0.55rem;font-size:11px;line-height:1.45;font-style:italic;color:#57534d;padding:0.45rem 0 0.1rem 0.65rem;border-left:3px solid rgba(180,83,9,0.38);background:rgba(254,243,199,0.35);border-radius:0 4px 4px 0;max-width:36rem}
-.premium-readonly-doc p.premium-doc-signature-party-start{margin-top:2.35rem;padding-top:1.4rem;border-top:1px solid rgba(28,25,23,0.1);font-weight:600;color:#0c0a09}
+.premium-readonly-doc p.premium-doc-signature-party-start{margin-top:2.35rem;padding-top:1.4rem;border-top:1px solid rgba(28,25,23,0.1);font-weight:600;color:#0c0a09;letter-spacing:0.03em}
 .premium-readonly-doc p.premium-doc-signature-party-start:first-of-type{margin-top:1.65rem}
-.premium-readonly-doc p.premium-doc-signature-field{margin:0 0 0.5rem;max-width:26rem;line-height:1.65}
+.premium-readonly-doc p.premium-doc-signature-entity-name{margin:0.1rem 0 0.75rem;font-weight:600;color:#0c0a09;line-height:1.5;max-width:26rem}
+.premium-readonly-doc p.premium-doc-signature-field{margin:0 0 0.5rem;max-width:26rem;line-height:1.65;font-weight:400;color:#292524}
 .premium-readonly-doc p.premium-doc-signature-field + p.premium-doc-signature-party-start{margin-top:2.5rem}
-.premium-readonly-doc .premium-doc-hydrated-value{font-weight:600;color:#0c0a09;letter-spacing:0.01em}
-.premium-readonly-doc p.premium-doc-signature-notice{margin-bottom:0.45rem;max-width:26rem;padding-left:0.125rem}
+.premium-readonly-doc p.premium-doc-signature-notice{margin-bottom:0.45rem;max-width:26rem;padding-left:0.125rem;font-weight:400;color:#292524}
 `;
 
 type Props = {

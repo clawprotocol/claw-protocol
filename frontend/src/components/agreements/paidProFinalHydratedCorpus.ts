@@ -23,6 +23,7 @@ import {
   type PaidProDocumentSurface,
 } from "./paidProSourceOfTruth";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
+import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 
 export const PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN = 500;
 
@@ -159,6 +160,23 @@ export function resolvePaidProFinalHydratedCorpusForSurface(
           };
         }
       }
+    }
+  }
+  if (
+    (surface === "review" || surface === "copy") &&
+    resolution.signerMetadataApplied &&
+    resolution.text.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN
+  ) {
+    const aligned = resolvePaidProReviewRenderPlain({
+      draft: opts?.draft ?? null,
+      intakeText: opts?.intakeText ?? null,
+    });
+    if (aligned.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+      resolution = {
+        ...resolution,
+        text: aligned,
+        hash: hashPaidProCorpus(aligned),
+      };
     }
   }
   return resolution;

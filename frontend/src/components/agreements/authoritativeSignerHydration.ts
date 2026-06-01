@@ -120,7 +120,9 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   if (args.repairRecital) {
     rawCorpus = repairMalformedPaidProAgreementRecital(rawCorpus, args.authority.parties).text;
   }
-  const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties);
+  const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, {
+    intakeText: args.intakeRaw,
+  });
   let result = buildHydratedAuthoritativeSigningCorpus({
     rawCorpus,
     identities,
@@ -168,6 +170,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     const canonicalParties = applyCanonicalPartyLegalNamesToSigningCorpus(
       result.corpus,
       args.authority.parties,
+      { intakeText: args.intakeRaw },
     );
     result = {
       ...result,

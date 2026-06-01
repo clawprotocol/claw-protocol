@@ -349,10 +349,19 @@ export function scanGuidedAuthoritativePlaceholders(args: {
   return scan;
 }
 
+let lastGuidedFinalReviewAuthoritativeBodyLogKey = "";
+
+export function resetGuidedFinalReviewAuthoritativeBodyLogDedupeForTests(): void {
+  lastGuidedFinalReviewAuthoritativeBodyLogKey = "";
+}
+
 export function logGuidedFinalReviewAuthoritativeBody(
   payload: GuidedFinalReviewAuthoritativeBodyResolution,
 ): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const key = `${payload.source}:${payload.finalizedHash}:${payload.len}:${payload.hasSignerHydration}`;
+  if (key === lastGuidedFinalReviewAuthoritativeBodyLogKey) return;
+  lastGuidedFinalReviewAuthoritativeBodyLogKey = key;
   // eslint-disable-next-line no-console
   console.info("[guided-final-review-authoritative-body]", {
     source: payload.source,

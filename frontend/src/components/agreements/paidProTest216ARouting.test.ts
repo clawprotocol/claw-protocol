@@ -115,6 +115,8 @@ describe("paidPro Test216A routing", () => {
     expect(paidProStickyCtaShowsStickyBar(state.phase)).toBe(false);
     expect(state.reason).toBe(PAID_PRO_REVIEW_DECISION_SCROLL_REASON);
     expect(state.reason).not.toBe(PAID_PRO_REVIEW_DECISION_LEGACY_PREPARE_REASON);
+    expect(state.label).toBe("");
+    expect(state.disabled).toBe(true);
   });
 
   it("cannot proceed to signing until Prepare signature links is explicitly requested", () => {

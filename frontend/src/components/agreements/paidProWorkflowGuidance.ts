@@ -16,13 +16,13 @@ export const PAID_PRO_REVIEW_STEP_NEXT_SIGNER_SETUP =
 export const PAID_PRO_REVIEW_STEP_NEXT_SIGNATURE_PREP =
   "Continue below to finish signer details or prepare signature links. Signing happens after you confirm and share links.";
 
-export const PAID_PRO_SIGNER_SETUP_ORIENTATION_HEADLINE = "Signer details — not signing yet";
+export const PAID_PRO_SIGNER_SETUP_ORIENTATION_HEADLINE = "Add signer details";
 
 export const PAID_PRO_SIGNER_SETUP_ORIENTATION_BODY =
-  "This step prepares signer information. No signatures are collected here. After signer details are added, LawDog will prepare signature links for you to review and share.";
+  "Enter who will sign for each party. No one signs here — LawDog creates signature links only after you confirm.";
 
 export const PAID_PRO_SIGNER_SETUP_WORKFLOW_TRAIL =
-  "Review → Signer details → Signature preparation → Signing";
+  "Review → Signer details → Signature links → Signing";
 
 export const PAID_PRO_STICKY_CTA_DIRECTION_LABEL = "Continue below";
 

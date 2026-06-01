@@ -477,7 +477,14 @@ export function getPaidProDocumentForSurface(
     reason: `surface:${surface}`,
   });
   const executionBlockAppended = false;
-  if (surface === "review" || surface === "copy" || surface === "display" || surface === "signer_setup") {
+  if (
+    surface === "review" ||
+    surface === "copy" ||
+    surface === "display" ||
+    surface === "signer_setup" ||
+    surface === "vs01" ||
+    surface === "finalized"
+  ) {
     const aligned = resolvePaidProReviewRenderPlain(opts);
     if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
       text = aligned;
@@ -493,7 +500,11 @@ export function getPaidProDocumentForSurface(
   } else {
     const partiesForSanitizer = resolvePartiesForReviewRender(opts);
     if (partiesForSanitizer.length >= 2 && (signerMetadataApplied || paidProSignerExecutionCorpusIsFrozen())) {
-      text = applyPaidProReviewRenderSanitizer(text, partiesForSanitizer).text.trim();
+      text = applyPaidProReviewRenderSanitizer(text, partiesForSanitizer, {
+        intakeText: opts?.intakeText ?? null,
+        draftPartyNames:
+          opts?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+      }).text.trim();
       hash = hashPaidProCorpus(text);
     }
   }

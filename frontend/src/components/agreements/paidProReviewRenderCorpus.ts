@@ -71,8 +71,11 @@ export function logPaidProReviewRenderFusedPartyWarning(payload: {
   console.warn("[paid-pro-review-render-fused-party-repair]", payload);
 }
 
-function normLegalNames(parties: readonly PaidProSignerMetadataParty[]): string[] {
-  return authorityPartiesToCanonicalPartyIdentities(parties)
+function normLegalNames(
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: { intakeText?: string | null; draftPartyNames?: readonly string[] | null },
+): string[] {
+  return authorityPartiesToCanonicalPartyIdentities(parties, roleContext)
     .map((id) => id.partyDisplayName.trim())
     .filter((n) => n.length >= 2);
 }
@@ -303,9 +306,10 @@ export function resolvePartiesForReviewRender(args?: {
 export function applyPaidProReviewRenderSanitizer(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: { intakeText?: string | null; draftPartyNames?: readonly string[] | null },
 ): { text: string; repaired: boolean } {
-  const identities = authorityPartiesToCanonicalPartyIdentities(parties);
-  const legalNames = normLegalNames(parties);
+  const identities = authorityPartiesToCanonicalPartyIdentities(parties, roleContext);
+  const legalNames = normLegalNames(parties, roleContext);
   let text = (corpus || "").replace(/\r\n/g, "\n").trimEnd();
   let repaired = false;
 
@@ -472,7 +476,19 @@ export function syncConsumedAuthoritySignerTitlesFromCorpus(corpus: string): voi
 export type ResolvePaidProReviewRenderPlainArgs = {
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
+  /** When true, return frozen SoT/review corpus without signer-driven repair or opening guards. */
+  deferSignerMetadataRepair?: boolean;
 };
+
+function paidProPartyRoleContextFromArgs(
+  args?: ResolvePaidProReviewRenderPlainArgs,
+): { intakeText?: string | null; draftPartyNames?: readonly string[] | null } {
+  return {
+    intakeText: args?.intakeText ?? null,
+    draftPartyNames:
+      args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+  };
+}
 
 export function resolvePaidProReviewRenderSource(
   args?: ResolvePaidProReviewRenderPlainArgs,
@@ -510,8 +526,9 @@ function finalizePaidProReviewRenderPlain(
 ): string {
   const parties = resolvePartiesForReviewRender(args);
   if (parties.length < 2) return text.trim();
+  const roleContext = paidProPartyRoleContextFromArgs(args);
   const records = canonicalPartyRecordsFromSignerIdentities(
-    authorityPartiesToCanonicalPartyIdentities(parties),
+    authorityPartiesToCanonicalPartyIdentities(parties, roleContext),
   );
   if (records.length < 2) return text.trim();
   let out = text;
@@ -524,12 +541,33 @@ function finalizePaidProReviewRenderPlain(
 export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
-  return finalizePaidProReviewRenderPlain(resolvePaidProReviewRenderPlainInner(args), args);
+  const inner = resolvePaidProReviewRenderPlainInner(args);
+  if (args?.deferSignerMetadataRepair) return inner;
+  return finalizePaidProReviewRenderPlain(inner, args);
 }
 
 function resolvePaidProReviewRenderPlainInner(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
+  if (args?.deferSignerMetadataRepair) {
+    const unified = resolvePaidProUnifiedSurfaceCorpus();
+    if (unified && unified.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      return unified.text.trim();
+    }
+    const hydrated = resolvePaidProFinalHydratedCorpusForSurface("review", {
+      draft: args?.draft ?? null,
+      intakeText: args?.intakeText ?? null,
+    });
+    if (hydrated.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      return hydrated.text.trim();
+    }
+    if (hasPaidProSourceOfTruth()) {
+      return getPaidProSourceOfTruthText().trim();
+    }
+    return "";
+  }
+
+  const roleContext = paidProPartyRoleContextFromArgs(args);
   const unified = resolvePaidProUnifiedSurfaceCorpus();
   if (unified && unified.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
     const parties = resolvePartiesForReviewRender(args);
@@ -539,7 +577,7 @@ function resolvePaidProReviewRenderPlainInner(
     if (shouldSanitize) {
       const intakeText = (args?.intakeText ?? "").trim();
       const hydratedBase = hydrateTextWhenSignerMetadataComplete(unified.text, parties, intakeText);
-      return applyPaidProReviewRenderSanitizer(hydratedBase, parties).text.trim();
+      return applyPaidProReviewRenderSanitizer(hydratedBase, parties, roleContext).text.trim();
     }
     if (parties.length >= 2) {
       return guardPaidProReviewRenderCorpus(unified.text, parties).text.trim();
@@ -566,7 +604,7 @@ function resolvePaidProReviewRenderPlainInner(
   if (shouldSanitize) {
     const intakeText = (args?.intakeText ?? "").trim();
     const hydratedBase = hydrateTextWhenSignerMetadataComplete(text, parties, intakeText);
-    return applyPaidProReviewRenderSanitizer(hydratedBase, parties).text.trim();
+    return applyPaidProReviewRenderSanitizer(hydratedBase, parties, roleContext).text.trim();
   }
   if (parties.length >= 2) {
     const legacy = stripTrailingLegacyEntitySignatureLines(text);

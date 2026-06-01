@@ -44,33 +44,11 @@ function premiumCalloutInline(text: string): string {
 
 const SIGNATURE_PARTY_HEADER_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:?\s*$/i;
 const SIGNATURE_NOTICE_EMAIL_RE = /^email(?:\s+for\s+notices?)?\s*:/i;
+const SIGNATURE_ENTITY_LINE_RE =
+  /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
 
+/** Display-only: signature region lines use uniform legal-document weight (no per-field bold). */
 function formatSignatureRegionLineHtml(line: string): string {
-  const trimmed = line.trim();
-  if (SIGNATURE_PARTY_HEADER_RE.test(trimmed)) {
-    return escapeHtml(trimmed);
-  }
-  const nameMatch = trimmed.match(/^name\s*:\s*(.+)$/i);
-  if (nameMatch) {
-    const value = nameMatch[1].trim();
-    if (value && !/^_{3,}$/.test(value)) {
-      return `Name: <span class="premium-doc-hydrated-value">${escapeHtml(value)}</span>`;
-    }
-  }
-  const emailMatch = trimmed.match(/^(email(?:\s+for\s+notices?)?)\s*:\s*(.+)$/i);
-  if (emailMatch) {
-    const value = emailMatch[2].trim();
-    if (value && !/^_{3,}$/.test(value) && !/^\[.+\]$/.test(value)) {
-      return `${escapeHtml(emailMatch[1])}: <span class="premium-doc-hydrated-value">${escapeHtml(value)}</span>`;
-    }
-  }
-  const titleMatch = trimmed.match(/^title\s*:\s*(.+)$/i);
-  if (titleMatch) {
-    const value = titleMatch[1].trim();
-    if (value && !/^_{3,}$/.test(value)) {
-      return `Title: <span class="premium-doc-hydrated-value">${escapeHtml(value)}</span>`;
-    }
-  }
   return escapeHtml(line);
 }
 
@@ -78,6 +56,14 @@ function paragraphClassForSignatureChunk(chunk: string, inSignatureRegion: boole
   if (!inSignatureRegion) return null;
   const firstLine = chunk.split("\n")[0]?.trim() ?? "";
   if (SIGNATURE_PARTY_HEADER_RE.test(firstLine)) return "premium-doc-signature-party-start";
+  if (
+    firstLine.length >= 4 &&
+    firstLine.length <= 120 &&
+    SIGNATURE_ENTITY_LINE_RE.test(firstLine) &&
+    !/^(?:by|name|title|date|email|address|signature)\s*:/i.test(firstLine)
+  ) {
+    return "premium-doc-signature-entity-name";
+  }
   if (SIGNATURE_NOTICE_EMAIL_RE.test(firstLine)) return "premium-doc-signature-notice";
   if (/^(?:by|name|title|date|address|signature)\s*:/i.test(firstLine)) {
     return "premium-doc-signature-field";
@@ -229,12 +215,21 @@ export function resolvePremiumSignaturePreviewMode(
   };
 }
 
+let lastSignaturePreviewModeLogKey = "";
+
+export function resetSignaturePreviewModeLogDedupeForTests(): void {
+  lastSignaturePreviewModeLogKey = "";
+}
+
 export function logSignaturePreviewMode(payload: {
   mode: PremiumSignaturePreviewMode;
   hasCorpusSignatureBlock: boolean;
   signerCount: number;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const key = `${payload.mode}:${payload.hasCorpusSignatureBlock}:${payload.signerCount}`;
+  if (key === lastSignaturePreviewModeLogKey) return;
+  lastSignaturePreviewModeLogKey = key;
   // eslint-disable-next-line no-console
   console.info("[signature-preview-mode]", payload);
 }

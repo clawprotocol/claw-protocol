@@ -4,7 +4,10 @@
 
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import { rebuildSignatureBlocksWithPartyIdentities } from "./guidedDealCompletion/signerPartyIdentity";
-import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
+import {
+  authorityPartiesToCanonicalPartyIdentities,
+  type PaidProPartyRoleContext,
+} from "./paidProSignerMetadataAuthority";
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import {
   applyPartyNoticeDetailsToCorpus,
@@ -73,8 +76,9 @@ function signatureRegionNeedsCanonicalRebuild(
 export function applyCanonicalPartyLegalNamesToSigningCorpus(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; repaired: boolean } {
-  const identities = authorityPartiesToCanonicalPartyIdentities(parties);
+  const identities = authorityPartiesToCanonicalPartyIdentities(parties, roleContext);
   const signerCount = identities.filter((id) => id.partyDisplayName.trim().length >= 2).length;
   let text = (corpus || "").replace(/\r\n/g, "\n");
   let repaired = false;
@@ -93,14 +97,14 @@ export function applyCanonicalPartyLegalNamesToSigningCorpus(
 
   if (!partyNoticeDetailsBlockMatchesAuthority(text, parties)) {
     const stripped = stripExistingPartyNoticeDetails(text);
-    const noticeApply = applyPartyNoticeDetailsToCorpus(stripped, parties);
+    const noticeApply = applyPartyNoticeDetailsToCorpus(stripped, parties, roleContext);
     if (noticeApply.applied) {
       text = noticeApply.text;
       repaired = true;
     }
   }
 
-  const signatureNoticeApply = applySignatureNoticeContactFieldsToCorpus(text, parties);
+  const signatureNoticeApply = applySignatureNoticeContactFieldsToCorpus(text, parties, roleContext);
   if (signatureNoticeApply.applied) {
     text = signatureNoticeApply.text;
     repaired = true;

@@ -38,13 +38,14 @@ describe("paidProWorkflowGuidance", () => {
     expect(callout.textContent).toContain(PAID_PRO_REVIEW_STEP_NEXT_SIGNER_SETUP);
   });
 
-  it("signer setup orientation explains no signatures collected yet", () => {
+  it("signer setup orientation uses tighter copy and workflow trail", () => {
     render(<PaidProSignerSetupOrientationBanner />);
     const banner = screen.getByTestId("paid-pro-signer-setup-orientation");
+    expect(banner.textContent).toContain("Add signer details");
     expect(banner.textContent).toContain(PAID_PRO_SIGNER_SETUP_ORIENTATION_BODY);
-    expect(banner.textContent).toMatch(/not signing yet/i);
+    expect(banner.textContent).toMatch(/No one signs here/i);
     expect(screen.getByTestId("paid-pro-signer-setup-workflow-trail").textContent).toMatch(
-      /Review → Signer details → Signature preparation → Signing/,
+      /Review → Signer details → Signature links → Signing/,
     );
   });
 
