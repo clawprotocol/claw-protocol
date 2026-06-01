@@ -32,11 +32,10 @@ import {
   type PaidProFinalHydratedCorpusSource,
 } from "./paidProFinalHydratedCorpus";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
-import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
-import {
-  resolvePartyIndexForSignatureLine,
-  SIGNATURE_DATE_BLANK_LINE,
-} from "./guidedDealCompletion/signerPartyIdentity";
+import { SIGNATURE_DATE_BLANK_LINE } from "./guidedDealCompletion/signerPartyIdentity";
+import { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
+
+export { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
 import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity";
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import {
@@ -126,45 +125,6 @@ export function stripStrayStandalonePartyEntityLinesBeforeRecital(
 
   if (removed === 0) return { text: corpus, removed: 0 };
   return { text: out.join("\n").replace(/\n{3,}/g, "\n\n"), removed };
-}
-
-/** Never show a party legal entity in a signature Name: line before signer metadata exists. */
-export function repairSignatureNameLinesUsingLegalEntity(
-  corpus: string,
-  identities: readonly CanonicalPartyIdentity[],
-): { text: string; repairs: number } {
-  const legalLower = identities
-    .map((id) => id.partyDisplayName.trim().toLowerCase())
-    .filter((n) => n.length >= 2);
-  if (!legalLower.length) return { text: corpus, repairs: 0 };
-
-  const lines = (corpus || "").replace(/\r\n/g, "\n").split("\n");
-  let repairs = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-    const match = line.match(/^(\s*)Name:\s*(.+)$/i);
-    if (!match) continue;
-    const value = match[2].trim();
-    if (!value || /_{4,}/.test(value)) continue;
-    const valueLower = value.toLowerCase();
-    const isLegalEntityValue = legalLower.some(
-      (legal) => valueLower === legal || (legal.length >= 8 && valueLower.includes(legal)),
-    );
-    if (!isLegalEntityValue) continue;
-
-    const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
-    const signerName = identities[partyIndex]?.representativeName?.trim() ?? "";
-    const indent = match[1] ?? "";
-    if (signerName && !legalLower.includes(signerName.toLowerCase())) {
-      lines[i] = `${indent}Name: ${signerName}`;
-    } else {
-      lines[i] = `${indent}Name: __________________________`;
-    }
-    repairs += 1;
-  }
-
-  return { text: lines.join("\n"), repairs };
 }
 
 /** Force signature Date lines blank for review (execution-time population only). */

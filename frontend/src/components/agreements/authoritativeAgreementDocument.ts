@@ -279,6 +279,44 @@ export function markAuthoritativeAgreementUserEdited(newText: string): Authorita
   return authoritativeAgreementDocument;
 }
 
+export type PostAcceptanceMutationAuditKind =
+  | "mutation_attempt"
+  | "mutation_route_fallback"
+  | "generation_route_fallback";
+
+export type PostAcceptanceMutationAuditEntry = {
+  kind: PostAcceptanceMutationAuditKind;
+  surface: string;
+  mutation: string;
+  attemptedHash: string | null;
+  authoritativeHash: string | null;
+  attemptedLen: number | null;
+  authoritativeLen: number | null;
+  outcome: "rejected_throw" | "rejected_fallback" | "logged_only";
+};
+
+let postAcceptanceMutationAuditCapture = false;
+const postAcceptanceMutationAuditBuffer: PostAcceptanceMutationAuditEntry[] = [];
+
+/** Test/QA harness: capture post-acceptance guard events without changing guard behavior. */
+export function setPostAcceptanceMutationAuditCapture(enabled: boolean): void {
+  postAcceptanceMutationAuditCapture = enabled;
+  if (!enabled) postAcceptanceMutationAuditBuffer.length = 0;
+}
+
+export function readPostAcceptanceMutationAuditBuffer(): readonly PostAcceptanceMutationAuditEntry[] {
+  return [...postAcceptanceMutationAuditBuffer];
+}
+
+export function clearPostAcceptanceMutationAuditBuffer(): void {
+  postAcceptanceMutationAuditBuffer.length = 0;
+}
+
+function recordPostAcceptanceMutationAudit(entry: PostAcceptanceMutationAuditEntry): void {
+  if (!postAcceptanceMutationAuditCapture) return;
+  postAcceptanceMutationAuditBuffer.push(entry);
+}
+
 export function logIllegalPostAcceptanceMutationAttempt(payload: {
   surface: string;
   mutation: string;
@@ -286,12 +324,23 @@ export function logIllegalPostAcceptanceMutationAttempt(payload: {
   authoritativeHash?: string | null;
   attemptedLen?: number | null;
   authoritativeLen?: number | null;
+  outcome?: PostAcceptanceMutationAuditEntry["outcome"];
 }): void {
   const body = {
     ...payload,
     authoritativeHash: payload.authoritativeHash ?? authoritativeAgreementDocument?.authoritativeHash ?? null,
     authoritativeLen: payload.authoritativeLen ?? authoritativeAgreementDocument?.fullCorpusText.length ?? null,
   };
+  recordPostAcceptanceMutationAudit({
+    kind: "mutation_attempt",
+    surface: payload.surface,
+    mutation: payload.mutation,
+    attemptedHash: body.attemptedHash ?? null,
+    authoritativeHash: body.authoritativeHash ?? null,
+    attemptedLen: body.attemptedLen ?? null,
+    authoritativeLen: body.authoritativeLen ?? null,
+    outcome: payload.outcome ?? "logged_only",
+  });
   // eslint-disable-next-line no-console
   console.error("[illegal-post-acceptance-mutation-attempt]", body);
 }
@@ -317,10 +366,21 @@ export function assertNoPostAcceptanceStructuralMutation(args: {
     authoritativeHash,
     attemptedLen: trim(args.outputText).length,
     authoritativeLen: doc.fullCorpusText.length,
+    outcome: isBrowserRuntime() ? "rejected_fallback" : isDevOrTest() ? "rejected_throw" : "logged_only",
   });
   if (isBrowserRuntime()) {
     // Browser routes must recover to the immutable authoritative corpus instead of blanking the page.
     // Unit/node paths still throw so mutation bugs remain visible in tests.
+    recordPostAcceptanceMutationAudit({
+      kind: "mutation_route_fallback",
+      surface: args.surface,
+      mutation: args.mutation,
+      attemptedHash: outputHash,
+      authoritativeHash,
+      attemptedLen: trim(args.outputText).length,
+      authoritativeLen: doc.fullCorpusText.length,
+      outcome: "rejected_fallback",
+    });
     // eslint-disable-next-line no-console
     console.warn("[illegal-post-acceptance-mutation-route-fallback]", {
       surface: args.surface,
@@ -349,8 +409,21 @@ export function returnAuthoritativeTextForIllegalPostAcceptanceGeneration(args: 
     mutation: `independent_builder:${args.builder}`,
     attemptedHash: hash(generated),
     attemptedLen: generated.length,
+    authoritativeHash: doc.authoritativeHash,
+    authoritativeLen: doc.fullCorpusText.length,
+    outcome: isBrowserRuntime() ? "rejected_fallback" : isDevOrTest() ? "rejected_throw" : "logged_only",
   });
   if (isBrowserRuntime()) {
+    recordPostAcceptanceMutationAudit({
+      kind: "generation_route_fallback",
+      surface: args.surface,
+      mutation: `independent_builder:${args.builder}`,
+      attemptedHash: hash(generated),
+      authoritativeHash: doc.authoritativeHash,
+      attemptedLen: generated.length,
+      authoritativeLen: doc.fullCorpusText.length,
+      outcome: "rejected_fallback",
+    });
     // eslint-disable-next-line no-console
     console.warn("[illegal-post-acceptance-generation-route-fallback]", {
       surface: args.surface,

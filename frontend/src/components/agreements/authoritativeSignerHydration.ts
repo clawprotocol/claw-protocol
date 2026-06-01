@@ -24,6 +24,7 @@ import { logPartyNoticeDetailsHydration } from "./paidProPartyNoticeDetails";
 import { applyCanonicalPartyLegalNamesToSigningCorpus } from "./canonicalPartyLegalNameSanitizer";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
+import { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
 import {
   buildLivePaidProSignerMetadataAuthority,
   hashPaidProSignerMetadataAuthority,
@@ -185,6 +186,17 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       ...result,
       corpus: stripPremiumIntelligenceCalloutsFromCorpus(result.corpus),
     };
+  }
+
+  if (!result.rejected && signerCount >= 2) {
+    const nameRepair = repairSignatureNameLinesUsingLegalEntity(result.corpus, identities);
+    if (nameRepair.repairs > 0) {
+      result = {
+        ...result,
+        corpus: nameRepair.text,
+        signaturePolishCount: result.signaturePolishCount + nameRepair.repairs,
+      };
+    }
   }
 
   return result;
