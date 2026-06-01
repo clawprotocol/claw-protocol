@@ -185,6 +185,32 @@ Date: ________________________
     expect(html).not.toContain("claw-premium-signature-section");
   });
 
+  it("adds display-only signature region classes and highlights hydrated signer names", () => {
+    const plain = [
+      "SERVICES AGREEMENT",
+      "",
+      "1. SCOPE",
+      "Services.",
+      "",
+      "IN WITNESS WHEREOF, the parties execute.",
+      "",
+      "CLIENT:",
+      "",
+      "Name: Anthem H Blanchard",
+      "Title: CEO",
+      "Email for Notices: signer@example.com",
+    ].join("\n");
+    const html = buildPremiumAgreementReadonlyHtml(plain, {
+      signatureSectionMode: "collaboration",
+      partyNames: ["Blue Canyon Analytics LLC", "Iron Vale Systems Inc."],
+      forceEmbeddedCorpusSignature: true,
+    });
+    expect(html).toContain('class="premium-doc-signature-party-start"');
+    expect(html).toContain('class="premium-doc-hydrated-value">Anthem H Blanchard</span>');
+    expect(html).toContain('class="premium-doc-signature-party-start"');
+    expect(html).toContain("CLIENT:");
+  });
+
   it("renders decorative signature card only when corpus lacks execution block", () => {
     const html = buildPremiumAgreementReadonlyHtml("SERVICES AGREEMENT\n\n1. SCOPE\nThe parties agree.", {
       signatureSectionMode: "execution",

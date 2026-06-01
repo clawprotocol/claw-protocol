@@ -144,11 +144,69 @@ describe("SimpleProFinalReviewScreen", () => {
     const actions = screen.getByTestId("simple-pro-final-review-actions");
     expect(documentShell.contains(actions)).toBe(false);
     expect(actions.textContent).toContain("Add signer details");
-    expect(screen.getByTestId("simple-pro-final-review-signers-required").textContent).toContain(
-      "Add signer details before continuing.",
+    expect(screen.getByTestId("paid-pro-review-status-panel").textContent).toContain(
+      "Signer details needed",
     );
     expect(screen.queryByTestId("simple-pro-send-for-review")).toBeNull();
     expect(screen.queryByTestId("simple-pro-change-signing-order")).toBeNull();
+    cleanup();
+  });
+
+  it("canonical paid Pro review shows trust status, final version indicator, and signer confirmation", () => {
+    const sotPlain = `PRO AGREEMENT body. ${"Substantive operative clause. ".repeat(600)}`;
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>e-sign card</p>"
+        canonicalPaidProReview
+        paidReviewPlain={sotPlain}
+        signersReady
+        signerSavedMappings={[
+          { partyLegalName: "Blue Canyon Analytics LLC", signerName: "Anthem H Blanchard" },
+          { partyLegalName: "Iron Vale Systems Inc.", signerName: "Ira Vee" },
+        ]}
+        signaturePrimaryLabel="Send for signature"
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const statusPanel = screen.getByTestId("paid-pro-review-status-panel");
+    expect(statusPanel.textContent).toContain("Agreement generated");
+    expect(statusPanel.textContent).toContain("Signer details added");
+    expect(statusPanel.textContent).toContain("Ready for signatures");
+    expect(screen.getByTestId("paid-pro-final-version-indicator").textContent).toContain(
+      "Final agreement version",
+    );
+    const banner = screen.getByTestId("paid-pro-signer-saved-confirmation");
+    expect(banner.textContent).toContain("Signer details saved");
+    expect(banner.textContent).toContain("Blue Canyon Analytics LLC");
+    expect(banner.textContent).toContain("Anthem H Blanchard");
+    expect(banner.textContent).toContain("Iron Vale Systems Inc.");
+    cleanup();
+  });
+
+  it("canonical paid Pro review before signers shows signer-required status steps", () => {
+    const sotPlain = `PRO AGREEMENT body. ${"Substantive operative clause. ".repeat(600)}`;
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml=""
+        canonicalPaidProReview
+        paidReviewPlain={sotPlain}
+        signaturePrimaryLabel="Add signer details"
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const statusPanel = screen.getByTestId("paid-pro-review-status-panel");
+    expect(statusPanel.textContent).toContain("Signer details needed");
+    expect(statusPanel.textContent).toContain("final agreement draft");
+    expect(screen.getByTestId("paid-pro-final-version-indicator").textContent).toContain(
+      "Nothing is sent, signed, or shared until you confirm",
+    );
+    expect(screen.queryByTestId("paid-pro-signer-saved-confirmation")).toBeNull();
     cleanup();
   });
 

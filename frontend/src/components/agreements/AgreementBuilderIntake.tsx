@@ -634,6 +634,19 @@ import {
   shouldClearSigningSnapshotOnSignerMetadataDrift,
 } from "./paidProStickyCta";
 import {
+  PAID_PRO_REVIEW_STICKY_BAR_SHELL_CLASS,
+  PAID_PRO_REVIEW_STICKY_FOCUS_REVEAL_CLASS,
+  PAID_PRO_REVIEW_STICKY_HELPER_CLASS,
+  PAID_PRO_REVIEW_STICKY_HIDDEN_VISUAL_CLASS,
+  PAID_PRO_REVIEW_STICKY_PRIMARY_BUTTON_CLASS,
+  PAID_PRO_REVIEW_STICKY_REVEAL_TRANSITION_CLASS,
+} from "./paidProStickyCtaBarPresentation";
+import {
+  isPaidProStickyRevealMobileViewport,
+  resolvePaidProStickyCtaRevealImmediately,
+  usePaidProStickyCtaDelayedReveal,
+} from "./paidProStickyCtaDelayedReveal";
+import {
   buildCtaForensicEvaluation,
   collectSignerMetadataFieldLineage,
   collectSignerMetadataForensicMatrix,
@@ -13256,6 +13269,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   /** Validation-only: may flip true while typing; never releases corpus/session freezes. */
   const signerDetailsAreComplete = paidProSignatureDetailsReady;
+  const paidProSignerSavedMappings = useMemo(() => {
+    const parties = readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
+    return parties
+      .filter((p) => p.partyLegalName.trim() && p.signerName.trim())
+      .map((p) => ({
+        partyLegalName: p.partyLegalName.trim(),
+        signerName: p.signerName.trim(),
+      }));
+  }, [
+    paidProSignatureDetailsReady,
+    premiumSurfaceGateTick,
+    recipient1Name,
+    recipient2Name,
+    partySignerNames,
+    signaturePreparationRequested,
+  ]);
 
   const paidProSignerHydratedPreviewPlain = useMemo(() => {
     const snapshotCorpus = readAuthoritativeSigningCorpus();
@@ -21218,6 +21247,52 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return resolvePaidProStickyBarHeadlines(paidProCanonicalStickyCta.phase);
   }, [acceptedPaidProAuthorityActive, paidProCanonicalStickyCta]);
 
+  /** Document-first utility bar during paid Pro review / signer setup (not full-width promo chrome). */
+  const paidProReviewUtilityStickyBar = Boolean(paidProInlineStickyBarCopy);
+
+  const [paidProStickyRevealMobile, setPaidProStickyRevealMobile] = useState(() =>
+    typeof window !== "undefined" ? isPaidProStickyRevealMobileViewport() : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 639px)");
+    const sync = () => setPaidProStickyRevealMobile(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  const paidProStickyCtaRevealForceImmediate = useMemo(
+    () =>
+      paidProReviewUtilityStickyBar
+        ? resolvePaidProStickyCtaRevealImmediately({
+            signerSetupPanelActive: paidProCanonicalReviewSignerSetupActive,
+            signerFieldsActive: paidProInlineSignerSetupLatched,
+            signerDetailsComplete: paidProSignatureDetailsReady,
+            stickyPhase: paidProCanonicalStickyCta?.phase,
+            signaturePreparationRequested,
+            recoveryOrRetryActive: Boolean(showRetryAsPrimaryCta || failedPremiumCorpusActive),
+            isMobileViewport: paidProStickyRevealMobile,
+          })
+        : false,
+    [
+      paidProReviewUtilityStickyBar,
+      paidProCanonicalReviewSignerSetupActive,
+      paidProInlineSignerSetupLatched,
+      paidProSignatureDetailsReady,
+      paidProCanonicalStickyCta?.phase,
+      signaturePreparationRequested,
+      showRetryAsPrimaryCta,
+      failedPremiumCorpusActive,
+      paidProStickyRevealMobile,
+    ],
+  );
+
+  const { visuallyRevealed: paidProStickyCtaVisuallyRevealed } = usePaidProStickyCtaDelayedReveal({
+    enabled: paidProReviewUtilityStickyBar,
+    forceImmediate: paidProStickyCtaRevealForceImmediate,
+  });
+
   const productionReviewReadyToSendLine = Boolean(
     createProductionTwoPane &&
       createUiStage === CreateUiStage.DRAFT &&
@@ -26240,6 +26315,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           onKeepLawDogVersion={handleKeepLawDogVersionAfterUpload}
                                           onBackToSignerDetails={handleGuidedBackToSignerDetailsFromFinalReview}
                                           signersReady={paidProSignatureDetailsReady}
+                                          signerMetadataFinalized={paidProSignerMetadataFinalized}
+                                          signerSavedMappings={paidProSignerSavedMappings}
                                           enableSectionJump={false}
                                           sendDisabled={
                                             guidedFinalizeModalActive ||
@@ -27534,12 +27611,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   attachPaidProStickyBar(el);
                 }}
                 data-testid="paid-pro-sticky-cta-bar"
-                className={`fixed inset-x-0 bottom-0 z-40 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 transition-[box-shadow] duration-300 motion-safe:transition-all ${
-                  simpleCreateBarCoolToneForBasicContinuePath
-                    ? "border-t border-slate-700/70 bg-gradient-to-t from-slate-950 via-slate-900/98 to-slate-900/90 shadow-md shadow-black/35"
-                    : "border-t border-emerald-400/30 bg-gradient-to-t from-emerald-950 via-emerald-900/98 to-emerald-800/90 shadow-md shadow-black/25"
+                data-paid-pro-review-utility-bar={paidProReviewUtilityStickyBar ? "true" : undefined}
+                data-paid-pro-sticky-cta-revealed={
+                  paidProReviewUtilityStickyBar
+                    ? paidProStickyCtaVisuallyRevealed
+                      ? "true"
+                      : "false"
+                    : undefined
+                }
+                className={`fixed inset-x-0 bottom-0 z-40 transition-[box-shadow] duration-300 motion-safe:transition-all ${
+                  paidProReviewUtilityStickyBar
+                    ? `${PAID_PRO_REVIEW_STICKY_REVEAL_TRANSITION_CLASS} ${
+                        paidProStickyCtaVisuallyRevealed
+                          ? PAID_PRO_REVIEW_STICKY_BAR_SHELL_CLASS
+                          : `border-transparent bg-transparent shadow-none pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1.5 ${PAID_PRO_REVIEW_STICKY_HIDDEN_VISUAL_CLASS} ${PAID_PRO_REVIEW_STICKY_FOCUS_REVEAL_CLASS}`
+                      }`
+                    : `pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 ${
+                        simpleCreateBarCoolToneForBasicContinuePath
+                          ? "border-t border-slate-700/70 bg-gradient-to-t from-slate-950 via-slate-900/98 to-slate-900/90 shadow-md shadow-black/35"
+                          : "border-t border-emerald-400/30 bg-gradient-to-t from-emerald-950 via-emerald-900/98 to-emerald-800/90 shadow-md shadow-black/25"
+                      }`
                 } ${
-                  simpleCreateReadyForSend && readyIdleForAction && !createProductionTwoPane
+                  !paidProReviewUtilityStickyBar &&
+                  simpleCreateReadyForSend &&
+                  readyIdleForAction &&
+                  !createProductionTwoPane
                     ? "ring-2 ring-emerald-400/40 ring-offset-0"
                     : ""
                 }`}
@@ -27612,13 +27708,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     </div>
                   ) : null}
                   {productionReviewReadyToSendLine || paidProInlineStickyBarCopy?.subline ? (
-                    <div className="mb-2 text-center" role="status" aria-live="polite">
+                    <div
+                      className={paidProReviewUtilityStickyBar ? "mb-1 text-center" : "mb-2 text-center"}
+                      role="status"
+                      aria-live="polite"
+                    >
                       {paidProInlineStickyBarCopy?.subline ? (
                         <p
                           className={
-                            simpleCreateBarCoolToneForBasicContinuePath
-                              ? "text-[11px] leading-snug text-slate-400 sm:text-xs"
-                              : "text-[11px] leading-snug text-emerald-100/80 sm:text-xs"
+                            paidProReviewUtilityStickyBar
+                              ? PAID_PRO_REVIEW_STICKY_HELPER_CLASS
+                              : simpleCreateBarCoolToneForBasicContinuePath
+                                ? "text-[11px] leading-snug text-slate-400 sm:text-xs"
+                                : "text-[11px] leading-snug text-emerald-100/80 sm:text-xs"
                           }
                         >
                           {paidProInlineStickyBarCopy.subline}
@@ -27839,8 +27941,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       type="button"
                       aria-busy={isGenerating || draftPreCommitFreeze || showProductionPremiumInlineSendLoading}
                       aria-disabled={effectivePrimaryCtaDisabled}
-                      className={`${simpleCreateBottomPrimaryClass}${isGenerating ? " motion-safe:animate-pulse" : ""}${
-                        stickyRecipientBlockedNudge ? " opacity-90 ring-1 ring-amber-400/40 ring-offset-2 ring-offset-slate-950" : ""
+                      className={`${
+                        paidProReviewUtilityStickyBar
+                          ? PAID_PRO_REVIEW_STICKY_PRIMARY_BUTTON_CLASS
+                          : simpleCreateBottomPrimaryClass
+                      }${isGenerating ? " motion-safe:animate-pulse" : ""}${
+                        stickyRecipientBlockedNudge
+                          ? paidProReviewUtilityStickyBar
+                            ? " opacity-90 ring-1 ring-amber-500/35 ring-offset-2 ring-offset-white"
+                            : " opacity-90 ring-1 ring-amber-400/40 ring-offset-2 ring-offset-slate-950"
+                          : ""
                       }`}
                       onClick={() => {
                         try {

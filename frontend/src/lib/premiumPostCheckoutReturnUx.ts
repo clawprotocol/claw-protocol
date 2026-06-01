@@ -15,24 +15,24 @@ export const PREMIUM_PRO_WAIT_REASSURANCE =
   "Nothing is sent, signed, or shared until you confirm.";
 
 export const PREMIUM_PRO_WAIT_PROGRESS_STEPS = [
-  { short: "Upgrade", full: "Upgrade confirmed" },
-  { short: "Terms loaded", full: "Source terms loaded" },
-  { short: "Pro draft", full: "Pro agreement building" },
-  { short: "Review", full: "Review screen ready" },
+  { short: "Terms loaded", full: "Terms loaded" },
+  { short: "Agreement generated", full: "Agreement generated" },
+  { short: "Review complete", full: "Review complete" },
+  { short: "Signer workflow", full: "Preparing signer workflow" },
 ] as const;
 
-/** Rotating status microcopy — one line visible at a time; no fake progress. */
-export const PREMIUM_PRO_WAIT_ROTATING_LINES: readonly string[] = [
-  "Using your original deal terms.",
-  "Organizing the bones.",
-  "Tightening the deal flow.",
-  "Organizing parties and responsibilities.",
-  "Turning rough terms into review-ready language.",
-  "Preparing collaboration + signing.",
-  "Building the review-ready version.",
-  "Keeping the workflow under your control.",
-  "Making it easier for the other side to review.",
-] as const;
+/** Workflow-oriented status lines (shown instead of vague rotating copy). */
+export const PREMIUM_PRO_WAIT_STATUS_LINES: Record<
+  Exclude<PremiumProWaitVisualPhase, "terminal_failure" | "success">,
+  string
+> = {
+  processing: "Loading your deal terms and generating the Pro agreement draft.",
+  soft_wait: "Agreement generated. Running review checks before opening your review screen.",
+  extended_wait: "Preparing signature-ready version. Larger agreements may take a bit longer.",
+};
+
+/** @deprecated Rotating lines removed from UI; kept empty for legacy imports. */
+export const PREMIUM_PRO_WAIT_ROTATING_LINES: readonly string[] = [] as const;
 
 /** Banned stale / awkward phrases — guarded in tests. */
 export const PREMIUM_PRO_WAIT_STALE_COPY_BANS = [
@@ -43,6 +43,13 @@ export const PREMIUM_PRO_WAIT_STALE_COPY_BANS = [
   "Still finishing your Pro agreement",
   "generation failed",
   "starter draft",
+  "Big agreement. Still on it",
+  "Organizing the bones",
+  "Still building — good deals take a minute",
+  "Still building",
+  "Making it easier for the other side to review",
+  "Organizing parties and responsibilities",
+  "Tightening the deal flow",
 ] as const;
 
 export const PREMIUM_PRO_WAIT_ROTATE_INTERVAL_MS = 5000;
@@ -112,7 +119,7 @@ export type PremiumProWaitProgressStep = {
 export type PremiumProWaitModalView = {
   phase: PremiumProWaitVisualPhase;
   title: string;
-  /** Static status for terminal phases; null while rotating lines run. */
+  /** Static status for terminal phases; workflow line while generating. */
   statusLine: string | null;
   showRotatingLines: boolean;
   showSpinner: boolean;
@@ -149,12 +156,26 @@ export function resolvePremiumProWaitProgressSteps(
       { shortLabel: steps[3].short, state: "pending" },
     ];
   }
-  const termsDone = phase === "soft_wait" || phase === "extended_wait";
-  const buildingActive = phase === "processing" || phase === "soft_wait" || phase === "extended_wait";
+  if (phase === "extended_wait") {
+    return [
+      { shortLabel: steps[0].short, state: "done" },
+      { shortLabel: steps[1].short, state: "done" },
+      { shortLabel: steps[2].short, state: "done" },
+      { shortLabel: steps[3].short, state: "active" },
+    ];
+  }
+  if (phase === "soft_wait") {
+    return [
+      { shortLabel: steps[0].short, state: "done" },
+      { shortLabel: steps[1].short, state: "done" },
+      { shortLabel: steps[2].short, state: "active" },
+      { shortLabel: steps[3].short, state: "pending" },
+    ];
+  }
   return [
-    { shortLabel: steps[0].short, state: "done" },
-    { shortLabel: steps[1].short, state: termsDone ? "done" : "active" },
-    { shortLabel: steps[2].short, state: buildingActive ? "active" : "pending" },
+    { shortLabel: steps[0].short, state: "active" },
+    { shortLabel: steps[1].short, state: "pending" },
+    { shortLabel: steps[2].short, state: "pending" },
     { shortLabel: steps[3].short, state: "pending" },
   ];
 }
@@ -192,9 +213,9 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
   if (phase === "extended_wait") {
     return {
       phase,
-      title: "Big agreement. Still on it.",
-      statusLine: null,
-      showRotatingLines: true,
+      title: "Preparing signature-ready version…",
+      statusLine: PREMIUM_PRO_WAIT_STATUS_LINES.extended_wait,
+      showRotatingLines: false,
       showSpinner: true,
       showRecoveryActions: false,
       progressSteps,
@@ -205,9 +226,9 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
   if (phase === "soft_wait") {
     return {
       phase,
-      title: "Still building — good deals take a minute",
-      statusLine: null,
-      showRotatingLines: true,
+      title: "Preparing final agreement…",
+      statusLine: PREMIUM_PRO_WAIT_STATUS_LINES.soft_wait,
+      showRotatingLines: false,
       showSpinner: true,
       showRecoveryActions: false,
       progressSteps,
@@ -217,9 +238,9 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
 
   return {
     phase,
-    title: "Building your Pro agreement",
-    statusLine: null,
-    showRotatingLines: true,
+    title: "Preparing final agreement…",
+    statusLine: PREMIUM_PRO_WAIT_STATUS_LINES.processing,
+    showRotatingLines: false,
     showSpinner: true,
     showRecoveryActions: false,
     progressSteps,

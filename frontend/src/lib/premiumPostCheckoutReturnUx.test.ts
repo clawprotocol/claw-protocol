@@ -60,7 +60,9 @@ describe("premium post-checkout return UX policy", () => {
     });
     expect(phase).toBe("extended_wait");
     const view = resolvePremiumProWaitModalView(phase);
-    expect(view.title).toMatch(/Big agreement/i);
+    expect(view.title).toMatch(/Preparing signature-ready version/i);
+    expect(view.showRotatingLines).toBe(false);
+    expect(view.statusLine).toMatch(/Preparing signature-ready/i);
     expect(view.showRecoveryActions).toBe(false);
     expect(
       shouldShowPremiumProWaitRecoveryActions({
@@ -71,11 +73,13 @@ describe("premium post-checkout return UX policy", () => {
     expect(view.reassurance).toBe(PREMIUM_PRO_WAIT_REASSURANCE);
   });
 
-  it("progress pills use Upgrade and Terms loaded, not Payment", () => {
+  it("progress pills use workflow-oriented labels, not Payment", () => {
     const view = resolvePremiumProWaitModalView("processing");
     const labels = view.progressSteps.map((s) => s.shortLabel).join(" ");
-    expect(labels).toContain("Upgrade");
     expect(labels).toContain("Terms loaded");
+    expect(labels).toContain("Agreement generated");
+    expect(labels).toContain("Review complete");
+    expect(labels).toContain("Signer workflow");
     expect(labels).not.toMatch(/\bPayment\b/);
   });
 
@@ -112,12 +116,12 @@ describe("premium post-checkout return UX policy", () => {
     expect(PREMIUM_NETWORK_RECOVERABLE_HEADLINE).toMatch(/payment is confirmed/i);
   });
 
-  it("soft wait uses warmer building headline without finishing copy", () => {
+  it("soft wait uses preparing final agreement headline and workflow status line", () => {
     const soft = resolvePremiumProWaitModalView("soft_wait");
-    expect(soft.title).toMatch(/Still building/i);
+    expect(soft.title).toMatch(/Preparing final agreement/i);
     expect(soft.title).not.toMatch(/Still finishing/i);
-    expect(soft.showRotatingLines).toBe(true);
-    expect(soft.statusLine).toBeNull();
+    expect(soft.showRotatingLines).toBe(false);
+    expect(soft.statusLine).toMatch(/review checks/i);
   });
 
   it("success state copy for late apply transition", () => {
@@ -127,11 +131,11 @@ describe("premium post-checkout return UX policy", () => {
     expect(success.showSpinner).toBe(false);
   });
 
-  it("processing shows one reassurance line and rotating status", () => {
+  it("processing shows reassurance and workflow status line (no rotating copy)", () => {
     const view = resolvePremiumProWaitModalView("processing");
     expect(view.reassurance).toBe(PREMIUM_PRO_WAIT_REASSURANCE);
-    expect(view.showRotatingLines).toBe(true);
-    expect(view.statusLine).toBeNull();
+    expect(view.showRotatingLines).toBe(false);
+    expect(view.statusLine).toMatch(/generating the Pro agreement/i);
   });
 
   it("does not include stale awkward wait copy", () => {

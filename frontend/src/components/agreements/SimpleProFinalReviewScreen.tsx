@@ -6,12 +6,18 @@ import type { ProVisiblePaperCandidate } from "./visibleProPaperRenderBoundary";
 import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload";
 import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSection } from "./guidedDealCompletion/guidedSectionScroll";
 import {
-  PAID_PRO_REVIEW_CHIP_STATE,
   PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL,
   PAID_PRO_REVIEW_SHELL_SUBTITLE,
   PAID_PRO_REVIEW_SHELL_TITLE,
   suppressPaidProFinalReviewFinalizingState,
 } from "./authoritativePaidProReview";
+import { PaidProReviewStatusPanel } from "./PaidProReviewStatusPanel";
+import { PaidProSignerSavedConfirmationBanner } from "./PaidProSignerSavedConfirmationBanner";
+import {
+  PAID_PRO_FINAL_VERSION_HEADLINE,
+  resolvePaidProFinalVersionCopy,
+  type PaidProSignerSavedMapping,
+} from "./paidProReviewTrustUx";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   SIMPLE_PRO_FINAL_REVIEW_HEADLINE,
@@ -45,6 +51,10 @@ export type SimpleProFinalReviewScreenProps = {
   signersReady?: boolean;
   /** Hide edit/suggest/upload chrome after signer setup is complete. */
   suppressPostReviewEditUx?: boolean;
+  /** Signing snapshot finalized — signature-link prep step complete. */
+  signerMetadataFinalized?: boolean;
+  /** Party → signer mapping for post-save confirmation banner. */
+  signerSavedMappings?: readonly PaidProSignerSavedMapping[];
   /** Shown when authoritative corpus is blocked or empty. */
   corpusRecoveryMessage?: string | null;
   /** When false, checklist shows without broken jump links (DOM anchors missing). */
@@ -115,6 +125,8 @@ export function SimpleProFinalReviewScreen({
   onBackToFinalReviewFromReviewHandoff,
   onRetryReviewFirstHandoff,
   signersReady = false,
+  signerMetadataFinalized = false,
+  signerSavedMappings = [],
   suppressPostReviewEditUx = false,
   corpusRecoveryMessage = null,
   enableSectionJump = true,
@@ -164,6 +176,11 @@ export function SimpleProFinalReviewScreen({
   const hasCanonicalPaidReviewBody =
     canonicalPaidProReview && paidReviewBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN;
   const signerSetupRequired = canonicalPaidProReview && !signersReady;
+  const showSignerSavedBanner =
+    canonicalPaidProReview && signersReady && signerSavedMappings.length > 0;
+  const finalVersionCopy = canonicalPaidProReview
+    ? resolvePaidProFinalVersionCopy({ signersReady })
+    : null;
   const suppressFinalizingForPaidAuthority =
     hasCanonicalPaidReviewBody || suppressPaidProFinalReviewFinalizingState();
   const effectiveCorpusRecoveryMessage =
@@ -226,14 +243,6 @@ export function SimpleProFinalReviewScreen({
             >
               {reviewHeadline}
             </h2>
-            <div className="mt-1.5">
-              <span
-                className="rounded-full border border-emerald-300/80 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-900"
-                data-testid="canonical-paid-pro-review-chip-state"
-              >
-                {PAID_PRO_REVIEW_CHIP_STATE}
-              </span>
-            </div>
           </>
         ) : (
           <>
@@ -251,7 +260,7 @@ export function SimpleProFinalReviewScreen({
             {answerCount} answer{answerCount === 1 ? "" : "s"} applied to this version
           </p>
         ) : null}
-        {signersReady ? (
+        {canonicalPaidProReview ? null : signersReady ? (
           <p
             className="mt-1 text-xs font-medium text-emerald-900/95"
             data-testid="simple-pro-final-review-signers-ready"
@@ -352,6 +361,32 @@ export function SimpleProFinalReviewScreen({
           {effectiveCorpusRecoveryMessage}
         </div>
       ) : null}
+
+      {canonicalPaidProReview && hasCanonicalPaidReviewBody ? (
+        <PaidProReviewStatusPanel
+          signersReady={signersReady}
+          signerMetadataFinalized={signerMetadataFinalized}
+        />
+      ) : null}
+
+      {showSignerSavedBanner ? (
+        <PaidProSignerSavedConfirmationBanner mappings={signerSavedMappings} />
+      ) : null}
+
+      {canonicalPaidProReview && hasCanonicalPaidReviewBody && finalVersionCopy ? (
+        <div
+          className="rounded-md border border-stone-200/90 bg-white px-3 py-2.5 shadow-sm ring-1 ring-black/[0.04] sm:px-3.5"
+          data-testid="paid-pro-final-version-indicator"
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-700">
+            {PAID_PRO_FINAL_VERSION_HEADLINE}
+          </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-stone-600 sm:text-[13px]">
+            {finalVersionCopy}
+          </p>
+        </div>
+      ) : null}
+
       <div
         className="rounded-sm border border-stone-200/90 bg-white shadow-sm ring-1 ring-black/[0.05]"
         data-testid="simple-pro-final-review-document"

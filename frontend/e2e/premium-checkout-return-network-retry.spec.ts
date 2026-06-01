@@ -304,7 +304,7 @@ test("Ironclad checkout return: network retry → authoritative Pro review (no p
     await page.getByRole("button", { name: /^use defaults$/i }).click();
   }
 
-  const waitTitle = page.getByRole("heading", { name: /Building your Pro agreement|Still building/i });
+  const waitTitle = page.getByRole("heading", { name: /Preparing final agreement|Preparing signature-ready version/i });
   await expect(waitTitle.first()).toBeVisible({ timeout: 120_000 });
 
   await expect(page.getByText("We couldn't safely finalize the Pro version.")).toHaveCount(0);

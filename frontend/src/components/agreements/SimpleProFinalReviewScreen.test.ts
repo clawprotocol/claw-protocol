@@ -45,13 +45,16 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(intake).toContain("if (reviewFirstHandoffError && simpleProFinalReviewActive) return null;");
   });
 
-  it("canonical paid Pro review uses single enterprise header (one title + one status chip)", () => {
+  it("canonical paid Pro review uses enterprise header and review status panel", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain("canonicalPaidProReview");
     expect(screen).toContain("PAID_PRO_REVIEW_SHELL_TITLE");
-    expect(screen).toContain('data-testid="canonical-paid-pro-review-chip-state"');
-    expect(screen).toContain("PAID_PRO_REVIEW_CHIP_STATE");
+    expect(screen).toContain("PaidProReviewStatusPanel");
+    expect(screen).toContain("paid-pro-final-version-indicator");
+    const statusPanel = readFileSync(join(__dirname, "PaidProReviewStatusPanel.tsx"), "utf8");
+    expect(statusPanel).toContain('data-testid="paid-pro-review-status-panel"');
     // Legacy noisy header surfaces are gone.
+    expect(screen).not.toContain('data-testid="canonical-paid-pro-review-chip-state"');
     expect(screen).not.toContain('data-testid="canonical-paid-pro-review-badge"');
     expect(screen).not.toContain("Ready for review");
     expect(screen).not.toContain("Back to signer details");

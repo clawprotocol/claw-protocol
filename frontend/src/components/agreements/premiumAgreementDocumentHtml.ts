@@ -42,6 +42,49 @@ function premiumCalloutInline(text: string): string {
   return `<span class="premium-doc-callout-inline" role="note">${escapeHtml(text)}</span>`;
 }
 
+const SIGNATURE_PARTY_HEADER_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:?\s*$/i;
+const SIGNATURE_NOTICE_EMAIL_RE = /^email(?:\s+for\s+notices?)?\s*:/i;
+
+function formatSignatureRegionLineHtml(line: string): string {
+  const trimmed = line.trim();
+  if (SIGNATURE_PARTY_HEADER_RE.test(trimmed)) {
+    return escapeHtml(trimmed);
+  }
+  const nameMatch = trimmed.match(/^name\s*:\s*(.+)$/i);
+  if (nameMatch) {
+    const value = nameMatch[1].trim();
+    if (value && !/^_{3,}$/.test(value)) {
+      return `Name: <span class="premium-doc-hydrated-value">${escapeHtml(value)}</span>`;
+    }
+  }
+  const emailMatch = trimmed.match(/^(email(?:\s+for\s+notices?)?)\s*:\s*(.+)$/i);
+  if (emailMatch) {
+    const value = emailMatch[2].trim();
+    if (value && !/^_{3,}$/.test(value) && !/^\[.+\]$/.test(value)) {
+      return `${escapeHtml(emailMatch[1])}: <span class="premium-doc-hydrated-value">${escapeHtml(value)}</span>`;
+    }
+  }
+  const titleMatch = trimmed.match(/^title\s*:\s*(.+)$/i);
+  if (titleMatch) {
+    const value = titleMatch[1].trim();
+    if (value && !/^_{3,}$/.test(value)) {
+      return `Title: <span class="premium-doc-hydrated-value">${escapeHtml(value)}</span>`;
+    }
+  }
+  return escapeHtml(line);
+}
+
+function paragraphClassForSignatureChunk(chunk: string, inSignatureRegion: boolean): string | null {
+  if (!inSignatureRegion) return null;
+  const firstLine = chunk.split("\n")[0]?.trim() ?? "";
+  if (SIGNATURE_PARTY_HEADER_RE.test(firstLine)) return "premium-doc-signature-party-start";
+  if (SIGNATURE_NOTICE_EMAIL_RE.test(firstLine)) return "premium-doc-signature-notice";
+  if (/^(?:by|name|title|date|address|signature)\s*:/i.test(firstLine)) {
+    return "premium-doc-signature-field";
+  }
+  return null;
+}
+
 export type PremiumSignatureSectionMode = "collaboration" | "execution";
 
 function formatSignerDisplayName(raw: string, index: number): { primary: string; sub: string } {
@@ -239,13 +282,24 @@ export function buildPremiumAgreementReadonlyHtml(
   }
   const chunks = raw.split(/\n\n+/);
   const out: string[] = [];
+  const signatureRegionStart = findSignatureRegionStart(raw);
+  let chunkOffset = 0;
 
   for (const part of chunks) {
     const chunk = part.trim();
-    if (!chunk) continue;
+    if (!chunk) {
+      chunkOffset += part.length + 2;
+      continue;
+    }
+    const inSignatureRegion = signatureRegionStart >= 0 && chunkOffset >= signatureRegionStart;
+    chunkOffset += part.length + 2;
     const lines = chunk.split("\n");
     const oneLine = lines.length === 1;
 
+    if (oneLine && inSignatureRegion && SIGNATURE_PARTY_HEADER_RE.test(chunk)) {
+      out.push(`<p class="premium-doc-signature-party-start">${escapeHtml(chunk)}</p>`);
+      continue;
+    }
     if (oneLine && SECTION_HEADING.test(chunk)) {
       out.push(`<h2>${escapeHtml(chunk)}</h2>`);
       if (hints?.paymentNeedsFinalNumbers && /^2\.\s+PAYMENT\b/i.test(chunk)) {
@@ -258,7 +312,7 @@ export function buildPremiumAgreementReadonlyHtml(
       }
       continue;
     }
-    if (oneLine && isStandaloneTitleLine(chunk)) {
+    if (oneLine && isStandaloneTitleLine(chunk) && !(inSignatureRegion && SIGNATURE_PARTY_HEADER_RE.test(chunk))) {
       out.push(`<h1>${escapeHtml(chunk)}</h1>`);
       if (hints?.executiveFramingLine) {
         out.push(premiumCallout(hints.executiveFramingLine));
@@ -271,8 +325,11 @@ export function buildPremiumAgreementReadonlyHtml(
       }
       continue;
     }
-    const inner = lines.map((ln) => escapeHtml(ln)).join("<br />");
-    out.push(`<p>${inner}</p>`);
+    const inner = inSignatureRegion
+      ? lines.map((ln) => formatSignatureRegionLineHtml(ln)).join("<br />")
+      : lines.map((ln) => escapeHtml(ln)).join("<br />");
+    const sigClass = paragraphClassForSignatureChunk(chunk, inSignatureRegion);
+    out.push(sigClass ? `<p class="${sigClass}">${inner}</p>` : `<p>${inner}</p>`);
   }
 
   let html = out.join("\n");

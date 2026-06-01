@@ -65,14 +65,15 @@ describe("premium Pro generation wait (static)", () => {
       })
       .join(" ");
     expect(copy).not.toMatch(/Still finishing/i);
-    expect(copy).toMatch(/Still building/i);
+    expect(copy).toMatch(/Preparing final agreement/i);
+    expect(copy).not.toMatch(/Still building/i);
   });
 
-  it("progress pills use Upgrade and Terms loaded, not Payment", () => {
+  it("progress pills use Terms loaded and Agreement generated, not Payment", () => {
     const view = resolvePremiumProWaitModalView("processing");
     const labels = view.progressSteps.map((s) => s.shortLabel).join(" ");
-    expect(labels).toContain("Upgrade");
     expect(labels).toContain("Terms loaded");
+    expect(labels).toContain("Agreement generated");
     expect(labels).not.toMatch(/\bPayment\b/);
   });
 
