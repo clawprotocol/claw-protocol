@@ -11,7 +11,10 @@ import {
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
 } from "./paidProSourceOfTruth";
-import { resolvePaidProFinalHydratedCorpusForSurface } from "./paidProFinalHydratedCorpus";
+import {
+  setPaidProPinnedSignerAppliedCorpus,
+  resolvePaidProFinalHydratedCorpusForSurface,
+} from "./paidProFinalHydratedCorpus";
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import { computePremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
 import { resolveGuidedFinalReviewAuthoritativeBody } from "./guidedDealCompletion/guidedFinalReviewAuthoritativeBody";
@@ -76,6 +79,7 @@ describe("paidProReviewHydrationParity", () => {
       intakeRaw: "consulting",
       surface: "review_parity",
     });
+    setPaidProPinnedSignerAppliedCorpus(hydrated.corpus);
     const reviewPlain = resolveAuthoritativePaidProReviewPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;
     const reviewSurface = getPaidProDocumentForSurface("review")!;
@@ -144,7 +148,15 @@ describe("paidProReviewHydrationParity", () => {
 
   it("review HTML uses hydrated corpus without intelligence callouts", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
-    setConsumedPaidProSignerMetadataAuthority(authority());
+    const auth = authority();
+    setConsumedPaidProSignerMetadataAuthority(auth);
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: RAW,
+      authority: auth,
+      intakeRaw: "consulting",
+      surface: "review_html_parity",
+    });
+    setPaidProPinnedSignerAppliedCorpus(hydrated.corpus);
     const plain = resolvePaidProFinalHydratedCorpusForSurface("review").text;
     const html = buildPremiumAgreementReadonlyHtml(plain, {
       signatureSectionMode: "collaboration",

@@ -5,6 +5,7 @@
 import type { PremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { corpusHasHydratedSignatureBlock } from "./guidedDealCompletion/signatureRegion";
+import { forbidPaidProExecutionBlockSynthesis } from "./paidProExecutionBlockAuthority";
 import { sanitizeProReviewDisplayText } from "./polishProAgreementDisplayLayer";
 import { premiumRenderHintsWithoutDocumentCallouts } from "./premiumDocumentIntelligenceStrip";
 import {
@@ -289,11 +290,16 @@ export function buildPremiumAgreementReadonlyHtml(
     });
     return html;
   }
+  const forceEmbeddedFromAuthority =
+    hasPaidProSourceOfTruth() && forbidPaidProExecutionBlockSynthesis(raw, opts.partyNames.length);
   const previewMode = resolvePremiumSignaturePreviewMode(raw, opts.partyNames.length, {
-    forceEmbeddedCorpusSignature: opts.forceEmbeddedCorpusSignature,
+    forceEmbeddedCorpusSignature: opts.forceEmbeddedCorpusSignature || forceEmbeddedFromAuthority,
   });
   logSignaturePreviewMode(previewMode);
-  if (previewMode.mode === "decorative_fallback_signature_card") {
+  if (
+    previewMode.mode === "decorative_fallback_signature_card" &&
+    !forceEmbeddedFromAuthority
+  ) {
     html += buildPremiumSignatureSectionHtml(opts.partyNames, opts.signatureSectionMode);
   }
   return html;

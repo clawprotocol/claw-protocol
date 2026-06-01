@@ -2,7 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ParsedDraftShape } from "../../intakeSmartDefaults";
+import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "../../authoritativeSignerHydration";
 import { applyAcceptedProCorpusSafeDisplay } from "../../acceptedProCorpusSafeDisplay";
+import { setPaidProPinnedSignerAppliedCorpus } from "../../paidProFinalHydratedCorpus";
 import { repairMalformedPaidProAgreementRecital } from "../../paidProAgreementRecitalRepair";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "../../canonicalPartyIdentityResolver";
 import { ensurePaidProServicesAgreementOpening } from "../../paidProOpeningRecitalGuard";
@@ -79,6 +81,16 @@ export function armPaidProHardeningSession(args: {
   if (args.withSignerMetadata) {
     authority = buildTest204SignerAuthority();
     setConsumedPaidProSignerMetadataAuthority(authority);
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: acceptedText,
+      authority,
+      intakeRaw: args.fixture.intakeText,
+      surface: "paid_pro_hardening_finalize",
+      signatureRegionOnly: true,
+    });
+    if (!hydrated.rejected && hydrated.corpus.trim().length > 0) {
+      setPaidProPinnedSignerAppliedCorpus(hydrated.corpus);
+    }
   }
   return { acceptedText, authority };
 }

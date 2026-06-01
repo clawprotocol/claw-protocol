@@ -13,6 +13,7 @@ import { neutralizeHarmlessEntityMetadataPlaceholders } from "./harmlessEntityMe
 import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolver";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 import { stripTrailingLegacyEntitySignatureLines } from "./paidProReviewRenderCorpus";
+import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -120,6 +121,12 @@ export function applyAcceptedProCorpusSafeDisplay(
   if (legacySig.removed > 0) {
     out = legacySig.text;
     repairs.push("safe:strip_legacy_entity_signature_lines");
+  }
+
+  const prepared = preparePaidProServerDocumentForAcceptance(out, opts?.draft ?? null, intakeRaw ?? "");
+  if (prepared.text !== out) {
+    out = prepared.text;
+    repairs.push(...prepared.repairs);
   }
 
   return { text: out, repairs: [...new Set(repairs)] };

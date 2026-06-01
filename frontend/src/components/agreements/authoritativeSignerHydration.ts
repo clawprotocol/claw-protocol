@@ -26,6 +26,10 @@ import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecita
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
 import {
+  forbidPaidProExecutionBlockSynthesis,
+  logPaidProExecutionBlockSynthesisBlocked,
+} from "./paidProExecutionBlockAuthority";
+import {
   buildLivePaidProSignerMetadataAuthority,
   hashPaidProSignerMetadataAuthority,
   recipientMetadataToAuthorityParties,
@@ -130,7 +134,8 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     const tail = result.corpus.slice(Math.floor(result.corpus.length * 0.72));
     return (tail.match(/^name\s*:\s*(?!_{4,})(?!\s*$).+/gim) || []).length >= signerCount;
   })();
-  if (!result.rejected && (!hasBlocks || !hasPopulatedNames)) {
+  const synthesisForbidden = forbidPaidProExecutionBlockSynthesis(result.corpus, signerCount);
+  if (!result.rejected && (!hasBlocks || !hasPopulatedNames) && !synthesisForbidden) {
     const rebuilt = rebuildSignatureBlocksWithPartyIdentities(result.corpus, identities);
     if (rebuilt.count > 0) {
       result = {
@@ -152,6 +157,11 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
         afterLen: rebuilt.text.length,
       });
     }
+  } else if (synthesisForbidden && (!hasBlocks || !hasPopulatedNames)) {
+    logPaidProExecutionBlockSynthesisBlocked({
+      surface: args.surface,
+      reason: "hydration_signature_block_rebuild_skipped",
+    });
   }
 
   if (!result.rejected && signerCount >= 2) {

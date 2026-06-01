@@ -250,6 +250,7 @@ function hydrateTextWhenSignerMetadataComplete(
   parties: readonly PaidProSignerMetadataParty[],
   intakeText: string,
 ): string {
+  if (!paidProSignerExecutionCorpusIsFrozen()) return text;
   if (!consumedAuthoritySignerMetadataComplete(parties)) return text;
   const authority = readConsumedPaidProSignerMetadataAuthority();
   if (!authority) return text;
@@ -532,9 +533,7 @@ function resolvePaidProReviewRenderPlainInner(
     const parties = resolvePartiesForReviewRender(args);
     const shouldSanitize =
       parties.length >= 2 &&
-      (unified.layer === "execution" ||
-        paidProSignerExecutionCorpusIsFrozen() ||
-        consumedAuthoritySignerMetadataComplete(parties));
+      (unified.layer === "execution" || paidProSignerExecutionCorpusIsFrozen());
     if (shouldSanitize) {
       const intakeText = (args?.intakeText ?? "").trim();
       const hydratedBase = hydrateTextWhenSignerMetadataComplete(unified.text, parties, intakeText);
@@ -561,9 +560,7 @@ function resolvePaidProReviewRenderPlainInner(
   if (text.length < PAID_PRO_AUTHORITY_MIN_LEN) return "";
 
   const parties = resolvePartiesForReviewRender(args);
-  const shouldSanitize =
-    parties.length >= 2 &&
-    (paidProSignerExecutionCorpusIsFrozen() || consumedAuthoritySignerMetadataComplete(parties));
+  const shouldSanitize = parties.length >= 2 && paidProSignerExecutionCorpusIsFrozen();
   if (shouldSanitize) {
     const intakeText = (args?.intakeText ?? "").trim();
     const hydratedBase = hydrateTextWhenSignerMetadataComplete(text, parties, intakeText);

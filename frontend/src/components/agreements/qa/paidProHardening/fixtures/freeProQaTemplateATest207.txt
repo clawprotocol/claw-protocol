@@ -1,0 +1,43 @@
+MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT
+
+This Mutual Consulting and Implementation Agreement (this "Agreement") is entered into as of the Effective Date by and between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").
+
+1. SCOPE OF SERVICES AND PROJECT DELIVERABLES. Service Provider will perform consulting and implementation services including automation tooling, AI-assisted reporting workflows, and related implementation support for Client as described in any Statement of Work.
+
+2. TERM. This Agreement begins on the Effective Date and continues until the services are completed or terminated as provided herein.
+
+3. COMPENSATION AND PAYMENT SCHEDULE. Client will pay Service Provider a total fee of $8,500, with fifty percent due on commencement and fifty percent due on completion unless otherwise stated in a Statement of Work.
+
+4. CONFIDENTIALITY. Each Party will protect the other Party's Confidential Information using reasonable care and use it only to perform under this Agreement.
+
+5. OWNERSHIP AND WORK PRODUCT. Client owns deliverables created specifically for Client under this Agreement once paid in full. Service Provider retains pre-existing tools, templates, and background materials.
+
+6. INDEPENDENT CONTRACTOR AND ACCESS. Service Provider is an independent contractor and will access Client systems only as authorized.
+
+7. WARRANTIES AND COMPLIANCE. Each Party represents it has authority to enter this Agreement. Services are provided professionally and in material conformance with the agreed scope.
+
+8. TERMINATION AND SUSPENSION. Either Party may terminate for uncured material breach after written notice. Service Provider may suspend services for non-payment after notice.
+
+9. LIMITATION OF LIABILITY. Neither Party is liable for indirect or consequential damages except as required by law.
+
+10. NOTICES. Formal notices may be sent by email to the addresses in Party Notice Details or the signature blocks.
+
+11. GOVERNING LAW AND VENUE. This Agreement is governed by the laws of Delaware, without regard to conflict-of-law rules.
+
+12. MISCELLANEOUS AND ELECTRONIC SIGNATURES. This Agreement is the entire agreement between the Parties and may be executed electronically with the same effect as originals.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+Blue Canyon Analytics LLC
+By: __________________________
+Name: __________________________
+Title: __________________________
+Date: _________________________
+
+SERVICE PROVIDER:
+Iron Vale Systems Inc.
+By: __________________________
+Name: __________________________
+Title: __________________________
+Date: _________________________

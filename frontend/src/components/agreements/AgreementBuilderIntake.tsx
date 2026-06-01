@@ -657,10 +657,12 @@ import {
   setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
+import { shouldStagePaidProSignerMetadataLocally } from "./paidProSignerMetadataCommitPolicy";
 import {
   resolvePaidProFinalHydratedCorpusForSurface,
   setPaidProPinnedSignerAppliedCorpus,
 } from "./paidProFinalHydratedCorpus";
+import { usePaidProStickyBottomInset } from "./paidProStickyBottomInset";
 import {
   isPremiumGenerationApiUnavailableForUi,
   PAID_PRO_API_UNAVAILABLE_BODY,
@@ -12592,10 +12594,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       clearConsumedPaidProSignerMetadataAuthority();
       return;
     }
+    if (
+      shouldStagePaidProSignerMetadataLocally({
+        signerMetadataSessionActive: paidProSignerMetadataSessionActive,
+      })
+    ) {
+      return;
+    }
     setConsumedPaidProSignerMetadataAuthority(
       buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState),
     );
-  }, [liveSignerMetadataUiState, premiumSurfaceGateTick]);
+  }, [
+    liveSignerMetadataUiState,
+    premiumSurfaceGateTick,
+    paidProSignerMetadataSessionActive,
+  ]);
 
   const emitPaidProSignerMetadataFieldDiagnosticsCb = React.useCallback(
     (args: {
@@ -12620,6 +12633,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       inputEventKind: "change" | "input" | "blur" | "paste" | "autofill";
     }) => {
       if (!paidProSignerMetadataSessionActiveRef.current) return;
+      if (args.inputEventKind === "change") return;
       const before = getPaidProSourceOfTruth();
       if (import.meta.env.DEV) {
         logSignerMetadataLifecycleEvent("metadata-freeze", {
@@ -13025,29 +13039,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProSignerHydratedPreviewPlain = useMemo(() => {
     const snapshotCorpus = readAuthoritativeSigningCorpus();
     if (snapshotCorpus.length >= 500) return snapshotCorpus;
-    if (!paidProSignerDetailsGate.complete) return "";
-    if (!hasPaidProSourceOfTruth()) return "";
-    const authority = readConsumedPaidProSignerMetadataAuthority();
-    if (!authority?.parties.length) return "";
-    const raw = (getPaidProSourceOfTruthText() || "").trim();
-    if (raw.length < 200) return "";
-    const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
-      rawCorpus: raw,
-      authority,
-      intakeRaw: intakeForHydration,
-      surface: "paid_pro_signer_hydrated_preview",
-      signatureRegionOnly: true,
-      repairRecital: false,
-    });
-    return hydrated.rejected ? "" : hydrated.corpus;
-  }, [
-    paidProSignerDetailsGate.complete,
-    premiumSurfaceGateTick,
-    currentPremiumMergedIntakeKey,
-    intakeCombined,
-    paidProPostSignerMetadataFreezeActive,
-  ]);
+    return "";
+  }, [premiumSurfaceGateTick, signaturePreparationRequested]);
   useEffect(() => {
     if (!import.meta.env.DEV || !paidProSignerMetadataSessionActive) return;
     logPremiumSignerDetailsGate(
@@ -13622,6 +13615,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       inputEventKind: "change" | "blur";
     }) => {
       if (!paidProSignerMetadataForensicLineageEnabled()) return;
+      if (args.inputEventKind === "change") return;
       logSignerMetadataLifecycleEvent("metadata-input-change", {
         field: args.field,
         partyIndex: args.partyIndex,
@@ -13670,6 +13664,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const paidProSignerMetadataCtaEvalKey = `${paidProSignerDetailsGate.complete}:${paidProSignerDetailsGate.ctaLabel}:${paidProCanonicalStickyCta?.phase ?? "none"}:${paidProCanonicalStickyCta?.action ?? "none"}`;
+
   useEffect(() => {
     if (!import.meta.env.DEV || !paidProCanonicalStickyCta) return;
     emitPaidProSignerMetadataCtaEvaluation(
@@ -13687,11 +13683,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ),
       }),
     );
-  }, [
-    paidProCanonicalStickyCta,
-    paidProSignerDetailsGate,
-    liveSignerMetadataUiState,
-  ]);
+  }, [paidProCanonicalStickyCta, paidProSignerMetadataCtaEvalKey, paidProSignerDetailsGate]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !paidProSignerMetadataSessionActive) return;
@@ -13715,22 +13707,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       },
     });
     for (const row of matrix) {
-      logSignerMetadataFieldLineage("session-matrix", row);
+      logSignerMetadataFieldLineage("session-matrix-snapshot", row);
     }
-  }, [
-    paidProSignerMetadataSessionActive,
-    recipient1Name,
-    recipient2Name,
-    recipient1Email,
-    recipient2Email,
-    partySignerNames,
-    partySignerTitles,
-    partyAddresses,
-    paidProSignerDetailsGate,
-    paidProCanonicalStickyCta,
-    signaturePreparationRequested,
-    paidProInlineSignerSetupLatched,
-  ]);
+  }, [paidProSignerMetadataSessionActive]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !acceptedPaidProAuthorityActive) return;
@@ -20464,6 +20443,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const simpleCreateStickyBottomBarVisible =
     simpleCreateStickyBottomBarVisibleBaseGated && !hideStickyForGuidedInProgress;
 
+  const stickyBottomScrollInsetPx = usePaidProStickyBottomInset(
+    simpleCreateActionBarRef,
+    simpleCreateStickyBottomBarVisible,
+  );
+
   useEffect(() => {
     if (!import.meta.env.DEV || !hideStickyForGuidedInProgress) return;
     // eslint-disable-next-line no-console
@@ -24247,14 +24231,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             ? "lg:grid lg:grid-cols-1 lg:gap-6 lg:items-stretch"
                             : "lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start"
                     }`
-                  : `mx-auto w-full ${simpleCreateWorkspaceOuterMaxClass} motion-safe:transition-[max-width] motion-safe:duration-200`) +
-                (simpleCreateStickyBottomBarVisible
-                  ? simpleCreateReadyForSend
-                    ? " pb-[calc(11rem+24px+11rem)] sm:pb-[calc(12rem+24px+11rem)]"
-                    : showUpgradeToFullDraftOnReview && createUiStage === CreateUiStage.DRAFT
-                      ? " pb-[calc(14rem+48px)] sm:pb-[calc(15rem+48px)]"
-                      : " pb-[calc(11rem+24px)] sm:pb-[calc(12rem+24px)]"
-                  : "")
+                  : `mx-auto w-full ${simpleCreateWorkspaceOuterMaxClass} motion-safe:transition-[max-width] motion-safe:duration-200`)}
+              style={
+                simpleCreateStickyBottomBarVisible && stickyBottomScrollInsetPx > 0
+                  ? {
+                      paddingBottom: `calc(${stickyBottomScrollInsetPx}px + env(safe-area-inset-bottom, 0px))`,
+                    }
+                  : undefined
               }
               >
               {!productionDraftPrimaryReviewSurface ? (

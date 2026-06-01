@@ -14,6 +14,7 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
 import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
+import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualConsultingQualityFloor";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { stripMalformedProReviewDisplayArtifacts } from "./polishProAgreementDisplayLayer";
@@ -279,6 +280,12 @@ export function preparePaidProServerDocumentForAcceptance(
   const opening = repairDuplicateAgreementOpening(out, records.length >= 2 ? records : undefined);
   out = opening.text;
   repairs.push(...opening.repairs);
+
+  const mutualFloor = applyMutualConsultingProfessionalQualityFloor(out, draft ?? null, intakeText);
+  if (mutualFloor.text !== out) {
+    out = mutualFloor.text;
+    repairs.push(...mutualFloor.repairs);
+  }
 
   const floored = applyAiWorkflowServicesQualityFloorToFallback(out, draft ?? null, intakeText);
   if (floored !== out) {

@@ -23,7 +23,6 @@ import {
   type PaidProDocumentSurface,
 } from "./paidProSourceOfTruth";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
-import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 
 export const PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN = 500;
 
@@ -89,23 +88,10 @@ function authorityHasSignerMetadata(): boolean {
   });
 }
 
-function consumedAuthoritySignerMetadataComplete(
-  parties: readonly PaidProSignerMetadataParty[],
-): boolean {
-  if (parties.length < 2) return false;
-  return parties.every((p) => {
-    const legal = p.partyLegalName.trim();
-    return legal.length >= 2 && p.signerName.trim().length >= 1 && p.signerEmail.trim().length >= 3;
-  });
-}
-
 function hydrateFromConsumedAuthority(rawCorpus: string, intakeRaw: string): string {
   const authority = readConsumedPaidProSignerMetadataAuthority();
   if (!authority || !authorityHasSignerMetadata()) return "";
-  if (
-    !paidProSignerExecutionCorpusIsFrozen() &&
-    !consumedAuthoritySignerMetadataComplete(authority.parties)
-  ) {
+  if (!paidProSignerExecutionCorpusIsFrozen()) {
     return "";
   }
   const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({

@@ -20,6 +20,8 @@ import {
   type PaidProContactSubstitutionResult,
 } from "./paidProIntakeContactSubstitution";
 import { polishPaidProAgreementText } from "./paidProAgreementPolish";
+import { forbidPaidProExecutionBlockSynthesis } from "./paidProExecutionBlockAuthority";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import {
   maskProtectedSpans,
   restoreExactIntakeEmails,
@@ -238,7 +240,11 @@ export function applyPaidProRenderPolish(
     tier: "premium",
   });
   working = quality.text;
-  if (!/\bIN WITNESS WHEREOF\b/i.test(working) && (partyNames?.length ?? 0) >= 2) {
+  const mayAppendWitness =
+    !/\bIN WITNESS WHEREOF\b/i.test(working) &&
+    (partyNames?.length ?? 0) >= 2 &&
+    !(hasPaidProSourceOfTruth() && forbidPaidProExecutionBlockSynthesis(working, partyNames!.length));
+  if (mayAppendWitness) {
     const signatureBlocks = (partyNames ?? [])
       .map((party) => `${party}\nBy: _________________________`)
       .join("\n\n");

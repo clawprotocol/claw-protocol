@@ -3,6 +3,7 @@ import { resolveCanonicalFinalPartyManifest } from "./guidedDealCompletion/canon
 import {
   assertPaidProFinalCorpusParity,
   clearPaidProPinnedSignerAppliedCorpus,
+  setPaidProPinnedSignerAppliedCorpus,
   resolvePaidProFinalHydratedCorpusForSurface,
 } from "./paidProFinalHydratedCorpus";
 import {
@@ -145,13 +146,24 @@ describe("paidProFinalHydratedCorpus", () => {
     expect(parity.ok).toBe(true);
   });
 
-  it("uses signer_hydrated_from_authority before snapshot when metadata is complete", () => {
+  it("does not hydrate from consumed metadata until execution corpus is frozen (pin or snapshot)", () => {
     establishPaidProSourceOfTruth({ text: RAW_BODY, source: "server_full_draft" });
     setConsumedPaidProSignerMetadataAuthority(partyAuthority());
-    const resolved = resolvePaidProFinalHydratedCorpusForSurface("copy");
-    expect(resolved.source).toBe("signer_hydrated_from_authority");
-    expect(resolved.signerMetadataApplied).toBe(true);
-    expect(resolved.text).toMatch(/Name:\s*Jay Nine/i);
+    const beforePin = resolvePaidProFinalHydratedCorpusForSurface("copy");
+    expect(beforePin.source).toBe("paidProSourceOfTruth");
+    expect(beforePin.signerMetadataApplied).toBe(false);
+
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: RAW_BODY,
+      authority: partyAuthority(),
+      intakeRaw: "",
+      surface: "test_pin",
+    });
+    setPaidProPinnedSignerAppliedCorpus(hydrated.corpus);
+    const afterPin = resolvePaidProFinalHydratedCorpusForSurface("copy");
+    expect(afterPin.source).toBe("pinned_signer_applied_corpus");
+    expect(afterPin.signerMetadataApplied).toBe(true);
+    expect(afterPin.text).toMatch(/Name:\s*Jay Nine/i);
   });
 
   it("falls back to raw SoT when no signer metadata exists", () => {

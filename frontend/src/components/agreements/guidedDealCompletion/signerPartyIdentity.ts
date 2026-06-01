@@ -19,6 +19,10 @@ import {
 } from "./signatureRegion";
 import { fingerprintAgreementBody } from "./guidedSigningPacketVersion";
 import {
+  forbidPaidProExecutionBlockSynthesis,
+  logPaidProExecutionBlockSynthesisBlocked,
+} from "../paidProExecutionBlockAuthority";
+import {
   applyCanonicalManifestPlaceholdersToCorpus,
   buildCanonicalFinalPartyManifestFromIdentities,
   formatCanonicalFinalPartyManifestLines,
@@ -358,6 +362,13 @@ export function rebuildSignatureBlocksWithPartyIdentities(
   text: string,
   identities: readonly CanonicalPartyIdentity[],
 ): { text: string; count: number } {
+  if (forbidPaidProExecutionBlockSynthesis(text)) {
+    logPaidProExecutionBlockSynthesisBlocked({
+      surface: "rebuildSignatureBlocksWithPartyIdentities",
+      reason: "authoritative_execution_block_present",
+    });
+    return { text, count: 0 };
+  }
   const { blocks, count } = buildSignatureBlocks(identities);
   if (!blocks.length) return { text, count: 0 };
   const trimmed = text.trimEnd();

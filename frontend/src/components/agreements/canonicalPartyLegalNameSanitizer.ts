@@ -14,6 +14,7 @@ import {
   stripExistingPartyNoticeDetails,
 } from "./paidProPartyNoticeDetails";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { forbidPaidProExecutionBlockSynthesis } from "./paidProExecutionBlockAuthority";
 import {
   isFusedOrConcatenatedPartyLegalName,
   QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE,
@@ -78,7 +79,11 @@ export function applyCanonicalPartyLegalNamesToSigningCorpus(
   let text = (corpus || "").replace(/\r\n/g, "\n");
   let repaired = false;
 
-  if (signerCount >= 2 && signatureRegionNeedsCanonicalRebuild(text, identities)) {
+  if (
+    signerCount >= 2 &&
+    signatureRegionNeedsCanonicalRebuild(text, identities) &&
+    !forbidPaidProExecutionBlockSynthesis(text, signerCount)
+  ) {
     const rebuilt = rebuildSignatureBlocksWithPartyIdentities(text, identities);
     if (rebuilt.count > 0) {
       text = rebuilt.text;
