@@ -11,6 +11,7 @@ import {
   PAID_PRO_REVIEW_SHELL_TITLE,
   suppressPaidProFinalReviewFinalizingState,
 } from "./authoritativePaidProReview";
+import { PaidProReviewNextStepCallout } from "./PaidProReviewNextStepCallout";
 import { PaidProReviewStatusPanel } from "./PaidProReviewStatusPanel";
 import { PaidProSignerSavedConfirmationBanner } from "./PaidProSignerSavedConfirmationBanner";
 import {
@@ -385,6 +386,10 @@ export function SimpleProFinalReviewScreen({
             {finalVersionCopy}
           </p>
         </div>
+      ) : null}
+
+      {canonicalPaidProReview && hasCanonicalPaidReviewBody ? (
+        <PaidProReviewNextStepCallout signersReady={signersReady} />
       ) : null}
 
       <div

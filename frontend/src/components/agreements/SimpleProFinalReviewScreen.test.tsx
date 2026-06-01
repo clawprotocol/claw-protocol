@@ -152,6 +152,27 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
+  it("canonical paid Pro review shows next-step callout before the document", () => {
+    const sotPlain = `PRO AGREEMENT body. ${"Substantive operative clause. ".repeat(600)}`;
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml=""
+        canonicalPaidProReview
+        paidReviewPlain={sotPlain}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const callout = screen.getByTestId("paid-pro-review-next-step-callout");
+    expect(callout.textContent).toMatch(/Step 3 of 4/i);
+    expect(callout.textContent).toMatch(/not signing/i);
+    const document = screen.getByTestId("simple-pro-final-review-document");
+    expect(callout.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    cleanup();
+  });
+
   it("canonical paid Pro review shows trust status, final version indicator, and signer confirmation", () => {
     const sotPlain = `PRO AGREEMENT body. ${"Substantive operative clause. ".repeat(600)}`;
     render(

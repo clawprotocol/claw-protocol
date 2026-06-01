@@ -9,7 +9,10 @@ import {
   resolvePaidProStickyCtaPhase,
   shouldClearSigningSnapshotOnSignerMetadataDrift,
 } from "./paidProStickyCta";
-import { PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA } from "./signerSetupPartyIdentity";
+import {
+  PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
+  PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
+} from "./signerSetupPartyIdentity";
 
 describe("paidProStickyCta", () => {
   it("progresses phases in canonical order", () => {
@@ -54,7 +57,7 @@ describe("paidProStickyCta", () => {
     ).toBe("send_ready");
   });
 
-  it("review_decision hides sticky bar and uses card decision CTAs", () => {
+  it("review_decision keeps sticky bar with Prepare for signing CTA", () => {
     const state = resolvePaidProStickyCta({
       hasAuthoritativeSigningSnapshot: true,
       signerDetailsComplete: true,
@@ -63,9 +66,13 @@ describe("paidProStickyCta", () => {
       sendSurfaceReady: false,
     });
     expect(state.phase).toBe("review_decision");
-    expect(paidProStickyCtaShowsStickyBar(state.phase)).toBe(false);
-    expect(state.disabled).toBe(true);
-    expect(state.reason).toBe("paid_pro_review_decision_on_card");
+    expect(paidProStickyCtaShowsStickyBar(state.phase)).toBe(true);
+    expect(state.disabled).toBe(false);
+    expect(state.label).toBe(PAID_PRO_PREPARE_ESIGN_DECISION_CTA);
+    expect(state.reason).toBe("paid_pro_review_decision_prepare_signing");
+    const mapped = mapPaidProStickyCtaToPrimaryCta(state);
+    expect(mapped.disabled).toBe(false);
+    expect(mapped.label).toBe(PAID_PRO_PREPARE_ESIGN_DECISION_CTA);
   });
 
   it("signer_details_complete maps to a single finalize CTA reason", () => {

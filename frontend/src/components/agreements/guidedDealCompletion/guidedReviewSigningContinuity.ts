@@ -194,7 +194,20 @@ export function canProceedFromGuidedFinalReviewToSigning(args: {
   signersComplete: boolean;
   refineInFlight?: boolean;
   minAuthoritativeLen?: number;
+  /** Post–signer-finalize paid Pro: signing snapshot is the authority boundary. */
+  hasAuthoritativeSigningSnapshot?: boolean;
+  acceptedPaidProAuthority?: boolean;
 }): boolean {
+  if (
+    args.acceptedPaidProAuthority &&
+    args.hasAuthoritativeSigningSnapshot &&
+    args.signersComplete
+  ) {
+    if (args.refineInFlight) return false;
+    const minLen = args.minAuthoritativeLen ?? GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN;
+    if (args.authoritativeCorpusLen < minLen) return false;
+    return true;
+  }
   if (!args.paidProAuthoritative) return false;
   if (args.guidedCompletionPhase !== "applied") return false;
   if (args.refineInFlight) return false;

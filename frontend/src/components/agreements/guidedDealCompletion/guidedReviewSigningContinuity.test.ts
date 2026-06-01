@@ -115,6 +115,33 @@ describe("guidedReviewSigningContinuity", () => {
     ).toBe(false);
   });
 
+  it("canProceedFromGuidedFinalReviewToSigning allows paid Pro signing snapshot without guided apply", () => {
+    expect(
+      canProceedFromGuidedFinalReviewToSigning({
+        paidProAuthoritative: true,
+        acceptedPaidProAuthority: true,
+        hasAuthoritativeSigningSnapshot: true,
+        guidedCompletionPhase: "inactive",
+        finalReviewExplicitlyOpened: true,
+        createFlowPhase: "draft_ready_for_review",
+        authoritativeCorpusLen: LONG_CORPUS.length,
+        signersComplete: true,
+      }),
+    ).toBe(true);
+    expect(
+      canProceedFromGuidedFinalReviewToSigning({
+        paidProAuthoritative: false,
+        acceptedPaidProAuthority: true,
+        hasAuthoritativeSigningSnapshot: true,
+        guidedCompletionPhase: "inactive",
+        finalReviewExplicitlyOpened: true,
+        createFlowPhase: "draft_ready_for_review",
+        authoritativeCorpusLen: LONG_CORPUS.length,
+        signersComplete: true,
+      }),
+    ).toBe(true);
+  });
+
   it("blocks transition when preview is blank but authoritative body was full", () => {
     const manifest = buildCanonicalSignerManifest({ identities: IDENTITIES, signFirst: false });
     const assertion = assertGuidedPostFinalReviewTransition({

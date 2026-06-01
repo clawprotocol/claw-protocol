@@ -50,6 +50,7 @@ export function resolvePaidProStickyCtaRevealImmediately(
   if (args.signerDetailsComplete) return true;
   if (args.signaturePreparationRequested) return true;
   if (args.stickyPhase === "signer_details_complete") return true;
+  if (args.stickyPhase === "review_decision") return true;
   if (args.stickyPhase === "prepare_signing" || args.stickyPhase === "send_ready") return true;
   return false;
 }
