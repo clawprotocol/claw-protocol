@@ -8,6 +8,7 @@ import { scrubVisiblePlaceholderLexemes } from "./proAgreementCompleteness/famil
 import { scrubMarkdownArtifacts } from "./proAgreementCompleteness/proStructuralDetection";
 import { repairAgreementTemplatePlaceholders } from "./agreementTemplatePlaceholderSafety";
 import type { ProCompletenessContext } from "./proAgreementCompleteness/types";
+import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 
 const PLACEHOLDER_SCHEDULE_RE =
   /\n\s*(?:SCHEDULE\s+[A-Z]|IMPLEMENTATION\s+MILESTONES)\s*\n[\s\S]*?(?=\n\s*\d+\.|\n\s*IN WITNESS|$)/gi;
@@ -169,6 +170,10 @@ export function applyVisibleBodyQualityGate(
   const sig = stripSignatureSectionBlocks(working);
   working = sig.text;
   repairs.push(...sig.repairs);
+
+  const sigOrder = repairPaidProSignatureSectionOrdering(working);
+  working = sigOrder.text;
+  repairs.push(...sigOrder.repairs);
 
   return { text: working, repairs };
 }

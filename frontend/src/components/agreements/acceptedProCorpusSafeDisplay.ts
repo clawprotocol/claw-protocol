@@ -14,6 +14,7 @@ import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolv
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 import { stripTrailingLegacyEntitySignatureLines } from "./paidProReviewRenderCorpus";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
+import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -127,6 +128,12 @@ export function applyAcceptedProCorpusSafeDisplay(
   if (prepared.text !== out) {
     out = prepared.text;
     repairs.push(...prepared.repairs);
+  }
+
+  const sigOrder = repairPaidProSignatureSectionOrdering(out);
+  if (sigOrder.text !== out) {
+    out = sigOrder.text;
+    repairs.push(...sigOrder.repairs);
   }
 
   return { text: out, repairs: [...new Set(repairs)] };

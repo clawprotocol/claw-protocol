@@ -38,6 +38,7 @@ import { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureName
 export { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
 import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity";
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
+import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -381,13 +382,14 @@ export function guardPaidProReviewRenderCorpus(
   const input = (corpus || "").replace(/\r\n/g, "\n").trimEnd();
   if (!input) return { text: "", repaired: false, warned: false };
 
-  const authParties = parties ?? readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
-  if (!corpusContainsFusedPartyLegalName(input)) {
-    return { text: input, repaired: false, warned: false };
-  }
+  const sigOrder = repairPaidProSignatureSectionOrdering(input);
+  let text = sigOrder.text;
+  let repaired = sigOrder.repairs.length > 0;
 
-  let text = input;
-  let repaired = false;
+  const authParties = parties ?? readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
+  if (!corpusContainsFusedPartyLegalName(text)) {
+    return { text, repaired, warned: false };
+  }
 
   if (authParties.length >= 2) {
     const canonical = applyCanonicalPartyLegalNamesToSigningCorpus(text, authParties);

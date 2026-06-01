@@ -26,6 +26,7 @@ import {
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
+import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 
 export type PolishProAgreementDisplayLayerOpts = {
   draft?: ParsedDraftShape | null;
@@ -551,6 +552,10 @@ export function polishProAgreementDisplayLayer(
   const conf = dedupeConfidentialityParagraphs(out);
   out = conf.text;
   repairs.push(...conf.repairs);
+
+  const sigOrder = repairPaidProSignatureSectionOrdering(out);
+  out = sigOrder.text;
+  repairs.push(...sigOrder.repairs);
 
   if (!opts?.retainSignatureExecutionBlock) {
     const sections = normalizeProAgreementSectionContinuity(out);

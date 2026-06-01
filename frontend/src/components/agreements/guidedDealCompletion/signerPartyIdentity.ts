@@ -22,6 +22,7 @@ import {
   forbidPaidProExecutionBlockSynthesis,
   logPaidProExecutionBlockSynthesisBlocked,
 } from "../paidProExecutionBlockAuthority";
+import { repairPaidProSignatureSectionOrdering } from "../paidProSignatureSectionOrdering";
 import {
   applyCanonicalManifestPlaceholdersToCorpus,
   buildCanonicalFinalPartyManifestFromIdentities,
@@ -371,7 +372,8 @@ export function rebuildSignatureBlocksWithPartyIdentities(
   }
   const { blocks, count } = buildSignatureBlocks(identities);
   if (!blocks.length) return { text, count: 0 };
-  const trimmed = text.trimEnd();
+  const ordered = repairPaidProSignatureSectionOrdering(text.trimEnd());
+  const trimmed = ordered.text.trimEnd();
   const marker = findSignatureRegionStart(trimmed);
   const witnessLine = "IN WITNESS WHEREOF, the Parties execute this Agreement.";
   const signatureTail = `${witnessLine}\n\n${blocks.join("\n\n")}\n`;

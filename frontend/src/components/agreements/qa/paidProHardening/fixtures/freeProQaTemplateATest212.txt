@@ -1,0 +1,44 @@
+MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT
+
+This Mutual Consulting and Implementation Agreement (this "Agreement") is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").
+
+1. Scope of Services. Service Provider will deliver automation tooling and implementation support.
+
+2. Fees and Payment. Client will pay Service Provider a total fee of $8,500, with fifty percent due on commencement and fifty percent due on completion.
+
+3. Term. This Agreement begins on the Effective Date and continues until services are completed.
+
+4. Confidentiality. Each Party will protect the other Party's confidential information.
+
+5. Intellectual Property. Client owns deliverables created for Client once paid in full.
+
+6. Limitation of Liability. Neither Party is liable for indirect damages except as required by law.
+
+7. Governing Law. This Agreement is governed by the laws of the State of Delaware.
+
+8. Notices. Notices may be sent by email to the addresses in Party Notice Details.
+
+9. Electronic Signatures. Electronic signatures are permitted.
+
+10. Entire Agreement. This Agreement is the entire agreement between the Parties.
+
+SIGNATURES
+
+12. Scope of Services and Project Deliverables
+Service Provider will configure internal automation tooling, AI-assisted reporting workflows, and implementation milestones agreed in writing. Client will provide timely access and approvals needed for delivery.
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+Blue Canyon Analytics LLC
+By: __________________________
+Name: Anthem H Blanchard
+Title: Manager
+Date: __________________________
+
+SERVICE PROVIDER:
+Iron Vale Systems Inc..
+By: __________________________
+Name: Ira Vale
+Title: Member
+Date: __________________________
