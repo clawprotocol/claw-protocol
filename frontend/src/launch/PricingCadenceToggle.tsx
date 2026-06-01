@@ -10,7 +10,9 @@ export function PricingCadenceToggle(props: {
   const baseBtn =
     "min-h-[2.5rem] flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors sm:text-[11px]";
   const inactive = "text-slate-400 hover:text-slate-200";
-  const active = "bg-emerald-500/15 text-emerald-200 shadow-inner ring-1 ring-emerald-500/25";
+  const active = "bg-emerald-500/20 text-emerald-50 shadow-inner ring-2 ring-emerald-400/50";
+  const activeMonthly = active;
+  const activeAnnual = "bg-amber-500/20 text-amber-50 shadow-inner ring-2 ring-amber-400/45";
 
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>
@@ -22,29 +24,43 @@ export function PricingCadenceToggle(props: {
         <button
           type="button"
           id={`${idPrefix}-monthly`}
-          className={`${baseBtn} rounded-md ${value === "monthly" ? active : inactive}`}
+          className={`${baseBtn} rounded-md ${value === "monthly" ? activeMonthly : inactive}`}
           aria-pressed={value === "monthly"}
           onClick={() => onChange("monthly")}
         >
-          Monthly
+          <span className="inline-flex items-center justify-center gap-1">
+            {value === "monthly" ? (
+              <span className="text-emerald-300" aria-hidden>
+                ✓
+              </span>
+            ) : null}
+            Monthly
+          </span>
         </button>
         <button
           type="button"
           id={`${idPrefix}-annual`}
-          className={`${baseBtn} rounded-md ${value === "annual" ? active : inactive}`}
+          className={`${baseBtn} rounded-md ${value === "annual" ? activeAnnual : inactive}`}
           aria-pressed={value === "annual"}
           onClick={() => onChange("annual")}
         >
-          Annual <span className="font-normal normal-case text-slate-500">(recommended)</span>
+          <span className="inline-flex items-center justify-center gap-1">
+            {value === "annual" ? (
+              <span className="text-amber-300" aria-hidden>
+                ✓
+              </span>
+            ) : null}
+            Annual <span className="font-normal normal-case text-slate-500">(recommended)</span>
+          </span>
         </button>
       </div>
       {value === "annual" ? (
-        <span className="rounded-full border border-emerald-800/40 bg-emerald-950/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-200/90">
-          Best value
+        <span className="rounded-full border border-amber-800/40 bg-amber-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-200/90">
+          Selected plan · Best value
         </span>
       ) : (
-        <span className="rounded-full border border-slate-700/80 bg-slate-900/50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-          Most teams choose annual
+        <span className="rounded-full border border-emerald-800/40 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-200/90">
+          Selected plan · Monthly billing
         </span>
       )}
     </div>

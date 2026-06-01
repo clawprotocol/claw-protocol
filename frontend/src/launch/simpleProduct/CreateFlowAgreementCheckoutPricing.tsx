@@ -57,14 +57,21 @@ export function CreateFlowAgreementCheckoutPricing({ tier, cadence, onCadenceCha
           type="button"
           role="tab"
           aria-selected={cadence === "monthly"}
-          className={`min-h-12 flex-1 rounded-lg px-3 text-sm font-semibold transition sm:px-4 ${
+          className={`relative min-h-12 flex-1 rounded-lg px-3 text-sm font-semibold transition sm:px-4 ${
             cadence === "monthly"
-              ? "bg-slate-800 text-slate-50 ring-2 ring-slate-500/40"
+              ? "bg-emerald-500/20 text-emerald-50 ring-2 ring-emerald-400/55 shadow-sm shadow-emerald-950/25"
               : "text-slate-300 hover:bg-slate-900/60 hover:text-slate-100"
           }`}
           onClick={() => onCadenceChange("monthly")}
         >
-          Monthly
+          <span className="inline-flex items-center justify-center gap-1.5">
+            {cadence === "monthly" ? (
+              <span className="text-emerald-300" aria-hidden>
+                ✓
+              </span>
+            ) : null}
+            Monthly
+          </span>
         </button>
       </div>
 
@@ -72,15 +79,22 @@ export function CreateFlowAgreementCheckoutPricing({ tier, cadence, onCadenceCha
         <button
           type="button"
           onClick={() => onCadenceChange("annual")}
+          aria-current={cadence === "annual" ? "true" : undefined}
           className={`rounded-2xl border p-4 text-left transition motion-safe:duration-200 sm:p-5 ${
             cadence === "annual"
               ? "border-amber-500/45 bg-gradient-to-b from-amber-950/35 to-slate-950/90 shadow-lg shadow-black/30 ring-2 ring-amber-400/35 motion-safe:sm:scale-[1.01]"
               : "border-slate-800/80 bg-slate-950/50 hover:border-slate-700/90"
           }`}
         >
-          <span className="inline-block rounded-full bg-amber-400 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-950">
-            Most popular
-          </span>
+          {cadence === "annual" ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-400/90 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-950">
+              <span aria-hidden>✓</span> Selected plan
+            </span>
+          ) : (
+            <span className="inline-block rounded-full bg-amber-400 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-950">
+              Most popular
+            </span>
+          )}
           <p className="mt-3 text-3xl font-semibold tracking-tight leading-none text-white sm:text-4xl">
             {formatMoneyUsdWhole(annualCharge)}
             <span className="text-lg font-medium text-slate-300 sm:text-xl">/year</span>
@@ -97,13 +111,22 @@ export function CreateFlowAgreementCheckoutPricing({ tier, cadence, onCadenceCha
         <button
           type="button"
           onClick={() => onCadenceChange("monthly")}
+          aria-current={cadence === "monthly" ? "true" : undefined}
           className={`rounded-2xl border p-4 text-left transition sm:p-5 ${
             cadence === "monthly"
-              ? "border-slate-500/50 bg-slate-900/70 ring-2 ring-slate-500/30"
+              ? "border-emerald-500/45 bg-gradient-to-b from-emerald-950/30 to-slate-950/90 ring-2 ring-emerald-400/40 shadow-lg shadow-black/25 motion-safe:sm:scale-[1.01]"
               : "border-slate-800/70 bg-slate-950/40 hover:border-slate-700/80"
           }`}
         >
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 sm:text-xs">Flexible</p>
+          {cadence === "monthly" ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-100">
+              <span aria-hidden>✓</span> Selected plan
+            </span>
+          ) : (
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 sm:text-xs">
+              Flexible
+            </p>
+          )}
           <p className="mt-2 text-2xl font-semibold tracking-tight leading-none text-white sm:text-3xl">
             {formatMoneyUsdWhole(m)}
             <span className="text-base font-medium text-slate-300 sm:text-lg">/month</span>
