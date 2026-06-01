@@ -43,6 +43,44 @@ export function loadPaidProHardeningFixture(baseName: string): PaidProHardeningF
   return { name: baseName, rawCorpus, intakeText, draft };
 }
 
+export const TEST219_INTAKE_PROMPT =
+  "I need a consulting agreement between Blue Canyon Analytics LLC and Iron Vale Systems Inc. for AI workflow implementation services. Fixed fee $8,500. Client owns work product after full payment. Delaware law.";
+
+/** Test219: long accepted corpus with correct CLIENT / SERVICE PROVIDER signature block at end. */
+export function buildExpandedTest219AcceptedCorpus(): string {
+  const base = loadPaidProHardeningFixture("freeProQaTemplateATest204").rawCorpus;
+  const witnessIdx = base.search(/\nIN WITNESS WHEREOF\b/i);
+  const head = witnessIdx >= 0 ? base.slice(0, witnessIdx).trimEnd() : base;
+  const tail = witnessIdx >= 0 ? base.slice(witnessIdx).trim() : "";
+  const pad =
+    "Service Provider will deliver AI workflow implementation services, milestones, acceptance testing, and documentation. Client owns work product after full payment. ";
+  let body = head;
+  let section = 11;
+  while (body.length < 10_500) {
+    body += `\n\n${section}. Implementation and Acceptance. ${pad.repeat(5)}`;
+    section += 1;
+  }
+  return tail ? `${body}\n\n${tail}` : body;
+}
+
+export function loadTest219HardeningFixture(): PaidProHardeningFixtureBundle {
+  const intakePath = join(FIXTURE_DIR, "freeProQaTemplateATest219.intake.txt");
+  const intakeText = existsSync(intakePath)
+    ? readFileSync(intakePath, "utf8").replace(/\r\n/g, "\n").trim()
+    : TEST219_INTAKE_PROMPT;
+  return {
+    name: "freeProQaTemplateATest219",
+    rawCorpus: buildExpandedTest219AcceptedCorpus(),
+    intakeText,
+    draft: {
+      parties: [
+        { name: PAID_PRO_HARDENING_CLIENT, role: "Client" },
+        { name: PAID_PRO_HARDENING_PROVIDER, role: "Service Provider" },
+      ],
+    } as ParsedDraftShape,
+  };
+}
+
 export function buildTest204SignerAuthority(): PaidProSignerMetadataAuthority {
   return buildLivePaidProSignerMetadataAuthority({
     partyCount: 2,

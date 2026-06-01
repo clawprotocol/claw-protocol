@@ -71,6 +71,12 @@ import {
   getAuthoritativeAgreementDocument,
   returnAuthoritativeTextForIllegalPostAcceptanceGeneration,
 } from "./authoritativeAgreementDocument";
+import {
+  resolvePaidProAuthoritativeDisplayPlain,
+  shouldUsePaidProSourceOfTruthDisplayOnly,
+} from "./paidProAuthoritativeRenderGate";
+import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 
 const MISSING = "[Not yet specified]";
@@ -969,6 +975,22 @@ export function buildAgreementPreviewText(
 ): string {
   const starterPreview = Boolean(options?.starterPreview);
   const freeStarterReviewPreview = Boolean(options?.freeStarterReviewPreview);
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    const display = resolvePaidProAuthoritativeDisplayPlain();
+    return returnAuthoritativeTextForIllegalPostAcceptanceGeneration({
+      surface: starterPreview ? "preview_starter" : "preview_paid_authoritative",
+      builder: "buildAgreementPreviewText",
+      generatedText: display,
+    });
+  }
+  if (hasPaidProSourceOfTruth() && getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    const display = resolvePaidProAuthoritativeDisplayPlain();
+    return returnAuthoritativeTextForIllegalPostAcceptanceGeneration({
+      surface: starterPreview ? "preview_starter" : "preview_paid_authoritative",
+      builder: "buildAgreementPreviewText",
+      generatedText: display,
+    });
+  }
   const authoritative = getAuthoritativeAgreementDocument();
   if (authoritative?.fullCorpusText && !starterPreview) {
     return authoritative.fullCorpusText;

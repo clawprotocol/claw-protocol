@@ -10608,7 +10608,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     if (agreementDocumentDirtyRef.current) return;
-    if (paidProSignerMetadataSessionActiveRef.current && hasPaidProSourceOfTruth()) return;
+    if (hasPaidProSourceOfTruth()) return;
     const placeholderGate = {
       isGenerating: previewPlaceholderGateIsGeneratingRef.current,
       hasDraftPayload: starterReviewServerDraftReadyRef.current,

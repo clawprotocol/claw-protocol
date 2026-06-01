@@ -4,6 +4,7 @@
  */
 
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 export function shouldStagePaidProSignerMetadataLocally(args: {
@@ -18,7 +19,7 @@ export function shouldStagePaidProSignerMetadataLocally(args: {
 export function shouldDeferPaidProReviewRenderSignerRepair(args: {
   signerMetadataSessionActive: boolean;
 }): boolean {
-  return shouldStagePaidProSignerMetadataLocally(args);
+  return shouldStagePaidProSignerMetadataLocally(args) || shouldUsePaidProSourceOfTruthDisplayOnly();
 }
 
 /**

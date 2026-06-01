@@ -8,6 +8,7 @@ import { corpusHasHydratedSignatureBlock } from "./guidedDealCompletion/signatur
 import { forbidPaidProExecutionBlockSynthesis } from "./paidProExecutionBlockAuthority";
 import { sanitizeProReviewDisplayText } from "./polishProAgreementDisplayLayer";
 import { premiumRenderHintsWithoutDocumentCallouts } from "./premiumDocumentIntelligenceStrip";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import {
   applyPaidProReviewRenderSanitizer,
   resolvePartiesForReviewRender,
@@ -262,6 +263,7 @@ export function buildPremiumAgreementReadonlyHtml(
   let raw = stripStarterPreviewDisclaimerFromPlainText((plain || "").replace(/\r\n/g, "\n")).trimEnd();
   if (
     hasPaidProSourceOfTruth() &&
+    !shouldUsePaidProSourceOfTruthDisplayOnly() &&
     (opts.forceEmbeddedCorpusSignature || opts.suppressDocumentIntelligenceCallouts)
   ) {
     const parties = resolvePartiesForReviewRender();

@@ -1,5 +1,6 @@
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { assertNoPostAcceptanceStructuralMutation } from "./authoritativeAgreementDocument";
+import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "./paidProAuthoritativeRenderGate";
 
 type CompilerSignerIdentity = {
   partyDisplayName: string;
@@ -705,6 +706,10 @@ export function stabilizeFinalAgreementCompilerOutput(
   const repairs: string[] = [];
   const defects: string[] = [];
   if (!out) return { text: out, repairs, defects };
+
+  if (shouldBlockPaidProStructuralMutationAfterAcceptance(context.surface)) {
+    return { text: out, repairs, defects };
+  }
 
   const execution = isolateExecutionBlocks(out, context);
   out = execution.text;

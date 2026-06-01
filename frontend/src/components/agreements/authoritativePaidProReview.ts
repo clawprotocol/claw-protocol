@@ -16,6 +16,10 @@ import {
 import { QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE } from "./canonicalPartyLegalNameSanitizer";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
+  resolvePaidProAuthoritativeDisplayPlain,
+  shouldUsePaidProSourceOfTruthDisplayOnly,
+} from "./paidProAuthoritativeRenderGate";
+import {
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -48,6 +52,9 @@ function finalizeAuthoritativePaidProReviewPlain(text: string): string {
 export function resolveAuthoritativePaidProReviewPlain(
   args?: AuthoritativePaidProReviewInput,
 ): string {
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    return resolvePaidProAuthoritativeDisplayPlain();
+  }
   if (hasPaidProSourceOfTruth()) {
     const renderPlain = resolvePaidProReviewRenderPlain({
       draft: args?.draft ?? null,
@@ -148,6 +155,9 @@ export function resolvePaidProFinalReviewVisiblePlain(args: {
   boundaryPlain?: string | null;
   displayCandidatePlain?: string | null;
 }): string {
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    return resolvePaidProAuthoritativeDisplayPlain();
+  }
   const renderPlain = resolvePaidProReviewRenderPlain({
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
@@ -165,14 +175,16 @@ export function resolvePaidProFinalReviewVisiblePlain(args: {
   const boundary = (args.boundaryPlain || "").trim();
   if (
     boundary.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-    !boundary.includes(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE)
+    !boundary.includes(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE) &&
+    !shouldUsePaidProSourceOfTruthDisplayOnly()
   ) {
     return guardPaidProReviewRenderCorpus(boundary).text;
   }
   const display = (args.displayCandidatePlain || "").trim();
   if (
     display.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-    !display.includes(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE)
+    !display.includes(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE) &&
+    !shouldUsePaidProSourceOfTruthDisplayOnly()
   ) {
     return guardPaidProReviewRenderCorpus(display).text;
   }

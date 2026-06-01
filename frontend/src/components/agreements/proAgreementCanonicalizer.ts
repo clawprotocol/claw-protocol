@@ -22,6 +22,7 @@ import {
 } from "./proFullAgreementCandidate";
 import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
 import { assertNoPostAcceptanceStructuralMutation } from "./authoritativeAgreementDocument";
+import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "./paidProAuthoritativeRenderGate";
 
 export type ProAgreementCanonicalizationOptions = {
   canonicalPartyNames?: readonly string[];
@@ -391,6 +392,14 @@ export function canonicalizeProAgreementText(
     .replace(/[ \t]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+  if (shouldBlockPaidProStructuralMutationAfterAcceptance(opts?.surface)) {
+    const commercialSpecificity = scoreCommercialSpecificity(
+      `${opts?.intakeText ?? ""}\n${Object.values(opts?.semanticFacts?.facts ?? {}).join("\n")}`,
+      out,
+    );
+    return { text: out, repairs, warnings, commercialSpecificity };
+  }
 
   const placeholderParties = replaceProCorpusPartyPlaceholders(out, opts);
   out = placeholderParties.text;
