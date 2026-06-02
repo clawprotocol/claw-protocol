@@ -1946,9 +1946,7 @@ function CreateFlowSendRecipientsPanel({
     ? r1e
     : r1Invalid
       ? "That email doesn’t look valid yet — check spelling and the part after @."
-      : minimalProSendRecipientChrome
-        ? "Add email for your records (optional for labeling)"
-        : "Add recipient 1 email (labels your invite; you’ll copy a secure link next)";
+      : "";
   const modeLinkLabel = resolvedSendMode === "review" ? "Review link" : "Signing link";
   const minimalAgreementFirstBody =
     resolvedSendMode === "review"

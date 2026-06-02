@@ -5,6 +5,7 @@
 
 const LOGGED_ORIGIN_KEYS = new Set<string>();
 const LOGGED_CONTEXT_KEYS = new Set<string>();
+const LOGGED_ENTITY_MAP_KEYS = new Set<string>();
 
 function devOnlyEnabled(): boolean {
   return typeof import.meta !== "undefined" && import.meta.env.DEV && import.meta.env.MODE !== "test";
@@ -98,6 +99,15 @@ export type PaidProEntityMapInput = {
 
 export function logPaidProEntityMap(args: PaidProEntityMapInput): void {
   if (!devOnlyEnabled()) return;
+  const key = [
+    args.sourceModule,
+    args.organizations.slice(0, 12).join("|"),
+    args.signers.slice(0, 12).join("|"),
+    args.noticeRecipients.slice(0, 12).join("|"),
+    args.affiliates.slice(0, 12).join("|"),
+  ].join("::");
+  if (LOGGED_ENTITY_MAP_KEYS.has(key)) return;
+  LOGGED_ENTITY_MAP_KEYS.add(key);
   // eslint-disable-next-line no-console
   console.info("[paid-pro-entity-map]", {
     sourceModule: args.sourceModule,
@@ -157,6 +167,7 @@ export function inferOrgSlotOriginMetadata(
 export function resetPaidProPlaceholderAttributionLogsForTests(): void {
   LOGGED_ORIGIN_KEYS.clear();
   LOGGED_CONTEXT_KEYS.clear();
+  LOGGED_ENTITY_MAP_KEYS.clear();
 }
 
 export function logOrgPlaceholderOriginsFromText(args: {

@@ -96,6 +96,10 @@ import {
   isCommercialServicesIntake,
 } from "./agreementIntentContract";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
+import {
+  countNumberedAgreementSections,
+  MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING,
+} from "./paidProMutualConsultingQualityFloor";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
@@ -1843,7 +1847,11 @@ async function runPremiumCompletionInner(
         }
         const structureStartedAt =
           typeof performance !== "undefined" ? performance.now() : Date.now();
-        if (isCommercialServicesIntake(preGateIntake) && doc.length < 2_500) {
+        if (
+          isCommercialServicesIntake(preGateIntake) &&
+          (doc.length < 2_500 ||
+            countNumberedAgreementSections(doc) <= MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING)
+        ) {
           doc = preparePaidProServerDocumentForAcceptance(doc, mergedForApi, preGateIntake).text;
         }
         paidProPerfRecordInstant(

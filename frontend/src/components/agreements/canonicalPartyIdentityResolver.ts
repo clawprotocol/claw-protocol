@@ -5,6 +5,11 @@
 
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
+import { logPaidProEntityMap } from "./paidProPlaceholderAttributionLog";
+import {
+  partyLegalNamesMatch,
+  resolvePaidProPartyRolesFromAcceptedCorpus,
+} from "./paidProAcceptedCorpusPartyRoles";
 import {
   isAuthoritativeLegalEntityName,
   preserveFullLegalPartyNames,
@@ -257,6 +262,14 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
   const fullNames = selected;
   if (fullNames.length < 2) return [];
 
+  logPaidProEntityMap({
+    sourceModule: "canonicalPartyIdentityResolver",
+    organizations: fullNames.slice(0, 2),
+    signers: [],
+    noticeRecipients: [],
+    affiliates: fullNames.slice(2),
+  });
+
   return fullNames.slice(0, 12).map((fullLegalName, index) => {
     const full = fullLegalName.replace(/\s+/g, " ").trim();
     const displayAlias = definedShortNameFromLegalEntity(full);
@@ -274,6 +287,13 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
       signerTitle: null,
       partyAddress: null,
     };
+  }).map((rec) => {
+    const corpusBody = String(args.generatedBody || "").trim();
+    if (!corpusBody) return rec;
+    const hit = resolvePaidProPartyRolesFromAcceptedCorpus(corpusBody).find((a) =>
+      partyLegalNamesMatch(rec.fullLegalName, a.legalName),
+    );
+    return hit ? { ...rec, roleLabel: hit.roleLabel } : rec;
   });
 }
 

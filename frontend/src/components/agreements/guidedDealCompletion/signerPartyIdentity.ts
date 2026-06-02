@@ -23,6 +23,7 @@ import {
   logPaidProExecutionBlockSynthesisBlocked,
 } from "../paidProExecutionBlockAuthority";
 import { repairPaidProSignatureSectionOrdering } from "../paidProSignatureSectionOrdering";
+import { sortIdentitiesForExecutionBlockOrder } from "../paidProSignerMetadataMergeGate";
 import {
   applyCanonicalManifestPlaceholdersToCorpus,
   buildCanonicalFinalPartyManifestFromIdentities,
@@ -84,7 +85,9 @@ function escapeRe(s: string): string {
 export function resolvePaidProPolishPartyNamesFromIdentities(
   identities: readonly CanonicalPartyIdentity[],
 ): string[] {
-  return identities.map((p) => p.partyDisplayName).filter((n) => n.length >= 2);
+  return sortIdentitiesForExecutionBlockOrder([...identities])
+    .map((p) => p.partyDisplayName)
+    .filter((n) => n.length >= 2);
 }
 
 const BRACKET_PARTY_MAP: readonly { re: RegExp; partyIndex: number }[] = [
@@ -334,7 +337,7 @@ function buildSignatureBlocks(identities: readonly CanonicalPartyIdentity[]): {
 } {
   const blocks: string[] = [];
   let count = 0;
-  for (const id of identities) {
+  for (const id of sortIdentitiesForExecutionBlockOrder([...identities])) {
     if (!id.partyDisplayName) continue;
     const lines: string[] = [`${id.blockHeading}:`];
     lines.push(id.partyDisplayName);

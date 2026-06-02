@@ -8,7 +8,7 @@ import {
   type CanonicalPartyIdentityRecord,
   repairCanonicalPartyIdentityInCorpus,
   repairDuplicateAgreementOpening,
-  resolveCanonicalPartyIdentitiesFromIntake,
+  resolveCanonicalPartyIdentitiesFromSources,
   stripDanglingPartyMetadataFragments,
   stripIrrelevantFixedFeeBoilerplate,
   intakeSpecifiesSimpleFixedFee,
@@ -27,6 +27,11 @@ import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPa
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
+import {
+  buildCorpusRoleIdentitiesForExecutionReconcile,
+  detectExecutionBlockRoleInversion,
+} from "./paidProAcceptedCorpusPartyRoles";
+import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 
 export type PolishProAgreementDisplayLayerOpts = {
   draft?: ParsedDraftShape | null;
@@ -501,7 +506,11 @@ export function polishProAgreementDisplayLayer(
   let out = basicNormalize(input);
 
   const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
-  const records = resolveCanonicalPartyIdentitiesFromIntake(opts?.intakeText ?? null, partyNames);
+  const records = resolveCanonicalPartyIdentitiesFromSources({
+    rawIntake: opts?.intakeText ?? null,
+    starterNames: partyNames,
+    generatedBody: input,
+  });
 
   const structuredOpening = normalizeAgreementOpeningStructure(out, {
     records,
@@ -589,6 +598,15 @@ export function polishProAgreementDisplayLayer(
       candidateSource: "display_layer_polish",
     });
     return { text: coalesced.text, repairs: [...repairs, ...(coalesced.downgradePrevented ? ["display:shrink_blocked"] : [])] };
+  }
+
+  if (records.length >= 2 && detectExecutionBlockRoleInversion(out)) {
+    const identities = buildCorpusRoleIdentitiesForExecutionReconcile(out);
+    const reconciled = reconcileExecutionBlockToRoleIdentities(out, identities);
+    if (reconciled.repairs > 0) {
+      out = reconciled.text;
+      repairs.push("display:reconcile_execution_block_roles");
+    }
   }
 
   return { text: out, repairs: [...new Set(repairs)] };

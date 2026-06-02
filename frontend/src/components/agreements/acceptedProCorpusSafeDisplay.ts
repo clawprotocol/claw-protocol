@@ -6,7 +6,7 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   intakeHasFullLegalEntityParties,
-  resolveCanonicalPartyIdentitiesFromIntake,
+  resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import { neutralizeHarmlessEntityMetadataPlaceholders } from "./harmlessEntityMetadataPlaceholders";
@@ -15,6 +15,11 @@ import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGu
 import { stripTrailingLegacyEntitySignatureLines } from "./paidProReviewRenderCorpus";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
+import {
+  buildCorpusRoleIdentitiesForExecutionReconcile,
+  detectExecutionBlockRoleInversion,
+} from "./paidProAcceptedCorpusPartyRoles";
+import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -51,6 +56,14 @@ export function stripAcceptedProMarkdownArtifacts(text: string): { text: string;
   return { text: out, repairs };
 }
 
+function reconcileAcceptedCorpusExecutionRolesIfInverted(text: string): { text: string; repaired: boolean } {
+  if (!detectExecutionBlockRoleInversion(text)) return { text, repaired: false };
+  const identities = buildCorpusRoleIdentitiesForExecutionReconcile(text);
+  const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
+  if (reconciled.repairs <= 0 || reconciled.text === text) return { text, repaired: false };
+  return { text: reconciled.text, repaired: true };
+}
+
 function canonicalPartyNamesFromDraft(draft: ParsedDraftShape | null | undefined): string[] {
   return (draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
@@ -81,7 +94,13 @@ export function applyAcceptedProCorpusSafeDisplay(
   const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
   const intakeRaw = opts?.intakeText ?? null;
   const hasFullLegal = intakeHasFullLegalEntityParties(intakeRaw, partyNames);
-  const records = hasFullLegal ? resolveCanonicalPartyIdentitiesFromIntake(intakeRaw, partyNames) : [];
+  const records = hasFullLegal
+    ? resolveCanonicalPartyIdentitiesFromSources({
+        rawIntake: intakeRaw,
+        starterNames: partyNames,
+        generatedBody: out,
+      })
+    : [];
 
   if (hasFullLegal && records.length >= 2) {
     const partyRepair = repairFullAgreementPartyIdentity({
@@ -92,6 +111,11 @@ export function applyAcceptedProCorpusSafeDisplay(
     if (partyRepair.text !== out) {
       out = partyRepair.text;
       repairs.push(...partyRepair.repairs);
+    }
+    const roleRepair = reconcileAcceptedCorpusExecutionRolesIfInverted(out);
+    if (roleRepair.repaired) {
+      out = roleRepair.text;
+      repairs.push("safe:reconcile_execution_block_roles");
     }
   }
 
@@ -130,10 +154,22 @@ export function applyAcceptedProCorpusSafeDisplay(
     repairs.push(...prepared.repairs);
   }
 
+  const preSigRoleRepair = reconcileAcceptedCorpusExecutionRolesIfInverted(out);
+  if (preSigRoleRepair.repaired) {
+    out = preSigRoleRepair.text;
+    repairs.push("safe:reconcile_execution_block_roles");
+  }
+
   const sigOrder = repairPaidProSignatureSectionOrdering(out);
   if (sigOrder.text !== out) {
     out = sigOrder.text;
     repairs.push(...sigOrder.repairs);
+  }
+
+  const postSigRoleRepair = reconcileAcceptedCorpusExecutionRolesIfInverted(out);
+  if (postSigRoleRepair.repaired) {
+    out = postSigRoleRepair.text;
+    repairs.push("safe:reconcile_execution_block_roles");
   }
 
   return { text: out, repairs: [...new Set(repairs)] };

@@ -3,7 +3,10 @@
  * parentheticals win over later inverted recitals or recipient slot order).
  */
 
-function partyLegalNamesMatch(a: string, b: string): boolean {
+import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
+import { sortIdentitiesForExecutionBlockOrder } from "./paidProSignerMetadataMergeGate";
+
+export function partyLegalNamesMatch(a: string, b: string): boolean {
   const na = a
     .replace(/\s+/g, " ")
     .trim()
@@ -104,4 +107,51 @@ export function resolveAcceptedCorpusRoleLabelForLegalName(
     partyLegalNamesMatch(trimmed, a.legalName),
   );
   return hit?.roleLabel ?? null;
+}
+
+function roleLabelToBlockHeading(roleLabel: string): string {
+  const r = roleLabel.trim().toLowerCase();
+  if (r === "client") return "CLIENT";
+  if (r.includes("service") && r.includes("provider")) return "SERVICE PROVIDER";
+  return roleLabel.trim().toUpperCase();
+}
+
+/** Build execution identities ordered CLIENT then SERVICE PROVIDER from corpus role parentheticals. */
+export function buildCorpusRoleIdentitiesForExecutionReconcile(
+  corpus: string,
+): CanonicalPartyIdentity[] {
+  const assignments = resolvePaidProPartyRolesFromAcceptedCorpus(corpus);
+  const identities: CanonicalPartyIdentity[] = assignments.map((a, index) => ({
+    index,
+    partyDisplayName: a.legalName,
+    blockHeading: roleLabelToBlockHeading(a.roleLabel),
+    email: "",
+    partyAddress: null,
+    representativeName: null,
+    title: null,
+    isIndividual: false,
+  }));
+  return sortIdentitiesForExecutionBlockOrder(identities);
+}
+
+/** True when CLIENT / SERVICE PROVIDER headings name the wrong party vs corpus recital roles. */
+export function detectExecutionBlockRoleInversion(corpus: string): boolean {
+  const assignments = resolvePaidProPartyRolesFromAcceptedCorpus(corpus);
+  const client = assignments.find((a) => a.role === "client");
+  const provider = assignments.find((a) => a.role === "service_provider");
+  if (!client || !provider) return false;
+
+  const witnessIdx = corpus.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return false;
+  const tail = corpus.slice(witnessIdx);
+
+  const clientBlock = tail.match(/^\s*CLIENT\s*:\s*\n([^\n]+)/im);
+  const providerBlock = tail.match(/^\s*SERVICE\s+PROVIDER\s*:\s*\n([^\n]+)/im);
+  if (!clientBlock?.[1] || !providerBlock?.[1]) return false;
+
+  const underClient = clientBlock[1].trim();
+  const underProvider = providerBlock[1].trim();
+  const clientOk = partyLegalNamesMatch(underClient, client.legalName);
+  const providerOk = partyLegalNamesMatch(underProvider, provider.legalName);
+  return !clientOk || !providerOk;
 }

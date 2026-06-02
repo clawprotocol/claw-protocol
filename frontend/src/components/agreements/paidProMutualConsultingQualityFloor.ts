@@ -66,21 +66,21 @@ export function assessPaidProMutualConsultingProfessionalStructure(args: {
 } {
   const text = (args.text || "").trim();
   const intake = (args.rawIntake || "").trim();
+  const numberedSectionCount = countNumberedAgreementSections(text);
   const applies =
     isCommercialServicesIntake(intake) &&
-    /\bmutual\s+consulting\b/i.test(intake) &&
-    /\bimplementation\b/i.test(intake);
+    ((/\bmutual\s+consulting\b/i.test(intake) && /\bimplementation\b/i.test(intake)) ||
+      (numberedSectionCount > 0 && numberedSectionCount <= MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING));
   if (!applies) {
     return {
       applies: false,
       ok: true,
-      numberedSectionCount: countNumberedAgreementSections(text),
+      numberedSectionCount,
       topicsFound: [],
       topicsMissing: [],
       collapsedLightweight: false,
     };
   }
-  const numberedSectionCount = countNumberedAgreementSections(text);
   const topicsFound: MutualConsultingStructureTopic[] = [];
   const topicsMissing: MutualConsultingStructureTopic[] = [];
   for (const topic of Object.keys(TOPIC_PATTERNS) as MutualConsultingStructureTopic[]) {

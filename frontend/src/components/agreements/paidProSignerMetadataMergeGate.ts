@@ -12,6 +12,10 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { corpusHasPartyNoticeDetails } from "./paidProPartyNoticeDetails";
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
+import {
+  buildCorpusRoleIdentitiesForExecutionReconcile,
+  detectExecutionBlockRoleInversion,
+} from "./paidProAcceptedCorpusPartyRoles";
 
 const SUBSTANTIVE_ROLE_BLOCK_START_RE =
   /^(?:Client|Service Provider|Party\s+\d+)\s*:\s*$/i;
@@ -224,7 +228,10 @@ export function applyPaidProSignerMetadataMergeGate(args: {
       expectedParties: canonicalPartyCount,
     });
     if (execInvariant.executionBlockCount === 1) {
-      const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
+      const reconcileIdentities = detectExecutionBlockRoleInversion(text)
+        ? buildCorpusRoleIdentitiesForExecutionReconcile(text)
+        : sortIdentitiesForExecutionBlockOrder(identities);
+      const reconciled = reconcileExecutionBlockToRoleIdentities(text, reconcileIdentities);
       if (reconciled.repairs > 0) {
         text = reconciled.text;
         repairs.push("reconcile_execution_block_roles");

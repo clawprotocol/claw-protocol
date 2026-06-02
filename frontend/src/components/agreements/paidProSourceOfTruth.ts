@@ -220,7 +220,7 @@ export function establishPaidProSourceOfTruth(args: {
     intakeText: args.intakeText ?? null,
   }).text;
   const minimumSubstance = validateProMinimumSubstance({
-    text: args.text,
+    text: safe,
     rawIntake: args.intakeText ?? "",
     draft: args.draft ?? null,
     source: args.source ?? "server_full_draft",
