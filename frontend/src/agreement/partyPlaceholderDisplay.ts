@@ -10,6 +10,14 @@
  */
 
 import { extractBetweenPartyNameList } from "../components/agreements/partyBetweenParse";
+import {
+  countIdentityPlaceholders,
+  inferOrgSlotOriginMetadata,
+  listUnresolvedIdentityPlaceholderTokens,
+  logOrgPlaceholderOriginsFromText,
+  logPaidProPlaceholderOrigin,
+  logPaidProPlaceholderRepair,
+} from "../components/agreements/paidProPlaceholderAttributionLog";
 
 const ENTITY_SUFFIX = /(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|PC|P\.C\.|Co\.?|Company)/i;
 
@@ -155,8 +163,44 @@ export type RepairKnownPartyPlaceholdersResult = {
   text: string;
   repaired: boolean;
   repairedSlots: number[];
+  collapsedExtraOrgSlots: number[];
   hasRemainingIdentityPlaceholder: boolean;
 };
+
+/** Paid Pro only: collapse ORG_n / PARTY_n overflow (n > 2) when every guard is satisfied. */
+export type SyntheticOrgOverflowCollapseGuard = {
+  structuredPartyCount: number;
+  canonicalIdentityCount: number;
+  placeholderResolutionPartyCount: number;
+  intakeHasFullLegalEntities: boolean;
+};
+
+const SYNTHETIC_ORG_OVERFLOW_REPLACEMENT = "the applicable Party";
+
+export function shouldCollapseSyntheticOrgPartyOverflow(args: {
+  realAuthoritativePartyCount: number;
+  structuredPartyCount: number;
+  canonicalIdentityCount: number;
+  placeholderResolutionPartyCount: number;
+  intakeHasFullLegalEntities: boolean;
+}): boolean {
+  return (
+    args.realAuthoritativePartyCount === 2 &&
+    args.structuredPartyCount === 2 &&
+    args.canonicalIdentityCount === 2 &&
+    args.placeholderResolutionPartyCount === 2 &&
+    args.intakeHasFullLegalEntities
+  );
+}
+
+/** True when the token is a numbered ORG/PARTY slot (not PERSON, ENTITY, mustache, etc.). */
+function isCollapsibleSyntheticOrgPartyToken(match: string, slot: number): boolean {
+  if (slot <= 2) return false;
+  const t = match.trim();
+  if (/\{\{|\}\}/.test(t) || /__/.test(t)) return false;
+  if (/\b(?:PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)\b/i.test(t)) return false;
+  return /(?:^|\[|\(|\b)(ORG|PARTY)(?:[_\s\-]+)?[1-9]\d*/i.test(t);
+}
 
 /**
  * Deterministically replace ONLY party/identity placeholders ([ORG_1], "[ORG_2]", PARTY_2, …) whose
@@ -171,39 +215,100 @@ export function repairKnownPartyPlaceholders(
   text: string,
   authoritativePartyNames?: readonly (string | null | undefined)[] | null,
   context?: string | null,
+  syntheticOverflowCollapse?: SyntheticOrgOverflowCollapseGuard | null,
 ): RepairKnownPartyPlaceholdersResult {
   const original = text || "";
   if (!original.trim()) {
-    return { text: original, repaired: false, repairedSlots: [], hasRemainingIdentityPlaceholder: false };
+    return {
+      text: original,
+      repaired: false,
+      repairedSlots: [],
+      collapsedExtraOrgSlots: [],
+      hasRemainingIdentityPlaceholder: false,
+    };
   }
   const auth = (authoritativePartyNames || []).map((n) => String(n ?? "").replace(/\s+/g, " ").trim());
   const candidates = context ? extractAgreementEntityCandidates(context) : [];
   const repairedSlots = new Set<number>();
+  const collapsedExtraOrgSlots = new Set<number>();
 
   const resolveSlot = (slot: number): string | null => {
     const idx = Math.max(0, slot - 1);
     const a = auth[idx];
     if (isRealPartyName(a)) return a;
+    const realAuthCount = auth.filter((n) => isRealPartyName(n)).length;
+    if (slot > realAuthCount) return null;
     const c = candidates[idx];
     if (isRealPartyName(c)) return c;
     return null;
   };
 
   const re = new RegExp(PARTY_PLACEHOLDER_TOKEN_SOURCE, "gi");
+  const beforeCount = countIdentityPlaceholders(original);
+  const canonicalPartyCount = auth.filter((n) => isRealPartyName(n)).length;
+  const collapseSyntheticOverflow =
+    syntheticOverflowCollapse != null &&
+    shouldCollapseSyntheticOrgPartyOverflow({
+      realAuthoritativePartyCount: canonicalPartyCount,
+      structuredPartyCount: syntheticOverflowCollapse.structuredPartyCount,
+      canonicalIdentityCount: syntheticOverflowCollapse.canonicalIdentityCount,
+      placeholderResolutionPartyCount: syntheticOverflowCollapse.placeholderResolutionPartyCount,
+      intakeHasFullLegalEntities: syntheticOverflowCollapse.intakeHasFullLegalEntities,
+    });
+  logOrgPlaceholderOriginsFromText({
+    text: original,
+    sourceModule: "repairKnownPartyPlaceholders",
+    canonicalPartyCount,
+  });
   const out = original.replace(re, (match, offset, whole) => {
     const num = match.match(/([1-9]\d*)/);
     const slot = num ? parseInt(num[1], 10) : 1;
     const normalizedSlot = Number.isFinite(slot) && slot > 0 ? slot : 1;
     const replacement = resolveSlot(normalizedSlot);
-    if (replacement == null) return match;
-    repairedSlots.add(normalizedSlot);
-    return dedupeAmpersandPrefixBeforePlaceholder(whole.slice(0, offset), replacement);
+    if (replacement != null) {
+      repairedSlots.add(normalizedSlot);
+      return dedupeAmpersandPrefixBeforePlaceholder(whole.slice(0, offset), replacement);
+    }
+    if (
+      collapseSyntheticOverflow &&
+      isCollapsibleSyntheticOrgPartyToken(match, normalizedSlot)
+    ) {
+      collapsedExtraOrgSlots.add(normalizedSlot);
+      return dedupeAmpersandPrefixBeforePlaceholder(
+        whole.slice(0, offset),
+        SYNTHETIC_ORG_OVERFLOW_REPLACEMENT,
+      );
+    }
+    return match;
+  });
+
+  const unresolved = listUnresolvedIdentityPlaceholderTokens(out);
+  for (const token of unresolved) {
+    const meta = inferOrgSlotOriginMetadata(token, canonicalPartyCount);
+    logPaidProPlaceholderOrigin({
+      placeholder: token,
+      sourceModule: "repairKnownPartyPlaceholders",
+      sourceEntityType:
+        meta.sourceEntityType === "contracting_party_slot"
+          ? "unresolved_contracting_party_slot"
+          : meta.sourceEntityType,
+      sourceValue: meta.sourceValue,
+    });
+  }
+  const collapsedSlots = [...collapsedExtraOrgSlots].sort((a, b) => a - b);
+  logPaidProPlaceholderRepair({
+    sourceModule: "repairKnownPartyPlaceholders",
+    beforeCount,
+    afterCount: countIdentityPlaceholders(out),
+    unresolvedPlaceholders: unresolved,
+    collapsedExtraOrgSlots: collapsedSlots,
   });
 
   return {
     text: out,
-    repaired: repairedSlots.size > 0 && out !== original,
+    repaired: (repairedSlots.size > 0 || collapsedExtraOrgSlots.size > 0) && out !== original,
     repairedSlots: [...repairedSlots].sort((a, b) => a - b),
+    collapsedExtraOrgSlots: collapsedSlots,
     hasRemainingIdentityPlaceholder: textContainsUnresolvedIdentityPlaceholders(out),
   };
 }

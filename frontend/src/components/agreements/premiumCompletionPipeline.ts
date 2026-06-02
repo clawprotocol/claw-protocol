@@ -128,6 +128,11 @@ import {
 } from "./paidProPremiumGenerationCallAudit";
 import { logPremiumSecondGenerationTriggered } from "./paidProSecondGenerationTriggerLog";
 import {
+  logDraftingStubOriginsFromText,
+  logOrgPlaceholderOriginsFromText,
+  logPaidProEntityMap,
+} from "./paidProPlaceholderAttributionLog";
+import {
   buildPaidProJsonParseDegradedDiagnostics,
   logPaidProJsonParseDegradedDiagnostics,
 } from "./paidProJsonParseDegradedDiagnostics";
@@ -137,7 +142,11 @@ import type { PremiumNetworkCallReason } from "./paidProPremiumGenerationCallAud
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryable";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
-import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
+import { finalizeUserVisibleAgreementPlainText, resolvePlaceholderPartyNamesWithMeta } from "./agreementTemplatePlaceholderSafety";
+import {
+  intakeHasFullLegalEntityParties,
+  resolveCanonicalPartyIdentitiesFromSources,
+} from "./canonicalPartyIdentityResolver";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import { adaptPremiumFullDraftToProIntelligencePacket } from "./proAgreementIntelligence";
 import {
@@ -1727,6 +1736,22 @@ async function runPremiumCompletionInner(
         };
       }
       let doc = (effectiveFull.document_text || "").trim();
+      const canonicalPartyNamesForAttribution = (merged.parties || [])
+        .map((p) => String(p?.name ?? "").trim())
+        .filter(Boolean);
+      logOrgPlaceholderOriginsFromText({
+        text: doc,
+        sourceModule: "premium_full_draft_http",
+        canonicalPartyCount: canonicalPartyNamesForAttribution.length,
+      });
+      logDraftingStubOriginsFromText({ text: doc, sourceModule: "premium_full_draft_http" });
+      logPaidProEntityMap({
+        sourceModule: "premium_completion_pipeline",
+        organizations: canonicalPartyNamesForAttribution.slice(0, 2),
+        signers: [],
+        noticeRecipients: [],
+        affiliates: [],
+      });
       // Tracks deterministic known-party placeholder repair so a `needs_details`/soft-gate response
       // whose only gap was a party name we already know is accepted rather than rejected.
       let partyPlaceholderRepairApplied = false;
@@ -1759,7 +1784,33 @@ async function runPremiumCompletionInner(
           const canonicalPartyNamesForRepair = (merged.parties || []).map((p) =>
             String(p?.name ?? "").trim(),
           );
-          const repair = repairKnownPartyPlaceholders(doc, canonicalPartyNamesForRepair, preGateIntake);
+          const structuredPartyCount = (merged.parties || []).length;
+          const canonicalIdentityCount = resolveCanonicalPartyIdentitiesFromSources({
+            rawIntake: preGateIntake,
+            starterNames: canonicalPartyNamesForRepair,
+          }).length;
+          const placeholderResolution = resolvePlaceholderPartyNamesWithMeta(
+            { intakeRaw: preGateIntake, partyNames: canonicalPartyNamesForRepair },
+            null,
+          );
+          const placeholderResolutionPartyCount = resolveCanonicalPartyIdentitiesFromSources({
+            rawIntake: preGateIntake,
+            starterNames: placeholderResolution.names,
+          }).length;
+          const repair = repairKnownPartyPlaceholders(
+            doc,
+            canonicalPartyNamesForRepair,
+            preGateIntake,
+            {
+              structuredPartyCount,
+              canonicalIdentityCount,
+              placeholderResolutionPartyCount,
+              intakeHasFullLegalEntities: intakeHasFullLegalEntityParties(
+                preGateIntake,
+                canonicalPartyNamesForRepair,
+              ),
+            },
+          );
           if (repair.repaired) {
             doc = repair.text;
             partyPlaceholderRepairApplied = true;
@@ -1779,6 +1830,7 @@ async function runPremiumCompletionInner(
             logPremiumCompletionDebug({
               stage: "pipeline_party_placeholder_repaired",
               repairedSlots: repair.repairedSlots,
+              collapsedExtraOrgSlots: repair.collapsedExtraOrgSlots,
               remainingIdentityPlaceholder: repair.hasRemainingIdentityPlaceholder,
               resolvesPaidBody: partyPlaceholderRepairResolvesPaidBody,
               currentDocLen: doc.length,
