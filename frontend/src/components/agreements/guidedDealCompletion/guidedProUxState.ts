@@ -45,6 +45,10 @@ export type ResolveGuidedProUxStateArgs = {
   hasGuidedSession: boolean;
   /** Accepted paid Pro corpus (e.g. paidProSourceOfTruth) — signer setup does not require guided Q&A. */
   paidProAcceptedCorpusReady?: boolean;
+  /** Post-checkout gate: never show guided question collection as primary Pro result. */
+  suppressPaidProGuidedCompletion?: boolean;
+  /** Displayable local recovery corpus length (degraded server recovery). */
+  postCheckoutRecoveryBodyLen?: number;
   guidedCompletionPhase: GuidedCompletionPhase;
   createFlowPhase: CreateFlowProductionPhase;
   premiumRecipientUxActive: boolean;
@@ -101,6 +105,10 @@ export function guidedProUxBlocksRecipientSetup(args: {
 export function resolveGuidedProUxState(args: ResolveGuidedProUxStateArgs): GuidedProUxState {
   if (!args.premiumPaidDocumentSurface) return "inactive";
   if (args.guidedCompletionPhase === "inactive" && !args.paidProAcceptedCorpusReady) return "inactive";
+
+  if (args.suppressPaidProGuidedCompletion) {
+    return "paid_pro_draft";
+  }
 
   if (hasAcceptedPaidProAuthority()) {
     if (

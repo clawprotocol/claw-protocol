@@ -40,7 +40,10 @@ export function canActivateGuidedCompletionPhase(args: {
   premiumPaidDocumentSurface: boolean;
   paidBodyLen: number;
   minBodyLen?: number;
+  /** When true, paid post-checkout must not enter guided question collection. */
+  suppressPaidProGuidedCompletion?: boolean;
 }): boolean {
+  if (args.suppressPaidProGuidedCompletion) return false;
   const min = args.minBodyLen ?? 200;
   return args.premiumPaidDocumentSurface && args.paidBodyLen >= min;
 }

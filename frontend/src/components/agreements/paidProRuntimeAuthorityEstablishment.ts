@@ -16,6 +16,7 @@ import {
   PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN,
 } from "./paidProAuthorityConstants";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { resolvePaidProPostCheckoutRecoveryDisplayPlain } from "./paidProPostCheckoutRenderGate";
 
 export { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 
@@ -23,6 +24,7 @@ export type PaidProRuntimeAuthorityReason =
   | "paid_pro_source_of_truth"
   | "authoritative_agreement_document"
   | "server_full_document_on_draft"
+  | "post_checkout_local_recovery_display"
   | "awaiting_server_full_document"
   | "live_preview_blocked"
   | "forbidden_render_source"
@@ -119,13 +121,27 @@ export function assessPaidProRuntimeAuthority(args: {
   premiumPipelineSource?: string | null;
   /** Declared corpus source for dev false-authority detection. */
   declaredCorpusSource?: string | null;
+  intakeText?: string | null;
+  postCheckoutRecoveryPlain?: string | null;
 }): PaidProRuntimeAuthorityAssessment {
   const paidTruthText = getPaidProSourceOfTruthText();
   const authoritativeText = getAuthoritativeAgreementText();
   const paidEstablished = hasPaidProSourceOfTruth();
   const serverFullDocExists = draftServerFullDocumentExists(args.draft ?? null);
   const renderSource = resolvePaidProRuntimeRenderSource(args);
-  const corpusLen = Math.max(paidTruthText.length, authoritativeText.length, materialPremiumPipelineCorpusMaxLen(args.draft ?? null));
+  const recoveryPlain =
+    (args.postCheckoutRecoveryPlain || "").trim() ||
+    resolvePaidProPostCheckoutRecoveryDisplayPlain({
+      draft: args.draft as ParsedDraftShape | null,
+      intakeText: args.intakeText,
+      premiumRenderSource: args.premiumPipelineSource ?? args.premiumRenderSourceResolved,
+    });
+  const corpusLen = Math.max(
+    paidTruthText.length,
+    authoritativeText.length,
+    recoveryPlain.length,
+    materialPremiumPipelineCorpusMaxLen(args.draft ?? null),
+  );
   const forbiddenRender = isForbiddenPaidProDisplayRenderSource(renderSource);
   const livePreviewOnly =
     renderSource === "live_generated_preview" && !paidEstablished && !serverFullDocExists;
@@ -144,6 +160,9 @@ export function assessPaidProRuntimeAuthority(args: {
   } else if (serverFullDocExists && corpusLen >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
     established = true;
     reason = "server_full_document_on_draft";
+  } else if (!paidEstablished && recoveryPlain.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
+    established = true;
+    reason = "post_checkout_local_recovery_display";
   } else if (corpusLen > 0 && corpusLen < PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
     reason = "empty_corpus";
   }

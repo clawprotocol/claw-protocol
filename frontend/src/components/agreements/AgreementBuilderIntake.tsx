@@ -561,6 +561,10 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
+  resolvePaidProPostCheckoutRecoveryDisplayPlain,
+  shouldSuppressPaidProGuidedCompletionUi,
+} from "./paidProPostCheckoutRenderGate";
+import {
   armPaidProMutationTraceReviewReady,
   tracePaidProCorpusMutation,
 } from "./paidProMutationTrace";
@@ -7333,7 +7337,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             trackAgreementFunnelEvent("pro_draft_loaded", { path: "fallback" }, { planTier: String(tier), atMsProDraft: Date.now() });
           }
         }
-        commitParsedDraftToReviewFlow(merged.draft, { forceReviewDisplay: true });
+        let draftForReview = merged.draft;
+        if (paidRecovery) {
+          const recoverySnapFb = readPremiumCompletionSnapshot();
+          const recoveryBodyFb =
+            (winningBodyText || "").trim() ||
+            readAuthoritativeSnapshotBody(recoverySnapFb);
+          const pipelineSrc =
+            recoverySnapFb?.premiumPipelineRenderSource ||
+            lastPremiumPipelineRenderSourceRef.current ||
+            null;
+          if (recoveryBodyFb.length >= 500) {
+            draftForReview = {
+              ...merged.draft,
+              premium_full_document_text: recoveryBodyFb,
+              premium_render_source: pipelineSrc || merged.draft.premium_render_source,
+            };
+          }
+        }
+        commitParsedDraftToReviewFlow(draftForReview, { forceReviewDisplay: true });
         if (createProductionTwoPane && simpleProductFlow) {
           setDisplayPhase("review");
         }
@@ -11178,7 +11200,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       // the active review predicate is transiently false (e.g. signer hydration mutated the draft so
       // the draft-validated surface read briefly fails). The resolver still returns "" when no real
       // SoT/authoritative corpus is available, so this never fabricates a body during generation.
-      isAuthoritativePaidProReviewActive || (premiumCheckoutCompleted && hasPaidProSourceOfTruth())
+      isAuthoritativePaidProReviewActive ||
+        (premiumCheckoutCompleted && hasPaidProSourceOfTruth()) ||
+        (premiumCheckoutCompleted &&
+          resolvePaidProPostCheckoutRecoveryDisplayPlain({
+            draft: draft ?? null,
+            intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+            premiumRenderSource:
+              premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+          }).length >= 500)
         ? resolveAuthoritativePaidProReviewPlain({
             draft: draft ?? null,
             intakeText: currentPremiumMergedIntakeKey || intakeCombined,
@@ -11187,6 +11217,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [
       isAuthoritativePaidProReviewActive,
       premiumCheckoutCompleted,
+      premiumTruthPipelineSource,
       draft,
       currentPremiumMergedIntakeKey,
       intakeCombined,
@@ -12679,6 +12710,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     logGuidedQuestionGateDecision(guidedQuestionGateDecision);
   }, [premiumPaidDocumentSurface, guidedQuestionGateDecision]);
 
+  const paidProPostCheckoutRenderGateInputEarly = useMemo(
+    () => ({
+      premiumPaidDocumentSurface,
+      premiumCheckoutCompleted,
+      premiumCompletionSessionActive: hasPaidPremiumCompletionSession() || premiumPersistedFlowActive,
+      premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+      premiumDegradedServerLocalRecovery:
+        (premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current) ===
+        "premium_degraded_server_local_recovery",
+      premiumDegradedServerRecoverable: Boolean(proFullDraftQualityRetry && proFullDraftCustomGateMessage),
+      premiumNetworkLocalRecovery:
+        (premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current) ===
+        "premium_network_local_recovery",
+    }),
+    [
+      premiumPaidDocumentSurface,
+      premiumCheckoutCompleted,
+      premiumPersistedFlowActive,
+      premiumTruthPipelineSource,
+      proFullDraftQualityRetry,
+      proFullDraftCustomGateMessage,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
+  );
+
+  const suppressPaidProGuidedCompletionUi = useMemo(
+    () => shouldSuppressPaidProGuidedCompletionUi(paidProPostCheckoutRenderGateInputEarly),
+    [paidProPostCheckoutRenderGateInputEarly],
+  );
+
   const guidedProUxState = useMemo(() => {
     const state = resolveGuidedProUxState({
       premiumPaidDocumentSurface,
@@ -12688,6 +12750,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ),
       ),
       paidProAcceptedCorpusReady,
+      suppressPaidProGuidedCompletion: suppressPaidProGuidedCompletionUi,
       guidedCompletionPhase,
       createFlowPhase,
       premiumRecipientUxActive,
@@ -12713,6 +12776,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     resolvedGuidedAnswerApplyStatus,
     paidProAcceptedCorpusReady,
     guidedQuestionGateDecision,
+    suppressPaidProGuidedCompletionUi,
   ]);
 
   const suppressGuidedFreeformUx = guidedProUxSuppressesFreeform(guidedProUxState);
@@ -13791,18 +13855,52 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [draft, reviewDocRefreshTick, premiumSurfaceGateTick],
   );
 
+  const paidProPostCheckoutRecoveryPlain = useMemo(() => {
+    const snap = readPremiumCompletionSnapshot();
+    return resolvePaidProPostCheckoutRecoveryDisplayPlain({
+      draft: (reviewDraft ?? draft) as ParsedDraftShape | null,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      winningPremiumBodyText:
+        (premiumPaidReadonlyPick.plainText || "").trim() ||
+        snap?.premiumWinningBodyText ||
+        snap?.premiumReadonlyPlainText,
+      premiumRenderSource:
+        premiumTruthPipelineSource ??
+        lastPremiumPipelineRenderSourceRef.current ??
+        snap?.premiumPipelineRenderSource,
+      premiumDegradedServerLocalRecovery:
+        (premiumTruthPipelineSource ?? snap?.premiumPipelineRenderSource) ===
+        "premium_degraded_server_local_recovery",
+    });
+  }, [
+    reviewDraft,
+    draft,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    premiumTruthPipelineSource,
+    premiumPaidReadonlyPick.plainText,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+    guidedAuthVersionNonce,
+  ]);
+
   const paidProRuntimeAuthority = useMemo(
     () =>
       assessPaidProRuntimeAuthority({
         draft: (reviewDraft ?? draft) as import("./intakeSmartDefaults").ParsedDraftShape | null,
         premiumRenderSourceResolved: premiumPaidReadonlyPick.sourceUsed,
         premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        postCheckoutRecoveryPlain: paidProPostCheckoutRecoveryPlain,
       }),
     [
       reviewDraft,
       draft,
       premiumPaidReadonlyPick.sourceUsed,
       premiumTruthPipelineSource,
+      paidProPostCheckoutRecoveryPlain,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
       reviewDocRefreshTick,
       premiumSurfaceGateTick,
       guidedAuthVersionNonce,
@@ -17142,6 +17240,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
   });
   const guidedCompletionSessionBase = useMemo(() => {
+    if (suppressPaidProGuidedCompletionUi) return null;
     if (guidedQueueRebuildBlocked) return null;
     // Signer-setup isolation: once a paid SoT is accepted and the user is entering signer metadata,
     // typing must never rebuild the guided question queue (no guided_continue / guided-question-queue
@@ -17267,12 +17366,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionPhase,
     simpleProFinalReviewActive,
     guidedQueueRebuildBlocked,
+    suppressPaidProGuidedCompletionUi,
   ]);
   useEffect(() => {
+    if (suppressPaidProGuidedCompletionUi) return;
     if (
       !canActivateGuidedCompletionPhase({
         premiumPaidDocumentSurface,
         paidBodyLen: paidBodyForGuidedCompletion.length,
+        suppressPaidProGuidedCompletion: suppressPaidProGuidedCompletionUi,
       })
     ) {
       return;
@@ -17286,7 +17388,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionPhase,
     guidedCompletionSession,
     guidedCompletionSessionBase,
+    suppressPaidProGuidedCompletionUi,
   ]);
+  React.useEffect(() => {
+    if (!suppressPaidProGuidedCompletionUi) return;
+    if (
+      guidedCompletionPhase === "collecting_answers" ||
+      guidedCompletionPhase === "ready_to_apply" ||
+      guidedCompletionPhase === "failed"
+    ) {
+      setGuidedCompletionPhase(GUIDED_COMPLETION_PHASE_INACTIVE);
+    }
+  }, [suppressPaidProGuidedCompletionUi, guidedCompletionPhase]);
   const handleGuidedCompletionSessionChange = React.useCallback(
     (next: GuidedCompletionSession) => {
       const keyed = { ...next, sessionKey: next.sessionKey ?? guidedSessionKey };
@@ -17343,6 +17456,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           canActivateGuidedCompletionPhase({
             premiumPaidDocumentSurface,
             paidBodyLen: paidBodyForGuidedCompletion.length,
+            suppressPaidProGuidedCompletion: suppressPaidProGuidedCompletionUi,
           }) &&
           guidedCompletionPhase !== "applying_all" &&
           guidedCompletionPhase !== "applied"
@@ -17456,6 +17570,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           canActivateGuidedCompletionPhase({
             premiumPaidDocumentSurface,
             paidBodyLen: paidBodyForGuidedCompletion.length,
+            suppressPaidProGuidedCompletion: suppressPaidProGuidedCompletionUi,
           }) &&
           guidedCompletionPhase !== "applying_all" &&
           guidedCompletionPhase !== "applied"
@@ -17466,7 +17581,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       setGuidedBulkApplyError(null);
     },
-    [guidedSessionKey, guidedCompletionSessionBase, guidedCompletionPhase, premiumPaidDocumentSurface, paidBodyForGuidedCompletion],
+    [
+      guidedSessionKey,
+      guidedCompletionSessionBase,
+      guidedCompletionPhase,
+      premiumPaidDocumentSurface,
+      paidBodyForGuidedCompletion,
+      suppressPaidProGuidedCompletionUi,
+    ],
   );
 
   const handleGuidedEditAnswer = React.useCallback(
@@ -17740,6 +17862,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const preferGuidedCompletionOverRetry = useMemo(() => {
+    if (suppressPaidProGuidedCompletionUi) return false;
     const snap = readPremiumCompletionSnapshot();
     return shouldPreferGuidedCompletionOverRetry({
       hasUsableBody: paidBodyForGuidedCompletion.length >= 500 || hasUsablePaidBody,
@@ -17755,6 +17878,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
     reviewDocRefreshTick,
     authoritativePremiumUiCommitted,
+    suppressPaidProGuidedCompletionUi,
   ]);
   const activeGuidedCompletionSession = useMemo(() => {
     const raw = guidedCompletionSession ?? guidedCompletionSessionBase;
@@ -19703,6 +19827,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }).sessionHasRenderableQueue,
   );
   const showPrimaryGuidedCompletion = Boolean(
+    !suppressPaidProGuidedCompletionUi &&
     !hasAcceptedPaidProAuthority({
       draft: draft ?? null,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,

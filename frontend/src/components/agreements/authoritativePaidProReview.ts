@@ -19,6 +19,7 @@ import {
   resolvePaidProAuthoritativeDisplayPlain,
   shouldUsePaidProSourceOfTruthDisplayOnly,
 } from "./paidProAuthoritativeRenderGate";
+import { resolvePaidProPostCheckoutFirstReviewPlain } from "./paidProPostCheckoutRenderGate";
 import {
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruthText,
@@ -54,6 +55,13 @@ export function resolveAuthoritativePaidProReviewPlain(
 ): string {
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
     return resolvePaidProAuthoritativeDisplayPlain();
+  }
+  const postCheckoutRecovery = resolvePaidProPostCheckoutFirstReviewPlain({
+    draft: args?.draft ?? null,
+    intakeText: args?.intakeText ?? null,
+  });
+  if (postCheckoutRecovery.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return finalizeAuthoritativePaidProReviewPlain(postCheckoutRecovery);
   }
   if (hasPaidProSourceOfTruth()) {
     const renderPlain = resolvePaidProReviewRenderPlain({
