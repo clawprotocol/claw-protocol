@@ -18,6 +18,12 @@ import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualCo
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { stripMalformedProReviewDisplayArtifacts } from "./polishProAgreementDisplayLayer";
+import {
+  assessProMinimumSubstanceCached,
+  hasPaidProAuthoritativeValidationPassed,
+} from "./paidProPostAcceptanceValidatorCache";
+import { corpusHashForScanCache } from "./paidProCorpusScanCache";
+import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 
 export type ConciseCommercialServicesFactId =
   | "party_names"
@@ -203,16 +209,29 @@ export function validateProMinimumSubstance(args: {
   draft?: ParsedDraftShape | null;
   source?: string | null;
 }): ConciseCommercialServicesQualityAssessment {
-  const decision = assessConciseCommercialServicesProQuality({
+  const source = args.source ?? "unknown";
+  if (hasPaidProAuthoritativeValidationPassed({ text: args.text, source })) {
+    return {
+      applies: true,
+      ok: true,
+      docLen: args.text.trim().length,
+      requiredFactsFound: [],
+      requiredFactsMissing: [],
+      missingSections: [],
+      malformedOpening: false,
+    };
+  }
+  const decision = assessProMinimumSubstanceCached({
     text: args.text,
     rawIntake: args.rawIntake,
-    draft: args.draft ?? null,
+    draft: args.draft,
+    source,
   });
   logProMinimumSubstanceDecision({
     accepted: !decision.applies || decision.ok,
     missingSections: decision.missingSections,
     docLen: decision.docLen,
-    source: args.source ?? null,
+    source,
   });
   return decision;
 }
@@ -224,6 +243,19 @@ export function logProMinimumSubstanceDecision(payload: {
   source?: string | null;
 }): void {
   if (import.meta.env.MODE === "test") return;
+  if (!paidProVerboseDetailLogsEnabled()) return;
+  const hash = corpusHashForScanCache(String(payload.docLen));
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "pro-minimum-substance-decision",
+      surface: payload.source ?? "unknown",
+      hash,
+      source: payload.accepted ? "accepted" : "blocked",
+      payloadSignature: JSON.stringify(payload.missingSections),
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[pro-minimum-substance-decision]", payload);
 }

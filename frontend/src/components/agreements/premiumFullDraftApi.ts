@@ -25,6 +25,11 @@ import { rejectPremiumDegradedFiller } from "./premiumFullDraftClientAcceptance"
 import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGuard";
 import { enrichPremiumContextWithOperationalSynthesis } from "./proOperationalSynthesis";
 import type { ProAgreementIntelligencePacket } from "./proAgreementIntelligence";
+import {
+  recordPremiumNetworkCall,
+  type PremiumNetworkCallReason,
+} from "./paidProPremiumGenerationCallAudit";
+import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 
 const MAX_CONTEXT_CHARS = 22_000;
 
@@ -573,6 +578,7 @@ export async function postPremiumFullDraftOnce(args: {
   agreementGenerationId?: string | null;
   intakeFingerprint?: string | null;
   agreementId?: string | null;
+  networkCallReason?: PremiumNetworkCallReason;
 }): Promise<PremiumFullDraftResult> {
   const uga = (args.userGapAnswers || "").trim();
   if (import.meta.env.DEV) {
@@ -583,12 +589,13 @@ export async function postPremiumFullDraftOnce(args: {
       needles_in_gap_answers: gapTraceNeedlesHit(uga),
     });
   }
-  if (import.meta.env.MODE !== "test") {
+  if (import.meta.env.MODE !== "test" && paidProVerboseDetailLogsEnabled()) {
     // eslint-disable-next-line no-console
     console.info("[CLAW] premium request start", {
       intake_len: (args.intakeText || "").length,
       intake_fingerprint: shortIntakeFingerprint(args.intakeText),
       similarity_regeneration: Boolean(args.similarityRegeneration),
+      network_call_reason: args.networkCallReason ?? "unknown",
     });
   }
   const res = await fetch(apiUrl("/api/agreements/premium-full-draft"), {
@@ -616,7 +623,21 @@ export async function postPremiumFullDraftOnce(args: {
   } catch {
     parsed = {};
   }
-  if (import.meta.env.MODE !== "test") {
+  const networkReason: PremiumNetworkCallReason = args.networkCallReason
+    ?? (args.similarityRegeneration ? "similarity_regeneration" : "unknown");
+  recordPremiumNetworkCall({
+    reason: networkReason,
+    intakeFingerprint: (args.intakeFingerprint || "").trim() || shortIntakeFingerprint(args.intakeText),
+    agreementGenerationId: args.agreementGenerationId ?? null,
+    responseBodyLen: bodyText.length,
+    documentTextLen: typeof parsed?.document_text === "string" ? parsed.document_text.length : 0,
+    serverFullDocumentTextLen:
+      typeof parsed?.server_full_document_text === "string" ? parsed.server_full_document_text.length : 0,
+    generationOutcome: parsed?.generation_outcome,
+    failureCode: parsed?.server_generation_failure_code,
+  });
+
+  if (import.meta.env.MODE !== "test" && paidProVerboseDetailLogsEnabled()) {
     const genOutLog = String(parsed?.generation_outcome || "").trim();
     const failCodeLog = String(parsed?.server_generation_failure_code || "").trim();
     const docStr = typeof parsed?.document_text === "string" ? (parsed.document_text as string) : "";
@@ -771,6 +792,7 @@ export async function postPremiumFullDraftWithRetry(
     agreementGenerationId?: string | null;
     /** @deprecated Use agreementGenerationId */
     agreementIdShort?: string | null;
+    networkCallReason?: PremiumNetworkCallReason;
   },
 ): Promise<PremiumFullDraftApiResult> {
   const agreementId = (args.agreementId ?? "").trim() || null;
@@ -851,6 +873,7 @@ export async function postPremiumFullDraftWithRetry(
         agreementGenerationId,
         intakeFingerprint: shortIntakeFingerprint(args.intakeText),
         agreementId,
+        networkCallReason: args.networkCallReason ?? "checkout_completion",
       });
       const genRetry = classifyPremiumFullDraftGenerationRetryable(result);
       if (genRetry.retryable) {

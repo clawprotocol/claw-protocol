@@ -20,13 +20,17 @@ export function paidProAuthoritySurfaceLogKey(event: PaidProAuthoritySurfaceLogE
   return `${event.event}:${event.surface}:${event.hash}:${event.source}:${event.payloadSignature ?? ""}`;
 }
 
+function runtimePerfTrace(): boolean {
+  return Boolean(typeof import.meta !== "undefined" && import.meta.env?.VITE_PAID_PRO_PERF_TRACE);
+}
+
 export function shouldLogPaidProAuthoritySurfaceEvent(
   event: PaidProAuthoritySurfaceLogEvent,
   opts?: { dev?: boolean; test?: boolean },
 ): boolean {
   const dev = opts?.dev ?? runtimeDev();
   const test = opts?.test ?? runtimeTest();
-  if (test || !dev) return false;
+  if (test || (!dev && !runtimePerfTrace())) return false;
   const key = paidProAuthoritySurfaceLogKey(event);
   if (loggedAuthoritySurfaceEvents.has(key)) return false;
   loggedAuthoritySurfaceEvents.add(key);

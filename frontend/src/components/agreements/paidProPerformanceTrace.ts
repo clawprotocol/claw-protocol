@@ -3,6 +3,7 @@
  */
 
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 
 export type PaidProPerformanceSpanName =
   | "intake_classification"
@@ -22,6 +23,20 @@ export type PaidProPerformanceSpanName =
   | "html_render"
   | "vs01_eligibility";
 
+export type PaidProPerformanceSpanMeta = {
+  attempt?: number;
+  requestReason?: string;
+  responseBodyLen?: number;
+  documentTextLen?: number;
+  serverFullDocumentTextLen?: number;
+  generationOutcome?: string;
+  failureCode?: string;
+  accepted?: boolean;
+  rejectedReason?: string;
+  retryReason?: string;
+  [key: string]: string | number | boolean | null | undefined;
+};
+
 export type PaidProPerformanceSpan = {
   name: PaidProPerformanceSpanName;
   startMs: number;
@@ -31,7 +46,24 @@ export type PaidProPerformanceSpan = {
   docHash?: string;
   outcome?: string;
   failureCode?: string;
-  meta?: Record<string, string | number | boolean | null>;
+  meta?: PaidProPerformanceSpanMeta;
+};
+
+export type PaidProWaterfallSpanSummary = {
+  name: string;
+  startMs: number;
+  durationMs: number;
+  attempt?: number;
+  requestReason?: string;
+  responseBodyLen?: number;
+  documentTextLen?: number;
+  serverFullDocumentTextLen?: number;
+  generationOutcome?: string;
+  outcome?: string;
+  failureCode?: string;
+  accepted?: boolean;
+  rejectedReason?: string;
+  retryReason?: string;
 };
 
 export type PaidProPerformanceTrace = {
@@ -56,12 +88,6 @@ export function clearLastFinishedPaidProPerformanceTrace(): void {
 
 function nowMs(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
-}
-
-function paidProPerfVerboseEnabled(): boolean {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return false;
-  if (typeof import.meta === "undefined") return false;
-  return Boolean(import.meta.env.DEV || import.meta.env.VITE_PAID_PRO_PERF_TRACE);
 }
 
 /** One compact waterfall per run in prod/QA; scattered span logs only when verbose. */
@@ -107,7 +133,7 @@ export function paidProPerfSpanEnd(
     docText?: string;
     outcome?: string;
     failureCode?: string;
-    extra?: Record<string, string | number | boolean | null>;
+    extra?: PaidProPerformanceSpanMeta;
   },
 ): void {
   if (!activeTrace) return;
@@ -137,7 +163,7 @@ export function paidProPerfRecordInstant(
     docText?: string;
     outcome?: string;
     failureCode?: string;
-    extra?: Record<string, string | number | boolean | null>;
+    extra?: PaidProPerformanceSpanMeta;
   },
 ): void {
   if (!activeTrace) return;
@@ -183,18 +209,31 @@ export function paidProPerfResetScanCounters(traceId?: string): void {
   }
 }
 
+export function flattenPaidProWaterfallSpan(s: PaidProPerformanceSpan): PaidProWaterfallSpanSummary {
+  const m = s.meta ?? {};
+  return {
+    name: s.name,
+    startMs: s.startMs,
+    durationMs: s.durationMs,
+    ...(m.attempt != null ? { attempt: m.attempt } : {}),
+    ...(m.requestReason ? { requestReason: m.requestReason } : {}),
+    ...(m.responseBodyLen != null ? { responseBodyLen: m.responseBodyLen } : {}),
+    ...(m.documentTextLen != null ? { documentTextLen: m.documentTextLen } : s.docLen != null ? { documentTextLen: s.docLen } : {}),
+    ...(m.serverFullDocumentTextLen != null ? { serverFullDocumentTextLen: m.serverFullDocumentTextLen } : {}),
+    ...(m.generationOutcome ? { generationOutcome: m.generationOutcome } : s.outcome ? { generationOutcome: s.outcome } : {}),
+    ...(s.outcome && !m.generationOutcome ? { outcome: s.outcome } : {}),
+    ...(m.failureCode ? { failureCode: m.failureCode } : s.failureCode ? { failureCode: s.failureCode } : {}),
+    ...(m.accepted != null ? { accepted: m.accepted } : {}),
+    ...(m.rejectedReason ? { rejectedReason: m.rejectedReason } : {}),
+    ...(m.retryReason ? { retryReason: m.retryReason } : {}),
+  };
+}
+
 export function finishPaidProPerformanceWaterfall(): void {
   if (!activeTrace) return;
   const trace = activeTrace;
   const totalMs = Math.round(nowMs() - trace.startedAtMs);
-  const spans = trace.spans.map((s) => ({
-    name: s.name,
-    ms: s.durationMs,
-    ...(s.docLen != null ? { docLen: s.docLen } : {}),
-    ...(s.docHash ? { hash: s.docHash.slice(0, 24) } : {}),
-    ...(s.outcome ? { outcome: s.outcome } : {}),
-    ...(s.failureCode ? { failureCode: s.failureCode } : {}),
-  }));
+  const spanSummaries = trace.spans.map(flattenPaidProWaterfallSpan);
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") {
     lastFinishedTrace = {
       ...trace,
@@ -208,12 +247,13 @@ export function finishPaidProPerformanceWaterfall(): void {
       sessionGenerationId: trace.sessionGenerationId,
       intakeFingerprint: trace.intakeFingerprint,
       totalMs,
-      spans,
+      spanCount: spanSummaries.length,
+      spans: spanSummaries,
     });
   }
-  if (paidProPerfVerboseEnabled()) {
+  if (paidProVerboseDetailLogsEnabled()) {
     // eslint-disable-next-line no-console
-    console.debug("[paid-pro-waterfall-verbose]", { traceId: trace.traceId, totalMs, spans });
+    console.debug("[paid-pro-waterfall-verbose]", { traceId: trace.traceId, totalMs, spans: spanSummaries });
   }
   clearPaidProPerformanceTrace();
   paidProPerfResetScanCounters(trace.traceId);

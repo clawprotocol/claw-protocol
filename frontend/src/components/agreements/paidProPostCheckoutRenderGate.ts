@@ -22,6 +22,7 @@ import {
   PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
+import { isNonfatalGenerationFailureCode } from "./premiumAcceptancePolicy";
 
 /** Minimum plain length for a displayable degraded/local recovery Pro agreement on first review. */
 export const PAID_PRO_RECOVERY_MIN_DISPLAY_LEN = 4_000;
@@ -78,6 +79,26 @@ export function shouldSuppressPaidProGuidedCompletionUi(
 ): boolean {
   if (hasPaidProSourceOfTruth()) return true;
   return isPaidProPostCheckoutFlowActive(args);
+}
+
+/**
+ * When the first degraded json_parse body already satisfies paid Pro display requirements,
+ * skip a blocking client structural retry (second premium-full-draft) and use local recovery instead.
+ */
+export function shouldSkipPremiumStructuralRetryForDegradedDisplay(args: {
+  documentText: string;
+  intakeText: string;
+  generationOutcome?: string | null;
+  failureCode?: string | null;
+  accRejected: boolean;
+}): boolean {
+  if (!args.accRejected) return false;
+  if ((args.generationOutcome || "").trim() !== "degraded") return false;
+  const fc = (args.failureCode || "").trim();
+  if (fc !== "json_parse" && !isNonfatalGenerationFailureCode(fc)) return false;
+  const doc = (args.documentText || "").trim();
+  if (doc.length < 6_000) return false;
+  return meetsPaidProDegradedRecoveryDisplayRequirements(doc, args.intakeText);
 }
 
 export function meetsPaidProDegradedRecoveryDisplayRequirements(

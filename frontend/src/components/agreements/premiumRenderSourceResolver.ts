@@ -9,7 +9,11 @@ import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 import { shouldPreserveAcceptedServerFullDraftText } from "./proCorpusSourcePath";
 import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
+import { hasPaidProAuthoritativeValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
+import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
+import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
+import { corpusHashForScanCache } from "./paidProCorpusScanCache";
 
 const SECTION_SIGNAL_RES = [
   /\bterminat/i,
@@ -196,11 +200,15 @@ export function validatePremiumRenderBody(
     }
   }
 
-  const concise = assessConciseCommercialServicesProQuality({
-    text: t,
-    rawIntake: probe,
-    draft: opts.draft ?? null,
-  });
+  const concise =
+    opts.mode === "server" &&
+    hasPaidProAuthoritativeValidationPassed({ text: t, source: "premium_render_resolve" })
+      ? { applies: true, ok: true, docLen: t.length, requiredFactsFound: [], requiredFactsMissing: [], missingSections: [], malformedOpening: false }
+      : assessConciseCommercialServicesProQuality({
+          text: t,
+          rawIntake: probe,
+          draft: opts.draft ?? null,
+        });
   if (concise.applies && concise.ok && opts.mode === "server") {
     const kept = reasons.filter(
       (r) =>
@@ -584,6 +592,21 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
 }
 
 export function emitPremiumRenderResolveLog(res: PremiumRenderResolveResult): void {
+  if (import.meta.env.MODE === "test") return;
+  if (!paidProVerboseDetailLogsEnabled()) return;
+  const hash = corpusHashForScanCache(res.text);
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "premium-render-resolve",
+      surface: res.premium_render_source,
+      hash,
+      source: res.premium_render_reason,
+      payloadSignature: JSON.stringify(res.premium_validation_result?.reasons ?? []),
+    })
+  ) {
+    return;
+  }
+  // eslint-disable-next-line no-console
   console.info("[premium-render-resolve]", {
     premium_render_source: res.premium_render_source,
     premium_render_reason: res.premium_render_reason,
