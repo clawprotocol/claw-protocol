@@ -30,13 +30,26 @@ export function isBelowDocumentRefineSectionParentEligible(input: {
  * `premiumPaidDocumentSurface` misfires (e.g. `draftHasFullDraftExpansion` with
  * `showUpgradeToFullDraftOnReview` false).
  */
+/**
+ * Paid Pro signer setup collects signer metadata only — no agreement-change drafting panel.
+ */
+export function shouldHideAgreementChangeRequestDuringPaidProSignerSetup(args: {
+  paidProInlineSignerSetupActive?: boolean;
+  paidProRecipientSetupOnDraft?: boolean;
+}): boolean {
+  return Boolean(args.paidProInlineSignerSetupActive || args.paidProRecipientSetupOnDraft);
+}
+
 export function shouldShowPersistedRefineTextareaBox(
   parentEligible: boolean,
   /** Tier Pro / server billing / post-checkout grant — not body-marker-only. */
   entitledToBelowDocumentPersistedRefine: boolean,
   /** `premiumPaidDocumentSurface` in Intake: full pro review, not upgrade-tease starter. */
   premiumPaidDocumentSurface: boolean,
+  /** Hide while user is completing signer details (inline or recipient setup on draft). */
+  hideDuringPaidProSignerSetup = false,
 ): boolean {
+  if (hideDuringPaidProSignerSetup) return false;
   return parentEligible && entitledToBelowDocumentPersistedRefine && premiumPaidDocumentSurface;
 }
 

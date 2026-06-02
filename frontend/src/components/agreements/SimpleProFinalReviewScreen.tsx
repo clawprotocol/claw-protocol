@@ -165,6 +165,7 @@ export function SimpleProFinalReviewScreen({
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const reviewFirstErrorRef = useRef<HTMLDivElement>(null);
+  const editAgreementTextBaselineRef = useRef("");
   const [editAgreementTextOpen, setEditAgreementTextOpen] = useState(false);
   const [showUploadActions, setShowUploadActions] = useState(Boolean(uploadedSource));
   const reviewFirstActionsBlocked = Boolean(reviewFirstHandoffError?.trim());
@@ -172,11 +173,12 @@ export function SimpleProFinalReviewScreen({
   const canSuggestEdits =
     !suppressPostReviewEditUx &&
     Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
-  const canEditAgreementText = canDirectEditPlainText || canSuggestEdits;
+  const signerSetupRequired = canonicalPaidProReview && !signersReady;
+  const canEditAgreementText =
+    !signerSetupRequired && !suppressPostReviewEditUx && (canDirectEditPlainText || canSuggestEdits);
   const paidReviewBodyLen = paidReviewPlain.trim().length;
   const hasCanonicalPaidReviewBody =
     canonicalPaidProReview && paidReviewBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN;
-  const signerSetupRequired = canonicalPaidProReview && !signersReady;
   const showSignerSavedBanner =
     canonicalPaidProReview && signersReady && signerSavedMappings.length > 0;
   const finalVersionCopy = canonicalPaidProReview
@@ -216,6 +218,11 @@ export function SimpleProFinalReviewScreen({
   useEffect(() => {
     if (uploadedSource) setShowUploadActions(true);
   }, [uploadedSource]);
+
+  useEffect(() => {
+    if (!signerSetupRequired && !suppressPostReviewEditUx) return;
+    setEditAgreementTextOpen(false);
+  }, [signerSetupRequired, suppressPostReviewEditUx]);
 
   useEffect(() => {
     if (!reviewFirstHandoffError?.trim()) return;
@@ -565,12 +572,20 @@ export function SimpleProFinalReviewScreen({
               >
                 {exportBusy ? "Preparing export…" : "Download / export"}
               </button>
-              {canEditAgreementText && !suppressPostReviewEditUx ? (
+              {canEditAgreementText ? (
                 <button
                   type="button"
                   className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
                   aria-expanded={editAgreementTextOpen}
-                  onClick={() => setEditAgreementTextOpen((v) => !v)}
+                  onClick={() => {
+                    setEditAgreementTextOpen((open) => {
+                      const next = !open;
+                      if (next) {
+                        editAgreementTextBaselineRef.current = (editablePlainText ?? "").trim();
+                      }
+                      return next;
+                    });
+                  }}
                   data-testid="simple-pro-edit-agreement-text-toggle"
                 >
                   {editAgreementTextOpen ? "Hide agreement text editor" : "Edit agreement text"}
@@ -616,6 +631,18 @@ export function SimpleProFinalReviewScreen({
                   data-testid="simple-pro-save-agreement-edits"
                 >
                   {savePlainTextBusy ? "Saving…" : savePlainTextAck ? "Saved ✓" : "Save edits"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-stone-300/90 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-stone-800"
+                  disabled={savePlainTextBusy}
+                  onClick={() => {
+                    onEditablePlainTextChange?.(editAgreementTextBaselineRef.current);
+                    setEditAgreementTextOpen(false);
+                  }}
+                  data-testid="simple-pro-cancel-agreement-edits"
+                >
+                  Cancel
                 </button>
               </div>
               <p className="mt-1.5 text-[10px] leading-relaxed text-stone-500">

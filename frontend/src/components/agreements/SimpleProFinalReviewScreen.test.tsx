@@ -61,6 +61,27 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
+  it("paid Pro Test222: hides Edit agreement text while signer setup is required", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT. ${"Clause. ".repeat(400)}`}
+        signersReady={false}
+        suppressPostReviewEditUx
+        editablePlainText="Agreement plain"
+        onEditablePlainTextChange={vi.fn()}
+        onSavePlainTextEdits={vi.fn()}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("simple-pro-edit-agreement-text-toggle")).toBeNull();
+    cleanup();
+  });
+
   it("shows Edit agreement text alongside copy and export actions", () => {
     render(
       <SimpleProFinalReviewScreen
@@ -79,6 +100,32 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(within(actions).getByTestId("simple-pro-copy-agreement")).toBeTruthy();
     expect(within(actions).getByTestId("simple-pro-export-agreement")).toBeTruthy();
     expect(within(actions).getByTestId("simple-pro-edit-agreement-text-toggle")).toBeTruthy();
+    cleanup();
+  });
+
+  it("paid Pro Test222: edit mode cancel restores baseline plain without touching signers", () => {
+    const onChange = vi.fn();
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT. ${"Clause. ".repeat(400)}`}
+        signersReady
+        editablePlainText="Agreement plain body"
+        onEditablePlainTextChange={onChange}
+        onSavePlainTextEdits={vi.fn()}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("simple-pro-edit-agreement-text-toggle"));
+    fireEvent.change(screen.getByTestId("simple-pro-edit-agreement-plain-input"), {
+      target: { value: "Edited agreement text" },
+    });
+    fireEvent.click(screen.getByTestId("simple-pro-cancel-agreement-edits"));
+    expect(onChange).toHaveBeenLastCalledWith("Agreement plain body");
     cleanup();
   });
 

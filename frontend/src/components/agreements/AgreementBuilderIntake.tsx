@@ -143,6 +143,7 @@ import {
 } from "./starterProRefineCtaExperiment";
 import {
   isBelowDocumentRefineSectionParentEligible,
+  shouldHideAgreementChangeRequestDuringPaidProSignerSetup,
   shouldShowPersistedRefineTextareaBox,
   shouldShowStarterProRefineUpsellCard,
 } from "./agreementRefineBelowDocumentPolicy";
@@ -11814,6 +11815,46 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const hideAgreementChangeRequestDuringPaidProSignerSetup = useMemo(
+    () =>
+      shouldHideAgreementChangeRequestDuringPaidProSignerSetup({
+        paidProInlineSignerSetupActive: resolvePaidProInlineSignerSetupMounted({
+          hasAcceptedPaidProAuthority: hasAcceptedPaidProAuthority({
+            draft: draft ?? null,
+            intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+          }),
+          premiumPaidDocumentSurface,
+          premiumRecipientUxActive,
+          createUiStageIsDraft: createUiStage === CreateUiStage.DRAFT,
+          signerSetupLatched: paidProInlineSignerSetupLatched,
+          signaturePreparationRequested,
+        }),
+        paidProRecipientSetupOnDraft: Boolean(
+          paidProAuthoritative &&
+            createProductionTwoPane &&
+            createUiStage === CreateUiStage.DRAFT &&
+            premiumSignersSurfaceReady &&
+            !guidedSigningConfirmationActive &&
+            (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send"),
+        ),
+      }),
+    [
+      draft,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      premiumPaidDocumentSurface,
+      premiumRecipientUxActive,
+      createUiStage,
+      paidProInlineSignerSetupLatched,
+      signaturePreparationRequested,
+      paidProAuthoritative,
+      createProductionTwoPane,
+      premiumSignersSurfaceReady,
+      guidedSigningConfirmationActive,
+      createFlowPhase,
+    ],
+  );
+
   const showPersistedRefineBelowDocument = useMemo(
     () =>
       isFreeStarterReviewSurface
@@ -11822,12 +11863,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             belowDocumentRefineSectionParentEligible,
             entitledToBelowDocumentPersistedRefine,
             premiumPaidDocumentSurface,
+            hideAgreementChangeRequestDuringPaidProSignerSetup,
           ),
     [
       isFreeStarterReviewSurface,
       belowDocumentRefineSectionParentEligible,
       entitledToBelowDocumentPersistedRefine,
       premiumPaidDocumentSurface,
+      hideAgreementChangeRequestDuringPaidProSignerSetup,
     ],
   );
 
@@ -13589,6 +13632,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProCanonicalReviewSignerSetupActive ||
     (paidProRecipientSetupOnDraft && !paidProSignatureDetailsReady),
   );
+
+  useEffect(() => {
+    if (!paidProCanonicalReviewSignerSetupActive && !paidProRecipientSetupOnDraft) return;
+    if (!premiumReviewDocEditorOpen) return;
+    setPaidProCardEditDraft(null);
+    setPaidProCardAiInstruction("");
+    setPremiumReviewDocEditorOpen(false);
+  }, [
+    paidProCanonicalReviewSignerSetupActive,
+    paidProRecipientSetupOnDraft,
+    premiumReviewDocEditorOpen,
+  ]);
   const premiumRecipientPanelSendLabelOverride =
     paidProRecipientSetupOnDraft &&
     !recipientsDeferred &&
@@ -26706,7 +26761,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           }
                                           onCopyAgreement={handleSimpleProFinalReviewCopy}
                                           onExportAgreement={() => void handleSimpleProFinalReviewExport()}
-                                          suppressPostReviewEditUx={paidProSignatureDetailsReady}
+                                          suppressPostReviewEditUx={paidProCanonicalReviewSignerSetupActive}
                                           corpusRecoveryMessage={
                                             suppressPaidProFinalReviewFinalizingState({
                                               draft: draft ?? null,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CreateUiStage } from "./createUiStage";
 import {
   isBelowDocumentRefineSectionParentEligible,
+  shouldHideAgreementChangeRequestDuringPaidProSignerSetup,
   shouldShowPersistedRefineTextareaBox,
   shouldShowStarterProRefineUpsellCard,
 } from "./agreementRefineBelowDocumentPolicy";
@@ -40,6 +41,22 @@ describe("agreementRefineBelowDocumentPolicy", () => {
   it("LawDog Pro / unlocked: persisted refine textarea, not upsell", () => {
     expect(shouldShowPersistedRefineTextareaBox(true, true, true)).toBe(true);
     expect(shouldShowStarterProRefineUpsellCard(true, true, false)).toBe(false);
+  });
+
+  it("hides persisted refine during paid Pro signer setup", () => {
+    expect(
+      shouldHideAgreementChangeRequestDuringPaidProSignerSetup({
+        paidProInlineSignerSetupActive: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldHideAgreementChangeRequestDuringPaidProSignerSetup({
+        paidProRecipientSetupOnDraft: true,
+      }),
+    ).toBe(true);
+    expect(shouldHideAgreementChangeRequestDuringPaidProSignerSetup({})).toBe(false);
+    expect(shouldShowPersistedRefineTextareaBox(true, true, true, true)).toBe(false);
+    expect(shouldShowPersistedRefineTextareaBox(true, true, true, false)).toBe(true);
   });
 
   it("suppresses starter upsell when premium upsell is suppressed (e.g. workspace entitled)", () => {
