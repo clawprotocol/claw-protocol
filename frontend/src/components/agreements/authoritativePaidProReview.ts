@@ -40,6 +40,7 @@ export type AuthoritativePaidProReviewInput = {
   isPaidPro?: boolean;
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
+  premiumRenderSource?: string | null;
 };
 
 function finalizeAuthoritativePaidProReviewPlain(text: string): string {
@@ -59,6 +60,9 @@ export function resolveAuthoritativePaidProReviewPlain(
   const postCheckoutRecovery = resolvePaidProPostCheckoutFirstReviewPlain({
     draft: args?.draft ?? null,
     intakeText: args?.intakeText ?? null,
+    premiumRenderSource: args?.premiumRenderSource ?? null,
+    winningPremiumBodyText:
+      String(args?.draft?.premium_full_document_text ?? "").trim() || undefined,
   });
   if (postCheckoutRecovery.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
     return finalizeAuthoritativePaidProReviewPlain(postCheckoutRecovery);

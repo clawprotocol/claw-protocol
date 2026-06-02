@@ -7,6 +7,9 @@ import {
   type AuthoritativePaidProReviewInput,
 } from "./authoritativePaidProReview";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
+import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { resolvePaidProPostCheckoutRecoveryDisplayPlain } from "./paidProPostCheckoutRenderGate";
+import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import { getPaidProSourceOfTruth, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 export function shouldBlockStarterRegenerationAfterPaidAuthority(
@@ -62,7 +65,7 @@ export function shouldIgnoreLatePremiumPipelineResult(args: {
 export type ProDeliveryTrackCanonicalCorpus = {
   hasCanonicalCorpus: boolean;
   hash: string | null;
-  source: "frozen_canonical" | "paid_pro_source_of_truth" | "none";
+  source: "frozen_canonical" | "paid_pro_source_of_truth" | "post_checkout_recovery_display" | "none";
 };
 
 /** Delivery-track diagnostics: prefer frozen canonical, then paid SoT (phase must not clear hash). */
@@ -81,6 +84,30 @@ export function resolveProDeliveryTrackCanonicalCorpus(): ProDeliveryTrackCanoni
       hasCanonicalCorpus: true,
       hash: record.hash,
       source: "paid_pro_source_of_truth",
+    };
+  }
+  const snap = readPremiumCompletionSnapshot();
+  const recovery = resolvePaidProPostCheckoutRecoveryDisplayPlain({
+    draft: snap?.premiumDraft ?? null,
+    intakeText: null,
+    winningPremiumBodyText: snap?.premiumWinningBodyText,
+    premiumRenderSource: snap?.premiumPipelineRenderSource,
+    premiumDegradedServerLocalRecovery:
+      snap?.premiumPipelineRenderSource === "premium_degraded_server_local_recovery",
+  });
+  if (recovery.length > 0) {
+    const frozen = getFrozenCanonicalAgreementCorpus();
+    if (frozen?.hash && frozen.frozen) {
+      return {
+        hasCanonicalCorpus: true,
+        hash: frozen.hash,
+        source: "post_checkout_recovery_display",
+      };
+    }
+    return {
+      hasCanonicalCorpus: true,
+      hash: fingerprintAgreementBody(recovery),
+      source: "post_checkout_recovery_display",
     };
   }
   return { hasCanonicalCorpus: false, hash: null, source: "none" };

@@ -73,6 +73,24 @@ describe("premiumAuthoritativeVisibleCommit", () => {
     ).toBe(true);
   });
 
+  it("shouldSkipAgreementDocLivePreviewSync for post-checkout degraded local recovery corpus", () => {
+    const body = "x".repeat(4_500);
+    expect(
+      shouldSkipAgreementDocLivePreviewSync({
+        premiumPersistedFlowActive: true,
+        snapshot: {
+          ...snapAuthoritative(4_500),
+          premiumAccepted: false,
+          premiumPipelineRenderSource: "premium_degraded_server_local_recovery",
+          premiumWinningBodyText: body,
+          premiumReadonlyPlainText: body,
+        },
+        pipelineRenderSourceRef: "premium_degraded_server_local_recovery",
+        hydratedBodyTrimmed: body,
+      }),
+    ).toBe(true);
+  });
+
   it("shouldSkipAgreementDocLivePreviewSync during send workflow phases", () => {
     expect(
       shouldSkipAgreementDocLivePreviewSync({

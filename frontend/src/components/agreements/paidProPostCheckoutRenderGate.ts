@@ -5,6 +5,11 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  buildCanonicalAgreementSnapshot,
+  freezeCanonicalAgreementSnapshot,
+} from "./canonicalAgreementSnapshot";
+import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -154,6 +159,116 @@ export function resolvePaidProPostCheckoutRecoveryDisplayPlain(args?: {
     }
   }
   return "";
+}
+
+export function isPaidProPostCheckoutRecoveryReviewActive(args?: {
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
+  premiumRenderSource?: string | null;
+  premiumCheckoutCompleted?: boolean;
+}): boolean {
+  if (hasPaidProSourceOfTruth()) return false;
+  if (!args?.premiumCheckoutCompleted && !hasPaidPremiumCompletionSession()) return false;
+  const plain = resolvePaidProPostCheckoutFirstReviewPlain({
+    ...args,
+    winningPremiumBodyText:
+      String(args?.draft?.premium_full_document_text ?? "").trim() || undefined,
+  });
+  return plain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
+}
+
+/** Paid Pro first-review display (SoT or post-checkout recovery) — does not imply SoT acceptance. */
+export function isPaidProFirstReviewDisplayActive(args?: {
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
+  premiumRenderSource?: string | null;
+  premiumCheckoutCompleted?: boolean;
+  isPaidPro?: boolean;
+}): boolean {
+  if (hasPaidProSourceOfTruth()) return true;
+  return isPaidProPostCheckoutRecoveryReviewActive({
+    intakeText: args?.intakeText,
+    draft: args?.draft,
+    premiumRenderSource: args?.premiumRenderSource,
+    premiumCheckoutCompleted: args?.premiumCheckoutCompleted,
+  });
+}
+
+export function resolvePaidProFirstReviewDisplayPlain(args?: {
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
+  premiumRenderSource?: string | null;
+  premiumCheckoutCompleted?: boolean;
+}): string {
+  if (hasPaidProSourceOfTruth()) {
+    return "";
+  }
+  return resolvePaidProPostCheckoutFirstReviewPlain({
+    ...args,
+    winningPremiumBodyText:
+      String(args?.draft?.premium_full_document_text ?? "").trim() || undefined,
+  });
+}
+
+/**
+ * Freeze display-only canonical corpus from post-checkout recovery (never establishes paidProSourceOfTruth).
+ */
+export function freezePaidProPostCheckoutRecoveryCanonicalSnapshot(args: {
+  text: string;
+  draft?: ParsedDraftShape | null;
+  intakeText?: string | null;
+  reviewSessionId?: string | null;
+}): { hash: string; len: number } | null {
+  const canonicalText = (args.text || "").trim();
+  if (canonicalText.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) return null;
+  const parties = ((args.draft?.parties ?? []) as Array<{ name?: string; role?: string; email?: string }>)
+    .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
+    .filter((p) => p.name.trim());
+  try {
+    const snapshot = buildCanonicalAgreementSnapshot({
+      surface: "paid_pro_post_checkout_recovery_display",
+      tier: "pro",
+      candidates: [
+        {
+          source: "last_known_good_authoritative",
+          text: canonicalText,
+        },
+      ],
+      intakeText: args.intakeText ?? "",
+      parties,
+      signerState: { complete: false, signerCount: Math.max(2, parties.length) },
+      minLen: PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
+      reviewSessionId: args.reviewSessionId ?? null,
+    });
+    const frozen = freezeCanonicalAgreementSnapshot(snapshot, "canonical_working_draft");
+    if (!frozen?.hash) return null;
+    return { hash: frozen.hash, len: frozen.len };
+  } catch {
+    return { hash: fingerprintAgreementBody(canonicalText), len: canonicalText.length };
+  }
+}
+
+export function shouldBlockStarterPreviewOverrideForPaidPostCheckout(args?: {
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
+  premiumRenderSource?: string | null;
+  premiumPaidDocumentSurface?: boolean;
+  premiumCheckoutCompleted?: boolean;
+}): boolean {
+  if (!args?.premiumPaidDocumentSurface) return false;
+  return isPaidProFirstReviewDisplayActive({
+    intakeText: args.intakeText,
+    draft: args.draft,
+    premiumRenderSource: args.premiumRenderSource,
+    premiumCheckoutCompleted: args.premiumCheckoutCompleted,
+  });
+}
+
+export function shouldHideLegacyPaidProDraftPanels(args: {
+  premiumPaidDocumentSurface: boolean;
+  paidProFirstReviewDisplayActive: boolean;
+}): boolean {
+  return Boolean(args.premiumPaidDocumentSurface && args.paidProFirstReviewDisplayActive);
 }
 
 /** First-review plain for post-checkout recovery (never establishes SoT). */

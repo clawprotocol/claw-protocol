@@ -19,6 +19,7 @@ import type { FreeReviewSurfaceSource } from "./freeStreamlineDraftReview";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { shouldBlockStarterRegenerationAfterPaidAuthority } from "./paidProPostAcceptanceStateGuard";
+import { isPaidProFirstReviewDisplayActive } from "./paidProPostCheckoutRenderGate";
 
 export const FREE_STARTER_REVIEW_TITLE = "Review your draft";
 export const FREE_STARTER_REVIEW_SUBTITLE =
@@ -35,6 +36,9 @@ export type ResolveReviewShellChromeInput = {
   paidProReviewReadyBase: boolean;
   guidedCompletionActive: boolean;
   premiumCheckoutCompleted?: boolean;
+  intakeText?: string | null;
+  draft?: import("./intakeSmartDefaults").ParsedDraftShape | null;
+  premiumRenderSource?: string | null;
 };
 
 export function resolveFreeStarterReviewShellActive(input: {
@@ -44,7 +48,21 @@ export function resolveFreeStarterReviewShellActive(input: {
   paidProAuthoritative: boolean;
   /** Hard invariant: any completed paid checkout / QA bypass forbids the starter shell. */
   premiumCheckoutCompleted?: boolean;
+  intakeText?: string | null;
+  draft?: import("./intakeSmartDefaults").ParsedDraftShape | null;
+  premiumRenderSource?: string | null;
 }): boolean {
+  if (
+    isPaidProFirstReviewDisplayActive({
+      premiumCheckoutCompleted: input.premiumCheckoutCompleted,
+      intakeText: input.intakeText,
+      draft: input.draft,
+      premiumRenderSource: input.premiumRenderSource,
+      isPaidPro: input.paidProAuthoritative,
+    })
+  ) {
+    return false;
+  }
   // HARD INVARIANT: isPaidPro === true (checkout completed) => free starter shell MUST NOT mount,
   // even when the authoritative corpus failed validation. Paid surfaces fail closed into the
   // explicit recovery state, never into a silent starter degrade.
@@ -80,6 +98,9 @@ export function resolveReviewShellChrome(input: ResolveReviewShellChromeInput): 
     premiumPaidDocumentSurface: input.premiumPaidDocumentSurface,
     paidProAuthoritative: input.paidProAuthoritative,
     premiumCheckoutCompleted: input.premiumCheckoutCompleted,
+    intakeText: input.intakeText,
+    draft: input.draft,
+    premiumRenderSource: input.premiumRenderSource,
   });
   const paidProReviewReady = input.paidProReviewReadyBase && !blockPaidProShell;
 

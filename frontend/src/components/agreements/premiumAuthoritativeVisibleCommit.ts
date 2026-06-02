@@ -1,6 +1,10 @@
 import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import { isPremiumSendWorkflowPhase } from "./committedReviewArtifact";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import {
+  isPaidProPostCheckoutRecoveryPipelineSource,
+  PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
+} from "./paidProPostCheckoutRenderGate";
 
 /**
  * Live preview sync must not overwrite POST /premium-full-draft text once an authoritative pipeline
@@ -33,7 +37,19 @@ export function shouldSkipAgreementDocLivePreviewSync(args: {
     args.premiumPersistedFlowActive &&
     (snapBody.length >= 500 || pipelineRefAuthoritative);
 
-  return snapshotAuthoritative || persistedFlowWithCorpus || pipelineRefAuthoritative;
+  const recoveryPipeline =
+    isPaidProPostCheckoutRecoveryPipelineSource(String(snap?.premiumPipelineRenderSource || "")) ||
+    isPaidProPostCheckoutRecoveryPipelineSource(String(args.pipelineRenderSourceRef || ""));
+  const recoveryBodyLen = Math.max(snapBody.length, args.hydratedBodyTrimmed.length);
+  const postCheckoutRecoveryAuthoritative =
+    recoveryPipeline && recoveryBodyLen >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
+
+  return (
+    snapshotAuthoritative ||
+    persistedFlowWithCorpus ||
+    pipelineRefAuthoritative ||
+    postCheckoutRecoveryAuthoritative
+  );
 }
 
 /** Snapshot persisted but React doc state never received the winning corpus (duplicate applySuccess guard). */

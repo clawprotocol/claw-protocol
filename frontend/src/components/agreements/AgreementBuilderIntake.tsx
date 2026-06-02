@@ -561,7 +561,13 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
+  freezePaidProPostCheckoutRecoveryCanonicalSnapshot,
+  isPaidProFirstReviewDisplayActive,
+  isPaidProPostCheckoutRecoveryPipelineSource,
+  isPaidProPostCheckoutRecoveryReviewActive,
+  PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
   resolvePaidProPostCheckoutRecoveryDisplayPlain,
+  shouldHideLegacyPaidProDraftPanels,
   shouldSuppressPaidProGuidedCompletionUi,
 } from "./paidProPostCheckoutRenderGate";
 import {
@@ -4728,7 +4734,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
     }
     try {
-      const canonicalReviewPlain = buildPreviewForCurrentTier(nextDraft);
+      const intakeForCanonical = currentPremiumMergedIntakeKey || intakeCombined;
+      const pipelineForCanonical =
+        readPremiumCompletionSnapshot()?.premiumPipelineRenderSource ??
+        lastPremiumPipelineRenderSourceRef.current;
+      const recoveryDisplayPlain = proReviewDisplay
+        ? resolvePaidProPostCheckoutRecoveryDisplayPlain({
+            draft: nextDraft,
+            intakeText: intakeForCanonical,
+            winningPremiumBodyText: String(nextDraft.premium_full_document_text ?? "").trim(),
+            hydratedPremiumBody: hydratedPremiumBodyRef.current.trim(),
+            premiumRenderSource: pipelineForCanonical,
+          })
+        : "";
+      const premiumFullOnDraft = String(nextDraft.premium_full_document_text ?? "").trim();
+      const recoveryFromDraftPremiumFull =
+        proReviewDisplay &&
+        isPaidProPostCheckoutRecoveryPipelineSource(pipelineForCanonical) &&
+        premiumFullOnDraft.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
+          ? premiumFullOnDraft
+          : "";
+      const canonicalReviewPlain =
+        recoveryDisplayPlain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
+          ? recoveryDisplayPlain
+          : recoveryFromDraftPremiumFull.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
+            ? recoveryFromDraftPremiumFull
+            : proReviewDisplay && premiumFullOnDraft.length >= 500
+              ? premiumFullOnDraft
+              : buildPreviewForCurrentTier(nextDraft);
       const draftParties = ((nextDraft as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? [])
         .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
         .filter((p) => p.name.trim());
@@ -4748,6 +4781,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reviewSessionId: reviewAgreementIdRef.current || getOrInitSessionAgreementGenerationId(),
       });
       freezeCanonicalAgreementSnapshot(snapshot, snapshot.source);
+      if (
+        proReviewDisplay &&
+        canonicalReviewPlain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+        isPaidProPostCheckoutRecoveryPipelineSource(pipelineForCanonical)
+      ) {
+        freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
+          text: canonicalReviewPlain,
+          draft: nextDraft,
+          intakeText: intakeForCanonical,
+          reviewSessionId: reviewAgreementIdRef.current || getOrInitSessionAgreementGenerationId(),
+        });
+      }
     } catch (e) {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -7378,6 +7423,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             readAuthoritativeSnapshotBody(readPremiumCompletionSnapshot());
           if (recoveryBodyForDisplay.length >= 500) {
             setAgreementDocumentText(recoveryBodyForDisplay);
+            if (recoveryBodyForDisplay.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
+              freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
+                text: recoveryBodyForDisplay,
+                draft: draftForReview,
+                intakeText: mergedIntake,
+                reviewSessionId: getOrInitSessionAgreementGenerationId(),
+              });
+            }
           } else {
             try {
               setAgreementDocumentText(
@@ -11177,14 +11230,59 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [premiumPersistedFlowActive, premiumSendPathUnlocked, reviewDocRefreshTick, premiumSurfaceGateTick],
   );
 
+  const paidProPostCheckoutFirstReviewActive = useMemo(
+    () =>
+      isPaidProPostCheckoutRecoveryReviewActive({
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumCheckoutCompleted,
+      }),
+    [
+      draft,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      premiumTruthPipelineSource,
+      premiumCheckoutCompleted,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
+  );
+
+  const paidProFirstReviewDisplayActive = useMemo(
+    () =>
+      hasPaidProSourceOfTruth() ||
+      paidProPostCheckoutFirstReviewActive ||
+      isPaidProFirstReviewDisplayActive({
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumCheckoutCompleted,
+        isPaidPro: paidProAuthoritative,
+      }),
+    [
+      paidProPostCheckoutFirstReviewActive,
+      paidProAuthoritative,
+      draft,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      premiumTruthPipelineSource,
+      premiumCheckoutCompleted,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
+  );
+
   const isAuthoritativePaidProReviewActive = useMemo(
     () =>
+      paidProFirstReviewDisplayActive ||
       isAuthoritativePaidProReview({
         isPaidPro: paidProAuthoritative || hasPaidProSourceOfTruth(),
         draft: draft ?? null,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       }),
     [
+      paidProFirstReviewDisplayActive,
       paidProAuthoritative,
       draft,
       currentPremiumMergedIntakeKey,
@@ -11212,6 +11310,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ? resolveAuthoritativePaidProReviewPlain({
             draft: draft ?? null,
             intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+            premiumRenderSource:
+              premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
           })
         : "",
     [
@@ -11548,7 +11648,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const useStarterDocumentPaperSurface = Boolean(
-    isFreeStreamlineDraftReview && createUiStage === CreateUiStage.DRAFT && !isAuthoritativePaidProReviewActive,
+    isFreeStreamlineDraftReview &&
+      createUiStage === CreateUiStage.DRAFT &&
+      !paidProFirstReviewDisplayActive &&
+      !isAuthoritativePaidProReviewActive,
   );
 
   const freeStarterReviewShellActive = useMemo(
@@ -11559,6 +11662,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumPaidDocumentSurface,
         paidProAuthoritative,
         premiumCheckoutCompleted,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        draft: draft ?? null,
+        premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
       }),
     [
       isFreeStreamlineDraftReview,
@@ -11566,9 +11672,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPaidDocumentSurface,
       paidProAuthoritative,
       premiumCheckoutCompleted,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      premiumTruthPipelineSource,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
     ],
+  );
+
+  const hideLegacyPaidProDraftPanels = useMemo(
+    () =>
+      shouldHideLegacyPaidProDraftPanels({
+        premiumPaidDocumentSurface,
+        paidProFirstReviewDisplayActive,
+      }),
+    [premiumPaidDocumentSurface, paidProFirstReviewDisplayActive],
   );
 
   const reviewShellChrome = useMemo(
@@ -11578,17 +11696,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         isFreeStarterReviewSurface,
         premiumPaidDocumentSurface,
         paidProAuthoritative,
-        paidProReviewReadyBase,
+        paidProReviewReadyBase:
+          paidProReviewReadyBase ||
+          computeSimpleCreatePaidProReviewReady({
+            simpleProductFlow,
+            liveWorkspaceTwoPane,
+            paidProAuthoritative: paidProAuthoritative || paidProPostCheckoutFirstReviewActive,
+            createUiStage,
+            displayPhase,
+          }),
         guidedCompletionActive: false,
         premiumCheckoutCompleted,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        draft: draft ?? null,
+        premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
       }),
     [
       isFreeStreamlineDraftReview,
       isFreeStarterReviewSurface,
       premiumPaidDocumentSurface,
       paidProAuthoritative,
+      paidProPostCheckoutFirstReviewActive,
       paidProReviewReadyBase,
+      simpleProductFlow,
+      liveWorkspaceTwoPane,
+      createUiStage,
+      displayPhase,
       premiumCheckoutCompleted,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      premiumTruthPipelineSource,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
     ],
@@ -11643,7 +11780,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPaidDocumentSurface &&
           createUiStage === CreateUiStage.DRAFT &&
           draft &&
-          productionDraftPrimaryReviewSurface,
+          productionDraftPrimaryReviewSurface &&
+          !hideLegacyPaidProDraftPanels &&
+          !paidProReviewReady,
       ),
     [
       createProductionTwoPane,
@@ -11652,6 +11791,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createUiStage,
       draft,
       productionDraftPrimaryReviewSurface,
+      hideLegacyPaidProDraftPanels,
+      paidProReviewReady,
     ],
   );
 
@@ -13711,7 +13852,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const adtHasPremiumMarkers = /\b(lawdog pro|commercial safeguards|raw-intent premium protections|execution\s+—\s+signatures|signatures)\b/i.test(
       adt,
     );
+    const recoveryAuthoritative = resolvePaidProPostCheckoutRecoveryDisplayPlain({
+      draft: draft ?? null,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      winningPremiumBodyText: winner || pipelineBody || hydratedBody,
+      hydratedPremiumBody: hydratedBody,
+      premiumRenderSource:
+        premiumTruthPipelineSource ??
+        lastPremiumPipelineRenderSourceRef.current ??
+        snapObj?.premiumPipelineRenderSource,
+      premiumDegradedServerLocalRecovery:
+        (premiumTruthPipelineSource ?? snapObj?.premiumPipelineRenderSource) ===
+        "premium_degraded_server_local_recovery",
+    });
     const explicitAuthoritative =
+      (recoveryAuthoritative.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ? recoveryAuthoritative : "") ||
       (lastKnownGoodAuthoritativeDraftRef.current || "").trim() ||
       (lastPremiumWinningCorpusRef.current || "").trim() ||
       winner ||
@@ -13921,7 +14076,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const simpleProFinalReviewShellActive = useMemo(() => {
     if (
-      acceptedPaidProAuthorityActive &&
+      (acceptedPaidProAuthorityActive || paidProPostCheckoutFirstReviewActive) &&
       premiumPaidDocumentSurface &&
       !premiumRecipientUxActive &&
       createUiStage === CreateUiStage.DRAFT
@@ -13931,6 +14086,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return simpleProFinalReviewActive && paidProRuntimeAuthority.canRenderProReviewShell;
   }, [
     acceptedPaidProAuthorityActive,
+    paidProPostCheckoutFirstReviewActive,
     premiumPaidDocumentSurface,
     premiumRecipientUxActive,
     createUiStage,
@@ -18308,12 +18464,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const paidReviewAuthorityPlain = resolveAuthoritativePaidProReviewPlain({
       draft: draft ?? null,
       intakeText: intakeForPolish,
+      premiumRenderSource:
+        premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
     });
     const paidProReview = getPaidProDocumentForSurface("review", {
       draft: draft ?? null,
       intakeText: intakeForPolish,
     });
     const raw = (
+      (paidProPostCheckoutRecoveryPlain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
+        ? paidProPostCheckoutRecoveryPlain
+        : "") ||
       paidProSignerHydratedPreviewPlain.trim() ||
       (signingSnapshotActive ? readAuthoritativeSigningCorpus() : "") ||
       paidProReview?.text ||
@@ -18361,6 +18522,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewDocRefreshTick,
     premiumSurfaceGateTick,
     authoritativePaidProReviewPlain,
+    paidProPostCheckoutRecoveryPlain,
     paidProSignerHydratedPreviewPlain,
     deferPaidProReviewRenderSignerRepair,
   ]);
@@ -22843,6 +23005,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const handleSimpleProFinalReviewCopy = React.useCallback(() => {
     const intakeForCopy = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const recoveryCopyPlain = resolvePaidProPostCheckoutRecoveryDisplayPlain({
+      draft: draft ?? null,
+      intakeText: intakeForCopy,
+      premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+    });
     const hydratedCopy = resolvePaidProFinalHydratedCorpusForSurface("copy", {
       draft: draft ?? null,
       intakeText: intakeForCopy,
@@ -22865,6 +23032,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ? paidProCopy.text
       : polishedAuthoritativeProPlainForCopy(
           [
+            recoveryCopyPlain,
+            authoritativePaidProReviewPlain,
             finalized?.ok ? finalized.body : "",
             acceptedPremiumCorpusPickOpts.acceptedAuthoritativeBody,
             finalizedSigningCorpusRef.current,
