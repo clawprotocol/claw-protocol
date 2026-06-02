@@ -1,0 +1,76 @@
+"""
+Paid Pro premium-full-draft server timing — QA/dev only.
+
+Emits compact span data in X-Claw-Paid-Pro-Server-Timing when the client sends
+X-Claw-Paid-Pro-Perf-Trace: 1 or CLAW_PAID_PRO_PERF_TRACE=1.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from starlette.requests import Request
+
+
+def paid_pro_perf_trace_requested(request: Request) -> bool:
+    hdr = (request.headers.get("x-claw-paid-pro-perf-trace") or "").strip()
+    if hdr == "1":
+        return True
+    return os.environ.get("CLAW_PAID_PRO_PERF_TRACE", "").strip() == "1"
+
+
+@dataclass
+class PaidProServerTiming:
+    trace_id: str = ""
+    session_generation_id: str = ""
+    intake_fingerprint: str = ""
+    _t0: float = field(default_factory=time.perf_counter)
+    spans: List[Dict[str, Any]] = field(default_factory=list)
+
+    def mark_instant(self, name: str, **meta: Any) -> None:
+        at_ms = round((time.perf_counter() - self._t0) * 1000)
+        row: Dict[str, Any] = {"name": name, "startMs": at_ms, "durationMs": 0}
+        for k, v in meta.items():
+            if v is not None:
+                row[k] = v
+        self.spans.append(row)
+
+    def record(self, name: str, duration_ms: float, **meta: Any) -> None:
+        dur = max(0, round(duration_ms))
+        end_ms = round((time.perf_counter() - self._t0) * 1000)
+        start_ms = max(0, end_ms - dur)
+        row: Dict[str, Any] = {"name": name, "startMs": start_ms, "durationMs": dur}
+        for k, v in meta.items():
+            if v is not None:
+                row[k] = v
+        self.spans.append(row)
+
+    def to_wire(self) -> Dict[str, Any]:
+        total_ms = round((time.perf_counter() - self._t0) * 1000)
+        return {
+            "traceId": self.trace_id,
+            "sessionGenerationId": self.session_generation_id,
+            "intakeFingerprint": self.intake_fingerprint,
+            "totalMs": total_ms,
+            "spans": self.spans,
+        }
+
+    def response_header_value(self) -> str:
+        return json.dumps(self.to_wire(), ensure_ascii=False, separators=(",", ":"))
+
+
+def maybe_attach_server_timing_header(
+    response: Any,
+    timing: Optional[PaidProServerTiming],
+) -> Any:
+    if timing is None:
+        return response
+    try:
+        response.headers["X-Claw-Paid-Pro-Server-Timing"] = timing.response_header_value()
+    except Exception:
+        pass
+    return response

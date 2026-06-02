@@ -109,10 +109,12 @@ import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible"
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
-  startPaidProPerformanceTrace,
+  ensurePaidProPerformanceTrace,
+  readActivePaidProPerformanceTrace,
   paidProPerfSpanStart,
   paidProPerfSpanEnd,
   paidProPerfRecordInstant,
+  paidProPerfRecordE2ePhase,
   finishPaidProPerformanceWaterfall,
 } from "./paidProPerformanceTrace";
 import {
@@ -196,6 +198,8 @@ export type PremiumCompletionInput = {
   isPremiumRequestStillValid?: () => boolean;
   /** Why premium-full-draft is being invoked (checkout vs explicit retry). */
   premiumGenerationCallReason?: PremiumGenerationCallReason;
+  /** When true, waterfall finishes after review surface visible (checkout path). */
+  deferWaterfallFinish?: boolean;
 };
 
 export type PremiumRecipientCandidate = { name: string; email: string; role: string };
@@ -1046,15 +1050,19 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   const intakeFingerprintEarly =
     input.premiumRequestIntakeFingerprint ?? shortIntakeFingerprint(rawIntake);
   const traceId = input.agreementGenerationId ?? intakeFingerprintEarly;
-  startPaidProPerformanceTrace({
+  ensurePaidProPerformanceTrace({
     traceId,
     sessionGenerationId: input.agreementGenerationId ?? null,
     intakeFingerprint: intakeFingerprintEarly,
+    deferFinish: input.deferWaterfallFinish ?? false,
   });
+  paidProPerfRecordE2ePhase("premium_completion_started");
   try {
   return await runPremiumCompletionInner(input, { traceId, intakeFingerprintEarly });
   } finally {
-    finishPaidProPerformanceWaterfall();
+    if (!readActivePaidProPerformanceTrace()?.deferFinish) {
+      finishPaidProPerformanceWaterfall();
+    }
     assertAtMostOneCheckoutPremiumGenerationCall();
   }
 }
@@ -2090,6 +2098,8 @@ async function runPremiumCompletionInner(
           serverGenerationDegraded = null;
         }
       }
+      const clientGatesStartedAt =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
       let acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
       const intakeS = (rawForSoT || rawIntake).trim();
       const founderIntent = isFounderEquityVestingIntent(intakeS);
@@ -2281,6 +2291,14 @@ async function runPremiumCompletionInner(
           { docLen: doc.length, outcome: placeholderClientOk ? "ok" : "blocked" },
         );
       }
+      paidProPerfRecordE2ePhase("frontend_client_gates", {
+        durationMs: Math.round(
+          (typeof performance !== "undefined" ? performance.now() : Date.now()) - clientGatesStartedAt,
+        ),
+        accOk: acc.ok,
+        vPaidOk: vPaid.ok,
+        placeholderOk: placeholderClientOk,
+      });
       const structuralFatalCount = countStructuralFatals(acc.reasons);
       const longAdvisoryAccept = shouldPreserveLongPremiumDespiteSoftGateFailure({
         bodyLen: (doc || "").length,
@@ -2441,6 +2459,10 @@ async function runPremiumCompletionInner(
           structuralFatalCount,
           generationOutcome: (effectiveFull.generation_outcome || "").trim(),
           renderSource: premiumRenderSource,
+        });
+        paidProPerfRecordE2ePhase("authoritative_commit", {
+          renderSource: premiumRenderSource,
+          docLen: doc.length,
         });
         logPremiumCompletionDebug({
           stage: "pipeline_client_gates_passed",

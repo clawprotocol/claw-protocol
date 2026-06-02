@@ -289,6 +289,10 @@ import {
   type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
 import { ensurePremiumCompletion } from "./premiumCompletionEnsure";
+import {
+  beginPaidProPaymentToReviewTrace,
+  completePaidProPaymentToReviewTrace,
+} from "./paidProPaymentToReviewTrace";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import {
   clearPaidPremiumCompletionSession,
@@ -5805,6 +5809,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumResumeNotesLen: (resumeSnap?.premiumUpgradeNotes ?? "").trim().length,
         pendCapturedLen: pendCaptured.length,
       });
+      beginPaidProPaymentToReviewTrace({
+        traceId: getOrInitSessionAgreementGenerationId(),
+        sessionGenerationId: getOrInitSessionAgreementGenerationId(),
+        intakeText: rawIntakeBase,
+      });
 
       const docSnap = agreementDocumentTextRef.current.trim();
       if (docSnap) {
@@ -6873,6 +6882,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reason: "premium_rewrite_request_success_immediate_commit",
             premiumRenderResolveSource: resolvedPersist.premium_render_source,
           });
+          completePaidProPaymentToReviewTrace({ renderSource: result.premiumRenderSource });
           if (extendedWaitAtApplyStart && !hardFailopenAtApplyStart) {
             console.info("[premium-authoritative-visible-surface] applied_after_soft_timeout", {
               bodyLen: snapshotPlain.length,
@@ -6886,6 +6896,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
           setAgreementDocumentText(finalDoc);
           agreementDocumentDirtyRef.current = false;
+          completePaidProPaymentToReviewTrace({ renderSource: result.premiumRenderSource });
         }
         logPremiumLiveTrace("premium_pipeline_output", {
           source_id: "ensurePremiumCompletion_result",
@@ -7753,6 +7764,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       premiumRequestIntakeFingerprint: sessionFpForPass,
                       isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
                       premiumGenerationCallReason: "checkout_completion",
+                      deferWaterfallFinish: true,
                     }),
                     premiumCompletionAttemptTimeoutMs,
                     "premium_completion_attempt",

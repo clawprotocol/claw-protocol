@@ -3,7 +3,7 @@
  */
 
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
-import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
+import { paidProPerfTraceEnabled, paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 
 export type PaidProPerformanceSpanName =
   | "intake_classification"
@@ -23,6 +23,28 @@ export type PaidProPerformanceSpanName =
   | "html_render"
   | "vs01_eligibility";
 
+/** E2E payment → first review milestones (instrumentation). */
+export type PaidProE2ePhaseName =
+  | "checkout_return_detected"
+  | "premium_completion_started"
+  | "frontend_request_assembled"
+  | "premium_http_fetch_started"
+  | "frontend_response_received"
+  | "frontend_parse_normalize"
+  | "frontend_client_gates"
+  | "authoritative_commit"
+  | "review_surface_visible"
+  | "backend_request_received"
+  | "backend_context_assembly"
+  | "backend_llm_primary"
+  | "backend_llm_repair"
+  | "backend_llm_sanitized_retry"
+  | "backend_parse_normalize"
+  | "backend_validation"
+  | "backend_response_serialize";
+
+export type PaidProPerformanceSpanNameOrE2e = PaidProPerformanceSpanName | PaidProE2ePhaseName;
+
 export type PaidProPerformanceSpanMeta = {
   attempt?: number;
   requestReason?: string;
@@ -38,7 +60,7 @@ export type PaidProPerformanceSpanMeta = {
 };
 
 export type PaidProPerformanceSpan = {
-  name: PaidProPerformanceSpanName;
+  name: PaidProPerformanceSpanNameOrE2e;
   startMs: number;
   endMs: number;
   durationMs: number;
@@ -47,6 +69,13 @@ export type PaidProPerformanceSpan = {
   outcome?: string;
   failureCode?: string;
   meta?: PaidProPerformanceSpanMeta;
+};
+
+export type PaidProServerTimingSpanWire = {
+  name: string;
+  startMs: number;
+  durationMs: number;
+  [key: string]: string | number | boolean | null | undefined;
 };
 
 export type PaidProWaterfallSpanSummary = {
@@ -71,6 +100,7 @@ export type PaidProPerformanceTrace = {
   sessionGenerationId: string | null;
   intakeFingerprint: string;
   startedAtMs: number;
+  deferFinish?: boolean;
   spans: PaidProPerformanceSpan[];
 };
 
@@ -90,26 +120,38 @@ function nowMs(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
-/** One compact waterfall per run in prod/QA; scattered span logs only when verbose. */
+/** One compact waterfall per run in dev/QA trace mode; not for normal production users. */
 function shouldEmitPaidProWaterfall(): boolean {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return false;
-  return true;
+  return paidProPerfTraceEnabled() || Boolean(import.meta.env?.DEV);
 }
 
 export function startPaidProPerformanceTrace(args: {
   traceId: string;
   sessionGenerationId?: string | null;
   intakeFingerprint: string;
+  deferFinish?: boolean;
 }): PaidProPerformanceTrace {
   activeTrace = {
     traceId: args.traceId,
     sessionGenerationId: args.sessionGenerationId ?? null,
     intakeFingerprint: args.intakeFingerprint,
     startedAtMs: nowMs(),
+    deferFinish: args.deferFinish ?? false,
     spans: [],
   };
   openSpanStarts.clear();
   return activeTrace;
+}
+
+export function ensurePaidProPerformanceTrace(args: {
+  traceId: string;
+  sessionGenerationId?: string | null;
+  intakeFingerprint: string;
+  deferFinish?: boolean;
+}): PaidProPerformanceTrace {
+  if (activeTrace) return activeTrace;
+  return startPaidProPerformanceTrace(args);
 }
 
 export function readActivePaidProPerformanceTrace(): PaidProPerformanceTrace | null {
@@ -156,7 +198,7 @@ export function paidProPerfSpanEnd(
 }
 
 export function paidProPerfRecordInstant(
-  name: PaidProPerformanceSpanName,
+  name: PaidProPerformanceSpanNameOrE2e,
   durationMs: number,
   meta?: {
     docLen?: number;
@@ -180,6 +222,60 @@ export function paidProPerfRecordInstant(
     failureCode: meta?.failureCode,
     meta: meta?.extra,
   });
+}
+
+export function paidProPerfRecordE2ePhase(
+  phase: PaidProE2ePhaseName,
+  meta?: Record<string, string | number | boolean | null | undefined>,
+): void {
+  if (!activeTrace) return;
+  paidProPerfRecordInstant(phase, 0, {
+    extra: meta as PaidProPerformanceSpanMeta | undefined,
+  });
+}
+
+export function ingestPaidProServerTimingSpans(spans: PaidProServerTimingSpanWire[]): void {
+  if (!activeTrace || spans.length === 0) return;
+  for (const s of spans) {
+    const name = (s.name || "").trim();
+    if (!name) continue;
+    activeTrace.spans.push({
+      name: name as PaidProE2ePhaseName,
+      startMs: Math.round(Number(s.startMs) || 0),
+      endMs: Math.round(Number(s.startMs) || 0) + Math.round(Number(s.durationMs) || 0),
+      durationMs: Math.round(Number(s.durationMs) || 0),
+      meta: Object.fromEntries(
+        Object.entries(s).filter(([k]) => !["name", "startMs", "durationMs"].includes(k)),
+      ) as PaidProPerformanceSpanMeta,
+    });
+  }
+  activeTrace.spans.sort((a, b) => a.startMs - b.startMs || a.durationMs - b.durationMs);
+}
+
+const DUPLICATE_WATCH_SPANS: PaidProPerformanceSpanName[] = [
+  "structure_repair",
+  "enterprise_polish",
+  "placeholder_gate",
+  "premium_local_pre_processing",
+];
+
+function buildWaterfallSummary(spans: PaidProWaterfallSpanSummary[]): {
+  topContributors: Array<{ name: string; durationMs: number }>;
+  duplicateSpanWarnings: string[];
+} {
+  const byName = new Map<string, number>();
+  for (const s of spans) {
+    byName.set(s.name, (byName.get(s.name) ?? 0) + 1);
+  }
+  const duplicateSpanWarnings = [...byName.entries()]
+    .filter(([name, count]) => count > 1 && DUPLICATE_WATCH_SPANS.includes(name as PaidProPerformanceSpanName))
+    .map(([name, count]) => `${name}x${count}`);
+  const topContributors = [...spans]
+    .filter((s) => s.durationMs > 0)
+    .sort((a, b) => b.durationMs - a.durationMs)
+    .slice(0, 5)
+    .map((s) => ({ name: s.name, durationMs: s.durationMs }));
+  return { topContributors, duplicateSpanWarnings };
 }
 
 const scanCounters = new Map<string, number>();
@@ -234,6 +330,7 @@ export function finishPaidProPerformanceWaterfall(): void {
   const trace = activeTrace;
   const totalMs = Math.round(nowMs() - trace.startedAtMs);
   const spanSummaries = trace.spans.map(flattenPaidProWaterfallSpan);
+  const { topContributors, duplicateSpanWarnings } = buildWaterfallSummary(spanSummaries);
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") {
     lastFinishedTrace = {
       ...trace,
@@ -248,12 +345,21 @@ export function finishPaidProPerformanceWaterfall(): void {
       intakeFingerprint: trace.intakeFingerprint,
       totalMs,
       spanCount: spanSummaries.length,
+      topContributors,
+      ...(duplicateSpanWarnings.length ? { duplicateSpanWarnings } : {}),
       spans: spanSummaries,
     });
   }
   if (paidProVerboseDetailLogsEnabled()) {
     // eslint-disable-next-line no-console
-    console.debug("[paid-pro-waterfall-verbose]", { traceId: trace.traceId, totalMs, spans: spanSummaries });
+    console.debug("[paid-pro-waterfall-verbose]", {
+      traceId: trace.traceId,
+      sessionGenerationId: trace.sessionGenerationId,
+      intakeFingerprint: trace.intakeFingerprint,
+      totalMs,
+      topContributors,
+      spans: spanSummaries,
+    });
   }
   clearPaidProPerformanceTrace();
   paidProPerfResetScanCounters(trace.traceId);

@@ -67,6 +67,11 @@ from backend.agreements.premium_full_draft_quality_gate import (
     evaluate_premium_full_draft_quality,
     premium_full_draft_repair_system_prompt,
 )
+from backend.agreements.paid_pro_server_timing import (
+    PaidProServerTiming,
+    maybe_attach_server_timing_header,
+    paid_pro_perf_trace_requested,
+)
 from backend.agreements.pro_redline_diff import compute_pro_redline_block_diff
 from backend.agreements.premium_refine_narrow import (
     classify_narrow_amendment_prompt,
@@ -1008,11 +1013,13 @@ def _premium_full_draft_finalize_http_response(
     *,
     intake_len: int,
     session_hint: str,
+    server_timing: Optional[PaidProServerTiming] = None,
 ) -> Response:
     """
     Single JSON serialization to bytes — avoids streaming/partial frames and catches wire-unsafe text
     before any response bytes are committed.
     """
+    serialize_started = time.perf_counter()
     try:
         wire = _premium_full_draft_model_to_wire_dict(model)
         raw = json.dumps(wire, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
@@ -1064,11 +1071,26 @@ def _premium_full_draft_finalize_http_response(
         session_hint,
         wire.get("generation_outcome"),
     )
-    return Response(
+    if server_timing is not None:
+        server_timing.record(
+            "backend_response_serialize",
+            (time.perf_counter() - serialize_started) * 1000,
+            bodyLen=len(body_bytes),
+            documentTextLen=doc_len,
+        )
+        try:
+            log.info(
+                "[paid-pro-server-waterfall] %s",
+                json.dumps(server_timing.to_wire(), ensure_ascii=False, default=str)[:12000],
+            )
+        except Exception:
+            pass
+    response = Response(
         status_code=status_code,
         content=body_bytes,
         media_type="application/json; charset=utf-8",
     )
+    return maybe_attach_server_timing_header(response, server_timing)
 
 
 class PremiumMissingFactsRequest(BaseModel):
@@ -4378,6 +4400,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             "[CLAW] premium similarity retry model=%s",
             llm_model or "default",
         )
+    context_assembly_started = time.perf_counter()
     user_payload, ctx_dict = build_premium_full_draft_user_payload_for_airlock(body)
     intake_s = (body.intake_text or "").strip()
     intent_key = resolve_premium_intent_key(intake_s, ctx_dict)
@@ -4407,6 +4430,19 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
     client_fp = (getattr(body, "intake_fingerprint", None) or "").strip() or "n/a"
     client_agreement_id = (getattr(body, "agreement_id", None) or "").strip() or "n/a"
     ctx_title = (str((ctx_dict or {}).get("title") or "")[:120]) if ctx_dict else ""
+    server_timing: Optional[PaidProServerTiming] = None
+    if paid_pro_perf_trace_requested(request):
+        server_timing = PaidProServerTiming(
+            trace_id=client_gen,
+            session_generation_id=client_gen,
+            intake_fingerprint=client_fp,
+        )
+        server_timing.mark_instant("backend_request_received")
+        server_timing.record(
+            "backend_context_assembly",
+            (time.perf_counter() - context_assembly_started) * 1000,
+            payloadJsonLen=len(json.dumps(user_payload, ensure_ascii=False)),
+        )
     log.info(
         "[premium-full-draft] event=start agreement_id=%s session_hint=%s client_generation_id=%s intake_fingerprint=%s intake_len=%s context_title=%r sim_regen=%s payload_json_len=%s",
         client_agreement_id,
@@ -4441,9 +4477,10 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             len(intake_s),
         )
         return _premium_full_draft_finalize_http_response(
-            dm, intake_len=len(intake_s), session_hint=session_hint
+            dm, intake_len=len(intake_s), session_hint=session_hint, server_timing=server_timing
         )
     try:
+        llm_primary_started = time.perf_counter()
         llm_text = call_legal_llm(
             messages=[
                 {"role": "system", "content": _premium_full_draft_system_prompt()},
@@ -4455,6 +4492,12 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             airlock_profile="agreement_outbound",
             airlock_log_context="premium_full_draft:primary",
         )
+        if server_timing is not None:
+            server_timing.record(
+                "backend_llm_primary",
+                (time.perf_counter() - llm_primary_started) * 1000,
+                responseChars=len((llm_text or "").strip()),
+            )
         log.info(
             "claw_premium route=premium_full_draft openai_response_chars=%s model=%s",
             len((llm_text or "").strip()),
@@ -4463,6 +4506,12 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         intelligence_parse_start = time.perf_counter()
         parsed = _extract_json_object(llm_text)
         out_primary = _normalize_premium_full_draft_result(parsed)
+        if server_timing is not None:
+            server_timing.record(
+                "backend_parse_normalize",
+                (time.perf_counter() - intelligence_parse_start) * 1000,
+                primaryDocLen=len((out_primary.document_text or "").strip()),
+            )
         _log_agreement_intelligence_summary(
             out_primary.agreement_intelligence,
             stage="primary",
@@ -4527,6 +4576,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             if len(json.dumps(repair_payload, ensure_ascii=False)) > 260_000:
                 raise ValueError("repair_payload_too_large")
             airlock_wire_text = json.dumps(repair_payload, ensure_ascii=False)
+            llm_repair_started = time.perf_counter()
             llm_repair = call_legal_llm(
                 messages=[
                     {"role": "system", "content": premium_full_draft_repair_system_prompt()},
@@ -4538,6 +4588,12 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 airlock_profile="agreement_outbound",
                 airlock_log_context="premium_full_draft:repair",
             )
+            if server_timing is not None:
+                server_timing.record(
+                    "backend_llm_repair",
+                    (time.perf_counter() - llm_repair_started) * 1000,
+                    responseChars=len((llm_repair or "").strip()),
+                )
             intelligence_parse_start = time.perf_counter()
             parsed_repair = _extract_json_object(llm_repair)
             out = _normalize_premium_full_draft_result(parsed_repair)
@@ -4573,6 +4629,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             if len(json.dumps(up_clean, ensure_ascii=False)) > 240_000:
                 raise ValueError("clean_premium_user_payload_too_large")
             airlock_wire_text = json.dumps(up_clean, ensure_ascii=False)
+            llm_sanitized_started = time.perf_counter()
             llm_clean = call_legal_llm(
                 messages=[
                     {"role": "system", "content": _premium_full_draft_system_prompt()},
@@ -4584,6 +4641,12 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 airlock_profile="agreement_outbound",
                 airlock_log_context="premium_full_draft:sanitized_retry",
             )
+            if server_timing is not None:
+                server_timing.record(
+                    "backend_llm_sanitized_retry",
+                    (time.perf_counter() - llm_sanitized_started) * 1000,
+                    responseChars=len((llm_clean or "").strip()),
+                )
             intelligence_parse_start = time.perf_counter()
             parsed_c = _extract_json_object(llm_clean)
             out_clean = _normalize_premium_full_draft_result(parsed_c)
@@ -4608,6 +4671,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             repair_body = ""
             log.info("dev_context_leak event=premium_full_draft_sanitized_retry_succeeded")
         ok_final, final_reasons = _grade_draft(out)
+        validation_started = time.perf_counter()
         generation_outcome: Literal["ok", "needs_details", "degraded"] = "ok" if ok_final else "needs_details"
         if not ok_final:
             log.info(
@@ -4683,6 +4747,12 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             original_intake=intake_s,
             stage="final",
         )
+        if server_timing is not None:
+            server_timing.record(
+                "backend_validation",
+                (time.perf_counter() - validation_started) * 1000,
+                qualityOk=bool(ok_final),
+            )
         ok_model = PremiumFullDraftResponse(
             title=out.title,
             agreement_family=out.agreement_family,
@@ -4700,7 +4770,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             retryable=False,
         )
         return _premium_full_draft_finalize_http_response(
-            ok_model, intake_len=len(intake_s), session_hint=session_hint
+            ok_model, intake_len=len(intake_s), session_hint=session_hint, server_timing=server_timing
         )
     except Exception as exc:
         code, log_detail = _classify_premium_full_draft_failure(exc)
@@ -4775,7 +4845,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             failure_message=_degraded_user_message_for_code(code),
         )
         return _premium_full_draft_finalize_http_response(
-            dm, intake_len=len(intake_s), session_hint=session_hint
+            dm, intake_len=len(intake_s), session_hint=session_hint, server_timing=server_timing
         )
 
 

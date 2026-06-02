@@ -29,6 +29,12 @@ import {
   recordPremiumNetworkCall,
   type PremiumNetworkCallReason,
 } from "./paidProPremiumGenerationCallAudit";
+import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
+import {
+  paidProPerfRecordE2ePhase,
+  readActivePaidProPerformanceTrace,
+} from "./paidProPerformanceTrace";
+import { ingestPaidProPaymentToReviewServerTiming } from "./paidProPaymentToReviewTrace";
 import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 
 const MAX_CONTEXT_CHARS = 22_000;
@@ -596,11 +602,24 @@ export async function postPremiumFullDraftOnce(args: {
       intake_fingerprint: shortIntakeFingerprint(args.intakeText),
       similarity_regeneration: Boolean(args.similarityRegeneration),
       network_call_reason: args.networkCallReason ?? "unknown",
+      traceId: readActivePaidProPerformanceTrace()?.traceId,
+      sessionGenerationId: readActivePaidProPerformanceTrace()?.sessionGenerationId,
     });
   }
+  paidProPerfRecordE2ePhase("frontend_request_assembled", {
+    networkCallReason: args.networkCallReason ?? "unknown",
+    intakeLen: (args.intakeText || "").length,
+  });
+  paidProPerfRecordE2ePhase("premium_http_fetch_started", {
+    networkCallReason: args.networkCallReason ?? "unknown",
+  });
+  const fetchStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const res = await fetch(apiUrl("/api/agreements/premium-full-draft"), {
     method: "POST",
-    headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
+    headers: clawAgreementHeaders({
+      "Content-Type": "application/json",
+      ...(paidProPerfTraceEnabled() ? { "X-Claw-Paid-Pro-Perf-Trace": "1" } : {}),
+    }),
     body: JSON.stringify({
       intake_text: args.intakeText,
       context: args.context,
@@ -613,16 +632,29 @@ export async function postPremiumFullDraftOnce(args: {
         ? { intake_fingerprint: (args.intakeFingerprint || "").trim() }
         : {}),
       ...((args.agreementId || "").trim() ? { agreement_id: (args.agreementId || "").trim() } : {}),
+      ...(args.networkCallReason ? { network_call_reason: args.networkCallReason } : {}),
     }),
     signal: args.signal,
   });
+  const fetchMs = Math.round(
+    (typeof performance !== "undefined" ? performance.now() : Date.now()) - fetchStartedAt,
+  );
+  paidProPerfRecordE2ePhase("frontend_response_received", { httpStatus: res.status, fetchMs });
   const bodyText = await res.text();
+  const parseStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   let parsed: Partial<PremiumFullDraftResult> & { detail?: unknown } = {};
   try {
     if (bodyText) parsed = JSON.parse(bodyText) as Partial<PremiumFullDraftResult> & { detail?: unknown };
   } catch {
     parsed = {};
   }
+  paidProPerfRecordE2ePhase("frontend_parse_normalize", {
+    durationMs: Math.round(
+      (typeof performance !== "undefined" ? performance.now() : Date.now()) - parseStartedAt,
+    ),
+    responseBodyLen: bodyText.length,
+  });
+  ingestPaidProPaymentToReviewServerTiming(res.headers.get("X-Claw-Paid-Pro-Server-Timing"));
   const networkReason: PremiumNetworkCallReason = args.networkCallReason
     ?? (args.similarityRegeneration ? "similarity_regeneration" : "unknown");
   recordPremiumNetworkCall({

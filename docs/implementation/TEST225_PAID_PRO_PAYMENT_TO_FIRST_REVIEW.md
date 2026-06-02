@@ -56,6 +56,16 @@ The **Test225 skip path was not exercised live** because the environment did not
 
 ---
 
+## Performance instrumentation (post-Test225)
+
+Enable with `VITE_PAID_PRO_PERF_TRACE=1` (frontend) and optional `CLAW_PAID_PRO_PERF_TRACE=1` (backend). One `[paid-pro-waterfall]` per checkout run includes `topContributors`, optional `duplicateSpanWarnings`, and merged backend spans from `X-Claw-Paid-Pro-Server-Timing`.
+
+E2E trace starts at `payment_return_detected` and finishes at `review_surface_visible` on the checkout path (`deferWaterfallFinish`).
+
+**Key modules:** `paidProPaymentToReviewTrace.ts`, `paidProPerformanceTrace.ts`, `paidProPerfLogging.ts`, `backend/agreements/paid_pro_server_timing.py`.
+
+---
+
 ## Rollback
 
 Revert Test224/225 latency commits or restore pre-skip behavior in `paidProPostCheckoutRenderGate.ts` and `premiumCompletionPipeline.ts` (structural retry on ACC reject when body is not long-commercially-usable).
