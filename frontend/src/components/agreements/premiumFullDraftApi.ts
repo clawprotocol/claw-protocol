@@ -20,6 +20,7 @@ import { applyDeterministicIntentToPremiumFullDraftContext } from "./determinist
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
 import { logPremiumApiResultFromWire } from "./premiumApiHandoff";
+import { normalizePremiumFullDraftResponsePayload } from "./premiumFullDraftResponseNormalization";
 import { logDevPostPremiumFullDraftHttp } from "./premiumFullDraftPostResponseTrace";
 import { rejectPremiumDegradedFiller } from "./premiumFullDraftClientAcceptance";
 import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGuard";
@@ -775,7 +776,18 @@ export async function postPremiumFullDraftOnce(args: {
     }
     throw new Error((msg as string) || "premium_full_draft_failed");
   }
-  const wire = parsed as PremiumFullDraftResult;
+  const normalized = normalizePremiumFullDraftResponsePayload(
+    parsed as Partial<PremiumFullDraftResult> & Record<string, unknown>,
+  );
+  const wire = normalized.wire;
+  if (import.meta.env.DEV && normalized.sourceField && normalized.rejectedCandidates.length > 0) {
+    // eslint-disable-next-line no-console
+    console.info("[premium-full-draft] response_normalized", {
+      sourceField: normalized.sourceField,
+      authoritativeLen: normalized.authoritativeText.length,
+      rejectedCandidates: normalized.rejectedCandidates.slice(0, 6),
+    });
+  }
   logPremiumApiResultFromWire({ ok: true, status: res.status, wire });
   logAgreementIntelligenceExtraction(wire);
   logAgreementValidationResult(wire);

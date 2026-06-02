@@ -23,6 +23,9 @@ import {
 } from "./premiumAcceptancePolicy";
 import { repairKnownPartyPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
+import { clearPremiumParseSessionGuard } from "./premiumParseSessionGuard";
+import { clearPaidProPostAcceptanceValidatorCache } from "./paidProPostAcceptanceValidatorCache";
+import { clearPremiumGenerationCallAudit } from "./paidProPremiumGenerationCallAudit";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
 
@@ -33,6 +36,7 @@ const premiumApiMock = vi.hoisted(() => ({
   mockResponses: [] as PremiumFullDraftResult[],
   callIndex: 0,
   forceValidateFail: false,
+  jsonParseRunSeq: 0,
 }));
 
 vi.mock("./premiumFullDraftApi", async (importOriginal) => {
@@ -80,6 +84,9 @@ vi.mock("./paidProCorpusAcceptance", async (importOriginal) => {
 
 beforeEach(() => {
   clearFrozenPremiumSessionBodiesForTests();
+  clearPremiumParseSessionGuard();
+  clearPaidProPostAcceptanceValidatorCache();
+  clearPremiumGenerationCallAudit();
   premiumApiMock.mockResponses = [];
   premiumApiMock.callIndex = 0;
   premiumApiMock.forceValidateFail = false;
@@ -1097,6 +1104,7 @@ function buildMediumServicesBody(targetLen: number): string {
 
 function runJsonParseDegraded(args: { bodyLen: number; forceValidateFail: boolean }) {
   premiumApiMock.forceValidateFail = args.forceValidateFail;
+  premiumApiMock.jsonParseRunSeq += 1;
   const body = buildMediumServicesBody(args.bodyLen);
   premiumApiMock.mockResponses = [
     {
@@ -1119,7 +1127,7 @@ function runJsonParseDegraded(args: { bodyLen: number; forceValidateFail: boolea
     simpleProductFlow: true,
     partyRoleLabels: defaultIntakePartyRoleLabels(),
     userGapAnswers: null,
-    agreementGenerationId: `gen-json-parse-${args.bodyLen}-${args.forceValidateFail}`,
+    agreementGenerationId: `gen-json-parse-${args.bodyLen}-${args.forceValidateFail}-${premiumApiMock.jsonParseRunSeq}`,
     premiumRequestIntakeFingerprint: "fp-json-parse",
     isPremiumRequestStillValid: () => true,
     parseDraft: async () => mediumServicesStructured(),
