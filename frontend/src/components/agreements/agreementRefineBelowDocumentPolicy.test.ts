@@ -3,6 +3,7 @@ import { CreateUiStage } from "./createUiStage";
 import {
   isBelowDocumentRefineSectionParentEligible,
   shouldHideAgreementChangeRequestDuringPaidProSignerSetup,
+  shouldHideAgreementChangeRequestForPaidPro,
   shouldShowPersistedRefineTextareaBox,
   shouldShowStarterProRefineUpsellCard,
 } from "./agreementRefineBelowDocumentPolicy";
@@ -57,6 +58,21 @@ describe("agreementRefineBelowDocumentPolicy", () => {
     expect(shouldHideAgreementChangeRequestDuringPaidProSignerSetup({})).toBe(false);
     expect(shouldShowPersistedRefineTextareaBox(true, true, true, true)).toBe(false);
     expect(shouldShowPersistedRefineTextareaBox(true, true, true, false)).toBe(true);
+  });
+
+  it("hides persisted refine on paid Pro canonical review surface", () => {
+    expect(
+      shouldHideAgreementChangeRequestForPaidPro({
+        paidProAuthoritative: true,
+        premiumPaidDocumentSurface: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldHideAgreementChangeRequestForPaidPro({
+        paidProAuthoritative: false,
+        premiumPaidDocumentSurface: true,
+      }),
+    ).toBe(false);
   });
 
   it("suppresses starter upsell when premium upsell is suppressed (e.g. workspace entitled)", () => {

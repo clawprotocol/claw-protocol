@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  shouldHideAgreementChangeRequestDuringPaidProSignerSetup,
+  shouldHideAgreementChangeRequestForPaidPro,
   shouldShowPersistedRefineTextareaBox,
 } from "../../agreementRefineBelowDocumentPolicy";
 import { REFINE_FIELD_HEADING_PRO } from "../../draftPreviewLabels";
@@ -16,7 +16,7 @@ const INTAKE_SRC = readFileSync(
 describe("paidPro Test222 signer setup policy and intake wiring", () => {
   it("policy hides persisted refine textarea during paid Pro signer setup", () => {
     expect(
-      shouldHideAgreementChangeRequestDuringPaidProSignerSetup({
+      shouldHideAgreementChangeRequestForPaidPro({
         paidProInlineSignerSetupActive: true,
       }),
     ).toBe(true);
@@ -25,7 +25,7 @@ describe("paidPro Test222 signer setup policy and intake wiring", () => {
   });
 
   it("intake wires refine suppression and suppresses post-review edit during inline signer setup", () => {
-    expect(INTAKE_SRC).toContain("shouldHideAgreementChangeRequestDuringPaidProSignerSetup");
+    expect(INTAKE_SRC).toContain("shouldHideAgreementChangeRequestForPaidPro");
     expect(INTAKE_SRC).toContain("hideAgreementChangeRequestDuringPaidProSignerSetup");
     expect(INTAKE_SRC).toMatch(
       /showPersistedRefineBelowDocument[\s\S]{0,400}hideAgreementChangeRequestDuringPaidProSignerSetup/,

@@ -212,12 +212,22 @@ export function resolveCanonicalFinalPartyManifest(
 }
 
 /** Build a full manifest entry set from canonical party identities (shared by finalizer, polish, scans). */
+function manifestRoleFromBlockHeading(
+  blockHeading: string,
+  partyIndex: number,
+): CanonicalFinalPartyRole {
+  const h = blockHeading.trim().toUpperCase();
+  if (h === "CLIENT") return "client";
+  if (h === "SERVICE PROVIDER") return "service_provider";
+  return roleForIndex(partyIndex);
+}
+
 export function buildCanonicalFinalPartyManifestFromIdentities(
   identities: readonly CanonicalPartyIdentity[],
 ): CanonicalFinalPartyManifest {
   return {
     parties: identities.map((p) => {
-      const role = roleForIndex(p.index);
+      const role = manifestRoleFromBlockHeading(p.blockHeading, p.index);
       const isIndividual =
         p.isIndividual ?? (p.partyDisplayName ? isIndividualPartyName(p.partyDisplayName) : false);
       return {
@@ -229,11 +239,17 @@ export function buildCanonicalFinalPartyManifestFromIdentities(
         signerTitle: p.title,
         roleLabel: roleLabelForEntry(role, p.index),
         signerKind: isIndividual ? ("individual" as const) : ("entity_representative" as const),
-        isSenderSide: p.index === 0,
+        isSenderSide: role === "client",
         isIndividual,
       };
     }),
   };
+}
+
+function blockHeadingForManifestParty(p: CanonicalFinalPartyEntry): string {
+  if (p.role === "client") return "CLIENT";
+  if (p.role === "service_provider") return "SERVICE PROVIDER";
+  return `PARTY ${p.index + 1}`;
 }
 
 export function manifestToCanonicalPartyIdentities(
@@ -245,7 +261,7 @@ export function manifestToCanonicalPartyIdentities(
     email: p.email,
     representativeName: p.signerName,
     title: p.signerTitle,
-    blockHeading: p.index === 0 ? "CLIENT" : p.index === 1 ? "SERVICE PROVIDER" : `PARTY ${p.index + 1}`,
+    blockHeading: blockHeadingForManifestParty(p),
     isIndividual: p.partyName ? isIndividualPartyName(p.partyName) : false,
   }));
 }

@@ -17,6 +17,7 @@ import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecita
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   authorityPartiesToCanonicalPartyIdentities,
+  type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
 import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "./authoritativeSignerHydration";
@@ -39,6 +40,7 @@ export { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureName
 import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity";
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
+import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -306,10 +308,14 @@ export function resolvePartiesForReviewRender(args?: {
 export function applyPaidProReviewRenderSanitizer(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
-  roleContext?: { intakeText?: string | null; draftPartyNames?: readonly string[] | null },
+  roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; repaired: boolean } {
-  const identities = authorityPartiesToCanonicalPartyIdentities(parties, roleContext);
-  const legalNames = normLegalNames(parties, roleContext);
+  const ctx: PaidProPartyRoleContext = {
+    ...roleContext,
+    acceptedCorpus: roleContext?.acceptedCorpus ?? corpus,
+  };
+  const identities = authorityPartiesToCanonicalPartyIdentities(parties, ctx);
+  const legalNames = normLegalNames(parties, ctx);
   let text = (corpus || "").replace(/\r\n/g, "\n").trimEnd();
   let repaired = false;
 
@@ -333,7 +339,7 @@ export function applyPaidProReviewRenderSanitizer(
   }
 
   if (parties.length >= 2) {
-    const canonical = applyCanonicalPartyLegalNamesToSigningCorpus(text, parties);
+    const canonical = applyCanonicalPartyLegalNamesToSigningCorpus(text, parties, ctx);
     if (canonical.repaired) {
       text = canonical.text;
       repaired = true;
@@ -366,6 +372,18 @@ export function applyPaidProReviewRenderSanitizer(
 
   const guarded = guardPaidProReviewRenderCorpus(text, parties);
   let out = guarded.text.trimEnd() + (guarded.text.endsWith("\n") ? "" : "\n");
+  if (parties.length >= 2) {
+    const mergeGated = applyPaidProSignerMetadataMergeGate({
+      corpus: out,
+      parties,
+      canonicalPartyCount: 2,
+      roleContext: ctx,
+    });
+    if (mergeGated.repairs.length > 0) {
+      out = mergeGated.text;
+      repaired = true;
+    }
+  }
   if (parties.length >= 2) {
     const records = canonicalPartyRecordsFromSignerIdentities(identities);
     if (records.length >= 2) {
@@ -482,11 +500,13 @@ export type ResolvePaidProReviewRenderPlainArgs = {
 
 function paidProPartyRoleContextFromArgs(
   args?: ResolvePaidProReviewRenderPlainArgs,
-): { intakeText?: string | null; draftPartyNames?: readonly string[] | null } {
+  acceptedCorpus?: string | null,
+): { intakeText?: string | null; draftPartyNames?: readonly string[] | null; acceptedCorpus?: string | null } {
   return {
     intakeText: args?.intakeText ?? null,
     draftPartyNames:
       args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+    acceptedCorpus: acceptedCorpus ?? null,
   };
 }
 
@@ -567,8 +587,11 @@ function resolvePaidProReviewRenderPlainInner(
     return "";
   }
 
-  const roleContext = paidProPartyRoleContextFromArgs(args);
   const unified = resolvePaidProUnifiedSurfaceCorpus();
+  const acceptedCorpusSeed =
+    unified?.text?.trim() ||
+    (hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "");
+  const roleContext = paidProPartyRoleContextFromArgs(args, acceptedCorpusSeed || null);
   if (unified && unified.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
     const parties = resolvePartiesForReviewRender(args);
     const shouldSanitize =

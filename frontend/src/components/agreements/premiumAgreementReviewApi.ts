@@ -1,6 +1,10 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { readJson, resolveApiBase } from "../../lib/clawApi";
 import { buildPremiumFullDraftContext, type PremiumFullDraftContextPayload } from "./premiumFullDraftApi";
+import {
+  isPaidProPremiumReviewNetworkFailure,
+  logPaidProPremiumReviewNetworkNonfatal,
+} from "./paidProPremiumReviewNetworkGuard";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
@@ -58,7 +62,7 @@ async function postOnce(args: ReviewRequest, signal?: AbortSignal): Promise<Prem
  */
 export async function postPremiumAgreementReviewWithRetry(
   args: ReviewRequest,
-  options?: { logPostAcceptFailure?: boolean },
+  options?: { logPostAcceptFailure?: boolean; paidProSourceOfTruthEstablished?: boolean },
 ): Promise<PremiumAgreementReview | null> {
   if (import.meta.env.MODE === "test") {
     return null;
@@ -74,6 +78,13 @@ export async function postPremiumAgreementReviewWithRetry(
     } catch (e) {
       last = e;
     }
+  }
+  if (
+    options?.paidProSourceOfTruthEstablished &&
+    isPaidProPremiumReviewNetworkFailure(last)
+  ) {
+    logPaidProPremiumReviewNetworkNonfatal(last, "POST /api/agreements/premium-review");
+    return null;
   }
   if (import.meta.env.DEV) {
     if (options?.logPostAcceptFailure) {

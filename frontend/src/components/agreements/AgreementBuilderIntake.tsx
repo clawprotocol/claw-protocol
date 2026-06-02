@@ -143,7 +143,7 @@ import {
 } from "./starterProRefineCtaExperiment";
 import {
   isBelowDocumentRefineSectionParentEligible,
-  shouldHideAgreementChangeRequestDuringPaidProSignerSetup,
+  shouldHideAgreementChangeRequestForPaidPro,
   shouldShowPersistedRefineTextareaBox,
   shouldShowStarterProRefineUpsellCard,
 } from "./agreementRefineBelowDocumentPolicy";
@@ -11817,7 +11817,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const hideAgreementChangeRequestDuringPaidProSignerSetup = useMemo(
     () =>
-      shouldHideAgreementChangeRequestDuringPaidProSignerSetup({
+      shouldHideAgreementChangeRequestForPaidPro({
         paidProInlineSignerSetupActive: resolvePaidProInlineSignerSetupMounted({
           hasAcceptedPaidProAuthority: hasAcceptedPaidProAuthority({
             draft: draft ?? null,
@@ -11837,6 +11837,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             !guidedSigningConfirmationActive &&
             (createFlowPhase === "recipient_setup_required" || createFlowPhase === "ready_to_send"),
         ),
+        paidProAuthoritative,
+        premiumPaidDocumentSurface,
       }),
     [
       draft,

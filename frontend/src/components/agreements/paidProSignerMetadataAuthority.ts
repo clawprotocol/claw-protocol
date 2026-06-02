@@ -20,10 +20,13 @@ import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPa
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
+import { resolveAcceptedCorpusRoleLabelForLegalName } from "./paidProAcceptedCorpusPartyRoles";
 
 export type PaidProPartyRoleContext = {
   intakeText?: string | null;
   draftPartyNames?: readonly string[] | null;
+  /** Accepted Pro corpus — opening recital role parentheticals override slot index. */
+  acceptedCorpus?: string | null;
 };
 
 function normalizedLegalNameKey(name: string): string {
@@ -34,7 +37,7 @@ function normalizedLegalNameKey(name: string): string {
     .replace(/[.,;:]+$/g, "");
 }
 
-function partyLegalNamesMatch(a: string, b: string): boolean {
+export function partyLegalNamesMatch(a: string, b: string): boolean {
   const na = normalizedLegalNameKey(a);
   const nb = normalizedLegalNameKey(b);
   if (!na || !nb) return false;
@@ -52,6 +55,21 @@ function resolveIntakeRoleLabelForLegalName(
   const records = resolveCanonicalPartyIdentitiesFromIntake(intake, context?.draftPartyNames ?? null);
   const hit = records.find((rec) => partyLegalNamesMatch(legalName, rec.fullLegalName));
   return hit?.roleLabel?.trim() || null;
+}
+
+function resolveRoleLabelForAuthorityParty(
+  legalName: string,
+  partyIndex: number,
+  context?: PaidProPartyRoleContext | null,
+): string {
+  const corpusRole = resolveAcceptedCorpusRoleLabelForLegalName(
+    legalName,
+    context?.acceptedCorpus ?? null,
+  );
+  if (corpusRole) return corpusRole;
+  const intakeRole = resolveIntakeRoleLabelForLegalName(legalName, context);
+  if (intakeRole) return intakeRole;
+  return displayRoleLabelFromRoleLabel("", partyIndex);
 }
 
 function blockHeadingFromRoleLabel(roleLabel: string, partyIndex: number): string {
@@ -86,10 +104,7 @@ export function partyDisplayRoleLabelForAuthorityParty(
   roleContext?: PaidProPartyRoleContext | null,
 ): string {
   const legal = sanitizeAuthorityPartyLegalName(party.partyLegalName);
-  const intakeRoleLabel = resolveIntakeRoleLabelForLegalName(legal, roleContext);
-  return intakeRoleLabel
-    ? displayRoleLabelFromRoleLabel(intakeRoleLabel, party.partyIndex)
-    : displayRoleLabelFromRoleLabel("", party.partyIndex);
+  return resolveRoleLabelForAuthorityParty(legal, party.partyIndex, roleContext);
 }
 
 export const PAID_PRO_SIGNER_METADATA_FIELDS = [
@@ -333,10 +348,8 @@ export function authorityPartiesToCanonicalPartyIdentities(
   return parties.map((p) => {
     const legal = slotIsolatedCanonicalEntity(p.partyIndex, slots);
     const isIndividual = legal ? isIndividualPartyName(legal) : false;
-    const intakeRoleLabel = resolveIntakeRoleLabelForLegalName(legal, roleContext);
-    const blockHeading = intakeRoleLabel
-      ? blockHeadingFromRoleLabel(intakeRoleLabel, p.partyIndex)
-      : blockHeadingFromRoleLabel("", p.partyIndex);
+    const roleLabel = resolveRoleLabelForAuthorityParty(legal, p.partyIndex, roleContext);
+    const blockHeading = blockHeadingFromRoleLabel(roleLabel, p.partyIndex);
     return {
       index: p.partyIndex,
       partyDisplayName: legal,
@@ -358,13 +371,8 @@ export function buildCanonicalFinalPartyManifestFromAuthority(
     parties: authority.parties.map((p) => {
       const legal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
       const isIndividual = legal ? isIndividualPartyName(legal) : false;
-      const intakeRoleLabel = resolveIntakeRoleLabelForLegalName(legal, roleContext);
-      const role = intakeRoleLabel
-        ? manifestRoleFromRoleLabel(intakeRoleLabel, p.partyIndex)
-        : manifestRoleFromRoleLabel("", p.partyIndex);
-      const roleLabel = intakeRoleLabel
-        ? displayRoleLabelFromRoleLabel(intakeRoleLabel, p.partyIndex)
-        : displayRoleLabelFromRoleLabel("", p.partyIndex);
+      const roleLabel = resolveRoleLabelForAuthorityParty(legal, p.partyIndex, roleContext);
+      const role = manifestRoleFromRoleLabel(roleLabel, p.partyIndex);
       return {
         index: p.partyIndex,
         role,

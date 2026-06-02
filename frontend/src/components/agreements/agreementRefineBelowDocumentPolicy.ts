@@ -40,6 +40,26 @@ export function shouldHideAgreementChangeRequestDuringPaidProSignerSetup(args: {
   return Boolean(args.paidProInlineSignerSetupActive || args.paidProRecipientSetupOnDraft);
 }
 
+/** Paid Pro review + signer flows use Edit agreement text only — not the request-changes panel. */
+export function shouldHideAgreementChangeRequestDuringPaidProCanonicalReview(args: {
+  paidProAuthoritative?: boolean;
+  premiumPaidDocumentSurface?: boolean;
+}): boolean {
+  return Boolean(args.paidProAuthoritative && args.premiumPaidDocumentSurface);
+}
+
+export function shouldHideAgreementChangeRequestForPaidPro(args: {
+  paidProInlineSignerSetupActive?: boolean;
+  paidProRecipientSetupOnDraft?: boolean;
+  paidProAuthoritative?: boolean;
+  premiumPaidDocumentSurface?: boolean;
+}): boolean {
+  return (
+    shouldHideAgreementChangeRequestDuringPaidProSignerSetup(args) ||
+    shouldHideAgreementChangeRequestDuringPaidProCanonicalReview(args)
+  );
+}
+
 export function shouldShowPersistedRefineTextareaBox(
   parentEligible: boolean,
   /** Tier Pro / server billing / post-checkout grant — not body-marker-only. */

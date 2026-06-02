@@ -152,8 +152,12 @@ function replaceGenericOpeningPartyLabels(
   text: string,
   identities: readonly CanonicalPartyIdentity[],
 ): { text: string; count: number } {
-  const client = identities[0]?.partyDisplayName?.trim();
-  const provider = identities[1]?.partyDisplayName?.trim();
+  const client =
+    identities.find((id) => id.blockHeading === "CLIENT")?.partyDisplayName?.trim() ??
+    identities[0]?.partyDisplayName?.trim();
+  const provider =
+    identities.find((id) => id.blockHeading === "SERVICE PROVIDER")?.partyDisplayName?.trim() ??
+    identities[1]?.partyDisplayName?.trim();
   if (!client || !provider) return { text, count: 0 };
 
   const headLen = Math.min(text.length, 2_500);

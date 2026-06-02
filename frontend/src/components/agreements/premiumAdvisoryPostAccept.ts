@@ -57,7 +57,7 @@ export async function fetchPremiumAdvisoryEnrichmentAfterAccept(args: {
           documentText: doc,
           context: buildContextForReview(args.draft),
         },
-        postAcceptLog,
+        { ...postAcceptLog, paidProSourceOfTruthEstablished: true },
       );
     }
 

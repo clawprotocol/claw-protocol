@@ -162,8 +162,14 @@ export function resolvePaidProFinalHydratedCorpusForSurface(
       }
     }
   }
+  const reviewAlignedSurfaces: PaidProDocumentSurface[] = [
+    "review",
+    "copy",
+    "display",
+    "finalized",
+  ];
   if (
-    (surface === "review" || surface === "copy") &&
+    reviewAlignedSurfaces.includes(surface) &&
     resolution.signerMetadataApplied &&
     resolution.text.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN
   ) {

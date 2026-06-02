@@ -29,6 +29,7 @@ import {
   forbidPaidProExecutionBlockSynthesis,
   logPaidProExecutionBlockSynthesisBlocked,
 } from "./paidProExecutionBlockAuthority";
+import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import {
   buildLivePaidProSignerMetadataAuthority,
   hashPaidProSignerMetadataAuthority,
@@ -120,9 +121,11 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   if (args.repairRecital) {
     rawCorpus = repairMalformedPaidProAgreementRecital(rawCorpus, args.authority.parties).text;
   }
-  const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, {
+  const roleContext = {
     intakeText: args.intakeRaw,
-  });
+    acceptedCorpus: rawCorpus,
+  };
+  const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, roleContext);
   let result = buildHydratedAuthoritativeSigningCorpus({
     rawCorpus,
     identities,
@@ -170,7 +173,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     const canonicalParties = applyCanonicalPartyLegalNamesToSigningCorpus(
       result.corpus,
       args.authority.parties,
-      { intakeText: args.intakeRaw },
+      roleContext,
     );
     result = {
       ...result,
@@ -208,6 +211,22 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
         ...result,
         corpus: nameRepair.text,
         signaturePolishCount: result.signaturePolishCount + nameRepair.repairs,
+      };
+    }
+  }
+
+  if (!result.rejected && signerCount >= 2) {
+    const gated = applyPaidProSignerMetadataMergeGate({
+      corpus: result.corpus,
+      parties: args.authority.parties,
+      canonicalPartyCount: 2,
+      roleContext,
+    });
+    if (gated.repairs.length > 0) {
+      result = {
+        ...result,
+        corpus: gated.text,
+        signaturePolishCount: result.signaturePolishCount + gated.repairs.length,
       };
     }
   }

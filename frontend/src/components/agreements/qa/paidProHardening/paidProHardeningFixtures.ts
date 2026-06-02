@@ -81,6 +81,29 @@ export function loadTest219HardeningFixture(): PaidProHardeningFixtureBundle {
   };
 }
 
+/** Test223: >10k corpus with opening roles correct and inverted secondary recital. */
+export function buildExpandedTest223PreSignerCorpus(): string {
+  const base = buildExpandedTest219AcceptedCorpus();
+  const inverted = `\n\nRECITAL (scheduling). ${PAID_PRO_HARDENING_CLIENT} ("Service Provider") and ${PAID_PRO_HARDENING_PROVIDER} ("Client") acknowledge the Statement of Work.\n`;
+  const firstSection = base.search(/\n\n1\.\s/);
+  if (firstSection < 0) return `${base}${inverted}`;
+  return `${base.slice(0, firstSection)}${inverted}${base.slice(firstSection)}`;
+}
+
+export function buildTest223SignerAuthority(): PaidProSignerMetadataAuthority {
+  return buildLivePaidProSignerMetadataAuthority({
+    partyCount: 2,
+    recipient1Name: PAID_PRO_HARDENING_CLIENT,
+    recipient2Name: PAID_PRO_HARDENING_PROVIDER,
+    recipient1Email: "anthemhayek@gmail.com",
+    recipient2Email: "ira.banks@ironvale.com",
+    extraPartyReviewEmails: [],
+    partySignerNames: ["Anthem H Blanchard", "Ira Banks"],
+    partySignerTitles: ["Manager", "Member"],
+    partyAddresses: ["1027 S. Rainbow Blvd., #124", "138 Main St., Clarkville, OH 23087"],
+  });
+}
+
 export function buildTest204SignerAuthority(): PaidProSignerMetadataAuthority {
   return buildLivePaidProSignerMetadataAuthority({
     partyCount: 2,
