@@ -126,6 +126,7 @@ import {
   assertAtMostOneCheckoutPremiumGenerationCall,
   type PremiumGenerationCallReason,
 } from "./paidProPremiumGenerationCallAudit";
+import { logPremiumSecondGenerationTriggered } from "./paidProSecondGenerationTriggerLog";
 import {
   buildPaidProJsonParseDegradedDiagnostics,
   logPaidProJsonParseDegradedDiagnostics,
@@ -1041,6 +1042,36 @@ function amplifyPremiumMaterialityRepair(
   return x;
 }
 
+function logPremiumSecondGenerationBeforePost(args: {
+  reason: PremiumNetworkCallReason;
+  doc: string;
+  effectiveFull: PremiumFullDraftResult;
+  clientAcceptanceOk: boolean;
+  clientAcceptanceReasons: readonly string[];
+  skipStructuralRetryApplied: boolean;
+  lexicalSimilarityToFreePreview: number | null;
+  traceCtx: { traceId: string; intakeFingerprintEarly: string };
+  agreementGenerationId?: string | null;
+  intakeFingerprint: string;
+}): void {
+  const validation = args.effectiveFull.agreement_validation;
+  logPremiumSecondGenerationTriggered({
+    reason: args.reason,
+    firstDocumentLen: args.doc.length,
+    firstServerFullDocumentLen: (args.effectiveFull.server_full_document_text || "").trim().length,
+    generationOutcome: (args.effectiveFull.generation_outcome || "").trim() || null,
+    agreementValidationPassed: validation?.passed ?? null,
+    agreementValidationFailureCodes: (validation?.failures || []).map((f) => f.code),
+    clientAcceptanceOk: args.clientAcceptanceOk,
+    clientAcceptanceReasons: [...args.clientAcceptanceReasons],
+    lexicalSimilarityToFreePreview: args.lexicalSimilarityToFreePreview,
+    skipStructuralRetryApplied: args.skipStructuralRetryApplied,
+    traceId: args.traceCtx.traceId,
+    sessionGenerationId: args.agreementGenerationId ?? null,
+    intakeFingerprint: args.intakeFingerprint,
+  });
+}
+
 /**
  * Async premium completion: clean parties, normalize law/payment language, enrich clauses,
  * strip internal artifacts, and build recipient name candidates (emails blank unless present on draft).
@@ -1862,6 +1893,19 @@ async function runPremiumCompletionInner(
           if (sim0 > 0.75) {
             // eslint-disable-next-line no-console
             console.info("[CLAW] premium similarity retry", { sim: Number(sim0.toFixed(4)) });
+            const accSimLog = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
+            logPremiumSecondGenerationBeforePost({
+              reason: "similarity_regeneration",
+              doc,
+              effectiveFull: full,
+              clientAcceptanceOk: accSimLog.ok,
+              clientAcceptanceReasons: accSimLog.reasons,
+              skipStructuralRetryApplied: false,
+              lexicalSimilarityToFreePreview: sim0,
+              traceCtx,
+              agreementGenerationId: input.agreementGenerationId,
+              intakeFingerprint,
+            });
             try {
               const regenSim = await postPremiumFullDraftOnce({
                 intakeText: rawForSoT || rawIntake,
@@ -1992,6 +2036,19 @@ async function runPremiumCompletionInner(
           !isLongCommerciallyUsablePremiumBody(doc.length) &&
           !skipStructuralRetry
         ) {
+          const freeSimBaseline = buildAgreementPreviewText(input.structuredDraft, { starterPreview: true });
+          logPremiumSecondGenerationBeforePost({
+            reason: "degraded_structural_retry",
+            doc,
+            effectiveFull,
+            clientAcceptanceOk: acc0.ok,
+            clientAcceptanceReasons: acc0.reasons,
+            skipStructuralRetryApplied: skipStructuralRetry,
+            lexicalSimilarityToFreePreview: lexicalSimilarity(freeSimBaseline, doc),
+            traceCtx,
+            agreementGenerationId: input.agreementGenerationId,
+            intakeFingerprint,
+          });
           try {
             const full2 = await postPremiumFullDraftOnce({
               intakeText: rawForSoT || rawIntake,
@@ -2024,6 +2081,20 @@ async function runPremiumCompletionInner(
           if (import.meta.env.MODE !== "test") {
             try {
               const minIntake = stripDevContextMarkersForModelRetry(rawForSoT || rawIntake);
+              const accDevLog = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
+              const freeDevBaseline = buildAgreementPreviewText(input.structuredDraft, { starterPreview: true });
+              logPremiumSecondGenerationBeforePost({
+                reason: "dev_context_regen",
+                doc,
+                effectiveFull,
+                clientAcceptanceOk: accDevLog.ok,
+                clientAcceptanceReasons: accDevLog.reasons,
+                skipStructuralRetryApplied: false,
+                lexicalSimilarityToFreePreview: lexicalSimilarity(freeDevBaseline, doc),
+                traceCtx,
+                agreementGenerationId: input.agreementGenerationId,
+                intakeFingerprint,
+              });
               const regen = await postPremiumFullDraftOnce({
                 intakeText: minIntake,
                 context: buildSanitizedPremiumFullDraftContext(mergedForApi, rawForSoT || rawIntake),
@@ -2121,6 +2192,19 @@ async function runPremiumCompletionInner(
         let titleForGate = getResolvedTitleForFounderGating((effectiveFull.title || "").trim(), doc);
         if (!hasRequiredFounderPremiumTitle(titleForGate, doc)) {
           try {
+            const freeFounderBaseline = buildAgreementPreviewText(input.structuredDraft, { starterPreview: true });
+            logPremiumSecondGenerationBeforePost({
+              reason: "founder_title_retry",
+              doc,
+              effectiveFull,
+              clientAcceptanceOk: acc.ok,
+              clientAcceptanceReasons: acc.reasons,
+              skipStructuralRetryApplied: false,
+              lexicalSimilarityToFreePreview: lexicalSimilarity(freeFounderBaseline, doc),
+              traceCtx,
+              agreementGenerationId: input.agreementGenerationId,
+              intakeFingerprint,
+            });
             const fr = await postPremiumFullDraftOnce({
               intakeText: buildFounderTitleRetryIntake(intakeS),
               context: fullCtx,
