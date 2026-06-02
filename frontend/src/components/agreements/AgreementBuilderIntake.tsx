@@ -282,10 +282,10 @@ import {
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
   PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
+  resolveSignerSetupAutoCorrectTarget,
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
   shouldArmPaidProInlineSignerSetupLatch,
-  shouldUpgradeRecipientNameToLegalEntity,
   type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
 import { ensurePremiumCompletion } from "./premiumCompletionEnsure";
@@ -16251,42 +16251,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (signerSetupPartyIdentities.length < 1) return;
-    const corrected0 = resolveSignerSetupRenderSlot({
+    const corpusHash = getPaidProSourceOfTruth()?.hash ?? "";
+    const target0 = resolveSignerSetupAutoCorrectTarget({
       slotIndex: 0,
-      currentLegalEntityValue: recipient1Name,
+      currentRecipientName: recipient1Name,
       slotIdentities: signerSetupPartyIdentities,
-      source: "auto_correct",
-    }).canonicalLegalEntity;
-    const corrected1 =
-      signerSetupPartyIdentities.length > 1
-        ? resolveSignerSetupRenderSlot({
-            slotIndex: 1,
-            currentLegalEntityValue: recipient2Name,
-            slotIdentities: signerSetupPartyIdentities,
-            source: "auto_correct",
-          }).canonicalLegalEntity
-        : "";
-    if (corrected0 && corrected0 !== recipient1Name.trim()) {
-      setRecipient1Name(corrected0);
-    } else if (
-      signerSetupPartyIdentities[0]?.legalEntityName &&
-      shouldUpgradeRecipientNameToLegalEntity(
-        recipient1Name,
-        signerSetupPartyIdentities[0].legalEntityName,
-      )
-    ) {
-      setRecipient1Name(signerSetupPartyIdentities[0].legalEntityName);
-    }
-    if (corrected1 && corrected1 !== recipient2Name.trim()) {
-      setRecipient2Name(corrected1);
-    } else if (
-      signerSetupPartyIdentities[1]?.legalEntityName &&
-      shouldUpgradeRecipientNameToLegalEntity(
-        recipient2Name,
-        signerSetupPartyIdentities[1].legalEntityName,
-      )
-    ) {
-      setRecipient2Name(signerSetupPartyIdentities[1].legalEntityName);
+      corpusHash,
+    });
+    if (target0) setRecipient1Name(target0);
+    if (signerSetupPartyIdentities.length > 1) {
+      const target1 = resolveSignerSetupAutoCorrectTarget({
+        slotIndex: 1,
+        currentRecipientName: recipient2Name,
+        slotIdentities: signerSetupPartyIdentities,
+        corpusHash,
+      });
+      if (target1) setRecipient2Name(target1);
     }
   }, [signerSetupPartyIdentities, recipient1Name, recipient2Name]);
 

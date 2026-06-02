@@ -8,6 +8,11 @@ import {
   PARTY_ENTITY_SUFFIX_RE,
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
+import {
+  partyLegalNamesMatch,
+  resolvePaidProPartyRolesFromAcceptedCorpus,
+} from "./paidProAcceptedCorpusPartyRoles";
+import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
@@ -102,10 +107,147 @@ function countLegalEntitySuffixes(name: string): number {
   return (name.match(new RegExp(PARTY_ENTITY_SUFFIX_RE.source, "gi")) || []).length;
 }
 
+/** Opening recital / sentence fragments must never seed signer legal-entity fields. */
+const RECITAL_PARTY_NAME_PREFIX_RE =
+  /^(?:this\s+(?:mutual\s+[\w\s]+?\s+)?agreement|agreement|entered\s+into|between)\b/i;
+
+const TRAILING_LEGAL_ENTITY_FROM_RECITAL_RE =
+  /\b([A-Z][\w.&'’\-]+(?:\s+[A-Z][\w.&'’\-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\.?\s*$/i;
+
+export function isRecitalSentenceFragmentPartyName(name: string): boolean {
+  const t = norm(name);
+  if (!t) return false;
+  if (RECITAL_PARTY_NAME_PREFIX_RE.test(t)) return true;
+  if (/^this agreement is between\b/i.test(t)) return true;
+  return false;
+}
+
+function extractLegalEntityFromRecitalPollution(name: string): string {
+  const t = norm(name);
+  if (!t || !isRecitalSentenceFragmentPartyName(t)) return t;
+  const m = t.match(TRAILING_LEGAL_ENTITY_FROM_RECITAL_RE);
+  const entity = m ? norm(m[1]) : "";
+  if (!entity || isRecitalSentenceFragmentPartyName(entity)) return "";
+  return entity;
+}
+
+function resolveFallbackSignerSlotLegalEntity(
+  slotIndex: number,
+  slotIdentities: readonly SignerSetupPartyIdentity[],
+): string {
+  const bodyText = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : "";
+  if (bodyText) {
+    const roles = resolvePaidProPartyRolesFromAcceptedCorpus(bodyText);
+    const rolePick =
+      slotIndex === 0
+        ? roles.find((r) => r.role === "client")?.legalName
+        : slotIndex === 1
+          ? roles.find((r) => r.role === "service_provider")?.legalName
+          : roles[slotIndex]?.legalName;
+    const fromRole = norm(rolePick ?? roles[slotIndex]?.legalName ?? "");
+    if (
+      fromRole &&
+      !isRecitalSentenceFragmentPartyName(fromRole) &&
+      !candidateContainsMultipleEntities(fromRole)
+    ) {
+      return fromRole;
+    }
+    const signatureEntities = extractSignerEntitiesFromSignatureBlock(bodyText);
+    const fromSig = norm(signatureEntities[slotIndex] ?? "");
+    if (
+      fromSig &&
+      !isRecitalSentenceFragmentPartyName(fromSig) &&
+      !candidateContainsMultipleEntities(fromSig)
+    ) {
+      return fromSig;
+    }
+  }
+
+  const manifestName = norm(
+    String(getAuthoritativeAgreementDocument()?.canonicalPartyManifest?.[slotIndex]?.name ?? ""),
+  );
+  if (
+    manifestName &&
+    !isRecitalSentenceFragmentPartyName(manifestName) &&
+    !candidateContainsMultipleEntities(manifestName)
+  ) {
+    return manifestName;
+  }
+
+  const polluted = norm(slotIdentities[slotIndex]?.legalEntityName ?? "");
+  const extracted = extractLegalEntityFromRecitalPollution(polluted);
+  if (
+    extracted &&
+    !isRecitalSentenceFragmentPartyName(extracted) &&
+    !candidateContainsMultipleEntities(extracted)
+  ) {
+    return extracted;
+  }
+
+  return "";
+}
+
+function safeSignerSlotCanonicalEntity(
+  slotIndex: number,
+  slotIdentities: readonly SignerSetupPartyIdentity[],
+): string {
+  const canonical = slotIsolatedCanonicalEntity(slotIndex, slotIdentities);
+  if (canonical && !isRecitalSentenceFragmentPartyName(canonical)) return canonical;
+  return resolveFallbackSignerSlotLegalEntity(slotIndex, slotIdentities);
+}
+
+const signerAutoCorrectAppliedKeys = new Set<string>();
+
+export function clearSignerSetupAutoCorrectLatch(): void {
+  signerAutoCorrectAppliedKeys.clear();
+}
+
+/** Idempotent auto-correct target — null when no state write is needed. */
+export function resolveSignerSetupAutoCorrectTarget(args: {
+  slotIndex: number;
+  currentRecipientName: string;
+  slotIdentities: readonly SignerSetupPartyIdentity[];
+  corpusHash?: string | null;
+}): string | null {
+  const current = norm(args.currentRecipientName);
+  const canonical = safeSignerSlotCanonicalEntity(args.slotIndex, args.slotIdentities);
+  if (!canonical || isRecitalSentenceFragmentPartyName(canonical)) return null;
+  if (current === canonical) return null;
+  if (
+    hasLegalEntitySuffix(current) &&
+    !isRecitalSentenceFragmentPartyName(current) &&
+    !candidateContainsMultipleEntities(current) &&
+    !containsOtherSlotCanonicalLegalEntity(current, args.slotIndex, args.slotIdentities) &&
+    partyLegalNamesMatch(current, canonical)
+  ) {
+    return null;
+  }
+
+  let target: string | null = null;
+  if (shouldUpgradeRecipientNameToLegalEntity(current, canonical)) {
+    target = canonical;
+  } else {
+    const contamination = detectSignerSlotContamination(
+      args.slotIndex,
+      current,
+      args.slotIdentities,
+    );
+    if (contamination.contaminated) target = canonical;
+  }
+  if (!target || isRecitalSentenceFragmentPartyName(target) || current === target) return null;
+  const latchKey = `${args.corpusHash ?? ""}|${args.slotIndex}|${target}`;
+  if (signerAutoCorrectAppliedKeys.has(latchKey)) return null;
+  signerAutoCorrectAppliedKeys.add(latchKey);
+  return target;
+}
+
 export function isShortPrefixOfFullLegal(shortName: string, fullLegalName: string): boolean {
   const short = norm(shortName).toLowerCase();
   const full = norm(fullLegalName).toLowerCase();
   if (!short || !full || short === full) return false;
+  if (isRecitalSentenceFragmentPartyName(short) || isRecitalSentenceFragmentPartyName(full)) {
+    return false;
+  }
   if (full.startsWith(`${short} `)) return true;
   const shortWords = short.split(/\s+/).filter(Boolean);
   const fullWords = full.split(/\s+/).filter(Boolean);
@@ -333,6 +475,21 @@ export function logIllegalSignerRenderBindingBlocked(args: {
   reason?: string;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (isRecitalSentenceFragmentPartyName(args.correctedValue)) return;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "illegal-signer-render-binding-blocked",
+      surface: `slot:${args.slot}`,
+      hash: args.correctedValue,
+      source: args.source,
+      payloadSignature: JSON.stringify({
+        attemptedValue: args.attemptedValue,
+        reason: args.reason ?? null,
+      }),
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[illegal-signer-render-binding-blocked]", args);
 }
@@ -450,6 +607,11 @@ export function slotIsolatedCanonicalEntity(
   if (candidateContainsMultipleEntities(canonical)) {
     canonical = firstSingleLegalEntity(canonical);
   }
+  if (isRecitalSentenceFragmentPartyName(canonical)) {
+    const extracted = extractLegalEntityFromRecitalPollution(canonical);
+    canonical =
+      extracted && !isRecitalSentenceFragmentPartyName(extracted) ? extracted : "";
+  }
   return canonical;
 }
 
@@ -458,10 +620,13 @@ export function detectSignerSlotContamination(
   attemptedValue: string,
   slotIdentities: readonly SignerSetupPartyIdentity[],
 ): SignerSlotContaminationResult {
-  const canonical = slotIsolatedCanonicalEntity(slotIndex, slotIdentities);
+  const canonical = safeSignerSlotCanonicalEntity(slotIndex, slotIdentities);
   const current = norm(attemptedValue);
   if (!current) {
     return { contaminated: false, correctedValue: canonical };
+  }
+  if (isRecitalSentenceFragmentPartyName(current)) {
+    return { contaminated: true, correctedValue: canonical, reason: "multiple_entities" };
   }
   if (candidateContainsMultipleEntities(current)) {
     return { contaminated: true, correctedValue: canonical, reason: "multiple_entities" };
@@ -573,7 +738,8 @@ function pickBestLegalCandidate(
         c.name.length >= 2 &&
         !isRecipientHandoffSeedDisposable(c.name) &&
         !looksLikeJoinedPartyList(c.name) &&
-        !candidateContainsMultipleEntities(c.name),
+        !candidateContainsMultipleEntities(c.name) &&
+        !isRecitalSentenceFragmentPartyName(c.name),
     );
   if (usable.length === 0) return null;
 
@@ -701,6 +867,26 @@ export function resolveSignerSetupPartyIdentity(
     legalEntityName = signatureSlotEntity;
   }
 
+  if (isRecitalSentenceFragmentPartyName(legalEntityName)) {
+    legalEntityName =
+      extractLegalEntityFromRecitalPollution(legalEntityName) ||
+      canonicalSlotEntity ||
+      (signatureSlotEntity && !isRecitalSentenceFragmentPartyName(signatureSlotEntity)
+        ? signatureSlotEntity
+        : "") ||
+      (manifestName && !isRecitalSentenceFragmentPartyName(manifestName) ? manifestName : "") ||
+      draftSlotName;
+  }
+  if (isRecitalSentenceFragmentPartyName(legalEntityName)) {
+    legalEntityName = resolveFallbackSignerSlotLegalEntity(index, [
+      {
+        legalEntityName: canonicalSlotEntity || manifestName || draftSlotName,
+        displayName: "",
+        source: "display_fallback",
+      },
+    ]);
+  }
+
   const displayName = legalEntityName
     ? compactDisplayNameFromLegalEntity(legalEntityName)
     : recipientName || handoffName || draftName || `Party ${index + 1}`;
@@ -727,7 +913,7 @@ export function resolveEditableSignerLegalEntityForSlot(args: {
   slotIdentities: readonly SignerSetupPartyIdentity[];
   source?: string;
 }): string {
-  const canonical = slotIsolatedCanonicalEntity(args.slotIndex, args.slotIdentities);
+  const canonical = safeSignerSlotCanonicalEntity(args.slotIndex, args.slotIdentities);
   const contamination = detectSignerSlotContamination(
     args.slotIndex,
     args.currentInputValue,
@@ -778,7 +964,7 @@ export function resolveSignerSetupRenderSlot(args: {
   const identity = args.slotIdentities[args.slotIndex];
   // Hard invariant: the rendered legal entity is always the strictly slot-isolated canonical — it can
   // never be another slot's entity or a concatenation, regardless of what the identity/field carried.
-  const canonical = slotIsolatedCanonicalEntity(args.slotIndex, args.slotIdentities);
+  const canonical = safeSignerSlotCanonicalEntity(args.slotIndex, args.slotIdentities);
   const current = norm(String(args.currentLegalEntityValue ?? ""));
   if (canonical && current && current !== canonical) {
     const contamination = detectSignerSlotContamination(
@@ -818,7 +1004,7 @@ export function assertEditableSignerRenderValueInvariant(args: {
   slotIdentities: readonly SignerSetupPartyIdentity[];
   source: string;
 }): void {
-  const canonical = slotIsolatedCanonicalEntity(args.slotIndex, args.slotIdentities);
+  const canonical = safeSignerSlotCanonicalEntity(args.slotIndex, args.slotIdentities);
   const rendered = norm(args.renderedValue);
   if (canonical && rendered !== canonical) {
     throw new Error(
@@ -872,8 +1058,9 @@ export function shouldUpgradeRecipientNameToLegalEntity(
 ): boolean {
   const current = norm(currentName);
   const legal = norm(legalEntityName);
-  if (!legal) return false;
+  if (!legal || isRecitalSentenceFragmentPartyName(legal)) return false;
   if (!current) return true;
+  if (isRecitalSentenceFragmentPartyName(current)) return true;
   if (isRecipientHandoffSeedDisposable(current)) return true;
   if (isShortPrefixOfFullLegal(current, legal)) return true;
   if (candidateContainsMultipleEntities(current)) return true;

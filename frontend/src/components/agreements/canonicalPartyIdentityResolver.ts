@@ -174,6 +174,10 @@ function isInvalidCanonicalPartyName(name: string, knownPartyTokens?: readonly s
   if (/^(?:party|parties|client|service provider|provider|contractor|company)$/i.test(t)) return true;
   if (INVALID_CANONICAL_PARTY_PHRASE_RE.test(t)) return true;
   if (SECTION_HEADING_PARTY_PREFIX_RE.test(t)) return true;
+  if (/^(?:this\s+(?:mutual\s+[\w\s]+?\s+)?agreement|agreement|entered\s+into|between)\b/i.test(t)) {
+    return true;
+  }
+  if (/^this agreement is between\b/i.test(t)) return true;
   if (/^client\.\s+/i.test(t)) return true;
   if (containsMultipleKnownPartyNames(t, knownPartyTokens)) return true;
   return false;
