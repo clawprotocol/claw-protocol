@@ -18,6 +18,14 @@ import {
   shouldSkipPlaceholderScanForTransientPreview,
   transientGateInputFromPlaceholderContext,
 } from "./agreementPreviewPlaceholderTransientGate";
+import {
+  countIdentityPlaceholders,
+  listUnresolvedIdentityPlaceholderTokens,
+  logDraftingStubOriginsFromText,
+  logOrgPlaceholderOriginsFromText,
+  logPaidProPlaceholderContext,
+  logPaidProPlaceholderRepair,
+} from "./paidProPlaceholderAttributionLog";
 import { formatStarterPreviewForDisplay } from "./starterPreviewFormatting";
 import { repairMoneyCommaBracketPlaceholderCorruption } from "./agreementMoneyPlaceholderRepair";
 import {
@@ -266,6 +274,13 @@ const ANGLE_INSERT_RE = /<\s*insert\b[^>]{0,200}>/gi;
 const TRIPLE_UNDERSCORE_RE = /___[A-Z][A-Z0-9_]*___/g;
 const DRAFTING_STUB_PHRASE_RE =
   /\b(?:fill\s+in\s+later|to\s+be\s+completed|insert\s+here|fill\s+in\s+with\s+counsel)\b/gi;
+const TO_BE_COMPLETED_EXACT_RE = /\bto\s+be\s+completed\b/gi;
+const CONTEXTUAL_DRAFTING_STUB_POSITIVE_RE =
+  /\b(?:schedule\s+a|statement\s+of\s+work|\bsow\b|milestones?|deliverables?|implementation\s+schedule|workstreams?)\b/i;
+const CONTEXTUAL_DRAFTING_STUB_NEGATIVE_RE =
+  /\b(?:notice\s+address|address\s+for\s+notice|email\s+for\s+notice|party\s+notice\s+details|effective\s+date|recitals?|in\s+witness\s+whereof)\b/i;
+const CONTEXTUAL_DRAFTING_STUB_CONTEXT_RADIUS = 160;
+const CONTEXTUAL_DRAFTING_STUB_REPLACEMENT = "as confirmed by the Parties in writing";
 const SCHEDULE_STUB_RE = /\bschedule\s+a\b[^.\n]{0,120}\b(?:tbd|placeholder|to\s+be\s+completed|\[)\b/gi;
 const ANGLE_LEGAL_STUB_RE =
   /<\s*[^>\n]{0,200}(?:customer|client|legal\s*name|party\s*name|tbd|placeholder|to\s+be\s+(?:completed|filled)|insert\s+here)[^>\n]{0,200}\s*>/gi;
@@ -927,6 +942,53 @@ function repairSoftFieldBracketPlaceholders(text: string): { text: string; repai
   return { text: out, repaired };
 }
 
+function isGenericTermsRemainToBeCompletedStub(text: string, matchIndex: number, matchLen: number): boolean {
+  const start = Math.max(0, matchIndex - 96);
+  const span = text.slice(start, matchIndex + matchLen);
+  return /\b(?:terms|commercial\s+terms|additional\s+(?:commercial\s+)?terms)\s+remain\s+to\s+be\s+completed\b/i.test(
+    span,
+  );
+}
+
+function shouldRepairContextualToBeCompleted(text: string, matchIndex: number, matchLen: number): boolean {
+  if (isGenericTermsRemainToBeCompletedStub(text, matchIndex, matchLen)) return false;
+  if (isExecutionSignatureContext(text, matchIndex)) return false;
+  const start = Math.max(0, matchIndex - CONTEXTUAL_DRAFTING_STUB_CONTEXT_RADIUS);
+  const end = Math.min(text.length, matchIndex + matchLen + CONTEXTUAL_DRAFTING_STUB_CONTEXT_RADIUS);
+  const window = text.slice(start, end);
+  if (CONTEXTUAL_DRAFTING_STUB_NEGATIVE_RE.test(window)) return false;
+  return CONTEXTUAL_DRAFTING_STUB_POSITIVE_RE.test(window);
+}
+
+/** Guarded Paid Pro repair for schedule/SOW/milestone "to be completed" stubs only. */
+export function repairContextualDraftingStubPhrases(text: string): { text: string; repaired: string[] } {
+  const src = String(text || "");
+  const repaired: string[] = [];
+  TO_BE_COMPLETED_EXACT_RE.lastIndex = 0;
+  if (!TO_BE_COMPLETED_EXACT_RE.test(src)) {
+    TO_BE_COMPLETED_EXACT_RE.lastIndex = 0;
+    return { text: src, repaired };
+  }
+  TO_BE_COMPLETED_EXACT_RE.lastIndex = 0;
+  const replacements: { index: number; length: number }[] = [];
+  for (const m of src.matchAll(TO_BE_COMPLETED_EXACT_RE)) {
+    if (m.index == null) continue;
+    const original = m[0] || "";
+    if (!original) continue;
+    if (shouldRepairContextualToBeCompleted(src, m.index, original.length)) {
+      replacements.push({ index: m.index, length: original.length });
+    }
+  }
+  if (!replacements.length) return { text: src, repaired };
+  let out = src;
+  for (let i = replacements.length - 1; i >= 0; i--) {
+    const { index, length } = replacements[i];
+    out = out.slice(0, index) + CONTEXTUAL_DRAFTING_STUB_REPLACEMENT + out.slice(index + length);
+    repaired.push(`drafting_stub:to be completed→${CONTEXTUAL_DRAFTING_STUB_REPLACEMENT}`);
+  }
+  return { text: out, repaired };
+}
+
 export function repairAgreementTemplatePlaceholders(
   text: string,
   ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
@@ -948,6 +1010,13 @@ function repairAgreementTemplatePlaceholdersUncached(
   const prepared = prepareAgreementTextForPlaceholderScan(text);
   let out = prepared;
   const repaired: string[] = [];
+  const beforeIdentityCount = countIdentityPlaceholders(prepared);
+  logOrgPlaceholderOriginsFromText({
+    text: prepared,
+    sourceModule: "repairAgreementTemplatePlaceholders",
+    canonicalPartyCount: normPartyNames(ctx.partyNames).length,
+  });
+  logDraftingStubOriginsFromText({ text: prepared, sourceModule: "repairAgreementTemplatePlaceholders" });
   const moneyRepair = repairMoneyCommaBracketPlaceholderCorruption(out);
   if (moneyRepair.repairs.length) {
     out = moneyRepair.text;
@@ -985,6 +1054,29 @@ function repairAgreementTemplatePlaceholdersUncached(
     out = out.replace(/\[\s*PROVIDER\s*\]/gi, "the providing Party");
     repaired.push("[PROVIDER]→the providing Party");
   }
+
+  const draftingStubRepair = repairContextualDraftingStubPhrases(out);
+  if (draftingStubRepair.repaired.length) {
+    out = draftingStubRepair.text;
+    repaired.push(...draftingStubRepair.repaired);
+  }
+
+  const draftingStubs: string[] = [];
+  DRAFTING_STUB_PHRASE_RE.lastIndex = 0;
+  for (const m of out.matchAll(DRAFTING_STUB_PHRASE_RE)) {
+    const phrase = (m[0] || "").trim().toLowerCase();
+    if (phrase && !draftingStubs.includes(phrase)) draftingStubs.push(phrase);
+  }
+  const unresolved = [...listUnresolvedIdentityPlaceholderTokens(out), ...draftingStubs].slice(0, 24);
+  logPaidProPlaceholderRepair({
+    sourceModule: "repairAgreementTemplatePlaceholders",
+    beforeCount: beforeIdentityCount,
+    afterCount: countIdentityPlaceholders(out),
+    unresolvedPlaceholders: unresolved,
+    ...(draftingStubRepair.repaired.length
+      ? { repairedDraftingStubPhrases: draftingStubRepair.repaired.slice(0, 16) }
+      : {}),
+  });
 
   return { text: out, repaired };
 }
@@ -1242,6 +1334,12 @@ export function finalizeUserVisibleAgreementPlainText(
   }
   if (!ok) {
     logPlaceholderRejectDetail(remainingDetail, ctx.surface, partyResolution);
+    for (const d of remainingDetail.filter((x) => x.fatal).slice(0, 12)) {
+      logPaidProPlaceholderContext({
+        placeholder: d.token,
+        surroundingText: d.contextSnippet.slice(0, 120),
+      });
+    }
     phLog(LOG_PREFIX_REJECT, {
       surface: ctx.surface,
       family: ctx.agreementFamily ?? "",

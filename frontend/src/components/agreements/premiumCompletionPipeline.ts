@@ -142,7 +142,11 @@ import type { PremiumNetworkCallReason } from "./paidProPremiumGenerationCallAud
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryable";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
-import { finalizeUserVisibleAgreementPlainText, resolvePlaceholderPartyNamesWithMeta } from "./agreementTemplatePlaceholderSafety";
+import {
+  finalizeUserVisibleAgreementPlainText,
+  repairContextualDraftingStubPhrases,
+  resolvePlaceholderPartyNamesWithMeta,
+} from "./agreementTemplatePlaceholderSafety";
 import {
   intakeHasFullLegalEntityParties,
   resolveCanonicalPartyIdentitiesFromSources,
@@ -2057,6 +2061,15 @@ async function runPremiumCompletionInner(
         freezeAcceptedPremiumBodyForSession(input.agreementGenerationId, doc, "server_full_draft");
       }
       {
+        const draftingStubRepair = repairContextualDraftingStubPhrases(doc);
+        if (draftingStubRepair.repaired.length) {
+          doc = draftingStubRepair.text;
+          logPremiumCompletionDebug({
+            stage: "pipeline_contextual_drafting_stub_repaired",
+            repairedCount: draftingStubRepair.repaired.length,
+            currentDocLen: doc.length,
+          });
+        }
         const acc0 = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
         const skipStructuralRetry =
           !acc0.ok &&

@@ -9,6 +9,7 @@ import {
   isNumberedSignatureContactToken,
   normalizePlaceholderToken,
   repairAgreementTemplatePlaceholders,
+  repairContextualDraftingStubPhrases,
 } from "./agreementTemplatePlaceholderSafety";
 
 describe("agreementTemplatePlaceholderSafety", () => {
@@ -241,5 +242,91 @@ describe("agreementTemplatePlaceholderSafety", () => {
     });
     expect(fin.ok).toBe(false);
     expect(fin.remaining.some((x) => x.includes("{{"))).toBe(true);
+  });
+});
+
+describe("repairContextualDraftingStubPhrases", () => {
+  const pad = "Commercial operative terms apply throughout this agreement. ".repeat(120);
+
+  function expectStillFatalDraftingStub(raw: string): void {
+    const { text, repaired } = repairContextualDraftingStubPhrases(raw);
+    expect(repaired).toEqual([]);
+    expect(text).toBe(raw);
+    const fatal = collectForbiddenTemplateFragments(raw, "", { partyNames: ["Acme LLC", "Beta Inc."] });
+    expect(fatal.some((x) => /\bto be completed\b/i.test(x))).toBe(true);
+  }
+
+  it("repairs Schedule A to be completed by the parties", () => {
+    const raw = `${pad}\nSchedule A details to be completed by the parties before kickoff.\n${pad}`;
+    const { text, repaired } = repairContextualDraftingStubPhrases(raw);
+    expect(repaired).toHaveLength(1);
+    expect(text).toContain("as confirmed by the Parties in writing");
+    expect(text).not.toMatch(/\bto be completed\b/i);
+    const fin = finalizeUserVisibleAgreementPlainText(text, {
+      intakeRaw: "between Acme LLC and Beta Inc.",
+      partyNames: ["Acme LLC", "Beta Inc."],
+      surface: "test",
+    });
+    expect(fin.ok).toBe(true);
+  });
+
+  it("repairs Statement of Work to be completed by the parties", () => {
+    const raw = `${pad}\nThe Statement of Work to be completed by the parties is attached as Schedule A.\n${pad}`;
+    const { text, repaired } = repairContextualDraftingStubPhrases(raw);
+    expect(repaired).toHaveLength(1);
+    expect(text).toContain("as confirmed by the Parties in writing");
+    expect(text).not.toMatch(/\bto be completed\b/i);
+  });
+
+  it("repairs milestone and deliverable context", () => {
+    const raw = `${pad}\nEach milestone deliverable may be to be completed before acceptance testing.\n${pad}`;
+    const { text, repaired } = repairContextualDraftingStubPhrases(raw);
+    expect(repaired).toHaveLength(1);
+    expect(text).toContain("as confirmed by the Parties in writing");
+    expect(text).not.toMatch(/\bto be completed\b/i);
+  });
+
+  it("repairs implementation schedule and workstream context via repairAgreementTemplatePlaceholders", () => {
+    const raw = `${pad}\nThe implementation schedule for workstream Alpha remains to be completed in Phase 2.\n${pad}`;
+    const { text, repaired } = repairAgreementTemplatePlaceholders(raw, {
+      intakeRaw: "between Acme LLC and Beta Inc.",
+      partyNames: ["Acme LLC", "Beta Inc."],
+    });
+    expect(repaired.some((r) => r.includes("drafting_stub:to be completed"))).toBe(true);
+    expect(text).toContain("as confirmed by the Parties in writing");
+    expect(text).not.toMatch(/\bto be completed\b/i);
+  });
+
+  it("leaves notice address to be completed fatal", () => {
+    expectStillFatalDraftingStub(
+      `${pad}\nThe notice address to be completed before execution must be supplied in writing.\n${pad}`,
+    );
+  });
+
+  it("leaves email for notice to be completed fatal", () => {
+    expectStillFatalDraftingStub(
+      `${pad}\nThe email for notice to be completed must be provided under Section 8.\n${pad}`,
+    );
+  });
+
+  it("leaves additional commercial terms remain to be completed fatal", () => {
+    expectStillFatalDraftingStub(
+      `${pad}\nAdditional commercial terms remain to be completed at a later date.\n${pad}`,
+    );
+  });
+
+  it("leaves bare to be completed fatal", () => {
+    expectStillFatalDraftingStub(`${pad}\nPayment mechanics shall be to be completed.\n${pad}`);
+  });
+
+  it("leaves signature and execution context unchanged", () => {
+    const raw =
+      `${pad}\nIN WITNESS WHEREOF, the Parties have executed this Agreement.\n` +
+      "Counterpart execution details to be completed below.\n" +
+      "Acme LLC\nBy: _________________________\n";
+    const { text, repaired } = repairContextualDraftingStubPhrases(raw);
+    expect(repaired).toEqual([]);
+    expect(text).toBe(raw);
+    expect(text).toMatch(/\bto be completed\b/i);
   });
 });

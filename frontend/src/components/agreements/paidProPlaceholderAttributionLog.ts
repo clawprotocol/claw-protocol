@@ -44,6 +44,7 @@ export function logPaidProPlaceholderRepair(args: {
   afterCount: number;
   unresolvedPlaceholders: readonly string[];
   collapsedExtraOrgSlots?: readonly number[];
+  repairedDraftingStubPhrases?: readonly string[];
 }): void {
   if (!devOnlyEnabled()) return;
   // eslint-disable-next-line no-console
@@ -54,6 +55,9 @@ export function logPaidProPlaceholderRepair(args: {
     unresolvedPlaceholders: args.unresolvedPlaceholders.slice(0, 16),
     ...(args.collapsedExtraOrgSlots?.length
       ? { collapsedExtraOrgSlots: args.collapsedExtraOrgSlots.slice(0, 16) }
+      : {}),
+    ...(args.repairedDraftingStubPhrases?.length
+      ? { repairedDraftingStubPhrases: args.repairedDraftingStubPhrases.slice(0, 16) }
       : {}),
   });
 }
