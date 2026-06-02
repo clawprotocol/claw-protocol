@@ -24,6 +24,7 @@ import {
   isHarmlessEntityMetadataBracketToken,
   neutralizeHarmlessEntityMetadataPlaceholders,
 } from "./harmlessEntityMetadataPlaceholders";
+import { runCachedCorpusScan } from "./paidProCorpusScanCache";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -927,6 +928,20 @@ function repairSoftFieldBracketPlaceholders(text: string): { text: string; repai
 }
 
 export function repairAgreementTemplatePlaceholders(
+  text: string,
+  ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
+): { text: string; repaired: string[] } {
+  const surface = "placeholder_safety";
+  return runCachedCorpusScan({
+    surface,
+    corpus: text,
+    phase: "repair",
+    scanType: "placeholder_scan",
+    run: () => repairAgreementTemplatePlaceholdersUncached(text, ctx),
+  });
+}
+
+function repairAgreementTemplatePlaceholdersUncached(
   text: string,
   ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
 ): { text: string; repaired: string[] } {

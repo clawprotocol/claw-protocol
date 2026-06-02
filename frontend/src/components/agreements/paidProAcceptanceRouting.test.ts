@@ -255,6 +255,7 @@ describe("paidProAcceptanceRouting", () => {
       premiumAccepted: true,
       premiumComplete: true,
       guidedPro: true,
+      signaturePreparationRequested: true,
     });
     // After premium return with a real (>10k) paid corpus, the gate must NOT fall to blocked_short_preview.
     expect(res.source).not.toBe("blocked_short_preview");
@@ -268,6 +269,7 @@ describe("paidProAcceptanceRouting", () => {
       premiumComplete: false,
       acceptedAuthoritativePlain: "STARTER DRAFT short preview body",
       guidedPro: true,
+      vs01CheckPhase: "signature_preparation",
     });
     expect(res.source).toBe("blocked_short_preview");
     expect(res.allowed).toBe(false);

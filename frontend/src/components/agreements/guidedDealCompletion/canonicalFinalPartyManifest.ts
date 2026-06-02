@@ -16,6 +16,7 @@ import type { ResolveGuidedPreReviewSignerSlotsArgs } from "./resolveGuidedPreRe
 import { resolveSignerSetupPartyIdentity } from "../signerSetupPartyIdentity";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
 import { isIndividualPartyName } from "./signerPartyIdentity";
+import { runCachedCorpusScan } from "../paidProCorpusScanCache";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company)\.?$/i;
@@ -154,6 +155,25 @@ function resolveSignerRepresentative(
 export function resolveCanonicalFinalPartyManifest(
   args: ResolveCanonicalFinalPartyManifestArgs,
 ): CanonicalFinalPartyManifest {
+  const cacheCorpus = [
+    String(args.partyCount),
+    args.recipient1Email,
+    args.recipient2Email,
+    ...(args.partySignerNames ?? []),
+    ...(args.draftPartyRoles ?? []),
+  ].join("|");
+  return runCachedCorpusScan({
+    surface: "canonical_final_party_manifest",
+    corpus: cacheCorpus,
+    phase: "resolve",
+    scanType: "canonical_final_party_manifest",
+    run: () => resolveCanonicalFinalPartyManifestUncached(args),
+  });
+}
+
+function resolveCanonicalFinalPartyManifestUncached(
+  args: ResolveCanonicalFinalPartyManifestArgs,
+): CanonicalFinalPartyManifest {
   const handoff = args.handoff ?? readPremiumRecipientHandoff();
   const slotCount = Math.max(args.partyCount, 2);
   const handoffSlots = handoff ? linearPremiumRecipientSlots(handoff, slotCount) : [];
@@ -196,7 +216,11 @@ export function resolveCanonicalFinalPartyManifest(
     });
   }
 
-  if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
+  if (
+    typeof import.meta !== "undefined" &&
+    import.meta.env?.MODE !== "test" &&
+    (import.meta.env.DEV || import.meta.env.VITE_PAID_PRO_PERF_TRACE)
+  ) {
     // eslint-disable-next-line no-console
     console.info("[canonical-final-party-manifest]", {
       parties: parties.map((p) => ({

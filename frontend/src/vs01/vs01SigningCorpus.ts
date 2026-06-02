@@ -39,6 +39,11 @@ import { getAuthoritativeSigningSnapshot } from "../components/agreements/author
 import { getPaidProDocumentForSurface } from "../components/agreements/paidProSourceOfTruth";
 import { requireAuthoritativeCorpusForSurface } from "../components/agreements/authoritativeAgreementDocument";
 import { logLawdogOutputPathMap } from "../components/agreements/lawdogOutputPathMap";
+import {
+  resolvePaidProVs01CheckPhase,
+  shouldRunPaidProVs01CorpusChecks,
+  type PaidProVs01CheckPhase,
+} from "../components/agreements/paidProVs01PhaseGuard";
 
 export const VS01_SIGNING_CORPUS_MIN_LEN = GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 /** Preferred final guided Pro corpus length (test59 / full premium snapshot). */
@@ -237,6 +242,10 @@ export type ResolveFinalVs01CorpusOrBlockArgs = {
   intakeText?: string | null;
   /** When true, decorative HTML signature cards satisfy witness gate for long accepted Pro bodies. */
   allowDecorativeEsignCardMode?: boolean;
+  /** Override phase for tests; otherwise derived from premium/signing state. */
+  vs01CheckPhase?: PaidProVs01CheckPhase;
+  signaturePreparationRequested?: boolean;
+  prepareSignatureLinksRequested?: boolean;
 };
 
 export type Vs01WitnessRequirement = {
@@ -342,6 +351,33 @@ function logVs01Eligibility(payload: {
  * Single authoritative VS01 corpus resolver for paid/guided Pro signing.
  * Never selects rendered_preview / free-hash / short preview when final premium corpus exists.
  */
+function buildDeferredVs01Resolution(args: {
+  premiumInProgress: boolean;
+  premiumComplete: boolean;
+  signerCount: number;
+  blockReason: string;
+}): FinalVs01CorpusResolution {
+  return {
+    corpus: "",
+    source: "paidProSourceOfTruth",
+    len: 0,
+    hash: "",
+    matchesFreeHash: false,
+    isFreeHashMatch: false,
+    hasWitnessBlock: false,
+    requiresSignatureBlock: true,
+    requiresWitness: false,
+    witnessReason: null,
+    hasBySignatureLines: false,
+    hasByOrSignatureLines: false,
+    signerCount: args.signerCount,
+    allowed: false,
+    blockReason: args.blockReason,
+    premiumInProgress: args.premiumInProgress,
+    premiumComplete: args.premiumComplete,
+  };
+}
+
 export function resolveFinalVs01CorpusOrBlock(
   args: ResolveFinalVs01CorpusOrBlockArgs,
 ): FinalVs01CorpusResolution {
@@ -353,6 +389,25 @@ export function resolveFinalVs01CorpusOrBlock(
     1 + (args.bridge?.counterparties?.length ?? args.draft?.parties?.length ?? 1),
   );
   const signingSnapshot = getAuthoritativeSigningSnapshot();
+  const handoffCorpusLen = (args.guidedSigningHandoff?.corpusText ?? "").trim().length;
+  const vs01Phase =
+    args.vs01CheckPhase ??
+    resolvePaidProVs01CheckPhase({
+      premiumCorpusInProgress: premiumInProgress,
+      paidProAuthoritative: guidedPro && Boolean(args.premiumAccepted || args.acceptedAuthoritativePlain?.trim()),
+      hasAuthoritativeSigningSnapshot: Boolean(signingSnapshot?.corpus?.trim()),
+      guidedSigningHandoffActive: handoffCorpusLen >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN,
+      signaturePreparationRequested: args.signaturePreparationRequested,
+      prepareSignatureLinksRequested: args.prepareSignatureLinksRequested,
+    });
+  if (!shouldRunPaidProVs01CorpusChecks(vs01Phase)) {
+    return buildDeferredVs01Resolution({
+      premiumInProgress,
+      premiumComplete,
+      signerCount,
+      blockReason: `vs01_checks_deferred:${vs01Phase}`,
+    });
+  }
   const snapshotCorpus = signingSnapshot?.corpus?.trim() ?? "";
   if (guidedPro && snapshotCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
     const hash = fingerprintAgreementBody(snapshotCorpus);

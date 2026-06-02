@@ -588,6 +588,12 @@ export function preserveLargestPartyListFromIntake(
  * Single entry: attach `agreement_family`, optional `[agreement-family-route]` log,
  * then either bilateral service smart defaults or family shell + party overlay.
  */
+const loggedFamilyRouteKeys = new Set<string>();
+
+export function clearAgreementFamilyRouteLogDedupe(): void {
+  loggedFamilyRouteKeys.clear();
+}
+
 export function runIntakeDefaultsAndRoles(
   parsed: ParsedDraftShape,
   rawIntake: string,
@@ -596,10 +602,17 @@ export function runIntakeDefaultsAndRoles(
 ): ParsedDraftShape {
   const family = parsed.agreement_family ?? detectAgreementFamily(rawIntake);
   let next: ParsedDraftShape = { ...parsed, agreement_family: family };
-  console.debug("[agreement-family-route]", {
-    intakeSnippet: rawIntake.slice(0, 140),
-    detectedFamily: family,
-  });
+  const routeKey = `${family}:${rawIntake.slice(0, 120)}`;
+  if (!loggedFamilyRouteKeys.has(routeKey)) {
+    loggedFamilyRouteKeys.add(routeKey);
+    if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+      console.debug("[agreement-family-route]", {
+        intakeSnippet: rawIntake.slice(0, 140),
+        detectedFamily: family,
+        authoritative: Boolean(parsed.agreement_family),
+      });
+    }
+  }
   if (!simpleProductFlow) {
     return next;
   }

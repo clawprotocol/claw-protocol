@@ -1,6 +1,7 @@
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { assertNoPostAcceptanceStructuralMutation } from "./authoritativeAgreementDocument";
 import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "./paidProAuthoritativeRenderGate";
+import { runCachedCorpusScan } from "./paidProCorpusScanCache";
 
 type CompilerSignerIdentity = {
   partyDisplayName: string;
@@ -699,6 +700,20 @@ export function validateCanonicalFactParity(freeText: string, proText: string): 
 }
 
 export function stabilizeFinalAgreementCompilerOutput(
+  text: string,
+  context: FinalAgreementCompilerIntegrityContext = {},
+): FinalAgreementCompilerIntegrityResult {
+  const surface = context.surface ?? "final_agreement_compiler_integrity";
+  return runCachedCorpusScan({
+    surface,
+    corpus: text,
+    phase: "stabilize",
+    scanType: "integrity_auto_repair",
+    run: () => stabilizeFinalAgreementCompilerOutputUncached(text, context),
+  });
+}
+
+function stabilizeFinalAgreementCompilerOutputUncached(
   text: string,
   context: FinalAgreementCompilerIntegrityContext = {},
 ): FinalAgreementCompilerIntegrityResult {

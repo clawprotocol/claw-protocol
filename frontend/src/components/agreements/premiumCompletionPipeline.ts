@@ -76,7 +76,6 @@ import {
   rejectPremiumDegradedFiller,
   stripClientPremiumArtifactBlocksFromDraft,
 } from "./premiumFullDraftClientAcceptance";
-import { mapPremiumFullDraftFamilyHint } from "./premiumFullDraftMapFamily";
 import type { PremiumAgreementReview } from "./premiumAgreementReviewTypes";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
@@ -109,6 +108,26 @@ import {
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
+import {
+  startPaidProPerformanceTrace,
+  paidProPerfSpanStart,
+  paidProPerfSpanEnd,
+  paidProPerfRecordInstant,
+  finishPaidProPerformanceWaterfall,
+} from "./paidProPerformanceTrace";
+import {
+  resolveAuthoritativePaidProAgreementFamily,
+  applyAuthoritativeFamilyToDraft,
+} from "./paidProAgreementFamilyAuthority";
+import {
+  recordPremiumFullDraftCall,
+  assertAtMostOneCheckoutPremiumGenerationCall,
+  type PremiumGenerationCallReason,
+} from "./paidProPremiumGenerationCallAudit";
+import {
+  buildPaidProJsonParseDegradedDiagnostics,
+  logPaidProJsonParseDegradedDiagnostics,
+} from "./paidProJsonParseDegradedDiagnostics";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryable";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
@@ -172,6 +191,8 @@ export type PremiumCompletionInput = {
   agreementId?: string | null;
   premiumRequestIntakeFingerprint?: string;
   isPremiumRequestStillValid?: () => boolean;
+  /** Why premium-full-draft is being invoked (checkout vs explicit retry). */
+  premiumGenerationCallReason?: PremiumGenerationCallReason;
 };
 
 export type PremiumRecipientCandidate = { name: string; email: string; role: string };
@@ -1019,6 +1040,27 @@ function amplifyPremiumMaterialityRepair(
  */
 export async function runPremiumCompletion(input: PremiumCompletionInput): Promise<PremiumCompletionResult> {
   const rawIntake = input.intakeText.trim();
+  const intakeFingerprintEarly =
+    input.premiumRequestIntakeFingerprint ?? shortIntakeFingerprint(rawIntake);
+  const traceId = input.agreementGenerationId ?? intakeFingerprintEarly;
+  startPaidProPerformanceTrace({
+    traceId,
+    sessionGenerationId: input.agreementGenerationId ?? null,
+    intakeFingerprint: intakeFingerprintEarly,
+  });
+  try {
+  return await runPremiumCompletionInner(input, { traceId, intakeFingerprintEarly });
+  } finally {
+    finishPaidProPerformanceWaterfall();
+    assertAtMostOneCheckoutPremiumGenerationCall();
+  }
+}
+
+async function runPremiumCompletionInner(
+  input: PremiumCompletionInput,
+  traceCtx: { traceId: string; intakeFingerprintEarly: string },
+): Promise<PremiumCompletionResult> {
+  const rawIntake = input.intakeText.trim();
   logPremiumSessionConsistency({
     context: "runPremiumCompletion_start",
     agreementId: input.agreementId,
@@ -1085,7 +1127,24 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   if (input.agreementFamily) {
     merged = { ...merged, agreement_family: input.agreementFamily };
   }
+  paidProPerfSpanStart("intake_classification");
   merged = runIntakeDefaultsAndRoles(merged, rawIntake, input.simpleProductFlow, input.partyRoleLabels);
+  const intakeFingerprint =
+    input.premiumRequestIntakeFingerprint ??
+    shortIntakeFingerprint(rawForSoT || rawIntake);
+  const familyAtIntake = resolveAuthoritativePaidProAgreementFamily({
+    intakeText: rawForSoT || rawIntake,
+    draft: merged,
+    inputAgreementFamily: input.agreementFamily ?? null,
+    traceId: traceCtx.traceId,
+    sessionGenerationId: input.agreementGenerationId ?? null,
+    intakeFingerprint,
+  });
+  merged = applyAuthoritativeFamilyToDraft(merged, familyAtIntake);
+  paidProPerfSpanEnd("intake_classification", {
+    outcome: familyAtIntake.family,
+    extra: { source: familyAtIntake.source, intakeFamily: familyAtIntake.intakeFamily },
+  });
   merged = applyHardFamilyLocks(merged, rawIntake);
   merged = alignTitleWithCanonical(merged, rawIntake);
   merged = normalizeParsedDraftLegalConcepts(merged, rawIntake);
@@ -1469,19 +1528,52 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       stage: "premium_full_draft_with_retry_start",
       intakeLen: soT.length,
     });
-    const premiumRequestStartedAt =
-      typeof performance !== "undefined" ? performance.now() : Date.now();
-    const fullResp = await postPremiumFullDraftWithRetry({
-      intakeText: soT,
-      context: fullCtx,
-      userGapAnswers: gapAns || null,
-      agreementId: input.agreementId ?? null,
+    const callReason = input.premiumGenerationCallReason ?? "checkout_completion";
+    const genCall = recordPremiumFullDraftCall({
+      reason: callReason,
+      intakeFingerprint,
       agreementGenerationId: input.agreementGenerationId ?? null,
     });
+    paidProPerfSpanStart("premium_full_draft_api");
+    const premiumRequestStartedAt =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    let fullResp: Awaited<ReturnType<typeof postPremiumFullDraftWithRetry>>;
+    if (genCall.duplicateBlocked) {
+      logPremiumCompletionDebug({
+        stage: "premium_full_draft_duplicate_checkout_blocked",
+        intakeLen: soT.length,
+        accepted: false,
+        rejectedReason: "duplicate_checkout_premium_call",
+      });
+      fullResp = {
+        ok: false,
+        failure_kind: "http",
+        retryable: false,
+        error_code: "duplicate_checkout_premium_call",
+        document_text: "",
+        attemptCount: 0,
+      };
+    } else {
+      fullResp = await postPremiumFullDraftWithRetry({
+        intakeText: soT,
+        context: fullCtx,
+        userGapAnswers: gapAns || null,
+        agreementId: input.agreementId ?? null,
+        agreementGenerationId: input.agreementGenerationId ?? null,
+      });
+    }
     const premiumServerModelMs = Math.round(
       (typeof performance !== "undefined" ? performance.now() : Date.now()) - premiumRequestStartedAt,
     );
-    if (import.meta.env.MODE !== "test") {
+    paidProPerfSpanEnd("premium_full_draft_api", {
+      outcome: genCall.duplicateBlocked ? "duplicate_blocked" : fullResp.ok ? "ok" : "fail",
+      failureCode: fullResp.ok ? undefined : fullResp.error_code,
+    });
+    paidProPerfRecordInstant("server_model", premiumServerModelMs, {
+      outcome: fullResp.ok ? "ok" : fullResp.failure_kind ?? "fail",
+      failureCode: fullResp.ok ? undefined : fullResp.error_code,
+    });
+    if (import.meta.env.MODE !== "test" && import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.info("[premium-timing]", {
         phase: "server_model",
@@ -1579,6 +1671,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       let partyPlaceholderRepairResolvesPaidBody = false;
       if (doc) {
         const preGateIntake = (rawForSoT || rawIntake).trim();
+        paidProPerfSpanStart("premium_local_pre_processing");
         const postProcessStartedAt =
           typeof performance !== "undefined" ? performance.now() : Date.now();
         doc = applyAcceptedProCorpusSafeDisplay(doc, {
@@ -1648,7 +1741,9 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         const postProcessMs = Math.round(
           (typeof performance !== "undefined" ? performance.now() : Date.now()) - postProcessStartedAt,
         );
-        if (import.meta.env.MODE !== "test") {
+        paidProPerfSpanEnd("premium_local_pre_processing", { docLen: doc.length, docText: doc });
+        paidProPerfRecordInstant("structure_repair", postProcessMs, { docLen: doc.length });
+        if (import.meta.env.MODE !== "test" && import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[premium-timing]", {
             phase: "post_processing",
@@ -1685,6 +1780,23 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
       let serverGenDegraded = firstCallOutcomeDegraded;
       if (serverGenDegraded) {
         const c0 = (full.server_generation_failure_code || "").trim();
+        if (c0 === "json_parse") {
+          paidProPerfSpanStart("json_parse_degraded_handling");
+          logPaidProJsonParseDegradedDiagnostics(
+            buildPaidProJsonParseDegradedDiagnostics({
+              documentText: doc,
+              serverFullDocumentText: effectiveFull.server_full_document_text,
+              failureCode: c0,
+              failureMessage: effectiveFull.server_generation_failure_message,
+              rawResponseLen: JSON.stringify(full).length,
+            }),
+          );
+          paidProPerfSpanEnd("json_parse_degraded_handling", {
+            failureCode: c0,
+            docLen: doc.length,
+            docText: doc,
+          });
+        }
         const hard0 = c0 === "airlock_blocked" || c0 === "dev_context_leak";
         if (hard0 || !rejectPremiumDegradedFiller(doc).ok) {
           doc = "";
@@ -2153,7 +2265,15 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         }
       }
       if (standardClientGatesPass || advisoryAccept) {
-        const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
+        const familyDecision = resolveAuthoritativePaidProAgreementFamily({
+          intakeText: rawForSoT || rawIntake,
+          draft: merged,
+          serverFamilyHint: effectiveFull.agreement_family,
+          inputAgreementFamily: input.agreementFamily ?? null,
+          traceId: traceCtx.traceId,
+          sessionGenerationId: input.agreementGenerationId ?? null,
+          intakeFingerprint,
+        });
         const srvFull =
           (effectiveFull.server_full_document_text || "").trim() ||
           extractPremiumApiServerCorpusText(effectiveFull) ||
@@ -2167,7 +2287,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           premium_full_draft_key_terms: effectiveFull.key_terms_found,
           premium_full_draft_missing_info: effectiveFull.missing_material_info,
           title: (effectiveFull.title || "").trim() || merged.title,
-          ...(fam ? { agreement_family: fam } : {}),
+          agreement_family: familyDecision.family,
         });
         winningPremiumBodyText = doc;
         if (serverGenDegraded) {
@@ -2180,6 +2300,7 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
         } else {
           premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
         }
+        outMerged = applyAuthoritativeFamilyToDraft(outMerged, familyDecision);
         if (import.meta.env.DEV) {
           console.info("[premium-render-source]", {
             premiumRenderSource,
@@ -2298,18 +2419,29 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
           doc = preserved;
           winningPremiumBodyText = preserved;
           premiumRenderSource = (frozenReject?.source || "server_full_draft") as PremiumRenderSource;
-          const fam = mapPremiumFullDraftFamilyHint(effectiveFull.agreement_family, merged.agreement_family);
-          outMerged = stripClientPremiumArtifactBlocksFromDraft({
-            ...merged,
-            premium_full_document_text: preserved,
-            premium_server_full_document_text:
-              (effectiveFull.server_full_document_text || "").trim() || preserved,
-            premium_server_repair_document_text: (effectiveFull.server_repair_document_text || "").trim() || null,
-            premium_full_draft_key_terms: effectiveFull.key_terms_found,
-            premium_full_draft_missing_info: effectiveFull.missing_material_info,
-            title: (effectiveFull.title || "").trim() || merged.title,
-            ...(fam ? { agreement_family: fam } : {}),
+          const preservedFamily = resolveAuthoritativePaidProAgreementFamily({
+            intakeText: rawForSoT || rawIntake,
+            draft: merged,
+            serverFamilyHint: effectiveFull.agreement_family,
+            inputAgreementFamily: input.agreementFamily ?? null,
+            traceId: traceCtx.traceId,
+            sessionGenerationId: input.agreementGenerationId ?? null,
+            intakeFingerprint,
           });
+          outMerged = applyAuthoritativeFamilyToDraft(
+            stripClientPremiumArtifactBlocksFromDraft({
+              ...merged,
+              premium_full_document_text: preserved,
+              premium_server_full_document_text:
+                (effectiveFull.server_full_document_text || "").trim() || preserved,
+              premium_server_repair_document_text: (effectiveFull.server_repair_document_text || "").trim() || null,
+              premium_full_draft_key_terms: effectiveFull.key_terms_found,
+              premium_full_draft_missing_info: effectiveFull.missing_material_info,
+              title: (effectiveFull.title || "").trim() || merged.title,
+              agreement_family: preservedFamily.family,
+            }),
+            preservedFamily,
+          );
           premiumCompletionOutcome =
             premiumCompletionOutcome ||
             "authoritative_draft_complete_with_recommended_clarifications";

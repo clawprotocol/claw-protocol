@@ -5358,6 +5358,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementId: agreementIdForPass,
         premiumRequestIntakeFingerprint: shortIntakeFingerprint(mergedIntake),
         isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
+        premiumGenerationCallReason: "entitled_rewrite",
       });
       if (result.staleIntakeOrGeneration) {
         setHardError("Your details changed while we were finishing. Try again when ready.");
@@ -7751,6 +7752,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
                       premiumRequestIntakeFingerprint: sessionFpForPass,
                       isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
+                      premiumGenerationCallReason: "checkout_completion",
                     }),
                     premiumCompletionAttemptTimeoutMs,
                     "premium_completion_attempt",

@@ -28,6 +28,7 @@ import { fingerprintAgreementBody } from "../../guidedDealCompletion/guidedSigni
 import { buildFreeStarterBaselinePlain } from "../../paidProRenderSurface";
 import { polishedAuthoritativeProPlainForCopy } from "../../polishProAgreementDisplayLayer";
 import { resolveAuthoritativePaidProReviewPlain } from "../../authoritativePaidProReview";
+import { clearPremiumGenerationCallAudit } from "../../paidProPremiumGenerationCallAudit";
 import { clearFrozenCanonicalAgreementCorpus } from "../../canonicalAgreementSnapshot";
 import {
   clearPaidPremiumCompletionSession,
@@ -122,6 +123,7 @@ vi.mock("../../premiumFullDraftApi", async (importOriginal) => {
 
 describe("paidPro Test221 first review after degraded recovery — no legacy starter shell", () => {
   beforeEach(() => {
+    clearPremiumGenerationCallAudit();
     const doc = buildTest221RejectedDegradedServerBody(6_387);
     h.mockResult.document_text = doc;
     h.mockResult.server_full_document_text = doc;
