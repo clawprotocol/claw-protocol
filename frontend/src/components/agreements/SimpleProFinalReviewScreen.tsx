@@ -175,7 +175,7 @@ export function SimpleProFinalReviewScreen({
     Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
   const signerSetupRequired = canonicalPaidProReview && !signersReady;
   const canEditAgreementText =
-    !signerSetupRequired && !suppressPostReviewEditUx && (canDirectEditPlainText || canSuggestEdits);
+    canDirectEditPlainText || (!signerSetupRequired && !suppressPostReviewEditUx && canSuggestEdits);
   const paidReviewBodyLen = paidReviewPlain.trim().length;
   const hasCanonicalPaidReviewBody =
     canonicalPaidProReview && paidReviewBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN;

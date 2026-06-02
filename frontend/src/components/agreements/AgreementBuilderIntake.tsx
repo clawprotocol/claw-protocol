@@ -411,6 +411,12 @@ import {
   resolvePaidProReviewRenderSource,
   syncConsumedAuthoritySignerTitlesFromCorpus,
 } from "./paidProReviewRenderCorpus";
+import {
+  clearPaidProSignerStagingDisplayCorpus,
+  freezePaidProSignerStagingDisplayCorpus,
+  readPaidProSignerStagingDisplayCorpus,
+} from "./paidProSignerStagingDisplayCorpus";
+import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { commitPaidProAcceptanceStorageHygiene } from "./paidProAcceptanceRouting";
 import {
@@ -13093,6 +13099,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     clearedSignerStagingAddressesRef.current = true;
     setPartyAddresses((prev) => prev.map(() => ""));
   }, [paidProSignerMetadataSessionActive, premiumSurfaceGateTick]);
+  useEffect(() => {
+    if (!paidProSignerMetadataSessionActive || !hasPaidProSourceOfTruth()) {
+      if (!paidProSignerMetadataSessionActive) clearPaidProSignerStagingDisplayCorpus();
+      return;
+    }
+    const sotHash = getPaidProSourceOfTruth()?.hash ?? "";
+    const cached = readPaidProSignerStagingDisplayCorpus();
+    if (cached?.sotHash === sotHash && cached.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN) return;
+    const intakeForFreeze = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const frozenPlain = resolvePaidProReviewRenderPlain({
+      draft: draft ?? null,
+      intakeText: intakeForFreeze,
+      deferSignerMetadataRepair: true,
+    });
+    if (frozenPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN && sotHash) {
+      freezePaidProSignerStagingDisplayCorpus(frozenPlain, sotHash);
+    }
+  }, [
+    paidProSignerMetadataSessionActive,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    draft,
+    premiumSurfaceGateTick,
+  ]);
   // Mirror into refs so imperative callbacks (body rebuilds, handoff applies) can consult the guard
   // without re-binding: signer-metadata edits must never overwrite the authoritative body.
   useEffect(() => {
@@ -13407,6 +13437,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (fromSnapshot?.length) {
       return fromSnapshot;
     }
+    if (paidProSignerMetadataSessionActive && hasPaidProSourceOfTruth()) {
+      const stableParties = (draft?.parties ?? []).slice(0, 12).map((p, partyIndex) => ({
+        partyIndex,
+        partyLegalName: String((p as { name?: string }).name ?? "").trim(),
+        signerEmail: "",
+        signerName: "",
+        signerTitle: "",
+        partyAddress: "",
+      }));
+      if (stableParties.length >= 2) {
+        return authorityPartiesToCanonicalPartyIdentities(stableParties, paidProPartyRoleContext);
+      }
+    }
     const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
     if (hasPaidProSourceOfTruth()) {
       return authorityPartiesToCanonicalPartyIdentities(authority.parties, paidProPartyRoleContext);
@@ -13426,6 +13469,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipientsDeferred,
     });
   }, [
+    paidProSignerMetadataSessionActive,
+    paidProPartyRoleContext,
     liveSignerMetadataUiState,
     paidProPostSignerMetadataFreezeActive,
     signaturePreparationRequested,
@@ -18251,6 +18296,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const guidedFinalReviewAuthoritativeResolution = useMemo(() => {
+    if (paidProSignerMetadataSessionActive && hasPaidProSourceOfTruth()) {
+      const sotPlain = getPaidProSourceOfTruthText();
+      const sotHash = getPaidProSourceOfTruth()?.hash ?? "";
+      return {
+        body: sotPlain,
+        source: "paidProSourceOfTruth" as const,
+        len: sotPlain.length,
+        finalizedHash: sotHash,
+      };
+    }
     const rd = reviewDraft ?? draft;
     const serverFullDocumentText = (
       (rd as { server_full_document_text?: string | null } | null)?.server_full_document_text ||
@@ -18282,6 +18337,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       pinnedFinalizedSignerCorpus: buildPinnedFinalizedSignerCorpus(pinnedFinalizedSignerCorpusRef.current),
     });
   }, [
+    paidProSignerMetadataSessionActive,
     agreementDocumentText,
     premiumPaidReadonlyPick.plainText,
     guidedAuthVersionNonce,
@@ -21377,14 +21433,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const handleSaveProFinalReviewPlainEdits = React.useCallback(() => {
     let raw = proFinalReviewEditPlain.trim();
     if (!raw) return;
+    const intakeForSave = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const safe = applyAcceptedProCorpusSafeDisplay(raw, {
+      draft: draft ?? null,
+      intakeText: intakeForSave,
+    });
+    raw = safe.text.trim();
+    if (!raw) return;
     const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
-    if (parties && parties.length >= 2) {
-      raw = applyPaidProReviewRenderSanitizer(raw, parties).text.trim();
+    if (parties && parties.length >= 2 && !paidProSignerMetadataSessionActiveRef.current) {
+      raw = applyPaidProReviewRenderSanitizer(raw, parties, paidProPartyRoleContext).text.trim();
     }
     setProFinalReviewSaveBusy(true);
     setProFinalReviewSaveAck(false);
     if (hasPaidProSourceOfTruth()) {
       const stable = commitPaidProUserApprovedRevision(raw, "pro_final_review_plain_edit_revision");
+      clearPaidProSignerStagingDisplayCorpus();
       syncConsumedAuthoritySignerTitlesFromCorpus(stable);
       setPaidProPinnedSignerAppliedCorpus(stable);
       setProFinalReviewEditPlain(stable);
@@ -21409,6 +21473,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedSignerCanonicalIdentities,
     pinFinalizedSignerAppliedCorpus,
     commitPaidProUserApprovedRevision,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    draft,
+    paidProPartyRoleContext,
   ]);
 
   const proReviewSigningFlowState = useMemo(() => {
@@ -26776,7 +26844,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           }
                                           onCopyAgreement={handleSimpleProFinalReviewCopy}
                                           onExportAgreement={() => void handleSimpleProFinalReviewExport()}
-                                          suppressPostReviewEditUx={paidProCanonicalReviewSignerSetupActive}
+                                          suppressPostReviewEditUx={false}
                                           corpusRecoveryMessage={
                                             suppressPaidProFinalReviewFinalizingState({
                                               draft: draft ?? null,

@@ -61,7 +61,7 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
-  it("paid Pro Test222: hides Edit agreement text while signer setup is required", () => {
+  it("paid Pro Test222: allows direct Edit agreement text while signer setup is required", () => {
     render(
       <SimpleProFinalReviewScreen
         agreementHtml="<p>Body</p>"
@@ -78,7 +78,7 @@ describe("SimpleProFinalReviewScreen", () => {
         onExportAgreement={vi.fn()}
       />,
     );
-    expect(screen.queryByTestId("simple-pro-edit-agreement-text-toggle")).toBeNull();
+    expect(screen.getByTestId("simple-pro-edit-agreement-text-toggle")).toBeTruthy();
     cleanup();
   });
 

@@ -57,6 +57,12 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
+import {
+  clearPaidProReviewRenderFusedRepairCache,
+} from "./paidProReviewRenderCorpus";
+import {
+  clearPaidProSignerStagingDisplayCorpus,
+} from "./paidProSignerStagingDisplayCorpus";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -121,6 +127,8 @@ export function clearPaidProSourceOfTruth(): void {
   paidProSourceOfTruth = null;
   clearAuthoritativeAgreementDocument();
   clearFrozenCanonicalAgreementCorpus();
+  clearPaidProSignerStagingDisplayCorpus();
+  clearPaidProReviewRenderFusedRepairCache();
   tracePaidProCorpusMutation({
     store: "paidProSourceOfTruth",
     caller: "clearPaidProSourceOfTruth",
@@ -305,6 +313,8 @@ export function establishPaidProSourceOfTruth(args: {
     reason: "authoritative_source_of_truth_established",
   });
   paidProSourceOfTruth = record;
+  clearPaidProSignerStagingDisplayCorpus();
+  clearPaidProReviewRenderFusedRepairCache();
   if (args.allowShorterOverwrite) {
     clearPaidProPinnedSignerAppliedCorpus();
     clearAuthoritativeSigningSnapshot();

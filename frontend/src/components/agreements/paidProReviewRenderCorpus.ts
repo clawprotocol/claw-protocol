@@ -50,6 +50,11 @@ import {
 } from "./paidProAcceptedCorpusPartyRoles";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import {
+  paidProSignerStagingDisplayUsesFrozenCorpus,
+  readPaidProSignerStagingDisplayCorpus,
+  resolvePaidProSignerStagingDisplayPlain,
+} from "./paidProSignerStagingDisplayCorpus";
+import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
@@ -411,6 +416,12 @@ export function applyPaidProReviewRenderSanitizer(
 }
 
 /** Hard render-time guard: repair fused party legal names before review HTML/display. */
+let fusedPartyRepairCache: { inputHash: string; text: string } | null = null;
+
+export function clearPaidProReviewRenderFusedRepairCache(): void {
+  fusedPartyRepairCache = null;
+}
+
 export function guardPaidProReviewRenderCorpus(
   corpus: string,
   parties?: readonly PaidProSignerMetadataParty[],
@@ -418,12 +429,18 @@ export function guardPaidProReviewRenderCorpus(
   const input = (corpus || "").replace(/\r\n/g, "\n").trimEnd();
   if (!input) return { text: "", repaired: false, warned: false };
 
+  const inputHash = hashPaidProCorpus(input);
+  if (fusedPartyRepairCache?.inputHash === inputHash) {
+    return { text: fusedPartyRepairCache.text, repaired: false, warned: false };
+  }
+
   const sigOrder = repairPaidProSignatureSectionOrdering(input);
   let text = sigOrder.text;
   let repaired = sigOrder.repairs.length > 0;
 
   const authParties = parties ?? readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
   if (!corpusContainsFusedPartyLegalName(text)) {
+    fusedPartyRepairCache = { inputHash, text };
     return { text, repaired, warned: false };
   }
 
@@ -465,6 +482,7 @@ export function guardPaidProReviewRenderCorpus(
     pattern: QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE,
   });
 
+  fusedPartyRepairCache = { inputHash, text };
   return { text, repaired: repaired || text !== input, warned: true };
 }
 
@@ -582,9 +600,17 @@ function alignExecutionBlockRolesFromAcceptedCorpus(corpus: string): string {
 export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
-  const inner = alignExecutionBlockRolesFromAcceptedCorpus(resolvePaidProReviewRenderPlainInner(args));
-  if (args?.deferSignerMetadataRepair) return inner.trim();
-  return finalizePaidProReviewRenderPlain(inner, args);
+  if (args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()) {
+    return readPaidProSignerStagingDisplayCorpus()?.plain ?? getPaidProSourceOfTruthText().trim();
+  }
+  return resolvePaidProSignerStagingDisplayPlain({
+    stagingActive: Boolean(args?.deferSignerMetadataRepair),
+    resolveFresh: () => {
+      const inner = alignExecutionBlockRolesFromAcceptedCorpus(resolvePaidProReviewRenderPlainInner(args));
+      if (args?.deferSignerMetadataRepair) return inner.trim();
+      return finalizePaidProReviewRenderPlain(inner, args);
+    },
+  });
 }
 
 function resolvePaidProReviewRenderPlainInner(

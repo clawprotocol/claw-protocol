@@ -18,12 +18,16 @@ import {
 } from "./paidProPartyNamePreserve";
 import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import type { CanonicalPartyIdentity as SignerCanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
+import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 export const PARTY_ENTITY_SUFFIX_RE =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company|Foundation|Trust)\.?$/i;
 
 const INVALID_CANONICAL_PARTY_PHRASE_RE =
   /\b(?:effective\s+date|services?\s+term|governing\s+law|this\s+agreement|agreement|payment\s+terms?|electronic\s+signatures?|confidentiality|miscellaneous|termination|scope|purpose|ownership|notices?|dispute|venue|jurisdiction|signature|execution)\b/i;
+
+const SECTION_HEADING_PARTY_PREFIX_RE =
+  /^(?:INDEPENDENT CONTRACTOR AND ACCESS|SCOPE OF SERVICES|WARRANTIES AND COMPLIANCE|LIMITATION OF LIABILITY|INTELLECTUAL PROPERTY|CONFIDENTIALITY|GOVERNING LAW|NOTICES|TERMINATION|ELECTRONIC SIGNATURES|ENTIRE AGREEMENT|MISCELLANEOUS|FEES AND PAYMENT|TERM\b|CLIENT\.)/i;
 
 const ADDRESS_PLACEHOLDER_LINE_RE =
   /(?:,\s*)?(?:a\s+\[[^\]]+\]\s+)?(?:with\s+(?:its\s+)?(?:principal\s+place\s+of\s+business|principal\s+office|mailing\s+address|notice\s+address)|(?:principal\s+place\s+of\s+business|principal\s+office|mailing\s+address|notice\s+address)\s*(?:at|:)?|located\s+at)\s+\[?(?:client\s+address|service\s+provider\s+address|address|principal\s+place\s+of\s+business|principal\s+office|mailing\s+address|notice\s+address)[^\]\n.,;]*\]?/gi;
@@ -131,14 +135,47 @@ function roleLabelForIndex(index: number, explicit?: string): string {
 }
 
 function normalizedName(s: string): string {
-  return s.replace(/\s+/g, " ").trim();
+  return s
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\s*\(\s*(?:Client|Service\s+Provider)\s*\)\.?$/i, "");
 }
 
-function isInvalidCanonicalPartyName(name: string): boolean {
-  const t = normalizedName(name).replace(/[.,;:]+$/g, "");
+function dedupeKnownPartyTokens(tokens: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const raw of tokens) {
+    const token = norm(raw).replace(/[.,;:]+$/g, "");
+    if (token.length < 8) continue;
+    if (out.some((existing) => partyLegalNamesMatch(existing, token))) continue;
+    out.push(token);
+  }
+  return out;
+}
+
+function containsMultipleKnownPartyNames(name: string, knownPartyTokens?: readonly string[]): boolean {
+  const uniqueTokens = dedupeKnownPartyTokens(knownPartyTokens || []);
+  if (uniqueTokens.length < 2) return false;
+  const n = norm(name).replace(/[.,;:]+$/g, "");
+  if (!n) return false;
+  let matched = 0;
+  for (const token of uniqueTokens) {
+    if (partyLegalNamesMatch(n, token)) {
+      matched += 1;
+      continue;
+    }
+    if (n.length > token.length + 2 && n.includes(token)) matched += 1;
+  }
+  return matched >= 2;
+}
+
+function isInvalidCanonicalPartyName(name: string, knownPartyTokens?: readonly string[]): boolean {
+  const t = normalizedName(name);
   if (!t || t.length < 3) return true;
   if (/^(?:party|parties|client|service provider|provider|contractor|company)$/i.test(t)) return true;
   if (INVALID_CANONICAL_PARTY_PHRASE_RE.test(t)) return true;
+  if (SECTION_HEADING_PARTY_PREFIX_RE.test(t)) return true;
+  if (/^client\.\s+/i.test(t)) return true;
+  if (containsMultipleKnownPartyNames(t, knownPartyTokens)) return true;
   return false;
 }
 
@@ -158,15 +195,18 @@ function canonicalEntityNamesFromText(
     return knownTokens.some((token) => n === token || n.startsWith(`${token} `) || token.startsWith(`${n} `));
   };
   const accept = (name: string, fromBetween: boolean) => {
-    if (isInvalidCanonicalPartyName(name)) return false;
-    if (hasLegalEntitySuffix(name)) return true;
-    if (opts?.requireSuffix && !matchesKnownToken(name)) return false;
+    const cleaned = normalizedName(name);
+    if (isInvalidCanonicalPartyName(cleaned, knownTokens)) return false;
+    if (hasLegalEntitySuffix(cleaned)) return true;
+    if (opts?.requireSuffix && !matchesKnownToken(cleaned)) return false;
     if (fromBetween && opts?.allowBetweenWithoutSuffix) return true;
-    return matchesKnownToken(name);
+    return matchesKnownToken(cleaned);
   };
   const between = extractBetweenPartyNameList(raw).filter((name) => accept(name, true)).map(normalizedName);
   if (between.length >= 2) return between;
-  return extractAgreementEntityCandidates(raw).filter((name) => accept(name, false)).map(normalizedName);
+  return extractAgreementEntityCandidates(raw)
+    .map(normalizedName)
+    .filter((name) => accept(name, false));
 }
 
 function authoritativeNamesFromPartyNames(partyNames: readonly string[] | null | undefined): string[] {
@@ -237,21 +277,38 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     allowBetweenWithoutSuffix: true,
     knownPartyTokens: starterNames,
   });
-  const generatedBodyNames = canonicalEntityNamesFromText(args.generatedBody, {
-    requireSuffix: true,
-    knownPartyTokens: [...rawIntakeNames, ...starterAuthoritative],
-  });
+  const paidProSotActive = hasPaidProSourceOfTruth();
+  const sotCorpusRoles = paidProSotActive
+    ? resolvePaidProPartyRolesFromAcceptedCorpus(getPaidProSourceOfTruthText())
+    : [];
+  const generatedBodyNames =
+    paidProSotActive || sotCorpusRoles.length >= 2
+      ? []
+      : canonicalEntityNamesFromText(args.generatedBody, {
+          requireSuffix: true,
+          knownPartyTokens: [...rawIntakeNames, ...starterAuthoritative],
+        });
   const fullCandidates = [...rawIntakeNames, ...generatedBodyNames, ...starterAuthoritative];
   let selected =
-    rawIntakeNames.length >= 2
-      ? rawIntakeNames
-      : generatedBodyNames.length >= 2
-        ? generatedBodyNames
-        : starterAuthoritative.length >= 2
-          ? starterAuthoritative
-          : upgradeShortNamesToFullLegal(starterNames, fullCandidates).filter(hasLegalEntitySuffix);
+    sotCorpusRoles.length >= 2
+      ? sotCorpusRoles.map((role) => role.legalName)
+      : rawIntakeNames.length >= 2
+        ? rawIntakeNames
+        : generatedBodyNames.length >= 2
+          ? generatedBodyNames
+          : starterAuthoritative.length >= 2
+            ? starterAuthoritative
+            : upgradeShortNamesToFullLegal(starterNames, fullCandidates).filter(hasLegalEntitySuffix);
+  const trustedPartyTokens = [
+    ...rawIntakeNames,
+    ...starterAuthoritative,
+    ...sotCorpusRoles.map((role) => role.legalName),
+  ];
   selected = selected.filter(
-    (n) => n.length >= 3 && !/^(?:party|parties)$/i.test(n),
+    (n) =>
+      n.length >= 3 &&
+      !/^(?:party|parties)$/i.test(n) &&
+      !isInvalidCanonicalPartyName(n, trustedPartyTokens),
   );
   logCanonicalPartySourceCandidates({
     rawIntakeNames,
