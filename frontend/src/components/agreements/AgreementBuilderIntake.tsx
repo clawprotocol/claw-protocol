@@ -252,6 +252,7 @@ import {
   stripPremiumUserNotesFromMergedIntake,
   type PremiumCompletionResult,
 } from "./premiumCompletionPipeline";
+import { shouldSuppressPremiumPipelineRetryAfterAuthoritativeAccept } from "./premiumParseSessionGuard";
 import {
   clearOriginalUserIntakeRaw,
   pickLongestPremiumIntakeCorpus,
@@ -4342,7 +4343,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     try {
       const reqTs = new Date().toISOString();
       const controller = new AbortController();
-      const parseTimeoutMs = isPremium ? 60000 : 5000;
+      const parseTimeoutMs = isPremium ? 90_000 : 5000;
       const parseTimeoutId = window.setTimeout(
         () => controller.abort(isPremium ? "premium_parse_timeout" : "basic_parse_timeout"),
         parseTimeoutMs,
@@ -7800,6 +7801,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               } catch (e) {
                 const em = e instanceof Error ? e.message : String(e);
                 const timedOutThisAttempt = em.includes("premium_completion_attempt_timeout_");
+                if (
+                  attempt === 0 &&
+                  shouldSuppressPremiumPipelineRetryAfterAuthoritativeAccept(e) &&
+                  (hasPaidProSourceOfTruth() ||
+                    Boolean(
+                      readPremiumCompletionSnapshot()?.premiumAccepted &&
+                        hasUsablePremiumBodyText(readPremiumCompletionSnapshot()?.premiumWinningBodyText),
+                    ))
+                ) {
+                  console.info("[premium-flow] suppress_retry_after_authoritative_server_accept", {
+                    attempt,
+                    err: em,
+                  });
+                  break;
+                }
                 console.info("[premium-flow] premium_completion_timeout_boundary", {
                   attempt,
                   started_at: new Date(premiumCompletionAttemptStartedAt).toISOString(),

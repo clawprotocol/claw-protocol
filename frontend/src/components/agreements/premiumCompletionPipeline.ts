@@ -90,6 +90,10 @@ import {
   logPremiumApiResultFromWire,
   premiumApiResultHasAuthoritativeServerCorpus,
 } from "./premiumApiHandoff";
+import {
+  clearPremiumParseSessionGuard,
+  markPremiumAuthoritativeServerCorpusAccepted,
+} from "./premiumParseSessionGuard";
 import { logDevPostPremiumFullDraftPipelineReturn } from "./premiumFullDraftPostResponseTrace";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import {
@@ -1119,6 +1123,7 @@ async function runPremiumCompletionInner(
   input: PremiumCompletionInput,
   traceCtx: { traceId: string; intakeFingerprintEarly: string },
 ): Promise<PremiumCompletionResult> {
+  clearPremiumParseSessionGuard();
   const rawIntake = input.intakeText.trim();
   logPremiumSessionConsistency({
     context: "runPremiumCompletion_start",
@@ -1362,18 +1367,9 @@ async function runPremiumCompletionInner(
 
   const trackA = enforceEconomicsSafety(merged, rawForSoT || rawIntake);
 
-  const trackBPrompt = [
-    "Premium agreement generation instructions:",
-    "- Preserve commercial asks from user intake.",
-    "- Infer missing standard protections without inventing economics.",
-    "- Use professional agreement structure and complete signature-ready drafting.",
-    "- Retain clear user economics exactly; if unclear, use 'as specified in Schedule A'.",
-    "- Include ownership, compliance, termination, dispute, and signature mechanics when relevant.",
-    "",
-    "User intake:",
-    rawForSoT || rawIntake,
-  ].join("\n");
-  const trackBParse = await input.parseDraft(trackBPrompt);
+  // Paid Pro checkout uses server_full_draft as authority. Track B is a third premium parse that
+  // frequently hit premium_parse_timeout (~60s) after the HTTP draft had already succeeded on retry.
+  const trackBParse = premiumParse;
   let trackB = mergePremiumParsePreferFresh(input.structuredDraft, trackBParse, rawForSoT || rawIntake);
   trackB = runIntakeDefaultsAndRoles(trackB, rawForSoT || rawIntake, input.simpleProductFlow, input.partyRoleLabels);
   trackB = applyHardFamilyLocks(trackB, rawForSoT || rawIntake);
@@ -1717,6 +1713,9 @@ async function runPremiumCompletionInner(
     } else {
       const full = fullResp.result;
       logPremiumApiResultFromWire({ ok: true, status: 200, wire: full });
+      if (premiumApiResultHasAuthoritativeServerCorpus(full)) {
+        markPremiumAuthoritativeServerCorpusAccepted();
+      }
       if (!premiumApiResultHasAuthoritativeServerCorpus(full) && import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.warn("[premium-api-handoff] server_full_document_text missing or short after HTTP ok", {

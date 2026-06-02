@@ -19,6 +19,7 @@ import {
   buildCorpusRoleIdentitiesForExecutionReconcile,
   detectExecutionBlockRoleInversion,
 } from "./paidProAcceptedCorpusPartyRoles";
+import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
@@ -164,6 +165,14 @@ export function applyAcceptedProCorpusSafeDisplay(
   if (sigOrder.text !== out) {
     out = sigOrder.text;
     repairs.push(...sigOrder.repairs);
+  }
+
+  if (hasFullLegal && records.length >= 2) {
+    const execution = enforcePaidProSingleExecutionBlock(out);
+    if (execution.text !== out) {
+      out = execution.text;
+      repairs.push(...execution.repairs);
+    }
   }
 
   const postSigRoleRepair = reconcileAcceptedCorpusExecutionRolesIfInverted(out);

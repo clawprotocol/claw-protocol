@@ -4,6 +4,10 @@
  */
 
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
+import {
+  isRecitalFragmentExecutionPartyLine,
+  repairDuplicatedLegalEntitySuffixPhrase,
+} from "./paidProLegalEntityNameHygiene";
 import { sortIdentitiesForExecutionBlockOrder } from "./paidProSignerMetadataMergeGate";
 
 export function partyLegalNamesMatch(a: string, b: string): boolean {
@@ -49,6 +53,13 @@ function normalizedKey(name: string): string {
     .replace(/[.,;:]+$/g, "");
 }
 
+function acceptCorpusRoleLegalName(raw: string): string | null {
+  const legal = repairDuplicatedLegalEntitySuffixPhrase(raw.trim().replace(/[.,;]+$/, ""));
+  if (!legal || legal.length < 3) return null;
+  if (isRecitalFragmentExecutionPartyLine(legal)) return null;
+  return legal;
+}
+
 /**
  * Parse role assignments from the corpus head (before execution). First mention per legal name wins.
  */
@@ -63,8 +74,8 @@ export function resolvePaidProPartyRolesFromAcceptedCorpus(
 
   const betweenMatch = head.match(BETWEEN_CLIENT_PROVIDER_RE);
   if (betweenMatch?.[1] && betweenMatch?.[2]) {
-    const clientLegal = betweenMatch[1].trim().replace(/[.,;]+$/, "");
-    const providerLegal = betweenMatch[2].trim().replace(/[.,;]+$/, "");
+    const clientLegal = acceptCorpusRoleLegalName(betweenMatch[1]);
+    const providerLegal = acceptCorpusRoleLegalName(betweenMatch[2]);
     if (clientLegal) {
       seen.add(normalizedKey(clientLegal));
       out.push({
@@ -84,9 +95,9 @@ export function resolvePaidProPartyRolesFromAcceptedCorpus(
   }
 
   for (const match of head.matchAll(ROLE_PAREN_RE)) {
-    const legal = (match[1] ?? "").trim().replace(/[.,;]+$/, "");
+    const legal = acceptCorpusRoleLegalName(match[1] ?? "");
+    if (!legal) continue;
     const roleRaw = (match[2] ?? "").trim().toLowerCase();
-    if (!legal || legal.length < 3) continue;
     const key = normalizedKey(legal);
     if (!key || seen.has(key)) continue;
     seen.add(key);
