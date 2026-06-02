@@ -6,8 +6,10 @@ import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
+  getPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
+import { paidProSurfaceCorpusMatchesAuthority } from "./paidProAgreementAuthorityChain";
 import {
   PAID_PRO_HARDENING_CLIENT,
   PAID_PRO_HARDENING_PROVIDER,
@@ -90,5 +92,43 @@ describe("paidPro accepted source discipline", () => {
     const polishedTail = polished.text.slice(polished.text.search(/\bIN WITNESS WHEREOF\b/i));
     expect(polishedTail).toMatch(/CLIENT\s*:\s*\nBlue Canyon Analytics LLC/i);
     expect(polishedTail).toMatch(/SERVICE\s+PROVIDER\s*:\s*\nIron Vale Systems Inc/i);
+  });
+
+  it("treats signer-applied signature tail as allowed overlay when operative body matches SoT", () => {
+    const draft = {
+      parties: [
+        { name: PAID_PRO_HARDENING_CLIENT, role: "Client" },
+        { name: PAID_PRO_HARDENING_PROVIDER, role: "Service Provider" },
+      ],
+    } as ParsedDraftShape;
+    const source = establishPaidProSourceOfTruth({
+      text: ACCEPTED,
+      intakeText: INTAKE,
+      draft,
+      source: "server_full_draft",
+    });
+    const witnessIdx = source.text.search(/\bIN WITNESS WHEREOF\b/i);
+    const signerOverlay = `${source.text.slice(0, witnessIdx)}
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT:
+${PAID_PRO_HARDENING_CLIENT}
+By: __________________________
+Name: Jane Doe
+Email for Notice: jane@test.com
+
+SERVICE PROVIDER:
+${PAID_PRO_HARDENING_PROVIDER}
+By: __________________________
+Name: Ira Vale
+Email for Notice: ivee@test.com
+`;
+    expect(paidProSurfaceCorpusMatchesAuthority({
+      text: signerOverlay,
+      signerMetadataApplied: true,
+      actualSource: "signer_hydrated_from_authority",
+    })).toBe(true);
+    expect(hashPaidProCorpus(signerOverlay)).not.toBe(source.hash);
+    expect(getPaidProSourceOfTruth()?.hash).toBe(source.hash);
   });
 });

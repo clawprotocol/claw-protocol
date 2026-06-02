@@ -32,7 +32,10 @@ import {
   resolvePaidProFinalHydratedCorpusForSurface,
   type PaidProFinalHydratedCorpusSource,
 } from "./paidProFinalHydratedCorpus";
-import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
+import {
+  resolveCanonicalPartyIdentitiesFromIntake,
+  resolveCanonicalPartyIdentitiesFromSources,
+} from "./canonicalPartyIdentityResolver";
 import { SIGNATURE_DATE_BLANK_LINE } from "./guidedDealCompletion/signerPartyIdentity";
 import { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
 
@@ -41,6 +44,11 @@ import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity"
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
+import {
+  buildCorpusRoleIdentitiesForExecutionReconcile,
+  detectExecutionBlockRoleInversion,
+} from "./paidProAcceptedCorpusPartyRoles";
+import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -289,10 +297,16 @@ export function resolvePartiesForReviewRender(args?: {
   if (consumed && consumed.length >= 2) return consumed;
 
   const intakeRaw = (args?.intakeText ?? "").trim();
-  const records = resolveCanonicalPartyIdentitiesFromIntake(
-    intakeRaw || null,
-    args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
-  );
+  const acceptedCorpus = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : null;
+  const draftPartyNames =
+    args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null;
+  const records = acceptedCorpus
+    ? resolveCanonicalPartyIdentitiesFromSources({
+        rawIntake: intakeRaw || null,
+        starterNames: draftPartyNames,
+        generatedBody: acceptedCorpus,
+      })
+    : resolveCanonicalPartyIdentitiesFromIntake(intakeRaw || null, draftPartyNames);
   if (records.length < 2) return consumed ?? [];
 
   return records.slice(0, 12).map((record, partyIndex) => ({
@@ -558,11 +572,18 @@ function finalizePaidProReviewRenderPlain(
   return ensurePaidProServicesAgreementOpening(out, records).text.trim();
 }
 
+function alignExecutionBlockRolesFromAcceptedCorpus(corpus: string): string {
+  if (!detectExecutionBlockRoleInversion(corpus)) return corpus;
+  const identities = buildCorpusRoleIdentitiesForExecutionReconcile(corpus);
+  const reconciled = reconcileExecutionBlockToRoleIdentities(corpus, identities);
+  return reconciled.repairs > 0 ? reconciled.text : corpus;
+}
+
 export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
-  const inner = resolvePaidProReviewRenderPlainInner(args);
-  if (args?.deferSignerMetadataRepair) return inner;
+  const inner = alignExecutionBlockRolesFromAcceptedCorpus(resolvePaidProReviewRenderPlainInner(args));
+  if (args?.deferSignerMetadataRepair) return inner.trim();
   return finalizePaidProReviewRenderPlain(inner, args);
 }
 

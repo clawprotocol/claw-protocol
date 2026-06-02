@@ -127,6 +127,10 @@ export function paidProSurfaceCorpusMatchesAuthority(args: {
   const expected = expectedPaidProSurfaceHash(args);
   if (expected && actualHash === expected) return true;
   if (actualHash === source.hash) return true;
+  // Signer hydration / execution role alignment may change signature tail only.
+  const operativeExpected = fingerprintPaidProAgreementOperativeBody(source.text);
+  const operativeActual = fingerprintPaidProAgreementOperativeBody(actualText);
+  if (operativeExpected === operativeActual) return true;
   if (args.allowExecutionAppend && differsOnlyByExecutionAppend(source.text, actualText)) return true;
   return false;
 }

@@ -34,6 +34,10 @@ export type AcceptedCorpusRoleAssignment = {
 const ROLE_PAREN_RE =
   /([A-Za-z0-9][^("\n]{2,140}?)\s*\(\s*["']?(Client|Service\s+Provider)["']?\s*\)/gi;
 
+/** Entity line in execution tail: `Blue Canyon Analytics LLC (Service Provider)`. */
+const EXECUTION_ENTITY_PAREN_ROLE_RE =
+  /^([A-Za-z0-9][^(\n]{2,140}?)\s*\(\s*(Client|Service\s+Provider)\s*\)\s*$/i;
+
 const BETWEEN_CLIENT_PROVIDER_RE =
   /(?:\bbetween|\bby\s+and\s+between)\s+(.+?)\s*\(\s*["']?Client["']?\s*\)\s+and\s+(.+?)\s*\(\s*["']?Service\s+Provider["']?\s*\)/i;
 
@@ -134,7 +138,24 @@ export function buildCorpusRoleIdentitiesForExecutionReconcile(
   return sortIdentitiesForExecutionBlockOrder(identities);
 }
 
-/** True when CLIENT / SERVICE PROVIDER headings name the wrong party vs corpus recital roles. */
+function executionTailRoleParentheticalInversion(
+  tail: string,
+  corpus: string,
+): boolean {
+  for (const match of tail.matchAll(new RegExp(EXECUTION_ENTITY_PAREN_ROLE_RE.source, "gim"))) {
+    const entity = (match[1] ?? "").trim().replace(/[.,;]+$/, "");
+    const labeledRole = (match[2] ?? "").trim().toLowerCase();
+    if (!entity) continue;
+    const expected = resolveAcceptedCorpusRoleLabelForLegalName(entity, corpus);
+    if (!expected) continue;
+    const expectedNorm = expected.toLowerCase();
+    const labeledNorm = labeledRole === "client" ? "client" : "service provider";
+    if (expectedNorm !== labeledNorm) return true;
+  }
+  return false;
+}
+
+/** True when execution block roles disagree with accepted corpus recital roles. */
 export function detectExecutionBlockRoleInversion(corpus: string): boolean {
   const assignments = resolvePaidProPartyRolesFromAcceptedCorpus(corpus);
   const client = assignments.find((a) => a.role === "client");
@@ -147,11 +168,13 @@ export function detectExecutionBlockRoleInversion(corpus: string): boolean {
 
   const clientBlock = tail.match(/^\s*CLIENT\s*:\s*\n([^\n]+)/im);
   const providerBlock = tail.match(/^\s*SERVICE\s+PROVIDER\s*:\s*\n([^\n]+)/im);
-  if (!clientBlock?.[1] || !providerBlock?.[1]) return false;
+  if (clientBlock?.[1] && providerBlock?.[1]) {
+    const underClient = clientBlock[1].trim();
+    const underProvider = providerBlock[1].trim();
+    const clientOk = partyLegalNamesMatch(underClient, client.legalName);
+    const providerOk = partyLegalNamesMatch(underProvider, provider.legalName);
+    if (!clientOk || !providerOk) return true;
+  }
 
-  const underClient = clientBlock[1].trim();
-  const underProvider = providerBlock[1].trim();
-  const clientOk = partyLegalNamesMatch(underClient, client.legalName);
-  const providerOk = partyLegalNamesMatch(underProvider, provider.legalName);
-  return !clientOk || !providerOk;
+  return executionTailRoleParentheticalInversion(tail, corpus);
 }

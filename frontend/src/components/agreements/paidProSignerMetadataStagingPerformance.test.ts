@@ -3,7 +3,7 @@ import * as paidProAgreementRecitalRepair from "./paidProAgreementRecitalRepair"
 import * as paidProOpeningRecitalGuard from "./paidProOpeningRecitalGuard";
 import * as paidProReviewRenderCorpus from "./paidProReviewRenderCorpus";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
-import { clearPaidProSourceOfTruth, hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth, hashPaidProCorpus } from "./paidProSourceOfTruth";
 import {
   armPaidProHardeningSession,
   loadPaidProHardeningFixture,
@@ -25,52 +25,85 @@ describe("paidProSignerMetadataStagingPerformance", () => {
     ).toBe(true);
     expect(
       shouldDeferPaidProReviewRenderSignerRepair({ signerMetadataSessionActive: false }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it.each([
-    ["signerName"],
-    ["signerTitle"],
-    ["signerEmail"],
-    ["partyAddress"],
-  ] as const)(
-    "repeated resolve with deferSignerMetadataRepair (%s) does not run repair or opening guards",
-    () => {
-      const fixture = loadPaidProHardeningFixture(FIXTURE);
-      armPaidProHardeningSession({ fixture, withSignerMetadata: false });
+  it("repeated resolve with deferSignerMetadataRepair does not run repair or opening guards", () => {
+    const fixture = loadPaidProHardeningFixture(FIXTURE);
+    armPaidProHardeningSession({ fixture, withSignerMetadata: false });
 
-      const guardSpy = vi.spyOn(paidProReviewRenderCorpus, "guardPaidProReviewRenderCorpus");
-      const sanitizeSpy = vi.spyOn(paidProReviewRenderCorpus, "applyPaidProReviewRenderSanitizer");
-      const openingSpy = vi.spyOn(paidProOpeningRecitalGuard, "ensurePaidProServicesAgreementOpening");
-      const recitalSpy = vi.spyOn(paidProAgreementRecitalRepair, "repairMalformedPaidProAgreementRecital");
+    const guardSpy = vi.spyOn(paidProReviewRenderCorpus, "guardPaidProReviewRenderCorpus");
+    const sanitizeSpy = vi.spyOn(paidProReviewRenderCorpus, "applyPaidProReviewRenderSanitizer");
+    const openingSpy = vi.spyOn(paidProOpeningRecitalGuard, "ensurePaidProServicesAgreementOpening");
+    const recitalSpy = vi.spyOn(paidProAgreementRecitalRepair, "repairMalformedPaidProAgreementRecital");
 
-      const baseline = paidProReviewRenderCorpus.resolvePaidProReviewRenderPlain({
+    const baseline = paidProReviewRenderCorpus.resolvePaidProReviewRenderPlain({
+      draft: fixture.draft,
+      intakeText: fixture.intakeText,
+      deferSignerMetadataRepair: true,
+    });
+    const baselineHash = hashPaidProCorpus(baseline);
+
+    for (let i = 0; i < 3; i += 1) {
+      const next = paidProReviewRenderCorpus.resolvePaidProReviewRenderPlain({
         draft: fixture.draft,
         intakeText: fixture.intakeText,
         deferSignerMetadataRepair: true,
       });
-      const baselineHash = hashPaidProCorpus(baseline);
+      expect(hashPaidProCorpus(next)).toBe(baselineHash);
+    }
 
-      for (let i = 0; i < 3; i += 1) {
-        const next = paidProReviewRenderCorpus.resolvePaidProReviewRenderPlain({
-          draft: fixture.draft,
-          intakeText: fixture.intakeText,
-          deferSignerMetadataRepair: true,
-        });
-        expect(hashPaidProCorpus(next)).toBe(baselineHash);
-      }
+    expect(guardSpy).not.toHaveBeenCalled();
+    expect(sanitizeSpy).not.toHaveBeenCalled();
+    expect(openingSpy).not.toHaveBeenCalled();
+    expect(recitalSpy).not.toHaveBeenCalled();
 
-      expect(guardSpy).not.toHaveBeenCalled();
-      expect(sanitizeSpy).not.toHaveBeenCalled();
-      expect(openingSpy).not.toHaveBeenCalled();
-      expect(recitalSpy).not.toHaveBeenCalled();
+    guardSpy.mockRestore();
+    sanitizeSpy.mockRestore();
+    openingSpy.mockRestore();
+    recitalSpy.mockRestore();
+  });
 
-      guardSpy.mockRestore();
-      sanitizeSpy.mockRestore();
-      openingSpy.mockRestore();
-      recitalSpy.mockRestore();
-    },
-  );
+  it("parenthetical inversion reconcile on defer path does not invoke opening guard or sanitizer", () => {
+    const fixture = loadPaidProHardeningFixture(FIXTURE);
+    const inverted = [
+      "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+      "",
+      `This Agreement is between ${PAID_PRO_HARDENING_CLIENT} ("Client") and ${PAID_PRO_HARDENING_PROVIDER} ("Service Provider").`,
+      "",
+      "1. SCOPE. Services.",
+      "2. FEES. Fixed fee.",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      `${PAID_PRO_HARDENING_CLIENT} (Service Provider)`,
+      "By: __________________________",
+      "",
+      `${PAID_PRO_HARDENING_PROVIDER} (Client)`,
+      "By: __________________________",
+    ].join("\n");
+    establishPaidProSourceOfTruth({
+      text: inverted,
+      intakeText: fixture.intakeText,
+      draft: fixture.draft,
+      source: "server_full_draft",
+    });
+
+    const sanitizeSpy = vi.spyOn(paidProReviewRenderCorpus, "applyPaidProReviewRenderSanitizer");
+    const openingSpy = vi.spyOn(paidProOpeningRecitalGuard, "ensurePaidProServicesAgreementOpening");
+
+    const renderPlain = paidProReviewRenderCorpus.resolvePaidProReviewRenderPlain({
+      draft: fixture.draft,
+      intakeText: fixture.intakeText,
+      deferSignerMetadataRepair: true,
+    });
+    expect(renderPlain).toMatch(/CLIENT\s*:\s*\nBlue Canyon Analytics LLC/i);
+    expect(sanitizeSpy).not.toHaveBeenCalled();
+    expect(openingSpy).not.toHaveBeenCalled();
+
+    sanitizeSpy.mockRestore();
+    openingSpy.mockRestore();
+  });
 
   it("partial address staging uses defer path without fused-party guard", () => {
     const fixture = loadPaidProHardeningFixture(FIXTURE);

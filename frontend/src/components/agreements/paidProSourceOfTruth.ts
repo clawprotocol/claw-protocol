@@ -56,6 +56,7 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -485,7 +486,10 @@ export function getPaidProDocumentForSurface(
     surface === "vs01" ||
     surface === "finalized"
   ) {
-    const aligned = resolvePaidProReviewRenderPlain(opts);
+    const aligned = resolvePaidProReviewRenderPlain({
+      ...opts,
+      deferSignerMetadataRepair: shouldUsePaidProSourceOfTruthDisplayOnly(),
+    });
     if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
       text = aligned;
       hash = hashPaidProCorpus(text);

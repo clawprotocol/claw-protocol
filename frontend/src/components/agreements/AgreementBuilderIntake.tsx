@@ -2385,9 +2385,9 @@ function CreateFlowSendRecipientsPanel({
             {secondPartyName ? (
               <>
                 <p className="mt-3 text-lg font-medium tracking-tight text-slate-100">{secondPartyName}</p>
-                <p className={`mt-1 text-sm ${looksLikeEmail(r2e) ? "text-slate-300" : "text-slate-500"}`}>
-                  {looksLikeEmail(r2e) ? r2e : "Add this party’s email (optional for labeling)"}
-                </p>
+                {looksLikeEmail(r2e) ? (
+                  <p className="mt-1 text-sm text-slate-300">{r2e}</p>
+                ) : null}
               </>
             ) : null}
           </>
@@ -13079,8 +13079,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     () => ({
       intakeText: (currentPremiumMergedIntakeKey || intakeCombined || "").trim(),
       draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+      acceptedCorpus: hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : null,
     }),
-    [currentPremiumMergedIntakeKey, intakeCombined, draft?.parties],
+    [currentPremiumMergedIntakeKey, intakeCombined, draft?.parties, premiumSurfaceGateTick],
   );
   const clearedSignerStagingAddressesRef = useRef(false);
   useEffect(() => {

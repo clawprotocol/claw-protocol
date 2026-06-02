@@ -13,6 +13,7 @@ import {
   setConsumedPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
 import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth, getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
+import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 import {
   armPaidProHardeningSession,
   loadPaidProHardeningFixture,
@@ -46,6 +47,28 @@ function buildSwappedSignatureTail(): string {
   ].join("\n");
 }
 
+function buildParentheticalSwappedSignatureTail(): string {
+  return [
+    "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+    "",
+    `This Agreement is entered into between ${PAID_PRO_HARDENING_CLIENT} ("Client") and ${PAID_PRO_HARDENING_PROVIDER} ("Service Provider").`,
+    "",
+    "1. SCOPE. Provider will deliver AI workflow implementation services.",
+    "2. FEES. Client will pay a fixed fee of $8,500.",
+    "3. GOVERNING LAW. Delaware law governs.",
+    "",
+    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    "",
+    `${PAID_PRO_HARDENING_CLIENT} (Service Provider)`,
+    "By: __________________________",
+    "Name: __________________________",
+    "",
+    `${PAID_PRO_HARDENING_PROVIDER} (Client)`,
+    "By: __________________________",
+    "Name: __________________________",
+  ].join("\n");
+}
+
 describe("paidPro execution block role consistency", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
@@ -60,6 +83,30 @@ describe("paidPro execution block role consistency", () => {
 
   it("detects inverted execution block roles vs accepted corpus recital", () => {
     expect(detectExecutionBlockRoleInversion(buildSwappedSignatureTail())).toBe(true);
+  });
+
+  it("detects parenthetical execution block role inversion before signer metadata", () => {
+    expect(detectExecutionBlockRoleInversion(buildParentheticalSwappedSignatureTail())).toBe(true);
+  });
+
+  it("defer render path reconciles parenthetical inversion without opening guard", () => {
+    const fixture = loadPaidProHardeningFixture("freeProQaTemplateATest204");
+    const inverted = buildParentheticalSwappedSignatureTail();
+    establishPaidProSourceOfTruth({
+      text: inverted,
+      intakeText: INTAKE,
+      draft: fixture.draft,
+      source: "server_full_draft",
+    });
+    const renderPlain = resolvePaidProReviewRenderPlain({
+      draft: fixture.draft,
+      intakeText: INTAKE,
+      deferSignerMetadataRepair: true,
+    });
+    expect(detectExecutionBlockRoleInversion(renderPlain)).toBe(false);
+    const tail = renderPlain.slice(renderPlain.search(/\bIN WITNESS WHEREOF\b/i));
+    expect(tail).toMatch(/CLIENT\s*:\s*\nBlue Canyon Analytics LLC/i);
+    expect(tail).toMatch(/SERVICE\s+PROVIDER\s*:\s*\nIron Vale Systems Inc/i);
   });
 
   it("safe display repair reconciles swapped CLIENT / SERVICE PROVIDER blocks", () => {
