@@ -22,6 +22,10 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { AUTHORITATIVE_BODY_PRESERVE_MIN_WINNING_LEN } from "./premiumAuthoritativeBodyPreservation";
+import {
+  logExecutionBlockCount,
+  logExecutionBlockLocation,
+} from "./paidProExecutionBlockInstrumentation";
 
 export type CanonicalAgreementSnapshotSource =
   | "free_starter"
@@ -424,6 +428,8 @@ export function freezeCanonicalAgreementSnapshot(
     sectionGraph: snapshot.sectionGraph.length ? snapshot.sectionGraph : collectSectionGraph(snapshot.canonicalText),
   };
   frozenCanonicalAgreementCorpus = frozen;
+  logExecutionBlockLocation(frozen.canonicalText, `canonical-corpus-freeze:${frozen.source}`);
+  logExecutionBlockCount(frozen.canonicalText, `canonical-corpus-freeze:${frozen.source}`);
   if (
     shouldLogPaidProAuthoritySurfaceEvent({
       event: "canonical-corpus-freeze",

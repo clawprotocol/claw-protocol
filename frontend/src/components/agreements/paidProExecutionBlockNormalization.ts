@@ -15,6 +15,11 @@ import {
   repairOrphanedLegalEntitySuffixSpacingInCorpus,
 } from "./paidProLegalEntityNameHygiene";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
+import { isStandaloneSignaturesHeadingLine } from "./paidProSignatureSectionOrdering";
+import {
+  logExecutionBlockCount,
+  logExecutionBlockLocation,
+} from "./paidProExecutionBlockInstrumentation";
 
 export {
   isRecitalFragmentExecutionPartyLine,
@@ -24,6 +29,107 @@ export {
 
 const EXECUTION_ROLE_HEADING_LINE_RE =
   /^\s*(?:CLIENT|SERVICE\s+PROVIDER|CONSULTANT|PROVIDER|PARTY\s+\d+)\s*:?\s*$/i;
+
+const NUMBERED_SECTION_HEADING_RE = /^\s*(\d+(?:\.\d+)*)\.\s+\S+/;
+const EXECUTION_FIELD_LINE_RE = /^\s*(?:By|Name|Title|Date|Email|Signature)\s*:/i;
+
+function roleHeadingStartsExecutionCluster(lines: readonly string[], start: number): boolean {
+  const trimmed = (lines[start] ?? "").trim();
+  if (!EXECUTION_ROLE_HEADING_LINE_RE.test(trimmed)) return false;
+  for (let j = start + 1; j < Math.min(start + 18, lines.length); j += 1) {
+    const t = (lines[j] ?? "").trim();
+    if (!t) continue;
+    if (NUMBERED_SECTION_HEADING_RE.test(t)) return false;
+    if (EXECUTION_FIELD_LINE_RE.test(t)) return true;
+    if (EXECUTION_ROLE_HEADING_LINE_RE.test(t)) return false;
+  }
+  return true;
+}
+
+/**
+ * Remove premature SIGNATURES sections, role execution clusters, and stray witness lines
+ * from the operative prefix (everything before the canonical document-tail witness).
+ */
+export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
+  text: string;
+  repairs: string[];
+} {
+  const repairs: string[] = [];
+  const lines = (prefix || "").replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+
+    if (/^\s*IN WITNESS WHEREOF\b/i.test(trimmed)) {
+      repairs.push("execution_block:strip_pre_witness_witness_clause");
+      i += 1;
+      while (i < lines.length && (lines[i] ?? "").trim()) i += 1;
+      continue;
+    }
+
+    if (isStandaloneSignaturesHeadingLine(line)) {
+      repairs.push("execution_block:strip_pre_witness_signatures_section");
+      i += 1;
+      while (i < lines.length) {
+        const t = (lines[i] ?? "").trim();
+        if (!t) {
+          i += 1;
+          continue;
+        }
+        if (NUMBERED_SECTION_HEADING_RE.test(t)) break;
+        if (roleHeadingStartsExecutionCluster(lines, i)) break;
+        if (isStandaloneSignaturesHeadingLine(lines[i] ?? "")) break;
+        if (EXECUTION_FIELD_LINE_RE.test(t)) {
+          i += 1;
+          continue;
+        }
+        i += 1;
+      }
+      continue;
+    }
+
+    if (roleHeadingStartsExecutionCluster(lines, i)) {
+      repairs.push("execution_block:strip_pre_witness_role_execution_cluster");
+      i += 1;
+      while (i < lines.length) {
+        const t = (lines[i] ?? "").trim();
+        if (!t) {
+          i += 1;
+          continue;
+        }
+        if (NUMBERED_SECTION_HEADING_RE.test(t)) break;
+        if (roleHeadingStartsExecutionCluster(lines, i)) break;
+        if (isStandaloneSignaturesHeadingLine(lines[i] ?? "")) break;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (EXECUTION_FIELD_LINE_RE.test(trimmed)) {
+      repairs.push("execution_block:strip_pre_witness_orphan_execution_field");
+      i += 1;
+      continue;
+    }
+
+    out.push(line);
+    i += 1;
+  }
+
+  const text = out
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+  return { text, repairs };
+}
 
 function sanitizeRoleAssignments(corpus: string): AcceptedCorpusRoleAssignment[] {
   return resolvePaidProPartyRolesFromAcceptedCorpus(corpus)
@@ -36,10 +142,13 @@ function sanitizeRoleAssignments(corpus: string): AcceptedCorpusRoleAssignment[]
 
 function operativeBodyWithoutExecutionTails(text: string): string {
   const firstWitness = text.search(/\bIN WITNESS WHEREOF\b/i);
-  if (firstWitness >= 0) return text.slice(0, firstWitness).trimEnd();
-  const sigStart = text.search(/\n\s*(?:CLIENT|SERVICE\s+PROVIDER)\s*:\s*(?:\n|$)/i);
-  if (sigStart >= 0) return text.slice(0, sigStart).trimEnd();
-  return text.trimEnd();
+  let prefix = firstWitness >= 0 ? text.slice(0, firstWitness) : text;
+  const stripped = stripPreWitnessExecutionPollutionFromPrefix(prefix);
+  prefix = stripped.text;
+  if (firstWitness >= 0) return prefix.trimEnd();
+  const sigStart = prefix.search(/\n\s*(?:CLIENT|SERVICE\s+PROVIDER)\s*:\s*(?:\n|$)/i);
+  if (sigStart >= 0) return prefix.slice(0, sigStart).trimEnd();
+  return prefix.trimEnd();
 }
 
 /** Hard invariant: no duplicate role headings after the first CLIENT / SERVICE PROVIDER pair. */
@@ -154,6 +263,21 @@ export function enforcePaidProSingleExecutionBlock(corpus: string): { text: stri
     repairs.push(`execution_block:orphan_suffix_spacing:${spacingRepair.repairs}`);
   }
 
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx >= 0) {
+    const preWitnessStrip = stripPreWitnessExecutionPollutionFromPrefix(text.slice(0, witnessIdx));
+    if (preWitnessStrip.repairs.length > 0) {
+      text = `${preWitnessStrip.text}\n\n${text.slice(witnessIdx).trimStart()}`;
+      repairs.push(...preWitnessStrip.repairs);
+    }
+  } else {
+    const preWitnessStrip = stripPreWitnessExecutionPollutionFromPrefix(text);
+    if (preWitnessStrip.repairs.length > 0) {
+      text = preWitnessStrip.text;
+      repairs.push(...preWitnessStrip.repairs);
+    }
+  }
+
   const roles = sanitizeRoleAssignments(text);
   const client = roles.find((r) => r.role === "client");
   const provider = roles.find((r) => r.role === "service_provider");
@@ -196,5 +320,7 @@ export function enforcePaidProSingleExecutionBlock(corpus: string): { text: stri
     text = truncated.text;
   }
 
+  logExecutionBlockLocation(text, "enforcePaidProSingleExecutionBlock");
+  logExecutionBlockCount(text, "enforcePaidProSingleExecutionBlock");
   return { text, repairs: [...new Set(repairs)] };
 }

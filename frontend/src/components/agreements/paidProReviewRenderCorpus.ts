@@ -65,6 +65,11 @@ import {
 } from "./paidProSourceOfTruth";
 import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
 import {
+  logExecutionBlockCount,
+  logExecutionBlockLocation,
+  logPostFreezeCorpusDrift,
+} from "./paidProExecutionBlockInstrumentation";
+import {
   consumedAuthoritySignerMetadataComplete,
   shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
 } from "./paidProSignerMetadataCommitPolicy";
@@ -634,12 +639,16 @@ export function resolvePaidProReviewRenderPlain(
 ): string {
   const surface = "paid_pro_review_render_plain";
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return tracePaidProQaPassText(
+    const rendered = tracePaidProQaPassText(
       "resolvePaidProReviewRenderPlain",
       `${surface}:display_only_sot`,
       getPaidProSourceOfTruthText().trim(),
       () => resolvePaidProAuthoritativeDisplayPlain(),
     );
+    logPostFreezeCorpusDrift({ surface: "paid_pro_review_render", renderedText: rendered });
+    logExecutionBlockLocation(rendered, "paid_pro_review_render");
+    logExecutionBlockCount(rendered, "paid_pro_review_render");
+    return rendered;
   }
   if (args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()) {
     const seed = readPaidProSignerStagingDisplayCorpus()?.plain ?? getPaidProSourceOfTruthText().trim();

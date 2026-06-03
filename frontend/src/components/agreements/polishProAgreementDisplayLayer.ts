@@ -34,6 +34,13 @@ import {
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { detectProReviewDisplaySanityViolations } from "./paidProReviewDisplaySanity";
+import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "./paidProAuthoritativeRenderGate";
+import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
+import {
+  logExecutionBlockCount,
+  logExecutionBlockLocation,
+  logPostFreezeCorpusDrift,
+} from "./paidProExecutionBlockInstrumentation";
 
 export { detectProReviewDisplaySanityViolations } from "./paidProReviewDisplaySanity";
 export type { PaidProDisplaySanityExecutionContext } from "./paidProReviewDisplaySanity";
@@ -390,6 +397,18 @@ export function sanitizeProReviewDisplayText(
   if (!input) {
     return { text: "", repairs: [], sanityBlocked: false, inputHash, outputHash: inputHash };
   }
+  if (shouldBlockPaidProStructuralMutationAfterAcceptance() && !opts?.retainSignatureExecutionBlock) {
+    const out = basicNormalize(stripPremiumIntelligenceCalloutsFromCorpus(input));
+    const outputHash = fingerprintAgreementBody(out);
+    logPostFreezeCorpusDrift({ surface: opts?.source ?? "pro_review_display_passthrough", renderedText: out });
+    return {
+      text: out,
+      repairs: ["display:sot_sanitize_passthrough"],
+      sanityBlocked: false,
+      inputHash,
+      outputHash,
+    };
+  }
   const inputViolations = detectProReviewDisplaySanityViolations(input);
   const source = opts?.source ?? "pro_review_display";
   let sanityBlocked = inputViolations.length > 0;
@@ -493,6 +512,13 @@ export function polishProAgreementDisplayLayer(
 ): PolishProAgreementDisplayLayerResult {
   const input = trim(raw);
   if (!input) return { text: "", repairs: [] };
+  if (shouldBlockPaidProStructuralMutationAfterAcceptance() && !opts?.retainSignatureExecutionBlock) {
+    const out = basicNormalize(stripPremiumIntelligenceCalloutsFromCorpus(input));
+    logPostFreezeCorpusDrift({ surface: "polishProAgreementDisplayLayer", renderedText: out });
+    logExecutionBlockLocation(out, "polishProAgreementDisplayLayer:passthrough");
+    logExecutionBlockCount(out, "polishProAgreementDisplayLayer:passthrough");
+    return { text: out, repairs: ["display:authoritative_sot_passthrough"] };
+  }
   const repairs: string[] = [];
   let out = basicNormalize(input);
 

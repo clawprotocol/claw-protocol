@@ -17,6 +17,11 @@ import {
 } from "./paidProReviewRenderCorpus";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
+import {
+  logExecutionBlockCount,
+  logExecutionBlockLocation,
+  logPostFreezeCorpusDrift,
+} from "./paidProExecutionBlockInstrumentation";
 
 export function escapeHtml(s: string): string {
   return (s || "")
@@ -262,6 +267,11 @@ export function buildPremiumAgreementReadonlyHtml(
   opts: BuildPremiumAgreementReadonlyHtmlOpts,
 ): string {
   const surface = opts.surface ?? "premium_agreement_readonly_html";
+  if (shouldBlockPaidProStructuralMutationAfterAcceptance() && (plain || "").trim().length >= 200) {
+    logPostFreezeCorpusDrift({ surface: `buildPremiumAgreementReadonlyHtml:${surface}`, renderedText: plain });
+    logExecutionBlockLocation(plain, `buildPremiumAgreementReadonlyHtml:${surface}`);
+    logExecutionBlockCount(plain, `buildPremiumAgreementReadonlyHtml:${surface}`);
+  }
   return tracePaidProQaPassText("buildPremiumAgreementReadonlyHtml", surface, plain || "", () =>
     buildPremiumAgreementReadonlyHtmlCore(plain, opts),
   );

@@ -25,6 +25,11 @@ import {
 } from "./canonicalAgreementSnapshot";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import {
+  logExecutionBlockCount,
+  logExecutionBlockLocation,
+  logPostFreezeCorpusDrift,
+} from "./paidProExecutionBlockInstrumentation";
+import {
   enforceAuthoritativeProCorpusDisplay,
   logProCorpusSourceMap,
 } from "./proCorpusSourcePath";
@@ -338,6 +343,13 @@ export function establishPaidProSourceOfTruth(args: {
     reason: "authoritative_source_of_truth_established",
   });
   paidProSourceOfTruth = record;
+  logExecutionBlockLocation(record.text, "paid_pro_source_of_truth_establish");
+  logExecutionBlockCount(record.text, "paid_pro_source_of_truth_establish");
+  logPostFreezeCorpusDrift({
+    surface: "paid_pro_source_of_truth_establish",
+    renderedText: record.text,
+    frozenHash: frozen?.hash ?? record.hash,
+  });
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();
   if (args.allowShorterOverwrite) {
