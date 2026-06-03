@@ -20,6 +20,7 @@ import {
 } from "./proOperationalSynthesis";
 import { softenProDocumentTone } from "./premiumSituationIntelligence";
 import { shouldSkipPaidProPolish } from "./agreementDocumentSurfacePolicy";
+import { tracePaidProQaPassText, tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company|DAO|Foundation|Trust)\.?$/i;
@@ -687,13 +688,18 @@ export function polishPaidProAgreementText(
       ? ("low" as const)
       : assessed;
 
-  const recital = normalizeOpeningRecital(text, parties, confidence, {
-    skipInternalMask: opts?.skipInternalMask,
-  });
+  const surface = opts?.surface ?? "unknown";
+  const recital = tracePaidProQaPassWithText("paid-pro-recital-polish", surface, text, () =>
+    normalizeOpeningRecital(text, parties, confidence, {
+      skipInternalMask: opts?.skipInternalMask,
+    }),
+  );
   let working = recital.text;
-  const signature = normalizeSignatureBlockHeadings(working, parties, {
-    skipInternalMask: opts?.skipInternalMask,
-  });
+  const signature = tracePaidProQaPassWithText("paid-pro-signature-polish", `${surface}:initial`, working, () =>
+    normalizeSignatureBlockHeadings(working, parties, {
+      skipInternalMask: opts?.skipInternalMask,
+    }),
+  );
   working = signature.text;
   const synthesis = buildProOperationalSynthesis(intakeRaw || "", {
     parties: parties.map((p) => ({ name: p.full, role: "" })),
@@ -711,12 +717,16 @@ export function polishPaidProAgreementText(
   });
   working = operational.text;
 
-  const enterprise = applyEnterpriseClausePolish(working);
+  const enterprise = tracePaidProQaPassWithText("paid-pro-enterprise-polish", surface, working, () =>
+    applyEnterpriseClausePolish(working),
+  );
   working = enterprise.text;
 
-  const signatureFinal = normalizeSignatureBlockHeadings(working, parties, {
-    skipInternalMask: opts?.skipInternalMask,
-  });
+  const signatureFinal = tracePaidProQaPassWithText("paid-pro-signature-polish", `${surface}:final`, working, () =>
+    normalizeSignatureBlockHeadings(working, parties, {
+      skipInternalMask: opts?.skipInternalMask,
+    }),
+  );
   working = signatureFinal.text;
 
   const purityFinal = applySectionPurityPass(working);

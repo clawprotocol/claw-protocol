@@ -11,7 +11,12 @@ import {
   startPaidProPerformanceTrace,
   type PaidProE2ePhaseName,
 } from "./paidProPerformanceTrace";
-import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
+import {
+  paidProQaPerfTraceEnabled,
+  markPaidProCheckoutReturnAt,
+  markPaidProFirstReviewPaintAt,
+  storePaidProServerTimingHeaderForWaterfall,
+} from "./paidProQaPerfTrace";
 
 export function beginPaidProPaymentToReviewTrace(args: {
   traceId: string;
@@ -19,7 +24,7 @@ export function beginPaidProPaymentToReviewTrace(args: {
   intakeFingerprint?: string | null;
   intakeText?: string | null;
 }): void {
-  if (!paidProPerfTraceEnabled() && import.meta.env.MODE !== "test") return;
+  if (!paidProQaPerfTraceEnabled()) return;
   const fp =
     (args.intakeFingerprint || "").trim() ||
     (args.intakeText ? shortIntakeFingerprint(args.intakeText) : "") ||
@@ -31,6 +36,7 @@ export function beginPaidProPaymentToReviewTrace(args: {
     deferFinish: true,
   });
   paidProPerfRecordE2ePhase("checkout_return_detected");
+  markPaidProCheckoutReturnAt();
 }
 
 export function recordPaidProPaymentToReviewPhase(
@@ -41,6 +47,7 @@ export function recordPaidProPaymentToReviewPhase(
 }
 
 export function ingestPaidProPaymentToReviewServerTiming(headerValue: string | null | undefined): void {
+  storePaidProServerTimingHeaderForWaterfall(headerValue);
   if (!headerValue?.trim()) return;
   try {
     const parsed = JSON.parse(headerValue) as { spans?: unknown[] };
@@ -60,6 +67,7 @@ export function completePaidProPaymentToReviewTrace(meta?: {
     if (trace) finishPaidProPerformanceWaterfall();
     return;
   }
+  markPaidProFirstReviewPaintAt();
   paidProPerfRecordE2ePhase("review_surface_visible", {
     renderSource: meta?.renderSource ?? undefined,
   });

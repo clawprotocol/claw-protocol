@@ -4,6 +4,7 @@
  */
 
 import { parseAgreementSections } from "./proOperationalSynthesis/sectionPurityValidator";
+import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 
 export type PremiumStructureIssue = {
   code: string;
@@ -307,7 +308,17 @@ export function validatePremiumAgreementStructure(text: string): PremiumStructur
   return { text: working, ok, issues, repairs };
 }
 
-export function validateAndRepairPremiumAgreementStructure(text: string): PremiumStructureResult {
+export function validateAndRepairPremiumAgreementStructure(
+  text: string,
+  opts?: { surface?: string },
+): PremiumStructureResult {
+  const surface = opts?.surface ?? "premium_structure_repair";
+  return tracePaidProQaPassWithText("premium-structure-repair", surface, text, () =>
+    validateAndRepairPremiumAgreementStructureCore(text),
+  );
+}
+
+function validateAndRepairPremiumAgreementStructureCore(text: string): PremiumStructureResult {
   const result = validatePremiumAgreementStructure(text);
   if (import.meta.env.MODE !== "test" && result.repairs.length > 0) {
     // eslint-disable-next-line no-console

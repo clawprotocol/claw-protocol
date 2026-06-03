@@ -13,6 +13,7 @@ import { buildPartyEntries, normalizeSignatureBlockHeadings } from "./paidProAgr
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import { isCanonicalCommittedText, stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
 import { isStarterDocumentSurface } from "./agreementDocumentSurfacePolicy";
+import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import {
   logPlaceholderScanSkippedTransient,
   shouldSkipPlaceholderScanForTransientPreview,
@@ -1243,6 +1244,16 @@ export function inspectStarterUserVisibleAgreementPlainText(
 }
 
 export function finalizeUserVisibleAgreementPlainText(
+  text: string,
+  ctx: PlaceholderSafetyContext,
+): PlaceholderSafetyOutcome {
+  const surface = ctx.surface ?? "placeholder_gate";
+  return tracePaidProQaPassWithText("paid-pro-placeholder-gate", surface, text, () =>
+    finalizeUserVisibleAgreementPlainTextCore(text, ctx),
+  );
+}
+
+function finalizeUserVisibleAgreementPlainTextCore(
   text: string,
   ctx: PlaceholderSafetyContext,
 ): PlaceholderSafetyOutcome {

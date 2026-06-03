@@ -230,7 +230,7 @@ export function applyPaidProRenderPolish(
 
   logPaidProEmailMutationGuard({ surface, ...guard, repairedCount });
 
-  const structure = validateAndRepairPremiumAgreementStructure(working);
+  const structure = validateAndRepairPremiumAgreementStructure(working, { surface });
   working = structure.text;
 
   const quality = finalizeAgreementOutput(working, {

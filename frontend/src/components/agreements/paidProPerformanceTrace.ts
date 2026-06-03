@@ -4,6 +4,14 @@
 
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { paidProPerfTraceEnabled, paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
+import {
+  markPaidProCheckoutWaterfallEmitted,
+  paidProQaPerfTraceEnabled,
+  readPaidProCheckoutMilestonesForWaterfall,
+  readPaidProCheckoutWaterfallEmittedSession,
+  setPaidProQaTraceSessionGenerationId,
+} from "./paidProQaPerfTrace";
+import { shortIdForPremiumLog } from "./premiumSessionDiagnostics";
 
 export type PaidProPerformanceSpanName =
   | "intake_classification"
@@ -120,10 +128,9 @@ function nowMs(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
-/** One compact waterfall per run in dev/QA trace mode; not for normal production users. */
-function shouldEmitPaidProWaterfall(): boolean {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return false;
-  return paidProPerfTraceEnabled() || Boolean(import.meta.env?.DEV);
+/** Legacy compact waterfall when checkout QA waterfall did not emit. */
+function shouldEmitLegacyPaidProWaterfall(): boolean {
+  return paidProQaPerfTraceEnabled();
 }
 
 export function startPaidProPerformanceTrace(args: {
@@ -140,6 +147,7 @@ export function startPaidProPerformanceTrace(args: {
     deferFinish: args.deferFinish ?? false,
     spans: [],
   };
+  setPaidProQaTraceSessionGenerationId(args.sessionGenerationId ?? args.traceId);
   openSpanStarts.clear();
   return activeTrace;
 }
@@ -160,7 +168,70 @@ export function readActivePaidProPerformanceTrace(): PaidProPerformanceTrace | n
 
 export function clearPaidProPerformanceTrace(): void {
   activeTrace = null;
+  setPaidProQaTraceSessionGenerationId(null);
   openSpanStarts.clear();
+}
+
+function spanDurationByName(spans: PaidProWaterfallSpanSummary[], name: string): number {
+  return spans.find((s) => s.name === name)?.durationMs ?? 0;
+}
+
+function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, totalMs: number): boolean {
+  if (!paidProQaPerfTraceEnabled()) return false;
+  const sessionId = (trace.sessionGenerationId ?? trace.traceId).trim();
+  if (!sessionId) return false;
+  if (readPaidProCheckoutWaterfallEmittedSession() === sessionId) return false;
+
+  const milestones = readPaidProCheckoutMilestonesForWaterfall();
+  const spanSummaries = trace.spans.map(flattenPaidProWaterfallSpan);
+  const topContributors = [...spanSummaries]
+    .filter((s) => s.durationMs > 0)
+    .sort((a, b) => b.durationMs - a.durationMs)
+    .slice(0, 5)
+    .map((s) => ({ name: s.name, durationMs: s.durationMs }));
+  const serverRoundTripMs =
+    milestones.premiumRequestStartAt != null && milestones.premiumHttpEndAt != null
+      ? milestones.premiumHttpEndAt - milestones.premiumRequestStartAt
+      : spanDurationByName(spanSummaries, "premium_full_draft_api") ||
+        spanDurationByName(spanSummaries, "frontend_response_received");
+  const localPostProcessingMs =
+    milestones.premiumHttpEndAt != null && milestones.localPostProcessingEndAt != null
+      ? milestones.localPostProcessingEndAt - milestones.premiumHttpEndAt
+      : spanDurationByName(spanSummaries, "premium_local_pre_processing");
+  const checkoutReturnAt = milestones.checkoutReturnAt;
+  const firstReviewPaintAt = milestones.firstReviewPaintAt;
+  const totalPaymentToReviewMs =
+    checkoutReturnAt != null && firstReviewPaintAt != null
+      ? firstReviewPaintAt - checkoutReturnAt
+      : totalMs;
+
+  markPaidProCheckoutWaterfallEmitted(sessionId);
+
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-waterfall]", {
+    traceId: trace.traceId,
+    sessionGenerationId: trace.sessionGenerationId,
+    sessionGenerationIdShort: shortIdForPremiumLog(trace.sessionGenerationId),
+    intakeFingerprint: trace.intakeFingerprint,
+    checkoutReturnAt,
+    premiumRequestStartAt: milestones.premiumRequestStartAt,
+    premiumHttpEndAt: milestones.premiumHttpEndAt,
+    serverRoundTripMs,
+    localPostProcessingMs,
+    firstReviewPaintAt,
+    totalPaymentToReviewMs,
+    totalMs,
+    topContributors,
+    ...(milestones.lastServerTimingHeader
+      ? { backendServerTimingHeader: milestones.lastServerTimingHeader }
+      : {}),
+    ...(milestones.lastBackendSpans.length
+      ? { backendServerTimingSpans: milestones.lastBackendSpans }
+      : {}),
+    spanCount: spanSummaries.length,
+    spans: spanSummaries,
+  });
+  return true;
 }
 
 export function paidProPerfSpanStart(name: PaidProPerformanceSpanName): void {
@@ -337,7 +408,8 @@ export function finishPaidProPerformanceWaterfall(): void {
       spans: trace.spans.map((s) => ({ ...s })),
     };
   }
-  if (shouldEmitPaidProWaterfall()) {
+  const emittedCheckoutWaterfall = emitPaidProCheckoutWaterfallIfReady(trace, totalMs);
+  if (!emittedCheckoutWaterfall && shouldEmitLegacyPaidProWaterfall()) {
     // eslint-disable-next-line no-console
     console.info("[paid-pro-waterfall]", {
       traceId: trace.traceId,

@@ -13,6 +13,7 @@ import {
   repairDuplicateAgreementOpening,
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
+import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
 import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualConsultingQualityFloor";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
@@ -290,6 +291,21 @@ export function logPaidProValidationDecision(payload: {
 
 /** Repair malformed openings and expand thin AI workflow services bodies before acceptance gates. */
 export function preparePaidProServerDocumentForAcceptance(
+  raw: string,
+  draft: ParsedDraftShape | null | undefined,
+  intakeText: string,
+  opts?: { surface?: string },
+): { text: string; repairs: string[] } {
+  const surface = opts?.surface ?? "prepare_paid_pro_server_acceptance";
+  return tracePaidProQaPassWithText(
+    "preparePaidProServerDocumentForAcceptance",
+    surface,
+    raw || "",
+    () => preparePaidProServerDocumentForAcceptanceCore(raw, draft, intakeText),
+  );
+}
+
+function preparePaidProServerDocumentForAcceptanceCore(
   raw: string,
   draft: ParsedDraftShape | null | undefined,
   intakeText: string,

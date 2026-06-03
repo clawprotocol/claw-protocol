@@ -22,12 +22,15 @@ import {
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
   /** When true, append execution/signature block only if missing (VS01 signing). */
   appendExecutionBlockIfMissing?: boolean;
+  /** QA perf trace label only — does not affect output. */
+  surface?: string;
 };
 
 export type AcceptedProCorpusSafeDisplayResult = {
@@ -101,6 +104,17 @@ export function applyAcceptedProCorpusSafeDisplay(
   raw: string,
   opts?: AcceptedProCorpusSafeDisplayOpts,
 ): AcceptedProCorpusSafeDisplayResult {
+  const surface = opts?.surface ?? "accepted_pro_corpus_safe_display";
+  const input = String(raw || "").replace(/\s+$/g, "");
+  return tracePaidProQaPassWithText("applyAcceptedProCorpusSafeDisplay", surface, input, () =>
+    applyAcceptedProCorpusSafeDisplayCore(raw, opts),
+  );
+}
+
+function applyAcceptedProCorpusSafeDisplayCore(
+  raw: string,
+  opts?: AcceptedProCorpusSafeDisplayOpts,
+): AcceptedProCorpusSafeDisplayResult {
   const input = String(raw || "").replace(/\s+$/g, "");
   if (!input.trim()) return { text: "", repairs: [] };
   const repairs: string[] = [];
@@ -165,7 +179,9 @@ export function applyAcceptedProCorpusSafeDisplay(
     repairs.push("safe:strip_legacy_entity_signature_lines");
   }
 
-  const prepared = preparePaidProServerDocumentForAcceptance(out, opts?.draft ?? null, intakeRaw ?? "");
+  const prepared = preparePaidProServerDocumentForAcceptance(out, opts?.draft ?? null, intakeRaw ?? "", {
+    surface: opts?.surface ? `${opts.surface}:prepare` : "accepted_pro_corpus_safe_display:prepare",
+  });
   if (prepared.text !== out) {
     out = prepared.text;
     repairs.push(...prepared.repairs);

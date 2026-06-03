@@ -161,6 +161,7 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import { markPaidProLocalPostProcessingEndAt } from "./paidProQaPerfTrace";
 import { adaptPremiumFullDraftToProIntelligencePacket } from "./proAgreementIntelligence";
 import {
   extractJointVentureEconomicsAnchors,
@@ -1789,6 +1790,7 @@ async function runPremiumCompletionInner(
         doc = applyAcceptedProCorpusSafeDisplay(doc, {
           draft: mergedForApi,
           intakeText: preGateIntake,
+          surface: "premium_completion_pipeline",
         }).text;
         paidProPerfRecordInstant(
           "enterprise_polish",
@@ -1867,7 +1869,9 @@ async function runPremiumCompletionInner(
           (doc.length < 2_500 ||
             countNumberedAgreementSections(doc) <= MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING)
         ) {
-          doc = preparePaidProServerDocumentForAcceptance(doc, mergedForApi, preGateIntake).text;
+          doc = preparePaidProServerDocumentForAcceptance(doc, mergedForApi, preGateIntake, {
+            surface: "premium_completion_pipeline:thin_services",
+          }).text;
         }
         paidProPerfRecordInstant(
           "structure_repair",
@@ -1902,6 +1906,7 @@ async function runPremiumCompletionInner(
         );
         paidProPerfSpanEnd("premium_local_pre_processing", { docLen: doc.length, docText: doc });
         paidProPerfRecordInstant("structure_repair", postProcessMs, { docLen: doc.length });
+        markPaidProLocalPostProcessingEndAt();
         if (import.meta.env.MODE !== "test" && import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[premium-timing]", {
@@ -2429,6 +2434,7 @@ async function runPremiumCompletionInner(
         const adoptedServerFull = applyAcceptedProCorpusSafeDisplay(serverFullDoc, {
           draft: mergedForApi,
           intakeText: rawForSoT || rawIntake,
+          surface: "premium_completion_pipeline:server_full_adopt",
         }).text.trim();
         if (adoptedServerFull.length >= (doc || "").length) {
           doc = adoptedServerFull;

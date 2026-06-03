@@ -55,6 +55,7 @@ import {
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
+import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
 
 const LABELED_SIGNATURE_BLOCK_START =
   /^(?:CLIENT|SERVICE PROVIDER|PROVIDER|CONTRACTOR|COMPANY|PARTY\s+\d+)\s*:/i;
@@ -598,17 +599,22 @@ function alignExecutionBlockRolesFromAcceptedCorpus(corpus: string): string {
 export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
+  const surface = "paid_pro_review_render_plain";
   if (args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()) {
-    return readPaidProSignerStagingDisplayCorpus()?.plain ?? getPaidProSourceOfTruthText().trim();
+    const seed = readPaidProSignerStagingDisplayCorpus()?.plain ?? getPaidProSourceOfTruthText().trim();
+    return tracePaidProQaPassText("resolvePaidProReviewRenderPlain", `${surface}:frozen`, seed, () => seed);
   }
-  return resolvePaidProSignerStagingDisplayPlain({
-    stagingActive: Boolean(args?.deferSignerMetadataRepair),
-    resolveFresh: () => {
-      const inner = alignExecutionBlockRolesFromAcceptedCorpus(resolvePaidProReviewRenderPlainInner(args));
-      if (args?.deferSignerMetadataRepair) return inner.trim();
-      return finalizePaidProReviewRenderPlain(inner, args);
-    },
-  });
+  const seed = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
+  return tracePaidProQaPassText("resolvePaidProReviewRenderPlain", surface, seed, () =>
+    resolvePaidProSignerStagingDisplayPlain({
+      stagingActive: Boolean(args?.deferSignerMetadataRepair),
+      resolveFresh: () => {
+        const inner = alignExecutionBlockRolesFromAcceptedCorpus(resolvePaidProReviewRenderPlainInner(args));
+        if (args?.deferSignerMetadataRepair) return inner.trim();
+        return finalizePaidProReviewRenderPlain(inner, args);
+      },
+    }),
+  );
 }
 
 function resolvePaidProReviewRenderPlainInner(

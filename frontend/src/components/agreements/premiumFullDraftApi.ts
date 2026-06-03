@@ -32,6 +32,13 @@ import {
 } from "./paidProPremiumGenerationCallAudit";
 import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 import {
+  logPremiumGenerationRatio,
+  markPaidProPremiumHttpEndAt,
+  markPaidProPremiumRequestStartAt,
+  paidProQaPerfTraceEnabled,
+  resolvePremiumGenerationRatioSourceField,
+} from "./paidProQaPerfTrace";
+import {
   paidProPerfRecordE2ePhase,
   readActivePaidProPerformanceTrace,
 } from "./paidProPerformanceTrace";
@@ -614,12 +621,15 @@ export async function postPremiumFullDraftOnce(args: {
   paidProPerfRecordE2ePhase("premium_http_fetch_started", {
     networkCallReason: args.networkCallReason ?? "unknown",
   });
+  markPaidProPremiumRequestStartAt();
   const fetchStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const res = await fetch(apiUrl("/api/agreements/premium-full-draft"), {
     method: "POST",
     headers: clawAgreementHeaders({
       "Content-Type": "application/json",
-      ...(paidProPerfTraceEnabled() ? { "X-Claw-Paid-Pro-Perf-Trace": "1" } : {}),
+      ...(paidProPerfTraceEnabled() || paidProQaPerfTraceEnabled()
+        ? { "X-Claw-Paid-Pro-Perf-Trace": "1" }
+        : {}),
     }),
     body: JSON.stringify({
       intake_text: args.intakeText,
@@ -655,7 +665,17 @@ export async function postPremiumFullDraftOnce(args: {
     ),
     responseBodyLen: bodyText.length,
   });
+  markPaidProPremiumHttpEndAt();
   ingestPaidProPaymentToReviewServerTiming(res.headers.get("X-Claw-Paid-Pro-Server-Timing"));
+  const ratioFields = resolvePremiumGenerationRatioSourceField(parsed);
+  logPremiumGenerationRatio({
+    sessionGenerationId: args.agreementGenerationId ?? null,
+    intakeLen: (args.intakeText || "").length,
+    serverDocumentLen: ratioFields.serverDocumentLen,
+    normalizedDocumentLen: ratioFields.normalizedDocumentLen,
+    sourceField: ratioFields.sourceField,
+    responseBodyLen: bodyText.length,
+  });
   const networkReason: PremiumNetworkCallReason = args.networkCallReason
     ?? (args.similarityRegeneration ? "similarity_regeneration" : "unknown");
   recordPremiumNetworkCall({

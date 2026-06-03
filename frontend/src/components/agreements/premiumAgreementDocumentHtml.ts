@@ -16,6 +16,7 @@ import {
   resolvePartiesForReviewRender,
 } from "./paidProReviewRenderCorpus";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
 
 export function escapeHtml(s: string): string {
   return (s || "")
@@ -181,6 +182,8 @@ export type BuildPremiumAgreementReadonlyHtmlOpts = {
   suppressCorpusEmbeddedSignatureForDisplay?: boolean;
   /** Final paid Pro review: omit situation-intelligence callouts from the agreement paper. */
   suppressDocumentIntelligenceCallouts?: boolean;
+  /** QA perf trace label only — does not affect output. */
+  surface?: string;
 };
 
 /** Remove signature tails when external signer UI owns execution blocks. */
@@ -255,6 +258,16 @@ export function stripStarterPreviewDisclaimerFromPlainText(plain: string): strin
 }
 
 export function buildPremiumAgreementReadonlyHtml(
+  plain: string,
+  opts: BuildPremiumAgreementReadonlyHtmlOpts,
+): string {
+  const surface = opts.surface ?? "premium_agreement_readonly_html";
+  return tracePaidProQaPassText("buildPremiumAgreementReadonlyHtml", surface, plain || "", () =>
+    buildPremiumAgreementReadonlyHtmlCore(plain, opts),
+  );
+}
+
+function buildPremiumAgreementReadonlyHtmlCore(
   plain: string,
   opts: BuildPremiumAgreementReadonlyHtmlOpts,
 ): string {
