@@ -23,6 +23,8 @@ import {
   type PaidProDocumentSurface,
 } from "./paidProSourceOfTruth";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
+import { consumedAuthoritySignerMetadataComplete } from "./paidProSignerMetadataCommitPolicy";
+import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 
 export const PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN = 500;
@@ -92,7 +94,13 @@ function authorityHasSignerMetadata(): boolean {
 function hydrateFromConsumedAuthority(rawCorpus: string, intakeRaw: string): string {
   const authority = readConsumedPaidProSignerMetadataAuthority();
   if (!authority || !authorityHasSignerMetadata()) return "";
-  if (!paidProSignerExecutionCorpusIsFrozen()) {
+  if (
+    !paidProSignerExecutionCorpusIsFrozen() &&
+    !(
+      consumedAuthoritySignerMetadataComplete(authority.parties) &&
+      !isPaidProReviewSignerMetadataSessionActive()
+    )
+  ) {
     return "";
   }
   const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
@@ -171,7 +179,9 @@ export function resolvePaidProFinalHydratedCorpusForSurface(
   if (
     reviewAlignedSurfaces.includes(surface) &&
     resolution.signerMetadataApplied &&
-    resolution.text.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN
+    resolution.text.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN &&
+    resolution.source !== "pinned_signer_applied_corpus" &&
+    resolution.source !== "authoritative_signing_snapshot"
   ) {
     const aligned = resolvePaidProReviewRenderPlain({
       draft: opts?.draft ?? null,

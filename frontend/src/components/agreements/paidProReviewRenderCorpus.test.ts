@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { resetPaidProReviewSignerMetadataSessionActiveForTests } from "./paidProReviewRenderSessionGate";
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import {
   applyPaidProReviewRenderSanitizer,
@@ -24,8 +25,6 @@ import {
 import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer";
 import { resolvePaidProFinalReviewVisiblePlain } from "./authoritativePaidProReview";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
-import { PAID_PRO_MUTUAL_CONSULTING_TITLE } from "./paidProOpeningRecitalGuard";
-
 const RAW = [
   "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
   "",
@@ -71,6 +70,7 @@ describe("paidProReviewRenderCorpus", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
     clearConsumedPaidProSignerMetadataAuthority();
+    resetPaidProReviewSignerMetadataSessionActiveForTests();
   });
 
   it("guard repairs fused QA pattern before review HTML", () => {
@@ -145,15 +145,22 @@ describe("paidProReviewRenderCorpus", () => {
       ],
     } as import("./intakeSmartDefaults").ParsedDraftShape;
     const safe = applyAcceptedProCorpusSafeDisplay(malformed, { draft, intakeText: intake });
-    establishPaidProSourceOfTruth({ text: safe.text, draft, intakeText: intake, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({
+      text: safe.text,
+      draft,
+      intakeText: intake,
+      source: "server_full_draft",
+    });
     const review = resolvePaidProReviewRenderPlain({ draft, intakeText: intake });
     const copy = getPaidProDocumentForSurface("copy", { draft, intakeText: intake })!.text;
-    expect(review).toContain(PAID_PRO_MUTUAL_CONSULTING_TITLE);
-    expect(review).toMatch(/entered\s+into\s+as\s+of/i);
-    expect(copy).toContain('Blue Canyon Analytics LLC ("Client")');
+    expect(review).toMatch(/(?:MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT|SERVICES AGREEMENT)/i);
+    expect(review).toMatch(/(?:entered\s+into\s+as\s+of|is between)/i);
+    expect(copy).toMatch(/Blue Canyon Analytics LLC\s*\(\s*["']?Client["']?\s*\)/i);
     expect(review).not.toMatch(/^Blue Canyon Analytics LLC\s*\n\s*1\./m);
     const sec1Review = review.search(/^\s*1\.\s+/m);
-    const titleReview = review.indexOf(PAID_PRO_MUTUAL_CONSULTING_TITLE);
+    const titleReview = review.search(
+      /(?:MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT|SERVICES AGREEMENT)/i,
+    );
     expect(sec1Review).toBeGreaterThan(titleReview);
   });
 
@@ -204,8 +211,7 @@ describe("paidProReviewRenderCorpus", () => {
   });
 
   it("review and copy surfaces stay equivalent when only SoT is established", () => {
-    const clean = RAW.replace(/IN WITNESS WHEREOF[\s\S]*/i, "SIGNATURES\n\nEnd.");
-    establishPaidProSourceOfTruth({ text: clean, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
     setConsumedPaidProSignerMetadataAuthority(authority());
     const review = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;

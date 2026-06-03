@@ -8,7 +8,11 @@ import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourc
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
-import { resolvePaidProFinalHydratedCorpusForSurface } from "./paidProFinalHydratedCorpus";
+import {
+  PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN,
+  readPaidProPinnedSignerAppliedCorpus,
+  resolvePaidProFinalHydratedCorpusForSurface,
+} from "./paidProFinalHydratedCorpus";
 import {
   guardPaidProReviewRenderCorpus,
   resolvePaidProReviewRenderPlain,
@@ -56,6 +60,10 @@ export function resolveAuthoritativePaidProReviewPlain(
 ): string {
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
     return resolvePaidProAuthoritativeDisplayPlain();
+  }
+  const pinnedPlain = readPaidProPinnedSignerAppliedCorpus().trim();
+  if (pinnedPlain.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+    return finalizeAuthoritativePaidProReviewPlain(pinnedPlain);
   }
   const postCheckoutRecovery = resolvePaidProPostCheckoutFirstReviewPlain({
     draft: args?.draft ?? null,

@@ -18,6 +18,7 @@ import {
 import { getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "../paidProSourceOfTruth";
 import { resolvePaidProFinalHydratedCorpusForSurface } from "../paidProFinalHydratedCorpus";
 import { resolvePaidProReviewRenderPlain, resolvePaidProReviewRenderSource } from "../paidProReviewRenderCorpus";
+import { logGuidedFinalReviewRenderStable } from "../paidProReviewStability";
 
 export const GUIDED_FINAL_REVIEW_AUTHORITATIVE_MIN_LEN = 1500;
 
@@ -386,7 +387,5 @@ export function logGuidedFinalReviewRender(payload: {
   hash: string;
   len: number;
 }): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
-  // eslint-disable-next-line no-console
-  console.info("[guided-final-review-render]", payload);
+  logGuidedFinalReviewRenderStable(payload);
 }

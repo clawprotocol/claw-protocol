@@ -28,7 +28,6 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { resolvePaidProUnifiedSurfaceCorpus } from "./paidProAgreementAuthorityChain";
 import {
-  paidProSignerExecutionCorpusIsFrozen,
   resolvePaidProFinalHydratedCorpusForSurface,
   type PaidProFinalHydratedCorpusSource,
 } from "./paidProFinalHydratedCorpus";
@@ -56,6 +55,10 @@ import {
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
+import {
+  consumedAuthoritySignerMetadataComplete,
+  shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
+} from "./paidProSignerMetadataCommitPolicy";
 
 const LABELED_SIGNATURE_BLOCK_START =
   /^(?:CLIENT|SERVICE PROVIDER|PROVIDER|CONTRACTOR|COMPANY|PARTY\s+\d+)\s*:/i;
@@ -261,12 +264,14 @@ export function stripDuplicateLegacySignatureBlocksAfterAuthoritative(
   return { text: `${before}\n\n${rebuiltTail}`, removed };
 }
 
+export { consumedAuthoritySignerMetadataComplete, shouldHydratePaidProReviewSurfacesFromConsumedAuthority } from "./paidProSignerMetadataCommitPolicy";
+
 function hydrateTextWhenSignerMetadataComplete(
   text: string,
   parties: readonly PaidProSignerMetadataParty[],
   intakeText: string,
 ): string {
-  if (!paidProSignerExecutionCorpusIsFrozen()) return text;
+  if (!shouldHydratePaidProReviewSurfacesFromConsumedAuthority(parties)) return text;
   if (!consumedAuthoritySignerMetadataComplete(parties)) return text;
   const authority = readConsumedPaidProSignerMetadataAuthority();
   if (!authority) return text;
@@ -279,16 +284,6 @@ function hydrateTextWhenSignerMetadataComplete(
     repairRecital: false,
   });
   return hydrated.rejected ? text : hydrated.corpus;
-}
-
-export function consumedAuthoritySignerMetadataComplete(
-  parties: readonly PaidProSignerMetadataParty[],
-): boolean {
-  if (parties.length < 2) return false;
-  return parties.every((p) => {
-    const legal = p.partyLegalName.trim();
-    return legal.length >= 2 && p.signerName.trim().length >= 1 && p.signerEmail.trim().length >= 3;
-  });
 }
 
 export function resolvePartiesForReviewRender(args?: {
@@ -647,7 +642,7 @@ function resolvePaidProReviewRenderPlainInner(
     const parties = resolvePartiesForReviewRender(args);
     const shouldSanitize =
       parties.length >= 2 &&
-      (unified.layer === "execution" || paidProSignerExecutionCorpusIsFrozen());
+      (unified.layer === "execution" || shouldHydratePaidProReviewSurfacesFromConsumedAuthority(parties));
     if (shouldSanitize) {
       const intakeText = (args?.intakeText ?? "").trim();
       const hydratedBase = hydrateTextWhenSignerMetadataComplete(unified.text, parties, intakeText);
@@ -674,7 +669,8 @@ function resolvePaidProReviewRenderPlainInner(
   if (text.length < PAID_PRO_AUTHORITY_MIN_LEN) return "";
 
   const parties = resolvePartiesForReviewRender(args);
-  const shouldSanitize = parties.length >= 2 && paidProSignerExecutionCorpusIsFrozen();
+  const shouldSanitize =
+    parties.length >= 2 && shouldHydratePaidProReviewSurfacesFromConsumedAuthority(parties);
   if (shouldSanitize) {
     const intakeText = (args?.intakeText ?? "").trim();
     const hydratedBase = hydrateTextWhenSignerMetadataComplete(text, parties, intakeText);

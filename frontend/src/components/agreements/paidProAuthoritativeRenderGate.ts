@@ -15,14 +15,24 @@ import {
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
+import { consumedAuthoritySignerMetadataComplete } from "./paidProSignerMetadataCommitPolicy";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
+import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
-/** True when paid SoT is valid and signer metadata has not been finalized into snapshot/pin. */
+/** True when review should show frozen SoT only (no signer hydration / sanitizer recompute). */
 export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
   if (!hasPaidProSourceOfTruth()) return false;
   if (getPaidProSourceOfTruthText().trim().length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
   if (hasAuthoritativeSigningSnapshot()) return false;
   if (readPaidProPinnedSignerAppliedCorpus().trim().length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+    return false;
+  }
+  const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
+  if (
+    consumedAuthoritySignerMetadataComplete(consumed) &&
+    !isPaidProReviewSignerMetadataSessionActive()
+  ) {
     return false;
   }
   return true;

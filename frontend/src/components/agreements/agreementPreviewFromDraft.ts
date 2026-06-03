@@ -77,6 +77,7 @@ import {
 } from "./paidProAuthoritativeRenderGate";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { recordPaidProPreviewRecompute } from "./paidProReviewStability";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 
 const MISSING = "[Not yet specified]";
@@ -624,6 +625,9 @@ export function buildAgreementPreviewTextCore(
   draft: ParsedDraftShape,
   options?: AgreementPreviewBuildOptions,
 ): string {
+  if (!hasPaidProSourceOfTruth()) {
+    recordPaidProPreviewRecompute("buildAgreementPreviewTextCore");
+  }
   const starterPreview = Boolean(options?.starterPreview);
   const premiumDeliverable = Boolean(options?.premiumDeliverablePreview) && !starterPreview;
   const route = selectAgreementPreviewRoute(draft, options);

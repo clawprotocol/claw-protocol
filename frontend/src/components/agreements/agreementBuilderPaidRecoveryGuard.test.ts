@@ -86,11 +86,46 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
     expect(src).toContain("applySuccess_degraded_server_local_recovery");
   });
 
-  it("paid checkout applySuccess handles degraded server local recovery before authoritative apply", () => {
+  it("paid checkout applySuccess handles degraded server local recovery with SoT commit gate", () => {
     expect(src).toContain("isPremiumDegradedServerRetryablePipelineResult(result)");
     expect(src).toContain("applySuccess_degraded_server_local_recovery");
     expect(src).toContain("premium_degraded_server_local_recovery");
-    expect(src).toContain("premiumAccepted: false");
+    expect(src).toContain("tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth");
+    expect(src).toContain("shouldBlockPaidProReviewShellWithoutCanonicalCorpus");
+    expect(src).toContain("hasRenderablePaidProFirstReviewCorpus");
+
+    const degradedStart = src.indexOf("if (isPremiumDegradedServerRetryablePipelineResult(result)) {");
+    expect(degradedStart).toBeGreaterThan(-1);
+    const degradedEnd = src.indexOf('logPaymentFlowStage("premium_unlock_received"', degradedStart);
+    expect(degradedEnd).toBeGreaterThan(degradedStart);
+    const degradedBlock = src.slice(degradedStart, degradedEnd);
+
+    expect(degradedBlock).toContain("isPremiumDegradedServerLocalRecoveryResult(result)");
+    expect(degradedBlock).toContain("hasUsablePremiumBodyText(localWinning)");
+
+    const localRecoveryStart = degradedBlock.indexOf("if (hasLocalRecovery) {");
+    expect(localRecoveryStart).toBeGreaterThan(-1);
+    const localRecoveryBlock = degradedBlock.slice(localRecoveryStart);
+
+    const blockedRecovery = localRecoveryBlock.slice(
+      localRecoveryBlock.indexOf("if (!sotCommit.committed)"),
+      localRecoveryBlock.indexOf("paidCheckoutCompletedRef.current = true;"),
+    );
+    expect(blockedRecovery).toContain("paidCheckoutCompletedRef.current = false");
+    expect(blockedRecovery).toContain("[premium-handoff] post_checkout_recovery_sot_blocked");
+    expect(blockedRecovery).toContain('setPremiumPostCheckoutPhase("generation_retry")');
+    expect(blockedRecovery).not.toContain("premiumAccepted: true");
+
+    expect(localRecoveryBlock).toContain("tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth({");
+    const sotCommitIdx = localRecoveryBlock.indexOf("tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth");
+    const successAt = localRecoveryBlock.indexOf("paidCheckoutCompletedRef.current = true;", sotCommitIdx);
+    expect(successAt).toBeGreaterThan(sotCommitIdx);
+    const successRecovery = localRecoveryBlock.slice(successAt);
+    expect(successRecovery).toMatch(/premiumAccepted:\s*true/);
+    expect(successRecovery).toContain("commitPaidProAcceptanceStorageHygiene");
+    expect(successRecovery).toContain("setPremiumPostCheckoutPhase(null)");
+    expect(successRecovery).toContain("guidedFinalReviewExplicitlyUnlockedRef.current = true");
+    expect(successRecovery).not.toContain("paidCheckoutCompletedRef.current = false");
   });
 
   it("suppresses amber recovery while premium return wait is active (patience / in-flight)", () => {

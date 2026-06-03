@@ -4,8 +4,38 @@
  */
 
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import {
+  PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN,
+  readPaidProPinnedSignerAppliedCorpus,
+} from "./paidProFinalHydratedCorpus";
 import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
+
+function paidProSignerExecutionCorpusIsFrozenForHydration(): boolean {
+  if (hasAuthoritativeSigningSnapshot()) return true;
+  return readPaidProPinnedSignerAppliedCorpus().length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN;
+}
+
+export function consumedAuthoritySignerMetadataComplete(
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  if (parties.length < 2) return false;
+  return parties.every((p) => {
+    const legal = p.partyLegalName.trim();
+    return legal.length >= 2 && p.signerName.trim().length >= 1 && p.signerEmail.trim().length >= 3;
+  });
+}
+
+/** Hydrate notice/signature metadata on review surfaces (not while live signer session is active). */
+export function shouldHydratePaidProReviewSurfacesFromConsumedAuthority(
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  if (paidProSignerExecutionCorpusIsFrozenForHydration()) return true;
+  if (!consumedAuthoritySignerMetadataComplete(parties)) return false;
+  return !isPaidProReviewSignerMetadataSessionActive();
+}
 
 export function shouldStagePaidProSignerMetadataLocally(args: {
   signerMetadataSessionActive: boolean;

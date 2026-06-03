@@ -581,6 +581,13 @@ import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import { resolvePaidProAuthoritativeDisplayPlain } from "./paidProAuthoritativeRenderGate";
+import {
+  logReviewPipelineTelemetryOnce,
+  notePaidProReviewHashFromPlain,
+  recordPaidProReviewRender,
+} from "./paidProReviewStability";
+import { setPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 import {
   freezePaidProPostCheckoutRecoveryCanonicalSnapshot,
   isPaidProFirstReviewDisplayActive,
@@ -3088,6 +3095,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         return "";
       }
+      if (
+        hasPaidProSourceOfTruth() &&
+        getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
+      ) {
+        return resolvePaidProAuthoritativeDisplayPlain();
+      }
       const starterPreview = !(
         tierAllowsAdvancedFullDraftReveal(tier) ||
         draftHasFullDraftExpansion(d) ||
@@ -3173,6 +3186,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hasPaidProSourceOfTruth()
       ) {
         return "";
+      }
+      if (
+        hasPaidProSourceOfTruth() &&
+        getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
+      ) {
+        return resolvePaidProAuthoritativeDisplayPlain();
       }
       return draft ? buildPreviewForCurrentTier(draft) : "";
     },
@@ -5973,7 +5992,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumPostCheckoutPhase(null);
             resetPremiumReviewScrollToTop({
               reason: "payment_success_authoritative_apply",
-              force: true,
             });
           }, 1400);
         } else {
@@ -10650,7 +10668,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!createProductionTwoPane) return;
     if (shouldSuppressReviewPipelineTelemetry()) return;
     if (!paidProVerboseQaLogsEnabled()) return;
-    console.debug("[review-handoff]", {
+    logReviewPipelineTelemetryOnce("review-handoff", {
       createUiStage,
       createFlowPhase,
       displayPhase,
@@ -10717,7 +10735,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!createProductionTwoPane) return;
     if (shouldSuppressReviewPipelineTelemetry()) return;
     if (!paidProVerboseQaLogsEnabled()) return;
-    console.debug("[review-gate]", {
+    logReviewPipelineTelemetryOnce("review-gate", {
       createUiStage,
       createFlowPhase,
       displayPhase,
@@ -11085,8 +11103,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!createProductionTwoPane || !productionDraftPrimaryReviewSurface) return;
+    if (shouldSuppressReviewPipelineTelemetry()) return;
     if (!paidProVerboseQaLogsEnabled()) return;
-    console.debug("[review-model]", {
+    logReviewPipelineTelemetryOnce("review-model", {
       draftExists: Boolean(draft),
       reviewDraftExists: Boolean(reviewDraft),
       renderedPreviewExists: renderedAgreementPreview.length > 0,
@@ -13345,6 +13364,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // Mirror into refs so imperative callbacks (body rebuilds, handoff applies) can consult the guard
   // without re-binding: signer-metadata edits must never overwrite the authoritative body.
   useEffect(() => {
+    setPaidProReviewSignerMetadataSessionActive(paidProSignerMetadataSessionActive);
+  }, [paidProSignerMetadataSessionActive]);
+
+  useEffect(() => {
     paidProSignerMetadataEditGuardRef.current = paidProSignerMetadataEditGuardActive;
     paidProSignerMetadataSessionActiveRef.current = paidProSignerMetadataSessionActive;
     paidProPostSignerMetadataFreezeRef.current = paidProPostSignerMetadataFreezeActive;
@@ -14953,7 +14976,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateUiStage(CreateUiStage.DRAFT);
       setPreviewPaneRevealed(true);
       bumpPremiumSurfaceGateTick();
-      resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply", force: true });
+      resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply" });
     }
     cleanPremiumUrlAfterAuthoritativeCommit();
     if (!authoritativePremiumRepairLoggedRef.current) {
@@ -18906,6 +18929,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     deferPaidProReviewRenderSignerRepair,
   ]);
 
+  useEffect(() => {
+    if (!hasPaidProSourceOfTruth()) return;
+    const plain = (
+      simpleProFinalReviewDisplayPlain ||
+      displayPolishedPaidProPlain ||
+      getPaidProSourceOfTruthText()
+    ).trim();
+    if (plain.length < PAID_PRO_AUTHORITY_MIN_LEN) return;
+    notePaidProReviewHashFromPlain(plain);
+    recordPaidProReviewRender(plain);
+  }, [
+    simpleProFinalReviewDisplayPlain,
+    displayPolishedPaidProPlain,
+    premiumSurfaceGateTick,
+  ]);
+
   const visibleProPaperBoundaryState = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const paidProReview = getPaidProDocumentForSurface("review", {
@@ -19978,10 +20017,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const snapshotActive = hasAuthoritativeSigningSnapshot();
     const signerHydratedPreview = Boolean(paidProSignerHydratedPreviewPlain.trim());
     const forceEmbedded =
-      snapshotActive ||
-      signerHydratedPreview ||
-      guidedSignatureRebuiltRef.current ||
-      (acceptedPaidProAuthorityActive && hasPaidProSourceOfTruth());
+      !suppressProDocumentEmbeddedSignatures &&
+      (snapshotActive ||
+        signerHydratedPreview ||
+        guidedSignatureRebuiltRef.current ||
+        (acceptedPaidProAuthorityActive && hasPaidProSourceOfTruth()));
     return buildPremiumAgreementReadonlyHtml(corpus, {
       signatureSectionMode: "collaboration",
       partyNames: signaturePartyNames,
@@ -20000,6 +20040,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     currentPremiumMergedIntakeKey,
     displayLivePreviewModel.partiesLine,
     premiumSurfaceGateTick,
+    suppressProDocumentEmbeddedSignatures,
   ]);
 
   React.useEffect(() => {

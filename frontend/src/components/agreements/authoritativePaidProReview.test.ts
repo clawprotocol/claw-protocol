@@ -24,7 +24,12 @@ import {
   clearConsumedPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
-import { clearPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
+import {
+  clearPaidProPinnedSignerAppliedCorpus,
+  setPaidProPinnedSignerAppliedCorpus,
+} from "./paidProFinalHydratedCorpus";
+import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "./authoritativeSignerHydration";
+import { resetPaidProReviewSignerMetadataSessionActiveForTests } from "./paidProReviewRenderSessionGate";
 import { resolveFreeStarterReviewShellActive, resolveReviewShellChrome } from "./freeStarterReviewShell";
 import { resolveIsFreeStreamlineDraftReview } from "./freeStreamlineDraftReview";
 import { CreateUiStage } from "./createUiStage";
@@ -38,6 +43,7 @@ describe("authoritativePaidProReview", () => {
     clearPaidProSourceOfTruth();
     clearConsumedPaidProSignerMetadataAuthority();
     clearPaidProPinnedSignerAppliedCorpus();
+    resetPaidProReviewSignerMetadataSessionActiveForTests();
   });
 
   it("isAuthoritativePaidProReview is true after establishPaidProSourceOfTruth", () => {
@@ -203,6 +209,15 @@ describe("authoritativePaidProReview", () => {
       ],
     });
     setConsumedPaidProSignerMetadataAuthority(authority);
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: body,
+      authority,
+      intakeRaw: "",
+      surface: "authoritative_paid_pro_review_test",
+      repairRecital: true,
+    });
+    expect(hydrated.rejected).toBe(false);
+    setPaidProPinnedSignerAppliedCorpus(hydrated.corpus);
     const plain = resolveAuthoritativePaidProReviewPlain();
     expect(plain).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
     expect(plain).toMatch(/Email for Notice:\s*irenev34@gmail\.com/i);

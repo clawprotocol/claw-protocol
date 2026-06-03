@@ -46,4 +46,20 @@ describe("resetPremiumReviewScrollToTop", () => {
       applied: false,
     });
   });
+
+  it("ignores force on payment_success after first apply", async () => {
+    resetPremiumReviewScrollResetConsumedForTests();
+    resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply" });
+    await new Promise<void>((r) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => r()));
+    });
+    resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply", force: true });
+    await new Promise<void>((r) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => r()));
+    });
+    const applied = (console.info as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[0] === "[premium-review-scroll-reset]" && c[1]?.applied === true,
+    );
+    expect(applied).toHaveLength(1);
+  });
 });

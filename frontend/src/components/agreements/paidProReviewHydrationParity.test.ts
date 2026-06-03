@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { resetPaidProReviewSignerMetadataSessionActiveForTests } from "./paidProReviewRenderSessionGate";
 import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "./authoritativeSignerHydration";
 import {
   buildLivePaidProSignerMetadataAuthority,
@@ -67,6 +68,7 @@ describe("paidProReviewHydrationParity", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
     clearConsumedPaidProSignerMetadataAuthority();
+    resetPaidProReviewSignerMetadataSessionActiveForTests();
   });
 
   it("review, copy, and authoritative plain share hydrated notice metadata", () => {

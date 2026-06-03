@@ -52,16 +52,19 @@ describe("paid checkout authoritative render (source contract)", () => {
 
   it("applySuccess skips paid gate retry path when authoritativeCommittedForGate.committed", () => {
     expect(src).toContain("const authoritativeCommittedForGate = resolveAuthoritativePremiumCommitted");
-    expect(src).toMatch(/if \(!fin\.ok && !authoritativeCommittedForGate\.committed\)/);
+    expect(src).toMatch(/skipQualityRetryForAdvisoryOnly/);
+    expect(src).toMatch(/authoritativeCommittedForGate\.committed/);
+    expect(src).toMatch(/if \(!fin\.ok && !skipQualityRetryForAdvisoryOnly\)/);
   });
 
   it("does not set finish-draft placeholder when authoritative pipeline applies", () => {
-    const gateBlock = src.slice(
-      src.indexOf("const authoritativeCommittedForGate = resolveAuthoritativePremiumCommitted"),
-      src.indexOf("setProFullDraftQualityRetry(false);", src.indexOf("const authoritativeCommittedForGate")),
-    );
-    expect(gateBlock).toContain("Review and edit the document below when it appears");
-    expect(gateBlock).toContain("return;");
-    expect(gateBlock).toContain("!authoritativeCommittedForGate.committed");
+    const gateStart = src.indexOf("const authoritativeCommittedForGate = resolveAuthoritativePremiumCommitted");
+    const skipIdx = src.indexOf("const skipQualityRetryForAdvisoryOnly", gateStart);
+    expect(skipIdx).toBeGreaterThan(gateStart);
+    const gateBlock = src.slice(gateStart, skipIdx + 600);
+    expect(gateBlock).toContain("skipQualityRetryForAdvisoryOnly");
+    expect(gateBlock).toContain("authoritativeCommittedForGate.committed");
+    expect(gateBlock).toMatch(/if \(!fin\.ok && !skipQualityRetryForAdvisoryOnly\)/);
+    expect(gateBlock).not.toContain("Review and edit the document below when it appears");
   });
 });

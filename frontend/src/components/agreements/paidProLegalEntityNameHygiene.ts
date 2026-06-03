@@ -43,8 +43,10 @@ export function isRecitalFragmentExecutionPartyLine(line: string): boolean {
 
 /** "Iron Vale Systems Inc. Systems Inc" → "Iron Vale Systems Inc." */
 export function repairDuplicatedLegalEntitySuffixPhrase(name: string): string {
-  let s = dedupeEntitySuffixes(String(name || "").replace(/\s+/g, " ").trim());
+  let s = String(name || "").replace(/\s+/g, " ").trim();
   if (!s) return s;
+  s = s.replace(/^(.*\bSystems\s+Inc\.?)(?:\s+Systems(?:\s+Inc\.?)?)+\s*$/i, "$1");
+  s = dedupeEntitySuffixes(s);
   s = s.replace(/^(.*\bSystems\s+Inc\.?)\s+Systems(?:\s+Inc\.?)?\s*$/i, "$1");
   const collapsed = s.replace(TRAILING_DUPLICATE_SUFFIX_RUN_RE, "$1");
   if (collapsed !== s) s = collapsed.trim();

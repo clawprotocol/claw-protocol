@@ -5,6 +5,7 @@
  * → updated_agreement_ready → guided_final_review → send_intent_selected → recipient_setup
  */
 
+import { logGuidedProUxStateResolvedStable } from "../paidProReviewStability";
 import { hasAcceptedPaidProAuthority } from "../authoritativePaidProReview";
 import type { CreateFlowProductionPhase } from "../createFlowTypes";
 import { isFinalizingFinalReviewPhase, isGuidedFinalReviewPhase, isUpdatedAgreementReadyPhase } from "../createFlowTypes";
@@ -392,9 +393,7 @@ export function logGuidedSendCtaBlocked(
 }
 
 export function logGuidedProUxStateResolved(state: GuidedProUxState, phase: GuidedCompletionPhase): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
-  // eslint-disable-next-line no-console
-  console.info("[guided-pro-ux-state]", { state, guidedCompletionPhase: phase });
+  logGuidedProUxStateResolvedStable(state, phase);
 }
 
 export function logRecipientSetupPhaseBlocked(context: string, uxState: GuidedProUxState): void {

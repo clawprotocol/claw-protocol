@@ -56,7 +56,8 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
-import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
+import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
+import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 import {
   clearPaidProReviewRenderFusedRepairCache,
 } from "./paidProReviewRenderCorpus";
@@ -130,6 +131,7 @@ export function clearPaidProSourceOfTruth(): void {
   clearFrozenCanonicalAgreementCorpus();
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();
+  clearPaidProPinnedSignerAppliedCorpus();
   tracePaidProCorpusMutation({
     store: "paidProSourceOfTruth",
     caller: "clearPaidProSourceOfTruth",
@@ -521,9 +523,15 @@ export function getPaidProDocumentForSurface(
   ) {
     const aligned = resolvePaidProReviewRenderPlain({
       ...opts,
-      deferSignerMetadataRepair: shouldUsePaidProSourceOfTruthDisplayOnly(),
+      deferSignerMetadataRepair: shouldDeferPaidProReviewRenderSignerRepair({
+        signerMetadataSessionActive: isPaidProReviewSignerMetadataSessionActive(),
+      }),
     });
-    if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
+    const preserveHydratedExecutionCorpus =
+      hydrated.signerMetadataApplied &&
+      (hydrated.source === "pinned_signer_applied_corpus" ||
+        hydrated.source === "authoritative_signing_snapshot");
+    if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN && !preserveHydratedExecutionCorpus) {
       text = aligned;
       hash = hashPaidProCorpus(text);
       if (!signerMetadataApplied) {

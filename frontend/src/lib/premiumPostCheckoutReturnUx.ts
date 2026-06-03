@@ -327,6 +327,12 @@ export type PremiumReviewScrollResetReason =
   | "premium_completion_hydrate"
   | "premium_return_restore";
 
+import {
+  markPaidProPaymentScrollResetApplied,
+  resetPaidProPaymentApplyScrollResetLatch,
+  shouldApplyPaidProPaymentScrollReset,
+} from "../components/agreements/paidProReviewStability";
+
 let premiumReviewScrollResetConsumed = false;
 
 /** Reset scroll/focus to top of Pro review shell after authoritative draft commit (once per success). */
@@ -334,11 +340,19 @@ export function resetPremiumReviewScrollToTop(args: {
   reason: PremiumReviewScrollResetReason;
   force?: boolean;
 }): void {
-  if (premiumReviewScrollResetConsumed && !args.force) {
+  if (args.reason === "payment_success_authoritative_apply") {
+    if (!shouldApplyPaidProPaymentScrollReset()) {
+      console.info("[premium-review-scroll-reset]", { reason: args.reason, applied: false });
+      return;
+    }
+    markPaidProPaymentScrollResetApplied();
+    premiumReviewScrollResetConsumed = true;
+  } else if (premiumReviewScrollResetConsumed && !args.force) {
     console.info("[premium-review-scroll-reset]", { reason: args.reason, applied: false });
     return;
+  } else {
+    premiumReviewScrollResetConsumed = true;
   }
-  premiumReviewScrollResetConsumed = true;
 
   const run = () => {
     try {
@@ -375,6 +389,7 @@ export function resetPremiumReviewScrollToTop(args: {
 /** Test-only: allow repeated scroll-reset assertions. */
 export function resetPremiumReviewScrollResetConsumedForTests(): void {
   premiumReviewScrollResetConsumed = false;
+  resetPaidProPaymentApplyScrollResetLatch();
 }
 
 export {
