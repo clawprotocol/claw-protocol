@@ -33,6 +33,14 @@ import {
 } from "./paidProAcceptedCorpusPartyRoles";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
+import { detectProReviewDisplaySanityViolations } from "./paidProReviewDisplaySanity";
+
+export { detectProReviewDisplaySanityViolations } from "./paidProReviewDisplaySanity";
+export type { PaidProDisplaySanityExecutionContext } from "./paidProReviewDisplaySanity";
+export {
+  analyzePaidProDisplaySanityExecutionContext,
+  isAllowedExecutionTailLine,
+} from "./paidProReviewDisplaySanity";
 
 export type PolishProAgreementDisplayLayerOpts = {
   draft?: ParsedDraftShape | null;
@@ -165,18 +173,6 @@ const SERVICES_DUPLICATE_OPENING_RE =
 /** Title + Agreement") is This Agreement is between — any descriptive title prefix. */
 const FUSED_TITLE_OPENING_RE =
   /(\bThis\s+[\w\s]+Agreement\s*\(\s*(?:the\s+)?["']Agreement["']\s*\))\s+is\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/gi;
-
-const PRO_REVIEW_SANITY_PATTERNS: ReadonlyArray<{ reason: string; re: RegExp }> = [
-  { reason: "signature_dot", re: /\.signature\b/i },
-  { reason: "signature_below", re: /\bsignature\s+below\b/i },
-  { reason: "witness", re: /\bIN WITNESS WHEREOF\b/i },
-  { reason: "duplicate_opening", re: /Agreement["']?\s*\)\s+is\s+This\s+Agreement\s+is\s+between/i },
-  { reason: "with_its_dot", re: /with its\s*\./i },
-  { reason: "execution_by_line", re: /^\s*By:\s*_{2,}/im },
-  { reason: "execution_name_line", re: /^\s*Name:\s*_{2,}/im },
-  { reason: "execution_title_line", re: /^\s*Title:\s*_{2,}/im },
-  { reason: "execution_date_line", re: /^\s*Date:\s*_{2,}/im },
-];
 
 function isAgreementTitleParagraph(part: string): boolean {
   const t = part.trim();
@@ -344,12 +340,6 @@ export function stripMalformedProReviewDisplayArtifacts(text: string): { text: s
     repairs.push("display:strip_service_provider_signature_residue");
   }
   return { text: out.trim(), repairs };
-}
-
-export function detectProReviewDisplaySanityViolations(text: string): string[] {
-  const t = (text || "").trim();
-  if (!t) return [];
-  return PRO_REVIEW_SANITY_PATTERNS.filter(({ re }) => re.test(t)).map(({ reason }) => reason);
 }
 
 export function logProReviewDisplaySanityBlocked(payload: {
