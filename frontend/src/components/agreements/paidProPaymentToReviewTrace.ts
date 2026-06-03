@@ -11,8 +11,8 @@ import {
   startPaidProPerformanceTrace,
   type PaidProE2ePhaseName,
 } from "./paidProPerformanceTrace";
+import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 import {
-  paidProQaPerfTraceEnabled,
   markPaidProCheckoutReturnAt,
   markPaidProFirstReviewPaintAt,
   storePaidProServerTimingHeaderForWaterfall,
@@ -24,7 +24,7 @@ export function beginPaidProPaymentToReviewTrace(args: {
   intakeFingerprint?: string | null;
   intakeText?: string | null;
 }): void {
-  if (!paidProQaPerfTraceEnabled()) return;
+  if (!paidProPerfTraceEnabled()) return;
   const fp =
     (args.intakeFingerprint || "").trim() ||
     (args.intakeText ? shortIntakeFingerprint(args.intakeText) : "") ||

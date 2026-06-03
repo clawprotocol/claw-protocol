@@ -30,9 +30,9 @@ describe("paidProQaPerfTrace", () => {
     clearLastFinishedPaidProPerformanceTrace();
   });
 
-  it("is disabled in production without DEV or perf flag", () => {
-    vi.stubEnv("MODE", "production");
-    vi.stubEnv("DEV", false);
+  it("is disabled without VITE_PAID_PRO_PERF_TRACE even when DEV is true", () => {
+    vi.stubEnv("MODE", "development");
+    vi.stubEnv("DEV", true);
     vi.stubEnv("VITE_PAID_PRO_PERF_TRACE", "");
     expect(paidProQaPerfTraceEnabled()).toBe(false);
   });

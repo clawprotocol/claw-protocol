@@ -3,10 +3,12 @@
  */
 
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
-import { paidProPerfTraceEnabled, paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
+import {
+  paidProPerfTraceEnabled,
+  paidProVerboseDetailLogsEnabled,
+} from "./paidProPerfLogging";
 import {
   markPaidProCheckoutWaterfallEmitted,
-  paidProQaPerfTraceEnabled,
   readPaidProCheckoutMilestonesForWaterfall,
   readPaidProCheckoutWaterfallEmittedSession,
   setPaidProQaTraceSessionGenerationId,
@@ -130,7 +132,7 @@ function nowMs(): number {
 
 /** Legacy compact waterfall when checkout QA waterfall did not emit. */
 function shouldEmitLegacyPaidProWaterfall(): boolean {
-  return paidProQaPerfTraceEnabled();
+  return paidProPerfTraceEnabled();
 }
 
 export function startPaidProPerformanceTrace(args: {
@@ -177,7 +179,7 @@ function spanDurationByName(spans: PaidProWaterfallSpanSummary[], name: string):
 }
 
 function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, totalMs: number): boolean {
-  if (!paidProQaPerfTraceEnabled()) return false;
+  if (!paidProPerfTraceEnabled()) return false;
   const sessionId = (trace.sessionGenerationId ?? trace.traceId).trim();
   if (!sessionId) return false;
   if (readPaidProCheckoutWaterfallEmittedSession() === sessionId) return false;

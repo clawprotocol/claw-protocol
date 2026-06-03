@@ -1,3 +1,5 @@
+import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
+
 /** Safe short ids for premium upgrade logs (never full UUIDs in prod console). */
 export function shortIdForPremiumLog(id: string | null | undefined): string | null {
   const t = (id ?? "").trim();
@@ -12,6 +14,7 @@ export function logPremiumSessionConsistency(args: {
   intakeFingerprint?: string | null;
 }): void {
   if (import.meta.env.MODE === "test") return;
+  if (!paidProVerboseQaLogsEnabled()) return;
   // eslint-disable-next-line no-console
   console.info("[premium-session-consistency]", {
     context: args.context,

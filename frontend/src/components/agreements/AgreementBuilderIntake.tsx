@@ -294,6 +294,7 @@ import {
   beginPaidProPaymentToReviewTrace,
   completePaidProPaymentToReviewTrace,
 } from "./paidProPaymentToReviewTrace";
+import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import {
   clearPaidPremiumCompletionSession,
@@ -10465,6 +10466,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (!createProductionTwoPane) return;
     if (shouldSuppressReviewPipelineTelemetry()) return;
+    if (!paidProVerboseQaLogsEnabled()) return;
     console.debug("[review-handoff]", {
       createUiStage,
       createFlowPhase,
@@ -10494,6 +10496,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             intakeText: debouncedStepBuffer,
           }) === "identity_placeholder_in_corpus"
         : false;
+    if (!paidProVerboseQaLogsEnabled()) {
+      if (hasP || hasF || identityBlock) {
+        console.debug("[review-placeholder-guard]", {
+          hasPlaceholderParties: hasP,
+          hasPlaceholderFields: hasF,
+          hasIdentityPlaceholderCorpusBlocker: identityBlock,
+          renderedPreviewHasUnresolvedIdentityTokens:
+            renderedAgreementPreview.trim().length > 0
+              ? textContainsUnresolvedIdentityPlaceholders(renderedAgreementPreview)
+              : false,
+          continueAllowed: Boolean(draft && !hasP && !identityBlock && !isGenerating),
+        });
+      }
+      return;
+    }
     console.debug("[review-placeholder-guard]", {
       hasPlaceholderParties: hasP,
       hasPlaceholderFields: hasF,
@@ -10516,6 +10533,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (!createProductionTwoPane) return;
     if (shouldSuppressReviewPipelineTelemetry()) return;
+    if (!paidProVerboseQaLogsEnabled()) return;
     console.debug("[review-gate]", {
       createUiStage,
       createFlowPhase,
@@ -10884,6 +10902,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!createProductionTwoPane || !productionDraftPrimaryReviewSurface) return;
+    if (!paidProVerboseQaLogsEnabled()) return;
     console.debug("[review-model]", {
       draftExists: Boolean(draft),
       reviewDraftExists: Boolean(reviewDraft),

@@ -13,6 +13,7 @@ import { buildPartyEntries, normalizeSignatureBlockHeadings } from "./paidProAgr
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import { isCanonicalCommittedText, stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
 import { isStarterDocumentSurface } from "./agreementDocumentSurfacePolicy";
+import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import {
   logPlaceholderScanSkippedTransient,
@@ -161,6 +162,12 @@ export function logPaidProPlaceholderGateDecision(payload: {
   executionContextFound?: boolean;
 }): void {
   if (import.meta.env.MODE === "test") return;
+  const shouldLog =
+    payload.fatalCount > 0 ||
+    payload.repairedCount > 0 ||
+    payload.accepted === false ||
+    paidProPerfTraceEnabled();
+  if (!shouldLog) return;
   // eslint-disable-next-line no-console
   console.info("[paid-pro-placeholder-gate-decision]", payload);
 }

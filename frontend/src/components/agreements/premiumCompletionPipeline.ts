@@ -1651,15 +1651,6 @@ async function runPremiumCompletionInner(
         ...wireMeta,
       },
     });
-    if (import.meta.env.MODE !== "test" && import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.info("[premium-timing]", {
-        phase: "server_model",
-        ms: premiumServerModelMs,
-        ok: fullResp.ok,
-        failure_kind: fullResp.ok ? null : fullResp.failure_kind,
-      });
-    }
     if (!fullResp.ok) {
       if (fullResp.failure_kind === "network" && fullResp.retryable) {
         logPremiumGenerationApiUnavailable({
@@ -1907,14 +1898,6 @@ async function runPremiumCompletionInner(
         paidProPerfSpanEnd("premium_local_pre_processing", { docLen: doc.length, docText: doc });
         paidProPerfRecordInstant("structure_repair", postProcessMs, { docLen: doc.length });
         markPaidProLocalPostProcessingEndAt();
-        if (import.meta.env.MODE !== "test" && import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.info("[premium-timing]", {
-            phase: "post_processing",
-            ms: postProcessMs,
-            docLen: doc.length,
-          });
-        }
         const classified = classifyLongPremiumHttpOutcome({
           documentText: doc,
           missingMaterial: effectiveFull.missing_material_info,

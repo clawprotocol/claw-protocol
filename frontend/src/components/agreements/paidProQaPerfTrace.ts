@@ -1,9 +1,10 @@
 /**
- * DEV / QA-only Paid Pro performance trace (no corpus or UX changes).
- * Enable with VITE_PAID_PRO_PERF_TRACE=1 or import.meta.env.DEV.
+ * QA-only Paid Pro performance trace (no corpus or UX changes).
+ * Emits [premium-generation-ratio], [premium-pass-timing] when VITE_PAID_PRO_PERF_TRACE=1.
  */
 
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 import { shortIdForPremiumLog } from "./premiumSessionDiagnostics";
 import type { PaidProServerTimingSpanWire } from "./paidProPerformanceTrace";
 
@@ -24,16 +25,9 @@ export type PremiumGenerationRatioSourceField =
   | "server_repair_document_text"
   | "none";
 
-/** DEV or explicit perf flag; never on in production builds without DEV. */
+/** @deprecated Alias for paidProPerfTraceEnabled (flag-only). */
 export function paidProQaPerfTraceEnabled(): boolean {
-  if (typeof import.meta === "undefined") return false;
-  if (import.meta.env.MODE === "production" && !import.meta.env.DEV) {
-    return Boolean(import.meta.env.VITE_PAID_PRO_PERF_TRACE);
-  }
-  if (import.meta.env.MODE === "test") {
-    return Boolean(import.meta.env.VITE_PAID_PRO_PERF_TRACE);
-  }
-  return Boolean(import.meta.env.DEV || import.meta.env.VITE_PAID_PRO_PERF_TRACE);
+  return paidProPerfTraceEnabled();
 }
 
 function nowMs(): number {
@@ -127,7 +121,7 @@ function emitPremiumPassTiming(payload: {
   corpusHashAfter: string;
   changed: boolean;
 }): void {
-  if (!paidProQaPerfTraceEnabled()) return;
+  if (!paidProPerfTraceEnabled()) return;
   if (!shouldLogPass(payload.passName, payload.surface, payload.corpusHashBefore)) return;
   // eslint-disable-next-line no-console
   console.info("[premium-pass-timing]", {
@@ -150,7 +144,7 @@ export function tracePaidProQaPassText(
   inputText: string,
   run: () => string,
 ): string {
-  if (!paidProQaPerfTraceEnabled()) return run();
+  if (!paidProPerfTraceEnabled()) return run();
   const hashBefore = corpusHashForTrace(inputText);
   const inputLen = (inputText || "").length;
   const started = nowMs();
@@ -177,7 +171,7 @@ export function tracePaidProQaPassWithText<T extends { text: string }>(
   inputText: string,
   run: () => T,
 ): T {
-  if (!paidProQaPerfTraceEnabled()) return run();
+  if (!paidProPerfTraceEnabled()) return run();
   const hashBefore = corpusHashForTrace(inputText);
   const inputLen = (inputText || "").length;
   const started = nowMs();
@@ -205,7 +199,7 @@ export function logPremiumGenerationRatio(args: {
   sourceField: PremiumGenerationRatioSourceField;
   responseBodyLen: number;
 }): void {
-  if (!paidProQaPerfTraceEnabled()) return;
+  if (!paidProPerfTraceEnabled()) return;
   const intakeLen = Math.max(0, args.intakeLen);
   const normalizedDocumentLen = Math.max(0, args.normalizedDocumentLen);
   const expansionRatio =
@@ -255,36 +249,36 @@ export function resolvePremiumGenerationRatioSourceField(parsed: {
 }
 
 export function markPaidProCheckoutReturnAt(): void {
-  if (!paidProQaPerfTraceEnabled()) return;
+  if (!paidProPerfTraceEnabled()) return;
   if (checkoutMilestones.checkoutReturnAt == null) {
     checkoutMilestones.checkoutReturnAt = wallClockMs();
   }
 }
 
 export function markPaidProPremiumRequestStartAt(): void {
-  if (!paidProQaPerfTraceEnabled()) return;
+  if (!paidProPerfTraceEnabled()) return;
   if (checkoutMilestones.premiumRequestStartAt == null) {
     checkoutMilestones.premiumRequestStartAt = wallClockMs();
   }
 }
 
 export function markPaidProPremiumHttpEndAt(): void {
-  if (!paidProQaPerfTraceEnabled()) return;
+  if (!paidProPerfTraceEnabled()) return;
   checkoutMilestones.premiumHttpEndAt = wallClockMs();
 }
 
 export function markPaidProLocalPostProcessingEndAt(): void {
-  if (!paidProQaPerfTraceEnabled()) return;
+  if (!paidProPerfTraceEnabled()) return;
   checkoutMilestones.localPostProcessingEndAt = wallClockMs();
 }
 
 export function markPaidProFirstReviewPaintAt(): void {
-  if (!paidProQaPerfTraceEnabled()) return;
+  if (!paidProPerfTraceEnabled()) return;
   checkoutMilestones.firstReviewPaintAt = wallClockMs();
 }
 
 export function storePaidProServerTimingHeaderForWaterfall(headerValue: string | null | undefined): void {
-  if (!paidProQaPerfTraceEnabled()) return;
+  if (!paidProPerfTraceEnabled()) return;
   const raw = (headerValue || "").trim();
   if (!raw) return;
   checkoutMilestones.lastServerTimingHeader = raw;

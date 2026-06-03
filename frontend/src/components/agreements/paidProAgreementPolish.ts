@@ -20,7 +20,7 @@ import {
 } from "./proOperationalSynthesis";
 import { softenProDocumentTone } from "./premiumSituationIntelligence";
 import { shouldSkipPaidProPolish } from "./agreementDocumentSurfacePolicy";
-import { tracePaidProQaPassText, tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
+import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company|DAO|Foundation|Trust)\.?$/i;

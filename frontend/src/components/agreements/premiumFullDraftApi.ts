@@ -35,7 +35,6 @@ import {
   logPremiumGenerationRatio,
   markPaidProPremiumHttpEndAt,
   markPaidProPremiumRequestStartAt,
-  paidProQaPerfTraceEnabled,
   resolvePremiumGenerationRatioSourceField,
 } from "./paidProQaPerfTrace";
 import {
@@ -627,9 +626,7 @@ export async function postPremiumFullDraftOnce(args: {
     method: "POST",
     headers: clawAgreementHeaders({
       "Content-Type": "application/json",
-      ...(paidProPerfTraceEnabled() || paidProQaPerfTraceEnabled()
-        ? { "X-Claw-Paid-Pro-Perf-Trace": "1" }
-        : {}),
+      ...(paidProPerfTraceEnabled() ? { "X-Claw-Paid-Pro-Perf-Trace": "1" } : {}),
     }),
     body: JSON.stringify({
       intake_text: args.intakeText,
