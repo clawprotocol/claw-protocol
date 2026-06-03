@@ -1,8 +1,7 @@
 import { useId, useLayoutEffect } from "react";
-import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   emitVisibleProPaperBoundaryDiagnostics,
-  type ProVisiblePaperCandidate,
+  type VisibleProPaperDiagnosticsTrace,
 } from "./visibleProPaperRenderBoundary";
 
 const DOC_STYLES = `
@@ -38,15 +37,7 @@ type Props = {
   /** Extra padding below document body when a bottom sticky CTA is visible (px). */
   bottomScrollInsetPx?: number;
   /** Paid Pro final DOM boundary diagnostics (dev-only logs). */
-  visibleProPaperTrace?: {
-    declaredSource: string;
-    candidates: readonly ProVisiblePaperCandidate[];
-    intakeText?: string | null;
-    draft?: ParsedDraftShape | null;
-    paidProReviewSurface?: boolean;
-    isAuthoritative?: boolean;
-    isFreeBodyMatch?: boolean;
-  };
+  visibleProPaperTrace?: VisibleProPaperDiagnosticsTrace;
 };
 
 export function PremiumAgreementReadonlyView({
@@ -64,6 +55,7 @@ export function PremiumAgreementReadonlyView({
     if (!visibleProPaperTrace || !safe) return;
     emitVisibleProPaperBoundaryDiagnostics({
       html: safe,
+      renderPlain: visibleProPaperTrace.renderPlain,
       declaredSource: visibleProPaperTrace.declaredSource,
       candidates: visibleProPaperTrace.candidates,
       intakeText: visibleProPaperTrace.intakeText,
@@ -74,6 +66,7 @@ export function PremiumAgreementReadonlyView({
     });
   }, [
     safe,
+    visibleProPaperTrace?.renderPlain,
     visibleProPaperTrace?.declaredSource,
     visibleProPaperTrace?.candidates,
     visibleProPaperTrace?.intakeText,

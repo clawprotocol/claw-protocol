@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PaidProReviewStickyScrollSpacer } from "./paidProStickyBottomInset";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
-import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import type { ProVisiblePaperCandidate } from "./visibleProPaperRenderBoundary";
+import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
 import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload";
 import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSection } from "./guidedDealCompletion/guidedSectionScroll";
 import {
@@ -95,15 +94,7 @@ export type SimpleProFinalReviewScreenProps = {
   /** Measured sticky CTA clearance — spacer after execution block (px). */
   stickyBottomScrollInsetPx?: number;
   className?: string;
-  visibleProPaperTrace?: {
-    declaredSource: string;
-    candidates: readonly ProVisiblePaperCandidate[];
-    intakeText?: string | null;
-    draft?: ParsedDraftShape | null;
-    paidProReviewSurface?: boolean;
-    isAuthoritative?: boolean;
-    isFreeBodyMatch?: boolean;
-  };
+  visibleProPaperTrace?: VisibleProPaperDiagnosticsTrace;
 };
 
 export function SimpleProFinalReviewScreen({

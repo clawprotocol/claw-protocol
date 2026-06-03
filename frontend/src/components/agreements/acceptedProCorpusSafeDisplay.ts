@@ -21,6 +21,7 @@ import {
 } from "./paidProAcceptedCorpusPartyRoles";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -65,6 +66,27 @@ function reconcileAcceptedCorpusExecutionRolesIfInverted(text: string): { text: 
   return { text: reconciled.text, repaired: true };
 }
 
+function paidProSafeDisplayHasAuthoritativeParties(
+  intakeRaw: string | null | undefined,
+  partyNames: readonly string[],
+): boolean {
+  if (partyNames.filter(isAuthoritativeLegalEntityName).length >= 2) return true;
+  return intakeHasFullLegalEntityParties(intakeRaw, partyNames);
+}
+
+function resolvePaidProSafeDisplayPartyRecords(
+  intakeRaw: string | null | undefined,
+  partyNames: readonly string[],
+  generatedBody: string,
+): ReturnType<typeof resolveCanonicalPartyIdentitiesFromSources> {
+  if (!paidProSafeDisplayHasAuthoritativeParties(intakeRaw, partyNames)) return [];
+  return resolveCanonicalPartyIdentitiesFromSources({
+    rawIntake: intakeRaw,
+    starterNames: partyNames,
+    generatedBody,
+  });
+}
+
 function canonicalPartyNamesFromDraft(draft: ParsedDraftShape | null | undefined): string[] {
   return (draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
@@ -94,16 +116,10 @@ export function applyAcceptedProCorpusSafeDisplay(
 
   const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
   const intakeRaw = opts?.intakeText ?? null;
-  const hasFullLegal = intakeHasFullLegalEntityParties(intakeRaw, partyNames);
-  const records = hasFullLegal
-    ? resolveCanonicalPartyIdentitiesFromSources({
-        rawIntake: intakeRaw,
-        starterNames: partyNames,
-        generatedBody: out,
-      })
-    : [];
+  const hasAuthoritativeParties = paidProSafeDisplayHasAuthoritativeParties(intakeRaw, partyNames);
+  const records = resolvePaidProSafeDisplayPartyRecords(intakeRaw, partyNames, out);
 
-  if (hasFullLegal && records.length >= 2) {
+  if (hasAuthoritativeParties && records.length >= 2) {
     const partyRepair = repairFullAgreementPartyIdentity({
       text: out,
       intakeRaw,
@@ -135,8 +151,8 @@ export function applyAcceptedProCorpusSafeDisplay(
     };
   }
 
-  if (hasFullLegal && records.length >= 2) {
-    const openingGuard = ensurePaidProServicesAgreementOpening(out, records);
+  if (hasAuthoritativeParties && records.length >= 2) {
+    const openingGuard = ensurePaidProServicesAgreementOpening(out, records, intakeRaw);
     if (openingGuard.text !== out) {
       out = openingGuard.text;
       repairs.push(...openingGuard.repairs);
@@ -167,18 +183,21 @@ export function applyAcceptedProCorpusSafeDisplay(
     repairs.push(...sigOrder.repairs);
   }
 
-  if (hasFullLegal && records.length >= 2) {
+  const postSigRoleRepair = reconcileAcceptedCorpusExecutionRolesIfInverted(out);
+  if (postSigRoleRepair.repaired) {
+    out = postSigRoleRepair.text;
+    repairs.push("safe:reconcile_execution_block_roles");
+  }
+
+  if (
+    (hasAuthoritativeParties && records.length >= 2) ||
+    /\bIN WITNESS WHEREOF\b/i.test(out)
+  ) {
     const execution = enforcePaidProSingleExecutionBlock(out);
     if (execution.text !== out) {
       out = execution.text;
       repairs.push(...execution.repairs);
     }
-  }
-
-  const postSigRoleRepair = reconcileAcceptedCorpusExecutionRolesIfInverted(out);
-  if (postSigRoleRepair.repaired) {
-    out = postSigRoleRepair.text;
-    repairs.push("safe:reconcile_execution_block_roles");
   }
 
   return { text: out, repairs: [...new Set(repairs)] };

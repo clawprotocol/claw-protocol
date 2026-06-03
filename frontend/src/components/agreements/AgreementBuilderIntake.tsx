@@ -18681,6 +18681,54 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
   ]);
 
+  const visibleProPaperRenderPlainForDiagnostics = useMemo(() => {
+    if (simpleProFinalReviewActive) {
+      const intakeForHtml = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+      return (
+        resolvePaidProReviewRenderPlain({
+          draft: draft ?? null,
+          intakeText: intakeForHtml,
+          deferSignerMetadataRepair: deferPaidProReviewRenderSignerRepair,
+        }).trim() ||
+        simpleProFinalReviewDisplayPlain.trim() ||
+        (acceptedPaidProAuthorityActive ? authoritativePaidProReviewPlain : "")
+      );
+    }
+    if (premiumPaidDocumentSurface && !shouldShowPaidRetry) {
+      const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+      const paidProDisplay = getPaidProDocumentForSurface("display", {
+        draft: draft ?? null,
+        intakeText: intakeForPolish,
+      });
+      if (paidProDisplay?.text?.trim()) {
+        return (paidProSignerHydratedPreviewPlain.trim() || paidProDisplay.text).trim();
+      }
+      return (
+        paidProSignerHydratedPreviewPlain.trim() ||
+        displayPolishedPaidProPlain ||
+        premiumPaidReadonlyPick.plainText ||
+        ""
+      ).trim();
+    }
+    return (simpleProFinalReviewDisplayPlain || displayPolishedPaidProPlain || "").trim();
+  }, [
+    simpleProFinalReviewActive,
+    acceptedPaidProAuthorityActive,
+    authoritativePaidProReviewPlain,
+    deferPaidProReviewRenderSignerRepair,
+    premiumPaidDocumentSurface,
+    shouldShowPaidRetry,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    draft,
+    paidProSignerHydratedPreviewPlain,
+    displayPolishedPaidProPlain,
+    premiumPaidReadonlyPick.plainText,
+    simpleProFinalReviewDisplayPlain,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
+
   const visibleProPaperTrace = useMemo(() => {
     if (!premiumPaidDocumentSurface && !simpleProFinalReviewActive) return undefined;
     return {
@@ -18691,6 +18739,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProReviewSurface: true,
       isAuthoritative: visibleProPaperBoundaryState.isAuthoritative,
       isFreeBodyMatch: visibleProPaperBoundaryState.isFreeBodyMatch,
+      renderPlain: visibleProPaperRenderPlainForDiagnostics,
     };
   }, [
     premiumPaidDocumentSurface,
@@ -18701,6 +18750,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeCombined,
     reviewDraft,
     draft,
+    visibleProPaperRenderPlainForDiagnostics,
   ]);
 
   const syncReviewContinuityState = React.useCallback((next: ReviewContinuityState) => {
@@ -19629,6 +19679,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const simpleProFinalReviewHtmlSourcePlain = useMemo(() => {
+    if (simpleProFinalReviewActive) {
+      return visibleProPaperRenderPlainForDiagnostics;
+    }
     const intakeForHtml = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     return (
       resolvePaidProReviewRenderPlain({
@@ -19640,6 +19693,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (acceptedPaidProAuthorityActive ? authoritativePaidProReviewPlain : "")
     );
   }, [
+    simpleProFinalReviewActive,
+    visibleProPaperRenderPlainForDiagnostics,
     simpleProFinalReviewDisplayPlain,
     acceptedPaidProAuthorityActive,
     authoritativePaidProReviewPlain,

@@ -32,6 +32,7 @@ import {
   detectExecutionBlockRoleInversion,
 } from "./paidProAcceptedCorpusPartyRoles";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
+import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 
 export type PolishProAgreementDisplayLayerOpts = {
   draft?: ParsedDraftShape | null;
@@ -565,6 +566,14 @@ export function polishProAgreementDisplayLayer(
   const sigOrder = repairPaidProSignatureSectionOrdering(out);
   out = sigOrder.text;
   repairs.push(...sigOrder.repairs);
+
+  if (records.length >= 2) {
+    const execution = enforcePaidProSingleExecutionBlock(out);
+    if (execution.text !== out) {
+      out = execution.text;
+      repairs.push(...execution.repairs);
+    }
+  }
 
   if (!opts?.retainSignatureExecutionBlock) {
     const sections = normalizeProAgreementSectionContinuity(out);

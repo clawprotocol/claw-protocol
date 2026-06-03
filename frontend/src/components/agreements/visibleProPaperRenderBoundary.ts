@@ -230,7 +230,18 @@ function detectVisibleProPaperCollision(args: {
   return null;
 }
 
-function pickAuthoritativePlainForPaidPro(candidates: readonly ProVisiblePaperCandidate[]): {
+/** Plain corpus fed to buildPremiumAgreementReadonlyHtml — normalized before hash compare. */
+export function normalizeVisibleProPaperComparePlain(text: string): string {
+  return (text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+}
+
+export function pickAuthoritativePlainForVisibleProPaper(
+  candidates: readonly ProVisiblePaperCandidate[],
+): {
   plain: string;
   source: string;
 } | null {
@@ -280,7 +291,7 @@ export function resolveVisibleProPaperBoundary(args: {
   const visiblePlain = trim(args.visiblePlain);
   const visibleHash = bodyHash(visiblePlain);
   const intakeText = trim(args.intakeText);
-  const authoritative = pickAuthoritativePlainForPaidPro(args.candidates);
+  const authoritative = pickAuthoritativePlainForVisibleProPaper(args.candidates);
   const authoritativePlain = authoritative?.plain ?? "";
   const collision = detectVisibleProPaperCollision({
     visiblePlain,
@@ -437,8 +448,101 @@ export function resolveVisibleProPaperBoundary(args: {
   };
 }
 
+let visibleProPaperDiagnosticsForceEnabledForTests = false;
+
+export function setVisibleProPaperDiagnosticsForceEnabledForTests(enabled: boolean): void {
+  visibleProPaperDiagnosticsForceEnabledForTests = enabled;
+}
+
 function isDiagnosticsEnabled(): boolean {
+  if (visibleProPaperDiagnosticsForceEnabledForTests) return true;
   return typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV) && import.meta.env?.MODE !== "test";
+}
+
+export type VisibleProPaperDiagnosticsTrace = {
+  declaredSource: string;
+  candidates: readonly ProVisiblePaperCandidate[];
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
+  paidProReviewSurface?: boolean;
+  isAuthoritative?: boolean;
+  isFreeBodyMatch?: boolean;
+  /** Plain text passed into buildPremiumAgreementReadonlyHtml (collision compare input). */
+  renderPlain: string;
+};
+
+export type VisibleProPaperCollisionForensics = {
+  authoritativeHash: string;
+  renderedPlainHash: string;
+  authoritativeLen: number;
+  renderedPlainLen: number;
+  firstDiffOffset: number;
+  contextBefore: string;
+  contextAfter: string;
+  normalizedComparison: string | null;
+  declaredSource: string;
+  responsibleLayer: string;
+  /** True when legacy HTML strip would have disagreed with render-plain compare (whitespace collapse). */
+  htmlRoundTripWouldMismatch: boolean;
+};
+
+const VISIBLE_PRO_PAPER_COLLISION_COMPARE_LAYER =
+  "emitVisibleProPaperBoundaryDiagnostics:renderPlain_vs_pickAuthoritativePlainForVisibleProPaper";
+
+export function buildVisibleProPaperCollisionForensics(args: {
+  renderedPlain: string;
+  declaredSource: string;
+  candidates: readonly ProVisiblePaperCandidate[];
+  htmlRoundTripPlain?: string | null;
+}): VisibleProPaperCollisionForensics | null {
+  const authoritative = pickAuthoritativePlainForVisibleProPaper(args.candidates);
+  const authPlain = normalizeVisibleProPaperComparePlain(authoritative?.plain ?? "");
+  const renderedPlain = normalizeVisibleProPaperComparePlain(args.renderedPlain);
+  if (!authPlain || !renderedPlain) return null;
+
+  const authoritativeHash = bodyHash(authPlain);
+  const renderedPlainHash = bodyHash(renderedPlain);
+  if (authoritativeHash === renderedPlainHash) return null;
+
+  const left = authPlain;
+  const right = renderedPlain;
+  let firstDiffOffset = 0;
+  while (firstDiffOffset < left.length && firstDiffOffset < right.length && left[firstDiffOffset] === right[firstDiffOffset]) {
+    firstDiffOffset += 1;
+  }
+
+  const contextRadius = 100;
+  const normalizedComparison = (() => {
+    if (left === right) return null;
+    return [
+      `first_diff_at=${firstDiffOffset}`,
+      `left_len=${left.length}`,
+      `right_len=${right.length}`,
+      `left_snip=${JSON.stringify(left.slice(Math.max(0, firstDiffOffset - contextRadius), firstDiffOffset + contextRadius))}`,
+      `right_snip=${JSON.stringify(right.slice(Math.max(0, firstDiffOffset - contextRadius), firstDiffOffset + contextRadius))}`,
+    ].join("\n");
+  })();
+
+  const htmlStrip = args.htmlRoundTripPlain
+    ? normalizeVisibleProPaperComparePlain(args.htmlRoundTripPlain)
+    : "";
+  const htmlRoundTripWouldMismatch = Boolean(
+    htmlStrip && bodyHash(authPlain) !== bodyHash(htmlStrip) && bodyHash(renderedPlain) === bodyHash(authPlain),
+  );
+
+  return {
+    authoritativeHash,
+    renderedPlainHash,
+    authoritativeLen: left.length,
+    renderedPlainLen: right.length,
+    firstDiffOffset,
+    contextBefore: left.slice(Math.max(0, firstDiffOffset - contextRadius), firstDiffOffset),
+    contextAfter: left.slice(firstDiffOffset, firstDiffOffset + contextRadius),
+    normalizedComparison,
+    declaredSource: args.declaredSource,
+    responsibleLayer: VISIBLE_PRO_PAPER_COLLISION_COMPARE_LAYER,
+    htmlRoundTripWouldMismatch,
+  };
 }
 
 export function logVisibleProPaperBody(payload: {
@@ -484,6 +588,8 @@ export function logProSourceCandidateDiff(payload: {
 
 export function emitVisibleProPaperBoundaryDiagnostics(args: {
   html: string;
+  /** Plain corpus passed to buildPremiumAgreementReadonlyHtml — used for authoritative collision compare. */
+  renderPlain: string;
   declaredSource: string;
   candidates: readonly ProVisiblePaperCandidate[];
   intakeText?: string | null;
@@ -492,32 +598,42 @@ export function emitVisibleProPaperBoundaryDiagnostics(args: {
   isAuthoritative?: boolean;
   isFreeBodyMatch?: boolean;
 }): void {
-  const plain = stripHtmlToPlainForProPaperCompare(args.html);
+  const comparePlain = normalizeVisibleProPaperComparePlain(args.renderPlain);
+  const htmlRoundTripPlain = stripHtmlToPlainForProPaperCompare(args.html);
   logVisibleProPaperBody({
     source: args.declaredSource,
-    plain,
+    plain: comparePlain,
     intakeText: args.intakeText,
     draft: args.draft,
     isAuthoritative: args.isAuthoritative,
     isFreeBodyMatch: args.isFreeBodyMatch,
   });
-  logProSourceCandidateDiff({ visiblePlain: plain, candidates: args.candidates });
+  logProSourceCandidateDiff({ visiblePlain: comparePlain, candidates: args.candidates });
   if (!isDiagnosticsEnabled()) return;
   const resolution = resolveVisibleProPaperBoundary({
-    visiblePlain: plain,
+    visiblePlain: comparePlain,
     declaredSource: args.declaredSource,
     candidates: args.candidates,
     intakeText: args.intakeText,
     draft: args.draft,
     paidProReviewSurface: args.paidProReviewSurface,
   });
-  if (resolution.collision) {
-    // eslint-disable-next-line no-console
-    console.warn("[visible-pro-paper-collision]", {
-      collision: resolution.collision,
-      declaredSource: args.declaredSource,
-      blocked: resolution.blocked,
-      showFinalizing: resolution.showFinalizing,
-    });
-  }
+  if (!resolution.collision) return;
+
+  const forensics = buildVisibleProPaperCollisionForensics({
+    renderedPlain: comparePlain,
+    declaredSource: args.declaredSource,
+    candidates: args.candidates,
+    htmlRoundTripPlain,
+  });
+
+  // eslint-disable-next-line no-console
+  console.warn("[visible-pro-paper-collision]", {
+    collision: resolution.collision,
+    declaredSource: args.declaredSource,
+    blocked: resolution.blocked,
+    showFinalizing: resolution.showFinalizing,
+    compareInput: "render_plain",
+    ...(forensics ?? {}),
+  });
 }

@@ -5,7 +5,7 @@ import {
   detectPaidProMalformedServicesOpening,
   ensurePaidProServicesAgreementOpening,
   isPaidProOpeningStructurallyValid,
-  PAID_PRO_MUTUAL_CONSULTING_TITLE,
+  PAID_PRO_SERVICES_TITLE,
   repairPaidProServicesAgreementOpening,
 } from "./paidProOpeningRecitalGuard";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
@@ -69,17 +69,17 @@ describe("paidProOpeningRecitalGuard", () => {
     expect(detectPaidProMalformedServicesOpening(MALFORMED_HEAD, records)).toBe(true);
   });
 
-  it("repairs malformed head with canonical mutual consulting opening", () => {
+  it("repairs malformed head with canonical services opening", () => {
     const records = resolveCanonicalPartyIdentitiesFromIntake(INTAKE, [BLUE, IRON]);
-    const { text, repairs } = repairPaidProServicesAgreementOpening(MALFORMED_HEAD, records);
+    const { text, repairs } = repairPaidProServicesAgreementOpening(MALFORMED_HEAD, records, INTAKE);
     expect(repairs.length).toBeGreaterThan(0);
-    expect(text).not.toMatch(new RegExp(`^${BLUE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n`, "m"));
-    expect(text).toContain(PAID_PRO_MUTUAL_CONSULTING_TITLE);
+    expect(text.trim()).not.toMatch(new RegExp(`^${BLUE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n`));
+    expect(text).toContain(PAID_PRO_SERVICES_TITLE);
     expect(text).toMatch(/entered\s+into\s+as\s+of/i);
     expect(text).toContain(`${BLUE} ("Client")`);
     expect(text).toMatch(/Iron Vale Systems Inc\.?\s*\(\s*["']Service Provider["']\s*\)/);
     const sec1 = text.search(/^\s*1\.\s+/m);
-    const titleIdx = text.indexOf(PAID_PRO_MUTUAL_CONSULTING_TITLE);
+    const titleIdx = text.indexOf(PAID_PRO_SERVICES_TITLE);
     expect(sec1).toBeGreaterThan(titleIdx);
     expect(isPaidProOpeningStructurallyValid(text, records)).toBe(true);
   });
@@ -88,8 +88,8 @@ describe("paidProOpeningRecitalGuard", () => {
     const draft = draftParties();
     const raw = padBody(MALFORMED_HEAD);
     const safe = applyAcceptedProCorpusSafeDisplay(raw, { draft, intakeText: INTAKE });
-    expect(safe.text).toContain(PAID_PRO_MUTUAL_CONSULTING_TITLE);
-    expect(safe.text).not.toMatch(new RegExp(`^${BLUE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n`, "m"));
+    expect(safe.text).toContain(PAID_PRO_SERVICES_TITLE);
+    expect(safe.text.trim()).not.toMatch(new RegExp(`^${BLUE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n`));
     expect(safe.repairs.some((r) => r.startsWith("opening:"))).toBe(true);
 
     clearPaidProSourceOfTruth();
@@ -110,12 +110,12 @@ describe("paidProOpeningRecitalGuard", () => {
     for (const label of ["review", "copy", "display"] as const) {
       const surface = label === "review" ? review : label === "copy" ? copy : display;
       const head = surface.slice(0, 1_500);
-      expect(head.startsWith(PAID_PRO_MUTUAL_CONSULTING_TITLE), label).toBe(true);
+      expect(head.startsWith(PAID_PRO_SERVICES_TITLE), label).toBe(true);
       expect(head).toMatch(/entered\s+into\s+as\s+of/i);
       expect(surface).toContain(`${BLUE} ("Client")`);
       expect(surface).toMatch(/Iron Vale Systems Inc\.?\s*\(\s*["']Service Provider["']\s*\)/);
       const sec1 = surface.search(/^\s*1\.\s+/m);
-      const titleIdx = surface.indexOf(PAID_PRO_MUTUAL_CONSULTING_TITLE);
+      const titleIdx = surface.indexOf(PAID_PRO_SERVICES_TITLE);
       expect(sec1, label).toBeGreaterThan(titleIdx);
       const firstMeaningful = surface
         .trim()
@@ -129,8 +129,8 @@ describe("paidProOpeningRecitalGuard", () => {
 
   it("buildCanonicalPaidProServicesOpeningRecital matches required shape", () => {
     const records = resolveCanonicalPartyIdentitiesFromIntake(INTAKE, [BLUE, IRON]);
-    const block = buildCanonicalPaidProServicesOpeningRecital(records[0]!, records[1]!);
-    expect(block).toContain(PAID_PRO_MUTUAL_CONSULTING_TITLE);
+    const block = buildCanonicalPaidProServicesOpeningRecital(records[0]!, records[1]!, INTAKE);
+    expect(block).toContain(PAID_PRO_SERVICES_TITLE);
     expect(block).toContain('this "Agreement")');
     expect(block).toContain("collectively as the \"Parties.\"");
   });

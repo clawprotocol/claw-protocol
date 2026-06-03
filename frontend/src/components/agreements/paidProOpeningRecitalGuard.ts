@@ -9,23 +9,44 @@ import {
 } from "./canonicalPartyIdentityResolver";
 
 export const PAID_PRO_MUTUAL_CONSULTING_TITLE = "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT";
+export const PAID_PRO_CONSULTING_TITLE = "CONSULTING AND IMPLEMENTATION AGREEMENT";
+export const PAID_PRO_SERVICES_TITLE = "SERVICES AGREEMENT";
 
-const RECITAL_LINE_RE =
-  /^(?:This\s+)?(?:Mutual\s+)?(?:Consulting|Services|Professional)[\s\S]{0,220}?(?:Agreement|Contract)\b/i;
+const PAID_PRO_CANONICAL_TITLE_RE =
+  /(?:MUTUAL\s+CONSULTING\s+AND\s+IMPLEMENTATION|CONSULTING\s+AND\s+IMPLEMENTATION|SERVICES)\s+AGREEMENT/i;
+
+export function resolvePaidProServicesAgreementTitle(intakeText?: string | null): string {
+  const low = String(intakeText || "").toLowerCase();
+  if (/\bmutual\b/.test(low)) return PAID_PRO_MUTUAL_CONSULTING_TITLE;
+  if (/\bconsulting\b/.test(low)) return PAID_PRO_CONSULTING_TITLE;
+  return PAID_PRO_SERVICES_TITLE;
+}
+
+function recitalAgreementPhrase(title: string): string {
+  if (/MUTUAL/i.test(title)) return "Mutual Consulting and Implementation Agreement";
+  if (/CONSULTING/i.test(title)) return "Consulting and Implementation Agreement";
+  return "Services Agreement";
+}
 
 export function buildCanonicalPaidProServicesOpeningRecital(
   client: CanonicalPartyIdentityRecord,
   provider: CanonicalPartyIdentityRecord,
+  intakeText?: string | null,
 ): string {
   const clientName = client.fullLegalName.trim();
   const providerName = provider.fullLegalName.trim();
+  const title = resolvePaidProServicesAgreementTitle(intakeText);
+  const phrase = recitalAgreementPhrase(title);
   return [
-    PAID_PRO_MUTUAL_CONSULTING_TITLE,
+    title,
     "",
-    `This Mutual Consulting and Implementation Agreement (this "Agreement") is entered into as of the Effective Date by and between ${clientName} ("Client") and ${providerName} ("Service Provider"). Client and Service Provider may be referred to individually as a "Party" and collectively as the "Parties."`,
+    `This ${phrase} (this "Agreement") is entered into as of the Effective Date by and between ${clientName} ("Client") and ${providerName} ("Service Provider"). Client and Service Provider may be referred to individually as a "Party" and collectively as the "Parties."`,
     "",
   ].join("\n");
 }
+
+const RECITAL_LINE_RE =
+  /^(?:This\s+)?(?:Mutual\s+)?(?:Consulting|Services|Professional)[\s\S]{0,220}?(?:Agreement|Contract)\b/i;
 
 function meaningfulLines(text: string, max = 8): string[] {
   return text
@@ -103,9 +124,11 @@ export function detectPaidProMalformedServicesOpening(
     return true;
   }
   if (!/MUTUAL\s+CONSULTING\s+AND\s+IMPLEMENTATION\s+AGREEMENT/i.test(preSec1)) {
-    const trimmedPre = preSec1.trim();
-    if (trimmedPre.length < 120 || isStandalonePartyEntityLine(first, legalNames)) {
-      return true;
+    if (!PAID_PRO_CANONICAL_TITLE_RE.test(preSec1)) {
+      const trimmedPre = preSec1.trim();
+      if (trimmedPre.length < 120 || isStandalonePartyEntityLine(first, legalNames)) {
+        return true;
+      }
     }
   }
 
@@ -124,7 +147,7 @@ export function isPaidProOpeningStructurallyValid(
   const client = records[0]!.fullLegalName.trim();
   const provider = records[1]!.fullLegalName.trim();
 
-  if (!/MUTUAL\s+CONSULTING\s+AND\s+IMPLEMENTATION\s+AGREEMENT/i.test(head)) {
+  if (!PAID_PRO_CANONICAL_TITLE_RE.test(head)) {
     return false;
   }
   if (!/entered\s+into\s+as\s+of/i.test(head)) {
@@ -183,6 +206,7 @@ function stripLeadingStandalonePartyLines(
 export function repairPaidProServicesAgreementOpening(
   text: string,
   records: readonly CanonicalPartyIdentityRecord[],
+  intakeText?: string | null,
 ): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   if (records.length < 2) {
@@ -210,7 +234,7 @@ export function repairPaidProServicesAgreementOpening(
 
   const sec1Idx = body.search(/^\s*1\.\s+/m);
   const remainder = sec1Idx >= 0 ? body.slice(sec1Idx).trim() : body;
-  const opening = buildCanonicalPaidProServicesOpeningRecital(client, provider);
+  const opening = buildCanonicalPaidProServicesOpeningRecital(client, provider, intakeText);
   repairs.push("opening:prepend_canonical_services_recital");
   return { text: `${opening}${remainder}`, repairs };
 }
@@ -218,6 +242,7 @@ export function repairPaidProServicesAgreementOpening(
 export function ensurePaidProServicesAgreementOpening(
   text: string,
   records: readonly CanonicalPartyIdentityRecord[],
+  intakeText?: string | null,
 ): { text: string; repairs: string[] } {
   if (records.length < 2) {
     return { text, repairs: [] };
@@ -225,7 +250,7 @@ export function ensurePaidProServicesAgreementOpening(
   if (!detectPaidProMalformedServicesOpening(text, records)) {
     return { text, repairs: [] };
   }
-  const repaired = repairPaidProServicesAgreementOpening(text, records);
+  const repaired = repairPaidProServicesAgreementOpening(text, records, intakeText);
   if (import.meta.env?.DEV && import.meta.env?.MODE !== "test" && repaired.repairs.length > 0) {
     // eslint-disable-next-line no-console
     console.info("[paid-pro-opening-recital-guard]", {

@@ -44,11 +44,7 @@ import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity"
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
-import {
-  buildCorpusRoleIdentitiesForExecutionReconcile,
-  detectExecutionBlockRoleInversion,
-} from "./paidProAcceptedCorpusPartyRoles";
-import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
+import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import {
   paidProSignerStagingDisplayUsesFrozenCorpus,
   readPaidProSignerStagingDisplayCorpus,
@@ -406,8 +402,13 @@ export function applyPaidProReviewRenderSanitizer(
   if (parties.length >= 2) {
     const records = canonicalPartyRecordsFromSignerIdentities(identities);
     if (records.length >= 2) {
-      out = ensurePaidProServicesAgreementOpening(out, records).text;
+      out = ensurePaidProServicesAgreementOpening(out, records, ctx?.intakeText ?? null).text;
     }
+  }
+  const execution = enforcePaidProSingleExecutionBlock(out);
+  if (execution.text !== out) {
+    out = execution.text;
+    repaired = true;
   }
   return {
     text: out,
@@ -587,14 +588,11 @@ function finalizePaidProReviewRenderPlain(
   if (parties.length >= 2) {
     out = stripTrailingLegacyEntitySignatureLines(out).text;
   }
-  return ensurePaidProServicesAgreementOpening(out, records).text.trim();
+  return ensurePaidProServicesAgreementOpening(out, records, args?.intakeText ?? null).text.trim();
 }
 
 function alignExecutionBlockRolesFromAcceptedCorpus(corpus: string): string {
-  if (!detectExecutionBlockRoleInversion(corpus)) return corpus;
-  const identities = buildCorpusRoleIdentitiesForExecutionReconcile(corpus);
-  const reconciled = reconcileExecutionBlockToRoleIdentities(corpus, identities);
-  return reconciled.repairs > 0 ? reconciled.text : corpus;
+  return enforcePaidProSingleExecutionBlock(corpus).text;
 }
 
 export function resolvePaidProReviewRenderPlain(
