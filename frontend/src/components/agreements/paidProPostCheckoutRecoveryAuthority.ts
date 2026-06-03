@@ -9,6 +9,7 @@ import {
   freezePaidProPostCheckoutRecoveryCanonicalSnapshot,
   resolvePaidProPostCheckoutRecoveryDisplayPlain,
 } from "./paidProPostCheckoutRenderGate";
+import { hasLatchedLongAcceptedServerFullDraft } from "./paidProAcceptedServerFullDraftCommitGuard";
 import {
   establishPaidProSourceOfTruth,
   type PaidProSourceOfTruth,
@@ -26,6 +27,9 @@ export function tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth(args: {
   premiumRenderSource: string;
   reviewSessionId?: string | null;
 }): PostCheckoutRecoverySotCommitResult {
+  if (hasLatchedLongAcceptedServerFullDraft()) {
+    return { committed: false, reason: "latched_server_full_draft_authority_present" };
+  }
   const displayPlain = resolvePaidProPostCheckoutRecoveryDisplayPlain({
     draft: args.draft,
     intakeText: args.intakeText,

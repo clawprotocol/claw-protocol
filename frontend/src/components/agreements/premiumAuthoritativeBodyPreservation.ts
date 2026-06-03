@@ -9,6 +9,7 @@ import {
   getAcceptedPremiumCanonicalText,
   getAcceptedPremiumDisplayText,
 } from "./acceptedPremiumCanonicalCorpus";
+import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
 export const AUTHORITATIVE_BODY_PRESERVE_MIN_WINNING_LEN = 1500;
@@ -115,11 +116,18 @@ export function resolveAuthoritativePremiumSnapshotPlain(args: {
   draft?: ParsedDraftShape | null;
   allowValidatedRepairSuccess?: boolean;
 }): CoalesceAuthoritativePremiumBodyResult & { text: string } {
-  const winning = trim(args.winningBody);
+  let winning = trim(args.winningBody);
   const resolved = trim(args.resolvedText);
   if (!isAuthoritativePremiumPipelineRenderSource(args.pipelineSource) || winning.length < 500) {
     return { text: resolved, preserved: false, downgradePrevented: false };
   }
+  winning = guardPaidProAcceptedServerFullDraftCommit({
+    candidateText: winning,
+    candidateSource: args.pipelineSource,
+    renderSource: args.pipelineSource,
+    generationOutcome: "ok",
+    reason: "resolve_authoritative_premium_snapshot_winning",
+  }).text;
 
   const attemptedDowngrade = wouldMateriallyShrinkAuthoritativeBody(winning.length, resolved.length);
 
@@ -157,8 +165,16 @@ export function resolveAuthoritativePremiumSnapshotPlain(args: {
     allowValidatedRepairSuccess: false,
   });
 
+  const snapshotText = guardPaidProAcceptedServerFullDraftCommit({
+    candidateText: established.text,
+    candidateSource: args.pipelineSource,
+    renderSource: args.pipelineSource,
+    generationOutcome: "ok",
+    reason: "resolve_authoritative_premium_snapshot_established",
+  }).text;
+
   return {
-    text: coalesced.text === resolved && coalesced.downgradePrevented ? established.text : established.text,
+    text: snapshotText,
     preserved: true,
     downgradePrevented: attemptedDowngrade || coalesced.downgradePrevented,
     reason: coalesced.downgradePrevented ? "accepted_canonical_preserved" : "accepted_canonical_established",

@@ -9,6 +9,8 @@ import { extractIntakeContacts, type IntakeContactRecord } from "./paidProIntake
 import { resolveFullLegalPartiesFromIntake } from "./paidProPartyNamePreserve";
 import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 export type PremiumRecipientCandidate = { name: string; email: string; role: string };
 
 export type PremiumRenderSource =
@@ -159,8 +161,40 @@ const sessionFrozenPremiumByGenerationId = new Map<
   { body: string; source: PremiumRenderSource; frozenAt: number }
 >();
 
+type LatchedAcceptedServerFullDraft = {
+  body: string;
+  source: PremiumRenderSource;
+  len: number;
+  hash: string;
+};
+
+let latchedAcceptedServerFullDraft: LatchedAcceptedServerFullDraft | null = null;
+
+/** Longest accepted server_full_draft for this session (survives generation-id churn). */
+export function latchAcceptedServerFullDraftAuthority(
+  body: string,
+  source: PremiumRenderSource,
+): void {
+  const t = (body || "").trim();
+  if (!isLongCommerciallyUsablePremiumBody(t.length)) return;
+  if (!isAuthoritativePremiumPipelineRenderSource(source)) return;
+  if (!latchedAcceptedServerFullDraft || t.length >= latchedAcceptedServerFullDraft.len) {
+    latchedAcceptedServerFullDraft = {
+      body: t,
+      source,
+      len: t.length,
+      hash: fingerprintAgreementBody(t),
+    };
+  }
+}
+
+export function getLatchedAcceptedServerFullDraftAuthority(): LatchedAcceptedServerFullDraft | null {
+  return latchedAcceptedServerFullDraft;
+}
+
 export function clearFrozenPremiumSessionBodiesForTests(): void {
   sessionFrozenPremiumByGenerationId.clear();
+  latchedAcceptedServerFullDraft = null;
 }
 
 export function isLongCommerciallyUsablePremiumBody(bodyLen: number): boolean {
@@ -240,6 +274,7 @@ export function freezeAcceptedPremiumBodyForSession(
   const prev = sessionFrozenPremiumByGenerationId.get(id);
   if (prev && prev.body.length >= t.length) return;
   sessionFrozenPremiumByGenerationId.set(id, { body: t, source, frozenAt: Date.now() });
+  latchAcceptedServerFullDraftAuthority(t, source);
 }
 
 export function getFrozenPremiumBodyForSession(

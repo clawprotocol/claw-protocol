@@ -63,6 +63,7 @@ import {
 import {
   clearPaidProSignerStagingDisplayCorpus,
 } from "./paidProSignerStagingDisplayCorpus";
+import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -173,6 +174,8 @@ export function establishPaidProSourceOfTruth(args: {
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
   reviewSessionId?: string | null;
+  agreementGenerationId?: string | null;
+  generationOutcome?: string | null;
   /** User-approved revisions may legitimately shorten the body; automated paths may not. Default false. */
   allowShorterOverwrite?: boolean;
 }): PaidProSourceOfTruth {
@@ -216,15 +219,26 @@ export function establishPaidProSourceOfTruth(args: {
       return existingSot;
     }
   }
+  const authorityGuard = guardPaidProAcceptedServerFullDraftCommit({
+    candidateText: args.text,
+    candidateSource: requestedSource,
+    renderSource: requestedSource,
+    generationOutcome: args.generationOutcome ?? "ok",
+    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    reason: "establish_paid_pro_source_of_truth",
+  });
+  const authorityText = authorityGuard.text;
   logProCorpusSourceMap({
     stage: "server_full_draft_received",
     source: args.source ?? "server_full_draft",
-    len: trim(args.text).length,
-    text: args.text,
+    len: authorityText.length,
+    text: authorityText,
     allowedToOverride: false,
-    reason: "establish_paid_pro_source_of_truth",
+    reason: authorityGuard.rejected
+      ? "establish_paid_pro_source_of_truth_latch_restore"
+      : "establish_paid_pro_source_of_truth",
   });
-  const safe = applyAcceptedProCorpusSafeDisplay(args.text, {
+  const safe = applyAcceptedProCorpusSafeDisplay(authorityText, {
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
   }).text;
@@ -250,6 +264,15 @@ export function establishPaidProSourceOfTruth(args: {
     allowedToOverride: false,
     reason: "accepted_pro_corpus_safe_display",
   });
+  const postSafeGuard = guardPaidProAcceptedServerFullDraftCommit({
+    candidateText: safe,
+    candidateSource: requestedSource,
+    renderSource: requestedSource,
+    generationOutcome: args.generationOutcome ?? "ok",
+    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    reason: "establish_paid_pro_source_of_truth_post_safe_display",
+  });
+  const safeForCommit = postSafeGuard.text;
   const parties: CanonicalAgreementSnapshotParty[] = (args.draft?.parties ?? [])
     .map((p) => ({
       name: String(p?.name ?? "").trim(),
@@ -263,7 +286,7 @@ export function establishPaidProSourceOfTruth(args: {
   const snapshot = buildCanonicalAgreementSnapshot({
     surface: "paid_pro_source_of_truth_establish",
     tier: "pro",
-    candidates: [{ source: "server_full_document_text", text: safe }],
+    candidates: [{ source: "server_full_document_text", text: safeForCommit }],
     intakeText: args.intakeText ?? null,
     parties,
     signerState: { complete: false, signerCount: Math.max(2, parties.length) },
@@ -271,9 +294,9 @@ export function establishPaidProSourceOfTruth(args: {
     reviewSessionId: args.reviewSessionId,
   });
   const frozen = freezeCanonicalAgreementSnapshot(snapshot, "server_full_document_text");
-  const frozenText = frozen?.canonicalText ?? safe;
+  const frozenText = frozen?.canonicalText ?? safeForCommit;
   const driftGuard = enforceAuthoritativeProCorpusDisplay({
-    authoritativeText: safe,
+    authoritativeText: safeForCommit,
     displayText: frozenText,
     source: "canonical_freeze",
     surface: "paid_pro_source_of_truth_establish",

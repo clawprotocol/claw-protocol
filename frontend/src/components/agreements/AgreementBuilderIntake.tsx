@@ -563,6 +563,8 @@ import {
   acceptedProDraftSafeDespiteFinalizationFailure,
   resolveAuthoritativePremiumSnapshotPlain,
 } from "./premiumAuthoritativeBodyPreservation";
+import { resolvePremiumBodyAgainstSessionFreeze } from "./premiumAcceptancePolicy";
+import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import {
   getAcceptedPremiumCanonicalCorpus,
   getAcceptedPremiumCanonicalText,
@@ -5885,6 +5887,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         },
       ) => {
         if (!isAuthoritativePremiumPipelineRenderSource(pipelineSource) || opts.acceptedPlainLen < 500) return;
+        const visibleGuarded = guardPaidProAcceptedServerFullDraftCommit({
+          candidateText: collapsedDoc,
+          candidateSource: opts.premiumRenderResolveSource ?? pipelineSource,
+          renderSource: pipelineSource,
+          generationOutcome: opts.reason?.includes("needs") ? "needs_details" : "ok",
+          agreementGenerationId: getOrInitSessionAgreementGenerationId(),
+          reason: opts.reason ?? "commit_authoritative_premium_visible_surface",
+        });
+        const commitPlain = visibleGuarded.text;
         const agreementDocumentTextLenBefore = agreementDocumentTextRef.current.trim().length;
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
@@ -5920,22 +5931,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           createUiStage: String(createUiStageRef.current),
           displayPhase: displayPhaseRef.current,
         });
-        syncAuthoritativePremiumDocumentRefs(collapsedDoc, authoritativePremiumDocRefs, {
+        syncAuthoritativePremiumDocumentRefs(commitPlain, authoritativePremiumDocRefs, {
           pipelineSource,
           premiumRenderResolveSource: opts.premiumRenderResolveSource,
         });
-        commitReviewArtifact({ plainText: collapsedDoc, source: "premium_authoritative" });
+        commitReviewArtifact({ plainText: commitPlain, source: "premium_authoritative" });
         setHardError(null);
         setPremiumPipelineUserMessage(null);
         setProFullDraftCustomGateMessage(null);
         setProUpgradeUseStarterView(false);
         setProFullDraftQualityRetry(false);
-        setAgreementDocumentText(collapsedDoc);
+        setAgreementDocumentText(commitPlain);
         agreementDocumentDirtyRef.current = false;
         setDraft((prev) => {
           const base = prev ?? draftSnapshotRef.current;
           if (!base) return prev;
-          const committed = commitAuthoritativePremiumDocument(collapsedDoc, base, authoritativePremiumDocRefs, {
+          const committed = commitAuthoritativePremiumDocument(commitPlain, base, authoritativePremiumDocRefs, {
             pipelineSource,
             premiumRenderResolveSource: opts.premiumRenderResolveSource,
           });
@@ -5979,11 +5990,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           })
         ) {
           if (opts.hardFailopenWasActive) {
-            logPremiumFailopenOverriddenBySuccess({ bodyLen: opts.acceptedPlainLen, pipelineSource });
+            logPremiumFailopenOverriddenBySuccess({ bodyLen: commitPlain.length, pipelineSource });
           }
           // eslint-disable-next-line no-console
           console.info("[premium-return-late-success-applied]", {
-            bodyLen: opts.acceptedPlainLen,
+            bodyLen: commitPlain.length,
             pipelineSource,
             reason: opts.reason ?? "unspecified",
             hard_failopen_was_active: opts.hardFailopenWasActive,
@@ -6024,7 +6035,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           displayPhase: "review",
         });
         logPremiumAuthoritativeCommit({
-          bodyLen: opts.acceptedPlainLen,
+          bodyLen: commitPlain.length,
           source: pipelineSource,
           generationOutcome: opts.reason?.includes("needs") ? "needs_details" : "ok",
         });
@@ -6560,7 +6571,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           { ...rc0, name: merged.displayName1 },
           { ...rc1, name: merged.displayName2 },
         ];
-        const winning = (result.winningPremiumBodyText || "").trim();
+        const sessionGenId = result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId();
+        const generationOutcomeLabel = result.serverGenerationDegraded ? "degraded" : "ok";
+        let winning = (result.winningPremiumBodyText || "").trim();
+        const frozenWinning = resolvePremiumBodyAgainstSessionFreeze(
+          sessionGenId,
+          winning,
+          result.premiumRenderSource,
+        );
+        winning = guardPaidProAcceptedServerFullDraftCommit({
+          candidateText: frozenWinning.body,
+          candidateSource: result.premiumRenderSource,
+          renderSource: result.premiumRenderSource,
+          generationOutcome: generationOutcomeLabel,
+          agreementGenerationId: sessionGenId,
+          reason: "apply_success_winning",
+        }).text;
         // First-authoritative-success-wins: if a valid paid SoT has already been committed for this
         // session, a later duplicate-race premium response that comes back degraded/rejected/shorter
         // must be ignored entirely — never overwrite the SoT, never re-run the rewrite path, never
@@ -6644,7 +6670,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           intakeText: mergedIntake,
           draft: merged.draft,
         });
-        const snapshotPlain = snapshotCoalesce.text.trim();
+        let snapshotPlain = guardPaidProAcceptedServerFullDraftCommit({
+          candidateText: snapshotCoalesce.text.trim(),
+          candidateSource: resolvedPersist.premium_render_source,
+          renderSource: result.premiumRenderSource,
+          generationOutcome: generationOutcomeLabel,
+          agreementGenerationId: sessionGenId,
+          reason: "apply_success_snapshot_plain",
+        }).text;
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[premium-success-hydrate]", {
@@ -6884,6 +6917,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               source: "server_full_draft",
               draft: mergedDraftPersist,
               intakeText: mergedIntake,
+              agreementGenerationId: sessionGenId,
+              generationOutcome: generationOutcomeLabel,
             });
             commitPaidProAcceptanceStorageHygiene();
             bumpPremiumSurfaceGateTick();
@@ -6923,7 +6958,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
         }
-        const finalDoc = collapseDuplicateEsignNoticesInFullPreview(snapshotPlain);
+        const finalDoc = guardPaidProAcceptedServerFullDraftCommit({
+          candidateText: collapseDuplicateEsignNoticesInFullPreview(snapshotPlain),
+          candidateSource: resolvedPersist.premium_render_source,
+          renderSource: result.premiumRenderSource,
+          generationOutcome: generationOutcomeLabel,
+          agreementGenerationId: sessionGenId,
+          reason: "apply_success_final_doc",
+        }).text;
         const icCommitGate = resolveAgreementIntentContract(mergedIntake);
         const vCommitGate = validatePaidProOutput({
           text: snapshotPlain,

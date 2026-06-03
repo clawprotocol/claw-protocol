@@ -38,6 +38,7 @@ import {
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { clearPremiumGenerationCallAudit } from "./paidProPremiumGenerationCallAudit";
+import { clearFrozenPremiumSessionBodiesForTests } from "./premiumAcceptancePolicy";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "qa/paidProHardening/fixtures");
 const TEST243_INTAKE = readFileSync(
@@ -99,6 +100,7 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
     clearPremiumCompletionSnapshot();
     clearFrozenCanonicalAgreementCorpus();
     clearPremiumGenerationCallAudit();
+    clearFrozenPremiumSessionBodiesForTests();
   });
 
   afterEach(() => {
