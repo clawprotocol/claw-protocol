@@ -25,6 +25,8 @@ describe("paidPro Test242 premium_parse_timeout checkout", () => {
     const src = readFileSync(join(agreementsDir, "premiumCompletionPipeline.ts"), "utf8");
     expect(src).toContain('input.premiumGenerationCallReason !== "checkout_completion"');
     expect(src).toMatch(/await\s+input\.parseDraft\(rawForSoT \|\| rawIntake\)/);
+    expect(src).toContain("shouldSkipCheckoutPremiumParseBeforeFullDraft");
+    expect(src).toContain("resolveCheckoutPremiumParseSubstitute");
   });
 
   it("defers trouble-finalizing copy for parse-timeout retry", () => {

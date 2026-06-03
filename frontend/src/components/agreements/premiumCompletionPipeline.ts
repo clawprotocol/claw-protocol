@@ -36,6 +36,11 @@ import {
 import { elevatePremiumPaymentTermsFromIntake } from "./premiumPaymentTermsElevate";
 import { draftHasPlaceholderParties } from "./reviewPlaceholderGuard";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
+import { buildCheckoutPreflightAgreementPreviewText } from "./paidProCheckoutPreviewPreflightCache";
+import {
+  resolveCheckoutPremiumParseSubstitute,
+  shouldSkipCheckoutPremiumParseBeforeFullDraft,
+} from "./paidProCheckoutParseSkip";
 import { ensureMaterialAsksInAdditional } from "./materialAsksMerge";
 import { setPaidFunnelLastPremiumProContext } from "../../lib/experimentation/paidFunnelIntentAttribution";
 import { getOrCreateLawdogSessionId } from "../../tracking/lawdogSession";
@@ -1156,7 +1161,23 @@ async function runPremiumCompletionInner(
       rawForSoTChosenLen: rawForSoT.length,
     });
   }
-  const premiumParse = await input.parseDraft(rawIntake);
+  const parseIntakeForSkip = rawForSoT || rawIntake;
+  const skipInitialCheckoutParse = shouldSkipCheckoutPremiumParseBeforeFullDraft({
+    premiumGenerationCallReason: input.premiumGenerationCallReason,
+    structuredDraft: input.structuredDraft,
+    rawIntake: parseIntakeForSkip,
+  });
+  paidProPerfSpanStart("parse_draft");
+  const premiumParse = skipInitialCheckoutParse
+    ? resolveCheckoutPremiumParseSubstitute(input.structuredDraft)
+    : await input.parseDraft(rawIntake);
+  paidProPerfSpanEnd("parse_draft", {
+    outcome: skipInitialCheckoutParse ? "skipped_checkout_structured" : "parsed",
+    extra: {
+      skipped: skipInitialCheckoutParse,
+      callReason: input.premiumGenerationCallReason ?? null,
+    },
+  });
   let merged = mergePremiumParsePreferFresh(input.structuredDraft, premiumParse, rawForSoT);
   merged = ensureMaterialAsksInAdditional(merged);
   if (import.meta.env.DEV) {
@@ -1400,12 +1421,26 @@ async function runPremiumCompletionInner(
   merged = { ...merged, title: inferPremiumTitle(merged, rawForSoT || rawIntake) };
   merged = applyHardTitleLocks(merged, rawForSoT || rawIntake);
   const rawSoT = rawForSoT || rawIntake;
-  let freeBaseline = buildAgreementPreviewText(input.structuredDraft, { starterPreview: true });
-  let premiumFinal = buildAgreementPreviewText(merged, {
-    starterPreview: false,
-    premiumDeliverablePreview: true,
-    intakeText: rawSoT,
-  });
+  const preflightPreviewCtx = {
+    premiumGenerationCallReason: input.premiumGenerationCallReason,
+    sessionGenerationId: input.agreementGenerationId ?? null,
+    intakeFingerprint,
+  };
+  paidProPerfSpanStart("client_preflight_preview");
+  let freeBaseline = buildCheckoutPreflightAgreementPreviewText(
+    input.structuredDraft,
+    { starterPreview: true },
+    preflightPreviewCtx,
+  );
+  let premiumFinal = buildCheckoutPreflightAgreementPreviewText(
+    merged,
+    {
+      starterPreview: false,
+      premiumDeliverablePreview: true,
+      intakeText: rawSoT,
+    },
+    preflightPreviewCtx,
+  );
   let similarity = lexicalSimilarity(freeBaseline, premiumFinal);
   let deltaSignals = protectionSignalsPresent(premiumFinal) - protectionSignalsPresent(freeBaseline);
   let lengthRatio = premiumFinal.length / Math.max(1, freeBaseline.length);
@@ -1413,11 +1448,15 @@ async function runPremiumCompletionInner(
   if ((similarity > 0.78 && (deltaSignals < 2 || lengthRatio < 1.2)) || !mat.ok) {
     regenTriggered = true;
     merged = amplifyPremiumMaterialityRepair(merged, rawSoT, premiumFinal);
-    premiumFinal = buildAgreementPreviewText(merged, {
-      starterPreview: false,
-      premiumDeliverablePreview: true,
-      intakeText: rawSoT,
-    });
+    premiumFinal = buildCheckoutPreflightAgreementPreviewText(
+      merged,
+      {
+        starterPreview: false,
+        premiumDeliverablePreview: true,
+        intakeText: rawSoT,
+      },
+      preflightPreviewCtx,
+    );
     similarity = lexicalSimilarity(freeBaseline, premiumFinal);
     deltaSignals = protectionSignalsPresent(premiumFinal) - protectionSignalsPresent(freeBaseline);
     lengthRatio = premiumFinal.length / Math.max(1, freeBaseline.length);
@@ -1435,16 +1474,24 @@ async function runPremiumCompletionInner(
   if (!mat.ok) {
     regenTriggered = true;
     merged = amplifyPremiumMaterialityRepair(merged, rawSoT, premiumFinal);
-    premiumFinal = buildAgreementPreviewText(merged, {
-      starterPreview: false,
-      premiumDeliverablePreview: true,
-      intakeText: rawSoT,
-    });
+    premiumFinal = buildCheckoutPreflightAgreementPreviewText(
+      merged,
+      {
+        starterPreview: false,
+        premiumDeliverablePreview: true,
+        intakeText: rawSoT,
+      },
+      preflightPreviewCtx,
+    );
     mat = evaluateUniversalPremiumMateriality(freeBaseline, premiumFinal, rawSoT);
     if (import.meta.env.DEV) {
       console.info("[premium-universal-materiality]", { pass: 2, ok: mat.ok, reasons: mat.reasons, metrics: mat.metrics });
     }
   }
+  paidProPerfSpanEnd("client_preflight_preview", {
+    docLen: premiumFinal.length,
+    extra: { regenTriggered },
+  });
   const parsePayment = nz(premiumParse.payment_terms);
   const finalPayment = nz(merged.payment_terms);
   const finalGeneric = /\b(to be agreed|to be specified|payment schedule to be agreed|tbd)\b/i.test(finalPayment);
@@ -2594,6 +2641,7 @@ async function runPremiumCompletionInner(
           // eslint-disable-next-line no-console
           console.info("[CLAW] premium accepted", { source: premiumRenderSource, doc_len: doc.length });
         }
+        paidProPerfSpanStart("post_accept_commit_render");
         freezeAcceptedPremiumBodyForSession(
           input.agreementGenerationId,
           doc,
@@ -2635,6 +2683,11 @@ async function runPremiumCompletionInner(
         paidProPerfRecordE2ePhase("authoritative_commit", {
           renderSource: premiumRenderSource,
           docLen: doc.length,
+        });
+        paidProPerfSpanEnd("post_accept_commit_render", {
+          docLen: doc.length,
+          docText: doc,
+          outcome: premiumRenderSource,
         });
         logPremiumCompletionDebug({
           stage: "pipeline_client_gates_passed",

@@ -16,6 +16,9 @@ import {
 import { shortIdForPremiumLog } from "./premiumSessionDiagnostics";
 
 export type PaidProPerformanceSpanName =
+  | "parse_draft"
+  | "client_preflight_preview"
+  | "post_accept_commit_render"
   | "intake_classification"
   | "guided_question_gate"
   | "premium_local_pre_processing"
@@ -208,6 +211,7 @@ function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, tot
       : totalMs;
 
   markPaidProCheckoutWaterfallEmitted(sessionId);
+  emitPremiumGenerationAttribution(trace, spanSummaries, totalMs);
 
   // eslint-disable-next-line no-console
   console.info("[paid-pro-waterfall]", {
@@ -329,11 +333,82 @@ export function ingestPaidProServerTimingSpans(spans: PaidProServerTimingSpanWir
 }
 
 const DUPLICATE_WATCH_SPANS: PaidProPerformanceSpanName[] = [
+  "parse_draft",
+  "client_preflight_preview",
   "structure_repair",
   "enterprise_polish",
   "placeholder_gate",
   "premium_local_pre_processing",
 ];
+
+const ATTRIBUTION_BUCKET_SPANS: Array<{
+  bucket: "parse_draft" | "premium_full_draft_http" | "client_preflight" | "post_accept_render";
+  spanNames: string[];
+}> = [
+  { bucket: "parse_draft", spanNames: ["parse_draft"] },
+  { bucket: "premium_full_draft_http", spanNames: ["premium_full_draft_api", "server_model"] },
+  {
+    bucket: "client_preflight",
+    spanNames: [
+      "client_preflight_preview",
+      "intake_classification",
+      "premium_local_pre_processing",
+      "enterprise_polish",
+      "structure_repair",
+      "placeholder_gate",
+      "integrity_repair",
+    ],
+  },
+  {
+    bucket: "post_accept_render",
+    spanNames: [
+      "post_accept_commit_render",
+      "authoritative_commit",
+      "sot_establishment",
+      "final_review_render_plain",
+      "html_render",
+    ],
+  },
+];
+
+function sumAttributionMs(spans: PaidProWaterfallSpanSummary[], names: string[]): number {
+  let total = 0;
+  for (const s of spans) {
+    if (names.includes(s.name)) total += s.durationMs;
+  }
+  return total;
+}
+
+function emitPremiumGenerationAttribution(
+  trace: PaidProPerformanceTrace,
+  spanSummaries: PaidProWaterfallSpanSummary[],
+  totalMs: number,
+): void {
+  if (!paidProPerfTraceEnabled()) return;
+  const buckets = Object.fromEntries(
+    ATTRIBUTION_BUCKET_SPANS.map(({ bucket, spanNames }) => [
+      bucket,
+      sumAttributionMs(spanSummaries, spanNames),
+    ]),
+  ) as Record<string, number>;
+  const unattributedMs = Math.max(
+    0,
+    totalMs -
+      (buckets.parse_draft ?? 0) -
+      (buckets.premium_full_draft_http ?? 0) -
+      (buckets.client_preflight ?? 0) -
+      (buckets.post_accept_render ?? 0),
+  );
+  // eslint-disable-next-line no-console
+  console.info("[premium-generation-attribution]", {
+    traceId: trace.traceId,
+    sessionGenerationId: trace.sessionGenerationId,
+    intakeFingerprint: trace.intakeFingerprint,
+    totalMs,
+    ...buckets,
+    unattributedMs,
+  });
+}
 
 function buildWaterfallSummary(spans: PaidProWaterfallSpanSummary[]): {
   topContributors: Array<{ name: string; durationMs: number }>;
@@ -415,6 +490,7 @@ export function finishPaidProPerformanceWaterfall(): void {
   }
   const emittedCheckoutWaterfall = emitPaidProCheckoutWaterfallIfReady(trace, totalMs);
   if (!emittedCheckoutWaterfall && shouldEmitLegacyPaidProWaterfall()) {
+    emitPremiumGenerationAttribution(trace, spanSummaries, totalMs);
     // eslint-disable-next-line no-console
     console.info("[paid-pro-waterfall]", {
       traceId: trace.traceId,

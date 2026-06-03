@@ -26,6 +26,8 @@ import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { clearPremiumParseSessionGuard } from "./premiumParseSessionGuard";
 import { clearPaidProPostAcceptanceValidatorCache } from "./paidProPostAcceptanceValidatorCache";
 import { clearPremiumGenerationCallAudit } from "./paidProPremiumGenerationCallAudit";
+import { clearPaidProCheckoutPreviewPreflightCache } from "./paidProCheckoutPreviewPreflightCache";
+import { clearPaidProPerformanceTrace, clearLastFinishedPaidProPerformanceTrace } from "./paidProPerformanceTrace";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
 
@@ -87,6 +89,9 @@ beforeEach(() => {
   clearPremiumParseSessionGuard();
   clearPaidProPostAcceptanceValidatorCache();
   clearPremiumGenerationCallAudit();
+  clearPaidProCheckoutPreviewPreflightCache();
+  clearPaidProPerformanceTrace();
+  clearLastFinishedPaidProPerformanceTrace();
   premiumApiMock.mockResponses = [];
   premiumApiMock.callIndex = 0;
   premiumApiMock.forceValidateFail = false;
