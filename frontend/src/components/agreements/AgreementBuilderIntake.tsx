@@ -29,6 +29,7 @@ import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnel
 import { fetchAgreementDraft, fetchAgreementDraftWithSigningLock } from "../../agreement/agreementWorkspaceApi";
 import { apiUrl, resolveApiBase } from "../../lib/clawApi";
 import { PREMIUM_COMPLETION_ATTEMPT_MAX_MS } from "../../lib/premiumCompletionAttemptTimeout";
+import { resolvePremiumAgreementParseTimeoutMs } from "../../lib/premiumAgreementParseTimeout";
 import { defaultPostCheckoutRunModelPassInput, getPremiumGenerationIntakeFingerprint } from "../../lib/postCheckoutProFlow";
 import { canApplyLatePremiumCompletionFromModal } from "../../lib/premiumPostCheckoutModalRace";
 import { useAccess } from "../../access/AccessContext";
@@ -252,7 +253,10 @@ import {
   stripPremiumUserNotesFromMergedIntake,
   type PremiumCompletionResult,
 } from "./premiumCompletionPipeline";
-import { shouldSuppressPremiumPipelineRetryAfterAuthoritativeAccept } from "./premiumParseSessionGuard";
+import {
+  isPremiumParseTimeoutDeferredCheckoutRetry,
+  shouldSuppressPremiumPipelineRetryAfterAuthoritativeAccept,
+} from "./premiumParseSessionGuard";
 import {
   clearOriginalUserIntakeRaw,
   pickLongestPremiumIntakeCorpus,
@@ -4332,7 +4336,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   async function parseDraft(
     rawText: string,
-    opts?: { aiModelClass?: "basic" | "premium" },
+    opts?: { aiModelClass?: "basic" | "premium"; checkoutCompletion?: boolean },
   ): Promise<ParsedDraftShape> {
     const payment = extractIntakePayment(rawText);
     const intakeFallback = rawText.trim();
@@ -4346,7 +4350,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     try {
       const reqTs = new Date().toISOString();
       const controller = new AbortController();
-      const parseTimeoutMs = isPremium ? 90_000 : 5000;
+      const parseTimeoutMs = resolvePremiumAgreementParseTimeoutMs({
+        aiModelClass: opts?.aiModelClass,
+        checkoutCompletion: opts?.checkoutCompletion,
+      });
       const parseTimeoutId = window.setTimeout(
         () => controller.abort(isPremium ? "premium_parse_timeout" : "basic_parse_timeout"),
         parseTimeoutMs,
@@ -7684,12 +7691,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumGapQuestions([]);
             setPremiumGapOneField("");
           };
+          let deferInFlightClearForParseTimeoutRetry = false;
           for (let attempt = 0; attempt < 2; attempt++) {
             lastAttemptForLog = attempt;
             if (!runIsCurrent()) return;
             if (attempt === 1) {
-              setPremiumPipelineUserMessage("We had trouble finalizing your agreement — retrying…");
-              logPremiumModalInfo("[premium-modal-stage]", { retryAttempt: 1, ts: new Date().toISOString() });
+              if (!deferInFlightClearForParseTimeoutRetry) {
+                setPremiumPipelineUserMessage("We had trouble finalizing your agreement — retrying…");
+              }
+              logPremiumModalInfo("[premium-modal-stage]", {
+                retryAttempt: 1,
+                deferred_parse_timeout_retry: deferInFlightClearForParseTimeoutRetry,
+                ts: new Date().toISOString(),
+              });
             }
             const premiumCompletionAttemptStartedAt = Date.now();
             const premiumCompletionAttemptTimeoutMs = PREMIUM_COMPLETION_ATTEMPT_MAX_MS;
@@ -7747,7 +7761,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       guidedFlowId,
                       simpleProductFlow,
                       partyRoleLabels: intakePartyRoleLabels,
-                      parseDraft: (raw) => parseDraft(raw, { aiModelClass: "premium" }),
+                      parseDraft: (raw) =>
+                        parseDraft(raw, { aiModelClass: "premium", checkoutCompletion: true }),
                       userGapAnswers: args.userGapAnswers,
                       gapResolverSkippedWithDefaults: args.gapResolverSkippedWithDefaults,
                       agreementGenerationId: sessionGenForPass,
@@ -7762,8 +7777,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     "premium_completion_attempt",
                   );
                 } finally {
-                  setPremiumAuthoritativeRequestInFlight(false);
+                  if (!deferInFlightClearForParseTimeoutRetry) {
+                    setPremiumAuthoritativeRequestInFlight(false);
+                  }
                 }
+                deferInFlightClearForParseTimeoutRetry = false;
                 console.info("[premium-flow] premium_completion_timeout_boundary", {
                   attempt,
                   started_at: new Date(premiumCompletionAttemptStartedAt).toISOString(),
@@ -7788,6 +7806,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               } catch (e) {
                 const em = e instanceof Error ? e.message : String(e);
                 const timedOutThisAttempt = em.includes("premium_completion_attempt_timeout_");
+                const parseTimeoutDeferredRetry =
+                  attempt === 0 && isPremiumParseTimeoutDeferredCheckoutRetry(e);
+                if (parseTimeoutDeferredRetry) {
+                  deferInFlightClearForParseTimeoutRetry = true;
+                  console.info("[premium-flow] premium_parse_timeout_deferred_retry", {
+                    attempt,
+                    elapsed_ms: Date.now() - premiumCompletionAttemptStartedAt,
+                    authoritative_request_in_flight: true,
+                  });
+                }
                 if (
                   attempt === 0 &&
                   shouldSuppressPremiumPipelineRetryAfterAuthoritativeAccept(e) &&
@@ -7811,7 +7839,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   timeout_ms: premiumCompletionAttemptTimeoutMs,
                   timed_out: timedOutThisAttempt,
                 });
-                console.warn("[premium-flow] premium_rewrite_request_failure", { attempt, err: e });
+                if (!parseTimeoutDeferredRetry) {
+                  console.warn("[premium-flow] premium_rewrite_request_failure", { attempt, err: e });
+                } else {
+                  console.info("[premium-flow] premium_rewrite_request_deferred", {
+                    attempt,
+                    err: em,
+                    reason: "premium_parse_timeout_checkout_extended_wait",
+                  });
+                }
                 if (timedOutThisAttempt) {
                   console.warn("[premium-return-terminal-timeout]", {
                     attempt,
@@ -7842,6 +7878,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             } finally {
               endPremiumEnsureForIntake(intakeFpGuard);
             }
+          }
+          if (deferInFlightClearForParseTimeoutRetry) {
+            setPremiumAuthoritativeRequestInFlight(false);
           }
           clearPostCheckoutModalTimers();
           premiumModalEscapeHandlerRef.current = null;

@@ -184,6 +184,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(s).toMatch(
       /controller\.abort\(\s*isPremium\s*\?\s*"premium_parse_timeout"\s*:\s*"basic_parse_timeout"\s*\)/,
     );
+    expect(s).toContain("resolvePremiumAgreementParseTimeoutMs");
   });
 
   it("continue_basic_draft opens full-draft upgrade checkout when not paid authoritative and no premium session flags", () => {

@@ -115,6 +115,14 @@ describe("paidPro Test234 execution normalization", () => {
 });
 
 describe("paidPro Test234 parse session guard", () => {
+  it("classifies premium_parse_timeout separately from completion attempt timeout", async () => {
+    const { isPremiumParseTimeoutError } = await import("./premiumParseSessionGuard");
+    expect(isPremiumParseTimeoutError(new Error("premium_parse_timeout"))).toBe(true);
+    expect(isPremiumParseTimeoutError(new Error("premium_completion_attempt_timeout_600000ms"))).toBe(
+      false,
+    );
+  });
+
   it("suppresses retry after authoritative server corpus is marked accepted", () => {
     clearPremiumParseSessionGuard();
     expect(shouldSuppressPremiumPipelineRetryAfterAuthoritativeAccept(new Error("premium_parse_timeout"))).toBe(

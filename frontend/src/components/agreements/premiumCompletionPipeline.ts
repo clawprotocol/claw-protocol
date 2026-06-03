@@ -1346,23 +1346,25 @@ async function runPremiumCompletionInner(
       (!hybridPrompt || premiumSignals - baseFreeSignals >= 2) &&
       (!sparsePrompt || premiumSignals - baseFreeSignals >= 2);
     if (!substance.ok || !deltaOk) {
-      const reparsed = await input.parseDraft(rawForSoT || rawIntake);
-      merged = mergePremiumParsePreferFresh(input.structuredDraft, reparsed, rawForSoT || rawIntake);
-      merged = synthesizePremiumScopeAndOperativeFields(merged, rawForSoT || rawIntake);
-      merged = { ...merged, jurisdiction: resolvePremiumJurisdiction(merged, rawForSoT || rawIntake) };
-      merged = elevatePremiumPaymentTermsFromIntake(merged, rawForSoT || rawIntake);
-      merged = injectCoreClausesConservative(merged, rawForSoT || rawIntake);
-      merged = enrichPremiumTerminationFromContext(merged, rawForSoT || rawIntake);
-      merged = reinforcePremiumSignalPersistence(merged, rawForSoT || rawIntake);
-      merged = applySparseDefaultExpansion(merged, rawForSoT || rawIntake);
-      merged = polishAllTextFields(merged);
-      premiumSignals = protectionSignalsPresent(
-        `${nz(merged.purpose)}\n${nz(merged.payment_terms)}\n${nz(merged.additional_terms)}\n${nz(merged.termination_summary)}`,
-      );
-      deltaOk =
-        (!commercialPrompt || premiumSignals - baseFreeSignals >= 3) &&
-        (!hybridPrompt || premiumSignals - baseFreeSignals >= 2) &&
-        (!sparsePrompt || premiumSignals - baseFreeSignals >= 2);
+      if (input.premiumGenerationCallReason !== "checkout_completion") {
+        const reparsed = await input.parseDraft(rawForSoT || rawIntake);
+        merged = mergePremiumParsePreferFresh(input.structuredDraft, reparsed, rawForSoT || rawIntake);
+        merged = synthesizePremiumScopeAndOperativeFields(merged, rawForSoT || rawIntake);
+        merged = { ...merged, jurisdiction: resolvePremiumJurisdiction(merged, rawForSoT || rawIntake) };
+        merged = elevatePremiumPaymentTermsFromIntake(merged, rawForSoT || rawIntake);
+        merged = injectCoreClausesConservative(merged, rawForSoT || rawIntake);
+        merged = enrichPremiumTerminationFromContext(merged, rawForSoT || rawIntake);
+        merged = reinforcePremiumSignalPersistence(merged, rawForSoT || rawIntake);
+        merged = applySparseDefaultExpansion(merged, rawForSoT || rawIntake);
+        merged = polishAllTextFields(merged);
+        premiumSignals = protectionSignalsPresent(
+          `${nz(merged.purpose)}\n${nz(merged.payment_terms)}\n${nz(merged.additional_terms)}\n${nz(merged.termination_summary)}`,
+        );
+        deltaOk =
+          (!commercialPrompt || premiumSignals - baseFreeSignals >= 3) &&
+          (!hybridPrompt || premiumSignals - baseFreeSignals >= 2) &&
+          (!sparsePrompt || premiumSignals - baseFreeSignals >= 2);
+      }
     }
     merged = { ...merged, title: inferPremiumTitle(merged, rawForSoT || rawIntake) };
   }
