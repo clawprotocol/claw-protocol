@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from backend.agreements.paid_pro_server_timing import CORS_EXPOSE_PAID_PRO_HEADERS
 from backend.utils import metrics
 from backend.handlers.receipt_handler import build_receipt
 from backend.handlers.verify_handler import (
@@ -315,6 +316,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=CORS_EXPOSE_PAID_PRO_HEADERS,
 )
 
 
@@ -338,6 +340,12 @@ async def claw_cors_api_acao_fallback(request: Request, call_next):
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers.setdefault("Access-Control-Allow-Methods", "*")
         response.headers.setdefault("Access-Control-Allow-Headers", "*")
+        exposed = response.headers.get("access-control-expose-headers", "")
+        for hdr in CORS_EXPOSE_PAID_PRO_HEADERS:
+            if hdr.lower() not in exposed.lower():
+                exposed = f"{exposed}, {hdr}".strip(", ")
+        if exposed:
+            response.headers["Access-Control-Expose-Headers"] = exposed
     return response
 
 

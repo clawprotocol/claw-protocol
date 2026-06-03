@@ -1073,7 +1073,7 @@ def _premium_full_draft_finalize_http_response(
     )
     if server_timing is not None:
         server_timing.record(
-            "backend_response_serialize",
+            "backend_response_packaging",
             (time.perf_counter() - serialize_started) * 1000,
             bodyLen=len(body_bytes),
             documentTextLen=doc_len,
@@ -4588,15 +4588,28 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 airlock_profile="agreement_outbound",
                 airlock_log_context="premium_full_draft:repair",
             )
+            repair_llm_ms = (time.perf_counter() - llm_repair_started) * 1000
             if server_timing is not None:
                 server_timing.record(
                     "backend_llm_repair",
-                    (time.perf_counter() - llm_repair_started) * 1000,
+                    repair_llm_ms,
                     responseChars=len((llm_repair or "").strip()),
+                )
+                server_timing.record(
+                    "backend_llm_repair_or_regen",
+                    repair_llm_ms,
+                    path="repair",
                 )
             intelligence_parse_start = time.perf_counter()
             parsed_repair = _extract_json_object(llm_repair)
             out = _normalize_premium_full_draft_result(parsed_repair)
+            if server_timing is not None:
+                server_timing.record(
+                    "backend_parse_normalize",
+                    (time.perf_counter() - intelligence_parse_start) * 1000,
+                    primaryDocLen=len((out.document_text or "").strip()),
+                    path="repair",
+                )
             _log_agreement_intelligence_summary(
                 out.agreement_intelligence,
                 stage="repair",
@@ -4641,15 +4654,28 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 airlock_profile="agreement_outbound",
                 airlock_log_context="premium_full_draft:sanitized_retry",
             )
+            sanitized_llm_ms = (time.perf_counter() - llm_sanitized_started) * 1000
             if server_timing is not None:
                 server_timing.record(
                     "backend_llm_sanitized_retry",
-                    (time.perf_counter() - llm_sanitized_started) * 1000,
+                    sanitized_llm_ms,
                     responseChars=len((llm_clean or "").strip()),
+                )
+                server_timing.record(
+                    "backend_llm_repair_or_regen",
+                    sanitized_llm_ms,
+                    path="sanitized_retry",
                 )
             intelligence_parse_start = time.perf_counter()
             parsed_c = _extract_json_object(llm_clean)
             out_clean = _normalize_premium_full_draft_result(parsed_c)
+            if server_timing is not None:
+                server_timing.record(
+                    "backend_parse_normalize",
+                    (time.perf_counter() - intelligence_parse_start) * 1000,
+                    primaryDocLen=len((out_clean.document_text or "").strip()),
+                    path="sanitized_retry",
+                )
             _log_agreement_intelligence_summary(
                 out_clean.agreement_intelligence,
                 stage="sanitized_retry",

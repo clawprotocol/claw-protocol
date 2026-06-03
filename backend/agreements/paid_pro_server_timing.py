@@ -15,6 +15,10 @@ from typing import Any, Dict, List, Optional
 
 from starlette.requests import Request
 
+PAID_PRO_PERF_TRACE_REQUEST_HEADER = "X-Claw-Paid-Pro-Perf-Trace"
+PAID_PRO_SERVER_TIMING_RESPONSE_HEADER = "X-Claw-Paid-Pro-Server-Timing"
+CORS_EXPOSE_PAID_PRO_HEADERS = [PAID_PRO_SERVER_TIMING_RESPONSE_HEADER]
+
 
 def paid_pro_perf_trace_requested(request: Request) -> bool:
     hdr = (request.headers.get("x-claw-paid-pro-perf-trace") or "").strip()
@@ -62,6 +66,13 @@ class PaidProServerTiming:
     def response_header_value(self) -> str:
         return json.dumps(self.to_wire(), ensure_ascii=False, separators=(",", ":"))
 
+    def finalize_request_total(self) -> None:
+        """Wall-clock for the premium-full-draft handler (record once before response)."""
+        total_ms = round((time.perf_counter() - self._t0) * 1000)
+        if any(s.get("name") == "backend_request_total" for s in self.spans):
+            return
+        self.record("backend_request_total", total_ms)
+
 
 def maybe_attach_server_timing_header(
     response: Any,
@@ -70,7 +81,8 @@ def maybe_attach_server_timing_header(
     if timing is None:
         return response
     try:
-        response.headers["X-Claw-Paid-Pro-Server-Timing"] = timing.response_header_value()
+        timing.finalize_request_total()
+        response.headers[PAID_PRO_SERVER_TIMING_RESPONSE_HEADER] = timing.response_header_value()
     except Exception:
         pass
     return response

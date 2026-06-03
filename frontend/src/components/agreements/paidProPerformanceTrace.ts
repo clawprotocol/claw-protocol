@@ -54,7 +54,7 @@ export type PaidProE2ePhaseName =
   | "backend_llm_sanitized_retry"
   | "backend_parse_normalize"
   | "backend_validation"
-  | "backend_response_serialize";
+  | "backend_response_packaging";
 
 export type PaidProPerformanceSpanNameOrE2e = PaidProPerformanceSpanName | PaidProE2ePhaseName;
 
