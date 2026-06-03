@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS } from "./postCheckoutModalTimeout";
+import { PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS } from "./postCheckoutModalTimeout";
 import {
   PREMIUM_PRO_WAIT_REASSURANCE,
   PREMIUM_PRO_WAIT_STALE_COPY_BANS,
@@ -31,7 +31,7 @@ function allUserFacingCopy(): string {
 }
 
 describe("premium post-checkout return UX policy", () => {
-  it("120s hard ceiling while request in flight does not trigger modal failopen", () => {
+  it("in-flight request does not trigger modal failopen", () => {
     expect(
       shouldTriggerPremiumModalFailopen({
         hasAcceptedServerFullDraftBody: false,
@@ -41,10 +41,17 @@ describe("premium post-checkout return UX policy", () => {
     ).toBe(false);
   });
 
-  it("enters patience extended state at hard ceiling when request still in flight", () => {
+  it("enters patience extended at 150s in-flight threshold, not at 121s", () => {
     expect(
       shouldEnterPremiumReturnPatienceExtended({
-        elapsedMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+        elapsedMs: 121_383,
+        authoritativeRequestInFlight: true,
+        hasAcceptedServerFullDraftBody: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldEnterPremiumReturnPatienceExtended({
+        elapsedMs: PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
         authoritativeRequestInFlight: true,
         hasAcceptedServerFullDraftBody: false,
       }),
@@ -62,7 +69,7 @@ describe("premium post-checkout return UX policy", () => {
     const view = resolvePremiumProWaitModalView(phase);
     expect(view.title).toMatch(/Preparing signature-ready version/i);
     expect(view.showRotatingLines).toBe(false);
-    expect(view.statusLine).toMatch(/Preparing signature-ready/i);
+    expect(view.statusLine).toMatch(/Still preparing your Pro agreement/i);
     expect(view.showRecoveryActions).toBe(false);
     expect(
       shouldShowPremiumProWaitRecoveryActions({

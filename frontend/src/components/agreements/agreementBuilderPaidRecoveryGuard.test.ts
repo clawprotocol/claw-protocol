@@ -102,11 +102,13 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
     expect(src).toMatch(/showProAmberRecoveryPanel = Boolean\([\s\S]*?!authoritativePremiumUiCommitted/);
   });
 
-  it("120s hard ceiling defers to patience extended when authoritative request is in flight", () => {
+  it("150s in-flight patience extended timer; 180s hard failopen when not in flight", () => {
+    expect(src).toContain("onInflightPatienceExtendedTimeout");
     expect(src).toContain("onHardPatienceThresholdTimeout");
-    expect(src).toContain("[premium-modal-hard-ceiling-nonterminal]");
+    expect(src).toContain("[premium-modal-inflight-patience-extended]");
     expect(src).toContain("[premium-return-wait-extended]");
     expect(src).toContain("setPremiumReturnPatienceExtended(true)");
+    expect(src).toContain("PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS");
   });
 
   it("does not call applyPremiumModalFailopen from hard ceiling while request is in flight", () => {

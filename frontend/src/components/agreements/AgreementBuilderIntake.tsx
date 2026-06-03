@@ -761,6 +761,7 @@ import {
 import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+  PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
 } from "../../lib/postCheckoutModalTimeout";
 import {
@@ -2961,7 +2962,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   /** UI-only: longer-wait copy after PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS without closing the modal. */
   const [premiumCheckoutModalExtendedWait, setPremiumCheckoutModalExtendedWait] = useState(false);
-  /** After 120s patience threshold while authoritative request still runs — not a failure state. */
+  /** After in-flight patience threshold (150s) while authoritative request still runs — not a failure state. */
   const [premiumReturnPatienceExtended, setPremiumReturnPatienceExtended] = useState(false);
   const [premiumProWaitSuccessFlash, setPremiumProWaitSuccessFlash] = useState(false);
   const [premiumAuthoritativeRequestInFlightUi, setPremiumAuthoritativeRequestInFlightUi] = useState(false);
@@ -7631,11 +7632,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       };
 
       let modalSoftProgressTimerId = 0;
+      let modalInflightPatienceTimerId = 0;
       let modalHardFailopenTimerId = 0;
       const clearPostCheckoutModalTimers = () => {
         if (modalSoftProgressTimerId) {
           window.clearTimeout(modalSoftProgressTimerId);
           modalSoftProgressTimerId = 0;
+        }
+        if (modalInflightPatienceTimerId) {
+          window.clearTimeout(modalInflightPatienceTimerId);
+          modalInflightPatienceTimerId = 0;
         }
         if (modalHardFailopenTimerId) {
           window.clearTimeout(modalHardFailopenTimerId);
@@ -7711,6 +7717,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumGapOneField("");
         };
 
+        const onInflightPatienceExtendedTimeout = () => {
+          if (!runIsCurrent()) return;
+          if (!premiumAuthoritativeRequestInFlightRef.current) return;
+          const snap = readPremiumCompletionSnapshot();
+          const hasAuthoritative =
+            Boolean(snap?.premiumAccepted) &&
+            isAuthoritativePremiumPipelineRenderSource(String(snap?.premiumPipelineRenderSource || "")) &&
+            (snap?.premiumWinningBodyText || "").trim().length >= 500;
+          if (hasAuthoritative) return;
+          logPremiumModalInfo("[premium-modal-inflight-patience-extended]", {
+            timeoutMs: PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
+            ts: new Date().toISOString(),
+          });
+          console.info("[premium-return-wait-extended]", {
+            authoritative_request_in_flight: true,
+            patience_threshold_ms: PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
+          });
+          premiumModalExtendedWaitActiveRef.current = true;
+          setPremiumCheckoutModalExtendedWait(true);
+          setPremiumReturnPatienceExtended(true);
+        };
+
         const onHardPatienceThresholdTimeout = () => {
           if (!runIsCurrent()) return;
           const snap = readPremiumCompletionSnapshot();
@@ -7721,16 +7749,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (hasAuthoritative) return;
 
           if (premiumAuthoritativeRequestInFlightRef.current) {
-            logPremiumModalInfo("[premium-modal-hard-ceiling-nonterminal]", {
+            logPremiumModalInfo("[premium-modal-inflight-wait-continued]", {
               timeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
               ts: new Date().toISOString(),
             });
-            console.info("[premium-return-wait-extended]", {
-              authoritative_request_in_flight: true,
-            });
-            premiumModalExtendedWaitActiveRef.current = true;
-            setPremiumCheckoutModalExtendedWait(true);
-            setPremiumReturnPatienceExtended(true);
             return;
           }
 
@@ -7796,7 +7818,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           let result: Awaited<ReturnType<typeof ensurePremiumCompletion>> | null = null;
           let lastAttemptForLog = 0;
           modalSoftProgressTimerId = window.setTimeout(onSoftProgressTimeout, PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS);
-          modalHardFailopenTimerId = window.setTimeout(onHardPatienceThresholdTimeout, PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS);
+          modalInflightPatienceTimerId = window.setTimeout(
+            onInflightPatienceExtendedTimeout,
+            PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
+          );
+          modalHardFailopenTimerId = window.setTimeout(
+            onHardPatienceThresholdTimeout,
+            PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+          );
           premiumModalEscapeHandlerRef.current = () => {
             if (!runIsCurrent()) return;
             clearPostCheckoutModalTimers();

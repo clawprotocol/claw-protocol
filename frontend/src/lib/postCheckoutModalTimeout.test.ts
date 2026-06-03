@@ -4,6 +4,7 @@ import { computeProTruthSurface } from "../components/agreements/premiumProTruth
 import type { ParsedDraftShape } from "../components/agreements/intakeSmartDefaults";
 import {
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+  PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
   shouldFailOpenAfterHardCeiling,
 } from "./postCheckoutModalTimeout";
@@ -60,10 +61,10 @@ describe("postCheckoutModalTimeout policy", () => {
     ).toBe(true);
   });
 
-  it("120s hard ceiling while authoritative request in flight does not trigger failopen", () => {
+  it("121s in-flight does not trigger failopen before 180s hard ceiling", () => {
     expect(
       shouldFailOpenAfterHardCeiling({
-        elapsedMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+        elapsedMs: 121_383,
         hasAcceptedServerFullDraftBody: false,
         premiumFullDraftRequestFailed: false,
         authoritativeRequestInFlight: true,
@@ -83,7 +84,8 @@ describe("postCheckoutModalTimeout policy", () => {
 
   it("constants match modal UX contract", () => {
     expect(PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS).toBe(30_000);
-    expect(PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS).toBe(120_000);
+    expect(PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS).toBe(150_000);
+    expect(PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS).toBe(180_000);
   });
 });
 

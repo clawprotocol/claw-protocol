@@ -1,5 +1,6 @@
 import {
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+  PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
 } from "./postCheckoutModalTimeout";
 
@@ -28,7 +29,7 @@ export const PREMIUM_PRO_WAIT_STATUS_LINES: Record<
 > = {
   processing: "Loading your deal terms and generating the Pro agreement draft.",
   soft_wait: "Agreement generated. Running review checks before opening your review screen.",
-  extended_wait: "Preparing signature-ready version. Larger agreements may take a bit longer.",
+  extended_wait: "Still preparing your Pro agreement. This step can take a few minutes for larger deals.",
 };
 
 /** @deprecated Rotating lines removed from UI; kept empty for legacy imports. */
@@ -294,7 +295,7 @@ export function shouldEnterPremiumReturnPatienceExtended(args: {
 }): boolean {
   if (!args.authoritativeRequestInFlight) return false;
   if (args.hasAcceptedServerFullDraftBody) return false;
-  return args.elapsedMs >= PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS;
+  return args.elapsedMs >= PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS;
 }
 
 export function shouldLogPremiumReturnLateSuccess(args: {
@@ -378,5 +379,6 @@ export function resetPremiumReviewScrollResetConsumedForTests(): void {
 
 export {
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
+  PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
 };

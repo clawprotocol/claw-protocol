@@ -13,7 +13,8 @@ export function logPremiumModalInfo(
     | "[premium-modal-soft-progress]"
     | "[premium-modal-failopen-suppressed]"
     | "[premium-modal-failopen]"
-    | "[premium-modal-hard-ceiling-nonterminal]",
+    | "[premium-modal-inflight-patience-extended]"
+    | "[premium-modal-inflight-wait-continued]",
   payload: Record<string, unknown>,
 ): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
