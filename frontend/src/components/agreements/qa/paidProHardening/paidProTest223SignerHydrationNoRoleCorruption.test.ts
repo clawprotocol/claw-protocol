@@ -103,8 +103,8 @@ describe("paidProTest223SignerHydrationNoRoleCorruption", () => {
 
     expect(postSigner).not.toMatch(/Party\s+3\s*:/i);
     expect(postSigner).not.toMatch(/Party\s+1\s*:\s*\n\s*Blue Canyon/i);
-    expect(postSigner).toMatch(/Party Notice Details:[\s\S]*Client:\s*\n\s*Blue Canyon Analytics LLC/i);
-    expect((postSigner.match(/Party Notice Details:/gi) || []).length).toBeLessThanOrEqual(1);
+    expect(postSigner).not.toMatch(/Party Notice Details:/i);
+    expect(postSigner).toMatch(/Email for Notice:\s*\S+@/i);
     expect((postSigner.match(/\bIN WITNESS WHEREOF\b/gi) || []).length).toBe(1);
 
     const exec = analyzePaidProExecutionBlockInvariant(postSigner, { expectedParties: 2 });

@@ -96,9 +96,10 @@ describe("paidProReviewRenderCorpus", () => {
     const copy = getPaidProDocumentForSurface("copy")!.text;
     for (const corpus of [renderPlain, copy]) {
       expect(corpus).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
-      expect(corpus).toMatch(/Party Notice Details:/i);
-      expect(corpus).toMatch(/Client:\s*\n\s*Blue Canyon Analytics LLC/i);
-      expect(corpus).toMatch(/Service Provider:\s*\n\s*Iron Vale Systems Inc/i);
+      expect(corpus).not.toMatch(/Party Notice Details:/i);
+      expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+      expect(corpus).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
+      expect(corpus).toMatch(/SERVICE PROVIDER:\s*\n\s*Iron Vale Systems Inc/i);
     }
   });
 

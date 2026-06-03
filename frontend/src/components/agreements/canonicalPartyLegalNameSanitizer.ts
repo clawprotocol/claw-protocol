@@ -10,12 +10,12 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import {
-  applyPartyNoticeDetailsToCorpus,
   applySignatureNoticeContactFieldsToCorpus,
   buildPartyNoticeDetailsBlock,
   corpusHasPartyNoticeDetails,
   stripExistingPartyNoticeDetails,
 } from "./paidProPartyNoticeDetails";
+import { stripPaidProSignerSummaryBlocksFromCorpus } from "./paidProSignerSigningCorpusHygiene";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { forbidPaidProExecutionBlockSynthesis } from "./paidProExecutionBlockAuthority";
 import {
@@ -71,7 +71,7 @@ function signatureRegionNeedsCanonicalRebuild(
 }
 
 /**
- * Rebuild signature blocks and Party Notice Details from authority — never leave fused legal names.
+ * Rebuild signature blocks from authority — notice contact fields live in execution only.
  */
 export function applyCanonicalPartyLegalNamesToSigningCorpus(
   corpus: string,
@@ -95,13 +95,14 @@ export function applyCanonicalPartyLegalNamesToSigningCorpus(
     }
   }
 
-  if (!partyNoticeDetailsBlockMatchesAuthority(text, parties)) {
-    const stripped = stripExistingPartyNoticeDetails(text);
-    const noticeApply = applyPartyNoticeDetailsToCorpus(stripped, parties, roleContext);
-    if (noticeApply.applied) {
-      text = noticeApply.text;
-      repaired = true;
-    }
+  if (corpusHasPartyNoticeDetails(text)) {
+    text = stripExistingPartyNoticeDetails(text);
+    repaired = true;
+  }
+  const summaryStrip = stripPaidProSignerSummaryBlocksFromCorpus(text);
+  if (summaryStrip.removed > 0) {
+    text = summaryStrip.text;
+    repaired = true;
   }
 
   const signatureNoticeApply = applySignatureNoticeContactFieldsToCorpus(text, parties, roleContext);

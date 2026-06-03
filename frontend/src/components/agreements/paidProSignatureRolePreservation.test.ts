@@ -68,9 +68,7 @@ describe("paidProSignatureRolePreservation", () => {
     expect(signatureTail).toMatch(/CLIENT\s*:\s*\nBlue Canyon Analytics LLC/i);
     expect(signatureTail).toMatch(/SERVICE\s+PROVIDER\s*:\s*\nIron Vale Systems Inc/i);
 
-    const noticeTail =
-      hydrated.corpus.split(/Party Notice Details:/i)[1]?.split(/IN WITNESS WHEREOF/i)[0] ?? "";
-    expect(noticeTail).toMatch(/Client:\s*\nBlue Canyon Analytics LLC/i);
-    expect(noticeTail).toMatch(/Service Provider:\s*\nIron Vale Systems Inc/i);
+    expect(hydrated.corpus).not.toMatch(/Party Notice Details:/i);
+    expect(signatureTail).toMatch(/Email for Notice:/i);
   });
 });

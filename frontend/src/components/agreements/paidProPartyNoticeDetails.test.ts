@@ -131,11 +131,8 @@ describe("paidProPartyNoticeDetails", () => {
       intakeRaw: "",
       surface: "test_notice_hydration",
     });
-    expect(hydrated.partyNoticeApplied).toBe(true);
-    expect(hydrated.corpus).toMatch(/Party Notice Details:/i);
-    expect(hydrated.corpus).toMatch(/Email:\s*anthemhayek@gmail\.com/i);
-    expect(hydrated.corpus).toMatch(/Email:\s*jn789@me\.com/i);
-    expect(hydrated.corpus).toMatch(/Address:\s*1027 S\. Rainbow/i);
+    expect(hydrated.partyNoticeApplied).toBe(false);
+    expect(hydrated.corpus).not.toMatch(/Party Notice Details:/i);
     expect(hydrated.corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
     expect(hydrated.corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
     expect(hydrated.corpus).toMatch(/Email for Notice:\s*jn789@me\.com/i);
@@ -180,9 +177,9 @@ describe("paidProPartyNoticeDetails", () => {
     }).corpus;
 
     for (const corpus of [copy, exportText, reviewDoc, vs01]) {
-      expect(corpus).toMatch(/Email:\s*anthemhayek@gmail\.com/i);
-      expect(corpus).toMatch(/Email:\s*jn789@me\.com/i);
-      expect(corpus).toMatch(/Address:\s*1027 S\. Rainbow/i);
+      expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+      expect(corpus).toMatch(/Email for Notice:\s*jn789@me\.com/i);
+      expect(corpus).toMatch(/Address for Notice:\s*1027 S\. Rainbow/i);
     }
   });
 
@@ -215,6 +212,6 @@ describe("paidProPartyNoticeDetails", () => {
       surface: "hash_b",
     });
     expect(fingerprintAgreementBody(h1.corpus)).not.toBe(fingerprintAgreementBody(h2.corpus));
-    expect(h2.corpus).toMatch(/Email:\s*changed@test\.com/i);
+    expect(h2.corpus).toMatch(/Email for Notice:\s*changed@test\.com/i);
   });
 });

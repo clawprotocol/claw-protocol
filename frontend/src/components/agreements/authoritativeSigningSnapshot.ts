@@ -15,6 +15,7 @@ import {
   corpusContainsFusedPartyLegalName,
 } from "./canonicalPartyLegalNameSanitizer";
 import { setPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
+import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import {
   readConsumedPaidProSignerMetadataAuthority,
@@ -129,9 +130,10 @@ export function createAuthoritativeSigningSnapshot(
       ...args.signerMetadata,
       partyAddresses: args.signerMetadata.partyAddresses ?? [],
     });
-  const corpus = applyCanonicalPartyLegalNamesToSigningCorpus(
-    (args.corpus || "").trim(),
+  const corpus = finalizePaidProSigningCorpusText(
+    applyCanonicalPartyLegalNamesToSigningCorpus((args.corpus || "").trim(), parties).text,
     parties,
+    { acceptedCorpus: (args.corpus || "").trim() },
   ).text.trim();
   const hash = hashPaidProCorpus(corpus);
   const frozenAt = Date.now();

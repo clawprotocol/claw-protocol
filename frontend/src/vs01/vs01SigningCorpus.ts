@@ -351,6 +351,56 @@ function logVs01Eligibility(payload: {
  * Single authoritative VS01 corpus resolver for paid/guided Pro signing.
  * Never selects rendered_preview / free-hash / short preview when final premium corpus exists.
  */
+/** Explicit prepare-signature corpus (unit tests / VS01 model) — do not defer gate when anchors are present. */
+function resolveExplicitVs01AgreementCorpus(
+  args: ResolveFinalVs01CorpusOrBlockArgs,
+  signerCount: number,
+  premiumInProgress: boolean,
+  premiumComplete: boolean,
+): FinalVs01CorpusResolution | null {
+  const corpus = (args.agreementCorpusText ?? "").replace(/\r\n/g, "\n").trim();
+  if (corpus.length < VS01_SIGNING_CORPUS_MIN_LEN) return null;
+
+  const witnessRequirement = resolveVs01WitnessRequirement({
+    corpusText: corpus,
+    intakeText: args.intakeText,
+    draft: args.draft ?? null,
+  });
+  const hasWitnessBlock = corpusHasWitnessBlock(corpus);
+  const hasSignatureBlock = corpusHasVisibleSignatureExecutionLines(corpus);
+  const hasBySignatureLines = corpusSignatureBlocksHaveRequiredByLines(corpus, signerCount);
+  if (
+    !hasSignatureBlock ||
+    (witnessRequirement.requiresWitness && !hasWitnessBlock) ||
+    !hasBySignatureLines
+  ) {
+    return null;
+  }
+
+  const hash = fingerprintAgreementBody(corpus);
+  const allowed = !premiumInProgress;
+  return {
+    corpus,
+    source: "handoff_corpus",
+    len: corpus.length,
+    hash,
+    matchesFreeHash: false,
+    isFreeHashMatch: false,
+    hasWitnessBlock,
+    requiresSignatureBlock: true,
+    requiresWitness: witnessRequirement.requiresWitness,
+    witnessReason: witnessRequirement.witnessReason,
+    hasBySignatureLines,
+    hasByOrSignatureLines: hasBySignatureLines,
+    signerCount,
+    allowed,
+    blockReason: allowed ? undefined : "premium_corpus_in_progress",
+    premiumInProgress,
+    premiumComplete,
+    userMessage: allowed ? undefined : VS01_CORPUS_GATE_USER_MESSAGE,
+  };
+}
+
 function buildDeferredVs01Resolution(args: {
   premiumInProgress: boolean;
   premiumComplete: boolean;
@@ -401,6 +451,23 @@ export function resolveFinalVs01CorpusOrBlock(
       prepareSignatureLinksRequested: args.prepareSignatureLinksRequested,
     });
   if (!shouldRunPaidProVs01CorpusChecks(vs01Phase)) {
+    const explicit = resolveExplicitVs01AgreementCorpus(
+      args,
+      signerCount,
+      premiumInProgress,
+      premiumComplete,
+    );
+    if (explicit) {
+      logVs01CorpusGateSelectedFinal({
+        source: explicit.source,
+        len: explicit.len,
+        hash: explicit.hash,
+        allowed: explicit.allowed,
+        skippedRebuild: true,
+        skippedIntegrityRepair: true,
+      });
+      return explicit;
+    }
     return buildDeferredVs01Resolution({
       premiumInProgress,
       premiumComplete,

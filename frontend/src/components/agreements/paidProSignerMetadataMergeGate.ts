@@ -1,6 +1,6 @@
 /**
- * Paid Pro signer metadata merge gate — hydrate only Party Notice Details and the single
- * existing execution block; strip illegal substantive signer inserts before IN WITNESS WHEREOF.
+ * Paid Pro signer metadata merge gate — keep a single execution block; strip notice-style
+ * signer summary inserts before IN WITNESS WHEREOF (never Party Notice Details in body).
  */
 
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
@@ -10,7 +10,7 @@ import {
   type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
-import { corpusHasPartyNoticeDetails } from "./paidProPartyNoticeDetails";
+import { stripPaidProSignerSummaryBlocksFromCorpus } from "./paidProSignerSigningCorpusHygiene";
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import {
   buildCorpusRoleIdentitiesForExecutionReconcile,
@@ -30,11 +30,14 @@ function clampPartiesForCanonicalCount(
   return parties.slice(0, canonicalPartyCount).map((p, i) => ({ ...p, partyIndex: i }));
 }
 
-/** Remove stray role-labeled signer blocks before execution (not Party Notice Details). */
+/** Remove Party Notice Details and stray role-labeled signer blocks before execution. */
 export function stripSubstantiveSignerMetadataBeforeWitness(corpus: string): {
   text: string;
   removed: number;
 } {
+  const summary = stripPaidProSignerSummaryBlocksFromCorpus(corpus);
+  if (summary.removed > 0) return { text: summary.text, removed: summary.removed };
+
   const witnessIdx = corpus.search(/\bIN WITNESS WHEREOF\b/i);
   if (witnessIdx < 0) return { text: corpus, removed: 0 };
 
@@ -44,25 +47,11 @@ export function stripSubstantiveSignerMetadataBeforeWitness(corpus: string): {
   const out: string[] = [];
   let removed = 0;
   let i = 0;
-  let inPartyNoticeSection = false;
 
   while (i < lines.length) {
     const line = lines[i] ?? "";
     const trimmed = line.trim();
-    if (/^\s*Party Notice Details:\s*$/i.test(trimmed)) {
-      inPartyNoticeSection = true;
-    } else if (
-      inPartyNoticeSection &&
-      (/\bIN WITNESS WHEREOF\b/i.test(trimmed) || /^\d+\.\s+\w/.test(trimmed))
-    ) {
-      inPartyNoticeSection = false;
-    }
     if (SUBSTANTIVE_ROLE_BLOCK_START_RE.test(trimmed)) {
-      if (inPartyNoticeSection) {
-        out.push(line);
-        i += 1;
-        continue;
-      }
       let j = i + 1;
       while (j < lines.length && lines[j]?.trim()) j += 1;
       removed += 1;
@@ -217,10 +206,10 @@ export function applyPaidProSignerMetadataMergeGate(args: {
     repairs.push(`strip_substantive_signer_blocks:${substantive.removed}`);
   }
 
-  const noticeDedupe = dedupePartyNoticeDetailsSections(text);
-  if (noticeDedupe.removed > 0) {
-    text = noticeDedupe.text;
-    repairs.push(`dedupe_party_notice:${noticeDedupe.removed}`);
+  const summaryStrip = stripPaidProSignerSummaryBlocksFromCorpus(text);
+  if (summaryStrip.removed > 0) {
+    text = summaryStrip.text;
+    repairs.push(`strip_signer_summary_blocks:${summaryStrip.removed}`);
   }
 
   if (identities.length >= 2 && signaturePatchStartIndex(text) >= 0) {
@@ -237,10 +226,6 @@ export function applyPaidProSignerMetadataMergeGate(args: {
         repairs.push("reconcile_execution_block_roles");
       }
     }
-  }
-
-  if (!corpusHasPartyNoticeDetails(text) && corpusHasPartyNoticeDetails(args.corpus)) {
-    repairs.push("party_notice_preserved_from_input");
   }
 
   return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), repairs };

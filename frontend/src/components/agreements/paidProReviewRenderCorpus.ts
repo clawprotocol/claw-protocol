@@ -44,11 +44,20 @@ import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
+import { applySignerPartyIdentityToAuthoritativeAgreement } from "./guidedDealCompletion/signerPartyIdentity";
+import {
+  fillPaidProSignatureNoticeFieldsAfterExecutionRepair,
+  finalizePaidProSigningCorpusText,
+} from "./paidProSignerSigningCorpusHygiene";
 import {
   paidProSignerStagingDisplayUsesFrozenCorpus,
   readPaidProSignerStagingDisplayCorpus,
   resolvePaidProSignerStagingDisplayPlain,
 } from "./paidProSignerStagingDisplayCorpus";
+import {
+  resolvePaidProAuthoritativeDisplayPlain,
+  shouldUsePaidProSourceOfTruthDisplayOnly,
+} from "./paidProAuthoritativeRenderGate";
 import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -406,6 +415,11 @@ export function applyPaidProReviewRenderSanitizer(
     out = execution.text;
     repaired = true;
   }
+  const finalized = finalizePaidProSigningCorpusText(out, parties, ctx);
+  if (finalized.text !== out) {
+    out = finalized.text;
+    repaired = true;
+  }
   return {
     text: out,
     repaired: repaired || guarded.repaired,
@@ -587,14 +601,46 @@ function finalizePaidProReviewRenderPlain(
   return ensurePaidProServicesAgreementOpening(out, records, args?.intakeText ?? null).text.trim();
 }
 
-function alignExecutionBlockRolesFromAcceptedCorpus(corpus: string): string {
-  return enforcePaidProSingleExecutionBlock(corpus).text;
+function alignExecutionBlockRolesFromAcceptedCorpus(
+  corpus: string,
+  parties?: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): string {
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    return corpus;
+  }
+  if (!parties?.length || !shouldHydratePaidProReviewSurfacesFromConsumedAuthority(parties)) {
+    return corpus;
+  }
+  let text = enforcePaidProSingleExecutionBlock(corpus).text;
+  if (parties && parties.length >= 2) {
+    text = fillPaidProSignatureNoticeFieldsAfterExecutionRepair(text, parties, roleContext).text;
+    const identities = authorityPartiesToCanonicalPartyIdentities(parties, roleContext);
+    const identityApply = applySignerPartyIdentityToAuthoritativeAgreement(
+      text,
+      identities,
+      roleContext?.intakeText ?? "",
+      { signatureRegionOnly: true },
+    );
+    if (!identityApply.rejected) {
+      text = identityApply.text;
+    }
+  }
+  return text;
 }
 
 export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
   const surface = "paid_pro_review_render_plain";
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    return tracePaidProQaPassText(
+      "resolvePaidProReviewRenderPlain",
+      `${surface}:display_only_sot`,
+      getPaidProSourceOfTruthText().trim(),
+      () => resolvePaidProAuthoritativeDisplayPlain(),
+    );
+  }
   if (args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()) {
     const seed = readPaidProSignerStagingDisplayCorpus()?.plain ?? getPaidProSourceOfTruthText().trim();
     return tracePaidProQaPassText("resolvePaidProReviewRenderPlain", `${surface}:frozen`, seed, () => seed);
@@ -604,7 +650,13 @@ export function resolvePaidProReviewRenderPlain(
     resolvePaidProSignerStagingDisplayPlain({
       stagingActive: Boolean(args?.deferSignerMetadataRepair),
       resolveFresh: () => {
-        const inner = alignExecutionBlockRolesFromAcceptedCorpus(resolvePaidProReviewRenderPlainInner(args));
+        const parties = resolvePartiesForReviewRender(args);
+        const roleContext = paidProPartyRoleContextFromArgs(args);
+        const inner = alignExecutionBlockRolesFromAcceptedCorpus(
+          resolvePaidProReviewRenderPlainInner(args),
+          parties,
+          roleContext,
+        );
         if (args?.deferSignerMetadataRepair) return inner.trim();
         return finalizePaidProReviewRenderPlain(inner, args);
       },

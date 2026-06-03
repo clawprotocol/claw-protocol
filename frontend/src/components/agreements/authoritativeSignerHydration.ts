@@ -20,8 +20,8 @@ import {
   type AuthoritativeSigningSnapshot,
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
-import { logPartyNoticeDetailsHydration } from "./paidProPartyNoticeDetails";
 import { applyCanonicalPartyLegalNamesToSigningCorpus } from "./canonicalPartyLegalNameSanitizer";
+import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
@@ -179,7 +179,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       ...result,
       corpus: canonicalParties.text,
       signaturePolishCount: result.signaturePolishCount + (canonicalParties.repaired ? 1 : 0),
-      partyNoticeApplied: /Party Notice Details:/i.test(canonicalParties.text),
+      partyNoticeApplied: false,
     };
     if (canonicalParties.repaired) {
       logSignatureBlockSource({
@@ -187,12 +187,6 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
         source: "canonical_party_legal_name_repair",
         hasFilledBlocks: corpusSignatureBlocksHaveRequiredByLines(canonicalParties.text, signerCount),
         signerCount,
-      });
-      logPartyNoticeDetailsHydration({
-        surface: args.surface,
-        inserted: true,
-        corpusLen: canonicalParties.text.length,
-        partyCount: args.authority.parties.length,
       });
     }
   }
@@ -227,6 +221,22 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
         ...result,
         corpus: gated.text,
         signaturePolishCount: result.signaturePolishCount + gated.repairs.length,
+      };
+    }
+  }
+
+  if (!result.rejected && result.corpus) {
+    const finalized = finalizePaidProSigningCorpusText(
+      result.corpus,
+      args.authority.parties,
+      roleContext,
+    );
+    if (finalized.text !== result.corpus) {
+      result = {
+        ...result,
+        corpus: finalized.text,
+        signaturePolishCount: result.signaturePolishCount + finalized.repairs.length,
+        partyNoticeApplied: false,
       };
     }
   }

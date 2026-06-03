@@ -71,7 +71,11 @@ describe("vs01SignatureDomPlacement", () => {
       mode: "guided_pro",
       authoritativeCorpusPlain: witnessCorpus(),
       roles: roles(),
-      corpusGateArgs: { freeBaselinePlain: STARTER_749 },
+      corpusGateArgs: {
+        freeBaselinePlain: STARTER_749,
+        premiumComplete: true,
+        signaturePreparationRequested: true,
+      },
     });
     expect(model.allowed).toBe(true);
     const witnessPage = model.pages.find((p) =>

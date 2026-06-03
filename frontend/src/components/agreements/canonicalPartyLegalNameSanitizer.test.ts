@@ -65,25 +65,16 @@ describe("canonicalPartyLegalNameSanitizer", () => {
     expect(corpusContainsFusedPartyLegalName(FUSED_CORPUS)).toBe(true);
   });
 
-  it("repairs fused names in signature blocks and party notice details", () => {
+  it("repairs fused names in signature blocks and strips legacy party notice summaries", () => {
     const { text, repaired } = applyCanonicalPartyLegalNamesToSigningCorpus(FUSED_CORPUS, authority().parties);
     expect(repaired).toBe(true);
     expect(text).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
+    expect(text).not.toMatch(/Party Notice Details:/i);
     expect(text).toContain(BLUE);
     expect(text).toContain(IRON);
-    const blueCount = (text.match(new RegExp(BLUE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
-    const ironCount = (text.match(new RegExp(IRON.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
-    expect(blueCount).toBeGreaterThanOrEqual(1);
-    expect(ironCount).toBeGreaterThanOrEqual(1);
-    expect(text).not.toMatch(new RegExp(`${BLUE}\\s+${IRON}`, "i"));
-
-    const clientSection = text.split(/Service Provider:/i)[0] ?? "";
-    const spSection = text.split(/Service Provider:/i)[1] ?? "";
-    expect(clientSection).toContain(BLUE);
-    expect(clientSection).not.toContain(IRON);
-    expect(spSection).toContain(IRON);
-    expect(spSection).not.toMatch(new RegExp(`${BLUE}\\s+${IRON}`, "i"));
-
+    const sigTail = text.split(/\bIN WITNESS WHEREOF\b/i)[1] ?? "";
+    expect(sigTail).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+    expect(sigTail).toMatch(/Email for Notice:\s*bca234@me\.com/i);
     assertCorpusHasNoFusedPartyLegalNames(text, authority().parties);
   });
 

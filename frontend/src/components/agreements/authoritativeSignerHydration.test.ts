@@ -37,6 +37,8 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
+  "Email for Notice:",
+  "Address for Notice:",
   "Date:",
   "",
   "SERVICE PROVIDER:",
@@ -44,6 +46,8 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
+  "Email for Notice:",
+  "Address for Notice:",
   "Date:",
 ].join("\n");
 
@@ -111,7 +115,7 @@ describe("authoritativeSignerHydration", () => {
     expect(ironTail).not.toMatch(/Anthem H Blanchard/);
   });
 
-  it("hydrates Party Notice Details with signer emails and addresses", () => {
+  it("hydrates Email for Notice in execution block without Party Notice Details body section", () => {
     const authority = buildLivePaidProSignerMetadataAuthority({
       partyCount: 2,
       recipient1Name: BLUE_CANYON,
@@ -123,12 +127,13 @@ describe("authoritativeSignerHydration", () => {
       partySignerTitles: ["Manager", "Manager"],
       partyAddresses: ["100 Main St", ""],
     });
+    const witnessAt = RAW_BODY.indexOf("IN WITNESS WHEREOF");
     const body = [
-      ...RAW_BODY.split("\n").slice(0, RAW_BODY.indexOf("IN WITNESS")),
+      RAW_BODY.slice(0, witnessAt).trimEnd(),
       "11. Notices and Dispute Terms.",
       "11.1 Notices. Any notice under this Agreement must be in writing and may be delivered by email or courier to the notice details below, unless a party updates those details by written notice to the other party.",
       "",
-      RAW_BODY.slice(RAW_BODY.indexOf("IN WITNESS")),
+      RAW_BODY.slice(witnessAt),
     ].join("\n");
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
       rawCorpus: body,
@@ -136,13 +141,14 @@ describe("authoritativeSignerHydration", () => {
       intakeRaw: "",
       surface: "party_notice",
     });
-    expect(hydrated.partyNoticeApplied).toBe(true);
-    expect(hydrated.corpus).toMatch(/Email:\s*anthem@test\.com/i);
-    expect(hydrated.corpus).toMatch(/Email:\s*ira@test\.com/i);
-    expect(hydrated.corpus).toMatch(/Address:\s*100 Main St/i);
-    const noticeTail = hydrated.corpus.split(/Party Notice Details:/i)[1]?.split(/IN WITNESS WHEREOF/i)[0] ?? "";
-    const spNotice = noticeTail.split(/Service Provider:/i)[1] ?? "";
-    expect(spNotice).not.toMatch(/\nAddress:/i);
+    expect(hydrated.partyNoticeApplied).toBe(false);
+    expect(hydrated.corpus).not.toMatch(/Party Notice Details:/i);
+    expect(hydrated.corpus).toMatch(/Email for Notice:\s*anthem@test\.com/i);
+    expect(hydrated.corpus).toMatch(/Email for Notice:\s*ira@test\.com/i);
+    expect(hydrated.corpus).toMatch(/Address for Notice:\s*100 Main St/i);
+    const sigTail = hydrated.corpus.split(/IN WITNESS WHEREOF/i)[1] ?? "";
+    const spSig = sigTail.split(/SERVICE PROVIDER:/i)[1] ?? "";
+    expect(spSig).not.toMatch(/Address for Notice:\s*100 Main St/i);
   });
 
   it("hydrates distinct signer names per party from consumed authority", () => {
@@ -278,7 +284,7 @@ describe("authoritativeSignerHydration", () => {
     expect(fromReader[1]?.representativeName).toBe(fromSnap[1]?.representativeName);
     expect(readAuthoritativeSigningCorpus()).toBe(snap.corpus);
     expect(snap.corpus).not.toContain("Iron Vale Systems Inc Analytics LLC");
-    expect(snap.corpus).toMatch(/Party Notice Details:/);
+    expect(snap.corpus).not.toMatch(/Party Notice Details:/i);
   });
 
   it("legal entity edits trigger drift fingerprint", () => {

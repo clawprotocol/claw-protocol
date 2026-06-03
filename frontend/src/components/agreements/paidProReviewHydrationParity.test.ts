@@ -90,7 +90,7 @@ describe("paidProReviewHydrationParity", () => {
     expect(reviewSurface.source).not.toBe("paidProSourceOfTruth");
 
     for (const corpus of [hydrated.corpus, reviewPlain, copy, reviewSurface.text]) {
-      expect(corpus).toMatch(/Party Notice Details:/i);
+      expect(corpus).not.toMatch(/Party Notice Details:/i);
       expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
       expect(corpus).toMatch(/Address for Notice:\s*1027 S\. Rainbow/i);
       expect(corpus).not.toMatch(/Email for Notice:\s*_{4,}/i);

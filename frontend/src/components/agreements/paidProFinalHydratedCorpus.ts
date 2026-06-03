@@ -234,8 +234,11 @@ export function assertPaidProFinalCorpusParity(args: {
   if (/title\s*:\s*_{4,}/i.test(copy)) {
     mismatches.push("copy_blank_signer_title");
   }
-  if (!/Party Notice Details:/i.test(copy) && /Email:\s*\S+@/i.test(review)) {
-    mismatches.push("copy_missing_party_notice_details");
+  if (
+    !/email\s+for\s+notice\s*:\s*\S+@/i.test(copy) &&
+    /email\s+for\s+notice\s*:\s*\S+@/i.test(review)
+  ) {
+    mismatches.push("copy_missing_signature_notice_email");
   }
   if (/email\s+for\s+notices?\s*:\s*_{4,}/i.test(copy) && /email\s+for\s+notices?\s*:\s*\S+@/i.test(review)) {
     mismatches.push("copy_blank_signature_notice_email");

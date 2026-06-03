@@ -113,17 +113,24 @@ describe("paidProSignatureNoticeHydration", () => {
     expect(tail.match(new RegExp(SIGNATURE_DATE_BLANK_LINE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"))?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("Party Notice Details stays idempotent and single", () => {
+  it("hydration strips Party Notice Details and does not re-insert on second apply", () => {
     const authority = qaAuthority();
+    const withNotice = applyPartyNoticeDetailsToCorpus(RAW_WITH_NOTICE_FIELDS, authority.parties).text;
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
-      rawCorpus: RAW_WITH_NOTICE_FIELDS,
+      rawCorpus: withNotice,
       authority,
       intakeRaw: "",
-      surface: "notice_idempotent",
+      surface: "notice_strip",
     });
-    const second = applyPartyNoticeDetailsToCorpus(hydrated.corpus, authority.parties);
-    expect((hydrated.corpus.match(/Party Notice Details:/gi) || []).length).toBe(1);
-    expect((second.text.match(/Party Notice Details:/gi) || []).length).toBe(1);
+    const second = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus: hydrated.corpus,
+      authority,
+      intakeRaw: "",
+      surface: "notice_strip_second",
+    });
+    expect((hydrated.corpus.match(/Party Notice Details:/gi) || []).length).toBe(0);
+    expect(second.corpus).toBe(hydrated.corpus);
+    expect(second.corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
   });
 
   it("review, copy, export, and VS01 share hydrated notice fields", () => {
