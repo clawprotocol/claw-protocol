@@ -538,7 +538,7 @@ export function logCanonicalSurfaceRead(surface: CanonicalAgreementSurface | str
   });
 }
 
-export function logAuthoritativeCorpusInvariant(args?: {
+export function readAuthoritativeCorpusInvariant(args?: {
   reviewHash?: string | null;
   signerHash?: string | null;
   reviewerHash?: string | null;
@@ -551,20 +551,29 @@ export function logAuthoritativeCorpusInvariant(args?: {
   const reviewerHash = args?.reviewerHash ?? canonicalHash;
   const hashes = [reviewHash, signerHash, reviewerHash, canonicalHash].filter(Boolean);
   const invariantOk = Boolean(canonicalHash && hashes.every((hash) => hash === canonicalHash));
-  const payload = {
+  return {
     reviewHash,
     signerHash,
     reviewerHash,
     canonicalHash,
     invariantOk,
   };
+}
+
+export function logAuthoritativeCorpusInvariant(args?: {
+  reviewHash?: string | null;
+  signerHash?: string | null;
+  reviewerHash?: string | null;
+  canonicalHash?: string | null;
+}): AuthoritativeCorpusInvariantResult {
+  const payload = readAuthoritativeCorpusInvariant(args);
   if (
     shouldLogPaidProAuthoritySurfaceEvent(
       {
         event: "authoritative-corpus-invariant",
         surface: "canonical_corpus",
-        hash: canonicalHash ?? "missing",
-        source: invariantOk ? "invariant_ok" : "invariant_failed",
+        hash: payload.canonicalHash ?? "missing",
+        source: payload.invariantOk ? "invariant_ok" : "invariant_failed",
       },
       { dev: true },
     )

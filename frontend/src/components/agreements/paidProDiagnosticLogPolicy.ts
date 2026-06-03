@@ -66,3 +66,7 @@ export function shouldLogFullPreviewSourceDiagnostic(length: number): boolean {
   if (!paidProVerboseQaLogsEnabled()) return false;
   return length > 0;
 }
+
+export function shouldLogPremiumAdvisorySkipDiagnostic(): boolean {
+  return paidProQaDiagnosticConsoleEnabled();
+}

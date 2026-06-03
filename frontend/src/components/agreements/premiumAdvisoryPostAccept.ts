@@ -18,6 +18,10 @@ import {
   logSourceCompareSuppressed,
   type AgreementReviewMode,
 } from "./agreementReviewMode";
+import {
+  evaluatePremiumAdvisorySkipAfterAuthoritativeAccept,
+  logPremiumAdvisorySkipAfterAuthority,
+} from "./premiumAdvisorySkipAfterAuthority";
 
 const postAcceptLog = { logPostAcceptFailure: true } as const;
 
@@ -42,6 +46,16 @@ export async function fetchPremiumAdvisoryEnrichmentAfterAccept(args: {
   const doc = (args.winningBodyText || "").trim();
   const soT = (args.rawIntakeForSot || "").trim();
   if (doc.length < 80 || soT.length < 1) {
+    return { premiumReview: null, premiumFinalizeAudit: null, premiumReviewRoute: null };
+  }
+
+  const skipGate = evaluatePremiumAdvisorySkipAfterAuthoritativeAccept();
+  if (skipGate.skip) {
+    logPremiumAdvisorySkipAfterAuthority({
+      canonicalHash: skipGate.canonicalHash,
+      reviewLen: skipGate.reviewLen,
+      sotLen: skipGate.sotLen,
+    });
     return { premiumReview: null, premiumFinalizeAudit: null, premiumReviewRoute: null };
   }
 
