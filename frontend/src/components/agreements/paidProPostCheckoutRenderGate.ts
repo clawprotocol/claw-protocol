@@ -12,7 +12,9 @@ import {
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
-import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import type { AuthoritativePaidProReviewInput } from "./authoritativePaidProReview";
+import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 import {
   hasPaidPremiumCompletionSession,
   readPremiumCompletionSnapshot,
@@ -182,6 +184,52 @@ export function resolvePaidProPostCheckoutRecoveryDisplayPlain(args?: {
   return "";
 }
 
+/** Non-empty paid first-review corpus: committed SoT render or gated post-checkout recovery plain. */
+export function hasRenderablePaidProFirstReviewCorpus(
+  input?: AuthoritativePaidProReviewInput & {
+    premiumCheckoutCompleted?: boolean;
+    hydratedPremiumBody?: string | null;
+    winningPremiumBodyText?: string | null;
+    premiumDegradedServerLocalRecovery?: boolean;
+  },
+): boolean {
+  if (hasPaidProSourceOfTruth()) {
+    const renderPlain = resolvePaidProReviewRenderPlain({
+      draft: input?.draft ?? null,
+      intakeText: input?.intakeText ?? null,
+    });
+    if (renderPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
+    return getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN;
+  }
+  const recovery = resolvePaidProPostCheckoutFirstReviewPlain({
+    draft: input?.draft ?? null,
+    intakeText: input?.intakeText ?? null,
+    premiumRenderSource: input?.premiumRenderSource ?? null,
+    winningPremiumBodyText: input?.winningPremiumBodyText,
+    hydratedPremiumBody: input?.hydratedPremiumBody,
+    premiumDegradedServerLocalRecovery: input?.premiumDegradedServerLocalRecovery,
+  });
+  return recovery.length >= PAID_PRO_AUTHORITY_MIN_LEN;
+}
+
+/**
+ * Fail closed: paid checkout is latched but no canonical paid corpus is available for review render.
+ */
+export function shouldBlockPaidProReviewShellWithoutCanonicalCorpus(
+  input?: AuthoritativePaidProReviewInput & {
+    premiumCheckoutCompleted?: boolean;
+    hydratedPremiumBody?: string | null;
+    winningPremiumBodyText?: string | null;
+    premiumDegradedServerLocalRecovery?: boolean;
+  },
+): boolean {
+  const checkoutLatched = Boolean(
+    input?.premiumCheckoutCompleted || hasPaidPremiumCompletionSession(),
+  );
+  if (!checkoutLatched) return false;
+  return !hasRenderablePaidProFirstReviewCorpus(input);
+}
+
 export function isPaidProPostCheckoutRecoveryReviewActive(args?: {
   intakeText?: string | null;
   draft?: ParsedDraftShape | null;
@@ -190,12 +238,14 @@ export function isPaidProPostCheckoutRecoveryReviewActive(args?: {
 }): boolean {
   if (hasPaidProSourceOfTruth()) return false;
   if (!args?.premiumCheckoutCompleted && !hasPaidPremiumCompletionSession()) return false;
-  const plain = resolvePaidProPostCheckoutFirstReviewPlain({
-    ...args,
+  return hasRenderablePaidProFirstReviewCorpus({
+    draft: args?.draft ?? null,
+    intakeText: args?.intakeText ?? null,
+    premiumRenderSource: args?.premiumRenderSource ?? null,
+    premiumCheckoutCompleted: args?.premiumCheckoutCompleted,
     winningPremiumBodyText:
       String(args?.draft?.premium_full_document_text ?? "").trim() || undefined,
   });
-  return plain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
 }
 
 /** Paid Pro first-review display (SoT or post-checkout recovery) — does not imply SoT acceptance. */

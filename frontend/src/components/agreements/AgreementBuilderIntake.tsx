@@ -589,6 +589,11 @@ import {
   shouldHideLegacyPaidProDraftPanels,
   shouldSuppressPaidProGuidedCompletionUi,
 } from "./paidProPostCheckoutRenderGate";
+import { tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth } from "./paidProPostCheckoutRecoveryAuthority";
+import {
+  hasRenderablePaidProFirstReviewCorpus,
+  shouldBlockPaidProReviewShellWithoutCanonicalCorpus,
+} from "./paidProPostCheckoutRenderGate";
 import {
   armPaidProMutationTraceReviewReady,
   tracePaidProCorpusMutation,
@@ -6144,16 +6149,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPostCheckoutModalHardFailopenRef.current = false;
           setPremiumAuthoritativeRequestInFlight(false);
           if (hasLocalRecovery) {
-            paidCheckoutCompletedRef.current = true;
-            premiumPipelineOutputBodyRef.current = localWinning;
-            hydratedPremiumBodyRef.current = localWinning;
-            lastPremiumWinningCorpusRef.current = localWinning;
-            updateLastKnownGoodAuthoritativeDraftRef(
-              lastKnownGoodAuthoritativeDraftRef,
-              localWinning,
-              "premium_network_local_recovery",
-              { paidProFlow: true, freeBaselinePlain: paidProStarterBaselinePlain },
-            );
             const priorForMerge =
               draftSnapshotRef.current ?? readCreateComplexityResume()?.pending ?? prior ?? null;
             const mergedLocal = mergePremiumDraftPartiesWithRecipientPriority(
@@ -6172,29 +6167,80 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               { ...rc0, name: mergedLocal.displayName1 },
               { ...rc1, name: mergedLocal.displayName2 },
             ];
+            const mergedDraftPersist = mergePremiumDraftWithServerCorpusFields(mergedLocal.draft, {
+              authoritativePlain: localWinning,
+              serverFullFromApi: localWinning,
+              premiumRenderSource: result.premiumRenderSource,
+            });
+            const sotCommit = tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth({
+              body: localWinning,
+              draft: mergedDraftPersist,
+              intakeText: mergedIntake,
+              premiumRenderSource: result.premiumRenderSource,
+              reviewSessionId:
+                (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
+                getOrInitSessionAgreementGenerationId(),
+            });
+            if (!sotCommit.committed) {
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.warn("[premium-handoff] post_checkout_recovery_sot_blocked", {
+                  reason: sotCommit.reason,
+                  renderSource: result.premiumRenderSource,
+                });
+              }
+              paidCheckoutCompletedRef.current = false;
+              premiumPipelineOutputBodyRef.current = "";
+              applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+              setPremiumPostCheckoutPhase("premium_network_recoverable");
+              setPremiumPipelineUserMessage(null);
+              logPremiumModalInfo("[premium-modal-stage]", {
+                to: "premium_network_recoverable",
+                recoverySotBlocked: sotCommit.reason,
+                ts: new Date().toISOString(),
+              });
+              return;
+            }
+            paidCheckoutCompletedRef.current = true;
+            const committedText = sotCommit.record.text;
+            premiumPipelineOutputBodyRef.current = committedText;
+            hydratedPremiumBodyRef.current = committedText;
+            lastPremiumWinningCorpusRef.current = committedText;
+            updateLastKnownGoodAuthoritativeDraftRef(
+              lastKnownGoodAuthoritativeDraftRef,
+              committedText,
+              "premium_network_local_recovery",
+              { paidProFlow: true, freeBaselinePlain: paidProStarterBaselinePlain },
+            );
             persistPremiumCompletionSnapshot({
               premiumDraft: {
-                ...mergedLocal.draft,
-                premium_full_document_text: localWinning,
+                ...mergedDraftPersist,
+                premium_full_document_text: committedText,
               },
               premiumParties: result.premiumParties,
               recipientCandidates,
-              premiumWinningBodyText: localWinning,
-              premiumReadonlyPlainText: localWinning,
+              premiumWinningBodyText: committedText,
+              premiumReadonlyPlainText: committedText,
               premiumReview: null,
               premiumFinalizeAudit: null,
               premiumReviewRoute: null,
               agreementGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
               intakeTextFingerprint: shortIntakeFingerprint(mergedIntake),
               premiumPipelineRenderSource: result.premiumRenderSource,
-              premiumAccepted: false,
+              premiumAccepted: true,
             });
-            applyFailureFallback(localWinning, { paidCheckoutRecovery: true });
+            commitPaidProAcceptanceStorageHygiene();
+            bumpPremiumSurfaceGateTick();
+            setGuidedCompletionPhase("applied");
+            setGuidedFinalReviewExplicitlyOpened(true);
+            guidedFinalReviewExplicitlyUnlockedRef.current = true;
+            applyFailureFallback(committedText, { paidCheckoutRecovery: true });
             setPremiumPostCheckoutPhase(null);
             setPremiumPipelineUserMessage(null);
             logPremiumModalInfo("[premium-modal-stage]", {
               to: "premium_network_local_recovery",
-              bodyLen: localWinning.length,
+              bodyLen: committedText.length,
+              sotHash: sotCommit.record.hash,
               ts: new Date().toISOString(),
             });
             return;
@@ -6246,16 +6292,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPostCheckoutModalHardFailopenRef.current = false;
           setPremiumAuthoritativeRequestInFlight(false);
           if (hasLocalRecovery) {
-            paidCheckoutCompletedRef.current = true;
-            premiumPipelineOutputBodyRef.current = localWinning;
-            hydratedPremiumBodyRef.current = localWinning;
-            lastPremiumWinningCorpusRef.current = localWinning;
-            updateLastKnownGoodAuthoritativeDraftRef(
-              lastKnownGoodAuthoritativeDraftRef,
-              localWinning,
-              "premium_degraded_server_local_recovery",
-              { paidProFlow: true, freeBaselinePlain: paidProStarterBaselinePlain },
-            );
             const priorForMerge =
               draftSnapshotRef.current ?? readCreateComplexityResume()?.pending ?? prior ?? null;
             const mergedLocal = mergePremiumDraftPartiesWithRecipientPriority(
@@ -6274,29 +6310,80 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               { ...rc0, name: mergedLocal.displayName1 },
               { ...rc1, name: mergedLocal.displayName2 },
             ];
+            const mergedDraftPersist = mergePremiumDraftWithServerCorpusFields(mergedLocal.draft, {
+              authoritativePlain: localWinning,
+              serverFullFromApi: localWinning,
+              premiumRenderSource: result.premiumRenderSource,
+            });
+            const sotCommit = tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth({
+              body: localWinning,
+              draft: mergedDraftPersist,
+              intakeText: mergedIntake,
+              premiumRenderSource: result.premiumRenderSource,
+              reviewSessionId:
+                (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
+                getOrInitSessionAgreementGenerationId(),
+            });
+            if (!sotCommit.committed) {
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.warn("[premium-handoff] post_checkout_recovery_sot_blocked", {
+                  reason: sotCommit.reason,
+                  renderSource: result.premiumRenderSource,
+                });
+              }
+              paidCheckoutCompletedRef.current = false;
+              premiumPipelineOutputBodyRef.current = "";
+              applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+              setPremiumPostCheckoutPhase("generation_retry");
+              setPremiumPipelineUserMessage(null);
+              logPremiumModalInfo("[premium-modal-stage]", {
+                to: "generation_retry",
+                recoverySotBlocked: sotCommit.reason,
+                ts: new Date().toISOString(),
+              });
+              return;
+            }
+            paidCheckoutCompletedRef.current = true;
+            const committedText = sotCommit.record.text;
+            premiumPipelineOutputBodyRef.current = committedText;
+            hydratedPremiumBodyRef.current = committedText;
+            lastPremiumWinningCorpusRef.current = committedText;
+            updateLastKnownGoodAuthoritativeDraftRef(
+              lastKnownGoodAuthoritativeDraftRef,
+              committedText,
+              "premium_degraded_server_local_recovery",
+              { paidProFlow: true, freeBaselinePlain: paidProStarterBaselinePlain },
+            );
             persistPremiumCompletionSnapshot({
               premiumDraft: {
-                ...mergedLocal.draft,
-                premium_full_document_text: localWinning,
+                ...mergedDraftPersist,
+                premium_full_document_text: committedText,
               },
               premiumParties: result.premiumParties,
               recipientCandidates,
-              premiumWinningBodyText: localWinning,
-              premiumReadonlyPlainText: localWinning,
+              premiumWinningBodyText: committedText,
+              premiumReadonlyPlainText: committedText,
               premiumReview: null,
               premiumFinalizeAudit: null,
               premiumReviewRoute: null,
               agreementGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
               intakeTextFingerprint: shortIntakeFingerprint(mergedIntake),
               premiumPipelineRenderSource: result.premiumRenderSource,
-              premiumAccepted: false,
+              premiumAccepted: true,
             });
-            applyFailureFallback(localWinning, { paidCheckoutRecovery: true });
+            commitPaidProAcceptanceStorageHygiene();
+            bumpPremiumSurfaceGateTick();
+            setGuidedCompletionPhase("applied");
+            setGuidedFinalReviewExplicitlyOpened(true);
+            guidedFinalReviewExplicitlyUnlockedRef.current = true;
+            applyFailureFallback(committedText, { paidCheckoutRecovery: true });
             setPremiumPostCheckoutPhase(null);
             setPremiumPipelineUserMessage(null);
             logPremiumModalInfo("[premium-modal-stage]", {
               to: "premium_degraded_server_local_recovery",
-              bodyLen: localWinning.length,
+              bodyLen: committedText.length,
+              sotHash: sotCommit.record.hash,
               ts: new Date().toISOString(),
             });
             return;
@@ -7379,7 +7466,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 intakeTextFingerprint: shortIntakeFingerprint(mergedIntake),
                 premiumPipelineRenderSource:
                   lastPremiumPipelineRenderSourceRef.current || "premium_network_local_recovery",
-                premiumAccepted: false,
+                premiumAccepted: hasPaidProSourceOfTruth(),
               });
             }
           } else {
@@ -14250,10 +14337,62 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [draft, currentPremiumMergedIntakeKey, intakeCombined, premiumSurfaceGateTick, reviewDocRefreshTick],
   );
 
+  const paidProFirstReviewCorpusReady = useMemo(
+    () =>
+      hasRenderablePaidProFirstReviewCorpus({
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        premiumRenderSource:
+          premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumCheckoutCompleted,
+        winningPremiumBodyText:
+          (premiumPaidReadonlyPick.plainText || "").trim() ||
+          readPremiumCompletionSnapshot()?.premiumWinningBodyText,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      }),
+    [
+      draft,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      premiumTruthPipelineSource,
+      premiumCheckoutCompleted,
+      premiumPaidReadonlyPick.plainText,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
+  );
+
+  const blockPaidProReviewShellWithoutCorpus = useMemo(
+    () =>
+      shouldBlockPaidProReviewShellWithoutCanonicalCorpus({
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        premiumRenderSource:
+          premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumCheckoutCompleted,
+        winningPremiumBodyText:
+          (premiumPaidReadonlyPick.plainText || "").trim() ||
+          readPremiumCompletionSnapshot()?.premiumWinningBodyText,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      }),
+    [
+      draft,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      premiumTruthPipelineSource,
+      premiumCheckoutCompleted,
+      premiumPaidReadonlyPick.plainText,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
+  );
+
   const simpleProFinalReviewShellActive = useMemo(() => {
+    if (blockPaidProReviewShellWithoutCorpus) return false;
     if (
       (acceptedPaidProAuthorityActive || paidProPostCheckoutFirstReviewActive) &&
       premiumPaidDocumentSurface &&
+      paidProFirstReviewCorpusReady &&
       !premiumRecipientUxActive &&
       createUiStage === CreateUiStage.DRAFT
     ) {
@@ -14261,8 +14400,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     return simpleProFinalReviewActive && paidProRuntimeAuthority.canRenderProReviewShell;
   }, [
+    blockPaidProReviewShellWithoutCorpus,
     acceptedPaidProAuthorityActive,
     paidProPostCheckoutFirstReviewActive,
+    paidProFirstReviewCorpusReady,
     premiumPaidDocumentSurface,
     premiumRecipientUxActive,
     createUiStage,

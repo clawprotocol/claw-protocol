@@ -8,14 +8,40 @@ import {
 } from "./authoritativePaidProReview";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
-import { resolvePaidProPostCheckoutRecoveryDisplayPlain } from "./paidProPostCheckoutRenderGate";
-import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import {
+  isPaidProPostCheckoutRecoveryPipelineSource,
+  resolvePaidProPostCheckoutRecoveryDisplayPlain,
+} from "./paidProPostCheckoutRenderGate";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import {
+  hasPaidPremiumCompletionSession,
+  readPremiumCompletionSnapshot,
+} from "./premiumCompletionStorage";
 import { getPaidProSourceOfTruth, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 export function shouldBlockStarterRegenerationAfterPaidAuthority(
   input?: AuthoritativePaidProReviewInput,
 ): boolean {
-  return hasPaidProSourceOfTruth() || hasAcceptedPaidProAuthority(input);
+  if (hasPaidProSourceOfTruth() || hasAcceptedPaidProAuthority(input)) return true;
+  const snap = readPremiumCompletionSnapshot();
+  const pipeline = String(
+    input?.premiumRenderSource ?? snap?.premiumPipelineRenderSource ?? "",
+  ).trim();
+  if (isPaidProPostCheckoutRecoveryPipelineSource(pipeline)) {
+    const recovery = resolvePaidProPostCheckoutRecoveryDisplayPlain({
+      draft: input?.draft ?? snap?.premiumDraft ?? null,
+      intakeText: input?.intakeText ?? null,
+      winningPremiumBodyText: snap?.premiumWinningBodyText,
+      premiumRenderSource: pipeline,
+      premiumDegradedServerLocalRecovery: pipeline === "premium_degraded_server_local_recovery",
+    });
+    if (recovery.length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
+  }
+  const latchedBody = String(snap?.premiumWinningBodyText ?? snap?.premiumReadonlyPlainText ?? "").trim();
+  if (hasPaidPremiumCompletionSession() && latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return true;
+  }
+  return false;
 }
 
 export function shouldSuppressPremiumProcessingModalAfterPaidAuthority(
