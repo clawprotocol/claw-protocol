@@ -13,6 +13,7 @@ import { buildPartyEntries, normalizeSignatureBlockHeadings } from "./paidProAgr
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import { isCanonicalCommittedText, stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
 import { isStarterDocumentSurface } from "./agreementDocumentSurfacePolicy";
+import { shouldLogPlaceholderScanResult } from "./paidProDiagnosticLogPolicy";
 import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import {
@@ -106,6 +107,15 @@ export function logPlaceholderScanResult(
   } & Partial<PlaceholderPartyResolution>,
 ): void {
   if (import.meta.env.MODE === "test") return;
+  if (
+    !shouldLogPlaceholderScanResult({
+      fatalCount: payload.fatalCount,
+      repairedCount: payload.repairedCount,
+      ok: payload.ok,
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[placeholder-scan-result]", payload);
 }

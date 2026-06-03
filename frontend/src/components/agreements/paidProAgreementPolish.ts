@@ -20,6 +20,7 @@ import {
 } from "./proOperationalSynthesis";
 import { softenProDocumentTone } from "./premiumSituationIntelligence";
 import { shouldSkipPaidProPolish } from "./agreementDocumentSurfacePolicy";
+import { shouldLogPaidProPolishDiagnostic } from "./paidProDiagnosticLogPolicy";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 
 const ENTITY_SUFFIX =
@@ -623,18 +624,35 @@ export function applyEnterpriseClausePolish(text: string): { text: string; log: 
 
 export function logPaidProRecitalPolish(payload: RecitalPolishLog & { surface?: string }): void {
   if (import.meta.env.MODE === "test") return;
+  if (
+    !shouldLogPaidProPolishDiagnostic({ applied: payload.applied })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[paid-pro-recital-polish]", payload);
 }
 
 export function logPaidProSignaturePolish(payload: SignaturePolishLog & { surface?: string }): void {
   if (import.meta.env.MODE === "test") return;
+  if (!shouldLogPaidProPolishDiagnostic({ replacedCount: payload.replacedCount })) return;
   // eslint-disable-next-line no-console
   console.info("[paid-pro-signature-polish]", payload);
 }
 
 export function logPaidProEnterprisePolish(payload: EnterprisePolishLog & { surface?: string }): void {
   if (import.meta.env.MODE === "test") return;
+  if (
+    !shouldLogPaidProPolishDiagnostic({
+      effectiveDateAdded: payload.effectiveDateAdded,
+      disputeWindowAdded: payload.disputeWindowAdded,
+      uptimeTargetAdded: payload.uptimeTargetAdded,
+      survivalPolished: payload.survivalPolished,
+      attorneysFeesAdded: payload.attorneysFeesAdded,
+    })
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info("[paid-pro-enterprise-polish]", payload);
 }

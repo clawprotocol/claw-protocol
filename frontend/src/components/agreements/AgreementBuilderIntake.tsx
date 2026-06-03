@@ -295,6 +295,8 @@ import {
   completePaidProPaymentToReviewTrace,
 } from "./paidProPaymentToReviewTrace";
 import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
+import { logPremiumModalInfo } from "./paidProPremiumModalDiagnostics";
+import { shouldLogFullPreviewSourceDiagnostic } from "./paidProDiagnosticLogPolicy";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import {
   clearPaidPremiumCompletionSession,
@@ -3196,12 +3198,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const prev = premiumModalPrevPhaseRef.current;
     if (premiumPostCheckoutPhase && prev !== premiumPostCheckoutPhase) {
       if (premiumPostCheckoutPhase === "processing") {
-        console.info("[premium-modal-enter]", { phase: premiumPostCheckoutPhase, ts: new Date().toISOString() });
+        logPremiumModalInfo("[premium-modal-enter]", { phase: premiumPostCheckoutPhase, ts: new Date().toISOString() });
       }
-      console.info("[premium-modal-stage]", { from: prev, to: premiumPostCheckoutPhase, ts: new Date().toISOString() });
+      logPremiumModalInfo("[premium-modal-stage]", { from: prev, to: premiumPostCheckoutPhase, ts: new Date().toISOString() });
     }
     if (!premiumPostCheckoutPhase && prev) {
-      console.info("[premium-modal-exit]", { from: prev, ts: new Date().toISOString() });
+      logPremiumModalInfo("[premium-modal-exit]", { from: prev, ts: new Date().toISOString() });
     }
     premiumModalPrevPhaseRef.current = premiumPostCheckoutPhase;
   }, [premiumPostCheckoutPhase]);
@@ -6085,10 +6087,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumReviewRoute(null);
           setPremiumPostCheckoutPhase("generation_retry");
           setPremiumPipelineUserMessage(null);
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.info("[premium-modal-stage]", { to: "generation_retry", ts: new Date().toISOString() });
-          }
+          logPremiumModalInfo("[premium-modal-stage]", { to: "generation_retry", ts: new Date().toISOString() });
           return;
         }
         if (isPremiumNetworkRetryablePipelineResult(result)) {
@@ -6186,24 +6185,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             applyFailureFallback(localWinning, { paidCheckoutRecovery: true });
             setPremiumPostCheckoutPhase(null);
             setPremiumPipelineUserMessage(null);
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.info("[premium-modal-stage]", {
-                to: "premium_network_local_recovery",
-                bodyLen: localWinning.length,
-                ts: new Date().toISOString(),
-              });
-            }
+            logPremiumModalInfo("[premium-modal-stage]", {
+              to: "premium_network_local_recovery",
+              bodyLen: localWinning.length,
+              ts: new Date().toISOString(),
+            });
             return;
           }
           premiumPipelineOutputBodyRef.current = "";
           applyFailureFallback(undefined, { paidCheckoutRecovery: true });
           setPremiumPostCheckoutPhase("premium_network_recoverable");
           setPremiumPipelineUserMessage(null);
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.info("[premium-modal-stage]", { to: "premium_network_recoverable", ts: new Date().toISOString() });
-          }
+          logPremiumModalInfo("[premium-modal-stage]", { to: "premium_network_recoverable", ts: new Date().toISOString() });
           return;
         }
         if (isPremiumDegradedServerRetryablePipelineResult(result)) {
@@ -6294,28 +6287,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             applyFailureFallback(localWinning, { paidCheckoutRecovery: true });
             setPremiumPostCheckoutPhase(null);
             setPremiumPipelineUserMessage(null);
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.info("[premium-modal-stage]", {
-                to: "premium_degraded_server_local_recovery",
-                bodyLen: localWinning.length,
-                ts: new Date().toISOString(),
-              });
-            }
+            logPremiumModalInfo("[premium-modal-stage]", {
+              to: "premium_degraded_server_local_recovery",
+              bodyLen: localWinning.length,
+              ts: new Date().toISOString(),
+            });
             return;
           }
           premiumPipelineOutputBodyRef.current = "";
           applyFailureFallback(undefined, { paidCheckoutRecovery: true });
           setPremiumPostCheckoutPhase("generation_retry");
           setPremiumPipelineUserMessage(null);
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.info("[premium-modal-stage]", {
-              to: "generation_retry",
-              degradedRecoverable: true,
-              ts: new Date().toISOString(),
-            });
-          }
+          logPremiumModalInfo("[premium-modal-stage]", {
+            to: "generation_retry",
+            degradedRecoverable: true,
+            ts: new Date().toISOString(),
+          });
           return;
         }
         paidCheckoutCompletedRef.current = true;
@@ -7527,17 +7514,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumModalExtendedWaitActiveRef.current = true;
           setPremiumCheckoutModalExtendedWait(true);
           if (premiumAuthoritativeRequestInFlightRef.current) {
-            console.info("[premium-modal-timeout-deferred]", { reason: "authoritative_request_in_flight" });
+            logPremiumModalInfo("[premium-modal-timeout-deferred]", { reason: "authoritative_request_in_flight" });
           }
-          console.info("[premium-modal-soft-progress]", {
+          logPremiumModalInfo("[premium-modal-soft-progress]", {
             timeoutMs: PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
             ts: new Date().toISOString(),
           });
         };
         const applyPremiumModalFailopen = (failopenReason: string) => {
           if (premiumAuthoritativeRequestInFlightRef.current) {
-            // eslint-disable-next-line no-console
-            console.info("[premium-modal-failopen-suppressed]", {
+            logPremiumModalInfo("[premium-modal-failopen-suppressed]", {
               reason: failopenReason,
               authoritative_request_in_flight: true,
             });
@@ -7556,7 +7542,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reason: failopenReason,
             ts: new Date().toISOString(),
           });
-          console.info("[premium-modal-failopen]", {
+          logPremiumModalInfo("[premium-modal-failopen]", {
             reason: failopenReason,
             source: "terminal_failure",
           });
@@ -7599,7 +7585,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (hasAuthoritative) return;
 
           if (premiumAuthoritativeRequestInFlightRef.current) {
-            console.info("[premium-modal-hard-ceiling-nonterminal]", {
+            logPremiumModalInfo("[premium-modal-hard-ceiling-nonterminal]", {
               timeoutMs: PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
               ts: new Date().toISOString(),
             });
@@ -7681,7 +7667,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumModalExtendedWaitActiveRef.current = false;
             setPremiumCheckoutModalExtendedWait(false);
             premiumPostCheckoutUserDismissedRef.current = true;
-            console.info("[premium-modal-failopen]", { reason: "user_escape", source: "cached_or_prior_draft" });
+            logPremiumModalInfo("[premium-modal-failopen]", { reason: "user_escape", source: "cached_or_prior_draft" });
             setPremiumPipelineUserMessage(null);
             if (hasPaidPremiumCompletionSession()) {
               setHardError(null);
@@ -7703,7 +7689,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             if (!runIsCurrent()) return;
             if (attempt === 1) {
               setPremiumPipelineUserMessage("We had trouble finalizing your agreement — retrying…");
-              console.info("[premium-modal-stage]", { retryAttempt: 1, ts: new Date().toISOString() });
+              logPremiumModalInfo("[premium-modal-stage]", { retryAttempt: 1, ts: new Date().toISOString() });
             }
             const premiumCompletionAttemptStartedAt = Date.now();
             const premiumCompletionAttemptTimeoutMs = PREMIUM_COMPLETION_ATTEMPT_MAX_MS;
@@ -10914,6 +10900,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!createProductionTwoPane || !productionDraftPrimaryReviewSurface) return;
+    if (!shouldLogFullPreviewSourceDiagnostic(renderedAgreementPreview.length)) return;
     console.debug("[full-preview-source]", {
       source: "renderedAgreementPreview",
       length: renderedAgreementPreview.length,

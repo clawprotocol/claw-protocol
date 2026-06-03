@@ -2,6 +2,7 @@
  * Pro operational agreement synthesis — pre-API context + post-generation passes.
  */
 
+import { shouldLogPaidProPolishDiagnostic } from "../paidProDiagnosticLogPolicy";
 import type { AgreementFamily } from "../agreementFamilyRouter";
 import type { ParsedDraftShape } from "../intakeSmartDefaults";
 import type { PremiumFullDraftContextPayload } from "../premiumFullDraftApi";
@@ -179,7 +180,13 @@ export function applyProOperationalSynthesisPasses(
     enterpriseReadability: { hedgesReduced: readability.hedgesReduced },
   };
 
-  if (import.meta.env.MODE !== "test") {
+  if (import.meta.env.MODE !== "test" && shouldLogPaidProPolishDiagnostic({
+    operationalReplaced: log.operationalSpecificity.replaced,
+    repetitionDiversified: log.repetitionCompression.diversified,
+    sectionPurityRelocated: log.sectionPurity.relocated,
+    milestoneInserted: log.milestoneTable.inserted,
+    hedgesReduced: log.enterpriseReadability.hedgesReduced,
+  })) {
     // eslint-disable-next-line no-console
     console.info("[pro-operational-synthesis]", log);
   }

@@ -5,6 +5,11 @@ import {
   ingestPaidProPaymentToReviewServerTiming,
 } from "./paidProPaymentToReviewTrace";
 import {
+  markPaidProFirstReviewPaintAt,
+  markPaidProPremiumHttpEndAt,
+  resetPaidProQaPerfTraceForTests,
+} from "./paidProQaPerfTrace";
+import {
   clearLastFinishedPaidProPerformanceTrace,
   clearPaidProPerformanceTrace,
   readActivePaidProPerformanceTrace,
@@ -15,12 +20,14 @@ import { readPremiumNetworkCallRecords } from "./paidProPremiumGenerationCallAud
 describe("paidProPaymentToReviewTrace", () => {
   beforeEach(() => {
     vi.stubEnv("VITE_PAID_PRO_PERF_TRACE", "1");
+    resetPaidProQaPerfTraceForTests();
     clearPaidProPerformanceTrace();
     clearLastFinishedPaidProPerformanceTrace();
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    resetPaidProQaPerfTraceForTests();
     clearPaidProPerformanceTrace();
     clearLastFinishedPaidProPerformanceTrace();
   });
@@ -41,6 +48,22 @@ describe("paidProPaymentToReviewTrace", () => {
     expect(readActivePaidProPerformanceTrace()).toBeNull();
     const finished = readLastFinishedPaidProPerformanceTrace();
     expect(finished?.spans.some((s) => s.name === "review_surface_visible")).toBe(true);
+  });
+
+  it("records backendServerTimingHeaderMissing on waterfall when header is empty", () => {
+    beginPaidProPaymentToReviewTrace({
+      traceId: "g-perf-missing",
+      sessionGenerationId: "g-perf-missing",
+      intakeFingerprint: "fp-missing",
+    });
+    markPaidProPremiumHttpEndAt();
+    ingestPaidProPaymentToReviewServerTiming("");
+    markPaidProFirstReviewPaintAt();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    completePaidProPaymentToReviewTrace({ renderSource: "server_full_draft" });
+    const waterfall = info.mock.calls.find((c) => c[0] === "[paid-pro-waterfall]");
+    expect(waterfall?.[1]).toMatchObject({ backendServerTimingHeaderMissing: true });
+    info.mockRestore();
   });
 
   it("merges backend timing spans into the active trace", () => {

@@ -230,6 +230,9 @@ function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, tot
     ...(milestones.lastBackendSpans.length
       ? { backendServerTimingSpans: milestones.lastBackendSpans }
       : {}),
+    ...(milestones.serverTimingHeaderObserved && !milestones.serverTimingHeaderPresent
+      ? { backendServerTimingHeaderMissing: true }
+      : {}),
     spanCount: spanSummaries.length,
     spans: spanSummaries,
   });

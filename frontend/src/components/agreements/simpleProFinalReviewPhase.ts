@@ -3,6 +3,9 @@
  */
 
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
+import { paidProVerboseQaLogsEnabled, paidProPerfTraceEnabled } from "./paidProPerfLogging";
+
+const simpleProFinalReviewMountedLogKeys = new Set<string>();
 import { isGuidedFinalReviewPhase } from "./createFlowTypes";
 import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
 
@@ -55,8 +58,16 @@ export function logSimpleProFinalReviewMounted(payload: {
   recipientUxActive: boolean;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const key = `${payload.bodyLen}|${payload.phase}|${payload.guidedApplied}|${payload.recipientUxActive}`;
+  if (simpleProFinalReviewMountedLogKeys.has(key)) return;
+  simpleProFinalReviewMountedLogKeys.add(key);
+  if (!paidProVerboseQaLogsEnabled() && !paidProPerfTraceEnabled()) return;
   // eslint-disable-next-line no-console
   console.info("[simple-pro-final-review-mounted]", payload);
+}
+
+export function resetSimpleProFinalReviewMountedLogDedupeForTests(): void {
+  simpleProFinalReviewMountedLogKeys.clear();
 }
 
 export function logSimpleProFinalReviewHiddenRecipientUi(): void {

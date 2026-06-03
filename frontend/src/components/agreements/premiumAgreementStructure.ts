@@ -4,6 +4,7 @@
  */
 
 import { parseAgreementSections } from "./proOperationalSynthesis/sectionPurityValidator";
+import { shouldLogPremiumStructureRepair } from "./paidProDiagnosticLogPolicy";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 
 export type PremiumStructureIssue = {
@@ -320,7 +321,7 @@ export function validateAndRepairPremiumAgreementStructure(
 
 function validateAndRepairPremiumAgreementStructureCore(text: string): PremiumStructureResult {
   const result = validatePremiumAgreementStructure(text);
-  if (import.meta.env.MODE !== "test" && result.repairs.length > 0) {
+  if (import.meta.env.MODE !== "test" && shouldLogPremiumStructureRepair(result.repairs)) {
     // eslint-disable-next-line no-console
     console.info("[premium-structure-repair]", {
       repairs: result.repairs,

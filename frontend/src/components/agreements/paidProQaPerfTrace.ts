@@ -66,6 +66,8 @@ const checkoutMilestones: {
   firstReviewPaintAt: number | null;
   lastServerTimingHeader: string | null;
   lastBackendSpans: PaidProServerTimingSpanWire[];
+  serverTimingHeaderObserved: boolean;
+  serverTimingHeaderPresent: boolean;
 } = {
   checkoutReturnAt: null,
   premiumRequestStartAt: null,
@@ -74,6 +76,8 @@ const checkoutMilestones: {
   firstReviewPaintAt: null,
   lastServerTimingHeader: null,
   lastBackendSpans: [],
+  serverTimingHeaderObserved: false,
+  serverTimingHeaderPresent: false,
 };
 
 export function readPaidProCheckoutMilestonesForWaterfall(): typeof checkoutMilestones {
@@ -102,6 +106,8 @@ export function resetPaidProQaPerfTraceForTests(): void {
   checkoutMilestones.firstReviewPaintAt = null;
   checkoutMilestones.lastServerTimingHeader = null;
   checkoutMilestones.lastBackendSpans = [];
+  checkoutMilestones.serverTimingHeaderObserved = false;
+  checkoutMilestones.serverTimingHeaderPresent = false;
 }
 
 function shouldLogPass(passName: string, surface: string, corpusHashBefore: string): boolean {
@@ -279,7 +285,9 @@ export function markPaidProFirstReviewPaintAt(): void {
 
 export function storePaidProServerTimingHeaderForWaterfall(headerValue: string | null | undefined): void {
   if (!paidProPerfTraceEnabled()) return;
+  checkoutMilestones.serverTimingHeaderObserved = true;
   const raw = (headerValue || "").trim();
+  checkoutMilestones.serverTimingHeaderPresent = Boolean(raw);
   if (!raw) return;
   checkoutMilestones.lastServerTimingHeader = raw;
   try {
