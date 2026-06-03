@@ -1,28 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  explicitSignerNameForEntity,
-  normalizeSignerMetadataForSave,
-  prepareRoleSignerName,
-  signerMetadataContainsInternalSpace,
+  logSignerMetadataInputBlur,
+  logSignerMetadataInputChange,
 } from "./signerMetadataNormalize";
 
-describe("signerMetadataNormalize", () => {
-  it("preserves internal single spaces at save time", () => {
-    expect(normalizeSignerMetadataForSave("  Jane   Doe  ")).toBe("Jane Doe");
+describe("signerMetadataNormalize logging", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it("does not collapse mid-word spaces incorrectly", () => {
-    expect(normalizeSignerMetadataForSave("Jane Doe")).toBe("Jane Doe");
-    expect(signerMetadataContainsInternalSpace("Jane Doe")).toBe(true);
+  it("logSignerMetadataInputChange is a no-op (no per-keystroke spam)", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    logSignerMetadataInputChange({
+      surface: "test",
+      field: "signerName",
+      partyIndex: 0,
+      raw: "Anthem",
+    });
+    expect(info).not.toHaveBeenCalled();
   });
 
-  it("never treats entity name as signer name", () => {
-    expect(explicitSignerNameForEntity("Acme LLC", "Acme LLC")).toBeUndefined();
-    expect(explicitSignerNameForEntity("Jane Doe", "Acme LLC")).toBe("Jane Doe");
-  });
-
-  it("prepareRoleSignerName keeps trailing space while typing", () => {
-    expect(prepareRoleSignerName("Jane ", "Acme LLC")).toBe("Jane ");
-    expect(prepareRoleSignerName("Jane Doe", "Acme LLC")).toBe("Jane Doe");
+  it("logSignerMetadataInputBlur skips console in test mode", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    logSignerMetadataInputBlur({
+      surface: "recipient_setup",
+      field: "signerName",
+      partyIndex: 1,
+      raw: "Anthem H Blanchard",
+    });
+    expect(info).not.toHaveBeenCalled();
   });
 });

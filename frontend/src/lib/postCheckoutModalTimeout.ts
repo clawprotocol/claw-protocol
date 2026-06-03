@@ -1,5 +1,8 @@
-/** Post-checkout Pro modal: 30s is extended-wait copy only; terminal failopen uses hard ceiling. */
+/** Post-checkout Pro modal: 30s is soft-wait reassurance copy; terminal failopen uses hard ceiling. */
 export const PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS = 30_000;
+
+/** After this elapsed time, show extended “keep tab open” copy (in-flight request may still run). */
+export const PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS = 60_000;
 
 /**
  * While authoritative premium-full-draft is still in flight, switch to extended-wait copy

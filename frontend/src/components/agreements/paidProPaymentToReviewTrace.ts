@@ -12,6 +12,7 @@ import {
   type PaidProE2ePhaseName,
 } from "./paidProPerformanceTrace";
 import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
+import { markPaidProFinalDisplayedRenderSource } from "./paidProGenerationLatencyDiagnostics";
 import {
   markPaidProCheckoutReturnAt,
   markPaidProFirstReviewPaintAt,
@@ -68,6 +69,7 @@ export function completePaidProPaymentToReviewTrace(meta?: {
     return;
   }
   markPaidProFirstReviewPaintAt();
+  markPaidProFinalDisplayedRenderSource(meta?.renderSource ?? null);
   paidProPerfRecordE2ePhase("review_surface_visible", {
     renderSource: meta?.renderSource ?? undefined,
   });

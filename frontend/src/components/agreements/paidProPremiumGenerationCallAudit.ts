@@ -3,7 +3,7 @@
  * Network ledger tracks each HTTP premium-full-draft request (including structural retries).
  */
 
-import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
+import { paidProPerfTraceEnabled, paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 
 export type PremiumGenerationCallReason =
   | "checkout_completion"
@@ -78,9 +78,14 @@ export function recordPremiumNetworkCall(args: {
     failureCode: (args.failureCode ?? "").trim() || undefined,
   };
   networkRecords.push(row);
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test" && paidProVerboseDetailLogsEnabled()) {
-    // eslint-disable-next-line no-console
-    console.info("[paid-pro-premium-network-call]", row);
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+    if (paidProPerfTraceEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info("[premium-network-call]", row);
+    } else if (paidProVerboseDetailLogsEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info("[paid-pro-premium-network-call]", row);
+    }
   }
   return row;
 }

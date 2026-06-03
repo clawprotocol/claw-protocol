@@ -404,8 +404,8 @@ import {
   hasAcceptedPaidProAuthority,
   isAuthoritativePaidProReview,
   PAID_PRO_REVIEW_BADGE,
-  PAID_PRO_REVIEW_CHIP_STATE,
   PAID_PRO_REVIEW_CHIP_VERSION,
+  resolvePaidProReviewChipState,
   PAID_PRO_REVIEW_SHELL_SUBTITLE,
   PAID_PRO_REVIEW_SHELL_TITLE,
   resolveAuthoritativePaidProReviewPlain,
@@ -502,7 +502,7 @@ import {
 } from "./guidedDealCompletion/guidedFinalReviewToSigning";
 import {
   explicitSignerNameForEntity,
-  logSignerMetadataInputChange,
+  logSignerMetadataInputBlur,
   logSignerMetadataNormalizedForSave,
   normalizeSignerMetadataForSave,
   signerMetadataInputRaw,
@@ -767,6 +767,7 @@ import {
 } from "./sendHandoffAuthoritativeCorpus";
 import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
+  PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS,
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
   PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
@@ -2121,7 +2122,6 @@ function CreateFlowSendRecipientsPanel({
             });
             return;
           }
-          logSignerMetadataInputChange({ surface: "recipient_setup", field: "signerName", partyIndex: idx, raw: v });
           notifySignerMetadataFieldEdit({
             partyIndex: idx,
             field: "signerName",
@@ -2138,6 +2138,12 @@ function CreateFlowSendRecipientsPanel({
         };
         const onSignerNameBlur = () => {
           const before = signerMetadataInputRaw(partySignerNames[idx]);
+          logSignerMetadataInputBlur({
+            surface: "recipient_setup",
+            field: "signerName",
+            partyIndex: idx,
+            raw: before,
+          });
           const after = normalizeSignerMetadataForSave(before) ?? "";
           if (after === before) return;
           logSignerMetadataNormalizedForSave({
@@ -2168,7 +2174,6 @@ function CreateFlowSendRecipientsPanel({
             });
             return;
           }
-          logSignerMetadataInputChange({ surface: "recipient_setup", field: "signerTitle", partyIndex: idx, raw: v });
           notifySignerMetadataFieldEdit({
             partyIndex: idx,
             field: "signerTitle",
@@ -2185,6 +2190,12 @@ function CreateFlowSendRecipientsPanel({
         };
         const onSignerTitleBlur = () => {
           const before = signerMetadataInputRaw(partySignerTitles[idx]);
+          logSignerMetadataInputBlur({
+            surface: "recipient_setup",
+            field: "signerTitle",
+            partyIndex: idx,
+            raw: before,
+          });
           const after = normalizeSignerMetadataForSave(before) ?? "";
           if (after === before) return;
           logSignerMetadataNormalizedForSave({
@@ -2971,6 +2982,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumCheckoutModalExtendedWait, setPremiumCheckoutModalExtendedWait] = useState(false);
   /** After in-flight patience threshold (150s) while authoritative request still runs — not a failure state. */
   const [premiumReturnPatienceExtended, setPremiumReturnPatienceExtended] = useState(false);
+  /** UI-only: extended “keep tab open” copy after 60s while generation may still be in flight. */
+  const [premiumReturnExtendedWaitCopy, setPremiumReturnExtendedWaitCopy] = useState(false);
   const [premiumProWaitSuccessFlash, setPremiumProWaitSuccessFlash] = useState(false);
   const [premiumAuthoritativeRequestInFlightUi, setPremiumAuthoritativeRequestInFlightUi] = useState(false);
   const [premiumNetworkRetryInFlight, setPremiumNetworkRetryInFlight] = useState(false);
@@ -7650,12 +7663,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       };
 
       let modalSoftProgressTimerId = 0;
+      let modalExtendedWaitCopyTimerId = 0;
       let modalInflightPatienceTimerId = 0;
       let modalHardFailopenTimerId = 0;
       const clearPostCheckoutModalTimers = () => {
         if (modalSoftProgressTimerId) {
           window.clearTimeout(modalSoftProgressTimerId);
           modalSoftProgressTimerId = 0;
+        }
+        if (modalExtendedWaitCopyTimerId) {
+          window.clearTimeout(modalExtendedWaitCopyTimerId);
+          modalExtendedWaitCopyTimerId = 0;
         }
         if (modalInflightPatienceTimerId) {
           window.clearTimeout(modalInflightPatienceTimerId);
@@ -7830,12 +7848,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumModalExtendedWaitActiveRef.current = false;
           setPremiumCheckoutModalExtendedWait(false);
           setPremiumReturnPatienceExtended(false);
+          setPremiumReturnExtendedWaitCopy(false);
           premiumPostCheckoutModalHardFailopenRef.current = false;
           const sessionGenForPass = getOrInitSessionAgreementGenerationId();
           const sessionFpForPass = shortIntakeFingerprint(args.intakeText);
           let result: Awaited<ReturnType<typeof ensurePremiumCompletion>> | null = null;
           let lastAttemptForLog = 0;
           modalSoftProgressTimerId = window.setTimeout(onSoftProgressTimeout, PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS);
+          modalExtendedWaitCopyTimerId = window.setTimeout(() => {
+            if (!runIsCurrent()) return;
+            setPremiumReturnExtendedWaitCopy(true);
+            if (import.meta.env.MODE !== "test") {
+              // eslint-disable-next-line no-console
+              console.info("[premium-modal-extended-wait-copy]", {
+                timeoutMs: PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS,
+                ts: new Date().toISOString(),
+              });
+            }
+          }, PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS);
           modalInflightPatienceTimerId = window.setTimeout(
             onInflightPatienceExtendedTimeout,
             PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
@@ -7849,6 +7879,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             clearPostCheckoutModalTimers();
             premiumModalExtendedWaitActiveRef.current = false;
             setPremiumCheckoutModalExtendedWait(false);
+            setPremiumReturnExtendedWaitCopy(false);
             premiumPostCheckoutUserDismissedRef.current = true;
             logPremiumModalInfo("[premium-modal-failopen]", { reason: "user_escape", source: "cached_or_prior_draft" });
             setPremiumPipelineUserMessage(null);
@@ -15210,7 +15241,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const productionDocumentStatusChips = useMemo((): { version: string; state: string } | null => {
     if (createUiStage !== CreateUiStage.DRAFT || !draft) return null;
     if (isAuthoritativePaidProReviewActive) {
-      return { version: PAID_PRO_REVIEW_CHIP_VERSION, state: PAID_PRO_REVIEW_CHIP_STATE };
+      return {
+        version: PAID_PRO_REVIEW_CHIP_VERSION,
+        state: resolvePaidProReviewChipState({
+          signersReady: paidProSignatureDetailsReady,
+          signingLinksCreated:
+            peekPremiumRecipientsSurfaceReleased() && paidProSignatureDetailsReady,
+        }),
+      };
     }
     if (premiumPaidDocumentSurface) {
       const paidBodyForChip = (
@@ -15288,6 +15326,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumPaidReadonlyPick.plainText,
     agreementDocumentText,
     premiumSurfaceGateTick,
+    paidProSignatureDetailsReady,
   ]);
 
   /**
@@ -25371,6 +25410,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             terminalFailure: premiumPostCheckoutPhase === "terminal_failure",
                             patienceExtended: premiumReturnPatienceExtended,
                             softProgress: premiumCheckoutModalExtendedWait,
+                            extendedWaitCopy: premiumReturnExtendedWaitCopy,
                           }),
                         )}
                         titleId="claw-premium-processing-title"

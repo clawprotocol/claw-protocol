@@ -39,7 +39,7 @@ describe("paidProReviewTrustUx", () => {
       "Agreement generated",
       "Legal review complete",
       "Signer details added",
-      "Ready for signatures",
+      "Ready to prepare signing links",
     ]);
     expect(steps.every((s) => s.state === "done")).toBe(true);
     expect(resolvePaidProReviewSupportingCopy({ signersReady: true })).toBe(

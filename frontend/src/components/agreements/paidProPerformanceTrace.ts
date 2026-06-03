@@ -14,6 +14,7 @@ import {
   setPaidProQaTraceSessionGenerationId,
 } from "./paidProQaPerfTrace";
 import { shortIdForPremiumLog } from "./premiumSessionDiagnostics";
+import { emitPaidProGenerationLatencyDiagnostics } from "./paidProGenerationLatencyDiagnostics";
 
 export type PaidProPerformanceSpanName =
   | "parse_draft"
@@ -212,6 +213,7 @@ function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, tot
 
   markPaidProCheckoutWaterfallEmitted(sessionId);
   emitPremiumGenerationAttribution(trace, spanSummaries, totalMs);
+  emitPaidProGenerationLatencyDiagnostics(trace);
 
   // eslint-disable-next-line no-console
   console.info("[paid-pro-waterfall]", {

@@ -6,6 +6,7 @@ import {
   hasAcceptedPaidProAuthority,
   PAID_PRO_REVIEW_CHIP_STATE,
   PAID_PRO_REVIEW_CHIP_VERSION,
+  resolvePaidProReviewChipState,
   resolvePaidProAcceptanceRoutingMarkers,
   resolvePaidProFinalReviewVisiblePlain,
 } from "./authoritativePaidProReview";
@@ -174,6 +175,9 @@ describe("paidProAcceptanceRouting", () => {
   it("paid shell chip copy constants", () => {
     expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).toContain("pro");
     expect(PAID_PRO_REVIEW_CHIP_STATE.toLowerCase()).toContain("ready");
+    expect(resolvePaidProReviewChipState({ signersReady: false }).toLowerCase()).toContain(
+      "signer setup",
+    );
   });
 
   it("paid SoT accepted with incomplete signer metadata keeps canonical corpus and skips home regen", () => {

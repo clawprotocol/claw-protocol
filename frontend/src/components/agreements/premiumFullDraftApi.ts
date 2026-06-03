@@ -30,11 +30,18 @@ import {
   recordPremiumNetworkCall,
   type PremiumNetworkCallReason,
 } from "./paidProPremiumGenerationCallAudit";
+import {
+  incrementPaidProPremiumHttpRetryCount,
+  markPaidProPremiumHttpFirstAttemptFailed,
+  recordPaidProPremiumHttpFetchTimeoutMs,
+  recordPaidProPremiumHttpRetryDelayMs,
+} from "./paidProGenerationLatencyDiagnostics";
 import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 import {
   logPremiumGenerationRatio,
   markPaidProPremiumHttpEndAt,
   markPaidProPremiumRequestStartAt,
+  readPaidProCheckoutMilestonesForWaterfall,
   resolvePremiumGenerationRatioSourceField,
 } from "./paidProQaPerfTrace";
 import {
@@ -886,6 +893,7 @@ export async function postPremiumFullDraftWithRetry(
   const intakeLen = (args.intakeText || "").length;
   let networkAttempt = 0;
   let totalAttempts = 0;
+  recordPaidProPremiumHttpFetchTimeoutMs(PREMIUM_FULL_DRAFT_FETCH_TIMEOUT_MS);
 
   while (networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS) {
     if (args.signal?.aborted) {
@@ -905,7 +913,11 @@ export async function postPremiumFullDraftWithRetry(
         networkAttempt += 1;
         totalAttempts += 1;
         if (networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS) {
-          await sleepMs(premiumRetryBackoffMs(networkAttempt - 1));
+          const delayMs = premiumRetryBackoffMs(networkAttempt - 1);
+          if (networkAttempt === 0) markPaidProPremiumHttpFirstAttemptFailed();
+          incrementPaidProPremiumHttpRetryCount();
+          recordPaidProPremiumHttpRetryDelayMs(delayMs);
+          await sleepMs(delayMs);
         }
         continue;
       }
@@ -941,12 +953,17 @@ export async function postPremiumFullDraftWithRetry(
         return premiumFullDraftApiFailureFromRetryableGeneration(result, genRetry, totalAttempts);
       }
       if (import.meta.env.MODE !== "test") {
+        const requestStartedAt = readPaidProCheckoutMilestonesForWaterfall().premiumRequestStartAt;
+        const requestEndedAt = Date.now();
         // eslint-disable-next-line no-console
         console.info("[premium-network-retry-success]", {
           agreementIdShort: shortIdForPremiumLog(agreementId),
           sessionGenerationIdShort: shortIdForPremiumLog(agreementGenerationId),
           attemptCount: totalAttempts,
           networkAttempts: networkAttempt + 1,
+          firstAttemptFailed: networkAttempt > 0,
+          totalRequestDurationMs:
+            requestStartedAt != null ? requestEndedAt - requestStartedAt : null,
         });
       }
       return { ok: true, result };
@@ -992,7 +1009,11 @@ export async function postPremiumFullDraftWithRetry(
         errorCode: premiumFullDraftNetworkErrorCode(e),
       });
       if (networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS) {
-        await sleepMs(premiumRetryBackoffMs(networkAttempt - 1));
+        const delayMs = premiumRetryBackoffMs(networkAttempt - 1);
+        if (totalAttempts === 1) markPaidProPremiumHttpFirstAttemptFailed();
+        incrementPaidProPremiumHttpRetryCount();
+        recordPaidProPremiumHttpRetryDelayMs(delayMs);
+        await sleepMs(delayMs);
       }
     } finally {
       window.clearTimeout(fetchTimeoutId);

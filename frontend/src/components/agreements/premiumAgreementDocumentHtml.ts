@@ -353,6 +353,18 @@ function buildPremiumAgreementReadonlyHtmlCore(
       ? lines.map((ln) => formatSignatureRegionLineHtml(ln)).join("<br />")
       : lines.map((ln) => escapeHtml(ln)).join("<br />");
     const sigClass = paragraphClassForSignatureChunk(chunk, inSignatureRegion);
+    if (
+      inSignatureRegion &&
+      sigClass === "premium-doc-signature-notice" &&
+      !out.some((line) => line.includes("premium-doc-notice-group-label"))
+    ) {
+      const lastOut = out[out.length - 1] ?? "";
+      if (!lastOut.includes("premium-doc-signature-notice")) {
+        out.push(
+          `<p class="premium-doc-notice-group-label">${escapeHtml("Notice Information")}</p>`,
+        );
+      }
+    }
     out.push(sigClass ? `<p class="${sigClass}">${inner}</p>` : `<p>${inner}</p>`);
   }
 

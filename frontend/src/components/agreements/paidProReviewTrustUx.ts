@@ -55,7 +55,11 @@ export function resolvePaidProReviewTrustSteps(args: {
     },
     {
       id: "signature_links_ready",
-      label: signersDone ? "Ready for signatures" : "Signature links ready",
+      label: linksDone
+        ? "Ready for signing"
+        : signersDone
+          ? "Ready to prepare signing links"
+          : "Signature links ready",
       state: linksDone ? "done" : "pending",
     },
   ];

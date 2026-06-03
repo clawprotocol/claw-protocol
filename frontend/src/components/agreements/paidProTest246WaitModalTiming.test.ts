@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS,
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
   PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS,
   shouldFailOpenAfterHardCeiling,
@@ -23,7 +24,8 @@ import {
 const agreementsDir = dirname(fileURLToPath(import.meta.url));
 
 describe("paidPro Test246 wait modal timing", () => {
-  it("uses 150s in-flight patience and 180s terminal failopen ceilings", () => {
+  it("uses 60s extended-wait copy, 150s in-flight patience, and 180s terminal failopen ceilings", () => {
+    expect(PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS).toBe(60_000);
     expect(PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS).toBe(150_000);
     expect(PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS).toBe(180_000);
   });
@@ -64,7 +66,7 @@ describe("paidPro Test246 wait modal timing", () => {
     const view = resolvePremiumProWaitModalView(phase);
     expect(view.title).not.toBe(PREMIUM_PAID_CORPUS_REJECTED_HEADLINE);
     expect(view.showRecoveryActions).toBe(false);
-    expect(view.statusLine).toMatch(/review checks/i);
+    expect(view.statusLine).toMatch(/payment is complete/i);
   });
 
   it("true terminal failure still surfaces retry copy when request is not in flight", () => {
@@ -116,6 +118,7 @@ describe("paidPro Test246 wait modal timing", () => {
     expect(src).toContain("[premium-modal-inflight-patience-extended]");
     expect(src).toContain("[premium-modal-inflight-wait-continued]");
     expect(src).not.toContain("[premium-modal-hard-ceiling-nonterminal]");
+    expect(src).toContain("PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS");
     expect(src).toContain("PREMIUM_POST_CHECKOUT_INFLIGHT_PATIENCE_EXTENDED_MS");
     expect(src).toMatch(
       /modalInflightPatienceTimerId = window\.setTimeout\(\s*onInflightPatienceExtendedTimeout/,

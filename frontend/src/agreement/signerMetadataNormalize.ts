@@ -31,21 +31,33 @@ export function signerMetadataContainsInternalSpace(value: string): boolean {
   return /\s/.test(value);
 }
 
-export function logSignerMetadataInputChange(args: {
+/** QA log on blur/finalize only — avoids per-keystroke console noise while typing. */
+export function logSignerMetadataInputBlur(args: {
   surface: string;
   field: "signerName" | "signerTitle";
   partyIndex?: number;
   raw: string;
 }): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   const raw = signerMetadataInputRaw(args.raw);
   // eslint-disable-next-line no-console
-  console.info("[signer-metadata-input-change]", {
+  console.info("[signer-metadata-input-blur]", {
     surface: args.surface,
     field: args.field,
     partyIndex: args.partyIndex ?? null,
     rawLen: raw.length,
     containsSpace: signerMetadataContainsInternalSpace(raw),
   });
+}
+
+/** @deprecated Keystroke logging removed; use {@link logSignerMetadataInputBlur} on blur. */
+export function logSignerMetadataInputChange(args: {
+  surface: string;
+  field: "signerName" | "signerTitle";
+  partyIndex?: number;
+  raw: string;
+}): void {
+  void args;
 }
 
 export function logSignerMetadataNormalizedForSave(args: {

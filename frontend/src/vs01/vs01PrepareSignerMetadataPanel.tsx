@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  logSignerMetadataInputChange,
+  logSignerMetadataInputBlur,
   logSignerMetadataNormalizedForSave,
   normalizeSignerMetadataForSave,
   signerMetadataInputRaw,
@@ -105,14 +105,14 @@ function SignerMetadataEditor({
           placeholder="Human signer name"
           autoComplete="name"
           onChange={(ev) => {
-            logSignerMetadataInputChange({
+            onPatch({ signerName: ev.target.value });
+          }}
+          onBlur={(ev) => {
+            logSignerMetadataInputBlur({
               surface: "vs01_prepare_rail",
               field: "signerName",
               raw: ev.target.value,
             });
-            onPatch({ signerName: ev.target.value });
-          }}
-          onBlur={(ev) => {
             const before = ev.target.value;
             const after = normalizeSignerMetadataForSave(before) ?? "";
             if (after !== before) {
@@ -139,14 +139,14 @@ function SignerMetadataEditor({
           placeholder="Title or role"
           autoComplete="organization-title"
           onChange={(ev) => {
-            logSignerMetadataInputChange({
+            onPatch({ signerTitle: ev.target.value });
+          }}
+          onBlur={(ev) => {
+            logSignerMetadataInputBlur({
               surface: "vs01_prepare_rail",
               field: "signerTitle",
               raw: ev.target.value,
             });
-            onPatch({ signerTitle: ev.target.value });
-          }}
-          onBlur={(ev) => {
             const before = ev.target.value;
             const after = normalizeSignerMetadataForSave(before) ?? "";
             if (after !== before) {

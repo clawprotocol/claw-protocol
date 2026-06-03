@@ -23,7 +23,9 @@ const DOC_STYLES = `
 .premium-readonly-doc p.premium-doc-signature-entity-name{margin:0.1rem 0 0.75rem;font-weight:600;color:#0c0a09;line-height:1.5;max-width:26rem}
 .premium-readonly-doc p.premium-doc-signature-field{margin:0 0 0.5rem;max-width:26rem;line-height:1.65;font-weight:400;color:#292524}
 .premium-readonly-doc p.premium-doc-signature-field + p.premium-doc-signature-party-start{margin-top:2.5rem}
-.premium-readonly-doc p.premium-doc-signature-notice{margin-bottom:0.45rem;max-width:26rem;padding-left:0.125rem;font-weight:400;color:#292524}
+.premium-readonly-doc p.premium-doc-notice-group-label{margin:0.55rem 0 0.15rem;max-width:26rem;font-size:10px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#78716c}
+.premium-readonly-doc p.premium-doc-signature-notice{margin-bottom:0.2rem;max-width:26rem;padding-left:0.125rem;font-weight:400;color:#292524;line-height:1.55}
+.premium-readonly-doc p.premium-doc-signature-notice + p.premium-doc-signature-notice{margin-top:0.08rem}
 `;
 
 type Props = {

@@ -67,9 +67,9 @@ describe("premium post-checkout return UX policy", () => {
     });
     expect(phase).toBe("extended_wait");
     const view = resolvePremiumProWaitModalView(phase);
-    expect(view.title).toMatch(/Preparing signature-ready version/i);
+    expect(view.title).toMatch(/Generating final Pro agreement/i);
     expect(view.showRotatingLines).toBe(false);
-    expect(view.statusLine).toMatch(/Still preparing your Pro agreement/i);
+    expect(view.statusLine).toMatch(/keep this tab open/i);
     expect(view.showRecoveryActions).toBe(false);
     expect(
       shouldShowPremiumProWaitRecoveryActions({
@@ -123,12 +123,12 @@ describe("premium post-checkout return UX policy", () => {
     expect(PREMIUM_NETWORK_RECOVERABLE_HEADLINE).toMatch(/payment is confirmed/i);
   });
 
-  it("soft wait uses preparing final agreement headline and workflow status line", () => {
+  it("soft wait uses generating headline and payment-complete reassurance", () => {
     const soft = resolvePremiumProWaitModalView("soft_wait");
-    expect(soft.title).toMatch(/Preparing final agreement/i);
+    expect(soft.title).toMatch(/Generating final Pro agreement/i);
     expect(soft.title).not.toMatch(/Still finishing/i);
     expect(soft.showRotatingLines).toBe(false);
-    expect(soft.statusLine).toMatch(/review checks/i);
+    expect(soft.statusLine).toMatch(/payment is complete/i);
   });
 
   it("success state copy for late apply transition", () => {
@@ -138,11 +138,26 @@ describe("premium post-checkout return UX policy", () => {
     expect(success.showSpinner).toBe(false);
   });
 
-  it("processing shows reassurance and workflow status line (no rotating copy)", () => {
+  it("processing shows reassurance and estimated timing (no rotating copy)", () => {
     const view = resolvePremiumProWaitModalView("processing");
     expect(view.reassurance).toBe(PREMIUM_PRO_WAIT_REASSURANCE);
     expect(view.showRotatingLines).toBe(false);
-    expect(view.statusLine).toMatch(/generating the Pro agreement/i);
+    expect(view.statusLine).toMatch(/15–30 seconds/i);
+    expect(view.title).toMatch(/Generating final Pro agreement/i);
+  });
+
+  it("extended_wait copy at 60s threshold uses keep-tab-open message", () => {
+    const phase = resolvePremiumProWaitVisualPhase({
+      successFlash: false,
+      terminalFailure: false,
+      patienceExtended: false,
+      softProgress: true,
+      extendedWaitCopy: true,
+    });
+    expect(phase).toBe("extended_wait");
+    const view = resolvePremiumProWaitModalView(phase);
+    expect(view.statusLine).toMatch(/keep this tab open/i);
+    expect(view.title).toMatch(/Generating final Pro agreement/i);
   });
 
   it("does not include stale awkward wait copy", () => {

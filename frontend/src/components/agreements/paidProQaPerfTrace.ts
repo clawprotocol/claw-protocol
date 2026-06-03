@@ -6,6 +6,7 @@
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 import { shortIdForPremiumLog } from "./premiumSessionDiagnostics";
+import { resetPaidProPremiumHttpLatencyMetaForTests } from "./paidProGenerationLatencyDiagnostics";
 import type { PaidProServerTimingSpanWire } from "./paidProPerformanceTrace";
 
 export type PaidProQaPassName =
@@ -99,6 +100,7 @@ export function resetPaidProQaPerfTraceForTests(): void {
   passLogDedupe.clear();
   checkoutWaterfallEmittedForSession = null;
   activeQaTraceSessionGenerationId = null;
+  resetPaidProPremiumHttpLatencyMetaForTests();
   checkoutMilestones.checkoutReturnAt = null;
   checkoutMilestones.premiumRequestStartAt = null;
   checkoutMilestones.premiumHttpEndAt = null;

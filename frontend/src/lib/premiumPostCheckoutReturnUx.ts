@@ -23,13 +23,17 @@ export const PREMIUM_PRO_WAIT_PROGRESS_STEPS = [
 ] as const;
 
 /** Workflow-oriented status lines (shown instead of vague rotating copy). */
+export const PREMIUM_PRO_WAIT_ESTIMATED_TIMING =
+  "This usually takes 15–30 seconds, but complex agreements may take longer.";
+
 export const PREMIUM_PRO_WAIT_STATUS_LINES: Record<
   Exclude<PremiumProWaitVisualPhase, "terminal_failure" | "success">,
   string
 > = {
-  processing: "Loading your deal terms and generating the Pro agreement draft.",
-  soft_wait: "Agreement generated. Running review checks before opening your review screen.",
-  extended_wait: "Still preparing your Pro agreement. This step can take a few minutes for larger deals.",
+  processing: `Generating your final Pro agreement from your deal terms. ${PREMIUM_PRO_WAIT_ESTIMATED_TIMING}`,
+  soft_wait:
+    "Still working. Your payment is complete and we're finishing the Pro agreement.",
+  extended_wait: "Still processing the full Pro draft. Please keep this tab open.",
 };
 
 /** @deprecated Rotating lines removed from UI; kept empty for legacy imports. */
@@ -132,12 +136,16 @@ export type PremiumProWaitModalView = {
 export function resolvePremiumProWaitVisualPhase(args: {
   successFlash: boolean;
   terminalFailure: boolean;
+  /** 150s+ in-flight patience (logging); may coincide with extended wait copy. */
   patienceExtended: boolean;
+  /** 30s+ soft reassurance copy. */
   softProgress: boolean;
+  /** 60s+ extended “keep tab open” copy while request may still be in flight. */
+  extendedWaitCopy?: boolean;
 }): PremiumProWaitVisualPhase {
   if (args.successFlash) return "success";
   if (args.terminalFailure) return "terminal_failure";
-  if (args.patienceExtended) return "extended_wait";
+  if (args.patienceExtended || args.extendedWaitCopy) return "extended_wait";
   if (args.softProgress) return "soft_wait";
   return "processing";
 }
@@ -214,7 +222,7 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
   if (phase === "extended_wait") {
     return {
       phase,
-      title: "Preparing signature-ready version…",
+      title: "Generating final Pro agreement…",
       statusLine: PREMIUM_PRO_WAIT_STATUS_LINES.extended_wait,
       showRotatingLines: false,
       showSpinner: true,
@@ -227,7 +235,7 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
   if (phase === "soft_wait") {
     return {
       phase,
-      title: "Preparing final agreement…",
+      title: "Generating final Pro agreement…",
       statusLine: PREMIUM_PRO_WAIT_STATUS_LINES.soft_wait,
       showRotatingLines: false,
       showSpinner: true,
@@ -239,7 +247,7 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
 
   return {
     phase,
-    title: "Preparing final agreement…",
+    title: "Generating final Pro agreement…",
     statusLine: PREMIUM_PRO_WAIT_STATUS_LINES.processing,
     showRotatingLines: false,
     showSpinner: true,

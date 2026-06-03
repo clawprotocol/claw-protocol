@@ -35,7 +35,22 @@ export const PAID_PRO_REVIEW_SHELL_SUBTITLE =
   "This is the final agreement version prepared for review and signing.";
 export const PAID_PRO_REVIEW_BADGE = "Pro agreement";
 export const PAID_PRO_REVIEW_CHIP_VERSION = "Pro agreement";
+/** @deprecated Prefer {@link resolvePaidProReviewChipState} for stage-accurate copy. */
 export const PAID_PRO_REVIEW_CHIP_STATE = "Ready for signature";
+
+export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP = "Ready for signer setup";
+export const PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS = "Ready to prepare signing links";
+export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING = "Ready for signing";
+
+/** Display-only review status chip — does not change workflow state machine. */
+export function resolvePaidProReviewChipState(args: {
+  signersReady: boolean;
+  signingLinksCreated?: boolean;
+}): string {
+  if (args.signingLinksCreated) return PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING;
+  if (args.signersReady) return PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS;
+  return PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP;
+}
 /** Subtle secondary action on the paid Pro review shell. */
 export const PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL = "Edit signer details";
 
