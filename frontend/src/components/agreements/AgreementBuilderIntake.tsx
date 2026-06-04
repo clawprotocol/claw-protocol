@@ -584,6 +584,7 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { resolvePaidProAuthoritativeDisplayPlain } from "./paidProAuthoritativeRenderGate";
+import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRenderParties";
 import {
   logReviewPipelineTelemetryOnce,
   notePaidProReviewHashFromPlain,
@@ -3103,6 +3104,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProSignerMetadataSessionActiveRef = useRef(false);
   const paidProSignerMetadataEditGuardRef = useRef(false);
   const paidProPostSignerMetadataFreezeRef = useRef(false);
+  const paidProReviewSurfaceOptsRef = useRef<ResolvePaidProReviewRenderPartiesArgs>({});
 
   const buildPreviewForCurrentTier = React.useCallback(
     (d: ParsedDraftShape) => {
@@ -3120,7 +3122,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hasPaidProSourceOfTruth() &&
         getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
       ) {
-        return resolvePaidProAuthoritativeDisplayPlain();
+        return resolvePaidProAuthoritativeDisplayPlain(paidProReviewSurfaceOptsRef.current);
       }
       const starterPreview = !(
         tierAllowsAdvancedFullDraftReveal(tier) ||
@@ -3212,7 +3214,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hasPaidProSourceOfTruth() &&
         getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
       ) {
-        return resolvePaidProAuthoritativeDisplayPlain();
+        return resolvePaidProAuthoritativeDisplayPlain(paidProReviewSurfaceOptsRef.current);
       }
       return draft ? buildPreviewForCurrentTier(draft) : "";
     },
@@ -12367,10 +12369,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const openPaidProDraftCardEditor = React.useCallback(() => {
     if (!draft) return;
     setPaidProCardAiInstruction("");
-    const paidProReview = getPaidProDocumentForSurface("review", {
-      draft: draft ?? null,
-      intakeText: intakeCombined,
-    });
+    const paidProReview = getPaidProDocumentForSurface("review", paidProReviewSurfaceOpts);
     if (paidProReview) {
       setPaidProCardEditDraft(paidProReview.text);
       setPremiumReviewDocEditorOpen(true);
@@ -13583,6 +13582,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const paidProReviewSurfaceOpts = React.useMemo(
+    (): ResolvePaidProReviewRenderPartiesArgs => ({
+      draft: draft ?? null,
+      intakeText: intakeCombined,
+      liveSignerMetadataUi: liveSignerMetadataUiState,
+    }),
+    [draft, intakeCombined, liveSignerMetadataUiState],
+  );
+  paidProReviewSurfaceOptsRef.current = paidProReviewSurfaceOpts;
+
   useEffect(() => {
     if (!hasPaidProSourceOfTruth()) {
       clearConsumedPaidProSignerMetadataAuthority();
@@ -14345,7 +14354,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const premiumPaidReadonlyPick = useMemo(() => {
     const paidProDisplay = getPaidProDocumentForSurface("display", {
-      draft: draft ?? null,
+      ...paidProReviewSurfaceOpts,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
     });
     if (paidProDisplay) {
@@ -15597,6 +15606,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (shouldShowPaidRetry) return "";
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const paidProDisplay = getPaidProDocumentForSurface("display", {
+      ...paidProReviewSurfaceOpts,
       draft: (reviewDraft ?? draft) ?? null,
       intakeText: intakeForPolish,
     });
@@ -18998,7 +19008,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const displayPolishedPaidProPlain = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const paidProDisplay = getPaidProDocumentForSurface("display", {
-      draft: draft ?? null,
+      ...paidProReviewSurfaceOpts,
       intakeText: intakeForPolish,
     });
     const raw = (
@@ -19065,7 +19075,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
     });
     const paidProReview = getPaidProDocumentForSurface("review", {
-      draft: draft ?? null,
+      ...paidProReviewSurfaceOpts,
       intakeText: intakeForPolish,
     });
     const raw = (
@@ -19143,7 +19153,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const visibleProPaperBoundaryState = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const paidProReview = getPaidProDocumentForSurface("review", {
-      draft: draft ?? null,
+      ...paidProReviewSurfaceOpts,
       intakeText: intakeForPolish,
     });
     const declaredSource = paidProReview
@@ -19188,7 +19198,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (premiumPaidDocumentSurface && !shouldShowPaidRetry) {
       const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
       const paidProDisplay = getPaidProDocumentForSurface("display", {
-        draft: draft ?? null,
+        ...paidProReviewSurfaceOpts,
         intakeText: intakeForPolish,
       });
       if (paidProDisplay?.text?.trim()) {
@@ -19420,7 +19430,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const finalizeAndFreezeGuidedFinalCorpus = React.useCallback(
     (source: string): FinalizeGuidedProAgreementCorpusResult => {
       const paidProFinalized = getPaidProDocumentForSurface("finalized", {
-        draft: draft ?? null,
+        ...paidProReviewSurfaceOpts,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       });
       if (paidProFinalized) {
@@ -19841,7 +19851,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const ensureGuidedSigningCorpusReady = React.useCallback(() => {
     flushGuidedSignerMetadataBeforeFinalReview();
     const paidProSignerSetup = getPaidProDocumentForSurface("signer_setup", {
-      draft: draft ?? null,
+      ...paidProReviewSurfaceOpts,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
     });
     let corpusText = paidProSignerSetup?.text.trim() ?? "";
@@ -20950,7 +20960,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
 
     const paidProFinalized = getPaidProDocumentForSurface("finalized", {
-      draft: draft ?? null,
+      ...paidProReviewSurfaceOpts,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
     });
     if (paidProFinalized) {
@@ -23353,7 +23363,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       handlePremiumSendModePick(sendMode);
       devPremiumSendRoute(sendMode, peekPremiumSenderSignFirst(), opts?.openConfirmModal ? "send_confirm" : "sign_now");
       const paidProReview = getPaidProDocumentForSurface("review", {
-        draft: draft ?? null,
+        ...paidProReviewSurfaceOpts,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       });
       const acceptedCorpus = (
@@ -23704,7 +23714,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         : (() => {
             const surface = getPaidProDocumentForSurface("copy", {
-              draft: draft ?? null,
+              ...paidProReviewSurfaceOpts,
               intakeText: intakeForCopy,
             });
             return surface ? { text: surface.text, source: surface.source } : null;
@@ -23741,11 +23751,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       // must never be reported as the review/finalized corpus, or copy(=SoT) vs review(=display)
       // length/hash drift would trip a false paid-pro-corpus-invariant-violation after signer edits.
       const reviewSurface = getPaidProDocumentForSurface("review", {
-        draft: draft ?? null,
+        ...paidProReviewSurfaceOpts,
         intakeText: intakeForCopy,
       });
       const finalizedSurface = getPaidProDocumentForSurface("finalized", {
-        draft: draft ?? null,
+        ...paidProReviewSurfaceOpts,
         intakeText: intakeForCopy,
       });
       logAcceptedPremiumCorpusInstrumentation({

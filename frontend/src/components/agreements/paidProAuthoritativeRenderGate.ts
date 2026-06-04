@@ -19,6 +19,13 @@ import { consumedAuthoritySignerMetadataComplete } from "./paidProSignerMetadata
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { resolvePaidProFrozenDisplayPlain } from "./paidProPostFreezeCorpusInvariant";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
+import {
+  resolvePartiesForReviewRender,
+  type ResolvePaidProReviewRenderPartiesArgs,
+} from "./paidProReviewRenderParties";
+import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
+
+export type ResolvePaidProAuthoritativeDisplayPlainArgs = ResolvePaidProReviewRenderPartiesArgs;
 
 /** True when review should show frozen SoT only (no signer hydration / sanitizer recompute). */
 export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
@@ -38,9 +45,33 @@ export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
   return true;
 }
 
-/** Non-mutating display plain for first authoritative Pro review — byte-identical to frozen SoT. */
-export function resolvePaidProAuthoritativeDisplayPlain(): string {
-  return resolvePaidProFrozenDisplayPlain();
+function paidProPartyRoleContextFromDisplayArgs(
+  args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
+  acceptedCorpus?: string | null,
+): {
+  intakeText?: string | null;
+  draftPartyNames?: readonly string[] | null;
+  acceptedCorpus?: string | null;
+} {
+  return {
+    intakeText: args?.intakeText ?? null,
+    draftPartyNames:
+      args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+    acceptedCorpus: acceptedCorpus ?? null,
+  };
+}
+
+/** Frozen SoT plain with optional render-time signature-region signer overlay (does not mutate stored SoT). */
+export function resolvePaidProAuthoritativeDisplayPlain(
+  args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
+): string {
+  const frozen = resolvePaidProFrozenDisplayPlain();
+  const parties = resolvePartiesForReviewRender(args);
+  return applyPaidProSoTSignerExecutionOverlay(
+    frozen,
+    parties,
+    paidProPartyRoleContextFromDisplayArgs(args, frozen),
+  );
 }
 
 export function paidProAuthoritativeRenderGateMeta(): { len: number; hash: string } | null {

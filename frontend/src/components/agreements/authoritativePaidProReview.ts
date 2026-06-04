@@ -78,7 +78,10 @@ export function resolveAuthoritativePaidProReviewPlain(
   args?: AuthoritativePaidProReviewInput,
 ): string {
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return resolvePaidProAuthoritativeDisplayPlain();
+    return resolvePaidProAuthoritativeDisplayPlain({
+      draft: args?.draft ?? null,
+      intakeText: args?.intakeText ?? null,
+    });
   }
   const pinnedPlain = readPaidProPinnedSignerAppliedCorpus().trim();
   if (pinnedPlain.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
@@ -195,7 +198,10 @@ export function resolvePaidProFinalReviewVisiblePlain(args: {
   displayCandidatePlain?: string | null;
 }): string {
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return resolvePaidProAuthoritativeDisplayPlain();
+    return resolvePaidProAuthoritativeDisplayPlain({
+      draft: args?.draft ?? null,
+      intakeText: args?.intakeText ?? null,
+    });
   }
   const renderPlain = resolvePaidProReviewRenderPlain({
     draft: args.draft ?? null,

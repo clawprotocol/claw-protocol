@@ -2,7 +2,6 @@
  * Paid Pro final review render corpus — same sanitized body as copy/export, plus render-time guards.
  */
 
-import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   applyCanonicalPartyLegalNamesToSigningCorpus,
   corpusContainsFusedPartyLegalName,
@@ -32,9 +31,9 @@ import {
   type PaidProFinalHydratedCorpusSource,
 } from "./paidProFinalHydratedCorpus";
 import {
-  resolveCanonicalPartyIdentitiesFromIntake,
-  resolveCanonicalPartyIdentitiesFromSources,
-} from "./canonicalPartyIdentityResolver";
+  resolvePartiesForReviewRender,
+  type ResolvePaidProReviewRenderPartiesArgs,
+} from "./paidProReviewRenderParties";
 import { SIGNATURE_DATE_BLANK_LINE } from "./guidedDealCompletion/signerPartyIdentity";
 import { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
 
@@ -71,8 +70,10 @@ import {
 } from "./paidProExecutionBlockInstrumentation";
 import {
   consumedAuthoritySignerMetadataComplete,
+  hasSignerMetadataForExecutionOverlay,
   shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
 } from "./paidProSignerMetadataCommitPolicy";
+import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
 
 const LABELED_SIGNATURE_BLOCK_START =
   /^(?:CLIENT|SERVICE PROVIDER|PROVIDER|CONTRACTOR|COMPANY|PARTY\s+\d+)\s*:/i;
@@ -300,35 +301,10 @@ function hydrateTextWhenSignerMetadataComplete(
   return hydrated.rejected ? text : hydrated.corpus;
 }
 
-export function resolvePartiesForReviewRender(args?: {
-  draft?: ParsedDraftShape | null;
-  intakeText?: string | null;
-}): PaidProSignerMetadataParty[] {
-  const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
-  if (consumed && consumed.length >= 2) return consumed;
-
-  const intakeRaw = (args?.intakeText ?? "").trim();
-  const acceptedCorpus = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : null;
-  const draftPartyNames =
-    args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null;
-  const records = acceptedCorpus
-    ? resolveCanonicalPartyIdentitiesFromSources({
-        rawIntake: intakeRaw || null,
-        starterNames: draftPartyNames,
-        generatedBody: acceptedCorpus,
-      })
-    : resolveCanonicalPartyIdentitiesFromIntake(intakeRaw || null, draftPartyNames);
-  if (records.length < 2) return consumed ?? [];
-
-  return records.slice(0, 12).map((record, partyIndex) => ({
-    partyIndex,
-    partyLegalName: record.fullLegalName,
-    signerEmail: "",
-    signerName: "",
-    signerTitle: "",
-    partyAddress: "",
-  }));
-}
+export {
+  resolvePartiesForReviewRender,
+  type ResolvePaidProReviewRenderPartiesArgs,
+} from "./paidProReviewRenderParties";
 
 export function applyPaidProReviewRenderSanitizer(
   corpus: string,
@@ -539,9 +515,7 @@ export function syncConsumedAuthoritySignerTitlesFromCorpus(corpus: string): voi
   setConsumedPaidProSignerMetadataAuthority(next);
 }
 
-export type ResolvePaidProReviewRenderPlainArgs = {
-  draft?: ParsedDraftShape | null;
-  intakeText?: string | null;
+export type ResolvePaidProReviewRenderPlainArgs = ResolvePaidProReviewRenderPartiesArgs & {
   /** When true, return frozen SoT/review corpus without signer-driven repair or opening guards. */
   deferSignerMetadataRepair?: boolean;
 };
@@ -612,9 +586,15 @@ function alignExecutionBlockRolesFromAcceptedCorpus(
   roleContext?: PaidProPartyRoleContext | null,
 ): string {
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return corpus;
+    if (!parties?.length || !hasSignerMetadataForExecutionOverlay(parties)) {
+      return corpus;
+    }
+    return applyPaidProSoTSignerExecutionOverlay(corpus, parties, roleContext);
   }
   if (!parties?.length || !shouldHydratePaidProReviewSurfacesFromConsumedAuthority(parties)) {
+    if (parties?.length && hasSignerMetadataForExecutionOverlay(parties)) {
+      return applyPaidProSoTSignerExecutionOverlay(corpus, parties, roleContext);
+    }
     return corpus;
   }
   let text = enforcePaidProSingleExecutionBlock(corpus).text;
@@ -643,7 +623,7 @@ export function resolvePaidProReviewRenderPlain(
       "resolvePaidProReviewRenderPlain",
       `${surface}:display_only_sot`,
       getPaidProSourceOfTruthText().trim(),
-      () => resolvePaidProAuthoritativeDisplayPlain(),
+      () => resolvePaidProAuthoritativeDisplayPlain(args),
     );
     logPostFreezeCorpusDrift({ surface: "paid_pro_review_render", renderedText: rendered });
     logExecutionBlockLocation(rendered, "paid_pro_review_render");

@@ -28,6 +28,17 @@ export function consumedAuthoritySignerMetadataComplete(
   });
 }
 
+/** Human signer name present for render-time execution-block overlay (email not required). */
+export function hasSignerMetadataForExecutionOverlay(
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  if (parties.length < 2) return false;
+  return parties.every((p) => {
+    const legal = p.partyLegalName.trim();
+    return legal.length >= 2 && p.signerName.trim().length >= 1;
+  });
+}
+
 /** Hydrate notice/signature metadata on review surfaces (not while live signer session is active). */
 export function shouldHydratePaidProReviewSurfacesFromConsumedAuthority(
   parties: readonly PaidProSignerMetadataParty[],

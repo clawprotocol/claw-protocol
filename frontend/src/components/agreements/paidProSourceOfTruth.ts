@@ -519,7 +519,11 @@ export function getPaidProVs01Text(opts?: {
 
 export function getPaidProDocumentForSurface(
   surface: PaidProDocumentSurface,
-  opts?: { draft?: ParsedDraftShape | null; intakeText?: string | null },
+  opts?: {
+    draft?: ParsedDraftShape | null;
+    intakeText?: string | null;
+    liveSignerMetadataUi?: import("./paidProSignerMetadataAuthority").LiveSignerMetadataUiState | null;
+  },
 ): PaidProDocumentForSurface | null {
   const source = getPaidProSourceOfTruth();
   if (!source) return null;
