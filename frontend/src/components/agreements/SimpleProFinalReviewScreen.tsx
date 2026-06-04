@@ -61,6 +61,8 @@ export type SimpleProFinalReviewScreenProps = {
   enableSectionJump?: boolean;
   /** Post-checkout paid SoT — canonical Pro review shell (no guided Q&A chrome). */
   canonicalPaidProReview?: boolean;
+  /** Shell already shows title + trust line — hide in-panel duplicate chrome. */
+  suppressShellDuplicatedChrome?: boolean;
   /** Frozen paid SoT plain — renders when HTML prop is still empty after acceptance. */
   paidReviewPlain?: string;
   /** Corpus authority label for diagnostics (hydrated vs raw SoT). */
@@ -123,6 +125,7 @@ export function SimpleProFinalReviewScreen({
   corpusRecoveryMessage = null,
   enableSectionJump = true,
   canonicalPaidProReview = false,
+  suppressShellDuplicatedChrome = false,
   paidReviewPlain = "",
   paidReviewAuthoritativeSource = "paidProSourceOfTruth",
   signaturePrimaryLabel = "Send for signature",
@@ -190,6 +193,9 @@ export function SimpleProFinalReviewScreen({
     !showDocument &&
     !hasCanonicalPaidReviewBody &&
     !suppressFinalizingForPaidAuthority;
+  const hideInPanelTitleChrome = Boolean(canonicalPaidProReview && suppressShellDuplicatedChrome);
+  const documentFirst = Boolean(canonicalPaidProReview && hasCanonicalPaidReviewBody);
+  const stackGapClass = hideInPanelTitleChrome ? "gap-2" : "gap-3";
   const reviewHeadline = canonicalPaidProReview ? PAID_PRO_REVIEW_SHELL_TITLE : SIMPLE_PRO_FINAL_REVIEW_HEADLINE;
   const reviewSubcopy = canonicalPaidProReview ? PAID_PRO_REVIEW_SHELL_SUBTITLE : SIMPLE_PRO_FINAL_REVIEW_SUBCOPY;
   const answerCount = canonicalPaidProReview
@@ -225,15 +231,96 @@ export function SimpleProFinalReviewScreen({
     return () => window.clearTimeout(timer);
   }, [reviewFirstHandoffError]);
 
+  const documentBlock = (
+    <div
+      className="w-full max-w-full min-w-0 overflow-x-hidden rounded-sm border border-stone-200/90 bg-white shadow-sm ring-1 ring-black/[0.05]"
+      data-testid="simple-pro-final-review-document"
+    >
+      {showDocument ? (
+        preferHydratedReviewHtml ? (
+          <PremiumAgreementReadonlyView
+            html={effectiveAgreementHtml}
+            suppressEmptyFallback={suppressEmptyFallback}
+            fullDocumentFlow={canonicalPaidProReview}
+            compactDocumentTopPadding={hideInPanelTitleChrome}
+            bottomScrollInsetPx={canonicalPaidProReview ? 0 : stickyBottomScrollInsetPx}
+            visibleProPaperTrace={visibleProPaperTrace}
+          />
+        ) : showCanonicalPaidPre ? (
+          <article
+            aria-label="Agreement document preview"
+            className={`premium-readonly-doc box-border max-w-full min-w-0 overflow-x-hidden pb-12 text-left max-[480px]:px-4 sm:px-[clamp(1.25rem,4vw,3.5rem)] ${
+              hideInPanelTitleChrome ? "pt-8" : "pt-11"
+            } min-h-0 overflow-visible`}
+            data-testid="premium-agreement-readonly-article"
+            data-paid-pro-review-paper={hideInPanelTitleChrome ? "true" : undefined}
+            data-paid-pro-authoritative-source={paidReviewAuthoritativeSource}
+          >
+            <pre
+              className="whitespace-pre-wrap font-serif text-[15px] leading-[1.75] text-stone-800"
+              data-testid="simple-pro-final-review-paid-sot-body"
+            >
+              {paidReviewPlain.trim()}
+            </pre>
+          </article>
+        ) : effectiveAgreementHtml.length > 0 ? (
+          <PremiumAgreementReadonlyView
+            html={effectiveAgreementHtml}
+            suppressEmptyFallback={suppressEmptyFallback}
+            fullDocumentFlow={false}
+            visibleProPaperTrace={visibleProPaperTrace}
+          />
+        ) : null
+      ) : showPreviewUnavailable ? (
+        <p
+          className="px-6 py-10 text-center text-sm text-stone-500"
+          data-testid="simple-pro-final-review-document-empty"
+        >
+          Agreement preview is not available. Use Edit signer details, then continue to final review again.
+        </p>
+      ) : null}
+    </div>
+  );
+
+  const postDocumentGuidance = (
+    <>
+      {canonicalPaidProReview && hasCanonicalPaidReviewBody ? (
+        <PaidProReviewStatusPanel
+          signersReady={signersReady}
+          signerMetadataFinalized={signerMetadataFinalized}
+        />
+      ) : null}
+      {showSignerSavedBanner ? (
+        <PaidProSignerSavedConfirmationBanner mappings={signerSavedMappings} />
+      ) : null}
+      {canonicalPaidProReview && hasCanonicalPaidReviewBody && finalVersionCopy ? (
+        <div
+          className="rounded-md border border-stone-200/90 bg-white px-3 py-2.5 shadow-sm ring-1 ring-black/[0.04] sm:px-3.5"
+          data-testid="paid-pro-final-version-indicator"
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-700">
+            {PAID_PRO_FINAL_VERSION_HEADLINE}
+          </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-stone-600 sm:text-[13px]">
+            {finalVersionCopy}
+          </p>
+        </div>
+      ) : null}
+      {canonicalPaidProReview && hasCanonicalPaidReviewBody ? (
+        <PaidProReviewNextStepCallout signersReady={signersReady} />
+      ) : null}
+    </>
+  );
+
   return (
     <div
-      className={`flex flex-col gap-3 ${className}`}
+      className={`flex flex-col ${stackGapClass} ${className}`}
       data-testid="simple-pro-final-review-screen"
       role="region"
       aria-label={reviewHeadline}
     >
       <div className="min-w-0">
-        {canonicalPaidProReview ? (
+        {hideInPanelTitleChrome ? null : canonicalPaidProReview ? (
           <>
             {/* Enterprise paid Pro header: one primary title, one status chip, one sentence. */}
             <h2
@@ -314,12 +401,14 @@ export function SimpleProFinalReviewScreen({
             {appliedAreas.length > 4 ? ` (+${appliedAreas.length - 4} more)` : ""}
           </p>
         ) : null}
-        <p
-          className="mt-2 text-xs leading-relaxed text-stone-600 sm:text-sm"
-          data-testid="simple-pro-final-review-subcopy"
-        >
-          {reviewSubcopy}
-        </p>
+        {hideInPanelTitleChrome ? null : (
+          <p
+            className="mt-2 text-xs leading-relaxed text-stone-600 sm:text-sm"
+            data-testid="simple-pro-final-review-subcopy"
+          >
+            {reviewSubcopy}
+          </p>
+        )}
         {onBackToSignerDetails ? (
           <button
             type="button"
@@ -361,80 +450,23 @@ export function SimpleProFinalReviewScreen({
         </div>
       ) : null}
 
-      {canonicalPaidProReview && hasCanonicalPaidReviewBody ? (
-        <PaidProReviewStatusPanel
-          signersReady={signersReady}
-          signerMetadataFinalized={signerMetadataFinalized}
-        />
-      ) : null}
-
-      {showSignerSavedBanner ? (
-        <PaidProSignerSavedConfirmationBanner mappings={signerSavedMappings} />
-      ) : null}
-
-      {canonicalPaidProReview && hasCanonicalPaidReviewBody && finalVersionCopy ? (
-        <div
-          className="rounded-md border border-stone-200/90 bg-white px-3 py-2.5 shadow-sm ring-1 ring-black/[0.04] sm:px-3.5"
-          data-testid="paid-pro-final-version-indicator"
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-700">
-            {PAID_PRO_FINAL_VERSION_HEADLINE}
-          </p>
-          <p className="mt-1.5 text-xs leading-relaxed text-stone-600 sm:text-[13px]">
-            {finalVersionCopy}
-          </p>
-        </div>
-      ) : null}
-
-      {canonicalPaidProReview && hasCanonicalPaidReviewBody ? (
-        <PaidProReviewNextStepCallout signersReady={signersReady} />
-      ) : null}
-
-      <div
-        className="rounded-sm border border-stone-200/90 bg-white shadow-sm ring-1 ring-black/[0.05]"
-        data-testid="simple-pro-final-review-document"
-      >
-        {showDocument ? (
-          preferHydratedReviewHtml ? (
-            <PremiumAgreementReadonlyView
-              html={effectiveAgreementHtml}
-              suppressEmptyFallback={suppressEmptyFallback}
-              fullDocumentFlow={canonicalPaidProReview}
-              bottomScrollInsetPx={canonicalPaidProReview ? 0 : stickyBottomScrollInsetPx}
-              visibleProPaperTrace={visibleProPaperTrace}
-            />
-          ) : showCanonicalPaidPre ? (
-            <article
-              aria-label="Agreement document preview"
-              className="premium-readonly-doc min-h-0 overflow-visible px-[clamp(1.85rem,6.5vw,3.5rem)] pb-16 pt-11 text-left"
-              data-testid="premium-agreement-readonly-article"
-              data-paid-pro-authoritative-source={paidReviewAuthoritativeSource}
-            >
-              <pre
-                className="whitespace-pre-wrap font-serif text-[15px] leading-[1.75] text-stone-800"
-                data-testid="simple-pro-final-review-paid-sot-body"
-              >{paidReviewPlain.trim()}</pre>
-            </article>
-          ) : effectiveAgreementHtml.length > 0 ? (
-            <PremiumAgreementReadonlyView
-              html={effectiveAgreementHtml}
-              suppressEmptyFallback={suppressEmptyFallback}
-              fullDocumentFlow={false}
-              visibleProPaperTrace={visibleProPaperTrace}
-            />
-          ) : null
-        ) : showPreviewUnavailable ? (
-          <p
-            className="px-4 py-8 text-center text-sm leading-relaxed text-stone-600"
-            data-testid="simple-pro-final-review-document-empty"
-          >
-            Agreement preview is not available. Use Edit signer details, then continue to final review again.
-          </p>
-        ) : null}
-        {stickyBottomScrollInsetPx > 0 ? (
-          <PaidProReviewStickyScrollSpacer heightPx={stickyBottomScrollInsetPx} />
-        ) : null}
-      </div>
+      {documentFirst ? (
+        <>
+          {documentBlock}
+          {stickyBottomScrollInsetPx > 0 ? (
+            <PaidProReviewStickyScrollSpacer heightPx={stickyBottomScrollInsetPx} />
+          ) : null}
+          {postDocumentGuidance}
+        </>
+      ) : (
+        <>
+          {postDocumentGuidance}
+          {documentBlock}
+          {stickyBottomScrollInsetPx > 0 ? (
+            <PaidProReviewStickyScrollSpacer heightPx={stickyBottomScrollInsetPx} />
+          ) : null}
+        </>
+      )}
       {signersReady ? (
         <p
           className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-[11px] leading-relaxed text-stone-700"

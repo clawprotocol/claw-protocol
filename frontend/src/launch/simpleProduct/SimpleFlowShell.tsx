@@ -30,6 +30,8 @@ export function SimpleFlowShell(props: {
   hideHeader?: boolean;
   /** Optional id on the page H1 for post-checkout scroll/focus restore. */
   titleHeadingId?: string;
+  /** Paid Pro review: tighter header stack so the agreement card sits higher. */
+  compactReviewHeader?: boolean;
   /** Optional progress: highlights current step only; earlier steps show as completed. */
   step?: Step;
   /** Override nav labels (4- or 5-step flows, e.g. checkout upgrade path). */
@@ -46,6 +48,7 @@ export function SimpleFlowShell(props: {
     titleClassName,
     hideHeader,
     titleHeadingId,
+    compactReviewHeader,
     step,
     progressLabels = DEFAULT_PROGRESS,
   } = props;
@@ -115,7 +118,11 @@ export function SimpleFlowShell(props: {
           ) : null}
         </nav>
         {!hideHeader ? (
-        <header className="vs01-header pb-2 pt-4">
+        <header
+          className={
+            compactReviewHeader ? "vs01-header pb-1 pt-2 sm:pb-1 sm:pt-2" : "vs01-header pb-2 pt-4"
+          }
+        >
           {kicker ? (
             <p className="mb-2 text-center text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-slate-500 sm:text-left sm:text-xs md:text-[0.8125rem] lg:tracking-[0.1em] lg:text-slate-400">
               {kicker}
@@ -129,7 +136,11 @@ export function SimpleFlowShell(props: {
           </h1>
           {subtitle ? (
             <p
-              className={`vs01-header-subtitle mt-3 text-base leading-relaxed text-slate-300 sm:mt-2 sm:text-[0.9375rem] sm:leading-[1.55] sm:text-slate-300 md:text-[1rem] lg:text-[1.125rem] lg:leading-[1.55] lg:text-slate-300/95 ${subtitleClassName ?? ""}`}
+              className={`vs01-header-subtitle text-base leading-relaxed text-slate-300 sm:text-[0.9375rem] sm:leading-[1.55] sm:text-slate-300 md:text-[1rem] lg:text-[1.125rem] lg:leading-[1.55] lg:text-slate-300/95 ${
+                compactReviewHeader
+                  ? "mt-2 sm:mt-1.5"
+                  : "mt-3 sm:mt-2"
+              } ${subtitleClassName ?? ""}`}
             >
               {subtitle}
             </p>

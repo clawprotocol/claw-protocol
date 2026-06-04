@@ -19,17 +19,16 @@ describe("Pro review shell UX", () => {
 
   it("targets concise Pro review copy", () => {
     expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).toBe("Review your Pro agreement");
-    expect(SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE).toMatch(/ready\. Edit it/i);
+    expect(SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE).toMatch(/Nothing is sent or signed/i);
     expect(SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE).toMatch(/Nothing is sent or signed/i);
-    expect(PRO_REVIEW_DOCUMENT_PANEL_HEADING).toBe("Review your draft");
-    expect(PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY).toMatch(/Built from your deal terms/i);
-    expect(PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY).toMatch(/signatures/i);
+    expect(PRO_REVIEW_DOCUMENT_PANEL_HEADING).toBe("Review your Pro agreement");
+    expect(PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY).toMatch(/Nothing is sent or signed/i);
   });
 
   it("highlights Review on paid Pro create shell and hides duplicate intake chrome", () => {
     expect(createPage).toContain("shellLifecycleStage");
     expect(createPage).toContain("lifecycleStepForStage(shellLifecycleStage)");
-    expect(createPage).toContain("SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE");
+    expect(createPage).toContain("compactReviewHeader={paidProReviewReadyShell}");
     expect(intake).toContain("paidProReviewCompactChrome");
     expect(intake).toContain("PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY");
     expect(intake).toContain("resolveSimpleCreateShellLifecycleStage");

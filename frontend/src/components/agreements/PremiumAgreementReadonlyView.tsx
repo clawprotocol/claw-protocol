@@ -26,6 +26,19 @@ const DOC_STYLES = `
 .premium-readonly-doc p.premium-doc-notice-group-label{margin:0.55rem 0 0.15rem;max-width:26rem;font-size:10px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#78716c}
 .premium-readonly-doc p.premium-doc-signature-notice{margin-bottom:0.2rem;max-width:26rem;padding-left:0.125rem;font-weight:400;color:#292524;line-height:1.55}
 .premium-readonly-doc p.premium-doc-signature-notice + p.premium-doc-signature-notice{margin-top:0.08rem}
+@media (max-width:480px){
+.premium-readonly-doc[data-paid-pro-review-paper="true"]{box-sizing:border-box;max-width:100%;min-width:0;overflow-x:hidden}
+.premium-readonly-doc[data-paid-pro-review-paper="true"] .premium-doc-body{max-width:100%;width:100%;min-width:0;box-sizing:border-box}
+.premium-readonly-doc[data-paid-pro-review-paper="true"] h1{font-size:clamp(1.05rem,4.8vw,1.35rem);letter-spacing:0.03em;overflow-wrap:anywhere;word-break:break-word;hyphens:auto;margin-left:0;margin-right:0}
+.premium-readonly-doc[data-paid-pro-review-paper="true"] p,.premium-readonly-doc[data-paid-pro-review-paper="true"] h2{overflow-wrap:break-word;word-break:break-word}
+.premium-readonly-doc[data-paid-pro-review-paper="true"] p.premium-doc-signature-party-start,
+.premium-readonly-doc[data-paid-pro-review-paper="true"] p.premium-doc-signature-entity-name,
+.premium-readonly-doc[data-paid-pro-review-paper="true"] p.premium-doc-signature-field,
+.premium-readonly-doc[data-paid-pro-review-paper="true"] p.premium-doc-signature-notice,
+.premium-readonly-doc[data-paid-pro-review-paper="true"] p.premium-doc-notice-group-label{max-width:100%;width:100%;box-sizing:border-box}
+.premium-readonly-doc[data-paid-pro-review-paper="true"] [style*="display:grid"]{max-width:100%!important;width:100%!important;box-sizing:border-box}
+.premium-readonly-doc[data-paid-pro-review-paper="true"] [style*="grid-template-columns:minmax(0,1fr) 100px"]{grid-template-columns:minmax(0,1fr)!important}
+}
 `;
 
 type Props = {
@@ -36,6 +49,8 @@ type Props = {
   suppressEmptyFallback?: boolean;
   /** Canonical paid review renders in normal document flow, not a nested scroll viewport. */
   fullDocumentFlow?: boolean;
+  /** Tighter top inset when the shell already shows title + trust line (post-checkout review). */
+  compactDocumentTopPadding?: boolean;
   /** Extra padding below document body when a bottom sticky CTA is visible (px). */
   bottomScrollInsetPx?: number;
   /** Paid Pro final DOM boundary diagnostics (dev-only logs). */
@@ -47,6 +62,7 @@ export function PremiumAgreementReadonlyView({
   emptyFallback,
   suppressEmptyFallback = false,
   fullDocumentFlow = false,
+  compactDocumentTopPadding = false,
   bottomScrollInsetPx = 0,
   visibleProPaperTrace,
 }: Props) {
@@ -76,6 +92,10 @@ export function PremiumAgreementReadonlyView({
     visibleProPaperTrace?.isAuthoritative,
     visibleProPaperTrace?.isFreeBodyMatch,
   ]);
+  const paperPaddingClass = compactDocumentTopPadding
+    ? "box-border max-w-full min-w-0 overflow-x-hidden max-[480px]:px-4 sm:px-[clamp(1.25rem,4vw,3.5rem)]"
+    : "px-[clamp(1.85rem,6.5vw,3.5rem)]";
+
   return (
     <>
       <style id={`premium-doc-styles-${sid}`}>{DOC_STYLES}</style>
@@ -83,10 +103,13 @@ export function PremiumAgreementReadonlyView({
         role="article"
         aria-label="Agreement document preview"
         data-testid="premium-agreement-readonly-article"
-        className={`premium-readonly-doc px-[clamp(1.85rem,6.5vw,3.5rem)] pt-11 text-left [font-feature-settings:'kern'_1,'liga'_1,'onum'_1] ${
+        data-paid-pro-review-paper={compactDocumentTopPadding ? "true" : undefined}
+        className={`premium-readonly-doc text-left [font-feature-settings:'kern'_1,'liga'_1,'onum'_1] ${paperPaddingClass} ${
           fullDocumentFlow
-            ? "min-h-0 overflow-visible pb-16"
-            : `max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto${bottomScrollInsetPx > 0 ? "" : " pb-16"}`
+            ? compactDocumentTopPadding
+              ? "min-h-0 overflow-visible pb-12 pt-8"
+              : "min-h-0 overflow-visible pb-16 pt-11"
+            : `max-h-[min(78vh,54rem)] min-h-[min(68vh,44rem)] overflow-y-auto pt-11${bottomScrollInsetPx > 0 ? "" : " pb-16"}`
         }`}
         style={
           !fullDocumentFlow && bottomScrollInsetPx > 0

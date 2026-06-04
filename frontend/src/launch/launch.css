@@ -147,3 +147,41 @@
 .simple-flow-preview-continuity-fade {
   animation: simple-flow-preview-fade-in 0.18s ease-out;
 }
+
+/* Paid Pro post-checkout review — pull agreement preview closer to shell title */
+#claw-simple-create-preview[data-paid-pro-review-compact="true"] {
+  margin-top: 0.5rem;
+}
+
+/* Paid Pro review — mobile paper must fit viewport (layout only, ≤480px) */
+@media (max-width: 480px) {
+  #claw-simple-create-preview[data-paid-pro-review-compact="true"] {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  #claw-simple-create-preview[data-paid-pro-review-compact="true"] #fadeWrapper {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+  }
+
+  #claw-simple-create-preview[data-paid-pro-review-compact="true"] [data-testid="simple-pro-final-review-screen"] {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  #claw-simple-create-preview[data-paid-pro-review-compact="true"] [data-paid-pro-review-document-shell="true"] {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  #claw-simple-create-preview[data-paid-pro-review-compact="true"] [data-testid="simple-pro-final-review-document"] {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+}

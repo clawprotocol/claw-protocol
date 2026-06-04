@@ -65,7 +65,6 @@ import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttribut
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import {
   PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID,
-  SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE,
   SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE,
   SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE,
   SIMPLE_CREATE_STARTER_CONTROL_LINE,
@@ -305,12 +304,8 @@ export function SimpleCreatePage() {
       title={shellTitle}
       subtitle={shellSubtitle}
       titleHeadingId={paidProReviewReadyShell ? PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID : undefined}
+      compactReviewHeader={paidProReviewReadyShell}
     >
-      {paidProReviewReadyShell ? (
-        <p className="mb-4 text-center text-xs leading-relaxed text-slate-500 sm:mb-5 sm:text-left sm:text-sm">
-          {SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE}
-        </p>
-      ) : null}
       <HomeCreateTransitionOverlay active={homeTransitionVisible} />
       <div className={isFreshSimpleCreateStart || paidProReviewReadyShell ? "pb-36 sm:pb-32" : undefined}>
         {isFreshSimpleCreateStart && simplifyFirstSession && !quickSendTypedArrival && !hideIntakeMarketingChrome ? (

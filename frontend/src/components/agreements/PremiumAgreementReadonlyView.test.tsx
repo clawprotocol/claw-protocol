@@ -40,4 +40,19 @@ describe("PremiumAgreementReadonlyView mobile readability", () => {
     expect(article.className).not.toContain("overflow-y-auto");
     expect(article.className).not.toContain("max-h-[");
   });
+
+  it("compactDocumentTopPadding enables mobile paper containment attrs and padding", () => {
+    const { getByTestId } = render(
+      <PremiumAgreementReadonlyView
+        html="<h1>CONSULTING AND IMPLEMENTATION AGREEMENT</h1>"
+        fullDocumentFlow
+        compactDocumentTopPadding
+      />,
+    );
+    const article = getByTestId("premium-agreement-readonly-article");
+    expect(article.getAttribute("data-paid-pro-review-paper")).toBe("true");
+    expect(article.className).toContain("max-[480px]:px-4");
+    expect(article.className).toContain("overflow-x-hidden");
+    expect(componentSrc).toContain("@media (max-width:480px)");
+  });
 });

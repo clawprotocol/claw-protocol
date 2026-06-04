@@ -25980,6 +25980,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               {showWorkspacePreview ? (
                 <div
                   id="claw-simple-create-preview"
+                  data-paid-pro-review-compact={paidProReviewCompactChrome ? "true" : undefined}
                   style={
                     simpleCreateStickyBottomBarVisible && stickyBottomScrollInsetPx > 0
                       ? { paddingBottom: `${stickyBottomScrollInsetPx}px` }
@@ -26668,7 +26669,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               showUpgradeToFullDraftOnReview && createUiStage === CreateUiStage.DRAFT
                                 ? "relative mt-1.5 sm:mt-2"
                                 : premiumPaidDocumentSurface
-                                  ? "mt-4 rounded-2xl border border-stone-800/20 bg-gradient-to-b from-stone-900/35 to-slate-950 px-1 py-6 sm:mt-5 sm:px-3 sm:py-8"
+                                  ? paidProReviewCompactChrome
+                                    ? "mt-2 rounded-2xl border border-stone-800/20 bg-gradient-to-b from-stone-900/35 to-slate-950 px-1 py-3 sm:mt-2.5 sm:px-2 sm:py-4"
+                                    : "mt-4 rounded-2xl border border-stone-800/20 bg-gradient-to-b from-stone-900/35 to-slate-950 px-1 py-6 sm:mt-5 sm:px-3 sm:py-8"
                                   : "mt-3"
                             }
                           >
@@ -27137,8 +27140,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         </p>
                                       </div>
                                     ) : simpleProFinalReviewShellActive && !failedPremiumCorpusActive ? (
-                                      <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
+                                      <div
+                                        data-paid-pro-review-document-shell={
+                                          paidProReviewCompactChrome ? "true" : undefined
+                                        }
+                                        className={
+                                          paidProReviewCompactChrome
+                                            ? "px-[clamp(1.35rem,4.5vw,2.65rem)] py-2 sm:py-3"
+                                            : "px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4"
+                                        }
+                                      >
                                         <SimpleProFinalReviewScreen
+                                          suppressShellDuplicatedChrome={paidProReviewCompactChrome}
                                           stickyBottomScrollInsetPx={
                                             simpleCreateStickyBottomBarVisible
                                               ? stickyBottomScrollInsetPx

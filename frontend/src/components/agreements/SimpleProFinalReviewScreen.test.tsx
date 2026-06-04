@@ -199,7 +199,7 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
-  it("canonical paid Pro review shows next-step callout before the document", () => {
+  it("canonical paid Pro review shows next-step callout after the document", () => {
     const sotPlain = `PRO AGREEMENT body. ${"Substantive operative clause. ".repeat(600)}`;
     render(
       <SimpleProFinalReviewScreen
@@ -216,7 +216,7 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(callout.textContent).toMatch(/Step 3 of 4/i);
     expect(callout.textContent).toMatch(/not signing/i);
     const document = screen.getByTestId("simple-pro-final-review-document");
-    expect(callout.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(callout.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     cleanup();
   });
 
@@ -242,7 +242,7 @@ describe("SimpleProFinalReviewScreen", () => {
     const statusPanel = screen.getByTestId("paid-pro-review-status-panel");
     expect(statusPanel.textContent).toContain("Agreement generated");
     expect(statusPanel.textContent).toContain("Signer details added");
-    expect(statusPanel.textContent).toContain("Ready for signatures");
+    expect(statusPanel.textContent).toContain("Ready for signing");
     expect(screen.getByTestId("paid-pro-final-version-indicator").textContent).toContain(
       "Final agreement version",
     );
