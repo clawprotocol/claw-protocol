@@ -79,9 +79,8 @@ import {
   resolvePaidProAuthoritativeDisplayPlain,
   shouldUsePaidProSourceOfTruthDisplayOnly,
 } from "./paidProAuthoritativeRenderGate";
-import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
-import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { recordPaidProPreviewRecompute } from "./paidProReviewStability";
+import { tryReadPaidProFrozenPreviewPlain } from "./paidProPostAcceptancePreviewRead";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 
 const MISSING = "[Not yet specified]";
@@ -629,9 +628,14 @@ export function buildAgreementPreviewTextCore(
   draft: ParsedDraftShape,
   options?: AgreementPreviewBuildOptions,
 ): string {
-  if (!hasPaidProSourceOfTruth()) {
-    recordPaidProPreviewRecompute("buildAgreementPreviewTextCore");
-  }
+  const frozenCore = tryReadPaidProFrozenPreviewPlain({
+    surface: options?.starterPreview ? "preview_starter" : "preview_structured",
+    builder: "buildAgreementPreviewTextCore",
+    createFlowPhase: options?.placeholderGate?.createFlowPhase ?? null,
+    displayPhase: options?.placeholderGate?.displayPhase ?? null,
+  });
+  if (frozenCore !== null) return frozenCore;
+  recordPaidProPreviewRecompute("buildAgreementPreviewTextCore");
   const starterPreview = Boolean(options?.starterPreview);
   const premiumDeliverable = Boolean(options?.premiumDeliverablePreview) && !starterPreview;
   const route = selectAgreementPreviewRoute(draft, options);
@@ -935,6 +939,13 @@ export function buildStarterAgreementPreviewForReview(
   draft: ParsedDraftShape,
   options?: AgreementPreviewBuildOptions,
 ): string {
+  const frozenRead = tryReadPaidProFrozenPreviewPlain({
+    surface: "preview_starter",
+    builder: "buildStarterAgreementPreviewForReview",
+    createFlowPhase: options?.placeholderGate?.createFlowPhase ?? null,
+    displayPhase: options?.placeholderGate?.displayPhase ?? null,
+  });
+  if (frozenRead !== null) return frozenRead;
   // Free/starter recitals must keep full legal entity names. When the caller does not thread
   // intake through (e.g. restore=starterReview after refresh, where draft.parties may carry the
   // short parse form "Red Mesa"), fall back to the persisted creator intake so short party names
@@ -983,21 +994,15 @@ export function buildAgreementPreviewText(
 ): string {
   const starterPreview = Boolean(options?.starterPreview);
   const freeStarterReviewPreview = Boolean(options?.freeStarterReviewPreview);
+  const frozenRead = tryReadPaidProFrozenPreviewPlain({
+    surface: starterPreview ? "preview_starter" : "preview_paid_authoritative",
+    builder: "buildAgreementPreviewText",
+    createFlowPhase: options?.placeholderGate?.createFlowPhase ?? null,
+    displayPhase: options?.placeholderGate?.displayPhase ?? null,
+  });
+  if (frozenRead !== null) return frozenRead;
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    const display = resolvePaidProAuthoritativeDisplayPlain();
-    return returnAuthoritativeTextForIllegalPostAcceptanceGeneration({
-      surface: starterPreview ? "preview_starter" : "preview_paid_authoritative",
-      builder: "buildAgreementPreviewText",
-      generatedText: display,
-    });
-  }
-  if (hasPaidProSourceOfTruth() && getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    const display = resolvePaidProAuthoritativeDisplayPlain();
-    return returnAuthoritativeTextForIllegalPostAcceptanceGeneration({
-      surface: starterPreview ? "preview_starter" : "preview_paid_authoritative",
-      builder: "buildAgreementPreviewText",
-      generatedText: display,
-    });
+    return resolvePaidProAuthoritativeDisplayPlain();
   }
   const authoritative = getAuthoritativeAgreementDocument();
   if (authoritative?.fullCorpusText && !starterPreview) {

@@ -7406,11 +7406,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               buildFailurePayload: (probe) => {
                 let renderedAgreementPreviewLen = 0;
                 try {
-                  renderedAgreementPreviewLen = buildAgreementPreviewText(mergedDraftPersist, {
-                    starterPreview: false,
-                    premiumDeliverablePreview: true,
-                    intakeText: debouncedStepBuffer,
-                  }).length;
+                  if (hasPaidProSourceOfTruth()) {
+                    renderedAgreementPreviewLen = getPaidProSourceOfTruthText().trim().length;
+                  } else {
+                    renderedAgreementPreviewLen = buildAgreementPreviewText(mergedDraftPersist, {
+                      starterPreview: false,
+                      premiumDeliverablePreview: true,
+                      intakeText: debouncedStepBuffer,
+                    }).length;
+                  }
                 } catch {
                   renderedAgreementPreviewLen = 0;
                 }
@@ -11296,7 +11300,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       reviewDraftExists: Boolean(reviewDraft),
       renderedPreviewExists: renderedAgreementPreview.length > 0,
       structuredSource: "reviewDraft",
-      fullPreviewSource: "buildAgreementPreviewText(reviewDraft)",
+      fullPreviewSource:
+        hasPaidProSourceOfTruth() &&
+        getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
+          ? "paidProSourceOfTruth(canonical)"
+          : "buildAgreementPreviewText(reviewDraft)",
     });
   }, [createProductionTwoPane, productionDraftPrimaryReviewSurface, draft, reviewDraft, renderedAgreementPreview]);
 
@@ -18768,6 +18776,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const paidProStarterPreviewPlain = useMemo(() => {
     if (!draft) return "";
+    if (
+      hasPaidProSourceOfTruth() &&
+      getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
+    ) {
+      return "";
+    }
     try {
       const text = buildAgreementPreviewText(draft as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
         starterPreview: true,
