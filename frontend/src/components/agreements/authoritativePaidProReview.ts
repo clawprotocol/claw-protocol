@@ -33,9 +33,11 @@ import { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS } from "./paidProReviewTru
 
 export { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS };
 
-export const PAID_PRO_REVIEW_SHELL_TITLE = "PRO AGREEMENT";
+export const PAID_PRO_REVIEW_SHELL_TITLE = "Agreement ready";
 export const PAID_PRO_REVIEW_SHELL_SUBTITLE =
-  "This is the final agreement version prepared for review and signing.";
+  "Review the agreement below. Next, add signer details to create signature links.";
+export const PAID_PRO_REVIEW_SHELL_SAFETY_LINE =
+  "Nothing is sent or signed until you choose to share the links.";
 export const PAID_PRO_REVIEW_BADGE = "Pro agreement";
 export const PAID_PRO_REVIEW_CHIP_VERSION = "Pro agreement";
 /** @deprecated Prefer {@link resolvePaidProReviewChipState} for stage-accurate copy. */

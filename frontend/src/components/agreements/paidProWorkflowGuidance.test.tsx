@@ -27,14 +27,14 @@ describe("paidProWorkflowGuidance", () => {
   it("review next-step copy states signer setup is not signing", () => {
     const copy = resolvePaidProReviewNextStepCopy({ signersReady: false });
     expect(copy.stepLabel).toMatch(/Step 3 of 4/i);
-    expect(copy.nextLine).toContain("not signing");
+    expect(copy.nextLine).toMatch(/No one signs|not signing/i);
     expect(copy.nextLine).toMatch(/signer details/i);
   });
 
   it("review callout renders step guidance above document flow", () => {
     render(<PaidProReviewNextStepCallout signersReady={false} />);
     const callout = screen.getByTestId("paid-pro-review-next-step-callout");
-    expect(callout.textContent).toContain("Review your agreement");
+    expect(callout.textContent).toContain("Signer details next");
     expect(callout.textContent).toContain(PAID_PRO_REVIEW_STEP_NEXT_SIGNER_SETUP);
   });
 

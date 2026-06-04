@@ -408,6 +408,7 @@ import {
   PAID_PRO_REVIEW_CHIP_VERSION,
   PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS,
   resolvePaidProReviewChipState,
+  PAID_PRO_REVIEW_SHELL_SAFETY_LINE,
   PAID_PRO_REVIEW_SHELL_SUBTITLE,
   PAID_PRO_REVIEW_SHELL_TITLE,
   resolveAuthoritativePaidProReviewPlain,
@@ -26501,6 +26502,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
                                   {PAID_PRO_REVIEW_SHELL_SUBTITLE}
                                 </p>
+                                <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
+                                  {PAID_PRO_REVIEW_SHELL_SAFETY_LINE}
+                                </p>
                               </>
                             ) : isFreeStreamlineDraftReview ? (
                               <>
@@ -26882,7 +26886,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 ? "relative mt-1.5 sm:mt-2"
                                 : premiumPaidDocumentSurface
                                   ? paidProReviewCompactChrome
-                                    ? "mt-2 rounded-2xl border border-stone-800/20 bg-gradient-to-b from-stone-900/35 to-slate-950 px-1 py-3 sm:mt-2.5 sm:px-2 sm:py-4"
+                                    ? "mt-1.5 rounded-2xl border border-stone-800/20 bg-gradient-to-b from-stone-900/35 to-slate-950 px-1 py-2 sm:mt-2 sm:px-2 sm:py-3"
                                     : "mt-4 rounded-2xl border border-stone-800/20 bg-gradient-to-b from-stone-900/35 to-slate-950 px-1 py-6 sm:mt-5 sm:px-3 sm:py-8"
                                   : "mt-3"
                             }

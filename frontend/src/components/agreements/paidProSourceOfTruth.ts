@@ -25,6 +25,10 @@ import {
 } from "./canonicalAgreementSnapshot";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import {
+  buildPaidProNormalizedSurfaceDiffPayload,
+  logPaidProNormalizedSurfaceDiff,
+} from "./paidProNormalizedSurfaceDiff";
+import {
   logCanonicalEstablishReconcile,
   logExecutionBlockCount,
   logExecutionBlockLocation,
@@ -642,11 +646,23 @@ export function getPaidProDocumentForSurface(
     allowExecutionAppend: surface === "vs01",
     signerMetadataApplied,
   });
+  const sotForTelemetry = getPaidProSourceOfTruth();
+  if (sotForTelemetry && hash !== sotForTelemetry.hash) {
+    logPaidProNormalizedSurfaceDiff(
+      buildPaidProNormalizedSurfaceDiffPayload({
+        surface,
+        canonicalText: sotForTelemetry.text,
+        normalizedText: text,
+      }),
+    );
+  }
   logPaidProSurface({
     surface,
     len: text.length,
     hash,
     source: corpusSource,
+    canonicalHash: sotForTelemetry?.hash ?? hash,
+    canonicalLen: sotForTelemetry?.text.length ?? text.length,
   });
   return {
     text,
@@ -690,19 +706,31 @@ function logPaidProSurface(payload: {
   len: number;
   hash: string;
   source: PaidProDocumentCorpusSource;
+  canonicalHash?: string | null;
+  canonicalLen?: number | null;
 }): void {
+  const surfaceHash = payload.hash;
   if (
     !shouldLogPaidProAuthoritySurfaceEvent({
       event: "paid-pro-surface",
       surface: payload.surface,
-      hash: payload.hash,
+      hash: surfaceHash,
       source: payload.source,
     })
   ) {
     return;
   }
   // eslint-disable-next-line no-console
-  console.info("[paid-pro-surface]", payload);
+  console.info("[paid-pro-surface]", {
+    surface: payload.surface,
+    len: payload.len,
+    hash: surfaceHash,
+    normalizedHash: surfaceHash,
+    canonicalHash: payload.canonicalHash ?? surfaceHash,
+    canonicalLen: payload.canonicalLen ?? payload.len,
+    lenDelta: payload.canonicalLen != null ? payload.len - payload.canonicalLen : 0,
+    source: payload.source,
+  });
 }
 
 export function assertPaidProSurfaceCorpus(args: {

@@ -7,8 +7,16 @@ type Props = {
   signersReady?: boolean;
 };
 
-export function PaidProReviewNextStepCallout({ signersReady = false }: Props) {
-  const copy = resolvePaidProReviewNextStepCopy({ signersReady });
+type PaidProReviewNextStepCalloutProps = Props & {
+  compactShell?: boolean;
+};
+
+export function PaidProReviewNextStepCallout({
+  signersReady = false,
+  compactShell = false,
+}: PaidProReviewNextStepCalloutProps) {
+  const copy = resolvePaidProReviewNextStepCopy({ signersReady, compactShell });
+  if (!copy.showCallout) return null;
 
   return (
     <section

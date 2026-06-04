@@ -33,18 +33,19 @@ export function resolvePaidProReviewSignerStatusReady(args: {
 }
 
 export const PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS =
-  "Your agreement has been generated and reviewed. The document below is the final agreement draft. Add signer information to prepare signature links.";
+  "Add signer name, title, and notice details for each party.";
 
 export const PAID_PRO_REVIEW_SUPPORTING_AFTER_SIGNERS =
-  "Signer information has been merged into the agreement. This version is ready for signature preparation.";
+  "Signer details are saved in the agreement. Continue when you are ready to prepare signature links.";
 
-export const PAID_PRO_FINAL_VERSION_HEADLINE = "Final agreement version";
+/** Shown only on non-compact shells that still render the final-version card. */
+export const PAID_PRO_FINAL_VERSION_HEADLINE = "Next step";
 
 export const PAID_PRO_FINAL_VERSION_BEFORE_SIGNERS =
-  "This is the agreement that will be used to create signature links. Nothing is sent, signed, or shared until you confirm.";
+  "Add signer details below, then prepare signature links when you are ready.";
 
 export const PAID_PRO_FINAL_VERSION_READY_FOR_SIGNATURE =
-  "Ready for signature preparation. This is the final agreement version that will be used to create signature links.";
+  "Prepare signature links when you are ready to share them with signers.";
 
 export const PAID_PRO_SIGNER_SAVED_BANNER_HEADLINE = "Signer details saved.";
 

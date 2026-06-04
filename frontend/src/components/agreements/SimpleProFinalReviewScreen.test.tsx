@@ -199,7 +199,7 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
-  it("canonical paid Pro review shows next-step callout after the document", () => {
+  it("non-compact canonical paid Pro review shows next-step callout after the document", () => {
     const sotPlain = `PRO AGREEMENT body. ${"Substantive operative clause. ".repeat(600)}`;
     render(
       <SimpleProFinalReviewScreen
@@ -214,9 +214,9 @@ describe("SimpleProFinalReviewScreen", () => {
     );
     const callout = screen.getByTestId("paid-pro-review-next-step-callout");
     expect(callout.textContent).toMatch(/Step 3 of 4/i);
-    expect(callout.textContent).toMatch(/not signing/i);
+    expect(callout.textContent).toMatch(/No one signs|not signing/i);
     const document = screen.getByTestId("simple-pro-final-review-document");
-    expect(callout.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(document.compareDocumentPosition(callout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     cleanup();
   });
 
@@ -243,9 +243,7 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(statusPanel.textContent).toContain("Agreement generated");
     expect(statusPanel.textContent).toContain("Signer details added");
     expect(statusPanel.textContent).toContain("Ready for signing");
-    expect(screen.getByTestId("paid-pro-final-version-indicator").textContent).toContain(
-      "Final agreement version",
-    );
+    expect(screen.getByTestId("paid-pro-final-version-indicator").textContent).toContain("Next step");
     const banner = screen.getByTestId("paid-pro-signer-saved-confirmation");
     expect(banner.textContent).toContain("Signer details saved");
     expect(banner.textContent).toContain("Blue Canyon Analytics LLC");
@@ -270,9 +268,9 @@ describe("SimpleProFinalReviewScreen", () => {
     );
     const statusPanel = screen.getByTestId("paid-pro-review-status-panel");
     expect(statusPanel.textContent).toContain("Signer details needed");
-    expect(statusPanel.textContent).toContain("final agreement draft");
-    expect(screen.getByTestId("paid-pro-final-version-indicator").textContent).toContain(
-      "Nothing is sent, signed, or shared until you confirm",
+    expect(statusPanel.textContent).toMatch(/signer name/i);
+    expect(screen.getByTestId("paid-pro-final-version-indicator").textContent).toMatch(
+      /signature links/i,
     );
     expect(screen.queryByTestId("paid-pro-signer-saved-confirmation")).toBeNull();
     cleanup();

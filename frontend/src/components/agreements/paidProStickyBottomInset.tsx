@@ -100,13 +100,21 @@ export function usePaidProStickyBottomInset(active: boolean): [number, (el: HTML
       return;
     }
 
-    const update = () => setInsetPx(measureStickyBottomInsetPx(barEl));
+    let rafId = 0;
+    const update = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        setInsetPx(measureStickyBottomInsetPx(barEl));
+      });
+    };
     update();
 
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
     ro?.observe(barEl);
-    window.addEventListener("resize", update);
+    window.addEventListener("resize", update, { passive: true });
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       ro?.disconnect();
       window.removeEventListener("resize", update);
     };

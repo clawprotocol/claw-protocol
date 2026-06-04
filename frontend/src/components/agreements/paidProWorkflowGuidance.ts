@@ -6,15 +6,15 @@ export const PAID_PRO_WORKFLOW_TOTAL_STEPS = 4;
 
 export const PAID_PRO_REVIEW_STEP_LABEL = "Step 3 of 4";
 
-export const PAID_PRO_REVIEW_STEP_HEADLINE = "Review your agreement";
+export const PAID_PRO_REVIEW_STEP_HEADLINE = "Signer details next";
 
 export const PAID_PRO_REVIEW_STEP_NEXT_PREFIX = "Next:";
 
 export const PAID_PRO_REVIEW_STEP_NEXT_SIGNER_SETUP =
-  "Add signer details so LawDog can prepare signature links. You are not signing yet — this step only collects signer information.";
+  "Add signer details to create signature links. No one signs on this step.";
 
 export const PAID_PRO_REVIEW_STEP_NEXT_SIGNATURE_PREP =
-  "Continue below to finish signer details or prepare signature links. Signing happens after you confirm and share links.";
+  "Prepare signature links when you are ready. Signing happens only after you share a link.";
 
 export const PAID_PRO_SIGNER_SETUP_ORIENTATION_HEADLINE = "Add signer details";
 
@@ -31,17 +31,31 @@ export const PAID_PRO_STICKY_CTA_DIRECTION_SUBLABEL = "Next step";
 export const PAID_PRO_STICKY_CTA_DIRECTION_ARIA =
   "Primary action continues in the sticky bar below the agreement";
 
-export function resolvePaidProReviewNextStepCopy(args: { signersReady: boolean }): {
+export function resolvePaidProReviewNextStepCopy(args: {
+  signersReady: boolean;
+  /** Compact paid review shell — skip redundant step callout. */
+  compactShell?: boolean;
+}): {
   stepLabel: string;
   headline: string;
   nextLine: string;
+  showCallout: boolean;
 } {
+  if (args.compactShell) {
+    return {
+      stepLabel: "",
+      headline: "",
+      nextLine: "",
+      showCallout: false,
+    };
+  }
   return {
     stepLabel: PAID_PRO_REVIEW_STEP_LABEL,
     headline: PAID_PRO_REVIEW_STEP_HEADLINE,
     nextLine: args.signersReady
       ? PAID_PRO_REVIEW_STEP_NEXT_SIGNATURE_PREP
       : PAID_PRO_REVIEW_STEP_NEXT_SIGNER_SETUP,
+    showCallout: true,
   };
 }
 
