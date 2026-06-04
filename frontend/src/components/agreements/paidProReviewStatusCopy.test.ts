@@ -7,7 +7,10 @@ import {
   PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS,
   resolvePaidProReviewChipState,
 } from "./authoritativePaidProReview";
-import { resolvePaidProReviewTrustSteps } from "./paidProReviewTrustUx";
+import {
+  resolvePaidProReviewSignerStatusReady,
+  resolvePaidProReviewTrustSteps,
+} from "./paidProReviewTrustUx";
 
 describe("paidProReviewStatusCopy", () => {
   it("chip state matches trust rail while signer details are still needed", () => {
@@ -34,6 +37,30 @@ describe("paidProReviewStatusCopy", () => {
     expect(
       resolvePaidProReviewChipState({ signersReady: true, signingLinksCreated: true }),
     ).toBe(PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING);
+  });
+
+  it("review signer status treats authoritative snapshot as ready for trust rail and chip", () => {
+    expect(
+      resolvePaidProReviewSignerStatusReady({
+        signerDetailsGateComplete: false,
+        hasAuthoritativeSigningSnapshot: true,
+      }),
+    ).toBe(true);
+    expect(
+      resolvePaidProReviewChipState({
+        signersReady: resolvePaidProReviewSignerStatusReady({
+          signerDetailsGateComplete: false,
+          hasAuthoritativeSigningSnapshot: true,
+        }),
+        signingLinksCreated: false,
+      }),
+    ).toBe(PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS);
+    const steps = resolvePaidProReviewTrustSteps({
+      signersReady: true,
+      signerMetadataFinalized: true,
+    });
+    expect(steps.find((s) => s.id === "signer_details")?.label).toBe("Signer details added");
+    expect(steps.find((s) => s.id === "signer_details")?.state).toBe("done");
   });
 
   it("trust steps do not show Ready for signing while signer details are still needed", () => {

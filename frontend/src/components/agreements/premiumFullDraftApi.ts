@@ -4,6 +4,10 @@ import { apiUrl } from "../../lib/clawApi";
 import { waitForBrowserOnline } from "./premiumBackendHealth";
 import { logPremiumSessionConsistency, shortIdForPremiumLog } from "./premiumSessionDiagnostics";
 import {
+  classifyPremiumNetworkFailure,
+  logPremiumNetworkClassification,
+} from "./premiumNetworkClassification";
+import {
   classifyPremiumFullDraftGenerationRetryable,
   logPremiumAirlockEmptyOutput,
   logPremiumGenerationRetryableFailure,
@@ -897,6 +901,15 @@ export async function postPremiumFullDraftWithRetry(
 
   while (networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS) {
     if (args.signal?.aborted) {
+      logPremiumNetworkClassification({
+        cause: "request_aborted_user",
+        recoverable: false,
+        sessionGenerationIdShort: shortIdForPremiumLog(agreementGenerationId),
+        intakeFingerprint: shortIntakeFingerprint(args.intakeText),
+        attemptCount: totalAttempts,
+        networkAttempt,
+        note: "caller_abort_signal_before_fetch",
+      });
       return {
         ok: false,
         failure_kind: "network",
@@ -955,6 +968,18 @@ export async function postPremiumFullDraftWithRetry(
       if (import.meta.env.MODE !== "test") {
         const requestStartedAt = readPaidProCheckoutMilestonesForWaterfall().premiumRequestStartAt;
         const requestEndedAt = Date.now();
+        logPremiumNetworkClassification({
+          cause: "retry_recovered",
+          recoverable: true,
+          sessionGenerationIdShort: shortIdForPremiumLog(agreementGenerationId),
+          intakeFingerprint: shortIntakeFingerprint(args.intakeText),
+          attemptCount: totalAttempts,
+          networkAttempt: networkAttempt + 1,
+          note:
+            networkAttempt > 0
+              ? "structural_retry_after_transient_network"
+              : "first_attempt_success",
+        });
         // eslint-disable-next-line no-console
         console.info("[premium-network-retry-success]", {
           agreementIdShort: shortIdForPremiumLog(agreementId),
@@ -997,6 +1022,18 @@ export async function postPremiumFullDraftWithRetry(
           message: msg,
         });
       }
+      const classification = classifyPremiumNetworkFailure(e);
+      logPremiumNetworkClassification({
+        cause: classification.cause,
+        recoverable:
+          classification.recoverable &&
+          networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS,
+        sessionGenerationIdShort: shortIdForPremiumLog(agreementGenerationId),
+        intakeFingerprint: shortIntakeFingerprint(args.intakeText),
+        attemptCount: totalAttempts,
+        networkAttempt,
+        note: "in_loop_network_retry",
+      });
       logPremiumNetworkError({
         agreementId,
         agreementGenerationId,

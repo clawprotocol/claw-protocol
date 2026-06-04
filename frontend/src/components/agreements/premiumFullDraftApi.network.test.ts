@@ -59,6 +59,8 @@ describe("postPremiumFullDraftWithRetry network handling", () => {
     }
     const joined = JSON.stringify(log.mock.calls);
     expect(joined).toContain("[premium-network-error]");
+    expect(joined).toContain("[premium-network-classification]");
+    expect(joined).toMatch(/"cause":"browser_fetch_failed"/);
     log.mockRestore();
   });
 });

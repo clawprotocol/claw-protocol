@@ -21,6 +21,17 @@ export const PAID_PRO_REVIEW_STATUS_HEADLINE = "Review status";
 /** Canonical status while signer metadata is incomplete (document chip + trust rail). */
 export const PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS = "Signer details needed";
 
+/**
+ * Review trust rail + status chip only — routing/CTA gates still use the live signer-details gate.
+ * After {@link hasAuthoritativeSigningSnapshot}, never show "Signer details needed" on status surfaces.
+ */
+export function resolvePaidProReviewSignerStatusReady(args: {
+  signerDetailsGateComplete: boolean;
+  hasAuthoritativeSigningSnapshot: boolean;
+}): boolean {
+  return Boolean(args.signerDetailsGateComplete || args.hasAuthoritativeSigningSnapshot);
+}
+
 export const PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS =
   "Your agreement has been generated and reviewed. The document below is the final agreement draft. Add signer information to prepare signature links.";
 

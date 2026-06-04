@@ -86,6 +86,7 @@ import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
 import type { PremiumReviewRoute } from "./premiumReviewRouteTypes";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { logPremiumCompletionDebug } from "./premiumCompletionDebugLog";
+import { logPremiumNetworkClassification } from "./premiumNetworkClassification";
 import {
   repairKnownPartyPlaceholders,
   textContainsUnresolvedIdentityPlaceholders,
@@ -1646,6 +1647,14 @@ async function runPremiumCompletionInner(
       typeof performance !== "undefined" ? performance.now() : Date.now();
     let fullResp: Awaited<ReturnType<typeof postPremiumFullDraftWithRetry>>;
     if (genCall.duplicateBlocked) {
+      logPremiumNetworkClassification({
+        cause: "duplicate_checkout_suppressed",
+        recoverable: false,
+        sessionGenerationIdShort: (input.agreementGenerationId ?? "").trim().slice(0, 8) || null,
+        intakeFingerprint,
+        duplicateCheckoutBlocked: true,
+        note: "second_checkout_orchestration_blocked",
+      });
       logPremiumCompletionDebug({
         stage: "premium_full_draft_duplicate_checkout_blocked",
         intakeLen: soT.length,

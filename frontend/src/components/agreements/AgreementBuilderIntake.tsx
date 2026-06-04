@@ -414,6 +414,7 @@ import {
   suppressPaidProFinalReviewFinalizingState,
   starterPlainLooksStaleVersusPaidAuthority,
 } from "./authoritativePaidProReview";
+import { resolvePaidProReviewSignerStatusReady } from "./paidProReviewTrustUx";
 import {
   applyPaidProReviewRenderSanitizer,
   resolvePaidProReviewRenderPlain,
@@ -14538,6 +14539,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const paidProSignerMetadataFinalized = hasAuthoritativeSigningSnapshot();
+  /** Trust rail + status chip only — finalized snapshot must not show "Signer details needed". */
+  const paidProReviewSignerStatusReady = resolvePaidProReviewSignerStatusReady({
+    signerDetailsGateComplete: paidProSignatureDetailsReady,
+    hasAuthoritativeSigningSnapshot: paidProSignerMetadataFinalized,
+  });
   const paidProSignerSetupRequiredBeforeDelivery = Boolean(
     acceptedPaidProAuthorityActive &&
       premiumPaidDocumentSurface &&
@@ -15245,9 +15251,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return {
         version: PAID_PRO_REVIEW_CHIP_VERSION,
         state: resolvePaidProReviewChipState({
-          signersReady: paidProSignatureDetailsReady,
+          signersReady: paidProReviewSignerStatusReady,
           signingLinksCreated:
-            peekPremiumRecipientsSurfaceReleased() && paidProSignatureDetailsReady,
+            peekPremiumRecipientsSurfaceReleased() && paidProReviewSignerStatusReady,
         }),
       };
     }
@@ -27279,7 +27285,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           onUseUploadedForSigning={handleUseUploadedVersionForSigning}
                                           onKeepLawDogVersion={handleKeepLawDogVersionAfterUpload}
                                           onBackToSignerDetails={handleGuidedBackToSignerDetailsFromFinalReview}
-                                          signersReady={paidProSignatureDetailsReady}
+                                          signersReady={paidProReviewSignerStatusReady}
                                           signerMetadataFinalized={paidProSignerMetadataFinalized}
                                           signerSavedMappings={paidProSignerSavedMappings}
                                           enableSectionJump={false}
