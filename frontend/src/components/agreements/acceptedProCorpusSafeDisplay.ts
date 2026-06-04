@@ -9,6 +9,10 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
+import {
+  ensurePaidProAcceptanceExecutionBlockInvariant,
+  manifestRecordsForPaidProAcceptance,
+} from "./paidProAcceptanceExecutionBlockInvariant";
 import { neutralizeHarmlessEntityMetadataPlaceholders } from "./harmlessEntityMetadataPlaceholders";
 import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolver";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
@@ -155,7 +159,20 @@ function applyAcceptedProCorpusSafeDisplayCore(
     }
   }
 
-  if (opts?.appendExecutionBlockIfMissing && records.length >= 2) {
+  const executionRecords =
+    records.length >= 2
+      ? records
+      : manifestRecordsForPaidProAcceptance({
+          draft: opts?.draft ?? null,
+          intakeText: intakeRaw,
+        });
+  if (executionRecords.length >= 2) {
+    const execInvariant = ensurePaidProAcceptanceExecutionBlockInvariant(out, executionRecords);
+    if (execInvariant.text !== out) {
+      out = execInvariant.text;
+      repairs.push(...execInvariant.repairs);
+    }
+  } else if (opts?.appendExecutionBlockIfMissing) {
     const exec = appendProExecutionBlockIfMissing(out, records);
     if (exec.text !== out) {
       out = exec.text;

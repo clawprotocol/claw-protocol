@@ -61,6 +61,11 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import {
+  ensurePaidProAcceptanceExecutionBlockInvariant,
+  manifestRecordsForPaidProAcceptance,
+} from "./paidProAcceptanceExecutionBlockInvariant";
+import { assertPaidProSingleExecutionBlock } from "./paidProExecutionBlockAuthority";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 import {
@@ -279,7 +284,17 @@ export function establishPaidProSourceOfTruth(args: {
     agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
     reason: "establish_paid_pro_source_of_truth_post_safe_display",
   });
-  const safeForCommit = postSafeGuard.text;
+  let safeForCommit = postSafeGuard.text;
+  const acceptanceManifest = manifestRecordsForPaidProAcceptance({
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+  });
+  const exec = ensurePaidProAcceptanceExecutionBlockInvariant(safeForCommit, acceptanceManifest);
+  safeForCommit = exec.text;
+  assertPaidProSingleExecutionBlock(safeForCommit, "establish_paid_pro_source_of_truth_pre_freeze");
+  const partyNameList = (args.draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((n) => n.length >= 2);
   const parties: CanonicalAgreementSnapshotParty[] = (args.draft?.parties ?? [])
     .map((p) => ({
       name: String(p?.name ?? "").trim(),
@@ -318,7 +333,6 @@ export function establishPaidProSourceOfTruth(args: {
     reason: driftGuard.blocked ? "drift_blocked_used_authoritative" : "canonical_freeze",
   });
   let acceptedCorpusText = driftGuard.displayText;
-  const partyNameList = parties.map((p) => p.name);
   if (intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList)) {
     const identityRecords = resolveCanonicalPartyIdentitiesFromIntake(args.intakeText ?? "", partyNameList);
     if (identityRecords.length >= 2) {

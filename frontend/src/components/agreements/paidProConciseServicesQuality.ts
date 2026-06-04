@@ -26,6 +26,10 @@ import {
 } from "./paidProPostAcceptanceValidatorCache";
 import { corpusHashForScanCache } from "./paidProCorpusScanCache";
 import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
+import {
+  ensurePaidProAcceptanceExecutionBlockInvariant,
+  manifestRecordsForPaidProAcceptance,
+} from "./paidProAcceptanceExecutionBlockInvariant";
 
 export type ConciseCommercialServicesFactId =
   | "party_names"
@@ -320,7 +324,7 @@ function preparePaidProServerDocumentForAcceptanceCore(
   const roleLabels = (draft?.parties ?? [])
     .map((p) => String(p?.role ?? "").trim())
     .filter((r) => r.length >= 2);
-  const records =
+  const resolved =
     partyNames.length >= 2
       ? resolveCanonicalPartyIdentitiesFromIntake(
           intakeText,
@@ -328,6 +332,10 @@ function preparePaidProServerDocumentForAcceptanceCore(
           roleLabels.length >= 2 ? roleLabels : undefined,
         )
       : [];
+  const records =
+    resolved.length >= 2
+      ? resolved
+      : manifestRecordsForPaidProAcceptance({ draft: draft ?? null, intakeText });
 
   if (records.length >= 2) {
     const roleFix = repairOpeningRecitalRoleLabelsFromManifest(out, records);
@@ -358,6 +366,14 @@ function preparePaidProServerDocumentForAcceptanceCore(
   const tailArtifacts = stripMalformedProReviewDisplayArtifacts(out);
   out = tailArtifacts.text;
   repairs.push(...tailArtifacts.repairs);
+
+  if (records.length >= 2) {
+    const execution = ensurePaidProAcceptanceExecutionBlockInvariant(out, records);
+    if (execution.text !== out) {
+      out = execution.text;
+      repairs.push(...execution.repairs);
+    }
+  }
 
   return { text: out.trim(), repairs: [...new Set(repairs)] };
 }
