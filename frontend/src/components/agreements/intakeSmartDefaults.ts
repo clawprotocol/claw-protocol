@@ -3,7 +3,8 @@ import { formatPaymentTermsLine, type IntakePaymentField } from "./intakeCurrenc
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
-import { extractBetweenPartyPair } from "./partyBetweenParse";
+import { extractBetweenPartyNameList, extractBetweenPartyPair } from "./partyBetweenParse";
+import { stripSignerInstructionClausesFromIntake } from "./intakeSignerInstructionParse";
 import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
 import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
 import {
@@ -120,7 +121,15 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
     next.jurisdiction = gl || "Delaware";
   }
 
-  if ((next.parties || []).length < 2) {
+  const betweenLegalEntities = extractBetweenPartyNameList(
+    stripSignerInstructionClausesFromIntake(intakeText),
+  );
+  if (betweenLegalEntities.length >= 2) {
+    next.parties = betweenLegalEntities.slice(0, 12).map((name, index) => ({
+      name: name.slice(0, MAX_PARTY_NAME_LEN),
+      role: next.parties?.[index]?.role || "party",
+    }));
+  } else if ((next.parties || []).length < 2) {
     const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
     if (explicitSigners && explicitSigners.length >= 2) {
       next.parties = explicitSigners;

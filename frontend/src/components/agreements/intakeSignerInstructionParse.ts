@@ -27,11 +27,37 @@ const STRAY_FOR_ENTITY_ONLY_RE =
 const INLINE_FOR_ENTITY_IS_SIGNER_RE =
   /\bfor\s+((?:[A-Za-z0-9][A-Za-z0-9\s&'.-]*?)(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?)\s+is\s+[A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+)*/gi;
 
+/** Provider-scope sentence built from a contaminated party label. */
+const ENTITY_WILL_PROVIDE_RE =
+  /\b(for\s+)?((?:[A-Za-z0-9][A-Za-z0-9\s&'.-]*?)(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?)\s+is\s+[A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+)*\s+will\s+(?:provide|perform|deliver)/gi;
+
 /** Remove signer instruction sentences before party-list / between-clause parsing. */
 export function stripSignerInstructionClausesFromIntake(raw: string): string {
   let text = (raw || "").replace(/\r\n/g, "\n");
   text = text.replace(SIGNER_FOR_ENTITY_IS_CLAUSE_RE, " ");
   return text.replace(/\s+/g, " ").trim();
+}
+
+/** Strip signer-instruction or purpose tails from a single party fragment. */
+export function sanitizePartyLegalNameFromIntakeFragment(raw: string): string {
+  let s = (raw || "").replace(/\s+/g, " ").trim();
+  if (!s) return s;
+  if (/^\s*for\s+/i.test(s)) {
+    s = s.replace(/^\s*for\s+/i, "").trim();
+  }
+  const entityBeforeIs = s.match(
+    /^((?:[A-Za-z0-9][A-Za-z0-9\s&'.-]*?)(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?)\s+is\s+[A-Z]/i,
+  );
+  if (entityBeforeIs?.[1]) {
+    return entityBeforeIs[1].replace(/\s+/g, " ").trim();
+  }
+  const purposeTail = s.match(
+    /^((?:[A-Za-z0-9][A-Za-z0-9\s&'.-]*?)(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?)(?:\s+for\s+(?!Signer\b)[\s\S]+)?$/i,
+  );
+  if (purposeTail?.[1]) {
+    return purposeTail[1].replace(/\s+/g, " ").trim();
+  }
+  return s.replace(/\s+is\s+[A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+)+.*$/i, "").trim();
 }
 
 export function isContaminatedPartyLegalNameFromSignerInstruction(name: string): boolean {
@@ -94,6 +120,7 @@ export function stripSignerInstructionContaminationFromCorpus(corpus: string): {
 
   apply(BETWEEN_FOR_ENTITY_IS_SIGNER_RE, "between $1");
   apply(INLINE_FOR_ENTITY_IS_SIGNER_RE, "$1");
+  apply(ENTITY_WILL_PROVIDE_RE, (_m, _forPrefix, entity) => `${entity.trim()} will provide`);
   apply(STRAY_FOR_ENTITY_ONLY_RE, "\n");
 
   return { text: text.replace(/\n{3,}/g, "\n\n").trim(), repairs };

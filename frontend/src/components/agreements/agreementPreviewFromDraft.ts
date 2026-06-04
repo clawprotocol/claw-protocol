@@ -24,6 +24,10 @@ import {
   partyNameLooksLikeRawPrompt,
   tryExtractPartyPairFromPromptBlob,
 } from "./agreementPreviewPartyLine";
+import {
+  sanitizePartyLegalNameFromIntakeFragment,
+  stripSignerInstructionClausesFromIntake,
+} from "./intakeSignerInstructionParse";
 import { formatLegalPartyPreamble, type PartyEntry } from "./formatLegalPartyList";
 import { formatPaymentTermsLine } from "./intakeCurrencyParse";
 import { normalizePaymentTermsForDisplay, normalizeStarterPaymentTermsForDisplay } from "./paymentTermsDisplay";
@@ -293,7 +297,7 @@ function looksLikePaymentOnlyScope(text: string): boolean {
 }
 
 function extractServiceDescriptionFromIntake(intakeText: string | null | undefined): string {
-  const intake = (intakeText || "").replace(/\s+/g, " ").trim();
+  const intake = stripSignerInstructionClausesFromIntake(intakeText || "");
   if (!intake) return "";
   const betweenMatch = intake.match(/\bbetween\b[\s\S]{0,220}?\bfor\s+([^.!?;]+)(?:[.!?;]|$)/i);
   const candidate = (betweenMatch?.[1] || "").trim();
@@ -319,8 +323,8 @@ function buildStarterServicesScopeFromIntake(
 ): string {
   if (!isServicesAgreementLikeDraft(draft, intakeText)) return "";
   const parties = draft.parties ?? [];
-  const client = (parties[0]?.name || "").trim();
-  const provider = (parties[1]?.name || "").trim();
+  const client = sanitizePartyLegalNameFromIntakeFragment((parties[0]?.name || "").trim());
+  const provider = sanitizePartyLegalNameFromIntakeFragment((parties[1]?.name || "").trim());
   const serviceDescription = extractServiceDescriptionFromIntake(intakeText);
   if (!client || !provider || !serviceDescription) return "";
   return `${provider} will provide ${serviceDescription} services for ${client}.`;

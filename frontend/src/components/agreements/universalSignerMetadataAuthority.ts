@@ -22,7 +22,10 @@ import {
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
-import { matchSignerForEntityIsClauses } from "./intakeSignerInstructionParse";
+import {
+  matchSignerForEntityIsClauses,
+  sanitizePartyLegalNameFromIntakeFragment,
+} from "./intakeSignerInstructionParse";
 
 export type SignerMetadataAuthoritySource =
   | "user_edited_ui"
@@ -436,7 +439,9 @@ function mergeCandidatesByEntity(
 export function resolveUniversalSignerMetadataBySlot(
   sources: UniversalSignerMetadataSources,
 ): ResolvedEntitySignerMetadata[] {
-  const legalEntities = sources.legalEntities.map((e) => e.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const legalEntities = sources.legalEntities
+    .map((e) => sanitizePartyLegalNameFromIntakeFragment(e.replace(/\s+/g, " ").trim()))
+    .filter(Boolean);
   const partyCount = Math.max(legalEntities.length, sources.draftParties?.length ?? 0, 2);
   const handoff = sources.handoff ?? readPremiumRecipientHandoff();
   const snapshotMeta =
@@ -469,6 +474,7 @@ export function resolveUniversalSignerMetadataBySlot(
 
   const byEntity = mergeCandidatesByEntity(allCandidates);
   const indexOnly = intakeExtract.candidates.filter((c) => !c.entity && c.signerName);
+  const intakeRowsOrdered = matchSignerForEntityIsClauses(sources.intakeText);
 
   const resolved: ResolvedEntitySignerMetadata[] = [];
   for (let i = 0; i < partyCount; i++) {
@@ -478,6 +484,26 @@ export function resolveUniversalSignerMetadataBySlot(
       if (entity && m.entity && entitiesMatchForSignerMetadata(entity, m.entity)) {
         hit = m;
         break;
+      }
+    }
+    if ((!hit?.signerName || !hit?.signerTitle) && intakeRowsOrdered[i]) {
+      const row = intakeRowsOrdered[i]!;
+      const rowName = cleanSignerField(row.signerName, "signerName");
+      const rowTitle = cleanSignerField(row.signerTitle, "signerTitle");
+      if (rowName || rowTitle) {
+        const entityOk =
+          !entity ||
+          !row.entity ||
+          entitiesMatchForSignerMetadata(entity, sanitizePartyLegalNameFromIntakeFragment(row.entity));
+        if (entityOk) {
+          hit = {
+            entity,
+            signerName: rowName || hit?.signerName || "",
+            signerTitle: rowTitle || hit?.signerTitle || "",
+            source: "intake_natural_language",
+            authorityRank: SIGNER_METADATA_AUTHORITY_RANK.intake_natural_language,
+          };
+        }
       }
     }
     if (!hit && indexOnly[i]) {

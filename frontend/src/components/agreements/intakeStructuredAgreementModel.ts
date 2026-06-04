@@ -12,7 +12,10 @@ import {
 } from "./intakeCurrencyParse";
 import { formatPartiesJoinedLine, formatPartySegmentForPreview } from "./partyFormat";
 import { normalizePartyNameFragment, splitTwoPartiesFromJoinedLine, type StructuredTwoParties } from "./partyIntakeNormalize";
-import { stripSignerInstructionClausesFromIntake } from "./intakeSignerInstructionParse";
+import {
+  sanitizePartyLegalNameFromIntakeFragment,
+  stripSignerInstructionClausesFromIntake,
+} from "./intakeSignerInstructionParse";
 import { preCleanBetweenTailForMultiPartySplit, stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 
 export type IntakeStructuredAgreement = {
@@ -170,7 +173,7 @@ function clampPartySegment(raw: string): string {
  * separately via {@link IntakeStructuredAgreement.partyRoleHints}.
  */
 function clampPartySegmentWithRole(raw: string): { name: string; role: string | null } {
-  const noEntityFor = stripCompanyForSuffix(raw);
+  const noEntityFor = stripCompanyForSuffix(sanitizePartyLegalNameFromIntakeFragment(raw));
   const noPurposeFor = stripTrailingForPurpose(noEntityFor);
   const { name: noRole, role } = stripPartyRoleAnnotations(noPurposeFor);
   const formatted = formatPartySegmentForPreview(normalizePartyNameFragment(noRole));
@@ -1003,7 +1006,7 @@ export function extractScheduleLine(lower: string, text: string): string | null 
  * (never stuff a paragraph into `parties`).
  */
 export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredAgreement {
-  const text = raw.trim();
+  const text = stripSignerInstructionClausesFromIntake(raw.trim());
   if (!text) {
     return {
       parties: [],

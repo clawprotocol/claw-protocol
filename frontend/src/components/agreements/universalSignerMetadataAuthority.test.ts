@@ -13,7 +13,12 @@ import {
   clearAuthoritativeSigningSnapshot,
   createAuthoritativeSigningSnapshot,
 } from "./authoritativeSigningSnapshot";
-import { persistPremiumRecipientHandoff } from "./premiumPartyNamesHandoff";
+import {
+  linearPremiumRecipientSlots,
+  persistPremiumRecipientHandoff,
+  readPremiumRecipientHandoff,
+} from "./premiumPartyNamesHandoff";
+import { BLUE_CANYON_QA_HOME_PROMPT } from "./intakeSignerInstructionParse";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const IRON = "Iron Vale Systems Inc";
@@ -209,6 +214,24 @@ describe("universalSignerMetadataAuthority", () => {
     ]);
     expect(merged.parties![0].signerName).toBe("Existing A");
     expect(merged.parties![1].signerName).toBe("New B");
+  });
+
+  it("runPaidProSignerMetadataAuthoritySeed writes both signers to review-link handoff (Blue Canyon QA)", () => {
+    const seed = runPaidProSignerMetadataAuthoritySeed({
+      stage: "qa_home_prompt",
+      legalEntities: [BLUE, `${IRON}.`],
+      intakeText: BLUE_CANYON_QA_HOME_PROMPT,
+      uiSignerNames: ["", ""],
+      uiSignerTitles: ["", ""],
+    });
+    expect(seed.names[0]).toBe("Sarah Mitchell");
+    expect(seed.names[1]).toBe("Michael Torres");
+    expect(seed.titles[0]).toBe("CEO");
+    expect(seed.titles[1]).toBe("President");
+    const ho = readPremiumRecipientHandoff();
+    const slots = linearPremiumRecipientSlots(ho, 2);
+    expect(slots.filter((s) => (s.signerName || "").trim()).length).toBe(2);
+    expect(slots.filter((s) => (s.signerTitle || "").trim()).length).toBe(2);
   });
 
   it("runPaidProSignerMetadataAuthoritySeed fills empty UI from intake", () => {

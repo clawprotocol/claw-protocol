@@ -3,7 +3,10 @@
  * Preserves full entity phrases (LLC, Inc., multi-word names); does not split on internal "and".
  */
 
-import { stripSignerInstructionClausesFromIntake } from "./intakeSignerInstructionParse";
+import {
+  sanitizePartyLegalNameFromIntakeFragment,
+  stripSignerInstructionClausesFromIntake,
+} from "./intakeSignerInstructionParse";
 import { normalizePartyNameFragment } from "./partyIntakeNormalize";
 import { truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 
@@ -28,7 +31,8 @@ const SENTENCE_BOUNDARY_FIELD_STOP =
 
 function trimBetweenPartyFragment(s: string): string {
   // Strip list punctuation only — preserve "Inc." / "Corp." terminal periods.
-  return normalizePartyNameFragment(s.replace(/[,;:]+$/g, "").trim());
+  const cleaned = sanitizePartyLegalNameFromIntakeFragment(s.replace(/[,;:]+$/g, "").trim());
+  return normalizePartyNameFragment(cleaned);
 }
 
 function sliceBetweenPartyClauseTail(raw: string): string | null {

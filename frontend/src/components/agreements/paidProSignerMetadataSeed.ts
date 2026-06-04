@@ -4,6 +4,8 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PremiumRecipientHandoffV2 } from "./premiumPartyNamesHandoff";
+import { logPaidProSignerMetadataPipelineDiagnostics } from "./paidProSignerMetadataPipelineDiagnostics";
+import { writePremiumRecipientHandoffSignerMetadata } from "./premiumPartyNamesHandoff";
 import {
   detectAndLogSignerMetadataLoss,
   hydrateSignerMetadataArraysNonDestructive,
@@ -64,6 +66,25 @@ export function runPaidProSignerMetadataAuthoritySeed(
     draftChanged = merged !== draft;
     draft = merged as ParsedDraftShape;
   }
+
+  const hasSignerSignal = resolved.some((r) => r.signerName.trim() || r.signerTitle.trim());
+  if (hasSignerSignal) {
+    writePremiumRecipientHandoffSignerMetadata({
+      signerNames: hydrated.names,
+      signerTitles: hydrated.titles,
+      partyLegalNames: args.legalEntities,
+    });
+  }
+
+  logPaidProSignerMetadataPipelineDiagnostics({
+    stage: args.stage,
+    intakeRaw: args.intakeText,
+    legalEntities: args.legalEntities,
+    draftParties: draft?.parties ?? undefined,
+    uiSignerNames: hydrated.names,
+    uiSignerTitles: hydrated.titles,
+    executionBlockSignerSource: hasSignerSignal ? "universal_signer_metadata_authority" : null,
+  });
 
   return {
     names: hydrated.names,

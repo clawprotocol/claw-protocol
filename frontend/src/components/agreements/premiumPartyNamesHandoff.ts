@@ -400,6 +400,34 @@ export function writePremiumRecipientHandoffLinear(slots: PremiumRecipientHandof
   writePremiumRecipientHandoffExact(party1, party2, partyIndexSlots);
 }
 
+/** Force signer metadata onto session handoff (review-link payload) without dropping legal names/emails. */
+export function writePremiumRecipientHandoffSignerMetadata(args: {
+  signerNames: readonly string[];
+  signerTitles: readonly string[];
+  partyLegalNames?: readonly string[];
+  partyEmails?: readonly string[];
+}): void {
+  const cur = readPremiumRecipientHandoff();
+  const base1 = cur?.party1 ?? emptySlot();
+  const base2 = cur?.party2 ?? emptySlot();
+  const legal = args.partyLegalNames ?? [];
+  const emails = args.partyEmails ?? [];
+  const party1 = mergeSlot(base1, {
+    name: legal[0]?.trim() || base1.name,
+    email: emails[0]?.trim() || base1.email,
+    signerName: args.signerNames[0] ?? "",
+    signerTitle: args.signerTitles[0] ?? "",
+  });
+  const party2 = mergeSlot(base2, {
+    name: legal[1]?.trim() || base2.name,
+    email: emails[1]?.trim() || base2.email,
+    signerName: args.signerNames[1] ?? "",
+    signerTitle: args.signerTitles[1] ?? "",
+  });
+  if (!party1.name && !party2.name && !party1.signerName && !party2.signerName) return;
+  writePremiumRecipientHandoffExact(party1, party2, cur?.partyIndexSlots);
+}
+
 /** Build `partyIndexSlots` for indices ≥2 from authoritative parties + optional checkout candidates. */
 export function buildPartyIndexSlotsFromPartiesAndCandidates(
   parties: readonly {

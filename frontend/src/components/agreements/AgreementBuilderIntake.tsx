@@ -275,6 +275,7 @@ import {
   premiumHandoffSlotFromParty,
   writePremiumRecipientHandoffExact,
   writePremiumRecipientHandoffLinear,
+  writePremiumRecipientHandoffSignerMetadata,
   MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
   type PremiumRecipientHandoffSlot,
 } from "./premiumPartyNamesHandoff";
@@ -12869,6 +12870,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return next;
         });
       }
+      if (seed.names.some((n) => n.trim()) || seed.titles.some((t) => t.trim())) {
+        writePremiumRecipientHandoffSignerMetadata({
+          signerNames: seed.names,
+          signerTitles: seed.titles,
+          partyLegalNames: legalEntities,
+          partyEmails: [
+            String(p0?.email ?? "").trim(),
+            String(p1?.email ?? "").trim(),
+            ...extraPartyReviewEmails.slice(0, Math.max(0, cap - 2)),
+          ],
+        });
+      }
     }
     setRecipientSignerLabels((prev) =>
       pickRecipientSignerLabelsForHandoff(prev, n1, n2, {
@@ -12876,7 +12889,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         role2: draft.parties?.[1]?.role,
       }),
     );
-  }, [createProductionTwoPane, draftPartiesPrefillKey, draft]);
+  }, [createProductionTwoPane, draftPartiesPrefillKey, draft, intakeCombined]);
 
   useEffect(() => {
     reviewAgreementIdRef.current = reviewAgreementId;
