@@ -729,6 +729,7 @@ import {
   setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
+import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
 import {
   partyAddressForSignerMetadataStaging,
   shouldDeferPaidProReviewRenderSignerRepair,
@@ -3578,8 +3579,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setExtraPartyReviewEmails([]);
     }
     if (partiesLen > 0) {
-      setPartySignerNames(slots.slice(0, partiesLen).map((s) => String(s.signerName ?? "").trim()));
-      setPartySignerTitles(slots.slice(0, partiesLen).map((s) => String(s.signerTitle ?? "").trim()));
+      const seed = runPaidProSignerMetadataAuthoritySeed({
+        stage: "premium_send_confirm_handoff",
+        legalEntities: slotIdentities.map((s) => s.legalEntityName),
+        intakeText,
+        corpusText: agreementBodyText,
+        draft: draftSnapshotRef.current,
+        handoff: ho,
+        uiSignerNames: partySignerNamesRef.current,
+        uiSignerTitles: partySignerTitlesRef.current,
+      });
+      setPartySignerNames(seed.names);
+      setPartySignerTitles(seed.titles);
       setPartyAddresses(slots.slice(0, partiesLen).map((s) => String(s.partyAddress ?? "").trim()));
     }
   }, [premiumSendConfirmOpen]);
@@ -3628,8 +3639,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setExtraPartyReviewEmails([]);
     }
     if (partiesLen > 0) {
-      setPartySignerNames(slots.slice(0, partiesLen).map((s) => String(s.signerName ?? "").trim()));
-      setPartySignerTitles(slots.slice(0, partiesLen).map((s) => String(s.signerTitle ?? "").trim()));
+      const seed = runPaidProSignerMetadataAuthoritySeed({
+        stage: "recipients_stage_handoff",
+        legalEntities: slotIdentities.map((s) => s.legalEntityName),
+        intakeText,
+        corpusText: agreementBodyText,
+        draft: draftSnapshotRef.current,
+        handoff: ho,
+        uiSignerNames: partySignerNamesRef.current,
+        uiSignerTitles: partySignerTitlesRef.current,
+      });
+      setPartySignerNames(seed.names);
+      setPartySignerTitles(seed.titles);
       setPartyAddresses(slots.slice(0, partiesLen).map((s) => String(s.partyAddress ?? "").trim()));
     }
   }, [
@@ -4777,6 +4798,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateFlowPhase("capturing_input");
       setCreateUiStage(CreateUiStage.DRAFT);
       return;
+    }
+    const proReviewSeedEligible =
+      opts?.forceReviewDisplay === true ||
+      premiumPersistedFlowActive ||
+      premiumSendPathUnlocked ||
+      hasPaidPremiumCompletionSession() ||
+      hasPaidProSourceOfTruth();
+    if (proReviewSeedEligible && (nextDraft.parties?.length ?? 0) >= 2) {
+      const legalEntities = (nextDraft.parties ?? [])
+        .map((p) => String((p as { name?: string }).name ?? "").trim())
+        .filter(Boolean);
+      if (legalEntities.length >= 2) {
+        const seed = runPaidProSignerMetadataAuthoritySeed({
+          stage: "commit_parsed_draft_review",
+          legalEntities,
+          intakeText: intakeCombinedRef.current || intakeCombined,
+          corpusText: getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "",
+          draft: nextDraft,
+          uiSignerNames: partySignerNamesRef.current,
+          uiSignerTitles: partySignerTitlesRef.current,
+        });
+        if (seed.draftChanged && seed.draft) nextDraft = seed.draft;
+        if (seed.uiChanged) {
+          setPartySignerNames(seed.names);
+          setPartySignerTitles(seed.titles);
+        }
+      }
     }
     setDraft(nextDraft);
     setFollowUpDetailTotal(0);
@@ -12765,26 +12813,44 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const parties = draft.parties ?? [];
     const cap = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
     if (cap > 0) {
-      setPartySignerNames((prev) => {
-        const next = prev.slice(0, cap);
-        while (next.length < cap) {
-          const i = next.length;
-          const fromDraft = String((parties[i] as { signerName?: string })?.signerName ?? "").trim();
-          const cur = (next[i] ?? "").trim();
-          next.push(cur || fromDraft);
-        }
-        return next;
+      const legalEntities = parties
+        .slice(0, cap)
+        .map((p) => String((p as { name?: string }).name ?? "").trim())
+        .filter(Boolean);
+      const seed = runPaidProSignerMetadataAuthoritySeed({
+        stage: "draft_parties_prefill",
+        legalEntities,
+        intakeText: intakeCombinedRef.current || intakeCombined,
+        corpusText: getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "",
+        draft,
+        uiSignerNames: partySignerNames,
+        uiSignerTitles: partySignerTitles,
       });
-      setPartySignerTitles((prev) => {
-        const next = prev.slice(0, cap);
-        while (next.length < cap) {
-          const i = next.length;
-          const fromDraft = String((parties[i] as { signerTitle?: string })?.signerTitle ?? "").trim();
-          const cur = (next[i] ?? "").trim();
-          next.push(cur || fromDraft);
-        }
-        return next;
-      });
+      if (seed.uiChanged) {
+        setPartySignerNames(seed.names);
+        setPartySignerTitles(seed.titles);
+      } else {
+        setPartySignerNames((prev) => {
+          const next = prev.slice(0, cap);
+          while (next.length < cap) {
+            const i = next.length;
+            const fromDraft = String((parties[i] as { signerName?: string })?.signerName ?? "").trim();
+            const cur = (next[i] ?? "").trim();
+            next.push(cur || fromDraft);
+          }
+          return next;
+        });
+        setPartySignerTitles((prev) => {
+          const next = prev.slice(0, cap);
+          while (next.length < cap) {
+            const i = next.length;
+            const fromDraft = String((parties[i] as { signerTitle?: string })?.signerTitle ?? "").trim();
+            const cur = (next[i] ?? "").trim();
+            next.push(cur || fromDraft);
+          }
+          return next;
+        });
+      }
     }
     setRecipientSignerLabels((prev) =>
       pickRecipientSignerLabelsForHandoff(prev, n1, n2, {

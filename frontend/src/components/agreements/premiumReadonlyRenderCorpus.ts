@@ -26,9 +26,8 @@ import {
   PREMIUM_GENERATION_DRAFT_API_PATH,
 } from "./premiumGenerationApiAvailability";
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
-import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
+import { getPaidProSourceOfTruth, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
-import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import {
   enforceAuthoritativeProCorpusDisplay,
   logProCorpusSourceMap,
@@ -264,10 +263,11 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   /** Sticky accepted corpus — never downgrade below this when still valid. */
   stickyAuthoritativePlainText?: string | null;
 }): PremiumPaidReadonlyPickResult {
-  const canonical = readCanonicalAgreementCorpusForSurface("readonly", { tier: "pro" });
-  if (canonical) {
-    const display = canonical.canonicalText;
-    const nonThin = display.length >= 1200 || premiumReadonlyCorpusSignalHits(display) >= 3;
+  const paidProRecord = getPaidProSourceOfTruth();
+  if (paidProRecord) {
+    const display = paidProRecord.text.trim();
+    const nonThin =
+      display.length >= 1200 || premiumReadonlyCorpusSignalHits(display) >= 3;
     return {
       plainText: display,
       sourceUsed: "server_full_document_text",
@@ -286,14 +286,10 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       },
     };
   }
-  const paidPro = getPaidProDocumentForSurface("display", {
-    draft: args.draft,
-    intakeText: args.intakeText,
-  });
-  if (paidPro) {
-    const display = paidPro.text;
-    const nonThin =
-      display.length >= 1200 || premiumReadonlyCorpusSignalHits(display) >= 3;
+  const canonical = readCanonicalAgreementCorpusForSurface("readonly", { tier: "pro" });
+  if (canonical) {
+    const display = canonical.canonicalText;
+    const nonThin = display.length >= 1200 || premiumReadonlyCorpusSignalHits(display) >= 3;
     return {
       plainText: display,
       sourceUsed: "server_full_document_text",

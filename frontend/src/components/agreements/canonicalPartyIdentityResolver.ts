@@ -17,6 +17,7 @@ import {
 import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import type { CanonicalPartyIdentity as SignerCanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 
 export const PARTY_ENTITY_SUFFIX_RE =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company|Foundation|Trust)\.?$/i;
@@ -325,15 +326,22 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
           !isInvalidCanonicalPartyName(n, trustedPartyTokensEarly),
       );
     if (manifestNames.length >= 2) {
+      const signerBySlot = resolveUniversalSignerMetadataBySlot({
+        legalEntities: manifestNames,
+        intakeText: args.rawIntake,
+        corpusText: args.generatedBody,
+        draftParties: args.starterNames?.map((name) => ({ name })),
+      });
       return manifestNames.slice(0, 12).map((fullLegalName, index) => {
         const full = cleanManifestLegalName(fullLegalName);
         const displayAlias = definedShortNameFromLegalEntity(full);
+        const signer = signerBySlot[index];
         return {
           fullLegalName: full,
           roleLabel: roleLabelForIndex(index, roleLabelsIn[index]),
           displayAlias: displayAlias === full ? full.split(/\s+/).slice(0, 2).join(" ") : displayAlias,
-          signerName: null,
-          signerTitle: null,
+          signerName: signer?.signerName?.trim() || null,
+          signerTitle: signer?.signerTitle?.trim() || null,
           partyAddress: null,
         };
       });
@@ -382,6 +390,12 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     affiliates: fullNames.slice(2),
   });
 
+  const signerBySlot = resolveUniversalSignerMetadataBySlot({
+    legalEntities: fullNames,
+    intakeText: args.rawIntake,
+    corpusText: args.generatedBody,
+    draftParties: args.starterNames?.map((name) => ({ name })),
+  });
   return fullNames.slice(0, 12).map((fullLegalName, index) => {
     const full = fullLegalName.replace(/\s+/g, " ").trim();
     const displayAlias = definedShortNameFromLegalEntity(full);
@@ -391,12 +405,13 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
       source: args.source || "intake",
       surface: args.surface || "canonicalPartyIdentityResolver",
     });
+    const signer = signerBySlot[index];
     return {
       fullLegalName: full,
       roleLabel: roleLabelForIndex(index, args.roleLabels?.[index]),
       displayAlias: displayAlias === full ? full.split(/\s+/).slice(0, 2).join(" ") : displayAlias,
-      signerName: null,
-      signerTitle: null,
+      signerName: signer?.signerName?.trim() || null,
+      signerTitle: signer?.signerTitle?.trim() || null,
       partyAddress: null,
     };
   });

@@ -11,6 +11,7 @@ import {
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
+  isGenericPaidProAcceptanceManifestFallback,
   manifestRecordsForPaidProAcceptance,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { neutralizeHarmlessEntityMetadataPlaceholders } from "./harmlessEntityMetadataPlaceholders";
@@ -166,7 +167,10 @@ function applyAcceptedProCorpusSafeDisplayCore(
           draft: opts?.draft ?? null,
           intakeText: intakeRaw,
         });
-  if (executionRecords.length >= 2) {
+  if (
+    executionRecords.length >= 2 &&
+    !isGenericPaidProAcceptanceManifestFallback(executionRecords)
+  ) {
     const execInvariant = ensurePaidProAcceptanceExecutionBlockInvariant(out, executionRecords);
     if (execInvariant.text !== out) {
       out = execInvariant.text;
@@ -227,10 +231,11 @@ function applyAcceptedProCorpusSafeDisplayCore(
     repairs.push("safe:reconcile_execution_block_roles");
   }
 
-  if (
-    (hasAuthoritativeParties && records.length >= 2) ||
-    /\bIN WITNESS WHEREOF\b/i.test(out)
-  ) {
+  const mayNormalizeExecutionBlock =
+    /\bIN WITNESS WHEREOF\b/i.test(out) ||
+    (executionRecords.length >= 2 &&
+      !isGenericPaidProAcceptanceManifestFallback(executionRecords));
+  if (mayNormalizeExecutionBlock) {
     const execution = enforcePaidProSingleExecutionBlock(out);
     if (execution.text !== out) {
       out = execution.text;

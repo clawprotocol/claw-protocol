@@ -94,6 +94,11 @@ export function manifestRecordsForPaidProAcceptance(args: {
       partyAddress: null,
     }));
   }
+  return genericPaidProAcceptanceManifestFallback();
+}
+
+/** Placeholder manifest used when no draft/intake party context exists — must not drive SoT synthesis. */
+export function genericPaidProAcceptanceManifestFallback(): CanonicalPartyIdentityRecord[] {
   return [
     {
       fullLegalName: "Party 1",
@@ -112,6 +117,16 @@ export function manifestRecordsForPaidProAcceptance(args: {
       partyAddress: null,
     },
   ];
+}
+
+export function isGenericPaidProAcceptanceManifestFallback(
+  records: readonly CanonicalPartyIdentityRecord[],
+): boolean {
+  if (records.length !== 2) return false;
+  return (
+    records[0]?.fullLegalName.trim() === "Party 1" &&
+    records[1]?.fullLegalName.trim() === "Party 2"
+  );
 }
 
 export function buildCanonicalExecutionTailFromManifest(

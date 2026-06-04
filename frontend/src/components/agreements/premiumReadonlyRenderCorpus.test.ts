@@ -297,6 +297,28 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
   });
 });
 
+describe("pickPremiumPaidReadonlyPlainText SoT byte stability with signer metadata", () => {
+  afterEach(() => clearPaidProSourceOfTruth());
+
+  it("readonly pick stays byte-identical when intake implies signers but SoT body has no execution block", () => {
+    const source = "Accepted paid Pro agreement body. ".repeat(180);
+    establishPaidProSourceOfTruth({ text: source });
+    const draft = richConsultingDraft();
+    (draft.parties[0] as { signerName?: string }).signerName = "Alice Signer";
+    (draft.parties[1] as { signerName?: string }).signerName = "Bob Signer";
+    const out = pickPremiumPaidReadonlyPlainText({
+      premiumReadonlySnapshotText: "",
+      draft,
+      agreementDocumentText: "",
+      premiumCheckoutCompleted: true,
+      intakeText:
+        "Signer for Acme LLC is Alice Signer, CEO. Jim Summit, President, will sign for Beta LLC.",
+    });
+    expect(out.plainText).toBe(source.trim());
+    expect(out.plainText).not.toMatch(/IN WITNESS WHEREOF/i);
+  });
+});
+
 describe("paid Pro displayed surface resolves to the SoT body, not decorative chrome", () => {
   afterEach(() => clearPaidProSourceOfTruth());
 

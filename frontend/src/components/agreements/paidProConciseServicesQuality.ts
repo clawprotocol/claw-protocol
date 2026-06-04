@@ -28,6 +28,7 @@ import { corpusHashForScanCache } from "./paidProCorpusScanCache";
 import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
+  isGenericPaidProAcceptanceManifestFallback,
   manifestRecordsForPaidProAcceptance,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 
@@ -367,7 +368,7 @@ function preparePaidProServerDocumentForAcceptanceCore(
   out = tailArtifacts.text;
   repairs.push(...tailArtifacts.repairs);
 
-  if (records.length >= 2) {
+  if (records.length >= 2 && !isGenericPaidProAcceptanceManifestFallback(records)) {
     const execution = ensurePaidProAcceptanceExecutionBlockInvariant(out, records);
     if (execution.text !== out) {
       out = execution.text;

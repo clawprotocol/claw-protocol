@@ -64,6 +64,7 @@ import {
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
+  isGenericPaidProAcceptanceManifestFallback,
   manifestRecordsForPaidProAcceptance,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { assertPaidProSingleExecutionBlock } from "./paidProExecutionBlockAuthority";
@@ -290,9 +291,14 @@ export function establishPaidProSourceOfTruth(args: {
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
   });
-  const exec = ensurePaidProAcceptanceExecutionBlockInvariant(safeForCommit, acceptanceManifest);
-  safeForCommit = exec.text;
-  assertPaidProSingleExecutionBlock(safeForCommit, "establish_paid_pro_source_of_truth_pre_freeze");
+  const skipAcceptanceExecutionSynthesis = isGenericPaidProAcceptanceManifestFallback(
+    acceptanceManifest,
+  );
+  if (!skipAcceptanceExecutionSynthesis) {
+    const exec = ensurePaidProAcceptanceExecutionBlockInvariant(safeForCommit, acceptanceManifest);
+    safeForCommit = exec.text;
+    assertPaidProSingleExecutionBlock(safeForCommit, "establish_paid_pro_source_of_truth_pre_freeze");
+  }
   const partyNameList = (args.draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
     .filter((n) => n.length >= 2);
@@ -580,10 +586,13 @@ export function getPaidProDocumentForSurface(
     reason: `surface:${surface}`,
   });
   const executionBlockAppended = false;
-  if (
+  if (surface === "display") {
+    text = source.text;
+    hash = source.hash;
+    corpusSource = "paidProSourceOfTruth";
+  } else if (
     surface === "review" ||
     surface === "copy" ||
-    surface === "display" ||
     surface === "signer_setup" ||
     surface === "vs01" ||
     surface === "finalized"
