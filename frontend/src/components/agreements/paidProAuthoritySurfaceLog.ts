@@ -26,8 +26,14 @@ function runtimePerfTrace(): boolean {
 
 export function shouldLogPaidProAuthoritySurfaceEvent(
   event: PaidProAuthoritySurfaceLogEvent,
-  opts?: { dev?: boolean; test?: boolean },
+  opts?: { dev?: boolean; test?: boolean; force?: boolean },
 ): boolean {
+  if (opts?.force) {
+    const key = paidProAuthoritySurfaceLogKey(event);
+    if (loggedAuthoritySurfaceEvents.has(key)) return false;
+    loggedAuthoritySurfaceEvents.add(key);
+    return true;
+  }
   const dev = opts?.dev ?? runtimeDev();
   const test = opts?.test ?? runtimeTest();
   if (test || (!dev && !runtimePerfTrace())) return false;

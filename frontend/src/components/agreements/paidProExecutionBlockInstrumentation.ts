@@ -22,7 +22,19 @@ import {
   resolvePaidProFrozenAuthoritativePlain,
   shouldSkipPostFreezeDriftForReadonlyHtmlStrip,
   type PaidProPostFreezeMutationSource,
+  type PostFreezeCorpusMutationClass,
 } from "./paidProPostFreezeCorpusInvariant";
+
+let instrumentationLogForceForTests = false;
+
+/** Enables authority-surface console instrumentation under Vitest (dedupe still applies). */
+export function setPaidProInstrumentationLogForceForTests(on: boolean): void {
+  instrumentationLogForceForTests = on;
+}
+
+function shouldEmitAuthorityLog(event: Parameters<typeof shouldLogPaidProAuthoritySurfaceEvent>[0]): boolean {
+  return shouldLogPaidProAuthoritySurfaceEvent(event, { force: instrumentationLogForceForTests || undefined });
+}
 
 function normalizeNewlines(text: string): string {
   return (text || "").replace(/\r\n/g, "\n");
@@ -95,7 +107,7 @@ export function logExecutionBlockLocation(text: string, surface: string): void {
   const corpusHash = payload.hash ?? "";
   if (!corpusHash) return;
   if (
-    !shouldLogPaidProAuthoritySurfaceEvent({
+    !shouldEmitAuthorityLog({
       event: "execution-block-location",
       surface: payload.surface,
       hash: corpusHash,
@@ -120,7 +132,7 @@ export function logExecutionBlockCount(text: string, surface: string): void {
   const hash = body.length >= 200 ? hashPaidProCorpus(body) : "";
   if (!hash) return;
   if (
-    !shouldLogPaidProAuthoritySurfaceEvent({
+    !shouldEmitAuthorityLog({
       event: "execution-block-count",
       surface,
       hash,
@@ -141,37 +153,214 @@ export function resolveFrozenCorpusHashForDrift(): string | null {
   return null;
 }
 
+export type CanonicalEstablishReconcileClassification = "canonical_refreeze" | "corpus_boundary_match";
+
+function executionPartyRoleFingerprint(text: string): string {
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : text;
+  const roles =
+    tail.match(
+      /(?:^|\n)\s*(?:CLIENT|SERVICE\s+PROVIDER|CONSULTANT|PROVIDER|COMPANY|CONTRACTOR)\s*:/gim,
+    ) ?? [];
+  return fingerprintAgreementBody(roles.join("|"));
+}
+
+export function detectPostFreezeStructuralDrift(before: string, after: string): boolean {
+  const frozenPlain = normalizeNewlines(before).trim();
+  const renderedPlain = normalizeNewlines(after).trim();
+  if (!frozenPlain || !renderedPlain) return false;
+  if (countWitnessExecutionSections(frozenPlain) !== countWitnessExecutionSections(renderedPlain)) {
+    return true;
+  }
+  if (countPaidProExecutionBlocks(frozenPlain) !== countPaidProExecutionBlocks(renderedPlain)) {
+    return true;
+  }
+  if (executionPartyRoleFingerprint(frozenPlain) !== executionPartyRoleFingerprint(renderedPlain)) {
+    return true;
+  }
+  const frozenManifestHash = getFrozenCanonicalAgreementCorpus()?.signerManifestHash;
+  if (frozenManifestHash) {
+    const manifest = getFrozenCanonicalAgreementCorpus()?.signerManifest ?? [];
+    const manifestKey = fingerprintAgreementBody(JSON.stringify(manifest));
+    if (manifestKey !== frozenManifestHash) return true;
+  }
+  return false;
+}
+
+export type PostFreezeCorpusInstrumentationEmit = "canonical_establish_reconcile" | "post_freeze_corpus_drift" | "none";
+
+export type PostFreezeCorpusInstrumentationDecision = {
+  emit: PostFreezeCorpusInstrumentationEmit;
+  frozenHash: string | null;
+  renderedHash: string | null;
+  identical: boolean;
+  structuralDrift: boolean;
+  witnessCount: number;
+  executionBlockCount: number;
+  classification: PostFreezeCorpusMutationClass | null;
+};
+
+export function decidePostFreezeCorpusInstrumentation(args: {
+  surface: string;
+  renderedText: string;
+  frozenHash?: string | null;
+  mutationSource?: PaidProPostFreezeMutationSource;
+  frozenPlain?: string | null;
+}): PostFreezeCorpusInstrumentationDecision {
+  const rendered = (args.renderedText || "").trim();
+  const witnessCount = countWitnessExecutionSections(rendered);
+  const executionBlockCount = countPaidProExecutionBlocks(rendered);
+  const none = (frozenHash: string | null, renderedHash: string | null): PostFreezeCorpusInstrumentationDecision => ({
+    emit: "none",
+    frozenHash,
+    renderedHash,
+    identical: Boolean(frozenHash && renderedHash && frozenHash === renderedHash),
+    structuralDrift: false,
+    witnessCount,
+    executionBlockCount,
+    classification: null,
+  });
+
+  if (shouldSkipPostFreezeDriftForReadonlyHtmlStrip(args.surface)) {
+    return none(null, null);
+  }
+  if (rendered.length < 200) {
+    return none(null, null);
+  }
+
+  const frozenHash = args.frozenHash ?? resolveFrozenCorpusHashForDrift();
+  if (!frozenHash) {
+    return none(null, null);
+  }
+
+  const renderedHash = hashPaidProCorpus(rendered);
+  const identical = frozenHash === renderedHash;
+  const frozenPlain = args.frozenPlain ?? resolvePaidProFrozenAuthoritativePlain();
+  const structuralDrift = frozenPlain ? detectPostFreezeStructuralDrift(frozenPlain, rendered) : false;
+  const mutationSource = args.mutationSource ?? "unknown";
+  const classification =
+    frozenPlain && !identical
+      ? classifyPostFreezeCorpusMutation({ mutationSource, before: frozenPlain, after: rendered })
+      : null;
+
+  if (identical && !structuralDrift) {
+    return {
+      emit: "canonical_establish_reconcile",
+      frozenHash,
+      renderedHash,
+      identical: true,
+      structuralDrift: false,
+      witnessCount,
+      executionBlockCount,
+      classification: null,
+    };
+  }
+
+  const suppressedClassification =
+    classification === "canonical_refreeze" ||
+    classification === "display_html" ||
+    mutationSource === "canonical_establish_reconcile";
+
+  if (!identical && suppressedClassification) {
+    return {
+      emit: "none",
+      frozenHash,
+      renderedHash,
+      identical: false,
+      structuralDrift,
+      witnessCount,
+      executionBlockCount,
+      classification,
+    };
+  }
+
+  if (!identical || structuralDrift) {
+    return {
+      emit: "post_freeze_corpus_drift",
+      frozenHash,
+      renderedHash,
+      identical,
+      structuralDrift,
+      witnessCount,
+      executionBlockCount,
+      classification: classification ?? (identical ? null : "illegal_structural"),
+    };
+  }
+
+  return none(frozenHash, renderedHash);
+}
+
 export function logCanonicalEstablishReconcile(args: {
   surface: string;
-  preFreezeHash: string;
-  postFreezeHash: string;
-  preFreezeLen: number;
-  postFreezeLen: number;
+  classification: CanonicalEstablishReconcileClassification;
+  frozenHash?: string;
+  renderedHash?: string;
+  preFreezeHash?: string;
+  postFreezeHash?: string;
+  preFreezeLen?: number;
+  postFreezeLen?: number;
   preFreezePlain?: string | null;
   postFreezePlain?: string | null;
+  witnessCount?: number;
+  executionBlockCount?: number;
 }): void {
+  const classification = args.classification;
+  const frozenHash = args.frozenHash ?? args.postFreezeHash ?? args.preFreezeHash ?? "";
+  const renderedHash = args.renderedHash ?? frozenHash;
   const pre = (args.preFreezePlain || "").trim();
   const post = (args.postFreezePlain || "").trim();
   const byteDiff =
-    pre && post ? formatByteLevelCorpusDiffReport(computeByteLevelCorpusDiff(pre, post)) : null;
+    classification === "canonical_refreeze" && pre && post
+      ? formatByteLevelCorpusDiffReport(computeByteLevelCorpusDiff(pre, post))
+      : null;
+
+  const source =
+    classification === "canonical_refreeze" ? "canonical_refreeze" : "corpus_boundary_match";
+  const payloadSignature =
+    classification === "canonical_refreeze"
+      ? JSON.stringify({
+          preFreezeHash: args.preFreezeHash,
+          postFreezeHash: args.postFreezeHash,
+        })
+      : JSON.stringify({
+          frozenHash,
+          renderedHash,
+          identical: frozenHash === renderedHash,
+          witnessCount: args.witnessCount ?? 0,
+          executionBlockCount: args.executionBlockCount ?? 0,
+        });
+
   if (
-    !shouldLogPaidProAuthoritySurfaceEvent({
+    !shouldEmitAuthorityLog({
       event: "canonical-establish-reconcile",
       surface: args.surface,
-      hash: args.postFreezeHash,
-      source: "canonical_refreeze",
-      payloadSignature: JSON.stringify({
-        preFreezeHash: args.preFreezeHash,
-        postFreezeHash: args.postFreezeHash,
-      }),
+      hash: renderedHash || frozenHash,
+      source,
+      payloadSignature,
     })
   ) {
     return;
   }
+
+  if (classification === "corpus_boundary_match") {
+    // eslint-disable-next-line no-console
+    console.info("[canonical-establish-reconcile]", {
+      surface: args.surface,
+      classification,
+      frozenHash,
+      renderedHash,
+      identical: frozenHash === renderedHash,
+      witnessCount: args.witnessCount ?? 0,
+      executionBlockCount: args.executionBlockCount ?? 0,
+      len: args.postFreezeLen,
+    });
+    return;
+  }
+
   // eslint-disable-next-line no-console
   console.info("[canonical-establish-reconcile]", {
     surface: args.surface,
-    classification: "canonical_refreeze",
+    classification,
     preFreezeHash: args.preFreezeHash,
     postFreezeHash: args.postFreezeHash,
     preFreezeLen: args.preFreezeLen,
@@ -186,65 +375,101 @@ export function logPostFreezeCorpusDrift(args: {
   frozenHash?: string | null;
   mutationSource?: PaidProPostFreezeMutationSource;
 }): void {
-  if (shouldSkipPostFreezeDriftForReadonlyHtmlStrip(args.surface)) {
-    return;
-  }
   const rendered = (args.renderedText || "").trim();
   if (rendered.length < 200) return;
-  const frozenHash = args.frozenHash ?? resolveFrozenCorpusHashForDrift();
-  if (!frozenHash) return;
+
   const frozenPlain = resolvePaidProFrozenAuthoritativePlain();
-  const renderedHash = hashPaidProCorpus(rendered);
-  const identical = frozenHash === renderedHash;
-  const mutationSource = args.mutationSource ?? "unknown";
-  const boundary = recordPostFreezeCorpusBoundary({
+  const decision = decidePostFreezeCorpusInstrumentation({
     surface: args.surface,
     renderedText: rendered,
-    mutationSource,
-    frozenHash,
+    frozenHash: args.frozenHash,
+    mutationSource: args.mutationSource,
+    frozenPlain: frozenPlain ?? undefined,
   });
+
+  if (decision.frozenHash) {
+    recordPostFreezeCorpusBoundary({
+      surface: args.surface,
+      renderedText: rendered,
+      mutationSource: args.mutationSource,
+      frozenHash: decision.frozenHash,
+    });
+  }
+
   assertPostFreezeRenderedCorpusMatchesFrozen({
     surface: args.surface,
     renderedText: rendered,
-    mutationSource,
-    frozenHash,
+    mutationSource: args.mutationSource,
+    frozenHash: decision.frozenHash ?? undefined,
     frozenPlain: frozenPlain ?? undefined,
   });
-  const diff =
-    !identical && frozenPlain
-      ? formatByteLevelCorpusDiffReport(computeByteLevelCorpusDiff(frozenPlain, rendered))
-      : null;
-  const classification =
-    frozenPlain && !identical
-      ? classifyPostFreezeCorpusMutation({ mutationSource, before: frozenPlain, after: rendered })
-      : null;
-  if (classification === "canonical_refreeze" || classification === "display_html") {
+
+  if (decision.emit === "canonical_establish_reconcile" && decision.frozenHash && decision.renderedHash) {
+    logCanonicalEstablishReconcile({
+      surface: args.surface,
+      classification: "corpus_boundary_match",
+      frozenHash: decision.frozenHash,
+      renderedHash: decision.renderedHash,
+      witnessCount: decision.witnessCount,
+      executionBlockCount: decision.executionBlockCount,
+      postFreezeLen: rendered.length,
+    });
     return;
   }
+
+  if (decision.emit !== "post_freeze_corpus_drift" || !decision.frozenHash || !decision.renderedHash) {
+    return;
+  }
+
+  const diff = frozenPlain
+    ? formatByteLevelCorpusDiffReport(computeByteLevelCorpusDiff(frozenPlain, rendered))
+    : null;
+  const boundary = readPostFreezeBoundaryHeadTail(rendered);
+  const mutationSource = args.mutationSource ?? "unknown";
+
   if (
-    !shouldLogPaidProAuthoritySurfaceEvent({
+    !shouldEmitAuthorityLog({
       event: "post-freeze-corpus-drift",
       surface: args.surface,
-      hash: renderedHash,
-      source: identical ? "identical" : "drift",
-      payloadSignature: JSON.stringify({ frozenHash, identical, mutationSource }),
+      hash: decision.renderedHash,
+      source: "drift",
+      payloadSignature: JSON.stringify({
+        frozenHash: decision.frozenHash,
+        identical: decision.identical,
+        mutationSource,
+        structuralDrift: decision.structuralDrift,
+        witnessCount: decision.witnessCount,
+        executionBlockCount: decision.executionBlockCount,
+      }),
     })
   ) {
     return;
   }
+
   // eslint-disable-next-line no-console
   console.info("[post-freeze-corpus-drift]", {
     surface: args.surface,
-    frozenHash,
-    renderedHash,
-    identical,
+    frozenHash: decision.frozenHash,
+    renderedHash: decision.renderedHash,
+    identical: decision.identical,
+    structuralDrift: decision.structuralDrift,
     len: rendered.length,
     mutationSource,
-    classification: classification ?? (identical ? "identical" : "illegal_structural"),
+    classification: decision.classification ?? "illegal_structural",
+    witnessCount: decision.witnessCount,
+    executionBlockCount: decision.executionBlockCount,
     head: boundary.head,
     tail: boundary.tail,
     ...(diff ? { byteDiff: diff } : {}),
   });
+}
+
+function readPostFreezeBoundaryHeadTail(text: string, n = 250): { head: string; tail: string } {
+  const t = text || "";
+  return {
+    head: t.slice(0, n),
+    tail: t.length > n ? t.slice(-n) : t,
+  };
 }
 
 /** Fingerprint helper for HTML/plain render boundaries that use agreement body hash. */

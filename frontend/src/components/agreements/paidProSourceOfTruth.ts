@@ -347,6 +347,7 @@ export function establishPaidProSourceOfTruth(args: {
   if (preEstablishFreezeHash && preEstablishFreezeHash !== acceptedCorpusHash) {
     logCanonicalEstablishReconcile({
       surface: "paid_pro_source_of_truth_establish",
+      classification: "canonical_refreeze",
       preFreezeHash: preEstablishFreezeHash,
       postFreezeHash: acceptedCorpusHash,
       preFreezeLen: frozenText.length,
