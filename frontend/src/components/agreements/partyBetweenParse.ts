@@ -3,10 +3,12 @@
  * Preserves full entity phrases (LLC, Inc., multi-word names); does not split on internal "and".
  */
 
+import { stripSignerInstructionClausesFromIntake } from "./intakeSignerInstructionParse";
 import { normalizePartyNameFragment } from "./partyIntakeNormalize";
 import { truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 
-const TAIL_STOP = /\s+(?:\n|(?:(?:for|whereas|hereafter|effective|the\s+term|term:|scope:|consideration|warranties)\b))/i;
+const TAIL_STOP =
+  /\s+(?:\n|(?:(?:for|whereas|hereafter|effective|the\s+term|term:|scope:|consideration|warranties|Signer\s+for)\b))/i;
 
 /**
  * Continuity guard (Railway QA): if the tail after "between" includes a sentence boundary
@@ -30,7 +32,7 @@ function trimBetweenPartyFragment(s: string): string {
 }
 
 function sliceBetweenPartyClauseTail(raw: string): string | null {
-  const text = raw.trim();
+  const text = stripSignerInstructionClausesFromIntake(raw.trim());
   const m = text.match(/\bbetween\s+/i);
   if (!m || m.index === undefined) return null;
 

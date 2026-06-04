@@ -22,6 +22,7 @@ import {
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
+import { matchSignerForEntityIsClauses } from "./intakeSignerInstructionParse";
 
 export type SignerMetadataAuthoritySource =
   | "user_edited_ui"
@@ -161,13 +162,20 @@ export function extractSignerMetadataFromIntakeNaturalLanguage(
   const byEntity = new Map<string, EntitySignerMetadataCandidate>();
   const indexOnly: EntitySignerMetadataCandidate[] = [];
 
+  for (const row of matchSignerForEntityIsClauses(raw)) {
+    if (row.entity) pushCandidate(byEntity, row.entity, row.signerName, row.signerTitle, "intake_natural_language");
+    else if (row.signerName) {
+      indexOnly.push({
+        entity: "",
+        signerName: cleanSignerField(row.signerName, "signerName"),
+        signerTitle: cleanSignerField(row.signerTitle, "signerTitle"),
+        source: "intake_natural_language",
+        authorityRank: SIGNER_METADATA_AUTHORITY_RANK.intake_natural_language,
+      });
+    }
+  }
+
   const entityPatterns: Array<{ re: RegExp; entityIdx: number; nameIdx: number; titleIdx: number }> = [
-    {
-      re: /signer\s+for\s+([^.\n]+?)\s+is\s+([^,\n]+?)(?:,\s*([^.\n]+?))?(?:\.|$)/gi,
-      entityIdx: 1,
-      nameIdx: 2,
-      titleIdx: 3,
-    },
     {
       re: /([^,\n]+?),\s*([^,\n]+?),\s*will\s+sign\s+for\s+([^.\n]+)/gi,
       entityIdx: 3,

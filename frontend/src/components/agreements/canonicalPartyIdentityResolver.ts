@@ -18,6 +18,10 @@ import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import type { CanonicalPartyIdentity as SignerCanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
+import {
+  isContaminatedPartyLegalNameFromSignerInstruction,
+  stripSignerInstructionContaminationFromCorpus,
+} from "./intakeSignerInstructionParse";
 
 export const PARTY_ENTITY_SUFFIX_RE =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company|Foundation|Trust)\.?$/i;
@@ -197,6 +201,7 @@ function isInvalidCanonicalPartyName(name: string, knownPartyTokens?: readonly s
   if (/^this agreement is between\b/i.test(t)) return true;
   if (/^client\.\s+/i.test(t)) return true;
   if (containsMultipleKnownPartyNames(t, knownPartyTokens)) return true;
+  if (isContaminatedPartyLegalNameFromSignerInstruction(t)) return true;
   return false;
 }
 
@@ -538,6 +543,11 @@ export function repairMalformedAgreementOpeningPhrases(text: string): { text: st
     IS_IS_BETWEEN_RE.lastIndex = 0;
     out = out.replace(IS_IS_BETWEEN_RE, "is between");
     repairs.push("opening:repair_duplicate_is_between");
+  }
+  const contam = stripSignerInstructionContaminationFromCorpus(out);
+  if (contam.repairs > 0) {
+    out = contam.text;
+    repairs.push("opening:strip_signer_instruction_contamination");
   }
   return { text: out, repairs };
 }

@@ -6,6 +6,10 @@ import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 import { extractBetweenPartyPair } from "./partyBetweenParse";
 import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
 import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
+import {
+  mergeSignerMetadataIntoDraftParties,
+  resolveUniversalSignerMetadataBySlot,
+} from "./universalSignerMetadataAuthority";
 
 export type { AgreementFamily } from "./agreementFamilyRouter";
 
@@ -192,6 +196,14 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
     if (structuredTermination) {
       next.termination_summary = structuredTermination;
     }
+  }
+
+  if ((next.parties || []).length >= 2) {
+    const legalEntities = (next.parties || [])
+      .map((p) => String(p.name || "").trim())
+      .filter((n) => n.length >= 2);
+    const resolved = resolveUniversalSignerMetadataBySlot({ legalEntities, intakeText });
+    next = mergeSignerMetadataIntoDraftParties(next, resolved) as ParsedDraftShape;
   }
 
   return next;

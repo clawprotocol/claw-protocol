@@ -3,6 +3,7 @@
  * but the intake names a person + entity (e.g. employment-style phrasing).
  */
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { extractBetweenPartyPair } from "./partyBetweenParse";
 import { stripPartyRoleAnnotations } from "./partyRoleAnnotations";
 
 const MAX_NAME = 280;
@@ -106,10 +107,10 @@ export function tryInferNamedPartiesFromIntake(raw: string): { name: string; rol
     ];
   }
 
-  const between = t.match(/\bbetween\s+([^,]{2,120}?)\s+and\s+([^.,;]{2,120})\b/i);
-  if (between && between[1] && between[2]) {
-    const a = cleanFallbackName(between[1]);
-    const b = cleanFallbackName(between[2]);
+  const betweenPair = extractBetweenPartyPair(t);
+  if (betweenPair) {
+    const a = cleanFallbackName(betweenPair.left);
+    const b = cleanFallbackName(betweenPair.right);
     if (a.length >= 2 && b.length >= 2 && !/^the\s+/i.test(a)) {
       return [
         { name: a.slice(0, MAX_NAME), role: "party" },

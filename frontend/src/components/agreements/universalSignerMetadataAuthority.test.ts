@@ -53,6 +53,14 @@ describe("universalSignerMetadataAuthority", () => {
     expect(entitiesMatchForSignerMetadata(BLUE, IRON)).toBe(false);
   });
 
+  it("extracts Signer for … Inc. is … when entity suffix includes a period", () => {
+    const hits = extractSignerMetadataFromIntakeNaturalLanguage(
+      `Signer for ${IRON} is Michael Torres, President.`,
+    );
+    expect(hits.some((h) => h.entity.includes("Iron Vale") && h.signerName === "Michael Torres")).toBe(true);
+    expect(hits.some((h) => h.signerTitle === "President")).toBe(true);
+  });
+
   it("extracts natural-language signer instructions per entity", () => {
     const intake = [
       `Signer for ${BLUE} is Anthem H Blanchard, Manager.`,

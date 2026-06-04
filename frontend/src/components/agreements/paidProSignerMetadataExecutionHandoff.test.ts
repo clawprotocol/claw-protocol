@@ -16,6 +16,7 @@ import { resolvePaidProAuthoritativeDisplayPlain } from "./paidProAuthoritativeR
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import { collectPaidProSignerMetadataHandoffDiagnostics } from "./paidProSignerMetadataHandoffDiagnostics";
 import { extractExecutionBlockSignerLines } from "./paidProSignerMetadataHandoffExtract";
+import { BLUE_CANYON_QA_HOME_PROMPT } from "./intakeSignerInstructionParse";
 
 const BLUE_CANYON = "Blue Canyon Analytics LLC";
 const IRON_VALE = "Iron Vale Systems Inc.";
@@ -120,6 +121,34 @@ describe("paidProSignerMetadataExecutionHandoff", () => {
     expect(rows[0]?.copiedPlainText.nameLine).toBe("Anthem H Blanchard");
     expect(rows[1]?.executionBlockRendered.nameLine).toBe("Ivan Vee");
     expect(extractExecutionBlockSignerLines(copy, 0).nameLine).toBe("Anthem H Blanchard");
+  });
+
+  it("home prompt populates execution block for Sarah Mitchell and Michael Torres", () => {
+    establishPaidProSourceOfTruth({ text: SOT_BODY, source: "server_full_draft" });
+    setPaidProReviewSignerMetadataSessionActive(true);
+    const opts = {
+      draft: renderOpts().draft,
+      intakeText: BLUE_CANYON_QA_HOME_PROMPT,
+      liveSignerMetadataUi: {
+        partyCount: 2,
+        recipient1Name: BLUE_CANYON,
+        recipient2Name: IRON_VALE,
+        recipient1Email: "sarah@blue.com",
+        recipient2Email: "michael@iron.com",
+        extraPartyReviewEmails: [] as string[],
+        partySignerNames: ["Sarah Mitchell", "Michael Torres"],
+        partySignerTitles: ["CEO", "President"],
+        partyAddresses: [] as string[],
+      },
+    };
+    const review = getPaidProDocumentForSurface("review", opts)!.text;
+    const copy = getPaidProDocumentForSurface("copy", opts)!.text;
+    expect(review).toMatch(/Name:\s*Sarah Mitchell/i);
+    expect(review).toMatch(/Title:\s*CEO/i);
+    expect(review).toMatch(/Name:\s*Michael Torres/i);
+    expect(review).toMatch(/Title:\s*President/i);
+    expect(copy).toBe(review);
+    expect(review).not.toMatch(/for Blue Canyon Analytics LLC is Sarah Mitchell/i);
   });
 
   it("uses consumed authority when not in live session and signer metadata is complete", () => {

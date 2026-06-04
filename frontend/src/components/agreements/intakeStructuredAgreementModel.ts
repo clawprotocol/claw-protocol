@@ -12,6 +12,7 @@ import {
 } from "./intakeCurrencyParse";
 import { formatPartiesJoinedLine, formatPartySegmentForPreview } from "./partyFormat";
 import { normalizePartyNameFragment, splitTwoPartiesFromJoinedLine, type StructuredTwoParties } from "./partyIntakeNormalize";
+import { stripSignerInstructionClausesFromIntake } from "./intakeSignerInstructionParse";
 import { preCleanBetweenTailForMultiPartySplit, stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 
 export type IntakeStructuredAgreement = {
@@ -369,11 +370,12 @@ function sliceFirstPartyListSentenceFromBetweenTail(tail: string): string {
 }
 
 function extractStructuredParties(text: string, lower: string): PartiesExtract {
-  const betweenPair = extractBetweenPartyPair(text);
+  const partyParseText = stripSignerInstructionClausesFromIntake(text);
+  const betweenPair = extractBetweenPartyPair(partyParseText);
   if (betweenPair) {
-    const betweenIdx = text.toLowerCase().indexOf("between ");
+    const betweenIdx = partyParseText.toLowerCase().indexOf("between ");
     if (betweenIdx >= 0) {
-      const firstLine = (text.slice(betweenIdx + "between ".length).split(/\n/)[0] || "").trim();
+      const firstLine = (partyParseText.slice(betweenIdx + "between ".length).split(/\n/)[0] || "").trim();
       const tailRaw = sliceFirstPartyListSentenceFromBetweenTail(truncatePartyClauseTailAtLabeledFields(firstLine));
       const tail = preCleanBetweenTailForMultiPartySplit(tailRaw);
       // Source list parallel to `multi` — used to recover role hints destroyed by pre-clean.

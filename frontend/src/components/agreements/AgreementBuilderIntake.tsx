@@ -731,6 +731,7 @@ import {
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
+import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 import {
   partyAddressForSignerMetadataStaging,
   shouldDeferPaidProReviewRenderSignerRepair,
@@ -5003,7 +5004,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ? explicitSignerNameForEntity(parties?.[idx]?.signerName, entityName)
         : parties?.[idx]?.signerTitle,
     );
-    return fromDraft ?? "";
+    if (fromDraft) return fromDraft;
+
+    const intakeText = (intakeCombinedRef.current || "").trim();
+    const legalEntities = (parties ?? [])
+      .map((p) => String(p?.name ?? "").trim())
+      .filter((n) => n.length >= 2);
+    if (intakeText && legalEntities.length >= 2 && entityName) {
+      const resolved = resolveUniversalSignerMetadataBySlot({ legalEntities, intakeText });
+      const slot = resolved[idx];
+      if (slot) {
+        const raw = field === "signerName" ? slot.signerName : slot.signerTitle;
+        const normalized =
+          field === "signerName"
+            ? normalizeSignerMetadataForSave(explicitSignerNameForEntity(raw, entityName) ?? raw)
+            : normalizeSignerMetadataForSave(raw);
+        if (normalized) return normalized;
+      }
+    }
+    return "";
   }
 
   function buildRecipientPartySignerNamesArrayForHandoff(d: ParsedDraftShape | null): string[] | undefined {
