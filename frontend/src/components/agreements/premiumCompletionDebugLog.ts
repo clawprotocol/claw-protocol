@@ -18,7 +18,10 @@ export type PremiumCompletionDebugPayload = {
   validationReasons?: string[];
   accStructuralOk?: boolean;
   accStructuralReasons?: string[];
+  /** Authoritative adoption only — use {@link PremiumCompletionDebugPayload.recoveryCandidateEligible} for pre-apply recovery preview. */
   accepted?: boolean;
+  /** Pipeline/local-recovery preview passed SoT commit gates; not final authority adoption. */
+  recoveryCandidateEligible?: boolean;
   rejectedReason?: string;
   snapshotWritten?: boolean;
   premiumRenderSource?: string;

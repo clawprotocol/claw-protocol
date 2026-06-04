@@ -14,11 +14,108 @@ import {
   establishPaidProSourceOfTruth,
   type PaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
-import { PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE } from "./premiumNetworkRecoveryLocalDraft";
+import {
+  PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+  PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
+} from "./premiumNetworkRecoveryLocalDraft";
 
 export type PostCheckoutRecoverySotCommitResult =
-  | { committed: true; record: PaidProSourceOfTruth }
-  | { committed: false; reason: string };
+  | {
+      committed: true;
+      record: PaidProSourceOfTruth;
+      /** Result of freezePaidProPostCheckoutRecoveryCanonicalSnapshot only — not ref assignment. */
+      canonicalSnapshotFrozen: boolean;
+      reviewCorpusLen: number;
+    }
+  | { committed: false; reason: string; reviewCorpusLen: number };
+
+export type PostCheckoutRecoverySotPreview = {
+  eligible: boolean;
+  displayPlain: string;
+  blockReason: string;
+  rawBodyLen: number;
+  displayPlainLen: number;
+};
+
+/** Same gates as {@link tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth} without mutating SoT. */
+export function previewPostCheckoutRecoverySotCommit(args: {
+  body: string;
+  draft: ParsedDraftShape;
+  intakeText: string;
+  premiumRenderSource: string;
+}): PostCheckoutRecoverySotPreview {
+  const rawBodyLen = (args.body || "").trim().length;
+  if (hasLatchedLongAcceptedServerFullDraft()) {
+    return {
+      eligible: false,
+      displayPlain: "",
+      blockReason: "latched_server_full_draft_authority_present",
+      rawBodyLen,
+      displayPlainLen: 0,
+    };
+  }
+  const displayPlain = resolvePaidProPostCheckoutRecoveryDisplayPlain({
+    draft: args.draft,
+    intakeText: args.intakeText,
+    winningPremiumBodyText: args.body,
+    premiumRenderSource: args.premiumRenderSource,
+    premiumDegradedServerLocalRecovery:
+      args.premiumRenderSource === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+  });
+  if (displayPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+    return {
+      eligible: false,
+      displayPlain,
+      blockReason: "recovery_display_plain_below_review_min",
+      rawBodyLen,
+      displayPlainLen: displayPlain.length,
+    };
+  }
+  return {
+    eligible: true,
+    displayPlain,
+    blockReason: "",
+    rawBodyLen,
+    displayPlainLen: displayPlain.length,
+  };
+}
+
+export function logPremiumRecoveryAuthority(args: {
+  surface: string;
+  /** Final authority adoption only — call after authoritativeAgreementSnapshotRef is assigned when true. */
+  accepted: boolean;
+  adoptedToSoT: boolean;
+  /** authoritativeAgreementSnapshotRef.current assigned with non-empty committed corpus. */
+  authoritativeSnapshotAssigned: boolean;
+  /** freezePaidProPostCheckoutRecoveryCanonicalSnapshot produced a frozen hash. */
+  canonicalSnapshotFrozen: boolean;
+  blockedReason: string | null;
+  reviewCorpusLen: number;
+  premiumRenderSource?: string | null;
+  rawBodyLen?: number | null;
+  displayPlainLen?: number | null;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (import.meta.env.DEV && args.accepted && !args.authoritativeSnapshotAssigned) {
+    // eslint-disable-next-line no-console
+    console.warn("[premium-recovery-authority] accepted:true requires authoritativeSnapshotAssigned:true", {
+      surface: args.surface,
+    });
+  }
+  // eslint-disable-next-line no-console
+  console.info("[premium-recovery-authority]", {
+    surface: args.surface,
+    accepted: args.accepted,
+    adoptedToSoT: args.adoptedToSoT,
+    authoritativeSnapshotAssigned: args.authoritativeSnapshotAssigned,
+    canonicalSnapshotFrozen: args.canonicalSnapshotFrozen,
+    blockedReason: args.blockedReason,
+    reviewCorpusLen: args.reviewCorpusLen,
+    premiumRenderSource: args.premiumRenderSource ?? null,
+    rawBodyLen: args.rawBodyLen ?? null,
+    displayPlainLen: args.displayPlainLen ?? null,
+  });
+}
 
 export function tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth(args: {
   body: string;
@@ -27,38 +124,42 @@ export function tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth(args: {
   premiumRenderSource: string;
   reviewSessionId?: string | null;
 }): PostCheckoutRecoverySotCommitResult {
-  if (hasLatchedLongAcceptedServerFullDraft()) {
-    return { committed: false, reason: "latched_server_full_draft_authority_present" };
-  }
-  const displayPlain = resolvePaidProPostCheckoutRecoveryDisplayPlain({
+  const preview = previewPostCheckoutRecoverySotCommit({
+    body: args.body,
     draft: args.draft,
     intakeText: args.intakeText,
-    winningPremiumBodyText: args.body,
     premiumRenderSource: args.premiumRenderSource,
-    premiumDegradedServerLocalRecovery:
-      args.premiumRenderSource === "premium_degraded_server_local_recovery",
   });
-  if (displayPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
-    return { committed: false, reason: "recovery_display_plain_below_review_min" };
+  if (!preview.eligible) {
+    return {
+      committed: false,
+      reason: preview.blockReason,
+      reviewCorpusLen: preview.rawBodyLen,
+    };
   }
   try {
     const record = establishPaidProSourceOfTruth({
-      text: displayPlain,
+      text: preview.displayPlain,
       source: "server_full_draft",
       draft: args.draft,
       intakeText: args.intakeText,
       reviewSessionId: args.reviewSessionId ?? null,
     });
-    freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
+    const frozen = freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
       text: record.text,
       draft: args.draft,
       intakeText: args.intakeText,
       reviewSessionId: args.reviewSessionId ?? null,
     });
-    return { committed: true, record };
+    return {
+      committed: true,
+      record,
+      canonicalSnapshotFrozen: Boolean(frozen?.hash),
+      reviewCorpusLen: record.text.length,
+    };
   } catch (err) {
     const reason = err instanceof Error ? err.message : "establish_paid_pro_source_of_truth_failed";
-    return { committed: false, reason };
+    return { committed: false, reason, reviewCorpusLen: preview.displayPlainLen };
   }
 }
 

@@ -8,6 +8,7 @@ import { defaultIntakePartyRoleLabels } from "../../partyRoleIntake";
 import { runPremiumCompletion } from "../../premiumCompletionPipeline";
 import type { PremiumFullDraftResult } from "../../premiumFullDraftApi";
 import { PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE } from "../../premiumNetworkRecoveryLocalDraft";
+import { previewPostCheckoutRecoverySotCommit } from "../../paidProPostCheckoutRecoveryAuthority";
 import {
   paidProCheckoutCompletionHasVisibleOutcome,
   PREMIUM_USABLE_BODY_MIN_LEN,
@@ -62,10 +63,13 @@ function buildTest210RejectedDegradedServerBody(targetLen: number): string {
   return body;
 }
 
+/** Long corpus for direct client-gate assertions only. */
 const rejectedDegradedDoc = buildTest210RejectedDegradedServerBody(8_062);
 
 const h = vi.hoisted(() => {
-  const doc = buildTest210RejectedDegradedServerBody(8_062);
+  /** Short degraded server body so normalized wire text does not suppress local recovery (Test259-class). */
+  const pipelineMockRejectedLen = 320;
+  const doc = buildTest210RejectedDegradedServerBody(pipelineMockRejectedLen);
   return {
     mockResult: {
       title: "Mutual Consulting Agreement",
@@ -93,7 +97,7 @@ vi.mock("../../premiumFullDraftApi", async (importOriginal) => {
 
 describe("paidProHardening test210 degraded server recovery", () => {
   beforeEach(() => {
-    const doc = buildTest210RejectedDegradedServerBody(8_062);
+    const doc = buildTest210RejectedDegradedServerBody(320);
     h.mockResult.document_text = doc;
     h.mockResult.server_full_document_text = doc;
   });
@@ -140,5 +144,13 @@ describe("paidProHardening test210 degraded server recovery", () => {
     expect(structure.ok).toBe(true);
 
     expect(countPaidProExecutionBlocks(out.winningPremiumBodyText)).toBeGreaterThanOrEqual(1);
+
+    const recoveryPreview = previewPostCheckoutRecoverySotCommit({
+      body: out.winningPremiumBodyText,
+      draft: out.premiumDraft,
+      intakeText: TEST210_INTAKE,
+      premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+    });
+    expect(recoveryPreview.eligible).toBe(true);
   });
 });

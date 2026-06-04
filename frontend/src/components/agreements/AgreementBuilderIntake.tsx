@@ -600,7 +600,11 @@ import {
   shouldHideLegacyPaidProDraftPanels,
   shouldSuppressPaidProGuidedCompletionUi,
 } from "./paidProPostCheckoutRenderGate";
-import { tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth } from "./paidProPostCheckoutRecoveryAuthority";
+import {
+  logPremiumRecoveryAuthority,
+  previewPostCheckoutRecoverySotCommit,
+  tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth,
+} from "./paidProPostCheckoutRecoveryAuthority";
 import {
   hasRenderablePaidProFirstReviewCorpus,
   shouldBlockPaidProReviewShellWithoutCanonicalCorpus,
@@ -2612,6 +2616,7 @@ type PremiumPostCheckoutPhase =
   | "terminal_failure"
   | "network_retry"
   | "premium_network_recoverable"
+  | "premium_degraded_server_recoverable"
   | "generation_retry";
 
 function isPremiumNetworkRetryablePipelineResult(result: PremiumCompletionResult): boolean {
@@ -6152,8 +6157,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumGapBaseIntakeRef.current = mergedIntake;
           }
           const localWinning = (result.winningPremiumBodyText || "").trim();
-          const hasLocalRecovery =
-            isPremiumNetworkLocalRecoveryResult(result) && hasUsablePremiumBodyText(localWinning);
+          const networkRecoveryPreview =
+            isPremiumNetworkLocalRecoveryResult(result) && hasUsablePremiumBodyText(localWinning)
+              ? previewPostCheckoutRecoverySotCommit({
+                  body: localWinning,
+                  draft: result.premiumDraft,
+                  intakeText: mergedIntake,
+                  premiumRenderSource: result.premiumRenderSource,
+                })
+              : null;
+          const hasLocalRecovery = Boolean(
+            isPremiumNetworkLocalRecoveryResult(result) &&
+              hasUsablePremiumBodyText(localWinning) &&
+              networkRecoveryPreview?.eligible,
+          );
           logPremiumSessionConsistency({
             context: hasLocalRecovery
               ? "applySuccess_network_local_recovery"
@@ -6227,6 +6244,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 getOrInitSessionAgreementGenerationId(),
             });
             if (!sotCommit.committed) {
+              logPremiumRecoveryAuthority({
+                surface: "applySuccess_network_local_recovery",
+                accepted: false,
+                adoptedToSoT: false,
+                authoritativeSnapshotAssigned: false,
+                canonicalSnapshotFrozen: false,
+                blockedReason: sotCommit.reason,
+                reviewCorpusLen: sotCommit.reviewCorpusLen,
+                premiumRenderSource: result.premiumRenderSource,
+                rawBodyLen: localWinning.length,
+                displayPlainLen: networkRecoveryPreview?.displayPlainLen ?? null,
+              });
               if (import.meta.env.DEV) {
                 // eslint-disable-next-line no-console
                 console.warn("[premium-handoff] post_checkout_recovery_sot_blocked", {
@@ -6248,6 +6277,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }
             paidCheckoutCompletedRef.current = true;
             const committedText = sotCommit.record.text;
+            authoritativeAgreementSnapshotRef.current = committedText;
+            acceptedReviewCorpusRef.current = committedText;
+            finalizedSigningCorpusRef.current = committedText;
+            logPremiumRecoveryAuthority({
+              surface: "applySuccess_network_local_recovery",
+              accepted: true,
+              adoptedToSoT: true,
+              authoritativeSnapshotAssigned: true,
+              canonicalSnapshotFrozen: sotCommit.canonicalSnapshotFrozen,
+              blockedReason: null,
+              reviewCorpusLen: committedText.length,
+              premiumRenderSource: result.premiumRenderSource,
+              rawBodyLen: localWinning.length,
+              displayPlainLen: committedText.length,
+            });
             premiumPipelineOutputBodyRef.current = committedText;
             hydratedPremiumBodyRef.current = committedText;
             lastPremiumWinningCorpusRef.current = committedText;
@@ -6302,8 +6346,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumGapBaseIntakeRef.current = mergedIntake;
           }
           const localWinning = (result.winningPremiumBodyText || "").trim();
-          const hasLocalRecovery =
-            isPremiumDegradedServerLocalRecoveryResult(result) && hasUsablePremiumBodyText(localWinning);
+          const degradedRecoveryPreview =
+            isPremiumDegradedServerLocalRecoveryResult(result) && hasUsablePremiumBodyText(localWinning)
+              ? previewPostCheckoutRecoverySotCommit({
+                  body: localWinning,
+                  draft: result.premiumDraft,
+                  intakeText: mergedIntake,
+                  premiumRenderSource: result.premiumRenderSource,
+                })
+              : null;
+          const hasLocalRecovery = Boolean(
+            isPremiumDegradedServerLocalRecoveryResult(result) &&
+              hasUsablePremiumBodyText(localWinning) &&
+              degradedRecoveryPreview?.eligible,
+          );
           logPremiumSessionConsistency({
             context: hasLocalRecovery
               ? "applySuccess_degraded_server_local_recovery"
@@ -6370,6 +6426,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 getOrInitSessionAgreementGenerationId(),
             });
             if (!sotCommit.committed) {
+              logPremiumRecoveryAuthority({
+                surface: "applySuccess_degraded_server_local_recovery",
+                accepted: false,
+                adoptedToSoT: false,
+                authoritativeSnapshotAssigned: false,
+                canonicalSnapshotFrozen: false,
+                blockedReason: sotCommit.reason,
+                reviewCorpusLen: sotCommit.reviewCorpusLen,
+                premiumRenderSource: result.premiumRenderSource,
+                rawBodyLen: localWinning.length,
+                displayPlainLen: degradedRecoveryPreview?.displayPlainLen ?? null,
+              });
               if (import.meta.env.DEV) {
                 // eslint-disable-next-line no-console
                 console.warn("[premium-handoff] post_checkout_recovery_sot_blocked", {
@@ -6380,10 +6448,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               paidCheckoutCompletedRef.current = false;
               premiumPipelineOutputBodyRef.current = "";
               applyFailureFallback(undefined, { paidCheckoutRecovery: true });
-              setPremiumPostCheckoutPhase("generation_retry");
+              setPremiumPostCheckoutPhase("premium_degraded_server_recoverable");
               setPremiumPipelineUserMessage(null);
               logPremiumModalInfo("[premium-modal-stage]", {
-                to: "generation_retry",
+                to: "premium_degraded_server_recoverable",
                 recoverySotBlocked: sotCommit.reason,
                 ts: new Date().toISOString(),
               });
@@ -6391,6 +6459,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }
             paidCheckoutCompletedRef.current = true;
             const committedText = sotCommit.record.text;
+            authoritativeAgreementSnapshotRef.current = committedText;
+            acceptedReviewCorpusRef.current = committedText;
+            finalizedSigningCorpusRef.current = committedText;
+            logPremiumRecoveryAuthority({
+              surface: "applySuccess_degraded_server_local_recovery",
+              accepted: true,
+              adoptedToSoT: true,
+              authoritativeSnapshotAssigned: true,
+              canonicalSnapshotFrozen: sotCommit.canonicalSnapshotFrozen,
+              blockedReason: null,
+              reviewCorpusLen: committedText.length,
+              premiumRenderSource: result.premiumRenderSource,
+              rawBodyLen: localWinning.length,
+              displayPlainLen: committedText.length,
+            });
             premiumPipelineOutputBodyRef.current = committedText;
             hydratedPremiumBodyRef.current = committedText;
             lastPremiumWinningCorpusRef.current = committedText;

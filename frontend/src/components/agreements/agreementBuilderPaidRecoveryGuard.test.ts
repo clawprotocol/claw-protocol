@@ -9,6 +9,24 @@ const PAID_RECOVERY_USER_COPY =
  * Contract tests on AgreementBuilderIntake source: paid checkout return must not surface unpaid starter
  * upsell paths or drop the user to intake when premium-full-draft fails; retry must reuse runPremiumModelPassRef.
  */
+describe("premiumCompletionPipeline degraded recovery authority (source contract)", () => {
+  const pipelinePath = join(__dirname, "premiumCompletionPipeline.ts");
+  const src = readFileSync(pipelinePath, "utf8");
+
+  it("logs recoveryCandidateEligible for premium_degraded_server_local_recovery preview, not accepted", () => {
+    expect(src).toContain("degradedRecoveryPreview?.eligible");
+    expect(src).toMatch(
+      /if \(localRecovery\.ok && degradedRecoveryPreview\?\.eligible\)[\s\S]*?stage: "premium_degraded_server_local_recovery"[\s\S]*?recoveryCandidateEligible: true/,
+    );
+    expect(src).not.toMatch(
+      /stage: "premium_degraded_server_local_recovery"[\s\S]*?accepted: true/,
+    );
+    expect(src).toMatch(
+      /if \(localRecovery\.ok && degradedRecoveryPreview && !degradedRecoveryPreview\.eligible\)[\s\S]*?recoveryCandidateEligible: false/,
+    );
+  });
+});
+
 describe("AgreementBuilderIntake paid premium completion recovery (source contract)", () => {
   const intakePath = join(__dirname, "AgreementBuilderIntake.tsx");
   const src = readFileSync(intakePath, "utf8");
@@ -102,6 +120,7 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
 
     expect(degradedBlock).toContain("isPremiumDegradedServerLocalRecoveryResult(result)");
     expect(degradedBlock).toContain("hasUsablePremiumBodyText(localWinning)");
+    expect(degradedBlock).toContain("previewPostCheckoutRecoverySotCommit");
 
     const localRecoveryStart = degradedBlock.indexOf("if (hasLocalRecovery) {");
     expect(localRecoveryStart).toBeGreaterThan(-1);
@@ -113,19 +132,28 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
     );
     expect(blockedRecovery).toContain("paidCheckoutCompletedRef.current = false");
     expect(blockedRecovery).toContain("[premium-handoff] post_checkout_recovery_sot_blocked");
-    expect(blockedRecovery).toContain('setPremiumPostCheckoutPhase("generation_retry")');
+    expect(blockedRecovery).toContain('setPremiumPostCheckoutPhase("premium_degraded_server_recoverable")');
+    expect(blockedRecovery).toContain("logPremiumRecoveryAuthority");
+    expect(blockedRecovery).toContain("authoritativeSnapshotAssigned: false");
     expect(blockedRecovery).not.toContain("premiumAccepted: true");
 
     expect(localRecoveryBlock).toContain("tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth({");
     const sotCommitIdx = localRecoveryBlock.indexOf("tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth");
     const successAt = localRecoveryBlock.indexOf("paidCheckoutCompletedRef.current = true;", sotCommitIdx);
     expect(successAt).toBeGreaterThan(sotCommitIdx);
-    const successRecovery = localRecoveryBlock.slice(successAt);
+    const successReturnAt = localRecoveryBlock.indexOf("return;", successAt);
+    expect(successReturnAt).toBeGreaterThan(successAt);
+    const successRecovery = localRecoveryBlock.slice(successAt, successReturnAt + "return;".length);
     expect(successRecovery).toMatch(/premiumAccepted:\s*true/);
+    expect(successRecovery).toContain("authoritativeAgreementSnapshotRef.current = committedText");
+    expect(successRecovery).toMatch(
+      /authoritativeAgreementSnapshotRef\.current = committedText[\s\S]*?logPremiumRecoveryAuthority\([\s\S]*?accepted: true[\s\S]*?authoritativeSnapshotAssigned: true/,
+    );
     expect(successRecovery).toContain("commitPaidProAcceptanceStorageHygiene");
     expect(successRecovery).toContain("setPremiumPostCheckoutPhase(null)");
     expect(successRecovery).toContain("guidedFinalReviewExplicitlyUnlockedRef.current = true");
     expect(successRecovery).not.toContain("paidCheckoutCompletedRef.current = false");
+    expect(successRecovery).not.toContain('setPremiumPostCheckoutPhase("generation_retry")');
   });
 
   it("suppresses amber recovery while premium return wait is active (patience / in-flight)", () => {

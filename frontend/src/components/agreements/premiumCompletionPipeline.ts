@@ -120,7 +120,7 @@ import {
   PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
-import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
+import { previewPostCheckoutRecoverySotCommit } from "./paidProPostCheckoutRecoveryAuthority";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
@@ -2999,15 +2999,24 @@ async function runPremiumCompletionInner(
       intakeLower: intakeLowerGlobal,
       recoverySurface: PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
     });
-    if (localRecovery.ok && localRecovery.body.length >= PREMIUM_USABLE_BODY_MIN_LEN) {
+    const networkRecoveryPreview = localRecovery.ok
+      ? previewPostCheckoutRecoverySotCommit({
+          body: localRecovery.body,
+          draft: outMerged,
+          intakeText: rawForSoT || rawIntake,
+          premiumRenderSource: PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
+        })
+      : null;
+    if (localRecovery.ok && networkRecoveryPreview?.eligible) {
       const recoverySource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
       if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
       logPremiumCompletionDebug({
         stage: "premium_network_local_recovery",
-        accepted: true,
+        recoveryCandidateEligible: true,
         rejectedReason: undefined,
         premiumRenderSource: recoverySource,
         bodyLen: localRecovery.body.length,
+        displayPlainLen: networkRecoveryPreview.displayPlainLen,
       });
       outMerged = stripClientPremiumArtifactBlocksFromDraft({
         ...outMerged,
@@ -3142,15 +3151,24 @@ async function runPremiumCompletionInner(
       intakeLower: intakeLowerGlobal,
       recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
     });
-    if (localRecovery.ok && localRecovery.body.length >= PREMIUM_USABLE_BODY_MIN_LEN) {
+    const degradedRecoveryPreview = localRecovery.ok
+      ? previewPostCheckoutRecoverySotCommit({
+          body: localRecovery.body,
+          draft: outMerged,
+          intakeText: rawForSoT || rawIntake,
+          premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+        })
+      : null;
+    if (localRecovery.ok && degradedRecoveryPreview?.eligible) {
       const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
       if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
       logPremiumCompletionDebug({
         stage: "premium_degraded_server_local_recovery",
-        accepted: true,
+        recoveryCandidateEligible: true,
         rejectedReason: undefined,
         premiumRenderSource: recoverySource,
         bodyLen: localRecovery.body.length,
+        displayPlainLen: degradedRecoveryPreview.displayPlainLen,
         lastClientGate: lastClientGateTrace,
       });
       outMerged = stripClientPremiumArtifactBlocksFromDraft({
@@ -3177,6 +3195,17 @@ async function runPremiumCompletionInner(
         tierADiagnostic: tierADiag,
       };
     }
+    if (localRecovery.ok && degradedRecoveryPreview && !degradedRecoveryPreview.eligible) {
+      logPremiumCompletionDebug({
+        stage: "premium_degraded_server_local_recovery",
+        recoveryCandidateEligible: false,
+        rejectedReason: degradedRecoveryPreview.blockReason,
+        premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+        bodyLen: localRecovery.body.length,
+        displayPlainLen: degradedRecoveryPreview.displayPlainLen,
+        lastClientGate: lastClientGateTrace,
+      });
+    }
     if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
     logPremiumCompletionDebug({
       stage: "pipeline_return_rejected_paid_corpus",
@@ -3186,6 +3215,8 @@ async function runPremiumCompletionInner(
       lastClientGate: lastClientGateTrace,
       localRecoveryAttempted: true,
       localRecoveryOk: localRecovery.ok,
+      recoverySotEligible: degradedRecoveryPreview?.eligible ?? false,
+      recoverySotBlockReason: degradedRecoveryPreview?.blockReason ?? null,
     });
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
