@@ -7,6 +7,10 @@ import {
   getPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
+  buildPostFreezeCorpusByteDiffPayload,
+  isPostFreezeAuthorizedSignerOverlayDrift,
+} from "./paidProPostFreezeCorpusInvariant";
+import {
   decidePostFreezeCorpusInstrumentation,
   detectPostFreezeStructuralDrift,
   logPostFreezeCorpusDrift,
@@ -138,6 +142,41 @@ describe("paidProExecutionBlockInstrumentation", () => {
     expect((drift[0]![1] as { executionBlockCount?: number }).executionBlockCount).toBeGreaterThan(1);
     infoSpy.mockRestore();
     vi.restoreAllMocks();
+  });
+
+  it("suppresses post-freeze drift for authorized signature-region overlay (3-byte tail)", () => {
+    const frozen = corpusBody(
+      `${WITNESS_TAIL}\n\nCLIENT:\nAlpha LLC\nName:\n\nTitle:\n\nSERVICE PROVIDER:\nBeta LLC\nName:\n\nTitle:\n`,
+    );
+    const rendered = corpusBody(
+      `${WITNESS_TAIL}\n\nCLIENT:\nAlpha LLC\nName: Pat Lee\nTitle: CEO\n\nSERVICE PROVIDER:\nBeta LLC\nName: Sam Lee\nTitle: VP\n`,
+    );
+    establishPaidProSourceOfTruth({ text: frozen, source: "server_full_draft" });
+    const record = getPaidProSourceOfTruth()!;
+    expect(isPostFreezeAuthorizedSignerOverlayDrift(frozen, rendered)).toBe(true);
+    const diff = buildPostFreezeCorpusByteDiffPayload(frozen, rendered, "test_signer_overlay");
+    expect(diff.lenDelta).toBeGreaterThan(0);
+    expect(typeof diff.firstChangeOffset).toBe("number");
+
+    const decision = decidePostFreezeCorpusInstrumentation({
+      surface: "paid_pro_review_render",
+      renderedText: rendered,
+      frozenHash: record.hash,
+      frozenPlain: frozen,
+      mutationSource: "signer_identity_apply",
+    });
+    expect(decision.emit).not.toBe("post_freeze_corpus_drift");
+
+    resetPaidProAuthoritySurfaceLogDedupeForTests();
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    logPostFreezeCorpusDrift({
+      surface: "paid_pro_review_render",
+      renderedText: rendered,
+      frozenHash: record.hash,
+      mutationSource: "signer_identity_apply",
+    });
+    expect(infoSpy.mock.calls.filter((c) => c[0] === "[post-freeze-corpus-drift]")).toHaveLength(0);
+    infoSpy.mockRestore();
   });
 
   it("never logs post-freeze-corpus-drift with identical: true", () => {

@@ -601,12 +601,13 @@ export function getPaidProDocumentForSurface(
     surface === "vs01" ||
     surface === "finalized"
   ) {
-    const aligned = resolvePaidProReviewRenderPlain({
+    const reviewCopyPlain = resolvePaidProReviewRenderPlain({
       ...opts,
       deferSignerMetadataRepair: shouldDeferPaidProReviewRenderSignerRepair({
         signerMetadataSessionActive: isPaidProReviewSignerMetadataSessionActive(),
       }),
     });
+    const aligned = reviewCopyPlain;
     const preserveHydratedExecutionCorpus =
       hydrated.signerMetadataApplied &&
       (hydrated.source === "pinned_signer_applied_corpus" ||

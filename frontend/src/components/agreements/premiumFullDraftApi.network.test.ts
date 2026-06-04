@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  isPremiumFullDraftCorsBlocked,
   isPremiumFullDraftNetworkFailure,
   postPremiumFullDraftWithRetry,
   PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS,
@@ -30,6 +31,19 @@ describe("isPremiumFullDraftNetworkFailure", () => {
   });
 });
 
+describe("isPremiumFullDraftCorsBlocked", () => {
+  it("classifies cross-origin Failed to fetch as CORS (not retryable network)", () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://qa-frontend.up.railway.app" },
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+    });
+    vi.stubEnv("VITE_CLAW_API_BASE", "https://claw-protocol-production.up.railway.app");
+    expect(isPremiumFullDraftCorsBlocked(new TypeError("Failed to fetch"))).toBe(true);
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("postPremiumFullDraftWithRetry network handling", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -38,6 +52,15 @@ describe("postPremiumFullDraftWithRetry network handling", () => {
 
   it("returns typed network failure after retries (not null)", async () => {
     vi.stubEnv("MODE", "development");
+    vi.stubEnv("VITE_CLAW_API_BASE", "http://localhost:5173");
+    vi.stubGlobal("window", {
+      location: { origin: "http://localhost:5173" },
+      setTimeout: (fn: () => void, _ms?: number) => {
+        fn();
+        return 0;
+      },
+      clearTimeout: () => {},
+    });
     const log = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.stubGlobal(
       "fetch",
@@ -62,5 +85,31 @@ describe("postPremiumFullDraftWithRetry network handling", () => {
     expect(joined).toContain("[premium-network-classification]");
     expect(joined).toMatch(/"cause":"browser_fetch_failed"/);
     log.mockRestore();
+  });
+
+  it("returns cors failure_kind for cross-origin CORS block (no network retry)", async () => {
+    vi.stubEnv("MODE", "development");
+    vi.stubEnv("VITE_CLAW_API_BASE", "https://claw-protocol-production.up.railway.app");
+    vi.stubGlobal("window", {
+      location: { origin: "https://qa-frontend.up.railway.app" },
+      setTimeout: (fn: () => void) => {
+        fn();
+        return 0;
+      },
+      clearTimeout: () => {},
+    });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const out = await postPremiumFullDraftWithRetry({
+      intakeText: "x".repeat(80),
+      context: minimalContext,
+    });
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.failure_kind).toBe("cors");
+      expect(out.retryable).toBe(false);
+      expect(out.error_code).toBe("cors_blocked");
+      expect(out.attemptCount).toBe(1);
+    }
+    vi.unstubAllGlobals();
   });
 });

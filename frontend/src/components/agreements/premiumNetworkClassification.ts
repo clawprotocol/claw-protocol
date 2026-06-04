@@ -7,6 +7,7 @@ export type PremiumNetworkClassificationCause =
   | "browser_network_changed"
   | "browser_fetch_failed"
   | "browser_connection_error"
+  | "browser_cors_blocked"
   | "browser_offline"
   | "request_aborted_user"
   | "request_fetch_timeout"

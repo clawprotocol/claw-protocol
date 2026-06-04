@@ -16,6 +16,7 @@ from backend.config.agreement_signing_token import (
     review_link_mint_enabled,
 )
 from backend.config.deployment_runtime import is_production_like_claw_environment
+from backend.cors_policy import cors_env_raw_meta, cors_startup_diagnostics
 
 _log = logging.getLogger("claw.env")
 
@@ -71,9 +72,13 @@ def log_env_warnings_at_startup() -> None:
 
 def public_env_snapshot() -> dict:
     """Safe for /version and operator summaries — no secret values."""
+    cors = cors_startup_diagnostics()
     return {
         "claw_environment": os.getenv("CLAW_ENVIRONMENT", "local").strip().lower(),
         "cors_configured": _is_set("CLAW_CORS_ALLOW_ORIGINS"),
+        "cors_origin_count": cors.get("resolved_origin_count"),
+        "cors_allow_wildcard": cors.get("allow_wildcard"),
+        "cors_env_shape": cors_env_raw_meta(),
         "stripe_webhook_secret_configured": _is_set("STRIPE_WEBHOOK_SECRET"),
         "admin_secret_configured": _is_set("CLAW_ADMIN_SECRET"),
         "database_url_configured": _is_set("CLAW_DATABASE_URL") or _is_set("DATABASE_URL"),

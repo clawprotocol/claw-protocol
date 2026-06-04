@@ -625,7 +625,11 @@ export function resolvePaidProReviewRenderPlain(
       getPaidProSourceOfTruthText().trim(),
       () => resolvePaidProAuthoritativeDisplayPlain(args),
     );
-    logPostFreezeCorpusDrift({ surface: "paid_pro_review_render", renderedText: rendered });
+    logPostFreezeCorpusDrift({
+      surface: "paid_pro_review_render",
+      renderedText: rendered,
+      mutationSource: "signer_identity_apply",
+    });
     logExecutionBlockLocation(rendered, "paid_pro_review_render");
     logExecutionBlockCount(rendered, "paid_pro_review_render");
     return rendered;

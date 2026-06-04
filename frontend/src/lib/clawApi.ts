@@ -181,6 +181,18 @@ export function isProductionApiMisconfigured(): boolean {
   return l.includes("localhost") || l.includes("127.0.0.1");
 }
 
+/** True when explicit API base targets a different browser origin (split-origin deploy). */
+export function isLawDogApiCrossOrigin(): boolean {
+  if (typeof window === "undefined") return false;
+  const base = getLawDogApiBase().trim();
+  if (!base) return false;
+  try {
+    return new URL(base).origin !== window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 /** Absolute or root-relative URL for an API path (uses same resolution as `getLawDogApiBase`). */
 export function apiUrl(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;

@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 from pydantic import BaseModel
 
 from backend.agreements.paid_pro_server_timing import CORS_EXPOSE_PAID_PRO_HEADERS
@@ -295,19 +296,19 @@ async def claw_request_size_limit(request: Request, call_next):
     return await call_next(request)
 
 
+from backend.cors_policy import (
+    apply_cors_headers_to_response,
+    cors_allowed_origins,
+    log_cors_startup_diagnostics,
+    log_premium_full_draft_cors_proof,
+    normalize_cors_origin,
+    origin_is_allowed,
+    should_log_cors_proof_for_path,
+)
+
+
 def _cors_origins() -> List[str]:
-    """
-    Production: set CLAW_CORS_ALLOW_ORIGINS to a comma-separated list of allowed web origins
-    (e.g. https://app.example.com,https://www.example.com). Empty in production => no CORS origins
-    (browsers will block cross-origin API calls until configured).
-    Local/dev/test: defaults to "*" for developer ergonomics.
-    """
-    env = os.getenv("CLAW_CORS_ALLOW_ORIGINS", "").strip()
-    if env:
-        return [o.strip() for o in env.split(",") if o.strip()]
-    if os.getenv("CLAW_ENVIRONMENT", "local") in ("local", "dev", "test"):
-        return ["*"]
-    return []
+    return cors_allowed_origins()
 
 
 app.add_middleware(
@@ -326,27 +327,44 @@ async def claw_cors_api_acao_fallback(request: Request, call_next):
     If an API response is missing ACAO (e.g. misconfigured allow list + edge/proxy quirks),
     attach it when the Origin matches CLAW_CORS_ALLOW_ORIGINS so browser retries still see CORS.
     """
+    path = str(request.url.path)
+    origin = normalize_cors_origin(request.headers.get("origin") or "")
+
+    if (
+        request.method.upper() == "OPTIONS"
+        and path.startswith("/api/")
+        and origin
+        and origin_is_allowed(origin)
+    ):
+        preflight = Response(status_code=204)
+        preflight = apply_cors_headers_to_response(preflight, origin)
+        if should_log_cors_proof_for_path(path, request.method):
+            log_premium_full_draft_cors_proof(
+                request, preflight, note="options_preflight_fallback_layer"
+            )
+        return preflight
+
     response = await call_next(request)
-    if response.headers.get("access-control-allow-origin"):
+    if not path.startswith("/api/"):
         return response
-    origin = (request.headers.get("origin") or "").strip()
-    if not origin or not str(request.url.path).startswith("/api/"):
+    if not origin:
         return response
-    allowed = _cors_origins()
-    if not allowed or allowed == ["*"]:
-        return response
-    if origin in allowed:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers.setdefault("Access-Control-Allow-Methods", "*")
-        response.headers.setdefault("Access-Control-Allow-Headers", "*")
-        exposed = response.headers.get("access-control-expose-headers", "")
-        for hdr in CORS_EXPOSE_PAID_PRO_HEADERS:
-            if hdr.lower() not in exposed.lower():
-                exposed = f"{exposed}, {hdr}".strip(", ")
-        if exposed:
-            response.headers["Access-Control-Expose-Headers"] = exposed
+    had_acao = bool(response.headers.get("access-control-allow-origin"))
+    response = apply_cors_headers_to_response(response, origin)
+    if should_log_cors_proof_for_path(path, request.method):
+        log_premium_full_draft_cors_proof(
+            request,
+            response,
+            note=(
+                "response_after_fallback"
+                if not had_acao
+                else "response_cors_middleware_already_set_acao"
+            ),
+        )
     return response
+
+
+log_cors_startup_diagnostics()
 
 
 # stores
@@ -679,6 +697,17 @@ def llm_test():
     return JSONResponse({"ok": True, "out": out})
 
 
+def _attach_api_cors(request: Request, response: JSONResponse) -> JSONResponse:
+    origin = normalize_cors_origin(request.headers.get("origin") or "")
+    if request.url.path.startswith("/api/") and origin:
+        apply_cors_headers_to_response(response, origin)
+        if should_log_cors_proof_for_path(request.url.path, request.method):
+            log_premium_full_draft_cors_proof(
+                request, response, note="exception_handler_layer"
+            )
+    return response
+
+
 @app.exception_handler(HTTPException)
 async def _http_exception_handler(request: Request, exc: HTTPException):
     if request.url.path.startswith("/v1"):
@@ -690,7 +719,10 @@ async def _http_exception_handler(request: Request, exc: HTTPException):
             detail=exc.detail,
             trace_id=trace_id,
         )
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return _attach_api_cors(
+        request,
+        JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}),
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -704,7 +736,7 @@ async def _validation_exception_handler(request: Request, exc: RequestValidation
             detail=exc.errors(),
             trace_id=trace_id,
         )
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    return _attach_api_cors(request, JSONResponse(status_code=422, content={"detail": exc.errors()}))
 
 
 @app.exception_handler(Exception)
@@ -718,7 +750,10 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
             detail=str(exc),
             trace_id=trace_id,
         )
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return _attach_api_cors(
+        request,
+        JSONResponse(status_code=500, content={"detail": "Internal server error"}),
+    )
 
 
 # -------------------------------------------------

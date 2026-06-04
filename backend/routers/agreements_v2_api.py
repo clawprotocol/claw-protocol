@@ -73,6 +73,7 @@ from backend.agreements.paid_pro_server_timing import (
     maybe_attach_server_timing_header,
     paid_pro_perf_trace_requested,
 )
+from backend.cors_policy import attach_cors_from_request, log_premium_full_draft_cors_proof
 from backend.agreements.pro_redline_diff import compute_pro_redline_block_diff
 from backend.agreements.premium_refine_narrow import (
     classify_narrow_amendment_prompt,
@@ -1015,6 +1016,7 @@ def _premium_full_draft_finalize_http_response(
     intake_len: int,
     session_hint: str,
     server_timing: Optional[PaidProServerTiming] = None,
+    request: Optional[Request] = None,
 ) -> Response:
     """
     Single JSON serialization to bytes — avoids streaming/partial frames and catches wire-unsafe text
@@ -1041,11 +1043,17 @@ def _premium_full_draft_finalize_http_response(
             }
         }
         err_raw = json.dumps(err, ensure_ascii=False, separators=(",", ":"))
-        return Response(
+        err_response = Response(
             status_code=503,
             content=err_raw.encode("utf-8"),
             media_type="application/json; charset=utf-8",
         )
+        err_response = attach_cors_from_request(request, err_response)
+        if request is not None:
+            log_premium_full_draft_cors_proof(
+                request, err_response, note="finalize_serialize_error_503"
+            )
+        return err_response
     body_bytes = raw.encode("utf-8")
     doc_len = len(wire.get("document_text") or "") if isinstance(wire.get("document_text"), str) else 0
     gen_ok = wire.get("generation_ok")
@@ -1091,7 +1099,13 @@ def _premium_full_draft_finalize_http_response(
         content=body_bytes,
         media_type="application/json; charset=utf-8",
     )
-    return maybe_attach_server_timing_header(response, server_timing)
+    response = maybe_attach_server_timing_header(response, server_timing)
+    response = attach_cors_from_request(request, response)
+    if request is not None:
+        log_premium_full_draft_cors_proof(
+            request, response, note="finalize_http_response"
+        )
+    return response
 
 
 class PremiumMissingFactsRequest(BaseModel):
@@ -4488,7 +4502,11 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             len(intake_s),
         )
         return _premium_full_draft_finalize_http_response(
-            dm, intake_len=len(intake_s), session_hint=session_hint, server_timing=server_timing
+            dm,
+            intake_len=len(intake_s),
+            session_hint=session_hint,
+            server_timing=server_timing,
+            request=request,
         )
     try:
         if server_timing is not None:
@@ -4837,7 +4855,11 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             retryable=False,
         )
         return _premium_full_draft_finalize_http_response(
-            ok_model, intake_len=len(intake_s), session_hint=session_hint, server_timing=server_timing
+            ok_model,
+            intake_len=len(intake_s),
+            session_hint=session_hint,
+            server_timing=server_timing,
+            request=request,
         )
     except Exception as exc:
         code, log_detail = _classify_premium_full_draft_failure(exc)
@@ -4912,7 +4934,11 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             failure_message=_degraded_user_message_for_code(code),
         )
         return _premium_full_draft_finalize_http_response(
-            dm, intake_len=len(intake_s), session_hint=session_hint, server_timing=server_timing
+            dm,
+            intake_len=len(intake_s),
+            session_hint=session_hint,
+            server_timing=server_timing,
+            request=request,
         )
 
 

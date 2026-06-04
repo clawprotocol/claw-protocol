@@ -4,6 +4,8 @@
  */
 
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
+import { countWitnessExecutionSections } from "./paidProSignerSigningCorpusHygiene";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import {
   getPaidProSourceOfTruth,
@@ -122,6 +124,72 @@ export function resolvePaidProFrozenDisplayPlain(fallback?: string): string {
   if (sot.length >= 200) return sot;
   const fb = trimCorpus(fallback ?? "");
   return fb;
+}
+
+/**
+ * True when only the signature/execution tail differs (authorized render-time signer overlay).
+ */
+function signatureExecutionTailDiffIsSignerFieldsOnly(bTail: string, aTail: string): boolean {
+  const sigFieldRe = /^\s*(?:Name|Title|Email for Notice|Address for Notice|By)\s*:/i;
+  const roleHeadingRe =
+    /^\s*(?:CLIENT|SERVICE\s+PROVIDER|CONSULTANT|PROVIDER|COMPANY|CONTRACTOR|PARTY\s+\d+)\s*:/i;
+  const bl = bTail.split("\n");
+  const al = aTail.split("\n");
+  const max = Math.max(bl.length, al.length);
+  for (let i = 0; i < max; i++) {
+    const bLine = (bl[i] ?? "").trimEnd();
+    const aLine = (al[i] ?? "").trimEnd();
+    if (bLine === aLine) continue;
+    if (!bLine && !aLine) continue;
+    if (sigFieldRe.test(bLine) || sigFieldRe.test(aLine)) continue;
+    if (roleHeadingRe.test(bLine) || roleHeadingRe.test(aLine)) continue;
+    if (/^\s*IN WITNESS WHEREOF\b/i.test(bLine) || /^\s*IN WITNESS WHEREOF\b/i.test(aLine)) continue;
+    return false;
+  }
+  return true;
+}
+
+export function isPostFreezeAuthorizedSignerOverlayDrift(before: string, after: string): boolean {
+  const b = trimCorpus(before);
+  const a = trimCorpus(after);
+  if (!b || !a || b === a) return false;
+  const witness = /\bIN WITNESS WHEREOF\b/i;
+  const bi = b.search(witness);
+  const ai = a.search(witness);
+  if (bi < 0 || ai < 0) return false;
+  if (b.slice(0, bi).trimEnd() !== a.slice(0, ai).trimEnd()) return false;
+  if (countWitnessExecutionSections(b) !== countWitnessExecutionSections(a)) return false;
+  if (countPaidProExecutionBlocks(b) !== countPaidProExecutionBlocks(a)) return false;
+  return signatureExecutionTailDiffIsSignerFieldsOnly(b.slice(bi), a.slice(ai));
+}
+
+export function buildPostFreezeCorpusByteDiffPayload(
+  before: string,
+  after: string,
+  surface: string,
+): Record<string, unknown> {
+  const diff = computeByteLevelCorpusDiff(before, after);
+  const lenDelta = diff.afterLen - diff.beforeLen;
+  let removedChars = "";
+  let insertedChars = "";
+  for (const seg of diff.segments) {
+    if (seg.kind === "remove" || seg.kind === "replace") removedChars += seg.beforeText;
+    if (seg.kind === "insert" || seg.kind === "replace") insertedChars += seg.afterText;
+  }
+  return {
+    surface,
+    identical: diff.identical,
+    firstChangeOffset: diff.firstChangeOffset,
+    beforeLen: diff.beforeLen,
+    afterLen: diff.afterLen,
+    lenDelta,
+    removedByteCount: removedChars.length,
+    insertedByteCount: insertedChars.length,
+    removedSnippet: removedChars.slice(0, 120),
+    insertedSnippet: insertedChars.slice(0, 120),
+    beforeHash: diff.beforeHash,
+    afterHash: diff.afterHash,
+  };
 }
 
 export function classifyPostFreezeCorpusMutation(args: {
@@ -323,7 +391,9 @@ export function assertPostFreezeRenderedCorpusMatchesFrozen(args: {
   if (
     classification === "signer_hydration" ||
     classification === "display_html" ||
-    classification === "canonical_refreeze"
+    classification === "canonical_refreeze" ||
+    mutationSource === "signer_identity_apply" ||
+    isPostFreezeAuthorizedSignerOverlayDrift(frozenPlain, rendered)
   ) {
     return;
   }

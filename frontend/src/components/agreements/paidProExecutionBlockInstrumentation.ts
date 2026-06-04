@@ -15,9 +15,11 @@ import {
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import {
   assertPostFreezeRenderedCorpusMatchesFrozen,
+  buildPostFreezeCorpusByteDiffPayload,
   classifyPostFreezeCorpusMutation,
   computeByteLevelCorpusDiff,
   formatByteLevelCorpusDiffReport,
+  isPostFreezeAuthorizedSignerOverlayDrift,
   recordPostFreezeCorpusBoundary,
   resolvePaidProFrozenAuthoritativePlain,
   shouldSkipPostFreezeDriftForReadonlyHtmlStrip,
@@ -243,6 +245,17 @@ export function decidePostFreezeCorpusInstrumentation(args: {
       ? classifyPostFreezeCorpusMutation({ mutationSource, before: frozenPlain, after: rendered })
       : null;
 
+  const authorizedSignerOverlay =
+    Boolean(frozenPlain) &&
+    !identical &&
+    (mutationSource === "signer_identity_apply" ||
+      classification === "signer_hydration" ||
+      isPostFreezeAuthorizedSignerOverlayDrift(frozenPlain!, rendered));
+
+  if (authorizedSignerOverlay) {
+    return none(frozenHash, renderedHash);
+  }
+
   if (identical && !structuralDrift) {
     return {
       emit: "canonical_establish_reconcile",
@@ -259,7 +272,9 @@ export function decidePostFreezeCorpusInstrumentation(args: {
   const suppressedClassification =
     classification === "canonical_refreeze" ||
     classification === "display_html" ||
-    mutationSource === "canonical_establish_reconcile";
+    classification === "signer_hydration" ||
+    mutationSource === "canonical_establish_reconcile" ||
+    mutationSource === "signer_identity_apply";
 
   if (!identical && suppressedClassification) {
     return {
@@ -396,6 +411,16 @@ export function logPostFreezeCorpusDrift(args: {
     });
   }
 
+  if (frozenPlain) {
+    logPostFreezeCorpusByteDiff({
+      surface: args.surface,
+      frozenPlain,
+      renderedPlain: rendered,
+      mutationSource: args.mutationSource,
+      suppressed: decision.emit !== "post_freeze_corpus_drift",
+    });
+  }
+
   assertPostFreezeRenderedCorpusMatchesFrozen({
     surface: args.surface,
     renderedText: rendered,
@@ -461,6 +486,24 @@ export function logPostFreezeCorpusDrift(args: {
     head: boundary.head,
     tail: boundary.tail,
     ...(diff ? { byteDiff: diff } : {}),
+  });
+}
+
+function logPostFreezeCorpusByteDiff(args: {
+  surface: string;
+  frozenPlain: string;
+  renderedPlain: string;
+  mutationSource?: PaidProPostFreezeMutationSource;
+  suppressed?: boolean;
+}): void {
+  if (!instrumentationLogForceForTests && import.meta.env?.DEV !== true) return;
+  const payload = buildPostFreezeCorpusByteDiffPayload(args.frozenPlain, args.renderedPlain, args.surface);
+  if (payload.identical) return;
+  // eslint-disable-next-line no-console
+  console.info("[post-freeze-corpus-byte-diff]", {
+    ...payload,
+    mutationSource: args.mutationSource ?? "unknown",
+    suppressed: Boolean(args.suppressed),
   });
 }
 

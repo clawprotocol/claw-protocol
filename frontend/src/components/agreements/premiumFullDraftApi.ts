@@ -1,6 +1,6 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
-import { apiUrl } from "../../lib/clawApi";
+import { apiUrl, isLawDogApiCrossOrigin } from "../../lib/clawApi";
 import { waitForBrowserOnline } from "./premiumBackendHealth";
 import { logPremiumSessionConsistency, shortIdForPremiumLog } from "./premiumSessionDiagnostics";
 import {
@@ -289,7 +289,7 @@ export type PremiumFinalizationResult = {
   repair_succeeded: boolean;
 };
 
-export type PremiumFullDraftFailureKind = "network" | "http" | "exception" | "generation";
+export type PremiumFullDraftFailureKind = "network" | "http" | "exception" | "generation" | "cors";
 
 export type PremiumFullDraftNetworkErrorCode = "network_changed" | "network_error";
 
@@ -339,6 +339,21 @@ export function isPremiumFullDraftNetworkFailure(error: unknown): boolean {
   if (/network error|connection.*(lost|reset|closed|aborted)/i.test(msg)) return true;
   if (/browser offline/i.test(msg)) return true;
   if (name === "TypeError" && /fetch|network/i.test(msg)) return true;
+  return false;
+}
+
+/**
+ * Cross-origin fetch blocked by CORS (browser hides response; surfaces as Failed to fetch).
+ * Must not be retried or classified as transient network for local-recovery fallback.
+ */
+export function isPremiumFullDraftCorsBlocked(error: unknown): boolean {
+  if (!isLawDogApiCrossOrigin()) return false;
+  if (error == null) return false;
+  const msg = error instanceof Error ? error.message : String(error);
+  const name = error instanceof Error ? error.name : "";
+  if (/ERR_NETWORK_CHANGED|premium_full_draft_fetch_timeout/i.test(msg)) return false;
+  if (/Failed to fetch|NetworkError|Load failed|ERR_INTERNET_DISCONNECTED/i.test(msg)) return true;
+  if (name === "TypeError" && /fetch/i.test(msg)) return true;
   return false;
 }
 
@@ -994,6 +1009,55 @@ export async function postPremiumFullDraftWithRetry(
       return { ok: true, result };
     } catch (e) {
       lastErr = e;
+      if (isPremiumFullDraftCorsBlocked(e)) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.error("[premium-full-draft-cors-blocked]", {
+            apiOrigin: (() => {
+              try {
+                return new URL(apiUrl("/")).origin;
+              } catch {
+                return null;
+              }
+            })(),
+            pageOrigin: typeof window !== "undefined" ? window.location.origin : null,
+            originsMatch:
+              typeof window !== "undefined"
+                ? (() => {
+                    try {
+                      return new URL(apiUrl("/")).origin === window.location.origin;
+                    } catch {
+                      return false;
+                    }
+                  })()
+                : null,
+            message: msg.slice(0, 200),
+            hint:
+              "Backend must log [cors-response-proof] with acao=frontend origin. " +
+              "If env is set, check Origin exact match (no trailing slash) and that VITE_CLAW_API_BASE targets the same API service.",
+          });
+        }
+        logPremiumNetworkClassification({
+          cause: "browser_cors_blocked",
+          recoverable: false,
+          sessionGenerationIdShort: shortIdForPremiumLog(agreementGenerationId),
+          intakeFingerprint: shortIntakeFingerprint(args.intakeText),
+          attemptCount: totalAttempts,
+          networkAttempt,
+          note: "preflight_or_response_missing_acao",
+        });
+        return {
+          ok: false,
+          failure_kind: "cors",
+          retryable: false,
+          error_code: "cors_blocked",
+          document_text: "",
+          attemptCount: totalAttempts,
+          browserErrorName: e instanceof Error ? e.name : undefined,
+          browserErrorMessage: msg.slice(0, 200),
+        };
+      }
       if (!isPremiumFullDraftNetworkFailure(e)) {
         if (import.meta.env.DEV) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -1058,6 +1122,19 @@ export async function postPremiumFullDraftWithRetry(
   }
 
   const attemptCount = totalAttempts;
+  if (isPremiumFullDraftCorsBlocked(lastErr)) {
+    const browserErrorMessage = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    return {
+      ok: false,
+      failure_kind: "cors",
+      retryable: false,
+      error_code: "cors_blocked",
+      document_text: "",
+      attemptCount,
+      browserErrorName: lastErr instanceof Error ? lastErr.name : undefined,
+      browserErrorMessage: browserErrorMessage.slice(0, 200),
+    };
+  }
   if (isPremiumFullDraftNetworkFailure(lastErr)) {
     const errorCode = premiumFullDraftNetworkErrorCode(lastErr);
     const browserErrorName = lastErr instanceof Error ? lastErr.name : undefined;

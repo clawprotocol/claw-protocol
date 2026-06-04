@@ -1710,7 +1710,22 @@ async function runPremiumCompletionInner(
       },
     });
     if (!fullResp.ok) {
-      if (fullResp.failure_kind === "network" && fullResp.retryable) {
+      if (fullResp.failure_kind === "cors") {
+        logPremiumCompletionDebug({
+          stage: "premium_full_draft_cors_blocked",
+          intakeLen: soT.length,
+          accepted: false,
+          rejectedReason: fullResp.error_code ?? "cors_blocked",
+          premiumRenderSource: "rejected_paid_corpus",
+        });
+        if (import.meta.env.MODE !== "test" && intentContract.pro_strict) {
+          proIntentGateMessage = proIntentMessageWhenServerFullDraftFailed(intentContract);
+          premiumRenderSource = "rejected_paid_corpus";
+        }
+        if (tierAEnabled) {
+          tierADiag.backendGenerationOutcome = "cors_blocked";
+        }
+      } else if (fullResp.failure_kind === "network" && fullResp.retryable) {
         logPremiumGenerationApiUnavailable({
           endpoint: PREMIUM_GENERATION_DRAFT_API_PATH,
           error: fullResp.error_code ?? fullResp.browserErrorMessage ?? "network_error",
