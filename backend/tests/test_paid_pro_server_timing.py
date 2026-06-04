@@ -113,10 +113,17 @@ def test_premium_full_draft_server_timing_header_only_with_perf_trace(
     timing = json.loads(raw_timing)
     names = [s["name"] for s in timing.get("spans", [])]
     assert "backend_request_total" in names
+    assert "backend_request_received" in names
+    assert "backend_context_assembly" in names
+    assert "backend_prompt_assembly" in names
+    assert "backend_llm_api_call_start" in names
     assert "backend_llm_primary" in names
     assert "backend_parse_normalize" in names
+    assert "backend_post_processing" in names
+    assert "backend_quality_grade" in names
     assert "backend_validation" in names
     assert "backend_response_packaging" in names
+    assert timing.get("dominantSpan", {}).get("name") in names
     assert timing.get("traceId") == "c1f75f50-c35f-47a9-a62b-22b17e3c6f20"
     llm_primary = next(s for s in timing["spans"] if s["name"] == "backend_llm_primary")
     assert llm_primary["durationMs"] >= 0

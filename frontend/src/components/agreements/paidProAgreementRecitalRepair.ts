@@ -12,6 +12,7 @@ import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentInt
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 
 export function repairMalformedPaidProAgreementRecital(
   text: string,
@@ -32,6 +33,9 @@ export function repairMalformedPaidProAgreementRecital(
     ? canonicalPartyRecordsFromSignerIdentities(authorityPartiesToCanonicalPartyIdentities(parties))
     : undefined;
   if (records && records.length >= 2) {
+    const roleLabels = repairOpeningRecitalRoleLabelsFromManifest(out, records);
+    out = roleLabels.text;
+    repairs.push(...roleLabels.repairs);
     const opening = ensurePaidProServicesAgreementOpening(out, records);
     out = opening.text;
     repairs.push(...opening.repairs);

@@ -65,20 +65,29 @@ describe("premium Pro generation wait (static)", () => {
       })
       .join(" ");
     expect(copy).not.toMatch(/Still finishing/i);
-    expect(copy).toMatch(/Generating final Pro agreement/i);
+    expect(copy).toMatch(/Generating your final Pro agreement/i);
     expect(copy).not.toMatch(/Still building/i);
+    expect(copy).not.toMatch(/15[–-]30\s*seconds/i);
   });
 
-  it("progress pills use Terms loaded and Agreement generated, not Payment", () => {
+  it("progress pills use Terms loaded and Pro draft generating, not Payment", () => {
     const view = resolvePremiumProWaitModalView("processing");
     const labels = view.progressSteps.map((s) => s.shortLabel).join(" ");
     expect(labels).toContain("Terms loaded");
-    expect(labels).toContain("Agreement generated");
+    expect(labels).toContain("Pro draft generating");
     expect(labels).not.toMatch(/\bPayment\b/);
+    expect(labels).not.toContain("Agreement generated");
   });
 
   it("bans stale copy in resolved modal views", () => {
-    const phases = ["processing", "soft_wait", "extended_wait", "terminal_failure", "success"] as const;
+    const phases = [
+      "processing",
+      "soft_wait",
+      "extended_wait",
+      "patience_extended",
+      "terminal_failure",
+      "success",
+    ] as const;
     const bundle = phases
       .map((p) => {
         const v = resolvePremiumProWaitModalView(p);

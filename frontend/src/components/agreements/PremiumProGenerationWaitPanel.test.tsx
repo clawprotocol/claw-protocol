@@ -13,11 +13,12 @@ describe("PremiumProGenerationWaitPanel", () => {
     render(
       <PremiumProGenerationWaitPanel view={view} titleId="test-wait-title" />,
     );
-    expect(screen.getByRole("heading", { name: /Building your Pro agreement/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Generating your final Pro agreement/i })).toBeTruthy();
     expect(screen.getAllByText(PREMIUM_PRO_WAIT_REASSURANCE)).toHaveLength(1);
-    expect(screen.getByText("Upgrade")).toBeTruthy();
+    expect(screen.getByText("Terms loaded")).toBeTruthy();
     expect(screen.queryByText("Payment")).toBeNull();
-    expect(screen.getByText("Pro draft")).toBeTruthy();
+    expect(screen.getByText("Pro draft generating")).toBeTruthy();
+    expect(screen.getByText(/1–3 minutes/i)).toBeTruthy();
   });
 
   it("shows recovery actions only on terminal failure", () => {

@@ -6,7 +6,10 @@ import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 import { readPremiumNetworkCallRecords } from "./paidProPremiumGenerationCallAudit";
 import { readPaidProCheckoutMilestonesForWaterfall } from "./paidProQaPerfTrace";
 import { shortIdForPremiumLog } from "./premiumSessionDiagnostics";
-import type { PaidProPerformanceTrace } from "./paidProPerformanceTrace";
+import type {
+  PaidProPerformanceTrace,
+  PaidProServerTimingSpanWire,
+} from "./paidProPerformanceTrace";
 
 export type PaidProPremiumHttpLatencyMeta = {
   retryCount: number;
@@ -69,6 +72,40 @@ function isoAt(ms: number | null): string | null {
   }
 }
 
+const BACKEND_TIMING_SKIP_FOR_DOMINANT = new Set([
+  "backend_request_total",
+  "backend_request_received",
+  "backend_llm_api_call_start",
+]);
+
+function resolveDominantBackendSpan(
+  spans: PaidProServerTimingSpanWire[],
+): { name: string; durationMs: number } | null {
+  let best: { name: string; durationMs: number } | null = null;
+  for (const s of spans) {
+    const name = (s.name || "").trim();
+    if (!name || BACKEND_TIMING_SKIP_FOR_DOMINANT.has(name)) continue;
+    const durationMs = Math.max(0, Math.round(Number(s.durationMs) || 0));
+    if (!best || durationMs > best.durationMs) {
+      best = { name, durationMs };
+    }
+  }
+  return best;
+}
+
+function backendTimingAttribution(
+  spans: PaidProServerTimingSpanWire[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const s of spans) {
+    const name = (s.name || "").trim();
+    if (!name) continue;
+    const dur = Math.max(0, Math.round(Number(s.durationMs) || 0));
+    out[name] = (out[name] ?? 0) + dur;
+  }
+  return out;
+}
+
 /** Single QA-friendly latency row after checkout waterfall completes. */
 export function emitPaidProGenerationLatencyDiagnostics(trace: PaidProPerformanceTrace): void {
   if (!paidProPerfTraceEnabled()) return;
@@ -91,6 +128,10 @@ export function emitPaidProGenerationLatencyDiagnostics(trace: PaidProPerformanc
     checkoutReturnAt != null && premiumRequestStartAt != null
       ? premiumRequestStartAt - checkoutReturnAt
       : null;
+
+  const backendSpans = milestones.lastBackendSpans ?? [];
+  const dominantBackendSpan = resolveDominantBackendSpan(backendSpans);
+  const backendSpanAttributionMs = backendTimingAttribution(backendSpans);
 
   const firstNetwork = networkCalls[0];
   const lastNetwork = networkCalls[networkCalls.length - 1];
@@ -126,6 +167,13 @@ export function emitPaidProGenerationLatencyDiagnostics(trace: PaidProPerformanc
       premiumHttpEndAt != null && milestones.localPostProcessingEndAt != null
         ? milestones.localPostProcessingEndAt - premiumHttpEndAt
         : null,
+    backendServerTimingSpans: backendSpans,
+    backendDominantSpan: dominantBackendSpan,
+    backendSpanAttributionMs,
+    backendLlmPrimaryMs: backendSpanAttributionMs.backend_llm_primary ?? null,
+    backendPostProcessingMs: backendSpanAttributionMs.backend_post_processing ?? null,
+    backendValidationMs: backendSpanAttributionMs.backend_validation ?? null,
+    backendResponsePackagingMs: backendSpanAttributionMs.backend_response_packaging ?? null,
   };
 
   // eslint-disable-next-line no-console

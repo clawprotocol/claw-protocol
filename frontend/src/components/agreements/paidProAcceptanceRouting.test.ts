@@ -439,10 +439,13 @@ describe("paidProAcceptanceRouting", () => {
       expect(start).toBeGreaterThan(-1);
       const stickyIdx = intake.indexOf("if (paidProCanonicalStickyCta)", start);
       expect(stickyIdx).toBeGreaterThan(-1);
-      expect(intake.slice(stickyIdx, stickyIdx + 400)).toContain(
-        "mapPaidProStickyCtaToPrimaryCta(paidProCanonicalStickyCta)",
+      expect(intake.slice(stickyIdx, stickyIdx + 900)).toContain(
+        "const mapped = mapPaidProStickyCtaToPrimaryCta(paidProCanonicalStickyCta)",
       );
-      expect(intake.slice(stickyIdx, stickyIdx + 500)).toContain("assertCanonicalPaidProSignerCtaReason");
+      expect(intake.slice(stickyIdx, stickyIdx + 500)).toMatch(
+        /!paidProCanonicalStickyCta\.showStickyBar/,
+      );
+      expect(intake.slice(stickyIdx, stickyIdx + 900)).toContain("assertCanonicalPaidProSignerCtaReason");
       const canonicalReviewDecisionIdx = intake.indexOf(
         "paid_pro_review_decision_on_card",
         stickyIdx,
@@ -929,10 +932,18 @@ describe("paidProAcceptanceRouting", () => {
       expect(canonicalSlice).toMatch(/resolvePaidProInlineSignerSetupMounted/);
       expect(canonicalSlice).not.toMatch(/!paidProSignatureDetailsReady/);
       const ctaIdx = src.indexOf("const unifiedPrimaryCta = useMemo");
-      const ctaSlice = src.slice(ctaIdx, ctaIdx + 2200);
-      expect(ctaSlice).toMatch(/paidProInlineSignerSetupLatched && !signaturePreparationRequested/);
-      expect(ctaSlice).toMatch(/paid_pro_signer_details_required/);
-      expect(ctaSlice).toMatch(/signerDetailsAreComplete/);
+      expect(ctaIdx).toBeGreaterThan(-1);
+      const ctaSlice = src.slice(ctaIdx, ctaIdx + 12000);
+      const latchIdx = src.indexOf(
+        "paidProInlineSignerSetupLatched && !signaturePreparationRequested",
+        ctaIdx,
+      );
+      expect(latchIdx).toBeGreaterThan(ctaIdx);
+      const latchCtaSlice = src.slice(latchIdx, latchIdx + 700);
+      expect(latchCtaSlice).toMatch(/paidProSignerDetailsGate\.ctaLabel/);
+      expect(latchCtaSlice).toMatch(/paid_pro_signer_details_required/);
+      expect(latchCtaSlice).toMatch(/paid_pro_signer_details_complete/);
+      expect(latchCtaSlice).toMatch(/signerDetailsAreComplete/);
       expect(ctaSlice).not.toMatch(
         /const prepareSignatureLinksRequested\s*=\s*[\s\S]{0,120}paidProSignatureDetailsReady/,
       );

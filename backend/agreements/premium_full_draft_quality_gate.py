@@ -10,6 +10,11 @@ import unicodedata
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
+from backend.agreements.premium_simple_consulting_size_guard import (
+    append_simple_consulting_repair_directives,
+    evaluate_simple_consulting_document_length,
+)
+
 # Mirrors frontend premiumFullDraftQuality.ts — operative depth signals.
 _SECTION_RES = [
     re.compile(r"\bterminat", re.I),
@@ -349,6 +354,15 @@ def evaluate_premium_full_draft_quality(
     ):
         reasons.append("contradictory_exclusive_and_nonexclusive_operative_grants")
 
+    _simple_ok, _simple_reasons = evaluate_simple_consulting_document_length(
+        doc,
+        intake=intake,
+        context=context,
+        scenario_category=scenario_category,
+    )
+    if not _simple_ok:
+        reasons.extend(_simple_reasons)
+
     # Hard drift checks: do not let generic shells pass as "Pro" (wrong state, placeholder parties).
     if re.search(r"\boklahoma\b", intake_low) and "delaware" not in intake_low:
         if re.search(
@@ -403,6 +417,7 @@ def premium_full_draft_repair_system_prompt() -> str:
         "- Preserve facts from the user materials; do not invent party names, amounts, or dates not supplied.\n"
         "- If intake flagged exclusive vs non-exclusive conflict: choose **one** binding grant in operative text; "
         "do not grant both exclusive and non-exclusive rights as binding law in the same document.\n"
+        "- If `length_repair_directive` is present, follow it: shorten bloat while keeping required operative clauses.\n"
     )
 
 
@@ -443,4 +458,4 @@ def build_premium_full_draft_repair_user_payload(
         out["premium_intent_key"] = premium_intent_key
     if deterministic_premium_intent_skeleton:
         out["deterministic_premium_intent_skeleton"] = deterministic_premium_intent_skeleton
-    return out
+    return append_simple_consulting_repair_directives(out, rejection_reasons)

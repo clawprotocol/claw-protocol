@@ -15,6 +15,7 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
+import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualConsultingQualityFloor";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
@@ -316,10 +317,23 @@ function preparePaidProServerDocumentForAcceptanceCore(
     .map((p) => String(p?.name ?? "").trim())
     .filter((n) => n.length >= 2)
     .slice(0, 2);
+  const roleLabels = (draft?.parties ?? [])
+    .map((p) => String(p?.role ?? "").trim())
+    .filter((r) => r.length >= 2);
   const records =
     partyNames.length >= 2
-      ? resolveCanonicalPartyIdentitiesFromIntake(intakeText, partyNames)
+      ? resolveCanonicalPartyIdentitiesFromIntake(
+          intakeText,
+          partyNames,
+          roleLabels.length >= 2 ? roleLabels : undefined,
+        )
       : [];
+
+  if (records.length >= 2) {
+    const roleFix = repairOpeningRecitalRoleLabelsFromManifest(out, records);
+    out = roleFix.text;
+    repairs.push(...roleFix.repairs);
+  }
 
   const headArtifacts = stripMalformedProReviewDisplayArtifacts(out);
   out = headArtifacts.text;

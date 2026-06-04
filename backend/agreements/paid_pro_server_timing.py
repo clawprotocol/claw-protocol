@@ -55,16 +55,38 @@ class PaidProServerTiming:
 
     def to_wire(self) -> Dict[str, Any]:
         total_ms = round((time.perf_counter() - self._t0) * 1000)
-        return {
+        dom = self.dominant_span()
+        out: Dict[str, Any] = {
             "traceId": self.trace_id,
             "sessionGenerationId": self.session_generation_id,
             "intakeFingerprint": self.intake_fingerprint,
             "totalMs": total_ms,
             "spans": self.spans,
         }
+        if dom is not None:
+            out["dominantSpan"] = {
+                "name": dom.get("name"),
+                "durationMs": dom.get("durationMs"),
+            }
+        return out
 
     def response_header_value(self) -> str:
         return json.dumps(self.to_wire(), ensure_ascii=False, separators=(",", ":"))
+
+    def dominant_span(self) -> Optional[Dict[str, Any]]:
+        """Longest duration span (excludes zero-duration instants and request total)."""
+        skip = {"backend_request_total", "backend_request_received", "backend_llm_api_call_start"}
+        best: Optional[Dict[str, Any]] = None
+        best_dur = -1
+        for s in self.spans:
+            name = str(s.get("name") or "")
+            if name in skip:
+                continue
+            dur = int(s.get("durationMs") or 0)
+            if dur > best_dur:
+                best_dur = dur
+                best = s
+        return best
 
     def finalize_request_total(self) -> None:
         """Wall-clock for the premium-full-draft handler (record once before response)."""

@@ -69,6 +69,21 @@ describe("paidPro Test246 wait modal timing", () => {
     expect(view.statusLine).toMatch(/payment is complete/i);
   });
 
+  it("150s in-flight maps to patience_extended with active-processing copy", () => {
+    const phase = resolvePremiumProWaitVisualPhase({
+      successFlash: false,
+      terminalFailure: false,
+      patienceExtended: true,
+      softProgress: true,
+      extendedWaitCopy: true,
+    });
+    expect(phase).toBe("patience_extended");
+    const view = resolvePremiumProWaitModalView(phase);
+    expect(view.title).toMatch(/Finalizing your Pro agreement/i);
+    expect(view.statusLine).toMatch(/still active/i);
+    expect(view.showRecoveryActions).toBe(false);
+  });
+
   it("true terminal failure still surfaces retry copy when request is not in flight", () => {
     expect(
       shouldFailOpenAfterHardCeiling({

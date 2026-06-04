@@ -80,13 +80,17 @@ function paidProSafeDisplayHasAuthoritativeParties(
 function resolvePaidProSafeDisplayPartyRecords(
   intakeRaw: string | null | undefined,
   partyNames: readonly string[],
-  generatedBody: string,
+  draft: ParsedDraftShape | null | undefined,
 ): ReturnType<typeof resolveCanonicalPartyIdentitiesFromSources> {
   if (!paidProSafeDisplayHasAuthoritativeParties(intakeRaw, partyNames)) return [];
+  const roleLabels = (draft?.parties ?? [])
+    .map((p) => String(p?.role ?? "").trim())
+    .filter((r) => r.length >= 2);
   return resolveCanonicalPartyIdentitiesFromSources({
     rawIntake: intakeRaw,
     starterNames: partyNames,
-    generatedBody,
+    generatedBody: null,
+    roleLabels: roleLabels.length >= 2 ? roleLabels : undefined,
   });
 }
 
@@ -131,13 +135,14 @@ function applyAcceptedProCorpusSafeDisplayCore(
   const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
   const intakeRaw = opts?.intakeText ?? null;
   const hasAuthoritativeParties = paidProSafeDisplayHasAuthoritativeParties(intakeRaw, partyNames);
-  const records = resolvePaidProSafeDisplayPartyRecords(intakeRaw, partyNames, out);
+  const records = resolvePaidProSafeDisplayPartyRecords(intakeRaw, partyNames, opts?.draft);
 
   if (hasAuthoritativeParties && records.length >= 2) {
     const partyRepair = repairFullAgreementPartyIdentity({
       text: out,
       intakeRaw,
       partyNames: records.map((r) => r.fullLegalName),
+      roleLabels: records.map((r) => r.roleLabel),
     });
     if (partyRepair.text !== out) {
       out = partyRepair.text;

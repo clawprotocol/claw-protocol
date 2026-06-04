@@ -67,6 +67,7 @@ from backend.agreements.premium_full_draft_quality_gate import (
     evaluate_premium_full_draft_quality,
     premium_full_draft_repair_system_prompt,
 )
+from backend.agreements.premium_simple_consulting_size_guard import enrich_user_payload_for_simple_consulting
 from backend.agreements.paid_pro_server_timing import (
     PaidProServerTiming,
     maybe_attach_server_timing_header,
@@ -4323,6 +4324,7 @@ def build_premium_full_draft_user_payload_for_airlock(
             "rounds, termination, governing law and venue from the user’s **stated** state (never replace Oklahoma with "
             "Delaware or swap states without intake support), notices, counterparts, e-sign, and full signature blocks."
         )
+    user_payload = enrich_user_payload_for_simple_consulting(user_payload, intake_s, ctx_dict)
     return user_payload, ctx_dict
 
 
@@ -4400,8 +4402,25 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             "[CLAW] premium similarity retry model=%s",
             llm_model or "default",
         )
+    client_gen = (getattr(body, "agreement_generation_id", None) or "").strip() or "n/a"
+    client_fp = (getattr(body, "intake_fingerprint", None) or "").strip() or "n/a"
+    server_timing: Optional[PaidProServerTiming] = None
+    if paid_pro_perf_trace_requested(request):
+        server_timing = PaidProServerTiming(
+            trace_id=client_gen,
+            session_generation_id=client_gen,
+            intake_fingerprint=client_fp,
+        )
+        server_timing.mark_instant("backend_request_received")
     context_assembly_started = time.perf_counter()
     user_payload, ctx_dict = build_premium_full_draft_user_payload_for_airlock(body)
+    if server_timing is not None:
+        server_timing.record(
+            "backend_context_assembly",
+            (time.perf_counter() - context_assembly_started) * 1000,
+            payloadJsonLen=len(json.dumps(user_payload, ensure_ascii=False)),
+        )
+    prompt_assembly_started = time.perf_counter()
     intake_s = (body.intake_text or "").strip()
     intent_key = resolve_premium_intent_key(intake_s, ctx_dict)
     intent_skeleton = build_premium_intent_skeleton(intent_key, intake_s)
@@ -4426,22 +4445,14 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
     if len(json.dumps(user_payload, ensure_ascii=False)) > 240_000:
         raise HTTPException(status_code=400, detail="Input too large for premium full draft")
     session_hint = sha256_hex(intake_s.encode("utf-8"))[:16]
-    client_gen = (getattr(body, "agreement_generation_id", None) or "").strip() or "n/a"
-    client_fp = (getattr(body, "intake_fingerprint", None) or "").strip() or "n/a"
     client_agreement_id = (getattr(body, "agreement_id", None) or "").strip() or "n/a"
     ctx_title = (str((ctx_dict or {}).get("title") or "")[:120]) if ctx_dict else ""
-    server_timing: Optional[PaidProServerTiming] = None
-    if paid_pro_perf_trace_requested(request):
-        server_timing = PaidProServerTiming(
-            trace_id=client_gen,
-            session_generation_id=client_gen,
-            intake_fingerprint=client_fp,
-        )
-        server_timing.mark_instant("backend_request_received")
+    if server_timing is not None:
         server_timing.record(
-            "backend_context_assembly",
-            (time.perf_counter() - context_assembly_started) * 1000,
-            payloadJsonLen=len(json.dumps(user_payload, ensure_ascii=False)),
+            "backend_prompt_assembly",
+            (time.perf_counter() - prompt_assembly_started) * 1000,
+            intentKey=(intent_key.value if intent_key is not None else None),
+            airlockWireLen=len(airlock_wire_text),
         )
     log.info(
         "[premium-full-draft] event=start agreement_id=%s session_hint=%s client_generation_id=%s intake_fingerprint=%s intake_len=%s context_title=%r sim_regen=%s payload_json_len=%s",
@@ -4480,6 +4491,12 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             dm, intake_len=len(intake_s), session_hint=session_hint, server_timing=server_timing
         )
     try:
+        if server_timing is not None:
+            server_timing.mark_instant(
+                "backend_llm_api_call_start",
+                model=str(llm_model or ""),
+                maxTokens=max_out,
+            )
         llm_primary_started = time.perf_counter()
         llm_text = call_legal_llm(
             messages=[
@@ -4530,6 +4547,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         )
         _safe_record_ai_call(request, request_ip)
 
+        post_processing_started = time.perf_counter()
         free_blob = build_free_reference_blob(intake_s, ctx_dict)
         repair_used = False
         repair_body = ""
@@ -4556,7 +4574,16 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             merged = list(dict.fromkeys([*reasons_q, *reasons_s]))
             return (ok_q and ok_s), merged
 
+        quality_grade_started = time.perf_counter()
         ok_all, reject_reasons = _grade_draft(out_primary)
+        if server_timing is not None:
+            server_timing.record(
+                "backend_quality_grade",
+                (time.perf_counter() - quality_grade_started) * 1000,
+                path="primary",
+                qualityOk=bool(ok_all),
+                reasonCount=len(reject_reasons),
+            )
         if not ok_all:
             log.info(
                 "premium_full_draft_quality_event event=premium_full_draft_quality_or_schema_fail reasons=%s",
@@ -4696,7 +4723,21 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             repair_used = False
             repair_body = ""
             log.info("dev_context_leak event=premium_full_draft_sanitized_retry_succeeded")
+        final_grade_started = time.perf_counter()
         ok_final, final_reasons = _grade_draft(out)
+        if server_timing is not None:
+            server_timing.record(
+                "backend_quality_grade",
+                (time.perf_counter() - final_grade_started) * 1000,
+                path="final",
+                qualityOk=bool(ok_final),
+                reasonCount=len(final_reasons),
+            )
+            server_timing.record(
+                "backend_post_processing",
+                (time.perf_counter() - post_processing_started) * 1000,
+                repairUsed=bool(repair_used),
+            )
         validation_started = time.perf_counter()
         generation_outcome: Literal["ok", "needs_details", "degraded"] = "ok" if ok_final else "needs_details"
         if not ok_final:

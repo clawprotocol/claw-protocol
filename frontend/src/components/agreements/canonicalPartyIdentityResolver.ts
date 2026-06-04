@@ -6,10 +6,8 @@
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { logPaidProEntityMap } from "./paidProPlaceholderAttributionLog";
-import {
-  partyLegalNamesMatch,
-  resolvePaidProPartyRolesFromAcceptedCorpus,
-} from "./paidProAcceptedCorpusPartyRoles";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 import {
   isAuthoritativeLegalEntityName,
   preserveFullLegalPartyNames,
@@ -18,7 +16,7 @@ import {
 } from "./paidProPartyNamePreserve";
 import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import type { CanonicalPartyIdentity as SignerCanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
-import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 export const PARTY_ENTITY_SUFFIX_RE =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company|Foundation|Trust)\.?$/i;
@@ -139,6 +137,24 @@ function normalizedName(s: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\s*\(\s*(?:Client|Service\s+Provider)\s*\)\.?$/i, "");
+}
+
+/** Party fragment from between-clause may include inline role + trailing intake prose. */
+function partyNameFromIntakeFragment(raw: string): string {
+  let n = normalizedName(raw);
+  n = n.replace(/\s*\(\s*["'“”]?[^)"'“”]{1,64}["'“”]?\s*\).*$/i, "").trim();
+  if (!PARTY_ENTITY_SUFFIX_RE.test(n)) {
+    n = n.replace(/[.,;]+$/g, "");
+  }
+  return cleanManifestLegalName(n);
+}
+
+/** Drop stray period after suffixes not normally written with one (e.g. `LLC.` before `(`). Keeps `Inc.` / `Corp.` etc. */
+function cleanManifestLegalName(name: string): string {
+  return name
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b((?:LLC|L\.L\.C\.|LLP|L\.P\.|LP|PLLC))\.\s*$/i, "$1");
 }
 
 function dedupeKnownPartyTokens(tokens: readonly string[]): string[] {
@@ -282,32 +298,67 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     knownPartyTokens: starterNames,
   });
   const paidProSotActive = hasPaidProSourceOfTruth();
-  const sotCorpusRoles = paidProSotActive
-    ? resolvePaidProPartyRolesFromAcceptedCorpus(getPaidProSourceOfTruthText())
-    : [];
+  const roleLabelsIn = args.roleLabels ?? [];
+  const fullCandidatesEarly = [...rawIntakeNames, ...starterAuthoritative];
+  const trustedPartyTokensEarly = [...fullCandidatesEarly, ...starterNames];
+  if ((args.starterNames?.length ?? 0) >= 2 && roleLabelsIn.length >= 2) {
+    const manifestNames = (args.starterNames ?? [])
+      .map((n) => {
+        const norm = normalizedName(String(n));
+        const fromIntakeCandidates = rawIntakeNames
+          .filter((r) => partyLegalNamesMatch(norm, r))
+          .map((r) => partyNameFromIntakeFragment(r))
+          .filter((r) => r.length >= 3);
+        if (fromIntakeCandidates.length > 0) {
+          fromIntakeCandidates.sort((a, b) => b.length - a.length);
+          return cleanManifestLegalName(fromIntakeCandidates[0]!);
+        }
+        const fromAuth = starterAuthoritative.find((r) => partyLegalNamesMatch(norm, r));
+        if (fromAuth) return cleanManifestLegalName(normalizedName(fromAuth));
+        const upgraded = upgradeShortNamesToFullLegal([norm], fullCandidatesEarly)[0];
+        return cleanManifestLegalName(normalizedName(upgraded || norm));
+      })
+      .filter(
+        (n) =>
+          n.length >= 3 &&
+          !/^(?:party|parties)$/i.test(n) &&
+          !isInvalidCanonicalPartyName(n, trustedPartyTokensEarly),
+      );
+    if (manifestNames.length >= 2) {
+      return manifestNames.slice(0, 12).map((fullLegalName, index) => {
+        const full = cleanManifestLegalName(fullLegalName);
+        const displayAlias = definedShortNameFromLegalEntity(full);
+        return {
+          fullLegalName: full,
+          roleLabel: roleLabelForIndex(index, roleLabelsIn[index]),
+          displayAlias: displayAlias === full ? full.split(/\s+/).slice(0, 2).join(" ") : displayAlias,
+          signerName: null,
+          signerTitle: null,
+          partyAddress: null,
+        };
+      });
+    }
+  }
   const generatedBodyNames =
-    paidProSotActive || sotCorpusRoles.length >= 2
+    paidProSotActive
       ? []
       : canonicalEntityNamesFromText(args.generatedBody, {
           requireSuffix: true,
           knownPartyTokens: [...rawIntakeNames, ...starterAuthoritative],
         });
   const fullCandidates = [...rawIntakeNames, ...generatedBodyNames, ...starterAuthoritative];
-  let selected =
-    sotCorpusRoles.length >= 2
-      ? sotCorpusRoles.map((role) => role.legalName)
-      : rawIntakeNames.length >= 2
-        ? rawIntakeNames
-        : generatedBodyNames.length >= 2
-          ? generatedBodyNames
-          : starterAuthoritative.length >= 2
-            ? starterAuthoritative
-            : upgradeShortNamesToFullLegal(starterNames, fullCandidates).filter(hasLegalEntitySuffix);
-  const trustedPartyTokens = [
-    ...rawIntakeNames,
-    ...starterAuthoritative,
-    ...sotCorpusRoles.map((role) => role.legalName),
-  ];
+  const explicitManifestOrder =
+    starterAuthoritative.length >= 2 && roleLabelsIn.length >= 2;
+  let selected = explicitManifestOrder
+    ? starterAuthoritative
+    : rawIntakeNames.length >= 2
+      ? rawIntakeNames
+      : generatedBodyNames.length >= 2
+        ? generatedBodyNames
+        : starterAuthoritative.length >= 2
+          ? starterAuthoritative
+          : upgradeShortNamesToFullLegal(starterNames, fullCandidates).filter(hasLegalEntitySuffix);
+  const trustedPartyTokens = [...rawIntakeNames, ...starterAuthoritative];
   selected = selected.filter(
     (n) =>
       n.length >= 3 &&
@@ -348,13 +399,6 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
       signerTitle: null,
       partyAddress: null,
     };
-  }).map((rec) => {
-    const corpusBody = String(args.generatedBody || "").trim();
-    if (!corpusBody) return rec;
-    const hit = resolvePaidProPartyRolesFromAcceptedCorpus(corpusBody).find((a) =>
-      partyLegalNamesMatch(rec.fullLegalName, a.legalName),
-    );
-    return hit ? { ...rec, roleLabel: hit.roleLabel } : rec;
   });
 }
 
@@ -712,6 +756,10 @@ export function repairCanonicalPartyIdentityInCorpus(
   out = address.text;
   repairs.push(...address.repairs);
 
+  const openingRoles = repairOpeningRecitalRoleLabelsFromManifest(out, records);
+  out = openingRoles.text;
+  repairs.push(...openingRoles.repairs);
+
   const roleSwap = replaceTruncatedPartyRefsWithRoleLabels(out, records);
   out = roleSwap.text;
   repairs.push(...roleSwap.repairs);
@@ -778,7 +826,7 @@ export function repairFullAgreementPartyIdentity(args: {
       ? fromSigner
       : resolveCanonicalPartyIdentitiesFromSources({
           rawIntake: args.intakeRaw,
-          generatedBody: args.text,
+          generatedBody: null,
           starterNames: args.partyNames,
           roleLabels: args.roleLabels,
         });

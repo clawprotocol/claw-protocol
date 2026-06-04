@@ -9,6 +9,7 @@ export type PremiumProWaitVisualPhase =
   | "processing"
   | "soft_wait"
   | "extended_wait"
+  | "patience_extended"
   | "terminal_failure"
   | "success";
 
@@ -17,27 +18,10 @@ export const PREMIUM_PRO_WAIT_REASSURANCE =
 
 export const PREMIUM_PRO_WAIT_PROGRESS_STEPS = [
   { short: "Terms loaded", full: "Terms loaded" },
-  { short: "Agreement generated", full: "Agreement generated" },
-  { short: "Review complete", full: "Review complete" },
-  { short: "Signer workflow", full: "Preparing signer workflow" },
+  { short: "Pro draft generating", full: "Pro draft generating" },
+  { short: "Review checks", full: "Review checks" },
+  { short: "Signer setup", full: "Signer setup" },
 ] as const;
-
-/** Workflow-oriented status lines (shown instead of vague rotating copy). */
-export const PREMIUM_PRO_WAIT_ESTIMATED_TIMING =
-  "This usually takes 15–30 seconds, but complex agreements may take longer.";
-
-export const PREMIUM_PRO_WAIT_STATUS_LINES: Record<
-  Exclude<PremiumProWaitVisualPhase, "terminal_failure" | "success">,
-  string
-> = {
-  processing: `Generating your final Pro agreement from your deal terms. ${PREMIUM_PRO_WAIT_ESTIMATED_TIMING}`,
-  soft_wait:
-    "Still working. Your payment is complete and we're finishing the Pro agreement.",
-  extended_wait: "Still processing the full Pro draft. Please keep this tab open.",
-};
-
-/** @deprecated Rotating lines removed from UI; kept empty for legacy imports. */
-export const PREMIUM_PRO_WAIT_ROTATING_LINES: readonly string[] = [] as const;
 
 /** Banned stale / awkward phrases — guarded in tests. */
 export const PREMIUM_PRO_WAIT_STALE_COPY_BANS = [
@@ -55,9 +39,33 @@ export const PREMIUM_PRO_WAIT_STALE_COPY_BANS = [
   "Making it easier for the other side to review",
   "Organizing parties and responsibilities",
   "Tightening the deal flow",
+  "15–30 seconds",
+  "15-30 seconds",
+  "Agreement generated",
+  "Review complete",
+  "Generating final Pro agreement",
 ] as const;
 
 export const PREMIUM_PRO_WAIT_ROTATE_INTERVAL_MS = 5000;
+
+/** @deprecated Rotating lines removed from UI; kept empty for legacy imports. */
+export const PREMIUM_PRO_WAIT_ROTATING_LINES: readonly string[] = [] as const;
+
+export const PREMIUM_PRO_WAIT_TITLE_PROCESSING = "Generating your final Pro agreement…";
+export const PREMIUM_PRO_WAIT_TITLE_EXTENDED = "Still preparing your Pro agreement…";
+export const PREMIUM_PRO_WAIT_TITLE_PATIENCE = "Finalizing your Pro agreement…";
+
+export const PREMIUM_PRO_WAIT_BODY_PROCESSING =
+  "LawDog is drafting, reviewing, and preparing your Pro agreement for signing. Most agreements are ready in 1–3 minutes. Larger or more detailed agreements may take a few minutes longer.";
+
+export const PREMIUM_PRO_WAIT_BODY_SOFT_WAIT =
+  "Still working normally. Your payment is complete, and LawDog is preparing the full Pro draft. Please keep this tab open.";
+
+export const PREMIUM_PRO_WAIT_BODY_EXTENDED_WAIT =
+  "Larger agreements can take a few minutes. LawDog is still working and your agreement will open here when ready.";
+
+export const PREMIUM_PRO_WAIT_BODY_PATIENCE_EXTENDED =
+  "This is taking longer than usual, but processing is still active. Please keep this tab open.";
 
 export const PREMIUM_RETURN_RETRY_GENERATION_LABEL = "Retry Pro generation";
 export const PREMIUM_RETURN_USE_STARTER_LABEL = "Use current draft for now";
@@ -136,16 +144,17 @@ export type PremiumProWaitModalView = {
 export function resolvePremiumProWaitVisualPhase(args: {
   successFlash: boolean;
   terminalFailure: boolean;
-  /** 150s+ in-flight patience (logging); may coincide with extended wait copy. */
+  /** 150s+ in-flight patience copy (not terminal). */
   patienceExtended: boolean;
   /** 30s+ soft reassurance copy. */
   softProgress: boolean;
-  /** 60s+ extended “keep tab open” copy while request may still be in flight. */
+  /** 60s+ extended “larger agreements” copy while request may still be in flight. */
   extendedWaitCopy?: boolean;
 }): PremiumProWaitVisualPhase {
   if (args.successFlash) return "success";
   if (args.terminalFailure) return "terminal_failure";
-  if (args.patienceExtended || args.extendedWaitCopy) return "extended_wait";
+  if (args.patienceExtended) return "patience_extended";
+  if (args.extendedWaitCopy) return "extended_wait";
   if (args.softProgress) return "soft_wait";
   return "processing";
 }
@@ -160,24 +169,24 @@ export function resolvePremiumProWaitProgressSteps(
   if (phase === "terminal_failure") {
     return [
       { shortLabel: steps[0].short, state: "done" },
-      { shortLabel: steps[1].short, state: "done" },
+      { shortLabel: steps[1].short, state: "active" },
       { shortLabel: steps[2].short, state: "pending" },
       { shortLabel: steps[3].short, state: "pending" },
     ];
   }
-  if (phase === "extended_wait") {
+  if (phase === "patience_extended") {
     return [
       { shortLabel: steps[0].short, state: "done" },
-      { shortLabel: steps[1].short, state: "done" },
-      { shortLabel: steps[2].short, state: "done" },
-      { shortLabel: steps[3].short, state: "active" },
+      { shortLabel: steps[1].short, state: "active" },
+      { shortLabel: steps[2].short, state: "pending" },
+      { shortLabel: steps[3].short, state: "pending" },
     ];
   }
-  if (phase === "soft_wait") {
+  if (phase === "extended_wait" || phase === "soft_wait") {
     return [
       { shortLabel: steps[0].short, state: "done" },
-      { shortLabel: steps[1].short, state: "done" },
-      { shortLabel: steps[2].short, state: "active" },
+      { shortLabel: steps[1].short, state: "active" },
+      { shortLabel: steps[2].short, state: "pending" },
       { shortLabel: steps[3].short, state: "pending" },
     ];
   }
@@ -219,11 +228,24 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
     };
   }
 
+  if (phase === "patience_extended") {
+    return {
+      phase,
+      title: PREMIUM_PRO_WAIT_TITLE_PATIENCE,
+      statusLine: PREMIUM_PRO_WAIT_BODY_PATIENCE_EXTENDED,
+      showRotatingLines: false,
+      showSpinner: true,
+      showRecoveryActions: false,
+      progressSteps,
+      reassurance,
+    };
+  }
+
   if (phase === "extended_wait") {
     return {
       phase,
-      title: "Generating final Pro agreement…",
-      statusLine: PREMIUM_PRO_WAIT_STATUS_LINES.extended_wait,
+      title: PREMIUM_PRO_WAIT_TITLE_EXTENDED,
+      statusLine: PREMIUM_PRO_WAIT_BODY_EXTENDED_WAIT,
       showRotatingLines: false,
       showSpinner: true,
       showRecoveryActions: false,
@@ -235,8 +257,8 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
   if (phase === "soft_wait") {
     return {
       phase,
-      title: "Generating final Pro agreement…",
-      statusLine: PREMIUM_PRO_WAIT_STATUS_LINES.soft_wait,
+      title: PREMIUM_PRO_WAIT_TITLE_PROCESSING,
+      statusLine: PREMIUM_PRO_WAIT_BODY_SOFT_WAIT,
       showRotatingLines: false,
       showSpinner: true,
       showRecoveryActions: false,
@@ -247,8 +269,8 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
 
   return {
     phase,
-    title: "Generating final Pro agreement…",
-    statusLine: PREMIUM_PRO_WAIT_STATUS_LINES.processing,
+    title: PREMIUM_PRO_WAIT_TITLE_PROCESSING,
+    statusLine: PREMIUM_PRO_WAIT_BODY_PROCESSING,
     showRotatingLines: false,
     showSpinner: true,
     showRecoveryActions: false,
@@ -264,7 +286,7 @@ export type PremiumCheckoutModalCopyTier = "initial" | "soft_progress" | "patien
 export function resolvePremiumCheckoutModalCopy(tier: PremiumCheckoutModalCopyTier) {
   const phase =
     tier === "patience_extended"
-      ? "extended_wait"
+      ? "patience_extended"
       : tier === "soft_progress"
         ? "soft_wait"
         : "processing";
