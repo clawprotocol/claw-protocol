@@ -26,6 +26,7 @@ import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
 } from "./paidProExecutionBlockInstrumentation";
+import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
 
 export type CanonicalAgreementSnapshotSource =
   | "free_starter"
@@ -590,7 +591,54 @@ export function logAuthoritativeCorpusInvariant(args?: {
   return payload;
 }
 
+export function canonicalSnapshotAlignsWithPaidProAuthority(
+  snapshot: CanonicalAgreementSnapshot,
+): boolean {
+  if (!snapshot.hash || snapshot.len < 200) return false;
+  const frozen = getFrozenCanonicalAgreementCorpus();
+  if (frozen?.hash && frozen.hash === snapshot.hash) return true;
+  const doc = getAuthoritativeAgreementDocument();
+  if (doc?.authoritativeHash && doc.authoritativeHash === snapshot.hash) return true;
+  return false;
+}
+
+export type CanonicalSnapshotDiagnosticIntegrity = {
+  /** Raw predicate from buildCanonicalAgreementSnapshot (unchanged). */
+  predicateIntegrityOk: boolean;
+  /** Value reported by [canonical-snapshot-selected] and diagnostic helpers. */
+  reportedIntegrityOk: boolean;
+  authorityAligned: boolean;
+  authorityInvariantOk: boolean;
+};
+
+/**
+ * Diagnostic integrity for canonical-snapshot-selected: when Paid Pro authority hash
+ * matches and the corpus invariant holds, do not report integrityOk: false for
+ * canonical_working_draft (stale pro-candidate predicate mismatch).
+ */
+export function resolveCanonicalSnapshotDiagnosticIntegrity(
+  snapshot: CanonicalAgreementSnapshot,
+): CanonicalSnapshotDiagnosticIntegrity {
+  const predicateIntegrityOk = snapshot.integrityOk;
+  const authorityAligned = canonicalSnapshotAlignsWithPaidProAuthority(snapshot);
+  const authorityInvariantOk = readAuthoritativeCorpusInvariant({
+    canonicalHash: snapshot.hash,
+  }).invariantOk;
+  const reportedIntegrityOk =
+    predicateIntegrityOk ||
+    (snapshot.source === "canonical_working_draft" &&
+      authorityAligned &&
+      authorityInvariantOk);
+  return {
+    predicateIntegrityOk,
+    reportedIntegrityOk,
+    authorityAligned,
+    authorityInvariantOk,
+  };
+}
+
 export function logCanonicalSnapshotSelected(snapshot: CanonicalAgreementSnapshot, surface: string): void {
+  const diagnostic = resolveCanonicalSnapshotDiagnosticIntegrity(snapshot);
   if (
     !shouldLogPaidProAuthoritySurfaceEvent({
       event: "canonical-snapshot-selected",
@@ -599,7 +647,7 @@ export function logCanonicalSnapshotSelected(snapshot: CanonicalAgreementSnapsho
       source: snapshot.source,
       payloadSignature: JSON.stringify({
         len: snapshot.len,
-        integrityOk: snapshot.integrityOk,
+        integrityOk: diagnostic.reportedIntegrityOk,
       }),
     })
   ) {
@@ -610,7 +658,7 @@ export function logCanonicalSnapshotSelected(snapshot: CanonicalAgreementSnapsho
     source: snapshot.source,
     len: snapshot.len,
     hash: snapshot.hash,
-    integrityOk: snapshot.integrityOk,
+    integrityOk: diagnostic.reportedIntegrityOk,
     surface,
   });
 }
