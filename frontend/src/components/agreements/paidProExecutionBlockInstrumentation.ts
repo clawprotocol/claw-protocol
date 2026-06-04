@@ -13,6 +13,16 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
+import {
+  assertPostFreezeRenderedCorpusMatchesFrozen,
+  classifyPostFreezeCorpusMutation,
+  computeByteLevelCorpusDiff,
+  formatByteLevelCorpusDiffReport,
+  recordPostFreezeCorpusBoundary,
+  resolvePaidProFrozenAuthoritativePlain,
+  shouldSkipPostFreezeDriftForReadonlyHtmlStrip,
+  type PaidProPostFreezeMutationSource,
+} from "./paidProPostFreezeCorpusInvariant";
 
 function normalizeNewlines(text: string): string {
   return (text || "").replace(/\r\n/g, "\n");
@@ -131,24 +141,93 @@ export function resolveFrozenCorpusHashForDrift(): string | null {
   return null;
 }
 
+export function logCanonicalEstablishReconcile(args: {
+  surface: string;
+  preFreezeHash: string;
+  postFreezeHash: string;
+  preFreezeLen: number;
+  postFreezeLen: number;
+  preFreezePlain?: string | null;
+  postFreezePlain?: string | null;
+}): void {
+  const pre = (args.preFreezePlain || "").trim();
+  const post = (args.postFreezePlain || "").trim();
+  const byteDiff =
+    pre && post ? formatByteLevelCorpusDiffReport(computeByteLevelCorpusDiff(pre, post)) : null;
+  if (
+    !shouldLogPaidProAuthoritySurfaceEvent({
+      event: "canonical-establish-reconcile",
+      surface: args.surface,
+      hash: args.postFreezeHash,
+      source: "canonical_refreeze",
+      payloadSignature: JSON.stringify({
+        preFreezeHash: args.preFreezeHash,
+        postFreezeHash: args.postFreezeHash,
+      }),
+    })
+  ) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.info("[canonical-establish-reconcile]", {
+    surface: args.surface,
+    classification: "canonical_refreeze",
+    preFreezeHash: args.preFreezeHash,
+    postFreezeHash: args.postFreezeHash,
+    preFreezeLen: args.preFreezeLen,
+    postFreezeLen: args.postFreezeLen,
+    ...(byteDiff ? { byteDiff } : {}),
+  });
+}
+
 export function logPostFreezeCorpusDrift(args: {
   surface: string;
   renderedText: string;
   frozenHash?: string | null;
+  mutationSource?: PaidProPostFreezeMutationSource;
 }): void {
+  if (shouldSkipPostFreezeDriftForReadonlyHtmlStrip(args.surface)) {
+    return;
+  }
   const rendered = (args.renderedText || "").trim();
   if (rendered.length < 200) return;
   const frozenHash = args.frozenHash ?? resolveFrozenCorpusHashForDrift();
   if (!frozenHash) return;
+  const frozenPlain = resolvePaidProFrozenAuthoritativePlain();
   const renderedHash = hashPaidProCorpus(rendered);
   const identical = frozenHash === renderedHash;
+  const mutationSource = args.mutationSource ?? "unknown";
+  const boundary = recordPostFreezeCorpusBoundary({
+    surface: args.surface,
+    renderedText: rendered,
+    mutationSource,
+    frozenHash,
+  });
+  assertPostFreezeRenderedCorpusMatchesFrozen({
+    surface: args.surface,
+    renderedText: rendered,
+    mutationSource,
+    frozenHash,
+    frozenPlain: frozenPlain ?? undefined,
+  });
+  const diff =
+    !identical && frozenPlain
+      ? formatByteLevelCorpusDiffReport(computeByteLevelCorpusDiff(frozenPlain, rendered))
+      : null;
+  const classification =
+    frozenPlain && !identical
+      ? classifyPostFreezeCorpusMutation({ mutationSource, before: frozenPlain, after: rendered })
+      : null;
+  if (classification === "canonical_refreeze" || classification === "display_html") {
+    return;
+  }
   if (
     !shouldLogPaidProAuthoritySurfaceEvent({
       event: "post-freeze-corpus-drift",
       surface: args.surface,
       hash: renderedHash,
       source: identical ? "identical" : "drift",
-      payloadSignature: JSON.stringify({ frozenHash, identical }),
+      payloadSignature: JSON.stringify({ frozenHash, identical, mutationSource }),
     })
   ) {
     return;
@@ -160,6 +239,11 @@ export function logPostFreezeCorpusDrift(args: {
     renderedHash,
     identical,
     len: rendered.length,
+    mutationSource,
+    classification: classification ?? (identical ? "identical" : "illegal_structural"),
+    head: boundary.head,
+    tail: boundary.tail,
+    ...(diff ? { byteDiff: diff } : {}),
   });
 }
 

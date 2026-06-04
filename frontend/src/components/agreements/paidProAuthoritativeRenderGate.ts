@@ -17,7 +17,7 @@ import {
 } from "./paidProSourceOfTruth";
 import { consumedAuthoritySignerMetadataComplete } from "./paidProSignerMetadataCommitPolicy";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
-import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
+import { resolvePaidProFrozenDisplayPlain } from "./paidProPostFreezeCorpusInvariant";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
 /** True when review should show frozen SoT only (no signer hydration / sanitizer recompute). */
@@ -38,9 +38,9 @@ export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
   return true;
 }
 
-/** Non-mutating display plain for first authoritative Pro review (intelligence callouts only). */
+/** Non-mutating display plain for first authoritative Pro review — byte-identical to frozen SoT. */
 export function resolvePaidProAuthoritativeDisplayPlain(): string {
-  return stripPremiumIntelligenceCalloutsFromCorpus(getPaidProSourceOfTruthText().trim());
+  return resolvePaidProFrozenDisplayPlain();
 }
 
 export function paidProAuthoritativeRenderGateMeta(): { len: number; hash: string } | null {

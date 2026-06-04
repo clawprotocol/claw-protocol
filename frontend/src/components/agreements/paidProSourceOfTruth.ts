@@ -25,6 +25,7 @@ import {
 } from "./canonicalAgreementSnapshot";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import {
+  logCanonicalEstablishReconcile,
   logExecutionBlockCount,
   logExecutionBlockLocation,
   logPostFreezeCorpusDrift,
@@ -295,6 +296,23 @@ export function establishPaidProSourceOfTruth(args: {
   const partyNameList = (args.draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
     .filter((n) => n.length >= 2);
+  const roleLabels = (args.draft?.parties ?? [])
+    .map((p) => String(p?.role ?? "").trim())
+    .filter((r) => r.length >= 2);
+  if (intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList)) {
+    const identityRecords = resolveCanonicalPartyIdentitiesFromIntake(
+      args.intakeText ?? "",
+      partyNameList,
+      roleLabels.length >= 2 ? roleLabels : undefined,
+    );
+    if (identityRecords.length >= 2) {
+      safeForCommit = ensurePaidProServicesAgreementOpening(
+        safeForCommit,
+        identityRecords,
+        args.intakeText ?? null,
+      ).text;
+    }
+  }
   const parties: CanonicalAgreementSnapshotParty[] = (args.draft?.parties ?? [])
     .map((p) => ({
       name: String(p?.name ?? "").trim(),
@@ -317,31 +335,49 @@ export function establishPaidProSourceOfTruth(args: {
   });
   const frozen = freezeCanonicalAgreementSnapshot(snapshot, "server_full_document_text");
   const frozenText = frozen?.canonicalText ?? safeForCommit;
+  const preEstablishFreezeHash = frozen?.hash ?? null;
   const driftGuard = enforceAuthoritativeProCorpusDisplay({
     authoritativeText: safeForCommit,
     displayText: frozenText,
     source: "canonical_freeze",
     surface: "paid_pro_source_of_truth_establish",
   });
+  const acceptedCorpusText = driftGuard.displayText;
+  const acceptedCorpusHash = hashPaidProCorpus(acceptedCorpusText);
+  if (preEstablishFreezeHash && preEstablishFreezeHash !== acceptedCorpusHash) {
+    logCanonicalEstablishReconcile({
+      surface: "paid_pro_source_of_truth_establish",
+      preFreezeHash: preEstablishFreezeHash,
+      postFreezeHash: acceptedCorpusHash,
+      preFreezeLen: frozenText.length,
+      postFreezeLen: acceptedCorpusText.length,
+      preFreezePlain: frozenText,
+      postFreezePlain: acceptedCorpusText,
+    });
+    const reconcileSnapshot = buildCanonicalAgreementSnapshot({
+      surface: "paid_pro_source_of_truth_establish",
+      tier: "pro",
+      candidates: [{ source: "server_full_document_text", text: acceptedCorpusText }],
+      intakeText: args.intakeText ?? null,
+      parties,
+      signerState: { complete: false, signerCount: Math.max(2, parties.length) },
+      minLen: 500,
+      reviewSessionId: args.reviewSessionId,
+    });
+    freezeCanonicalAgreementSnapshot(reconcileSnapshot, "server_full_document_text");
+  }
   logProCorpusSourceMap({
     stage: "authoritative_pro_freeze",
     source: "server_full_draft",
-    len: driftGuard.displayText.length,
-    text: driftGuard.displayText,
-    hash: frozen?.hash ?? hashPaidProCorpus(driftGuard.displayText),
+    len: acceptedCorpusText.length,
+    text: acceptedCorpusText,
+    hash: acceptedCorpusHash,
     allowedToOverride: false,
     reason: driftGuard.blocked ? "drift_blocked_used_authoritative" : "canonical_freeze",
   });
-  let acceptedCorpusText = driftGuard.displayText;
-  if (intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList)) {
-    const identityRecords = resolveCanonicalPartyIdentitiesFromIntake(args.intakeText ?? "", partyNameList);
-    if (identityRecords.length >= 2) {
-      acceptedCorpusText = ensurePaidProServicesAgreementOpening(acceptedCorpusText, identityRecords).text;
-    }
-  }
   const record: PaidProSourceOfTruth = {
     text: acceptedCorpusText,
-    hash: hashPaidProCorpus(acceptedCorpusText),
+    hash: acceptedCorpusHash,
     accepted_at: args.accepted_at ?? Date.now(),
     source: "server_full_draft",
     reviewSessionId: frozen?.reviewSessionId,
@@ -362,7 +398,11 @@ export function establishPaidProSourceOfTruth(args: {
   logPostFreezeCorpusDrift({
     surface: "paid_pro_source_of_truth_establish",
     renderedText: record.text,
-    frozenHash: frozen?.hash ?? record.hash,
+    frozenHash: record.hash,
+    mutationSource:
+      preEstablishFreezeHash && preEstablishFreezeHash !== acceptedCorpusHash
+        ? "canonical_establish_reconcile"
+        : undefined,
   });
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();

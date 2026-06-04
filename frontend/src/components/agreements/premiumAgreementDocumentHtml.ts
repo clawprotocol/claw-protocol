@@ -15,6 +15,7 @@ import {
   applyPaidProReviewRenderSanitizer,
   resolvePartiesForReviewRender,
 } from "./paidProReviewRenderCorpus";
+import { resolvePaidProFrozenAuthoritativePlain } from "./paidProPostFreezeCorpusInvariant";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
 import {
@@ -299,7 +300,8 @@ function buildPremiumAgreementReadonlyHtmlCore(
     }
   }
   if (opts.suppressCorpusEmbeddedSignatureForDisplay) {
-    raw = stripCorpusSignatureRegionForExternalSignerUi(raw);
+    const stripSource = resolvePaidProFrozenAuthoritativePlain() || raw;
+    raw = stripCorpusSignatureRegionForExternalSignerUi(stripSource);
     raw = sanitizeProReviewDisplayText(raw, {
       source: "premium_agreement_readonly_html",
     }).text;

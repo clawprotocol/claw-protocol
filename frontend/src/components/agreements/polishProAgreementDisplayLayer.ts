@@ -35,12 +35,16 @@ import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadata
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { detectProReviewDisplaySanityViolations } from "./paidProReviewDisplaySanity";
 import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "./paidProAuthoritativeRenderGate";
-import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
   logPostFreezeCorpusDrift,
 } from "./paidProExecutionBlockInstrumentation";
+import {
+  resolvePaidProFrozenAuthoritativePlain,
+  resolvePaidProFrozenDisplayPlain,
+  shouldSkipPostFreezeDriftForReadonlyHtmlStrip,
+} from "./paidProPostFreezeCorpusInvariant";
 
 export { detectProReviewDisplaySanityViolations } from "./paidProReviewDisplaySanity";
 export type { PaidProDisplaySanityExecutionContext } from "./paidProReviewDisplaySanity";
@@ -398,12 +402,22 @@ export function sanitizeProReviewDisplayText(
     return { text: "", repairs: [], sanityBlocked: false, inputHash, outputHash: inputHash };
   }
   if (shouldBlockPaidProStructuralMutationAfterAcceptance() && !opts?.retainSignatureExecutionBlock) {
-    const out = basicNormalize(stripPremiumIntelligenceCalloutsFromCorpus(input));
+    const readonlyStrip = shouldSkipPostFreezeDriftForReadonlyHtmlStrip(opts?.source);
+    const out = readonlyStrip
+      ? input
+      : resolvePaidProFrozenAuthoritativePlain() || resolvePaidProFrozenDisplayPlain(input);
     const outputHash = fingerprintAgreementBody(out);
-    logPostFreezeCorpusDrift({ surface: opts?.source ?? "pro_review_display_passthrough", renderedText: out });
+    if (!readonlyStrip) {
+      logPostFreezeCorpusDrift({
+        surface: opts?.source ?? "pro_review_display_passthrough",
+        renderedText: out,
+      });
+    }
     return {
       text: out,
-      repairs: ["display:sot_sanitize_passthrough"],
+      repairs: readonlyStrip
+        ? ["display:readonly_signature_strip_passthrough"]
+        : ["display:sot_sanitize_passthrough"],
       sanityBlocked: false,
       inputHash,
       outputHash,
@@ -513,7 +527,7 @@ export function polishProAgreementDisplayLayer(
   const input = trim(raw);
   if (!input) return { text: "", repairs: [] };
   if (shouldBlockPaidProStructuralMutationAfterAcceptance() && !opts?.retainSignatureExecutionBlock) {
-    const out = basicNormalize(stripPremiumIntelligenceCalloutsFromCorpus(input));
+    const out = resolvePaidProFrozenDisplayPlain(input);
     logPostFreezeCorpusDrift({ surface: "polishProAgreementDisplayLayer", renderedText: out });
     logExecutionBlockLocation(out, "polishProAgreementDisplayLayer:passthrough");
     logExecutionBlockCount(out, "polishProAgreementDisplayLayer:passthrough");
