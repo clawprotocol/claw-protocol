@@ -175,9 +175,7 @@ describe("paidProAcceptanceRouting", () => {
   it("paid shell chip copy constants", () => {
     expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).toContain("pro");
     expect(PAID_PRO_REVIEW_CHIP_STATE.toLowerCase()).toContain("ready");
-    expect(resolvePaidProReviewChipState({ signersReady: false }).toLowerCase()).toContain(
-      "signer setup",
-    );
+    expect(resolvePaidProReviewChipState({ signersReady: false })).toBe("Signer details needed");
   });
 
   it("paid SoT accepted with incomplete signer metadata keeps canonical corpus and skips home regen", () => {
@@ -464,11 +462,11 @@ describe("paidProAcceptanceRouting", () => {
   describe("paid Pro signer-setup UX surface (labels + Edit signer details scroll/focus)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 
-    it("signer setup section is titled 'Complete signer details' with a 'Signer setup' chip and signer-name copy", () => {
+    it("signer setup section is titled 'Complete signer details' with a signer-details-needed chip and signer-name copy", () => {
       expect(intake).toMatch(
         /paidProInlineRecipientShell\s*\n\s*\? PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA\s*\n\s*: "Share this agreement"/,
       );
-      expect(intake).toContain("Signer setup");
+      expect(intake).toContain("PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS");
       expect(intake).toContain(
         "Add the signer name and email for each party before creating review or signature links. LawDog does not email anyone automatically.",
       );

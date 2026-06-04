@@ -29,6 +29,9 @@ import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS } from "./paidProReviewTrustUx";
+
+export { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS };
 
 export const PAID_PRO_REVIEW_SHELL_TITLE = "PRO AGREEMENT";
 export const PAID_PRO_REVIEW_SHELL_SUBTITLE =
@@ -38,7 +41,8 @@ export const PAID_PRO_REVIEW_CHIP_VERSION = "Pro agreement";
 /** @deprecated Prefer {@link resolvePaidProReviewChipState} for stage-accurate copy. */
 export const PAID_PRO_REVIEW_CHIP_STATE = "Ready for signature";
 
-export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP = "Ready for signer setup";
+/** Same label as trust-rail signer step — status, not an action. */
+export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP = PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS;
 export const PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS = "Ready to prepare signing links";
 export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING = "Ready for signing";
 

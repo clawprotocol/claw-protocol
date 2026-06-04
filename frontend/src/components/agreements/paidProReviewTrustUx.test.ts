@@ -33,13 +33,13 @@ describe("paidProReviewTrustUx", () => {
     );
   });
 
-  it("after signer setup shows signer-added and ready-for-signatures steps", () => {
+  it("after signer setup shows signer-added and ready-for-signing step", () => {
     const steps = resolvePaidProReviewTrustSteps({ signersReady: true });
     expect(steps.map((s) => s.label)).toEqual([
       "Agreement generated",
       "Legal review complete",
       "Signer details added",
-      "Ready to prepare signing links",
+      "Ready for signing",
     ]);
     expect(steps.every((s) => s.state === "done")).toBe(true);
     expect(resolvePaidProReviewSupportingCopy({ signersReady: true })).toBe(

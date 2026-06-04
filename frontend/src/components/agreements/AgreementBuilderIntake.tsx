@@ -405,6 +405,7 @@ import {
   isAuthoritativePaidProReview,
   PAID_PRO_REVIEW_BADGE,
   PAID_PRO_REVIEW_CHIP_VERSION,
+  PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS,
   resolvePaidProReviewChipState,
   PAID_PRO_REVIEW_SHELL_SUBTITLE,
   PAID_PRO_REVIEW_SHELL_TITLE,
@@ -2384,7 +2385,7 @@ function CreateFlowSendRecipientsPanel({
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {paidProInlineRecipientShell ? (
           <span className="rounded-full border border-emerald-700/45 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-100/95">
-            Signer setup
+            {PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS}
           </span>
         ) : (
           <span className="rounded-full border border-emerald-700/45 bg-emerald-950/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-100/95">

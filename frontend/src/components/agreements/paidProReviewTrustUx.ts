@@ -18,6 +18,9 @@ export type PaidProReviewTrustStep = {
 
 export const PAID_PRO_REVIEW_STATUS_HEADLINE = "Review status";
 
+/** Canonical status while signer metadata is incomplete (document chip + trust rail). */
+export const PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS = "Signer details needed";
+
 export const PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS =
   "Your agreement has been generated and reviewed. The document below is the final agreement draft. Add signer information to prepare signature links.";
 
@@ -50,7 +53,7 @@ export function resolvePaidProReviewTrustSteps(args: {
     { id: "legal_review_complete", label: "Legal review complete", state: "done" },
     {
       id: "signer_details",
-      label: signersDone ? "Signer details added" : "Signer details needed",
+      label: signersDone ? "Signer details added" : PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS,
       state: signersDone ? "done" : "active",
     },
     {

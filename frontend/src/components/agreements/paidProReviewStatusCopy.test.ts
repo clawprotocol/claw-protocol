@@ -4,15 +4,18 @@ import {
   PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING,
   PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS,
   PAID_PRO_REVIEW_CHIP_STATE,
+  PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS,
   resolvePaidProReviewChipState,
 } from "./authoritativePaidProReview";
 import { resolvePaidProReviewTrustSteps } from "./paidProReviewTrustUx";
 
 describe("paidProReviewStatusCopy", () => {
-  it("chip state is Ready for signer setup while signer details are still needed", () => {
+  it("chip state matches trust rail while signer details are still needed", () => {
+    expect(PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP).toBe(PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS);
+    expect(PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS).toBe("Signer details needed");
     expect(
       resolvePaidProReviewChipState({ signersReady: false, signingLinksCreated: false }),
-    ).toBe(PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP);
+    ).toBe(PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS);
     expect(resolvePaidProReviewChipState({ signersReady: false })).not.toBe(
       PAID_PRO_REVIEW_CHIP_STATE,
     );
