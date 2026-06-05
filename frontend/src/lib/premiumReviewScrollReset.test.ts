@@ -1,10 +1,24 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { recordPaidProReviewRender } from "../components/agreements/paidProReviewStability";
+import { establishPaidProSourceOfTruth, clearPaidProSourceOfTruth } from "../components/agreements/paidProSourceOfTruth";
 import {
   PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID,
   resetPremiumReviewScrollResetConsumedForTests,
   resetPremiumReviewScrollToTop,
 } from "./premiumPostCheckoutReturnUx";
+
+const FREEZE_BODY = [
+  "CONSULTING AGREEMENT",
+  "",
+  ...Array.from({ length: 30 }, (_, i) => `Section ${i + 1}. Text ${i + 1}.`),
+  "",
+  "IN WITNESS WHEREOF",
+  "",
+  "CLIENT:\nAcme\nName:\nTitle:",
+  "",
+  "SERVICE PROVIDER:\nBeta\nName:\nTitle:",
+].join("\n");
 
 describe("resetPremiumReviewScrollToTop", () => {
   beforeEach(() => {
@@ -15,6 +29,7 @@ describe("resetPremiumReviewScrollToTop", () => {
   });
 
   afterEach(() => {
+    clearPaidProSourceOfTruth();
     vi.restoreAllMocks();
   });
 
@@ -45,6 +60,29 @@ describe("resetPremiumReviewScrollToTop", () => {
       reason: "payment_success_authoritative_apply",
       applied: false,
     });
+  });
+
+  it("preserves scroll when review mounted and corpus transition is signer_metadata_only", async () => {
+    clearPaidProSourceOfTruth();
+    establishPaidProSourceOfTruth({ text: FREEZE_BODY, source: "server_full_draft" });
+    resetPremiumReviewScrollResetConsumedForTests();
+    recordPaidProReviewRender(FREEZE_BODY);
+    const signerHydrated = FREEZE_BODY.replace("Name:", "Name: Jane Client");
+    resetPremiumReviewScrollToTop({
+      reason: "payment_success_authoritative_apply",
+      afterPlain: signerHydrated,
+    });
+    await new Promise<void>((r) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => r()));
+    });
+    expect(console.info).toHaveBeenCalledWith("[premium-review-scroll-reset]", {
+      reason: "payment_success_authoritative_apply",
+      applied: false,
+      preserveScroll: true,
+      corpusTransitionClassification: "signer_metadata_only",
+      corpusHashUnchanged: false,
+    });
+    expect(window.scrollTo).not.toHaveBeenCalled();
   });
 
   it("ignores force on payment_success after first apply", async () => {

@@ -357,10 +357,15 @@ export type PremiumReviewScrollResetReason =
   | "premium_completion_hydrate"
   | "premium_return_restore";
 
+import { classifyPaidProCorpusLifecycleDiff } from "../components/agreements/paidProCorpusLifecycleDiff";
+import { resolvePaidProFrozenAuthoritativePlain } from "../components/agreements/paidProPostFreezeCorpusInvariant";
+import { hashPaidProCorpus } from "../components/agreements/paidProSourceOfTruth";
 import {
+  getPaidProReviewStabilitySnapshot,
   markPaidProPaymentScrollResetApplied,
   resetPaidProPaymentApplyScrollResetLatch,
   shouldApplyPaidProPaymentScrollReset,
+  shouldSkipPaidProPaymentScrollResetForCorpus,
 } from "../components/agreements/paidProReviewStability";
 
 let premiumReviewScrollResetConsumed = false;
@@ -369,8 +374,34 @@ let premiumReviewScrollResetConsumed = false;
 export function resetPremiumReviewScrollToTop(args: {
   reason: PremiumReviewScrollResetReason;
   force?: boolean;
+  afterPlain?: string;
 }): void {
   if (args.reason === "payment_success_authoritative_apply") {
+    const afterPlain = (args.afterPlain || "").trim();
+    const snap = getPaidProReviewStabilitySnapshot();
+    const afterHash = afterPlain.length >= 200 ? hashPaidProCorpus(afterPlain) : null;
+    const corpusHashUnchanged = Boolean(snap.reviewHash && afterHash && snap.reviewHash === afterHash);
+    const frozenPlain = resolvePaidProFrozenAuthoritativePlain();
+    const corpusTransitionClassification =
+      afterPlain.length >= 200 && frozenPlain
+        ? classifyPaidProCorpusLifecycleDiff(frozenPlain, afterPlain)
+        : null;
+    if (
+      !args.force &&
+      shouldSkipPaidProPaymentScrollResetForCorpus({
+        corpusTransitionClassification,
+        corpusHashUnchanged,
+      })
+    ) {
+      console.info("[premium-review-scroll-reset]", {
+        reason: args.reason,
+        applied: false,
+        preserveScroll: true,
+        corpusTransitionClassification,
+        corpusHashUnchanged,
+      });
+      return;
+    }
     if (!shouldApplyPaidProPaymentScrollReset()) {
       console.info("[premium-review-scroll-reset]", { reason: args.reason, applied: false });
       return;
