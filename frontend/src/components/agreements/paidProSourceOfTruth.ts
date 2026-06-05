@@ -10,6 +10,13 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   applyAcceptedProCorpusSafeDisplay,
 } from "./acceptedProCorpusSafeDisplay";
+import {
+  paidProPipelineAcceptedCorpusHash,
+  readPaidProPipelineAcceptedCorpusHash,
+} from "./paidProPipelineAcceptedCorpus";
+import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
+import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
+import { clearPaidProVisibleRenderMemoForTests } from "./paidProVisibleRenderMemo";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
 import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { logFalseProAuthorityBlocked } from "./paidProRuntimeAuthorityEstablishment";
@@ -148,6 +155,9 @@ export function clearPaidProSourceOfTruth(): void {
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();
   clearPaidProPinnedSignerAppliedCorpus();
+  clearPaidProVisibleRenderMemoForTests();
+  clearAcceptedProCorpusSafeDisplayCacheForTests();
+  clearPaidProPipelineAcceptedCorpusHashForTests();
   tracePaidProCorpusMutation({
     store: "paidProSourceOfTruth",
     caller: "clearPaidProSourceOfTruth",
@@ -256,10 +266,19 @@ export function establishPaidProSourceOfTruth(args: {
       ? "establish_paid_pro_source_of_truth_latch_restore"
       : "establish_paid_pro_source_of_truth",
   });
-  const safe = applyAcceptedProCorpusSafeDisplay(authorityText, {
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-  }).text;
+  const incomingPreparedHash = paidProPipelineAcceptedCorpusHash(authorityText);
+  const pipelineAcceptedHash = readPaidProPipelineAcceptedCorpusHash();
+  const skipRedundantSafeDisplay =
+    Boolean(pipelineAcceptedHash) &&
+    Boolean(incomingPreparedHash) &&
+    pipelineAcceptedHash === incomingPreparedHash;
+  const safe = skipRedundantSafeDisplay
+    ? authorityText
+    : applyAcceptedProCorpusSafeDisplay(authorityText, {
+        draft: args.draft ?? null,
+        intakeText: args.intakeText ?? null,
+        surface: "establish_paid_pro_source_of_truth",
+      }).text;
   const minimumSubstance = validateProMinimumSubstance({
     text: safe,
     rawIntake: args.intakeText ?? "",

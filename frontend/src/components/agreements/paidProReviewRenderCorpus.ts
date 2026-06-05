@@ -64,6 +64,11 @@ import {
 } from "./paidProSourceOfTruth";
 import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
 import {
+  buildPaidProReviewPlainMemoKey,
+  readMemoizedPaidProReviewPlain,
+  writeMemoizedPaidProReviewPlain,
+} from "./paidProVisibleRenderMemo";
+import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
   logPostFreezeCorpusDrift,
@@ -618,11 +623,25 @@ export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
   const surface = "paid_pro_review_render_plain";
+  const seedForMemo = shouldUsePaidProSourceOfTruthDisplayOnly()
+    ? getPaidProSourceOfTruthText().trim()
+    : args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()
+      ? (readPaidProSignerStagingDisplayCorpus()?.plain ?? getPaidProSourceOfTruthText().trim())
+      : hasPaidProSourceOfTruth()
+        ? getPaidProSourceOfTruthText().trim()
+        : "";
+  const memoKey = buildPaidProReviewPlainMemoKey(seedForMemo, surface);
+  const memoHit = readMemoizedPaidProReviewPlain(memoKey);
+  if (memoHit != null) {
+    return memoHit;
+  }
+
+  let rendered: string;
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    const rendered = tracePaidProQaPassText(
+    rendered = tracePaidProQaPassText(
       "resolvePaidProReviewRenderPlain",
       `${surface}:display_only_sot`,
-      getPaidProSourceOfTruthText().trim(),
+      seedForMemo,
       () => resolvePaidProAuthoritativeDisplayPlain(args),
     );
     logPostFreezeCorpusDrift({
@@ -632,29 +651,29 @@ export function resolvePaidProReviewRenderPlain(
     });
     logExecutionBlockLocation(rendered, "paid_pro_review_render");
     logExecutionBlockCount(rendered, "paid_pro_review_render");
-    return rendered;
+  } else if (args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()) {
+    rendered = tracePaidProQaPassText("resolvePaidProReviewRenderPlain", `${surface}:frozen`, seedForMemo, () => seedForMemo);
+  } else {
+    const seed = seedForMemo;
+    rendered = tracePaidProQaPassText("resolvePaidProReviewRenderPlain", surface, seed, () =>
+      resolvePaidProSignerStagingDisplayPlain({
+        stagingActive: Boolean(args?.deferSignerMetadataRepair),
+        resolveFresh: () => {
+          const parties = resolvePartiesForReviewRender(args);
+          const roleContext = paidProPartyRoleContextFromArgs(args);
+          const inner = alignExecutionBlockRolesFromAcceptedCorpus(
+            resolvePaidProReviewRenderPlainInner(args),
+            parties,
+            roleContext,
+          );
+          if (args?.deferSignerMetadataRepair) return inner.trim();
+          return finalizePaidProReviewRenderPlain(inner, args);
+        },
+      }),
+    );
   }
-  if (args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()) {
-    const seed = readPaidProSignerStagingDisplayCorpus()?.plain ?? getPaidProSourceOfTruthText().trim();
-    return tracePaidProQaPassText("resolvePaidProReviewRenderPlain", `${surface}:frozen`, seed, () => seed);
-  }
-  const seed = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
-  return tracePaidProQaPassText("resolvePaidProReviewRenderPlain", surface, seed, () =>
-    resolvePaidProSignerStagingDisplayPlain({
-      stagingActive: Boolean(args?.deferSignerMetadataRepair),
-      resolveFresh: () => {
-        const parties = resolvePartiesForReviewRender(args);
-        const roleContext = paidProPartyRoleContextFromArgs(args);
-        const inner = alignExecutionBlockRolesFromAcceptedCorpus(
-          resolvePaidProReviewRenderPlainInner(args),
-          parties,
-          roleContext,
-        );
-        if (args?.deferSignerMetadataRepair) return inner.trim();
-        return finalizePaidProReviewRenderPlain(inner, args);
-      },
-    }),
-  );
+  writeMemoizedPaidProReviewPlain(memoKey, rendered);
+  return rendered;
 }
 
 function resolvePaidProReviewRenderPlainInner(

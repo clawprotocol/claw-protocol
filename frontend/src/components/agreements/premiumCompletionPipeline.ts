@@ -113,6 +113,7 @@ import {
 } from "./paidProMutualConsultingQualityFloor";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import { markPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
 import {
@@ -1969,7 +1970,9 @@ async function runPremiumCompletionInner(
           (typeof performance !== "undefined" ? performance.now() : Date.now()) - postProcessStartedAt,
         );
         paidProPerfSpanEnd("premium_local_pre_processing", { docLen: doc.length, docText: doc });
-        paidProPerfRecordInstant("structure_repair", postProcessMs, { docLen: doc.length });
+        paidProPerfRecordInstant("premium_local_post_processing_total", postProcessMs, {
+          docLen: doc.length,
+        });
         markPaidProLocalPostProcessingEndAt();
         const classified = classifyLongPremiumHttpOutcome({
           documentText: doc,
@@ -2642,6 +2645,7 @@ async function runPremiumCompletionInner(
           agreement_family: familyDecision.family,
         });
         winningPremiumBodyText = doc;
+        markPaidProPipelineAcceptedCorpusHash(doc);
         if (serverGenDegraded) {
           const fc = (effectiveFull.server_generation_failure_code || "").trim();
           if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {
@@ -3305,11 +3309,19 @@ async function runPremiumCompletionInner(
     }
   }
 
+  const pipelineWinningBody = (finalWinning || finalFallback).trim();
+  if (
+    pipelineWinningBody.length >= 500 &&
+    isAuthoritativePremiumPipelineRenderSource(premiumRenderSource)
+  ) {
+    markPaidProPipelineAcceptedCorpusHash(pipelineWinningBody);
+  }
+
   return {
     premiumDraft: outMerged,
     premiumParties,
     recipientCandidates,
-    winningPremiumBodyText: finalWinning || finalFallback,
+    winningPremiumBodyText: pipelineWinningBody || finalFallback,
     premiumRenderSource,
     premiumReview,
     premiumFinalizeAudit,

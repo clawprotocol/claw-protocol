@@ -28,6 +28,13 @@ import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNorma
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
+import {
+  buildAcceptedProCorpusSafeDisplayCacheKey,
+  logPaidProSafeDisplayCacheHit,
+  readAcceptedProCorpusSafeDisplayCache,
+  writeAcceptedProCorpusSafeDisplayCache,
+} from "./paidProAcceptedCorpusSafeDisplayCache";
+import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -115,9 +122,25 @@ export function applyAcceptedProCorpusSafeDisplay(
 ): AcceptedProCorpusSafeDisplayResult {
   const surface = opts?.surface ?? "accepted_pro_corpus_safe_display";
   const input = String(raw || "").replace(/\s+$/g, "");
-  return tracePaidProQaPassWithText("applyAcceptedProCorpusSafeDisplay", surface, input, () =>
+  const cacheKey = buildAcceptedProCorpusSafeDisplayCacheKey(input, { ...opts, surface });
+  const cached = readAcceptedProCorpusSafeDisplayCache(cacheKey);
+  if (cached) {
+    const inputHash =
+      input.length >= 80 ? hashPaidProCorpus(input) : input.length > 0 ? `len:${input.length}` : "empty";
+    const outputHash =
+      cached.text.length >= 80
+        ? hashPaidProCorpus(cached.text)
+        : cached.text.length > 0
+          ? `len:${cached.text.length}`
+          : "empty";
+    logPaidProSafeDisplayCacheHit({ surface, cacheKey, inputHash, outputHash });
+    return tracePaidProQaPassWithText("applyAcceptedProCorpusSafeDisplay", `${surface}:cache_hit`, input, () => cached);
+  }
+  const result = tracePaidProQaPassWithText("applyAcceptedProCorpusSafeDisplay", surface, input, () =>
     applyAcceptedProCorpusSafeDisplayCore(raw, opts),
   );
+  writeAcceptedProCorpusSafeDisplayCache(cacheKey, result);
+  return result;
 }
 
 function applyAcceptedProCorpusSafeDisplayCore(

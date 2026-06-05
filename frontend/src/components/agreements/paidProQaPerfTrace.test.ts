@@ -6,6 +6,7 @@ import {
   finishPaidProPerformanceWaterfall,
   startPaidProPerformanceTrace,
 } from "./paidProPerformanceTrace";
+import { readPaidProPassTimingByPassOnly } from "./paidProPassTimingAggregator";
 import {
   logPremiumGenerationRatio,
   markPaidProCheckoutReturnAt,
@@ -102,6 +103,8 @@ describe("paidProQaPerfTrace", () => {
     const passLogs = info.mock.calls.filter((c) => c[0] === "[premium-pass-timing]");
     expect(passLogs).toHaveLength(1);
     expect(readPaidProQaPerfTraceStateForTests().passLogDedupeSize).toBe(1);
+    const agg = readPaidProPassTimingByPassOnly().find((r) => r.passName === "paid-pro-placeholder-gate");
+    expect(agg?.count).toBe(2);
     info.mockRestore();
   });
 

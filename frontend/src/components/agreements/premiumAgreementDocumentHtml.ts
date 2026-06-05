@@ -19,6 +19,12 @@ import { resolvePaidProFrozenAuthoritativePlain } from "./paidProPostFreezeCorpu
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
 import {
+  buildPaidProReadonlyHtmlMemoKey,
+  buildPremiumReadonlyHtmlOptsFingerprint,
+  readMemoizedPaidProReadonlyHtml,
+  writeMemoizedPaidProReadonlyHtml,
+} from "./paidProVisibleRenderMemo";
+import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
   logPostFreezeCorpusDrift,
@@ -268,14 +274,24 @@ export function buildPremiumAgreementReadonlyHtml(
   opts: BuildPremiumAgreementReadonlyHtmlOpts,
 ): string {
   const surface = opts.surface ?? "premium_agreement_readonly_html";
+  const memoKey = buildPaidProReadonlyHtmlMemoKey(
+    plain,
+    `${buildPremiumReadonlyHtmlOptsFingerprint(opts)}|${surface}`,
+  );
+  const memoHit = readMemoizedPaidProReadonlyHtml(memoKey);
+  if (memoHit != null) {
+    return memoHit;
+  }
   if (shouldBlockPaidProStructuralMutationAfterAcceptance() && (plain || "").trim().length >= 200) {
     logPostFreezeCorpusDrift({ surface: `buildPremiumAgreementReadonlyHtml:${surface}`, renderedText: plain });
     logExecutionBlockLocation(plain, `buildPremiumAgreementReadonlyHtml:${surface}`);
     logExecutionBlockCount(plain, `buildPremiumAgreementReadonlyHtml:${surface}`);
   }
-  return tracePaidProQaPassText("buildPremiumAgreementReadonlyHtml", surface, plain || "", () =>
+  const html = tracePaidProQaPassText("buildPremiumAgreementReadonlyHtml", surface, plain || "", () =>
     buildPremiumAgreementReadonlyHtmlCore(plain, opts),
   );
+  writeMemoizedPaidProReadonlyHtml(memoKey, html);
+  return html;
 }
 
 function buildPremiumAgreementReadonlyHtmlCore(

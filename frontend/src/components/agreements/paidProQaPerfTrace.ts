@@ -8,6 +8,12 @@ import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 import { shortIdForPremiumLog } from "./premiumSessionDiagnostics";
 import { resetPaidProPremiumHttpLatencyMetaForTests } from "./paidProGenerationLatencyDiagnostics";
 import type { PaidProServerTimingSpanWire } from "./paidProPerformanceTrace";
+import {
+  emitPremiumPassTimingSummaryIfReady,
+  recordPaidProPassTimingAggregate,
+  resetPaidProPassTimingAggregatorForTests,
+  setPaidProPassTimingSessionKey,
+} from "./paidProPassTimingAggregator";
 
 export type PaidProQaPassName =
   | "applyAcceptedProCorpusSafeDisplay"
@@ -50,6 +56,7 @@ let activeQaTraceSessionGenerationId: string | null = null;
 
 export function setPaidProQaTraceSessionGenerationId(id: string | null | undefined): void {
   activeQaTraceSessionGenerationId = (id ?? "").trim() || null;
+  setPaidProPassTimingSessionKey(activeQaTraceSessionGenerationId);
 }
 
 function sessionKey(): string {
@@ -100,6 +107,7 @@ export function resetPaidProQaPerfTraceForTests(): void {
   passLogDedupe.clear();
   checkoutWaterfallEmittedForSession = null;
   activeQaTraceSessionGenerationId = null;
+  resetPaidProPassTimingAggregatorForTests(null);
   resetPaidProPremiumHttpLatencyMetaForTests();
   checkoutMilestones.checkoutReturnAt = null;
   checkoutMilestones.premiumRequestStartAt = null;
@@ -130,6 +138,14 @@ function emitPremiumPassTiming(payload: {
   changed: boolean;
 }): void {
   if (!paidProPerfTraceEnabled()) return;
+  recordPaidProPassTimingAggregate({
+    passName: payload.passName,
+    surface: payload.surface,
+    elapsedMs: payload.elapsedMs,
+    inputHash: payload.corpusHashBefore,
+    outputHash: payload.corpusHashAfter,
+    changed: payload.changed,
+  });
   if (!shouldLogPass(payload.passName, payload.surface, payload.corpusHashBefore)) return;
   // eslint-disable-next-line no-console
   console.info("[premium-pass-timing]", {
@@ -283,6 +299,7 @@ export function markPaidProLocalPostProcessingEndAt(): void {
 export function markPaidProFirstReviewPaintAt(): void {
   if (!paidProPerfTraceEnabled()) return;
   checkoutMilestones.firstReviewPaintAt = wallClockMs();
+  emitPremiumPassTimingSummaryIfReady(sessionKey());
 }
 
 export function storePaidProServerTimingHeaderForWaterfall(headerValue: string | null | undefined): void {

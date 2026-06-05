@@ -13,6 +13,10 @@ import {
   readPaidProCheckoutWaterfallEmittedSession,
   setPaidProQaTraceSessionGenerationId,
 } from "./paidProQaPerfTrace";
+import {
+  readPaidProDuplicateExpensiveWorkTotalMs,
+  readPaidProDuplicateExpensiveWorkWarnings,
+} from "./paidProPassTimingAggregator";
 import { shortIdForPremiumLog } from "./premiumSessionDiagnostics";
 import { emitPaidProGenerationLatencyDiagnostics } from "./paidProGenerationLatencyDiagnostics";
 
@@ -23,6 +27,7 @@ export type PaidProPerformanceSpanName =
   | "intake_classification"
   | "guided_question_gate"
   | "premium_local_pre_processing"
+  | "premium_local_post_processing_total"
   | "premium_full_draft_api"
   | "server_model"
   | "json_parse_degraded_handling"
@@ -215,12 +220,13 @@ function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, tot
       ? firstReviewPaintAt - checkoutReturnAt
       : totalMs;
 
-  const { duplicateSpanWarnings } = buildWaterfallSummary(spanSummaries);
+  const { duplicateSpanLabelWarnings } = buildWaterfallSummary(spanSummaries);
+  const duplicateExpensiveWorkWarnings = readPaidProDuplicateExpensiveWorkWarnings();
+  const duplicateExpensiveWorkTotalMs = readPaidProDuplicateExpensiveWorkTotalMs();
   markPaidProCheckoutWaterfallEmitted(sessionId);
   emitPremiumGenerationAttribution(trace, spanSummaries, totalMs, {
     serverRoundTripMs,
     localPostProcessingMs,
-    duplicateSpanWarnings,
   });
   emitPaidProGenerationLatencyDiagnostics(trace);
 
@@ -229,7 +235,8 @@ function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, tot
     totalMs: totalPaymentToReviewMs,
     serverRoundTripMs,
     localPostProcessingMs,
-    duplicateSpanWarnings,
+    duplicateExpensiveWorkWarnings,
+    duplicateExpensiveWorkTotalMs,
   });
 
   // eslint-disable-next-line no-console
@@ -257,7 +264,9 @@ function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, tot
         ? Math.round((localPostProcessingMs / totalPaymentToReviewMs) * 1000) / 10
         : null,
     topContributors,
-    ...(duplicateSpanWarnings.length ? { duplicateSpanWarnings } : {}),
+    ...(duplicateSpanLabelWarnings.length ? { duplicateSpanLabelWarnings } : {}),
+    ...(duplicateExpensiveWorkWarnings.length ? { duplicateExpensiveWorkWarnings } : {}),
+    duplicateExpensiveWorkTotalMs,
     ...(milestones.lastServerTimingHeader
       ? { backendServerTimingHeader: milestones.lastServerTimingHeader }
       : {}),
@@ -457,15 +466,24 @@ function enrichWaterfallSpanRows(
   });
 }
 
-function classifyPaidProLatencyBound(args: {
+export function classifyPaidProLatencyBound(args: {
   totalMs: number;
   serverRoundTripMs: number;
   localPostProcessingMs: number;
-  duplicateSpanWarnings: string[];
+  duplicateExpensiveWorkWarnings: string[];
+  duplicateExpensiveWorkTotalMs: number;
 }): "backend_bound" | "frontend_post_bound" | "duplicate_work_bound" | "mixed" {
-  if (args.duplicateSpanWarnings.length > 0) return "duplicate_work_bound";
   if (args.totalMs <= 0) return "mixed";
   if (args.serverRoundTripMs >= args.totalMs * 0.55) return "backend_bound";
+  const duplicateMs = args.duplicateExpensiveWorkTotalMs;
+  const duplicateWarnings = args.duplicateExpensiveWorkWarnings;
+  if (duplicateWarnings.length > 0 && duplicateMs > 0) {
+    const localBudget = Math.max(args.localPostProcessingMs, 1);
+    const isDominantDuplicate =
+      duplicateMs >= localBudget * 0.25 ||
+      (duplicateMs >= 400 && args.serverRoundTripMs < args.totalMs * 0.55);
+    if (isDominantDuplicate) return "duplicate_work_bound";
+  }
   if (args.localPostProcessingMs >= args.totalMs * 0.2) return "frontend_post_bound";
   return "mixed";
 }
@@ -477,7 +495,6 @@ function emitPremiumGenerationAttribution(
   opts?: {
     serverRoundTripMs?: number;
     localPostProcessingMs?: number;
-    duplicateSpanWarnings?: string[];
   },
 ): void {
   if (!paidProPerfTraceEnabled()) return;
@@ -507,11 +524,14 @@ function emitPremiumGenerationAttribution(
     }));
   const serverRoundTripMs = opts?.serverRoundTripMs ?? buckets.premium_full_draft_http ?? 0;
   const localPostProcessingMs = opts?.localPostProcessingMs ?? 0;
+  const duplicateExpensiveWorkWarnings = readPaidProDuplicateExpensiveWorkWarnings();
+  const duplicateExpensiveWorkTotalMs = readPaidProDuplicateExpensiveWorkTotalMs();
   const latencyBound = classifyPaidProLatencyBound({
     totalMs,
     serverRoundTripMs,
     localPostProcessingMs,
-    duplicateSpanWarnings: opts?.duplicateSpanWarnings ?? [],
+    duplicateExpensiveWorkWarnings,
+    duplicateExpensiveWorkTotalMs,
   });
   // eslint-disable-next-line no-console
   console.info("[premium-generation-attribution]", {
@@ -526,19 +546,21 @@ function emitPremiumGenerationAttribution(
     latencyBound,
     dominantStage: topContributors[0]?.name ?? null,
     topContributors,
+    duplicateExpensiveWorkWarnings,
+    duplicateExpensiveWorkTotalMs,
     stages: enrichWaterfallSpanRows(trace, spanSummaries).filter((s) => s.durationMs > 0),
   });
 }
 
 function buildWaterfallSummary(spans: PaidProWaterfallSpanSummary[]): {
   topContributors: Array<{ name: string; durationMs: number }>;
-  duplicateSpanWarnings: string[];
+  duplicateSpanLabelWarnings: string[];
 } {
   const byName = new Map<string, number>();
   for (const s of spans) {
     byName.set(s.name, (byName.get(s.name) ?? 0) + 1);
   }
-  const duplicateSpanWarnings = [...byName.entries()]
+  const duplicateSpanLabelWarnings = [...byName.entries()]
     .filter(([name, count]) => count > 1 && DUPLICATE_WATCH_SPANS.includes(name as PaidProPerformanceSpanName))
     .map(([name, count]) => `${name}x${count}`);
   const topContributors = [...spans]
@@ -546,7 +568,7 @@ function buildWaterfallSummary(spans: PaidProWaterfallSpanSummary[]): {
     .sort((a, b) => b.durationMs - a.durationMs)
     .slice(0, 5)
     .map((s) => ({ name: s.name, durationMs: s.durationMs }));
-  return { topContributors, duplicateSpanWarnings };
+  return { topContributors, duplicateSpanLabelWarnings };
 }
 
 const scanCounters = new Map<string, number>();
@@ -601,7 +623,7 @@ export function finishPaidProPerformanceWaterfall(): void {
   const trace = activeTrace;
   const totalMs = Math.round(nowMs() - trace.startedAtMs);
   const spanSummaries = trace.spans.map(flattenPaidProWaterfallSpan);
-  const { topContributors, duplicateSpanWarnings } = buildWaterfallSummary(spanSummaries);
+  const { topContributors, duplicateSpanLabelWarnings } = buildWaterfallSummary(spanSummaries);
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") {
     lastFinishedTrace = {
       ...trace,
@@ -610,7 +632,7 @@ export function finishPaidProPerformanceWaterfall(): void {
   }
   const emittedCheckoutWaterfall = emitPaidProCheckoutWaterfallIfReady(trace, totalMs);
   if (!emittedCheckoutWaterfall && shouldEmitLegacyPaidProWaterfall()) {
-    emitPremiumGenerationAttribution(trace, spanSummaries, totalMs, { duplicateSpanWarnings });
+    emitPremiumGenerationAttribution(trace, spanSummaries, totalMs);
     const enrichedSpans = enrichWaterfallSpanRows(trace, spanSummaries);
     // eslint-disable-next-line no-console
     console.info("[paid-pro-waterfall]", {
@@ -620,7 +642,7 @@ export function finishPaidProPerformanceWaterfall(): void {
       totalMs,
       spanCount: spanSummaries.length,
       topContributors,
-      ...(duplicateSpanWarnings.length ? { duplicateSpanWarnings } : {}),
+      ...(duplicateSpanLabelWarnings.length ? { duplicateSpanLabelWarnings } : {}),
       spans: enrichedSpans,
     });
     if (paidProVerboseDetailLogsEnabled()) {
