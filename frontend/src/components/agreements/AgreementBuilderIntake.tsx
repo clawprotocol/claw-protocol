@@ -289,6 +289,7 @@ import {
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
   PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
   resolveSignerSetupAutoCorrectTarget,
+  resolveSignerPartyLegalEntityDisplayValue,
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
   shouldArmPaidProInlineSignerSetupLatch,
@@ -2061,13 +2062,6 @@ function CreateFlowSendRecipientsPanel({
       {cappedParties.map((party, idx) => {
         const identity = signerSetupPartyIdentities[idx];
         const resolvedLine = partyDisplaySlots[idx]?.displayName?.trim();
-        // Legal-entity line must be the FULL canonical name, never the compact nickname.
-        const partyLine =
-          identity?.legalEntityName?.trim() ||
-          resolvedLine ||
-          String((party as { name?: string }).name ?? "").trim() ||
-          identity?.displayName?.trim() ||
-          `Party ${idx + 1}`;
         const legalEntityValue =
           idx === 0
             ? recipient1Name
@@ -2090,6 +2084,21 @@ function CreateFlowSendRecipientsPanel({
               })
             : null;
         const legalEntityFieldValue = signerRenderSlot?.canonicalLegalEntity ?? "";
+        // Summary line + inputs must use canonical/sanitized legal entity — never raw clause prose.
+        const partyLine =
+          legalEntityFieldValue ||
+          (idx === 0 || idx === 1
+            ? resolveSignerPartyLegalEntityDisplayValue({
+                slotIndex: idx,
+                currentInputValue: legalEntityValue,
+                slotIdentities: signerSetupPartyIdentities,
+                source: "signer_setup_party_line",
+              })
+            : "") ||
+          resolvedLine ||
+          String((party as { name?: string }).name ?? "").trim() ||
+          identity?.displayName?.trim() ||
+          `Party ${idx + 1}`;
         const onEmailChange =
           idx === 0
             ? (v: string) => {

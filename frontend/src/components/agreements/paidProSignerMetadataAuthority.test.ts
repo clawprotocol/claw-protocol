@@ -62,6 +62,17 @@ describe("paidProSignerMetadataAuthority", () => {
     vi.unstubAllGlobals();
   });
 
+  it("sanitizes polluted legal entity prose before persisting authority parties", () => {
+    const authority = buildLivePaidProSignerMetadataAuthority(
+      ui({
+        recipient1Name: "1 Parties. Blue Canyon Analytics LLC",
+        recipient2Name: "engages Iron Vale Systems Inc",
+      }),
+    );
+    expect(authority.parties[0]?.partyLegalName).toBe(BLUE);
+    expect(authority.parties[1]?.partyLegalName).toBe(IRON);
+  });
+
   it("every field contributes to authority hash", () => {
     const base = buildLivePaidProSignerMetadataAuthority(ui());
     const fields = [

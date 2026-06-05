@@ -1,6 +1,7 @@
 /**
  * Display-only sanitizer for Paid Pro signer-setup legal entity fields.
- * Strips leading connector verbs from extracted party labels — never mutates agreement corpus.
+ * Strips clause headings, recital fragments, and scope verbs from extracted party labels.
+ * Never mutates agreement corpus, SoT, recital, or execution blocks.
  */
 
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
@@ -10,16 +11,66 @@ const LEADING_CONNECTOR_CHAIN_RE =
 
 const SINGLE_LEADING_VERB_RE = /^(?:engages?|hires?|retains?|appoints?|contracts?\s+with)\s+/i;
 
+/** Numbered clause headings accidentally captured with entity text, e.g. "1 Parties. Acme LLC". */
+const NUMBERED_PARTIES_HEADING_PREFIX_RE =
+  /^(?:\d+(?:\.\d+)*\.?\s+)?(?:Parties?|PARTIES?)\.?\s+/i;
+
+/** Role-label prose prefixes, e.g. "Client is Acme LLC". */
+const ROLE_IS_PREFIX_RE =
+  /^(?:Client|Service\s+Provider|Provider|Contractor|Company|Vendor|Customer)\s+is\s+/i;
+
+const TRAILING_LEGAL_ENTITY_RE =
+  /\b([A-Z][\w.&'’\-]+(?:\s+[A-Z][\w.&'’\-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)\.?)\s*$/i;
+
 const loggedSanitizerEvents = new Set<string>();
 
 function norm(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
-export function hasSignerPartyLegalEntityLeadingVerbPollution(name: string): boolean {
+function hasRawDisplayPollutionMarkers(t: string): boolean {
+  if (!t) return false;
+  return (
+    LEADING_CONNECTOR_CHAIN_RE.test(t) ||
+    SINGLE_LEADING_VERB_RE.test(t) ||
+    NUMBERED_PARTIES_HEADING_PREFIX_RE.test(t) ||
+    ROLE_IS_PREFIX_RE.test(t) ||
+    /^(?:and|between)\s+/i.test(t) ||
+    /^\d+(?:\.\d+)*\.?\s+/i.test(t)
+  );
+}
+
+/** True when raw text still carries heading/prose pollution before or after sanitization heuristics. */
+export function hasSignerPartyLegalEntityDisplayPollution(name: string): boolean {
   const t = norm(name);
   if (!t) return false;
-  return LEADING_CONNECTOR_CHAIN_RE.test(t) || SINGLE_LEADING_VERB_RE.test(t) || /^(?:and|between)\s+/i.test(t);
+  return hasRawDisplayPollutionMarkers(t);
+}
+
+/** @deprecated Prefer {@link hasSignerPartyLegalEntityDisplayPollution}. */
+export function hasSignerPartyLegalEntityLeadingVerbPollution(name: string): boolean {
+  return hasSignerPartyLegalEntityDisplayPollution(name);
+}
+
+function stripHeadingAndProsePrefixes(s: string): string {
+  let out = s;
+  let prev = "";
+  while (out !== prev) {
+    prev = out;
+    out = out
+      .replace(LEADING_CONNECTOR_CHAIN_RE, "")
+      .replace(SINGLE_LEADING_VERB_RE, "")
+      .replace(NUMBERED_PARTIES_HEADING_PREFIX_RE, "")
+      .replace(ROLE_IS_PREFIX_RE, "")
+      .replace(/^(?:and|between)\s+/i, "")
+      .trim();
+  }
+  return out;
+}
+
+function extractTrailingLegalEntity(s: string): string {
+  const m = s.match(TRAILING_LEGAL_ENTITY_RE);
+  return m ? norm(m[1]) : s;
 }
 
 export function sanitizeSignerPartyLegalEntityDisplay(
@@ -33,14 +84,9 @@ export function sanitizeSignerPartyLegalEntityDisplay(
   let s = norm(raw);
   if (!s) return s;
   const before = s;
-  let prev = "";
-  while (s !== prev) {
-    prev = s;
-    s = s
-      .replace(LEADING_CONNECTOR_CHAIN_RE, "")
-      .replace(SINGLE_LEADING_VERB_RE, "")
-      .replace(/^(?:and|between)\s+/i, "")
-      .trim();
+  s = stripHeadingAndProsePrefixes(s);
+  if (s && hasRawDisplayPollutionMarkers(s)) {
+    s = extractTrailingLegalEntity(s);
   }
   if (s !== before && opts?.log !== false) {
     logPaidProSignerEntityDisplaySanitized({
@@ -70,6 +116,6 @@ export function logPaidProSignerEntityDisplaySanitized(payload: {
 export function isCleanSignerPartyLegalEntityDisplay(name: string): boolean {
   const t = sanitizeSignerPartyLegalEntityDisplay(name, { log: false });
   if (!t || t.length < 3) return false;
-  if (hasSignerPartyLegalEntityLeadingVerbPollution(t)) return false;
+  if (hasSignerPartyLegalEntityDisplayPollution(t)) return false;
   return PARTY_ENTITY_SUFFIX_RE.test(t);
 }

@@ -1165,13 +1165,52 @@ describe("signer party legal entity display sanitizer (Paid Pro signer details)"
     clearPaidProSourceOfTruth();
   });
 
-  it("sanitizes engages Iron Vale Systems Inc to Iron Vale Systems Inc for signer display", () => {
-    expect(sanitizeSignerPartyLegalEntityDisplay("engages Iron Vale Systems Inc", { log: false })).toBe(
-      "Iron Vale Systems Inc",
-    );
-    expect(sanitizeSignerPartyLegalEntityDisplay("Blue Canyon Analytics LLC", { log: false })).toBe(
-      "Blue Canyon Analytics LLC",
-    );
+  it.each([
+    ["engages Iron Vale Systems Inc", "Iron Vale Systems Inc"],
+    ["1 Parties. Blue Canyon Analytics LLC", PARTY_1],
+    ["1. Parties. Blue Canyon Analytics LLC", PARTY_1],
+    ["Parties. Blue Canyon Analytics LLC", PARTY_1],
+    ["Client is Blue Canyon Analytics LLC", PARTY_1],
+    ["Service Provider is Iron Vale Systems Inc", "Iron Vale Systems Inc"],
+  ])("sanitizes polluted signer display %j → %j", (input, expected) => {
+    expect(sanitizeSignerPartyLegalEntityDisplay(input, { log: false })).toBe(expected);
+  });
+
+  it("resolveSignerSetupPartyIdentity never returns clause-heading prose as legalEntityName", () => {
+    establishAuthoritativeAgreementDocument({
+      fullCorpusText: BODY,
+      canonicalPartyManifest: [
+        { name: PARTY_1, role: "client" },
+        { name: PARTY_2, role: "service_provider" },
+      ],
+    });
+    const identity = resolveSignerSetupPartyIdentity({
+      partyIndex: 0,
+      draftPartyName: "1 Parties. Blue Canyon Analytics LLC",
+      draftPartyNames: ["1 Parties. Blue Canyon Analytics LLC", PARTY_2],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+      log: false,
+    });
+    expect(identity.legalEntityName).toBe(PARTY_1);
+  });
+
+  it("resolveSignerSetupRenderSlot cleans polluted Party 1 summary and field values", () => {
+    const identities: SignerSetupPartyIdentity[] = [
+      {
+        legalEntityName: "1 Parties. Blue Canyon Analytics LLC",
+        displayName: "Blue Canyon",
+        source: "canonical_resolver",
+      },
+      { legalEntityName: PARTY_2, displayName: "Iron Vale", source: "authoritative_manifest" },
+    ];
+    const slot = resolveSignerSetupRenderSlot({
+      slotIndex: 0,
+      slotIdentities: identities,
+      currentLegalEntityValue: "1 Parties. Blue Canyon Analytics LLC",
+      source: "signer_setup_input_render",
+    });
+    expect(slot.canonicalLegalEntity).toBe(PARTY_1);
   });
 
   it("resolves polluted ROLE_PAREN extraction from scope sentence for Party 2 slot", () => {

@@ -18,7 +18,7 @@ import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { isRecipientHandoffSeedDisposable } from "./reviewPlaceholderGuard";
 import {
-  hasSignerPartyLegalEntityLeadingVerbPollution,
+  hasSignerPartyLegalEntityDisplayPollution,
   sanitizeSignerPartyLegalEntityDisplay,
 } from "./signerPartyLegalEntityDisplaySanitizer";
 
@@ -128,7 +128,7 @@ function isDeliberateSignerLegalEntityUserOverride(
   ) {
     return false;
   }
-  if (hasSignerPartyLegalEntityLeadingVerbPollution(current)) return false;
+  if (hasSignerPartyLegalEntityDisplayPollution(current)) return false;
   if (!hasLegalEntitySuffix(current)) return false;
   if (partyLegalNamesMatch(current, canonical)) return false;
   return true;
@@ -699,7 +699,7 @@ export function detectSignerSlotContamination(
   if (!current) {
     return { contaminated: false, correctedValue: canonical };
   }
-  if (hasSignerPartyLegalEntityLeadingVerbPollution(current)) {
+  if (hasSignerPartyLegalEntityDisplayPollution(current)) {
     const sanitized = sanitizeSlotLegalEntityDisplay(current, slotIndex, "verb_prefix_contamination");
     return {
       contaminated: true,
@@ -1150,7 +1150,7 @@ export function shouldUpgradeRecipientNameToLegalEntity(
   const legal = norm(legalEntityName);
   if (!legal || isRecitalSentenceFragmentPartyName(legal)) return false;
   if (!current) return true;
-  if (hasSignerPartyLegalEntityLeadingVerbPollution(current)) return true;
+  if (hasSignerPartyLegalEntityDisplayPollution(current)) return true;
   if (isRecitalSentenceFragmentPartyName(current)) return true;
   if (isRecipientHandoffSeedDisposable(current)) return true;
   if (isShortPrefixOfFullLegal(current, legal)) return true;
