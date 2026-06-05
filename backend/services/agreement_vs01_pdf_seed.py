@@ -17,7 +17,7 @@ _MAX_STORY_PAGES: Final[int] = 400
 # US Letter Story layout: asymmetric bottom inset reserves space for the VS01 initials band
 # (76x48px boxes, labels/shadow, and bottom margin) so agreement body never flows beneath initials.
 VS01_SIGNING_STORY_MARGIN_LEFT_PT: Final[int] = 40
-VS01_SIGNING_STORY_MARGIN_TOP_PT: Final[int] = 40
+VS01_SIGNING_STORY_MARGIN_TOP_PT: Final[int] = 36
 VS01_SIGNING_STORY_MARGIN_RIGHT_PT: Final[int] = 40
 VS01_SIGNING_STORY_MARGIN_BOTTOM_PT: Final[int] = 300
 
@@ -115,11 +115,13 @@ def _vs01_signing_story_user_css() -> str:
     plus body typography and draft footer stability.
     """
     return (
-        f"@page{{size:letter;margin:40pt 40pt {VS01_SIGNING_STORY_MARGIN_BOTTOM_PT}pt 40pt;}}"
-        "body{font-family:Helvetica,Arial,sans-serif;font-size:11pt;line-height:1.35;"
+        f"@page{{size:letter;margin:{VS01_SIGNING_STORY_MARGIN_TOP_PT}pt 40pt {VS01_SIGNING_STORY_MARGIN_BOTTOM_PT}pt 40pt;}}"
+        "body{font-family:Helvetica,Arial,sans-serif;font-size:11pt;line-height:1.3;"
         "margin:0;padding:0;}"
+        "h1,h2,h3{margin-top:0.85em;margin-bottom:0.45em;}"
+        "p{margin:0 0 0.65em;}"
         "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"
-        "orphans:3;widows:3;margin-top:28pt;padding-top:10pt;}"
+        "orphans:3;widows:3;margin-top:16pt;padding-top:8pt;}"
     )
 
 
@@ -129,9 +131,11 @@ def _recipient_preview_export_user_css() -> str:
     Bottom margin is modest — recipient exports do not reserve VS01 auto-initials band.
     """
     return (
-        "@page{size:letter;margin:48pt 52pt 56pt 52pt;}"
-        "body{font-family:Georgia,'Times New Roman',Times,serif;font-size:15px;line-height:1.65;"
+        "@page{size:letter;margin:44pt 48pt 48pt 48pt;}"
+        "body{font-family:Georgia,'Times New Roman',Times,serif;font-size:15px;line-height:1.58;"
         "color:#0f172a;margin:0;padding:0;}"
+        "h1,h2,h3{margin-top:0.8em;margin-bottom:0.4em;}"
+        "p{margin:0 0 0.62em;}"
         "h1,h2,h3,h4,p,li,td,th,table,pre,div,span,header,section,article{font-family:Georgia,'Times New Roman',Times,serif;}"
         "pre{white-space:pre-wrap;}"
         "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"
