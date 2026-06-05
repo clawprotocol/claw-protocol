@@ -12,7 +12,19 @@ describe("Test276 review-first submit authority wiring", () => {
     expect(recipientReview).toContain("logReviewFirstSubmitBlocked");
     expect(recipientReview).toContain("logReviewFirstSubmitSuccess");
     expect(recipientReview).toContain("logReviewFirstSubmitFailed");
+    expect(recipientReview).toContain("logReviewFirstSubmitAuthority");
+    expect(recipientReview).toContain("reviewerNeedsPersonalizedLink");
+    expect(recipientReview).toContain("resolveReviewerEffectiveParticipantId");
     expect(recipientReview).toContain('data-testid="recipient-review-submit-blocked"');
+    expect(recipientReview).toContain("Submitted — waiting for owner review");
+  });
+
+  it("AgreementReviewGate recovers token from session after URL strip", () => {
+    const gate = readFileSync(join(__dirname, "../ClawProductApp.tsx"), "utf8");
+    expect(gate).toContain("loadAnyRecipientMagicLinkSessionForAgreement");
+    expect(gate).toContain("logReviewerTokenDetected");
+    expect(gate).toContain("logReviewerTokenPersisted");
+    expect(gate).toContain("logReviewerTokenMissing");
   });
 
   it("routes copy-for-editing through formatAgreementPlainTextForEditing", () => {

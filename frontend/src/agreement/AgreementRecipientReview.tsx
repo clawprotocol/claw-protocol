@@ -257,6 +257,11 @@ import {
   logReviewFirstSubmitSuccess,
   resolveReviewFirstSubmitAuthority,
 } from "./reviewFirstSubmitAuthority";
+import {
+  logReviewFirstSubmitAuthority,
+  resolveReviewerEffectiveParticipantId,
+  reviewerNeedsPersonalizedLink,
+} from "./reviewerTokenPersistence";
 import { ReviewFirstChangeCard } from "./ReviewFirstChangeCard";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
@@ -991,8 +996,21 @@ export function AgreementRecipientReview({
     [draft?.audit_log]
   );
   const partiesHaveIds = Boolean(draft?.parties?.some((p) => (p.id || "").trim()));
-  const participantPid = (participantPartyId || "").trim();
-  const needsPersonalizedLink = Boolean(partiesHaveIds && entry.kind === "review" && !participantPid);
+  const participantPid = useMemo(
+    () =>
+      resolveReviewerEffectiveParticipantId({
+        agreementId,
+        participantPartyId,
+        recipientAccessToken,
+      }),
+    [agreementId, participantPartyId, recipientAccessToken],
+  );
+  const needsPersonalizedLink = reviewerNeedsPersonalizedLink({
+    entryKind: entry.kind,
+    partiesHaveIds,
+    participantPid,
+    recipientAccessToken,
+  });
   const myPendingProposals = useMemo(() => {
     if (!partiesHaveIds) return allOpenProposals;
     if (!participantPid) return [];
@@ -2240,15 +2258,17 @@ export function AgreementRecipientReview({
   const reviewFirstSubmitAuthority = useMemo(
     () =>
       resolveReviewFirstSubmitAuthority({
+        agreementId,
         diff: reviewFirstConfirmedDiff ?? reviewFirstTextDiff,
         needsPersonalizedLink,
-        participantPid: participantPid,
+        participantPid,
         partiesHaveIds,
         recipientAccessToken,
         recipientPreview: Boolean(recipientPreview),
         signingLockActive: Boolean(bundle && isSigningLockActive(bundle)),
       }),
     [
+      agreementId,
       reviewFirstConfirmedDiff,
       reviewFirstTextDiff,
       needsPersonalizedLink,
@@ -2259,6 +2279,31 @@ export function AgreementRecipientReview({
       bundle,
     ],
   );
+  useEffect(() => {
+    if (workflowMode !== "revised") return;
+    logReviewFirstSubmitAuthority({
+      agreementId,
+      canSubmit: reviewFirstSubmitAuthority.canSubmit,
+      reason: reviewFirstSubmitAuthority.reason,
+      hasAccessToken: Boolean(recipientAccessToken.trim()),
+      participantPid: participantPid || null,
+      needsPersonalizedLink,
+      hasRecipientPreview: Boolean(recipientPreview),
+      hasMaterialChanges: Boolean((reviewFirstConfirmedDiff ?? reviewFirstTextDiff)?.hasMaterialChanges),
+      tokenHashShort: recipientLinkTokenFingerprint(recipientAccessToken),
+    });
+  }, [
+    agreementId,
+    workflowMode,
+    reviewFirstSubmitAuthority.canSubmit,
+    reviewFirstSubmitAuthority.reason,
+    recipientAccessToken,
+    participantPid,
+    needsPersonalizedLink,
+    recipientPreview,
+    reviewFirstConfirmedDiff,
+    reviewFirstTextDiff,
+  ]);
   const reviewFirstProposalSubmitReady = reviewFirstSubmitAuthority.canSubmit;
   const recipientProposalSubmitReady =
     workflowMode === "revised" ? reviewFirstProposalSubmitReady : Boolean(previewDiff?.canSubmit && !needsPersonalizedLink);
@@ -4624,7 +4669,7 @@ export function AgreementRecipientReview({
           role="status"
         >
           <h2 className="text-base font-semibold text-emerald-100">
-            Submitted — waiting for other parties to review
+            Submitted — waiting for owner review
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-emerald-50/95">
             The owner can review your revision. Revisions do not change the original until accepted.

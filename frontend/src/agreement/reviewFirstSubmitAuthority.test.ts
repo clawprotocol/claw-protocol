@@ -14,6 +14,7 @@ const diff = buildReviewFirstTextDiffSummary(
 describe("resolveReviewFirstSubmitAuthority", () => {
   it("allows submit with valid token, participant, preview, and material changes", () => {
     const auth = resolveReviewFirstSubmitAuthority({
+      agreementId: "ag_test",
       diff,
       needsPersonalizedLink: false,
       participantPid: "party-1",
@@ -26,10 +27,24 @@ describe("resolveReviewFirstSubmitAuthority", () => {
     expect(auth.reason).toBe("ready");
   });
 
+  it("allows submit with personal token even when participant id is not yet hydrated", () => {
+    const auth = resolveReviewFirstSubmitAuthority({
+      agreementId: "ag_test",
+      diff,
+      participantPid: "",
+      partiesHaveIds: true,
+      recipientAccessToken: "tok_personal",
+      recipientPreview: true,
+      signingLockActive: false,
+    });
+    expect(auth.canSubmit).toBe(true);
+    expect(auth.reason).toBe("ready");
+  });
+
   it("blocks submit without personal access token when parties have ids", () => {
     const auth = resolveReviewFirstSubmitAuthority({
+      agreementId: "ag_test",
       diff,
-      needsPersonalizedLink: false,
       participantPid: "party-1",
       partiesHaveIds: true,
       recipientAccessToken: "",
@@ -41,10 +56,10 @@ describe("resolveReviewFirstSubmitAuthority", () => {
     expect(auth.userMessage).toBe(REVIEW_FIRST_SUBMIT_MISSING_TOKEN_MESSAGE);
   });
 
-  it("blocks submit on non-personalized preview links", () => {
+  it("blocks submit on preview URL without token", () => {
     const auth = resolveReviewFirstSubmitAuthority({
+      agreementId: "ag_test",
       diff,
-      needsPersonalizedLink: true,
       participantPid: "",
       partiesHaveIds: true,
       recipientAccessToken: "",

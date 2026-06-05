@@ -135,7 +135,7 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
       expect(screen.getByTestId("recipient-suggested-edits-sent-ack")).toBeTruthy();
     });
     expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain(
-      "Submitted — waiting for other parties to review",
+      "Submitted — waiting for owner review",
     );
     expect(screen.getByTestId("recipient-suggested-edits-sent-ack").textContent).toContain(
       "Revisions do not change the original until accepted",

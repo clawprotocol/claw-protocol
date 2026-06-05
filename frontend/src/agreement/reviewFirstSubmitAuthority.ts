@@ -26,14 +26,20 @@ export const REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE =
   "We could not determine your reviewer identity. Open the personal review link from the sender to submit this proposed update.";
 
 export function resolveReviewFirstSubmitAuthority(args: {
+  agreementId?: string;
   diff: ReviewFirstTextDiffSummary | null;
-  needsPersonalizedLink: boolean;
+  /** @deprecated Prefer recipientAccessToken — preview-only when no token and no participant. */
+  needsPersonalizedLink?: boolean;
   participantPid: string;
   partiesHaveIds: boolean;
   recipientAccessToken: string;
   recipientPreview: boolean;
   signingLockActive: boolean;
 }): ReviewFirstSubmitAuthority {
+  const hasPersonalToken = Boolean(args.recipientAccessToken.trim());
+  const isPreviewOnlySession =
+    args.needsPersonalizedLink ??
+    Boolean(args.partiesHaveIds && !hasPersonalToken && !args.participantPid.trim());
   if (args.signingLockActive) {
     return {
       canSubmit: false,
@@ -55,25 +61,25 @@ export function resolveReviewFirstSubmitAuthority(args: {
       userMessage: "Review changes before submitting your proposed update.",
     };
   }
-  if (args.needsPersonalizedLink) {
+  if (isPreviewOnlySession) {
     return {
       canSubmit: false,
       reason: "personal_link_required",
       userMessage: REVIEW_FIRST_SUBMIT_PERSONAL_LINK_MESSAGE,
     };
   }
-  if (args.partiesHaveIds && !args.participantPid.trim()) {
-    return {
-      canSubmit: false,
-      reason: "missing_participant_id",
-      userMessage: REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE,
-    };
-  }
-  if (args.partiesHaveIds && !args.recipientAccessToken.trim()) {
+  if (args.partiesHaveIds && !hasPersonalToken) {
     return {
       canSubmit: false,
       reason: "missing_access_token",
       userMessage: REVIEW_FIRST_SUBMIT_MISSING_TOKEN_MESSAGE,
+    };
+  }
+  if (args.partiesHaveIds && !args.participantPid.trim() && !hasPersonalToken) {
+    return {
+      canSubmit: false,
+      reason: "missing_participant_id",
+      userMessage: REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE,
     };
   }
   return { canSubmit: true, reason: "ready", userMessage: null };
