@@ -133,6 +133,13 @@ describe("Test271 review track routing (static intake wiring)", () => {
     expect(caseBlock).not.toContain('handlePremiumReviewFirstContinueToSigners({ telemetryMode: m })');
   });
 
+  it("review-link persist failure keeps authoritative corpus and surfaces persist blocker", () => {
+    expect(intake).toContain("reviewLinkPersistFailureRef");
+    expect(intake).toContain("logReviewLinkPersistFailure");
+    expect(intake).toContain('restorePinnedFinalizedSignerCorpus("guided_review_first_handoff_persist")');
+    expect(intake).toContain("reviewLinkPersistFailureActive");
+  });
+
   it("completeGuidedPaidProReviewFirstHandoff audits review link generation corpus", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
     const handoffBlock = intake.slice(handoffIdx, handoffIdx + 14000);

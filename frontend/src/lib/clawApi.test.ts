@@ -55,6 +55,9 @@ describe("getLawDogApiBase", () => {
     expect(apiUrl("/health")).toBe("http://127.0.0.1:8000/health");
     expect(apiUrl("/api/agreements/parse")).toBe("http://127.0.0.1:8000/api/agreements/parse");
     expect(apiUrl("/api/agreements/draft")).toBe("http://127.0.0.1:8000/api/agreements/draft");
+    expect(apiUrl("/api/agreements/premium-full-draft")).toBe(
+      "http://127.0.0.1:8000/api/agreements/premium-full-draft",
+    );
     expect(getApiBase()).toBe("http://192.168.1.23:8000");
   });
 

@@ -48,8 +48,11 @@ export type SimpleProFinalReviewScreenProps = {
   sendDisabled?: boolean;
   reviewFirstHandoffBusy?: boolean;
   reviewFirstHandoffError?: string | null;
+  /** Agreement save service unreachable — dedicated persist blocker (not mint failure). */
+  reviewLinkPersistFailureActive?: boolean;
   /** Railway/production: signing token secret unset — hide retry loop. */
   reviewFirstSigningTokenSecretMissing?: boolean;
+  onCopyReviewLinkPersistDebugInfo?: () => void;
   onBackToFinalReviewFromReviewHandoff?: () => void;
   onRetryReviewFirstHandoff?: () => void;
   /** Signer/reviewer emails captured before final review. */
@@ -124,9 +127,11 @@ export function SimpleProFinalReviewScreen({
   sendDisabled = false,
   reviewFirstHandoffBusy = false,
   reviewFirstHandoffError = null,
+  reviewLinkPersistFailureActive = false,
   reviewFirstSigningTokenSecretMissing = false,
   onBackToFinalReviewFromReviewHandoff,
   onRetryReviewFirstHandoff,
+  onCopyReviewLinkPersistDebugInfo,
   signersReady = false,
   signerMetadataFinalized = false,
   signerSavedMappings = [],
@@ -174,6 +179,7 @@ export function SimpleProFinalReviewScreen({
   const [editAgreementTextOpen, setEditAgreementTextOpen] = useState(false);
   const [showUploadActions, setShowUploadActions] = useState(Boolean(uploadedSource));
   const reviewFirstActionsBlocked = Boolean(reviewFirstHandoffError?.trim());
+  const persistSaveFailure = reviewLinkPersistFailureActive && !reviewFirstSigningTokenSecretMissing;
   const canDirectEditPlainText = Boolean(onEditablePlainTextChange && onSavePlainTextEdits);
   const canSuggestEdits =
     !suppressPostReviewEditUx &&
@@ -514,9 +520,15 @@ export function SimpleProFinalReviewScreen({
             ref={reviewFirstErrorRef}
             className="rounded-lg border-2 border-amber-500/90 bg-amber-50 px-4 py-4 text-sm text-amber-950 shadow-md shadow-amber-900/10"
             role="alert"
-            data-testid="simple-pro-review-first-handoff-error"
+            data-testid={
+              persistSaveFailure
+                ? "simple-pro-review-link-persist-failure"
+                : "simple-pro-review-first-handoff-error"
+            }
           >
-            <p className="text-base font-semibold text-amber-950">Review links unavailable</p>
+            <p className="text-base font-semibold text-amber-950">
+              {persistSaveFailure ? "Review link could not be created" : "Review links unavailable"}
+            </p>
             <p className="mt-2 leading-relaxed">{reviewFirstHandoffError}</p>
             {reviewFirstSigningTokenSecretMissing ? (
               <p
@@ -526,7 +538,10 @@ export function SimpleProFinalReviewScreen({
                 {REVIEW_FIRST_SIGNING_TOKEN_SECRET_OPERATOR_HINT}
               </p>
             ) : null}
-            {onBackToFinalReviewFromReviewHandoff || onRetryReviewFirstHandoff ? (
+            {onBackToFinalReviewFromReviewHandoff ||
+            onRetryReviewFirstHandoff ||
+            (persistSaveFailure && onCopyAgreement) ||
+            (persistSaveFailure && onCopyReviewLinkPersistDebugInfo) ? (
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 {onRetryReviewFirstHandoff && !reviewFirstSigningTokenSecretMissing ? (
                   <button
@@ -536,10 +551,36 @@ export function SimpleProFinalReviewScreen({
                     onClick={onRetryReviewFirstHandoff}
                     data-testid="simple-pro-review-first-retry"
                   >
-                    {reviewFirstHandoffBusy ? "Retrying…" : "Retry creating review links"}
+                    {reviewFirstHandoffBusy
+                      ? "Retrying…"
+                      : persistSaveFailure
+                        ? "Retry creating review link"
+                        : "Retry creating review links"}
                   </button>
                 ) : null}
-                {onBackToFinalReviewFromReviewHandoff ? (
+                {persistSaveFailure && onCopyAgreement ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-lg border border-amber-500/80 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 sm:w-auto"
+                    disabled={reviewFirstHandoffBusy}
+                    onClick={onCopyAgreement}
+                    data-testid="simple-pro-review-link-copy-agreement"
+                  >
+                    Copy agreement text
+                  </button>
+                ) : null}
+                {persistSaveFailure && onCopyReviewLinkPersistDebugInfo ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-lg border border-amber-500/80 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 sm:w-auto"
+                    disabled={reviewFirstHandoffBusy}
+                    onClick={onCopyReviewLinkPersistDebugInfo}
+                    data-testid="simple-pro-review-link-copy-debug"
+                  >
+                    Copy debug info
+                  </button>
+                ) : null}
+                {onBackToFinalReviewFromReviewHandoff && !persistSaveFailure ? (
                   <button
                     type="button"
                     className="w-full rounded-lg border border-amber-500/80 bg-white px-4 py-2.5 text-sm font-semibold text-amber-950 sm:w-auto"

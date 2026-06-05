@@ -112,16 +112,23 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(actionsIdx).toBeGreaterThan(documentIdx);
   });
 
+  it("review-link persist failure uses dedicated panel test ids near CTA", () => {
+    const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
+    expect(screen).toContain('"simple-pro-review-link-persist-failure"');
+    expect(screen).toContain("Retry creating review link");
+    expect(screen).toContain('data-testid="simple-pro-review-link-copy-debug"');
+  });
+
   it("SimpleProFinalReviewScreen renders review-first error in final review actions region", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain('data-testid="simple-pro-final-review-actions"');
     expect(screen).toContain("reviewFirstActionsBlocked");
-    expect(screen).toContain('data-testid="simple-pro-review-first-handoff-error"');
+    expect(screen).toContain('"simple-pro-review-first-handoff-error"');
     expect(screen).toContain("scrollIntoView");
     expect(screen).toContain("reviewFirstSigningTokenSecretMissing");
     expect(screen).toContain("review-first-env-config-hint");
     const actionsIdx = screen.indexOf('data-testid="simple-pro-final-review-actions"');
-    const errorIdx = screen.indexOf('data-testid="simple-pro-review-first-handoff-error"');
+    const errorIdx = screen.indexOf('"simple-pro-review-first-handoff-error"');
     expect(errorIdx).toBeGreaterThan(actionsIdx);
   });
 

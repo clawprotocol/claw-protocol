@@ -506,6 +506,13 @@ import {
   isReviewFirstPersistFailureReason,
 } from "./guidedDealCompletion/guidedFinalReviewToSigning";
 import {
+  REVIEW_LINK_PERSIST_BLOCKING_MESSAGE,
+  buildReviewLinkPersistDiagnostics,
+  formatReviewLinkPersistDebugInfo,
+  logReviewLinkPersistFailure,
+  type ReviewLinkPersistDiagnostics,
+} from "./reviewLinkPersistDiagnostics";
+import {
   explicitSignerNameForEntity,
   logSignerMetadataInputBlur,
   logSignerMetadataNormalizedForSave,
@@ -3444,6 +3451,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [reviewFirstHandoffBusy, setReviewFirstHandoffBusy] = useState(false);
   const [reviewFirstHandoffError, setReviewFirstHandoffError] = useState<string | null>(null);
   const [reviewFirstSigningTokenSecretMissing, setReviewFirstSigningTokenSecretMissing] = useState(false);
+  const [reviewLinkPersistFailureDiagnostics, setReviewLinkPersistFailureDiagnostics] =
+    useState<ReviewLinkPersistDiagnostics | null>(null);
+  const reviewLinkPersistFailureRef = useRef<ReviewLinkPersistDiagnostics | null>(null);
   const guidedFinalizeModalActive = guidedFinalizeModalStage !== null;
   /** Snapshot before signer-identity patch — used to recover final review if patch shrinks corpus. */
   const guidedPreIdentityAuthoritativeRef = useRef("");
@@ -10103,6 +10113,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ? (e as { message: string }).message
           : String(e ?? "Could not create draft.");
       console.error("[AgreementIntake] create/hydrate failed", { postedId, rawMessage: msg });
+      if (reviewFirstHandoffPersist) {
+        const diagnostics = buildReviewLinkPersistDiagnostics({
+          error: e,
+          reason: "persist_failed",
+        });
+        reviewLinkPersistFailureRef.current = diagnostics;
+        logReviewLinkPersistFailure(diagnostics);
+        setHardError(null);
+        setProductionSendBarPhase("idle");
+        setProductionSendBarAgreementId(null);
+        return false;
+      }
       const hydrate = msg === "hydrate_failed" || msg.toLowerCase().includes("hydrate");
       if (hydrate) {
         if (postedId) onCreateHydrateFailed?.(postedId);
@@ -22928,13 +22950,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setReviewFirstHandoffBusy(true);
       setReviewFirstHandoffError(null);
       setReviewFirstSigningTokenSecretMissing(false);
+      setReviewLinkPersistFailureDiagnostics(null);
+      reviewLinkPersistFailureRef.current = null;
       logReviewFirstHandoffStart({ source, phase: createFlowPhase });
 
-      const failReviewFirstPersist = (message: string, reason: string) => {
-        logReviewFirstError({ source, reason, message, failureClass: "persist" });
+      const failReviewFirstPersist = (
+        message: string,
+        reason: string,
+        diagnostics?: ReviewLinkPersistDiagnostics | null,
+      ) => {
+        const diag =
+          diagnostics ??
+          reviewLinkPersistFailureRef.current ??
+          buildReviewLinkPersistDiagnostics({ reason, error: null });
+        reviewLinkPersistFailureRef.current = diag;
+        logReviewLinkPersistFailure(diag);
+        logReviewFirstError({
+          source,
+          reason,
+          message,
+          failureClass: "persist",
+          pageOrigin: diag.pageOrigin,
+          apiOrigin: diag.apiOrigin,
+          endpoint: diag.endpoint,
+          persistFailureClass: diag.failureClass,
+          rawMessage: diag.rawMessage,
+        });
         setReviewFirstSigningTokenSecretMissing(false);
-        setReviewFirstHandoffError(null);
-        setHardError(message);
+        setHardError(null);
+        setReviewFirstHandoffError(message);
+        setReviewLinkPersistFailureDiagnostics(diag);
       };
 
       const failReviewFirstMint = (
@@ -23080,18 +23125,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             resumeAgreementId: readCreateReviewAgreementResumeId(),
           });
           if (!ok && !id) {
-            failReviewFirst(
-              "We could not save the agreement before creating review links. Try again in a moment.",
+            failReviewFirstPersist(
+              REVIEW_LINK_PERSIST_BLOCKING_MESSAGE,
               "persist_failed",
+              reviewLinkPersistFailureRef.current,
             );
             return;
           }
         }
 
         if (!id) {
-          failReviewFirst(
-            "We could not open the review link screen. Save the agreement and try again.",
-            "agreement_id_missing",
+          failReviewFirstPersist(
+            REVIEW_LINK_PERSIST_BLOCKING_MESSAGE,
+            "persist_failed",
+            reviewLinkPersistFailureRef.current,
           );
           return;
         }
@@ -27734,9 +27781,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           reviewFirstHandoffBusy={reviewFirstHandoffBusy}
                                           reviewFirstHandoffError={reviewFirstHandoffError}
                                           reviewFirstSigningTokenSecretMissing={reviewFirstSigningTokenSecretMissing}
+                                          reviewLinkPersistFailureActive={Boolean(reviewLinkPersistFailureDiagnostics)}
+                                          onCopyReviewLinkPersistDebugInfo={
+                                            reviewLinkPersistFailureDiagnostics
+                                              ? () => {
+                                                  void navigator.clipboard?.writeText(
+                                                    formatReviewLinkPersistDebugInfo(
+                                                      reviewLinkPersistFailureDiagnostics,
+                                                    ),
+                                                  );
+                                                }
+                                              : undefined
+                                          }
                                           onBackToFinalReviewFromReviewHandoff={() => {
                                             setReviewFirstHandoffError(null);
                                             setReviewFirstSigningTokenSecretMissing(false);
+                                            setReviewLinkPersistFailureDiagnostics(null);
+                                            reviewLinkPersistFailureRef.current = null;
                                             setHardError(null);
                                           }}
                                           onRetryReviewFirstHandoff={
@@ -27744,6 +27805,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               ? undefined
                                               : () => {
                                                   setReviewFirstHandoffError(null);
+                                                  setReviewLinkPersistFailureDiagnostics(null);
+                                                  reviewLinkPersistFailureRef.current = null;
                                                   setHardError(null);
                                                   void completeGuidedPaidProReviewFirstHandoff(
                                                     "simple_pro_review_first_retry",
