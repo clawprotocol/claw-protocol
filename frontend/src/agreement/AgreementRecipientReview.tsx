@@ -253,8 +253,10 @@ import {
   type ReviewFirstDiffPart,
 } from "./reviewFirstTextDiff";
 import { formatAgreementPlainTextForEditing } from "./formatAgreementPlainTextForEditing";
+import { validateRecipientAccessToken } from "./recipientAccessApi";
 import {
   logReviewFirstProposalCreated,
+  logReviewFirstProposalStageRequest,
   logReviewFirstSubmitBlocked,
   logReviewFirstSubmitConfirm,
   logReviewFirstSubmitFailed,
@@ -265,7 +267,7 @@ import {
 } from "./reviewFirstSubmitAuthority";
 import {
   logReviewFirstSubmitAuthority,
-  resolveReviewerEffectiveParticipantId,
+  resolveReviewFirstStageProposerId,
   reviewerNeedsPersonalizedLink,
 } from "./reviewerTokenPersistence";
 import { ReviewFirstChangeCard } from "./ReviewFirstChangeCard";
@@ -715,6 +717,8 @@ export function AgreementRecipientReview({
   const [recipientRevisePreviewError, setRecipientRevisePreviewError] = useState<string | null>(null);
   const recipientRedlineViewModelLogKeyRef = useRef<string>("");
   const recipientRedlineSourceLogKeyRef = useRef<string>("");
+  const reviewFirstStageInFlightRef = useRef(false);
+  const [tokenValidatedPartyId, setTokenValidatedPartyId] = useState("");
   const [recipientPosture] = useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
   const [suggestionUsed, setSuggestionUsed] = useState(false);
   const [workflowMode, setWorkflowMode] = useState<"revised" | "quick">("revised");
@@ -1004,14 +1008,32 @@ export function AgreementRecipientReview({
     [draft?.audit_log]
   );
   const partiesHaveIds = Boolean(draft?.parties?.some((p) => (p.id || "").trim()));
+  useEffect(() => {
+    const tok = recipientAccessToken.trim();
+    if (!tok) {
+      setTokenValidatedPartyId("");
+      return;
+    }
+    let cancel = false;
+    void validateRecipientAccessToken(tok, agreementId).then((r) => {
+      if (cancel) return;
+      const pid = r.ok ? String(r.data.recipient_party_id ?? "").trim() : "";
+      setTokenValidatedPartyId(pid);
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [agreementId, recipientAccessToken]);
   const participantPid = useMemo(
     () =>
-      resolveReviewerEffectiveParticipantId({
+      resolveReviewFirstStageProposerId({
         agreementId,
         participantPartyId,
         recipientAccessToken,
-      }),
-    [agreementId, participantPartyId, recipientAccessToken],
+        tokenValidatedPartyId,
+        draftParties: draft?.parties ?? null,
+      }).proposerId,
+    [agreementId, participantPartyId, recipientAccessToken, tokenValidatedPartyId, draft?.parties],
   );
   const needsPersonalizedLink = reviewerNeedsPersonalizedLink({
     entryKind: entry.kind,
@@ -2938,18 +2960,21 @@ export function AgreementRecipientReview({
     setSendSuggestedEditsModalOpen(true);
   }
 
-  function resolveSubmitProposerParticipantId(): string {
-    return resolveReviewerEffectiveParticipantId({
+  function resolveStageProposer(): ReturnType<typeof resolveReviewFirstStageProposerId> {
+    return resolveReviewFirstStageProposerId({
       agreementId,
       participantPartyId,
       recipientAccessToken,
-      validatedPartyId: participantPartyId,
-    }).trim();
+      tokenValidatedPartyId,
+      draftParties: draft?.parties ?? null,
+    });
   }
 
-  function buildRecipientProposalStageBody(preview: RecipientPreview): RecipientProposalSubmitBody {
+  function buildRecipientProposalStageBody(
+    preview: RecipientPreview,
+    proposerId: string,
+  ): RecipientProposalSubmitBody {
     const d = preview.proposedDraft;
-    const proposerId = resolveSubmitProposerParticipantId();
     return {
       instruction: preview.revisionText,
       proposer_id: proposerId,
@@ -3002,20 +3027,28 @@ export function AgreementRecipientReview({
       setSendSuggestedEditsModalOpen(false);
       return;
     }
-    const effectiveProposerId = resolveSubmitProposerParticipantId();
-    if (!effectiveProposerId && !recipientAccessToken.trim()) {
+    const stageProposer = resolveStageProposer();
+    const effectiveProposerId = stageProposer.proposerId;
+    const hasAccessToken = Boolean(recipientAccessToken.trim());
+    if (
+      !effectiveProposerId &&
+      !hasAccessToken &&
+      stageProposer.source !== "deferred_to_backend_token"
+    ) {
       const message = REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE;
       logReviewFirstSubmitBlocked({
         agreementId,
-        reason: "missing_participant_id",
+        reason: "proposer_id_missing_before_stage",
         message,
         hasAccessToken: false,
         participantPid: participantPid || null,
+        proposerIdSource: stageProposer.source,
       });
       setError(message);
       setSendSuggestedEditsModalOpen(false);
       return;
     }
+    if (reviewFirstStageInFlightRef.current) return;
     setSaving(true);
     setError(null);
     const stageEndpoint = `/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal/stage`;
@@ -3023,11 +3056,22 @@ export function AgreementRecipientReview({
     try {
       let proposalId = (p.proposalId || "").trim();
       if (!proposalId) {
+        reviewFirstStageInFlightRef.current = true;
+        const stageBody = buildRecipientProposalStageBody(p, effectiveProposerId);
+        logReviewFirstProposalStageRequest({
+          agreementId,
+          hasAccessToken,
+          participantPid: participantPid || null,
+          proposerId: effectiveProposerId || null,
+          proposerIdSource: stageProposer.source,
+          payloadKeys: Object.keys(stageBody),
+        });
         const staged = await stageRecipientProposalApi(
           agreementId,
-          buildRecipientProposalStageBody(p),
+          stageBody,
           recipientAccessToken,
         );
+        reviewFirstStageInFlightRef.current = false;
         if (!staged.ok || !staged.proposal_id?.trim()) {
           logReviewFirstSubmitFailed({
             agreementId,
@@ -3150,6 +3194,7 @@ export function AgreementRecipientReview({
       });
       setError(rawMessage);
     } finally {
+      reviewFirstStageInFlightRef.current = false;
       setSaving(false);
     }
   }

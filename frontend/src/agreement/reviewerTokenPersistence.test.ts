@@ -1,7 +1,9 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  inferSingleNonOwnerPartyId,
   loadAnyRecipientMagicLinkSessionForAgreement,
+  resolveReviewFirstStageProposerId,
   resolveReviewerEffectiveAccessToken,
   resolveReviewerEffectiveParticipantId,
   reviewerNeedsPersonalizedLink,
@@ -77,5 +79,40 @@ describe("reviewerTokenPersistence", () => {
         recipientAccessToken: "",
       }),
     ).toBe(true);
+  });
+
+  it("Test280 infers single non-owner party when token present but pid missing", () => {
+    expect(
+      inferSingleNonOwnerPartyId([
+        { id: "p-owner", role: "owner" },
+        { id: "p-reviewer", role: "party" },
+      ]),
+    ).toBe("p-reviewer");
+    const resolved = resolveReviewFirstStageProposerId({
+      agreementId: "ag_infer",
+      participantPartyId: "",
+      recipientAccessToken: "tok_personal",
+      draftParties: [
+        { id: "p-owner", role: "owner" },
+        { id: "p-reviewer", role: "party" },
+      ],
+    });
+    expect(resolved.proposerId).toBe("p-reviewer");
+    expect(resolved.source).toBe("single_non_owner_party");
+  });
+
+  it("Test280 defers to backend when token present and proposer cannot be resolved locally", () => {
+    const resolved = resolveReviewFirstStageProposerId({
+      agreementId: "ag_defer",
+      participantPartyId: "",
+      recipientAccessToken: "tok_personal",
+      draftParties: [
+        { id: "p-owner", role: "owner" },
+        { id: "p-a", role: "party" },
+        { id: "p-b", role: "party" },
+      ],
+    });
+    expect(resolved.proposerId).toBe("");
+    expect(resolved.source).toBe("deferred_to_backend_token");
   });
 });

@@ -8128,11 +8128,48 @@ def _recipient_party_id_from_access_token(request: Request, agreement_id: str) -
         return ""
 
 
+def _infer_single_nonowner_proposer_id(draft: AgreementDraft) -> str:
+    candidates: List[str] = []
+    for p in draft.parties or []:
+        pid = (p.id or "").strip()
+        if not pid or pid.startswith("legacy_"):
+            continue
+        wr = _normalize_workflow_role(p.role)
+        if wr in ("owner", "viewer"):
+            continue
+        candidates.append(pid)
+    if len(candidates) == 1:
+        return candidates[0]
+    return ""
+
+
+def _resolve_recipient_proposer_with_source(
+    request: Request, agreement_id: str, draft: AgreementDraft, body_proposer_id: str
+) -> Tuple[AgreementParty, str]:
+    body_pid = (body_proposer_id or "").strip()
+    if body_pid:
+        return _validate_nonowner_proposer(draft, body_pid), "body"
+    token_pid = _recipient_party_id_from_access_token(request, agreement_id)
+    if token_pid:
+        return _validate_nonowner_proposer(draft, token_pid), "token"
+    inferred = _infer_single_nonowner_proposer_id(draft)
+    if inferred:
+        log.info(
+            "[recipient-proposal-stage] agreement_id=%s proposer_id_source=inferred_single_reviewer proposer_id=%s",
+            agreement_id,
+            inferred,
+        )
+        return _validate_nonowner_proposer(draft, inferred), "inferred_single_reviewer"
+    raise HTTPException(status_code=400, detail="proposer_id_required")
+
+
 def _resolve_recipient_proposer(
     request: Request, agreement_id: str, draft: AgreementDraft, body_proposer_id: str
 ) -> AgreementParty:
-    pid = (body_proposer_id or "").strip() or _recipient_party_id_from_access_token(request, agreement_id)
-    return _validate_nonowner_proposer(draft, pid)
+    party, _source = _resolve_recipient_proposer_with_source(
+        request, agreement_id, draft, body_proposer_id
+    )
+    return party
 
 
 def _staged_recipient_proposals_map(draft: AgreementDraft) -> Dict[str, Any]:
@@ -8234,7 +8271,9 @@ def stage_recipient_proposal(
     if lock and bool((lock or {}).get("locked_version_id")):
         raise HTTPException(status_code=400, detail="negotiation_locked")
     draft = _persist_party_id_backfill(draft)
-    proposer = _resolve_recipient_proposer(request, agreement_id, draft, body.proposer_id)
+    proposer, proposer_source = _resolve_recipient_proposer_with_source(
+        request, agreement_id, draft, body.proposer_id
+    )
     assert_agreement_recipient_write_allowed(
         request,
         agreement_id,
@@ -8247,17 +8286,31 @@ def stage_recipient_proposal(
     proposal_id = str(uuid.uuid4())
     now = _utc_now_iso()
     dname = (body.proposer_display_name or "").strip() or proposer.name
+    proposer_id = (proposer.id or "").strip()
     payload: Dict[str, Any] = {
         "proposal_id": proposal_id,
         "instruction": instruction,
         "draft": body.draft.model_dump(),
         "rendered_html": (body.rendered_html or "").strip(),
         "staged_at": now,
-        "proposer_id": (proposer.id or "").strip(),
+        "proposer_id": proposer_id,
         "proposer_display_name": dname,
     }
     _persist_staged_recipient_proposal(draft, proposal_id, payload)
-    return {"ok": True, "proposal_id": proposal_id, "staged": True}
+    log.info(
+        "[recipient-proposal-stage] agreement_id=%s proposal_id=%s proposer_id=%s proposer_id_source=%s",
+        agreement_id,
+        proposal_id,
+        proposer_id,
+        proposer_source,
+    )
+    return {
+        "ok": True,
+        "proposal_id": proposal_id,
+        "staged": True,
+        "proposer_id": proposer_id,
+        "proposer_id_source": proposer_source,
+    }
 
 
 @router.post("/{agreement_id}/recipient-proposal")

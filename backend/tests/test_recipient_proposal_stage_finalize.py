@@ -107,3 +107,123 @@ def test_recipient_proposal_stage_then_finalize(monkeypatch, isolated_agreement_
     ]
     assert len(pending) == 1
     assert pending[0]["value"]["proposal_id"] == proposal_id
+
+
+def test_stage_derives_proposer_from_token_when_body_empty(monkeypatch, isolated_agreement_env):
+    client = TestClient(app)
+    org = {"X-Claw-Org-Id": "org-token-proposer"}
+    aid, ctx = _draft_with_reviewer(client, org)
+    reviewer_id = ctx["reviewer_id"]
+    draft = ctx["draft"]
+
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=org,
+        json={
+            "mode": "review",
+            "role": "reviewer",
+            "recipient_party_id": reviewer_id,
+            "inviter_display_name": "Owner",
+        },
+    )
+    assert mint.status_code == 200, mint.text
+    tok = mint.json()["token"]
+    rh = {"X-Claw-Recipient-Access-Token": tok}
+
+    stage = client.post(
+        f"/api/agreements/{aid}/recipient-proposal/stage",
+        headers=rh,
+        json={
+            "instruction": "Change payment timing to fifteen (15) days.",
+            "proposer_id": "",
+            "draft": {
+                "title": draft["title"],
+                "jurisdiction": draft["jurisdiction"],
+                "parties": draft["parties"],
+                "purpose": "Payment within fifteen (15) days after receipt.",
+                "payment_terms": draft["payment_terms"],
+                "duration": draft.get("duration"),
+                "due_date": draft.get("due_date"),
+                "effective_date": draft.get("effective_date"),
+            },
+            "rendered_html": "<p>updated</p>",
+        },
+    )
+    assert stage.status_code == 200, stage.text
+    body = stage.json()
+    assert body.get("proposer_id") == reviewer_id
+    assert body.get("proposer_id_source") == "token"
+
+
+def test_stage_infers_single_reviewer_without_token_pid(monkeypatch, isolated_agreement_env):
+    client = TestClient(app)
+    org = {"X-Claw-Org-Id": "org-infer-proposer"}
+    aid, ctx = _draft_with_reviewer(client, org)
+    reviewer_id = ctx["reviewer_id"]
+    draft = ctx["draft"]
+
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=org,
+        json={
+            "mode": "review",
+            "role": "reviewer",
+            "inviter_display_name": "Owner",
+        },
+    )
+    assert mint.status_code == 200, mint.text
+    tok = mint.json()["token"]
+    rh = {"X-Claw-Recipient-Access-Token": tok}
+
+    stage = client.post(
+        f"/api/agreements/{aid}/recipient-proposal/stage",
+        headers=rh,
+        json={
+            "instruction": "Change payment timing to fifteen (15) days.",
+            "proposer_id": "",
+            "draft": {
+                "title": draft["title"],
+                "jurisdiction": draft["jurisdiction"],
+                "parties": draft["parties"],
+                "purpose": "Payment within fifteen (15) days after receipt.",
+                "payment_terms": draft["payment_terms"],
+                "duration": draft.get("duration"),
+                "due_date": draft.get("due_date"),
+                "effective_date": draft.get("effective_date"),
+            },
+            "rendered_html": "<p>updated</p>",
+        },
+    )
+    assert stage.status_code == 200, stage.text
+    body = stage.json()
+    assert body.get("proposer_id") == reviewer_id
+    assert body.get("proposer_id_source") == "inferred_single_reviewer"
+
+
+def test_stage_requires_proposer_without_token(monkeypatch, isolated_agreement_env):
+    client = TestClient(app)
+    org = {"X-Claw-Org-Id": "org-no-token-proposer"}
+    aid, ctx = _draft_with_reviewer(client, org)
+    draft = ctx["draft"]
+
+    stage = client.post(
+        f"/api/agreements/{aid}/recipient-proposal/stage",
+        json={
+            "instruction": "Change payment timing to fifteen (15) days.",
+            "proposer_id": "",
+            "draft": {
+                "title": draft["title"],
+                "jurisdiction": draft["jurisdiction"],
+                "parties": draft["parties"],
+                "purpose": "Payment within fifteen (15) days after receipt.",
+                "payment_terms": draft["payment_terms"],
+                "duration": draft.get("duration"),
+                "due_date": draft.get("due_date"),
+                "effective_date": draft.get("effective_date"),
+            },
+            "rendered_html": "<p>updated</p>",
+        },
+    )
+    assert stage.status_code in (400, 401, 403)
+    if stage.status_code == 400:
+        assert stage.json().get("detail") == "proposer_id_required"

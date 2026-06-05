@@ -33,6 +33,15 @@ describe("Test276 review-first submit authority wiring", () => {
     expect(block).not.toMatch(/finalizeRecipientProposalApi[\s\S]{0,120}proposalId\s*=\s*""/);
   });
 
+  it("Test280 resolves stage proposer from token validation and draft inference", () => {
+    expect(recipientReview).toContain("resolveReviewFirstStageProposerId");
+    expect(recipientReview).toContain("validateRecipientAccessToken");
+    expect(recipientReview).toContain("logReviewFirstProposalStageRequest");
+    expect(recipientReview).toContain("proposer_id_missing_before_stage");
+    expect(recipientReview).toContain("reviewFirstStageInFlightRef");
+    expect(recipientReview).toContain("tokenValidatedPartyId");
+  });
+
   it("AgreementReviewGate recovers token from session after URL strip", () => {
     const gate = readFileSync(join(__dirname, "../ClawProductApp.tsx"), "utf8");
     expect(gate).toContain("loadAnyRecipientMagicLinkSessionForAgreement");

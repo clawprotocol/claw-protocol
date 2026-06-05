@@ -9,7 +9,8 @@ export type ReviewFirstSubmitBlockReason =
   | "missing_access_token"
   | "signing_lock_active"
   | "proposal_not_ready"
-  | "proposal_id_missing_before_post";
+  | "proposal_id_missing_before_post"
+  | "proposer_id_missing_before_stage";
 
 export type ReviewFirstSubmitAuthority = {
   canSubmit: boolean;
@@ -120,4 +121,10 @@ export function logReviewFirstSubmitConfirm(payload: Record<string, unknown>): v
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[review-first-submit-confirm]", payload);
+}
+
+export function logReviewFirstProposalStageRequest(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[review-first-proposal-stage-request]", payload);
 }

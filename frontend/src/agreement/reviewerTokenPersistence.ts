@@ -60,19 +60,80 @@ export function resolveReviewerEffectiveParticipantId(args: {
   participantPartyId?: string | null;
   recipientAccessToken?: string | null;
   validatedPartyId?: string | null;
+  urlPartyId?: string | null;
+  tokenValidatedPartyId?: string | null;
+  draftParties?: Array<{ id?: string; role?: string }> | null;
 }): string {
-  const fromValidated = (args.validatedPartyId || "").trim();
-  if (fromValidated) return fromValidated;
+  return resolveReviewFirstStageProposerId(args).proposerId;
+}
+
+export type ReviewFirstStageProposerSource =
+  | "participant_prop"
+  | "token_validation"
+  | "url_party_param"
+  | "session"
+  | "single_non_owner_party"
+  | "deferred_to_backend_token"
+  | "none";
+
+export function readReviewUrlPartyId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return new URL(window.location.href).searchParams.get("p")?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+export function inferSingleNonOwnerPartyId(
+  parties: Array<{ id?: string; role?: string }> | null | undefined,
+): string {
+  if (!parties?.length) return "";
+  const candidates: string[] = [];
+  for (const p of parties) {
+    const id = String(p.id ?? "").trim();
+    if (!id || id.startsWith("legacy_")) continue;
+    const role = String(p.role ?? "").trim().toLowerCase();
+    if (role === "owner" || role === "viewer") continue;
+    candidates.push(id);
+  }
+  return candidates.length === 1 ? candidates[0] : "";
+}
+
+export function resolveReviewFirstStageProposerId(args: {
+  agreementId: string;
+  participantPartyId?: string | null;
+  recipientAccessToken?: string | null;
+  validatedPartyId?: string | null;
+  urlPartyId?: string | null;
+  tokenValidatedPartyId?: string | null;
+  draftParties?: Array<{ id?: string; role?: string }> | null;
+}): { proposerId: string; source: ReviewFirstStageProposerSource } {
   const fromProp = (args.participantPartyId || "").trim();
-  if (fromProp) return fromProp;
+  if (fromProp) return { proposerId: fromProp, source: "participant_prop" };
+
+  const fromTokenValidation = (args.tokenValidatedPartyId || args.validatedPartyId || "").trim();
+  if (fromTokenValidation) return { proposerId: fromTokenValidation, source: "token_validation" };
+
+  const fromUrl = (args.urlPartyId || readReviewUrlPartyId()).trim();
+  if (fromUrl) return { proposerId: fromUrl, source: "url_party_param" };
+
   const tok = (args.recipientAccessToken || "").trim();
   if (tok) {
     const session = loadRecipientMagicLinkSession(args.agreementId, tok);
     const fromScopedSession = (session?.recipientPartyId || "").trim();
-    if (fromScopedSession) return fromScopedSession;
+    if (fromScopedSession) return { proposerId: fromScopedSession, source: "session" };
   }
   const anySession = loadAnyRecipientMagicLinkSessionForAgreement(args.agreementId);
-  return (anySession?.recipientPartyId || "").trim();
+  const fromAnySession = (anySession?.recipientPartyId || "").trim();
+  if (fromAnySession) return { proposerId: fromAnySession, source: "session" };
+
+  const inferred = inferSingleNonOwnerPartyId(args.draftParties);
+  if (inferred) return { proposerId: inferred, source: "single_non_owner_party" };
+
+  if (tok) return { proposerId: "", source: "deferred_to_backend_token" };
+
+  return { proposerId: "", source: "none" };
 }
 
 export function reviewerNeedsPersonalizedLink(args: {
