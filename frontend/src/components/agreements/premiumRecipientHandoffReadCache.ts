@@ -4,6 +4,8 @@
 
 import type { PremiumRecipientHandoffV2 } from "./premiumPartyNamesHandoff";
 import { readPremiumRecipientHandoff } from "./premiumPartyNamesHandoff";
+import { getPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { latchPaidProHandoffReadGateCorpusHash } from "./paidProPremiumRecipientHandoffReadGate";
 
 const KEY_V2 = "claw_premium_recipient_handoff_v2";
 
@@ -13,6 +15,7 @@ let readCache: { storageKey: string; handoff: PremiumRecipientHandoffV2 | null }
 };
 
 export function readPremiumRecipientHandoffMemo(): PremiumRecipientHandoffV2 | null {
+  latchPaidProHandoffReadGateCorpusHash(getPaidProSourceOfTruth()?.hash ?? null);
   if (typeof sessionStorage === "undefined") return readPremiumRecipientHandoff();
   try {
     const storageKey = sessionStorage.getItem(KEY_V2) ?? "";

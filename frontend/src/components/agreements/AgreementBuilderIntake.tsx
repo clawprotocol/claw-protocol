@@ -6109,6 +6109,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumPostCheckoutPhase(null);
             resetPremiumReviewScrollToTop({
               reason: "payment_success_authoritative_apply",
+              afterPlain: commitPlain,
             });
           }, 1400);
         } else {
@@ -6142,7 +6143,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumModalExtendedWaitActiveRef.current = false;
         premiumPostCheckoutModalHardFailopenRef.current = false;
         bumpPremiumSurfaceGateTick();
-        resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply" });
+        resetPremiumReviewScrollToTop({
+          reason: "payment_success_authoritative_apply",
+          afterPlain: commitPlain,
+        });
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[premium-success-immediate-visible-commit] after", {
@@ -7601,7 +7605,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           /* ignore */
         }
         if (usePaidAuthoritativeBody && !shouldImmediateAuthoritativeCommit) {
-          resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply" });
+          resetPremiumReviewScrollToTop({
+            reason: "payment_success_authoritative_apply",
+            afterPlain: snapshotPlain,
+          });
         }
         } catch (applyErr: unknown) {
           const serialized = serializeProgressionError(applyErr);
@@ -15239,7 +15246,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateUiStage(CreateUiStage.DRAFT);
       setPreviewPaneRevealed(true);
       bumpPremiumSurfaceGateTick();
-      resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply" });
+      resetPremiumReviewScrollToTop({
+        reason: "payment_success_authoritative_apply",
+        afterPlain: collapsed,
+      });
     }
     cleanPremiumUrlAfterAuthoritativeCommit();
     if (!authoritativePremiumRepairLoggedRef.current) {

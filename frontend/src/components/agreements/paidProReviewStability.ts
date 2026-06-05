@@ -3,6 +3,8 @@
  */
 
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import type { PaidProCorpusLifecycleDiffClassification } from "./paidProCorpusLifecycleDiff";
+import { shouldPreservePaidProReviewScrollForClassification } from "./paidProCorpusLifecycleDiff";
 
 export type PaidProReviewStabilitySnapshot = {
   reviewHash: string | null;
@@ -16,6 +18,7 @@ let renderCount = 0;
 let recomputeCount = 0;
 let scrollResetCount = 0;
 let paymentApplyScrollResetDone = false;
+let authoritativeReviewSurfaceMounted = false;
 
 const loggedGuidedFinalReviewKeys = new Set<string>();
 const loggedReviewPipelineKeys = new Set<string>();
@@ -29,6 +32,7 @@ export function resetPaidProReviewStabilityForTests(): void {
   recomputeCount = 0;
   scrollResetCount = 0;
   paymentApplyScrollResetDone = false;
+  authoritativeReviewSurfaceMounted = false;
   loggedGuidedFinalReviewKeys.clear();
   loggedReviewPipelineKeys.clear();
   lastGuidedProUxLogKey = null;
@@ -72,6 +76,7 @@ export function recordPaidProReviewRender(plain: string): void {
   if (h === reviewHash) return;
   reviewHash = h;
   renderCount += 1;
+  authoritativeReviewSurfaceMounted = true;
   emitPaidProReviewStabilityLog("review_render");
 }
 
@@ -93,6 +98,23 @@ export function resetPaidProPaymentApplyScrollResetLatch(): void {
 
 export function shouldApplyPaidProPaymentScrollReset(): boolean {
   return !paymentApplyScrollResetDone;
+}
+
+export function isPaidProAuthoritativeReviewSurfaceMounted(): boolean {
+  return authoritativeReviewSurfaceMounted;
+}
+
+export function markPaidProAuthoritativeReviewSurfaceMounted(): void {
+  authoritativeReviewSurfaceMounted = true;
+}
+
+export function shouldSkipPaidProPaymentScrollResetForCorpus(args: {
+  corpusTransitionClassification?: PaidProCorpusLifecycleDiffClassification | null;
+  corpusHashUnchanged?: boolean;
+}): boolean {
+  if (args.corpusHashUnchanged) return true;
+  if (!authoritativeReviewSurfaceMounted) return false;
+  return shouldPreservePaidProReviewScrollForClassification(args.corpusTransitionClassification);
 }
 
 export function markPaidProPaymentScrollResetApplied(): void {

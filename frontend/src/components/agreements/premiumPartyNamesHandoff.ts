@@ -9,6 +9,10 @@ import {
 } from "../../agreement/signerMetadataNormalize";
 
 import { invalidatePremiumRecipientHandoffReadCache } from "./premiumRecipientHandoffReadCache";
+import {
+  applyPremiumRecipientHandoffReadGate,
+  resetPaidProPremiumRecipientHandoffReadGateForTests,
+} from "./paidProPremiumRecipientHandoffReadGate";
 
 const LEGACY_KEY = "claw_premium_party_names_handoff_v1";
 const KEY_V2 = "claw_premium_recipient_handoff_v2";
@@ -30,6 +34,7 @@ export function resetPremiumRecipientHandoffDedupForTests(): void {
   lastHandoffReadLogFingerprint = "";
   lastHandoffWriteLogFingerprint = "";
   lastPersistedHandoffFingerprint = "";
+  resetPaidProPremiumRecipientHandoffReadGateForTests();
 }
 
 export type PremiumRecipientHandoffSlot = {
@@ -112,8 +117,11 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
           savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : Date.now(),
           ...(partyIndexSlots ? { partyIndexSlots } : {}),
         };
-        logReviewLinkSignerMetadataHandoffRead(handoff);
-        return handoff;
+        const gated = applyPremiumRecipientHandoffReadGate(handoff, {
+          partySlotCount: 2 + (partyIndexSlots?.length ?? 0),
+        });
+        if (gated) logReviewLinkSignerMetadataHandoffRead(gated);
+        return gated;
       }
     }
   } catch {
@@ -415,6 +423,12 @@ export function linearPremiumRecipientSlots(
     else out.push({ ...(handoff.partyIndexSlots?.[i - 2] ?? emptySlot()) });
   }
   return out;
+}
+
+/** Party identity only — for handoff read gate (signer fields excluded). */
+export function premiumRecipientHandoffPartyFingerprint(payload: PremiumRecipientHandoffV2): string {
+  const slots = linearPremiumRecipientSlots(payload, 2 + (payload.partyIndexSlots?.length ?? 0));
+  return JSON.stringify(slots.map((s) => ({ name: s.name, email: s.email, role: s.role })));
 }
 
 /** Persist full ordered party-indexed reviewer rows (`party1`/`party2` + optional `partyIndexSlots`). */

@@ -17,6 +17,7 @@ import {
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
 import { clearPaidProVisibleRenderMemoForTests } from "./paidProVisibleRenderMemo";
+import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycleDiff";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
 import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { logFalseProAuthorityBlocked } from "./paidProRuntimeAuthorityEstablishment";
@@ -158,6 +159,7 @@ export function clearPaidProSourceOfTruth(): void {
   clearPaidProVisibleRenderMemoForTests();
   clearAcceptedProCorpusSafeDisplayCacheForTests();
   clearPaidProPipelineAcceptedCorpusHashForTests();
+  resetPaidProCorpusLifecycleDiffForTests();
   tracePaidProCorpusMutation({
     store: "paidProSourceOfTruth",
     caller: "clearPaidProSourceOfTruth",

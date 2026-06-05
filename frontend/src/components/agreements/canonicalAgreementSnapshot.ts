@@ -26,6 +26,7 @@ import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
 } from "./paidProExecutionBlockInstrumentation";
+import { recordPaidProCorpusLifecycleCheckpoint } from "./paidProCorpusLifecycleDiff";
 import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
 
 export type CanonicalAgreementSnapshotSource =
@@ -429,6 +430,7 @@ export function freezeCanonicalAgreementSnapshot(
     sectionGraph: snapshot.sectionGraph.length ? snapshot.sectionGraph : collectSectionGraph(snapshot.canonicalText),
   };
   frozenCanonicalAgreementCorpus = frozen;
+  recordPaidProCorpusLifecycleCheckpoint("canonical_freeze", frozen.canonicalText);
   logExecutionBlockLocation(frozen.canonicalText, `canonical-corpus-freeze:${frozen.source}`);
   logExecutionBlockCount(frozen.canonicalText, `canonical-corpus-freeze:${frozen.source}`);
   if (

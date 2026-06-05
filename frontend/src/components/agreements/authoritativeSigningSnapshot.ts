@@ -15,6 +15,7 @@ import {
   corpusContainsFusedPartyLegalName,
 } from "./canonicalPartyLegalNameSanitizer";
 import { setPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
+import { auditPaidProSignerFinalizeCorpus } from "./paidProCorpusLifecycleDiff";
 import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import {
@@ -164,6 +165,7 @@ export function createAuthoritativeSigningSnapshot(
     frozenAt,
   });
   setPaidProPinnedSignerAppliedCorpus(corpus);
+  auditPaidProSignerFinalizeCorpus(corpus);
   tracePaidProCorpusMutation({
     store: "authoritative_signing_snapshot",
     caller: "createAuthoritativeSigningSnapshot",
