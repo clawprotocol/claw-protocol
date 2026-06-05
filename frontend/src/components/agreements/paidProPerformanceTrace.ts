@@ -215,9 +215,22 @@ function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, tot
       ? firstReviewPaintAt - checkoutReturnAt
       : totalMs;
 
+  const { duplicateSpanWarnings } = buildWaterfallSummary(spanSummaries);
   markPaidProCheckoutWaterfallEmitted(sessionId);
-  emitPremiumGenerationAttribution(trace, spanSummaries, totalMs);
+  emitPremiumGenerationAttribution(trace, spanSummaries, totalMs, {
+    serverRoundTripMs,
+    localPostProcessingMs,
+    duplicateSpanWarnings,
+  });
   emitPaidProGenerationLatencyDiagnostics(trace);
+
+  const enrichedSpans = enrichWaterfallSpanRows(trace, spanSummaries);
+  const latencyBound = classifyPaidProLatencyBound({
+    totalMs: totalPaymentToReviewMs,
+    serverRoundTripMs,
+    localPostProcessingMs,
+    duplicateSpanWarnings,
+  });
 
   // eslint-disable-next-line no-console
   console.info("[paid-pro-waterfall]", {
@@ -233,7 +246,18 @@ function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, tot
     firstReviewPaintAt,
     totalPaymentToReviewMs,
     totalMs,
+    latencyBound,
+    dominantStage: topContributors[0]?.name ?? null,
+    serverRoundTripPct:
+      totalPaymentToReviewMs > 0
+        ? Math.round((serverRoundTripMs / totalPaymentToReviewMs) * 1000) / 10
+        : null,
+    localPostProcessingPct:
+      totalPaymentToReviewMs > 0
+        ? Math.round((localPostProcessingMs / totalPaymentToReviewMs) * 1000) / 10
+        : null,
     topContributors,
+    ...(duplicateSpanWarnings.length ? { duplicateSpanWarnings } : {}),
     ...(milestones.lastServerTimingHeader
       ? { backendServerTimingHeader: milestones.lastServerTimingHeader }
       : {}),
@@ -244,8 +268,21 @@ function emitPaidProCheckoutWaterfallIfReady(trace: PaidProPerformanceTrace, tot
       ? { backendServerTimingHeaderMissing: true }
       : {}),
     spanCount: spanSummaries.length,
-    spans: spanSummaries,
+    spans: enrichedSpans,
   });
+  if (paidProVerboseDetailLogsEnabled()) {
+    // eslint-disable-next-line no-console
+    console.debug("[paid-pro-waterfall-verbose]", {
+      traceId: trace.traceId,
+      sessionGenerationId: trace.sessionGenerationId,
+      intakeFingerprint: trace.intakeFingerprint,
+      totalMs: totalPaymentToReviewMs,
+      latencyBound,
+      serverRoundTripMs,
+      localPostProcessingMs,
+      stages: enrichedSpans,
+    });
+  }
   return true;
 }
 
@@ -385,10 +422,63 @@ function sumAttributionMs(spans: PaidProWaterfallSpanSummary[], names: string[])
   return total;
 }
 
+function isServerSideWaterfallSpan(name: string): boolean {
+  return /^backend_/i.test(name) || name === "server_model" || name === "premium_full_draft_api";
+}
+
+function enrichWaterfallSpanRows(
+  trace: PaidProPerformanceTrace,
+  spanSummaries: PaidProWaterfallSpanSummary[],
+): Array<
+  PaidProWaterfallSpanSummary & {
+    elapsedMs: number;
+    startedAt: string;
+    endedAt: string;
+    stageKind: "server" | "client";
+    inputLen?: number;
+    outputLen?: number;
+  }
+> {
+  const originMs = trace.startedAtMs;
+  return spanSummaries.map((s) => {
+    const startedAtMs = originMs + s.startMs;
+    const endedAtMs = startedAtMs + s.durationMs;
+    const inputLen = s.responseBodyLen ?? s.documentTextLen;
+    const outputLen = s.serverFullDocumentTextLen ?? s.documentTextLen;
+    return {
+      ...s,
+      elapsedMs: s.durationMs,
+      startedAt: new Date(startedAtMs).toISOString(),
+      endedAt: new Date(endedAtMs).toISOString(),
+      stageKind: isServerSideWaterfallSpan(s.name) ? "server" : "client",
+      ...(inputLen != null ? { inputLen } : {}),
+      ...(outputLen != null ? { outputLen } : {}),
+    };
+  });
+}
+
+function classifyPaidProLatencyBound(args: {
+  totalMs: number;
+  serverRoundTripMs: number;
+  localPostProcessingMs: number;
+  duplicateSpanWarnings: string[];
+}): "backend_bound" | "frontend_post_bound" | "duplicate_work_bound" | "mixed" {
+  if (args.duplicateSpanWarnings.length > 0) return "duplicate_work_bound";
+  if (args.totalMs <= 0) return "mixed";
+  if (args.serverRoundTripMs >= args.totalMs * 0.55) return "backend_bound";
+  if (args.localPostProcessingMs >= args.totalMs * 0.2) return "frontend_post_bound";
+  return "mixed";
+}
+
 function emitPremiumGenerationAttribution(
   trace: PaidProPerformanceTrace,
   spanSummaries: PaidProWaterfallSpanSummary[],
   totalMs: number,
+  opts?: {
+    serverRoundTripMs?: number;
+    localPostProcessingMs?: number;
+    duplicateSpanWarnings?: string[];
+  },
 ): void {
   if (!paidProPerfTraceEnabled()) return;
   const buckets = Object.fromEntries(
@@ -405,6 +495,24 @@ function emitPremiumGenerationAttribution(
       (buckets.client_preflight ?? 0) -
       (buckets.post_accept_render ?? 0),
   );
+  const topContributors = [...spanSummaries]
+    .filter((s) => s.durationMs > 0)
+    .sort((a, b) => b.durationMs - a.durationMs)
+    .slice(0, 5)
+    .map((s) => ({
+      name: s.name,
+      elapsedMs: s.durationMs,
+      pctOfTotal: totalMs > 0 ? Math.round((s.durationMs / totalMs) * 1000) / 10 : 0,
+      stageKind: isServerSideWaterfallSpan(s.name) ? "server" : "client",
+    }));
+  const serverRoundTripMs = opts?.serverRoundTripMs ?? buckets.premium_full_draft_http ?? 0;
+  const localPostProcessingMs = opts?.localPostProcessingMs ?? 0;
+  const latencyBound = classifyPaidProLatencyBound({
+    totalMs,
+    serverRoundTripMs,
+    localPostProcessingMs,
+    duplicateSpanWarnings: opts?.duplicateSpanWarnings ?? [],
+  });
   // eslint-disable-next-line no-console
   console.info("[premium-generation-attribution]", {
     traceId: trace.traceId,
@@ -413,6 +521,12 @@ function emitPremiumGenerationAttribution(
     totalMs,
     ...buckets,
     unattributedMs,
+    serverRoundTripMs,
+    localPostProcessingMs,
+    latencyBound,
+    dominantStage: topContributors[0]?.name ?? null,
+    topContributors,
+    stages: enrichWaterfallSpanRows(trace, spanSummaries).filter((s) => s.durationMs > 0),
   });
 }
 
@@ -496,7 +610,8 @@ export function finishPaidProPerformanceWaterfall(): void {
   }
   const emittedCheckoutWaterfall = emitPaidProCheckoutWaterfallIfReady(trace, totalMs);
   if (!emittedCheckoutWaterfall && shouldEmitLegacyPaidProWaterfall()) {
-    emitPremiumGenerationAttribution(trace, spanSummaries, totalMs);
+    emitPremiumGenerationAttribution(trace, spanSummaries, totalMs, { duplicateSpanWarnings });
+    const enrichedSpans = enrichWaterfallSpanRows(trace, spanSummaries);
     // eslint-disable-next-line no-console
     console.info("[paid-pro-waterfall]", {
       traceId: trace.traceId,
@@ -506,19 +621,19 @@ export function finishPaidProPerformanceWaterfall(): void {
       spanCount: spanSummaries.length,
       topContributors,
       ...(duplicateSpanWarnings.length ? { duplicateSpanWarnings } : {}),
-      spans: spanSummaries,
+      spans: enrichedSpans,
     });
-  }
-  if (paidProVerboseDetailLogsEnabled()) {
-    // eslint-disable-next-line no-console
-    console.debug("[paid-pro-waterfall-verbose]", {
-      traceId: trace.traceId,
-      sessionGenerationId: trace.sessionGenerationId,
-      intakeFingerprint: trace.intakeFingerprint,
-      totalMs,
-      topContributors,
-      spans: spanSummaries,
-    });
+    if (paidProVerboseDetailLogsEnabled()) {
+      // eslint-disable-next-line no-console
+      console.debug("[paid-pro-waterfall-verbose]", {
+        traceId: trace.traceId,
+        sessionGenerationId: trace.sessionGenerationId,
+        intakeFingerprint: trace.intakeFingerprint,
+        totalMs,
+        topContributors,
+        stages: enrichedSpans,
+      });
+    }
   }
   clearPaidProPerformanceTrace();
   paidProPerfResetScanCounters(trace.traceId);

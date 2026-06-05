@@ -7,7 +7,8 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import type { PremiumGenerationCallReason } from "./paidProPremiumGenerationCallAudit";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
-import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { getPaidProSourceOfTruth, hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { premiumAuthoritativeServerCorpusAccepted } from "./premiumParseSessionGuard";
 
 export type CheckoutPreflightPreviewOpts = {
   starterPreview?: boolean;
@@ -84,6 +85,13 @@ export function buildCheckoutPreflightAgreementPreviewText(
   });
   const hit = previewCache.get(key);
   if (hit != null) return hit;
+  if (opts.premiumDeliverablePreview && premiumAuthoritativeServerCorpusAccepted()) {
+    const authoritative = getPaidProSourceOfTruth()?.text?.trim();
+    if (authoritative) {
+      previewCache.set(key, authoritative);
+      return authoritative;
+    }
+  }
   const built = buildAgreementPreviewText(draft, opts);
   previewCache.set(key, built);
   return built;

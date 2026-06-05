@@ -14,7 +14,9 @@ export type PaidProCorpusScanType =
   | "section_contract_violation"
   | "duplicate_payload_rejected"
   | "signature_preview_mode"
-  | "canonical_final_party_manifest";
+  | "canonical_final_party_manifest"
+  | "prepare_paid_pro_server_acceptance"
+  | "orphan_party_lines_pre_execution";
 
 export type PaidProCorpusScanCacheKey = {
   surface: string;

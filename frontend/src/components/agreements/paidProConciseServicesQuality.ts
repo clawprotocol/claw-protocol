@@ -24,7 +24,9 @@ import {
   assessProMinimumSubstanceCached,
   hasPaidProAuthoritativeValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
-import { corpusHashForScanCache } from "./paidProCorpusScanCache";
+import { corpusHashForScanCache, runCachedCorpusScan } from "./paidProCorpusScanCache";
+import { removeOrphanPartyLinesBeforeExecutionTail } from "./paidProOrphanPartyLines";
+import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
@@ -296,6 +298,16 @@ export function logPaidProValidationDecision(payload: {
 }
 
 /** Repair malformed openings and expand thin AI workflow services bodies before acceptance gates. */
+function draftFingerprintForPrepareCache(draft: ParsedDraftShape | null | undefined): string {
+  if (!draft) return "no-draft";
+  const blob = [
+    (draft.parties || []).map((p) => `${String(p?.name ?? "").trim()}|${String(p?.role ?? "").trim()}`).join(";"),
+    String(draft.title ?? "").trim(),
+    String(draft.jurisdiction ?? "").trim(),
+  ].join("\n");
+  return blob.length >= 80 ? corpusHashForScanCache(blob) : `len:${blob.length}`;
+}
+
 export function preparePaidProServerDocumentForAcceptance(
   raw: string,
   draft: ParsedDraftShape | null | undefined,
@@ -303,11 +315,19 @@ export function preparePaidProServerDocumentForAcceptance(
   opts?: { surface?: string },
 ): { text: string; repairs: string[] } {
   const surface = opts?.surface ?? "prepare_paid_pro_server_acceptance";
+  const phase = `intake:${shortIntakeFingerprint(intakeText)}|draft:${draftFingerprintForPrepareCache(draft)}`;
   return tracePaidProQaPassWithText(
     "preparePaidProServerDocumentForAcceptance",
     surface,
     raw || "",
-    () => preparePaidProServerDocumentForAcceptanceCore(raw, draft, intakeText),
+    () =>
+      runCachedCorpusScan({
+        surface,
+        corpus: raw || "",
+        phase,
+        scanType: "prepare_paid_pro_server_acceptance",
+        run: () => preparePaidProServerDocumentForAcceptanceCore(raw, draft, intakeText, surface),
+      }),
   );
 }
 
@@ -315,6 +335,7 @@ function preparePaidProServerDocumentForAcceptanceCore(
   raw: string,
   draft: ParsedDraftShape | null | undefined,
   intakeText: string,
+  surface: string,
 ): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   let out = (raw || "").replace(/\r\n?/g, "\n").trim();
@@ -373,6 +394,25 @@ function preparePaidProServerDocumentForAcceptanceCore(
     if (execution.text !== out) {
       out = execution.text;
       repairs.push(...execution.repairs);
+    }
+  }
+
+  const partyLegalNames =
+    records.length >= 2
+      ? records.map((r) => r.fullLegalName)
+      : partyNames;
+  if (partyLegalNames.length >= 2) {
+    const orphanFix = runCachedCorpusScan({
+      surface,
+      corpus: out,
+      phase: `parties:${partyLegalNames.map((n) => n.trim().toLowerCase()).join("|")}`,
+      scanType: "orphan_party_lines_pre_execution",
+      run: () =>
+        removeOrphanPartyLinesBeforeExecutionTail(out, partyLegalNames, { surface }),
+    });
+    if (orphanFix.detected) {
+      out = orphanFix.text;
+      repairs.push(...orphanFix.repairs);
     }
   }
 
