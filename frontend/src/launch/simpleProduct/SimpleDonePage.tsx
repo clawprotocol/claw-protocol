@@ -613,6 +613,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
     const normalizedReviewerRows = ownerReviewPresentation.normalizedReviewerRows;
     const multiReviewer = normalizedReviewerRows.length > 1;
     const primaryReviewHref = (normalizedReviewerRows[0]?.reviewHref || "").trim();
+    const primaryReviewHrefIsPreviewOnly = !extractReviewLinkTokenFromHref(primaryReviewHref);
     const anyReviewHref = normalizedReviewerRows.some((r) => r.reviewHref.trim().length > 0);
     const reviewerRowStatuses = ownerReviewPresentation.rowStatuses;
     const linksStillLoading =
@@ -842,27 +843,43 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     </button>
                   ) : null}
                   {!multiReviewer ? (
-                  <button
-                    type="button"
-                    className={reviewActionButtonClass("secondary")}
-                    data-testid="simple-done-open-reviewer-view-global"
-                    onClick={() => {
-                      if (!primaryReviewHref) return;
-                      logReviewLinkOpen({
-                        agreementId,
-                        href: primaryReviewHref,
-                        source: "simple_done_open_reviewer_view",
-                      });
-                      logPaidProReviewTrackLifecycle("reviewer_link_opened", {
-                        agreementId,
-                        source: "simple_done_open_reviewer_view",
-                        canonicalHash: null,
-                      });
-                      window.open(primaryReviewHref, "_blank", "noopener,noreferrer");
-                    }}
-                  >
-                    Open reviewer view
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className={reviewActionButtonClass("secondary")}
+                      data-testid="simple-done-open-reviewer-view-global"
+                      title={
+                        primaryReviewHrefIsPreviewOnly
+                          ? "Preview only — copy the personal review link to submit edits."
+                          : undefined
+                      }
+                      onClick={() => {
+                        if (!primaryReviewHref) return;
+                        logReviewLinkOpen({
+                          agreementId,
+                          href: primaryReviewHref,
+                          source: "simple_done_open_reviewer_view",
+                          previewOnly: primaryReviewHrefIsPreviewOnly,
+                        });
+                        logPaidProReviewTrackLifecycle("reviewer_link_opened", {
+                          agreementId,
+                          source: "simple_done_open_reviewer_view",
+                          canonicalHash: null,
+                        });
+                        window.open(primaryReviewHref, "_blank", "noopener,noreferrer");
+                      }}
+                    >
+                      {primaryReviewHrefIsPreviewOnly ? "Open preview (read-only)" : "Open reviewer view"}
+                    </button>
+                    {primaryReviewHrefIsPreviewOnly ? (
+                      <p
+                        className="w-full text-left text-[11px] leading-relaxed text-slate-500"
+                        data-testid="simple-done-reviewer-preview-only-note"
+                      >
+                        Preview only — use Copy review link for a personal link that can submit proposed updates.
+                      </p>
+                    ) : null}
+                  </>
                   ) : null}
                   <button
                     type="button"

@@ -243,13 +243,20 @@ import {
 import {
   buildReviewFirstTextDiffSummary,
   canReviewChanges,
-  canSubmitReviewFirstProposal,
   logReviewFirstProposalCompareDiag,
   logReviewFirstProposalReadiness,
   REVIEW_FIRST_FORMATTING_ARTIFACTS_NOTE,
   type ReviewFirstChangedSection,
   type ReviewFirstDiffPart,
 } from "./reviewFirstTextDiff";
+import { formatAgreementPlainTextForEditing } from "./formatAgreementPlainTextForEditing";
+import {
+  logReviewFirstSubmitBlocked,
+  logReviewFirstSubmitFailed,
+  logReviewFirstSubmitStart,
+  logReviewFirstSubmitSuccess,
+  resolveReviewFirstSubmitAuthority,
+} from "./reviewFirstSubmitAuthority";
 import { ReviewFirstChangeCard } from "./ReviewFirstChangeCard";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
@@ -2029,10 +2036,14 @@ export function AgreementRecipientReview({
     return stripCompareMarkupFromOriginalDraftHtml(inner);
   }, [recipientBaselineHtmlSource, draftSanitizeContext, authoritativePartyNames]);
 
-  const directCompareDefault = useMemo(
-    () => htmlToPlainText(scrubbedOriginalDraftHtmlForPdfExport || "").trim(),
-    [scrubbedOriginalDraftHtmlForPdfExport],
-  );
+  const directCompareDefault = useMemo(() => {
+    const corpus = resolveReviewFirstDisplayCorpus(draft)?.text.trim();
+    if (corpus) return formatAgreementPlainTextForEditing(corpus);
+    const fromHtml = htmlToPlainTextForLegalRedline(scrubbedOriginalDraftHtmlForPdfExport || "").trim();
+    return formatAgreementPlainTextForEditing(
+      fromHtml || htmlToPlainText(scrubbedOriginalDraftHtmlForPdfExport || "").trim(),
+    );
+  }, [draft, scrubbedOriginalDraftHtmlForPdfExport]);
   const reviewFirstComparisonBaseline = useMemo(
     () => resolveReviewFirstDisplayCorpus(draft)?.text.trim() || directCompareDefault,
     [directCompareDefault, draft],
@@ -2222,19 +2233,33 @@ export function AgreementRecipientReview({
     [reviewFirstConfirmedDiff],
   );
   const hasReviewerAttribution = !needsPersonalizedLink && Boolean(participantPid.trim() || !partiesHaveIds);
-  const reviewFirstComparisonPreviewRendered = Boolean(
-    recipientPreview &&
-      (reviewFirstConfirmedDiff?.hasMaterialChanges || (previewDiff && !previewDiff.isCompleteNoOp)),
-  );
   const reviewFirstCanReviewChanges = canReviewChanges({
     diff: reviewFirstTextDiff,
     proposedText: externalAiPaste,
   });
-  const reviewFirstProposalSubmitReady = canSubmitReviewFirstProposal({
-    diff: reviewFirstConfirmedDiff ?? reviewFirstTextDiff,
-    hasReviewerAttribution,
-    comparisonPreviewRendered: reviewFirstComparisonPreviewRendered,
-  });
+  const reviewFirstSubmitAuthority = useMemo(
+    () =>
+      resolveReviewFirstSubmitAuthority({
+        diff: reviewFirstConfirmedDiff ?? reviewFirstTextDiff,
+        needsPersonalizedLink,
+        participantPid: participantPid,
+        partiesHaveIds,
+        recipientAccessToken,
+        recipientPreview: Boolean(recipientPreview),
+        signingLockActive: Boolean(bundle && isSigningLockActive(bundle)),
+      }),
+    [
+      reviewFirstConfirmedDiff,
+      reviewFirstTextDiff,
+      needsPersonalizedLink,
+      participantPid,
+      partiesHaveIds,
+      recipientAccessToken,
+      recipientPreview,
+      bundle,
+    ],
+  );
+  const reviewFirstProposalSubmitReady = reviewFirstSubmitAuthority.canSubmit;
   const recipientProposalSubmitReady =
     workflowMode === "revised" ? reviewFirstProposalSubmitReady : Boolean(previewDiff?.canSubmit && !needsPersonalizedLink);
 
@@ -2261,6 +2286,7 @@ export function AgreementRecipientReview({
       hasParticipantAttribution: hasReviewerAttribution,
       canReviewChanges: reviewFirstCanReviewChanges,
       canSubmitProposedUpdate: reviewFirstProposalSubmitReady,
+      submitBlockReason: reviewFirstSubmitAuthority.reason,
       normalizedOriginalLength: reviewFirstTextDiff?.normalizedPrevious.length ?? 0,
       normalizedProposedLength: reviewFirstTextDiff?.normalizedProposed.length ?? 0,
     });
@@ -2269,6 +2295,7 @@ export function AgreementRecipientReview({
     hasReviewerAttribution,
     reviewFirstCanReviewChanges,
     reviewFirstProposalSubmitReady,
+    reviewFirstSubmitAuthority.reason,
     reviewFirstTextDiff,
     revisedIntakePhase,
     workflowMode,
@@ -2818,43 +2845,83 @@ export function AgreementRecipientReview({
   }
 
   function openSendSuggestedEditsModal() {
-    if (needsPersonalizedLink) {
-      setError("Use the personal review link from the sender (it includes your participant id).");
-      return;
-    }
-    if (bundle && isSigningLockActive(bundle)) {
-      setError("Review is closed on this agreement — you can still read the document.");
+    logReviewFirstSubmitStart({
+      agreementId,
+      workflowMode,
+      hasRecipientPreview: Boolean(recipientPreview),
+      submitReason: reviewFirstSubmitAuthority.reason,
+      hasAccessToken: Boolean(recipientAccessToken.trim()),
+      participantPid: participantPid || null,
+    });
+    if (!recipientProposalSubmitReady) {
+      const message =
+        reviewFirstSubmitAuthority.userMessage ||
+        (needsPersonalizedLink
+          ? REVIEW_FIRST_PERSONAL_LINK_SUBMIT_STAGE_MESSAGE
+          : recipientPreviewNoOpMessage());
+      logReviewFirstSubmitBlocked({
+        agreementId,
+        reason: reviewFirstSubmitAuthority.reason,
+        needsPersonalizedLink,
+        hasAccessToken: Boolean(recipientAccessToken.trim()),
+        participantPid: participantPid || null,
+        message,
+      });
+      setError(message);
       return;
     }
     const p = recipientPreview;
-    if (!p || saving) return;
-    if (!recipientProposalSubmitReady) {
-      setError(recipientPreviewNoOpMessage());
+    if (!p || saving) {
+      logReviewFirstSubmitBlocked({
+        agreementId,
+        reason: !p ? "missing_recipient_preview" : "proposal_not_ready",
+        saving,
+      });
+      if (!p) {
+        setError("Review changes before submitting your proposed update.");
+      }
       return;
     }
     setSendSuggestedEditsModalOpen(true);
   }
 
   async function performRecipientSuggestedEditsSubmit() {
-    if (needsPersonalizedLink) {
-      setError("Use the personal review link from the sender (it includes your participant id).");
-      setSendSuggestedEditsModalOpen(false);
-      return;
-    }
-    if (bundle && isSigningLockActive(bundle)) {
-      setError("Review is closed on this agreement — you can still read the document.");
+    logReviewFirstSubmitStart({
+      agreementId,
+      workflowMode,
+      phase: "confirm",
+      submitReason: reviewFirstSubmitAuthority.reason,
+      hasAccessToken: Boolean(recipientAccessToken.trim()),
+      participantPid: participantPid || null,
+    });
+    if (!recipientProposalSubmitReady) {
+      const message =
+        reviewFirstSubmitAuthority.userMessage ||
+        (needsPersonalizedLink
+          ? REVIEW_FIRST_PERSONAL_LINK_SUBMIT_STAGE_MESSAGE
+          : recipientPreviewNoOpMessage());
+      logReviewFirstSubmitBlocked({
+        agreementId,
+        reason: reviewFirstSubmitAuthority.reason,
+        message,
+      });
+      setError(message);
       setSendSuggestedEditsModalOpen(false);
       return;
     }
     const p = recipientPreview;
-    if (!p || saving) return;
-    if (!recipientProposalSubmitReady) {
-      setError(recipientPreviewNoOpMessage());
+    if (!p || saving) {
+      logReviewFirstSubmitBlocked({
+        agreementId,
+        reason: !p ? "missing_recipient_preview" : "proposal_not_ready",
+        saving,
+      });
       setSendSuggestedEditsModalOpen(false);
       return;
     }
     setSaving(true);
     setError(null);
+    const submitEndpoint = `/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal`;
     try {
       const d = p.proposedDraft;
       const submitted = await submitRecipientProposalApi(
@@ -2878,6 +2945,12 @@ export function AgreementRecipientReview({
         recipientAccessToken,
       );
       if (!submitted.ok) {
+        logReviewFirstSubmitFailed({
+          agreementId,
+          endpoint: submitEndpoint,
+          status: submitted.error ?? "unknown",
+          rawMessage: submitted.error ?? "submit_failed",
+        });
         if (
           submitted.error === "recipient_proposal_already_pending" ||
           submitted.error === "recipient_proposal_already_pending_from_participant"
@@ -2898,6 +2971,11 @@ export function AgreementRecipientReview({
           ),
         );
       }
+      logReviewFirstSubmitSuccess({
+        agreementId,
+        proposalId: submitted.proposal_id ?? null,
+        participantPid: participantPid || null,
+      });
       trackAgreementFunnelEvent("recipient_submitted_edits", { entry_kind: entry.kind }, { planTier: String(access.tier), agreementId });
       setSendSuggestedEditsModalOpen(false);
       setRecipientSuggestedEditsSentAck(true);
@@ -2910,7 +2988,14 @@ export function AgreementRecipientReview({
       setWorkspaceTab("read");
       await refresh();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Could not send suggestion.");
+      const rawMessage = e instanceof Error ? e.message : String(e ?? "Could not send suggestion.");
+      logReviewFirstSubmitFailed({
+        agreementId,
+        endpoint: submitEndpoint,
+        status: "exception",
+        rawMessage,
+      });
+      setError(rawMessage);
     } finally {
       setSaving(false);
     }
@@ -3187,6 +3272,11 @@ export function AgreementRecipientReview({
                 data-testid="recipient-open-send-suggested-edits-modal"
                 className="btn rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
                 disabled={saving || !recipientProposalSubmitReady}
+                title={
+                  !recipientProposalSubmitReady && reviewFirstSubmitAuthority.userMessage
+                    ? reviewFirstSubmitAuthority.userMessage
+                    : undefined
+                }
                 onClick={() => openSendSuggestedEditsModal()}
               >
                 {REVIEW_FIRST_SAVE_UPDATED_LABEL}
@@ -3204,13 +3294,17 @@ export function AgreementRecipientReview({
                 {RECIPIENT_BTN_CONTINUE_EDITING}
               </button>
             </div>
-            {workflowMode === "revised" && needsPersonalizedLink ? (
-              <p
-                className="mt-3 text-xs leading-relaxed text-amber-800"
-                data-testid="recipient-review-submit-attribution-hint"
+            {workflowMode === "revised" &&
+            reviewFirstConfirmedDiff?.hasMaterialChanges &&
+            !recipientProposalSubmitReady &&
+            reviewFirstSubmitAuthority.userMessage ? (
+              <div
+                className="mt-3 rounded-lg border border-amber-300/80 bg-amber-50 px-3 py-3 text-xs leading-relaxed text-amber-950"
+                role="alert"
+                data-testid="recipient-review-submit-blocked"
               >
-                {REVIEW_FIRST_PERSONAL_LINK_SUBMIT_STAGE_MESSAGE}
-              </p>
+                {reviewFirstSubmitAuthority.userMessage}
+              </div>
             ) : null}
             {false && recipientPresentationMode === "condensed_clean_revision" ? (
               <p

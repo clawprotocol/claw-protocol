@@ -1,5 +1,5 @@
 import type { ReviewerLinkRow, ReviewerLinkRowApprovalStatus } from "./reviewerLinkRowModel";
-import { reviewerLinkRowStatusLabel } from "./reviewerLinkRowModel";
+import { extractReviewLinkTokenFromHref, reviewerLinkRowStatusLabel } from "./reviewerLinkRowModel";
 
 export type PaidProReviewReviewerLinksTableProps = {
   rows: ReviewerLinkRow[];
@@ -57,6 +57,11 @@ export function PaidProReviewReviewerLinksTable(props: PaidProReviewReviewerLink
                         type="button"
                         className="rounded-md border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs font-medium text-slate-200 hover:border-slate-600 hover:bg-slate-800/80"
                         data-testid={`paid-pro-reviewer-open-${i}`}
+                        title={
+                          !extractReviewLinkTokenFromHref(r.reviewHref)
+                            ? "Preview only — copy the personal review link to submit edits."
+                            : undefined
+                        }
                         onClick={() =>
                           onOpenRow(r.reviewHref, {
                             rowIndex: i,
@@ -65,7 +70,9 @@ export function PaidProReviewReviewerLinksTable(props: PaidProReviewReviewerLink
                           })
                         }
                       >
-                        Open reviewer view
+                        {extractReviewLinkTokenFromHref(r.reviewHref)
+                          ? "Open reviewer view"
+                          : "Open preview (read-only)"}
                       </button>
                     </div>
                   </td>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NOT_LEGAL_ADVICE } from "../compliance/disclosureCopy";
+import { formatAgreementPlainTextForEditing } from "./formatAgreementPlainTextForEditing";
 import { RECIPIENT_COPY_ACK_COPIED } from "./portableReviewCopy";
 import { recipientExportBasenameFromTitle } from "./recipientExportFilenames";
 import {
@@ -139,7 +140,7 @@ export function RecipientAgreementReadPdfExport({
   }, [exportError]);
 
   const hasBody = Boolean(scrubbedCurrentHtml.trim());
-  const editableText = editablePlainText.trim();
+  const editableText = formatAgreementPlainTextForEditing(editablePlainText);
 
   const onCopyEditableText = useCallback(async () => {
     if (!editableText || copyBusy) return;

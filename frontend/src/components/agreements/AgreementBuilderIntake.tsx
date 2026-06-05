@@ -512,6 +512,7 @@ import {
   logReviewLinkPersistFailure,
   type ReviewLinkPersistDiagnostics,
 } from "./reviewLinkPersistDiagnostics";
+import { formatAgreementPlainTextForEditing } from "../../agreement/formatAgreementPlainTextForEditing";
 import {
   explicitSignerNameForEntity,
   logSignerMetadataInputBlur,
@@ -24050,7 +24051,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hash: liveTraceHash(text),
       });
     }
-    void navigator.clipboard.writeText(text).then(() => {
+    const copyText = formatAgreementPlainTextForEditing(text);
+    void navigator.clipboard.writeText(copyText).then(() => {
       setProFinalReviewCopyAck(true);
       window.setTimeout(() => setProFinalReviewCopyAck(false), 2000);
     });

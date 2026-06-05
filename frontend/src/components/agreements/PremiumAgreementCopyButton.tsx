@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatAgreementPlainTextForEditing } from "../../agreement/formatAgreementPlainTextForEditing";
 
 type Props = {
   getPlainText: () => string;
@@ -18,7 +19,7 @@ export function PremiumAgreementCopyButton({
   const [ack, setAck] = useState(false);
 
   const onCopy = () => {
-    const text = getPlainText().trim();
+    const text = formatAgreementPlainTextForEditing(getPlainText());
     if (!text || text.length < Math.min(200, minLen) || !navigator.clipboard?.writeText) return;
     void navigator.clipboard.writeText(text).then(() => {
       setAck(true);

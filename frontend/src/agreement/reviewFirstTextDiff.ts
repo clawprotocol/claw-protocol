@@ -504,6 +504,7 @@ export function logReviewFirstProposalReadiness(payload: {
   hasParticipantAttribution: boolean;
   canReviewChanges: boolean;
   canSubmitProposedUpdate: boolean;
+  submitBlockReason?: string | null;
   normalizedOriginalLength: number;
   normalizedProposedLength: number;
 }): void {
