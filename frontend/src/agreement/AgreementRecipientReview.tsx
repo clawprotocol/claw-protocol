@@ -267,9 +267,14 @@ import {
 } from "./reviewFirstSubmitAuthority";
 import {
   logReviewFirstSubmitAuthority,
+  clearReviewFirstSubmitInflightProposalId,
+  readReviewFirstSubmitInflightProposalId,
   resolveReviewFirstStageProposerId,
   reviewerNeedsPersonalizedLink,
+  writeReviewFirstSubmitInflightProposalId,
 } from "./reviewerTokenPersistence";
+import { buildReviewFirstDocumentDisplayHtml } from "./reviewFirstDocumentDisplay";
+import { PremiumAgreementReadonlyView } from "../components/agreements/PremiumAgreementReadonlyView";
 import { ReviewFirstChangeCard } from "./ReviewFirstChangeCard";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
@@ -742,6 +747,8 @@ export function AgreementRecipientReview({
   const recipientRedlineViewModelLogKeyRef = useRef<string>("");
   const recipientRedlineSourceLogKeyRef = useRef<string>("");
   const reviewFirstStageInFlightRef = useRef(false);
+  const lastReviewFirstSubmitAuthorityLogKeyRef = useRef("");
+  const lastReviewFirstProposalReadinessLogKeyRef = useRef("");
   const [tokenValidatedPartyId, setTokenValidatedPartyId] = useState("");
   const [recipientPosture] = useState<NegotiationPosture>(DEFAULT_NEGOTIATION_POSTURE);
   const [suggestionUsed, setSuggestionUsed] = useState(false);
@@ -1059,12 +1066,16 @@ export function AgreementRecipientReview({
       }).proposerId,
     [agreementId, participantPartyId, recipientAccessToken, tokenValidatedPartyId, draft?.parties],
   );
-  const needsPersonalizedLink = reviewerNeedsPersonalizedLink({
-    entryKind: entry.kind,
-    partiesHaveIds,
-    participantPid,
-    recipientAccessToken,
-  });
+  const needsPersonalizedLink = useMemo(
+    () =>
+      reviewerNeedsPersonalizedLink({
+        entryKind: entry.kind,
+        partiesHaveIds,
+        participantPid,
+        recipientAccessToken,
+      }),
+    [entry.kind, partiesHaveIds, participantPid, recipientAccessToken],
+  );
   const myPendingProposals = useMemo(() => {
     if (!partiesHaveIds) return allOpenProposals;
     if (!participantPid) return [];
@@ -2091,6 +2102,18 @@ export function AgreementRecipientReview({
       ),
     [renderedHtml, draftSanitizeContext, authoritativePartyNames],
   );
+  const reviewFirstDocumentHtml = useMemo(() => {
+    const corpus = resolveReviewFirstDisplayCorpus(draft)?.text.trim();
+    return buildReviewFirstDocumentDisplayHtml({
+      serverHtml: renderedHtmlDisplay,
+      corpusText: corpus,
+      partyNames: authoritativePartyNames,
+    });
+  }, [authoritativePartyNames, draft, renderedHtmlDisplay]);
+  const reviewFirstUsesPremiumDocument = useMemo(() => {
+    const corpus = resolveReviewFirstDisplayCorpus(draft)?.text.trim() || "";
+    return corpus.length >= 500;
+  }, [draft]);
 
   const scrubAgreementHtml = useCallback(
     (html: string) =>
@@ -2319,7 +2342,7 @@ export function AgreementRecipientReview({
         partiesHaveIds,
         recipientAccessToken,
         recipientPreview: Boolean(recipientPreview),
-        signingLockActive: Boolean(bundle && isSigningLockActive(bundle)),
+        signingLockActive: bundleSigningLocked,
       }),
     [
       agreementId,
@@ -2330,11 +2353,26 @@ export function AgreementRecipientReview({
       partiesHaveIds,
       recipientAccessToken,
       recipientPreview,
-      bundle,
+      bundleSigningLocked,
     ],
+  );
+  const reviewFirstHasMaterialChanges = Boolean(
+    (reviewFirstConfirmedDiff ?? reviewFirstTextDiff)?.hasMaterialChanges,
   );
   useEffect(() => {
     if (workflowMode !== "revised") return;
+    const key = JSON.stringify({
+      agreementId,
+      canSubmit: reviewFirstSubmitAuthority.canSubmit,
+      reason: reviewFirstSubmitAuthority.reason,
+      hasRecipientPreview: Boolean(recipientPreview),
+      hasMaterialChanges: reviewFirstHasMaterialChanges,
+      participantPid: participantPid || null,
+      needsPersonalizedLink,
+      tokenHashShort: recipientLinkTokenFingerprint(recipientAccessToken),
+    });
+    if (key === lastReviewFirstSubmitAuthorityLogKeyRef.current) return;
+    lastReviewFirstSubmitAuthorityLogKeyRef.current = key;
     logReviewFirstSubmitAuthority({
       agreementId,
       canSubmit: reviewFirstSubmitAuthority.canSubmit,
@@ -2343,7 +2381,7 @@ export function AgreementRecipientReview({
       participantPid: participantPid || null,
       needsPersonalizedLink,
       hasRecipientPreview: Boolean(recipientPreview),
-      hasMaterialChanges: Boolean((reviewFirstConfirmedDiff ?? reviewFirstTextDiff)?.hasMaterialChanges),
+      hasMaterialChanges: reviewFirstHasMaterialChanges,
       tokenHashShort: recipientLinkTokenFingerprint(recipientAccessToken),
     });
   }, [
@@ -2355,8 +2393,7 @@ export function AgreementRecipientReview({
     participantPid,
     needsPersonalizedLink,
     recipientPreview,
-    reviewFirstConfirmedDiff,
-    reviewFirstTextDiff,
+    reviewFirstHasMaterialChanges,
   ]);
   const reviewFirstProposalSubmitReady = reviewFirstSubmitAuthority.canSubmit;
   const recipientProposalSubmitReady =
@@ -2379,6 +2416,15 @@ export function AgreementRecipientReview({
 
   useEffect(() => {
     if (workflowMode !== "revised" || revisedIntakePhase !== "editing") return;
+    const key = JSON.stringify({
+      hasProposedText: Boolean(externalAiPaste.trim()),
+      hasMaterialChanges: Boolean(reviewFirstTextDiff?.hasMaterialChanges),
+      canReviewChanges: reviewFirstCanReviewChanges,
+      canSubmitProposedUpdate: reviewFirstProposalSubmitReady,
+      submitBlockReason: reviewFirstSubmitAuthority.reason,
+    });
+    if (key === lastReviewFirstProposalReadinessLogKeyRef.current) return;
+    lastReviewFirstProposalReadinessLogKeyRef.current = key;
     logReviewFirstProposalReadiness({
       hasProposedText: Boolean(externalAiPaste.trim()),
       hasMaterialChanges: Boolean(reviewFirstTextDiff?.hasMaterialChanges),
@@ -2395,7 +2441,9 @@ export function AgreementRecipientReview({
     reviewFirstCanReviewChanges,
     reviewFirstProposalSubmitReady,
     reviewFirstSubmitAuthority.reason,
-    reviewFirstTextDiff,
+    reviewFirstTextDiff?.hasMaterialChanges,
+    reviewFirstTextDiff?.normalizedPrevious.length,
+    reviewFirstTextDiff?.normalizedProposed.length,
     revisedIntakePhase,
     workflowMode,
   ]);
@@ -3018,6 +3066,15 @@ export function AgreementRecipientReview({
   }
 
   async function performRecipientSuggestedEditsSubmit() {
+    if (reviewFirstStageInFlightRef.current || saving) {
+      logReviewFirstSubmitBlocked({
+        agreementId,
+        reason: "submit_in_flight",
+        hasAccessToken: Boolean(recipientAccessToken.trim()),
+        participantPid: participantPid || null,
+      });
+      return;
+    }
     logReviewFirstSubmitStart({
       agreementId,
       workflowMode,
@@ -3072,15 +3129,15 @@ export function AgreementRecipientReview({
       setSendSuggestedEditsModalOpen(false);
       return;
     }
-    if (reviewFirstStageInFlightRef.current) return;
+    reviewFirstStageInFlightRef.current = true;
     setSaving(true);
     setError(null);
     const stageEndpoint = `/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal/stage`;
     const submitEndpoint = `/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal`;
     try {
-      let proposalId = (p.proposalId || "").trim();
+      let proposalId =
+        (p.proposalId || "").trim() || readReviewFirstSubmitInflightProposalId(agreementId);
       if (!proposalId) {
-        reviewFirstStageInFlightRef.current = true;
         const stageBody = buildRecipientProposalStageBody(p, effectiveProposerId);
         logReviewFirstProposalStageRequest({
           agreementId,
@@ -3128,6 +3185,7 @@ export function AgreementRecipientReview({
           return;
         }
         proposalId = staged.proposal_id.trim();
+        writeReviewFirstSubmitInflightProposalId(agreementId, proposalId);
         setRecipientPreview({ ...p, proposalId });
         logReviewFirstProposalCreated({
           agreementId,
@@ -3199,6 +3257,7 @@ export function AgreementRecipientReview({
         proposalId: submitted.proposal_id ?? proposalId,
         participantPid: effectiveProposerId,
       });
+      clearReviewFirstSubmitInflightProposalId(agreementId);
       trackAgreementFunnelEvent("recipient_submitted_edits", { entry_kind: entry.kind }, { planTier: String(access.tier), agreementId });
       setSendSuggestedEditsModalOpen(false);
       setRecipientSuggestedEditsSentAck(true);
@@ -4955,12 +5014,25 @@ export function AgreementRecipientReview({
         testId="recipient-document-shell"
         ariaLabel="Agreement draft"
       >
-          <div
-            ref={recipientReadDocAnchorRef}
-            tabIndex={-1}
-            className="prose max-w-none text-[0.9375rem] leading-relaxed text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
-            dangerouslySetInnerHTML={{ __html: renderedHtmlDisplay || "<p>No preview yet.</p>" }}
-          />
+        <div
+          ref={recipientReadDocAnchorRef}
+          tabIndex={-1}
+          className="outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+        >
+          {reviewFirstUsesPremiumDocument ? (
+            <PremiumAgreementReadonlyView
+              html={reviewFirstDocumentHtml}
+              fullDocumentFlow
+              compactDocumentTopPadding
+            />
+          ) : (
+            <div
+              className="premium-readonly-doc text-[0.9375rem] leading-relaxed text-slate-900"
+              data-paid-pro-review-paper="true"
+              dangerouslySetInnerHTML={{ __html: reviewFirstDocumentHtml || "<p>No preview yet.</p>" }}
+            />
+          )}
+        </div>
       </ReviewDocumentFrame>
 
       {false ? <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 sm:text-[13px]">

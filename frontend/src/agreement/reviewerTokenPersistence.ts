@@ -166,6 +166,37 @@ export function logReviewerTokenMissing(payload: Record<string, unknown>): void 
   console.info("[reviewer-token-missing]", payload);
 }
 
+const REVIEW_FIRST_SUBMIT_INFLIGHT_PREFIX = "review-first-submit-inflight:";
+
+export function readReviewFirstSubmitInflightProposalId(agreementId: string): string {
+  if (typeof sessionStorage === "undefined") return "";
+  try {
+    return sessionStorage.getItem(`${REVIEW_FIRST_SUBMIT_INFLIGHT_PREFIX}${agreementId}`)?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeReviewFirstSubmitInflightProposalId(agreementId: string, proposalId: string): void {
+  if (typeof sessionStorage === "undefined") return;
+  const pid = (proposalId || "").trim();
+  if (!pid) return;
+  try {
+    sessionStorage.setItem(`${REVIEW_FIRST_SUBMIT_INFLIGHT_PREFIX}${agreementId}`, pid);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearReviewFirstSubmitInflightProposalId(agreementId: string): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(`${REVIEW_FIRST_SUBMIT_INFLIGHT_PREFIX}${agreementId}`);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function logReviewFirstSubmitAuthority(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

@@ -26,6 +26,8 @@ import {
 import { AgreementReadinessCard } from "./AgreementReadinessCard";
 import { SIMPLE_HOME_REVISION_COMPARE_ANCHOR_ID } from "./simpleHomeRevisionCompareAnchor";
 import { substitutePartyPlaceholdersInUserFacingText } from "../../agreement/partyPlaceholderDisplay";
+import { isOwnerProposalReviewQaEnabled } from "../../agreement/ownerProposalReviewQa";
+import { OwnerProposalReviewQaPanel } from "./OwnerProposalReviewQaPanel";
 import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormalize";
 import { normalizeAgreementDisplayTitle } from "./canonicalAgreementTitle";
 import {
@@ -4544,6 +4546,15 @@ const AgreementReview: React.FC<Props> = ({
   const draftBlock = (
     <>
       {showWorkspaceRichHistory ? pendingBanner : null}
+      {showWorkspaceRichHistory && isOwnerProposalReviewQaEnabled() ? (
+        <OwnerProposalReviewQaPanel
+          agreementId={agreementId}
+          draft={draft}
+          onDraftUpdated={(next) => {
+            if (next) setDraft(next);
+          }}
+        />
+      ) : null}
       {showWorkspaceRichHistory ? recipientProposalPanel : null}
       {showWorkspaceRichHistory ? versionTimeline : null}
       {showWorkspaceRichHistory ? negotiationTimelineSection : null}

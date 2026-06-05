@@ -42,6 +42,18 @@ describe("Test276 review-first submit authority wiring", () => {
     expect(recipientReview).toContain("tokenValidatedPartyId");
   });
 
+  it("Test282 dedupes submit authority logs and guards in-flight submit", () => {
+    expect(recipientReview).toContain("lastReviewFirstSubmitAuthorityLogKeyRef");
+    expect(recipientReview).toContain("lastReviewFirstProposalReadinessLogKeyRef");
+    expect(recipientReview).toContain("readReviewFirstSubmitInflightProposalId");
+    expect(recipientReview).toContain("writeReviewFirstSubmitInflightProposalId");
+    expect(recipientReview).toContain("clearReviewFirstSubmitInflightProposalId");
+    const confirmIdx = recipientReview.indexOf("async function performRecipientSuggestedEditsSubmit");
+    const block = recipientReview.slice(confirmIdx, confirmIdx + 5500);
+    expect(block).toContain('reason: "submit_in_flight"');
+    expect(block).toContain("reviewFirstStageInFlightRef.current = true");
+  });
+
   it("Test281 surfaces stage proposer_id_required detail and skips finalize on stage 400", () => {
     expect(recipientReview).toContain("formatRecipientProposalStageError");
     expect(recipientReview).toContain("[review-first-proposal-stage-failed]");

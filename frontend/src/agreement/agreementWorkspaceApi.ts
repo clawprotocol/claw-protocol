@@ -343,14 +343,14 @@ export async function submitRecipientProposalApi(
 export async function rejectRecipientProposalApi(
   agreementId: string,
   proposalId: string
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; draft?: unknown; error?: string }> {
   try {
     const res = await fetch(
       `${base()}/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal/${encodeURIComponent(proposalId)}/reject`,
       { method: "POST", headers: clawAgreementHeaders({ "Content-Type": "application/json" }), body: "{}" }
     );
-    if (res.ok) return { ok: true };
-    const j = (await res.json().catch(() => ({}))) as { detail?: string };
+    const j = (await res.json().catch(() => ({}))) as { draft?: unknown; detail?: string };
+    if (res.ok) return { ok: true, draft: j.draft };
     return { ok: false, error: j.detail || `error_${res.status}` };
   } catch {
     return { ok: false, error: "network" };

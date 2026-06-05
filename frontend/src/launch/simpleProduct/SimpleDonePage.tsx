@@ -82,6 +82,8 @@ import {
   ReviewShell,
   reviewActionButtonClass,
 } from "../../agreement/reviewFirstLayout";
+import { OwnerProposalReviewQaPanel } from "../../components/agreements/OwnerProposalReviewQaPanel";
+import { isOwnerProposalReviewQaEnabled } from "../../agreement/ownerProposalReviewQa";
 
 const EMPTY_REVIEW_HANDOFF_RECIPIENTS: SimpleDoneReviewRecipientLinkRow[] = [];
 
@@ -111,6 +113,9 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const [finalizeNavigating, setFinalizeNavigating] = useState(false);
   const [rowCopyFlashByKey, setRowCopyFlashByKey] = useState<Record<string, boolean>>({});
   const [reviewFlowDiagLocal, setReviewFlowDiagLocal] = useState(false);
+  const [qaOwnerReviewEnabled] = useState(() =>
+    typeof window !== "undefined" ? isOwnerProposalReviewQaEnabled() : false,
+  );
   const ownerSuccessLoggedRef = useRef<string | null>(null);
   const ownerReviewLinkStatusDiagKeyRef = useRef("");
   const canDownload = !isSimpleSendPaywallActive() || canAccessSimpleSendActions(agreementId);
@@ -727,6 +732,13 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       ? "Track each reviewer in the table. When everyone has approved without open change requests, you can finalize for signing."
                       : reviewApprovalAgg.ownerStatusLine}
                   </ReviewNotice>
+                ) : null}
+                {qaOwnerReviewEnabled || isOwnerProposalReviewQaEnabled() ? (
+                  <OwnerProposalReviewQaPanel
+                    agreementId={agreementId}
+                    draft={ownerHandoffDraft}
+                    onDraftUpdated={setOwnerHandoffDraft}
+                  />
                 ) : null}
                 <span className="sr-only" data-testid="simple-done-owner-approval-status">
                   {signingLockActive ? "Signing version locked." : reviewApprovalAgg.ownerStatusLine}

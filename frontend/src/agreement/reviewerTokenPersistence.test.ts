@@ -3,10 +3,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   inferSingleNonOwnerPartyId,
   loadAnyRecipientMagicLinkSessionForAgreement,
+  clearReviewFirstSubmitInflightProposalId,
+  readReviewFirstSubmitInflightProposalId,
   resolveReviewFirstStageProposerId,
   resolveReviewerEffectiveAccessToken,
   resolveReviewerEffectiveParticipantId,
   reviewerNeedsPersonalizedLink,
+  writeReviewFirstSubmitInflightProposalId,
 } from "./reviewerTokenPersistence";
 import { saveRecipientMagicLinkSession } from "./recipientMagicLinkSession";
 
@@ -99,6 +102,13 @@ describe("reviewerTokenPersistence", () => {
     });
     expect(resolved.proposerId).toBe("p-reviewer");
     expect(resolved.source).toBe("single_non_owner_party");
+  });
+
+  it("Test282 persists in-flight proposal id across refresh", () => {
+    writeReviewFirstSubmitInflightProposalId("ag_refresh", "prop-inflight-1");
+    expect(readReviewFirstSubmitInflightProposalId("ag_refresh")).toBe("prop-inflight-1");
+    clearReviewFirstSubmitInflightProposalId("ag_refresh");
+    expect(readReviewFirstSubmitInflightProposalId("ag_refresh")).toBe("");
   });
 
   it("Test280 defers to backend when token present and proposer cannot be resolved locally", () => {

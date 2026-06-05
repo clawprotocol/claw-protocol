@@ -21,6 +21,21 @@ import {
 
 const ENTITY_SUFFIX = /(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|PC|P\.C\.|Co\.?|Company)/i;
 
+const ENTITY_DOUBLE_PERIOD_RE =
+  /\b((?:LLC|L\.L\.C\.|Inc|Inc\.|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\.{2,}/gi;
+
+/** Display-layer only — collapse Inc.. / LLC.. without mutating authoritative corpus upstream. */
+export function repairDuplicatedEntityPunctuationInDisplay(text: string): string {
+  let out = String(text || "");
+  if (!out) return out;
+  out = out.replace(ENTITY_DOUBLE_PERIOD_RE, "$1.");
+  out = out.replace(/\b(Inc)\.\./gi, "Inc.");
+  out = out.replace(/\b(LLC)\.\./gi, "LLC.");
+  out = out.replace(/\b(Corp)\.\./gi, "Corp.");
+  out = out.replace(/\b(Ltd)\.\./gi, "Ltd.");
+  return out;
+}
+
 function pushUnique(out: string[], seen: Set<string>, raw: string) {
   const t = raw.replace(/\s+/g, " ").trim();
   if (t.length < 2 || t.length > 160) return;
@@ -134,7 +149,7 @@ export function substitutePartyPlaceholdersInUserFacingText(
   if (textContainsUnresolvedIdentityPlaceholders(out)) {
     out = substitutePlaceholderTokensWithFn(out, replacer);
   }
-  return out;
+  return repairDuplicatedEntityPunctuationInDisplay(out);
 }
 
 const PARTY_PLACEHOLDER_TOKEN_SOURCE =

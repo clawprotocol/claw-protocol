@@ -8505,6 +8505,12 @@ def submit_recipient_proposal(
     return {"ok": True, "proposal_id": proposal_id, "draft": next_draft.model_dump()}
 
 
+def _corpus_fingerprint(text: str) -> str:
+    body = (text or "").strip()
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+    return f"{len(body)}:{digest}"
+
+
 @router.post("/{agreement_id}/recipient-proposal/{proposal_id}/reject")
 def reject_recipient_proposal(
     agreement_id: str, proposal_id: str, request: Request
@@ -8512,8 +8518,10 @@ def reject_recipient_proposal(
     _owner_mutation_guards(request, agreement_id, surface="recipient_proposal_reject")
     draft = _load_or_404(agreement_id)
     open_ids = _open_recipient_proposal_ids_set(draft.audit_log)
-    if (proposal_id or "").strip() not in open_ids:
+    pid = (proposal_id or "").strip()
+    if pid not in open_ids:
         raise HTTPException(status_code=400, detail="proposal_not_pending")
+    previous_hash = _corpus_fingerprint(draft.purpose or "")
     now = _utc_now_iso()
     audit = [*(draft.audit_log or [])]
     audit.append(
@@ -8521,11 +8529,19 @@ def reject_recipient_proposal(
             event_type="recipient_proposal_rejected",
             at=now,
             field="recipient_proposal",
-            value={"proposal_id": proposal_id},
+            value={"proposal_id": pid},
         )
     )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
     save_draft(next_draft.model_dump())
+    rejected_hash = _corpus_fingerprint(next_draft.purpose or "")
+    log.info(
+        "[owner-proposal-rejected] agreement_id=%s proposal_id=%s proposal_status=rejected previous_corpus_hash=%s rejected_corpus_hash=%s",
+        agreement_id,
+        pid,
+        previous_hash,
+        rejected_hash,
+    )
     return {"ok": True, "draft": next_draft.model_dump()}
 
 
@@ -8605,6 +8621,23 @@ def apply_recipient_proposal(
         payment_required=current.payment_required,
     )
     save_draft(next_draft.model_dump())
+    previous_hash = _corpus_fingerprint(current.purpose or "")
+    updated_hash = _corpus_fingerprint(next_draft.purpose or "")
+    log.info(
+        "[owner-proposal-accepted] agreement_id=%s proposal_id=%s proposal_status=accepted previous_corpus_hash=%s updated_corpus_hash=%s accepted_corpus_hash=%s",
+        agreement_id,
+        pid_apply,
+        previous_hash,
+        updated_hash,
+        updated_hash,
+    )
+    log.info(
+        "[owner-corpus-updated] agreement_id=%s proposal_id=%s previous_corpus_hash=%s updated_corpus_hash=%s source=accept",
+        agreement_id,
+        pid_apply,
+        previous_hash,
+        updated_hash,
+    )
     wm = _watermark_active_for_agreement(agreement_id)
     return {
         "id": agreement_id,
