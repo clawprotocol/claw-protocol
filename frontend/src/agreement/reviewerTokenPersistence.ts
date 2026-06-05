@@ -66,9 +66,13 @@ export function resolveReviewerEffectiveParticipantId(args: {
   const fromProp = (args.participantPartyId || "").trim();
   if (fromProp) return fromProp;
   const tok = (args.recipientAccessToken || "").trim();
-  if (!tok) return "";
-  const session = loadRecipientMagicLinkSession(args.agreementId, tok);
-  return (session?.recipientPartyId || "").trim();
+  if (tok) {
+    const session = loadRecipientMagicLinkSession(args.agreementId, tok);
+    const fromScopedSession = (session?.recipientPartyId || "").trim();
+    if (fromScopedSession) return fromScopedSession;
+  }
+  const anySession = loadAnyRecipientMagicLinkSessionForAgreement(args.agreementId);
+  return (anySession?.recipientPartyId || "").trim();
 }
 
 export function reviewerNeedsPersonalizedLink(args: {

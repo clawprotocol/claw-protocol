@@ -20,8 +20,8 @@ const initialDraft = {
   title: "Services",
   jurisdiction: "CA",
   parties: [
-    { name: "Alice", role: "owner" },
-    { name: "Bob", role: "party" },
+    { id: "p-owner", name: "Alice", role: "owner" },
+    { id: "p-reviewer", name: "Bob", role: "party" },
   ],
   purpose: "Consulting.",
   payment_terms: "Invoices are payable upon receipt.",
@@ -78,7 +78,12 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
         });
       }
       if (method === "POST" && url.includes("/recipient-proposal")) {
-        return jsonResponse({ proposal_id: "prop_modal_test" });
+        if (url.includes("/stage")) {
+          return jsonResponse({ proposal_id: "prop_modal_test", staged: true });
+        }
+        if (!url.includes("/apply") && !url.includes("/reject")) {
+          return jsonResponse({ proposal_id: "prop_modal_test", ok: true });
+        }
       }
       if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
         return jsonResponse({ draft: initialDraft });
@@ -88,7 +93,11 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
 
     render(
       <AccessProvider>
-        <AgreementRecipientReview agreementId={agreementId} recipientAccessToken="tok_test" />
+        <AgreementRecipientReview
+          agreementId={agreementId}
+          recipientAccessToken="tok_test"
+          participantPartyId="p-reviewer"
+        />
       </AccessProvider>,
     );
 

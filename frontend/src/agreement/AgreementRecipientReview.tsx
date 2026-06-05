@@ -28,6 +28,7 @@ import {
 import {
   assessRecipientPreviewDiff,
   buildRecipientClauseCards,
+  countSuggestedChanges,
   recipientPreviewNoOpMessage,
 } from "./recipientPreviewDiffModel";
 import { RecipientLegalRedlineDocument } from "./RecipientLegalRedlineDocument";
@@ -65,10 +66,12 @@ import {
 } from "../vs01/negotiationTimeline";
 import { detectChangedSnapshotFields } from "./negotiationMemory";
 import {
+  finalizeRecipientProposalApi,
   postSigningCeremonyComplete,
   postSigningCeremonyStart,
   recipientApproveCurrentApi,
-  submitRecipientProposalApi,
+  stageRecipientProposalApi,
+  type RecipientProposalSubmitBody,
 } from "./agreementWorkspaceApi";
 import {
   isAgreementMarkedSignedInAudit,
@@ -251,10 +254,13 @@ import {
 } from "./reviewFirstTextDiff";
 import { formatAgreementPlainTextForEditing } from "./formatAgreementPlainTextForEditing";
 import {
+  logReviewFirstProposalCreated,
   logReviewFirstSubmitBlocked,
+  logReviewFirstSubmitConfirm,
   logReviewFirstSubmitFailed,
   logReviewFirstSubmitStart,
   logReviewFirstSubmitSuccess,
+  REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE,
   resolveReviewFirstSubmitAuthority,
 } from "./reviewFirstSubmitAuthority";
 import {
@@ -615,6 +621,8 @@ type RecipientPreview = {
   postureAtPreview: NegotiationPosture;
   suggestionUsedAtPreview: boolean;
   routingKind: "quick_change" | "whole_document";
+  /** Server-staged proposal id — required before finalize POST. */
+  proposalId?: string | null;
   /** Heuristic split: commentary for the sender, excluded from agreement body compare. */
   separatedReviewerNotesForUi?: string;
   /** PDF import normalized to the same text as the current render — skip false structural redline. */
@@ -2930,6 +2938,36 @@ export function AgreementRecipientReview({
     setSendSuggestedEditsModalOpen(true);
   }
 
+  function resolveSubmitProposerParticipantId(): string {
+    return resolveReviewerEffectiveParticipantId({
+      agreementId,
+      participantPartyId,
+      recipientAccessToken,
+      validatedPartyId: participantPartyId,
+    }).trim();
+  }
+
+  function buildRecipientProposalStageBody(preview: RecipientPreview): RecipientProposalSubmitBody {
+    const d = preview.proposedDraft;
+    const proposerId = resolveSubmitProposerParticipantId();
+    return {
+      instruction: preview.revisionText,
+      proposer_id: proposerId,
+      proposer_display_name: proposerDisplayNameForApi,
+      draft: {
+        title: d.title,
+        jurisdiction: d.jurisdiction,
+        parties: d.parties,
+        purpose: d.purpose,
+        payment_terms: d.payment_terms,
+        duration: d.duration,
+        due_date: d.due_date,
+        effective_date: d.effective_date,
+      },
+      rendered_html: preview.proposedHtml,
+    };
+  }
+
   async function performRecipientSuggestedEditsSubmit() {
     logReviewFirstSubmitStart({
       agreementId,
@@ -2964,36 +3002,99 @@ export function AgreementRecipientReview({
       setSendSuggestedEditsModalOpen(false);
       return;
     }
+    const effectiveProposerId = resolveSubmitProposerParticipantId();
+    if (!effectiveProposerId && !recipientAccessToken.trim()) {
+      const message = REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE;
+      logReviewFirstSubmitBlocked({
+        agreementId,
+        reason: "missing_participant_id",
+        message,
+        hasAccessToken: false,
+        participantPid: participantPid || null,
+      });
+      setError(message);
+      setSendSuggestedEditsModalOpen(false);
+      return;
+    }
     setSaving(true);
     setError(null);
+    const stageEndpoint = `/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal/stage`;
     const submitEndpoint = `/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal`;
     try {
-      const d = p.proposedDraft;
-      const submitted = await submitRecipientProposalApi(
+      let proposalId = (p.proposalId || "").trim();
+      if (!proposalId) {
+        const staged = await stageRecipientProposalApi(
+          agreementId,
+          buildRecipientProposalStageBody(p),
+          recipientAccessToken,
+        );
+        if (!staged.ok || !staged.proposal_id?.trim()) {
+          logReviewFirstSubmitFailed({
+            agreementId,
+            endpoint: stageEndpoint,
+            status: staged.error ?? staged.httpStatus ?? "unknown",
+            detail: staged.error ?? null,
+            body: staged.responseBody ?? null,
+            rawMessage: staged.error ?? "stage_failed",
+          });
+          if (
+            staged.error === "recipient_proposal_already_pending" ||
+            staged.error === "recipient_proposal_already_pending_from_participant"
+          ) {
+            setError(
+              staged.error === "recipient_proposal_already_pending_from_participant"
+                ? "You already have a suggestion in the queue for this agreement."
+                : "You already have a suggestion waiting for the owner. Wait for them to review it.",
+            );
+            setSendSuggestedEditsModalOpen(false);
+            await refresh();
+            return;
+          }
+          throw new Error(
+            humanizeRecipientActionError(
+              staged.error,
+              "Couldn't prepare your suggestion. Please try again.",
+            ),
+          );
+        }
+        proposalId = staged.proposal_id.trim();
+        setRecipientPreview({ ...p, proposalId });
+        logReviewFirstProposalCreated({
+          agreementId,
+          proposalId,
+          changeCount:
+            reviewFirstConfirmedDiff?.changedSections.length ??
+            (previewDiff ? countSuggestedChanges(previewDiff) : 0),
+        });
+      }
+      if (!proposalId) {
+        const message =
+          "Your proposed update is not ready to send yet. Review changes again, then try submitting.";
+        logReviewFirstSubmitBlocked({
+          agreementId,
+          reason: "proposal_id_missing_before_post",
+          message,
+          hasAccessToken: Boolean(recipientAccessToken.trim()),
+          participantPid: effectiveProposerId,
+        });
+        setError(message);
+        setSendSuggestedEditsModalOpen(false);
+        return;
+      }
+      logReviewFirstSubmitConfirm({
         agreementId,
-        {
-          instruction: p.revisionText,
-          proposer_id: participantPid,
-          proposer_display_name: proposerDisplayNameForApi,
-          draft: {
-            title: d.title,
-            jurisdiction: d.jurisdiction,
-            parties: d.parties,
-            purpose: d.purpose,
-            payment_terms: d.payment_terms,
-            duration: d.duration,
-            due_date: d.due_date,
-            effective_date: d.effective_date,
-          },
-          rendered_html: p.proposedHtml,
-        },
-        recipientAccessToken,
-      );
+        proposalId,
+        hasAccessToken: Boolean(recipientAccessToken.trim()),
+        participantPid: effectiveProposerId,
+      });
+      const submitted = await finalizeRecipientProposalApi(agreementId, proposalId, recipientAccessToken);
       if (!submitted.ok) {
         logReviewFirstSubmitFailed({
           agreementId,
           endpoint: submitEndpoint,
-          status: submitted.error ?? "unknown",
+          status: submitted.error ?? submitted.httpStatus ?? "unknown",
+          detail: submitted.error ?? null,
+          body: submitted.responseBody ?? null,
           rawMessage: submitted.error ?? "submit_failed",
         });
         if (
@@ -3009,6 +3110,13 @@ export function AgreementRecipientReview({
           await refresh();
           return;
         }
+        if (submitted.error === "proposal_id_required" || submitted.error === "proposal_not_staged") {
+          setError(
+            "Your proposed update could not be submitted because the review session lost its proposal reference. Review changes again, then submit.",
+          );
+          setSendSuggestedEditsModalOpen(false);
+          return;
+        }
         throw new Error(
           humanizeRecipientActionError(
             submitted.error,
@@ -3018,8 +3126,8 @@ export function AgreementRecipientReview({
       }
       logReviewFirstSubmitSuccess({
         agreementId,
-        proposalId: submitted.proposal_id ?? null,
-        participantPid: participantPid || null,
+        proposalId: submitted.proposal_id ?? proposalId,
+        participantPid: effectiveProposerId,
       });
       trackAgreementFunnelEvent("recipient_submitted_edits", { entry_kind: entry.kind }, { planTier: String(access.tier), agreementId });
       setSendSuggestedEditsModalOpen(false);

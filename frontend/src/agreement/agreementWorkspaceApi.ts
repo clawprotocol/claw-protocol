@@ -248,11 +248,65 @@ export type RecipientProposalSubmitBody = {
   rendered_html: string;
 };
 
-export async function submitRecipientProposalApi(
+export type RecipientProposalApiResult = {
+  ok: boolean;
+  proposal_id?: string;
+  error?: string;
+  httpStatus?: number;
+  responseBody?: unknown;
+};
+
+function parseRecipientProposalApiError(
+  status: number,
+  payload: unknown,
+): { error: string; httpStatus: number; responseBody: unknown } {
+  const detail = (payload as { detail?: unknown } | null)?.detail;
+  if (typeof detail === "string" && detail.trim()) {
+    return { error: detail.trim(), httpStatus: status, responseBody: payload };
+  }
+  if (detail != null && typeof detail === "object") {
+    const obj = detail as { code?: string; message?: string };
+    const code = String(obj.code ?? "").trim();
+    const message = String(obj.message ?? "").trim();
+    if (code && message) return { error: `${code}: ${message}`, httpStatus: status, responseBody: payload };
+    if (code) return { error: code, httpStatus: status, responseBody: payload };
+    if (message) return { error: message, httpStatus: status, responseBody: payload };
+  }
+  return { error: `error_${status}`, httpStatus: status, responseBody: payload };
+}
+
+export async function stageRecipientProposalApi(
   agreementId: string,
   body: RecipientProposalSubmitBody,
-  recipientAccessToken?: string | null
-): Promise<{ ok: boolean; proposal_id?: string; error?: string }> {
+  recipientAccessToken?: string | null,
+): Promise<RecipientProposalApiResult> {
+  const id = encodeURIComponent(agreementId);
+  try {
+    const res = await fetch(`${base()}/api/agreements/${id}/recipient-proposal/stage`, {
+      method: "POST",
+      headers: {
+        ...clawAgreementHeaders({ "Content-Type": "application/json" }),
+        ...recipientAgreementReadHeaders(agreementId, recipientAccessToken),
+      },
+      body: JSON.stringify(body),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const proposal_id = String((j as { proposal_id?: unknown }).proposal_id ?? "").trim();
+      return { ok: true, proposal_id: proposal_id || undefined, httpStatus: res.status, responseBody: j };
+    }
+    const parsed = parseRecipientProposalApiError(res.status, j);
+    return { ok: false, ...parsed };
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+export async function finalizeRecipientProposalApi(
+  agreementId: string,
+  proposalId: string,
+  recipientAccessToken?: string | null,
+): Promise<RecipientProposalApiResult> {
   const id = encodeURIComponent(agreementId);
   try {
     const res = await fetch(`${base()}/api/agreements/${id}/recipient-proposal`, {
@@ -261,14 +315,29 @@ export async function submitRecipientProposalApi(
         ...clawAgreementHeaders({ "Content-Type": "application/json" }),
         ...recipientAgreementReadHeaders(agreementId, recipientAccessToken),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ proposal_id: proposalId }),
     });
-    const j = (await res.json().catch(() => ({}))) as { proposal_id?: string; detail?: string };
-    if (res.ok) return { ok: true, proposal_id: j.proposal_id };
-    return { ok: false, error: (j as { detail?: string }).detail || `error_${res.status}` };
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const proposal_id = String((j as { proposal_id?: unknown }).proposal_id ?? proposalId).trim();
+      return { ok: true, proposal_id: proposal_id || proposalId, httpStatus: res.status, responseBody: j };
+    }
+    const parsed = parseRecipientProposalApiError(res.status, j);
+    return { ok: false, ...parsed };
   } catch {
     return { ok: false, error: "network" };
   }
+}
+
+/** @deprecated Prefer stageRecipientProposalApi + finalizeRecipientProposalApi */
+export async function submitRecipientProposalApi(
+  agreementId: string,
+  body: RecipientProposalSubmitBody,
+  recipientAccessToken?: string | null,
+): Promise<RecipientProposalApiResult> {
+  const staged = await stageRecipientProposalApi(agreementId, body, recipientAccessToken);
+  if (!staged.ok || !staged.proposal_id) return staged;
+  return finalizeRecipientProposalApi(agreementId, staged.proposal_id, recipientAccessToken);
 }
 
 export async function rejectRecipientProposalApi(

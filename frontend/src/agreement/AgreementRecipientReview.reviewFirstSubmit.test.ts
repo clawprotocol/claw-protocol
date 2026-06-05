@@ -19,6 +19,20 @@ describe("Test276 review-first submit authority wiring", () => {
     expect(recipientReview).toContain("Submitted — waiting for owner review");
   });
 
+  it("Test279 confirm submit stages then finalizes with proposalId", () => {
+    expect(recipientReview).toContain("stageRecipientProposalApi");
+    expect(recipientReview).toContain("finalizeRecipientProposalApi");
+    expect(recipientReview).toContain("logReviewFirstProposalCreated");
+    expect(recipientReview).toContain("logReviewFirstSubmitConfirm");
+    expect(recipientReview).toContain("proposal_id_missing_before_post");
+    expect(recipientReview).toContain("proposalId?: string | null");
+    const confirmIdx = recipientReview.indexOf("async function performRecipientSuggestedEditsSubmit");
+    const block = recipientReview.slice(confirmIdx, confirmIdx + 6500);
+    expect(block).toContain("stageRecipientProposalApi");
+    expect(block).toContain("finalizeRecipientProposalApi");
+    expect(block).not.toMatch(/finalizeRecipientProposalApi[\s\S]{0,120}proposalId\s*=\s*""/);
+  });
+
   it("AgreementReviewGate recovers token from session after URL strip", () => {
     const gate = readFileSync(join(__dirname, "../ClawProductApp.tsx"), "utf8");
     expect(gate).toContain("loadAnyRecipientMagicLinkSessionForAgreement");
