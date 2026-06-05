@@ -67,12 +67,12 @@ export type Vs01SigningPacketModel = {
 export const VS01_PACKET_PAGE_WIDTH_PT = 612;
 export const VS01_PACKET_PAGE_HEIGHT_PT = 792;
 export const VS01_PACKET_MARGIN_LEFT_PT = 54;
-export const VS01_PACKET_MARGIN_TOP_PT = 50;
+export const VS01_PACKET_MARGIN_TOP_PT = 44;
 export const VS01_PACKET_MARGIN_RIGHT_PT = 54;
 export const VS01_PACKET_MARGIN_BOTTOM_PT = 20;
 /** Compact footer reservation: enough for auto-initials without creating a half-empty page. */
 export const VS01_PACKET_INITIALS_BAND_PT = 64;
-export const VS01_PACKET_LINE_HEIGHT_PT = 19;
+export const VS01_PACKET_LINE_HEIGHT_PT = 17.5;
 /** Extra lines withheld from pagination so DOM flow does not spill into the initials band. */
 export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 2;
 export const VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT = 6.3;
@@ -122,17 +122,17 @@ function wrapCanonicalTextLine(line: string): string[] {
 
 function canonicalFlowLineHeightUnits(line: string): number {
   const t = line.trim();
-  if (!t) return 0.62;
-  if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t)) return 1.12;
-  if (/^IN WITNESS WHEREOF/i.test(t)) return 1.18;
-  if (/^(?:By|Signature|Name|Title|Date)\s*:/i.test(t)) return 1.08;
-  if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return 1.16;
+  if (!t) return 0.5;
+  if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t)) return 1.02;
+  if (/^IN WITNESS WHEREOF/i.test(t)) return 1.08;
+  if (/^(?:By|Signature|Name|Title|Date)\s*:/i.test(t)) return 1.02;
+  if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return 1.04;
   return 1;
 }
 
 /** Matches canonical flow CSS: spacer 0.62 line-height, each text line one line-height block. */
 export function canonicalFlowLineStackStepUnits(line: string): number {
-  return line.trim() ? 1 : 0.62;
+  return line.trim() ? 1 : 0.5;
 }
 
 export function canonicalFlowStackBottomNorm(

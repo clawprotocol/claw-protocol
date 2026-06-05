@@ -320,6 +320,8 @@ function sectionLabel(
 function buildChangedSection(args: {
   changedPrevious: string;
   changedProposed: string;
+  fullPreviousText?: string;
+  fullProposedText?: string;
   label: { label: string; priority: number };
   rawTitle: string;
   inline: ReturnType<typeof buildInlineDiff>;
@@ -341,7 +343,12 @@ function buildChangedSection(args: {
       return { previousParts: raw.previousParts, proposedParts: raw.proposedParts };
     },
   });
-  const clauseLabel = resolveClauseLabel(changedPrevious, changedProposed) || rawTitle;
+  const clauseLabel =
+    resolveClauseLabel({
+      previous: args.fullPreviousText ?? changedPrevious,
+      proposed: args.fullProposedText ?? changedProposed,
+      changedPhrase: phrase.beforePhrase || phrase.afterPhrase,
+    }) || rawTitle;
   return {
     title: label.label,
     summary: label.label,
@@ -352,7 +359,11 @@ function buildChangedSection(args: {
     phrasePreviousParts: phrase.phrasePreviousParts,
     phraseProposedParts: phrase.phraseProposedParts,
     changeMagnitude: phrase.changeMagnitude,
-    clauseContextSnippet: clauseContextSnippet(changedProposed || changedPrevious),
+    clauseContextSnippet: clauseContextSnippet(
+      args.fullProposedText || changedProposed || changedPrevious,
+      140,
+      phrase.afterPhrase || phrase.beforePhrase,
+    ),
     previous: phrase.beforePhrase || joinTokenParts(previousParts) || "(No prior wording)",
     proposed: phrase.afterPhrase || joinTokenParts(proposedParts) || "(Removed)",
     fullPrevious: changedPrevious || "(No prior wording)",
@@ -383,7 +394,17 @@ export function getChangedReviewSections(previousText: string, proposedText: str
     const rawTitle = sectionTitle(changedPrevious, changedProposed);
     const inline = buildInlineDiff(changedPrevious, changedProposed);
     const label = sectionLabel(rawTitle, changedPrevious, changedProposed, inline);
-    sections.push(buildChangedSection({ changedPrevious, changedProposed, label, rawTitle, inline }));
+    sections.push(
+      buildChangedSection({
+        changedPrevious,
+        changedProposed,
+        fullPreviousText: previousText,
+        fullProposedText: proposedText,
+        label,
+        rawTitle,
+        inline,
+      }),
+    );
   };
 
   for (const [previousAnchor, proposedAnchor] of anchors) {
@@ -403,7 +424,17 @@ export function getChangedReviewSections(previousText: string, proposedText: str
       const rawTitle = sectionTitle(changedPrevious, changedProposed);
       const inline = buildInlineDiff(changedPrevious, changedProposed);
       const label = sectionLabel(rawTitle, changedPrevious, changedProposed, inline);
-      sections.push(buildChangedSection({ changedPrevious, changedProposed, label, rawTitle, inline }));
+      sections.push(
+        buildChangedSection({
+          changedPrevious,
+          changedProposed,
+          fullPreviousText: previousText,
+          fullProposedText: proposedText,
+          label,
+          rawTitle,
+          inline,
+        }),
+      );
     }
   }
   return sections.sort((a, b) => a.classificationPriority - b.classificationPriority);

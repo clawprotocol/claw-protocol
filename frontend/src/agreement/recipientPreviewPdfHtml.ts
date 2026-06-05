@@ -43,7 +43,7 @@ export type RecipientRedlinePdfAuditMeta = {
 };
 
 const P_STYLE =
-  "margin:0 0 14px;line-height:1.72;font-size:15px;color:#0f172a;font-family:Georgia,'Times New Roman',Times,serif;text-align:left;";
+  "margin:0 0 10px;line-height:1.58;font-size:15px;color:#0f172a;font-family:Georgia,'Times New Roman',Times,serif;text-align:left;";
 /** Retained — readable body text */
 const SPAN_SAME = `color:#0f172a;font:inherit;`;
 /** Insertions — soft green emphasis (no slab blocks) */

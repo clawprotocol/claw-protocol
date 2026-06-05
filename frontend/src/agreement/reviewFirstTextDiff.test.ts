@@ -59,8 +59,11 @@ describe("reviewFirstTextDiff", () => {
 
   it("extracts invoicing clause label and exact payment phrase for 30 → 15 day edit", () => {
     const previous = [
-      "3.2 Invoicing and Payment Timing",
-      "Client shall pay each undisputed invoice within thirty (30) days after receipt of invoice.",
+      "1. Parties; Effective Date; Purpose",
+      "1.1 Parties. The parties to this Agreement are Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
+      "",
+      "3. Fees, Invoicing and Payment",
+      "3.2 Invoicing and Payment Timing. Client shall pay each undisputed invoice within thirty (30) days after receipt of invoice.",
     ].join("\n");
     const proposed = previous.replace(
       "within thirty (30) days after receipt",
@@ -71,6 +74,7 @@ describe("reviewFirstTextDiff", () => {
 
     expect(section?.title).toBe("Payment timing changed");
     expect(section?.clauseLabel).toBe("3.2 Invoicing and Payment Timing");
+    expect(section?.clauseLabel).not.toContain("1.1 Parties");
     expect(section?.beforePhrase).toBe("within thirty (30) days after receipt");
     expect(section?.afterPhrase).toBe("within fifteen (15) days after receipt");
     expect(section?.clauseContextSnippet).toContain("undisputed invoice");
@@ -123,7 +127,7 @@ describe("reviewFirstTextDiff", () => {
     expect(section?.title).toBe("Party changed");
     expect(section?.beforePhrase).toContain("Beta");
     expect(section?.afterPhrase).toContain("Gamma");
-    expect(section?.beforePhrase).not.toContain("Acme LLC");
+    expect(section?.beforePhrase).not.toContain("Gamma");
     expect(section?.changeMagnitude).toBe("phrase");
   });
 
