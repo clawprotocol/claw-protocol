@@ -76,7 +76,8 @@ describe("paidProWorkflowGuidance", () => {
 
   it("intake wires signer orientation and sticky direction cue; review screen wires callout", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    expect(intake).toContain("PaidProSignerSetupOrientationBanner");
+    expect(intake).toContain("paid-pro-inline-signer-setup-panel");
+    expect(intake).toContain("PAID_PRO_INLINE_SIGNER_SECTION_TITLE");
     expect(intake).toContain("PaidProStickyCtaDirectionCue");
     const reviewScreen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(reviewScreen).toContain("PaidProReviewNextStepCallout");

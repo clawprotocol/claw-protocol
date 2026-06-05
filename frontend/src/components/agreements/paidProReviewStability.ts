@@ -21,6 +21,7 @@ const loggedGuidedFinalReviewKeys = new Set<string>();
 const loggedReviewPipelineKeys = new Set<string>();
 let lastGuidedProUxLogKey: string | null = null;
 let lastStabilityLogKey: string | null = null;
+let lastPreviewRecomputeBuilder: string | null = null;
 
 export function resetPaidProReviewStabilityForTests(): void {
   reviewHash = null;
@@ -32,6 +33,7 @@ export function resetPaidProReviewStabilityForTests(): void {
   loggedReviewPipelineKeys.clear();
   lastGuidedProUxLogKey = null;
   lastStabilityLogKey = null;
+  lastPreviewRecomputeBuilder = null;
 }
 
 export function getPaidProReviewStabilitySnapshot(): PaidProReviewStabilitySnapshot {
@@ -41,7 +43,9 @@ export function getPaidProReviewStabilitySnapshot(): PaidProReviewStabilitySnaps
 export function notePaidProReviewHashFromPlain(plain: string): void {
   const t = (plain || "").trim();
   if (t.length < 200) return;
-  reviewHash = hashPaidProCorpus(t);
+  const h = hashPaidProCorpus(t);
+  if (h === reviewHash) return;
+  reviewHash = h;
   emitPaidProReviewStabilityLog("review_hash");
 }
 
@@ -73,6 +77,8 @@ export function recordPaidProReviewRender(plain: string): void {
 
 /** Expensive preview rebuild attempted (full builder path only). */
 export function recordPaidProPreviewRecompute(builder: string): void {
+  if (builder === lastPreviewRecomputeBuilder) return;
+  lastPreviewRecomputeBuilder = builder;
   recomputeCount += 1;
   if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
     // eslint-disable-next-line no-console

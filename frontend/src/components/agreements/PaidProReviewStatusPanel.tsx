@@ -8,6 +8,8 @@ import {
 type Props = {
   signersReady: boolean;
   signerMetadataFinalized?: boolean;
+  /** `/app/create` compact review — status steps only, no supporting paragraph. */
+  compactShell?: boolean;
 };
 
 function StepIcon({ state }: { state: PaidProReviewTrustStep["state"] }) {
@@ -41,9 +43,13 @@ function StepIcon({ state }: { state: PaidProReviewTrustStep["state"] }) {
   );
 }
 
-export function PaidProReviewStatusPanel({ signersReady, signerMetadataFinalized }: Props) {
+export function PaidProReviewStatusPanel({
+  signersReady,
+  signerMetadataFinalized,
+  compactShell = false,
+}: Props) {
   const steps = resolvePaidProReviewTrustSteps({ signersReady, signerMetadataFinalized });
-  const supporting = resolvePaidProReviewSupportingCopy({ signersReady });
+  const supporting = compactShell ? null : resolvePaidProReviewSupportingCopy({ signersReady });
 
   return (
     <section
@@ -69,12 +75,14 @@ export function PaidProReviewStatusPanel({ signersReady, signerMetadataFinalized
           </li>
         ))}
       </ol>
-      <p
-        className="mt-2.5 text-xs leading-relaxed text-stone-600 sm:text-[13px]"
-        data-testid="paid-pro-review-status-supporting"
-      >
-        {supporting}
-      </p>
+      {supporting ? (
+        <p
+          className="mt-2.5 text-xs leading-relaxed text-stone-600 sm:text-[13px]"
+          data-testid="paid-pro-review-status-supporting"
+        >
+          {supporting}
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -6,7 +6,6 @@ import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload
 import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSection } from "./guidedDealCompletion/guidedSectionScroll";
 import {
   PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL,
-  PAID_PRO_REVIEW_SHELL_SAFETY_LINE,
   PAID_PRO_REVIEW_SHELL_SUBTITLE,
   PAID_PRO_REVIEW_SHELL_TITLE,
   suppressPaidProFinalReviewFinalizingState,
@@ -101,6 +100,10 @@ export type SimpleProFinalReviewScreenProps = {
   onBackToSignerDetails?: () => void;
   /** Measured sticky CTA clearance — spacer after execution block (px). */
   stickyBottomScrollInsetPx?: number;
+  /** Inline signer setup follows — scroll padding handled on outer preview shell only. */
+  suppressPostDocumentScrollSpacer?: boolean;
+  /** Inline signer + sticky CTA own primary actions — hide in-panel send/copy/export strip. */
+  suppressFinalReviewActions?: boolean;
   className?: string;
   visibleProPaperTrace?: VisibleProPaperDiagnosticsTrace;
 };
@@ -160,6 +163,8 @@ export function SimpleProFinalReviewScreen({
   onKeepLawDogVersion,
   onBackToSignerDetails,
   stickyBottomScrollInsetPx = 0,
+  suppressPostDocumentScrollSpacer = false,
+  suppressFinalReviewActions = false,
   className = "",
   visibleProPaperTrace,
 }: SimpleProFinalReviewScreenProps) {
@@ -299,6 +304,7 @@ export function SimpleProFinalReviewScreen({
         <PaidProReviewStatusPanel
           signersReady={signersReady}
           signerMetadataFinalized={signerMetadataFinalized}
+          compactShell={hideInPanelTitleChrome}
         />
       ) : null}
       {showSignerSavedBanner ? (
@@ -461,34 +467,11 @@ export function SimpleProFinalReviewScreen({
         </div>
       ) : null}
 
-      {hideInPanelTitleChrome && canonicalPaidProReview && hasCanonicalPaidReviewBody ? (
-        <header className="min-w-0" data-testid="paid-pro-review-compact-header">
-          <h2
-            className="font-serif text-base font-semibold tracking-tight text-stone-900 sm:text-lg"
-            data-testid="simple-pro-final-review-headline"
-          >
-            {PAID_PRO_REVIEW_SHELL_TITLE}
-          </h2>
-          <p
-            className="mt-1 text-xs leading-relaxed text-stone-600 sm:text-[13px]"
-            data-testid="simple-pro-final-review-subcopy"
-          >
-            {PAID_PRO_REVIEW_SHELL_SUBTITLE}
-          </p>
-          <p
-            className="mt-1 text-[11px] leading-snug text-stone-500"
-            data-testid="paid-pro-review-safety-line"
-          >
-            {PAID_PRO_REVIEW_SHELL_SAFETY_LINE}
-          </p>
-        </header>
-      ) : null}
-
       {documentFirst ? (
         <>
           {documentBlock}
           {postDocumentGuidance}
-          {stickyBottomScrollInsetPx > 0 ? (
+          {!suppressPostDocumentScrollSpacer && stickyBottomScrollInsetPx > 0 ? (
             <PaidProReviewStickyScrollSpacer heightPx={stickyBottomScrollInsetPx} />
           ) : null}
         </>
@@ -496,12 +479,12 @@ export function SimpleProFinalReviewScreen({
         <>
           {postDocumentGuidance}
           {documentBlock}
-          {stickyBottomScrollInsetPx > 0 ? (
+          {!suppressPostDocumentScrollSpacer && stickyBottomScrollInsetPx > 0 ? (
             <PaidProReviewStickyScrollSpacer heightPx={stickyBottomScrollInsetPx} />
           ) : null}
         </>
       )}
-      {signersReady ? (
+      {signersReady && !suppressFinalReviewActions ? (
         <p
           className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-[11px] leading-relaxed text-stone-700"
           data-testid="simple-pro-final-review-signing-fields-note"
@@ -510,6 +493,7 @@ export function SimpleProFinalReviewScreen({
         </p>
       ) : null}
 
+      {suppressFinalReviewActions ? null : (
       <div
         className="flex flex-col gap-2"
         data-testid="simple-pro-final-review-actions"
@@ -657,8 +641,9 @@ export function SimpleProFinalReviewScreen({
           </>
         )}
       </div>
+      )}
 
-      {canEditAgreementText && editAgreementTextOpen ? (
+      {!suppressFinalReviewActions && canEditAgreementText && editAgreementTextOpen ? (
         <div
           className="rounded-md border border-stone-200/95 bg-stone-50/95 px-2.5 py-2.5"
           data-testid="simple-pro-edit-agreement-text-card"
@@ -773,13 +758,13 @@ export function SimpleProFinalReviewScreen({
         </div>
       ) : null}
 
-      {uploadError ? (
+      {!suppressFinalReviewActions && uploadError ? (
         <p className="text-[11px] font-medium text-amber-800" role="alert">
           {uploadError}
         </p>
       ) : null}
 
-      {showUploadActions && uploadedSource ? (
+      {!suppressFinalReviewActions && showUploadActions && uploadedSource ? (
         <div
           className="space-y-2 rounded-md border border-stone-200/90 bg-white/90 px-2.5 py-2.5"
           data-testid="simple-pro-edited-version-actions"

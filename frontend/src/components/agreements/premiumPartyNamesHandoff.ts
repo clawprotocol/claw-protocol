@@ -14,6 +14,23 @@ const LEGACY_KEY = "claw_premium_party_names_handoff_v1";
 const KEY_V2 = "claw_premium_recipient_handoff_v2";
 
 let lastHandoffReadLogFingerprint = "";
+let lastHandoffWriteLogFingerprint = "";
+let lastPersistedHandoffFingerprint = "";
+
+function premiumRecipientHandoffFingerprint(payload: PremiumRecipientHandoffV2): string {
+  return JSON.stringify({
+    party1: payload.party1,
+    party2: payload.party2,
+    partyIndexSlots: payload.partyIndexSlots ?? null,
+  });
+}
+
+/** Test-only */
+export function resetPremiumRecipientHandoffDedupForTests(): void {
+  lastHandoffReadLogFingerprint = "";
+  lastHandoffWriteLogFingerprint = "";
+  lastPersistedHandoffFingerprint = "";
+}
 
 export type PremiumRecipientHandoffSlot = {
   name: string;
@@ -180,6 +197,9 @@ function logReviewLinkSignerMetadataHandoffWrite(payload: PremiumRecipientHandof
   const withSignerName = slots.filter((s) => signerMetadataInputRaw(s.signerName).length > 0).length;
   const withSignerTitle = slots.filter((s) => signerMetadataInputRaw(s.signerTitle).length > 0).length;
   if (!withSignerName && !withSignerTitle) return;
+  const fingerprint = premiumRecipientHandoffFingerprint(payload);
+  if (fingerprint === lastHandoffWriteLogFingerprint) return;
+  lastHandoffWriteLogFingerprint = fingerprint;
   // eslint-disable-next-line no-console
   console.info("[review-link-signer-metadata-handoff-write]", {
     partySlots: slots.length,
@@ -256,6 +276,11 @@ export function persistPremiumRecipientHandoff(patch: {
       savedAt: Date.now(),
       ...(partyIndexSlots?.length ? { partyIndexSlots } : {}),
     };
+    const fingerprint = premiumRecipientHandoffFingerprint(payload);
+    if (fingerprint === lastPersistedHandoffFingerprint) {
+      return;
+    }
+    lastPersistedHandoffFingerprint = fingerprint;
     sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
     sessionStorage.removeItem(LEGACY_KEY);
     invalidatePremiumRecipientHandoffReadCache();

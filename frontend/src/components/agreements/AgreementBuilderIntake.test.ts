@@ -405,11 +405,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toMatch(
       /\{paidProCanonicalReviewSignerSetupActive \? \([\s\S]*?id="claw-paid-pro-inline-signer-setup"[\s\S]*?<CreateFlowSendRecipientsPanel[\s\S]*?paidProInlineRecipientShell/,
     );
-    expect(intake).toMatch(
-      new RegExp(
-        `paidProInlineRecipientShell\\s*\\n\\s*\\? PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA\\s*\\n\\s*: "Share this agreement"`,
-      ),
-    );
+    expect(intake).toContain("paid-pro-inline-signer-setup-panel");
+    expect(intake).toContain("PAID_PRO_INLINE_SIGNER_SECTION_TITLE");
     expect(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA).toBe("Complete signer details");
     expect(intake).not.toMatch(
       /showProLawdogRefineAndFinalize[\s\S]{0,240}&&\s*acceptedPaidProAuthorityActive/,

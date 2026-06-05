@@ -702,7 +702,10 @@ import {
   resolvePaidProStickyCtaRevealImmediately,
   usePaidProStickyCtaDelayedReveal,
 } from "./paidProStickyCtaDelayedReveal";
-import { PaidProSignerSetupOrientationBanner } from "./PaidProSignerSetupOrientationBanner";
+import {
+  PAID_PRO_INLINE_SIGNER_SECTION_BODY,
+  PAID_PRO_INLINE_SIGNER_SECTION_TITLE,
+} from "./paidProInlineSignerSetupCopy";
 import { PaidProStickyCtaDirectionCue } from "./PaidProStickyCtaDirectionCue";
 import {
   markPaidProCtaDirectionCueSeen,
@@ -2376,6 +2379,31 @@ function CreateFlowSendRecipientsPanel({
   const advSummaryClass =
     "cursor-pointer list-none px-4 py-3 text-sm font-medium text-slate-200 marker:hidden hover:bg-slate-900/40";
 
+  if (paidProInlineRecipientShell && recipientBlockForceExpanded) {
+    return (
+      <div
+        id={variant === "staged" ? "claw-recipient-setup" : undefined}
+        data-claw-recipient-setup
+        data-testid="paid-pro-inline-signer-setup-panel"
+        className="rounded-xl border border-slate-700/50 bg-slate-950/90 p-4 sm:p-5"
+        role="region"
+        aria-label={PAID_PRO_INLINE_SIGNER_SECTION_TITLE}
+      >
+        <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
+          {PAID_PRO_INLINE_SIGNER_SECTION_TITLE}
+        </h2>
+        <p className="mt-1 text-sm leading-snug text-slate-400">{PAID_PRO_INLINE_SIGNER_SECTION_BODY}</p>
+        {guidedSigningTrustSlot ? <div className="mt-2">{guidedSigningTrustSlot}</div> : null}
+        <div className="mt-4">{recipientFields}</div>
+        {primaryCtaHelperText ? (
+          <p className="mt-3 text-sm leading-snug text-amber-200/90" role="note">
+            {primaryCtaHelperText}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       id={variant === "staged" ? "claw-recipient-setup" : undefined}
@@ -2388,9 +2416,7 @@ function CreateFlowSendRecipientsPanel({
         {minimalProSendRecipientChrome ? "Recipient setup" : "Recipient invite"}
       </p>
       <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl">
-        {paidProInlineRecipientShell
-          ? PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA
-          : "Share this agreement"}
+        {paidProInlineRecipientShell ? PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA : "Share this agreement"}
       </h2>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {paidProInlineRecipientShell ? (
@@ -2405,7 +2431,7 @@ function CreateFlowSendRecipientsPanel({
       </div>
       <p className="mt-3 text-sm leading-relaxed text-slate-300">
         {paidProInlineRecipientShell ? (
-          "Add the signer name and email for each party before creating review or signature links. LawDog does not email anyone automatically."
+          PAID_PRO_INLINE_SIGNER_SECTION_BODY
         ) : (
           <>
             {modeExplain}
@@ -27368,8 +27394,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       >
                                         <SimpleProFinalReviewScreen
                                           suppressShellDuplicatedChrome={paidProReviewCompactChrome}
+                                          suppressFinalReviewActions={paidProCanonicalReviewSignerSetupActive}
+                                          suppressPostDocumentScrollSpacer={
+                                            paidProCanonicalReviewSignerSetupActive
+                                          }
                                           stickyBottomScrollInsetPx={
-                                            simpleCreateStickyBottomBarVisible
+                                            simpleCreateStickyBottomBarVisible &&
+                                            !paidProCanonicalReviewSignerSetupActive
                                               ? stickyBottomScrollInsetPx
                                               : 0
                                           }
@@ -27510,11 +27541,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         />
                                         {paidProCanonicalReviewSignerSetupActive ? (
                                           <div
-                                            className="mt-5 w-full sm:pr-0 md:max-w-3xl"
+                                            className="mt-3 w-full sm:pr-0 md:max-w-3xl"
                                             id="claw-paid-pro-inline-signer-setup"
                                             data-testid="paid-pro-inline-signer-setup"
                                           >
-                                            <PaidProSignerSetupOrientationBanner />
                                             <CreateFlowSendRecipientsPanel
                                               variant="workspace"
                                               paidProInlineRecipientShell

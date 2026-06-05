@@ -462,13 +462,14 @@ describe("paidProAcceptanceRouting", () => {
   describe("paid Pro signer-setup UX surface (labels + Edit signer details scroll/focus)", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 
-    it("signer setup section is titled 'Complete signer details' with a signer-details-needed chip and signer-name copy", () => {
-      expect(intake).toMatch(
-        /paidProInlineRecipientShell\s*\n\s*\? PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA\s*\n\s*: "Share this agreement"/,
-      );
-      expect(intake).toContain("PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS");
-      expect(intake).toContain(
-        "Add the signer name and email for each party before creating review or signature links. LawDog does not email anyone automatically.",
+    it("inline signer setup uses a single Signer details heading without duplicate CTA title chrome", () => {
+      expect(intake).toContain("paid-pro-inline-signer-setup-panel");
+      expect(intake).toContain("PAID_PRO_INLINE_SIGNER_SECTION_TITLE");
+      expect(intake).toContain("PAID_PRO_INLINE_SIGNER_SECTION_BODY");
+      expect(intake).toContain("suppressPostDocumentScrollSpacer");
+      expect(intake).toContain("suppressFinalReviewActions={paidProCanonicalReviewSignerSetupActive}");
+      expect(intake).not.toMatch(
+        /paidProCanonicalReviewSignerSetupActive[\s\S]{0,400}PaidProSignerSetupOrientationBanner/,
       );
     });
 

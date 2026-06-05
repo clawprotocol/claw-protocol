@@ -63,6 +63,7 @@ import { parseClawPublicFeedPath } from "./feed/clawPublicFeed";
 import { TermsPage } from "./launch/legal/TermsPage";
 import { PrivacyPage } from "./launch/legal/PrivacyPage";
 import { AffiliateTermsPage } from "./launch/legal/AffiliateTermsPage";
+import { PaidProReviewUxVisualPage } from "./qa/PaidProReviewUxVisualPage";
 
 const ACCESS_HEADER_ASIDE = (
   <details className="vs01-access-disclosure text-left">
@@ -410,6 +411,10 @@ export function ClawProductApp() {
   const appMatch = matchAppPath(pathname);
   const pathNorm = (pathname.replace(/\/$/, "") || "/").split("?")[0];
   const affiliateLanding = parseAffiliateLandingPath(pathNorm);
+
+  if (import.meta.env.DEV && pathNorm === "/dev/qa/paid-pro-review-ux") {
+    return <PaidProReviewUxVisualPage />;
+  }
 
   if (pathNorm === "/terms") {
     return <TermsPage />;
