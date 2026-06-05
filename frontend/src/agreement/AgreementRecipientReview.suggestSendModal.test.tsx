@@ -165,4 +165,98 @@ describe("AgreementRecipientReview send suggested edits modal UX", () => {
     });
     expect(screen.getByTestId("recipient-intent-coverage-list")).toBeTruthy();
   });
+
+  it("Test281 stage 400 proposer_id_required shows backend detail and does not finalize", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const stageCalls: string[] = [];
+    const finalizeCalls: string[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (
+        init?.method || (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({ rendered_html: identicalListingHtml });
+      }
+      if (method === "POST" && url.includes("/revise")) {
+        return jsonResponse({
+          draft: revisedDraft,
+          rendered_html: identicalListingHtml,
+        });
+      }
+      if (method === "POST" && url.includes("/recipient-proposal/stage")) {
+        stageCalls.push(url);
+        return jsonResponse({ detail: "proposer_id_required" }, 400);
+      }
+      if (method === "POST" && url.includes("/recipient-proposal")) {
+        if (!url.includes("/apply") && !url.includes("/reject") && !url.includes("/stage")) {
+          finalizeCalls.push(url);
+          return jsonResponse({ proposal_id: "should_not_finalize" });
+        }
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({ draft: initialDraft });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview
+          agreementId={agreementId}
+          recipientAccessToken="tok_test"
+          participantPartyId=""
+        />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading agreement/i)).toBeNull();
+    });
+
+    await openRecipientQuickChangeWorkspace();
+    const instruction = await screen.findByTestId("recipient-revision-voice-field");
+    await userEvent.clear(instruction);
+    await userEvent.type(instruction, "Change payment to Net 30.");
+    await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("recipient-redline-chip-insertions").length).toBeGreaterThan(0);
+    });
+
+    const panel = screen.getAllByTestId("recipient-suggested-changes-panel")[0]!;
+    await userEvent.click(within(panel).getByTestId("recipient-open-send-suggested-edits-modal"));
+    await userEvent.click(screen.getByTestId("recipient-send-suggested-edits-confirm"));
+
+    await waitFor(() => {
+      expect(stageCalls.length).toBe(1);
+    });
+    expect(finalizeCalls.length).toBe(0);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[review-first-proposal-stage-failed]",
+      expect.objectContaining({
+        agreementId,
+        error: "proposer_id_required",
+        httpStatus: 400,
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Couldn't prepare your suggestion: proposer_id_required/i)).toBeTruthy();
+    });
+    expect(screen.queryByTestId("recipient-suggested-edits-sent-ack")).toBeNull();
+  });
 });

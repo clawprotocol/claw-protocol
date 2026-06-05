@@ -200,6 +200,123 @@ def test_stage_infers_single_reviewer_without_token_pid(monkeypatch, isolated_ag
     assert body.get("proposer_id_source") == "inferred_single_reviewer"
 
 
+def _stage_body_no_proposer(draft: dict) -> dict:
+    return {
+        "instruction": "Change payment timing to fifteen (15) days.",
+        "proposer_id": "",
+        "draft": {
+            "title": draft["title"],
+            "jurisdiction": draft["jurisdiction"],
+            "parties": draft["parties"],
+            "purpose": "Payment within fifteen (15) days after receipt.",
+            "payment_terms": draft["payment_terms"],
+            "duration": draft.get("duration"),
+            "due_date": draft.get("due_date"),
+            "effective_date": draft.get("effective_date"),
+        },
+        "rendered_html": "<p>updated</p>",
+    }
+
+
+def test_stage_infers_assumed_owner_counterparty_without_explicit_owner(
+    monkeypatch, isolated_agreement_env
+):
+    """Paid-pro style: both parties role=party; index 0 treated as owner."""
+    client = TestClient(app)
+    org = {"X-Claw-Org-Id": "org-assumed-owner"}
+    r = client.post(
+        "/api/agreements/draft",
+        headers=org,
+        json={
+            "title": "Services",
+            "jurisdiction": "CA",
+            "parties": [
+                {"name": "Client Co", "role": "party"},
+                {"name": "Service Provider", "role": "party"},
+            ],
+            "purpose": "Payment within thirty (30) days after receipt.",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert r.status_code == 200, r.text
+    aid = r.json()["id"]
+    draft = r.json()["draft"]
+    reviewer_id = draft["parties"][1]["id"]
+
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=org,
+        json={
+            "mode": "review",
+            "role": "reviewer",
+            "inviter_display_name": "Client Co",
+        },
+    )
+    assert mint.status_code == 200, mint.text
+    tok = mint.json()["token"]
+    rh = {"X-Claw-Recipient-Access-Token": tok}
+
+    stage = client.post(
+        f"/api/agreements/{aid}/recipient-proposal/stage",
+        headers=rh,
+        json=_stage_body_no_proposer(draft),
+    )
+    assert stage.status_code == 200, stage.text
+    body = stage.json()
+    assert body.get("proposer_id") == reviewer_id
+    assert body.get("proposer_id_source") == "inferred_single_reviewer"
+
+
+def test_stage_fails_ambiguous_multiple_counterparties(monkeypatch, isolated_agreement_env):
+    client = TestClient(app)
+    org = {"X-Claw-Org-Id": "org-ambiguous"}
+    r = client.post(
+        "/api/agreements/draft",
+        headers=org,
+        json={
+            "title": "Services",
+            "jurisdiction": "CA",
+            "parties": [
+                {"name": "Owner", "role": "owner"},
+                {"name": "Reviewer A", "role": "party"},
+                {"name": "Reviewer B", "role": "party"},
+            ],
+            "purpose": "Payment within thirty (30) days after receipt.",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert r.status_code == 200, r.text
+    aid = r.json()["id"]
+    draft = r.json()["draft"]
+
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=org,
+        json={
+            "mode": "review",
+            "role": "reviewer",
+            "inviter_display_name": "Owner",
+        },
+    )
+    assert mint.status_code == 200, mint.text
+    tok = mint.json()["token"]
+    rh = {"X-Claw-Recipient-Access-Token": tok}
+
+    stage = client.post(
+        f"/api/agreements/{aid}/recipient-proposal/stage",
+        headers=rh,
+        json=_stage_body_no_proposer(draft),
+    )
+    assert stage.status_code == 400, stage.text
+    assert stage.json().get("detail") == "proposer_id_required"
+
+
 def test_stage_requires_proposer_without_token(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
     org = {"X-Claw-Org-Id": "org-no-token-proposer"}

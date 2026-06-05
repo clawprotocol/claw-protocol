@@ -479,6 +479,30 @@ function humanizeRecipientActionError(raw: string | undefined, fallback: string)
   return r.length > 280 ? fallback : r;
 }
 
+function formatRecipientProposalStageError(
+  staged: { error?: string; httpStatus?: number; responseBody?: unknown },
+): string {
+  const code = (staged.error || "").trim();
+  const body = staged.responseBody as { detail?: unknown } | undefined;
+  const detail = body?.detail;
+  const detailText =
+    typeof detail === "string"
+      ? detail.trim()
+      : detail != null
+        ? JSON.stringify(detail)
+        : "";
+  if (code === "proposer_id_required") {
+    const extra =
+      detailText && detailText !== code
+        ? ` — ${detailText}`
+        : staged.httpStatus
+          ? ` (HTTP ${staged.httpStatus})`
+          : "";
+    return `Couldn't prepare your suggestion: proposer_id_required${extra}`;
+  }
+  return humanizeRecipientActionError(code, "Couldn't prepare your suggestion. Please try again.");
+}
+
 function recipientTrustCueStrip() {
   return (
     <ul className="mt-2 flex flex-wrap gap-2" aria-label="Trust cues">
@@ -3071,8 +3095,14 @@ export function AgreementRecipientReview({
           stageBody,
           recipientAccessToken,
         );
-        reviewFirstStageInFlightRef.current = false;
         if (!staged.ok || !staged.proposal_id?.trim()) {
+          // eslint-disable-next-line no-console
+          console.error("[review-first-proposal-stage-failed]", {
+            agreementId,
+            error: staged.error ?? null,
+            httpStatus: staged.httpStatus ?? null,
+            body: staged.responseBody ?? null,
+          });
           logReviewFirstSubmitFailed({
             agreementId,
             endpoint: stageEndpoint,
@@ -3094,12 +3124,8 @@ export function AgreementRecipientReview({
             await refresh();
             return;
           }
-          throw new Error(
-            humanizeRecipientActionError(
-              staged.error,
-              "Couldn't prepare your suggestion. Please try again.",
-            ),
-          );
+          setError(formatRecipientProposalStageError(staged));
+          return;
         }
         proposalId = staged.proposal_id.trim();
         setRecipientPreview({ ...p, proposalId });

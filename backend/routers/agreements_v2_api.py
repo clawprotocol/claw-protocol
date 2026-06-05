@@ -8106,14 +8106,51 @@ def _persist_party_id_backfill(draft: AgreementDraft) -> AgreementDraft:
     return next_draft
 
 
-def _recipient_party_id_from_access_token(request: Request, agreement_id: str) -> str:
+def _resolve_assumed_owner_party_index(parties: List[AgreementParty]) -> int:
+    """Mirror review-link owner index: first explicit owner, else index 0."""
+    for i, p in enumerate(parties or []):
+        if _normalize_workflow_role(p.role) == "owner":
+            return i
+    return 0
+
+
+def _review_link_eligible_party_ids(draft: AgreementDraft) -> List[str]:
+    """Non-owner counterparty rows eligible for review-link / staged proposal."""
+    parties = list(draft.parties or [])
+    owner_idx = _resolve_assumed_owner_party_index(parties)
+    eligible: List[str] = []
+    for i, p in enumerate(parties):
+        if i == owner_idx:
+            continue
+        pid = (p.id or "").strip()
+        if not pid or pid.startswith("legacy_"):
+            continue
+        if _normalize_workflow_role(p.role) == "viewer":
+            continue
+        eligible.append(pid)
+    return eligible
+
+
+def _parse_recipient_access_token_context(request: Request, agreement_id: str) -> Dict[str, Any]:
     tok = recipient_access_token_from_request(request)
     if not tok:
-        return ""
+        return {
+            "has_auth_token": False,
+            "token_valid": False,
+            "token_pid": "",
+            "token_role": "",
+            "token_mode": "",
+        }
     try:
         secret_raw = resolve_signing_token_secret_raw()
     except SigningTokenSecretMissingInProductionError:
-        return ""
+        return {
+            "has_auth_token": True,
+            "token_valid": False,
+            "token_pid": "",
+            "token_role": "",
+            "token_mode": "",
+        }
     try:
         out = validate_recipient_access_token_for_agreement(
             token=tok,
@@ -8123,43 +8160,169 @@ def _recipient_party_id_from_access_token(request: Request, agreement_id: str) -
             consume_single_use=False,
             log_validation=False,
         )
-        return str(out.get("recipient_party_id") or "").strip()
+        return {
+            "has_auth_token": True,
+            "token_valid": True,
+            "token_pid": str(out.get("recipient_party_id") or "").strip(),
+            "token_role": str(out.get("role") or "").strip().lower(),
+            "token_mode": str(out.get("mode") or "").strip().lower(),
+        }
     except HTTPException:
-        return ""
+        return {
+            "has_auth_token": True,
+            "token_valid": False,
+            "token_pid": "",
+            "token_role": "",
+            "token_mode": "",
+        }
 
 
-def _infer_single_nonowner_proposer_id(draft: AgreementDraft) -> str:
-    candidates: List[str] = []
+def _infer_proposer_from_eligible_parties(
+    draft: AgreementDraft, eligible: List[str], token_role: str
+) -> Tuple[str, str]:
+    if not eligible:
+        return "", ""
+    if len(eligible) == 1:
+        return eligible[0], "inferred_single_reviewer"
+    reviewer_ids: List[str] = []
+    signer_ids: List[str] = []
     for p in draft.parties or []:
         pid = (p.id or "").strip()
-        if not pid or pid.startswith("legacy_"):
+        if pid not in eligible:
             continue
         wr = _normalize_workflow_role(p.role)
-        if wr in ("owner", "viewer"):
-            continue
-        candidates.append(pid)
-    if len(candidates) == 1:
-        return candidates[0]
-    return ""
+        if wr == "reviewer":
+            reviewer_ids.append(pid)
+        elif wr == "signer":
+            signer_ids.append(pid)
+    role = (token_role or "reviewer").strip().lower()
+    if role in ("reviewer", "recipient") and len(reviewer_ids) == 1:
+        return reviewer_ids[0], "inferred_reviewer_role"
+    if role == "signer" and len(signer_ids) == 1:
+        return signer_ids[0], "inferred_signer_role"
+    if len(reviewer_ids) == 1:
+        return reviewer_ids[0], "inferred_reviewer_role"
+    return "", ""
+
+
+def _log_recipient_proposal_stage_proposer_resolution(
+    agreement_id: str,
+    token_ctx: Dict[str, Any],
+    body_proposer_id: str,
+    inferred_party_id: str,
+    inference_source: str,
+    party_count: int,
+    recipient_count: int,
+    failure_reason: str,
+) -> None:
+    log.info(
+        "[recipient-proposal-stage-proposer-resolution] agreement_id=%s has_auth_token=%s token_valid=%s token_pid=%s body_proposer_id=%s inferred_party_id=%s inference_source=%s party_count=%s recipient_count=%s failure_reason=%s",
+        agreement_id,
+        token_ctx.get("has_auth_token"),
+        token_ctx.get("token_valid"),
+        token_ctx.get("token_pid") or "",
+        (body_proposer_id or "").strip(),
+        inferred_party_id or "",
+        inference_source or "",
+        party_count,
+        recipient_count,
+        failure_reason or "",
+    )
 
 
 def _resolve_recipient_proposer_with_source(
     request: Request, agreement_id: str, draft: AgreementDraft, body_proposer_id: str
 ) -> Tuple[AgreementParty, str]:
+    parties = list(draft.parties or [])
+    party_count = len(parties)
+    eligible = _review_link_eligible_party_ids(draft)
+    recipient_count = len(eligible)
+    token_ctx = _parse_recipient_access_token_context(request, agreement_id)
     body_pid = (body_proposer_id or "").strip()
+
     if body_pid:
-        return _validate_nonowner_proposer(draft, body_pid), "body"
-    token_pid = _recipient_party_id_from_access_token(request, agreement_id)
-    if token_pid:
-        return _validate_nonowner_proposer(draft, token_pid), "token"
-    inferred = _infer_single_nonowner_proposer_id(draft)
-    if inferred:
-        log.info(
-            "[recipient-proposal-stage] agreement_id=%s proposer_id_source=inferred_single_reviewer proposer_id=%s",
+        party = _validate_nonowner_proposer(draft, body_pid)
+        _log_recipient_proposal_stage_proposer_resolution(
             agreement_id,
-            inferred,
+            token_ctx,
+            body_pid,
+            body_pid,
+            "body",
+            party_count,
+            recipient_count,
+            "",
         )
-        return _validate_nonowner_proposer(draft, inferred), "inferred_single_reviewer"
+        return party, "body"
+
+    token_pid = str(token_ctx.get("token_pid") or "").strip()
+    if token_pid and token_ctx.get("token_valid"):
+        party = _validate_nonowner_proposer(draft, token_pid)
+        _log_recipient_proposal_stage_proposer_resolution(
+            agreement_id,
+            token_ctx,
+            body_pid,
+            token_pid,
+            "token",
+            party_count,
+            recipient_count,
+            "",
+        )
+        return party, "token"
+
+    if not token_ctx.get("has_auth_token"):
+        _log_recipient_proposal_stage_proposer_resolution(
+            agreement_id,
+            token_ctx,
+            body_pid,
+            "",
+            "",
+            party_count,
+            recipient_count,
+            "no_auth_token",
+        )
+        raise HTTPException(status_code=400, detail="proposer_id_required")
+
+    if not token_ctx.get("token_valid"):
+        _log_recipient_proposal_stage_proposer_resolution(
+            agreement_id,
+            token_ctx,
+            body_pid,
+            "",
+            "",
+            party_count,
+            recipient_count,
+            "invalid_token",
+        )
+        raise HTTPException(status_code=400, detail="proposer_id_required")
+
+    inferred, source = _infer_proposer_from_eligible_parties(
+        draft, eligible, str(token_ctx.get("token_role") or "")
+    )
+    if inferred:
+        party = _validate_nonowner_proposer(draft, inferred)
+        _log_recipient_proposal_stage_proposer_resolution(
+            agreement_id,
+            token_ctx,
+            body_pid,
+            inferred,
+            source,
+            party_count,
+            recipient_count,
+            "",
+        )
+        return party, source
+
+    failure_reason = "ambiguous_reviewer_party" if recipient_count > 1 else "no_eligible_reviewer_party"
+    _log_recipient_proposal_stage_proposer_resolution(
+        agreement_id,
+        token_ctx,
+        body_pid,
+        "",
+        "",
+        party_count,
+        recipient_count,
+        failure_reason,
+    )
     raise HTTPException(status_code=400, detail="proposer_id_required")
 
 

@@ -14,7 +14,7 @@ describe("Test276 review-first submit authority wiring", () => {
     expect(recipientReview).toContain("logReviewFirstSubmitFailed");
     expect(recipientReview).toContain("logReviewFirstSubmitAuthority");
     expect(recipientReview).toContain("reviewerNeedsPersonalizedLink");
-    expect(recipientReview).toContain("resolveReviewerEffectiveParticipantId");
+    expect(recipientReview).toContain("resolveReviewFirstStageProposerId");
     expect(recipientReview).toContain('data-testid="recipient-review-submit-blocked"');
     expect(recipientReview).toContain("Submitted — waiting for owner review");
   });
@@ -40,6 +40,20 @@ describe("Test276 review-first submit authority wiring", () => {
     expect(recipientReview).toContain("proposer_id_missing_before_stage");
     expect(recipientReview).toContain("reviewFirstStageInFlightRef");
     expect(recipientReview).toContain("tokenValidatedPartyId");
+  });
+
+  it("Test281 surfaces stage proposer_id_required detail and skips finalize on stage 400", () => {
+    expect(recipientReview).toContain("formatRecipientProposalStageError");
+    expect(recipientReview).toContain("[review-first-proposal-stage-failed]");
+    const confirmIdx = recipientReview.indexOf("async function performRecipientSuggestedEditsSubmit");
+    const block = recipientReview.slice(confirmIdx, confirmIdx + 7000);
+    expect(block).toContain("formatRecipientProposalStageError(staged)");
+    expect(block).toContain("setError(formatRecipientProposalStageError(staged))");
+    const stageFailReturn = block.indexOf("setError(formatRecipientProposalStageError(staged))");
+    const finalizeIdx = block.indexOf("finalizeRecipientProposalApi");
+    expect(stageFailReturn).toBeGreaterThan(-1);
+    expect(finalizeIdx).toBeGreaterThan(stageFailReturn);
+    expect(block.slice(stageFailReturn, finalizeIdx)).toContain("return");
   });
 
   it("AgreementReviewGate recovers token from session after URL strip", () => {
