@@ -104,6 +104,18 @@ describe("AgreementBuilderIntake paid premium completion recovery (source contra
     expect(src).toContain("applySuccess_degraded_server_local_recovery");
   });
 
+  it("cors_blocked uses dedicated applySuccess path — not degraded server local recovery", () => {
+    expect(src).toContain("isPremiumCorsBlockedPipelineResult(result)");
+    expect(src).toContain("PREMIUM_CORS_BLOCKED_HEADLINE");
+    expect(src).toContain('setPremiumPostCheckoutPhase("premium_cors_blocked")');
+    expect(src).toContain("logPremiumCorsBlocked");
+    const corsStart = src.indexOf("if (isPremiumCorsBlockedPipelineResult(result)) {");
+    expect(corsStart).toBeGreaterThan(-1);
+    const corsBlock = src.slice(corsStart, corsStart + 2800);
+    expect(corsBlock).not.toContain("premium_degraded_server_local_recovery");
+    expect(corsBlock).not.toContain("tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth");
+  });
+
   it("paid checkout applySuccess handles degraded server local recovery with SoT commit gate", () => {
     expect(src).toContain("isPremiumDegradedServerRetryablePipelineResult(result)");
     expect(src).toContain("applySuccess_degraded_server_local_recovery");

@@ -27,6 +27,17 @@ def test_normalize_cors_origin_strips_quotes_trailing_slash_and_crlf() -> None:
     assert normalize_cors_origin("  https://qa.example.com/  ") == "https://qa.example.com"
 
 
+def test_railway_production_allows_up_railway_app_origin_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CLAW_CORS_ALLOW_ORIGINS", raising=False)
+    monkeypatch.delenv("CLAW_CORS_ALLOW_ORIGIN_SUFFIXES", raising=False)
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    assert origin_is_allowed("https://believable-gentleness-production-3ab6.up.railway.app")
+    assert origin_is_allowed("https://claw-protocol-production.up.railway.app")
+
+
 def test_origin_allowed_when_env_has_trailing_slash_typo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -69,6 +80,32 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     from backend.main import app
 
     return TestClient(app)
+
+
+def test_options_premium_full_draft_preflight_returns_acao_railway_production_suffix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.delenv("CLAW_CORS_ALLOW_ORIGINS", raising=False)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    from backend.main import app
+
+    caplog.set_level(logging.INFO, logger="claw.cors")
+    client = TestClient(app)
+    origin = "https://believable-gentleness-production-3ab6.up.railway.app"
+    res = client.options(
+        "/api/agreements/premium-full-draft",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert res.status_code in (200, 204)
+    assert res.headers.get("access-control-allow-origin") == origin
+    assert "POST" in (res.headers.get("access-control-allow-methods") or "").upper()
 
 
 def test_options_premium_full_draft_preflight_returns_acao(

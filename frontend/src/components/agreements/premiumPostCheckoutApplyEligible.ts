@@ -5,6 +5,16 @@ import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourc
 /** Minimum plain-text length for a usable post-checkout Pro body. */
 export const PREMIUM_USABLE_BODY_MIN_LEN = 500;
 
+export function isPremiumFullDraftCorsBlockedResult(
+  result: PremiumCompletionResult | null | undefined,
+): boolean {
+  if (!result) return false;
+  return (
+    Boolean(result.premiumFullDraftCorsBlocked) ||
+    result.premiumRenderSource === "premium_full_draft_cors_blocked"
+  );
+}
+
 export function isPremiumNetworkRecoverableResult(
   result: PremiumCompletionResult | null | undefined,
 ): boolean {
@@ -59,6 +69,7 @@ export function isPremiumGenerationRecoverableResult(
 export function isPremiumRecoverablePipelineResult(
   result: PremiumCompletionResult | null | undefined,
 ): boolean {
+  if (isPremiumFullDraftCorsBlockedResult(result)) return true;
   return (
     isPremiumNetworkRecoverableResult(result) ||
     isPremiumDegradedServerRecoverableResult(result) ||

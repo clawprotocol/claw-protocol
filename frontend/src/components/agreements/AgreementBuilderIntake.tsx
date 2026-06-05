@@ -771,6 +771,7 @@ import {
   hasUsablePremiumBodyText,
   isPremiumDegradedServerLocalRecoveryResult,
   isPremiumDegradedServerRecoverableResult,
+  isPremiumFullDraftCorsBlockedResult,
   isPremiumNetworkLocalRecoveryResult,
   isPremiumNetworkRecoverableResult,
   isPremiumPipelineRewriteSucceeded,
@@ -793,6 +794,10 @@ import {
   PREMIUM_POST_CHECKOUT_SOFT_PROGRESS_MS,
 } from "../../lib/postCheckoutModalTimeout";
 import {
+  PREMIUM_CORS_BLOCKED_BODY,
+  PREMIUM_CORS_BLOCKED_DEBUG_LABEL,
+  PREMIUM_CORS_BLOCKED_HEADLINE,
+  PREMIUM_CORS_BLOCKED_RETRY_LABEL,
   PREMIUM_DEGRADED_SERVER_RECOVERABLE_BODY,
   PREMIUM_DEGRADED_SERVER_RECOVERABLE_HEADLINE,
   PREMIUM_DEGRADED_SERVER_RECOVERABLE_RETRY_LABEL,
@@ -803,7 +808,9 @@ import {
   PREMIUM_NETWORK_RECOVERABLE_STARTER_LABEL,
   PREMIUM_RETURN_RETRY_GENERATION_LABEL,
   PREMIUM_RETURN_USE_STARTER_LABEL,
+  buildPremiumCorsBlockedDebugInfo,
   buildPremiumNetworkRecoverableDebugInfo,
+  logPremiumCorsBlocked,
   logPremiumNetworkRecoverable,
   logPremiumProWaitSuccessTransition,
   resetPremiumReviewScrollToTop,
@@ -2654,7 +2661,12 @@ type PremiumPostCheckoutPhase =
   | "network_retry"
   | "premium_network_recoverable"
   | "premium_degraded_server_recoverable"
+  | "premium_cors_blocked"
   | "generation_retry";
+
+function isPremiumCorsBlockedPipelineResult(result: PremiumCompletionResult): boolean {
+  return isPremiumFullDraftCorsBlockedResult(result);
+}
 
 function isPremiumNetworkRetryablePipelineResult(result: PremiumCompletionResult): boolean {
   return isPremiumNetworkRecoverableResult(result);
@@ -6257,6 +6269,61 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumPostCheckoutPhase("generation_retry");
           setPremiumPipelineUserMessage(null);
           logPremiumModalInfo("[premium-modal-stage]", { to: "generation_retry", ts: new Date().toISOString() });
+          return;
+        }
+        if (isPremiumCorsBlockedPipelineResult(result)) {
+          if (!premiumGapBaseIntakeRef.current.trim()) {
+            premiumGapBaseIntakeRef.current = mergedIntake;
+          }
+          const pageOrigin = typeof window !== "undefined" ? window.location.origin : null;
+          const apiOrigin = (() => {
+            try {
+              return new URL(apiUrl("/")).origin;
+            } catch {
+              return resolveApiBase() || null;
+            }
+          })();
+          logPremiumCorsBlocked({
+            sessionGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
+            intakeFingerprint: shortIntakeFingerprint(mergedIntake),
+            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+            renderSource: result.premiumRenderSource,
+            phase: "premium_full_draft_cors_blocked",
+            pageOrigin,
+            apiOrigin,
+          });
+          setPremiumServerGenerationDegraded(null);
+          setHardError(null);
+          setProFullDraftCustomGateMessage(
+            `${PREMIUM_CORS_BLOCKED_HEADLINE}\n\n${PREMIUM_CORS_BLOCKED_BODY}`,
+          );
+          setProFullDraftQualityRetry(true);
+          clearPremiumForkUserSendMode();
+          paidProPremiumSendIntentRef.current = null;
+          clearPremiumSendIntent();
+          setPremiumSendModeUserChoice(null);
+          setPremiumSendModeTouched(false);
+          if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
+          lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
+          setPremiumTruthPipelineSource(result.premiumRenderSource);
+          setPremiumRefineReview(null);
+          setPremiumFinalizeAudit(null);
+          setPremiumReviewRoute(null);
+          premiumModalExtendedWaitActiveRef.current = false;
+          setPremiumCheckoutModalExtendedWait(false);
+          setPremiumReturnPatienceExtended(false);
+          premiumPostCheckoutModalHardFailopenRef.current = false;
+          setPremiumAuthoritativeRequestInFlight(false);
+          premiumPipelineOutputBodyRef.current = "";
+          applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+          setPremiumPostCheckoutPhase("premium_cors_blocked");
+          setPremiumPipelineUserMessage(null);
+          logPremiumModalInfo("[premium-modal-stage]", {
+            to: "premium_cors_blocked",
+            pageOrigin,
+            apiOrigin,
+            ts: new Date().toISOString(),
+          });
           return;
         }
         if (isPremiumNetworkRetryablePipelineResult(result)) {
@@ -14398,15 +14465,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [draft, debouncedStepBuffer, scheduleAgreementDocSync, createProductionTwoPane, simpleProductFlow]);
 
   const handleCopyPremiumNetworkRecoverableDebugInfo = React.useCallback(async () => {
-    const debugText = buildPremiumNetworkRecoverableDebugInfo({
-      sessionGenerationId: getOrInitSessionAgreementGenerationId(),
-      intakeFingerprint: shortIntakeFingerprint(
-        premiumGapBaseIntakeRef.current || currentPremiumMergedIntakeKey || intakeCombined,
-      ),
-      agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-      renderSource: lastPremiumPipelineRenderSourceRef.current || "premium_network_retryable",
-      phase: premiumPostCheckoutPhase ?? "premium_network_recoverable",
-    });
+    const pageOrigin = typeof window !== "undefined" ? window.location.origin : null;
+    const apiOrigin = (() => {
+      try {
+        return new URL(apiUrl("/")).origin;
+      } catch {
+        return resolveApiBase() || null;
+      }
+    })();
+    const corsBlocked =
+      premiumPostCheckoutPhase === "premium_cors_blocked" ||
+      lastPremiumPipelineRenderSourceRef.current === "premium_full_draft_cors_blocked";
+    const debugText = corsBlocked
+      ? buildPremiumCorsBlockedDebugInfo({
+          sessionGenerationId: getOrInitSessionAgreementGenerationId(),
+          intakeFingerprint: shortIntakeFingerprint(
+            premiumGapBaseIntakeRef.current || currentPremiumMergedIntakeKey || intakeCombined,
+          ),
+          agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+          renderSource: lastPremiumPipelineRenderSourceRef.current || "premium_full_draft_cors_blocked",
+          phase: premiumPostCheckoutPhase ?? "premium_cors_blocked",
+          pageOrigin,
+          apiOrigin,
+        })
+      : buildPremiumNetworkRecoverableDebugInfo({
+          sessionGenerationId: getOrInitSessionAgreementGenerationId(),
+          intakeFingerprint: shortIntakeFingerprint(
+            premiumGapBaseIntakeRef.current || currentPremiumMergedIntakeKey || intakeCombined,
+          ),
+          agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+          renderSource: lastPremiumPipelineRenderSourceRef.current || "premium_network_retryable",
+          phase: premiumPostCheckoutPhase ?? "premium_network_recoverable",
+        });
     try {
       await navigator.clipboard.writeText(debugText);
     } catch {
@@ -14980,7 +15070,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (
       premiumPostCheckoutPhase === "premium_network_recoverable" ||
       premiumPostCheckoutPhase === "network_retry" ||
+      premiumPostCheckoutPhase === "premium_cors_blocked" ||
       premiumTruthPipelineSource === "premium_network_retryable" ||
+      premiumTruthPipelineSource === "premium_full_draft_cors_blocked" ||
       premiumTruthPipelineSource === "premium_network_local_recovery" ||
       premiumTruthPipelineSource === "premium_degraded_server_local_recovery" ||
       lastPremiumPipelineRenderSourceRef.current === "premium_network_retryable" ||
@@ -17122,9 +17214,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // review state machine and its inputs are initialized before use — prevents the post-checkout
   // "cannot access X before initialization" temporal-dead-zone crash in the CTA useMemo.
   const premiumReturnWaitActive = Boolean(
-    (premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable") ||
+    (premiumPostCheckoutPhase &&
+      premiumPostCheckoutPhase !== "premium_network_recoverable" &&
+      premiumPostCheckoutPhase !== "premium_cors_blocked") ||
       premiumAuthoritativeRequestInFlightUi ||
       premiumReturnPatienceExtended,
+  );
+  const showPremiumCorsBlockedPanel = Boolean(
+    premiumPaidDocumentSurface &&
+      (hasPaidPremiumCompletionSession() || premiumPersistedFlowActive) &&
+      (premiumPostCheckoutPhase === "premium_cors_blocked" ||
+        premiumTruthPipelineSource === "premium_full_draft_cors_blocked") &&
+      !authoritativePremiumUiCommitted &&
+      !canProceedWithPaidProDocument,
   );
   const showPremiumNetworkRecoverablePanel = Boolean(
     premiumPaidDocumentSurface &&
@@ -17132,6 +17234,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (premiumPostCheckoutPhase === "premium_network_recoverable" ||
         premiumPostCheckoutPhase === "network_retry" ||
         premiumTruthPipelineSource === "premium_network_retryable") &&
+      !showPremiumCorsBlockedPanel &&
       !authoritativePremiumUiCommitted &&
       !canProceedWithPaidProDocument,
   );
@@ -22262,7 +22365,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (premiumPaidUnavailableRetry || !canProceedWithPaidProDocument) &&
       !premiumReturnWaitActive &&
       !showGuidedCompletionRecovery &&
-      !showPremiumNetworkRecoverablePanel,
+      !showPremiumNetworkRecoverablePanel &&
+      !showPremiumCorsBlockedPanel,
   );
   const proAmberRecoveryHeadline = premiumGenerationApiUnavailable
     ? PAID_PRO_API_UNAVAILABLE_HEADLINE
@@ -22285,7 +22389,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (showStrictRetryNeedsDetailsPanel ||
         showProAmberRecoveryPanel ||
         premiumGenerationApiUnavailable ||
-        showPremiumNetworkRecoverablePanel),
+        showPremiumNetworkRecoverablePanel ||
+        showPremiumCorsBlockedPanel),
   );
 
   /** QA invariants: paid review must never silently degrade into starter / empty / Pro-upsell state. */
@@ -27062,7 +27167,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     </div>
                                   </div>
                                 ) : null}
-                                {showPremiumNetworkRecoverablePanel ? (
+                                {showPremiumCorsBlockedPanel ? (
+                                  <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
+                                    <div
+                                      className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-4 py-5 sm:px-6 sm:py-6"
+                                      role="status"
+                                      aria-live="polite"
+                                      data-testid="premium-cors-blocked-panel"
+                                    >
+                                      <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
+                                        {PREMIUM_CORS_BLOCKED_HEADLINE}
+                                      </p>
+                                      <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
+                                        {PREMIUM_CORS_BLOCKED_BODY}
+                                      </p>
+                                      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch sm:gap-2">
+                                        <button
+                                          type="button"
+                                          className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25 sm:w-auto"
+                                          data-testid="premium-cors-blocked-retry"
+                                          onClick={handleRetryProFullDraft}
+                                        >
+                                          {PREMIUM_CORS_BLOCKED_RETRY_LABEL}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-600/50 bg-transparent px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-900/40 sm:w-auto"
+                                          data-testid="premium-cors-blocked-copy-debug"
+                                          onClick={() => void handleCopyPremiumNetworkRecoverableDebugInfo()}
+                                        >
+                                          {PREMIUM_CORS_BLOCKED_DEBUG_LABEL}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : showPremiumNetworkRecoverablePanel ? (
                                   <div className="mx-auto mb-4 w-full max-w-[850px] px-0 sm:px-1">
                                     <div
                                       className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-4 py-5 sm:px-6 sm:py-6"

@@ -1011,26 +1011,22 @@ export async function postPremiumFullDraftWithRetry(
       lastErr = e;
       if (isPremiumFullDraftCorsBlocked(e)) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (import.meta.env.DEV) {
+        const apiOrigin = (() => {
+          try {
+            return new URL(apiUrl("/")).origin;
+          } catch {
+            return null;
+          }
+        })();
+        const pageOrigin = typeof window !== "undefined" ? window.location.origin : null;
+        if (import.meta.env.MODE !== "test") {
           // eslint-disable-next-line no-console
           console.error("[premium-full-draft-cors-blocked]", {
-            apiOrigin: (() => {
-              try {
-                return new URL(apiUrl("/")).origin;
-              } catch {
-                return null;
-              }
-            })(),
-            pageOrigin: typeof window !== "undefined" ? window.location.origin : null,
+            apiOrigin,
+            pageOrigin,
             originsMatch:
-              typeof window !== "undefined"
-                ? (() => {
-                    try {
-                      return new URL(apiUrl("/")).origin === window.location.origin;
-                    } catch {
-                      return false;
-                    }
-                  })()
+              pageOrigin && apiOrigin
+                ? apiOrigin === pageOrigin
                 : null,
             message: msg.slice(0, 200),
             hint:

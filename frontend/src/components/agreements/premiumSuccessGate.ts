@@ -18,7 +18,8 @@ function pipelineIsIneligible(s: string | null | undefined): boolean {
     s === "stale_intake" ||
     s === "rejected_paid_corpus" ||
     s === "premium_network_retryable" ||
-    s === "premium_generation_retryable"
+    s === "premium_generation_retryable" ||
+    s === "premium_full_draft_cors_blocked"
   );
 }
 

@@ -70,12 +70,24 @@ def cors_allowed_origins() -> List[str]:
     return []
 
 
+def _railway_deploy_detected() -> bool:
+    """Railway injects service metadata on hosted backends (split SPA/API deploys)."""
+    return bool(
+        os.getenv("RAILWAY_ENVIRONMENT", "").strip()
+        or os.getenv("RAILWAY_SERVICE_ID", "").strip()
+        or os.getenv("RAILWAY_PROJECT_ID", "").strip()
+    )
+
+
 def _origin_suffix_allowlist() -> List[str]:
     raw = os.getenv("CLAW_CORS_ALLOW_ORIGIN_SUFFIXES", "").strip()
     if raw:
         return [s.strip() for s in raw.split(",") if s.strip()]
     env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
     if env in ("staging", "qa", "preview", "test"):
+        return [".up.railway.app", ".railway.app"]
+    # Production Railway API + separate Railway SPA (e.g. believable-gentleness → claw-protocol).
+    if _railway_deploy_detected():
         return [".up.railway.app", ".railway.app"]
     return []
 
@@ -104,8 +116,14 @@ def apply_cors_headers_to_response(response: Response, origin: str) -> Response:
         return response
     response.headers["Access-Control-Allow-Origin"] = normalized
     response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers.setdefault("Access-Control-Allow-Methods", "*")
-    response.headers.setdefault("Access-Control-Allow-Headers", "*")
+    response.headers.setdefault(
+        "Access-Control-Allow-Methods",
+        "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    )
+    response.headers.setdefault(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, X-Request-Id, X-Claw-Org-Id, X-Claw-Agreement-Id",
+    )
     exposed = response.headers.get("access-control-expose-headers", "")
     for hdr in CORS_EXPOSE_PAID_PRO_HEADERS:
         if hdr.lower() not in exposed.lower():

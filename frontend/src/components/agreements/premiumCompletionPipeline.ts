@@ -248,7 +248,8 @@ export type PremiumRenderSource =
   | "premium_network_retryable"
   | "premium_network_local_recovery"
   | "premium_degraded_server_local_recovery"
-  | "premium_generation_retryable";
+  | "premium_generation_retryable"
+  | "premium_full_draft_cors_blocked";
 
 export type PremiumCompletionResult = {
   premiumDraft: ParsedDraftShape;
@@ -298,6 +299,8 @@ export type PremiumCompletionResult = {
   premiumDegradedServerLocalRecovery?: boolean;
   /** Recoverable server generation failure (e.g. airlock_blocked with empty document) — retry in modal. */
   premiumGenerationRetryable?: boolean;
+  /** Browser blocked cross-origin premium-full-draft (missing ACAO) — never local degraded recovery. */
+  premiumFullDraftCorsBlocked?: boolean;
   /** Client classification after output-quality pipeline (authoritative vs advisory clarifications). */
   premiumCompletionOutcome?: PremiumCompletionOutcome | null;
   /** Non-authoritative clarifications surfaced outside agreement body. */
@@ -1712,19 +1715,19 @@ async function runPremiumCompletionInner(
     });
     if (!fullResp.ok) {
       if (fullResp.failure_kind === "cors") {
+        premiumRenderSource = "premium_full_draft_cors_blocked";
         logPremiumCompletionDebug({
           stage: "premium_full_draft_cors_blocked",
           intakeLen: soT.length,
           accepted: false,
           rejectedReason: fullResp.error_code ?? "cors_blocked",
-          premiumRenderSource: "rejected_paid_corpus",
+          premiumRenderSource: "premium_full_draft_cors_blocked",
+          recoverySuppressed: true,
+          note: "browser_cors_blocked_no_server_response",
         });
-        if (import.meta.env.MODE !== "test" && intentContract.pro_strict) {
-          proIntentGateMessage = proIntentMessageWhenServerFullDraftFailed(intentContract);
-          premiumRenderSource = "rejected_paid_corpus";
-        }
         if (tierAEnabled) {
           tierADiag.backendGenerationOutcome = "cors_blocked";
+          tierADiag.premiumPipelineSource = "premium_full_draft_cors_blocked";
         }
       } else if (fullResp.failure_kind === "network" && fullResp.retryable) {
         logPremiumGenerationApiUnavailable({
@@ -2864,7 +2867,8 @@ async function runPremiumCompletionInner(
     !(winningPremiumBodyText || "").trim() &&
     premiumRenderSource !== "rejected_paid_corpus" &&
     premiumRenderSource !== "premium_network_retryable" &&
-    premiumRenderSource !== "premium_generation_retryable"
+    premiumRenderSource !== "premium_generation_retryable" &&
+    premiumRenderSource !== "premium_full_draft_cors_blocked"
   ) {
     const stripped = stripClientPremiumArtifactBlocksFromDraft(outMerged);
     const rawSoT = rawForSoT || rawIntake;
@@ -3093,6 +3097,36 @@ async function runPremiumCompletionInner(
       proIntentGateMessage: null,
       serverGenerationDegraded: null,
       premiumNetworkRetryable: true,
+      tierADiagnostic: tierADiag,
+    };
+  }
+  if (premiumRenderSource === "premium_full_draft_cors_blocked") {
+    if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
+    logPremiumCompletionDebug({
+      stage: "pipeline_return_premium_full_draft_cors_blocked",
+      accepted: false,
+      rejectedReason: "cors_blocked",
+      premiumRenderSource: "premium_full_draft_cors_blocked",
+      recoverySuppressed: true,
+      localRecoveryAttempted: false,
+      note: "no_premium_degraded_server_local_recovery",
+    });
+    return {
+      premiumDraft: outMerged,
+      premiumParties,
+      recipientCandidates,
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_full_draft_cors_blocked",
+      premiumReview,
+      premiumFinalizeAudit,
+      premiumReviewRoute,
+      staleIntakeOrGeneration: false,
+      agreementGenerationId: input.agreementGenerationId,
+      premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+      founderDetailsGateMessage: null,
+      proIntentGateMessage: null,
+      serverGenerationDegraded: null,
+      premiumFullDraftCorsBlocked: true,
       tierADiagnostic: tierADiag,
     };
   }

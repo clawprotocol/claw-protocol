@@ -13,7 +13,10 @@ export const PAID_PRO_API_UNAVAILABLE_HEADLINE =
 export const PAID_PRO_API_UNAVAILABLE_BODY =
   "Start the backend on http://127.0.0.1:8000 (see docs/DEV.md) or set VITE_API_URL to your API, then tap Retry Pro draft.";
 
-const API_UNAVAILABLE_PIPELINE_SOURCES = new Set<string>(["premium_network_retryable"]);
+const API_UNAVAILABLE_PIPELINE_SOURCES = new Set<string>([
+  "premium_network_retryable",
+  "premium_full_draft_cors_blocked",
+]);
 
 export function isPremiumGenerationApiUnavailablePipelineSource(
   source: string | null | undefined,
@@ -59,9 +62,11 @@ export function isPremiumGenerationApiUnavailableForUi(args: {
   if (args.hasPaidProSourceOfTruth) return false;
   if (String(args.pipelineSource || "").trim() === "premium_network_local_recovery") return false;
   if (String(args.pipelineSource || "").trim() === "premium_degraded_server_local_recovery") return false;
+  if (String(args.pipelineSource || "").trim() === "premium_full_draft_cors_blocked") return true;
   const phase = String(args.premiumPostCheckoutPhase || "").trim();
   if (
     phase === "premium_network_recoverable" ||
+    phase === "premium_cors_blocked" ||
     phase === "network_retry" ||
     phase === "generation_retry"
   ) {

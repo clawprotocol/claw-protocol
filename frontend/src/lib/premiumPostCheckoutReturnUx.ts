@@ -83,6 +83,14 @@ export const PREMIUM_DEGRADED_SERVER_RECOVERABLE_BODY =
   "We saved a review-ready Pro draft from your intake on this device. Retry Pro draft to request a fresh server version — no additional checkout.";
 export const PREMIUM_DEGRADED_SERVER_RECOVERABLE_RETRY_LABEL = "Retry Pro draft";
 
+export const PREMIUM_CORS_BLOCKED_HEADLINE =
+  "Your payment is confirmed. The Pro API could not be reached from this browser origin (CORS).";
+export const PREMIUM_CORS_BLOCKED_BODY =
+  "The server request never completed — this is an API routing/CORS configuration issue, not agreement quality. " +
+  "Confirm CLAW_CORS_ALLOW_ORIGINS on the API includes this SPA origin, then retry Pro draft.";
+export const PREMIUM_CORS_BLOCKED_RETRY_LABEL = "Retry Pro draft";
+export const PREMIUM_CORS_BLOCKED_DEBUG_LABEL = "Copy CORS debug info";
+
 export type PremiumNetworkRecoverableDebugPayload = {
   sessionGenerationId?: string | null;
   intakeFingerprint?: string | null;
@@ -91,6 +99,33 @@ export type PremiumNetworkRecoverableDebugPayload = {
   phase?: string | null;
   ts?: string;
 };
+
+export type PremiumCorsBlockedDebugPayload = PremiumNetworkRecoverableDebugPayload & {
+  pageOrigin?: string | null;
+  apiOrigin?: string | null;
+};
+
+export function buildPremiumCorsBlockedDebugInfo(payload: PremiumCorsBlockedDebugPayload): string {
+  const lines = [
+    "LawDog Pro checkout return (CORS blocked)",
+    `ts: ${payload.ts ?? new Date().toISOString()}`,
+    `phase: ${payload.phase ?? "premium_full_draft_cors_blocked"}`,
+    `pageOrigin: ${payload.pageOrigin ?? "—"}`,
+    `apiOrigin: ${payload.apiOrigin ?? "—"}`,
+    `sessionGenerationId: ${payload.sessionGenerationId ?? "—"}`,
+    `intakeFingerprint: ${payload.intakeFingerprint ?? "—"}`,
+    `agreementId: ${payload.agreementId ?? "—"}`,
+    `renderSource: ${payload.renderSource ?? "premium_full_draft_cors_blocked"}`,
+    "hint: API must return Access-Control-Allow-Origin for pageOrigin on POST and OPTIONS /api/agreements/premium-full-draft",
+  ];
+  return lines.join("\n");
+}
+
+export function logPremiumCorsBlocked(payload: PremiumCorsBlockedDebugPayload): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[premium-full-draft-cors-blocked]", payload);
+}
 
 export function buildPremiumNetworkRecoverableDebugInfo(
   payload: PremiumNetworkRecoverableDebugPayload,
