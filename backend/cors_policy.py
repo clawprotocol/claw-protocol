@@ -25,6 +25,7 @@ CORS_ALLOW_REQUEST_HEADERS: List[str] = [
     "X-Claw-Agreement-Id",
     "X-Claw-Affiliate-Code",
     "X-Claw-Paid-Pro-Perf-Trace",
+    "X-Claw-Review-First-Persist",
     "X-Claw-Recipient-Access-Token",
     "X-Claw-Recipient-Link-Mint-Key",
 ]

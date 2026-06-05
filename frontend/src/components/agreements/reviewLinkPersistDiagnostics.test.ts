@@ -1,66 +1,57 @@
-/** @vitest-environment jsdom */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  REVIEW_LINK_PERSIST_BLOCKING_MESSAGE,
-  REVIEW_LINK_PERSIST_ENDPOINT,
   buildReviewLinkPersistDiagnostics,
-  classifyReviewLinkPersistFailure,
-  formatReviewLinkPersistDebugInfo,
+  extractHttpDetailFromDraftResponseBody,
+  formatReviewLinkPersistUserMessage,
+  REVIEW_FIRST_PERSIST_REQUEST_HEADER,
 } from "./reviewLinkPersistDiagnostics";
 
-describe("reviewLinkPersistDiagnostics", () => {
-  beforeEach(() => {
-    vi.stubGlobal("window", {
-      location: { origin: "https://qa-frontend.up.railway.app" },
-    });
-    vi.stubEnv("VITE_CLAW_API_BASE", "https://claw-protocol-production.up.railway.app");
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.unstubAllEnvs();
-  });
-
-  it("classifies DNS resolution failures", () => {
+describe("reviewLinkPersistDiagnostics (Test278)", () => {
+  it("extracts structured draft_limit detail from 403 body", () => {
     expect(
-      classifyReviewLinkPersistFailure(new TypeError("Failed to fetch: net::ERR_NAME_NOT_RESOLVED")),
-    ).toBe("dns");
+      extractHttpDetailFromDraftResponseBody({
+        detail: {
+          code: "draft_limit_reached",
+          message: "Free workspaces can have up to 2 active drafts. Finish or upgrade to add another.",
+          paywall: true,
+        },
+      }),
+    ).toBe(
+      "draft_limit_reached: Free workspaces can have up to 2 active drafts. Finish or upgrade to add another.",
+    );
   });
 
-  it("classifies cross-origin Failed to fetch as cors", () => {
-    expect(classifyReviewLinkPersistFailure(new TypeError("Failed to fetch"))).toBe("cors");
-  });
-
-  it("classifies HTTP draft POST failures", () => {
-    expect(classifyReviewLinkPersistFailure(new Error("create_failed_http_503"), 503)).toBe("http");
-  });
-
-  it("builds routing diagnostics for review-link persist endpoint", async () => {
-    const { apiUrl } = await import("../../lib/clawApi");
-    const diag = buildReviewLinkPersistDiagnostics({
-      error: new TypeError("Failed to fetch"),
-      reason: "persist_failed",
+  it("buildReviewLinkPersistDiagnostics preserves full http error body", () => {
+    const err = Object.assign(new Error("create_failed_http_403"), {
+      httpStatus: 403,
+      httpDetail: "draft_limit_reached: capped",
+      responseBody: { detail: { code: "draft_limit_reached" } },
     });
-    expect(diag.pageOrigin).toBe("https://qa-frontend.up.railway.app");
-    expect(diag.apiOrigin).toBe("https://claw-protocol-production.up.railway.app");
-    expect(diag.endpoint).toBe(apiUrl(REVIEW_LINK_PERSIST_ENDPOINT));
-    expect(diag.failureClass).toBe("cors");
-    expect(diag.reason).toBe("persist_failed");
+    const diag = buildReviewLinkPersistDiagnostics({ error: err, reason: "persist_failed" });
+    expect(diag.httpStatus).toBe(403);
+    expect(diag.httpDetail).toBe("draft_limit_reached: capped");
+    expect(diag.responseBody).toEqual({ detail: { code: "draft_limit_reached" } });
+    expect(diag.rawMessage).toBe("create_failed_http_403");
   });
 
-  it("formats copyable debug payload", () => {
-    const diag = buildReviewLinkPersistDiagnostics({
-      error: new TypeError("Failed to fetch"),
+  it("formatReviewLinkPersistUserMessage exposes status, detail, and endpoint", () => {
+    const msg = formatReviewLinkPersistUserMessage({
+      pageOrigin: "https://app.lawdog.ai",
+      apiOrigin: "https://api.lawdog.ai",
+      endpoint: "https://api.lawdog.ai/api/agreements/draft",
+      method: "POST",
+      failureClass: "http",
       reason: "persist_failed",
+      rawMessage: "create_failed_http_403",
+      httpStatus: 403,
+      httpDetail: "draft_limit_reached: capped",
     });
-    const text = formatReviewLinkPersistDebugInfo(diag);
-    expect(text).toContain('"failureClass": "cors"');
-    expect(text).toContain('"endpoint"');
+    expect(msg).toContain("HTTP status: 403");
+    expect(msg).toContain("Backend detail: draft_limit_reached: capped");
+    expect(msg).toContain("Request endpoint: https://api.lawdog.ai/api/agreements/draft");
   });
 
-  it("exposes professional blocking copy for persist failures", () => {
-    expect(REVIEW_LINK_PERSIST_BLOCKING_MESSAGE).toContain("agreement save service");
-    expect(REVIEW_LINK_PERSIST_BLOCKING_MESSAGE).toContain("still saved in this browser");
+  it("exports review-first persist request header constant", () => {
+    expect(REVIEW_FIRST_PERSIST_REQUEST_HEADER).toBe("X-Claw-Review-First-Persist");
   });
 });

@@ -32,7 +32,7 @@ describe("Test274 review-link persist blocker", () => {
 
   it("persist network failure does not clear pinned authoritative corpus", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 9000);
+    const block = intake.slice(handoffIdx, handoffIdx + 12000);
     expect(block).toContain('restorePinnedFinalizedSignerCorpus("guided_review_first_handoff_persist")');
     expect(block).toContain("auditPaidProReviewLinkGenerationCorpus(bodyPlain)");
     expect(block).not.toMatch(
@@ -82,5 +82,29 @@ describe("Test274 review-link persist blocker", () => {
     expect(screen).toContain('data-testid="simple-pro-review-link-copy-agreement"');
     expect(screen).toContain('data-testid="simple-pro-review-link-copy-debug"');
     expect(screen).toContain("Retry creating review link");
+  });
+});
+
+describe("Test278 review-first persist regression", () => {
+  it("postNewDraft logs review-first request/response and sends bypass header", () => {
+    expect(intake).toContain("logReviewFirstPersistRequest");
+    expect(intake).toContain("logReviewFirstPersistResponse");
+    expect(intake).toContain("REVIEW_FIRST_PERSIST_REQUEST_HEADER");
+    expect(intake).toContain('[REVIEW_FIRST_PERSIST_REQUEST_HEADER]: "1"');
+    expect(intake).toContain("reviewFirstHandoffPersist");
+  });
+
+  it("runPersistAndOpen threads reviewFirstHandoffPersist into postNewDraft", () => {
+    const fnIdx = intake.indexOf("async function runPersistAndOpen");
+    const block = intake.slice(fnIdx, fnIdx + 4200);
+    expect(block).toContain("postNewDraft(parsed, partyNameContext, { reviewFirstHandoffPersist })");
+  });
+
+  it("failReviewFirstPersist surfaces HTTP status, detail, and endpoint in user message", () => {
+    const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
+    const block = intake.slice(handoffIdx, handoffIdx + 10000);
+    expect(block).toContain("formatReviewLinkPersistUserMessage");
+    expect(block).toContain("logReviewFirstPersistInvariantViolation");
+    expect(block).toContain("paid_pro_corpus_and_signer_metadata_persist_failed");
   });
 });

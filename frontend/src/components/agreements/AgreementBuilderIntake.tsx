@@ -506,10 +506,19 @@ import {
   isReviewFirstPersistFailureReason,
 } from "./guidedDealCompletion/guidedFinalReviewToSigning";
 import {
+  REVIEW_FIRST_PERSIST_REQUEST_HEADER,
   REVIEW_LINK_PERSIST_BLOCKING_MESSAGE,
   buildReviewLinkPersistDiagnostics,
+  extractHttpDetailFromDraftResponseBody,
   formatReviewLinkPersistDebugInfo,
+  formatReviewLinkPersistUserMessage,
+  headersRecordForLog,
+  logReviewFirstPersistInvariantViolation,
+  logReviewFirstPersistRequest,
+  logReviewFirstPersistResponse,
   logReviewLinkPersistFailure,
+  resolveReviewFirstPersistQaBypass,
+  type ReviewFirstPersistHttpError,
   type ReviewLinkPersistDiagnostics,
 } from "./reviewLinkPersistDiagnostics";
 import { formatAgreementPlainTextForEditing } from "../../agreement/formatAgreementPlainTextForEditing";
@@ -4640,7 +4649,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   async function postNewDraft(
     parsed: ParsedDraftShape,
     partyNameContext?: string,
+    options?: { reviewFirstHandoffPersist?: boolean },
   ): Promise<{ id: string; postDraft: AgreementDraft | null }> {
+    const reviewFirstHandoffPersist = Boolean(options?.reviewFirstHandoffPersist);
     const merged = mergeParsedForApiPersist(parsed);
     const persistPurpose = longestPlainForAgreementPersist(merged, agreementDocumentTextRef.current).trim() || merged.purpose;
     const {
@@ -4688,11 +4699,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       effective_date: rest.effective_date ?? null,
     };
     const draftUrl = apiUrl("/api/agreements/draft");
+    const draftHeaders = clawAgreementHeaders({
+      "Content-Type": "application/json",
+      ...(reviewFirstHandoffPersist ? { [REVIEW_FIRST_PERSIST_REQUEST_HEADER]: "1" } : {}),
+    });
+    const draftBody = JSON.stringify(apiDraft);
+    if (reviewFirstHandoffPersist) {
+      logReviewFirstPersistRequest({
+        endpoint: draftUrl,
+        method: "POST",
+        headers: headersRecordForLog(draftHeaders),
+        payloadKeys: Object.keys(apiDraft),
+        payloadLen: draftBody.length,
+        reviewIntent: "review",
+        qaBypass: resolveReviewFirstPersistQaBypass(),
+        agreementId: reviewAgreementIdRef.current?.trim() || readCreateReviewAgreementResumeId() || null,
+        draftExists: Boolean(reviewAgreementIdRef.current?.trim() || readCreateReviewAgreementResumeId()),
+      });
+    }
     console.log("[AgreementIntake] generate: draft API request");
     const res = await fetch(draftUrl, {
       method: "POST",
-      headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(apiDraft),
+      headers: draftHeaders,
+      body: draftBody,
     });
     const payload = await res.json().catch(() => ({}));
     let apiHost = "";
@@ -4709,6 +4738,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hasDraftPayload: payload?.draft != null,
     });
     if (!res.ok) {
+      const httpDetail = extractHttpDetailFromDraftResponseBody(payload);
+      if (reviewFirstHandoffPersist) {
+        logReviewFirstPersistResponse({
+          status: res.status,
+          detail: httpDetail,
+          body: payload,
+        });
+      }
       if (import.meta.env.PROD) {
         // eslint-disable-next-line no-console
         console.warn("[CLAW] draft POST failed", { status: res.status, path: "/api/agreements/draft" });
@@ -4727,11 +4764,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : pe.detail != null && typeof pe.detail === "object"
               ? "detail_object"
               : "";
-      if (import.meta.env.PROD) {
+      if (import.meta.env.PROD && !reviewFirstHandoffPersist) {
         // eslint-disable-next-line no-console
         console.warn("[CLAW] draft POST error detail (truncated)", { status: res.status, detailKind });
       }
-      throw new Error(`create_failed_http_${res.status}`);
+      const err = new Error(`create_failed_http_${res.status}`) as ReviewFirstPersistHttpError;
+      err.httpStatus = res.status;
+      err.httpDetail = httpDetail;
+      err.responseBody = payload;
+      throw err;
     }
     const id = String(payload?.id || "").trim();
     const postDraft = normalizeAgreementDraftFromApi(payload?.draft ?? null, {
@@ -9913,7 +9954,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           { fallbackAgreementId: id, partyNameContext },
         );
       } else {
-        const created = await postNewDraft(parsed, partyNameContext);
+        const created = await postNewDraft(parsed, partyNameContext, { reviewFirstHandoffPersist });
         id = created.id;
         postDraft = created.postDraft;
       }
@@ -10118,6 +10159,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const diagnostics = buildReviewLinkPersistDiagnostics({
           error: e,
           reason: "persist_failed",
+          reviewIntent: premiumSendIntent ?? "review",
+          agreementId: reviewAgreementIdRef.current?.trim() || readCreateReviewAgreementResumeId() || null,
+          draftExists: Boolean(reviewAgreementIdRef.current?.trim() || readCreateReviewAgreementResumeId()),
         });
         reviewLinkPersistFailureRef.current = diagnostics;
         logReviewLinkPersistFailure(diagnostics);
@@ -22956,30 +23000,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       logReviewFirstHandoffStart({ source, phase: createFlowPhase });
 
       const failReviewFirstPersist = (
-        message: string,
+        _message: string,
         reason: string,
         diagnostics?: ReviewLinkPersistDiagnostics | null,
       ) => {
         const diag =
           diagnostics ??
           reviewLinkPersistFailureRef.current ??
-          buildReviewLinkPersistDiagnostics({ reason, error: null });
+          buildReviewLinkPersistDiagnostics({ reason, error: null, reviewIntent: "review" });
         reviewLinkPersistFailureRef.current = diag;
         logReviewLinkPersistFailure(diag);
+        const userMessage = formatReviewLinkPersistUserMessage(diag);
         logReviewFirstError({
           source,
           reason,
-          message,
+          message: userMessage,
           failureClass: "persist",
           pageOrigin: diag.pageOrigin,
           apiOrigin: diag.apiOrigin,
           endpoint: diag.endpoint,
           persistFailureClass: diag.failureClass,
           rawMessage: diag.rawMessage,
+          httpStatus: diag.httpStatus ?? null,
+          httpDetail: diag.httpDetail ?? null,
         });
         setReviewFirstSigningTokenSecretMissing(false);
         setHardError(null);
-        setReviewFirstHandoffError(message);
+        setReviewFirstHandoffError(userMessage);
         setReviewLinkPersistFailureDiagnostics(diag);
       };
 
@@ -23126,6 +23173,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             resumeAgreementId: readCreateReviewAgreementResumeId(),
           });
           if (!ok && !id) {
+            const authoritativePaidPro =
+              isPaidProAgreementAuthoritative({
+                draft: mergedDraft,
+                tier,
+                premiumSendPathUnlocked,
+                premiumPersistedFlowActive,
+                premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+              }) && paidProSignerMetadataFinalized;
+            if (authoritativePaidPro) {
+              logReviewFirstPersistInvariantViolation({
+                source,
+                reason: "paid_pro_corpus_and_signer_metadata_persist_failed",
+                corpusLen: bodyPlain.length,
+                signerMetadataFinalized: paidProSignerMetadataFinalized,
+                diagnostics: reviewLinkPersistFailureRef.current,
+              });
+            }
             failReviewFirstPersist(
               REVIEW_LINK_PERSIST_BLOCKING_MESSAGE,
               "persist_failed",
@@ -23244,6 +23308,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipient2Email,
       recipientSignerLabels,
       extraPartyReviewEmails,
+      tier,
+      premiumSendPathUnlocked,
+      premiumPersistedFlowActive,
+      paidProSignerMetadataFinalized,
     ],
   );
 

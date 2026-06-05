@@ -65,6 +65,37 @@ def test_free_tier_blocks_third_draft(isolated_usage_db, monkeypatch: pytest.Mon
     assert body.get("detail", {}).get("code") == "draft_limit_reached"
 
 
+def test_review_first_paid_pro_persist_bypasses_free_draft_cap(isolated_usage_db, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
+    client = TestClient(app)
+    h = {"X-Claw-Org-Id": "test-org-review-first"}
+    body = {
+        "title": "Paid Pro Review",
+        "jurisdiction": "CA",
+        "parties": [{"name": "A", "role": "owner"}],
+        "purpose": "x" * 600,
+        "payment_terms": "pt",
+        "duration": None,
+        "due_date": None,
+        "effective_date": None,
+    }
+    for _ in range(2):
+        r = client.post("/api/agreements/draft", headers=h, json=body)
+        assert r.status_code == 200, r.text
+
+    r3 = client.post(
+        "/api/agreements/draft",
+        headers={**h, "X-Claw-Review-First-Persist": "1"},
+        json=body,
+    )
+    assert r3.status_code == 200, r3.text
+
+    r4 = client.post("/api/agreements/draft", headers=h, json=body)
+    assert r4.status_code == 403
+    assert r4.json().get("detail", {}).get("code") == "draft_limit_reached"
+
+
 def test_draft_requires_x_claw_org_id_header(isolated_usage_db, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     client = TestClient(app)

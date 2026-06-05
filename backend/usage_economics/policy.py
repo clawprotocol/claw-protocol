@@ -84,6 +84,22 @@ def _maybe_flag_abuse(*, subject_ref: str, ip: str, store: UsageEconomicsStore) 
         log.exception("usage_economics abuse heuristic failed")
 
 
+REVIEW_FIRST_PERSIST_REQUEST_HEADER = "X-Claw-Review-First-Persist"
+PAID_PRO_REVIEW_FIRST_MIN_PURPOSE_LEN = 500
+
+
+def review_first_paid_pro_persist_bypass(*, request: Request, purpose: str) -> bool:
+    """
+    Paid Pro review-first handoff persists a long frozen corpus as a new draft row.
+    Frontend QA bypass does not register backend billing; allow this narrow path when
+    the client signals review-first persist with substantial Pro corpus text.
+    """
+    hdr = (request.headers.get(REVIEW_FIRST_PERSIST_REQUEST_HEADER) or "").strip().lower()
+    if hdr not in ("1", "true", "yes"):
+        return False
+    return len((purpose or "").strip()) >= PAID_PRO_REVIEW_FIRST_MIN_PURPOSE_LEN
+
+
 def assert_can_create_draft(*, subject_ref: str, request_ip: str) -> None:
     """
     Raises HTTPException 403 with detail dict when blocked.

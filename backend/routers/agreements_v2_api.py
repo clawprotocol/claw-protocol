@@ -133,6 +133,7 @@ from backend.usage_economics.constants import WATERMARK_LABEL
 from backend.usage_economics.policy import (
     assert_can_complete_agreement,
     assert_can_create_draft,
+    review_first_paid_pro_persist_bypass,
     assert_free_incomplete_draft_not_expired,
     assert_registered_owner_matches,
     economics_overlay_for_agreement,
@@ -5033,7 +5034,8 @@ def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict
     require_claw_org_id_header(request)
     subject = resolve_subject_from_request(request)
     request_ip = request.client.host if request.client else "unknown"
-    assert_can_create_draft(subject_ref=subject, request_ip=request_ip or "unknown")
+    if not review_first_paid_pro_persist_bypass(request=request, purpose=body.purpose or ""):
+        assert_can_create_draft(subject_ref=subject, request_ip=request_ip or "unknown")
     now = _utc_now_iso()
     agreement_id = str(uuid.uuid4())
     parties = _ensure_agreement_parties_have_ids(list(body.parties or []))

@@ -21,6 +21,8 @@ from backend.cors_policy import (
 
 def test_cors_allow_request_headers_includes_paid_pro_perf_trace_case_insensitive() -> None:
     assert "X-Claw-Paid-Pro-Perf-Trace" in CORS_ALLOW_REQUEST_HEADERS
+    assert "X-Claw-Review-First-Persist" in CORS_ALLOW_REQUEST_HEADERS
+    assert cors_allow_request_header_allowed("x-claw-review-first-persist")
     assert cors_allow_request_header_allowed("x-claw-paid-pro-perf-trace")
     assert cors_allow_request_header_allowed("X-CLAW-ORG-ID")
     assert cors_allow_request_header_allowed("content-type")
