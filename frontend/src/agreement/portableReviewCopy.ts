@@ -34,6 +34,9 @@ export const RECIPIENT_OUTSIDE_REVIEW_WORKFLOW =
 export const PORTABLE_REVIEW_PASTE_LABEL = "Paste or import";
 export const PORTABLE_REVIEW_PASTE_PLACEHOLDER =
   "Paste the full agreement or the sections you changed. Or import a .txt / .md file.";
+/** Review-first paste guardrail — shown on the suggest-revision intake surface. */
+export const REVIEW_FIRST_PASTE_GUARD_COPY =
+  "Paste the complete agreement text, not screenshots. LawDog will ignore headers, footers, and formatting noise and show only material wording changes.";
 export const PORTABLE_REVIEW_OCR_FOOTNOTE =
   "Plain text and Markdown files import here. Other formats: copy text out and paste.";
 

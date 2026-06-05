@@ -72,7 +72,8 @@ describe("AgreementRecipientReview read-tab draft exports", () => {
     expect(screen.queryByTestId("recipient-review-download-actions")).toBeNull();
     expect(screen.getByTestId("recipient-review-download-pdf")).toBeTruthy();
     expect(screen.queryByTestId("recipient-review-download-text")).toBeNull();
-    expect(screen.queryByTestId("recipient-review-copy-text")).toBeNull();
+    expect(screen.getByTestId("recipient-review-copy-text")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Copy agreement text for editing/i })).toBeTruthy();
     expect(screen.queryAllByTestId("recipient-review-download-pdf")).toHaveLength(1);
     expect(screen.queryByTestId("recipient-want-a-copy-card")).toBeNull();
 

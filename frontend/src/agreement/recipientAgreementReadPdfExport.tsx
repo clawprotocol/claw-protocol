@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NOT_LEGAL_ADVICE } from "../compliance/disclosureCopy";
+import { RECIPIENT_COPY_ACK_COPIED } from "./portableReviewCopy";
 import { recipientExportBasenameFromTitle } from "./recipientExportFilenames";
 import {
   RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE,
@@ -27,6 +28,10 @@ type Props = {
   pdfDownloadButtonNativeTitle?: string;
   /** Omit helper line under the button (e.g. when parent already showed trust copy). */
   suppressBareDisclosure?: boolean;
+  /** Plain agreement text for reviewer copy-to-clipboard (read tab editing workflow). */
+  editablePlainText?: string;
+  copyTextButtonLabel?: string;
+  copyTextButtonTestId?: string;
 };
 
 /**
@@ -42,8 +47,13 @@ export function RecipientAgreementReadPdfExport({
   pdfDownloadButtonTestId,
   pdfDownloadButtonNativeTitle,
   suppressBareDisclosure = false,
+  editablePlainText = "",
+  copyTextButtonLabel = "Copy agreement text for editing",
+  copyTextButtonTestId = "recipient-review-copy-text",
 }: Props) {
   const [busy, setBusy] = useState(false);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyAck, setCopyAck] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [a11yStatus, setA11yStatus] = useState("");
   const inFlightRef = useRef(false);
@@ -129,6 +139,22 @@ export function RecipientAgreementReadPdfExport({
   }, [exportError]);
 
   const hasBody = Boolean(scrubbedCurrentHtml.trim());
+  const editableText = editablePlainText.trim();
+
+  const onCopyEditableText = useCallback(async () => {
+    if (!editableText || copyBusy) return;
+    setCopyBusy(true);
+    setCopyAck(false);
+    try {
+      await navigator.clipboard.writeText(editableText);
+      setCopyAck(true);
+      window.setTimeout(() => setCopyAck(false), 2000);
+    } catch {
+      // clipboard may be denied
+    } finally {
+      setCopyBusy(false);
+    }
+  }, [copyBusy, editableText]);
 
   const helperClass = bare
     ? "text-[10px] leading-snug text-slate-500 sm:text-xs"
@@ -156,22 +182,35 @@ export function RecipientAgreementReadPdfExport({
           )}
         </p>
       )}
-      <button
-        type="button"
-        disabled={busy || !hasBody}
-        aria-busy={busy}
-        title={pdfDownloadButtonNativeTitle}
-        className={buttonClass}
-        data-testid={
-          pdfDownloadButtonTestId ?? (bare ? "recipient-request-copy-export-pdf" : "recipient-read-download-pdf")
-        }
-        onClick={() => {
-          safeSet(() => setExportError(null));
-          void onDownload();
-        }}
-      >
-        {busy ? "Preparing PDF…" : pdfDownloadButtonLabel}
-      </button>
+      <div className={bare ? "flex flex-col gap-1.5" : "mt-1.5 flex flex-col gap-1.5"}>
+        <button
+          type="button"
+          disabled={busy || !hasBody}
+          aria-busy={busy}
+          title={pdfDownloadButtonNativeTitle}
+          className={buttonClass}
+          data-testid={
+            pdfDownloadButtonTestId ?? (bare ? "recipient-request-copy-export-pdf" : "recipient-read-download-pdf")
+          }
+          onClick={() => {
+            safeSet(() => setExportError(null));
+            void onDownload();
+          }}
+        >
+          {busy ? "Preparing PDF…" : pdfDownloadButtonLabel}
+        </button>
+        {editableText ? (
+          <button
+            type="button"
+            disabled={copyBusy}
+            className={buttonClass}
+            data-testid={copyTextButtonTestId}
+            onClick={() => void onCopyEditableText()}
+          >
+            {copyAck ? RECIPIENT_COPY_ACK_COPIED : copyTextButtonLabel}
+          </button>
+        ) : null}
+      </div>
       {exportError ? (
         <p
           ref={exportErrorRef}

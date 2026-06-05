@@ -1,6 +1,10 @@
+import { normalizeReviewFirstAgreementText } from "./reviewFirstPasteNormalization";
+
 export type ReviewFirstChangedSection = {
   title: string;
   summary: string;
+  /** Detected clause/section heading, when available. */
+  clauseTitle: string;
   previous: string;
   proposed: string;
   fullPrevious: string;
@@ -9,6 +13,7 @@ export type ReviewFirstChangedSection = {
   proposedParts: ReviewFirstDiffPart[];
   added: string[];
   removed: string[];
+  classificationPriority: number;
 };
 
 export type ReviewFirstDiffPart = {
@@ -23,7 +28,12 @@ export type ReviewFirstTextDiffSummary = {
   changedSections: ReviewFirstChangedSection[];
   normalizedPrevious: string;
   normalizedProposed: string;
+  /** True when PDF/header/footer or formatting noise was stripped before compare. */
+  formattingArtifactsIgnored: boolean;
 };
+
+export const REVIEW_FIRST_FORMATTING_ARTIFACTS_NOTE =
+  "Formatting/header changes ignored.";
 
 function normalizeLineForComparison(line: string): string {
   return line
@@ -57,7 +67,7 @@ function displayBlocks(text: string): string[] {
     .replace(/[\u2018\u2019\u2032]/g, "'")
     .replace(/[\u201c\u201d\u2033]/g, '"')
     .replace(/[\u2013\u2014]/g, "-")
-    .split(/\n\s*\n|\n(?=\s*(?:SCHEDULE|SECTION|ARTICLE)\b)/i)
+    .split(/\n\s*\n|\n(?=\s*(?:SCHEDULE|SECTION|ARTICLE)\b)|\n(?=\s*\d+\.\s)/i)
     .map((block) =>
       block
         .split("\n")
@@ -187,33 +197,80 @@ function sectionTitle(previous: string, proposed: string): string {
   return "";
 }
 
-function sectionLabel(title: string, previous: string, proposed: string): { label: string; priority: number } {
-  const haystack = `${title} ${previous} ${proposed}`.toLocaleLowerCase();
-  if (/\bschedule a\b/.test(haystack)) {
+const PAYMENT_TIMING_CHANGE_RE =
+  /\b(?:thirty|fifteen|twenty|ten|forty|sixty|ninety|\d+)\s*\(\s*\d+\s*\)\s*days?\b|\bwithin\s+(?:thirty|fifteen|twenty|ten|\d+)\s*(?:\(\s*\d+\s*\)\s*)?days?\b|\bnet\s*\d+\b/i;
+
+const OWNERSHIP_CHANGE_RE =
+  /\b(?:ownership|owns?\s+the|work\s+product|intellectual\s+property|title\s+to|assigns?\s+(?:to|all)|deliverables)\b/i;
+
+const PAYMENT_CONTEXT_RE = /\b(?:payment|fee|invoice|invoic|compensation|net\s*\d+|due)\b/i;
+
+function isPaymentTimingChange(changeHaystack: string, contextHaystack: string): boolean {
+  if (!PAYMENT_CONTEXT_RE.test(contextHaystack) && !/\bschedule a\b/.test(contextHaystack)) return false;
+  if (PAYMENT_TIMING_CHANGE_RE.test(changeHaystack)) return true;
+  const spelledDayCountChanged = /\b(?:thirty|fifteen|twenty|ten|forty|sixty|ninety)\b/.test(changeHaystack);
+  const numericDayCountChanged =
+    /\b\d+\b/.test(changeHaystack) &&
+    (/\bdays?\b/.test(changeHaystack) ||
+      /\(\s*\d+\s*\)/.test(changeHaystack) ||
+      /\bwithin\b/.test(contextHaystack) ||
+      /\bschedule a\b/.test(contextHaystack));
+  return spelledDayCountChanged || numericDayCountChanged;
+}
+
+function isOwnershipClauseChange(clauseTitle: string, changeHaystack: string, contextHaystack: string): boolean {
+  const ownershipHeading = /\b(?:ownership|work\s+product|intellectual\s+property)\b/i.test(clauseTitle);
+  const ownershipContext = ownershipHeading || OWNERSHIP_CHANGE_RE.test(contextHaystack.slice(0, 160));
+  if (!ownershipContext) return false;
+  return (
+    OWNERSHIP_CHANGE_RE.test(changeHaystack) ||
+    /\b(?:owns?|assigns?|deliverables|work\s+product|intellectual\s+property|company|client)\b/.test(changeHaystack)
+  );
+}
+
+function sectionLabel(
+  clauseTitle: string,
+  previous: string,
+  proposed: string,
+  changed: { added: string[]; removed: string[] },
+): { label: string; priority: number } {
+  const changeHaystack = [...changed.added, ...changed.removed].join(" ").toLocaleLowerCase();
+  const contextHaystack = `${clauseTitle} ${previous} ${proposed}`.toLocaleLowerCase();
+
+  if (isPaymentTimingChange(changeHaystack, contextHaystack)) {
+    return { label: "Payment timing changed", priority: 8 };
+  }
+  if (/\bschedule a\b/.test(contextHaystack)) {
     return { label: "Payment terms changed", priority: 10 };
   }
-  if (/\b(owner|owns|ownership|deliverables|work product|intellectual property|ip)\b/.test(haystack)) {
+  if (isOwnershipClauseChange(clauseTitle, changeHaystack, contextHaystack)) {
     return { label: "Ownership changed", priority: 30 };
   }
-  if (/\b(payment|fee|invoice|net \d+|compensation|due)\b/.test(haystack)) {
+  if (
+    /\b(?:party|parties)\b/.test(contextHaystack) &&
+    /\b(?:llc|inc|corp|company|client|provider|contractor|between)\b/.test(changeHaystack)
+  ) {
+    return { label: "Party changed", priority: 22 };
+  }
+  if (PAYMENT_CONTEXT_RE.test(contextHaystack) && PAYMENT_CONTEXT_RE.test(changeHaystack)) {
     return { label: "Payment terms changed", priority: 10 };
   }
-  if (/\b(purpose|scope|services|statement of work|sow)\b/.test(haystack)) {
+  if (/\b(purpose|scope|services|statement of work|sow)\b/.test(contextHaystack)) {
     return { label: "Purpose and scope changed", priority: 20 };
   }
-  if (/\b(support|response|escalation|handoff|acceptance)\b/.test(haystack)) {
+  if (/\b(support|response|escalation|handoff|acceptance)\b/.test(contextHaystack)) {
     return { label: "Support terms changed", priority: 40 };
   }
-  if (/\b(terminate|termination|cancel|notice)\b/.test(haystack)) {
+  if (/\b(terminate|termination|cancel)\b/.test(contextHaystack)) {
     return { label: "Termination terms changed", priority: 50 };
   }
-  if (/\b(confidential|confidentiality|non-disclosure)\b/.test(haystack)) {
+  if (/\b(confidential|confidentiality|non-disclosure)\b/.test(contextHaystack)) {
     return { label: "Confidentiality changed", priority: 60 };
   }
-  if (/\b(liability|indemn|damages|warranty)\b/.test(haystack)) {
+  if (/\b(liability|indemn|damages|warranty)\b/.test(contextHaystack)) {
     return { label: "Risk allocation changed", priority: 70 };
   }
-  if (/\b(signature|signed by|signer|name|title|company|client llc|studio llc)\b/.test(haystack)) {
+  if (/\b(signature|signed by|signer)\b/.test(contextHaystack)) {
     return { label: "Signer name changed", priority: 100 };
   }
   return { label: "Agreement wording changed", priority: 90 };
@@ -235,13 +292,14 @@ export function getChangedReviewSections(previousText: string, proposedText: str
     proposedCursor = proposedEnd + 1;
     if (!changedPrevious && !changedProposed) return;
     const rawTitle = sectionTitle(changedPrevious, changedProposed);
-    const label = sectionLabel(rawTitle, changedPrevious, changedProposed);
     const inline = buildInlineDiff(changedPrevious, changedProposed);
+    const label = sectionLabel(rawTitle, changedPrevious, changedProposed, inline);
     const previousParts = inline.previousParts.length ? inline.previousParts : [{ text: "(No prior wording)", kind: "removed" as const }];
     const proposedParts = inline.proposedParts.length ? inline.proposedParts : [{ text: "(Removed)", kind: "added" as const }];
     sections.push({
       title: label.label,
       summary: label.label,
+      clauseTitle: rawTitle,
       previous: joinTokenParts(previousParts) || "(No prior wording)",
       proposed: joinTokenParts(proposedParts) || "(Removed)",
       fullPrevious: changedPrevious || "(No prior wording)",
@@ -250,6 +308,7 @@ export function getChangedReviewSections(previousText: string, proposedText: str
       proposedParts,
       added: inline.added,
       removed: inline.removed,
+      classificationPriority: label.priority,
     });
   };
 
@@ -268,13 +327,14 @@ export function getChangedReviewSections(previousText: string, proposedText: str
     const changedProposed = proposedBlocks.slice(proposedCursor, proposedEnd).join("\n\n").trim();
     if (changedPrevious || changedProposed) {
       const rawTitle = sectionTitle(changedPrevious, changedProposed);
-      const label = sectionLabel(rawTitle, changedPrevious, changedProposed);
       const inline = buildInlineDiff(changedPrevious, changedProposed);
+      const label = sectionLabel(rawTitle, changedPrevious, changedProposed, inline);
       const previousParts = inline.previousParts.length ? inline.previousParts : [{ text: "(No prior wording)", kind: "removed" as const }];
       const proposedParts = inline.proposedParts.length ? inline.proposedParts : [{ text: "(Removed)", kind: "added" as const }];
       sections.push({
         title: label.label,
         summary: label.label,
+        clauseTitle: rawTitle,
         previous: joinTokenParts(previousParts) || "(No prior wording)",
         proposed: joinTokenParts(proposedParts) || "(Removed)",
         fullPrevious: changedPrevious || "(No prior wording)",
@@ -283,19 +343,20 @@ export function getChangedReviewSections(previousText: string, proposedText: str
         proposedParts,
         added: inline.added,
         removed: inline.removed,
+        classificationPriority: label.priority,
       });
     }
   }
-  return sections.sort((a, b) => {
-    const ap = sectionLabel(a.title, a.fullPrevious, a.fullProposed).priority;
-    const bp = sectionLabel(b.title, b.fullPrevious, b.fullProposed).priority;
-    return ap - bp;
-  });
+  return sections.sort((a, b) => a.classificationPriority - b.classificationPriority);
 }
 
 export function buildReviewFirstTextDiffSummary(previousText: string, proposedText: string): ReviewFirstTextDiffSummary {
-  const normalizedPrevious = normalizeReviewTextForComparison(previousText);
-  const normalizedProposed = normalizeReviewTextForComparison(proposedText);
+  const preparedPrevious = normalizeReviewFirstAgreementText(previousText);
+  const preparedProposed = normalizeReviewFirstAgreementText(proposedText);
+  const formattingArtifactsIgnored =
+    preparedPrevious.hadFormattingArtifacts || preparedProposed.hadFormattingArtifacts;
+  const normalizedPrevious = normalizeReviewTextForComparison(preparedPrevious.text);
+  const normalizedProposed = normalizeReviewTextForComparison(preparedProposed.text);
   if (!normalizedProposed) {
     return {
       hasMaterialChanges: false,
@@ -304,6 +365,7 @@ export function buildReviewFirstTextDiffSummary(previousText: string, proposedTe
       changedSections: [],
       normalizedPrevious,
       normalizedProposed,
+      formattingArtifactsIgnored,
     };
   }
   if (normalizedPrevious === normalizedProposed) {
@@ -314,9 +376,10 @@ export function buildReviewFirstTextDiffSummary(previousText: string, proposedTe
       changedSections: [],
       normalizedPrevious,
       normalizedProposed,
+      formattingArtifactsIgnored,
     };
   }
-  const changedSections = getChangedReviewSections(previousText, proposedText);
+  const changedSections = getChangedReviewSections(preparedPrevious.text, preparedProposed.text);
   const count = changedSections.length || 1;
   return {
     hasMaterialChanges: true,
@@ -325,6 +388,7 @@ export function buildReviewFirstTextDiffSummary(previousText: string, proposedTe
     changedSections,
     normalizedPrevious,
     normalizedProposed,
+    formattingArtifactsIgnored,
   };
 }
 

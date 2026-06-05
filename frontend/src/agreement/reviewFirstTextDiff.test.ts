@@ -4,7 +4,21 @@ import {
   canReviewChanges,
   canSubmitReviewFirstProposal,
   normalizeReviewTextForComparison,
+  REVIEW_FIRST_FORMATTING_ARTIFACTS_NOTE,
 } from "./reviewFirstTextDiff";
+import { normalizeReviewFirstAgreementText } from "./reviewFirstPasteNormalization";
+
+const BASE_AGREEMENT = [
+  "WEB DEVELOPMENT AGREEMENT",
+  "",
+  "1. Services. Provider shall perform the services described in the statement of work.",
+  "",
+  "2. Payment. Client shall pay undisputed invoiced amounts within thirty (30) days after receipt of invoice.",
+  "",
+  "3. Ownership and Work Product. Client owns deliverables upon full payment. Provider retains background technology.",
+  "",
+  "4. Termination. Either party may terminate upon thirty days written notice.",
+].join("\n");
 
 describe("reviewFirstTextDiff", () => {
   it("ignores whitespace, bullet indentation, smart quotes, and capitalization-only changes", () => {
@@ -18,7 +32,28 @@ describe("reviewFirstTextDiff", () => {
     expect(diff.hasMaterialChanges).toBe(false);
   });
 
-  it("identifies changed Schedule A wording", () => {
+  it("classifies thirty (30) → fifteen (15) days as Payment timing changed with compact snippets", () => {
+    const previous = BASE_AGREEMENT;
+    const proposed = BASE_AGREEMENT.replace(
+      "within thirty (30) days after receipt",
+      "within fifteen (15) days after receipt",
+    );
+
+    const diff = buildReviewFirstTextDiffSummary(previous, proposed);
+    const section = diff.changedSections[0];
+
+    expect(diff.status).toBe("changed");
+    expect(diff.hasMaterialChanges).toBe(true);
+    expect(diff.summary).toBe("1 material wording update found.");
+    expect(section?.title).toBe("Payment timing changed");
+    expect(section?.summary).toBe("Payment timing changed");
+    expect(section?.previous).toContain("thirty (30) days after receipt");
+    expect(section?.proposed).toContain("fifteen (15) days after receipt");
+    expect(section?.previous).not.toMatch(/Ownership/i);
+    expect(section?.previous.length ?? 0).toBeLessThan(previous.length);
+  });
+
+  it("identifies changed Schedule A wording as payment timing when days change", () => {
     const previous = "Agreement\n\nSchedule A\nPayment is due within 30 days.\nSupport is email only.";
     const proposed = "Agreement\n\nSchedule A\nPayment is due within 15 days.\nSupport includes phone escalation.";
 
@@ -26,16 +61,50 @@ describe("reviewFirstTextDiff", () => {
 
     expect(diff.status).toBe("changed");
     expect(diff.hasMaterialChanges).toBe(true);
-    expect(diff.changedSections[0]?.title).toBe("Payment terms changed");
+    expect(diff.changedSections[0]?.title).toBe("Payment timing changed");
     expect(diff.changedSections[0]?.previous).toContain("30 days");
     expect(diff.changedSections[0]?.proposed).toContain("15 days");
-    expect(diff.summary).toBe("1 material wording update found.");
-    expect(diff.changedSections[0]?.summary).toBe("Payment terms changed");
+    expect(diff.changedSections[0]?.summary).toBe("Payment timing changed");
     expect(diff.changedSections[0]?.previousParts.some((part) => part.kind === "removed" && part.text.includes("30"))).toBe(true);
     expect(diff.changedSections[0]?.proposedParts.some((part) => part.kind === "added" && part.text.includes("15"))).toBe(true);
   });
 
-  it("shows compact changed snippets instead of entire unchanged clauses", () => {
+  it("ignores PDF title/header/footer noise when agreement body is unchanged", () => {
+    const previous = BASE_AGREEMENT;
+    const proposed = [
+      "Draft Agreement (non-binding template)",
+      "LawDog Pro",
+      "Page 1 of 2",
+      BASE_AGREEMENT.replace(/\n\n/g, "\n"),
+      "",
+      "Created with LawDog",
+      "Page 2 of 2",
+    ].join("\n");
+
+    const diff = buildReviewFirstTextDiffSummary(previous, proposed);
+
+    expect(diff.status).toBe("no_change");
+    expect(diff.hasMaterialChanges).toBe(false);
+    expect(diff.formattingArtifactsIgnored).toBe(true);
+    expect(REVIEW_FIRST_FORMATTING_ARTIFACTS_NOTE).toBe("Formatting/header changes ignored.");
+  });
+
+  it("classifies party/entity name changes as Party changed", () => {
+    const previous =
+      "1. Parties. This Agreement is between Acme LLC (\"Client\") and Beta Corp (\"Provider\"). The parties agree as follows.";
+    const proposed =
+      "1. Parties. This Agreement is between Acme LLC (\"Client\") and Gamma Inc (\"Provider\"). The parties agree as follows.";
+
+    const diff = buildReviewFirstTextDiffSummary(previous, proposed);
+    const section = diff.changedSections[0];
+
+    expect(diff.hasMaterialChanges).toBe(true);
+    expect(section?.title).toBe("Party changed");
+    expect(section?.previous).toContain("Beta");
+    expect(section?.proposed).toContain("Gamma");
+  });
+
+  it("shows compact changed snippets for ownership/work-product clause changes", () => {
     const previous =
       "Ownership and Work Product\nCompany owns the project deliverables and work product created specifically for Company after payment. Existing background materials remain separately owned. This paragraph also confirms routine cooperation, ordinary access, and unchanged project administration terms that do not affect ownership.";
     const proposed =
@@ -52,6 +121,19 @@ describe("reviewFirstTextDiff", () => {
     expect(section?.proposed).toContain("scripts");
     expect(section?.previous.length ?? 0).toBeLessThan(previous.length);
     expect(section?.proposed.length ?? 0).toBeLessThan(proposed.length);
+  });
+
+  it("does not misclassify payment timing edits as Ownership changed when agreement includes ownership section", () => {
+    const previous = BASE_AGREEMENT;
+    const proposed = BASE_AGREEMENT.replace(
+      "within thirty (30) days after receipt",
+      "within fifteen (15) days after receipt",
+    );
+
+    const diff = buildReviewFirstTextDiffSummary(previous, proposed);
+
+    expect(diff.changedSections.every((section) => section.title !== "Ownership changed")).toBe(true);
+    expect(diff.changedSections[0]?.title).toBe("Payment timing changed");
   });
 
   it("enables review changes from pasted text diff only (not attribution)", () => {
@@ -91,5 +173,25 @@ describe("reviewFirstTextDiff", () => {
         comparisonPreviewRendered: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("normalizeReviewFirstAgreementText", () => {
+  it("strips draft template and page headers from pasted PDF text", () => {
+    const noisy = [
+      "Draft Agreement (non-binding template)",
+      "LawDog Pro",
+      "Page 1 of 2",
+      "2. Payment. Client shall pay within thirty (30) days after receipt.",
+      "Created with LawDog",
+    ].join("\n");
+
+    const { text, hadFormattingArtifacts } = normalizeReviewFirstAgreementText(noisy);
+
+    expect(hadFormattingArtifacts).toBe(true);
+    expect(text).not.toMatch(/Draft Agreement/i);
+    expect(text).not.toMatch(/LawDog Pro/i);
+    expect(text).not.toMatch(/Page 1 of 2/i);
+    expect(text).toContain("thirty (30) days after receipt");
   });
 });

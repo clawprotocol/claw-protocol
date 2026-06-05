@@ -171,6 +171,7 @@ import {
   RECIPIENT_WORKSPACE_SUBCOPY,
   buildRecipientRevisionText,
   recipientPreviewGapChipLabel,
+  REVIEW_FIRST_PASTE_GUARD_COPY,
 } from "./portableReviewCopy";
 import {
   recipientRedlineNavLog,
@@ -245,6 +246,7 @@ import {
   canSubmitReviewFirstProposal,
   logReviewFirstProposalCompareDiag,
   logReviewFirstProposalReadiness,
+  REVIEW_FIRST_FORMATTING_ARTIFACTS_NOTE,
   type ReviewFirstChangedSection,
   type ReviewFirstDiffPart,
 } from "./reviewFirstTextDiff";
@@ -306,6 +308,11 @@ function renderReviewFirstChangeSection(section: ReviewFirstChangedSection) {
   return (
     <article key={`${section.title}-${section.summary}`} className="rounded-xl bg-slate-50/80 p-3">
       <div className="text-sm font-semibold text-slate-950">{section.title}</div>
+      {section.clauseTitle ? (
+        <div className="mt-0.5 text-xs font-medium text-slate-500" data-testid="recipient-review-first-clause-title">
+          {section.clauseTitle}
+        </div>
+      ) : null}
       <div className="mt-3 space-y-2">
         <div className="rounded-lg bg-white p-3">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Previous</div>
@@ -3047,9 +3054,19 @@ export function AgreementRecipientReview({
           Everyone will review these wording changes before approval.
         </p>
         {workflowMode === "revised" && reviewFirstConfirmedDiff ? (
-          <p className="mt-2 text-sm leading-relaxed text-slate-700" data-testid="recipient-review-proposed-update-summary">
-            {reviewFirstConfirmedDiff.summary}
-          </p>
+          <>
+            <p className="mt-2 text-sm leading-relaxed text-slate-700" data-testid="recipient-review-proposed-update-summary">
+              {reviewFirstConfirmedDiff.summary}
+            </p>
+            {reviewFirstConfirmedDiff.formattingArtifactsIgnored ? (
+              <p
+                className="mt-1.5 text-xs leading-relaxed text-slate-500"
+                data-testid="recipient-review-formatting-artifacts-note"
+              >
+                {REVIEW_FIRST_FORMATTING_ARTIFACTS_NOTE}
+              </p>
+            ) : null}
+          </>
         ) : null}
         <div
           className={`mt-4 rounded-xl p-4 ${
@@ -4679,6 +4696,9 @@ export function AgreementRecipientReview({
                 agreementTitle={recipientAgreementTitleForDisplay(draft.title)}
                 readHeaders={recipientAgreementReadHeaders(agreementId, recipientAccessToken)}
                 scrubbedCurrentHtml={scrubbedOriginalDraftHtmlForPdfExport}
+                editablePlainText={directCompareDefault}
+                copyTextButtonLabel="Copy agreement text for editing"
+                copyTextButtonTestId="recipient-review-copy-text"
                 pdfDownloadButtonLabel="Download"
                 pdfDownloadButtonTestId="recipient-review-download-pdf"
               />
@@ -5118,7 +5138,7 @@ export function AgreementRecipientReview({
                         <div className="mt-1.5 space-y-2 text-sm leading-relaxed text-slate-600">
                           <p>Edit your agreement in any software you prefer.</p>
                           <p>When finished, paste the FULL updated agreement below.</p>
-                          <p>LawDog will compare the wording and show all material changes before submission.</p>
+                          <p data-testid="recipient-review-first-paste-guard">{REVIEW_FIRST_PASTE_GUARD_COPY}</p>
                         </div>
                       </div>
                       {draftImportError ? (
@@ -5174,7 +5194,7 @@ export function AgreementRecipientReview({
                       <div className="mt-1.5 space-y-2 text-sm leading-relaxed text-slate-600">
                       <p>Edit your agreement in any software you prefer.</p>
                         <p>When finished, paste the FULL updated agreement below.</p>
-                        <p>LawDog will compare the wording and show all material changes before submission.</p>
+                        <p data-testid="recipient-review-first-paste-guard">{REVIEW_FIRST_PASTE_GUARD_COPY}</p>
                       </div>
                     </div>
                   ) : null}
@@ -5454,6 +5474,14 @@ export function AgreementRecipientReview({
                       ? "Review changes to continue."
                       : "No wording changes detected."}
                   </p>
+                  {reviewFirstTextDiff.formattingArtifactsIgnored ? (
+                    <p
+                      className="mt-2 text-xs leading-relaxed text-slate-500"
+                      data-testid="recipient-review-formatting-artifacts-note"
+                    >
+                      {REVIEW_FIRST_FORMATTING_ARTIFACTS_NOTE}
+                    </p>
+                  ) : null}
                   <p
                     className={`mt-3 inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ${
                       reviewFirstTextDiff.hasMaterialChanges
