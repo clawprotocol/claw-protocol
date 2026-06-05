@@ -16,6 +16,34 @@ _log = logging.getLogger("claw.cors")
 
 _PREMIUM_FULL_DRAFT_PATH = "/api/agreements/premium-full-draft"
 
+# Canonical request headers for split-origin SPA → /api (keep in sync with frontend clawAgreementHeaders + premiumFullDraftApi).
+CORS_ALLOW_REQUEST_HEADERS: List[str] = [
+    "Content-Type",
+    "Authorization",
+    "X-Request-Id",
+    "X-Claw-Org-Id",
+    "X-Claw-Agreement-Id",
+    "X-Claw-Affiliate-Code",
+    "X-Claw-Paid-Pro-Perf-Trace",
+    "X-Claw-Recipient-Access-Token",
+    "X-Claw-Recipient-Link-Mint-Key",
+]
+
+CORS_ALLOW_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+
+
+def cors_allow_request_headers_csv() -> str:
+    return ", ".join(CORS_ALLOW_REQUEST_HEADERS)
+
+
+def cors_allow_request_header_allowed(requested: str) -> bool:
+    """Case-insensitive match for Access-Control-Request-Headers preflight tokens."""
+    token = (requested or "").strip().lower()
+    if not token:
+        return False
+    allowed = {h.lower() for h in CORS_ALLOW_REQUEST_HEADERS}
+    return token in allowed
+
 # Middleware registration order (request: outer → inner). Last registered runs first.
 CORS_MIDDLEWARE_STACK_REQUEST_ORDER: List[str] = [
     "claw_cors_api_acao_fallback",
@@ -116,14 +144,8 @@ def apply_cors_headers_to_response(response: Response, origin: str) -> Response:
         return response
     response.headers["Access-Control-Allow-Origin"] = normalized
     response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers.setdefault(
-        "Access-Control-Allow-Methods",
-        "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    )
-    response.headers.setdefault(
-        "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, X-Request-Id, X-Claw-Org-Id, X-Claw-Agreement-Id",
-    )
+    response.headers.setdefault("Access-Control-Allow-Methods", CORS_ALLOW_METHODS)
+    response.headers.setdefault("Access-Control-Allow-Headers", cors_allow_request_headers_csv())
     exposed = response.headers.get("access-control-expose-headers", "")
     for hdr in CORS_EXPOSE_PAID_PRO_HEADERS:
         if hdr.lower() not in exposed.lower():
