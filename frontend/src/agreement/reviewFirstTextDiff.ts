@@ -1,3 +1,9 @@
+import {
+  buildPhraseDelta,
+  clauseContextSnippet,
+  resolveClauseLabel,
+  type ReviewFirstChangeMagnitude,
+} from "./reviewFirstChangeCardModel";
 import { normalizeReviewFirstAgreementText } from "./reviewFirstPasteNormalization";
 
 export type ReviewFirstChangedSection = {
@@ -5,6 +11,16 @@ export type ReviewFirstChangedSection = {
   summary: string;
   /** Detected clause/section heading, when available. */
   clauseTitle: string;
+  /** Preferred clause label (e.g. "3.2 Invoicing and Payment Timing"). */
+  clauseLabel: string;
+  /** Smallest meaningful changed phrase — primary review artifact. */
+  beforePhrase: string;
+  afterPhrase: string;
+  phrasePreviousParts: ReviewFirstDiffPart[];
+  phraseProposedParts: ReviewFirstDiffPart[];
+  changeMagnitude: ReviewFirstChangeMagnitude;
+  /** One-line clause preview for optional expansion. */
+  clauseContextSnippet: string;
   previous: string;
   proposed: string;
   fullPrevious: string;
@@ -154,7 +170,7 @@ function compactParts(parts: ReviewFirstDiffPart[], changedKind: "added" | "remo
   return compacted;
 }
 
-function buildInlineDiff(previous: string, proposed: string): {
+function buildRawInlineDiff(previous: string, proposed: string): {
   previousParts: ReviewFirstDiffPart[];
   proposedParts: ReviewFirstDiffPart[];
   removed: string[];
@@ -177,14 +193,30 @@ function buildInlineDiff(previous: string, proposed: string): {
   }
   for (let i = prevCursor; i < previousTokens.length; i += 1) previousParts.push({ text: previousTokens[i], kind: "removed" });
   for (let i = propCursor; i < proposedTokens.length; i += 1) proposedParts.push({ text: proposedTokens[i], kind: "added" });
-
-  const compactPreviousParts = compactParts(previousParts, "removed");
-  const compactProposedParts = compactParts(proposedParts, "added");
   return {
-    previousParts: compactPreviousParts,
-    proposedParts: compactProposedParts,
+    previousParts,
+    proposedParts,
     removed: previousParts.filter((part) => part.kind === "removed").map((part) => part.text),
     added: proposedParts.filter((part) => part.kind === "added").map((part) => part.text),
+  };
+}
+
+function buildInlineDiff(previous: string, proposed: string): {
+  previousParts: ReviewFirstDiffPart[];
+  proposedParts: ReviewFirstDiffPart[];
+  removed: string[];
+  added: string[];
+  rawPreviousParts: ReviewFirstDiffPart[];
+  rawProposedParts: ReviewFirstDiffPart[];
+} {
+  const raw = buildRawInlineDiff(previous, proposed);
+  return {
+    previousParts: compactParts(raw.previousParts, "removed"),
+    proposedParts: compactParts(raw.proposedParts, "added"),
+    removed: raw.removed,
+    added: raw.added,
+    rawPreviousParts: raw.previousParts,
+    rawProposedParts: raw.proposedParts,
   };
 }
 
@@ -258,6 +290,15 @@ function sectionLabel(
   if (/\b(purpose|scope|services|statement of work|sow)\b/.test(contextHaystack)) {
     return { label: "Purpose and scope changed", priority: 20 };
   }
+  if (/\b(?:deliverable|deliverables|milestone|acceptance criteria)\b/.test(contextHaystack)) {
+    return { label: "Deliverable changed", priority: 35 };
+  }
+  if (/\b(?:work\s+product)\b/.test(contextHaystack) && !isOwnershipClauseChange(clauseTitle, changeHaystack, contextHaystack)) {
+    return { label: "Work product changed", priority: 32 };
+  }
+  if (/\b(?:term|duration|renewal|initial term)\b/.test(contextHaystack) && !/\b(?:terminate|termination)\b/.test(changeHaystack)) {
+    return { label: "Term changed", priority: 45 };
+  }
   if (/\b(support|response|escalation|handoff|acceptance)\b/.test(contextHaystack)) {
     return { label: "Support terms changed", priority: 40 };
   }
@@ -268,12 +309,60 @@ function sectionLabel(
     return { label: "Confidentiality changed", priority: 60 };
   }
   if (/\b(liability|indemn|damages|warranty)\b/.test(contextHaystack)) {
-    return { label: "Risk allocation changed", priority: 70 };
+    return { label: "Liability changed", priority: 70 };
   }
   if (/\b(signature|signed by|signer)\b/.test(contextHaystack)) {
     return { label: "Signer name changed", priority: 100 };
   }
   return { label: "Agreement wording changed", priority: 90 };
+}
+
+function buildChangedSection(args: {
+  changedPrevious: string;
+  changedProposed: string;
+  label: { label: string; priority: number };
+  rawTitle: string;
+  inline: ReturnType<typeof buildInlineDiff>;
+}): ReviewFirstChangedSection {
+  const { changedPrevious, changedProposed, label, rawTitle, inline } = args;
+  const previousParts = inline.previousParts.length
+    ? inline.previousParts
+    : [{ text: "(No prior wording)", kind: "removed" as const }];
+  const proposedParts = inline.proposedParts.length
+    ? inline.proposedParts
+    : [{ text: "(Removed)", kind: "added" as const }];
+  const phrase = buildPhraseDelta({
+    previousParts: inline.rawPreviousParts,
+    proposedParts: inline.rawProposedParts,
+    fullPrevious: changedPrevious,
+    fullProposed: changedProposed,
+    buildInlineParts: (before, after) => {
+      const raw = buildRawInlineDiff(before, after);
+      return { previousParts: raw.previousParts, proposedParts: raw.proposedParts };
+    },
+  });
+  const clauseLabel = resolveClauseLabel(changedPrevious, changedProposed) || rawTitle;
+  return {
+    title: label.label,
+    summary: label.label,
+    clauseTitle: rawTitle,
+    clauseLabel,
+    beforePhrase: phrase.beforePhrase,
+    afterPhrase: phrase.afterPhrase,
+    phrasePreviousParts: phrase.phrasePreviousParts,
+    phraseProposedParts: phrase.phraseProposedParts,
+    changeMagnitude: phrase.changeMagnitude,
+    clauseContextSnippet: clauseContextSnippet(changedProposed || changedPrevious),
+    previous: phrase.beforePhrase || joinTokenParts(previousParts) || "(No prior wording)",
+    proposed: phrase.afterPhrase || joinTokenParts(proposedParts) || "(Removed)",
+    fullPrevious: changedPrevious || "(No prior wording)",
+    fullProposed: changedProposed || "(Removed)",
+    previousParts,
+    proposedParts,
+    added: inline.added,
+    removed: inline.removed,
+    classificationPriority: label.priority,
+  };
 }
 
 export function getChangedReviewSections(previousText: string, proposedText: string): ReviewFirstChangedSection[] {
@@ -294,22 +383,7 @@ export function getChangedReviewSections(previousText: string, proposedText: str
     const rawTitle = sectionTitle(changedPrevious, changedProposed);
     const inline = buildInlineDiff(changedPrevious, changedProposed);
     const label = sectionLabel(rawTitle, changedPrevious, changedProposed, inline);
-    const previousParts = inline.previousParts.length ? inline.previousParts : [{ text: "(No prior wording)", kind: "removed" as const }];
-    const proposedParts = inline.proposedParts.length ? inline.proposedParts : [{ text: "(Removed)", kind: "added" as const }];
-    sections.push({
-      title: label.label,
-      summary: label.label,
-      clauseTitle: rawTitle,
-      previous: joinTokenParts(previousParts) || "(No prior wording)",
-      proposed: joinTokenParts(proposedParts) || "(Removed)",
-      fullPrevious: changedPrevious || "(No prior wording)",
-      fullProposed: changedProposed || "(Removed)",
-      previousParts,
-      proposedParts,
-      added: inline.added,
-      removed: inline.removed,
-      classificationPriority: label.priority,
-    });
+    sections.push(buildChangedSection({ changedPrevious, changedProposed, label, rawTitle, inline }));
   };
 
   for (const [previousAnchor, proposedAnchor] of anchors) {
@@ -329,22 +403,7 @@ export function getChangedReviewSections(previousText: string, proposedText: str
       const rawTitle = sectionTitle(changedPrevious, changedProposed);
       const inline = buildInlineDiff(changedPrevious, changedProposed);
       const label = sectionLabel(rawTitle, changedPrevious, changedProposed, inline);
-      const previousParts = inline.previousParts.length ? inline.previousParts : [{ text: "(No prior wording)", kind: "removed" as const }];
-      const proposedParts = inline.proposedParts.length ? inline.proposedParts : [{ text: "(Removed)", kind: "added" as const }];
-      sections.push({
-        title: label.label,
-        summary: label.label,
-        clauseTitle: rawTitle,
-        previous: joinTokenParts(previousParts) || "(No prior wording)",
-        proposed: joinTokenParts(proposedParts) || "(Removed)",
-        fullPrevious: changedPrevious || "(No prior wording)",
-        fullProposed: changedProposed || "(Removed)",
-        previousParts,
-        proposedParts,
-        added: inline.added,
-        removed: inline.removed,
-        classificationPriority: label.priority,
-      });
+      sections.push(buildChangedSection({ changedPrevious, changedProposed, label, rawTitle, inline }));
     }
   }
   return sections.sort((a, b) => a.classificationPriority - b.classificationPriority);

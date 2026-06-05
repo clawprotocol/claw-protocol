@@ -32,7 +32,7 @@ describe("reviewFirstTextDiff", () => {
     expect(diff.hasMaterialChanges).toBe(false);
   });
 
-  it("classifies thirty (30) → fifteen (15) days as Payment timing changed with compact snippets", () => {
+  it("classifies thirty (30) → fifteen (15) days as Payment timing changed with phrase-level delta", () => {
     const previous = BASE_AGREEMENT;
     const proposed = BASE_AGREEMENT.replace(
       "within thirty (30) days after receipt",
@@ -47,10 +47,33 @@ describe("reviewFirstTextDiff", () => {
     expect(diff.summary).toBe("1 material wording update found.");
     expect(section?.title).toBe("Payment timing changed");
     expect(section?.summary).toBe("Payment timing changed");
+    expect(section?.beforePhrase).toContain("thirty (30) days after receipt");
+    expect(section?.afterPhrase).toContain("fifteen (15) days after receipt");
+    expect(section?.changeMagnitude).toBe("phrase");
     expect(section?.previous).toContain("thirty (30) days after receipt");
     expect(section?.proposed).toContain("fifteen (15) days after receipt");
-    expect(section?.previous).not.toMatch(/Ownership/i);
-    expect(section?.previous.length ?? 0).toBeLessThan(previous.length);
+    expect(section?.beforePhrase).not.toMatch(/Ownership/i);
+    expect(section?.beforePhrase).not.toMatch(/Parties/i);
+    expect(section?.beforePhrase.length ?? 0).toBeLessThan(previous.length);
+  });
+
+  it("extracts invoicing clause label and exact payment phrase for 30 → 15 day edit", () => {
+    const previous = [
+      "3.2 Invoicing and Payment Timing",
+      "Client shall pay each undisputed invoice within thirty (30) days after receipt of invoice.",
+    ].join("\n");
+    const proposed = previous.replace(
+      "within thirty (30) days after receipt",
+      "within fifteen (15) days after receipt",
+    );
+
+    const section = buildReviewFirstTextDiffSummary(previous, proposed).changedSections[0];
+
+    expect(section?.title).toBe("Payment timing changed");
+    expect(section?.clauseLabel).toBe("3.2 Invoicing and Payment Timing");
+    expect(section?.beforePhrase).toBe("within thirty (30) days after receipt");
+    expect(section?.afterPhrase).toBe("within fifteen (15) days after receipt");
+    expect(section?.clauseContextSnippet).toContain("undisputed invoice");
   });
 
   it("identifies changed Schedule A wording as payment timing when days change", () => {
@@ -89,6 +112,21 @@ describe("reviewFirstTextDiff", () => {
     expect(REVIEW_FIRST_FORMATTING_ARTIFACTS_NOTE).toBe("Formatting/header changes ignored.");
   });
 
+  it("surfaces exact party name delta without unrelated clause noise", () => {
+    const previous =
+      "1. Parties. This Agreement is between Acme LLC (\"Client\") and Beta Corp (\"Provider\"). The parties agree as follows.";
+    const proposed =
+      "1. Parties. This Agreement is between Acme LLC (\"Client\") and Gamma Inc (\"Provider\"). The parties agree as follows.";
+
+    const section = buildReviewFirstTextDiffSummary(previous, proposed).changedSections[0];
+
+    expect(section?.title).toBe("Party changed");
+    expect(section?.beforePhrase).toContain("Beta");
+    expect(section?.afterPhrase).toContain("Gamma");
+    expect(section?.beforePhrase).not.toContain("Acme LLC");
+    expect(section?.changeMagnitude).toBe("phrase");
+  });
+
   it("classifies party/entity name changes as Party changed", () => {
     const previous =
       "1. Parties. This Agreement is between Acme LLC (\"Client\") and Beta Corp (\"Provider\"). The parties agree as follows.";
@@ -102,6 +140,21 @@ describe("reviewFirstTextDiff", () => {
     expect(section?.title).toBe("Party changed");
     expect(section?.previous).toContain("Beta");
     expect(section?.proposed).toContain("Gamma");
+  });
+
+  it("prioritizes ownership phrase delta over full clause wall of text", () => {
+    const previous =
+      "Ownership and Work Product\nCompany owns the project deliverables and work product created specifically for Company after payment. Existing background materials remain separately owned. This paragraph also confirms routine cooperation, ordinary access, and unchanged project administration terms that do not affect ownership.";
+    const proposed =
+      "Ownership and Work Product\nClient owns the project deliverables and work product created specifically for Client after full payment. Existing scripts, background technology, and reusable automation components remain separately owned. This paragraph also confirms routine cooperation, ordinary access, and unchanged project administration terms that do not affect ownership.";
+
+    const section = buildReviewFirstTextDiffSummary(previous, proposed).changedSections[0];
+
+    expect(section?.title).toBe("Ownership changed");
+    expect(section?.beforePhrase).toContain("Company");
+    expect(section?.afterPhrase).toContain("Client");
+    expect(section?.beforePhrase.length ?? 0).toBeLessThan(previous.length);
+    expect(section?.fullPrevious.length ?? 0).toBeGreaterThan(section?.beforePhrase.length ?? 0);
   });
 
   it("shows compact changed snippets for ownership/work-product clause changes", () => {
@@ -121,6 +174,29 @@ describe("reviewFirstTextDiff", () => {
     expect(section?.proposed).toContain("scripts");
     expect(section?.previous.length ?? 0).toBeLessThan(previous.length);
     expect(section?.proposed.length ?? 0).toBeLessThan(proposed.length);
+  });
+
+  it("classifies deliverable, term, and liability edits with phrase-level deltas", () => {
+    const deliverablePrevious = "Deliverables. Provider shall deliver a final website and source code archive by March 1.";
+    const deliverableProposed = "Deliverables. Provider shall deliver a final website, admin guide, and source code archive by March 1.";
+    const deliverable = buildReviewFirstTextDiffSummary(deliverablePrevious, deliverableProposed).changedSections[0];
+    expect(deliverable?.title).toBe("Deliverable changed");
+    expect(deliverable?.beforePhrase).toContain("website");
+    expect(deliverable?.afterPhrase).toContain("admin guide");
+
+    const termPrevious = "Term. The initial term is twelve (12) months from the Effective Date.";
+    const termProposed = "Term. The initial term is twenty-four (24) months from the Effective Date.";
+    const term = buildReviewFirstTextDiffSummary(termPrevious, termProposed).changedSections[0];
+    expect(term?.title).toBe("Term changed");
+    expect(term?.beforePhrase).toContain("twelve (12)");
+    expect(term?.afterPhrase).toContain("twenty-four (24)");
+
+    const liabilityPrevious = "Liability. Provider's aggregate liability shall not exceed fees paid in the prior three months.";
+    const liabilityProposed = "Liability. Provider's aggregate liability shall not exceed fees paid in the prior six months.";
+    const liability = buildReviewFirstTextDiffSummary(liabilityPrevious, liabilityProposed).changedSections[0];
+    expect(liability?.title).toBe("Liability changed");
+    expect(liability?.beforePhrase).toContain("three months");
+    expect(liability?.afterPhrase).toContain("six months");
   });
 
   it("does not misclassify payment timing edits as Ownership changed when agreement includes ownership section", () => {

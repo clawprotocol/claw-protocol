@@ -250,6 +250,7 @@ import {
   type ReviewFirstChangedSection,
   type ReviewFirstDiffPart,
 } from "./reviewFirstTextDiff";
+import { ReviewFirstChangeCard } from "./ReviewFirstChangeCard";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
 import {
   buildRecipientRedlineStickyNavRows,
@@ -305,41 +306,7 @@ function isSupportedReviewFirstRevisedDraftFile(file: File): boolean {
 }
 
 function renderReviewFirstChangeSection(section: ReviewFirstChangedSection) {
-  return (
-    <article key={`${section.title}-${section.summary}`} className="rounded-xl bg-slate-50/80 p-3">
-      <div className="text-sm font-semibold text-slate-950">{section.title}</div>
-      {section.clauseTitle ? (
-        <div className="mt-0.5 text-xs font-medium text-slate-500" data-testid="recipient-review-first-clause-title">
-          {section.clauseTitle}
-        </div>
-      ) : null}
-      <div className="mt-3 space-y-2">
-        <div className="rounded-lg bg-white p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Previous</div>
-          <p className="mt-1.5 break-words text-sm leading-relaxed text-slate-800">
-            {renderReviewFirstDiffParts(section.previousParts, "removed") ?? section.previous}
-          </p>
-        </div>
-        <div className="rounded-lg bg-white p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Updated</div>
-          <p className="mt-1.5 break-words text-sm leading-relaxed text-slate-800">
-            {renderReviewFirstDiffParts(section.proposedParts, "added") ?? section.proposed}
-          </p>
-        </div>
-      </div>
-      <details className="mt-3 text-xs text-slate-600">
-        <summary className="cursor-pointer font-medium text-slate-500">View full section</summary>
-        <div className="mt-2 grid gap-2 md:grid-cols-2">
-          <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 font-sans text-xs leading-relaxed">
-            {section.fullPrevious}
-          </pre>
-          <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 font-sans text-xs leading-relaxed">
-            {section.fullProposed}
-          </pre>
-        </div>
-      </details>
-    </article>
-  );
+  return <ReviewFirstChangeCard key={`${section.title}-${section.beforePhrase}`} section={section} />;
 }
 
 function renderReviewFirstDiffParts(parts: ReviewFirstDiffPart[] | null | undefined, changedKind: "added" | "removed") {
@@ -1608,12 +1575,17 @@ export function AgreementRecipientReview({
           return {
             title: scheduleSection.title,
             summary: scheduleSection.summary,
-            previous: scheduleSection.previous,
-            proposed: scheduleSection.proposed,
+            previous: scheduleSection.beforePhrase || scheduleSection.previous,
+            proposed: scheduleSection.afterPhrase || scheduleSection.proposed,
             fullPrevious: scheduleSection.fullPrevious,
             fullProposed: scheduleSection.fullProposed,
-            previousParts: scheduleSection.previousParts,
-            proposedParts: scheduleSection.proposedParts,
+            previousParts: scheduleSection.phrasePreviousParts.length
+              ? scheduleSection.phrasePreviousParts
+              : scheduleSection.previousParts,
+            proposedParts: scheduleSection.phraseProposedParts.length
+              ? scheduleSection.phraseProposedParts
+              : scheduleSection.proposedParts,
+            clauseLabel: scheduleSection.clauseLabel,
           };
         }
         return {
@@ -1636,12 +1608,17 @@ export function AgreementRecipientReview({
         return {
           title: reviewFirstSection.title,
           summary: reviewFirstSection.summary,
-          previous: reviewFirstSection.previous,
-          proposed: reviewFirstSection.proposed,
+          previous: reviewFirstSection.beforePhrase || reviewFirstSection.previous,
+          proposed: reviewFirstSection.afterPhrase || reviewFirstSection.proposed,
           fullPrevious: reviewFirstSection.fullPrevious,
           fullProposed: reviewFirstSection.fullProposed,
-          previousParts: reviewFirstSection.previousParts,
-          proposedParts: reviewFirstSection.proposedParts,
+          previousParts: reviewFirstSection.phrasePreviousParts.length
+            ? reviewFirstSection.phrasePreviousParts
+            : reviewFirstSection.previousParts,
+          proposedParts: reviewFirstSection.phraseProposedParts.length
+            ? reviewFirstSection.phraseProposedParts
+            : reviewFirstSection.proposedParts,
+          clauseLabel: reviewFirstSection.clauseLabel,
         };
       }
     }
@@ -1656,6 +1633,25 @@ export function AgreementRecipientReview({
     const previous = (firstCard?.currentText || fallbackCurrent).trim();
     const proposed = (firstCard?.proposedText || fallbackProposed).trim();
     if (!previous && !proposed) return null;
+    const compactFallbackDiff = buildReviewFirstTextDiffSummary(previous, proposed);
+    const fallbackSection = compactFallbackDiff.changedSections[0];
+    if (fallbackSection) {
+      return {
+        title: fallbackSection.title,
+        summary: fallbackSection.summary,
+        previous: fallbackSection.beforePhrase || fallbackSection.previous,
+        proposed: fallbackSection.afterPhrase || fallbackSection.proposed,
+        fullPrevious: fallbackSection.fullPrevious,
+        fullProposed: fallbackSection.fullProposed,
+        previousParts: fallbackSection.phrasePreviousParts.length
+          ? fallbackSection.phrasePreviousParts
+          : fallbackSection.previousParts,
+        proposedParts: fallbackSection.phraseProposedParts.length
+          ? fallbackSection.phraseProposedParts
+          : fallbackSection.proposedParts,
+        clauseLabel: fallbackSection.clauseLabel,
+      };
+    }
     return {
       title: firstCard?.cardTitle || "Wording change",
       summary: firstCard?.cardTitle ? `${firstCard.cardTitle} updated` : "Wording updated",
@@ -1665,6 +1661,7 @@ export function AgreementRecipientReview({
       fullProposed: proposed,
       previousParts: null,
       proposedParts: null,
+      clauseLabel: "",
     };
   }, [previewDiff, recipientPreview?.routingKind, recipientRedlinePlainTexts]);
 
@@ -3095,6 +3092,9 @@ export function AgreementRecipientReview({
               <div className={`text-sm font-semibold ${workflowMode === "revised" ? "text-slate-950" : "text-slate-100"}`}>
                 {simpleRecipientChange.title}
               </div>
+              {"clauseLabel" in simpleRecipientChange && simpleRecipientChange.clauseLabel ? (
+                <div className="text-xs text-slate-500">Clause: {simpleRecipientChange.clauseLabel}</div>
+              ) : null}
               <div
                 className={
                   workflowMode === "revised"
