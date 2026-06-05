@@ -47,6 +47,10 @@ import {
   shouldWritePaidProEditReturnHandoffAfterReview,
 } from "../../components/agreements/draftRecipientReviewSignals";
 import { logReviewApprovalStatus, logReviewLinkRowOpen } from "../../components/agreements/reviewFlowDebugLog";
+import {
+  logPaidProReviewTrackLifecycle,
+  logReviewLinkOpen,
+} from "../../components/agreements/paidProReviewTrackLifecycle";
 import { recipientLinkTokenFingerprint } from "../../agreement/recipientLinkTokenFingerprint";
 import {
   clearPaidProEditReturnHandoff,
@@ -450,6 +454,11 @@ export function SimpleDonePage(props: { agreementId: string }) {
 
   const backToDraft = useCallback(async () => {
     const id = agreementId.trim();
+    logPaidProReviewTrackLifecycle("returned_to_owner", {
+      agreementId: id,
+      source: "simple_done_back_to_draft",
+      canonicalHash: null,
+    });
     logOwnerReviewLinkStatus({
       agreementId: id,
       action: "back_to_draft_click",
@@ -838,7 +847,18 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     className={reviewActionButtonClass("secondary")}
                     data-testid="simple-done-open-reviewer-view-global"
                     onClick={() => {
-                      if (primaryReviewHref) window.open(primaryReviewHref, "_blank", "noopener,noreferrer");
+                      if (!primaryReviewHref) return;
+                      logReviewLinkOpen({
+                        agreementId,
+                        href: primaryReviewHref,
+                        source: "simple_done_open_reviewer_view",
+                      });
+                      logPaidProReviewTrackLifecycle("reviewer_link_opened", {
+                        agreementId,
+                        source: "simple_done_open_reviewer_view",
+                        canonicalHash: null,
+                      });
+                      window.open(primaryReviewHref, "_blank", "noopener,noreferrer");
                     }}
                   >
                     Open reviewer view

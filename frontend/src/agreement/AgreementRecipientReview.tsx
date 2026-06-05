@@ -79,6 +79,10 @@ import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { auditHasRecipientApprovalForParticipant } from "./participantModel";
 import { recipientLinkTokenFingerprint } from "./recipientLinkTokenFingerprint";
 import { logReviewStateSource } from "../components/agreements/reviewFlowDebugLog";
+import {
+  logPaidProReviewTrackLifecycle,
+  logReviewLinkSurfaceMounted,
+} from "../components/agreements/paidProReviewTrackLifecycle";
 import { substitutePartyPlaceholdersInUserFacingText } from "./partyPlaceholderDisplay";
 import { formatAuthoritativeAgreementPartiesInline } from "./handoffPartyDisplay";
 import { findOpenRecipientProposals } from "./recipientProposal";
@@ -869,6 +873,23 @@ export function AgreementRecipientReview({
     if (reviewerViewLoggedRef.current) return;
     reviewerViewLoggedRef.current = true;
     recipientReviewDevInfo("[reviewer-view-visible]", { agreementId, mode: "reviewer" as const });
+    logReviewLinkSurfaceMounted({
+      agreementId,
+      recipientLinkRole,
+      source: "agreement_recipient_review",
+    });
+    logPaidProReviewTrackLifecycle("reviewer_link_opened", {
+      agreementId,
+      source: "agreement_recipient_review",
+      canonicalHash: null,
+    });
+    return () => {
+      logPaidProReviewTrackLifecycle("reviewer_link_closed", {
+        agreementId,
+        source: "agreement_recipient_review",
+        canonicalHash: null,
+      });
+    };
   }, [agreementId, entry.kind, recipientAccessToken, recipientLinkRole]);
 
   const frictionPatterns = useMemo(

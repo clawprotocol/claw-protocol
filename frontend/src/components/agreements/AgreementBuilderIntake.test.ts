@@ -1039,16 +1039,24 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("logBlockedAutoNavigationWhileSignersEditing");
   });
 
-  it("test18: enterFinalReviewRecipientSetup blocked until post-ready send path", () => {
+  it("test18: enterFinalReviewRecipientSetup review_only is independent from signer setup", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
-    const enterBlock = intake.slice(enterIdx, enterIdx + 2200);
+    const enterBlock = intake.slice(enterIdx, enterIdx + 4200);
+    expect(enterBlock).toContain('if (intent === "review_only")');
+    expect(enterBlock).toContain('logPaidProReviewTrackLifecycle("review_recipient_setup"');
     expect(enterBlock).toContain("acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady");
     expect(enterBlock).toContain("claw-paid-pro-inline-signer-setup");
     expect(enterBlock).toContain("guidedProUxSuppressesProductionSendCta");
     expect(enterBlock).toContain("guidedProUxShowsQuestionPanel");
     expect(enterBlock).toContain('logGuidedSendCtaBlocked("enterFinalReviewRecipientSetup"');
     expect(enterBlock).toContain("continueGuidedFinalReviewToSigning({ intent })");
+    const reviewOnlyIdx = enterBlock.indexOf('if (intent === "review_only")');
+    const signerGateIdx = enterBlock.indexOf(
+      "acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady",
+    );
+    const reviewBranch = enterBlock.slice(reviewOnlyIdx, signerGateIdx);
+    expect(reviewBranch).not.toContain("handlePremiumReviewFirstContinueToSigners");
   });
 });
 

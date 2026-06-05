@@ -18,7 +18,13 @@ import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 export type PaidProCorpusLifecycleStage =
   | "canonical_freeze"
   | "signer_finalize"
-  | "review_render";
+  | "review_render"
+  | "review_link_generation";
+
+const REVIEW_LINK_GENERATION_ALLOWED_CLASSIFICATIONS = new Set<PaidProCorpusLifecycleDiffClassification>([
+  "identical",
+  "signer_metadata_only",
+]);
 
 export type PaidProCorpusLifecycleDiffClassification =
   | "signer_metadata_only"
@@ -252,6 +258,29 @@ export function auditPaidProReviewRenderCorpus(renderedText: string): PaidProCor
     toStage: "review_render",
     afterText: renderedText,
   });
+}
+
+export function auditPaidProReviewLinkGenerationCorpus(
+  linkGenerationText: string,
+): PaidProCorpusLifecycleDiffPayload | null {
+  const freeze = checkpoints.get("canonical_freeze");
+  if (!freeze) {
+    recordPaidProCorpusLifecycleCheckpoint("review_link_generation", linkGenerationText);
+    return null;
+  }
+  const payload = auditPaidProCorpusLifecycleFromCheckpoint({
+    fromStage: "canonical_freeze",
+    toStage: "review_link_generation",
+    afterText: linkGenerationText,
+  });
+  if (
+    payload &&
+    !REVIEW_LINK_GENERATION_ALLOWED_CLASSIFICATIONS.has(payload.classification)
+  ) {
+    // eslint-disable-next-line no-console
+    console.error("[paid-pro-review-link-generation-corpus-invariant]", payload);
+  }
+  return payload;
 }
 
 export function shouldPreservePaidProReviewScrollForClassification(

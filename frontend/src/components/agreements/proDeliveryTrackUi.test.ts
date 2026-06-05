@@ -109,7 +109,8 @@ describe("Pro delivery track UI wiring", () => {
     expect(intake).toContain("paidProSignerSetupRequiredBeforeDelivery");
     expect(intake).toContain("Add signer details before continuing.");
     expect(intake).toContain('data-testid="pro-review-add-signer-details"');
-    expect(intake).toContain('enterFinalReviewRecipientSetup(mode === "review" ? "review_only" : "signature")');
+    expect(intake).toContain('enterFinalReviewRecipientSetup("signature")');
+    expect(intake).not.toContain('enterFinalReviewRecipientSetup(mode === "review" ? "review_only" : "signature")');
   });
 
   it("canonical hash is unchanged when reading review vs handoff surfaces", () => {

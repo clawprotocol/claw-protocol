@@ -592,6 +592,12 @@ import {
   notePaidProReviewHashFromPlain,
   recordPaidProReviewRender,
 } from "./paidProReviewStability";
+import { auditPaidProReviewLinkGenerationCorpus } from "./paidProCorpusLifecycleDiff";
+import {
+  logPaidProReviewTrackLifecycle,
+  logReviewLinkCreated,
+  resolvePaidProReviewTrackCanonicalHash,
+} from "./paidProReviewTrackLifecycle";
 import { setPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 import {
   freezePaidProPostCheckoutRecoveryCanonicalSnapshot,
@@ -22989,6 +22995,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
         logGuidedReviewGenericSendBypassed({ source, agreementId: id, bodyLen: bodyPlain.length });
 
+        const reviewLinkGenAudit = auditPaidProReviewLinkGenerationCorpus(bodyPlain);
+        const reviewTrackCanonicalHash =
+          reviewLinkGenAudit?.toHash ??
+          resolvePaidProReviewTrackCanonicalHash(bodyPlain);
+        logPaidProReviewTrackLifecycle("review_link_generated", {
+          source,
+          agreementId: id,
+          canonicalHash: reviewTrackCanonicalHash,
+          classification: reviewLinkGenAudit?.classification ?? null,
+        });
+
         const donePath = `/app/done/${encodeURIComponent(id)}`;
         logReviewFirstMintStart({
           source,
@@ -23017,6 +23034,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
         logReviewFirstLinkCreated({ agreementId: id, destination: result.destination, source });
+        logReviewLinkCreated({
+          agreementId: id,
+          destination: result.destination,
+          source,
+          canonicalHash: reviewTrackCanonicalHash,
+        });
         logReviewFirstNavigateDone({ agreementId: id, path: donePath, source });
         clearPremiumSendIntent();
         clearReviewFirstHandoffSource();
@@ -23952,6 +23975,51 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const enterFinalReviewRecipientSetup = React.useCallback(
     (intent: FinalReviewSendIntent) => {
+      if (intent === "review_only") {
+        logPaidProReviewTrackLifecycle("review_recipient_setup", {
+          source: "enterFinalReviewRecipientSetup",
+          canonicalHash: resolvePaidProReviewTrackCanonicalHash(
+            simpleProFinalReviewCorpus.plainText || guidedAuthoritativeBodyPlain,
+          ),
+        });
+        if (acceptedPaidProAuthorityActive || paidProAuthoritative) {
+          void completeGuidedPaidProReviewFirstHandoff("review_recipient_setup");
+          return;
+        }
+        if (canProceedGuidedFinalReviewToSigning) {
+          void completeGuidedPaidProReviewFirstHandoff("review_recipient_setup_can_proceed");
+          return;
+        }
+        if (
+          guidedProUxSuppressesProductionSendCta(guidedProUxState, guidedQuestionGateDecision) ||
+          guidedProUxShowsQuestionPanel(guidedProUxState)
+        ) {
+          logGuidedSendCtaBlocked("enterFinalReviewRecipientSetup", guidedProUxState, intent);
+          logGuidedFinalReviewPhaseGuardBlocked("enterFinalReviewRecipientSetup", createFlowPhase);
+          logRecipientSetupPhaseBlocked("enterFinalReviewRecipientSetup", guidedProUxState);
+          return;
+        }
+        finalReviewSendPathChosenRef.current = true;
+        setGuidedSendIntentSelected(true);
+        finalReviewSendIntentRef.current = "review_only";
+        guidedFinalReviewContinueArmedRef.current = true;
+        handlePremiumSendModePick("review");
+        devPremiumSendRoute("review", false, "recipients_setup");
+        if (draft) {
+          agreementDocumentDirtyRef.current = false;
+          applyHandoffAgreementPreviewOrAuthoritative(draft);
+          persistPremiumRecipientHandoffFromDraftAndUi(draft);
+        }
+        setDisplayPhase("review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        advancePaidProToRecipientSetup();
+        markPremiumRecipientsSurfaceReleased();
+        setPremiumRecipientUxActive(true);
+        setCreateFlowSendRecipientEditorOpen(true);
+        guidedFinalReviewContinueArmedRef.current = false;
+        bumpPremiumSurfaceGateTick();
+        return;
+      }
       if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
         setHardError(null);
         // Entering inline signer setup → arm the mount latch and clear any prior prepare release.
@@ -23987,14 +24055,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalReviewSendPathChosenRef.current = true;
       setGuidedSendIntentSelected(true);
       finalReviewSendIntentRef.current = intent;
-      const sendMode: PremiumSendIntent = intent === "review_only" ? "review" : "signature";
       guidedFinalReviewContinueArmedRef.current = true;
-      handlePremiumSendModePick(sendMode);
-      if (intent === "signature") {
-        setPremiumSignatureSenderFirst(true);
-        writePremiumSenderSignFirst(true);
-      }
-      devPremiumSendRoute(sendMode, intent === "signature", "recipients_setup");
+      handlePremiumSendModePick("signature");
+      setPremiumSignatureSenderFirst(true);
+      writePremiumSenderSignFirst(true);
+      devPremiumSendRoute("signature", true, "recipients_setup");
       if (draft) {
         agreementDocumentDirtyRef.current = false;
         applyHandoffAgreementPreviewOrAuthoritative(draft);
@@ -24008,13 +24073,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateFlowSendRecipientEditorOpen(true);
       guidedFinalReviewContinueArmedRef.current = false;
       bumpPremiumSurfaceGateTick();
-      void handlePremiumReviewFirstContinueToSigners({ telemetryMode: sendMode });
+      void handlePremiumReviewFirstContinueToSigners({ telemetryMode: "signature" });
     },
     [
       acceptedPaidProAuthorityActive,
+      paidProAuthoritative,
       canProceedGuidedFinalReviewToSigning,
       paidProSignatureDetailsReady,
       continueGuidedFinalReviewToSigning,
+      completeGuidedPaidProReviewFirstHandoff,
       handlePremiumSendModePick,
       draft,
       applyHandoffAgreementPreviewOrAuthoritative,
@@ -24023,6 +24090,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       bumpPremiumSurfaceGateTick,
       handlePremiumReviewFirstContinueToSigners,
       guidedProUxState,
+      guidedQuestionGateDecision,
+      createFlowPhase,
+      simpleProFinalReviewCorpus.plainText,
+      guidedAuthoritativeBodyPlain,
     ],
   );
 
@@ -24103,11 +24174,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleProSendForReview = React.useCallback(() => {
+    const reviewBodyPlain = simpleProFinalReviewCorpus.plainText;
     logReviewFirstClick({
       source: "simple_pro_send_for_review",
       phase: createFlowPhase,
       canProceed: canProceedGuidedFinalReviewToSigning,
-      bodyLen: simpleProFinalReviewCorpus.plainText.length,
+      bodyLen: reviewBodyPlain.length,
+      selectedTrack: "review",
+    });
+    logPaidProReviewTrackLifecycle("review_track_selected", {
+      source: "simple_pro_send_for_review",
+      canonicalHash: resolvePaidProReviewTrackCanonicalHash(reviewBodyPlain),
     });
     const reviewFirstAgId = (
       productionSendBarAgreementId ||
@@ -24121,12 +24198,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     if (guidedCompletionActive) {
       logGuidedReviewTransition({
-        bodyLen: simpleProFinalReviewCorpus.plainText.length,
+        bodyLen: reviewBodyPlain.length,
         source: guidedCompletionRenderDocument.source,
       });
     }
-    if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
-      enterFinalReviewRecipientSetup("review_only");
+    if (acceptedPaidProAuthorityActive || paidProAuthoritative) {
+      void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review");
       return;
     }
     if (canProceedGuidedFinalReviewToSigning) {
@@ -24142,7 +24219,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionRenderDocument.source,
     simpleProFinalReviewCorpus.plainText,
     acceptedPaidProAuthorityActive,
-    paidProSignatureDetailsReady,
+    paidProAuthoritative,
     enterFinalReviewRecipientSetup,
   ]);
 
@@ -24156,8 +24233,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           source: guidedCompletionRenderDocument.source,
         });
       }
-      if (paidProAuthoritative && !paidProSignatureDetailsReady && (mode === "review" || mode === "signature")) {
-        enterFinalReviewRecipientSetup(mode === "review" ? "review_only" : "signature");
+      if (paidProAuthoritative && !paidProSignatureDetailsReady && mode === "signature") {
+        enterFinalReviewRecipientSetup("signature");
+        return;
+      }
+      if (mode === "review" && paidProAuthoritative) {
+        logPaidProReviewTrackLifecycle("review_track_selected", {
+          source: "finalize_route_primary_review",
+          canonicalHash: resolvePaidProReviewTrackCanonicalHash(
+            simpleProFinalReviewCorpus.plainText || guidedAuthoritativeBodyPlain,
+          ),
+        });
+        void completeGuidedPaidProReviewFirstHandoff("finalize_route_primary_review");
         return;
       }
       if (mode === "signature" && paidProAuthoritative) {
@@ -24167,19 +24254,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (
         paidProAuthoritative &&
         canProceedGuidedFinalReviewToSigning &&
-        (mode === "signature" || mode === "review")
+        mode === "signature"
       ) {
-        if (mode === "review") {
-          void completeGuidedPaidProReviewFirstHandoff("finalize_route_primary_review");
-          return;
-        }
         continueGuidedFinalReviewToSigning({ intent: "signature" });
         return;
       }
       handlePremiumSendModePick(mode);
-      if (mode === "review" || mode === "signature") {
+      if (mode === "review") {
         devPremiumSendRoute(mode, peekPremiumSenderSignFirst(), "recipients_setup");
-        void handlePremiumReviewFirstContinueToSigners({ telemetryMode: mode });
+        void completeGuidedPaidProReviewFirstHandoff("finalize_route_recipients_setup");
+        return;
+      }
+      if (mode === "signature") {
+        devPremiumSendRoute(mode, peekPremiumSenderSignFirst(), "recipients_setup");
+        void handlePremiumReviewFirstContinueToSigners({ telemetryMode: "signature" });
       }
     },
     [
@@ -24195,6 +24283,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedCompletionActive,
       guidedCompletionRenderDocument.plainText,
       guidedCompletionRenderDocument.source,
+      simpleProFinalReviewCorpus.plainText,
+      guidedAuthoritativeBodyPlain,
     ],
   );
 
@@ -24528,7 +24618,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             handlePremiumSendModePick(m);
             devPremiumSendChoice(m, peekPremiumSenderSignFirst());
             devPremiumSendRoute(m, peekPremiumSenderSignFirst(), "recipients_setup");
-            handlePremiumReviewFirstContinueToSigners({ telemetryMode: m });
+            if (m === "review") {
+              void completeGuidedPaidProReviewFirstHandoff("premium_continue_to_signers_review");
+              return;
+            }
+            handlePremiumReviewFirstContinueToSigners({ telemetryMode: "signature" });
             return;
           }
           case "keep_reviewing": {
