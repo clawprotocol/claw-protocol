@@ -17,7 +17,6 @@ import {
   containsMultipleCanonicalLegalEntities,
   detectSignerSlotContamination,
   extractSignerEntitiesFromSignatureBlock,
-  hydrateLegalEntityNameFromHandoff,
   isShortPrefixOfFullLegal,
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
@@ -29,11 +28,19 @@ import {
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
   resolveSignerSetupPartyIdentity,
+  resolveSignerPartyLegalEntityDisplayValue,
   shouldUpgradeRecipientNameToLegalEntity,
   signerDetailsFieldKey,
   slotIsolatedCanonicalEntity,
   type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
+import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import {
+  clearPaidProSourceOfTruth,
+  establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+} from "./paidProSourceOfTruth";
+import { sanitizeSignerPartyLegalEntityDisplay } from "./signerPartyLegalEntityDisplaySanitizer";
 import { buildResolvedPartyDisplayModel } from "../../agreement/resolvedPartyDisplayModel";
 import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -193,13 +200,13 @@ describe("signerSetupPartyIdentity", () => {
     expect(legal).toBe("Red Mesa Logistics LLC");
   });
 
-  it("does not render user legal entity edits over canonical slot identity", () => {
+  it("upgrades verb-polluted display labels to full legal names", () => {
     expect(
-      shouldUpgradeRecipientNameToLegalEntity("Red Mesa Logistics LLC", "Red Mesa Logistics LLC"),
-    ).toBe(false);
-    expect(
-      hydrateLegalEntityNameFromHandoff("Custom Entity LLC", "Red Mesa", "Red Mesa Logistics LLC"),
-    ).toBe("Red Mesa Logistics LLC");
+      shouldUpgradeRecipientNameToLegalEntity(
+        "engages Iron Vale Systems Inc",
+        "Iron Vale Systems Inc",
+      ),
+    ).toBe(true);
   });
 
   it("detects short prefix of full legal entity", () => {
@@ -394,7 +401,7 @@ describe("signerSetupPartyIdentity", () => {
     expect(p0).not.toContain("Automation");
   });
 
-  it("manual legal entity edits do not render over canonical slot values", () => {
+  it("manual legal entity edits persist when they are clean single-entity overrides", () => {
     const identities = resolveSignerSetupPartyIdentities({
       parties: [{ name: "Red Mesa Logistics LLC" }, { name: "Harbor Peak Automation LLC" }],
       intakeText: INTAKE,
@@ -405,7 +412,7 @@ describe("signerSetupPartyIdentity", () => {
       currentInputValue: "Custom Client Entity LLC",
       slotIdentities: identities,
     });
-    expect(edited).toBe("Red Mesa Logistics LLC");
+    expect(edited).toBe("Custom Client Entity LLC");
     const party2 = resolveEditableSignerLegalEntityForSlot({
       slotIndex: 1,
       currentInputValue: identities[1]!.legalEntityName,
@@ -1133,5 +1140,125 @@ describe("paid Pro inline signer setup mount latch", () => {
         signaturePreparationRequested: false,
       }),
     ).toBe(true);
+  });
+});
+
+describe("signer party legal entity display sanitizer (Paid Pro signer details)", () => {
+  const PARTY_1 = "Blue Canyon Analytics LLC";
+  const PARTY_2 = "Iron Vale Systems Inc.";
+  const INTAKE = `Services agreement between ${PARTY_1} and ${PARTY_2} for data work.`;
+  const BODY = [
+    `This Agreement is between ${PARTY_1} ("Client") and ${PARTY_2} ("Service Provider").`,
+    `${PARTY_1} engages ${PARTY_2} for professional services.`,
+    "",
+    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    "",
+    "CLIENT:",
+    PARTY_1,
+    "",
+    "SERVICE PROVIDER:",
+    PARTY_2,
+  ].join("\n");
+
+  afterEach(() => {
+    clearAuthoritativeAgreementDocument();
+    clearPaidProSourceOfTruth();
+  });
+
+  it("sanitizes engages Iron Vale Systems Inc to Iron Vale Systems Inc for signer display", () => {
+    expect(sanitizeSignerPartyLegalEntityDisplay("engages Iron Vale Systems Inc", { log: false })).toBe(
+      "Iron Vale Systems Inc",
+    );
+    expect(sanitizeSignerPartyLegalEntityDisplay("Blue Canyon Analytics LLC", { log: false })).toBe(
+      "Blue Canyon Analytics LLC",
+    );
+  });
+
+  it("resolves polluted ROLE_PAREN extraction from scope sentence for Party 2 slot", () => {
+    establishAuthoritativeAgreementDocument({
+      fullCorpusText: BODY,
+      canonicalPartyManifest: [
+        { name: PARTY_1, role: "client" },
+        { name: PARTY_2, role: "service_provider" },
+      ],
+    });
+    const pollutedIdentity = resolveSignerSetupPartyIdentity({
+      partyIndex: 1,
+      draftPartyName: "engages Iron Vale Systems Inc",
+      draftPartyNames: [PARTY_1, "engages Iron Vale Systems Inc"],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+      log: false,
+    });
+    expect(pollutedIdentity.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: "engages Iron Vale Systems Inc" }],
+      intakeText: INTAKE,
+      agreementBodyText: BODY,
+    });
+    const slot = resolveSignerSetupRenderSlot({
+      slotIndex: 1,
+      slotIdentities: identities,
+      currentLegalEntityValue: "engages Iron Vale Systems Inc",
+      source: "signer_setup_input_render",
+    });
+    expect(slot.canonicalLegalEntity).toMatch(/^Iron Vale Systems Inc\.?$/);
+  });
+
+  it("persists user-edited legal entity through metadata authority without mutating agreement body", () => {
+    const corpusBefore = BODY;
+    const sotRecord = establishPaidProSourceOfTruth({ text: corpusBefore, source: "server_full_draft" });
+    const operativeBefore = sotRecord.text.split(/\bIN WITNESS WHEREOF\b/i)[0]?.trim() ?? sotRecord.text;
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [{ name: PARTY_1 }, { name: PARTY_2 }],
+      intakeText: INTAKE,
+      agreementBodyText: corpusBefore,
+    });
+    const corrected = "Iron Vale Systems Inc";
+    const authority = buildLivePaidProSignerMetadataAuthority({
+      partyCount: 2,
+      recipient1Name: PARTY_1,
+      recipient2Name: corrected,
+      recipient1Email: "sarah@blue.test",
+      recipient2Email: "michael@iron.test",
+      partySignerNames: ["Sarah Mitchell", "Michael Torres"],
+      partySignerTitles: ["CEO", "President"],
+      partyAddresses: ["", ""],
+      extraPartyReviewEmails: [],
+    });
+    expect(authority.parties[1]?.partyLegalName).toBe(corrected);
+    const operativeAfter =
+      getPaidProSourceOfTruthText().split(/\bIN WITNESS WHEREOF\b/i)[0]?.trim() ??
+      getPaidProSourceOfTruthText();
+    expect(operativeAfter).toBe(operativeBefore);
+    expect(getPaidProSourceOfTruthText()).toContain(`${PARTY_1} engages ${PARTY_2}`);
+    expect(identities[1]?.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
+    const handoff = resolveLegalEntityNameForHandoffSlot({
+      partyIndex: 1,
+      currentSlotName: corrected,
+      draftPartyNames: [PARTY_1, corrected],
+      intakeText: INTAKE,
+      agreementBodyText: corpusBefore,
+      slotIdentities: identities,
+    });
+    expect(handoff).toBe(corrected);
+  });
+
+  it("resolveSignerPartyLegalEntityDisplayValue honors deliberate user correction over polluted canonical", () => {
+    const identities: SignerSetupPartyIdentity[] = [
+      { legalEntityName: PARTY_1, displayName: PARTY_1, source: "authoritative_manifest" },
+      {
+        legalEntityName: "engages Iron Vale Systems Inc",
+        displayName: "Iron Vale",
+        source: "canonical_resolver",
+      },
+    ];
+    const display = resolveSignerPartyLegalEntityDisplayValue({
+      slotIndex: 1,
+      currentInputValue: "Iron Vale Systems Inc",
+      slotIdentities: identities,
+      source: "user_correction",
+    });
+    expect(display).toBe("Iron Vale Systems Inc");
   });
 });

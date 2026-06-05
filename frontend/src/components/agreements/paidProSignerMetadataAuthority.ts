@@ -11,6 +11,7 @@ import {
   isIndividualPartyName,
   type CanonicalPartyIdentity,
 } from "./guidedDealCompletion/signerPartyIdentity";
+import { sanitizeSignerPartyLegalEntityDisplay } from "./signerPartyLegalEntityDisplaySanitizer";
 import {
   sanitizeAuthorityPartyLegalName,
   slotIsolatedCanonicalEntity,
@@ -196,7 +197,10 @@ export function buildPaidProSignerMetadataParties(
   for (let i = 0; i < count; i++) {
     parties.push({
       partyIndex: i,
-      partyLegalName: slotIsolatedCanonicalEntity(i, slots),
+      partyLegalName: sanitizeSignerPartyLegalEntityDisplay(partyLegalNameForIndex(ui, i), {
+        partyIndex: i,
+        source: "metadata_authority",
+      }),
       signerEmail: signerEmailForIndex(ui, i),
       signerName: norm(ui.partySignerNames[i]),
       signerTitle: norm(ui.partySignerTitles[i]),

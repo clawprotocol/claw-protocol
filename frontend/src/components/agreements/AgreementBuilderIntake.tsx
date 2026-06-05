@@ -2270,6 +2270,9 @@ function CreateFlowSendRecipientsPanel({
                   autoComplete="organization"
                   placeholder="e.g. Acme LLC"
                 />
+                <span className="mt-1 block text-[10px] font-normal leading-snug text-slate-500">
+                  Editable — corrections here apply to signer setup and signing metadata only, not the agreement body.
+                </span>
               </label>
             ) : idx === 1 ? (
               <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
@@ -2288,7 +2291,11 @@ function CreateFlowSendRecipientsPanel({
                     setRecipient2Name(e.target.value);
                   }}
                   className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                  placeholder="e.g. Iron Vale Systems Inc"
                 />
+                <span className="mt-1 block text-[10px] font-normal leading-snug text-slate-500">
+                  Editable — corrections here apply to signer setup and signing metadata only, not the agreement body.
+                </span>
               </label>
             ) : null}
             <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
