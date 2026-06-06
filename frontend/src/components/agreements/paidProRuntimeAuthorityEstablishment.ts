@@ -16,6 +16,11 @@ import {
   PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN,
 } from "./paidProAuthorityConstants";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  isPaidProApiFailureBlockingPaidProAuthority,
+  logPaidProAuthorityBlockedAfterApiFailure,
+} from "./paidProApiFailureAuthorityGuard";
+import { MIN_PAID_PRO_AUTHORITY_LEN } from "./premiumGenerationApiAvailability";
 import { resolvePaidProPostCheckoutRecoveryDisplayPlain } from "./paidProPostCheckoutRenderGate";
 
 export { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
@@ -119,6 +124,7 @@ export function assessPaidProRuntimeAuthority(args: {
   draft?: DraftServerFullProbe | null;
   premiumRenderSourceResolved?: string | null;
   premiumPipelineSource?: string | null;
+  premiumPostCheckoutPhase?: string | null;
   /** Declared corpus source for dev false-authority detection. */
   declaredCorpusSource?: string | null;
   intakeText?: string | null;
@@ -145,11 +151,27 @@ export function assessPaidProRuntimeAuthority(args: {
   const forbiddenRender = isForbiddenPaidProDisplayRenderSource(renderSource);
   const livePreviewOnly =
     renderSource === "live_generated_preview" && !paidEstablished && !serverFullDocExists;
+  const apiFailureBlocksAuthority =
+    !paidEstablished &&
+    isPaidProApiFailureBlockingPaidProAuthority({
+      premiumRenderSource: args.premiumPipelineSource ?? args.premiumRenderSourceResolved,
+      premiumPostCheckoutPhase: args.premiumPostCheckoutPhase,
+      hasPaidProSourceOfTruth: paidEstablished,
+    }) &&
+    corpusLen < MIN_PAID_PRO_AUTHORITY_LEN;
 
   let reason: PaidProRuntimeAuthorityReason = "awaiting_server_full_document";
   let established = false;
 
-  if (forbiddenRender || livePreviewOnly) {
+  if (apiFailureBlocksAuthority) {
+    logPaidProAuthorityBlockedAfterApiFailure({
+      corpusLen,
+      pipelineSource: args.premiumPipelineSource ?? args.premiumRenderSourceResolved ?? null,
+      phase: args.premiumPostCheckoutPhase ?? null,
+      surface: "paid_pro_runtime_authority",
+    });
+    reason = "live_preview_blocked";
+  } else if (forbiddenRender || livePreviewOnly) {
     reason = forbiddenRender ? "forbidden_render_source" : "live_preview_blocked";
   } else if (paidEstablished && paidTruthText.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
     established = true;

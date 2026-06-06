@@ -637,6 +637,14 @@ import {
   shouldBlockPaidProReviewShellWithoutCanonicalCorpus,
 } from "./paidProPostCheckoutRenderGate";
 import {
+  logPaidProApiFailureNoCanonicalFreeze,
+  logPaidProAuthorityBlockedAfterApiFailure,
+  logPaidProFallbackDisplayOnly,
+  logPaidProRetryRequested,
+  shouldBlockPaidProCanonicalFreezeOnApiFailure,
+  shouldBlockSignerMetadataPaidProAuthority,
+} from "./paidProApiFailureAuthorityGuard";
+import {
   armPaidProMutationTraceReviewReady,
   tracePaidProCorpusMutation,
 } from "./paidProMutationTrace";
@@ -4942,13 +4950,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateUiStage(CreateUiStage.DRAFT);
       return;
     }
+    const pipelineForSignerSeed =
+      readPremiumCompletionSnapshot()?.premiumPipelineRenderSource ??
+      lastPremiumPipelineRenderSourceRef.current;
     const proReviewSeedEligible =
       opts?.forceReviewDisplay === true ||
       premiumPersistedFlowActive ||
       premiumSendPathUnlocked ||
       hasPaidPremiumCompletionSession() ||
       hasPaidProSourceOfTruth();
-    if (proReviewSeedEligible && (nextDraft.parties?.length ?? 0) >= 2) {
+    const signerSeedBlocked = shouldBlockSignerMetadataPaidProAuthority({
+      premiumRenderSource: pipelineForSignerSeed,
+      premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+    });
+    if (proReviewSeedEligible && !signerSeedBlocked && (nextDraft.parties?.length ?? 0) >= 2) {
       const legalEntities = (nextDraft.parties ?? [])
         .map((p) => String((p as { name?: string }).name ?? "").trim())
         .filter(Boolean);
@@ -5020,36 +5035,63 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : proReviewDisplay && premiumFullOnDraft.length >= 500
               ? premiumFullOnDraft
               : buildPreviewForCurrentTier(nextDraft);
-      const draftParties = ((nextDraft as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? [])
-        .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
-        .filter((p) => p.name.trim());
-      const snapshot = buildCanonicalAgreementSnapshot({
-        surface: "draft_ready_for_review",
-        tier: proReviewDisplay ? "pro" : "starter",
-        candidates: [
-          {
-            source: proReviewDisplay ? "canonical_working_draft" : "free_starter",
-            text: canonicalReviewPlain,
-          },
-        ],
-        intakeText: intakeCombined,
-        parties: draftParties,
-        signerState: { complete: false, signerCount: Math.max(2, draftParties.length) },
-        minLen: proReviewDisplay ? 500 : 120,
-        reviewSessionId: reviewAgreementIdRef.current || getOrInitSessionAgreementGenerationId(),
+      const blockPaidProCanonicalFreeze = shouldBlockPaidProCanonicalFreezeOnApiFailure({
+        premiumRenderSource: pipelineForCanonical,
+        premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+        corpusLen: canonicalReviewPlain.length,
+        corpusSource: proReviewDisplay ? "canonical_working_draft" : "free_starter",
       });
-      freezeCanonicalAgreementSnapshot(snapshot, snapshot.source);
-      if (
-        proReviewDisplay &&
-        canonicalReviewPlain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
-        isPaidProPostCheckoutRecoveryPipelineSource(pipelineForCanonical)
-      ) {
-        freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
-          text: canonicalReviewPlain,
-          draft: nextDraft,
-          intakeText: intakeForCanonical,
+      const effectiveProCanonicalTier = proReviewDisplay && !blockPaidProCanonicalFreeze;
+      if (blockPaidProCanonicalFreeze) {
+        logPaidProApiFailureNoCanonicalFreeze({
+          corpusLen: canonicalReviewPlain.length,
+          pipelineSource: pipelineForCanonical,
+          phase: premiumPostCheckoutPhaseRef.current,
+          corpusSource: "canonical_working_draft",
+        });
+        logPaidProFallbackDisplayOnly({
+          corpusLen: canonicalReviewPlain.length,
+          pipelineSource: pipelineForCanonical,
+          displaySource: "free_starter",
+        });
+        logPaidProAuthorityBlockedAfterApiFailure({
+          corpusLen: canonicalReviewPlain.length,
+          pipelineSource: pipelineForCanonical,
+          phase: premiumPostCheckoutPhaseRef.current,
+          surface: "commit_parsed_draft_review",
+        });
+      } else {
+        const draftParties = ((nextDraft as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? [])
+          .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
+          .filter((p) => p.name.trim());
+        const snapshot = buildCanonicalAgreementSnapshot({
+          surface: "draft_ready_for_review",
+          tier: effectiveProCanonicalTier ? "pro" : "starter",
+          candidates: [
+            {
+              source: effectiveProCanonicalTier ? "canonical_working_draft" : "free_starter",
+              text: canonicalReviewPlain,
+            },
+          ],
+          intakeText: intakeCombined,
+          parties: draftParties,
+          signerState: { complete: false, signerCount: Math.max(2, draftParties.length) },
+          minLen: effectiveProCanonicalTier ? 500 : 120,
           reviewSessionId: reviewAgreementIdRef.current || getOrInitSessionAgreementGenerationId(),
         });
+        freezeCanonicalAgreementSnapshot(snapshot, snapshot.source);
+        if (
+          effectiveProCanonicalTier &&
+          canonicalReviewPlain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+          isPaidProPostCheckoutRecoveryPipelineSource(pipelineForCanonical)
+        ) {
+          freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
+            text: canonicalReviewPlain,
+            draft: nextDraft,
+            intakeText: intakeForCanonical,
+            reviewSessionId: reviewAgreementIdRef.current || getOrInitSessionAgreementGenerationId(),
+          });
+        }
       }
     } catch (e) {
       if (import.meta.env.DEV) {
@@ -6402,6 +6444,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           applyFailureFallback(undefined, { paidCheckoutRecovery: true });
           setPremiumPostCheckoutPhase("premium_cors_blocked");
           setPremiumPipelineUserMessage(null);
+          logPaidProApiFailureNoCanonicalFreeze({
+            corpusLen: (agreementDocumentTextRef.current || "").trim().length,
+            pipelineSource: result.premiumRenderSource,
+            phase: "premium_cors_blocked",
+            corpusSource: "canonical_working_draft",
+          });
+          logPaidProAuthorityBlockedAfterApiFailure({
+            corpusLen: (agreementDocumentTextRef.current || "").trim().length,
+            pipelineSource: result.premiumRenderSource,
+            phase: "premium_cors_blocked",
+            surface: "premium_cors_blocked_handler",
+          });
           logPremiumModalInfo("[premium-modal-stage]", {
             to: "premium_cors_blocked",
             pageOrigin,
@@ -7906,12 +7960,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             recoverySnapFb?.premiumPipelineRenderSource ||
             lastPremiumPipelineRenderSourceRef.current ||
             null;
-          if (recoveryBodyFb.length >= 500) {
+          const blockStarterAsPro = shouldBlockPaidProCanonicalFreezeOnApiFailure({
+            premiumRenderSource: pipelineSrc,
+            premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+            corpusLen: recoveryBodyFb.length,
+            corpusSource: "canonical_working_draft",
+          });
+          if (recoveryBodyFb.length >= 500 && !blockStarterAsPro) {
             draftForReview = {
               ...merged.draft,
               premium_full_document_text: recoveryBodyFb,
               premium_render_source: pipelineSrc || merged.draft.premium_render_source,
             };
+          } else if (blockStarterAsPro) {
+            logPaidProFallbackDisplayOnly({
+              corpusLen: recoveryBodyFb.length,
+              pipelineSource: pipelineSrc,
+              displaySource: "free_starter",
+            });
           }
         }
         commitParsedDraftToReviewFlow(draftForReview, { forceReviewDisplay: true });
@@ -7935,7 +8001,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const recoveryBodyForDisplay =
             (winningBodyText || "").trim() ||
             readAuthoritativeSnapshotBody(readPremiumCompletionSnapshot());
-          if (recoveryBodyForDisplay.length >= 500) {
+          const recoveryPipelineSrc =
+            readPremiumCompletionSnapshot()?.premiumPipelineRenderSource ||
+            lastPremiumPipelineRenderSourceRef.current ||
+            null;
+          const blockStarterDisplayAsPro = shouldBlockPaidProCanonicalFreezeOnApiFailure({
+            premiumRenderSource: recoveryPipelineSrc,
+            premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
+            corpusLen: recoveryBodyForDisplay.length,
+            corpusSource: "canonical_working_draft",
+          });
+          if (recoveryBodyForDisplay.length >= 500 && !blockStarterDisplayAsPro) {
             setAgreementDocumentText(recoveryBodyForDisplay);
             if (recoveryBodyForDisplay.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
               freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
@@ -7944,6 +8020,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 intakeText: mergedIntake,
                 reviewSessionId: getOrInitSessionAgreementGenerationId(),
               });
+            }
+          } else if (blockStarterDisplayAsPro) {
+            logPaidProFallbackDisplayOnly({
+              corpusLen: recoveryBodyForDisplay.length,
+              pipelineSource: recoveryPipelineSrc,
+              displaySource: "free_starter",
+            });
+            try {
+              setAgreementDocumentText(
+                buildAgreementPreviewText(merged.draft, {
+                  starterPreview: true,
+                  intakeText: mergedIntake,
+                }),
+              );
+            } catch {
+              /* keep existing starter document text */
             }
           } else {
             try {
@@ -14481,6 +14573,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       stage: "user_retry_pro_full_draft",
       intakeLen: it.length,
     });
+    logPaidProRetryRequested({
+      pipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+      phase: premiumPostCheckoutPhaseRef.current,
+      intakeLen: it.length,
+    });
     setPremiumPostCheckoutPhase("processing");
     void m({
       intakeText: it,
@@ -14856,6 +14953,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draft: (reviewDraft ?? draft) as import("./intakeSmartDefaults").ParsedDraftShape | null,
         premiumRenderSourceResolved: premiumPaidReadonlyPick.sourceUsed,
         premiumPipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumPostCheckoutPhase: premiumPostCheckoutPhase,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         postCheckoutRecoveryPlain: paidProPostCheckoutRecoveryPlain,
       }),
@@ -14864,6 +14962,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draft,
       premiumPaidReadonlyPick.sourceUsed,
       premiumTruthPipelineSource,
+      premiumPostCheckoutPhase,
       paidProPostCheckoutRecoveryPlain,
       currentPremiumMergedIntakeKey,
       intakeCombined,
@@ -14892,6 +14991,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         premiumRenderSource:
           premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumPostCheckoutPhase: premiumPostCheckoutPhase,
         premiumCheckoutCompleted,
         winningPremiumBodyText:
           (premiumPaidReadonlyPick.plainText || "").trim() ||
@@ -14903,6 +15003,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       currentPremiumMergedIntakeKey,
       intakeCombined,
       premiumTruthPipelineSource,
+      premiumPostCheckoutPhase,
       premiumCheckoutCompleted,
       premiumPaidReadonlyPick.plainText,
       reviewDocRefreshTick,
@@ -14917,6 +15018,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         premiumRenderSource:
           premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumPostCheckoutPhase: premiumPostCheckoutPhase,
         premiumCheckoutCompleted,
         winningPremiumBodyText:
           (premiumPaidReadonlyPick.plainText || "").trim() ||
@@ -14928,6 +15030,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       currentPremiumMergedIntakeKey,
       intakeCombined,
       premiumTruthPipelineSource,
+      premiumPostCheckoutPhase,
       premiumCheckoutCompleted,
       premiumPaidReadonlyPick.plainText,
       reviewDocRefreshTick,

@@ -25,6 +25,7 @@ import {
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
 import { isNonfatalGenerationFailureCode } from "./premiumAcceptancePolicy";
+import { shouldBlockPaidProReviewReadinessFromFallbackCorpus } from "./paidProApiFailureAuthorityGuard";
 
 /** Minimum plain length for a displayable degraded/local recovery Pro agreement on first review. */
 export const PAID_PRO_RECOVERY_MIN_DISPLAY_LEN = 4_000;
@@ -191,8 +192,32 @@ export function hasRenderablePaidProFirstReviewCorpus(
     hydratedPremiumBody?: string | null;
     winningPremiumBodyText?: string | null;
     premiumDegradedServerLocalRecovery?: boolean;
+    premiumPostCheckoutPhase?: string | null;
   },
 ): boolean {
+  const pipeline = String(input?.premiumRenderSource ?? "").trim();
+  const recoveryLen = resolvePaidProPostCheckoutFirstReviewPlain({
+    draft: input?.draft ?? null,
+    intakeText: input?.intakeText ?? null,
+    premiumRenderSource: pipeline,
+    winningPremiumBodyText: input?.winningPremiumBodyText,
+    hydratedPremiumBody: input?.hydratedPremiumBody,
+    premiumDegradedServerLocalRecovery: input?.premiumDegradedServerLocalRecovery,
+  }).length;
+  const draftLen = Math.max(
+    String(input?.draft?.premium_full_document_text ?? "").trim().length,
+    String(input?.winningPremiumBodyText ?? "").trim().length,
+    recoveryLen,
+  );
+  if (
+    shouldBlockPaidProReviewReadinessFromFallbackCorpus({
+      premiumRenderSource: pipeline,
+      premiumPostCheckoutPhase: input?.premiumPostCheckoutPhase,
+      corpusLen: draftLen,
+    })
+  ) {
+    return false;
+  }
   if (hasPaidProSourceOfTruth()) {
     const renderPlain = resolvePaidProReviewRenderPlain({
       draft: input?.draft ?? null,
@@ -221,6 +246,7 @@ export function shouldBlockPaidProReviewShellWithoutCanonicalCorpus(
     hydratedPremiumBody?: string | null;
     winningPremiumBodyText?: string | null;
     premiumDegradedServerLocalRecovery?: boolean;
+    premiumPostCheckoutPhase?: string | null;
   },
 ): boolean {
   const checkoutLatched = Boolean(
