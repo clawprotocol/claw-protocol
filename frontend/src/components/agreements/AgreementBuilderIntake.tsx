@@ -293,7 +293,6 @@ import {
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
   shouldArmPaidProFirstReviewSignerSetupLatch,
-  shouldArmPaidProInlineSignerSetupLatch,
   shouldShowPaidProForcedFirstReviewTrackChooser,
   type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
@@ -15114,6 +15113,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     signerDetailsGateComplete: paidProSignatureDetailsReady,
     hasAuthoritativeSigningSnapshot: paidProSignerMetadataFinalized,
   });
+  /** Legacy panel: user chose delivery track but signer metadata is still incomplete. */
+  const paidProSignerSetupRequiredBeforeDelivery = Boolean(
+    acceptedPaidProAuthorityActive &&
+      premiumPaidDocumentSurface &&
+      signaturePreparationRequested &&
+      !paidProSignatureDetailsReady &&
+      !paidProSignerMetadataFinalized,
+  );
+
   const paidProFirstReviewSignerSetupRequired = useMemo(
     () =>
       shouldArmPaidProFirstReviewSignerSetupLatch({

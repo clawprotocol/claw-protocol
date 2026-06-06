@@ -24,7 +24,6 @@ import {
   resolvePaidProStickyCtaPhase,
 } from "./paidProStickyCta";
 import { PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA } from "./signerSetupPartyIdentity";
-import { PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA } from "./signerSetupPartyIdentity";
 import { armPaidProStarterSignatureSendFromCreateFlow } from "../../launch/simpleProduct/premiumSendIntent";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 
