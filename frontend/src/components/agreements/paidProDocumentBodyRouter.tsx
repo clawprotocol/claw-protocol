@@ -10,12 +10,46 @@ import {
 } from "./paidProVisibleDocumentShell";
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
 import {
+  getAuthoritativeAgreementText,
+  hasAuthoritativeAgreementDocument,
+} from "./authoritativeAgreementDocument";
+import {
+  hasFrozenCanonicalAgreementCorpus,
+  readCanonicalAgreementCorpusForSurface,
+} from "./canonicalAgreementSnapshot";
+import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 
 /** Minimum frozen SoT length to force visible document shell (inclusive). */
 export const PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN = 1000;
+
+/** Read-only canonical review corpus length for render routing (no SoT mutation). */
+export function resolveCanonicalReviewCorpusLenForRender(): number {
+  if (hasPaidProSourceOfTruth()) {
+    return getPaidProSourceOfTruthText().trim().length;
+  }
+  const authoritative = getAuthoritativeAgreementText().trim();
+  if (authoritative.length > 0) return authoritative.length;
+  const frozen = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
+  return frozen?.canonicalText?.trim().length ?? 0;
+}
+
+export function hasCanonicalReviewCorpusForRender(): boolean {
+  return (
+    hasFrozenCanonicalAgreementCorpus() ||
+    hasAuthoritativeAgreementDocument() ||
+    hasPaidProSourceOfTruth()
+  );
+}
+
+export function shouldForcePaidProReviewDocumentRender(): boolean {
+  return (
+    hasCanonicalReviewCorpusForRender() &&
+    resolveCanonicalReviewCorpusLenForRender() >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+  );
+}
 
 export type PaidProDocumentBodyRouterBranch = "paid_pro_visible_shell_forced" | "legacy";
 
@@ -36,20 +70,28 @@ export function resetPaidProDocumentBodyRouterLogsForTests(): void {
 export function resolvePaidProDocumentBodyRouter(): PaidProDocumentBodyRouterState {
   const hasSoT = hasPaidProSourceOfTruth();
   const sotLen = hasSoT ? getPaidProSourceOfTruthText().trim().length : 0;
-  if (hasSoT && sotLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) {
+  const canonicalReviewLen = resolveCanonicalReviewCorpusLenForRender();
+  const hasCanonicalCorpus = hasCanonicalReviewCorpusForRender();
+  if (hasCanonicalCorpus && canonicalReviewLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) {
     return {
       hasSoT,
-      sotLen,
+      sotLen: canonicalReviewLen,
       branch: "paid_pro_visible_shell_forced",
-      reason: "frozen_sot_len_meets_threshold",
+      reason: hasSoT
+        ? "frozen_sot_len_meets_threshold"
+        : "canonical_review_corpus_len_meets_threshold",
       forced: true,
     };
   }
   return {
     hasSoT,
-    sotLen,
+    sotLen: sotLen || canonicalReviewLen,
     branch: "legacy",
-    reason: hasSoT ? "sot_below_threshold" : "no_frozen_sot",
+    reason: hasSoT
+      ? "sot_below_threshold"
+      : hasCanonicalCorpus
+        ? "canonical_corpus_below_threshold"
+        : "no_canonical_review_corpus",
     forced: false,
   };
 }

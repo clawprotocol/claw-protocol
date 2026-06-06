@@ -568,10 +568,18 @@ import {
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import { PaidProVisibleDocumentShell } from "./paidProVisibleDocumentShell";
 import {
+  hasCanonicalReviewCorpusForRender,
   PaidProDocumentBodyForcedRoute,
+  resolveCanonicalReviewCorpusLenForRender,
   resolvePaidProDocumentBodyRouter,
 } from "./paidProDocumentBodyRouter";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
+import { PaidProReviewRenderInvariantProbe } from "./PaidProReviewRenderInvariantProbe";
+import {
+  logPaidProReviewBranch,
+  resolvePaidProReviewBranchPath,
+  type PaidProReviewBranchSnapshot,
+} from "./paidProReviewBranchInstrumentation";
 import { PaidProSignerFieldsMountShell } from "./paidProSignerFieldsMountShell";
 import { logPaidProSignaturePrepSelected } from "./paidProSignaturePrepUi";
 import { PremiumAgreementCopyButton } from "./PremiumAgreementCopyButton";
@@ -22235,6 +22243,96 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedCompletionRenderDocument,
     ],
   );
+  const paidProCanonicalReviewCorpusReady = useMemo(
+    () => hasCanonicalReviewCorpusForRender(),
+    [premiumSurfaceGateTick, reviewDocRefreshTick],
+  );
+  const paidProCanonicalReviewCorpusLen = useMemo(
+    () => resolveCanonicalReviewCorpusLenForRender(),
+    [premiumSurfaceGateTick, reviewDocRefreshTick],
+  );
+  /** Test289: mount review document card when canonical corpus exists even if runtime authority gate is transiently false. */
+  const showPaidProReviewDocumentCard = useMemo(
+    () =>
+      canDisplayPaidProAgreementDocument ||
+      (premiumPaidDocumentSurface &&
+        paidProDocumentBodyRouter.forced &&
+        paidProCanonicalReviewCorpusReady),
+    [
+      canDisplayPaidProAgreementDocument,
+      premiumPaidDocumentSurface,
+      paidProDocumentBodyRouter.forced,
+      paidProCanonicalReviewCorpusReady,
+    ],
+  );
+  const paidProReviewBranchPath = useMemo(
+    () =>
+      resolvePaidProReviewBranchPath({
+        premiumPaidDocumentSurface,
+        showPaidProReviewDocumentCard,
+        proUpgradeUseStarterView,
+        paidProForcedFirstReviewActive,
+        guidedPreReviewSignerSetupActive,
+        paidProAwaitingRuntimeAuthority,
+        simpleProFinalReviewShellActive,
+        failedPremiumCorpusActive,
+        premiumReturnWaitActive,
+      }),
+    [
+      premiumPaidDocumentSurface,
+      showPaidProReviewDocumentCard,
+      proUpgradeUseStarterView,
+      paidProForcedFirstReviewActive,
+      guidedPreReviewSignerSetupActive,
+      paidProAwaitingRuntimeAuthority,
+      simpleProFinalReviewShellActive,
+      failedPremiumCorpusActive,
+      premiumReturnWaitActive,
+    ],
+  );
+  const paidProReviewBranchSnapshot = useMemo((): PaidProReviewBranchSnapshot => {
+    const path = paidProReviewBranchPath.path;
+    const documentMounted =
+      path === "forced_embedded" ||
+      path === "forced_standalone" ||
+      path === "legacy_simple_review" ||
+      path === "legacy_premium_readonly";
+    const chromeMounted =
+      path === "forced_embedded" ||
+      path === "legacy_simple_review" ||
+      paidProCanonicalReviewSignerSetupActive;
+    const signerMounted = paidProCanonicalReviewSignerSetupActive;
+    return {
+      forcedReviewActive: paidProForcedFirstReviewActive,
+      firstReviewSurfaceActive: paidProFirstReviewSurfaceActive,
+      simpleReviewActive: simpleProFinalReviewShellActive,
+      signerSetupActive: paidProCanonicalReviewSignerSetupActive,
+      canDisplayPaidProDocument: canDisplayPaidProAgreementDocument,
+      canonicalReviewCorpusReady: paidProCanonicalReviewCorpusReady,
+      canonicalReviewCorpusLen: paidProCanonicalReviewCorpusLen,
+      hasCanonicalCorpus: paidProCanonicalReviewCorpusReady,
+      premiumPaidDocumentSurface,
+      documentMounted,
+      chromeMounted,
+      signerMounted,
+      path,
+      reason: paidProReviewBranchPath.reason,
+    };
+  }, [
+    paidProReviewBranchPath,
+    paidProForcedFirstReviewActive,
+    paidProFirstReviewSurfaceActive,
+    simpleProFinalReviewShellActive,
+    paidProCanonicalReviewSignerSetupActive,
+    canDisplayPaidProAgreementDocument,
+    paidProCanonicalReviewCorpusReady,
+    paidProCanonicalReviewCorpusLen,
+    premiumPaidDocumentSurface,
+  ]);
+  useEffect(() => {
+    if (!premiumPaidDocumentSurface) return;
+    logPaidProReviewBranch(paidProReviewBranchSnapshot);
+  }, [premiumPaidDocumentSurface, paidProReviewBranchSnapshot]);
   const blockProEmptyDocumentFallback = shouldBlockProEmptyDocumentFallback(guidedCompletionRenderDocument);
   /** Upper “Want to adjust…” card — hidden when guided completion owns gap UX. */
   const showTopProAdjustCard = Boolean(
@@ -27444,6 +27542,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           >
                             {premiumPaidDocumentSurface ? (
                               <>
+                                <PaidProReviewRenderInvariantProbe
+                                  reviewShellMounted
+                                  snapshot={paidProReviewBranchSnapshot}
+                                />
                                 {showGuidedCompletionRecovery && activeGuidedCompletionSession ? (
                                   <div className="mx-auto mb-4 w-full max-w-[850px] px-0 sm:px-1">
                                     <div
@@ -27684,7 +27786,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       />
                                     </div>
                                   </div>
-                                ) : canDisplayPaidProAgreementDocument ? (
+                                ) : showPaidProReviewDocumentCard ? (
                                 <div
                                   key="paid-pro-agreement-document-stable"
                                   className="mx-auto w-full max-w-[850px] px-0 sm:px-1"

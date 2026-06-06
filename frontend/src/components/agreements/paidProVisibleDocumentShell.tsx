@@ -4,6 +4,8 @@
  */
 
 import { useEffect, useRef } from "react";
+import { getAuthoritativeAgreementText } from "./authoritativeAgreementDocument";
+import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
 import { PaidProCanonicalPlainReviewDocument } from "./paidProCanonicalPlainReviewDocument";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
@@ -24,13 +26,43 @@ export function resetPaidProVisibleDocumentShellLogsForTests(): void {
   mountedLogKeys.clear();
 }
 
+export function resolveCanonicalPlainForVisibleShell(): { plain: string; source: string } {
+  if (hasPaidProSourceOfTruth()) {
+    const sot = getPaidProSourceOfTruthText().trim();
+    if (sot.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+      return { plain: sot, source: "paidProSourceOfTruth" };
+    }
+  }
+  const authoritative = getAuthoritativeAgreementText().trim();
+  if (authoritative.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+    return { plain: authoritative, source: "authoritativeAgreementDocument" };
+  }
+  const frozen = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
+  const frozenPlain = frozen?.canonicalText?.trim() ?? "";
+  if (frozenPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+    return { plain: frozenPlain, source: "frozenCanonicalCorpus" };
+  }
+  return { plain: "", source: "none" };
+}
+
 export function resolvePaidProVisibleShellRenderBranch(args: {
   hasSoT: boolean;
   sotLen: number;
   htmlLen: number;
+  canonicalPlainLen?: number;
 }): { branch: PaidProVisibleShellRenderBranch; reason: string } {
-  if (args.hasSoT && args.sotLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
-    return { branch: "canonical_plain_forced", reason: "frozen_sot_len_above_threshold" };
+  const canonicalPlainLen = args.canonicalPlainLen ?? 0;
+  if (
+    (args.hasSoT && args.sotLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) ||
+    canonicalPlainLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+  ) {
+    return {
+      branch: "canonical_plain_forced",
+      reason:
+        args.hasSoT && args.sotLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+          ? "frozen_sot_len_above_threshold"
+          : "authoritative_or_frozen_corpus_above_threshold",
+    };
   }
   if (args.htmlLen > 0) {
     return { branch: "html", reason: "html_available_without_sot_threshold" };
@@ -81,11 +113,23 @@ export function PaidProVisibleDocumentShell({
   const sotPlain = hasSoT ? getPaidProSourceOfTruthText().trim() : "";
   const sotLen = sotPlain.length;
   const htmlLen = html.trim().length;
+  const canonicalPlain = resolveCanonicalPlainForVisibleShell();
   const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
     hasSoT,
     sotLen,
     htmlLen,
+    canonicalPlainLen: canonicalPlain.plain.length,
   });
+  const renderPlain =
+    branch === "canonical_plain_forced"
+      ? canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+        ? canonicalPlain.plain
+        : sotPlain
+      : "";
+  const renderSource =
+    branch === "canonical_plain_forced" && canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+      ? canonicalPlain.source
+      : authoritativeSource;
 
   useEffect(() => {
     logPaidProVisibleShellOwnerMounted({
@@ -107,10 +151,10 @@ export function PaidProVisibleDocumentShell({
     >
       {branch === "canonical_plain_forced" ? (
         <PaidProCanonicalPlainReviewDocument
-          plain={sotPlain}
+          plain={renderPlain}
           tailPaddingClass="pb-12"
           compactTopPadding={compactDocumentTopPadding}
-          authoritativeSource={authoritativeSource}
+          authoritativeSource={renderSource}
         />
       ) : branch === "html" ? (
         <PremiumAgreementReadonlyView
