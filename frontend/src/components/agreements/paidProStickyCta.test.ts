@@ -22,7 +22,7 @@ describe("paidProStickyCta", () => {
         signaturePreparationRequested: false,
         sendSurfaceReady: false,
       }),
-    ).toBe("review_decision");
+    ).toBe("signer_details_required");
 
     expect(
       resolvePaidProStickyCtaPhase({

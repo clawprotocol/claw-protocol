@@ -502,8 +502,50 @@ export function shouldArmPaidProInlineSignerSetupLatch(args: {
       !args.premiumRecipientUxActive &&
       args.createUiStageIsDraft &&
       args.simpleProFinalReviewShellActive &&
-      args.signaturePreparationRequested &&
       !args.paidProSignatureDetailsReady,
+  );
+}
+
+/** First paid Pro review entry — arm latch when corpus exists and signer metadata is incomplete. */
+export function shouldArmPaidProFirstReviewSignerSetupLatch(args: {
+  hasAcceptedPaidProAuthority: boolean;
+  premiumPaidDocumentSurface: boolean;
+  premiumRecipientUxActive: boolean;
+  createUiStageIsDraft: boolean;
+  firstReviewSurfaceActive: boolean;
+  hasCanonicalReviewCorpus: boolean;
+  paidProSignatureDetailsReady: boolean;
+  signerMetadataFinalized: boolean;
+  signaturePreparationRequested: boolean;
+  alreadyLatched: boolean;
+}): boolean {
+  if (args.alreadyLatched) return true;
+  if (args.signaturePreparationRequested) return false;
+  return Boolean(
+    args.hasAcceptedPaidProAuthority &&
+      args.premiumPaidDocumentSurface &&
+      !args.premiumRecipientUxActive &&
+      args.createUiStageIsDraft &&
+      args.firstReviewSurfaceActive &&
+      args.hasCanonicalReviewCorpus &&
+      !args.paidProSignatureDetailsReady &&
+      !args.signerMetadataFinalized,
+  );
+}
+
+/** Delivery-track chooser on forced document route — only after signer metadata is complete. */
+export function shouldShowPaidProForcedFirstReviewTrackChooser(args: {
+  forcedFirstReviewActive: boolean;
+  inlineSignerSetupMounted: boolean;
+  signerDetailsReady: boolean;
+  signerMetadataFinalized: boolean;
+  signaturePreparationRequested: boolean;
+}): boolean {
+  return Boolean(
+    args.forcedFirstReviewActive &&
+      !args.inlineSignerSetupMounted &&
+      (args.signerDetailsReady || args.signerMetadataFinalized) &&
+      !args.signaturePreparationRequested,
   );
 }
 

@@ -1038,7 +1038,7 @@ describe("paid Pro inline signer setup mount latch", () => {
     simpleProFinalReviewShellActive: true,
   };
 
-  it("arms the latch only after Prepare signatures when signer details are incomplete", () => {
+  it("arms the latch on first review when signer details are incomplete", () => {
     expect(
       shouldArmPaidProInlineSignerSetupLatch({
         ...shellArgs,
@@ -1046,15 +1046,15 @@ describe("paid Pro inline signer setup mount latch", () => {
         signaturePreparationRequested: false,
         alreadyLatched: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldArmPaidProInlineSignerSetupLatch({
         ...shellArgs,
-        paidProSignatureDetailsReady: false,
-        signaturePreparationRequested: true,
+        paidProSignatureDetailsReady: true,
+        signaturePreparationRequested: false,
         alreadyLatched: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("typing Party 2 signer name completes the gate but the mount latch keeps inline setup visible", () => {

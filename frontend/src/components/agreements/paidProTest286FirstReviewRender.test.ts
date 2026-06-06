@@ -24,6 +24,7 @@ import {
   resolvePaidProStickyCtaPhase,
 } from "./paidProStickyCta";
 import { PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA } from "./signerSetupPartyIdentity";
+import { PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA } from "./signerSetupPartyIdentity";
 import { armPaidProStarterSignatureSendFromCreateFlow } from "../../launch/simpleProduct/premiumSendIntent";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 
@@ -129,7 +130,7 @@ describe("Test286 paid Pro first-review render + signer metadata", () => {
     ).toBeNull();
   });
 
-  it("sticky CTA stays review_decision until Prepare signatures", () => {
+  it("sticky CTA shows Complete signer details while latch armed before Prepare signatures", () => {
     expect(
       resolvePaidProStickyCtaPhase({
         hasAuthoritativeSigningSnapshot: false,
@@ -138,7 +139,7 @@ describe("Test286 paid Pro first-review render + signer metadata", () => {
         signaturePreparationRequested: false,
         sendSurfaceReady: false,
       }),
-    ).toBe("review_decision");
+    ).toBe("signer_details_required");
     expect(
       resolvePaidProStickyCta({
         hasAuthoritativeSigningSnapshot: false,
@@ -147,7 +148,7 @@ describe("Test286 paid Pro first-review render + signer metadata", () => {
         signaturePreparationRequested: false,
         sendSurfaceReady: false,
       }).label,
-    ).not.toBe(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA);
+    ).toBe(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA);
   });
 
   it("defers starter signature intent until prepare signatures", () => {

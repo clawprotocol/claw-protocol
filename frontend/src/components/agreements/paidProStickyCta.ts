@@ -54,6 +54,20 @@ export function resolvePaidProStickyCtaPhase(
   if (args.hasAuthoritativeSigningSnapshot) {
     return "review_decision";
   }
+  if (
+    args.inlineSignerSetupLatched &&
+    !args.signaturePreparationRequested &&
+    !args.signerDetailsComplete
+  ) {
+    return "signer_details_required";
+  }
+  if (
+    args.inlineSignerSetupLatched &&
+    !args.signaturePreparationRequested &&
+    args.signerDetailsComplete
+  ) {
+    return "signer_details_complete";
+  }
   if (!args.signaturePreparationRequested) {
     return "review_decision";
   }

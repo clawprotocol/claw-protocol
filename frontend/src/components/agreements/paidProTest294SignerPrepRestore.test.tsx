@@ -141,6 +141,7 @@ describe("Test294 forced first review restores signer prep UI", () => {
       "const paidProFirstReviewSurfaceActive = simpleProFinalReviewShellActive || paidProForcedFirstReviewActive",
     );
     expect(intakeSrc).toContain("!paidProFirstReviewSurfaceActive) return null");
-    expect(intakeSrc).toContain("simpleProFinalReviewShellActive: paidProFirstReviewSurfaceActive");
+    expect(intakeSrc).toContain("shouldArmPaidProFirstReviewSignerSetupLatch");
+    expect(intakeSrc).toContain("paidProFirstReviewSignerSetupRequired");
   });
 });

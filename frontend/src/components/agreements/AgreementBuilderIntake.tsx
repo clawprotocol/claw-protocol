@@ -292,7 +292,9 @@ import {
   resolveSignerPartyLegalEntityDisplayValue,
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
+  shouldArmPaidProFirstReviewSignerSetupLatch,
   shouldArmPaidProInlineSignerSetupLatch,
+  shouldShowPaidProForcedFirstReviewTrackChooser,
   type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
 import { ensurePremiumCompletion } from "./premiumCompletionEnsure";
@@ -2019,7 +2021,7 @@ function CreateFlowSendRecipientsPanel({
       : finalReviewSendIntent === "signature"
         ? "signature"
         : effectivePremiumSendMode;
-  const signaturePrepMode = resolvedSendMode === "signature";
+  const signaturePrepMode = paidProInlineRecipientShell ? true : resolvedSendMode === "signature";
   const notifySignerMetadataFieldEdit = (args: {
     partyIndex: number;
     field: PaidProSignerMetadataField;
@@ -15112,43 +15114,65 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     signerDetailsGateComplete: paidProSignatureDetailsReady,
     hasAuthoritativeSigningSnapshot: paidProSignerMetadataFinalized,
   });
-  const paidProSignerSetupRequiredBeforeDelivery = Boolean(
-    acceptedPaidProAuthorityActive &&
-      premiumPaidDocumentSurface &&
-      signaturePreparationRequested &&
-      !paidProSignatureDetailsReady &&
-      !paidProSignerMetadataFinalized,
-  );
-
-  useEffect(() => {
-    if (!paidProSignerSetupRequiredBeforeDelivery || !paidProFirstReviewSurfaceActive) return;
-    if (
-      shouldArmPaidProInlineSignerSetupLatch({
+  const paidProFirstReviewSignerSetupRequired = useMemo(
+    () =>
+      shouldArmPaidProFirstReviewSignerSetupLatch({
         hasAcceptedPaidProAuthority: acceptedPaidProAuthorityActive,
         premiumPaidDocumentSurface,
         premiumRecipientUxActive,
         createUiStageIsDraft: createUiStage === CreateUiStage.DRAFT,
-        simpleProFinalReviewShellActive: paidProFirstReviewSurfaceActive,
+        firstReviewSurfaceActive: paidProFirstReviewSurfaceActive,
+        hasCanonicalReviewCorpus: hasCanonicalReviewCorpusForRender(),
         paidProSignatureDetailsReady,
+        signerMetadataFinalized: paidProSignerMetadataFinalized,
         signaturePreparationRequested,
         alreadyLatched: paidProInlineSignerSetupLatched,
-      })
-    ) {
+      }),
+    [
+      acceptedPaidProAuthorityActive,
+      premiumPaidDocumentSurface,
+      premiumRecipientUxActive,
+      createUiStage,
+      paidProFirstReviewSurfaceActive,
+      paidProSignatureDetailsReady,
+      paidProSignerMetadataFinalized,
+      signaturePreparationRequested,
+      paidProInlineSignerSetupLatched,
+      premiumSurfaceGateTick,
+      reviewDocRefreshTick,
+    ],
+  );
+
+  const showPaidProForcedFirstReviewTrackChooser = useMemo(
+    () =>
+      shouldShowPaidProForcedFirstReviewTrackChooser({
+        forcedFirstReviewActive: paidProForcedFirstReviewActive,
+        inlineSignerSetupMounted: paidProCanonicalReviewSignerSetupActive,
+        signerDetailsReady: paidProSignatureDetailsReady,
+        signerMetadataFinalized: paidProSignerMetadataFinalized,
+        signaturePreparationRequested,
+      }),
+    [
+      paidProForcedFirstReviewActive,
+      paidProCanonicalReviewSignerSetupActive,
+      paidProSignatureDetailsReady,
+      paidProSignerMetadataFinalized,
+      signaturePreparationRequested,
+    ],
+  );
+
+  useEffect(() => {
+    if (!paidProFirstReviewSignerSetupRequired) return;
+    if (!paidProInlineSignerSetupLatched) {
       setPaidProInlineSignerSetupLatched(true);
     }
     if (!createFlowSendRecipientEditorOpen) {
       setCreateFlowSendRecipientEditorOpen(true);
     }
   }, [
-    paidProSignerSetupRequiredBeforeDelivery,
-    paidProFirstReviewSurfaceActive,
-    createFlowSendRecipientEditorOpen,
-    acceptedPaidProAuthorityActive,
-    premiumPaidDocumentSurface,
-    premiumRecipientUxActive,
-    createUiStage,
-    paidProSignatureDetailsReady,
+    paidProFirstReviewSignerSetupRequired,
     paidProInlineSignerSetupLatched,
+    createFlowSendRecipientEditorOpen,
   ]);
 
   const paidProCanonicalStickyCta = useMemo(() => {
@@ -17566,7 +17590,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reason: assertCanonicalPaidProSignerCtaReason({
           reason: mapped.reason,
           canonicalSignerFlowActive: Boolean(
-            acceptedPaidProAuthorityActive && simpleProFinalReviewShellActive,
+            acceptedPaidProAuthorityActive && paidProFirstReviewSurfaceActive,
           ),
         }),
       };
@@ -17574,7 +17598,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (
       guidedFinalReviewActive &&
       acceptedPaidProAuthorityActive &&
-      simpleProFinalReviewShellActive
+      paidProFirstReviewSurfaceActive
     ) {
       if (paidProInlineSignerSetupLatched && !signaturePreparationRequested) {
         return {
@@ -27826,7 +27850,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             }).source
                                           }
                                         />
-                                        {!paidProCanonicalReviewSignerSetupActive ? (
+                                        {showPaidProForcedFirstReviewTrackChooser ? (
                                           <PaidProForcedFirstReviewChrome
                                             signersReady={paidProReviewSignerStatusReady}
                                             signerMetadataFinalized={paidProSignerMetadataFinalized}
