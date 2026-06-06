@@ -75,6 +75,8 @@ type ForcedRouteProps = {
   compactDocumentTopPadding?: boolean;
   visibleProPaperTrace?: VisibleProPaperDiagnosticsTrace;
   authoritativeSource?: string;
+  /** Inside the paid Pro white review card — skip duplicate outer frame chrome. */
+  embedded?: boolean;
 };
 
 export function PaidProDocumentBodyForcedRoute({
@@ -84,6 +86,7 @@ export function PaidProDocumentBodyForcedRoute({
   compactDocumentTopPadding = false,
   visibleProPaperTrace,
   authoritativeSource = "paidProSourceOfTruth",
+  embedded = false,
 }: ForcedRouteProps) {
   useEffect(() => {
     logPaidProDocumentBodyRouter({
@@ -94,6 +97,27 @@ export function PaidProDocumentBodyForcedRoute({
     });
   }, [router.hasSoT, router.sotLen, router.branch, router.reason]);
 
+  const shell = (
+    <PaidProVisibleDocumentShell
+      html={html}
+      suppressEmptyFallback={suppressEmptyFallback}
+      compactDocumentTopPadding={compactDocumentTopPadding}
+      visibleProPaperTrace={visibleProPaperTrace}
+      authoritativeSource={authoritativeSource}
+    />
+  );
+
+  if (embedded) {
+    return (
+      <div
+        data-testid="paid-pro-document-body-forced-route"
+        data-paid-pro-document-body-router="paid_pro_visible_shell_forced"
+      >
+        {shell}
+      </div>
+    );
+  }
+
   return (
     <div
       className="mx-auto w-full max-w-[850px] px-0 sm:px-1"
@@ -101,15 +125,7 @@ export function PaidProDocumentBodyForcedRoute({
       data-paid-pro-document-body-router="paid_pro_visible_shell_forced"
     >
       <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
-        <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
-          <PaidProVisibleDocumentShell
-            html={html}
-            suppressEmptyFallback={suppressEmptyFallback}
-            compactDocumentTopPadding={compactDocumentTopPadding}
-            visibleProPaperTrace={visibleProPaperTrace}
-            authoritativeSource={authoritativeSource}
-          />
-        </div>
+        <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">{shell}</div>
       </div>
     </div>
   );

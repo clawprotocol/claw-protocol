@@ -73,22 +73,16 @@ describe("Test293 paid Pro document body router forced visible shell", () => {
     expect((forcedRoute.textContent || "").length).toBeGreaterThan(PAID_PRO_REVIEW_VISIBLE_TEXT_MIN);
   });
 
-  it("AgreementBuilderIntake routes #fadeWrapper paid surface through document body router before legacy branches", () => {
+  it("AgreementBuilderIntake routes forced document inside paid Pro white card before legacy document branches", () => {
     const intakeSrc = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    const fadeIdx = intakeSrc.indexOf('id="fadeWrapper"');
-    expect(fadeIdx).toBeGreaterThan(0);
-    const premiumPaidBlock = intakeSrc.slice(
-      fadeIdx,
-      fadeIdx + intakeSrc.slice(fadeIdx).indexOf(") : productionDraftPrimaryReviewSurface"),
-    );
-    expect(premiumPaidBlock).toContain("paidProDocumentBodyRouter.branch");
-    expect(premiumPaidBlock).toContain("PaidProDocumentBodyForcedRoute");
-    expect(premiumPaidBlock).toContain("paid_pro_visible_shell_forced");
-    const forcedIdx = premiumPaidBlock.indexOf("PaidProDocumentBodyForcedRoute");
-    expect(forcedIdx).toBeGreaterThan(0);
-    expect(forcedIdx).toBeLessThan(premiumPaidBlock.indexOf("canDisplayPaidProAgreementDocument"));
-    expect(forcedIdx).toBeLessThan(premiumPaidBlock.indexOf("SimpleProFinalReviewScreen"));
-    expect(forcedIdx).toBeLessThan(premiumPaidBlock.indexOf("PremiumAgreementReadonlyView"));
+    expect(intakeSrc).toContain("paidProForcedFirstReviewActive ? (");
+    expect(intakeSrc).toContain("<PaidProDocumentBodyForcedRoute");
+    expect(intakeSrc).toContain("embedded");
+    const forcedIdx = intakeSrc.indexOf("paidProForcedFirstReviewActive ? (");
+    const guidedIdx = intakeSrc.indexOf("guidedPreReviewSignerSetupActive ? (", forcedIdx);
+    expect(guidedIdx).toBeGreaterThan(forcedIdx);
+    const routerSrc = readFileSync(join(__dirname, "paidProDocumentBodyRouter.tsx"), "utf8");
+    expect(routerSrc).toContain('data-paid-pro-document-body-router="paid_pro_visible_shell_forced"');
   });
 
   it("AgreementBuilderIntake resolves router from frozen SoT only (no shell-active gate)", () => {

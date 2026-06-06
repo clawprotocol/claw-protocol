@@ -571,6 +571,9 @@ import {
   PaidProDocumentBodyForcedRoute,
   resolvePaidProDocumentBodyRouter,
 } from "./paidProDocumentBodyRouter";
+import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
+import { PaidProSignerFieldsMountShell } from "./paidProSignerFieldsMountShell";
+import { logPaidProSignaturePrepSelected } from "./paidProSignaturePrepUi";
 import { PremiumAgreementCopyButton } from "./PremiumAgreementCopyButton";
 import {
   polishedAuthoritativeProPlainForCopy,
@@ -15092,6 +15095,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProRuntimeAuthority.canRenderProReviewShell,
   ]);
 
+  const paidProForcedFirstReviewActive = paidProDocumentBodyRouter.branch === "paid_pro_visible_shell_forced";
+  const paidProFirstReviewSurfaceActive = simpleProFinalReviewShellActive || paidProForcedFirstReviewActive;
+
   const paidProSignerMetadataFinalized = hasAuthoritativeSigningSnapshot();
   /** Trust rail + status chip only — finalized snapshot must not show "Signer details needed". */
   const paidProReviewSignerStatusReady = resolvePaidProReviewSignerStatusReady({
@@ -15107,14 +15113,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   useEffect(() => {
-    if (!paidProSignerSetupRequiredBeforeDelivery || !simpleProFinalReviewShellActive) return;
+    if (!paidProSignerSetupRequiredBeforeDelivery || !paidProFirstReviewSurfaceActive) return;
     if (
       shouldArmPaidProInlineSignerSetupLatch({
         hasAcceptedPaidProAuthority: acceptedPaidProAuthorityActive,
         premiumPaidDocumentSurface,
         premiumRecipientUxActive,
         createUiStageIsDraft: createUiStage === CreateUiStage.DRAFT,
-        simpleProFinalReviewShellActive,
+        simpleProFinalReviewShellActive: paidProFirstReviewSurfaceActive,
         paidProSignatureDetailsReady,
         signaturePreparationRequested,
         alreadyLatched: paidProInlineSignerSetupLatched,
@@ -15127,7 +15133,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
   }, [
     paidProSignerSetupRequiredBeforeDelivery,
-    simpleProFinalReviewShellActive,
+    paidProFirstReviewSurfaceActive,
     createFlowSendRecipientEditorOpen,
     acceptedPaidProAuthorityActive,
     premiumPaidDocumentSurface,
@@ -15138,7 +15144,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const paidProCanonicalStickyCta = useMemo(() => {
-    if (!acceptedPaidProAuthorityActive || !simpleProFinalReviewShellActive) return null;
+    if (!acceptedPaidProAuthorityActive || !paidProFirstReviewSurfaceActive) return null;
     return resolvePaidProStickyCta({
       hasAuthoritativeSigningSnapshot: paidProSignerMetadataFinalized,
       signerDetailsComplete: signerDetailsAreComplete,
@@ -15150,7 +15156,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
   }, [
     acceptedPaidProAuthorityActive,
-    simpleProFinalReviewShellActive,
+    paidProFirstReviewSurfaceActive,
     paidProSignerMetadataFinalized,
     signerDetailsAreComplete,
     paidProInlineSignerSetupLatched,
@@ -22293,8 +22299,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const proDeliveryTrackSelected = useMemo(
     () =>
       resolveProDeliveryTrackSelected({
-        sendModeTouched: premiumSendModeTouched && signaturePreparationRequested,
-        effectiveSendMode: signaturePreparationRequested ? effectivePremiumSendMode : "review",
+        sendModeTouched: premiumSendModeTouched,
+        effectiveSendMode: effectivePremiumSendMode,
         premiumSignersSurfaceReady,
       }),
     [
@@ -24565,6 +24571,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProAuthoritative,
     guidedAuthoritativeBodyPlain,
     enterFinalReviewRecipientSetup,
+  ]);
+
+  const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback(() => {
+    logPaidProSignaturePrepSelected({
+      source: paidProForcedFirstReviewActive ? "forced_first_review" : "paid_pro_first_review",
+      selectedTrack: "signature",
+    });
+    handlePremiumSendModePick("signature");
+    setPremiumSendModeTouched(true);
+    if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
+      enterFinalReviewRecipientSetup("signature");
+      return;
+    }
+    void handleProSendForSignature();
+  }, [
+    paidProForcedFirstReviewActive,
+    handlePremiumSendModePick,
+    acceptedPaidProAuthorityActive,
+    paidProSignatureDetailsReady,
+    enterFinalReviewRecipientSetup,
+    handleProSendForSignature,
   ]);
 
   const handleProSendForReview = React.useCallback(() => {
@@ -27417,24 +27444,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           >
                             {premiumPaidDocumentSurface ? (
                               <>
-                                {paidProDocumentBodyRouter.branch === "paid_pro_visible_shell_forced" ? (
-                                  <PaidProDocumentBodyForcedRoute
-                                    router={paidProDocumentBodyRouter}
-                                    html={premiumReadonlyAgreementHtml}
-                                    suppressEmptyFallback={blockProEmptyDocumentFallback}
-                                    compactDocumentTopPadding={paidProReviewCompactChrome}
-                                    visibleProPaperTrace={visibleProPaperTrace}
-                                    authoritativeSource={
-                                      resolvePaidProReviewRenderSource({
-                                        draft: draft ?? null,
-                                        intakeText: (
-                                          currentPremiumMergedIntakeKey || intakeCombined || ""
-                                        ).trim(),
-                                      }).source
-                                    }
-                                  />
-                                ) : (
-                              <>
                                 {showGuidedCompletionRecovery && activeGuidedCompletionSession ? (
                                   <div className="mx-auto mb-4 w-full max-w-[850px] px-0 sm:px-1">
                                     <div
@@ -27697,7 +27706,116 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     </div>
                                   ) : null}
                                   <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
-                                    {guidedPreReviewSignerSetupActive ? (
+                                    {paidProForcedFirstReviewActive ? (
+                                      <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
+                                        <PaidProDocumentBodyForcedRoute
+                                          embedded
+                                          router={paidProDocumentBodyRouter}
+                                          html={premiumReadonlyAgreementHtml}
+                                          suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                          compactDocumentTopPadding={paidProReviewCompactChrome}
+                                          visibleProPaperTrace={visibleProPaperTrace}
+                                          authoritativeSource={
+                                            resolvePaidProReviewRenderSource({
+                                              draft: draft ?? null,
+                                              intakeText: (
+                                                currentPremiumMergedIntakeKey || intakeCombined || ""
+                                              ).trim(),
+                                            }).source
+                                          }
+                                        />
+                                        {!paidProCanonicalReviewSignerSetupActive ? (
+                                          <PaidProForcedFirstReviewChrome
+                                            signersReady={paidProReviewSignerStatusReady}
+                                            signerMetadataFinalized={paidProSignerMetadataFinalized}
+                                            compactShell={paidProReviewCompactChrome}
+                                            sendDisabled={
+                                              (isGenerating && !draft) ||
+                                              upgradeLockActive ||
+                                              loading ||
+                                              guidedPacketSendBlocked ||
+                                              reviewFirstHandoffBusy
+                                            }
+                                            reviewBusy={reviewFirstHandoffBusy}
+                                            onShareForReview={() => void handleProSendForReview()}
+                                            onPrepareSignatures={() =>
+                                              void handlePaidProPrepareSignaturesFromFirstReview()
+                                            }
+                                          />
+                                        ) : null}
+                                        {paidProCanonicalReviewSignerSetupActive ? (
+                                          <PaidProSignerFieldsMountShell
+                                            partySlotCount={paidProSignerDetailsGate.requiredCount}
+                                            slotsWithSignerName={partySignerNames.filter((n) => n.trim()).length}
+                                            slotsWithSignerTitle={partySignerTitles.filter((t) => t.trim()).length}
+                                            gateComplete={paidProSignerDetailsGate.complete}
+                                            requiredCount={paidProSignerDetailsGate.requiredCount}
+                                          >
+                                            <CreateFlowSendRecipientsPanel
+                                              variant="workspace"
+                                              paidProInlineRecipientShell
+                                              hidePrimarySendCta={Boolean(
+                                                paidProCanonicalStickyCta?.showStickyBar,
+                                              )}
+                                              isPremiumRecipientSurface={false}
+                                              showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
+                                              productionReadyForPersist={productionReadyForPersist}
+                                              minimalProSendRecipientChrome={minimalProSendRecipientChrome}
+                                              draft={draft}
+                                              effectivePremiumSendMode={effectivePremiumSendMode}
+                                              onPremiumSendModePick={handlePremiumSendModePick}
+                                              recipient1Name={recipient1Name}
+                                              setRecipient1Name={setRecipient1Name}
+                                              recipient1Email={recipient1Email}
+                                              setRecipient1Email={setRecipient1Email}
+                                              recipient2Name={recipient2Name}
+                                              setRecipient2Name={setRecipient2Name}
+                                              recipient2Email={recipient2Email}
+                                              setRecipient2Email={setRecipient2Email}
+                                              extraPartyReviewEmails={extraPartyReviewEmails}
+                                              setExtraPartyReviewEmails={setExtraPartyReviewEmails}
+                                              partySignerNames={partySignerNames}
+                                              setPartySignerNames={setPartySignerNames}
+                                              partySignerTitles={partySignerTitles}
+                                              setPartySignerTitles={setPartySignerTitles}
+                                              partyAddresses={partyAddresses}
+                                              setPartyAddresses={setPartyAddresses}
+                                              recipientSignerLabels={recipientSignerLabels}
+                                              setRecipientSignerLabels={setRecipientSignerLabels}
+                                              reviewHandoffAgreementEcho={reviewHandoffAgreementEcho}
+                                              showStarterRecipientsReassurance={false}
+                                              editorOpen={createFlowSendRecipientEditorOpen}
+                                              setEditorOpen={setCreateFlowSendRecipientEditorOpen}
+                                              onDeferRecipients={() => {
+                                                setRecipientsDeferred(true);
+                                              }}
+                                              hideDeferOption
+                                              onSendClick={runPrimaryIntakeAction}
+                                              sendDisabled={effectivePrimaryCtaDisabled}
+                                              sendRequiresConfirmStep={false}
+                                              recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
+                                              premiumPrimarySendLabelOverride={PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA}
+                                              primaryCtaHelperText={paidProSignerDetailsGate.blockerMessage}
+                                              guidedSigningTrustSlot={guidedSigningTrustSlot}
+                                              partyDisplaySlots={resolvedPartyDisplaySlots}
+                                              signerSetupPartyIdentities={signerSetupPartyIdentities}
+                                              partyLabelsFinalizeHint={partyLabelsFinalizeHint}
+                                              finalReviewSendIntent={finalReviewSendIntentRef.current}
+                                              stripRecipientEmailNoise={stripRecipientEmailNoise}
+                                              looksLikeEmail={looksLikeEmail}
+                                              onRecipientMetadataPersist={() => {
+                                                if (draft) persistPremiumRecipientHandoffFromDraftAndUi(draft);
+                                              }}
+                                              onSignerMetadataSessionInput={emitSignerMetadataFreezeDiagnostics}
+                                              onSignerMetadataForensicInput={emitSignerMetadataForensicAudit}
+                                              onPaidProSignerMetadataFieldDiagnostics={
+                                                emitPaidProSignerMetadataFieldDiagnosticsCb
+                                              }
+                                            />
+                                          </PaidProSignerFieldsMountShell>
+                                        ) : null}
+                                      </div>
+                                    ) : guidedPreReviewSignerSetupActive ? (
                                       <div
                                         className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4"
                                         data-guided-final-review-sticky-cta={
@@ -28621,8 +28739,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 ) : premiumReturnWaitActive ? (
                                   <PremiumProWaitContinuityCard />
                                 ) : null}
-                              </>
-                                )}
                               </>
                             ) : productionDraftPrimaryReviewSurface ? (
                               <div
