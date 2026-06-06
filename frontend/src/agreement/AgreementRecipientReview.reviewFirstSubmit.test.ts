@@ -42,6 +42,14 @@ describe("Test276 review-first submit authority wiring", () => {
     expect(recipientReview).toContain("tokenValidatedPartyId");
   });
 
+  it("Test284 blocks approve draft while reviewer proposal awaits owner", () => {
+    expect(recipientReview).toContain("reviewerProposalAwaitingOwner");
+    expect(recipientReview).toContain("recipient-approve-blocked-awaiting-owner");
+    expect(recipientReview).toContain("logReviewerProposalSubmitted");
+    expect(recipientReview).toContain("recipient-qa-open-owner-review");
+    expect(recipientReview).toContain("QA: Open owner review");
+  });
+
   it("Test282 dedupes submit authority logs and guards in-flight submit", () => {
     expect(recipientReview).toContain("lastReviewFirstSubmitAuthorityLogKeyRef");
     expect(recipientReview).toContain("lastReviewFirstProposalReadinessLogKeyRef");

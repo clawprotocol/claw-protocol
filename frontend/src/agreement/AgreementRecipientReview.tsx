@@ -274,11 +274,17 @@ import {
   writeReviewFirstSubmitInflightProposalId,
 } from "./reviewerTokenPersistence";
 import {
+  buildOwnerQaWorkspaceAbsoluteLink,
+  buildOwnerQaWorkspacePath,
   corpusFingerprint,
   corpusHasSignatureBlock,
+  enableOwnerProposalReviewQaLocal,
   htmlHasSignatureBlock,
+  isOwnerProposalReviewQaEnabled,
+  logQaOwnerReviewLinkBuilt,
   logReviewerDisplayCopyParity,
   logReviewerOwnerCtaHidden,
+  logReviewerProposalSubmitted,
 } from "./ownerProposalReviewQa";
 import { buildReviewFirstDocumentDisplayHtml } from "./reviewFirstDocumentDisplay";
 import { PremiumAgreementReadonlyView } from "../components/agreements/PremiumAgreementReadonlyView";
@@ -318,6 +324,8 @@ const REVIEW_FIRST_TITLE = "Review agreement";
 const REVIEW_FIRST_HELPER =
   "Read the agreement, approve it, or propose an updated version. Nothing is signed until everyone approves the same version.";
 const REVIEW_FIRST_APPROVE_LABEL = "Approve draft";
+const REVIEWER_AWAITING_OWNER_APPROVE_BLOCKED_COPY =
+  "Approval is unavailable while your suggested change is pending owner review.";
 const REVIEW_FIRST_PROPOSE_UPDATED_LABEL = "Suggest revision";
 const REVIEW_FIRST_SAVE_UPDATED_LABEL = "Submit proposed update";
 const REVIEW_FIRST_PERSONAL_LINK_ATTRIBUTION_MESSAGE =
@@ -1089,6 +1097,7 @@ export function AgreementRecipientReview({
     return allOpenProposals.filter((p) => String(p.proposer_id || "").trim() === participantPid);
   }, [allOpenProposals, partiesHaveIds, participantPid]);
   const hasPendingSuggestion = myPendingProposals.length > 0;
+  const reviewerProposalAwaitingOwner = hasPendingSuggestion || recipientSuggestedEditsSentAck;
   const signingBlockedByProposalQueue = allOpenProposals.length > 0;
   const proposerDisplayNameForApi = useMemo(() => {
     if (!draft?.parties?.length) return recipientLabel;
@@ -3301,6 +3310,11 @@ export function AgreementRecipientReview({
         proposalId: submitted.proposal_id ?? proposalId,
         participantPid: effectiveProposerId,
       });
+      logReviewerProposalSubmitted({
+        agreementId,
+        proposalId: submitted.proposal_id ?? proposalId,
+        participantPid: effectiveProposerId || null,
+      });
       clearReviewFirstSubmitInflightProposalId(agreementId);
       trackAgreementFunnelEvent("recipient_submitted_edits", { entry_kind: entry.kind }, { planTier: String(access.tier), agreementId });
       setSendSuggestedEditsModalOpen(false);
@@ -3347,6 +3361,10 @@ export function AgreementRecipientReview({
     if (viewerLike) return;
     if (needsPersonalizedLink) {
       setError("Use the personal review link from the sender (it includes your participant id).");
+      return;
+    }
+    if (reviewerProposalAwaitingOwner) {
+      setError(REVIEWER_AWAITING_OWNER_APPROVE_BLOCKED_COPY);
       return;
     }
     if (
@@ -4842,7 +4860,11 @@ export function AgreementRecipientReview({
             }
             promoteLooksGoodVisually={false}
             looksGoodLoading={approving}
-            looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
+            looksGoodDisabled={
+              approving ||
+              Boolean(bundle && isSigningLockActive(bundle)) ||
+              reviewerProposalAwaitingOwner
+            }
             requestChangesDisabled={
               hasPendingSuggestion || recipientSuggestedEditsSentAck || recipientApprovedInAudit || approvedAck
             }
@@ -4876,7 +4898,11 @@ export function AgreementRecipientReview({
             }
             promoteLooksGoodVisually={false}
             looksGoodLoading={approving}
-            looksGoodDisabled={approving || Boolean(bundle && isSigningLockActive(bundle))}
+            looksGoodDisabled={
+              approving ||
+              Boolean(bundle && isSigningLockActive(bundle)) ||
+              reviewerProposalAwaitingOwner
+            }
             requestChangesDisabled={
               hasPendingSuggestion || recipientSuggestedEditsSentAck || recipientApprovedInAudit || approvedAck
             }
@@ -4986,6 +5012,27 @@ export function AgreementRecipientReview({
             >
               Suggest another change
             </button>
+            {isOwnerProposalReviewQaEnabled() ? (
+              <button
+                type="button"
+                className="rounded-lg border border-violet-500/60 bg-violet-950/40 px-4 py-2 text-sm font-medium text-violet-100 hover:bg-violet-950/60"
+                data-testid="recipient-qa-open-owner-review"
+                onClick={() => {
+                  enableOwnerProposalReviewQaLocal();
+                  const path = buildOwnerQaWorkspacePath(agreementId);
+                  const absoluteUrl = buildOwnerQaWorkspaceAbsoluteLink(agreementId);
+                  logQaOwnerReviewLinkBuilt({
+                    agreementId,
+                    path,
+                    absoluteUrl,
+                    source: "reviewer_submitted_qa_cta",
+                  });
+                  window.open(absoluteUrl, "_blank", "noopener,noreferrer");
+                }}
+              >
+                QA: Open owner review
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -5092,6 +5139,14 @@ export function AgreementRecipientReview({
           testId="recipient-review-first-actions"
           ariaLabel="Review agreement actions"
         >
+            {reviewerProposalAwaitingOwner ? (
+              <p
+                className="w-full text-xs leading-relaxed text-slate-500 sm:w-auto"
+                data-testid="recipient-approve-blocked-awaiting-owner"
+              >
+                {REVIEWER_AWAITING_OWNER_APPROVE_BLOCKED_COPY}
+              </p>
+            ) : (
             <button
               type="button"
               data-testid="recipient-review-approve-draft"
@@ -5101,6 +5156,7 @@ export function AgreementRecipientReview({
             >
               {approving ? "Approving…" : REVIEW_FIRST_APPROVE_LABEL}
             </button>
+            )}
             <button
               type="button"
               data-testid="recipient-review-propose-updated-draft"

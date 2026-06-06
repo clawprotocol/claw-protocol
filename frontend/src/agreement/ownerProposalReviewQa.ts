@@ -3,19 +3,35 @@ import type { RecipientProposalLifecycleStatus } from "./recipientProposalHistor
 const QA_QUERY_KEY = "qaReview";
 const QA_STORAGE_KEY = "lawdogQaOwnerReview";
 
+function qaOrigin(origin?: string): string {
+  return (
+    (origin || "").trim() ||
+    (typeof window !== "undefined" ? window.location.origin : "")
+  ).replace(/\/$/, "");
+}
+
 /** SPA path for owner QA review on Done page (use with app router `navigate`). */
 export function buildOwnerQaReviewDonePath(agreementId: string): string {
   const id = encodeURIComponent(String(agreementId || "").trim());
   return `/app/done/${id}?${QA_QUERY_KEY}=1`;
 }
 
+/** SPA path for owner workspace proposal review (Suggested changes received panel). */
+export function buildOwnerQaWorkspacePath(agreementId: string): string {
+  const id = encodeURIComponent(String(agreementId || "").trim());
+  return `/app/agreements/${id}?${QA_QUERY_KEY}=1`;
+}
+
 /** Absolute URL safe to paste in a fresh browser tab (avoids file:/// relative paths). */
 export function buildOwnerQaReviewAbsoluteLink(agreementId: string, origin?: string): string {
   const id = encodeURIComponent(String(agreementId || "").trim());
-  const base =
-    (origin || "").trim() ||
-    (typeof window !== "undefined" ? window.location.origin : "");
-  return `${base.replace(/\/$/, "")}/app/done/${id}?${QA_QUERY_KEY}=1`;
+  return `${qaOrigin(origin)}/app/done/${id}?${QA_QUERY_KEY}=1`;
+}
+
+/** Absolute owner workspace URL for QA party-simulation after reviewer submit. */
+export function buildOwnerQaWorkspaceAbsoluteLink(agreementId: string, origin?: string): string {
+  const id = encodeURIComponent(String(agreementId || "").trim());
+  return `${qaOrigin(origin)}/app/agreements/${id}?${QA_QUERY_KEY}=1`;
 }
 
 export function isOwnerProposalReviewQaEnabled(explicit?: boolean): boolean {
@@ -108,6 +124,23 @@ export function logOwnerReviewLinkBuilt(payload: {
   source: string;
 }): void {
   logOwnerReview("[owner-review-link-built]", payload);
+}
+
+export function logQaOwnerReviewLinkBuilt(payload: {
+  agreementId: string;
+  absoluteUrl: string;
+  path?: string;
+  source: string;
+}): void {
+  logOwnerReview("[qa-owner-review-link-built]", payload);
+}
+
+export function logReviewerProposalSubmitted(payload: {
+  agreementId: string;
+  proposalId: string;
+  participantPid?: string | null;
+}): void {
+  logOwnerReview("[reviewer-proposal-submitted]", payload);
 }
 
 export function logReviewerDisplayCopyParity(payload: {

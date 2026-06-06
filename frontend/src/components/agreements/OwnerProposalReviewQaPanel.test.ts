@@ -32,5 +32,7 @@ describe("OwnerProposalReviewQaPanel wiring", () => {
     expect(panel).toContain("logOwnerProposalAccepted");
     expect(panel).toContain("logOwnerProposalRejected");
     expect(qaLog).toContain("[owner-review-opened]");
+    expect(qaLog).toContain("[qa-owner-review-link-built]");
+    expect(qaLog).toContain("[reviewer-proposal-submitted]");
   });
 });

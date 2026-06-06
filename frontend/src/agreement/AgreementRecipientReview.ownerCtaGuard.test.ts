@@ -11,5 +11,10 @@ describe("AgreementRecipientReview owner CTA guard", () => {
     expect(s).not.toContain("OwnerProposalReviewQaPanel");
     expect(s).toContain("logReviewerOwnerCtaHidden");
     expect(s).toContain("logReviewerDisplayCopyParity");
+    expect(s).toContain("reviewerProposalAwaitingOwner");
+    expect(s).toContain("recipient-approve-blocked-awaiting-owner");
+    expect(s).toContain("logReviewerProposalSubmitted");
+    expect(s).toContain("recipient-qa-open-owner-review");
+    expect(s).not.toContain("Resolve in workspace");
   });
 });

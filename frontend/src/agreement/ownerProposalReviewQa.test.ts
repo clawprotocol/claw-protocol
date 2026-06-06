@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildOwnerQaReviewAbsoluteLink,
   buildOwnerQaReviewDonePath,
+  buildOwnerQaWorkspaceAbsoluteLink,
+  buildOwnerQaWorkspacePath,
   corpusHasSignatureBlock,
   htmlHasSignatureBlock,
 } from "./ownerProposalReviewQa";
@@ -12,6 +14,10 @@ describe("ownerProposalReviewQa", () => {
       "https://claw.example/app/done/ag_qa_1?qaReview=1",
     );
     expect(buildOwnerQaReviewDonePath("ag_qa_1")).toBe("/app/done/ag_qa_1?qaReview=1");
+    expect(buildOwnerQaWorkspacePath("ag_qa_1")).toBe("/app/agreements/ag_qa_1?qaReview=1");
+    expect(buildOwnerQaWorkspaceAbsoluteLink("ag_qa_1", "https://claw.example")).toBe(
+      "https://claw.example/app/agreements/ag_qa_1?qaReview=1",
+    );
   });
 
   it("detects signature blocks in copy and display html", () => {
