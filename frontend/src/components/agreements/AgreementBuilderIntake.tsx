@@ -567,6 +567,10 @@ import {
 } from "./premiumSituationIntelligence";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import { PaidProVisibleDocumentShell } from "./paidProVisibleDocumentShell";
+import {
+  PaidProDocumentBodyForcedRoute,
+  resolvePaidProDocumentBodyRouter,
+} from "./paidProDocumentBodyRouter";
 import { PremiumAgreementCopyButton } from "./PremiumAgreementCopyButton";
 import {
   polishedAuthoritativeProPlainForCopy,
@@ -12023,6 +12027,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       reviewDocRefreshTick,
       premiumSurfaceGateTick,
     ],
+  );
+
+  /** Test293: SoT-only gate — forces visible document shell before legacy #fadeWrapper branches. */
+  const paidProDocumentBodyRouter = useMemo(
+    () => resolvePaidProDocumentBodyRouter(),
+    [premiumSurfaceGateTick, reviewDocRefreshTick],
   );
 
   const isAuthoritativePaidProReviewActive = useMemo(
@@ -27407,6 +27417,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           >
                             {premiumPaidDocumentSurface ? (
                               <>
+                                {paidProDocumentBodyRouter.branch === "paid_pro_visible_shell_forced" ? (
+                                  <PaidProDocumentBodyForcedRoute
+                                    router={paidProDocumentBodyRouter}
+                                    html={premiumReadonlyAgreementHtml}
+                                    suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                    compactDocumentTopPadding={paidProReviewCompactChrome}
+                                    visibleProPaperTrace={visibleProPaperTrace}
+                                    authoritativeSource={
+                                      resolvePaidProReviewRenderSource({
+                                        draft: draft ?? null,
+                                        intakeText: (
+                                          currentPremiumMergedIntakeKey || intakeCombined || ""
+                                        ).trim(),
+                                      }).source
+                                    }
+                                  />
+                                ) : (
+                              <>
                                 {showGuidedCompletionRecovery && activeGuidedCompletionSession ? (
                                   <div className="mx-auto mb-4 w-full max-w-[850px] px-0 sm:px-1">
                                     <div
@@ -28593,6 +28621,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                 ) : premiumReturnWaitActive ? (
                                   <PremiumProWaitContinuityCard />
                                 ) : null}
+                              </>
+                                )}
                               </>
                             ) : productionDraftPrimaryReviewSurface ? (
                               <div
