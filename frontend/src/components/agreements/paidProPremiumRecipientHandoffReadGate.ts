@@ -8,6 +8,13 @@ import {
   premiumRecipientHandoffPartyFingerprint,
 } from "./premiumPartyNamesHandoff";
 import { signerMetadataInputRaw } from "../../agreement/signerMetadataNormalize";
+import {
+  countSignerMetadataSlots,
+  latchSignerMetadataEffectiveMax,
+  logSignerMetadataEffective,
+  logSignerMetadataStaleEmptyReadIgnored,
+  resetSignerMetadataEffectiveMaxForTests,
+} from "./signerMetadataEffective";
 
 let lastPopulatedHandoff: PremiumRecipientHandoffV2 | null = null;
 let sessionEverHadPopulatedHandoff = false;
@@ -74,9 +81,19 @@ export function applyPremiumRecipientHandoffReadGate(
   const corpusHash = (opts?.corpusHash ?? latchedCorpusHash).trim();
   const populatedCount = handoffSignerSlotCount(handoff, partySlotCount);
 
+  const counts = countSignerMetadataSlots(handoff, partySlotCount);
+
   if (populatedCount > 0) {
     lastPopulatedHandoff = handoff;
     sessionEverHadPopulatedHandoff = true;
+    latchSignerMetadataEffectiveMax(counts);
+    logSignerMetadataEffective({
+      source: "handoff_read_populated",
+      partySlots: counts.partySlots,
+      slotsWithSignerName: counts.slotsWithSignerName,
+      slotsWithSignerTitle: counts.slotsWithSignerTitle,
+      ignoredEmptyRead: false,
+    });
     return handoff;
   }
 
@@ -88,9 +105,32 @@ export function applyPremiumRecipientHandoffReadGate(
       premiumRecipientHandoffPartyFingerprint(lastPopulatedHandoff) &&
     (!corpusHash || !latchedCorpusHash || corpusHash === latchedCorpusHash)
   ) {
-    return mergeSignerFieldsFromPopulated(handoff, lastPopulatedHandoff);
+    const prior = countSignerMetadataSlots(lastPopulatedHandoff, partySlotCount);
+    logSignerMetadataStaleEmptyReadIgnored({
+      partySlots: counts.partySlots,
+      priorSlotsWithSignerName: prior.slotsWithSignerName,
+      priorSlotsWithSignerTitle: prior.slotsWithSignerTitle,
+    });
+    const merged = mergeSignerFieldsFromPopulated(handoff, lastPopulatedHandoff);
+    const mergedCounts = countSignerMetadataSlots(merged, partySlotCount);
+    latchSignerMetadataEffectiveMax(mergedCounts);
+    logSignerMetadataEffective({
+      source: "handoff_read_stale_empty_merged",
+      partySlots: mergedCounts.partySlots,
+      slotsWithSignerName: mergedCounts.slotsWithSignerName,
+      slotsWithSignerTitle: mergedCounts.slotsWithSignerTitle,
+      ignoredEmptyRead: true,
+    });
+    return merged;
   }
 
+  logSignerMetadataEffective({
+    source: "handoff_read_empty",
+    partySlots: counts.partySlots,
+    slotsWithSignerName: counts.slotsWithSignerName,
+    slotsWithSignerTitle: counts.slotsWithSignerTitle,
+    ignoredEmptyRead: false,
+  });
   return handoff;
 }
 
@@ -110,4 +150,5 @@ export function resetPaidProPremiumRecipientHandoffReadGateForTests(): void {
   lastPopulatedHandoff = null;
   sessionEverHadPopulatedHandoff = false;
   latchedCorpusHash = "";
+  resetSignerMetadataEffectiveMaxForTests();
 }

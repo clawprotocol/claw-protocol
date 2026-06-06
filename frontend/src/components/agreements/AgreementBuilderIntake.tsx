@@ -14958,6 +14958,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProSignerSetupRequiredBeforeDelivery = Boolean(
     acceptedPaidProAuthorityActive &&
       premiumPaidDocumentSurface &&
+      signaturePreparationRequested &&
       !paidProSignatureDetailsReady &&
       !paidProSignerMetadataFinalized,
   );
@@ -14972,6 +14973,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         createUiStageIsDraft: createUiStage === CreateUiStage.DRAFT,
         simpleProFinalReviewShellActive,
         paidProSignatureDetailsReady,
+        signaturePreparationRequested,
         alreadyLatched: paidProInlineSignerSetupLatched,
       })
     ) {
@@ -15670,6 +15672,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           signersReady: paidProReviewSignerStatusReady,
           signingLinksCreated:
             peekPremiumRecipientsSurfaceReleased() && paidProReviewSignerStatusReady,
+          reviewFirstNeutral: !signaturePreparationRequested,
         }),
       };
     }

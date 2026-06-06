@@ -22,14 +22,14 @@ describe("paidProStickyCta", () => {
         signaturePreparationRequested: false,
         sendSurfaceReady: false,
       }),
-    ).toBe("signer_details_required");
+    ).toBe("review_decision");
 
     expect(
       resolvePaidProStickyCtaPhase({
         hasAuthoritativeSigningSnapshot: false,
         signerDetailsComplete: true,
         inlineSignerSetupLatched: true,
-        signaturePreparationRequested: false,
+        signaturePreparationRequested: true,
         sendSurfaceReady: false,
       }),
     ).toBe("signer_details_complete");
@@ -77,7 +77,7 @@ describe("paidProStickyCta", () => {
         hasAuthoritativeSigningSnapshot: false,
         signerDetailsComplete: true,
         inlineSignerSetupLatched: true,
-        signaturePreparationRequested: false,
+        signaturePreparationRequested: true,
         sendSurfaceReady: false,
       }),
     );

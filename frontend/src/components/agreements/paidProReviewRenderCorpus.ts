@@ -69,6 +69,7 @@ import {
   writeMemoizedPaidProReviewPlain,
 } from "./paidProVisibleRenderMemo";
 import { auditPaidProReviewRenderCorpus } from "./paidProCorpusLifecycleDiff";
+import { auditPaidProReviewRenderSotParity } from "./paidProReviewSotParity";
 import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
@@ -676,6 +677,7 @@ export function resolvePaidProReviewRenderPlain(
   writeMemoizedPaidProReviewPlain(memoKey, rendered);
   if (rendered.length >= 200 && hasPaidProSourceOfTruth()) {
     auditPaidProReviewRenderCorpus(rendered);
+    auditPaidProReviewRenderSotParity({ reviewPlain: rendered, surface: "paid_pro_review_render_plain" });
   }
   return rendered;
 }

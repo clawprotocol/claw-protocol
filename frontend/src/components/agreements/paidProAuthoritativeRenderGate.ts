@@ -15,15 +15,8 @@ import {
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { consumedAuthoritySignerMetadataComplete } from "./paidProSignerMetadataCommitPolicy";
-import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { resolvePaidProFrozenDisplayPlain } from "./paidProPostFreezeCorpusInvariant";
-import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
-import {
-  resolvePartiesForReviewRender,
-  type ResolvePaidProReviewRenderPartiesArgs,
-} from "./paidProReviewRenderParties";
-import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
+import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRenderParties";
 
 export type ResolvePaidProAuthoritativeDisplayPlainArgs = ResolvePaidProReviewRenderPartiesArgs;
 
@@ -35,43 +28,14 @@ export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
   if (readPaidProPinnedSignerAppliedCorpus().trim().length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
     return false;
   }
-  const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
-  if (
-    consumedAuthoritySignerMetadataComplete(consumed) &&
-    !isPaidProReviewSignerMetadataSessionActive()
-  ) {
-    return false;
-  }
   return true;
 }
 
-function paidProPartyRoleContextFromDisplayArgs(
-  args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
-  acceptedCorpus?: string | null,
-): {
-  intakeText?: string | null;
-  draftPartyNames?: readonly string[] | null;
-  acceptedCorpus?: string | null;
-} {
-  return {
-    intakeText: args?.intakeText ?? null,
-    draftPartyNames:
-      args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
-    acceptedCorpus: acceptedCorpus ?? null,
-  };
-}
-
-/** Frozen SoT plain with optional render-time signature-region signer overlay (does not mutate stored SoT). */
+/** Frozen SoT plain — byte-aligned with canonical freeze (HTML may add visual-only formatting). */
 export function resolvePaidProAuthoritativeDisplayPlain(
-  args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
+  _args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
 ): string {
-  const frozen = resolvePaidProFrozenDisplayPlain();
-  const parties = resolvePartiesForReviewRender(args);
-  return applyPaidProSoTSignerExecutionOverlay(
-    frozen,
-    parties,
-    paidProPartyRoleContextFromDisplayArgs(args, frozen),
-  );
+  return resolvePaidProFrozenDisplayPlain();
 }
 
 export function paidProAuthoritativeRenderGateMeta(): { len: number; hash: string } | null {

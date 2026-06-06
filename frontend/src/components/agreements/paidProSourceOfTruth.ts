@@ -16,7 +16,7 @@ import {
 } from "./paidProPipelineAcceptedCorpus";
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
-import { clearPaidProVisibleRenderMemoForTests } from "./paidProVisibleRenderMemo";
+import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycleDiff";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
 import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
@@ -156,7 +156,7 @@ export function clearPaidProSourceOfTruth(): void {
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();
   clearPaidProPinnedSignerAppliedCorpus();
-  clearPaidProVisibleRenderMemoForTests();
+  clearPaidProVisibleRenderMemo();
   clearAcceptedProCorpusSafeDisplayCacheForTests();
   clearPaidProPipelineAcceptedCorpusHashForTests();
   resetPaidProCorpusLifecycleDiffForTests();
@@ -438,6 +438,7 @@ export function establishPaidProSourceOfTruth(args: {
   });
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();
+  clearPaidProVisibleRenderMemo();
   if (args.allowShorterOverwrite) {
     clearPaidProPinnedSignerAppliedCorpus();
     clearAuthoritativeSigningSnapshot();

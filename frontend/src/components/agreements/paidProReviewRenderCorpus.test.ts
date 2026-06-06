@@ -2,12 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resetPaidProReviewSignerMetadataSessionActiveForTests } from "./paidProReviewRenderSessionGate";
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import {
-  applyPaidProReviewRenderSanitizer,
   guardPaidProReviewRenderCorpus,
   repairSignatureNameLinesUsingLegalEntity,
   resolvePaidProReviewRenderPlain,
   stripStrayStandalonePartyEntityLinesBeforeRecital,
-  syncConsumedAuthoritySignerTitlesFromCorpus,
 } from "./paidProReviewRenderCorpus";
 import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -21,6 +19,8 @@ import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
+  getPaidProSourceOfTruth,
+  hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer";
 import { resolvePaidProFinalReviewVisiblePlain } from "./authoritativePaidProReview";
@@ -89,22 +89,23 @@ describe("paidProReviewRenderCorpus", () => {
     expect(html).toContain("Iron Vale Systems Inc");
   });
 
-  it("review render plain matches copy surface without fused party names", () => {
+  it("review render plain preserves SoT hash with consumed signer metadata (no structural sanitizer drift)", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
+    const record = getPaidProSourceOfTruth()!;
     setConsumedPaidProSignerMetadataAuthority(authority());
     const renderPlain = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;
+    expect(hashPaidProCorpus(renderPlain)).toBe(record.hash);
+    expect(hashPaidProCorpus(copy)).toBe(record.hash);
     for (const corpus of [renderPlain, copy]) {
-      expect(corpus).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
-      expect(corpus).not.toMatch(/Party Notice Details:/i);
-      expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
       expect(corpus).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
       expect(corpus).toMatch(/SERVICE PROVIDER:\s*\n\s*Iron Vale Systems Inc/i);
     }
   });
 
-  it("visible plain prefers render corpus over polished boundary with fused names", () => {
+  it("visible plain prefers frozen SoT over polished boundary candidate", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
+    const record = getPaidProSourceOfTruth()!;
     setConsumedPaidProSignerMetadataAuthority(authority());
     const polished = polishProAgreementDisplayLayer(RAW, {
       reviewDisplayMode: true,
@@ -114,17 +115,18 @@ describe("paidProReviewRenderCorpus", () => {
       boundaryPlain: polished,
       displayCandidatePlain: polished,
     });
-    expect(visible).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
-    expect(visible).toMatch(/Title: Membe/);
+    expect(visible).toBe(record.text);
+    expect(hashPaidProCorpus(visible)).toBe(record.hash);
+    expect(hashPaidProCorpus(visible)).not.toBe(hashPaidProCorpus(polished));
   });
 
-  it("review render removes fused legacy signature block after canonical CLIENT/SERVICE PROVIDER blocks", () => {
+  it("review render keeps canonical execution blocks after SoT freeze", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
     setConsumedPaidProSignerMetadataAuthority(authority());
     const renderPlain = resolvePaidProReviewRenderPlain();
-    expect(renderPlain).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     expect(renderPlain).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
     expect(renderPlain).toMatch(/SERVICE PROVIDER:\s*\n\s*Iron Vale Systems Inc/i);
+    expect(renderPlain).toMatch(/IN WITNESS WHEREOF/i);
   });
 
   it("repairs naked party-name-only Pro head at acceptance before review and copy", () => {
@@ -211,31 +213,29 @@ describe("paidProReviewRenderCorpus", () => {
     expect(repaired.text).not.toMatch(/Name:\s*Iron Vale Systems Inc/i);
   });
 
-  it("review and copy surfaces stay equivalent when only SoT is established", () => {
+  it("review and copy surfaces stay hash-equivalent when only SoT is established", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
+    const record = getPaidProSourceOfTruth()!;
     setConsumedPaidProSignerMetadataAuthority(authority());
     const review = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;
     expect(hasPaidProSourceOfTruth()).toBe(true);
     expect(review.length).toBeGreaterThan(400);
     expect(copy.length).toBeGreaterThan(400);
-    expect(review).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
-    expect(copy).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
-    const sanitizedReview = applyPaidProReviewRenderSanitizer(review, authority().parties).text;
-    expect(sanitizedReview).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
-    expect(sanitizedReview).toMatch(/SERVICE PROVIDER:\s*\n\s*Iron Vale Systems Inc/i);
+    expect(hashPaidProCorpus(review)).toBe(record.hash);
+    expect(hashPaidProCorpus(copy)).toBe(record.hash);
   });
 
-  it("direct text edit Membe to Member persists in render and copy paths", () => {
+  it("user-approved SoT revision stays byte-aligned on review and copy surfaces", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
     setConsumedPaidProSignerMetadataAuthority(authority());
     const edited = RAW.replace(/Title: Membe/g, "Title: Member");
     establishPaidProSourceOfTruth({ text: edited, source: "server_full_draft", allowShorterOverwrite: true });
-    syncConsumedAuthoritySignerTitlesFromCorpus(edited);
+    const record = getPaidProSourceOfTruth()!;
     const renderPlain = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;
-    expect(renderPlain).toMatch(/Title: Member\b/);
-    expect(copy).toMatch(/Title: Member\b/);
-    expect(renderPlain).not.toMatch(/Title: Membe\b/);
+    expect(renderPlain).toBe(record.text);
+    expect(copy).toBe(record.text);
+    expect(hashPaidProCorpus(renderPlain)).toBe(record.hash);
   });
 });

@@ -492,6 +492,7 @@ export function shouldArmPaidProInlineSignerSetupLatch(args: {
   createUiStageIsDraft: boolean;
   simpleProFinalReviewShellActive: boolean;
   paidProSignatureDetailsReady: boolean;
+  signaturePreparationRequested: boolean;
   alreadyLatched: boolean;
 }): boolean {
   if (args.alreadyLatched) return true;
@@ -501,6 +502,7 @@ export function shouldArmPaidProInlineSignerSetupLatch(args: {
       !args.premiumRecipientUxActive &&
       args.createUiStageIsDraft &&
       args.simpleProFinalReviewShellActive &&
+      args.signaturePreparationRequested &&
       !args.paidProSignatureDetailsReady,
   );
 }

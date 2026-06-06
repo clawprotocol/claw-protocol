@@ -65,7 +65,11 @@ export function buildPremiumReadonlyHtmlOptsFingerprint(opts: {
   ].join("|");
 }
 
-export function clearPaidProVisibleRenderMemoForTests(): void {
+export function clearPaidProVisibleRenderMemo(): void {
   plainByKey.clear();
   htmlByKey.clear();
+}
+
+export function clearPaidProVisibleRenderMemoForTests(): void {
+  clearPaidProVisibleRenderMemo();
 }

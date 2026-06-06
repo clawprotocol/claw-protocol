@@ -52,9 +52,12 @@ export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING = "Ready for signing";
 export function resolvePaidProReviewChipState(args: {
   signersReady: boolean;
   signingLinksCreated?: boolean;
+  /** Review-first neutral chip until Prepare signatures is explicitly selected. */
+  reviewFirstNeutral?: boolean;
 }): string {
   if (args.signingLinksCreated) return PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING;
   if (args.signersReady) return PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS;
+  if (args.reviewFirstNeutral) return PAID_PRO_REVIEW_CHIP_VERSION;
   return PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP;
 }
 /** Subtle secondary action on the paid Pro review shell. */

@@ -1038,11 +1038,20 @@ describe("paid Pro inline signer setup mount latch", () => {
     simpleProFinalReviewShellActive: true,
   };
 
-  it("arms the latch when signer details are incomplete on the canonical review shell", () => {
+  it("arms the latch only after Prepare signatures when signer details are incomplete", () => {
     expect(
       shouldArmPaidProInlineSignerSetupLatch({
         ...shellArgs,
         paidProSignatureDetailsReady: false,
+        signaturePreparationRequested: false,
+        alreadyLatched: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldArmPaidProInlineSignerSetupLatch({
+        ...shellArgs,
+        paidProSignatureDetailsReady: false,
+        signaturePreparationRequested: true,
         alreadyLatched: false,
       }),
     ).toBe(true);
@@ -1053,6 +1062,7 @@ describe("paid Pro inline signer setup mount latch", () => {
     let latched = shouldArmPaidProInlineSignerSetupLatch({
       ...shellArgs,
       paidProSignatureDetailsReady: false,
+      signaturePreparationRequested: true,
       alreadyLatched: false,
     });
     expect(latched).toBe(true);
@@ -1082,6 +1092,7 @@ describe("paid Pro inline signer setup mount latch", () => {
     latched = shouldArmPaidProInlineSignerSetupLatch({
       ...shellArgs,
       paidProSignatureDetailsReady: true,
+      signaturePreparationRequested: true,
       alreadyLatched: latched,
     });
     expect(latched).toBe(true);

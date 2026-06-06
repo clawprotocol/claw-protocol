@@ -54,6 +54,9 @@ export function resolvePaidProStickyCtaPhase(
   if (args.hasAuthoritativeSigningSnapshot) {
     return "review_decision";
   }
+  if (!args.signaturePreparationRequested) {
+    return "review_decision";
+  }
   if (args.signerDetailsComplete && args.inlineSignerSetupLatched) {
     return "signer_details_complete";
   }
