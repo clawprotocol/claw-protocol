@@ -4,7 +4,7 @@
 
 import { htmlToPlainText } from "../../agreement/externalAiHandoff";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
-import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { auditPaidProReviewRenderSotParity } from "./paidProReviewSotParity";
 
 /** Minimum DOM-visible text required before trusting HTML over canonical plain on first review. */
@@ -22,7 +22,20 @@ export type PaidProFirstReviewDocumentPresentation = {
   renderedVisibleTextLen: number;
   blockedBlankWithCanonical: boolean;
   fallbackApplied: boolean;
+  hardInvariantForced?: boolean;
 };
+
+export function resolveEffectivePaidProReviewPlain(args: {
+  paidReviewPlain: string;
+  canonicalPaidProReview: boolean;
+}): string {
+  const fromProp = (args.paidReviewPlain || "").trim();
+  if (fromProp.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromProp;
+  if (args.canonicalPaidProReview && hasPaidProSourceOfTruth()) {
+    return getPaidProSourceOfTruthText().trim();
+  }
+  return fromProp;
+}
 
 export function splitCanonicalPlainIntoBlocks(plain: string): string[] {
   return (plain || "")
@@ -129,7 +142,7 @@ export function resolvePaidProFirstReviewDocumentPresentation(args: {
     });
   }
 
-  return {
+  return enforcePaidProFirstReviewHardRenderInvariant({
     mode,
     agreementHtml: html,
     paidReviewPlain: plain,
@@ -139,7 +152,50 @@ export function resolvePaidProFirstReviewDocumentPresentation(args: {
     renderedVisibleTextLen,
     blockedBlankWithCanonical,
     fallbackApplied,
+  });
+}
+
+/** Production failsafe: never keep hollow HTML when canonical plain exceeds visible threshold. */
+export function enforcePaidProFirstReviewHardRenderInvariant(
+  presentation: PaidProFirstReviewDocumentPresentation,
+): PaidProFirstReviewDocumentPresentation {
+  const visibleMin = PAID_PRO_REVIEW_VISIBLE_TEXT_MIN;
+  const needsForce =
+    presentation.plainLen >= visibleMin &&
+    presentation.mode === "html" &&
+    presentation.htmlVisibleTextLen < visibleMin;
+
+  if (!needsForce) {
+    return { ...presentation, hardInvariantForced: false };
+  }
+
+  logPaidProReviewBlankRenderBlocked({
+    canonicalLen: presentation.plainLen,
+    htmlLen: presentation.htmlLen,
+    htmlVisibleTextLen: presentation.htmlVisibleTextLen,
+  });
+  logPaidProReviewVisibleRenderGuard({
+    canonicalLen: presentation.plainLen,
+    htmlLen: presentation.htmlLen,
+    visibleTextLen: presentation.htmlVisibleTextLen,
+    renderMode: "canonical_plain",
+    fallbackApplied: true,
+  });
+
+  return {
+    ...presentation,
+    mode: "canonical_plain",
+    fallbackApplied: true,
+    blockedBlankWithCanonical: true,
+    renderedVisibleTextLen: presentation.plainLen,
+    hardInvariantForced: true,
   };
+}
+
+export function shouldRenderPaidProFirstReviewDiagnostics(args: {
+  canonicalPaidProReview: boolean;
+}): boolean {
+  return Boolean(args.canonicalPaidProReview) || hasPaidProSourceOfTruth();
 }
 
 export function logPaidProReviewBlankRenderBlocked(payload: {

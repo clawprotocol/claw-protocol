@@ -27801,7 +27801,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           agreementHtml={simpleProFinalReviewHtml}
                                           paidReviewPlain={
                                             simpleProFinalReviewDisplayPlain.trim() ||
-                                            authoritativePaidProReviewPlain
+                                            authoritativePaidProReviewPlain ||
+                                            (hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : "")
                                           }
                                           paidReviewAuthoritativeSource={
                                             resolvePaidProReviewRenderSource({
@@ -27815,7 +27816,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}
                                           selectedTrack={proDeliveryTrackSelected}
                                           signaturePreparationRequested={signaturePreparationRequested}
-                                          canonicalPaidProReview={acceptedPaidProAuthorityActive}
+                                          canonicalPaidProReview={isAuthoritativePaidProReviewActive}
                                           appliedChecklist={
                                             acceptedPaidProAuthorityActive ? [] : guidedAppliedSummaryChecklist
                                           }
