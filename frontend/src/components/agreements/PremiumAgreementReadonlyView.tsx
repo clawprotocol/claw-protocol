@@ -4,7 +4,7 @@ import {
   type VisibleProPaperDiagnosticsTrace,
 } from "./visibleProPaperRenderBoundary";
 
-const DOC_STYLES = `
+export const PREMIUM_READONLY_DOC_STYLES = `
 .premium-readonly-doc{font-family:ui-serif,Georgia,Cambria,"Times New Roman",Times,serif;color:#1c1917;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 .premium-readonly-doc .premium-doc-body{max-width:38.5rem;margin:0 auto;padding:0 0.125rem 0.5rem}
 .premium-readonly-doc h1{font-size:clamp(1.45rem,2.6vw,1.85rem);font-weight:700;letter-spacing:0.04em;color:#0c0a09;margin:0.25rem 0 1.25rem;line-height:1.2;text-align:center;text-transform:uppercase}
@@ -98,7 +98,7 @@ export function PremiumAgreementReadonlyView({
 
   return (
     <>
-      <style id={`premium-doc-styles-${sid}`}>{DOC_STYLES}</style>
+      <style id={`premium-doc-styles-${sid}`}>{PREMIUM_READONLY_DOC_STYLES}</style>
       <div
         role="article"
         aria-label="Agreement document preview"

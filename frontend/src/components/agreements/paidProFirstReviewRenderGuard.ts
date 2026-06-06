@@ -1,11 +1,14 @@
 /**
- * Paid Pro first-review document presentation — canonical plain fallback when HTML is empty.
+ * Paid Pro first-review document presentation — DOM-visible text guard + canonical plain fallback.
  */
 
 import { htmlToPlainText } from "../../agreement/externalAiHandoff";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { auditPaidProReviewRenderSotParity } from "./paidProReviewSotParity";
+
+/** Minimum DOM-visible text required before trusting HTML over canonical plain on first review. */
+export const PAID_PRO_REVIEW_VISIBLE_TEXT_MIN = 1000;
 
 export type PaidProFirstReviewDocumentRenderMode = "html" | "canonical_plain" | "html_fallback" | "empty";
 
@@ -18,29 +21,88 @@ export type PaidProFirstReviewDocumentPresentation = {
   htmlVisibleTextLen: number;
   renderedVisibleTextLen: number;
   blockedBlankWithCanonical: boolean;
+  fallbackApplied: boolean;
 };
+
+export function splitCanonicalPlainIntoBlocks(plain: string): string[] {
+  return (plain || "")
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .split(/\n\n+/)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0);
+}
+
+function stripHiddenMarkupForVisibleEstimate(html: string): string {
+  let s = html;
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, " ");
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, " ");
+  s = s.replace(/<[^>]*\bhidden\b[^>]*>[\s\S]*?<\/[a-z][^>]*>/gi, " ");
+  s = s.replace(/<[^>]*aria-hidden=["']true["'][^>]*>[\s\S]*?<\/[a-z][^>]*>/gi, " ");
+  s = s.replace(
+    /<([a-z][a-z0-9]*)[^>]*style=["'][^"']*display\s*:\s*none[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
+    " ",
+  );
+  s = s.replace(
+    /<([a-z][a-z0-9]*)[^>]*style=["'][^"']*visibility\s*:\s*hidden[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
+    " ",
+  );
+  return s;
+}
+
+/** Estimate text a user would see — hidden markup stripped first (jsdom-safe), then DOM innerText. */
+export function measureHtmlDomVisibleTextLen(html: string): number {
+  const raw = (html || "").trim();
+  if (!raw) return 0;
+  const stripped = stripHiddenMarkupForVisibleEstimate(raw);
+  const staticVisible = htmlToPlainText(stripped).replace(/\s+/g, " ").trim();
+  if (staticVisible.length > 0) return staticVisible.length;
+  if (typeof document === "undefined") return 0;
+  const host = document.createElement("div");
+  host.innerHTML = stripped;
+  host.style.cssText =
+    "position:fixed;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;pointer-events:none;";
+  document.body.appendChild(host);
+  try {
+    return (host.innerText || host.textContent || "").replace(/\s+/g, " ").trim().length;
+  } finally {
+    document.body.removeChild(host);
+  }
+}
+
+export function measureElementVisibleTextLen(element: HTMLElement | null): number {
+  if (!element) return 0;
+  const inner = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+  return inner.length;
+}
 
 export function resolvePaidProFirstReviewDocumentPresentation(args: {
   agreementHtml: string;
   paidReviewPlain: string;
   canonicalPaidProReview: boolean;
   minLen?: number;
+  visibleTextMin?: number;
 }): PaidProFirstReviewDocumentPresentation {
   const min = args.minLen ?? PAID_PRO_AUTHORITY_MIN_LEN;
+  const visibleMin = args.visibleTextMin ?? PAID_PRO_REVIEW_VISIBLE_TEXT_MIN;
   const plain = (args.paidReviewPlain || "").trim();
   const html = (args.agreementHtml || "").trim();
-  const htmlVisibleTextLen = html ? htmlToPlainText(html).trim().length : 0;
+  const htmlVisibleTextLen = measureHtmlDomVisibleTextLen(html);
   const hasCanonicalPlain = Boolean(args.canonicalPaidProReview && plain.length >= min);
-  const htmlHasVisibleBody = htmlVisibleTextLen >= Math.min(min, Math.max(200, Math.floor(plain.length * 0.2)));
+  const htmlVisibleThreshold =
+    plain.length >= visibleMin ? visibleMin : Math.min(min, Math.max(200, Math.floor(plain.length * 0.2)));
+  const htmlHasVisibleBody = htmlVisibleTextLen >= htmlVisibleThreshold;
 
   let blockedBlankWithCanonical = false;
+  let fallbackApplied = false;
   let mode: PaidProFirstReviewDocumentRenderMode = "empty";
 
-  if (hasCanonicalPlain && html.length >= min && htmlHasVisibleBody) {
+  if (hasCanonicalPlain && htmlHasVisibleBody && html.length >= Math.min(min, 200)) {
     mode = "html";
   } else if (hasCanonicalPlain) {
-    if (html.length >= min && !htmlHasVisibleBody) {
+    if (html.length > 0 && !htmlHasVisibleBody) {
       blockedBlankWithCanonical = true;
+      fallbackApplied = true;
     }
     mode = "canonical_plain";
   } else if (html.length > 0 && htmlHasVisibleBody) {
@@ -52,11 +114,18 @@ export function resolvePaidProFirstReviewDocumentPresentation(args: {
   const renderedVisibleTextLen =
     mode === "canonical_plain" ? plain.length : mode === "empty" ? 0 : htmlVisibleTextLen;
 
-  if (blockedBlankWithCanonical) {
+  if (blockedBlankWithCanonical || fallbackApplied) {
     logPaidProReviewBlankRenderBlocked({
       canonicalLen: plain.length,
       htmlLen: html.length,
       htmlVisibleTextLen,
+    });
+    logPaidProReviewVisibleRenderGuard({
+      canonicalLen: plain.length,
+      htmlLen: html.length,
+      visibleTextLen: htmlVisibleTextLen,
+      renderMode: mode,
+      fallbackApplied: true,
     });
   }
 
@@ -69,6 +138,7 @@ export function resolvePaidProFirstReviewDocumentPresentation(args: {
     htmlVisibleTextLen,
     renderedVisibleTextLen,
     blockedBlankWithCanonical,
+    fallbackApplied,
   };
 }
 
@@ -80,6 +150,29 @@ export function logPaidProReviewBlankRenderBlocked(payload: {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.warn("[paid-pro-review-blank-render-blocked]", payload);
+}
+
+export function logPaidProReviewVisibleRenderGuard(payload: {
+  canonicalLen: number;
+  htmlLen: number;
+  visibleTextLen: number;
+  renderMode: PaidProFirstReviewDocumentRenderMode;
+  fallbackApplied: boolean;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-review-visible-render-guard]", payload);
+}
+
+let lastVisibleRenderGuardFingerprint = "";
+
+export function logPaidProReviewVisibleRenderGuardOnce(
+  payload: Parameters<typeof logPaidProReviewVisibleRenderGuard>[0],
+): void {
+  const fp = JSON.stringify(payload);
+  if (fp === lastVisibleRenderGuardFingerprint) return;
+  lastVisibleRenderGuardFingerprint = fp;
+  logPaidProReviewVisibleRenderGuard(payload);
 }
 
 export function logPaidProReviewRenderSource(payload: {
@@ -110,6 +203,7 @@ export function logPaidProReviewRenderSourceOnce(
 
 export function resetPaidProFirstReviewRenderGuardForTests(): void {
   lastRenderSourceFingerprint = "";
+  lastVisibleRenderGuardFingerprint = "";
 }
 
 export function auditPaidProFirstReviewVisibleCorpus(args: {
@@ -130,4 +224,19 @@ export function auditPaidProFirstReviewVisibleCorpus(args: {
       htmlVisibleTextLen: args.presentation.htmlVisibleTextLen,
     });
   }
+}
+
+export function shouldForcePaidProCanonicalPlainFallback(args: {
+  canonicalPaidProReview: boolean;
+  paidReviewPlain: string;
+  measuredVisibleTextLen: number;
+  visibleTextMin?: number;
+}): boolean {
+  const visibleMin = args.visibleTextMin ?? PAID_PRO_REVIEW_VISIBLE_TEXT_MIN;
+  const plainLen = (args.paidReviewPlain || "").trim().length;
+  return (
+    Boolean(args.canonicalPaidProReview) &&
+    plainLen >= visibleMin &&
+    args.measuredVisibleTextLen < visibleMin
+  );
 }

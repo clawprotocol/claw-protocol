@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PaidProReviewStickyScrollSpacer } from "./paidProStickyBottomInset";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
@@ -24,10 +24,15 @@ import {
   type PaidProSignerSavedMapping,
 } from "./paidProReviewTrustUx";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { PaidProCanonicalPlainReviewDocument } from "./paidProCanonicalPlainReviewDocument";
 import {
   auditPaidProFirstReviewVisibleCorpus,
   logPaidProReviewRenderSourceOnce,
+  logPaidProReviewVisibleRenderGuardOnce,
+  measureElementVisibleTextLen,
+  PAID_PRO_REVIEW_VISIBLE_TEXT_MIN,
   resolvePaidProFirstReviewDocumentPresentation,
+  shouldForcePaidProCanonicalPlainFallback,
 } from "./paidProFirstReviewRenderGuard";
 import {
   SIMPLE_PRO_FINAL_REVIEW_HEADLINE,
@@ -184,6 +189,8 @@ export function SimpleProFinalReviewScreen({
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const reviewFirstErrorRef = useRef<HTMLDivElement>(null);
+  const documentVisibleMeasureRef = useRef<HTMLDivElement>(null);
+  const [domVisibleFallback, setDomVisibleFallback] = useState(false);
   const editAgreementTextBaselineRef = useRef("");
   const [editAgreementTextOpen, setEditAgreementTextOpen] = useState(false);
   const [showUploadActions, setShowUploadActions] = useState(Boolean(uploadedSource));
@@ -214,10 +221,17 @@ export function SimpleProFinalReviewScreen({
   const effectiveCorpusRecoveryMessage =
     suppressFinalizingForPaidAuthority && hasCanonicalPaidReviewBody ? null : corpusRecoveryMessage;
   const effectiveAgreementHtml = documentPresentation.agreementHtml;
-  const preferHydratedReviewHtml = documentPresentation.mode === "html";
-  const showCanonicalPaidPre = documentPresentation.mode === "canonical_plain";
+  const renderCanonicalPlain =
+    hasCanonicalPaidReviewBody &&
+    (documentPresentation.mode === "canonical_plain" ||
+      documentPresentation.fallbackApplied ||
+      domVisibleFallback);
+  const preferHydratedReviewHtml =
+    documentPresentation.mode === "html" && !domVisibleFallback && !documentPresentation.fallbackApplied;
   const showDocument =
-    (documentPresentation.renderedVisibleTextLen > 0 || hasCanonicalPaidReviewBody) &&
+    (documentPresentation.renderedVisibleTextLen > 0 ||
+      hasCanonicalPaidReviewBody ||
+      effectiveAgreementHtml.length > 0) &&
     !effectiveCorpusRecoveryMessage;
   const showPreviewUnavailable =
     !showDocument &&
@@ -266,73 +280,125 @@ export function SimpleProFinalReviewScreen({
     return () => window.clearTimeout(timer);
   }, [reviewFirstHandoffError]);
 
+  useLayoutEffect(() => {
+    if (!canonicalPaidProReview || paidReviewBodyLen < PAID_PRO_REVIEW_VISIBLE_TEXT_MIN) {
+      setDomVisibleFallback(false);
+      return;
+    }
+    if (documentPresentation.mode === "canonical_plain" || documentPresentation.fallbackApplied) {
+      return;
+    }
+    const measuredVisibleLen = measureElementVisibleTextLen(documentVisibleMeasureRef.current);
+    const needsFallback = shouldForcePaidProCanonicalPlainFallback({
+      canonicalPaidProReview,
+      paidReviewPlain,
+      measuredVisibleTextLen: measuredVisibleLen,
+    });
+    if (needsFallback) {
+      setDomVisibleFallback(true);
+      logPaidProReviewVisibleRenderGuardOnce({
+        canonicalLen: paidReviewBodyLen,
+        htmlLen: documentPresentation.htmlLen,
+        visibleTextLen: measuredVisibleLen,
+        renderMode: "canonical_plain",
+        fallbackApplied: true,
+      });
+    }
+  }, [
+    canonicalPaidProReview,
+    paidReviewPlain,
+    paidReviewBodyLen,
+    agreementHtml,
+    documentPresentation.htmlLen,
+    documentPresentation.mode,
+    documentPresentation.fallbackApplied,
+  ]);
+
   useEffect(() => {
     if (!canonicalPaidProReview) return;
     auditPaidProFirstReviewVisibleCorpus({
       paidReviewPlain,
       presentation: documentPresentation,
     });
+    const effectiveVisibleLen = renderCanonicalPlain
+      ? documentPresentation.plainLen
+      : domVisibleFallback
+        ? documentPresentation.plainLen
+        : documentPresentation.renderedVisibleTextLen;
     logPaidProReviewRenderSourceOnce({
       hasCanonicalCorpus: hasCanonicalPaidReviewBody,
       canonicalLen: documentPresentation.plainLen,
       htmlLen: documentPresentation.htmlLen,
       plainLen: documentPresentation.plainLen,
-      renderedVisibleTextLen: documentPresentation.renderedVisibleTextLen,
-      renderMode: documentPresentation.mode,
+      renderedVisibleTextLen: effectiveVisibleLen,
+      renderMode: renderCanonicalPlain || domVisibleFallback ? "canonical_plain" : documentPresentation.mode,
       selectedTrack,
       signaturePreparationRequested,
     });
+    if (renderCanonicalPlain || domVisibleFallback) {
+      logPaidProReviewVisibleRenderGuardOnce({
+        canonicalLen: documentPresentation.plainLen,
+        htmlLen: documentPresentation.htmlLen,
+        visibleTextLen: renderCanonicalPlain ? documentPresentation.plainLen : 0,
+        renderMode: "canonical_plain",
+        fallbackApplied: documentPresentation.fallbackApplied || domVisibleFallback,
+      });
+    }
   }, [
     canonicalPaidProReview,
     paidReviewPlain,
     agreementHtml,
     hasCanonicalPaidReviewBody,
     documentPresentation.mode,
+    documentPresentation.fallbackApplied,
     documentPresentation.renderedVisibleTextLen,
     documentPresentation.plainLen,
     documentPresentation.htmlLen,
+    renderCanonicalPlain,
+    domVisibleFallback,
     selectedTrack,
     signaturePreparationRequested,
   ]);
 
   const documentBlock = (
     <div
+      ref={documentVisibleMeasureRef}
       className="w-full max-w-full min-w-0 overflow-x-hidden rounded-sm border border-stone-200/90 bg-white shadow-sm ring-1 ring-black/[0.05]"
       data-testid="simple-pro-final-review-document"
     >
       {showDocument ? (
-        preferHydratedReviewHtml ? (
+        renderCanonicalPlain ? (
+          <PaidProCanonicalPlainReviewDocument
+            plain={paidReviewPlain.trim()}
+            tailPaddingClass={documentTailPaddingClass}
+            compactTopPadding={hideInPanelTitleChrome}
+            authoritativeSource={paidReviewAuthoritativeSource}
+          />
+        ) : preferHydratedReviewHtml ? (
           <PremiumAgreementReadonlyView
             html={effectiveAgreementHtml}
-            suppressEmptyFallback={suppressEmptyFallback}
+            suppressEmptyFallback={hasCanonicalPaidReviewBody ? true : suppressEmptyFallback}
+            emptyFallback={
+              hasCanonicalPaidReviewBody ? undefined : "No document text yet."
+            }
             fullDocumentFlow={canonicalPaidProReview}
             compactDocumentTopPadding={hideInPanelTitleChrome}
             bottomScrollInsetPx={canonicalPaidProReview ? 0 : stickyBottomScrollInsetPx}
             visibleProPaperTrace={visibleProPaperTrace}
           />
-        ) : showCanonicalPaidPre ? (
-          <article
-            aria-label="Agreement document preview"
-            className={`premium-readonly-doc box-border max-w-full min-w-0 overflow-x-hidden ${documentTailPaddingClass} text-left max-[480px]:px-4 sm:px-[clamp(1.25rem,4vw,3.5rem)] ${
-              hideInPanelTitleChrome ? "pt-4 sm:pt-5" : "pt-11"
-            } min-h-0 overflow-visible`}
-            data-testid="premium-agreement-readonly-article"
-            data-paid-pro-review-paper={hideInPanelTitleChrome ? "true" : undefined}
-            data-paid-pro-authoritative-source={paidReviewAuthoritativeSource}
-          >
-            <pre
-              className="whitespace-pre-wrap font-serif text-[15px] leading-[1.75] text-stone-800"
-              data-testid="simple-pro-final-review-paid-sot-body"
-            >
-              {paidReviewPlain.trim()}
-            </pre>
-          </article>
         ) : effectiveAgreementHtml.length > 0 ? (
           <PremiumAgreementReadonlyView
             html={effectiveAgreementHtml}
-            suppressEmptyFallback={suppressEmptyFallback}
+            suppressEmptyFallback={hasCanonicalPaidReviewBody ? true : suppressEmptyFallback}
             fullDocumentFlow={false}
             visibleProPaperTrace={visibleProPaperTrace}
+          />
+        ) : hasCanonicalPaidReviewBody ? (
+          <PaidProCanonicalPlainReviewDocument
+            plain={paidReviewPlain.trim()}
+            tailPaddingClass={documentTailPaddingClass}
+            compactTopPadding={hideInPanelTitleChrome}
+            authoritativeSource={paidReviewAuthoritativeSource}
           />
         ) : null
       ) : showPreviewUnavailable ? (

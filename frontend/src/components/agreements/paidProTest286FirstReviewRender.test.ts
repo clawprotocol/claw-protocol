@@ -57,6 +57,7 @@ describe("Test286 paid Pro first-review render + signer metadata", () => {
     });
     expect(presentation.mode).toBe("canonical_plain");
     expect(presentation.blockedBlankWithCanonical).toBe(true);
+    expect(presentation.fallbackApplied).toBe(true);
     expect(presentation.renderedVisibleTextLen).toBe(CANONICAL_PLAIN.length);
   });
 

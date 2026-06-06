@@ -78,11 +78,11 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     expect(screen).toContain("paidReviewPlain");
     expect(screen).toContain("hasCanonicalPaidReviewBody");
-    expect(screen).toContain("simple-pro-final-review-paid-sot-body");
-    expect(screen).toMatch(/data-paid-pro-authoritative-source=\{/);
+    const canonicalDoc = readFileSync(join(__dirname, "paidProCanonicalPlainReviewDocument.tsx"), "utf8");
+    expect(canonicalDoc).toContain("simple-pro-final-review-paid-sot-body");
+    expect(canonicalDoc).toContain("data-paid-pro-authoritative-source={authoritativeSource}");
+    expect(screen).toContain("PaidProCanonicalPlainReviewDocument");
     const unavailableIdx = screen.indexOf("simple-pro-final-review-document-empty");
-    const paidBodyIdx = screen.indexOf("simple-pro-final-review-paid-sot-body");
-    expect(paidBodyIdx).toBeGreaterThan(-1);
     expect(screen).toContain("showPreviewUnavailable");
     expect(screen.indexOf("showPreviewUnavailable")).toBeLessThan(unavailableIdx);
   });
@@ -110,6 +110,8 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     const actionsIdx = screen.indexOf('data-testid="simple-pro-final-review-actions"');
     expect(screen).toContain("resolvePaidProFirstReviewDocumentPresentation");
     expect(screen).toContain("logPaidProReviewRenderSourceOnce");
+    expect(screen).toContain("PaidProCanonicalPlainReviewDocument");
+    expect(screen).toContain("logPaidProReviewVisibleRenderGuardOnce");
     expect(screen).toContain("preferHydratedReviewHtml");
     expect(documentIdx).toBeGreaterThan(-1);
     expect(actionsIdx).toBeGreaterThan(documentIdx);
