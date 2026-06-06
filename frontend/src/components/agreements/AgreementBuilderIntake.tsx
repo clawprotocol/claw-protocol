@@ -566,6 +566,7 @@ import {
   resolveProReviewDocumentPanelHeading,
 } from "./premiumSituationIntelligence";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
+import { PaidProVisibleDocumentShell } from "./paidProVisibleDocumentShell";
 import { PremiumAgreementCopyButton } from "./PremiumAgreementCopyButton";
 import {
   polishedAuthoritativeProPlainForCopy,
@@ -28525,10 +28526,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             showPrimaryGuidedCompletion ? "locked" : undefined
                                           }
                                         >
-                                          <PremiumAgreementReadonlyView
+                                          <PaidProVisibleDocumentShell
                                             html={premiumReadonlyAgreementHtml}
                                             suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                            compactDocumentTopPadding={paidProReviewCompactChrome}
                                             visibleProPaperTrace={visibleProPaperTrace}
+                                            authoritativeSource={
+                                              resolvePaidProReviewRenderSource({
+                                                draft: draft ?? null,
+                                                intakeText: (
+                                                  currentPremiumMergedIntakeKey || intakeCombined || ""
+                                                ).trim(),
+                                              }).source
+                                            }
                                           />
                                         </div>
                                       </>
