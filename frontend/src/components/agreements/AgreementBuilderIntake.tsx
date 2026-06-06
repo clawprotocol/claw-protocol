@@ -853,7 +853,12 @@ import {
   finalizePremiumAgreement,
   isPremiumFullDraftNetworkFailure,
   logPremiumFinalizationEvent,
+  logPremiumFullDraftRetryArmed,
 } from "./premiumFullDraftApi";
+import {
+  armExplicitPremiumGenerationRetry,
+  type PremiumGenerationCallReason,
+} from "./paidProPremiumGenerationCallAudit";
 import { preflightPremiumBackendHealth } from "./premiumBackendHealth";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumRetryPreservedContext } from "./premiumGenerationRetryable";
@@ -3097,7 +3102,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [proSuggestionsRefineDraft, setProSuggestionsRefineDraft] = useState("");
   const runPremiumModelPassRef = useRef<
     | ((
-        args: { intakeText: string; userGapAnswers: string | null; gapResolverSkippedWithDefaults: boolean },
+        args: {
+          intakeText: string;
+          userGapAnswers: string | null;
+          gapResolverSkippedWithDefaults: boolean;
+          premiumGenerationCallReason?: PremiumGenerationCallReason;
+        },
       ) => Promise<void>)
     | null
   >(null);
@@ -8231,6 +8241,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           intakeText: string;
           userGapAnswers: string | null;
           gapResolverSkippedWithDefaults: boolean;
+          premiumGenerationCallReason?: PremiumGenerationCallReason;
         }): Promise<void> => {
           if (!runIsCurrent()) return;
           premiumProRunInFlightRef.current = true;
@@ -8409,7 +8420,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
                       premiumRequestIntakeFingerprint: sessionFpForPass,
                       isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
-                      premiumGenerationCallReason: "checkout_completion",
+                      premiumGenerationCallReason:
+                        args.premiumGenerationCallReason ?? "checkout_completion",
                       deferWaterfallFinish: true,
                     }),
                     premiumCompletionAttemptTimeoutMs,
@@ -14578,11 +14590,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       phase: premiumPostCheckoutPhaseRef.current,
       intakeLen: it.length,
     });
+    armExplicitPremiumGenerationRetry();
+    logPremiumFullDraftRetryArmed({
+      reason: "explicit_retry_pro_draft",
+      pipelineSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+      phase: premiumPostCheckoutPhaseRef.current,
+    });
     setPremiumPostCheckoutPhase("processing");
     void m({
       intakeText: it,
       userGapAnswers: ga || null,
       gapResolverSkippedWithDefaults: !ga,
+      premiumGenerationCallReason: "explicit_retry_pro_draft",
     });
   }, [draft, resolveRawIntakeForPremiumCheckout]);
 

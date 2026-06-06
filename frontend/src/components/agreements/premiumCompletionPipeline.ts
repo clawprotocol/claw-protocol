@@ -50,9 +50,11 @@ import {
   proIntentPlainEnglishForGate,
   resolveAgreementIntentContract,
 } from "./agreementIntentContract";
+import { apiUrl } from "../../lib/clawApi";
 import {
   buildPremiumFullDraftContextForProRequest,
   buildSanitizedPremiumFullDraftContext,
+  logPremiumFullDraftAttemptFailed,
   postPremiumFullDraftOnce,
   postPremiumFullDraftWithRetry,
   type AgreementIntelligence,
@@ -1659,6 +1661,14 @@ async function runPremiumCompletionInner(
         duplicateCheckoutBlocked: true,
         note: "second_checkout_orchestration_blocked",
       });
+      logPremiumFullDraftAttemptFailed({
+        attempt: 0,
+        reason: callReason,
+        url: apiUrl("/api/agreements/premium-full-draft"),
+        failureKind: "http",
+        httpFired: false,
+        errorCode: "duplicate_checkout_premium_call",
+      });
       logPremiumCompletionDebug({
         stage: "premium_full_draft_duplicate_checkout_blocked",
         intakeLen: soT.length,
@@ -1729,7 +1739,10 @@ async function runPremiumCompletionInner(
           tierADiag.backendGenerationOutcome = "cors_blocked";
           tierADiag.premiumPipelineSource = "premium_full_draft_cors_blocked";
         }
-      } else if (fullResp.failure_kind === "network" && fullResp.retryable) {
+      } else if (
+        (fullResp.failure_kind === "network" || fullResp.failure_kind === "network_retryable") &&
+        fullResp.retryable
+      ) {
         logPremiumGenerationApiUnavailable({
           endpoint: PREMIUM_GENERATION_DRAFT_API_PATH,
           error: fullResp.error_code ?? fullResp.browserErrorMessage ?? "network_error",

@@ -45,12 +45,12 @@ describe("premium-full-draft CORS header contract", () => {
     vi.unstubAllGlobals();
   });
 
-  it("classifies cross-origin Failed to fetch as CORS blocked", () => {
+  it("does not classify cross-origin generic Failed to fetch as CORS blocked", () => {
     vi.stubEnv("VITE_CLAW_API_BASE", "https://claw-protocol-production.up.railway.app");
     vi.stubGlobal("window", {
       location: { origin: "https://qa-frontend.up.railway.app" },
     });
-    expect(isPremiumFullDraftCorsBlocked(new TypeError("Failed to fetch"))).toBe(true);
+    expect(isPremiumFullDraftCorsBlocked(new TypeError("Failed to fetch"))).toBe(false);
     vi.unstubAllGlobals();
   });
 });
@@ -96,7 +96,7 @@ describe("postPremiumFullDraftWithRetry CORS vs success", () => {
     }
   });
 
-  it("cross-origin fetch rejection still classifies as cors_blocked", async () => {
+  it("cross-origin generic fetch rejection classifies as network_retryable", async () => {
     vi.stubEnv("MODE", "development");
     vi.stubEnv("VITE_CLAW_API_BASE", "https://claw-protocol-production.up.railway.app");
     vi.stubGlobal("window", {
@@ -114,8 +114,8 @@ describe("postPremiumFullDraftWithRetry CORS vs success", () => {
     });
     expect(out.ok).toBe(false);
     if (!out.ok) {
-      expect(out.failure_kind).toBe("cors");
-      expect(out.error_code).toBe("cors_blocked");
+      expect(out.failure_kind).toBe("network_retryable");
+      expect(out.retryable).toBe(true);
     }
   });
 });

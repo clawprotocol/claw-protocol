@@ -44,7 +44,7 @@ describe("postPremiumFullDraftWithRetry network attempts", () => {
     expect(fetchMock).toHaveBeenCalledTimes(PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS);
     expect(out.ok).toBe(false);
     if (!out.ok) {
-      expect(out.failure_kind).toBe("network");
+      expect(out.failure_kind).toBe("network_retryable");
       expect(out.retryable).toBe(true);
       expect(out.attemptCount).toBe(PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS);
     }
@@ -55,7 +55,7 @@ describe("postPremiumFullDraftWithRetry network attempts", () => {
     log.mockRestore();
   });
 
-  it("succeeds on third network attempt after two failures", async () => {
+  it("succeeds on second network attempt after one failure", async () => {
     vi.stubEnv("MODE", "development");
     let calls = 0;
     const body = JSON.stringify({
@@ -68,12 +68,13 @@ describe("postPremiumFullDraftWithRetry network attempts", () => {
     });
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => {
       calls += 1;
-      if (calls < 3) {
+      if (calls < 2) {
         return Promise.reject(new Error("net::ERR_NETWORK_CHANGED"));
       }
       return Promise.resolve({
         ok: true,
         status: 200,
+        headers: { get: () => null },
         text: async () => body,
         json: async () => JSON.parse(body),
       });
@@ -88,7 +89,7 @@ describe("postPremiumFullDraftWithRetry network attempts", () => {
     });
 
     expect(out.ok).toBe(true);
-    expect(calls).toBe(3);
+    expect(calls).toBe(2);
     const joined = JSON.stringify(log.mock.calls);
     expect(joined).toContain("[premium-network-retry-success]");
     log.mockRestore();
@@ -134,10 +135,12 @@ describe("premium session diagnostics", () => {
 describe("AgreementBuilderIntake premium network recovery wiring", () => {
   const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 
-  it("preserves runModelPass ref on network retryable results", () => {
-    expect(intake).toContain("networkRetryableResult");
+  it("preserves runModelPass ref on retryable results (network and cors)", () => {
+    expect(intake).toContain("isPremiumRetryablePipelineResult(result)");
     expect(intake).toContain("isPremiumNetworkRetryablePipelineResult(result)");
-    expect(intake).toContain("!networkRetryableResult && (result != null");
+    expect(intake).toContain("isPremiumCorsBlockedPipelineResult(result)");
+    expect(intake).toContain("armExplicitPremiumGenerationRetry()");
+    expect(intake).toContain('premiumGenerationCallReason: "explicit_retry_pro_draft"');
   });
 
   it("preflights backend health before user retry", () => {
