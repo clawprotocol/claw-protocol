@@ -27,14 +27,21 @@ import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { PaidProCanonicalPlainReviewDocument } from "./paidProCanonicalPlainReviewDocument";
 import {
   auditPaidProFirstReviewVisibleCorpus,
+  hasPaidProFirstReviewAuthoritativeCorpus,
+  logPaidProFirstReviewDomVisible,
+  logPaidProFirstReviewEmergencyFallback,
+  logPaidProFirstReviewRenderBranch,
   logPaidProReviewRenderSourceOnce,
   logPaidProReviewVisibleRenderGuardOnce,
   measureElementVisibleTextLen,
   PAID_PRO_REVIEW_VISIBLE_TEXT_MIN,
+  readPaidProFirstReviewDomVisibilitySnapshot,
   resolveEffectivePaidProReviewPlain,
   resolvePaidProFirstReviewDocumentPresentation,
+  resolvePaidProFirstReviewEmergencyPlain,
   shouldForcePaidProCanonicalPlainFallback,
   shouldRenderPaidProFirstReviewDiagnostics,
+  shouldSynchronouslyRenderCanonicalPlainFirstReview,
 } from "./paidProFirstReviewRenderGuard";
 import {
   SIMPLE_PRO_FINAL_REVIEW_HEADLINE,
@@ -193,6 +200,7 @@ export function SimpleProFinalReviewScreen({
   const reviewFirstErrorRef = useRef<HTMLDivElement>(null);
   const documentVisibleMeasureRef = useRef<HTMLDivElement>(null);
   const [domVisibleFallback, setDomVisibleFallback] = useState(false);
+  const [emergencyFallbackActive, setEmergencyFallbackActive] = useState(false);
   const editAgreementTextBaselineRef = useRef("");
   const [editAgreementTextOpen, setEditAgreementTextOpen] = useState(false);
   const [showUploadActions, setShowUploadActions] = useState(Boolean(uploadedSource));
@@ -210,16 +218,27 @@ export function SimpleProFinalReviewScreen({
     canonicalPaidProReview,
   });
   const paidReviewBodyLen = effectivePaidReviewPlain.trim().length;
-  const hasCanonicalPaidReviewBody =
-    canonicalPaidProReview && paidReviewBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN;
-  const documentPresentation = resolvePaidProFirstReviewDocumentPresentation({
-    agreementHtml,
+  const firstReviewAuthorityActive = hasPaidProFirstReviewAuthoritativeCorpus({
     paidReviewPlain: effectivePaidReviewPlain,
     canonicalPaidProReview,
   });
-  const paidProFirstReviewDiagnosticsActive = shouldRenderPaidProFirstReviewDiagnostics({
-    canonicalPaidProReview,
+  const hasCanonicalPaidReviewBody =
+    firstReviewAuthorityActive && paidReviewBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN;
+  const documentPresentation = resolvePaidProFirstReviewDocumentPresentation({
+    agreementHtml,
+    paidReviewPlain: effectivePaidReviewPlain,
+    canonicalPaidProReview: firstReviewAuthorityActive || canonicalPaidProReview,
   });
+  const paidProFirstReviewDiagnosticsActive = shouldRenderPaidProFirstReviewDiagnostics({
+    canonicalPaidProReview: firstReviewAuthorityActive || canonicalPaidProReview,
+    paidReviewPlain: effectivePaidReviewPlain,
+  });
+  const syncCanonicalPlain = shouldSynchronouslyRenderCanonicalPlainFirstReview({
+    paidReviewPlain: effectivePaidReviewPlain,
+    canonicalPaidProReview: firstReviewAuthorityActive || canonicalPaidProReview,
+    presentation: documentPresentation,
+  });
+  const emergencyPlain = resolvePaidProFirstReviewEmergencyPlain();
   const showSignerSavedBanner =
     canonicalPaidProReview && signersReady && signerSavedMappings.length > 0;
   const finalVersionCopy = canonicalPaidProReview
@@ -231,19 +250,15 @@ export function SimpleProFinalReviewScreen({
     suppressFinalizingForPaidAuthority && hasCanonicalPaidReviewBody ? null : corpusRecoveryMessage;
   const effectiveAgreementHtml = documentPresentation.agreementHtml;
   const renderCanonicalPlain = Boolean(
-    canonicalPaidProReview &&
-      paidReviewBodyLen >= PAID_PRO_REVIEW_VISIBLE_TEXT_MIN &&
-      (documentPresentation.mode === "canonical_plain" ||
-        documentPresentation.fallbackApplied ||
-        documentPresentation.hardInvariantForced ||
-        domVisibleFallback ||
-        (documentPresentation.mode === "html" &&
-          documentPresentation.htmlVisibleTextLen < PAID_PRO_REVIEW_VISIBLE_TEXT_MIN)),
+    syncCanonicalPlain ||
+      domVisibleFallback ||
+      emergencyFallbackActive,
   );
   const preferHydratedReviewHtml =
     documentPresentation.mode === "html" &&
     !renderCanonicalPlain &&
     !domVisibleFallback &&
+    !emergencyFallbackActive &&
     !documentPresentation.fallbackApplied &&
     !documentPresentation.hardInvariantForced &&
     documentPresentation.htmlVisibleTextLen >= PAID_PRO_REVIEW_VISIBLE_TEXT_MIN;
@@ -252,6 +267,17 @@ export function SimpleProFinalReviewScreen({
       hasCanonicalPaidReviewBody ||
       effectiveAgreementHtml.length > 0) &&
     !effectiveCorpusRecoveryMessage;
+  const renderBranch = emergencyFallbackActive
+    ? "emergency_sot_plain"
+    : renderCanonicalPlain
+      ? "canonical_plain_sync"
+      : preferHydratedReviewHtml
+        ? "premium_readonly_html_full"
+        : effectiveAgreementHtml.length > 0
+          ? "premium_readonly_html_compact"
+          : hasCanonicalPaidReviewBody
+            ? "canonical_plain_tail"
+            : "empty";
   const showPreviewUnavailable =
     !showDocument &&
     !hasCanonicalPaidReviewBody &&
@@ -300,19 +326,35 @@ export function SimpleProFinalReviewScreen({
   }, [reviewFirstHandoffError]);
 
   useLayoutEffect(() => {
-    if (!canonicalPaidProReview || paidReviewBodyLen < PAID_PRO_REVIEW_VISIBLE_TEXT_MIN) {
+    if (!firstReviewAuthorityActive || paidReviewBodyLen < PAID_PRO_REVIEW_VISIBLE_TEXT_MIN) {
       setDomVisibleFallback(false);
+      setEmergencyFallbackActive(false);
       return;
     }
-    if (documentPresentation.mode === "canonical_plain" || documentPresentation.fallbackApplied) {
+    if (syncCanonicalPlain || renderCanonicalPlain) {
+      const domSnap = readPaidProFirstReviewDomVisibilitySnapshot(documentVisibleMeasureRef.current);
+      logPaidProFirstReviewDomVisible(domSnap);
+      if (
+        domSnap.containerInnerTextLen < PAID_PRO_REVIEW_VISIBLE_TEXT_MIN &&
+        emergencyPlain.length >= PAID_PRO_REVIEW_VISIBLE_TEXT_MIN
+      ) {
+        setEmergencyFallbackActive(true);
+        logPaidProFirstReviewEmergencyFallback({
+          canonicalLen: emergencyPlain.length,
+          containerInnerTextLen: domSnap.containerInnerTextLen,
+          reason: "container_empty_after_sync_canonical",
+        });
+      }
       return;
     }
     const measuredVisibleLen = measureElementVisibleTextLen(documentVisibleMeasureRef.current);
     const needsFallback = shouldForcePaidProCanonicalPlainFallback({
-      canonicalPaidProReview,
+      canonicalPaidProReview: firstReviewAuthorityActive || canonicalPaidProReview,
       paidReviewPlain: effectivePaidReviewPlain,
       measuredVisibleTextLen: measuredVisibleLen,
     });
+    const domSnap = readPaidProFirstReviewDomVisibilitySnapshot(documentVisibleMeasureRef.current);
+    logPaidProFirstReviewDomVisible(domSnap);
     if (needsFallback) {
       setDomVisibleFallback(true);
       logPaidProReviewVisibleRenderGuardOnce({
@@ -322,8 +364,19 @@ export function SimpleProFinalReviewScreen({
         renderMode: "canonical_plain",
         fallbackApplied: true,
       });
+    } else if (
+      measuredVisibleLen < PAID_PRO_REVIEW_VISIBLE_TEXT_MIN &&
+      emergencyPlain.length >= PAID_PRO_REVIEW_VISIBLE_TEXT_MIN
+    ) {
+      setEmergencyFallbackActive(true);
+      logPaidProFirstReviewEmergencyFallback({
+        canonicalLen: emergencyPlain.length,
+        containerInnerTextLen: measuredVisibleLen,
+        reason: "container_empty_after_html_paint",
+      });
     }
   }, [
+    firstReviewAuthorityActive,
     canonicalPaidProReview,
     paidReviewPlain,
     paidReviewBodyLen,
@@ -331,10 +384,31 @@ export function SimpleProFinalReviewScreen({
     documentPresentation.htmlLen,
     documentPresentation.mode,
     documentPresentation.fallbackApplied,
+    syncCanonicalPlain,
+    renderCanonicalPlain,
+    emergencyPlain,
+    effectivePaidReviewPlain,
   ]);
 
   useEffect(() => {
     if (!paidProFirstReviewDiagnosticsActive) return;
+    logPaidProFirstReviewRenderBranch({
+      bodyLen: paidReviewBodyLen,
+      canonicalLen: documentPresentation.plainLen,
+      htmlLen: documentPresentation.htmlLen,
+      visibleTextLen: renderCanonicalPlain || emergencyFallbackActive
+        ? documentPresentation.plainLen
+        : documentPresentation.htmlVisibleTextLen,
+      renderMode: renderCanonicalPlain || emergencyFallbackActive
+        ? "canonical_plain"
+        : documentPresentation.mode,
+      componentBranch: renderBranch,
+      fallbackApplied:
+        documentPresentation.fallbackApplied ||
+        documentPresentation.hardInvariantForced ||
+        domVisibleFallback ||
+        emergencyFallbackActive,
+    });
     auditPaidProFirstReviewVisibleCorpus({
       paidReviewPlain: effectivePaidReviewPlain,
       presentation: documentPresentation,
@@ -384,7 +458,16 @@ export function SimpleProFinalReviewScreen({
     domVisibleFallback,
     selectedTrack,
     signaturePreparationRequested,
+    firstReviewAuthorityActive,
+    renderBranch,
+    emergencyFallbackActive,
   ]);
+
+  const canonicalPlainForRender = (
+    emergencyFallbackActive && emergencyPlain.length >= PAID_PRO_REVIEW_VISIBLE_TEXT_MIN
+      ? emergencyPlain
+      : effectivePaidReviewPlain
+  ).trim();
 
   const documentBlock = (
     <div
@@ -396,9 +479,25 @@ export function SimpleProFinalReviewScreen({
       }
     >
       {showDocument ? (
-        renderCanonicalPlain ? (
+        emergencyFallbackActive && emergencyPlain.length >= PAID_PRO_REVIEW_VISIBLE_TEXT_MIN ? (
+          <>
+            <p
+              className="border-b border-amber-200/80 bg-amber-50/90 px-4 py-2.5 text-xs font-medium text-amber-950"
+              data-testid="paid-pro-first-review-emergency-banner"
+              role="status"
+            >
+              Pro agreement generated. Showing canonical agreement text.
+            </p>
+            <PaidProCanonicalPlainReviewDocument
+              plain={emergencyPlain}
+              tailPaddingClass={documentTailPaddingClass}
+              compactTopPadding={hideInPanelTitleChrome}
+              authoritativeSource="paidProSourceOfTruth"
+            />
+          </>
+        ) : renderCanonicalPlain ? (
           <PaidProCanonicalPlainReviewDocument
-            plain={effectivePaidReviewPlain.trim()}
+            plain={canonicalPlainForRender}
             tailPaddingClass={documentTailPaddingClass}
             compactTopPadding={hideInPanelTitleChrome}
             authoritativeSource={paidReviewAuthoritativeSource}
@@ -424,7 +523,7 @@ export function SimpleProFinalReviewScreen({
           />
         ) : hasCanonicalPaidReviewBody ? (
           <PaidProCanonicalPlainReviewDocument
-            plain={effectivePaidReviewPlain.trim()}
+            plain={canonicalPlainForRender}
             tailPaddingClass={documentTailPaddingClass}
             compactTopPadding={hideInPanelTitleChrome}
             authoritativeSource={paidReviewAuthoritativeSource}

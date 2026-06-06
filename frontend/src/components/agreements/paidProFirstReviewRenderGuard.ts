@@ -25,13 +25,27 @@ export type PaidProFirstReviewDocumentPresentation = {
   hardInvariantForced?: boolean;
 };
 
+export function hasPaidProFirstReviewAuthoritativeCorpus(args: {
+  paidReviewPlain: string;
+  canonicalPaidProReview?: boolean;
+  minLen?: number;
+}): boolean {
+  const min = args.minLen ?? PAID_PRO_AUTHORITY_MIN_LEN;
+  const plainLen = resolveEffectivePaidProReviewPlain({
+    paidReviewPlain: args.paidReviewPlain,
+    canonicalPaidProReview: Boolean(args.canonicalPaidProReview),
+  }).length;
+  if (plainLen < min) return false;
+  return Boolean(args.canonicalPaidProReview) || hasPaidProSourceOfTruth();
+}
+
 export function resolveEffectivePaidProReviewPlain(args: {
   paidReviewPlain: string;
   canonicalPaidProReview: boolean;
 }): string {
   const fromProp = (args.paidReviewPlain || "").trim();
   if (fromProp.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromProp;
-  if (args.canonicalPaidProReview && hasPaidProSourceOfTruth()) {
+  if (hasPaidProSourceOfTruth()) {
     return getPaidProSourceOfTruthText().trim();
   }
   return fromProp;
@@ -101,7 +115,12 @@ export function resolvePaidProFirstReviewDocumentPresentation(args: {
   const plain = (args.paidReviewPlain || "").trim();
   const html = (args.agreementHtml || "").trim();
   const htmlVisibleTextLen = measureHtmlDomVisibleTextLen(html);
-  const hasCanonicalPlain = Boolean(args.canonicalPaidProReview && plain.length >= min);
+  const authoritativeCorpusReady = hasPaidProFirstReviewAuthoritativeCorpus({
+    paidReviewPlain: plain,
+    canonicalPaidProReview: args.canonicalPaidProReview,
+    minLen: min,
+  });
+  const hasCanonicalPlain = Boolean(authoritativeCorpusReady && plain.length >= min);
   const htmlVisibleThreshold =
     plain.length >= visibleMin ? visibleMin : Math.min(min, Math.max(200, Math.floor(plain.length * 0.2)));
   const htmlHasVisibleBody = htmlVisibleTextLen >= htmlVisibleThreshold;
@@ -194,8 +213,102 @@ export function enforcePaidProFirstReviewHardRenderInvariant(
 
 export function shouldRenderPaidProFirstReviewDiagnostics(args: {
   canonicalPaidProReview: boolean;
+  paidReviewPlain?: string;
 }): boolean {
-  return Boolean(args.canonicalPaidProReview) || hasPaidProSourceOfTruth();
+  if (hasPaidProSourceOfTruth()) return true;
+  if (args.canonicalPaidProReview) return true;
+  return (args.paidReviewPlain || "").trim().length >= PAID_PRO_AUTHORITY_MIN_LEN;
+}
+
+export function shouldSynchronouslyRenderCanonicalPlainFirstReview(args: {
+  paidReviewPlain: string;
+  canonicalPaidProReview: boolean;
+  presentation: PaidProFirstReviewDocumentPresentation;
+}): boolean {
+  const plainLen = (args.paidReviewPlain || "").trim().length;
+  if (plainLen < PAID_PRO_REVIEW_VISIBLE_TEXT_MIN) return false;
+  if (
+    !hasPaidProFirstReviewAuthoritativeCorpus({
+      paidReviewPlain: args.paidReviewPlain,
+      canonicalPaidProReview: args.canonicalPaidProReview,
+    })
+  ) {
+    return false;
+  }
+  const p = args.presentation;
+  return (
+    p.mode === "canonical_plain" ||
+    p.fallbackApplied ||
+    p.hardInvariantForced ||
+    p.htmlVisibleTextLen < PAID_PRO_REVIEW_VISIBLE_TEXT_MIN ||
+    p.renderedVisibleTextLen < PAID_PRO_REVIEW_VISIBLE_TEXT_MIN
+  );
+}
+
+export function readPaidProFirstReviewDomVisibilitySnapshot(
+  element: HTMLElement | null,
+): {
+  containerInnerTextLen: number;
+  containerClientHeight: number;
+  childCount: number;
+  computedColor: string;
+  computedOpacity: string;
+  computedDisplay: string;
+  computedVisibility: string;
+} {
+  if (!element || typeof window === "undefined") {
+    return {
+      containerInnerTextLen: 0,
+      containerClientHeight: 0,
+      childCount: 0,
+      computedColor: "",
+      computedOpacity: "",
+      computedDisplay: "",
+      computedVisibility: "",
+    };
+  }
+  const style = window.getComputedStyle(element);
+  return {
+    containerInnerTextLen: measureElementVisibleTextLen(element),
+    containerClientHeight: Math.round(element.clientHeight),
+    childCount: element.childElementCount,
+    computedColor: style.color,
+    computedOpacity: style.opacity,
+    computedDisplay: style.display,
+    computedVisibility: style.visibility,
+  };
+}
+
+export function logPaidProFirstReviewRenderBranch(payload: {
+  bodyLen: number;
+  canonicalLen: number;
+  htmlLen: number;
+  visibleTextLen: number;
+  renderMode: PaidProFirstReviewDocumentRenderMode;
+  componentBranch: string;
+  fallbackApplied: boolean;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-first-review-render-branch]", payload);
+}
+
+export function logPaidProFirstReviewDomVisible(
+  payload: ReturnType<typeof readPaidProFirstReviewDomVisibilitySnapshot>,
+): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-first-review-dom-visible]", payload);
+}
+
+export function logPaidProFirstReviewEmergencyFallback(payload: {
+  canonicalLen: number;
+  containerInnerTextLen: number;
+  reason: string;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[paid-pro-first-review-emergency-fallback]", payload);
 }
 
 export function logPaidProReviewBlankRenderBlocked(payload: {
@@ -291,8 +404,18 @@ export function shouldForcePaidProCanonicalPlainFallback(args: {
   const visibleMin = args.visibleTextMin ?? PAID_PRO_REVIEW_VISIBLE_TEXT_MIN;
   const plainLen = (args.paidReviewPlain || "").trim().length;
   return (
-    Boolean(args.canonicalPaidProReview) &&
+    hasPaidProFirstReviewAuthoritativeCorpus({
+      paidReviewPlain: args.paidReviewPlain,
+      canonicalPaidProReview: args.canonicalPaidProReview,
+      minLen: PAID_PRO_AUTHORITY_MIN_LEN,
+    }) &&
     plainLen >= visibleMin &&
     args.measuredVisibleTextLen < visibleMin
   );
+}
+
+/** Frozen SoT bytes only — never mutate or re-freeze. */
+export function resolvePaidProFirstReviewEmergencyPlain(): string {
+  if (!hasPaidProSourceOfTruth()) return "";
+  return getPaidProSourceOfTruthText().trim();
 }

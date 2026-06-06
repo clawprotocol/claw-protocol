@@ -20688,7 +20688,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   React.useEffect(() => {
     if (!simpleProFinalReviewActive) return;
     logSimpleProFinalReviewMounted({
-      bodyLen: simpleProFinalReviewCorpus.plainText.length,
+      bodyLen: Math.max(
+        simpleProFinalReviewDisplayPlain.length,
+        simpleProFinalReviewCorpus.plainText.length,
+        paidProAuthoritativeBodyLen,
+        hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim().length : 0,
+      ),
       phase: createFlowPhase,
       guidedApplied: guidedCompletionPhase === "applied",
       recipientUxActive: premiumRecipientUxActive,
@@ -27938,7 +27943,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}
                                           selectedTrack={proDeliveryTrackSelected}
                                           signaturePreparationRequested={signaturePreparationRequested}
-                                          canonicalPaidProReview={isAuthoritativePaidProReviewActive}
+                                          canonicalPaidProReview={
+                                            isAuthoritativePaidProReviewActive ||
+                                            (hasPaidProSourceOfTruth() &&
+                                              paidProAuthoritativeBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN)
+                                          }
                                           appliedChecklist={
                                             acceptedPaidProAuthorityActive ? [] : guidedAppliedSummaryChecklist
                                           }

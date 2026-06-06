@@ -119,7 +119,9 @@ describe("Test288 first-review wiring (static)", () => {
   it("AgreementBuilderIntake wires authoritative review + SoT plain fallback into SimpleProFinalReviewScreen", () => {
     expect(intake).toContain("<SimpleProFinalReviewScreen");
     expect(intake).toContain("simpleProFinalReviewDisplayPlain");
-    expect(intake).toContain("canonicalPaidProReview={isAuthoritativePaidProReviewActive}");
+    expect(intake).toContain("isAuthoritativePaidProReviewActive");
+    expect(intake).toContain("hasPaidProSourceOfTruth()");
+    expect(intake).toContain("paidProAuthoritativeBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN");
     expect(intake).toContain("getPaidProSourceOfTruthText()");
     expect(intake).toContain("paidReviewPlain={");
   });
