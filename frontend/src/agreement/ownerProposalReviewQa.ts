@@ -3,6 +3,21 @@ import type { RecipientProposalLifecycleStatus } from "./recipientProposalHistor
 const QA_QUERY_KEY = "qaReview";
 const QA_STORAGE_KEY = "lawdogQaOwnerReview";
 
+/** SPA path for owner QA review on Done page (use with app router `navigate`). */
+export function buildOwnerQaReviewDonePath(agreementId: string): string {
+  const id = encodeURIComponent(String(agreementId || "").trim());
+  return `/app/done/${id}?${QA_QUERY_KEY}=1`;
+}
+
+/** Absolute URL safe to paste in a fresh browser tab (avoids file:/// relative paths). */
+export function buildOwnerQaReviewAbsoluteLink(agreementId: string, origin?: string): string {
+  const id = encodeURIComponent(String(agreementId || "").trim());
+  const base =
+    (origin || "").trim() ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+  return `${base.replace(/\/$/, "")}/app/done/${id}?${QA_QUERY_KEY}=1`;
+}
+
 export function isOwnerProposalReviewQaEnabled(explicit?: boolean): boolean {
   if (explicit === true) return true;
   if (explicit === false) return false;
@@ -84,6 +99,55 @@ export function logOwnerProposalRejected(payload: {
   rejectedCorpusHash: string;
 }): void {
   logOwnerReview("[owner-proposal-rejected]", payload);
+}
+
+export function logOwnerReviewLinkBuilt(payload: {
+  agreementId: string;
+  absoluteUrl: string;
+  path?: string;
+  source: string;
+}): void {
+  logOwnerReview("[owner-review-link-built]", payload);
+}
+
+export function logReviewerDisplayCopyParity(payload: {
+  agreementId: string;
+  copyHasSignatureBlock: boolean;
+  displayHasSignatureBlock: boolean;
+  parity: boolean;
+  copyCorpusHash?: string;
+  displayHtmlLength?: number;
+}): void {
+  logOwnerReview("[reviewer-display-copy-parity]", payload);
+}
+
+export function logReviewerOwnerCtaHidden(payload: {
+  agreementId: string;
+  surface: string;
+}): void {
+  logOwnerReview("[reviewer-owner-cta-hidden]", payload);
+}
+
+export function corpusHasSignatureBlock(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return false;
+  return (
+    /\bIN WITNESS WHEREOF\b/i.test(t) ||
+    /\b(signature|execution)\s+block\b/i.test(t) ||
+    /\b(By|Name|Title|Notice)\s*:/i.test(t) ||
+    /\b(CEO|President|Chief Executive Officer)\b/i.test(t)
+  );
+}
+
+export function htmlHasSignatureBlock(html: string): boolean {
+  const h = (html || "").trim();
+  if (!h) return false;
+  return (
+    /premium-doc-signature/i.test(h) ||
+    /\bIN WITNESS WHEREOF\b/i.test(h) ||
+    /\bCEO\b/i.test(h) ||
+    /\bPresident\b/i.test(h)
+  );
 }
 
 export function logOwnerCorpusUpdated(payload: {

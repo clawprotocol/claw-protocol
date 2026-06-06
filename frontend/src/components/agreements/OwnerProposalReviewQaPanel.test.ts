@@ -3,12 +3,17 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("OwnerProposalReviewQaPanel wiring", () => {
-  it("SimpleDonePage mounts QA owner review panel behind qaReview flag", () => {
+  it("SimpleDonePage mounts QA owner review panel and review suggested changes CTA", () => {
     const done = readFileSync(join(__dirname, "../../launch/simpleProduct/SimpleDonePage.tsx"), "utf8");
     expect(done).toContain("OwnerProposalReviewQaPanel");
-    expect(done).toContain("isOwnerProposalReviewQaEnabled");
+    expect(done).toContain("buildOwnerQaReviewAbsoluteLink");
+    expect(done).toContain("simple-done-review-suggested-changes");
+    expect(done).toContain("simple-done-copy-owner-qa-review-link");
     expect(readFileSync(join(__dirname, "OwnerProposalReviewQaPanel.tsx"), "utf8")).toContain(
       "owner-proposal-review-qa-panel",
+    );
+    expect(readFileSync(join(__dirname, "OwnerProposalReviewQaPanel.tsx"), "utf8")).toContain(
+      "No suggested changes are pending for this agreement",
     );
   });
 

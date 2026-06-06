@@ -142,7 +142,7 @@ describe("SimpleDonePage owner approval UX", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/app/esign/mock-vs01-doc?agreement_bridge=1");
   });
 
-  it("Resolve in workspace routes to negotiation when open recipient proposals exist", async () => {
+  it("Review suggested changes opens owner QA route when open recipient proposals exist", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
       ok: true,
       draft: baseDraft({
@@ -188,12 +188,14 @@ describe("SimpleDonePage owner approval UX", () => {
     render(<SimpleDonePage agreementId={agreementId} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("simple-done-resolve-in-workspace")).toBeTruthy();
+      expect(screen.getByTestId("simple-done-review-suggested-changes")).toBeTruthy();
+      expect(screen.getByTestId("simple-done-copy-owner-qa-review-link")).toBeTruthy();
+      expect(screen.getByTestId("owner-proposal-review-qa-panel")).toBeTruthy();
     });
 
-    await userEvent.click(screen.getByTestId("simple-done-resolve-in-workspace"));
+    await userEvent.click(screen.getByTestId("simple-done-review-suggested-changes"));
     expect(mockTryNavigatePaidProVs01).not.toHaveBeenCalled();
-    expect(mockNavigate).toHaveBeenCalledWith(`/app/agreements/${encodeURIComponent(agreementId)}`);
+    expect(mockNavigate).toHaveBeenCalledWith(`/app/done/${encodeURIComponent(agreementId)}?qaReview=1`);
   });
 
   it("with 4 review links and one approval, does not show Finalize or ready-to-sign for all reviewers", async () => {
@@ -470,7 +472,7 @@ describe("SimpleDonePage owner approval UX", () => {
     expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
   });
 
-  it("with 4 approvals and open proposals, hides Finalize and shows Resolve in workspace as primary", async () => {
+  it("with 4 approvals and open proposals, hides Finalize and shows Review suggested changes as primary", async () => {
     const parties = [
       { id: "r1", name: "R1", role: "reviewer" as const },
       { id: "r2", name: "R2", role: "reviewer" as const },
@@ -517,9 +519,10 @@ describe("SimpleDonePage owner approval UX", () => {
     render(<SimpleDonePage agreementId={agreementId} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("simple-done-resolve-in-workspace")).toBeTruthy();
+      expect(screen.getByTestId("simple-done-review-suggested-changes")).toBeTruthy();
     });
     expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
+    expect(screen.queryByTestId("simple-done-resolve-in-workspace")).toBeNull();
     expect(screen.getByTestId("simple-done-review-primary-actions")).toBeTruthy();
   });
 

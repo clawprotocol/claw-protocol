@@ -21,7 +21,7 @@ export function buildReviewFirstDocumentDisplayHtml(args: {
     return buildPremiumAgreementReadonlyHtml(polished, {
       signatureSectionMode: "collaboration",
       partyNames: names.length ? names : ["Party A", "Party B"],
-      suppressCorpusEmbeddedSignatureForDisplay: true,
+      suppressCorpusEmbeddedSignatureForDisplay: false,
       suppressDocumentIntelligenceCallouts: true,
     });
   }

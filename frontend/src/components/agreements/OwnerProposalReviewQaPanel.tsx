@@ -59,11 +59,14 @@ type Props = {
   draft: AgreementDraft | null;
   onDraftUpdated?: (draft: AgreementDraft | null) => void;
   qaEnabled?: boolean;
+  /** Owner Done page: show panel when open change requests exist even before ?qaReview=1. */
+  forceVisible?: boolean;
 };
 
 export function OwnerProposalReviewQaPanel(props: Props) {
-  const { agreementId, draft, onDraftUpdated, qaEnabled } = props;
-  const enabled = qaEnabled ?? isOwnerProposalReviewQaEnabled();
+  const { agreementId, draft, onDraftUpdated, qaEnabled, forceVisible = false } = props;
+  const qaFlagOn = qaEnabled ?? isOwnerProposalReviewQaEnabled();
+  const visible = forceVisible || qaFlagOn;
   const openedLoggedRef = useRef(false);
   const listLoggedRef = useRef("");
   const selectedLoggedRef = useRef("");
@@ -103,7 +106,7 @@ export function OwnerProposalReviewQaPanel(props: Props) {
   }, [agreementId, onDraftUpdated]);
 
   useEffect(() => {
-    if (!enabled || !draft) return;
+    if (!visible || !draft) return;
     if (openedLoggedRef.current) return;
     openedLoggedRef.current = true;
     logOwnerReviewOpened({
@@ -111,10 +114,10 @@ export function OwnerProposalReviewQaPanel(props: Props) {
       proposalCount: records.length,
       openProposalCount: openRecords.length,
     });
-  }, [agreementId, draft, enabled, openRecords.length, records.length]);
+  }, [agreementId, draft, visible, openRecords.length, records.length]);
 
   useEffect(() => {
-    if (!enabled || !draft) return;
+    if (!visible || !draft) return;
     const key = JSON.stringify({
       agreementId,
       count: records.length,
@@ -127,10 +130,10 @@ export function OwnerProposalReviewQaPanel(props: Props) {
       proposalCount: records.length,
       statuses: records.map((r) => r.status),
     });
-  }, [agreementId, draft, enabled, records]);
+  }, [agreementId, draft, visible, records]);
 
   useEffect(() => {
-    if (!enabled || !selected) return;
+    if (!visible || !selected) return;
     const key = `${selected.proposal_id}:${selected.status}`;
     if (key === selectedLoggedRef.current) return;
     selectedLoggedRef.current = key;
@@ -141,7 +144,7 @@ export function OwnerProposalReviewQaPanel(props: Props) {
       changeCount: selected.changeCount,
       proposerId: selected.proposer_id ?? null,
     });
-  }, [agreementId, enabled, selected]);
+  }, [agreementId, visible, selected]);
 
   async function acceptProposal() {
     if (!selected || selected.status !== "submitted") return;
@@ -205,7 +208,7 @@ export function OwnerProposalReviewQaPanel(props: Props) {
     }
   }
 
-  if (!enabled) return null;
+  if (!visible) return null;
   if (!draft) {
     return (
       <section
@@ -234,7 +237,7 @@ export function OwnerProposalReviewQaPanel(props: Props) {
 
       {records.length === 0 ? (
         <p className="mt-3 text-sm text-violet-200/80" data-testid="owner-proposal-qa-empty">
-          No recipient proposals yet.
+          No suggested changes are pending for this agreement.
         </p>
       ) : (
         <>

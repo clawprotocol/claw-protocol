@@ -83,7 +83,14 @@ import {
   reviewActionButtonClass,
 } from "../../agreement/reviewFirstLayout";
 import { OwnerProposalReviewQaPanel } from "../../components/agreements/OwnerProposalReviewQaPanel";
-import { isOwnerProposalReviewQaEnabled } from "../../agreement/ownerProposalReviewQa";
+import { OWNER_CTA_REVIEW_SUGGESTED_CHANGES } from "../../agreement/ownerRecipientSuggestedEditsCopy";
+import {
+  buildOwnerQaReviewAbsoluteLink,
+  buildOwnerQaReviewDonePath,
+  enableOwnerProposalReviewQaLocal,
+  isOwnerProposalReviewQaEnabled,
+  logOwnerReviewLinkBuilt,
+} from "../../agreement/ownerProposalReviewQa";
 
 const EMPTY_REVIEW_HANDOFF_RECIPIENTS: SimpleDoneReviewRecipientLinkRow[] = [];
 
@@ -113,9 +120,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const [finalizeNavigating, setFinalizeNavigating] = useState(false);
   const [rowCopyFlashByKey, setRowCopyFlashByKey] = useState<Record<string, boolean>>({});
   const [reviewFlowDiagLocal, setReviewFlowDiagLocal] = useState(false);
-  const [qaOwnerReviewEnabled] = useState(() =>
-    typeof window !== "undefined" ? isOwnerProposalReviewQaEnabled() : false,
-  );
+  const [ownerQaLinkCopyFlash, setOwnerQaLinkCopyFlash] = useState(false);
   const ownerSuccessLoggedRef = useRef<string | null>(null);
   const ownerReviewLinkStatusDiagKeyRef = useRef("");
   const canDownload = !isSimpleSendPaywallActive() || canAccessSimpleSendActions(agreementId);
@@ -273,7 +278,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
       : reviewApprovalAgg.finalizeForSigningEnabled
         ? "Prepare signing packet"
         : reviewApprovalAgg.hasOpenChangeRequests
-          ? "Resolve in workspace"
+          ? OWNER_CTA_REVIEW_SUGGESTED_CHANGES
           : multiMint
             ? "Per-reviewer copy (table)"
             : "Copy review link";
@@ -607,7 +612,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
   }
 
   if (isPaidProReviewDonePath) {
-    const negotiationHref = `/app/agreements/${encodeURIComponent(agreementId)}`;
     const agreementTitle =
       normalizeAgreementDisplayTitle(
         (ownerHandoffDraft?.title || "").trim() || (title || "").trim() || "Agreement",
@@ -650,10 +654,49 @@ export function SimpleDonePage(props: { agreementId: string }) {
       linksStillLoading,
       linksIncomplete,
     });
-    const showTopResolveWorkspace = !signingLockActive && reviewApprovalAgg.hasOpenChangeRequests;
+    const openProposalCount = ownerHandoffDraft
+      ? findOpenRecipientProposals(ownerHandoffDraft.audit_log).length
+      : 0;
+    const showTopReviewSuggestedChanges = !signingLockActive && reviewApprovalAgg.hasOpenChangeRequests;
     const showTopFinalizeForSigning = !signingLockActive && canFinalizeGate;
+    const qaOwnerReviewEnabled = isOwnerProposalReviewQaEnabled();
+    const showOwnerQaProposalPanel = qaOwnerReviewEnabled || openProposalCount > 0;
     const showTopAnySigningPrimary =
-      showTopContinueSigning || showTopResolveWorkspace || showTopFinalizeForSigning;
+      showTopContinueSigning ||
+      showTopReviewSuggestedChanges ||
+      showTopFinalizeForSigning;
+    const openOwnerQaReview = () => {
+      enableOwnerProposalReviewQaLocal();
+      const path = buildOwnerQaReviewDonePath(agreementId);
+      const absoluteUrl = buildOwnerQaReviewAbsoluteLink(agreementId);
+      logOwnerReviewLinkBuilt({
+        agreementId,
+        path,
+        absoluteUrl,
+        source: "review_suggested_changes_cta",
+      });
+      void navigate(path);
+      window.requestAnimationFrame(() => {
+        const panel = document.querySelector('[data-testid="owner-proposal-review-qa-panel"]');
+        if (panel && typeof panel.scrollIntoView === "function") {
+          panel.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
+    };
+    const copyOwnerQaReviewLink = () => {
+      enableOwnerProposalReviewQaLocal();
+      const absoluteUrl = buildOwnerQaReviewAbsoluteLink(agreementId);
+      logOwnerReviewLinkBuilt({
+        agreementId,
+        absoluteUrl,
+        path: buildOwnerQaReviewDonePath(agreementId),
+        source: "copy_owner_qa_review_link",
+      });
+      void navigator.clipboard.writeText(absoluteUrl).then(() => {
+        setOwnerQaLinkCopyFlash(true);
+        window.setTimeout(() => setOwnerQaLinkCopyFlash(false), 2000);
+      });
+    };
     const showBottomCopyPrimary =
       !multiReviewer &&
       reviewLinksReady &&
@@ -719,11 +762,10 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     {OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY}
                   </ReviewNotice>
                 ) : reviewApprovalAgg.hasOpenChangeRequests ? (
-                  <ReviewNotice tone="warning">
+                  <ReviewNotice tone="warning" testId="simple-done-open-change-requests">
                     <p className="font-semibold">Open change requests on this draft.</p>
                     <p className="mt-1">
-                      There are still open change requests on this agreement. Open the workspace to resolve them before
-                      finalizing.
+                      A reviewer submitted proposed wording. Review suggested changes here before finalizing for signing.
                     </p>
                   </ReviewNotice>
                 ) : reviewApprovalAgg.anyReviewerApproval ? (
@@ -733,11 +775,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       : reviewApprovalAgg.ownerStatusLine}
                   </ReviewNotice>
                 ) : null}
-                {qaOwnerReviewEnabled || isOwnerProposalReviewQaEnabled() ? (
+                {showOwnerQaProposalPanel ? (
                   <OwnerProposalReviewQaPanel
                     agreementId={agreementId}
                     draft={ownerHandoffDraft}
                     onDraftUpdated={setOwnerHandoffDraft}
+                    forceVisible={openProposalCount > 0}
                   />
                 ) : null}
                 <span className="sr-only" data-testid="simple-done-owner-approval-status">
@@ -759,14 +802,24 @@ export function SimpleDonePage(props: { agreementId: string }) {
                         {finalizeNavigating ? "Preparing signing packet…" : "Continue to signing"}
                       </button>
                     ) : null}
-                    {showTopResolveWorkspace ? (
+                    {showTopReviewSuggestedChanges ? (
                       <button
                         type="button"
                         className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
-                        data-testid="simple-done-resolve-in-workspace"
-                        onClick={() => void navigate(negotiationHref)}
+                        data-testid="simple-done-review-suggested-changes"
+                        onClick={openOwnerQaReview}
                       >
-                        Resolve in workspace
+                        {OWNER_CTA_REVIEW_SUGGESTED_CHANGES}
+                      </button>
+                    ) : null}
+                    {showTopReviewSuggestedChanges ? (
+                      <button
+                        type="button"
+                        className="vs01-btn min-h-[2.5rem] border border-slate-300 bg-white px-4 text-sm text-slate-800 hover:bg-slate-50"
+                        data-testid="simple-done-copy-owner-qa-review-link"
+                        onClick={() => copyOwnerQaReviewLink()}
+                      >
+                        {ownerQaLinkCopyFlash ? "Copied QA link" : "Copy owner QA review link"}
                       </button>
                     ) : null}
                     {showTopFinalizeForSigning ? (

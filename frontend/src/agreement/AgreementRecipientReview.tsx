@@ -273,6 +273,13 @@ import {
   reviewerNeedsPersonalizedLink,
   writeReviewFirstSubmitInflightProposalId,
 } from "./reviewerTokenPersistence";
+import {
+  corpusFingerprint,
+  corpusHasSignatureBlock,
+  htmlHasSignatureBlock,
+  logReviewerDisplayCopyParity,
+  logReviewerOwnerCtaHidden,
+} from "./ownerProposalReviewQa";
 import { buildReviewFirstDocumentDisplayHtml } from "./reviewFirstDocumentDisplay";
 import { PremiumAgreementReadonlyView } from "../components/agreements/PremiumAgreementReadonlyView";
 import { ReviewFirstChangeCard } from "./ReviewFirstChangeCard";
@@ -2202,6 +2209,43 @@ export function AgreementRecipientReview({
   }, [shouldPollSigningReadiness, refresh]);
 
   const lastReviewStateDiagKeyRef = useRef("");
+  const reviewerOwnerCtaHiddenLoggedRef = useRef(false);
+  const lastReviewerDisplayParityKeyRef = useRef("");
+  useEffect(() => {
+    if (entry.kind !== "review" || viewerLike) return;
+    if (reviewerOwnerCtaHiddenLoggedRef.current) return;
+    reviewerOwnerCtaHiddenLoggedRef.current = true;
+    logReviewerOwnerCtaHidden({ agreementId, surface: "AgreementRecipientReview" });
+  }, [agreementId, entry.kind, viewerLike]);
+  useEffect(() => {
+    if (entry.kind !== "review" || viewerLike || !draft) return;
+    const copyCorpus = directCompareDefault;
+    const copyHasSignatureBlock = corpusHasSignatureBlock(copyCorpus);
+    const displayHasSignatureBlock = htmlHasSignatureBlock(reviewFirstDocumentHtml);
+    const key = JSON.stringify({
+      copyHasSignatureBlock,
+      displayHasSignatureBlock,
+      copyHash: corpusFingerprint(copyCorpus),
+      displayLen: reviewFirstDocumentHtml.length,
+    });
+    if (key === lastReviewerDisplayParityKeyRef.current) return;
+    lastReviewerDisplayParityKeyRef.current = key;
+    logReviewerDisplayCopyParity({
+      agreementId,
+      copyHasSignatureBlock,
+      displayHasSignatureBlock,
+      parity: copyHasSignatureBlock === displayHasSignatureBlock,
+      copyCorpusHash: corpusFingerprint(copyCorpus),
+      displayHtmlLength: reviewFirstDocumentHtml.length,
+    });
+  }, [
+    agreementId,
+    directCompareDefault,
+    draft,
+    entry.kind,
+    reviewFirstDocumentHtml,
+    viewerLike,
+  ]);
   useEffect(() => {
     if (entry.kind !== "review" || viewerLike) return;
     const key = JSON.stringify({

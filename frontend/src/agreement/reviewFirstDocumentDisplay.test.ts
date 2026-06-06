@@ -8,6 +8,31 @@ This Mutual Services Agreement (the "Agreement") is entered into as of the Effec
 ${"Consulting services shall be performed in a professional manner. ".repeat(24)}`;
 
 describe("reviewFirstDocumentDisplay", () => {
+  it("includes signature region in display html when corpus has execution block", () => {
+    const corpus = `MASTER SERVICES AGREEMENT
+
+This Agreement is between parties.
+
+${"Services shall be performed professionally. ".repeat(30)}
+
+IN WITNESS WHEREOF
+
+Blue Canyon Analytics LLC
+Sarah Mitchell
+CEO
+Notice Email: legal@bluecanyon.example
+
+Iron Vale Systems Inc.
+Michael Torres
+President`;
+    const html = buildReviewFirstDocumentDisplayHtml({
+      serverHtml: "<p>short</p>",
+      corpusText: corpus,
+      partyNames: ["Blue Canyon Analytics LLC", "Iron Vale Systems Inc."],
+    });
+    expect(html).toMatch(/premium-doc-signature|Sarah Mitchell|Michael Torres/i);
+  });
+
   it("routes long paid-pro corpus through premium readonly html builder", () => {
     const html = buildReviewFirstDocumentDisplayHtml({
       serverHtml: "<p>weak title</p>",
