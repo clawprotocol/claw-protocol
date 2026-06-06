@@ -136,7 +136,7 @@ describe("inferPremiumDefaultSendMode", () => {
     ).toBe("review");
   });
 
-  it("returns signature when starter LawDog Pro send path is armed (overrides collaborate-first / review default)", () => {
+  it("stays review-first when starter LawDog Pro send path is armed (signature deferred until Prepare signatures)", () => {
     const draft = baseDraft({ title: "Agreement" });
     armPaidProStarterSignatureSendFromCreateFlow();
     expect(
@@ -146,7 +146,7 @@ describe("inferPremiumDefaultSendMode", () => {
         hasRecipientsReady: true,
         suggestCollaboratePrimed: true,
       }),
-    ).toBe("signature");
+    ).toBe("review");
   });
 });
 

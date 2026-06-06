@@ -64,13 +64,14 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     expect(screen).not.toContain("Back to signer details");
   });
 
-  it("guided final review resolution does not short-circuit to paidProSourceOfTruth label", () => {
+  it("guided final review resolution prefers paidProSourceOfTruth when canonical SoT exists", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const block = intake.slice(
       intake.indexOf("const guidedFinalReviewAuthoritativeResolution = useMemo"),
       intake.indexOf("const guidedAuthoritativeBodyPlain = useMemo"),
     );
-    expect(block).not.toMatch(/source:\s*["']paidProSourceOfTruth["']\s+as const/);
+    expect(block).toContain("hasPaidProSourceOfTruth()");
+    expect(block).toMatch(/source:\s*["']paidProSourceOfTruth["']\s+as const/);
   });
 
   it("canonical paid review renders paidReviewPlain before unavailable preview", () => {
@@ -107,6 +108,8 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
     const documentIdx = screen.indexOf('data-testid="simple-pro-final-review-document"');
     const actionsIdx = screen.indexOf('data-testid="simple-pro-final-review-actions"');
+    expect(screen).toContain("resolvePaidProFirstReviewDocumentPresentation");
+    expect(screen).toContain("logPaidProReviewRenderSourceOnce");
     expect(screen).toContain("preferHydratedReviewHtml");
     expect(documentIdx).toBeGreaterThan(-1);
     expect(actionsIdx).toBeGreaterThan(documentIdx);

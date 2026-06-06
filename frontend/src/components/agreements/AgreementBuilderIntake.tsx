@@ -710,6 +710,10 @@ import {
   shouldClearSigningSnapshotOnSignerMetadataDrift,
 } from "./paidProStickyCta";
 import {
+  capturePaidProDeferredStarterSignatureIntent,
+  consumePaidProDeferredStarterSignatureIntent,
+} from "./paidProDeferredSignatureIntent";
+import {
   isPaidProReviewDecisionScrollReason,
   scrollPaidProReviewDecisionIntoView,
 } from "./paidProSignerFinalizeRouting";
@@ -3442,6 +3446,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // (guidedSendIntentSelected, finalReviewSendPathChosenRef, guidedSigningConfirmationActive), all of
   // which are latched true while the signer form is still mounted and would defeat the freeze.
   const [signaturePreparationRequested, setSignaturePreparationRequested] = useState(false);
+  const applyDeferredPaidProSignatureIntent = React.useCallback(() => {
+    if (!consumePaidProDeferredStarterSignatureIntent()) return;
+    clearPremiumCollaborateFirstDefaultPrimed();
+    persistPremiumForkUserSendMode("signature");
+    writePremiumSendIntent("signature");
+    writePremiumSenderSignFirst(true);
+    paidProPremiumSendIntentRef.current = "signature";
+    setPremiumSendModeUserChoice("signature");
+    setPremiumSendModeTouched(true);
+    setPremiumSignatureSenderFirst(true);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[paid-pro-signature-intent-armed]", {
+        source: "prepare_signatures_deferred_starter_send",
+      });
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!signaturePreparationRequested) return;
+    applyDeferredPaidProSignatureIntent();
+  }, [signaturePreparationRequested, applyDeferredPaidProSignatureIntent]);
   // Inline signer setup latch: once the user is on Add signer details, stay mounted across metadata
   // edits — including when the gate becomes complete — until Prepare signature links is clicked.
   const [paidProInlineSignerSetupLatched, setPaidProInlineSignerSetupLatched] = useState(false);
@@ -5529,21 +5555,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
     primePremiumCollaborateFirstDefault();
     setPremiumForkPrimedNonce((n) => n + 1);
-    if (peekPaidProStarterSignatureSendFromCreateFlow()) {
-      clearPremiumCollaborateFirstDefaultPrimed();
-      persistPremiumForkUserSendMode("signature");
-      writePremiumSendIntent("signature");
-      writePremiumSenderSignFirst(true);
-      paidProPremiumSendIntentRef.current = "signature";
-      setPremiumSendModeUserChoice("signature");
-      setPremiumSendModeTouched(true);
-      setPremiumSignatureSenderFirst(true);
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.info("[paid-pro-signature-intent-armed]", {
-          source: "post_premium_completion_starter_send",
-        });
-      }
+    if (capturePaidProDeferredStarterSignatureIntent() && import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[paid-pro-signature-intent-deferred]", {
+        source: "post_premium_completion_starter_send",
+      });
     }
     markPremiumCompletionDoneInLocalStorage();
     writePremiumRecipientHandoffExact(
@@ -7488,21 +7504,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
         primePremiumCollaborateFirstDefault();
         setPremiumForkPrimedNonce((n) => n + 1);
-        if (peekPaidProStarterSignatureSendFromCreateFlow()) {
-          clearPremiumCollaborateFirstDefaultPrimed();
-          persistPremiumForkUserSendMode("signature");
-          writePremiumSendIntent("signature");
-          writePremiumSenderSignFirst(true);
-          paidProPremiumSendIntentRef.current = "signature";
-          setPremiumSendModeUserChoice("signature");
-          setPremiumSendModeTouched(true);
-          setPremiumSignatureSenderFirst(true);
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.info("[paid-pro-signature-intent-armed]", {
-              source: "post_premium_completion_starter_send",
-            });
-          }
+        if (capturePaidProDeferredStarterSignatureIntent() && import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[paid-pro-signature-intent-deferred]", {
+            source: "post_premium_completion_starter_send",
+          });
         }
         markPremiumCompletionDoneInLocalStorage();
         clearPaidPremiumCompletionSession();
@@ -13942,6 +13948,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [draft, agreementDocumentText, intakeCombined, hasAnyValidRecipientEmail, premiumForkPrimedNonce, getDraftFirstReviewBlockerForFork]);
 
   const effectivePremiumSendMode = useMemo((): PremiumSendIntent => {
+    if (paidProAuthoritative && !signaturePreparationRequested) {
+      return "review";
+    }
     if (paidProAuthoritative) {
       return (
         premiumSendModeUserChoice ??
@@ -13954,6 +13963,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return premiumSendModeUserChoice ?? premiumDefaultSendMode;
   }, [
     paidProAuthoritative,
+    signaturePreparationRequested,
     premiumSendModeUserChoice,
     premiumDefaultSendMode,
     premiumForkPrimedNonce,
@@ -22145,11 +22155,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const proDeliveryTrackSelected = useMemo(
     () =>
       resolveProDeliveryTrackSelected({
-        sendModeTouched: premiumSendModeTouched,
-        effectiveSendMode: effectivePremiumSendMode,
+        sendModeTouched: premiumSendModeTouched && signaturePreparationRequested,
+        effectiveSendMode: signaturePreparationRequested ? effectivePremiumSendMode : "review",
         premiumSignersSurfaceReady,
       }),
-    [premiumSendModeTouched, effectivePremiumSendMode, premiumSignersSurfaceReady],
+    [
+      premiumSendModeTouched,
+      signaturePreparationRequested,
+      effectivePremiumSendMode,
+      premiumSignersSurfaceReady,
+    ],
   );
 
   const showProDeliveryTrackChooser = Boolean(
@@ -27798,6 +27813,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           }
                                           visibleProPaperTrace={visibleProPaperTrace}
                                           suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                          selectedTrack={proDeliveryTrackSelected}
+                                          signaturePreparationRequested={signaturePreparationRequested}
                                           canonicalPaidProReview={acceptedPaidProAuthorityActive}
                                           appliedChecklist={
                                             acceptedPaidProAuthorityActive ? [] : guidedAppliedSummaryChecklist

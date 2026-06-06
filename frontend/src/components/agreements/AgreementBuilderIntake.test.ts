@@ -569,7 +569,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("reviewFirstSigningTokenSecretMissing");
     expect(intake).toContain("onRetryReviewFirstHandoff");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 12000);
+    const block = intake.slice(handoffIdx, handoffIdx + 16000);
     expect(block).toContain("guidedReviewFirstHandoffInFlightRef.current = false");
     expect(block).toContain("setReviewFirstHandoffBusy(false)");
   });
@@ -869,7 +869,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("onChangeSigningOrder");
     expect(screen).toContain("Back to final review");
     const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
-    const enterBlock = intake.slice(enterIdx, enterIdx + 2200);
+    const enterBlock = intake.slice(enterIdx, enterIdx + 4500);
     expect(enterBlock).toContain("continueGuidedFinalReviewToSigning({ intent })");
     expect(intake).toContain("GuidedFinalizeModal");
     expect(intake).toContain("logGuidedFinalizeModalEnter");
@@ -1080,7 +1080,7 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(intake).toContain("normalizePaidProCorpusSourceLabel");
     const guidedIdx = intake.indexOf("const guidedFinalReviewAuthoritativeResolution = useMemo");
     const guidedBlock = intake.slice(guidedIdx, guidedIdx + 400);
-    expect(guidedBlock).toContain("paidProReview.text.trim().length >= 500");
+    expect(guidedBlock).toContain("hasPaidProSourceOfTruth()");
   });
 
   it("gates Pro CTAs on runtime authority", () => {

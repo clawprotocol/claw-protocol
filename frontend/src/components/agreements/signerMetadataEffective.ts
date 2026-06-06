@@ -32,7 +32,7 @@ export function latchSignerMetadataEffectiveMax(counts: SignerMetadataEffectiveC
   sessionMaxSlotsWithSignerTitle = Math.max(sessionMaxSlotsWithSignerTitle, counts.slotsWithSignerTitle);
 }
 
-export function readSignerMetadataEffectiveMaxForTests(): SignerMetadataEffectiveCounts {
+export function readSignerMetadataEffectiveMax(): SignerMetadataEffectiveCounts {
   return {
     partySlots: 2,
     slotsWithSignerName: sessionMaxSlotsWithSignerName,
@@ -40,9 +40,14 @@ export function readSignerMetadataEffectiveMaxForTests(): SignerMetadataEffectiv
   };
 }
 
+export function readSignerMetadataEffectiveMaxForTests(): SignerMetadataEffectiveCounts {
+  return readSignerMetadataEffectiveMax();
+}
+
 export function resetSignerMetadataEffectiveMaxForTests(): void {
   sessionMaxSlotsWithSignerName = 0;
   sessionMaxSlotsWithSignerTitle = 0;
+  lastLoggedEffectiveFingerprint = "";
 }
 
 export function logSignerMetadataStaleEmptyReadIgnored(payload: {
@@ -55,6 +60,8 @@ export function logSignerMetadataStaleEmptyReadIgnored(payload: {
   console.info("[signer-metadata-stale-empty-read-ignored]", payload);
 }
 
+let lastLoggedEffectiveFingerprint = "";
+
 export function logSignerMetadataEffective(payload: {
   source: string;
   partySlots: number;
@@ -63,6 +70,9 @@ export function logSignerMetadataEffective(payload: {
   ignoredEmptyRead: boolean;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const fp = JSON.stringify(payload);
+  if (fp === lastLoggedEffectiveFingerprint) return;
+  lastLoggedEffectiveFingerprint = fp;
   // eslint-disable-next-line no-console
   console.info("[signer-metadata-effective]", payload);
 }

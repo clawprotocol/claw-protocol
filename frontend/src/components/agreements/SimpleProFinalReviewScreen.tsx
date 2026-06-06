@@ -25,6 +25,11 @@ import {
 } from "./paidProReviewTrustUx";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
+  auditPaidProFirstReviewVisibleCorpus,
+  logPaidProReviewRenderSourceOnce,
+  resolvePaidProFirstReviewDocumentPresentation,
+} from "./paidProFirstReviewRenderGuard";
+import {
   SIMPLE_PRO_FINAL_REVIEW_HEADLINE,
   SIMPLE_PRO_FINAL_REVIEW_SUBCOPY,
 } from "./guidedDealCompletion/guidedFinalReviewTransition";
@@ -109,6 +114,8 @@ export type SimpleProFinalReviewScreenProps = {
   suppressFinalReviewActions?: boolean;
   className?: string;
   visibleProPaperTrace?: VisibleProPaperDiagnosticsTrace;
+  selectedTrack?: string | null;
+  signaturePreparationRequested?: boolean;
 };
 
 export function SimpleProFinalReviewScreen({
@@ -172,6 +179,8 @@ export function SimpleProFinalReviewScreen({
   suppressFinalReviewActions = false,
   className = "",
   visibleProPaperTrace,
+  selectedTrack = null,
+  signaturePreparationRequested = false,
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const reviewFirstErrorRef = useRef<HTMLDivElement>(null);
@@ -190,6 +199,11 @@ export function SimpleProFinalReviewScreen({
   const paidReviewBodyLen = paidReviewPlain.trim().length;
   const hasCanonicalPaidReviewBody =
     canonicalPaidProReview && paidReviewBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN;
+  const documentPresentation = resolvePaidProFirstReviewDocumentPresentation({
+    agreementHtml,
+    paidReviewPlain,
+    canonicalPaidProReview,
+  });
   const showSignerSavedBanner =
     canonicalPaidProReview && signersReady && signerSavedMappings.length > 0;
   const finalVersionCopy = canonicalPaidProReview
@@ -199,13 +213,12 @@ export function SimpleProFinalReviewScreen({
     hasCanonicalPaidReviewBody || suppressPaidProFinalReviewFinalizingState();
   const effectiveCorpusRecoveryMessage =
     suppressFinalizingForPaidAuthority && hasCanonicalPaidReviewBody ? null : corpusRecoveryMessage;
-  const effectiveAgreementHtml = agreementHtml.trim();
-  const preferHydratedReviewHtml =
-    canonicalPaidProReview && effectiveAgreementHtml.length >= PAID_PRO_AUTHORITY_MIN_LEN;
-  const showCanonicalPaidPre =
-    hasCanonicalPaidReviewBody && !preferHydratedReviewHtml && paidReviewPlain.trim().length > 0;
+  const effectiveAgreementHtml = documentPresentation.agreementHtml;
+  const preferHydratedReviewHtml = documentPresentation.mode === "html";
+  const showCanonicalPaidPre = documentPresentation.mode === "canonical_plain";
   const showDocument =
-    (effectiveAgreementHtml.length > 0 || hasCanonicalPaidReviewBody) && !effectiveCorpusRecoveryMessage;
+    (documentPresentation.renderedVisibleTextLen > 0 || hasCanonicalPaidReviewBody) &&
+    !effectiveCorpusRecoveryMessage;
   const showPreviewUnavailable =
     !showDocument &&
     !hasCanonicalPaidReviewBody &&
@@ -252,6 +265,35 @@ export function SimpleProFinalReviewScreen({
     }, 100);
     return () => window.clearTimeout(timer);
   }, [reviewFirstHandoffError]);
+
+  useEffect(() => {
+    if (!canonicalPaidProReview) return;
+    auditPaidProFirstReviewVisibleCorpus({
+      paidReviewPlain,
+      presentation: documentPresentation,
+    });
+    logPaidProReviewRenderSourceOnce({
+      hasCanonicalCorpus: hasCanonicalPaidReviewBody,
+      canonicalLen: documentPresentation.plainLen,
+      htmlLen: documentPresentation.htmlLen,
+      plainLen: documentPresentation.plainLen,
+      renderedVisibleTextLen: documentPresentation.renderedVisibleTextLen,
+      renderMode: documentPresentation.mode,
+      selectedTrack,
+      signaturePreparationRequested,
+    });
+  }, [
+    canonicalPaidProReview,
+    paidReviewPlain,
+    agreementHtml,
+    hasCanonicalPaidReviewBody,
+    documentPresentation.mode,
+    documentPresentation.renderedVisibleTextLen,
+    documentPresentation.plainLen,
+    documentPresentation.htmlLen,
+    selectedTrack,
+    signaturePreparationRequested,
+  ]);
 
   const documentBlock = (
     <div

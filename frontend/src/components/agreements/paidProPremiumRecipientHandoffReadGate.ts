@@ -13,6 +13,7 @@ import {
   latchSignerMetadataEffectiveMax,
   logSignerMetadataEffective,
   logSignerMetadataStaleEmptyReadIgnored,
+  readSignerMetadataEffectiveMax,
   resetSignerMetadataEffectiveMaxForTests,
 } from "./signerMetadataEffective";
 
@@ -78,7 +79,9 @@ export function applyPremiumRecipientHandoffReadGate(
 ): PremiumRecipientHandoffV2 | null {
   if (!handoff) return null;
   const partySlotCount = Math.max(opts?.partySlotCount ?? 2, 2);
-  const corpusHash = (opts?.corpusHash ?? latchedCorpusHash).trim();
+  if ((opts?.corpusHash ?? "").trim()) {
+    latchedCorpusHash = (opts?.corpusHash ?? "").trim();
+  }
   const populatedCount = handoffSignerSlotCount(handoff, partySlotCount);
 
   const counts = countSignerMetadataSlots(handoff, partySlotCount);
@@ -97,19 +100,29 @@ export function applyPremiumRecipientHandoffReadGate(
     return handoff;
   }
 
+  const priorPopulated = lastPopulatedHandoff
+    ? countSignerMetadataSlots(lastPopulatedHandoff, partySlotCount)
+    : null;
+  const monotonicMax = readSignerMetadataEffectiveMax();
+  const partyFingerprintMatch =
+    partySlotsAreKnown(handoff) &&
+    lastPopulatedHandoff &&
+    partySlotsAreKnown(lastPopulatedHandoff) &&
+    premiumRecipientHandoffPartyFingerprint(handoff) ===
+      premiumRecipientHandoffPartyFingerprint(lastPopulatedHandoff);
+  const monotonicSignerLatchSatisfied =
+    monotonicMax.slotsWithSignerName >= 2 &&
+    (priorPopulated?.slotsWithSignerName ?? 0) >= 2;
+
   if (
     sessionEverHadPopulatedHandoff &&
     lastPopulatedHandoff &&
-    partySlotsAreKnown(handoff) &&
-    premiumRecipientHandoffPartyFingerprint(handoff) ===
-      premiumRecipientHandoffPartyFingerprint(lastPopulatedHandoff) &&
-    (!corpusHash || !latchedCorpusHash || corpusHash === latchedCorpusHash)
+    (partyFingerprintMatch || monotonicSignerLatchSatisfied)
   ) {
-    const prior = countSignerMetadataSlots(lastPopulatedHandoff, partySlotCount);
     logSignerMetadataStaleEmptyReadIgnored({
       partySlots: counts.partySlots,
-      priorSlotsWithSignerName: prior.slotsWithSignerName,
-      priorSlotsWithSignerTitle: prior.slotsWithSignerTitle,
+      priorSlotsWithSignerName: priorPopulated?.slotsWithSignerName ?? monotonicMax.slotsWithSignerName,
+      priorSlotsWithSignerTitle: priorPopulated?.slotsWithSignerTitle ?? monotonicMax.slotsWithSignerTitle,
     });
     const merged = mergeSignerFieldsFromPopulated(handoff, lastPopulatedHandoff);
     const mergedCounts = countSignerMetadataSlots(merged, partySlotCount);
@@ -124,25 +137,29 @@ export function applyPremiumRecipientHandoffReadGate(
     return merged;
   }
 
-  logSignerMetadataEffective({
-    source: "handoff_read_empty",
-    partySlots: counts.partySlots,
-    slotsWithSignerName: counts.slotsWithSignerName,
-    slotsWithSignerTitle: counts.slotsWithSignerTitle,
-    ignoredEmptyRead: false,
-  });
+  if (populatedCount === 0) {
+    logSignerMetadataEffective({
+      source: "handoff_read_empty",
+      partySlots: counts.partySlots,
+      slotsWithSignerName: counts.slotsWithSignerName,
+      slotsWithSignerTitle: counts.slotsWithSignerTitle,
+      ignoredEmptyRead: false,
+    });
+  }
   return handoff;
 }
 
 export function readPaidProHandoffReadGateStateForTests(): {
   sessionEverHadPopulatedHandoff: boolean;
   lastPopulatedSignerSlotCount: number;
+  latchedCorpusHash: string;
 } {
   return {
     sessionEverHadPopulatedHandoff,
     lastPopulatedSignerSlotCount: lastPopulatedHandoff
       ? handoffSignerSlotCount(lastPopulatedHandoff, 2)
       : 0,
+    latchedCorpusHash,
   };
 }
 
