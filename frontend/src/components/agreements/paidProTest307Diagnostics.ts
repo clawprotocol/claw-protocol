@@ -5,7 +5,6 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   detectPaidProMalformedServicesOpening,
-  PAID_PRO_CANONICAL_TITLE_RE,
 } from "./paidProOpeningRecitalGuard";
 import { canonicalPartyRecordsFromSignerIdentities } from "./canonicalPartyIdentityResolver";
 import {
@@ -16,6 +15,10 @@ import {
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+
+/** Diagnostics-only — mirrors paidProOpeningRecitalGuard title detection. */
+const PAID_PRO_CANONICAL_TITLE_RE =
+  /(?:MUTUAL\s+CONSULTING\s+AND\s+IMPLEMENTATION|CONSULTING\s+AND\s+IMPLEMENTATION|SERVICES)\s+AGREEMENT/i;
 
 export type PaidProFinalCorpusSourceDiagnostic = {
   surface: string;
@@ -143,7 +146,7 @@ export function logPaidProTest307Diagnostics(args: {
   const hydratedLen = hasAuthoritativeSigningSnapshot()
     ? resolvePaidProPostFinalizeReviewPlain().length
     : reviewPlain.length;
-  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
+  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
   const contact = buildPaidProSignerContactOverlayDiagnostic({
     reviewPlain,
     parties,
@@ -155,7 +158,7 @@ export function logPaidProTest307Diagnostics(args: {
     intakeText: args.intakeText,
     repaired: !detectPaidProMalformedServicesOpening(
       reviewPlain,
-      parties?.length >= 2
+      parties.length >= 2
         ? canonicalPartyRecordsFromSignerIdentities(
             authorityPartiesToCanonicalPartyIdentities(parties),
           )

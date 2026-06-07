@@ -55,7 +55,7 @@ export function RecipientPublicReviewRoute(props: Props) {
   const hero = postApprovalPresentation
     ? {
         title: postApprovalPresentation.shellHeroTitle,
-        subtitle: postApprovalPresentation.shellHeroSubtitle ?? undefined,
+        subtitle: postApprovalPresentation.shellHeroSubtitle ?? "",
       }
     : RECIPIENT_REVIEW_HERO;
 
