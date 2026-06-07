@@ -5,7 +5,12 @@ import {
 } from "../../components/agreements/authoritativeAgreementDocument";
 import { PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN } from "../../components/agreements/paidProFinalHydratedCorpus";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "../../components/agreements/paidProSignerMetadataCommitPolicy";
+import {
+  detectExecutionHeadingMetadataLeak,
+  repairExecutionBlockEntityHeadingLines,
+} from "../../components/agreements/paidProExecutionBlockEntityHeading";
 import { resolvePaidProPostFinalizeReviewPlain } from "../../components/agreements/paidProPostFinalizeReviewSurface";
+import { readConsumedPaidProSignerMetadataAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
 import { getPaidProDocumentForSurface, hashPaidProCorpus } from "../../components/agreements/paidProSourceOfTruth";
 import { peekReviewFirstPinnedCorpus } from "./reviewFirstSendSurface";
 
@@ -65,16 +70,25 @@ function reviewRouteHashInvariant(args: {
   }
 }
 
+function finalizeReviewFirstCorpusText(text: string): string {
+  const body = (text || "").trim();
+  if (body.length < 80) return body;
+  if (!detectExecutionHeadingMetadataLeak(body).leak) return body;
+  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
+  return repairExecutionBlockEntityHeadingLines(body, parties).text.trim();
+}
+
 export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): ReviewFirstDisplayCorpus | null {
   if (!draft) return null;
 
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const snapshotPlain = resolvePaidProPostFinalizeReviewPlain().trim();
     if (snapshotPlain.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+      const text = finalizeReviewFirstCorpusText(snapshotPlain);
       return {
-        text: snapshotPlain,
+        text,
         source: "authoritative_signing_snapshot",
-        hash: hashPaidProCorpus(snapshotPlain),
+        hash: hashPaidProCorpus(text),
       };
     }
   }
@@ -83,7 +97,7 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
   if (agreementId) {
     const pinned = peekReviewFirstPinnedCorpus(agreementId);
     if (pinned && pinned.trim().length >= 500) {
-      const text = pinned.trim();
+      const text = finalizeReviewFirstCorpusText(pinned.trim());
       return { text, source: "review_first_pinned_corpus", hash: corpusHash(text) };
     }
   }
@@ -119,8 +133,11 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
       ? (pr as Record<string, unknown>).review_first_final_corpus
       : null;
   if (rf && typeof rf === "object" && !Array.isArray(rf)) {
-    const text = String((rf as Record<string, unknown>).text ?? "").trim();
-    if (text) return { text, source: "review_first_final_corpus", hash: corpusHash(text) };
+    const raw = String((rf as Record<string, unknown>).text ?? "").trim();
+    if (raw) {
+      const text = finalizeReviewFirstCorpusText(raw);
+      return { text, source: "review_first_final_corpus", hash: corpusHash(text) };
+    }
   }
 
   if (draft.premium_render_source !== "review_first_final_corpus") return null;

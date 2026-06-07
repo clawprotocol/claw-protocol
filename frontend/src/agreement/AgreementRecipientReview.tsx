@@ -2034,9 +2034,8 @@ export function AgreementRecipientReview({
       const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
       const html = String(rp?.rendered_html || "");
       const reviewFirstCorpus = resolveReviewFirstDisplayCorpus(d);
-      const htmlPlain = htmlToPlainText(html).trim();
       const effectiveHtml =
-        reviewFirstCorpus && !htmlPlain.includes(reviewFirstCorpus.text.slice(0, Math.min(120, reviewFirstCorpus.text.length)))
+        reviewFirstCorpus && reviewFirstCorpus.text.trim().length >= 500
           ? renderReviewFirstCorpusHtml(reviewFirstCorpus.text)
           : html;
       if (entry.kind === "review" && reviewFirstCorpus) {

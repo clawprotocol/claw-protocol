@@ -82,6 +82,10 @@ import {
   shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
 } from "./paidProSignerMetadataCommitPolicy";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
+import {
+  detectExecutionHeadingMetadataLeak,
+  repairExecutionBlockEntityHeadingLines,
+} from "./paidProExecutionBlockEntityHeading";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
 
 const LABELED_SIGNATURE_BLOCK_START =
@@ -323,7 +327,11 @@ export function applyPaidProReviewRenderSanitizer(
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const locked = resolvePaidProPostFinalizeReviewPlain();
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      return { text: locked, repaired: false };
+      if (!detectExecutionHeadingMetadataLeak(locked).leak) {
+        return { text: locked, repaired: false };
+      }
+      const repaired = repairExecutionBlockEntityHeadingLines(locked, parties);
+      return { text: repaired.text, repaired: repaired.repairs.length > 0 };
     }
   }
   const ctx: PaidProPartyRoleContext = {

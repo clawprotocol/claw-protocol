@@ -13,14 +13,33 @@ import {
   readPaidProPinnedSignerAppliedCorpus,
 } from "./paidProFinalHydratedCorpus";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
+import {
+  detectExecutionHeadingMetadataLeak,
+  repairExecutionBlockEntityHeadingLines,
+} from "./paidProExecutionBlockEntityHeading";
+import {
+  readConsumedPaidProSignerMetadataAuthority,
+} from "./paidProSignerMetadataAuthority";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import type { AuthoritativeSigningSnapshotRecipientMetadata } from "./authoritativeSigningSnapshot";
 
+function finalizePostFinalizeReviewPlain(plain: string): string {
+  const body = (plain || "").trim();
+  if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
+  if (!detectExecutionHeadingMetadataLeak(body).leak) return body;
+  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
+  return repairExecutionBlockEntityHeadingLines(body, parties).text.trim();
+}
+
 export function resolvePaidProPostFinalizeReviewPlain(): string {
   const snapshot = readAuthoritativeSigningCorpus().trim();
-  if (snapshot.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return snapshot;
+  if (snapshot.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+    return finalizePostFinalizeReviewPlain(snapshot);
+  }
   const pinned = readPaidProPinnedSignerAppliedCorpus().trim();
-  if (pinned.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return pinned;
+  if (pinned.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+    return finalizePostFinalizeReviewPlain(pinned);
+  }
   return "";
 }
 

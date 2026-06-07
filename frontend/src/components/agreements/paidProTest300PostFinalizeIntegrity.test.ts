@@ -37,7 +37,7 @@ import {
   getPaidProDocumentForSurface,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { setPaidProPinnedSignerAppliedCorpus, clearPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
+import { clearPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const IRON = "Iron Vale Systems Inc.";
@@ -101,8 +101,7 @@ function armFinalizeSnapshot() {
     partyManifest: buildCanonicalFinalPartyManifestFromAuthority(authority),
     signatureBlockModel: buildCanonicalSignerManifest({ identities, signFirst: true }),
   });
-  setPaidProPinnedSignerAppliedCorpus(hydrated.corpus);
-  return hydrated.corpus;
+  return readAuthoritativeSigningCorpus();
 }
 
 function armSoT() {
@@ -196,9 +195,9 @@ describe("Test300 post-finalize signer metadata/action integrity", () => {
   });
 
   it("resolvePaidProPostFinalizeReviewPlain returns snapshot verbatim without sanitizer drift", () => {
-    const hydrated = armFinalizeSnapshot();
+    const snapshotPlain = armFinalizeSnapshot();
     const locked = resolvePaidProPostFinalizeReviewPlain();
-    expect(hashPaidProCorpus(locked)).toBe(hashPaidProCorpus(hydrated));
+    expect(hashPaidProCorpus(locked)).toBe(hashPaidProCorpus(snapshotPlain));
     expect(locked).toBe(readAuthoritativeSigningCorpus());
   });
 });

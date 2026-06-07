@@ -597,7 +597,7 @@ export function polishProAgreementDisplayLayer(
   out = sigOrder.text;
   repairs.push(...sigOrder.repairs);
 
-  if (records.length >= 2) {
+  if (records.length >= 2 && !opts?.retainSignatureExecutionBlock) {
     const execution = enforcePaidProSingleExecutionBlock(out);
     if (execution.text !== out) {
       out = execution.text;

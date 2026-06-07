@@ -18,6 +18,11 @@ import {
   signatureNameForIdentity,
   type CanonicalPartyIdentity,
 } from "./guidedDealCompletion/signerPartyIdentity";
+import {
+  logExecutionBlockDisplayIntegrity,
+  repairExecutionBlockEntityHeadingLines,
+  auditExecutionBlockDisplayIntegrity,
+} from "./paidProExecutionBlockEntityHeading";
 
 const PARTY_SECTION_HEADING_RE =
   /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*(.*)$/i;
@@ -158,15 +163,18 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
     return { corpus: raw, applied: false, fieldsHydrated: 0, missingFields: ["insufficient_parties"] };
   }
 
-  const witnessIdx = raw.search(/\bIN WITNESS WHEREOF\b/i);
+  const repairedHeadings = repairExecutionBlockEntityHeadingLines(raw, parties);
+  let working = repairedHeadings.text;
+
+  const witnessIdx = working.search(/\bIN WITNESS WHEREOF\b/i);
   if (witnessIdx < 0) {
-    return { corpus: raw, applied: false, fieldsHydrated: 0, missingFields: ["missing_witness"] };
+    return { corpus: working, applied: false, fieldsHydrated: 0, missingFields: ["missing_witness"] };
   }
 
-  const execInvariant = analyzePaidProExecutionBlockInvariant(raw, { expectedParties: parties.length });
+  const execInvariant = analyzePaidProExecutionBlockInvariant(working, { expectedParties: parties.length });
   if (execInvariant.witnessClauseCount !== 1) {
     return {
-      corpus: raw,
+      corpus: working,
       applied: false,
       fieldsHydrated: 0,
       missingFields: [`witness_count:${execInvariant.witnessClauseCount}`],
@@ -175,12 +183,12 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
 
   const context: PaidProPartyRoleContext = {
     ...roleContext,
-    acceptedCorpus: roleContext?.acceptedCorpus ?? raw,
+    acceptedCorpus: roleContext?.acceptedCorpus ?? working,
   };
   const identities = authorityPartiesToCanonicalPartyIdentities(parties, context);
 
-  const marker = signaturePatchStartIndex(raw);
-  const lines = raw.split("\n");
+  const marker = signaturePatchStartIndex(working);
+  const lines = working.split("\n");
   let offset = 0;
   let fieldsHydrated = 0;
   const missingFields: string[] = [];
@@ -228,9 +236,26 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
   }
 
   const normalized = lines.join("\n");
+  const integrity = auditExecutionBlockDisplayIntegrity({
+    text: normalized,
+    signerMetadata: recipientMetadata,
+    parties,
+  });
+  if (!integrity.invariantOk) {
+    logExecutionBlockDisplayIntegrity("[paid-pro-execution-block-integrity]", {
+      ...integrity,
+      reason: integrity.executionHeadingMetadataLeak
+        ? "EXECUTION_HEADING_METADATA_LEAK"
+        : integrity.signerFieldHydrationFailure
+          ? "SIGNER_FIELD_HYDRATION_FAILURE"
+          : "execution_block_integrity",
+      repairs: repairedHeadings.repairs,
+      fieldsHydrated,
+    });
+  }
   return {
     corpus: normalized,
-    applied: fieldsHydrated > 0,
+    applied: fieldsHydrated > 0 || repairedHeadings.repairs.length > 0,
     fieldsHydrated,
     missingFields,
   };

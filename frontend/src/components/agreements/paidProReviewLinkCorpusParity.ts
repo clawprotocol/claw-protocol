@@ -3,9 +3,8 @@
  * as the creator post-finalize review surface — never canonical SoT or frozen corpus.
  */
 
-import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
-import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
+import { auditExecutionBlockDisplayIntegrity } from "./paidProExecutionBlockEntityHeading";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import {
   resolvePaidProPostFinalizeReviewPlain,
@@ -43,8 +42,9 @@ export function auditPaidProReviewLinkCorpusParity(args: {
   const creatorHash =
     creatorPlain.length >= 80 ? hashPaidProCorpus(creatorPlain) : resolvePaidProPostFinalizeReviewHash();
   const reviewLinkHash = reviewLinkPlain.length >= 80 ? hashPaidProCorpus(reviewLinkPlain) : "";
-  const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(reviewLinkPlain);
-  const executionBlockCount = countPaidProExecutionBlocks(reviewLinkPlain);
+  const integrity = auditExecutionBlockDisplayIntegrity({ text: reviewLinkPlain });
+  const blankSignerLinesRemaining = integrity.blankSignerLinesRemaining;
+  const executionBlockCount = integrity.executionBlockCount;
   const hydrated = blankSignerLinesRemaining === 0 && executionBlockCount === 1;
   const locked = isPaidProPostFinalizeHydratedCorpusLocked();
   const invariantOk =
@@ -52,9 +52,7 @@ export function auditPaidProReviewLinkCorpusParity(args: {
     (creatorHash.length > 0 &&
       reviewLinkHash.length > 0 &&
       creatorHash === reviewLinkHash &&
-      hydrated &&
-      blankSignerLinesRemaining === 0 &&
-      executionBlockCount === 1);
+      integrity.invariantOk);
   return {
     creatorHash,
     reviewLinkHash,

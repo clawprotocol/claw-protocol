@@ -11,6 +11,7 @@ import { premiumRenderHintsWithoutDocumentCallouts } from "./premiumDocumentInte
 import {
   shouldBlockPaidProStructuralMutationAfterAcceptance,
 } from "./paidProAuthoritativeRenderGate";
+import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import {
   applyPaidProReviewRenderSanitizer,
   resolvePartiesForReviewRender,
@@ -306,6 +307,7 @@ function buildPremiumAgreementReadonlyHtmlCore(
   if (
     hasPaidProSourceOfTruth() &&
     !shouldBlockPaidProStructuralMutationAfterAcceptance() &&
+    !isPaidProPostFinalizeHydratedCorpusLocked() &&
     (opts.forceEmbeddedCorpusSignature || opts.suppressDocumentIntelligenceCallouts)
   ) {
     const parties = resolvePartiesForReviewRender();
