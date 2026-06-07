@@ -66,10 +66,19 @@ import {
 } from "../../components/agreements/premiumPartyNamesHandoff";
 import {
   mergeReviewLinkRecipientEmailsOntoHydratedDraft,
-  resolveReviewLinkAssumedOwnerPartyIndex,
 } from "./reviewLinkRecipientEmailMerge";
 import { logReviewLinkPartySimulationOpened } from "../../components/agreements/paidProReviewLinkCorpusParity";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "../../components/agreements/hydratePaidProExecutionBlockWithSignerMetadata";
+import {
+  buildReviewLinkPartySimulationRows,
+  ReviewLinkPartySimulationPanel,
+} from "./ReviewLinkPartySimulationPanel";
+import {
+  countOwnerReviewPartyApproved,
+  deriveOwnerReviewPartyStatusRows,
+  logReviewLinkOwnerReviewStatusLoaded,
+  OwnerReviewPartyStatusChecklist,
+} from "./ownerReviewPartyStatusChecklist";
 import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
 import {
   orderedAuthoritativePartyDisplayNames,
@@ -116,7 +125,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${verifyPath}` : verifyPath;
   const [reviewLinksTick, setReviewLinksTick] = useState(0);
   const [remintBusy, setRemintBusy] = useState(false);
-  const [partyOneSimulationBusy, setPartyOneSimulationBusy] = useState(false);
+  const [simulationBusyPartyIndex, setSimulationBusyPartyIndex] = useState<number | null>(null);
   const reviewRecipientHandoff = useMemo(
     () => readSimpleDoneReviewRecipientLinks(agreementId),
     [agreementId, reviewLinksTick],
@@ -229,6 +238,23 @@ export function SimpleDonePage(props: { agreementId: string }) {
     () => resolveReviewFirstDisplayCorpus(ownerHandoffDraft),
     [ownerHandoffDraft],
   );
+  const ownerReviewPartyStatusRows = useMemo(
+    () => deriveOwnerReviewPartyStatusRows(ownerHandoffDraft),
+    [ownerHandoffDraft],
+  );
+  const partySimulationRows = useMemo(
+    () => buildReviewLinkPartySimulationRows(ownerHandoffDraft),
+    [ownerHandoffDraft],
+  );
+
+  useEffect(() => {
+    if (!isPaidProReviewDonePath || !reviewLinksReady || !ownerHandoffDraft) return;
+    logReviewLinkOwnerReviewStatusLoaded({
+      agreementId,
+      partyCount: ownerReviewPartyStatusRows.length,
+      approvedCount: countOwnerReviewPartyApproved(ownerReviewPartyStatusRows),
+    });
+  }, [agreementId, isPaidProReviewDonePath, reviewLinksReady, ownerHandoffDraft, ownerReviewPartyStatusRows]);
 
   useEffect(() => {
     if (!isPaidProReviewDonePath || !ownerHandoffDraft) return;
@@ -630,7 +656,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
     const multiReviewer = normalizedReviewerRows.length > 1;
     const primaryReviewHref = (normalizedReviewerRows[0]?.reviewHref || "").trim();
     const primaryReviewHrefIsPreviewOnly = !extractReviewLinkTokenFromHref(primaryReviewHref);
-    const partyOneIndex = resolveReviewLinkAssumedOwnerPartyIndex(ownerHandoffDraft?.parties);
     const partyTwoRow = normalizedReviewerRows[0];
     const reviewCorpusBlankSignerLines = ownerReviewFirstDisplayCorpus?.text
       ? countBlankSignerMetadataLinesInExecutionBlock(ownerReviewFirstDisplayCorpus.text)
@@ -644,30 +669,35 @@ export function SimpleDonePage(props: { agreementId: string }) {
         blankSignerLinesRemaining: reviewCorpusBlankSignerLines,
       });
     };
-    const openPartyOneReviewerSimulation = () => {
-      if (!ownerHandoffDraft || partyOneSimulationBusy) return;
-      setPartyOneSimulationBusy(true);
+    const openPartyReviewerSimulation = (partyIndex: number, partyName: string) => {
+      if (!ownerHandoffDraft || simulationBusyPartyIndex !== null) return;
+      setSimulationBusyPartyIndex(partyIndex);
       void mintReviewPartySimulationRecipientLink({
         agreementId,
         draft: ownerHandoffDraft,
-        partyIndex: partyOneIndex,
+        partyIndex,
         signingCorpusPlain: ownerReviewFirstDisplayCorpus?.text,
         signingCorpusSource: ownerReviewFirstDisplayCorpus?.source,
       })
         .then((minted) => {
           if (!minted?.reviewHref) return;
-          const partyName =
-            String(ownerHandoffDraft?.parties?.[partyOneIndex]?.name ?? "").trim() || minted.partyName;
-          logPartyReviewSimulationOpened(minted.partyIndex, partyName);
+          const resolvedName =
+            String(ownerHandoffDraft?.parties?.[partyIndex]?.name ?? "").trim() || minted.partyName || partyName;
+          logPartyReviewSimulationOpened(minted.partyIndex, resolvedName);
           logReviewLinkOpen({
             agreementId,
             href: minted.reviewHref,
-            source: "simple_done_open_party_one_reviewer_view",
+            source: "simple_done_party_simulation_panel",
             previewOnly: false,
+          });
+          logPaidProReviewTrackLifecycle("reviewer_link_opened", {
+            agreementId,
+            source: "simple_done_party_simulation_panel",
+            canonicalHash: ownerReviewFirstDisplayCorpus?.hash ?? null,
           });
           window.open(minted.reviewHref, "_blank", "noopener,noreferrer");
         })
-        .finally(() => setPartyOneSimulationBusy(false));
+        .finally(() => setSimulationBusyPartyIndex(null));
     };
     const anyReviewHref = normalizedReviewerRows.some((r) => r.reviewHref.trim().length > 0);
     const reviewerRowStatuses = ownerReviewPresentation.rowStatuses;
@@ -911,6 +941,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
                     </p>
                   </ReviewDocumentFrame>
                 ) : null}
+                <OwnerReviewPartyStatusChecklist rows={ownerReviewPartyStatusRows} />
+                <ReviewLinkPartySimulationPanel
+                  rows={partySimulationRows}
+                  busyPartyIndex={simulationBusyPartyIndex}
+                  onOpenParty={(row) => openPartyReviewerSimulation(row.partyIndex, row.displayName)}
+                />
                 {multiReviewer ? (
                   <PaidProReviewReviewerLinksTable
                     rows={normalizedReviewerRows}
@@ -986,15 +1022,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       }}
                     >
                       {primaryReviewHrefIsPreviewOnly ? "Open preview (read-only)" : "Open reviewer view"}
-                    </button>
-                    <button
-                      type="button"
-                      className={reviewActionButtonClass("secondary")}
-                      data-testid="simple-done-open-party-one-reviewer-view"
-                      disabled={partyOneSimulationBusy || !ownerHandoffDraft}
-                      onClick={() => openPartyOneReviewerSimulation()}
-                    >
-                      {partyOneSimulationBusy ? "Opening…" : "Open Party 1 reviewer view"}
                     </button>
                     {primaryReviewHrefIsPreviewOnly ? (
                       <p

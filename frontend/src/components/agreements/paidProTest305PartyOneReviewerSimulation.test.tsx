@@ -175,11 +175,13 @@ describe("Test305 Party 1 reviewer simulation on review link ready page", () => 
       ok: true,
       draft: baseDraft(corpus),
     });
-    vi.spyOn(simpleDoneReviewRecipientLinks, "mintReviewPartySimulationRecipientLink").mockResolvedValue({
-      reviewHref: PARTY_ONE_HREF,
-      partyName: BLUE,
-      partyIndex: 0,
-    });
+    vi.spyOn(simpleDoneReviewRecipientLinks, "mintReviewPartySimulationRecipientLink").mockImplementation(
+      async (args) => ({
+        reviewHref: args.partyIndex === 0 ? PARTY_ONE_HREF : PARTY_TWO_HREF,
+        partyName: args.partyIndex === 0 ? BLUE : IRON,
+        partyIndex: args.partyIndex,
+      }),
+    );
     markSimpleFlowSent(agreementId);
     writeSimpleDoneReviewRecipientLinks({
       agreementId,
@@ -204,13 +206,16 @@ describe("Test305 Party 1 reviewer simulation on review link ready page", () => 
     vi.restoreAllMocks();
   });
 
-  it("renders Party 1 and Party 2 reviewer buttons; both open with same corpus hash", async () => {
+  it("renders scalable QA reviewer panel; each party opens with same corpus hash", async () => {
     const user = userEvent.setup();
     render(<SimpleDonePage agreementId={agreementId} />);
 
     await waitFor(() => {
       expect(screen.getByTestId("simple-done-open-reviewer-view-global")).toBeTruthy();
-      expect(screen.getByTestId("simple-done-open-party-one-reviewer-view")).toBeTruthy();
+      expect(screen.getByTestId("review-link-party-simulation-panel")).toBeTruthy();
+      expect(screen.getByTestId("review-link-party-simulation-open-0")).toBeTruthy();
+      expect(screen.getByTestId("review-link-party-simulation-open-1")).toBeTruthy();
+      expect(screen.getByTestId("owner-review-party-status-checklist")).toBeTruthy();
     });
 
     await user.click(screen.getByTestId("simple-done-open-reviewer-view-global"));
@@ -225,7 +230,7 @@ describe("Test305 Party 1 reviewer simulation on review link ready page", () => 
     );
     const partyTwoHash = simulationLogSpy.mock.calls[0]![0]!.corpusHash as string;
 
-    await user.click(screen.getByTestId("simple-done-open-party-one-reviewer-view"));
+    await user.click(screen.getByTestId("review-link-party-simulation-open-0"));
     await waitFor(() => expect(simulationLogSpy).toHaveBeenCalledTimes(2));
     expect(openSpy).toHaveBeenLastCalledWith(PARTY_ONE_HREF, "_blank", "noopener,noreferrer");
     expect(simulationLogSpy).toHaveBeenLastCalledWith(

@@ -269,10 +269,20 @@ import {
   logReviewFirstSubmitAuthority,
   clearReviewFirstSubmitInflightProposalId,
   readReviewFirstSubmitInflightProposalId,
+  readReviewUrlPartyId,
   resolveReviewFirstStageProposerId,
   reviewerNeedsPersonalizedLink,
   writeReviewFirstSubmitInflightProposalId,
 } from "./reviewerTokenPersistence";
+import {
+  logReviewerApprovalLocalStateApplied,
+  logReviewerApprovalSubmitFailed,
+  logReviewerApprovalSubmitStart,
+  logReviewerApprovalSubmitSuccess,
+  readReviewerApprovalLocalState,
+  writeReviewerApprovalLocalState,
+} from "./reviewerApprovalPersistence";
+import { loadRecipientMagicLinkSession } from "./recipientMagicLinkSession";
 import {
   buildOwnerQaWorkspaceAbsoluteLink,
   buildOwnerQaWorkspacePath,
@@ -753,6 +763,7 @@ export function AgreementRecipientReview({
   const [workspaceTab, setWorkspaceTab] = useState<"read" | "revise">("read");
   const [approving, setApproving] = useState(false);
   const [approvedAck, setApprovedAck] = useState(false);
+  const [localApprovalAt, setLocalApprovalAt] = useState<string | null>(null);
   const [bundle, setBundle] = useState<AgreementVersionBundle | null>(null);
   const [externalAiPaste, setExternalAiPaste] = useState("");
   const [recipientPreview, setRecipientPreview] = useState<RecipientPreview | null>(null);
@@ -1160,7 +1171,20 @@ export function AgreementRecipientReview({
     setSendSuggestedEditsModalOpen(false);
     setRecipientSuggestedEditsSentAck(false);
     setApprovedAck(false);
+    setLocalApprovalAt(null);
   }, [agreementId, recipientAccessToken, participantPartyId]);
+
+  useEffect(() => {
+    const local = readReviewerApprovalLocalState({
+      agreementId,
+      participantPartyId: participantPid,
+      recipientAccessToken,
+    });
+    if (local?.approvedAt) {
+      setApprovedAck(true);
+      setLocalApprovalAt(local.approvedAt);
+    }
+  }, [agreementId, participantPid, recipientAccessToken]);
 
   useEffect(() => {
     if (!recipientPreview && sendSuggestedEditsModalOpen) {
@@ -3356,6 +3380,45 @@ export function AgreementRecipientReview({
     });
   }
 
+  async function resolveParticipantIdForApprovalSubmit(): Promise<string> {
+    let pid = participantPid.trim();
+    if (pid) return pid;
+    const fromUrl = readReviewUrlPartyId();
+    if (fromUrl) return fromUrl;
+    const tok = recipientAccessToken.trim();
+    if (tok) {
+      const session = loadRecipientMagicLinkSession(agreementId, tok);
+      const fromSession = (session?.recipientPartyId || "").trim();
+      if (fromSession) return fromSession;
+    }
+    const validated = tokenValidatedPartyId.trim();
+    if (validated) return validated;
+    if (tok) {
+      const r = await validateRecipientAccessToken(tok, agreementId);
+      if (r.ok) {
+        const fromToken = String(r.data.recipient_party_id ?? "").trim();
+        if (fromToken) {
+          setTokenValidatedPartyId(fromToken);
+          return fromToken;
+        }
+      }
+    }
+    return inferSingleNonOwnerPartyIdFromDraft();
+  }
+
+  function inferSingleNonOwnerPartyIdFromDraft(): string {
+    if (!draft?.parties?.length) return "";
+    const candidates: string[] = [];
+    for (const p of draft.parties) {
+      const id = String(p.id ?? "").trim();
+      if (!id || id.startsWith("legacy_")) continue;
+      const role = String(p.role ?? "").trim().toLowerCase();
+      if (role === "owner" || role === "viewer") continue;
+      candidates.push(id);
+    }
+    return candidates.length === 1 ? candidates[0]! : "";
+  }
+
   async function acceptCurrentDraft() {
     if (viewerLike) return;
     if (needsPersonalizedLink) {
@@ -3377,15 +3440,47 @@ export function AgreementRecipientReview({
       setError("Review is closed on this agreement — you can still read the document.");
       return;
     }
+    const pidForApprove = await resolveParticipantIdForApprovalSubmit();
+    const agreementIdShort = agreementId.length <= 12 ? agreementId : `${agreementId.slice(0, 8)}…`;
+    logReviewerApprovalSubmitStart({
+      agreementIdShort,
+      participantPartyId: pidForApprove || null,
+      partiesHaveIds,
+    });
+    if (partiesHaveIds && !pidForApprove) {
+      logReviewerApprovalSubmitFailed({
+        agreementIdShort,
+        reason: "missing_participant_id",
+      });
+      setError(REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE);
+      return;
+    }
     setApproving(true);
     setError(null);
+    const localRecord = writeReviewerApprovalLocalState({
+      agreementId,
+      participantPartyId: pidForApprove,
+      recipientAccessToken,
+    });
+    setApprovedAck(true);
+    setLocalApprovalAt(localRecord.approvedAt);
+    logReviewerApprovalLocalStateApplied({
+      agreementIdShort,
+      participantPartyId: pidForApprove || null,
+      approvedAt: localRecord.approvedAt,
+    });
     try {
       const r = await recipientApproveCurrentApi(agreementId, {
-        participant_id: partiesHaveIds ? participantPid : undefined,
+        participant_id: partiesHaveIds ? pidForApprove : undefined,
         participant_display_name: partiesHaveIds ? proposerDisplayNameForApi : undefined,
         recipientAccessToken,
       });
       if (!r.ok) {
+        logReviewerApprovalSubmitFailed({
+          agreementIdShort,
+          participantPartyId: pidForApprove || null,
+          error: r.error ?? "unknown",
+        });
         throw new Error(
           humanizeRecipientActionError(r.error, "Couldn't record approval. Please try again."),
         );
@@ -3394,17 +3489,20 @@ export function AgreementRecipientReview({
         const merged = normalizeAgreementDraftFromApi(r.draft, { fallbackAgreementId: agreementId });
         if (merged) setDraft(merged);
       }
-      setApprovedAck(true);
+      logReviewerApprovalSubmitSuccess({
+        agreementIdShort,
+        participantPartyId: pidForApprove || null,
+      });
       if (import.meta.env.MODE !== "test") {
         // eslint-disable-next-line no-console
         console.info("[reviewer-approval-authoritative-server-success]", {
-          agreementIdShort: agreementId.length <= 12 ? agreementId : `${agreementId.slice(0, 8)}…`,
-          participantPartyId: participantPid || null,
+          agreementIdShort,
+          participantPartyId: pidForApprove || null,
         });
       }
       recipientAcceptTransitionDiag("approve_mutation_success", {
         agreementId,
-        participantPid: participantPid || null,
+        participantPid: pidForApprove || null,
         hasResponseDraft: Boolean(r.draft),
       });
       await refresh();
@@ -4662,7 +4760,8 @@ export function AgreementRecipientReview({
           <div
             className={`rounded-lg border px-4 py-3 text-sm leading-snug ${statusBanner.wrap}`}
             role="status"
-            data-testid="recipient-accepted-awaiting-status-banner"
+            data-testid="recipient-review-approved-status"
+            data-recipient-accepted-awaiting-lock="true"
           >
             <div className="font-semibold">{statusBanner.title}</div>
             <p className="mt-1 text-xs opacity-95">{statusBanner.detail}</p>
@@ -5144,6 +5243,19 @@ export function AgreementRecipientReview({
                 data-testid="recipient-approve-blocked-awaiting-owner"
               >
                 {REVIEWER_AWAITING_OWNER_APPROVE_BLOCKED_COPY}
+              </p>
+            ) : recipientAcceptedRecorded ? (
+              <p
+                className="w-full rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 sm:w-auto"
+                data-testid="recipient-review-approved-status"
+                role="status"
+              >
+                Approved
+                {localApprovalAt ? (
+                  <span className="mt-0.5 block text-xs font-normal text-emerald-800/90">
+                    {new Date(localApprovalAt).toLocaleString()}
+                  </span>
+                ) : null}
               </p>
             ) : (
             <button
