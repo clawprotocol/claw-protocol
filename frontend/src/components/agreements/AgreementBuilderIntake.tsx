@@ -15188,6 +15188,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const paidProPostFinalizeCorpusHash = useMemo(
+    () => resolvePaidProPostFinalizeReviewHash(),
+    [
+      paidProSignerMetadataFinalized,
+      premiumSurfaceGateTick,
+      reviewDocRefreshTick,
+      guidedAuthVersionNonce,
+    ],
+  );
+
+  const paidProPostFinalizeActionsReady = useMemo(
+    () =>
+      canProceedPaidProReviewFirstHandoffAfterFinalize({
+        signersComplete: paidProSignatureDetailsReady || paidProSignerMetadataFinalized,
+      }),
+    [
+      paidProSignerMetadataFinalized,
+      paidProSignatureDetailsReady,
+      premiumSurfaceGateTick,
+      reviewDocRefreshTick,
+      guidedAuthVersionNonce,
+    ],
+  );
+
   const paidProPostFinalizeHydrationBlocked = useMemo(() => {
     if (!paidProSignerMetadataFinalized || !paidProSignatureDetailsReady) return false;
     const reviewPlain = resolvePaidProPostFinalizeReviewPlain();
@@ -27951,12 +27975,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           compactDocumentTopPadding={paidProReviewCompactChrome}
                                           visibleProPaperTrace={visibleProPaperTrace}
                                           authoritativeSource={
-                                            resolvePaidProReviewRenderSource({
-                                              draft: draft ?? null,
-                                              intakeText: (
-                                                currentPremiumMergedIntakeKey || intakeCombined || ""
-                                              ).trim(),
-                                            }).source
+                                            isPaidProPostFinalizeHydratedCorpusLocked()
+                                              ? "authoritative_signing_snapshot"
+                                              : resolvePaidProReviewRenderSource({
+                                                  draft: draft ?? null,
+                                                  intakeText: (
+                                                    currentPremiumMergedIntakeKey || intakeCombined || ""
+                                                  ).trim(),
+                                                }).source
                                           }
                                         />
                                         {showPaidProForcedFirstReviewTrackChooser ? (
@@ -27978,8 +28004,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               (isGenerating && !draft) ||
                                               upgradeLockActive ||
                                               loading ||
-                                              !canProceedWithPaidProDocument
+                                              (isPaidProPostFinalizeHydratedCorpusLocked()
+                                                ? !paidProPostFinalizeActionsReady
+                                                : !canProceedWithPaidProDocument)
                                             }
+                                            postFinalizeCorpusHash={paidProPostFinalizeCorpusHash}
+                                            postFinalizeActionsReady={paidProPostFinalizeActionsReady}
                                             editDisabled={
                                               (isGenerating && !draft) || upgradeLockActive || loading || !draft
                                             }

@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { PremiumAgreementCopyButton } from "./PremiumAgreementCopyButton";
 import { PaidProSignerSavedConfirmationBanner } from "./PaidProSignerSavedConfirmationBanner";
 import { logPaidProReviewActionsVisible } from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import { logPaidProPostFinalizeActionClick } from "./paidProPostFinalizeReviewSurface";
 import { PaidProReviewNextStepCallout } from "./PaidProReviewNextStepCallout";
 import { PaidProReviewStatusPanel } from "./PaidProReviewStatusPanel";
 import { logPaidProSignaturePrepCtaVisible } from "./paidProSignaturePrepUi";
@@ -28,6 +29,8 @@ type Props = {
   editDisabled?: boolean;
   exportError?: string | null;
   signerSavedMappings?: readonly PaidProSignerSavedMapping[];
+  postFinalizeCorpusHash?: string;
+  postFinalizeActionsReady?: boolean;
   getCopyPlainText: () => string;
   onEditAgreement: () => void;
   onExportAgreement: () => void;
@@ -47,6 +50,8 @@ export function PaidProForcedFirstReviewChrome({
   editDisabled = false,
   exportError = null,
   signerSavedMappings = [],
+  postFinalizeCorpusHash = "",
+  postFinalizeActionsReady = false,
   getCopyPlainText,
   onEditAgreement,
   onExportAgreement,
@@ -71,6 +76,16 @@ export function PaidProForcedFirstReviewChrome({
   const showSignerSavedBanner =
     signerMetadataFinalized && signersReady && signerSavedMappings.length > 0;
   const actionsDisabled = sendDisabled || hydrationBlocked;
+
+  const logPostFinalizeAction = (action: string) => {
+    if (!signerMetadataFinalized || !postFinalizeCorpusHash) return;
+    logPaidProPostFinalizeActionClick({
+      action,
+      corpusHash: postFinalizeCorpusHash,
+      hydrated: true,
+      canProceed: postFinalizeActionsReady && !hydrationBlocked,
+    });
+  };
 
   return (
     <div
@@ -108,7 +123,10 @@ export function PaidProForcedFirstReviewChrome({
           type="button"
           className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
           disabled={actionsDisabled}
-          onClick={onPrepareSignatures}
+          onClick={() => {
+            logPostFinalizeAction("prepare_for_signing");
+            onPrepareSignatures();
+          }}
           data-testid="paid-pro-forced-prepare-signatures"
         >
           {PAID_PRO_PREPARE_ESIGN_DECISION_CTA}
@@ -121,13 +139,17 @@ export function PaidProForcedFirstReviewChrome({
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
             disabled={actionsDisabled || reviewBusy}
-            onClick={onShareForReview}
+            onClick={() => {
+              logPostFinalizeAction("send_for_review");
+              onShareForReview();
+            }}
             data-testid="paid-pro-forced-share-for-review"
           >
             {reviewBusy ? "Creating review links…" : "Send for review / compare edits"}
           </button>
           <PremiumAgreementCopyButton
             getPlainText={getCopyPlainText}
+            onCopyIntent={() => logPostFinalizeAction("copy_agreement")}
             disabled={copyDisabled || hydrationBlocked}
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
             data-testid="paid-pro-forced-copy-agreement"
@@ -136,7 +158,10 @@ export function PaidProForcedFirstReviewChrome({
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
             disabled={exportBusy || copyDisabled || hydrationBlocked}
-            onClick={onExportAgreement}
+            onClick={() => {
+              logPostFinalizeAction("download_export");
+              onExportAgreement();
+            }}
             data-testid="paid-pro-forced-export-agreement"
           >
             {exportBusy ? "Preparing export…" : "Download / export"}
@@ -145,7 +170,10 @@ export function PaidProForcedFirstReviewChrome({
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
             disabled={editDisabled || hydrationBlocked}
-            onClick={onEditAgreement}
+            onClick={() => {
+              logPostFinalizeAction("edit_agreement_text");
+              onEditAgreement();
+            }}
             data-testid="paid-pro-forced-edit-agreement"
           >
             Edit agreement text

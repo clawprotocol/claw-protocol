@@ -6,6 +6,7 @@ type Props = {
   disabled?: boolean;
   minLen?: number;
   className?: string;
+  onCopyIntent?: () => void;
   "data-testid"?: string;
 };
 
@@ -14,11 +15,13 @@ export function PremiumAgreementCopyButton({
   disabled = false,
   minLen = 1_500,
   className,
+  onCopyIntent,
   "data-testid": testId = "premium-copy-agreement",
 }: Props) {
   const [ack, setAck] = useState(false);
 
   const onCopy = () => {
+    onCopyIntent?.();
     const text = formatAgreementPlainTextForEditing(getPlainText());
     if (!text || text.length < Math.min(200, minLen) || !navigator.clipboard?.writeText) return;
     void navigator.clipboard.writeText(text).then(() => {

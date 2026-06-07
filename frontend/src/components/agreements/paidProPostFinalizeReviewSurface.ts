@@ -63,6 +63,86 @@ export function canProceedPaidProReviewFirstHandoffAfterFinalize(args: {
   return true;
 }
 
+const VISIBLE_BLANK_SIG_LINE_RE =
+  /^(?:name|title|email\s+for\s+notices?|address\s+for\s+notices?)\s*:\s*(?:_{4,}\s*)?$/im;
+
+export function countVisibleBlankSignerPlaceholderLines(visibleText: string): number {
+  const lines = (visibleText || "").split("\n");
+  let count = 0;
+  for (const line of lines) {
+    if (VISIBLE_BLANK_SIG_LINE_RE.test(line.trim())) count += 1;
+  }
+  return count;
+}
+
+export function auditPaidProPostFinalizeVisibleSurface(args: {
+  visibleText: string;
+  expectedPlain: string;
+  signerNames?: readonly string[];
+}): {
+  mismatch: boolean;
+  visibleHash: string;
+  expectedHash: string;
+  hasSarah: boolean;
+  hasMichael: boolean;
+  blankVisibleLines: number;
+} {
+  const visibleText = (args.visibleText || "").trim();
+  const expectedPlain = (args.expectedPlain || "").trim();
+  const visibleHash = visibleText.length >= 80 ? hashPaidProCorpus(visibleText) : "";
+  const expectedHash = expectedPlain.length >= 80 ? hashPaidProCorpus(expectedPlain) : "";
+  const names = (args.signerNames ?? []).map((n) => n.trim()).filter(Boolean);
+  const visibleLower = visibleText.toLowerCase();
+  const hasSarah = visibleLower.includes("sarah mitchell");
+  const hasMichael = visibleLower.includes("michael torres");
+  const blankVisibleLines = countVisibleBlankSignerPlaceholderLines(visibleText);
+  const requiredNames = names.length >= 2 ? names : ["Sarah Mitchell", "Michael Torres"];
+  const missingRequiredName = requiredNames.some(
+    (name) => name.trim() && !visibleLower.includes(name.trim().toLowerCase()),
+  );
+  const mismatch =
+    isPaidProPostFinalizeHydratedCorpusLocked() &&
+    countBlankSignerMetadataLinesInExecutionBlock(expectedPlain) === 0 &&
+    (blankVisibleLines > 0 || missingRequiredName);
+  return {
+    mismatch,
+    visibleHash,
+    expectedHash,
+    hasSarah,
+    hasMichael,
+    blankVisibleLines,
+  };
+}
+
+let lastVisibleSurfaceMismatchLog = "";
+
+export function logPaidProPostFinalizeVisibleSurfaceMismatch(payload: {
+  visibleHash: string;
+  expectedHash: string;
+  hasSarah: boolean;
+  hasMichael: boolean;
+  blankVisibleLines: number;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (typeof import.meta === "undefined" || !import.meta.env?.DEV) return;
+  const key = `${payload.visibleHash}:${payload.expectedHash}:${payload.blankVisibleLines}`;
+  if (key === lastVisibleSurfaceMismatchLog) return;
+  lastVisibleSurfaceMismatchLog = key;
+  // eslint-disable-next-line no-console
+  console.warn("[paid-pro-post-finalize-visible-surface-mismatch]", payload);
+}
+
+export function logPaidProPostFinalizeActionClick(payload: {
+  action: string;
+  corpusHash: string;
+  hydrated: boolean;
+  canProceed: boolean;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-post-finalize-action-click]", payload);
+}
+
 let lastHydrationBlockedLog = "";
 
 export function logPaidProPostFinalizeHydrationBlocked(payload: {
