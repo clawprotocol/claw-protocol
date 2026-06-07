@@ -1,11 +1,20 @@
 /**
- * First-review actions for forced paid Pro document route — review + prepare signatures.
+ * Post-signer-finalize review decision chrome for forced paid Pro document route.
  */
 
 import { useEffect } from "react";
+import { PremiumAgreementCopyButton } from "./PremiumAgreementCopyButton";
+import { PaidProSignerSavedConfirmationBanner } from "./PaidProSignerSavedConfirmationBanner";
+import { logPaidProReviewActionsVisible } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { PaidProReviewNextStepCallout } from "./PaidProReviewNextStepCallout";
 import { PaidProReviewStatusPanel } from "./PaidProReviewStatusPanel";
 import { logPaidProSignaturePrepCtaVisible } from "./paidProSignaturePrepUi";
+import { PAID_PRO_PREPARE_ESIGN_DECISION_CTA } from "./signerSetupPartyIdentity";
+
+export type PaidProSignerSavedMapping = {
+  partyLegalName: string;
+  signerName: string;
+};
 
 type Props = {
   signersReady: boolean;
@@ -13,6 +22,14 @@ type Props = {
   compactShell?: boolean;
   sendDisabled?: boolean;
   reviewBusy?: boolean;
+  exportBusy?: boolean;
+  copyDisabled?: boolean;
+  editDisabled?: boolean;
+  exportError?: string | null;
+  signerSavedMappings?: readonly PaidProSignerSavedMapping[];
+  getCopyPlainText: () => string;
+  onEditAgreement: () => void;
+  onExportAgreement: () => void;
   onShareForReview: () => void;
   onPrepareSignatures: () => void;
 };
@@ -23,6 +40,14 @@ export function PaidProForcedFirstReviewChrome({
   compactShell = false,
   sendDisabled = false,
   reviewBusy = false,
+  exportBusy = false,
+  copyDisabled = false,
+  editDisabled = false,
+  exportError = null,
+  signerSavedMappings = [],
+  getCopyPlainText,
+  onEditAgreement,
+  onExportAgreement,
   onShareForReview,
   onPrepareSignatures,
 }: Props) {
@@ -32,7 +57,17 @@ export function PaidProForcedFirstReviewChrome({
       prepareSignaturesCtaVisible: true,
       signerFieldsMounted: false,
     });
+    logPaidProReviewActionsVisible({
+      copyVisible: true,
+      editVisible: true,
+      exportVisible: true,
+      prepareVisible: true,
+      surface: "paid_pro_forced_first_review",
+    });
   }, []);
+
+  const showSignerSavedBanner =
+    signerMetadataFinalized && signersReady && signerSavedMappings.length > 0;
 
   return (
     <div
@@ -44,7 +79,11 @@ export function PaidProForcedFirstReviewChrome({
         signerMetadataFinalized={signerMetadataFinalized}
         compactShell={compactShell}
       />
-      <PaidProReviewNextStepCallout signersReady={signersReady} compactShell={compactShell} />
+      {showSignerSavedBanner ? (
+        <PaidProSignerSavedConfirmationBanner mappings={signerSavedMappings} />
+      ) : (
+        <PaidProReviewNextStepCallout signersReady={signersReady} compactShell={compactShell} />
+      )}
       <div
         className="flex flex-col gap-2.5 rounded-md border border-stone-200/90 bg-white px-3 py-3 shadow-sm ring-1 ring-black/[0.04] sm:px-4 sm:py-4"
         data-testid="paid-pro-forced-first-review-actions"
@@ -55,21 +94,55 @@ export function PaidProForcedFirstReviewChrome({
         <button
           type="button"
           className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-          disabled={sendDisabled || reviewBusy}
-          onClick={onShareForReview}
-          data-testid="paid-pro-forced-share-for-review"
-        >
-          {reviewBusy ? "Creating review links…" : "Send for review / compare edits"}
-        </button>
-        <button
-          type="button"
-          className="w-full rounded-lg border border-stone-300/90 bg-white px-4 py-2.5 text-sm font-semibold text-stone-800 shadow-sm hover:bg-stone-50 disabled:opacity-45"
           disabled={sendDisabled}
           onClick={onPrepareSignatures}
           data-testid="paid-pro-forced-prepare-signatures"
         >
-          Prepare signatures
+          {PAID_PRO_PREPARE_ESIGN_DECISION_CTA}
         </button>
+        <div
+          className="flex flex-col gap-2 sm:flex-row sm:flex-wrap"
+          data-testid="paid-pro-forced-first-review-secondary-actions"
+        >
+          <button
+            type="button"
+            className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+            disabled={sendDisabled || reviewBusy}
+            onClick={onShareForReview}
+            data-testid="paid-pro-forced-share-for-review"
+          >
+            {reviewBusy ? "Creating review links…" : "Send for review / compare edits"}
+          </button>
+          <PremiumAgreementCopyButton
+            getPlainText={getCopyPlainText}
+            disabled={copyDisabled}
+            className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+            data-testid="paid-pro-forced-copy-agreement"
+          />
+          <button
+            type="button"
+            className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+            disabled={exportBusy || copyDisabled}
+            onClick={onExportAgreement}
+            data-testid="paid-pro-forced-export-agreement"
+          >
+            {exportBusy ? "Preparing export…" : "Download / export"}
+          </button>
+          <button
+            type="button"
+            className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+            disabled={editDisabled}
+            onClick={onEditAgreement}
+            data-testid="paid-pro-forced-edit-agreement"
+          >
+            Edit agreement text
+          </button>
+        </div>
+        {exportError ? (
+          <p className="text-[11px] font-medium text-amber-800" role="alert">
+            {exportError}
+          </p>
+        ) : null}
         <p className="text-[11px] leading-relaxed text-stone-600">
           Nothing is sent or signed until you confirm the next step.
         </p>

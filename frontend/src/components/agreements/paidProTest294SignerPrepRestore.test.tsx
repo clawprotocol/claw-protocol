@@ -29,6 +29,9 @@ describe("Test294 forced first review restores signer prep UI", () => {
       <PaidProForcedFirstReviewChrome
         signersReady={false}
         signerMetadataFinalized={false}
+        getCopyPlainText={() => "Agreement body for copy."}
+        onEditAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
         onShareForReview={vi.fn()}
         onPrepareSignatures={vi.fn()}
       />,
@@ -44,6 +47,9 @@ describe("Test294 forced first review restores signer prep UI", () => {
       <PaidProForcedFirstReviewChrome
         signersReady={false}
         signerMetadataFinalized={false}
+        getCopyPlainText={() => "Agreement body for copy."}
+        onEditAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
         onShareForReview={vi.fn()}
         onPrepareSignatures={onPrepare}
       />,

@@ -19,6 +19,11 @@ import { auditPaidProSignerFinalizeCorpus } from "./paidProCorpusLifecycleDiff";
 import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import {
+  hydratePaidProExecutionBlockWithSignerMetadata,
+  countBlankSignerMetadataLinesInExecutionBlock,
+  signerMetadataAuthorityHasHydratableFields,
+} from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import {
   readConsumedPaidProSignerMetadataAuthority,
   recipientMetadataToAuthorityParties,
 } from "./paidProSignerMetadataAuthority";
@@ -131,17 +136,32 @@ export function createAuthoritativeSigningSnapshot(
       ...args.signerMetadata,
       partyAddresses: args.signerMetadata.partyAddresses ?? [],
     });
-  const corpus = finalizePaidProSigningCorpusText(
-    applyCanonicalPartyLegalNamesToSigningCorpus((args.corpus || "").trim(), parties).text,
-    parties,
-    { acceptedCorpus: (args.corpus || "").trim() },
-  ).text.trim();
-  const hash = hashPaidProCorpus(corpus);
-  const frozenAt = Date.now();
   const signerMetadata: AuthoritativeSigningSnapshotRecipientMetadata = {
     ...args.signerMetadata,
     partyAddresses: args.signerMetadata.partyAddresses ?? [],
   };
+  let corpus = finalizePaidProSigningCorpusText(
+    applyCanonicalPartyLegalNamesToSigningCorpus((args.corpus || "").trim(), parties).text,
+    parties,
+    { acceptedCorpus: (args.corpus || "").trim() },
+  ).text.trim();
+  if (signerMetadataAuthorityHasHydratableFields(signerMetadata)) {
+    const hydration = hydratePaidProExecutionBlockWithSignerMetadata(corpus, signerMetadata, {
+      acceptedCorpus: (args.corpus || "").trim(),
+    });
+    if (hydration.applied) {
+      corpus = hydration.corpus.trim();
+    } else if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0) {
+      const retry = hydratePaidProExecutionBlockWithSignerMetadata(
+        (args.corpus || "").trim(),
+        signerMetadata,
+        { acceptedCorpus: (args.corpus || "").trim() },
+      );
+      if (retry.applied) corpus = retry.corpus.trim();
+    }
+  }
+  const hash = hashPaidProCorpus(corpus);
+  const frozenAt = Date.now();
   authoritativeSigningSnapshot = {
     corpus,
     signerMetadata,

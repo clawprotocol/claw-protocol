@@ -627,7 +627,10 @@ import {
   notePaidProReviewHashFromPlain,
   recordPaidProReviewRender,
 } from "./paidProReviewStability";
-import { auditPaidProReviewLinkGenerationCorpus } from "./paidProCorpusLifecycleDiff";
+import {
+  auditPaidProReviewLinkGenerationCorpus,
+  auditPaidProSignerFinalizeCorpus,
+} from "./paidProCorpusLifecycleDiff";
 import {
   logPaidProReviewTrackLifecycle,
   logReviewLinkCreated,
@@ -679,6 +682,7 @@ import {
   normalizePaidProCorpusSourceLabel,
 } from "./paidProRuntimeAuthorityEstablishment";
 import {
+  getFrozenCanonicalAgreementCorpus,
   hasFrozenCanonicalAgreementCorpus,
   logAuthoritativeCorpusInvariant,
 } from "./canonicalAgreementSnapshot";
@@ -16088,7 +16092,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidProReviewSurface: true,
       });
       if (boundary.blocked || !boundary.plain.trim()) return "";
-      const corpus = (paidProSignerHydratedPreviewPlain.trim() || boundary.plain).trim();
+      const postFinalizePlain = paidProSignerHydratedPreviewPlain.trim() || readAuthoritativeSigningCorpus().trim();
+      const displayCorpusRaw = (postFinalizePlain || boundary.plain).trim();
+      const signingSnapshotActive = hasAuthoritativeSigningSnapshot();
+      const corpus =
+        signingSnapshotActive && displayCorpusRaw.length >= 200
+          ? polishProAgreementDisplayLayer(displayCorpusRaw, {
+              draft: rdForCandidates ?? null,
+              intakeText: intakeForPolish,
+              reviewDisplayMode: true,
+              retainSignatureExecutionBlock: true,
+            }).text
+          : displayCorpusRaw;
       const rd = reviewDraft ?? draft;
       const signaturePartyNames = extractAgreementParties({
         parties: rd?.parties,
@@ -19474,11 +19489,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const displayPolishedPaidProPlain = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const signingSnapshotActive = hasAuthoritativeSigningSnapshot();
     const paidProDisplay = getPaidProDocumentForSurface("display", {
       ...paidProReviewSurfaceOpts,
       intakeText: intakeForPolish,
     });
     const raw = (
+      paidProSignerHydratedPreviewPlain.trim() ||
+      (signingSnapshotActive ? readAuthoritativeSigningCorpus() : "") ||
       paidProDisplay?.text ||
       (hasPaidProSourceOfTruth() ? "" : (premiumPaidReadonlyPick.plainText || "").trim())
     ).trim();
@@ -19486,7 +19504,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const polished = polishProAgreementDisplayLayer(raw, {
       draft: draft ?? null,
       intakeText: intakeForPolish,
-      reviewDisplayMode: suppressProDocumentEmbeddedSignatures,
+      reviewDisplayMode: signingSnapshotActive ? true : suppressProDocumentEmbeddedSignatures,
+      retainSignatureExecutionBlock: signingSnapshotActive,
     }).text;
     if (!suppressProDocumentEmbeddedSignatures) {
       const boundary = resolveVisibleProPaperBoundary({
@@ -19501,6 +19520,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const sanitized = sanitizeProReviewDisplayText(polished, {
       source: paidProDisplay ? "paid_pro_display_surface" : "premium_readonly_display",
+      retainSignatureExecutionBlock: signingSnapshotActive,
     }).text;
     const boundary = resolveVisibleProPaperBoundary({
       visiblePlain: sanitized,
@@ -19522,6 +19542,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
     reviewDocRefreshTick,
     suppressProDocumentEmbeddedSignatures,
+    paidProSignerHydratedPreviewPlain,
   ]);
 
   const simpleProFinalReviewDisplayPlain = useMemo(() => {
@@ -24060,6 +24081,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
     });
     const rawCorpus = (
+      getFrozenCanonicalAgreementCorpus()?.canonicalText?.trim() ||
       getPaidProSourceOfTruthText() ||
       authoritativePaidProReviewPlain ||
       simpleProFinalReviewCorpus.plainText
@@ -24072,6 +24094,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signatureRegionOnly: true,
       repairRecital: false,
     });
+    auditPaidProSignerFinalizeCorpus(hydrated.corpus);
     const signatureBlockModel = buildCanonicalSignerManifest({
       identities: hydrated.identities,
       signFirst: premiumSignatureSenderFirst,
@@ -27871,6 +27894,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               reviewFirstHandoffBusy
                                             }
                                             reviewBusy={reviewFirstHandoffBusy}
+                                            copyDisabled={
+                                              (isGenerating && !draft) ||
+                                              upgradeLockActive ||
+                                              loading ||
+                                              !canProceedWithPaidProDocument
+                                            }
+                                            editDisabled={
+                                              (isGenerating && !draft) || upgradeLockActive || loading || !draft
+                                            }
+                                            signerSavedMappings={paidProSignerSavedMappings}
+                                            getCopyPlainText={() =>
+                                              simpleProFinalReviewDisplayPlain || displayPolishedPaidProPlain
+                                            }
+                                            onEditAgreement={() => void openPaidProDraftCardEditor()}
+                                            onExportAgreement={() => void handleSimpleProFinalReviewExport()}
+                                            exportBusy={proFinalReviewExportBusy}
+                                            exportError={proFinalReviewExportError}
                                             onShareForReview={() => void handleProSendForReview()}
                                             onPrepareSignatures={() =>
                                               void handlePaidProPrepareSignaturesFromFirstReview()

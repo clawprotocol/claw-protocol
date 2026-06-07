@@ -31,11 +31,23 @@ import {
 } from "./paidProExecutionBlockAuthority";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import {
+  authorityPartiesToRecipientMetadata,
   buildLivePaidProSignerMetadataAuthority,
   hashPaidProSignerMetadataAuthority,
   recipientMetadataToAuthorityParties,
   type LiveSignerMetadataUiState,
 } from "./paidProSignerMetadataAuthority";
+import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
+import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
+import {
+  countBlankSignerMetadataLinesInExecutionBlock,
+  hydratePaidProExecutionBlockWithSignerMetadata,
+  logPaidProSignerFinalizeParity,
+  logPaidProSignerMetadataHydrationApplied,
+  logPaidProSignerMetadataHydrationMissing,
+} from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
 
 export type HydratedAuthoritativeSigningCorpusResult = {
   corpus: string;
@@ -118,6 +130,8 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   repairRecital?: boolean;
 }): HydratedAuthoritativeSigningCorpusResult {
   let rawCorpus = (args.rawCorpus || "").trim();
+  const rawCorpusLenBeforeHydration = rawCorpus.length;
+  const isFinalizeSurface = args.surface === "finalize_paid_pro_signer_metadata";
   if (args.repairRecital) {
     rawCorpus = repairMalformedPaidProAgreementRecital(rawCorpus, args.authority.parties).text;
   }
@@ -125,6 +139,27 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     intakeText: args.intakeRaw,
     acceptedCorpus: rawCorpus,
   };
+  const recipientMeta = authorityPartiesToRecipientMetadata(args.authority.parties);
+  const executionHydration = hydratePaidProExecutionBlockWithSignerMetadata(
+    rawCorpus,
+    recipientMeta,
+    roleContext,
+  );
+  if (executionHydration.applied) {
+    rawCorpus = executionHydration.corpus;
+    logPaidProSignerMetadataHydrationApplied({
+      surface: args.surface,
+      fieldsHydrated: executionHydration.fieldsHydrated,
+      rawLen: rawCorpusLenBeforeHydration,
+      hydratedLen: rawCorpus.length,
+    });
+  } else if (executionHydration.missingFields.length) {
+    logPaidProSignerMetadataHydrationMissing({
+      surface: args.surface,
+      missingFields: executionHydration.missingFields,
+      rawLen: rawCorpusLenBeforeHydration,
+    });
+  }
   const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, roleContext);
   let result = buildHydratedAuthoritativeSigningCorpus({
     rawCorpus,
@@ -167,6 +202,24 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       surface: args.surface,
       reason: "hydration_signature_block_rebuild_skipped",
     });
+    const retryHydration = hydratePaidProExecutionBlockWithSignerMetadata(
+      result.corpus,
+      recipientMeta,
+      roleContext,
+    );
+    if (retryHydration.applied && retryHydration.corpus !== result.corpus) {
+      result = {
+        ...result,
+        corpus: retryHydration.corpus,
+        signaturePolishCount: result.signaturePolishCount + retryHydration.fieldsHydrated,
+      };
+      logPaidProSignerMetadataHydrationApplied({
+        surface: `${args.surface}:synthesis_forbidden_retry`,
+        fieldsHydrated: retryHydration.fieldsHydrated,
+        rawLen: result.corpus.length,
+        hydratedLen: retryHydration.corpus.length,
+      });
+    }
   }
 
   if (!result.rejected && signerCount >= 2) {
@@ -191,7 +244,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     }
   }
 
-  if (!result.rejected && result.corpus) {
+  if (!result.rejected && result.corpus && !isFinalizeSurface) {
     result = {
       ...result,
       corpus: stripPremiumIntelligenceCalloutsFromCorpus(result.corpus),
@@ -239,6 +292,37 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
         partyNoticeApplied: false,
       };
     }
+  }
+
+  if (isFinalizeSurface && !result.rejected && result.corpus) {
+    const invariant = analyzePaidProExecutionBlockInvariant(result.corpus, {
+      expectedParties: signerCount,
+    });
+    const canonicalHash = resolvePaidProFrozenAuthoritativeHash();
+    const finalizedHash = hashPaidProCorpus(result.corpus);
+    const classification = classifyPaidProCorpusLifecycleDiff(rawCorpus, result.corpus);
+    const signerFieldOnlyDelta =
+      classification === "signer_metadata_only" ||
+      classification === "execution_block_hydration_only" ||
+      classification === "whitespace_or_line_width_only";
+    const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(result.corpus);
+    logPaidProSignerFinalizeParity({
+      surface: args.surface,
+      rawLen: rawCorpusLenBeforeHydration,
+      hydratedLen: result.corpus.length,
+      lenDelta: result.corpus.length - rawCorpusLenBeforeHydration,
+      invariantOk:
+        invariant.ok &&
+        blankSignerLinesRemaining === 0 &&
+        (canonicalHash === finalizedHash || signerFieldOnlyDelta),
+      executionBlockCount: invariant.executionBlockCount,
+      witnessCount: invariant.witnessClauseCount,
+      canonicalHash,
+      finalizedHash,
+      signerFieldOnlyDelta,
+      signerHydrationApplied: executionHydration.applied || result.signaturePolishCount > 0,
+      blankSignerLinesRemaining,
+    });
   }
 
   return result;

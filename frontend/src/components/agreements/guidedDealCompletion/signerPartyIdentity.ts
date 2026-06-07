@@ -23,6 +23,7 @@ import {
   logPaidProExecutionBlockSynthesisBlocked,
 } from "../paidProExecutionBlockAuthority";
 import { repairPaidProSignatureSectionOrdering } from "../paidProSignatureSectionOrdering";
+import { partyLegalNamesMatch } from "../paidProAcceptedCorpusPartyRoles";
 import { sortIdentitiesForExecutionBlockOrder } from "../paidProSignerMetadataMergeGate";
 import {
   applyCanonicalManifestPlaceholdersToCorpus,
@@ -198,12 +199,22 @@ export function resolvePartyIndexForSignatureLine(
   const patchStart = signaturePatchStartIndex(fullText);
   for (let i = lineIndex; i >= 0; i--) {
     const trimmed = lines[i].trim();
+    const partyInline = trimmed.match(/^PARTY\s*:\s*(.+)$/i);
+    if (partyInline?.[1]) {
+      for (let p = 0; p < identities.length; p++) {
+        const id = identities[p];
+        if (id.partyDisplayName && partyLegalNamesMatch(partyInline[1], id.partyDisplayName)) {
+          return p;
+        }
+      }
+    }
     for (let p = 0; p < identities.length; p++) {
       const id = identities[p];
       if (!id.partyDisplayName) continue;
       const headingRe = new RegExp(`^${escapeRe(id.blockHeading)}\\s*:?\\s*$`, "i");
       if (headingRe.test(trimmed)) return p;
       if (trimmed.toLowerCase() === id.partyDisplayName.toLowerCase()) return p;
+      if (partyLegalNamesMatch(trimmed, id.partyDisplayName)) return p;
     }
     if (/^by\s*:/i.test(trimmed)) {
       let offset = 0;

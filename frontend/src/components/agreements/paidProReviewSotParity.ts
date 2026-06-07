@@ -2,13 +2,25 @@
  * Paid Pro review render SoT parity diagnostics — canonical freeze vs review plain hash.
  */
 
-import { hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
+import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import { getPaidProSourceOfTruthText, hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
+
+const SIGNER_FIELD_ONLY_CLASSIFICATIONS = new Set([
+  "signer_metadata_only",
+  "execution_block_hydration_only",
+  "whitespace_or_line_width_only",
+  "display_normalization_only",
+  "identical",
+]);
 
 export function logPaidProReviewSotParity(payload: {
   canonicalHash: string | null;
   reviewHash: string;
   invariantOk: boolean;
+  signerFieldOnlyDelta?: boolean;
+  blankSignerLinesRemaining?: number;
   surface?: string;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
@@ -19,18 +31,44 @@ export function logPaidProReviewSotParity(payload: {
 export function auditPaidProReviewRenderSotParity(args: {
   reviewPlain: string;
   surface?: string;
-}): { canonicalHash: string | null; reviewHash: string; invariantOk: boolean } {
+}): {
+  canonicalHash: string | null;
+  reviewHash: string;
+  invariantOk: boolean;
+  signerFieldOnlyDelta: boolean;
+  blankSignerLinesRemaining: number;
+} {
   const review = (args.reviewPlain || "").trim();
   const reviewHash = review.length >= 80 ? hashPaidProCorpus(review) : "";
   const canonicalHash = hasPaidProSourceOfTruth() ? resolvePaidProFrozenAuthoritativeHash() : null;
-  const invariantOk = Boolean(canonicalHash && reviewHash && canonicalHash === reviewHash);
+  const canonicalPlain = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
+  const classification =
+    canonicalPlain && review
+      ? classifyPaidProCorpusLifecycleDiff(canonicalPlain, review)
+      : null;
+  const signerFieldOnlyDelta = Boolean(
+    classification && SIGNER_FIELD_ONLY_CLASSIFICATIONS.has(classification),
+  );
+  const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(review);
+  const hashMatch = Boolean(canonicalHash && reviewHash && canonicalHash === reviewHash);
+  const invariantOk =
+    hashMatch ||
+    (signerFieldOnlyDelta && blankSignerLinesRemaining === 0);
   if (reviewHash) {
     logPaidProReviewSotParity({
       canonicalHash,
       reviewHash,
       invariantOk,
+      signerFieldOnlyDelta,
+      blankSignerLinesRemaining,
       surface: args.surface ?? "paid_pro_review_render",
     });
   }
-  return { canonicalHash, reviewHash, invariantOk };
+  return {
+    canonicalHash,
+    reviewHash,
+    invariantOk,
+    signerFieldOnlyDelta,
+    blankSignerLinesRemaining,
+  };
 }

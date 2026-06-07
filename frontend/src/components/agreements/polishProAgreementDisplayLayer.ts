@@ -639,7 +639,11 @@ export function polishProAgreementDisplayLayer(
     return { text: coalesced.text, repairs: [...repairs, ...(coalesced.downgradePrevented ? ["display:shrink_blocked"] : [])] };
   }
 
-  if (records.length >= 2 && detectExecutionBlockRoleInversion(out)) {
+  if (
+    records.length >= 2 &&
+    !opts?.retainSignatureExecutionBlock &&
+    detectExecutionBlockRoleInversion(out)
+  ) {
     const identities = buildCorpusRoleIdentitiesForExecutionReconcile(out);
     const reconciled = reconcileExecutionBlockToRoleIdentities(out, identities);
     if (reconciled.repairs > 0) {

@@ -216,10 +216,8 @@ export function applyPaidProSignerMetadataMergeGate(args: {
     const execInvariant = analyzePaidProExecutionBlockInvariant(text, {
       expectedParties: canonicalPartyCount,
     });
-    if (execInvariant.executionBlockCount === 1) {
-      const reconcileIdentities = detectExecutionBlockRoleInversion(text)
-        ? buildCorpusRoleIdentitiesForExecutionReconcile(text)
-        : sortIdentitiesForExecutionBlockOrder(identities);
+    if (execInvariant.executionBlockCount === 1 && detectExecutionBlockRoleInversion(text)) {
+      const reconcileIdentities = buildCorpusRoleIdentitiesForExecutionReconcile(text);
       const reconciled = reconcileExecutionBlockToRoleIdentities(text, reconcileIdentities);
       if (reconciled.repairs > 0) {
         text = reconciled.text;
