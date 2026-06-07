@@ -317,3 +317,64 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   }
   return { rows: out, attemptedMintCount, firstErrorStatus, lastMintErrorDetail, lastMintErrorCode };
 }
+
+/** Mint a single review magic link for QA party simulation (including owner / Party 1). */
+export async function mintReviewPartySimulationRecipientLink(args: {
+  agreementId: string;
+  draft: AgreementDraft;
+  partyIndex: number;
+  signingCorpusPlain?: string | null;
+  signingCorpusSource?: string | null;
+}): Promise<{ reviewHref: string; partyName: string; partyIndex: number } | null> {
+  const mintKey =
+    (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env?.VITE_RECIPIENT_LINK_MINT_KEY ||
+    "";
+  const list = (args.draft.parties || []) as AgreementParty[];
+  const partyIndex = Math.max(0, Math.min(args.partyIndex, Math.max(0, list.length - 1)));
+  const p = list[partyIndex];
+  if (!p) return null;
+  const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(list);
+  const inviter = String(list[ownerIdx]?.name ?? "").trim();
+  const signingCorpusLen = (args.signingCorpusPlain ?? "").trim().length;
+  const draftDocumentLen = Math.max(
+    String((args.draft as { document_text?: string }).document_text ?? "").length,
+    String((args.draft as { server_full_document_text?: string }).server_full_document_text ?? "").length,
+    String((args.draft as { premium_full_document_text?: string }).premium_full_document_text ?? "").length,
+  );
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const wf = String(p.role || "").trim().toLowerCase();
+  const role: "signer" | "reviewer" | "recipient" =
+    wf === "signer" ? "signer" : wf === "reviewer" ? "reviewer" : "recipient";
+  const partyId = p.id && !String(p.id).startsWith("legacy_") ? String(p.id).trim() : undefined;
+  const res = await mintRecipientAccessTokenResult(
+    args.agreementId,
+    {
+      mode: "review",
+      role,
+      recipient_party_id: partyId || undefined,
+      inviter_display_name: inviter || undefined,
+      review_first_document_text: signingCorpusLen > 0 ? args.signingCorpusPlain?.trim() : undefined,
+      review_first_document_source: signingCorpusLen > 0 ? args.signingCorpusSource ?? "review_first_pinned_corpus" : undefined,
+    },
+    mintKey,
+    {
+      recipientCount: Math.max(0, list.length - 1),
+      signerCount: list.filter((party) => (party.name || "").trim().length > 0).length,
+      hasDocumentText: signingCorpusLen > 0 || draftDocumentLen > 0,
+      documentTextLen: signingCorpusLen > 0 ? signingCorpusLen : draftDocumentLen || undefined,
+      hasTitle: Boolean((args.draft.title || "").trim()),
+      hasPartyLabels: list.filter((party) => (party.name || "").trim()).length > 0,
+      documentTextSource:
+        signingCorpusLen > 0
+          ? args.signingCorpusSource ?? "signing_corpus_plain"
+          : draftDocumentLen > 0
+            ? "draft_fields"
+            : "none",
+    },
+  );
+  if (!res.ok) return null;
+  const reviewHref = resolveReviewHrefFromMint(args.agreementId, origin, res.data).trim();
+  if (!reviewHref) return null;
+  const displayName = String(p.name || "").trim() || "Recipient";
+  return { reviewHref, partyName: displayName, partyIndex };
+}

@@ -593,7 +593,12 @@ export function logReviewFirstInlineErrorRendered(payload: Record<string, unknow
 /** Mint/persist failure reasons from paid Pro review-first handoff. */
 export function isReviewFirstMintFailureReason(reason: string): boolean {
   const r = (reason || "").trim();
-  return r === "review_link_mint" || r === "handoff_exception" || r === "vs01_seed";
+  return (
+    r === "review_link_mint" ||
+    r === "handoff_exception" ||
+    r === "vs01_seed" ||
+    r === "review_link_corpus_parity_failed"
+  );
 }
 
 export function isReviewFirstPersistFailureReason(reason: string): boolean {

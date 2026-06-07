@@ -80,6 +80,7 @@ async function mintAndPersistReviewLinksForHandoff(
   premiumSendIntent: PremiumSendIntent,
   agreementCorpusText?: string | null,
   logSource?: string,
+  agreementCorpusSource?: string | null,
 ): Promise<{ ok: true } | { ok: false; failure: PaidProPostRecipientSetupFailure }> {
   const id = agreementId.trim();
   const draftForMint = mergeDraftWithReviewFirstPinnedCorpus(draft, id);
@@ -124,7 +125,9 @@ async function mintAndPersistReviewLinksForHandoff(
       agreementId: id,
       draft: draftForMint,
       signingCorpusPlain: signingCorpusPlain || undefined,
-      signingCorpusSource: signingCorpusPlain ? "review_first_pinned_corpus" : undefined,
+      signingCorpusSource: signingCorpusPlain
+        ? (agreementCorpusSource ?? "review_first_pinned_corpus").trim() || "review_first_pinned_corpus"
+        : undefined,
     });
     linkRows = minted.rows;
     mintMeta = {
@@ -190,6 +193,8 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   logSource: string;
   /** Final agreement plain text for VS01 signature-block anchor placement. */
   agreementCorpusText?: string | null;
+  /** Corpus source label for review-link mint (e.g. authoritative_signing_snapshot). */
+  agreementCorpusSource?: string | null;
   guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
 }): Promise<PaidProPostRecipientSetupResult> {
   const id = String(options.agreementId || "").trim();
@@ -237,6 +242,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
         options.premiumSendIntent,
         options.agreementCorpusText,
         options.logSource,
+        options.agreementCorpusSource,
       );
       if (!minted.ok) return { ok: false, failure: minted.failure };
       markSimpleFlowSent(id);

@@ -492,6 +492,7 @@ import {
   isReviewFirstSigningTokenSecretNotConfigured,
   logReviewFirstEnvTokenSecretMissing,
   REVIEW_FIRST_SIMPLE_PRO_SOURCE,
+  peekReviewFirstPinnedCorpus,
   writeReviewFirstHandoffSource,
   writeReviewFirstPinnedCorpus,
 } from "../../launch/simpleProduct/reviewFirstSendSurface";
@@ -817,6 +818,12 @@ import {
   resolvePaidProPostFinalizeReviewHash,
   resolvePaidProPostFinalizeReviewPlain,
 } from "./paidProPostFinalizeReviewSurface";
+import {
+  auditPaidProReviewLinkCorpusParity,
+  logPaidProReviewLinkCorpusParity,
+  resolvePaidProReviewLinkCorpusPlain,
+  REVIEW_LINK_CORPUS_PARITY_BLOCK_MESSAGE,
+} from "./paidProReviewLinkCorpusParity";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import {
   resolvePaidProFinalHydratedCorpusForSurface,
@@ -23518,17 +23525,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       clearReviewFirstMintInFlight();
 
       try {
-        const finalized = finalizeAndFreezeGuidedFinalCorpus("guided_review_first_handoff");
-        if (!finalized.ok) {
-          const msg =
-            finalized.unresolvedPlaceholders.length > 0
-              ? "Signer names are saved, but the final agreement still contains party placeholders. Return to signer details before sending."
-              : "The final agreement body is not ready yet. Return to final review and try again.";
-          setGuidedSigningConfirmationBlockMessage(msg);
-          failReviewFirst(msg, "final_corpus_not_ready");
-          return;
+        const postFinalizeLinkCorpus = resolvePaidProReviewLinkCorpusPlain();
+        let bodyPlain: string;
+        let reviewLinkCorpusSource = "guided_final_corpus";
+        if (postFinalizeLinkCorpus) {
+          bodyPlain = postFinalizeLinkCorpus.plain;
+          reviewLinkCorpusSource = postFinalizeLinkCorpus.source;
+          const preHandoffParity = auditPaidProReviewLinkCorpusParity({
+            creatorPlain: bodyPlain,
+            reviewLinkPlain: bodyPlain,
+            source: reviewLinkCorpusSource,
+          });
+          logPaidProReviewLinkCorpusParity(preHandoffParity);
+          if (!preHandoffParity.invariantOk) {
+            failReviewFirst(REVIEW_LINK_CORPUS_PARITY_BLOCK_MESSAGE, "review_link_corpus_parity_failed");
+            return;
+          }
+        } else {
+          const finalized = finalizeAndFreezeGuidedFinalCorpus("guided_review_first_handoff");
+          if (!finalized.ok) {
+            const msg =
+              finalized.unresolvedPlaceholders.length > 0
+                ? "Signer names are saved, but the final agreement still contains party placeholders. Return to signer details before sending."
+                : "The final agreement body is not ready yet. Return to final review and try again.";
+            setGuidedSigningConfirmationBlockMessage(msg);
+            failReviewFirst(msg, "final_corpus_not_ready");
+            return;
+          }
+          bodyPlain = finalized.body.trim();
         }
-        const bodyPlain = finalized.body.trim();
         acceptGuidedReviewCorpus(bodyPlain, "review_only");
         const transition = assertGuidedTransitionReady("review_only");
         if (!transition.ok) {
@@ -23657,6 +23682,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         writeReviewFirstPinnedCorpus(id, bodyPlain);
         logReviewFirstMarkerWritten({ agreementId: id, source });
 
+        if (postFinalizeLinkCorpus) {
+          const pinnedPlain = (peekReviewFirstPinnedCorpus(id) ?? bodyPlain).trim();
+          const navParity = auditPaidProReviewLinkCorpusParity({
+            creatorPlain: resolvePaidProPostFinalizeReviewPlain() || bodyPlain,
+            reviewLinkPlain: pinnedPlain,
+            source: reviewLinkCorpusSource,
+          });
+          logPaidProReviewLinkCorpusParity(navParity);
+          if (!navParity.invariantOk) {
+            failReviewFirst(REVIEW_LINK_CORPUS_PARITY_BLOCK_MESSAGE, "review_link_corpus_parity_failed");
+            return;
+          }
+        }
+
         const primedForHandoff =
           mergeLiveDraftWithRecipientSetupForVs01Bridge(
             {
@@ -23701,6 +23740,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           recipientSetup: buildRecipientSetupForVs01Bridge(mergedDraft),
           logSource: source,
           agreementCorpusText: bodyPlain,
+          agreementCorpusSource: reviewLinkCorpusSource,
         });
         if (!result.ok) {
           failReviewFirstMint(

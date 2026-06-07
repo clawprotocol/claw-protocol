@@ -29,6 +29,7 @@ import { LawdogRecordedMark } from "../../components/ui/LawdogRecordedMark";
 import { PRODUCT_NOT_LAW_FIRM, RECORDS_DOWNLOAD_KEEP_COPY_SHORT } from "../../compliance/disclosureCopy";
 import type { SimpleDoneReviewRecipientLinkRow } from "./simpleDoneReviewRecipientLinks";
 import {
+  mintReviewPartySimulationRecipientLink,
   mintSimpleDoneReviewRecipientLinkRows,
   readSimpleDoneReviewRecipientLinks,
   writeSimpleDoneReviewRecipientLinks,
@@ -63,7 +64,12 @@ import {
   MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
   readPremiumRecipientHandoff,
 } from "../../components/agreements/premiumPartyNamesHandoff";
-import { mergeReviewLinkRecipientEmailsOntoHydratedDraft } from "./reviewLinkRecipientEmailMerge";
+import {
+  mergeReviewLinkRecipientEmailsOntoHydratedDraft,
+  resolveReviewLinkAssumedOwnerPartyIndex,
+} from "./reviewLinkRecipientEmailMerge";
+import { logReviewLinkPartySimulationOpened } from "../../components/agreements/paidProReviewLinkCorpusParity";
+import { countBlankSignerMetadataLinesInExecutionBlock } from "../../components/agreements/hydratePaidProExecutionBlockWithSignerMetadata";
 import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./agreementToVs01SigningBridge";
 import {
   orderedAuthoritativePartyDisplayNames,
@@ -110,6 +116,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}${verifyPath}` : verifyPath;
   const [reviewLinksTick, setReviewLinksTick] = useState(0);
   const [remintBusy, setRemintBusy] = useState(false);
+  const [partyOneSimulationBusy, setPartyOneSimulationBusy] = useState(false);
   const reviewRecipientHandoff = useMemo(
     () => readSimpleDoneReviewRecipientLinks(agreementId),
     [agreementId, reviewLinksTick],
@@ -623,6 +630,45 @@ export function SimpleDonePage(props: { agreementId: string }) {
     const multiReviewer = normalizedReviewerRows.length > 1;
     const primaryReviewHref = (normalizedReviewerRows[0]?.reviewHref || "").trim();
     const primaryReviewHrefIsPreviewOnly = !extractReviewLinkTokenFromHref(primaryReviewHref);
+    const partyOneIndex = resolveReviewLinkAssumedOwnerPartyIndex(ownerHandoffDraft?.parties);
+    const partyTwoRow = normalizedReviewerRows[0];
+    const reviewCorpusBlankSignerLines = ownerReviewFirstDisplayCorpus?.text
+      ? countBlankSignerMetadataLinesInExecutionBlock(ownerReviewFirstDisplayCorpus.text)
+      : 4;
+    const logPartyReviewSimulationOpened = (partyIndex: number, partyName: string) => {
+      logReviewLinkPartySimulationOpened({
+        partyIndex,
+        partyName,
+        corpusHash: ownerReviewFirstDisplayCorpus?.hash ?? "",
+        hydrated: reviewCorpusBlankSignerLines === 0,
+        blankSignerLinesRemaining: reviewCorpusBlankSignerLines,
+      });
+    };
+    const openPartyOneReviewerSimulation = () => {
+      if (!ownerHandoffDraft || partyOneSimulationBusy) return;
+      setPartyOneSimulationBusy(true);
+      void mintReviewPartySimulationRecipientLink({
+        agreementId,
+        draft: ownerHandoffDraft,
+        partyIndex: partyOneIndex,
+        signingCorpusPlain: ownerReviewFirstDisplayCorpus?.text,
+        signingCorpusSource: ownerReviewFirstDisplayCorpus?.source,
+      })
+        .then((minted) => {
+          if (!minted?.reviewHref) return;
+          const partyName =
+            String(ownerHandoffDraft?.parties?.[partyOneIndex]?.name ?? "").trim() || minted.partyName;
+          logPartyReviewSimulationOpened(minted.partyIndex, partyName);
+          logReviewLinkOpen({
+            agreementId,
+            href: minted.reviewHref,
+            source: "simple_done_open_party_one_reviewer_view",
+            previewOnly: false,
+          });
+          window.open(minted.reviewHref, "_blank", "noopener,noreferrer");
+        })
+        .finally(() => setPartyOneSimulationBusy(false));
+    };
     const anyReviewHref = normalizedReviewerRows.some((r) => r.reviewHref.trim().length > 0);
     const reviewerRowStatuses = ownerReviewPresentation.rowStatuses;
     const linksStillLoading =
@@ -920,6 +966,11 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       }
                       onClick={() => {
                         if (!primaryReviewHref) return;
+                        const partyTwoName =
+                          String(partyTwoRow?.displayName ?? partyTwoRow?.party_name ?? "").trim() ||
+                          "Party 2";
+                        const partyTwoIndex = partyTwoRow?.party_index ?? 1;
+                        logPartyReviewSimulationOpened(partyTwoIndex, partyTwoName);
                         logReviewLinkOpen({
                           agreementId,
                           href: primaryReviewHref,
@@ -929,12 +980,21 @@ export function SimpleDonePage(props: { agreementId: string }) {
                         logPaidProReviewTrackLifecycle("reviewer_link_opened", {
                           agreementId,
                           source: "simple_done_open_reviewer_view",
-                          canonicalHash: null,
+                          canonicalHash: ownerReviewFirstDisplayCorpus?.hash ?? null,
                         });
                         window.open(primaryReviewHref, "_blank", "noopener,noreferrer");
                       }}
                     >
                       {primaryReviewHrefIsPreviewOnly ? "Open preview (read-only)" : "Open reviewer view"}
+                    </button>
+                    <button
+                      type="button"
+                      className={reviewActionButtonClass("secondary")}
+                      data-testid="simple-done-open-party-one-reviewer-view"
+                      disabled={partyOneSimulationBusy || !ownerHandoffDraft}
+                      onClick={() => openPartyOneReviewerSimulation()}
+                    >
+                      {partyOneSimulationBusy ? "Opening…" : "Open Party 1 reviewer view"}
                     </button>
                     {primaryReviewHrefIsPreviewOnly ? (
                       <p

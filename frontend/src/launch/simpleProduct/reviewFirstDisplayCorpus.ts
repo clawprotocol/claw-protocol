@@ -3,10 +3,16 @@ import {
   authoritativeDocumentForSurface,
   logIllegalPostAcceptanceMutationAttempt,
 } from "../../components/agreements/authoritativeAgreementDocument";
-import { getPaidProDocumentForSurface } from "../../components/agreements/paidProSourceOfTruth";
+import { PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN } from "../../components/agreements/paidProFinalHydratedCorpus";
+import { isPaidProPostFinalizeHydratedCorpusLocked } from "../../components/agreements/paidProSignerMetadataCommitPolicy";
+import { resolvePaidProPostFinalizeReviewPlain } from "../../components/agreements/paidProPostFinalizeReviewSurface";
+import { getPaidProDocumentForSurface, hashPaidProCorpus } from "../../components/agreements/paidProSourceOfTruth";
+import { peekReviewFirstPinnedCorpus } from "./reviewFirstSendSurface";
 
 export type ReviewFirstDisplayCorpusSource =
   | "review_first_final_corpus"
+  | "review_first_pinned_corpus"
+  | "authoritative_signing_snapshot"
   | "server_full_document_text"
   | "premium_server_full_document_text"
   | "premium_full_document_text"
@@ -61,28 +67,52 @@ function reviewRouteHashInvariant(args: {
 
 export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): ReviewFirstDisplayCorpus | null {
   if (!draft) return null;
-  const paidPro = getPaidProDocumentForSurface("review");
-  if (paidPro && paidPro.text.trim().length >= 500) {
-    return {
-      text: paidPro.text,
-      source: "authoritative_agreement_document",
-      hash: paidPro.hash,
-    };
+
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const snapshotPlain = resolvePaidProPostFinalizeReviewPlain().trim();
+    if (snapshotPlain.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+      return {
+        text: snapshotPlain,
+        source: "authoritative_signing_snapshot",
+        hash: hashPaidProCorpus(snapshotPlain),
+      };
+    }
   }
-  const authoritative = authoritativeDocumentForSurface("review_route");
-  if (authoritative?.fullCorpusText) {
-    reviewRouteHashInvariant({
-      text: authoritative.fullCorpusText,
-      hash: authoritative.authoritativeHash,
-      authoritativeHash: authoritative.authoritativeHash,
-      userEdited: authoritative.explicitUserEditState.edited,
-    });
-    return {
-      text: authoritative.fullCorpusText,
-      source: "authoritative_agreement_document",
-      hash: authoritative.authoritativeHash,
-    };
+
+  const agreementId = String(draft.id ?? "").trim();
+  if (agreementId) {
+    const pinned = peekReviewFirstPinnedCorpus(agreementId);
+    if (pinned && pinned.trim().length >= 500) {
+      const text = pinned.trim();
+      return { text, source: "review_first_pinned_corpus", hash: corpusHash(text) };
+    }
   }
+
+  if (!isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const paidPro = getPaidProDocumentForSurface("review");
+    if (paidPro && paidPro.text.trim().length >= 500) {
+      return {
+        text: paidPro.text,
+        source: "authoritative_agreement_document",
+        hash: paidPro.hash,
+      };
+    }
+    const authoritative = authoritativeDocumentForSurface("review_route");
+    if (authoritative?.fullCorpusText) {
+      reviewRouteHashInvariant({
+        text: authoritative.fullCorpusText,
+        hash: authoritative.authoritativeHash,
+        authoritativeHash: authoritative.authoritativeHash,
+        userEdited: authoritative.explicitUserEditState.edited,
+      });
+      return {
+        text: authoritative.fullCorpusText,
+        source: "authoritative_agreement_document",
+        hash: authoritative.authoritativeHash,
+      };
+    }
+  }
+
   const pr = draft.pro_redline_v1;
   const rf =
     pr && typeof pr === "object" && !Array.isArray(pr)
