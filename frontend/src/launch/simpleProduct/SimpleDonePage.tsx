@@ -38,7 +38,6 @@ import { extractReviewLinkTokenFromHref, normalizeHandoffToReviewerLinkRows } fr
 import { PaidProReviewReviewerLinksTable } from "./PaidProReviewReviewerLinksTable";
 import { SimpleDoneReviewFlowDiagPanel } from "./SimpleDoneReviewFlowDiagPanel";
 import {
-  OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY,
   canContinueLockedSigningFromDonePage,
   canFinalizeReviewForSigning,
   computeOwnerDoneReviewApprovalPresentation,
@@ -99,6 +98,13 @@ import {
 } from "../../agreement/reviewFirstLayout";
 import { OwnerProposalReviewQaPanel } from "../../components/agreements/OwnerProposalReviewQaPanel";
 import { OWNER_CTA_REVIEW_SUGGESTED_CHANGES } from "../../agreement/ownerRecipientSuggestedEditsCopy";
+import {
+  CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
+  REVIEW_LINK_READY_ALL_APPROVED_BODY,
+  REVIEW_LINK_READY_ALL_APPROVED_TITLE,
+  REVIEW_LINK_READY_BACK_TO_DASHBOARD_LABEL,
+  logReviewLinkReadyAllApproved,
+} from "../creatorDashboardCopy";
 import {
   buildOwnerQaReviewAbsoluteLink,
   buildOwnerQaReviewDonePath,
@@ -309,7 +315,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
     const primaryCtaLabel = signingLockActive
       ? "Continue to signing"
       : reviewApprovalAgg.finalizeForSigningEnabled
-        ? "Prepare signing packet"
+        ? CREATOR_PREPARE_SIGNATURE_LINKS_LABEL
         : reviewApprovalAgg.hasOpenChangeRequests
           ? OWNER_CTA_REVIEW_SUGGESTED_CHANGES
           : multiMint
@@ -352,6 +358,26 @@ export function SimpleDonePage(props: { agreementId: string }) {
       status: reviewApprovalAgg.aggregateStatus,
     });
   }, [agreementId, isPaidProReviewDonePath, reviewLinksReady, reviewApprovalAgg]);
+
+  useEffect(() => {
+    if (!isPaidProReviewDonePath || !reviewLinksReady) return;
+    const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
+    const noOpenChangeRequests =
+      !ownerHandoffDraft || findOpenRecipientProposals(ownerHandoffDraft.audit_log).length === 0;
+    if (!reviewApprovalAgg.allReviewersApproved || signingLockActive || !noOpenChangeRequests) return;
+    logReviewLinkReadyAllApproved({
+      agreementId: agreementId.trim(),
+      approvedCount: reviewApprovalAgg.approvedReviewerCount,
+      partyCount: reviewApprovalAgg.requiredReviewerCount,
+    });
+  }, [
+    agreementId,
+    isPaidProReviewDonePath,
+    reviewLinksReady,
+    ownerHandoffDraft,
+    ownerSigningLockVid,
+    reviewApprovalAgg,
+  ]);
 
   useEffect(() => {
     if (!isPaidProReviewDonePath || !reviewLinksReady) return;
@@ -722,6 +748,8 @@ export function SimpleDonePage(props: { agreementId: string }) {
       linksIncomplete,
       reviewApprovalAggregate: reviewApprovalAgg,
     });
+    const showReviewLinkReadyAllApprovedCard =
+      showAllReviewersApprovedNoEditsCopy && canFinalizeGate;
     const showTopContinueSigning = canContinueLockedSigningFromDonePage({
       agreementIdTrimmed,
       signingLockActive,
@@ -734,7 +762,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
       ? findOpenRecipientProposals(ownerHandoffDraft.audit_log).length
       : 0;
     const showTopReviewSuggestedChanges = !signingLockActive && reviewApprovalAgg.hasOpenChangeRequests;
-    const showTopFinalizeForSigning = !signingLockActive && canFinalizeGate;
+    const showTopFinalizeForSigning = !signingLockActive && canFinalizeGate && !showReviewLinkReadyAllApprovedCard;
     const qaOwnerReviewEnabled = isOwnerProposalReviewQaEnabled();
     const showOwnerQaProposalPanel = qaOwnerReviewEnabled || openProposalCount > 0;
     const showTopAnySigningPrimary =
@@ -835,7 +863,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   </ReviewNotice>
                 ) : showAllReviewersApprovedNoEditsCopy ? (
                   <ReviewNotice tone="success" testId="simple-done-all-approved-body">
-                    {OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY}
+                    {REVIEW_LINK_READY_ALL_APPROVED_BODY}
                   </ReviewNotice>
                 ) : reviewApprovalAgg.hasOpenChangeRequests ? (
                   <ReviewNotice tone="warning" testId="simple-done-open-change-requests">
@@ -850,6 +878,34 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       ? "Track each reviewer in the table. When everyone has approved without open change requests, you can finalize for signing."
                       : reviewApprovalAgg.ownerStatusLine}
                   </ReviewNotice>
+                ) : null}
+                {showReviewLinkReadyAllApprovedCard ? (
+                  <section
+                    className="mt-4 rounded-xl border border-emerald-800/45 bg-emerald-950/20 px-4 py-4 sm:px-5"
+                    data-testid="review-link-ready-all-approved-card"
+                  >
+                    <h3 className="text-base font-semibold text-emerald-100">{REVIEW_LINK_READY_ALL_APPROVED_TITLE}</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-emerald-50/90">{REVIEW_LINK_READY_ALL_APPROVED_BODY}</p>
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      <button
+                        type="button"
+                        className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
+                        data-testid="review-link-ready-prepare-signature-links"
+                        disabled={finalizeNavigating}
+                        onClick={() => void handleOwnerFinalizeOrContinueSigning()}
+                      >
+                        {finalizeNavigating ? "Preparing signature links…" : CREATOR_PREPARE_SIGNATURE_LINKS_LABEL}
+                      </button>
+                      <button
+                        type="button"
+                        className="vs01-btn vs01-btn--secondary min-h-[2.5rem] px-4 text-sm"
+                        data-testid="review-link-ready-back-to-dashboard"
+                        onClick={() => navigate("/app")}
+                      >
+                        {REVIEW_LINK_READY_BACK_TO_DASHBOARD_LABEL}
+                      </button>
+                    </div>
+                  </section>
                 ) : null}
                 {showOwnerQaProposalPanel ? (
                   <OwnerProposalReviewQaPanel
@@ -906,7 +962,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                         disabled={finalizeNavigating}
                         onClick={() => void handleOwnerFinalizeOrContinueSigning()}
                       >
-                        {finalizeNavigating ? "Preparing signing packet…" : "Prepare signing packet"}
+                        {finalizeNavigating ? "Preparing signature links…" : CREATOR_PREPARE_SIGNATURE_LINKS_LABEL}
                       </button>
                     ) : null}
                   </div>

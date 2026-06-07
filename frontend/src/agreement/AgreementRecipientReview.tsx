@@ -114,6 +114,8 @@ import {
   RECIPIENT_SIGN_RECORD_SUBLINE,
 } from "./recipientReviewTrustCopy";
 import { RECIPIENT_APPROVED_LAWDOG_PROMO_LINE } from "./recipientPublicReviewChrome";
+import type { LawdogViewerContext } from "./lawdogViewerContext";
+import { RecipientApprovedWaitingPanel } from "./RecipientApprovedWaitingPanel";
 import { recipientReviewDevInfo, recipientReviewDevWarn } from "./recipientReviewDevLog";
 import { JoyMilestoneMark } from "../joy/JoyMilestone";
 import { emitActionCompleted } from "../joy/joyTelemetry";
@@ -667,6 +669,8 @@ type Props = {
   revisionLineage?: RecipientRevisionLineage;
   /** Parent shell hides account/plan chrome while the approved/waiting screen is shown. */
   onRecipientApprovedWaitingChange?: (active: boolean) => void;
+  /** Public recipient vs QA simulation — controls waiting copy and diagnostics only. */
+  recipientViewerContext?: LawdogViewerContext;
 };
 
 type RecipientPreview = {
@@ -753,6 +757,7 @@ export function AgreementRecipientReview({
   recipientAccessToken = "",
   revisionLineage = DEFAULT_RECIPIENT_REVISION_LINEAGE,
   onRecipientApprovedWaitingChange,
+  recipientViewerContext = "public_recipient",
 }: Props) {
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState("");
@@ -4780,24 +4785,14 @@ export function AgreementRecipientReview({
           </div>
         ) : null}
 
-        <div
-          className="rounded-lg border border-slate-700/70 bg-slate-950/50 px-4 py-3 text-slate-200"
-          data-testid="recipient-signing-readiness-panel"
-        >
-          <div className="text-sm font-semibold text-slate-100">Waiting for sender to finalize signing.</div>
-          <p className="mt-1 text-xs leading-relaxed text-slate-400">
-            This page checks for updates automatically (about every {Math.round(RECIPIENT_SIGNING_READINESS_POLL_MS / 1000)}s).
-          </p>
-          <button
-            type="button"
-            className="mt-2 inline-flex items-center justify-center rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
-            data-testid="recipient-refresh-signing-status"
-            disabled={loading}
-            onClick={() => void refresh()}
-          >
-            Refresh signing status
-          </button>
-        </div>
+        <RecipientApprovedWaitingPanel
+          agreementId={agreementId}
+          viewerContext={recipientViewerContext}
+          signingLinksExist={signingReadyActive}
+          loading={loading}
+          pollIntervalMs={RECIPIENT_SIGNING_READINESS_POLL_MS}
+          onRefresh={refresh}
+        />
 
         {needsPersonalizedLink ? (
           <div
@@ -5067,24 +5062,14 @@ export function AgreementRecipientReview({
       !signingReadyActive &&
       !agreementFullyExecuted &&
       !mySignatureDone ? (
-        <div
-          className="rounded-lg border border-slate-700/70 bg-slate-950/50 px-4 py-3 text-slate-200"
-          data-testid="recipient-signing-readiness-panel"
-        >
-          <p className="text-xs leading-relaxed text-slate-400">
-            When the sender finalizes this agreement for signature, this page picks it up automatically (about every{" "}
-            {Math.round(RECIPIENT_SIGNING_READINESS_POLL_MS / 1000)}s). If they already clicked finalize, refresh now.
-          </p>
-          <button
-            type="button"
-            className="mt-2 inline-flex items-center justify-center rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
-            data-testid="recipient-refresh-signing-status"
-            disabled={loading}
-            onClick={() => void refresh()}
-          >
-            Refresh signing status
-          </button>
-        </div>
+        <RecipientApprovedWaitingPanel
+          agreementId={agreementId}
+          viewerContext={recipientViewerContext}
+          signingLinksExist={signingReadyActive}
+          loading={loading}
+          pollIntervalMs={RECIPIENT_SIGNING_READINESS_POLL_MS}
+          onRefresh={refresh}
+        />
       ) : null}
 
       {entry.kind === "review" && recipientSuggestedEditsSentAck ? (

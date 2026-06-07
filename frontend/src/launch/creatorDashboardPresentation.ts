@@ -8,6 +8,7 @@ import {
   isAgreementFullySignedLocal,
   isAgreementPacketPrepared,
 } from "../vs01/vs01WorkspaceSigningStatus";
+import { CREATOR_PREPARE_SIGNATURE_LINKS_LABEL } from "./creatorDashboardCopy";
 
 export type CreatorDashboardStatus =
   | "draft"
@@ -113,7 +114,7 @@ export function creatorDashboardPrimaryAction(
       return { label: "View Signing Status", path: `/app/send/${id}`, emphasis: "primary" };
     case "ready_for_signing":
     case "review_approved":
-      return { label: "Prepare Signature Links", path: `/app/done/${id}`, emphasis: "primary" };
+      return { label: CREATOR_PREPARE_SIGNATURE_LINKS_LABEL, path: `/app/done/${id}`, emphasis: "primary" };
     case "in_review":
       return { label: "View Review Status", path: `/app/done/${id}`, emphasis: "secondary" };
     case "draft":
@@ -171,4 +172,33 @@ export function sortCreatorDashboardRows(
     const tb = new Date(b.updated_at).getTime();
     return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
   });
+}
+
+export function deriveCreatorSigningStatusLabel(row: WorkspaceIndexAgreement): string {
+  if (row.completed_signed || isAgreementFullySignedLocal(row.id)) return "Fully signed";
+  if (row.has_server_signing_lock || isAgreementPacketPrepared(row.id)) return "Signature links ready";
+  return "Signature links not prepared yet";
+}
+
+export function deriveCreatorReviewProgressLabel(
+  row: WorkspaceIndexAgreement,
+  reviewRows: readonly OwnerReviewPartyStatusRow[],
+): string | null {
+  const required = row.review_approvals_required ?? reviewRows.length;
+  if (required <= 0) return null;
+  const approved =
+    reviewRows.length > 0
+      ? reviewRows.filter((r) => r.status === "approved").length
+      : (row.review_approvals_completed ?? 0);
+  return `${approved} of ${required} approved`;
+}
+
+export function countCreatorReviewApproved(
+  row: WorkspaceIndexAgreement,
+  reviewRows: readonly OwnerReviewPartyStatusRow[],
+): number {
+  if (reviewRows.length > 0) {
+    return reviewRows.filter((r) => r.status === "approved").length;
+  }
+  return row.review_approvals_completed ?? 0;
 }

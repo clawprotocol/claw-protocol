@@ -32,8 +32,9 @@ type Props = {
   reviewGate: (args: {
     agreementId: string;
     token?: string;
-    recipientLinkRole?: RecipientLinkRole;
+    recipientLinkRole?: import("./AgreementRecipientReview").RecipientLinkRole;
     participantPartyId?: string;
+    viewerContext: LawdogViewerContext;
     onClose: () => void;
   }) => ReactNode;
 };
@@ -66,6 +67,7 @@ export function RecipientPublicReviewRoute(props: Props) {
           token: props.token,
           recipientLinkRole: props.recipientLinkRole,
           participantPartyId: props.participantPartyId,
+          viewerContext: props.viewerContext,
           onClose: props.onClose,
         })}
       </div>

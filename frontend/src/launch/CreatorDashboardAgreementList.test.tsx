@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { CreatorDashboardAgreementList } from "./CreatorDashboardAgreementList";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 
@@ -26,6 +26,10 @@ function indexRow(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement 
 }
 
 describe("CreatorDashboardAgreementList", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("shows per-party review status and prepare signature CTA when all approved", () => {
     render(
       <CreatorDashboardAgreementList
@@ -51,6 +55,8 @@ describe("CreatorDashboardAgreementList", () => {
           ],
         }}
         onNavigate={vi.fn()}
+        onPrepareSignatureLinks={vi.fn()}
+        featured
       />,
     );
 
@@ -61,6 +67,44 @@ describe("CreatorDashboardAgreementList", () => {
     expect(screen.getByTestId("creator-dashboard-review-party-1").textContent).toContain(
       "Iron Vale Systems Inc.",
     );
-    expect(screen.getByRole("button", { name: "Prepare Signature Links" })).toBeTruthy();
+    expect(screen.getByText(/Next action:/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open review link page" })).toBeTruthy();
+    expect(screen.getByText("Reviews complete")).toBeTruthy();
+  });
+
+  it("calls onPrepareSignatureLinks for the primary CTA", async () => {
+    const onPrepare = vi.fn();
+    render(
+      <CreatorDashboardAgreementList
+        rows={[indexRow({})]}
+        reviewRowsByAgreementId={{
+          ag_ready: [
+            {
+              partyIndex: 0,
+              partyLabel: "Party 1",
+              displayName: "Blue Canyon Analytics LLC",
+              partyId: "p1",
+              status: "approved",
+              statusLabel: "Approved",
+            },
+            {
+              partyIndex: 1,
+              partyLabel: "Party 2",
+              displayName: "Iron Vale Systems Inc.",
+              partyId: "p2",
+              status: "approved",
+              statusLabel: "Approved",
+            },
+          ],
+        }}
+        onNavigate={vi.fn()}
+        onPrepareSignatureLinks={onPrepare}
+        featured
+      />,
+    );
+
+    screen.getByTestId("creator-dashboard-action-ag_ready").click();
+    expect(onPrepare).toHaveBeenCalledWith("ag_ready");
   });
 });

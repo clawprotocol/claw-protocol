@@ -64,7 +64,7 @@ describe("creatorDashboardPresentation", () => {
           review_approvals_completed: 2,
         }),
       ).label,
-    ).toBe("Prepare Signature Links");
+    ).toBe("Prepare signature links");
     expect(creatorDashboardPrimaryAction(row({ has_server_signing_lock: true })).label).toBe(
       "View Signing Status",
     );

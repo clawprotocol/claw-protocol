@@ -10,7 +10,7 @@ import { SimpleDonePage } from "./SimpleDonePage";
 import { markSimpleFlowSent } from "../simpleFlowSent";
 import { writeSimpleDoneReviewRecipientLinks } from "./simpleDoneReviewRecipientLinks";
 import { persistPremiumRecipientHandoff } from "../../components/agreements/premiumPartyNamesHandoff";
-import { OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY } from "../../components/agreements/draftRecipientReviewSignals";
+import { REVIEW_LINK_READY_ALL_APPROVED_BODY } from "../creatorDashboardCopy";
 
 const { mockNavigate, mockTryNavigatePaidProVs01 } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
@@ -121,15 +121,16 @@ describe("SimpleDonePage owner approval UX", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "All reviewers approved" })).toBeTruthy();
     expect(screen.getByTestId("simple-done-all-approved-body").textContent).toBe(
-      OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY,
+      REVIEW_LINK_READY_ALL_APPROVED_BODY,
     );
-    expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
-    expect(screen.getByTestId("simple-done-review-primary-actions")).toBeTruthy();
+    expect(screen.getByTestId("review-link-ready-all-approved-card")).toBeTruthy();
+    expect(screen.getByTestId("review-link-ready-prepare-signature-links")).toBeTruthy();
+    expect(screen.getByTestId("review-link-ready-back-to-dashboard")).toBeTruthy();
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
       "All reviewers approved — ready to prepare signing.",
     );
 
-    await userEvent.click(screen.getByTestId("simple-done-finalize-for-signing"));
+    await userEvent.click(screen.getByTestId("review-link-ready-prepare-signature-links"));
     expect(mockTryNavigatePaidProVs01).toHaveBeenCalledWith(
       expect.objectContaining({
         agreementId,
@@ -231,7 +232,7 @@ describe("SimpleDonePage owner approval UX", () => {
         /1 of 4 reviewers approved/,
       );
     });
-    expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
+    expect(screen.queryByTestId("review-link-ready-prepare-signature-links")).toBeNull();
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
       "1 of 4 reviewers approved. Waiting for remaining reviewers.",
     );
@@ -273,13 +274,13 @@ describe("SimpleDonePage owner approval UX", () => {
     render(<SimpleDonePage agreementId={agreementId} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
+      expect(screen.getByTestId("review-link-ready-prepare-signature-links")).toBeTruthy();
     });
     expect(screen.getByRole("heading", { level: 1, name: "All reviewers approved" })).toBeTruthy();
     expect(screen.getByTestId("simple-done-all-approved-body").textContent).toBe(
-      OWNER_DONE_ALL_REVIEWERS_APPROVED_BODY_COPY,
+      REVIEW_LINK_READY_ALL_APPROVED_BODY,
     );
-    expect(screen.getByTestId("simple-done-review-primary-actions")).toBeTruthy();
+    expect(screen.getByTestId("review-link-ready-all-approved-card")).toBeTruthy();
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
       "4 of 4 reviewers approved. Ready to prepare signing.",
     );
@@ -346,10 +347,10 @@ describe("SimpleDonePage owner approval UX", () => {
     render(<SimpleDonePage agreementId={agreementId} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
+      expect(screen.getByTestId("review-link-ready-prepare-signature-links")).toBeTruthy();
     });
 
-    await userEvent.click(screen.getByTestId("simple-done-finalize-for-signing"));
+    await userEvent.click(screen.getByTestId("review-link-ready-prepare-signature-links"));
     expect(mockTryNavigatePaidProVs01).toHaveBeenCalledWith(
       expect.objectContaining({
         agreementId,
@@ -380,7 +381,7 @@ describe("SimpleDonePage owner approval UX", () => {
     await waitFor(() => {
       expect(screen.getByText("Review link ready")).toBeTruthy();
     });
-    expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
+    expect(screen.queryByTestId("review-link-ready-prepare-signature-links")).toBeNull();
     const primaries = screen.getAllByRole("button", { name: /Copy review link/i });
     expect(primaries.some((b) => b.className.includes("vs01-btn--primary"))).toBe(true);
   });
@@ -469,7 +470,7 @@ describe("SimpleDonePage owner approval UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain("0 of 4 reviewers approved");
     });
-    expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
+    expect(screen.queryByTestId("review-link-ready-prepare-signature-links")).toBeNull();
   });
 
   it("with 4 approvals and open proposals, hides Finalize and shows Review suggested changes as primary", async () => {
@@ -521,7 +522,7 @@ describe("SimpleDonePage owner approval UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("simple-done-review-suggested-changes")).toBeTruthy();
     });
-    expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
+    expect(screen.queryByTestId("review-link-ready-prepare-signature-links")).toBeNull();
     expect(screen.queryByTestId("simple-done-resolve-in-workspace")).toBeNull();
     expect(screen.getByTestId("simple-done-review-primary-actions")).toBeTruthy();
   });
@@ -565,7 +566,7 @@ describe("SimpleDonePage owner approval UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("simple-done-review-links-loading-warning")).toBeTruthy();
     });
-    expect(screen.queryByTestId("simple-done-finalize-for-signing")).toBeNull();
+    expect(screen.queryByTestId("review-link-ready-prepare-signature-links")).toBeNull();
   });
 
   it("multi-reviewer row-derived aggregate stays 4/4 when draft.parties omit reviewer roles but handoff rows carry party ids", async () => {
@@ -603,7 +604,7 @@ describe("SimpleDonePage owner approval UX", () => {
     render(<SimpleDonePage agreementId={agreementId} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("simple-done-finalize-for-signing")).toBeTruthy();
+      expect(screen.getByTestId("review-link-ready-prepare-signature-links")).toBeTruthy();
     });
     expect(screen.getByTestId("simple-done-owner-approval-status").textContent).toContain(
       "4 of 4 reviewers approved. Ready to prepare signing.",

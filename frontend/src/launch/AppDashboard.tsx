@@ -15,12 +15,14 @@ import {
 import { canAccessOperatorGrowthDashboard } from "./ops/OperatorGrowthDashboard";
 import { CreatorDashboardAgreementList } from "./CreatorDashboardAgreementList";
 import {
-  countCreatorDashboardMetrics,
+  countCreatorReviewApproved,
+  creatorDashboardAllPartiesApproved,
   creatorDashboardReviewRowsFromDraft,
   deriveCreatorDashboardStatus,
-  resolveCreatorGreetingHeadline,
   sortCreatorDashboardRows,
 } from "./creatorDashboardPresentation";
+import { logCreatorDashboardAgreementStatusLoaded } from "./creatorDashboardCopy";
+import { navigateCreatorPrepareSignatureLinks } from "./creatorDashboardPrepareSignatureLinks";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import { workspaceAgreementStatusBadge } from "./workspaceAgreementCard";
 
@@ -43,13 +45,6 @@ export function workspaceAgreementStatusLabel(r: WorkspaceIndexAgreement): strin
   return workspaceAgreementStatusBadge(r);
 }
 
-const METRIC_LABELS = {
-  drafts: "Drafts",
-  in_review: "In Review",
-  ready_for_signing: "Ready for Signing",
-  completed: "Completed",
-} as const;
-
 export function AppDashboard() {
   const { navigate, pathname } = useLaunchNav();
   const [rows, setRows] = useState<WorkspaceIndexAgreement[]>([]);
@@ -58,6 +53,7 @@ export function AppDashboard() {
   const [reviewRowsByAgreementId, setReviewRowsByAgreementId] = useState<
     Record<string, OwnerReviewPartyStatusRow[]>
   >({});
+  const [prepareBusyAgreementId, setPrepareBusyAgreementId] = useState<string | null>(null);
   const draftingRedirectedRef = useRef(false);
 
   const reloadWorkspaceIndex = useCallback(async () => {
@@ -74,8 +70,9 @@ export function AppDashboard() {
   }, [reloadWorkspaceIndex]);
 
   const safeRecent = useMemo(() => sortCreatorDashboardRows(rows), [rows]);
-  const metrics = useMemo(() => countCreatorDashboardMetrics(safeRecent), [safeRecent]);
   const mode = useMemo(() => getWorkspaceMode(safeRecent, indexLoading), [safeRecent, indexLoading]);
+  const primaryRow = safeRecent[0] ?? null;
+  const otherRows = safeRecent.length > 1 ? safeRecent.slice(1) : [];
 
   const entryResolved = useMemo(
     () => resolveLawdogEntryContext(safeRecent.length, indexLoading),
@@ -126,15 +123,49 @@ export function AppDashboard() {
     };
   }, [indexLoading, safeRecent]);
 
+  useEffect(() => {
+    if (indexLoading) return;
+    for (const row of safeRecent) {
+      const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
+      const status = deriveCreatorDashboardStatus(row);
+      const allApproved = creatorDashboardAllPartiesApproved(row, reviewRows);
+      if (status !== "ready_for_signing" || !allApproved) continue;
+      logCreatorDashboardAgreementStatusLoaded({
+        agreementId: row.id,
+        approvedCount: countCreatorReviewApproved(row, reviewRows),
+        partyCount: row.party_count || reviewRows.length || row.review_approvals_required || 0,
+        nextAction: "prepare_signature_links",
+      });
+    }
+  }, [indexLoading, safeRecent, reviewRowsByAgreementId]);
+
   const withClearEntry = useCallback((fn: () => void) => {
     clearLawdogEntryContext();
     fn();
   }, []);
 
-  const greeting = resolveCreatorGreetingHeadline();
+  const handlePrepareSignatureLinks = useCallback(
+    async (agreementId: string) => {
+      const id = agreementId.trim();
+      if (!id || prepareBusyAgreementId) return;
+      setPrepareBusyAgreementId(id);
+      try {
+        await navigateCreatorPrepareSignatureLinks({
+          agreementId: id,
+          navigate: (path) => withClearEntry(() => navigate(path)),
+        });
+      } finally {
+        setPrepareBusyAgreementId(null);
+      }
+    },
+    [navigate, prepareBusyAgreementId, withClearEntry],
+  );
 
   return (
-    <AppShell title={greeting} subtitle="Your agreements and next steps.">
+    <AppShell
+      title="Dashboard"
+      subtitle="Track agreements you created, review approvals, and signing readiness."
+    >
       {indexError ? (
         <div
           className="mb-6 rounded-xl border border-amber-800/40 bg-amber-950/25 px-4 py-3 text-sm text-amber-100"
@@ -152,68 +183,77 @@ export function AppDashboard() {
         </div>
       ) : null}
 
-      <section data-testid="creator-dashboard-metrics" aria-label="Agreement summary">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {(Object.keys(METRIC_LABELS) as Array<keyof typeof METRIC_LABELS>).map((key) => (
-            <div
-              key={key}
-              className="rounded-2xl border border-slate-800/60 bg-slate-950/30 px-4 py-3"
-              data-testid={`creator-dashboard-metric-${key}`}
-            >
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                {METRIC_LABELS[key]}
-              </p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-white">
-                {indexLoading ? "—" : metrics[key]}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-8" aria-labelledby="creator-dashboard-agreements-heading">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 id="creator-dashboard-agreements-heading" className="text-lg font-semibold tracking-tight text-white">
-              Agreements
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">Status, review progress, and your next action.</p>
-          </div>
-          {mode !== "empty" ? (
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              onClick={() => withClearEntry(() => navigate("/app/create"))}
-            >
-              New agreement
-            </button>
-          ) : null}
-        </div>
-
+      <div className="mx-auto w-full max-w-3xl">
         {indexLoading ? (
-          <p className="mt-6 text-sm text-slate-400">Loading agreements…</p>
+          <p className="text-sm text-slate-400">Loading agreements…</p>
         ) : safeRecent.length === 0 ? (
           <div
-            className="mt-6 rounded-2xl border border-dashed border-slate-800/80 bg-slate-950/20 px-6 py-10 text-center"
+            className="rounded-2xl border border-dashed border-slate-800/80 bg-slate-950/20 px-6 py-10 text-center"
             data-testid="creator-dashboard-empty"
           >
-            <p className="text-base font-medium text-slate-200">No active agreements.</p>
+            <p className="text-base font-medium text-slate-200">No agreements yet</p>
+            <p className="mt-2 text-sm text-slate-500">Create your first agreement to begin.</p>
             <button
               type="button"
               className="vs01-btn vs01-btn--primary mt-5"
               onClick={() => withClearEntry(() => navigate("/app/create"))}
             >
-              Create Agreement
+              Create agreement
             </button>
           </div>
         ) : (
-          <CreatorDashboardAgreementList
-            rows={safeRecent}
-            reviewRowsByAgreementId={reviewRowsByAgreementId}
-            onNavigate={(path) => withClearEntry(() => navigate(path))}
-          />
+          <>
+            <section aria-label="Current agreement" data-testid="creator-dashboard-primary">
+              <CreatorDashboardAgreementList
+                rows={primaryRow ? [primaryRow] : []}
+                reviewRowsByAgreementId={reviewRowsByAgreementId}
+                onNavigate={(path) => withClearEntry(() => navigate(path))}
+                onPrepareSignatureLinks={handlePrepareSignatureLinks}
+                prepareBusyAgreementId={prepareBusyAgreementId}
+                featured
+              />
+            </section>
+            {otherRows.length > 0 ? (
+              <section className="mt-8" aria-labelledby="creator-dashboard-other-agreements-heading">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <h2
+                    id="creator-dashboard-other-agreements-heading"
+                    className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500"
+                  >
+                    Other agreements
+                  </h2>
+                  {mode !== "empty" ? (
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                      onClick={() => withClearEntry(() => navigate("/app/create"))}
+                    >
+                      New agreement
+                    </button>
+                  ) : null}
+                </div>
+                <CreatorDashboardAgreementList
+                  rows={otherRows}
+                  reviewRowsByAgreementId={reviewRowsByAgreementId}
+                  onNavigate={(path) => withClearEntry(() => navigate(path))}
+                  onPrepareSignatureLinks={handlePrepareSignatureLinks}
+                  prepareBusyAgreementId={prepareBusyAgreementId}
+                />
+              </section>
+            ) : (
+              <div className="mt-6 flex justify-end">
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                  onClick={() => withClearEntry(() => navigate("/app/create"))}
+                >
+                  New agreement
+                </button>
+              </div>
+            )}
+          </>
         )}
-      </section>
+      </div>
 
       {canAccessOperatorGrowthDashboard() ? (
         <p className="mt-10 text-center text-[11px] text-slate-600">
