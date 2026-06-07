@@ -198,6 +198,43 @@ export function createAuthoritativeSigningSnapshot(
   return authoritativeSigningSnapshot;
 }
 
+/**
+ * Post-finalize clause edit — update frozen snapshot corpus while preserving signer metadata manifest.
+ */
+export function replaceAuthoritativeSigningSnapshotCorpus(args: {
+  corpus: string;
+  surface: string;
+}): AuthoritativeSigningSnapshot | null {
+  if (!authoritativeSigningSnapshot) return null;
+  const next = (args.corpus || "").trim();
+  if (!next) return null;
+  const oldText = authoritativeSigningSnapshot.corpus;
+  const hash = hashPaidProCorpus(next);
+  authoritativeSigningSnapshot = {
+    ...authoritativeSigningSnapshot,
+    corpus: next,
+    hash,
+  };
+  authorityPhase = "SIGNER_METADATA_FINALIZED";
+  setPaidProPinnedSignerAppliedCorpus(next);
+  auditPaidProSignerFinalizeCorpus(next);
+  tracePaidProCorpusMutation({
+    store: "authoritative_signing_snapshot",
+    caller: "replaceAuthoritativeSigningSnapshotCorpus",
+    stage: "post_finalize_clause_edit",
+    surface: args.surface,
+    oldText,
+    newText: next,
+    sourceAfter: authoritativeSigningSnapshot.source,
+  });
+  logAuthorityBoundary({
+    phase: authorityPhase,
+    hash,
+    corpusLen: next.length,
+  });
+  return authoritativeSigningSnapshot;
+}
+
 export function markSigningPreparationRequested(): void {
   if (authorityPhase === "SIGNER_METADATA_FINALIZED" || hasAuthoritativeSigningSnapshot()) {
     authorityPhase = "SIGNING_PREPARATION_REQUESTED";

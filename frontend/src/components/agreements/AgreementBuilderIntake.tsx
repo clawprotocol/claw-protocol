@@ -807,6 +807,10 @@ import {
   tryResolvePaidProPostFinalizeEditOpen,
 } from "./paidProPostFinalizeEditAgreement";
 import {
+  commitPaidProPostFinalizeClauseEditRevision,
+  logPaidProPostFinalizeEditSaveBlocked,
+} from "./paidProPostFinalizeEditSave";
+import {
   auditPaidProPostFinalizeHydrationInvariant,
   canProceedPaidProReviewFirstHandoffAfterFinalize,
   logPaidProPostFinalizeHydrationBlocked,
@@ -12830,6 +12834,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const stripped = stripPremiumInstructionNoiseForDocument(raw);
     const finalText = stripped !== raw ? stripped : raw;
+    if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+      const saved = commitPaidProPostFinalizeClauseEditRevision({
+        editedPlain: finalText,
+      });
+      if (!saved.ok) {
+        logPaidProPostFinalizeEditSaveBlocked({
+          reason: saved.reason,
+          corpusHash: saved.corpusHash,
+          hydrated: true,
+          blankSignerLinesRemaining: saved.blankSignerLinesRemaining,
+        });
+        return;
+      }
+      finalizedSigningCorpusRef.current = saved.corpus;
+      acceptedReviewCorpusRef.current = saved.corpus;
+      hydratedPremiumBodyRef.current = saved.corpus;
+      bumpPremiumSurfaceGateTick();
+      setGuidedAuthVersionNonce((n) => n + 1);
+      setReviewDocRefreshTick((n) => n + 1);
+      setPaidProCardEditDraft(null);
+      setPaidProCardAiInstruction("");
+      setPremiumReviewDocEditorOpen(false);
+      return;
+    }
     if (hasPaidProSourceOfTruth()) {
       commitPaidProUserApprovedRevision(finalText, "paid_pro_card_edit_revision");
       setPaidProCardEditDraft(null);
@@ -12843,7 +12871,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPaidProCardEditDraft(null);
     setPaidProCardAiInstruction("");
     setPremiumReviewDocEditorOpen(false);
-  }, [paidProCardEditDraft, scheduleAgreementDocSync, commitPaidProUserApprovedRevision]);
+  }, [paidProCardEditDraft, scheduleAgreementDocSync, commitPaidProUserApprovedRevision, bumpPremiumSurfaceGateTick]);
 
   const applyPaidProCardAiWithLawDog = React.useCallback(async () => {
     const ins = paidProCardAiInstruction.trim();
