@@ -12,6 +12,7 @@ import {
   RECIPIENT_WANT_COPY_LOOPBACK_CUE,
 } from "./portableReviewCopy";
 import { RECIPIENT_PUBLIC_HERO_TITLE } from "./recipientReviewTrustCopy";
+import { RECIPIENT_APPROVED_LAWDOG_PROMO_LINE } from "./recipientPublicReviewChrome";
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -102,6 +103,55 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
     expect(screen.getByTestId("recipient-records-download-pdf")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Download text$/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Copy text$/ })).toBeTruthy();
+    expect(screen.getByTestId("recipient-approved-lawdog-promo").textContent).toContain(
+      RECIPIENT_APPROVED_LAWDOG_PROMO_LINE,
+    );
+    expect(screen.queryByText(/Current plan:/)).toBeNull();
+    expect(screen.queryByText("Account")).toBeNull();
+  });
+
+  it("notifies parent shell to hide account chrome while approved/waiting", async () => {
+    const onApprovedWaitingChange = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (
+        init?.method ||
+        (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({ rendered_html: "<p>Services Agreement</p><p>Body.</p>" });
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({ draft: draftAccepted, signing_lock: null });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview
+          agreementId={agreementId}
+          recipientAccessToken="tok_test"
+          participantPartyId="p-bob"
+          onRecipientApprovedWaitingChange={onApprovedWaitingChange}
+        />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => {
+      expect(onApprovedWaitingChange).toHaveBeenCalledWith(true);
+    });
   });
 
   it("after refresh with signing_lock, signer sees Continue to signing and waiting root is gone", async () => {

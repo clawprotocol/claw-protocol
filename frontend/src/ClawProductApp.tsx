@@ -31,15 +31,12 @@ import { IntegrationsPage } from "./launch/IntegrationsPage";
 import { AgreementPublicVerify } from "./agreement/AgreementPublicVerifyView";
 import { parseAgreementVerifyPath } from "./agreement/agreementPublicVerify";
 import {
-  RECIPIENT_PUBLIC_HERO_SUBTITLE,
-  RECIPIENT_PUBLIC_HERO_TITLE,
-} from "./agreement/recipientReviewTrustCopy";
-import {
   AgreementRecipientReview,
   parseAgreementReviewPath,
   parseAgreementSignPath,
   type RecipientLinkRole,
 } from "./agreement/AgreementRecipientReview";
+import { RecipientPublicReviewRoute } from "./agreement/RecipientPublicReviewRoute";
 import { AgreementWizardShell } from "./agreement/AgreementWizardShell";
 import {
   fetchRecipientAccessPolicy,
@@ -97,15 +94,6 @@ const AGREEMENT_HERO: Vs01LayoutHero = {
     "Describe terms in plain language, review versions with counterparties, then export or send to signing.",
   tagline: "Version history and redlines stay with each agreement before it hits the signing flow.",
 };
-
-/** Public recipient agreement review (`/agreements/.../review`) — LawDog-only chrome, no CLAW eyebrow. */
-const RECIPIENT_REVIEW_HERO: Vs01LayoutHero = {
-  title: RECIPIENT_PUBLIC_HERO_TITLE,
-  subtitle: RECIPIENT_PUBLIC_HERO_SUBTITLE,
-};
-
-const LAWDOG_FOOTER_EVIDENCE_SENTENCE =
-  "LawDog produces verifiable evidence records; verification is cryptographic and file-based.";
 
 const VERIFY_HERO: Vs01LayoutHero = {
   eyebrow: "CLAW",
@@ -245,8 +233,10 @@ function AgreementReviewGate(props: {
   recipientLinkRole?: RecipientLinkRole;
   participantPartyId?: string;
   onClose: () => void;
+  onRecipientApprovedWaitingChange?: (active: boolean) => void;
 }) {
-  const { agreementId, token, recipientLinkRole, participantPartyId, onClose } = props;
+  const { agreementId, token, recipientLinkRole, participantPartyId, onClose, onRecipientApprovedWaitingChange } =
+    props;
   const [phase, setPhase] = useState<"loading" | "ready" | "bad">("loading");
   const [gateVid, setGateVid] = useState<string | undefined>(undefined);
   const [tokenValidated, setTokenValidated] = useState(false);
@@ -385,6 +375,7 @@ function AgreementReviewGate(props: {
       inviterDisplayNameOverride={inviterName || ""}
       recipientAccessToken={accessTokOut}
       onClose={onClose}
+      onRecipientApprovedWaitingChange={onRecipientApprovedWaitingChange}
     />
   );
 }
@@ -494,23 +485,23 @@ export function ClawProductApp() {
 
   if (reviewInfo) {
     return (
-      <Vs01Layout
-        hero={RECIPIENT_REVIEW_HERO}
-        headerAside={ACCESS_HEADER_ASIDE}
-        productNav={{ label: "← Home", onClick: () => navigate("/") }}
-        footerEvidenceSentence={LAWDOG_FOOTER_EVIDENCE_SENTENCE}
-        recipientPublicFooter
-      >
-        <div className="vs01-card vs01-card--envelope">
+      <RecipientPublicReviewRoute
+        agreementId={reviewInfo.agreementId}
+        token={reviewInfo.token}
+        recipientLinkRole={reviewInfo.role}
+        participantPartyId={reviewInfo.participantPartyId}
+        onClose={() => navigate("/")}
+        reviewGate={(gateProps) => (
           <AgreementReviewGate
-            agreementId={reviewInfo.agreementId}
-            token={reviewInfo.token}
-            recipientLinkRole={reviewInfo.role}
-            participantPartyId={reviewInfo.participantPartyId}
-            onClose={() => navigate("/")}
+            agreementId={gateProps.agreementId}
+            token={gateProps.token}
+            recipientLinkRole={gateProps.recipientLinkRole}
+            participantPartyId={gateProps.participantPartyId}
+            onClose={gateProps.onClose}
+            onRecipientApprovedWaitingChange={gateProps.onRecipientApprovedWaitingChange}
           />
-        </div>
-      </Vs01Layout>
+        )}
+      />
     );
   }
 

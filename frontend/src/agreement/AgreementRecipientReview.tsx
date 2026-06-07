@@ -113,6 +113,7 @@ import {
   RECIPIENT_SIGN_ONE_DONE_HEADLINE,
   RECIPIENT_SIGN_RECORD_SUBLINE,
 } from "./recipientReviewTrustCopy";
+import { RECIPIENT_APPROVED_LAWDOG_PROMO_LINE } from "./recipientPublicReviewChrome";
 import { recipientReviewDevInfo, recipientReviewDevWarn } from "./recipientReviewDevLog";
 import { JoyMilestoneMark } from "../joy/JoyMilestone";
 import { emitActionCompleted } from "../joy/joyTelemetry";
@@ -664,6 +665,8 @@ type Props = {
   recipientAccessToken?: string;
   /** Multi-round negotiation lineage (compare base / parent); defaults to first recipient round. */
   revisionLineage?: RecipientRevisionLineage;
+  /** Parent shell hides account/plan chrome while the approved/waiting screen is shown. */
+  onRecipientApprovedWaitingChange?: (active: boolean) => void;
 };
 
 type RecipientPreview = {
@@ -749,6 +752,7 @@ export function AgreementRecipientReview({
   inviterDisplayNameOverride = "",
   recipientAccessToken = "",
   revisionLineage = DEFAULT_RECIPIENT_REVISION_LINEAGE,
+  onRecipientApprovedWaitingChange,
 }: Props) {
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState("");
@@ -2193,6 +2197,14 @@ export function AgreementRecipientReview({
   const recipientAcceptedRecorded = Boolean(recipientApprovedInAudit || approvedAck);
   const recipientAcceptedAwaitingLock =
     entry.kind === "review" && !viewerLike && recipientAcceptedRecorded && !bundleSigningLocked;
+
+  useEffect(() => {
+    onRecipientApprovedWaitingChange?.(recipientAcceptedAwaitingLock);
+    return () => {
+      onRecipientApprovedWaitingChange?.(false);
+    };
+  }, [onRecipientApprovedWaitingChange, recipientAcceptedAwaitingLock]);
+
   const recipientAcceptedNoEditsBanner =
     recipientAcceptedAwaitingLock &&
     !hasPendingSuggestion &&
@@ -4837,6 +4849,13 @@ export function AgreementRecipientReview({
             />
           </div>
         ) : null}
+
+        <p
+          className="text-center text-xs leading-relaxed text-slate-500 sm:text-left"
+          data-testid="recipient-approved-lawdog-promo"
+        >
+          {RECIPIENT_APPROVED_LAWDOG_PROMO_LINE}
+        </p>
 
         <p className="text-center text-[10px] text-slate-600 sm:text-left">
           Support — ID <span className="font-mono text-slate-500 break-all">{agreementId}</span>
