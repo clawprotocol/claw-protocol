@@ -78,8 +78,10 @@ import {
 import {
   consumedAuthoritySignerMetadataComplete,
   hasSignerMetadataForExecutionOverlay,
+  isPaidProPostFinalizeHydratedCorpusLocked,
   shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
 } from "./paidProSignerMetadataCommitPolicy";
+import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
 
 const LABELED_SIGNATURE_BLOCK_START =
@@ -318,6 +320,12 @@ export function applyPaidProReviewRenderSanitizer(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; repaired: boolean } {
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const locked = resolvePaidProPostFinalizeReviewPlain();
+    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      return { text: locked, repaired: false };
+    }
+  }
   const ctx: PaidProPartyRoleContext = {
     ...roleContext,
     acceptedCorpus: roleContext?.acceptedCorpus ?? corpus,
@@ -592,6 +600,10 @@ function alignExecutionBlockRolesFromAcceptedCorpus(
   parties?: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): string {
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const locked = resolvePaidProPostFinalizeReviewPlain();
+    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
+  }
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
     if (!parties?.length || !hasSignerMetadataForExecutionOverlay(parties)) {
       return corpus;
@@ -625,6 +637,14 @@ export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
   const surface = "paid_pro_review_render_plain";
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const locked = resolvePaidProPostFinalizeReviewPlain();
+    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      auditPaidProReviewRenderCorpus(locked);
+      auditPaidProReviewRenderSotParity({ reviewPlain: locked, surface: "paid_pro_post_finalize_locked" });
+      return locked;
+    }
+  }
   const seedForMemo = shouldUsePaidProSourceOfTruthDisplayOnly()
     ? getPaidProSourceOfTruthText().trim()
     : args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()
@@ -685,6 +705,10 @@ export function resolvePaidProReviewRenderPlain(
 function resolvePaidProReviewRenderPlainInner(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const locked = resolvePaidProPostFinalizeReviewPlain();
+    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
+  }
   if (args?.deferSignerMetadataRepair) {
     const unified = resolvePaidProUnifiedSurfaceCorpus();
     if (unified && unified.text.length >= PAID_PRO_AUTHORITY_MIN_LEN) {

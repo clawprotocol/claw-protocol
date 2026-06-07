@@ -18,6 +18,11 @@ function paidProSignerExecutionCorpusIsFrozenForHydration(): boolean {
   return readPaidProPinnedSignerAppliedCorpus().length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN;
 }
 
+/** Post-finalize signing snapshot is locked — review must not re-sanitize or re-hydrate. */
+export function isPaidProPostFinalizeHydratedCorpusLocked(): boolean {
+  return paidProSignerExecutionCorpusIsFrozenForHydration();
+}
+
 export function consumedAuthoritySignerMetadataComplete(
   parties: readonly PaidProSignerMetadataParty[],
 ): boolean {
@@ -43,7 +48,7 @@ export function hasSignerMetadataForExecutionOverlay(
 export function shouldHydratePaidProReviewSurfacesFromConsumedAuthority(
   parties: readonly PaidProSignerMetadataParty[],
 ): boolean {
-  if (paidProSignerExecutionCorpusIsFrozenForHydration()) return true;
+  if (paidProSignerExecutionCorpusIsFrozenForHydration()) return false;
   if (!consumedAuthoritySignerMetadataComplete(parties)) return false;
   return !isPaidProReviewSignerMetadataSessionActive();
 }

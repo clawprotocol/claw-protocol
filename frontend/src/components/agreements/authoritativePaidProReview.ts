@@ -30,6 +30,8 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS } from "./paidProReviewTrustUx";
+import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
+import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 
 export { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS };
 
@@ -72,6 +74,10 @@ export type AuthoritativePaidProReviewInput = {
 };
 
 function finalizeAuthoritativePaidProReviewPlain(text: string): string {
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const locked = resolvePaidProPostFinalizeReviewPlain();
+    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
+  }
   const trimmed = text.trim();
   if (trimmed.length < PAID_PRO_AUTHORITY_MIN_LEN) return trimmed;
   const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
@@ -82,6 +88,10 @@ function finalizeAuthoritativePaidProReviewPlain(text: string): string {
 export function resolveAuthoritativePaidProReviewPlain(
   args?: AuthoritativePaidProReviewInput,
 ): string {
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const locked = resolvePaidProPostFinalizeReviewPlain();
+    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
+  }
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
     return resolvePaidProAuthoritativeDisplayPlain({
       draft: args?.draft ?? null,

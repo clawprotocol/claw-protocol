@@ -795,10 +795,19 @@ import {
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 import {
+  isPaidProPostFinalizeHydratedCorpusLocked,
   partyAddressForSignerMetadataStaging,
   shouldDeferPaidProReviewRenderSignerRepair,
   shouldStagePaidProSignerMetadataLocally,
 } from "./paidProSignerMetadataCommitPolicy";
+import {
+  auditPaidProPostFinalizeHydrationInvariant,
+  canProceedPaidProReviewFirstHandoffAfterFinalize,
+  logPaidProPostFinalizeHydrationBlocked,
+  resolvePaidProPostFinalizeReviewHash,
+  resolvePaidProPostFinalizeReviewPlain,
+} from "./paidProPostFinalizeReviewSurface";
+import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import {
   resolvePaidProFinalHydratedCorpusForSurface,
   setPaidProPinnedSignerAppliedCorpus,
@@ -12724,6 +12733,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const openPaidProDraftCardEditor = React.useCallback(() => {
     if (!draft) return;
     setPaidProCardAiInstruction("");
+    const lockedPlain = resolvePaidProPostFinalizeReviewPlain();
+    if (lockedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      setPaidProCardEditDraft(lockedPlain);
+      setPremiumReviewDocEditorOpen(true);
+      return;
+    }
     const paidProReview = getPaidProDocumentForSurface("review", paidProReviewSurfaceOpts);
     if (paidProReview) {
       setPaidProCardEditDraft(paidProReview.text);
@@ -15173,6 +15188,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const paidProPostFinalizeHydrationBlocked = useMemo(() => {
+    if (!paidProSignerMetadataFinalized || !paidProSignatureDetailsReady) return false;
+    const reviewPlain = resolvePaidProPostFinalizeReviewPlain();
+    if (reviewPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
+    const snap = getAuthoritativeSigningSnapshot();
+    const audit = auditPaidProPostFinalizeHydrationInvariant({
+      reviewPlain,
+      signerMetadata: snap?.signerMetadata ?? null,
+    });
+    return audit.blocked;
+  }, [
+    paidProSignerMetadataFinalized,
+    paidProSignatureDetailsReady,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+    guidedAuthVersionNonce,
+  ]);
+
+  useEffect(() => {
+    if (!paidProPostFinalizeHydrationBlocked) return;
+    const reviewPlain = resolvePaidProPostFinalizeReviewPlain();
+    logPaidProPostFinalizeHydrationBlocked({
+      blankSignerLinesRemaining: countBlankSignerMetadataLinesInExecutionBlock(reviewPlain),
+      reviewLen: reviewPlain.length,
+      reviewHash: resolvePaidProPostFinalizeReviewHash() || null,
+      surface: "paid_pro_forced_first_review",
+    });
+  }, [paidProPostFinalizeHydrationBlocked, premiumSurfaceGateTick, reviewDocRefreshTick]);
+
   useEffect(() => {
     if (!paidProFirstReviewSignerSetupRequired) return;
     if (!paidProInlineSignerSetupLatched) {
@@ -16092,7 +16136,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidProReviewSurface: true,
       });
       if (boundary.blocked || !boundary.plain.trim()) return "";
-      const postFinalizePlain = paidProSignerHydratedPreviewPlain.trim() || readAuthoritativeSigningCorpus().trim();
+      const postFinalizePlain = isPaidProPostFinalizeHydratedCorpusLocked()
+        ? resolvePaidProPostFinalizeReviewPlain()
+        : paidProSignerHydratedPreviewPlain.trim() || readAuthoritativeSigningCorpus().trim();
       const displayCorpusRaw = (postFinalizePlain || boundary.plain).trim();
       const signingSnapshotActive = hasAuthoritativeSigningSnapshot();
       const corpus =
@@ -19495,6 +19541,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText: intakeForPolish,
     });
     const raw = (
+      (isPaidProPostFinalizeHydratedCorpusLocked()
+        ? resolvePaidProPostFinalizeReviewPlain()
+        : "") ||
       paidProSignerHydratedPreviewPlain.trim() ||
       (signingSnapshotActive ? readAuthoritativeSigningCorpus() : "") ||
       paidProDisplay?.text ||
@@ -19547,6 +19596,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const simpleProFinalReviewDisplayPlain = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+      const locked = resolvePaidProPostFinalizeReviewPlain();
+      if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
+    }
     if (hasPaidProSourceOfTruth() || hasAuthoritativeSigningSnapshot()) {
       const renderPlain = resolvePaidProReviewRenderPlain({
         draft: draft ?? null,
@@ -24455,6 +24508,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const handleSimpleProFinalReviewExport = React.useCallback(async () => {
     const intakeForExport = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+    const lockedExport = resolvePaidProPostFinalizeReviewPlain();
+    if (lockedExport.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      const blob = new Blob([lockedExport], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(draft?.title || "lawdog-pro-agreement").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "lawdog-pro-agreement"}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
     const hydratedExport = resolvePaidProFinalHydratedCorpusForSurface("finalized", {
       draft: draft ?? null,
       intakeText: intakeForExport,
@@ -24748,11 +24814,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleProSendForReview = React.useCallback(() => {
-    const reviewBodyPlain = simpleProFinalReviewCorpus.plainText;
+    const reviewBodyPlain =
+      resolvePaidProPostFinalizeReviewPlain() ||
+      simpleProFinalReviewDisplayPlain ||
+      simpleProFinalReviewCorpus.plainText;
+    const canProceedReviewHandoff = canProceedPaidProReviewFirstHandoffAfterFinalize({
+      signersComplete: paidProSignatureDetailsReady || paidProSignerMetadataFinalized,
+      reviewPlain: reviewBodyPlain,
+    });
     logReviewFirstClick({
       source: "simple_pro_send_for_review",
       phase: createFlowPhase,
-      canProceed: canProceedGuidedFinalReviewToSigning,
+      canProceed: isPaidProPostFinalizeHydratedCorpusLocked()
+        ? canProceedReviewHandoff
+        : canProceedGuidedFinalReviewToSigning,
       bodyLen: reviewBodyPlain.length,
       selectedTrack: "review",
     });
@@ -24792,6 +24867,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedCompletionActive,
     guidedCompletionRenderDocument.source,
     simpleProFinalReviewCorpus.plainText,
+    simpleProFinalReviewDisplayPlain,
+    paidProSignatureDetailsReady,
+    paidProSignerMetadataFinalized,
     acceptedPaidProAuthorityActive,
     paidProAuthoritative,
     enterFinalReviewRecipientSetup,
@@ -27885,13 +27963,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           <PaidProForcedFirstReviewChrome
                                             signersReady={paidProReviewSignerStatusReady}
                                             signerMetadataFinalized={paidProSignerMetadataFinalized}
+                                            hydrationBlocked={paidProPostFinalizeHydrationBlocked}
                                             compactShell={paidProReviewCompactChrome}
                                             sendDisabled={
                                               (isGenerating && !draft) ||
                                               upgradeLockActive ||
                                               loading ||
                                               guidedPacketSendBlocked ||
-                                              reviewFirstHandoffBusy
+                                              reviewFirstHandoffBusy ||
+                                              paidProPostFinalizeHydrationBlocked
                                             }
                                             reviewBusy={reviewFirstHandoffBusy}
                                             copyDisabled={
@@ -27905,7 +27985,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             }
                                             signerSavedMappings={paidProSignerSavedMappings}
                                             getCopyPlainText={() =>
-                                              simpleProFinalReviewDisplayPlain || displayPolishedPaidProPlain
+                                              resolvePaidProPostFinalizeReviewPlain() ||
+                                              simpleProFinalReviewDisplayPlain ||
+                                              displayPolishedPaidProPlain
                                             }
                                             onEditAgreement={() => void openPaidProDraftCardEditor()}
                                             onExportAgreement={() => void handleSimpleProFinalReviewExport()}

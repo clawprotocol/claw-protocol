@@ -19,6 +19,7 @@ export type PaidProSignerSavedMapping = {
 type Props = {
   signersReady: boolean;
   signerMetadataFinalized: boolean;
+  hydrationBlocked?: boolean;
   compactShell?: boolean;
   sendDisabled?: boolean;
   reviewBusy?: boolean;
@@ -37,6 +38,7 @@ type Props = {
 export function PaidProForcedFirstReviewChrome({
   signersReady,
   signerMetadataFinalized,
+  hydrationBlocked = false,
   compactShell = false,
   sendDisabled = false,
   reviewBusy = false,
@@ -68,6 +70,7 @@ export function PaidProForcedFirstReviewChrome({
 
   const showSignerSavedBanner =
     signerMetadataFinalized && signersReady && signerSavedMappings.length > 0;
+  const actionsDisabled = sendDisabled || hydrationBlocked;
 
   return (
     <div
@@ -84,6 +87,16 @@ export function PaidProForcedFirstReviewChrome({
       ) : (
         <PaidProReviewNextStepCallout signersReady={signersReady} compactShell={compactShell} />
       )}
+      {hydrationBlocked ? (
+        <p
+          className="rounded-md border border-amber-200/90 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900"
+          role="alert"
+          data-testid="paid-pro-post-finalize-hydration-blocked"
+        >
+          Signer details were saved, but the agreement still shows blank signer lines. Refresh or re-finalize
+          signer details before continuing.
+        </p>
+      ) : null}
       <div
         className="flex flex-col gap-2.5 rounded-md border border-stone-200/90 bg-white px-3 py-3 shadow-sm ring-1 ring-black/[0.04] sm:px-4 sm:py-4"
         data-testid="paid-pro-forced-first-review-actions"
@@ -94,7 +107,7 @@ export function PaidProForcedFirstReviewChrome({
         <button
           type="button"
           className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-          disabled={sendDisabled}
+          disabled={actionsDisabled}
           onClick={onPrepareSignatures}
           data-testid="paid-pro-forced-prepare-signatures"
         >
@@ -107,7 +120,7 @@ export function PaidProForcedFirstReviewChrome({
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={sendDisabled || reviewBusy}
+            disabled={actionsDisabled || reviewBusy}
             onClick={onShareForReview}
             data-testid="paid-pro-forced-share-for-review"
           >
@@ -115,14 +128,14 @@ export function PaidProForcedFirstReviewChrome({
           </button>
           <PremiumAgreementCopyButton
             getPlainText={getCopyPlainText}
-            disabled={copyDisabled}
+            disabled={copyDisabled || hydrationBlocked}
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
             data-testid="paid-pro-forced-copy-agreement"
           />
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={exportBusy || copyDisabled}
+            disabled={exportBusy || copyDisabled || hydrationBlocked}
             onClick={onExportAgreement}
             data-testid="paid-pro-forced-export-agreement"
           >
@@ -131,7 +144,7 @@ export function PaidProForcedFirstReviewChrome({
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={editDisabled}
+            disabled={editDisabled || hydrationBlocked}
             onClick={onEditAgreement}
             data-testid="paid-pro-forced-edit-agreement"
           >

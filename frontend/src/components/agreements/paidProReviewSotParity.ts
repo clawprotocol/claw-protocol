@@ -3,6 +3,7 @@
  */
 
 import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
+import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { getPaidProSourceOfTruthText, hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
@@ -41,7 +42,12 @@ export function auditPaidProReviewRenderSotParity(args: {
   const review = (args.reviewPlain || "").trim();
   const reviewHash = review.length >= 80 ? hashPaidProCorpus(review) : "";
   const canonicalHash = hasPaidProSourceOfTruth() ? resolvePaidProFrozenAuthoritativeHash() : null;
-  const canonicalPlain = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
+  const canonicalPlain = (() => {
+    if (!hasPaidProSourceOfTruth()) return "";
+    const frozen = getFrozenCanonicalAgreementCorpus()?.canonicalText?.trim();
+    if (frozen && frozen.length >= 80) return frozen;
+    return getPaidProSourceOfTruthText().trim();
+  })();
   const classification =
     canonicalPlain && review
       ? classifyPaidProCorpusLifecycleDiff(canonicalPlain, review)
