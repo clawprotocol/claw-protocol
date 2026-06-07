@@ -45,15 +45,6 @@ export function AppShell(props: {
         >
           <div className="flex items-center gap-3">
             <LawdogLogoLink homeHref="/app" wordmark surface="dark" />
-            {!esignBridgeNav && !minimalNav ? (
-              <button
-                type="button"
-                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                onClick={() => navigate("/")}
-              >
-                Home
-              </button>
-            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             {minimalNav ? (
@@ -79,6 +70,7 @@ export function AppShell(props: {
               <button
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                title="Agreement dashboard"
                 onClick={() => navigate("/app")}
               >
                 Home

@@ -29,6 +29,8 @@ export type Vs01LayoutProps = {
    * Public recipient review: two-line trust strip + collapsible full legal stack (DisclosureFooter, VS01 note).
    */
   recipientPublicFooter?: boolean;
+  /** Logo target — public recipient flows use `/`; creator workspace uses `/app`. */
+  logoHomeHref?: string;
 };
 
 const DEFAULT_HERO: Vs01LayoutHero = {
@@ -55,15 +57,17 @@ export function Vs01Layout({
   headerAside,
   footerEvidenceSentence,
   recipientPublicFooter,
+  logoHomeHref,
 }: Vs01LayoutProps) {
   const h = hero ?? DEFAULT_HERO;
   const evidenceSentence = footerEvidenceSentence ?? DEFAULT_FOOTER_EVIDENCE_SENTENCE;
+  const resolvedLogoHomeHref = logoHomeHref ?? (recipientPublicFooter ? "/" : "/app");
   return (
     <div className="vs01-root">
       <div className="vs01-accent-strip" aria-hidden />
       <div className="vs01-shell">
         <div className="flex items-center border-b border-slate-800/60 pb-3 pt-1">
-          <LawdogLogoLink homeHref="/app" wordmark surface="dark" />
+          <LawdogLogoLink homeHref={resolvedLogoHomeHref} wordmark surface="dark" />
         </div>
         <header className="vs01-header" role="banner" aria-labelledby="vs01-shell-title">
           <div className="vs01-header-panel">

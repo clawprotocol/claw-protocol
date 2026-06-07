@@ -48,14 +48,14 @@ describe("AppShell esign bridge nav", () => {
     expect(within(nav).queryByRole("button", { name: "Work product" })).toBeNull();
   });
 
-  it("default nav still exposes Home twice (legacy)", () => {
+  it("default nav exposes a single Home button for the owner dashboard", () => {
     render(
       <AppShell title="Continue your document" subtitle="Test">
         <div>child</div>
       </AppShell>,
     );
     const nav = screen.getByTestId("app-shell-primary-nav");
-    expect(within(nav).getAllByRole("button", { name: /^Home$/ })).toHaveLength(2);
+    expect(within(nav).getAllByRole("button", { name: /^Home$/ })).toHaveLength(1);
   });
 
   it("minimal nav shows only logo, back to dashboard, and new agreement", () => {

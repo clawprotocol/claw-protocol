@@ -37,6 +37,10 @@ import {
   type RecipientLinkRole,
 } from "./agreement/AgreementRecipientReview";
 import { RecipientPublicReviewRoute } from "./agreement/RecipientPublicReviewRoute";
+import {
+  parseRecipientReviewRouteFlags,
+  resolveLawdogViewerContextFromReviewRoute,
+} from "./agreement/lawdogViewerContext";
 import { AgreementWizardShell } from "./agreement/AgreementWizardShell";
 import {
   fetchRecipientAccessPolicy,
@@ -56,7 +60,6 @@ import {
 import { recipientLinkTokenFingerprint } from "./agreement/recipientLinkTokenFingerprint";
 import { stripRecipientAccessTokenQueryFromLocation } from "./agreement/recipientLinkUrlHygiene";
 import { logRecipientReviewTokenResolved } from "./components/agreements/reviewFlowDebugLog";
-import { AccessAccountPanel } from "./components/access/AccessAccountPanel";
 import { Vs01Layout, type Vs01LayoutHero } from "./vs01/Vs01Layout";
 import { Vs01Wizard } from "./vs01/Vs01Wizard";
 import { getVs01UrlBootstrap } from "./vs01/vs01UrlBootstrap";
@@ -69,30 +72,9 @@ import { PrivacyPage } from "./launch/legal/PrivacyPage";
 import { AffiliateTermsPage } from "./launch/legal/AffiliateTermsPage";
 import { PaidProReviewUxVisualPage } from "./qa/PaidProReviewUxVisualPage";
 
-const ACCESS_HEADER_ASIDE = (
-  <details className="vs01-access-disclosure text-left">
-    <summary className="cursor-pointer list-none text-center text-sm text-slate-400 marker:content-none">
-      <span className="inline-flex min-h-9 items-center rounded-full border border-slate-700/80 bg-slate-900/50 px-3 py-1.5 hover:border-slate-600">
-        Account
-      </span>
-    </summary>
-    <div className="mt-2">
-      <AccessAccountPanel />
-    </div>
-  </details>
-);
-
 const RECIPIENT_SIGNING_HERO: Vs01LayoutHero = {
   title: "Review and sign",
   subtitle: "Complete your assigned fields below, then finish signing.",
-};
-
-const AGREEMENT_HERO: Vs01LayoutHero = {
-  eyebrow: "CLAW",
-  title: "Agreement workspace",
-  subtitle:
-    "Describe terms in plain language, review versions with counterparties, then export or send to signing.",
-  tagline: "Version history and redlines stay with each agreement before it hits the signing flow.",
 };
 
 const VERIFY_HERO: Vs01LayoutHero = {
@@ -233,10 +215,8 @@ function AgreementReviewGate(props: {
   recipientLinkRole?: RecipientLinkRole;
   participantPartyId?: string;
   onClose: () => void;
-  onRecipientApprovedWaitingChange?: (active: boolean) => void;
 }) {
-  const { agreementId, token, recipientLinkRole, participantPartyId, onClose, onRecipientApprovedWaitingChange } =
-    props;
+  const { agreementId, token, recipientLinkRole, participantPartyId, onClose } = props;
   const [phase, setPhase] = useState<"loading" | "ready" | "bad">("loading");
   const [gateVid, setGateVid] = useState<string | undefined>(undefined);
   const [tokenValidated, setTokenValidated] = useState(false);
@@ -375,7 +355,6 @@ function AgreementReviewGate(props: {
       inviterDisplayNameOverride={inviterName || ""}
       recipientAccessToken={accessTokOut}
       onClose={onClose}
-      onRecipientApprovedWaitingChange={onRecipientApprovedWaitingChange}
     />
   );
 }
@@ -466,9 +445,10 @@ export function ClawProductApp() {
   if (agreementSignInfo) {
     return (
       <Vs01Layout
-        hero={AGREEMENT_HERO}
-        headerAside={ACCESS_HEADER_ASIDE}
+        hero={RECIPIENT_SIGNING_HERO}
+        logoHomeHref="/"
         productNav={{ label: "← Home", onClick: () => navigate("/") }}
+        recipientPublicFooter
       >
         <div className="vs01-card vs01-card--envelope">
           <AgreementSignGate
@@ -484,9 +464,13 @@ export function ClawProductApp() {
   }
 
   if (reviewInfo) {
+    const reviewRouteFlags = parseRecipientReviewRouteFlags(search);
+    const reviewViewerContext = resolveLawdogViewerContextFromReviewRoute(search);
     return (
       <RecipientPublicReviewRoute
         agreementId={reviewInfo.agreementId}
+        viewerContext={reviewViewerContext}
+        ownerReturnPath={reviewRouteFlags.ownerReturnPath}
         token={reviewInfo.token}
         recipientLinkRole={reviewInfo.role}
         participantPartyId={reviewInfo.participantPartyId}
@@ -498,7 +482,6 @@ export function ClawProductApp() {
             recipientLinkRole={gateProps.recipientLinkRole}
             participantPartyId={gateProps.participantPartyId}
             onClose={gateProps.onClose}
-            onRecipientApprovedWaitingChange={gateProps.onRecipientApprovedWaitingChange}
           />
         )}
       />
@@ -509,8 +492,9 @@ export function ClawProductApp() {
     return (
       <Vs01Layout
         hero={VERIFY_HERO}
-        headerAside={ACCESS_HEADER_ASIDE}
+        logoHomeHref="/"
         productNav={{ label: "← Home", onClick: () => navigate("/") }}
+        recipientPublicFooter
       >
         <div className="vs01-card vs01-card--envelope">
           <AgreementPublicVerify
@@ -529,8 +513,9 @@ export function ClawProductApp() {
     return (
       <Vs01Layout
         hero={FEED_HERO}
-        headerAside={ACCESS_HEADER_ASIDE}
+        logoHomeHref="/"
         productNav={{ label: "← Home", onClick: () => navigate("/") }}
+        recipientPublicFooter
       >
         <div className="vs01-card vs01-card--envelope">
           <ClawPublicFeedView onClose={() => navigate("/")} />

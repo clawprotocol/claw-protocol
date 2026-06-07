@@ -11,6 +11,7 @@ import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } 
 import type { ReviewerLinkRow } from "./reviewerLinkRowModel";
 import { extractReviewLinkTokenFromHref, redactReviewUrlForLog } from "./reviewerLinkRowModel";
 import { recipientLinkTokenFingerprint } from "../../agreement/recipientLinkTokenFingerprint";
+import { appendQaRecipientSimulationQueryToReviewHref } from "../../agreement/lawdogViewerContext";
 
 /**
  * Session handoff: after simple-home review-link flow, `/app/done` can show copyable per-recipient magic links
@@ -373,7 +374,10 @@ export async function mintReviewPartySimulationRecipientLink(args: {
     },
   );
   if (!res.ok) return null;
-  const reviewHref = resolveReviewHrefFromMint(args.agreementId, origin, res.data).trim();
+  const reviewHref = appendQaRecipientSimulationQueryToReviewHref(
+    resolveReviewHrefFromMint(args.agreementId, origin, res.data).trim(),
+    args.agreementId,
+  );
   if (!reviewHref) return null;
   const displayName = String(p.name || "").trim() || "Recipient";
   return { reviewHref, partyName: displayName, partyIndex };
