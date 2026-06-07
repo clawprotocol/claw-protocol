@@ -26,7 +26,10 @@ import {
   PREMIUM_GENERATION_DRAFT_API_PATH,
 } from "./premiumGenerationApiAvailability";
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
-import { getPaidProSourceOfTruth, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { getPaidProSourceOfTruth, getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 import {
   enforceAuthoritativeProCorpusDisplay,
@@ -263,9 +266,39 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   /** Sticky accepted corpus — never downgrade below this when still valid. */
   stickyAuthoritativePlainText?: string | null;
 }): PremiumPaidReadonlyPickResult {
+  if (hasAuthoritativeSigningSnapshot()) {
+    const hydrated = resolvePaidProPostFinalizeReviewPlain().trim();
+    if (hydrated.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      const nonThin =
+        hydrated.length >= 1200 || premiumReadonlyCorpusSignalHits(hydrated) >= 3;
+      return {
+        plainText: hydrated,
+        sourceUsed: "server_full_document_text",
+        audit: {
+          selected: "server_full_document_text",
+          forcedPremiumSource: true,
+          candidates: [
+            {
+              source: "server_full_document_text",
+              len: hydrated.length,
+              nonThin,
+              eligible: true,
+              reason: "authoritative_signing_snapshot",
+            },
+          ],
+        },
+      };
+    }
+  }
   const paidProRecord = getPaidProSourceOfTruth();
   if (paidProRecord) {
-    const display = paidProRecord.text.trim();
+    const reviewDoc = getPaidProDocumentForSurface("review", {
+      draft: args.draft,
+      intakeText: args.intakeText,
+    });
+    const display = (
+      reviewDoc?.signerMetadataApplied ? reviewDoc.text : paidProRecord.text
+    ).trim();
     const nonThin =
       display.length >= 1200 || premiumReadonlyCorpusSignalHits(display) >= 3;
     return {
@@ -280,7 +313,9 @@ export function pickPremiumPaidReadonlyPlainText(args: {
             len: display.length,
             nonThin,
             eligible: true,
-            reason: "paidProSourceOfTruth",
+            reason: reviewDoc?.signerMetadataApplied
+              ? "paid_pro_review_hydrated"
+              : "paidProSourceOfTruth",
           },
         ],
       },

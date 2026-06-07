@@ -215,9 +215,22 @@ function AgreementReviewGate(props: {
   recipientLinkRole?: RecipientLinkRole;
   participantPartyId?: string;
   recipientViewerContext?: import("./agreement/lawdogViewerContext").LawdogViewerContext;
+  qaOwnerReturnPath?: string | null;
+  onRecipientPostApprovalPresentationChange?: (
+    presentation: import("./agreement/recipientApprovedWaitingPresentation").RecipientPostApprovalPresentation | null,
+  ) => void;
   onClose: () => void;
 }) {
-  const { agreementId, token, recipientLinkRole, participantPartyId, recipientViewerContext, onClose } = props;
+  const {
+    agreementId,
+    token,
+    recipientLinkRole,
+    participantPartyId,
+    recipientViewerContext,
+    qaOwnerReturnPath,
+    onRecipientPostApprovalPresentationChange,
+    onClose,
+  } = props;
   const [phase, setPhase] = useState<"loading" | "ready" | "bad">("loading");
   const [gateVid, setGateVid] = useState<string | undefined>(undefined);
   const [tokenValidated, setTokenValidated] = useState(false);
@@ -356,6 +369,8 @@ function AgreementReviewGate(props: {
       inviterDisplayNameOverride={inviterName || ""}
       recipientAccessToken={accessTokOut}
       recipientViewerContext={recipientViewerContext ?? "public_recipient"}
+      qaOwnerReturnPath={qaOwnerReturnPath ?? null}
+      onRecipientPostApprovalPresentationChange={onRecipientPostApprovalPresentationChange}
       onClose={onClose}
     />
   );
@@ -484,6 +499,8 @@ export function ClawProductApp() {
             recipientLinkRole={gateProps.recipientLinkRole}
             participantPartyId={gateProps.participantPartyId}
             recipientViewerContext={gateProps.viewerContext}
+            qaOwnerReturnPath={gateProps.qaOwnerReturnPath}
+            onRecipientPostApprovalPresentationChange={gateProps.onRecipientPostApprovalPresentationChange}
             onClose={gateProps.onClose}
           />
         )}

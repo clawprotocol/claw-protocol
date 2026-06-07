@@ -17,6 +17,13 @@ import {
 } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenDisplayPlain } from "./paidProPostFreezeCorpusInvariant";
 import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRenderParties";
+import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
+import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
+import {
+  hasSignerMetadataForExecutionOverlay,
+  shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
+} from "./paidProSignerMetadataCommitPolicy";
+import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
 export type ResolvePaidProAuthoritativeDisplayPlainArgs = ResolvePaidProReviewRenderPartiesArgs;
 
@@ -31,11 +38,24 @@ export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
   return true;
 }
 
-/** Frozen SoT plain — byte-aligned with canonical freeze (HTML may add visual-only formatting). */
+/** Frozen SoT plain — byte-aligned with canonical freeze; applies render-time signer overlay when staged. */
 export function resolvePaidProAuthoritativeDisplayPlain(
-  _args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
+  args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
 ): string {
-  return resolvePaidProFrozenDisplayPlain();
+  const base = resolvePaidProFrozenDisplayPlain();
+  const parties = resolvePartiesForReviewRender(args);
+  const needsOverlay =
+    isPaidProReviewSignerMetadataSessionActive() ||
+    hasSignerMetadataForExecutionOverlay(parties) ||
+    shouldHydratePaidProReviewSurfacesFromConsumedAuthority(parties);
+  if (!needsOverlay || parties.length < 2) return base;
+  const roleContext = {
+    intakeText: args?.intakeText ?? null,
+    draftPartyNames:
+      args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+    acceptedCorpus: base,
+  };
+  return applyPaidProSoTSignerExecutionOverlay(base, parties, roleContext);
 }
 
 export function paidProAuthoritativeRenderGateMeta(): { len: number; hash: string } | null {

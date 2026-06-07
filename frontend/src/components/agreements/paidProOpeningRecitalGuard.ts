@@ -79,6 +79,11 @@ export function detectPaidProMalformedServicesOpening(
   const body = (text || "").replace(/\r\n/g, "\n").trim();
   if (!body) return true;
 
+  const openingScan = body.slice(0, 6_000);
+  if (/\(\s*["']?party["']?\s*\)/i.test(openingScan)) {
+    return true;
+  }
+
   const client = records?.[0]?.fullLegalName.trim() ?? "";
   const provider = records?.[1]?.fullLegalName.trim() ?? "";
   const legalNames = new Set(
@@ -88,6 +93,14 @@ export function detectPaidProMalformedServicesOpening(
   const lines = meaningfulLines(body, 6);
   const first = lines[0] ?? "";
   const second = lines[1] ?? "";
+
+  if (/^This Agreement is between/i.test(first)) {
+    const hasTitleLater = body
+      .slice(0, 4_000)
+      .split("\n")
+      .some((line) => /(?:CONSULTING|SERVICES|MUTUAL).*AGREEMENT/i.test(line.trim()));
+    if (hasTitleLater) return true;
+  }
 
   if (legalNames.size >= 1 && isStandalonePartyEntityLine(first, legalNames)) {
     return true;

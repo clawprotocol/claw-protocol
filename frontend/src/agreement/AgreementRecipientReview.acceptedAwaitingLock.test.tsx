@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { AccessProvider } from "../access/AccessContext";
@@ -13,6 +13,17 @@ import {
 } from "./portableReviewCopy";
 import { RECIPIENT_PUBLIC_HERO_TITLE } from "./recipientReviewTrustCopy";
 import { RECIPIENT_APPROVED_LAWDOG_PROMO_LINE } from "./recipientPublicReviewChrome";
+
+const mockNavigate = vi.fn();
+
+vi.mock("../launch/LaunchNavContext", () => ({
+  useLaunchNav: () => ({
+    pathname: "/agreements/ag/review",
+    search: "",
+    hash: "",
+    navigate: mockNavigate,
+  }),
+}));
 
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -28,7 +39,7 @@ const draftAccepted = {
   title: "Services",
   jurisdiction: "CA",
   parties: [
-    { name: "Alice", role: "owner" },
+    { name: "Alice", role: "owner", id: "p-alice" },
     { name: "Bob", role: "party", id: "p-bob" },
   ],
   purpose: "Consulting.",
@@ -39,14 +50,22 @@ const draftAccepted = {
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   versions: [{ version: 1, created_at: new Date().toISOString(), note: "x" }],
-  audit_log: [{ event_type: "recipient_approved", at: new Date().toISOString() }],
+  audit_log: [
+    {
+      event_type: "recipient_approved",
+      at: new Date().toISOString(),
+      value: { participant_id: "p-bob" },
+    },
+  ],
 };
 
 describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     cleanup();
     localStorage.clear();
+    mockNavigate.mockClear();
   });
 
   it("shows clean waiting layout: no legacy review surface, Want a copy + downloads, refresh", async () => {
@@ -87,14 +106,15 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
     });
 
     expect(screen.getByTestId("recipient-accepted-awaiting-lock-root")).toBeTruthy();
-    expect(screen.getByText("Reviewer approved this draft without requesting changes.")).toBeTruthy();
-    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain(
-      "Approved — waiting for sender",
-    );
+    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review submitted");
     expect(screen.getByTestId("recipient-approved-waiting-body").textContent).toContain(
-      "The sender will prepare signature links",
+      "remaining reviewer(s)",
     );
-    expect(screen.getByRole("button", { name: "Check for updates" })).toBeTruthy();
+    expect(screen.getByTestId("recipient-approved-waiting-body").textContent).not.toMatch(
+      /sender will finalize/i,
+    );
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Check for updates" })).toBeNull();
 
     expect(screen.queryByTestId("recipient-document-shell")).toBeNull();
     expect(screen.queryByRole("heading", { name: RECIPIENT_PUBLIC_HERO_TITLE })).toBeNull();
@@ -159,11 +179,13 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
     });
   });
 
-  it("after refresh with signing_lock, signer sees Continue to signing and waiting root is gone", async () => {
-    Object.defineProperty(Element.prototype, "scrollIntoView", {
-      configurable: true,
-      value: vi.fn(),
-    });
+  it("after polling detects signing_lock, signer sees Continue to signing and waiting root is gone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      Object.defineProperty(Element.prototype, "scrollIntoView", {
+        configurable: true,
+        value: vi.fn(),
+      });
     let agreementGetCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
@@ -208,21 +230,26 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
       </AccessProvider>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByTestId("recipient-accepted-awaiting-lock-root")).toBeTruthy();
-    });
+      await waitFor(() => {
+        expect(screen.getByTestId("recipient-accepted-awaiting-lock-root")).toBeTruthy();
+      });
 
-    await userEvent.click(screen.getByTestId("recipient-refresh-signing-status"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8000);
+      });
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("recipient-accepted-awaiting-lock-root")).toBeNull();
-    });
-    const continueLinks = screen.getAllByRole("link", { name: recipientPartyReviewCopy.continueToSigning });
-    expect(continueLinks.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByTestId("recipient-document-shell")).toBeTruthy();
+      await waitFor(() => {
+        expect(screen.queryByTestId("recipient-accepted-awaiting-lock-root")).toBeNull();
+      });
+      const continueLinks = screen.getAllByRole("link", { name: recipientPartyReviewCopy.continueToSigning });
+      expect(continueLinks.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByTestId("recipient-document-shell")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("QA recipient simulation shows sender-waiting copy without dashboard routing context", async () => {
+  it("QA Party 2 simulation shows public recipient post-approval copy", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -264,12 +291,134 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
       expect(screen.getByTestId("recipient-accepted-awaiting-lock-root")).toBeTruthy();
     });
 
-    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain(
-      "Approved — waiting for sender",
-    );
-    expect(screen.getByRole("button", { name: "Check for updates" })).toBeTruthy();
+    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review submitted");
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Check for updates" })).toBeNull();
     expect(screen.queryByText("Account")).toBeNull();
     expect(screen.queryByText(/Current plan:/)).toBeNull();
     expect(screen.queryByRole("button", { name: /^Dashboard$/ })).toBeNull();
+  });
+
+  it("QA Party 1 simulation shows creator-aware post-approval copy", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (
+        init?.method ||
+        (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({ rendered_html: "<p>Services Agreement</p><p>Body.</p>" });
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({
+          draft: {
+            ...draftAccepted,
+            parties: [
+              { id: "p-blue", name: "Blue Canyon Analytics LLC", role: "owner" },
+              { id: "p-iron", name: "Iron Vale Systems Inc.", role: "party" },
+            ],
+            audit_log: [{ event_type: "recipient_approved", at: new Date().toISOString(), value: { participant_id: "p-blue" } }],
+          },
+          signing_lock: null,
+        });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview
+          agreementId={agreementId}
+          recipientAccessToken="tok_test"
+          participantPartyId="p-blue"
+          recipientViewerContext="qa_recipient_simulation"
+          qaOwnerReturnPath="/app/done/ag_accepted_await_lock"
+        />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-accepted-awaiting-lock-root")).toBeTruthy();
+    });
+
+    expect(screen.getByTestId("recipient-signing-readiness-panel").getAttribute("data-recipient-post-approval-audience")).toBe(
+      "creator",
+    );
+    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review complete");
+    expect(screen.getByRole("button", { name: "Return to dashboard" })).toBeTruthy();
+    expect(screen.getByTestId("recipient-approved-waiting-body").textContent).toContain(
+      "remaining reviewer(s)",
+    );
+    expect(screen.getByTestId("recipient-approved-waiting-body").textContent).not.toMatch(
+      /sender will finalize|Agreement review dashboard|Check for updates/i,
+    );
+  });
+
+  it("Party 1 QA can return to dashboard", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (
+        init?.method ||
+        (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({ rendered_html: "<p>Services Agreement</p><p>Body.</p>" });
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({
+          draft: {
+            ...draftAccepted,
+            parties: [
+              { id: "p-blue", name: "Blue Canyon Analytics LLC", role: "owner" },
+              { id: "p-iron", name: "Iron Vale Systems Inc.", role: "party" },
+            ],
+            audit_log: [{ event_type: "recipient_approved", at: new Date().toISOString(), value: { participant_id: "p-blue" } }],
+          },
+          signing_lock: null,
+        });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview
+          agreementId={agreementId}
+          recipientAccessToken="tok_test"
+          participantPartyId="p-blue"
+          recipientViewerContext="qa_recipient_simulation"
+          qaOwnerReturnPath="/app/done/ag_accepted_await_lock"
+        />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Return to dashboard" })).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Return to dashboard" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/app");
   });
 });

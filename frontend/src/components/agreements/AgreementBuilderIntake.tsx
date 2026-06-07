@@ -24264,7 +24264,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeRaw: intakeForHydration,
       surface: "finalize_paid_pro_signer_metadata",
       signatureRegionOnly: true,
-      repairRecital: false,
+      repairRecital: true,
     });
     auditPaidProSignerFinalizeCorpus(hydrated.corpus);
     const signatureBlockModel = buildCanonicalSignerManifest({

@@ -1,9 +1,11 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { AccessProvider } from "../access/AccessContext";
 import { RecipientPublicReviewRoute } from "./RecipientPublicReviewRoute";
 import { RECIPIENT_APPROVED_LAWDOG_PROMO_LINE } from "./recipientPublicReviewChrome";
+import type { RecipientPostApprovalPresentation } from "./recipientApprovedWaitingPresentation";
 
 const mockNavigate = vi.fn();
 
@@ -83,19 +85,43 @@ describe("RecipientPublicReviewRoute viewer context chrome", () => {
   });
 
   it("approved/waiting public recipient keeps review actions without creator chrome", async () => {
+    const presentation: RecipientPostApprovalPresentation = {
+      audience: "public_recipient",
+      shellHeroTitle: "Review submitted",
+      shellHeroSubtitle: null,
+      statusBanner: null,
+      waitingPanel: {
+        header: "Review submitted",
+        body: "Your approval has been recorded. We're waiting for the remaining reviewer(s) before signing can begin.",
+        actions: [{ kind: "done", label: "Done", emphasis: "primary" }],
+        pollHint: null,
+      },
+    };
+
+    function ApprovedWaitingMock(props: {
+      onPresentationChange: (value: RecipientPostApprovalPresentation | null) => void;
+    }) {
+      useEffect(() => {
+        props.onPresentationChange(presentation);
+        return () => props.onPresentationChange(null);
+      }, [props]);
+      return (
+        <div data-testid="recipient-accepted-awaiting-lock-root">
+          <h2>Want a copy?</h2>
+          <button type="button">Download PDF</button>
+          <p data-testid="recipient-approved-lawdog-promo">{RECIPIENT_APPROVED_LAWDOG_PROMO_LINE}</p>
+        </div>
+      );
+    }
+
     render(
       <AccessProvider>
         <RecipientPublicReviewRoute
           agreementId="ag_test308"
           viewerContext="public_recipient"
           onClose={vi.fn()}
-          reviewGate={() => (
-            <div data-testid="recipient-accepted-awaiting-lock-root">
-              <div data-testid="recipient-review-approved-status">Reviewer approved this draft without requesting changes.</div>
-              <h2>Want a copy?</h2>
-              <button type="button">Download PDF</button>
-              <p data-testid="recipient-approved-lawdog-promo">{RECIPIENT_APPROVED_LAWDOG_PROMO_LINE}</p>
-            </div>
+          reviewGate={({ onRecipientPostApprovalPresentationChange }) => (
+            <ApprovedWaitingMock onPresentationChange={onRecipientPostApprovalPresentationChange} />
           )}
         />
       </AccessProvider>,
@@ -106,6 +132,7 @@ describe("RecipientPublicReviewRoute viewer context chrome", () => {
     });
 
     assertNoCreatorChrome();
+    expect(screen.getByRole("heading", { name: "Review submitted" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: /^Want a copy\?$/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Download PDF$/ })).toBeTruthy();
   });

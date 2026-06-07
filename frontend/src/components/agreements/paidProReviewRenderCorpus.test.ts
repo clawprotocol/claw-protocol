@@ -89,23 +89,23 @@ describe("paidProReviewRenderCorpus", () => {
     expect(html).toContain("Iron Vale Systems Inc");
   });
 
-  it("review render plain preserves SoT hash with consumed signer metadata (no structural sanitizer drift)", () => {
+  it("review render plain hydrates signer metadata from consumed authority without losing entity blocks", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
-    const record = getPaidProSourceOfTruth()!;
     setConsumedPaidProSignerMetadataAuthority(authority());
     const renderPlain = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;
-    expect(hashPaidProCorpus(renderPlain)).toBe(record.hash);
-    expect(hashPaidProCorpus(copy)).toBe(record.hash);
+    expect(copy).toBe(renderPlain);
     for (const corpus of [renderPlain, copy]) {
       expect(corpus).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
       expect(corpus).toMatch(/SERVICE PROVIDER:\s*\n\s*Iron Vale Systems Inc/i);
+      expect(corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
+      expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+      expect(corpus).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     }
   });
 
-  it("visible plain prefers frozen SoT over polished boundary candidate", () => {
+  it("visible plain prefers hydrated authoritative display over polished boundary candidate", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
-    const record = getPaidProSourceOfTruth()!;
     setConsumedPaidProSignerMetadataAuthority(authority());
     const polished = polishProAgreementDisplayLayer(RAW, {
       reviewDisplayMode: true,
@@ -115,8 +115,9 @@ describe("paidProReviewRenderCorpus", () => {
       boundaryPlain: polished,
       displayCandidatePlain: polished,
     });
-    expect(visible).toBe(record.text);
-    expect(hashPaidProCorpus(visible)).toBe(record.hash);
+    expect(visible).toMatch(/Name:\s*Anthem H Blanchard/i);
+    expect(visible).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+    expect(visible).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     expect(hashPaidProCorpus(visible)).not.toBe(hashPaidProCorpus(polished));
   });
 
@@ -216,7 +217,6 @@ describe("paidProReviewRenderCorpus", () => {
   it("review and copy surfaces stay hash-equivalent when only SoT is established", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
     const record = getPaidProSourceOfTruth()!;
-    setConsumedPaidProSignerMetadataAuthority(authority());
     const review = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;
     expect(hasPaidProSourceOfTruth()).toBe(true);
@@ -226,9 +226,8 @@ describe("paidProReviewRenderCorpus", () => {
     expect(hashPaidProCorpus(copy)).toBe(record.hash);
   });
 
-  it("user-approved SoT revision stays byte-aligned on review and copy surfaces", () => {
+  it("user-approved SoT revision stays byte-aligned on review and copy when authority is not consumed", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
-    setConsumedPaidProSignerMetadataAuthority(authority());
     const edited = RAW.replace(/Title: Membe/g, "Title: Member");
     establishPaidProSourceOfTruth({ text: edited, source: "server_full_draft", allowShorterOverwrite: true });
     const record = getPaidProSourceOfTruth()!;

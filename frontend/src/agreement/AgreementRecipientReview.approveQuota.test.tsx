@@ -6,6 +6,15 @@ import { approveDraftFromReviewFirst } from "./AgreementRecipientReview.testHelp
 import { AccessProvider } from "../access/AccessContext";
 import { recipientPartyReviewCopy } from "./recipientReviewPartyActions";
 
+vi.mock("../launch/LaunchNavContext", () => ({
+  useLaunchNav: () => ({
+    pathname: "/agreements/ag/review",
+    search: "",
+    hash: "",
+    navigate: vi.fn(),
+  }),
+}));
+
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
@@ -70,7 +79,13 @@ describe("AgreementRecipientReview approve + localStorage quota", () => {
         return jsonResponse({
           draft: {
             ...draftOpen,
-            audit_log: [{ event_type: "recipient_approved", at: new Date().toISOString() }],
+            audit_log: [
+              {
+                event_type: "recipient_approved",
+                at: new Date().toISOString(),
+                value: { participant_id: "p-bob" },
+              },
+            ],
           },
         });
       }
@@ -80,7 +95,13 @@ describe("AgreementRecipientReview approve + localStorage quota", () => {
             approveCalls > 0
               ? {
                   ...draftOpen,
-                  audit_log: [{ event_type: "recipient_approved", at: new Date().toISOString() }],
+                  audit_log: [
+                    {
+                      event_type: "recipient_approved",
+                      at: new Date().toISOString(),
+                      value: { participant_id: "p-bob" },
+                    },
+                  ],
                 }
               : draftOpen,
           signing_lock: null,
@@ -109,12 +130,14 @@ describe("AgreementRecipientReview approve + localStorage quota", () => {
     await approveDraftFromReviewFirst();
 
     await waitFor(() => {
-      expect(screen.getByText("Reviewer approved this draft without requesting changes.")).toBeTruthy();
+      expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review submitted");
     });
 
     expect(screen.queryByText(/Failed to execute 'setItem'/i)).toBeNull();
     expect(screen.queryByText(/exceeded the quota/i)).toBeNull();
-    expect(screen.getByText("Waiting for sender to finalize signing.")).toBeTruthy();
+    expect(screen.getByTestId("recipient-approved-waiting-body").textContent).toContain(
+      "remaining reviewer(s)",
+    );
     expect(setItem.mock.calls.some(([k]) => String(k).startsWith("claw_agreement_versions_v1:"))).toBe(true);
     expect(screen.queryByRole("heading", { name: recipientPartyReviewCopy.looksGood })).toBeNull();
   });

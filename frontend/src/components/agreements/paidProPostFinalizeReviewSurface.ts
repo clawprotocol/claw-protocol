@@ -2,10 +2,16 @@
  * Post-signer-finalize paid Pro review surfaces — locked hydrated signing snapshot only.
  */
 
-import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
+import {
+  getAuthoritativeSigningSnapshot,
+  readAuthoritativeSigningCorpus,
+  type AuthoritativeSigningSnapshotRecipientMetadata,
+} from "./authoritativeSigningSnapshot";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import {
   countBlankSignerMetadataLinesInExecutionBlock,
+  hydratePaidProExecutionBlockWithSignerMetadata,
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import {
@@ -18,17 +24,59 @@ import {
   repairExecutionBlockEntityHeadingLines,
 } from "./paidProExecutionBlockEntityHeading";
 import {
+  authorityPartiesToRecipientMetadata,
   readConsumedPaidProSignerMetadataAuthority,
+  recipientMetadataToAuthorityParties,
 } from "./paidProSignerMetadataAuthority";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
-import type { AuthoritativeSigningSnapshotRecipientMetadata } from "./authoritativeSigningSnapshot";
+import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
+import { ensureExecutionBlockNoticeContactFieldLines } from "./paidProPartyNoticeDetails";
 
-function finalizePostFinalizeReviewPlain(plain: string): string {
+function resolvePostFinalizeRecipientMetadata(): AuthoritativeSigningSnapshotRecipientMetadata | null {
+  const snapshot = getAuthoritativeSigningSnapshot();
+  if (snapshot?.signerMetadata) return snapshot.signerMetadata;
+  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
+  if (!parties?.length) return null;
+  return authorityPartiesToRecipientMetadata(parties);
+}
+
+/** Render-time enrichment — does not mutate the frozen signing snapshot store. */
+export function enrichPaidProPostFinalizeDisplayCorpus(plain: string): string {
   const body = (plain || "").trim();
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
-  if (!detectExecutionHeadingMetadataLeak(body).leak) return body;
-  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
-  return repairExecutionBlockEntityHeadingLines(body, parties).text.trim();
+
+  const parties =
+    readConsumedPaidProSignerMetadataAuthority()?.parties ??
+    (() => {
+      const meta = resolvePostFinalizeRecipientMetadata();
+      return meta ? recipientMetadataToAuthorityParties(meta) : [];
+    })();
+
+  let out = body;
+  if (parties.length >= 2) {
+    out = repairMalformedPaidProAgreementRecital(out, parties).text;
+  }
+
+  const recipientMeta = resolvePostFinalizeRecipientMetadata();
+  if (recipientMeta && signerMetadataAuthorityHasHydratableFields(recipientMeta) && parties.length >= 2) {
+    out = ensureExecutionBlockNoticeContactFieldLines(out).text;
+    out = finalizePaidProSigningCorpusText(out, parties, { acceptedCorpus: body }).text;
+    const hydration = hydratePaidProExecutionBlockWithSignerMetadata(out, recipientMeta, {
+      acceptedCorpus: body,
+    });
+    if (hydration.applied) {
+      out = hydration.corpus;
+    }
+  }
+
+  if (!detectExecutionHeadingMetadataLeak(out).leak) return out.trim();
+  return repairExecutionBlockEntityHeadingLines(out, parties).text.trim();
+}
+
+function finalizePostFinalizeReviewPlain(plain: string): string {
+  const body = enrichPaidProPostFinalizeDisplayCorpus(plain);
+  if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
+  return body;
 }
 
 export function resolvePaidProPostFinalizeReviewPlain(): string {

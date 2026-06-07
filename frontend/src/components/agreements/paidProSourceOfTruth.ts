@@ -616,13 +616,10 @@ export function getPaidProDocumentForSurface(
     reason: `surface:${surface}`,
   });
   const executionBlockAppended = false;
-  if (surface === "display") {
-    text = source.text;
-    hash = source.hash;
-    corpusSource = "paidProSourceOfTruth";
-  } else if (
+  if (
     surface === "review" ||
     surface === "copy" ||
+    surface === "display" ||
     surface === "signer_setup" ||
     surface === "vs01" ||
     surface === "finalized"

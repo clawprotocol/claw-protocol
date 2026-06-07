@@ -116,6 +116,16 @@ import {
 import { RECIPIENT_APPROVED_LAWDOG_PROMO_LINE } from "./recipientPublicReviewChrome";
 import type { LawdogViewerContext } from "./lawdogViewerContext";
 import { RecipientApprovedWaitingPanel } from "./RecipientApprovedWaitingPanel";
+import {
+  resolveAllReviewPartiesApproved,
+  resolvePostApprovalPresentationAudience,
+  resolveRecipientPostApprovalPresentation,
+  resolveReviewerPartyIndex,
+  type PostApprovalPanelActionKind,
+  type RecipientPostApprovalPresentation,
+} from "./recipientApprovedWaitingPresentation";
+import { useLaunchNav } from "../launch/LaunchNavContext";
+import { navigateCreatorPrepareSignatureLinks } from "../launch/creatorDashboardPrepareSignatureLinks";
 import { recipientReviewDevInfo, recipientReviewDevWarn } from "./recipientReviewDevLog";
 import { JoyMilestoneMark } from "../joy/JoyMilestone";
 import { emitActionCompleted } from "../joy/joyTelemetry";
@@ -671,6 +681,10 @@ type Props = {
   onRecipientApprovedWaitingChange?: (active: boolean) => void;
   /** Public recipient vs QA simulation — controls waiting copy and diagnostics only. */
   recipientViewerContext?: LawdogViewerContext;
+  /** QA simulation owner return path (`ownerReturn` query) for Party 1 creator-aware post-approval. */
+  qaOwnerReturnPath?: string | null;
+  /** Shell hero override while post-approval waiting UI is active. */
+  onRecipientPostApprovalPresentationChange?: (presentation: RecipientPostApprovalPresentation | null) => void;
 };
 
 type RecipientPreview = {
@@ -758,7 +772,10 @@ export function AgreementRecipientReview({
   revisionLineage = DEFAULT_RECIPIENT_REVISION_LINEAGE,
   onRecipientApprovedWaitingChange,
   recipientViewerContext = "public_recipient",
+  qaOwnerReturnPath = null,
+  onRecipientPostApprovalPresentationChange,
 }: Props) {
+  const { navigate } = useLaunchNav();
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [renderedHtml, setRenderedHtml] = useState("");
   const [loading, setLoading] = useState(true);
@@ -2209,6 +2226,75 @@ export function AgreementRecipientReview({
       onRecipientApprovedWaitingChange?.(false);
     };
   }, [onRecipientApprovedWaitingChange, recipientAcceptedAwaitingLock]);
+
+  const reviewerPartyIndex = useMemo(
+    () => resolveReviewerPartyIndex(draft?.parties, participantPid),
+    [draft?.parties, participantPid],
+  );
+  const postApprovalPresentation = useMemo(() => {
+    if (entry.kind !== "review" || viewerLike || !draft) return null;
+    if (!recipientApprovedInAudit && !approvedAck) return null;
+    return resolveRecipientPostApprovalPresentation({
+      audience: resolvePostApprovalPresentationAudience({
+        viewerContext: recipientViewerContext,
+        qaOwnerReturnPath,
+        reviewerPartyIndex,
+      }),
+      signingLinksExist: bundleSigningLocked,
+      allReviewsComplete: resolveAllReviewPartiesApproved(draft),
+    });
+  }, [
+    entry.kind,
+    viewerLike,
+    draft,
+    recipientApprovedInAudit,
+    approvedAck,
+    recipientViewerContext,
+    qaOwnerReturnPath,
+    reviewerPartyIndex,
+    bundleSigningLocked,
+  ]);
+
+  useEffect(() => {
+    if (!recipientAcceptedAwaitingLock) {
+      onRecipientPostApprovalPresentationChange?.(null);
+      return;
+    }
+    onRecipientPostApprovalPresentationChange?.(postApprovalPresentation);
+    return () => {
+      onRecipientPostApprovalPresentationChange?.(null);
+    };
+  }, [
+    onRecipientPostApprovalPresentationChange,
+    postApprovalPresentation,
+    recipientAcceptedAwaitingLock,
+  ]);
+
+  const [postApprovalActionBusy, setPostApprovalActionBusy] = useState(false);
+  const handlePostApprovalAction = useCallback(
+    async (kind: PostApprovalPanelActionKind) => {
+      switch (kind) {
+        case "return_dashboard":
+          navigate("/app");
+          return;
+        case "prepare_signature_links":
+          setPostApprovalActionBusy(true);
+          try {
+            await navigateCreatorPrepareSignatureLinks({ agreementId, navigate });
+          } finally {
+            setPostApprovalActionBusy(false);
+          }
+          return;
+        case "done":
+          if (onClose) onClose();
+          else navigate("/");
+          return;
+        default:
+          return;
+      }
+    },
+    [agreementId, navigate, onClose],
+  );
 
   const recipientAcceptedNoEditsBanner =
     recipientAcceptedAwaitingLock &&
@@ -4724,6 +4810,9 @@ export function AgreementRecipientReview({
       };
     }
     if (recipientApprovedInAudit || approvedAck) {
+      if (recipientAcceptedNoEditsBanner && recipientAcceptedAwaitingLock) {
+        return null;
+      }
       if (recipientAcceptedNoEditsBanner) {
         return {
           wrap: "border-emerald-700/50 bg-emerald-950/40 text-emerald-50",
@@ -4765,34 +4854,17 @@ export function AgreementRecipientReview({
         className="vs01-agreement-review-inner space-y-6 pb-8"
         data-testid="recipient-accepted-awaiting-lock-root"
       >
-        <div className="flex flex-wrap items-start justify-end gap-3">
-          {onClose ? (
-            <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
-              Close
-            </button>
-          ) : null}
-        </div>
+        <div className="flex flex-wrap items-start justify-end gap-3" />
 
-        {statusBanner ? (
-          <div
-            className={`rounded-lg border px-4 py-3 text-sm leading-snug ${statusBanner.wrap}`}
-            role="status"
-            data-testid="recipient-review-approved-status"
-            data-recipient-accepted-awaiting-lock="true"
-          >
-            <div className="font-semibold">{statusBanner.title}</div>
-            <p className="mt-1 text-xs opacity-95">{statusBanner.detail}</p>
-          </div>
+        {postApprovalPresentation ? (
+          <RecipientApprovedWaitingPanel
+            agreementId={agreementId}
+            viewerContext={recipientViewerContext}
+            presentation={postApprovalPresentation}
+            loading={loading || postApprovalActionBusy}
+            onAction={handlePostApprovalAction}
+          />
         ) : null}
-
-        <RecipientApprovedWaitingPanel
-          agreementId={agreementId}
-          viewerContext={recipientViewerContext}
-          signingLinksExist={signingReadyActive}
-          loading={loading}
-          pollIntervalMs={RECIPIENT_SIGNING_READINESS_POLL_MS}
-          onRefresh={refresh}
-        />
 
         {needsPersonalizedLink ? (
           <div
@@ -5061,14 +5133,14 @@ export function AgreementRecipientReview({
       (recipientApprovedInAudit || approvedAck) &&
       !signingReadyActive &&
       !agreementFullyExecuted &&
-      !mySignatureDone ? (
+      !mySignatureDone &&
+      postApprovalPresentation ? (
         <RecipientApprovedWaitingPanel
           agreementId={agreementId}
           viewerContext={recipientViewerContext}
-          signingLinksExist={signingReadyActive}
-          loading={loading}
-          pollIntervalMs={RECIPIENT_SIGNING_READINESS_POLL_MS}
-          onRefresh={refresh}
+          presentation={postApprovalPresentation}
+          loading={loading || postApprovalActionBusy}
+          onAction={handlePostApprovalAction}
         />
       ) : null}
 

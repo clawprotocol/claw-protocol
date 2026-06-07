@@ -14,6 +14,8 @@ import {
   getPaidProSourceOfTruth,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 import { isForbiddenPaidProDisplayRenderSource } from "./premiumGenerationApiAvailability";
 
 export const PAID_PRO_VISIBLE_PAPER_FINALIZING_MESSAGE = "Finalizing secure agreement version…";
@@ -245,6 +247,12 @@ export function pickAuthoritativePlainForVisibleProPaper(
   plain: string;
   source: string;
 } | null {
+  if (hasAuthoritativeSigningSnapshot()) {
+    const hydrated = resolvePaidProPostFinalizeReviewPlain().trim();
+    if (hydrated.length >= 400) {
+      return { plain: hydrated, source: "authoritative_signing_snapshot" };
+    }
+  }
   const fromCandidates = [
     candidates.find((c) => c.id === "paidProSourceOfTruth"),
     candidates.find((c) => c.id === "authoritativeAgreementDocument"),

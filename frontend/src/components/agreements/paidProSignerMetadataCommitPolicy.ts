@@ -8,7 +8,6 @@ import {
   PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN,
   readPaidProPinnedSignerAppliedCorpus,
 } from "./paidProFinalHydratedCorpus";
-import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
@@ -44,6 +43,18 @@ export function hasSignerMetadataForExecutionOverlay(
   });
 }
 
+/** Review render must apply signer execution overlay (live session or consumed authority). */
+export function paidProReviewRenderNeedsSignerExecutionOverlay(args: {
+  deferSignerMetadataRepair?: boolean;
+  parties: readonly PaidProSignerMetadataParty[];
+}): boolean {
+  if (args.deferSignerMetadataRepair) return true;
+  return (
+    hasSignerMetadataForExecutionOverlay(args.parties) ||
+    shouldHydratePaidProReviewSurfacesFromConsumedAuthority(args.parties)
+  );
+}
+
 /** Hydrate notice/signature metadata on review surfaces (not while live signer session is active). */
 export function shouldHydratePaidProReviewSurfacesFromConsumedAuthority(
   parties: readonly PaidProSignerMetadataParty[],
@@ -65,7 +76,7 @@ export function shouldStagePaidProSignerMetadataLocally(args: {
 export function shouldDeferPaidProReviewRenderSignerRepair(args: {
   signerMetadataSessionActive: boolean;
 }): boolean {
-  return shouldStagePaidProSignerMetadataLocally(args) || shouldUsePaidProSourceOfTruthDisplayOnly();
+  return shouldStagePaidProSignerMetadataLocally(args);
 }
 
 /**

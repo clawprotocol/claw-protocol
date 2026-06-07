@@ -52,6 +52,7 @@ import {
   paidProSignerStagingDisplayUsesFrozenCorpus,
   readPaidProSignerStagingDisplayCorpus,
   resolvePaidProSignerStagingDisplayPlain,
+  buildPaidProSignerStagingOverlayCacheKey,
 } from "./paidProSignerStagingDisplayCorpus";
 import {
   resolvePaidProAuthoritativeDisplayPlain,
@@ -79,6 +80,7 @@ import {
   consumedAuthoritySignerMetadataComplete,
   hasSignerMetadataForExecutionOverlay,
   isPaidProPostFinalizeHydratedCorpusLocked,
+  paidProReviewRenderNeedsSignerExecutionOverlay,
   shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
 } from "./paidProSignerMetadataCommitPolicy";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
@@ -653,21 +655,28 @@ export function resolvePaidProReviewRenderPlain(
       return locked;
     }
   }
-  const seedForMemo = shouldUsePaidProSourceOfTruthDisplayOnly()
+  const partiesForRender = resolvePartiesForReviewRender(args);
+  const needsSignerOverlay = paidProReviewRenderNeedsSignerExecutionOverlay({
+    deferSignerMetadataRepair: args?.deferSignerMetadataRepair,
+    parties: partiesForRender,
+  });
+  const signerOverlayKey = buildPaidProSignerStagingOverlayCacheKey(partiesForRender);
+  const seedForMemo = shouldUsePaidProSourceOfTruthDisplayOnly() && !needsSignerOverlay
     ? getPaidProSourceOfTruthText().trim()
-    : args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()
+    : args?.deferSignerMetadataRepair &&
+        paidProSignerStagingDisplayUsesFrozenCorpus(signerOverlayKey)
       ? (readPaidProSignerStagingDisplayCorpus()?.plain ?? getPaidProSourceOfTruthText().trim())
       : hasPaidProSourceOfTruth()
         ? getPaidProSourceOfTruthText().trim()
         : "";
   const memoKey = buildPaidProReviewPlainMemoKey(seedForMemo, surface);
   const memoHit = readMemoizedPaidProReviewPlain(memoKey);
-  if (memoHit != null) {
+  if (memoHit != null && !needsSignerOverlay) {
     return memoHit;
   }
 
   let rendered: string;
-  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+  if (shouldUsePaidProSourceOfTruthDisplayOnly() && !needsSignerOverlay) {
     rendered = tracePaidProQaPassText(
       "resolvePaidProReviewRenderPlain",
       `${surface}:display_only_sot`,
@@ -681,13 +690,18 @@ export function resolvePaidProReviewRenderPlain(
     });
     logExecutionBlockLocation(rendered, "paid_pro_review_render");
     logExecutionBlockCount(rendered, "paid_pro_review_render");
-  } else if (args?.deferSignerMetadataRepair && paidProSignerStagingDisplayUsesFrozenCorpus()) {
+  } else if (
+    args?.deferSignerMetadataRepair &&
+    paidProSignerStagingDisplayUsesFrozenCorpus(signerOverlayKey) &&
+    !needsSignerOverlay
+  ) {
     rendered = tracePaidProQaPassText("resolvePaidProReviewRenderPlain", `${surface}:frozen`, seedForMemo, () => seedForMemo);
   } else {
     const seed = seedForMemo;
     rendered = tracePaidProQaPassText("resolvePaidProReviewRenderPlain", surface, seed, () =>
       resolvePaidProSignerStagingDisplayPlain({
         stagingActive: Boolean(args?.deferSignerMetadataRepair),
+        signerOverlayKey,
         resolveFresh: () => {
           const parties = resolvePartiesForReviewRender(args);
           const roleContext = paidProPartyRoleContextFromArgs(args);
@@ -702,7 +716,9 @@ export function resolvePaidProReviewRenderPlain(
       }),
     );
   }
-  writeMemoizedPaidProReviewPlain(memoKey, rendered);
+  if (!needsSignerOverlay) {
+    writeMemoizedPaidProReviewPlain(memoKey, rendered);
+  }
   if (rendered.length >= 200 && hasPaidProSourceOfTruth()) {
     auditPaidProReviewRenderCorpus(rendered);
     auditPaidProReviewRenderSotParity({ reviewPlain: rendered, surface: "paid_pro_review_render_plain" });

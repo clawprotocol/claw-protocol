@@ -4,6 +4,7 @@ import {
   applySignatureNoticeContactFieldsToCorpus,
   buildPartyNoticeDetailsBlock,
   corpusHasPartyNoticeDetails,
+  ensureExecutionBlockNoticeContactFieldLines,
 } from "./paidProPartyNoticeDetails";
 import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "./authoritativeSignerHydration";
@@ -99,6 +100,32 @@ describe("paidProPartyNoticeDetails", () => {
     expect(block).toContain("Email: b@test.com");
     const spSection = block.split(/Service Provider:/i)[1] ?? "";
     expect(spSection).not.toMatch(/\nAddress:/i);
+  });
+
+  it("ensureExecutionBlockNoticeContactFieldLines inserts missing notice rows before Date", () => {
+    const sparseBody = [
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      BLUE,
+      "By: __________________________",
+      "Name:",
+      "Title:",
+      "Date:",
+      "",
+      "SERVICE PROVIDER:",
+      IRON,
+      "By: __________________________",
+      "Name:",
+      "Title:",
+      "Date:",
+    ].join("\n");
+    const ensured = ensureExecutionBlockNoticeContactFieldLines(sparseBody);
+    expect(ensured.inserted).toBeGreaterThanOrEqual(4);
+    expect(ensured.text).toMatch(/Email for Notice:/i);
+    expect(ensured.text).toMatch(/Address for Notice:/i);
+    const filled = applySignatureNoticeContactFieldsToCorpus(ensured.text, authority().parties);
+    expect(filled.text).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
   });
 
   it("applySignatureNoticeContactFieldsToCorpus fills signature notice lines", () => {

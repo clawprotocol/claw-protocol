@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { Vs01Layout } from "../vs01/Vs01Layout";
 import {
@@ -12,6 +12,7 @@ import {
   resolveRecipientLogoHomeHref,
   resolveRecipientProductNavAction,
 } from "./lawdogViewerContext";
+import type { RecipientPostApprovalPresentation } from "./recipientApprovedWaitingPresentation";
 
 const RECIPIENT_REVIEW_HERO = {
   title: RECIPIENT_PUBLIC_HERO_TITLE,
@@ -35,19 +36,32 @@ type Props = {
     recipientLinkRole?: import("./AgreementRecipientReview").RecipientLinkRole;
     participantPartyId?: string;
     viewerContext: LawdogViewerContext;
+    qaOwnerReturnPath?: string | null;
     onClose: () => void;
+    onRecipientPostApprovalPresentationChange: (
+      presentation: RecipientPostApprovalPresentation | null,
+    ) => void;
   }) => ReactNode;
 };
 
 export function RecipientPublicReviewRoute(props: Props) {
   const { navigate } = useLaunchNav();
+  const [postApprovalPresentation, setPostApprovalPresentation] =
+    useState<RecipientPostApprovalPresentation | null>(null);
   const productNavAction = resolveRecipientProductNavAction(
     props.viewerContext,
     props.ownerReturnPath ?? null,
   );
+  const hero = postApprovalPresentation
+    ? {
+        title: postApprovalPresentation.shellHeroTitle,
+        subtitle: postApprovalPresentation.shellHeroSubtitle ?? undefined,
+      }
+    : RECIPIENT_REVIEW_HERO;
+
   return (
     <Vs01Layout
-      hero={RECIPIENT_REVIEW_HERO}
+      hero={hero}
       headerAside={resolveRecipientReviewHeaderAside(props.viewerContext)}
       logoHomeHref={resolveRecipientLogoHomeHref(props.viewerContext)}
       productNav={{
@@ -61,6 +75,7 @@ export function RecipientPublicReviewRoute(props: Props) {
         className="vs01-card vs01-card--envelope"
         data-testid="recipient-public-review-route"
         data-lawdog-viewer-context={props.viewerContext}
+        data-recipient-post-approval-audience={postApprovalPresentation?.audience ?? ""}
       >
         {props.reviewGate({
           agreementId: props.agreementId,
@@ -68,7 +83,9 @@ export function RecipientPublicReviewRoute(props: Props) {
           recipientLinkRole: props.recipientLinkRole,
           participantPartyId: props.participantPartyId,
           viewerContext: props.viewerContext,
+          qaOwnerReturnPath: props.ownerReturnPath ?? null,
           onClose: props.onClose,
+          onRecipientPostApprovalPresentationChange: setPostApprovalPresentation,
         })}
       </div>
     </Vs01Layout>

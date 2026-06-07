@@ -16,6 +16,7 @@ import {
 } from "./canonicalPartyLegalNameSanitizer";
 import { setPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
 import { auditPaidProSignerFinalizeCorpus } from "./paidProCorpusLifecycleDiff";
+import { ensureExecutionBlockNoticeContactFieldLines } from "./paidProPartyNoticeDetails";
 import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import {
@@ -140,10 +141,12 @@ export function createAuthoritativeSigningSnapshot(
     ...args.signerMetadata,
     partyAddresses: args.signerMetadata.partyAddresses ?? [],
   };
+  let rawInput = (args.corpus || "").trim();
+  rawInput = ensureExecutionBlockNoticeContactFieldLines(rawInput).text.trim();
   let corpus = finalizePaidProSigningCorpusText(
-    applyCanonicalPartyLegalNamesToSigningCorpus((args.corpus || "").trim(), parties).text,
+    applyCanonicalPartyLegalNamesToSigningCorpus(rawInput, parties).text,
     parties,
-    { acceptedCorpus: (args.corpus || "").trim() },
+    { acceptedCorpus: rawInput },
   ).text.trim();
   if (signerMetadataAuthorityHasHydratableFields(signerMetadata)) {
     const hydration = hydratePaidProExecutionBlockWithSignerMetadata(corpus, signerMetadata, {

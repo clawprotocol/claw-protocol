@@ -14,6 +14,15 @@ import { buildReviewLinkPartySimulationRows } from "../../launch/simpleProduct/R
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 
+vi.mock("../../launch/LaunchNavContext", () => ({
+  useLaunchNav: () => ({
+    pathname: "/agreements/ag/review",
+    search: "",
+    hash: "",
+    navigate: vi.fn(),
+  }),
+}));
+
 function jsonResponse(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
@@ -106,8 +115,9 @@ describe("Test307 reviewer approval state", () => {
     await approveDraftFromReviewFirst();
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-review-approved-status")).toBeTruthy();
+      expect(screen.getByTestId("recipient-signing-readiness-panel")).toBeTruthy();
     });
+    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review submitted");
     expect(screen.queryByTestId("recipient-review-approve-draft")).toBeNull();
   });
 
