@@ -4,7 +4,9 @@ import {
   countCreatorDashboardMetrics,
   creatorDashboardPrimaryAction,
   deriveCreatorDashboardStatus,
+  shouldCreatorRedirectPreSignatureDoneToDashboard,
 } from "./creatorDashboardPresentation";
+import type { AgreementDraft } from "../agreement/agreementTypes";
 
 function row(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement {
   return {
@@ -63,11 +65,61 @@ describe("creatorDashboardPresentation", () => {
           review_approvals_required: 2,
           review_approvals_completed: 2,
         }),
-      ).label,
-    ).toBe("Prepare signature links");
+      ),
+    ).toEqual({ label: "Prepare signature links", path: "/app", emphasis: "primary" });
     expect(creatorDashboardPrimaryAction(row({ has_server_signing_lock: true })).label).toBe(
       "View Signing Status",
     );
     expect(creatorDashboardPrimaryAction(row({ completed_signed: true })).label).toBe("View Agreement");
+  });
+
+  it("treats partial reviewer approval as in_review, not ready_for_signing", () => {
+    expect(
+      deriveCreatorDashboardStatus(
+        row({
+          review_sent_at: "2026-01-01T00:00:00Z",
+          reviewer_approved: true,
+          review_approvals_required: 1,
+          review_approvals_completed: 1,
+          party_count: 2,
+          all_reviewers_approved: false,
+        }),
+      ),
+    ).toBe("in_review");
+  });
+
+  it("redirects creator from pre-signature done page when all reviews are approved", () => {
+    const draft = {
+      parties: [{ id: "p1" }, { id: "p2" }],
+      audit_log: [
+        { event_type: "recipient_approved", value: { participant_id: "p1" } },
+        { event_type: "recipient_approved", value: { participant_id: "p2" } },
+      ],
+    } as AgreementDraft;
+    expect(
+      shouldCreatorRedirectPreSignatureDoneToDashboard({
+        signed: false,
+        signingLockActive: false,
+        draft,
+        isPaidProReviewDonePath: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldCreatorRedirectPreSignatureDoneToDashboard({
+        signed: false,
+        signingLockActive: false,
+        draft,
+        isPaidProReviewDonePath: false,
+        confirmedSend: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldCreatorRedirectPreSignatureDoneToDashboard({
+        signed: true,
+        signingLockActive: false,
+        draft,
+        isPaidProReviewDonePath: false,
+      }),
+    ).toBe(false);
   });
 });

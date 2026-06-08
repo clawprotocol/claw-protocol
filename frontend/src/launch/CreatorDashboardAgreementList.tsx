@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import {
@@ -5,20 +6,25 @@ import {
   CREATOR_ALL_REVIEWERS_APPROVED_HELPER_EXTENDED,
   CREATOR_NEXT_ACTION_PREPARE_SIGNATURE_LINKS,
   CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL,
+  CREATOR_PREPARE_SIGNATURE_LINKS_BLOCKED_NOTICE,
   CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
-  CREATOR_REVIEWS_COMPLETE_PILL,
+  CREATOR_SIGNATURE_LINKS_LOCKED_HELPER,
 } from "./creatorDashboardCopy";
 import {
-  CREATOR_DASHBOARD_STATUS_LABEL,
-  creatorDashboardAllPartiesApproved,
   creatorDashboardPrimaryAction,
   creatorDashboardShowsReviewPanel,
   deriveCreatorDashboardStatus,
+  deriveCreatorDashboardStatusPillFromGate,
   deriveCreatorReviewProgressLabel,
   deriveCreatorSigningStatusLabel,
   displayCreatorAgreementTitle,
   formatCreatorDashboardUpdated,
 } from "./creatorDashboardPresentation";
+import {
+  creatorDashboardReviewHydrationPending,
+  creatorDashboardWaitingOnReviewer,
+  resolveCreatorDashboardReviewGate,
+} from "./creatorDashboardReviewGate";
 
 type Props = {
   rows: readonly WorkspaceIndexAgreement[];
@@ -26,19 +32,9 @@ type Props = {
   onNavigate: (path: string) => void;
   onPrepareSignatureLinks: (agreementId: string) => void | Promise<void>;
   prepareBusyAgreementId?: string | null;
+  prepareNoticeByAgreementId?: Readonly<Record<string, string>>;
   featured?: boolean;
 };
-
-function deriveCreatorDashboardStatusPillLabel(
-  row: WorkspaceIndexAgreement,
-  reviewRows: readonly OwnerReviewPartyStatusRow[],
-): string {
-  const status = deriveCreatorDashboardStatus(row);
-  if (status === "ready_for_signing" && creatorDashboardAllPartiesApproved(row, reviewRows)) {
-    return CREATOR_REVIEWS_COMPLETE_PILL;
-  }
-  return CREATOR_DASHBOARD_STATUS_LABEL[status];
-}
 
 function ReviewStatusPanel(props: {
   rows: readonly OwnerReviewPartyStatusRow[];
@@ -72,6 +68,37 @@ function ReviewStatusPanel(props: {
   );
 }
 
+function CreatorDashboardAgreementCardSkeleton(props: {
+  row: WorkspaceIndexAgreement;
+  featured: boolean;
+}) {
+  const { row, featured } = props;
+  return (
+    <li
+      className="rounded-2xl border border-slate-800/70 bg-slate-950/25 px-4 py-4 sm:px-5 sm:py-5"
+      data-testid={`creator-dashboard-agreement-skeleton-${row.id}`}
+      data-creator-dashboard-featured={featured ? "true" : "false"}
+      aria-busy="true"
+      aria-label={`Loading review status for ${displayCreatorAgreementTitle(row.title)}`}
+    >
+      <div className="animate-pulse space-y-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="h-5 w-40 rounded bg-slate-800/80" />
+          <div className="h-5 w-28 rounded-full bg-slate-800/60" />
+        </div>
+        <div className="h-4 w-24 rounded bg-slate-800/50" />
+        <p className="text-sm text-slate-500" data-testid={`creator-dashboard-review-hydrating-${row.id}`}>
+          Loading review status…
+        </p>
+        <div className="space-y-2 pt-1">
+          <div className="h-4 w-56 rounded bg-slate-800/40" />
+          <div className="h-4 w-44 rounded bg-slate-800/40" />
+        </div>
+      </div>
+    </li>
+  );
+}
+
 export function CreatorDashboardAgreementList(props: Props) {
   const {
     rows,
@@ -79,8 +106,12 @@ export function CreatorDashboardAgreementList(props: Props) {
     onNavigate,
     onPrepareSignatureLinks,
     prepareBusyAgreementId = null,
+    prepareNoticeByAgreementId = {},
     featured: featuredSection = false,
   } = props;
+  const [prepareBlockedNoticeAgreementId, setPrepareBlockedNoticeAgreementId] = useState<string | null>(
+    null,
+  );
 
   return (
     <ul
@@ -88,18 +119,33 @@ export function CreatorDashboardAgreementList(props: Props) {
       data-testid="creator-dashboard-agreement-list"
     >
       {rows.map((row) => {
+        const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
+        if (creatorDashboardReviewHydrationPending(row, reviewRows)) {
+          return (
+            <CreatorDashboardAgreementCardSkeleton
+              key={row.id}
+              row={row}
+              featured={featuredSection}
+            />
+          );
+        }
+
         const status = deriveCreatorDashboardStatus(row);
         const action = creatorDashboardPrimaryAction(row);
-        const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
-        const allApproved = creatorDashboardAllPartiesApproved(row, reviewRows);
-        const readyForSigning = status === "ready_for_signing" && allApproved;
-        const showReview = creatorDashboardShowsReviewPanel(status);
-        const statusPill = deriveCreatorDashboardStatusPillLabel(row, reviewRows);
+        const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows);
+        const allApproved = reviewGate.allRequiredReviewPartiesApproved;
+        const waitingOnReviewer = creatorDashboardWaitingOnReviewer(reviewGate);
+        const readyForSigning = allApproved && status !== "completed" && status !== "signing_in_progress";
+        const showReview = creatorDashboardShowsReviewPanel(status) || waitingOnReviewer || readyForSigning;
+        const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate);
         const reviewProgress = deriveCreatorReviewProgressLabel(row, reviewRows);
         const signingStatus = deriveCreatorSigningStatusLabel(row);
-        const featured = featuredSection && readyForSigning;
+        const featured = featuredSection && (readyForSigning || waitingOnReviewer);
         const donePath = `/app/done/${encodeURIComponent(row.id)}`;
         const prepareBusy = prepareBusyAgreementId === row.id;
+        const prepareNotice = prepareNoticeByAgreementId[row.id] ?? null;
+        const prepareSignatureLinksVisible = readyForSigning || waitingOnReviewer;
+        const prepareSignatureLinksEnabled = readyForSigning;
 
         return (
           <li
@@ -107,11 +153,16 @@ export function CreatorDashboardAgreementList(props: Props) {
             className={`rounded-2xl border px-4 py-4 transition-colors sm:px-5 sm:py-5 ${
               readyForSigning
                 ? "border-emerald-800/50 bg-emerald-950/20 shadow-[0_0_0_1px_rgba(16,185,129,0.08)]"
-                : "border-slate-800/70 bg-slate-950/25"
+                : waitingOnReviewer
+                  ? "border-amber-800/40 bg-amber-950/15"
+                  : "border-slate-800/70 bg-slate-950/25"
             }`}
             data-testid={`creator-dashboard-agreement-${row.id}`}
             data-creator-dashboard-status={status}
             data-creator-dashboard-featured={featured ? "true" : "false"}
+            data-creator-dashboard-review-gate-all-approved={allApproved ? "true" : "false"}
+            data-creator-dashboard-prepare-enabled={prepareSignatureLinksEnabled ? "true" : "false"}
+            data-creator-dashboard-review-source={reviewGate.source}
           >
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start">
               <div className="min-w-0">
@@ -119,18 +170,22 @@ export function CreatorDashboardAgreementList(props: Props) {
                   <h3 className="truncate text-base font-semibold tracking-tight text-white">
                     {displayCreatorAgreementTitle(row.title)}
                   </h3>
-                  <span
-                    className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
-                      readyForSigning
-                        ? "bg-emerald-900/50 text-emerald-200"
-                        : status === "completed"
-                          ? "bg-slate-800 text-slate-300"
-                          : "bg-slate-900/80 text-slate-400"
-                    }`}
-                    data-testid={`creator-dashboard-status-pill-${row.id}`}
-                  >
-                    {statusPill}
-                  </span>
+                  {statusPill ? (
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
+                        readyForSigning
+                          ? "bg-emerald-900/50 text-emerald-200"
+                          : waitingOnReviewer
+                            ? "bg-amber-900/40 text-amber-200"
+                            : status === "completed"
+                              ? "bg-slate-800 text-slate-300"
+                              : "bg-slate-900/80 text-slate-400"
+                      }`}
+                      data-testid={`creator-dashboard-status-pill-${row.id}`}
+                    >
+                      {statusPill}
+                    </span>
+                  ) : null}
                 </div>
                 <p className="mt-1.5 text-sm text-slate-500" data-testid={`creator-dashboard-updated-${row.id}`}>
                   {formatCreatorDashboardUpdated(row.updated_at)}
@@ -152,6 +207,19 @@ export function CreatorDashboardAgreementList(props: Props) {
                         : CREATOR_ALL_REVIEWERS_APPROVED_HELPER}
                     </p>
                   </>
+                ) : waitingOnReviewer ? (
+                  <>
+                    <p className="mt-3 text-sm text-slate-300" data-testid={`creator-dashboard-next-action-${row.id}`}>
+                      Next action:{" "}
+                      <span className="font-medium text-slate-100">Wait for remaining reviewer approval</span>
+                    </p>
+                    <p
+                      className="mt-2 text-sm leading-relaxed text-slate-400"
+                      data-testid={`creator-dashboard-helper-${row.id}`}
+                    >
+                      {CREATOR_SIGNATURE_LINKS_LOCKED_HELPER}
+                    </p>
+                  </>
                 ) : (
                   <p className="mt-2 text-sm text-slate-300">
                     Next action: <span className="text-slate-100">{action.label}</span>
@@ -170,17 +238,44 @@ export function CreatorDashboardAgreementList(props: Props) {
                 ) : null}
               </div>
               <div className="flex flex-col gap-2 md:items-end">
-                {readyForSigning ? (
+                {prepareSignatureLinksVisible ? (
                   <>
                     <button
                       type="button"
-                      className="vs01-btn vs01-btn--compact vs01-btn--primary !mt-0 min-w-[10rem]"
+                      className={`vs01-btn vs01-btn--compact !mt-0 min-w-[10rem] ${
+                        prepareSignatureLinksEnabled ? "vs01-btn--primary" : "vs01-btn--secondary opacity-70"
+                      }`}
                       data-testid={`creator-dashboard-action-${row.id}`}
                       disabled={prepareBusy}
-                      onClick={() => void onPrepareSignatureLinks(row.id)}
+                      aria-disabled={prepareSignatureLinksEnabled ? undefined : true}
+                      onClick={() => {
+                        if (!prepareSignatureLinksEnabled) {
+                          setPrepareBlockedNoticeAgreementId(row.id);
+                          return;
+                        }
+                        setPrepareBlockedNoticeAgreementId(null);
+                        void onPrepareSignatureLinks(row.id);
+                      }}
                     >
                       {prepareBusy ? "Preparing signature links…" : CREATOR_PREPARE_SIGNATURE_LINKS_LABEL}
                     </button>
+                    {prepareNotice ? (
+                      <p
+                        className="text-sm text-amber-100/95"
+                        data-testid={`creator-dashboard-prepare-notice-${row.id}`}
+                        role="alert"
+                      >
+                        {prepareNotice}
+                      </p>
+                    ) : prepareBlockedNoticeAgreementId === row.id ? (
+                      <p
+                        className="text-sm text-amber-100/95"
+                        data-testid={`creator-dashboard-prepare-blocked-notice-${row.id}`}
+                        role="status"
+                      >
+                        {CREATOR_PREPARE_SIGNATURE_LINKS_BLOCKED_NOTICE}
+                      </p>
+                    ) : null}
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0 min-w-[10rem]"

@@ -6,10 +6,22 @@ import {
   deriveOwnerReviewPartyStatusRows,
 } from "../launch/simpleProduct/ownerReviewPartyStatusChecklist";
 
-export const CREATOR_REVIEW_COMPLETE_HERO = "Review complete 🎉";
+export const CREATOR_REVIEW_COMPLETE_HERO = "Your review is complete 🎉";
 
 export const CREATOR_REVIEW_COMPLETE_BODY =
-  "Your review is complete. We're waiting on the remaining reviewer(s). You'll be able to prepare signature links once everyone approves.";
+  "Your review is complete. We're waiting on the remaining reviewer(s) before signature links can be prepared.";
+
+export function formatCreatorWaitingOnReviewersBody(pendingReviewerDisplayNames: readonly string[]): string {
+  const names = pendingReviewerDisplayNames.map((name) => name.trim()).filter(Boolean);
+  if (names.length === 0) return CREATOR_REVIEW_COMPLETE_BODY;
+  if (names.length === 1) {
+    return `Waiting on ${names[0]} before signature links can be prepared.`;
+  }
+  if (names.length === 2) {
+    return `Waiting on ${names[0]} and ${names[1]} before signature links can be prepared.`;
+  }
+  return `Waiting on ${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]} before signature links can be prepared.`;
+}
 
 export const CREATOR_EVERYONE_APPROVED_HERO = "Everyone approved 🎉";
 
@@ -32,6 +44,8 @@ export const RECIPIENT_SIGNING_LINKS_READY_BODY =
   "The sender prepared signature links. You can open your signing link when you're ready.";
 
 export const POST_APPROVAL_RETURN_TO_DASHBOARD_LABEL = "Return to dashboard";
+
+export const POST_APPROVAL_GO_TO_DASHBOARD_LABEL = "Go to dashboard";
 
 export const POST_APPROVAL_DONE_LABEL = "Done";
 
@@ -129,8 +143,9 @@ export function resolveRecipientPostApprovalPresentation(args: {
   audience: PostApprovalPresentationAudience;
   signingLinksExist: boolean;
   allReviewsComplete: boolean;
+  pendingReviewerDisplayNames?: readonly string[];
 }): RecipientPostApprovalPresentation {
-  const { audience, signingLinksExist, allReviewsComplete } = args;
+  const { audience, signingLinksExist, allReviewsComplete, pendingReviewerDisplayNames = [] } = args;
 
   if (audience === "creator") {
     if (signingLinksExist) {
@@ -187,11 +202,11 @@ export function resolveRecipientPostApprovalPresentation(args: {
       statusBanner: null,
       waitingPanel: {
         header: CREATOR_REVIEW_COMPLETE_HERO,
-        body: CREATOR_REVIEW_COMPLETE_BODY,
+        body: formatCreatorWaitingOnReviewersBody(pendingReviewerDisplayNames),
         actions: [
           {
             kind: "return_dashboard",
-            label: POST_APPROVAL_RETURN_TO_DASHBOARD_LABEL,
+            label: POST_APPROVAL_GO_TO_DASHBOARD_LABEL,
             emphasis: "primary",
           },
         ],

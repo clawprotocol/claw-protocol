@@ -43,7 +43,7 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
     const vs01Spy = vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign")
       .mockResolvedValue(true);
 
-    await navigateCreatorPrepareSignatureLinks({
+    const result = await navigateCreatorPrepareSignatureLinks({
       agreementId: "ag_ready",
       navigate: mockNavigate,
     });
@@ -55,10 +55,13 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
         reviewerApprovedCleanHandoff: true,
       }),
     );
+    expect(result.navigated).toBe(true);
+    expect(result.vs01RouteAttempted).toBe(true);
+    expect(result.blockReason).toBeNull();
     expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/done/"));
   });
 
-  it("falls back to review link page when VS01 seed fails", async () => {
+  it("falls back to review link page when VS01 seed fails and fallback enabled", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
       ok: true,
       draft: baseDraft(),
@@ -68,11 +71,33 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
       false,
     );
 
-    await navigateCreatorPrepareSignatureLinks({
+    const result = await navigateCreatorPrepareSignatureLinks({
       agreementId: "ag_ready",
       navigate: mockNavigate,
+      navigateOnBridgeFailure: true,
     });
 
+    expect(result.navigated).toBe(true);
+    expect(result.destination).toBe("/app/done/ag_ready");
+    expect(result.blockReason).toBe("vs01_bridge_failed");
     expect(mockNavigate).toHaveBeenCalledWith("/app/done/ag_ready");
+  });
+
+  it("stays put when VS01 seed fails and dashboard disables fallback", async () => {
+    vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign").mockResolvedValue(
+      false,
+    );
+
+    const result = await navigateCreatorPrepareSignatureLinks({
+      agreementId: "ag_ready",
+      navigate: mockNavigate,
+      draft: baseDraft(),
+      lockedVersionId: null,
+      navigateOnBridgeFailure: false,
+    });
+
+    expect(result.navigated).toBe(false);
+    expect(result.blockReason).toBe("vs01_bridge_failed");
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });

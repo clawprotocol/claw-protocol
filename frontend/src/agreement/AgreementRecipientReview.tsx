@@ -124,8 +124,8 @@ import {
   type PostApprovalPanelActionKind,
   type RecipientPostApprovalPresentation,
 } from "./recipientApprovedWaitingPresentation";
+import { deriveOwnerReviewPartyStatusRows } from "../launch/simpleProduct/ownerReviewPartyStatusChecklist";
 import { useLaunchNav } from "../launch/LaunchNavContext";
-import { navigateCreatorPrepareSignatureLinks } from "../launch/creatorDashboardPrepareSignatureLinks";
 import { recipientReviewDevInfo, recipientReviewDevWarn } from "./recipientReviewDevLog";
 import { JoyMilestoneMark } from "../joy/JoyMilestone";
 import { emitActionCompleted } from "../joy/joyTelemetry";
@@ -2242,6 +2242,9 @@ export function AgreementRecipientReview({
       }),
       signingLinksExist: bundleSigningLocked,
       allReviewsComplete: resolveAllReviewPartiesApproved(draft),
+      pendingReviewerDisplayNames: deriveOwnerReviewPartyStatusRows(draft)
+        .filter((partyRow) => partyRow.status !== "approved")
+        .map((partyRow) => partyRow.displayName),
     });
   }, [
     entry.kind,
@@ -2278,12 +2281,7 @@ export function AgreementRecipientReview({
           navigate("/app");
           return;
         case "prepare_signature_links":
-          setPostApprovalActionBusy(true);
-          try {
-            await navigateCreatorPrepareSignatureLinks({ agreementId, navigate });
-          } finally {
-            setPostApprovalActionBusy(false);
-          }
+          navigate("/app");
           return;
         case "done":
           if (onClose) onClose();

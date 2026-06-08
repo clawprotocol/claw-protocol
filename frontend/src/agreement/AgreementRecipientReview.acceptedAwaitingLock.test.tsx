@@ -355,10 +355,13 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
     expect(screen.getByTestId("recipient-signing-readiness-panel").getAttribute("data-recipient-post-approval-audience")).toBe(
       "creator",
     );
-    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review complete");
-    expect(screen.getByRole("button", { name: "Return to dashboard" })).toBeTruthy();
+    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Your review is complete");
+    expect(screen.getByRole("button", { name: "Go to dashboard" })).toBeTruthy();
     expect(screen.getByTestId("recipient-approved-waiting-body").textContent).toContain(
-      "remaining reviewer(s)",
+      "Iron Vale Systems Inc.",
+    );
+    expect(screen.getByTestId("recipient-approved-waiting-body").textContent).toContain(
+      "before signature links can be prepared",
     );
     expect(screen.getByTestId("recipient-approved-waiting-body").textContent).not.toMatch(
       /sender will finalize|Agreement review dashboard|Check for updates/i,
@@ -415,10 +418,10 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Return to dashboard" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Go to dashboard" })).toBeTruthy();
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "Return to dashboard" }));
+    await userEvent.click(screen.getByRole("button", { name: "Go to dashboard" }));
     expect(mockNavigate).toHaveBeenCalledWith("/app");
   });
 });

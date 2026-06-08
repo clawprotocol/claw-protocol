@@ -1,14 +1,25 @@
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
+import { resolveAllReviewPartiesApproved } from "../agreement/recipientApprovedWaitingPresentation";
 import {
   deriveOwnerReviewPartyStatusRows,
+  countOwnerReviewPartyApproved,
   type OwnerReviewPartyStatusRow,
 } from "./simpleProduct/ownerReviewPartyStatusChecklist";
+import {
+  formatCreatorReviewProgressLabel,
+  resolveCreatorDashboardReviewGate,
+  creatorDashboardWaitingOnReviewer,
+} from "./creatorDashboardReviewGate";
 import {
   isAgreementFullySignedLocal,
   isAgreementPacketPrepared,
 } from "../vs01/vs01WorkspaceSigningStatus";
-import { CREATOR_PREPARE_SIGNATURE_LINKS_LABEL } from "./creatorDashboardCopy";
+import {
+  CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
+  CREATOR_REVIEWS_APPROVED_PILL,
+  CREATOR_WAITING_ON_REVIEWER_PILL,
+} from "./creatorDashboardCopy";
 
 export type CreatorDashboardStatus =
   | "draft"
@@ -59,11 +70,10 @@ export function deriveCreatorDashboardStatus(row: WorkspaceIndexAgreement): Crea
   if (row.completed_signed || isAgreementFullySignedLocal(row.id)) return "completed";
   if (row.has_server_signing_lock || isAgreementPacketPrepared(row.id)) return "signing_in_progress";
   if (row.all_reviewers_approved) return "ready_for_signing";
-  const req = row.review_approvals_required ?? 0;
+  const required = Math.max(row.review_approvals_required ?? 0, row.party_count ?? 0);
   const done = row.review_approvals_completed ?? 0;
-  if (row.reviewer_approved && req > 1 && done >= req) return "ready_for_signing";
-  if (row.reviewer_approved && req <= 1) return "ready_for_signing";
-  if (row.reviewer_approved && done > 0 && done < req) return "in_review";
+  if (required > 0 && done >= required && row.all_reviewers_approved) return "ready_for_signing";
+  if (row.reviewer_approved && done > 0 && (required <= 0 || done < required)) return "in_review";
   if (row.review_sent_at) return "in_review";
   return "draft";
 }
@@ -114,9 +124,9 @@ export function creatorDashboardPrimaryAction(
       return { label: "View Signing Status", path: `/app/send/${id}`, emphasis: "primary" };
     case "ready_for_signing":
     case "review_approved":
-      return { label: CREATOR_PREPARE_SIGNATURE_LINKS_LABEL, path: `/app/done/${id}`, emphasis: "primary" };
+      return { label: CREATOR_PREPARE_SIGNATURE_LINKS_LABEL, path: "/app", emphasis: "primary" };
     case "in_review":
-      return { label: "View Review Status", path: `/app/done/${id}`, emphasis: "secondary" };
+      return { label: "View Review Status", path: "/app", emphasis: "secondary" };
     case "draft":
     default:
       return { label: "Continue Editing", path: `/app/send/${id}`, emphasis: "secondary" };
@@ -133,15 +143,25 @@ export function creatorDashboardReviewRowsFromDraft(
   return deriveOwnerReviewPartyStatusRows(draft);
 }
 
+/** Prefer fresh draft party rows; fall back to dashboard-hydrated rows when draft lags approvals. */
+export function resolveEffectiveCreatorDashboardReviewRows(
+  draft: AgreementDraft | null | undefined,
+  cachedRows: readonly OwnerReviewPartyStatusRow[],
+): OwnerReviewPartyStatusRow[] {
+  const fromDraft = creatorDashboardReviewRowsFromDraft(draft);
+  if (fromDraft.length === 0) return [...cachedRows];
+  if (cachedRows.length === 0) return fromDraft;
+  const draftApproved = countOwnerReviewPartyApproved(fromDraft);
+  const cachedApproved = countOwnerReviewPartyApproved(cachedRows);
+  if (draftApproved >= cachedApproved) return fromDraft;
+  return [...cachedRows];
+}
+
 export function creatorDashboardAllPartiesApproved(
   row: WorkspaceIndexAgreement,
   reviewRows: readonly OwnerReviewPartyStatusRow[],
 ): boolean {
-  if (row.all_reviewers_approved) return true;
-  if (reviewRows.length === 0) {
-    return Boolean(row.reviewer_approved && (row.review_approvals_required ?? 1) <= (row.review_approvals_completed ?? 0));
-  }
-  return reviewRows.every((r) => r.status === "approved");
+  return resolveCreatorDashboardReviewGate(row, reviewRows).allRequiredReviewPartiesApproved;
 }
 
 export function formatCreatorDashboardUpdated(iso: string): string {
@@ -184,21 +204,53 @@ export function deriveCreatorReviewProgressLabel(
   row: WorkspaceIndexAgreement,
   reviewRows: readonly OwnerReviewPartyStatusRow[],
 ): string | null {
-  const required = row.review_approvals_required ?? reviewRows.length;
-  if (required <= 0) return null;
-  const approved =
-    reviewRows.length > 0
-      ? reviewRows.filter((r) => r.status === "approved").length
-      : (row.review_approvals_completed ?? 0);
-  return `${approved} of ${required} approved`;
+  return formatCreatorReviewProgressLabel(resolveCreatorDashboardReviewGate(row, reviewRows));
 }
 
 export function countCreatorReviewApproved(
   row: WorkspaceIndexAgreement,
   reviewRows: readonly OwnerReviewPartyStatusRow[],
 ): number {
-  if (reviewRows.length > 0) {
-    return reviewRows.filter((r) => r.status === "approved").length;
-  }
-  return row.review_approvals_completed ?? 0;
+  return resolveCreatorDashboardReviewGate(row, reviewRows).approvedCount;
+}
+
+export function deriveCreatorDashboardStatusPillFromGate(
+  row: WorkspaceIndexAgreement,
+  reviewGate: CreatorDashboardReviewGate,
+): string | null {
+  if (!reviewGate.authoritative) return null;
+  if (reviewGate.allRequiredReviewPartiesApproved) return CREATOR_REVIEWS_APPROVED_PILL;
+  if (creatorDashboardWaitingOnReviewer(reviewGate)) return CREATOR_WAITING_ON_REVIEWER_PILL;
+  return CREATOR_DASHBOARD_STATUS_LABEL[deriveCreatorDashboardStatus(row)];
+}
+
+/** Workspace-index snapshot for diagnostics only — never used for rendered review UI. */
+export function resolveCreatorDashboardIndexPreviewForDiagnostics(row: WorkspaceIndexAgreement): {
+  approvedCount: number;
+  requiredPartyCount: number;
+  allApproved: boolean;
+  statusPill: string;
+} {
+  const requiredPartyCount = Math.max(row.party_count ?? 0, row.review_approvals_required ?? 0, 1);
+  return {
+    approvedCount: row.review_approvals_completed ?? 0,
+    requiredPartyCount,
+    allApproved: Boolean(row.all_reviewers_approved),
+    statusPill: CREATOR_DASHBOARD_STATUS_LABEL[deriveCreatorDashboardStatus(row)],
+  };
+}
+
+/** Creator proof/done page should not replace the dashboard before signing completes. */
+export function shouldCreatorRedirectPreSignatureDoneToDashboard(args: {
+  signed: boolean | null;
+  signingLockActive: boolean;
+  draft: AgreementDraft | null | undefined;
+  isPaidProReviewDonePath: boolean;
+  confirmedSend?: boolean;
+}): boolean {
+  if (args.isPaidProReviewDonePath) return false;
+  if (args.confirmedSend) return false;
+  if (args.signed === true) return false;
+  if (args.signingLockActive) return false;
+  return resolveAllReviewPartiesApproved(args.draft);
 }

@@ -4,6 +4,7 @@ import { useLaunchNav } from "./LaunchNavContext";
 import {
   fetchWorkspaceIndex,
   fetchAgreementDraft,
+  fetchAgreementDraftWithSigningLock,
   type WorkspaceIndexAgreement,
 } from "../agreement/agreementWorkspaceApi";
 import { dedupeWorkspaceIndexAgreements } from "./workspaceIndexDedupe";
@@ -15,13 +16,31 @@ import {
 import { canAccessOperatorGrowthDashboard } from "./ops/OperatorGrowthDashboard";
 import { CreatorDashboardAgreementList } from "./CreatorDashboardAgreementList";
 import {
-  countCreatorReviewApproved,
-  creatorDashboardAllPartiesApproved,
   creatorDashboardReviewRowsFromDraft,
-  deriveCreatorDashboardStatus,
+  deriveCreatorDashboardStatusPillFromGate,
+  resolveCreatorDashboardIndexPreviewForDiagnostics,
+  resolveEffectiveCreatorDashboardReviewRows,
   sortCreatorDashboardRows,
 } from "./creatorDashboardPresentation";
-import { logCreatorDashboardAgreementStatusLoaded } from "./creatorDashboardCopy";
+import {
+  creatorDashboardNeedsAuthoritativeReviewHydration,
+  resolveCreatorDashboardReviewGate,
+} from "./creatorDashboardReviewGate";
+import {
+  filterCreatorDashboardAgreements,
+  logCreatorDashboardAgreementFilter,
+} from "./creatorDashboardAgreementFilter";
+import {
+  CREATOR_PREPARE_BRIDGE_FAILED_NOTICE,
+  CREATOR_PREPARE_SIGNATURE_LINKS_BLOCKED_NOTICE,
+  logCreatorDashboardAgreementStatusLoaded,
+  logCreatorDashboardPrepareBridgeResult,
+  logCreatorDashboardPrepareClick,
+  logCreatorDashboardPrepareNavigationBlocked,
+  logCreatorDashboardReviewGate,
+  logDashboardInitialState,
+  logDashboardPostReviewGateState,
+} from "./creatorDashboardCopy";
 import { navigateCreatorPrepareSignatureLinks } from "./creatorDashboardPrepareSignatureLinks";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import { workspaceAgreementStatusBadge } from "./workspaceAgreementCard";
@@ -54,6 +73,7 @@ export function AppDashboard() {
     Record<string, OwnerReviewPartyStatusRow[]>
   >({});
   const [prepareBusyAgreementId, setPrepareBusyAgreementId] = useState<string | null>(null);
+  const [prepareNoticeByAgreementId, setPrepareNoticeByAgreementId] = useState<Record<string, string>>({});
   const draftingRedirectedRef = useRef(false);
 
   const reloadWorkspaceIndex = useCallback(async () => {
@@ -69,10 +89,24 @@ export function AppDashboard() {
     void reloadWorkspaceIndex();
   }, [reloadWorkspaceIndex]);
 
-  const safeRecent = useMemo(() => sortCreatorDashboardRows(rows), [rows]);
+  const filteredDashboard = useMemo(() => filterCreatorDashboardAgreements(rows), [rows]);
+  const safeRecent = useMemo(
+    () => sortCreatorDashboardRows(filteredDashboard.visibleRows),
+    [filteredDashboard.visibleRows],
+  );
   const mode = useMemo(() => getWorkspaceMode(safeRecent, indexLoading), [safeRecent, indexLoading]);
-  const primaryRow = safeRecent[0] ?? null;
-  const otherRows = safeRecent.length > 1 ? safeRecent.slice(1) : [];
+  const primaryRow = useMemo(() => {
+    const featuredId = filteredDashboard.featuredAgreementId;
+    if (featuredId) {
+      const featured = safeRecent.find((row) => row.id === featuredId);
+      if (featured) return featured;
+    }
+    return safeRecent[0] ?? null;
+  }, [filteredDashboard.featuredAgreementId, safeRecent]);
+  const otherRows = useMemo(
+    () => (primaryRow ? safeRecent.filter((row) => row.id !== primaryRow.id) : []),
+    [primaryRow, safeRecent],
+  );
 
   const entryResolved = useMemo(
     () => resolveLawdogEntryContext(safeRecent.length, indexLoading),
@@ -95,16 +129,24 @@ export function AppDashboard() {
   }, [entryResolved, pathname, navigate]);
 
   useEffect(() => {
+    if (indexLoading) return;
+    logCreatorDashboardAgreementFilter({
+      totalLoaded: rows.length,
+      shownCount: filteredDashboard.visibleRows.length,
+      hiddenStaleCount: filteredDashboard.hiddenStaleCount,
+      featuredAgreementId: filteredDashboard.featuredAgreementId,
+    });
+  }, [indexLoading, rows.length, filteredDashboard]);
+
+  useEffect(() => {
     if (indexLoading || safeRecent.length === 0) return;
     let cancel = false;
     void (async () => {
-      const targets = safeRecent.filter((row) => {
-        const status = deriveCreatorDashboardStatus(row);
-        return status === "in_review" || status === "ready_for_signing" || status === "review_approved";
-      });
-      if (targets.length === 0) return;
+      const targets = safeRecent.filter((row) => creatorDashboardNeedsAuthoritativeReviewHydration(row));
+      const missing = targets.filter((row) => !(reviewRowsByAgreementId[row.id]?.length));
+      if (missing.length === 0) return;
       const entries = await Promise.all(
-        targets.map(async (row) => {
+        missing.map(async (row) => {
           const { draft } = await fetchAgreementDraft(row.id);
           return [row.id, creatorDashboardReviewRowsFromDraft(draft)] as const;
         }),
@@ -121,19 +163,59 @@ export function AppDashboard() {
     return () => {
       cancel = true;
     };
+  }, [indexLoading, safeRecent, reviewRowsByAgreementId]);
+
+  useEffect(() => {
+    if (indexLoading) return;
+    for (const row of safeRecent) {
+      if (!creatorDashboardNeedsAuthoritativeReviewHydration(row)) continue;
+      const preview = resolveCreatorDashboardIndexPreviewForDiagnostics(row);
+      logDashboardInitialState({
+        agreementId: row.id,
+        approvedCount: preview.approvedCount,
+        requiredPartyCount: preview.requiredPartyCount,
+        allApproved: preview.allApproved,
+        statusPill: preview.statusPill,
+        source: "workspace_index",
+      });
+    }
   }, [indexLoading, safeRecent]);
 
   useEffect(() => {
     if (indexLoading) return;
     for (const row of safeRecent) {
       const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
-      const status = deriveCreatorDashboardStatus(row);
-      const allApproved = creatorDashboardAllPartiesApproved(row, reviewRows);
-      if (status !== "ready_for_signing" || !allApproved) continue;
+      const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows);
+      if (!reviewGate.authoritative) continue;
+      const waitingOnReviewer = reviewGate.approvedCount > 0 && !reviewGate.allRequiredReviewPartiesApproved;
+      const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate);
+      logDashboardPostReviewGateState({
+        agreementId: row.id,
+        approvedCount: reviewGate.approvedCount,
+        requiredPartyCount: reviewGate.requiredPartyCount,
+        allApproved: reviewGate.allRequiredReviewPartiesApproved,
+        statusPill,
+        source: reviewGate.source,
+      });
+      logCreatorDashboardReviewGate({
+        agreementId: row.id,
+        requiredPartyCount: reviewGate.requiredPartyCount,
+        approvedCount: reviewGate.approvedCount,
+        allApproved: reviewGate.allRequiredReviewPartiesApproved,
+        partyStatuses: reviewGate.partyStatuses.map((party) => ({
+          displayName: party.displayName,
+          statusLabel: party.statusLabel,
+        })),
+        prepareSignatureLinksVisible:
+          reviewGate.allRequiredReviewPartiesApproved || waitingOnReviewer,
+        prepareSignatureLinksEnabled: reviewGate.allRequiredReviewPartiesApproved,
+        source: reviewGate.source,
+      });
+      if (!reviewGate.allRequiredReviewPartiesApproved) continue;
       logCreatorDashboardAgreementStatusLoaded({
         agreementId: row.id,
-        approvedCount: countCreatorReviewApproved(row, reviewRows),
-        partyCount: row.party_count || reviewRows.length || row.review_approvals_required || 0,
+        approvedCount: reviewGate.approvedCount,
+        partyCount: reviewGate.requiredPartyCount,
         nextAction: "prepare_signature_links",
       });
     }
@@ -149,16 +231,121 @@ export function AppDashboard() {
       const id = agreementId.trim();
       if (!id || prepareBusyAgreementId) return;
       setPrepareBusyAgreementId(id);
+      setPrepareNoticeByAgreementId((prev) => {
+        if (!prev[id]) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+
       try {
-        await navigateCreatorPrepareSignatureLinks({
+        const indexRow = rows.find((entry) => entry.id === id);
+        const cachedReviewRows = reviewRowsByAgreementId[id] ?? [];
+        const { ok, draft, lockedVersionId } = await fetchAgreementDraftWithSigningLock(id);
+        const fetchedReviewRows = creatorDashboardReviewRowsFromDraft(draft);
+        const reviewRows = resolveEffectiveCreatorDashboardReviewRows(draft, cachedReviewRows);
+        const usedCachedReviewRows = fetchedReviewRows.length === 0 && cachedReviewRows.length > 0;
+        const reviewGate = resolveCreatorDashboardReviewGate(
+          indexRow ?? {
+            id,
+            title: "",
+            updated_at: new Date(0).toISOString(),
+            party_count: draft?.parties?.length ?? reviewRows.length,
+            signer_count: 0,
+            version_ledger_count: 0,
+            completed_signed: false,
+            has_server_signing_lock: false,
+            locked_version_id: null,
+            workspace_archived_at: null,
+            review_sent_at: null,
+          },
+          reviewRows,
+        );
+        const hasSnapshot = Boolean(
+          (draft?.premium_full_document_text || "").trim() ||
+            (draft?.versions?.length ?? 0) > 0 ||
+            Boolean((draft as { additional_terms?: string } | null)?.additional_terms?.trim()),
+        );
+
+        logCreatorDashboardPrepareClick({
           agreementId: id,
-          navigate: (path) => withClearEntry(() => navigate(path)),
+          hasDraft: ok && Boolean(draft),
+          hasSnapshot,
+          reviewApprovedCount: reviewGate.approvedCount,
+          partyCount: reviewGate.requiredPartyCount,
+          reviewSource: reviewGate.source,
+          usedCachedReviewRows,
         });
+
+        logCreatorDashboardReviewGate({
+          agreementId: id,
+          requiredPartyCount: reviewGate.requiredPartyCount,
+          approvedCount: reviewGate.approvedCount,
+          allApproved: reviewGate.allRequiredReviewPartiesApproved,
+          partyStatuses: reviewGate.partyStatuses.map((party) => ({
+            displayName: party.displayName,
+            statusLabel: party.statusLabel,
+          })),
+          prepareSignatureLinksVisible: true,
+          prepareSignatureLinksEnabled: reviewGate.allRequiredReviewPartiesApproved,
+          source: `${reviewGate.source}:prepare_click`,
+        });
+
+        if (!reviewGate.allRequiredReviewPartiesApproved) {
+          logCreatorDashboardPrepareNavigationBlocked({
+            agreementId: id,
+            reason: "review_gate_not_all_approved",
+            reviewApprovedCount: reviewGate.approvedCount,
+            partyCount: reviewGate.requiredPartyCount,
+            allApproved: false,
+          });
+          setPrepareNoticeByAgreementId((prev) => ({
+            ...prev,
+            [id]: CREATOR_PREPARE_SIGNATURE_LINKS_BLOCKED_NOTICE,
+          }));
+          return;
+        }
+
+        clearLawdogEntryContext();
+        const bridgeResult = await navigateCreatorPrepareSignatureLinks({
+          agreementId: id,
+          navigate: (path) => navigate(path),
+          draft: ok ? draft : null,
+          lockedVersionId,
+          navigateOnBridgeFailure: false,
+        });
+
+        logCreatorDashboardPrepareBridgeResult({
+          agreementId: id,
+          navigated: bridgeResult.navigated,
+          destination: bridgeResult.destination,
+          bridgeAttempted: bridgeResult.bridgeAttempted,
+          blockReason: bridgeResult.blockReason,
+          vs01RouteAttempted: bridgeResult.vs01RouteAttempted,
+        });
+
+        if (bridgeResult.navigated && bridgeResult.vs01RouteAttempted) {
+          return;
+        }
+
+        if (!bridgeResult.navigated) {
+          logCreatorDashboardPrepareNavigationBlocked({
+            agreementId: id,
+            reason: bridgeResult.blockReason ?? "prepare_navigation_blocked",
+            reviewApprovedCount: reviewGate.approvedCount,
+            partyCount: reviewGate.requiredPartyCount,
+            allApproved: true,
+          });
+          setPrepareNoticeByAgreementId((prev) => ({
+            ...prev,
+            [id]: CREATOR_PREPARE_BRIDGE_FAILED_NOTICE,
+          }));
+        }
       } finally {
         setPrepareBusyAgreementId(null);
       }
     },
-    [navigate, prepareBusyAgreementId, withClearEntry],
+    [navigate, prepareBusyAgreementId, reviewRowsByAgreementId, rows],
   );
 
   return (
@@ -210,6 +397,7 @@ export function AppDashboard() {
                 onNavigate={(path) => withClearEntry(() => navigate(path))}
                 onPrepareSignatureLinks={handlePrepareSignatureLinks}
                 prepareBusyAgreementId={prepareBusyAgreementId}
+                prepareNoticeByAgreementId={prepareNoticeByAgreementId}
                 featured
               />
             </section>
@@ -238,6 +426,7 @@ export function AppDashboard() {
                   onNavigate={(path) => withClearEntry(() => navigate(path))}
                   onPrepareSignatureLinks={handlePrepareSignatureLinks}
                   prepareBusyAgreementId={prepareBusyAgreementId}
+                  prepareNoticeByAgreementId={prepareNoticeByAgreementId}
                 />
               </section>
             ) : (

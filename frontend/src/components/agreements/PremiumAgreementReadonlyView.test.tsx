@@ -22,6 +22,20 @@ describe("PremiumAgreementReadonlyView mobile readability", () => {
     expect(componentSrc).toContain("word-spacing:normal");
   });
 
+  it("section headings use legal typography without decorative label tracking", () => {
+    expect(componentSrc).toContain("h2.premium-doc-section-heading");
+    expect(componentSrc).toMatch(/h2\.premium-doc-section-heading\{[^}]*letter-spacing:normal/);
+    expect(componentSrc).toMatch(/h2\.premium-doc-section-heading\{[^}]*text-transform:none/);
+    expect(componentSrc).not.toMatch(/h2\.premium-doc-section-heading\{[^}]*letter-spacing:0\.14em/);
+    expect(componentSrc).not.toMatch(/\.premium-readonly-doc h2\{[^}]*letter-spacing:0\.14em/);
+    expect(htmlSrc).toContain('class="premium-doc-section-heading"');
+  });
+
+  it("preserves agreement title styling independently from section headings", () => {
+    expect(componentSrc).toMatch(/\.premium-readonly-doc h1\{[^}]*letter-spacing:0\.04em/);
+    expect(componentSrc).toMatch(/\.premium-readonly-doc h1\{[^}]*text-transform:uppercase/);
+  });
+
   it("renders readonly document without justify utility classes", () => {
     const { container } = render(
       <PremiumAgreementReadonlyView html="<p>Test paragraph for mobile layout.</p>" />,

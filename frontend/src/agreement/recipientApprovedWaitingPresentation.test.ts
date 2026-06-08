@@ -6,11 +6,13 @@ import {
   CREATOR_REVIEW_COMPLETE_BODY,
   CREATOR_REVIEW_COMPLETE_HERO,
   POST_APPROVAL_DONE_LABEL,
+  POST_APPROVAL_GO_TO_DASHBOARD_LABEL,
   POST_APPROVAL_RETURN_TO_DASHBOARD_LABEL,
   PUBLIC_ALL_REVIEWS_COMPLETE_BODY,
   PUBLIC_ALL_REVIEWS_COMPLETE_HERO,
   PUBLIC_REVIEW_SUBMITTED_BODY,
   PUBLIC_REVIEW_SUBMITTED_HERO,
+  formatCreatorWaitingOnReviewersBody,
   resolveAllReviewPartiesApproved,
   resolvePostApprovalPresentationAudience,
   resolveRecipientPostApprovalPresentation,
@@ -70,22 +72,33 @@ describe("recipientApprovedWaitingPresentation", () => {
     expect(resolveReviewerPartyIndex(parties, "missing")).toBeNull();
   });
 
-  it("uses creator review-complete copy with return to dashboard before all reviews complete", () => {
+  it("uses creator review-complete copy with go to dashboard before all reviews complete", () => {
     const copy = resolveRecipientPostApprovalPresentation({
       audience: "creator",
       signingLinksExist: false,
       allReviewsComplete: false,
+      pendingReviewerDisplayNames: ["Iron Vale Systems Inc."],
     });
     expect(copy.shellHeroTitle).toBe(CREATOR_REVIEW_COMPLETE_HERO);
-    expect(copy.waitingPanel.body).toBe(CREATOR_REVIEW_COMPLETE_BODY);
-    expect(copy.waitingPanel.body).not.toMatch(/sender will finalize/i);
+    expect(copy.waitingPanel.body).toBe(
+      "Waiting on Iron Vale Systems Inc. before signature links can be prepared.",
+    );
     expect(copy.waitingPanel.actions).toEqual([
       expect.objectContaining({
         kind: "return_dashboard",
-        label: POST_APPROVAL_RETURN_TO_DASHBOARD_LABEL,
+        label: POST_APPROVAL_GO_TO_DASHBOARD_LABEL,
       }),
     ]);
     expect(JSON.stringify(copy)).not.toMatch(/Check for updates|Agreement review dashboard/i);
+  });
+
+  it("formats waiting copy for multiple pending reviewers", () => {
+    expect(
+      formatCreatorWaitingOnReviewersBody(["Iron Vale Systems Inc.", "Pat Example LLC"]),
+    ).toBe(
+      "Waiting on Iron Vale Systems Inc. and Pat Example LLC before signature links can be prepared.",
+    );
+    expect(formatCreatorWaitingOnReviewersBody([])).toBe(CREATOR_REVIEW_COMPLETE_BODY);
   });
 
   it("uses creator everyone-approved copy with prepare and dashboard actions", () => {

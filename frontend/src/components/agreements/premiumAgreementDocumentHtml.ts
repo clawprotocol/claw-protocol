@@ -345,7 +345,7 @@ function buildPremiumAgreementReadonlyHtmlCore(
       continue;
     }
     if (oneLine && SECTION_HEADING.test(chunk)) {
-      out.push(`<h2>${escapeHtml(chunk)}</h2>`);
+      out.push(`<h2 class="premium-doc-section-heading">${escapeHtml(chunk)}</h2>`);
       if (hints?.paymentNeedsFinalNumbers && /^2\.\s+PAYMENT\b/i.test(chunk)) {
         out.push(
           premiumCallout("Confirm amounts, payment cadence, and tax treatment here before you send."),
@@ -389,7 +389,7 @@ function buildPremiumAgreementReadonlyHtmlCore(
   }
 
   let html = out.join("\n");
-  if (hints?.jurisdictionNeedsSelection && !/<h2>4\.\s+[^<]*GOVERNING/i.test(html)) {
+  if (hints?.jurisdictionNeedsSelection && !/<h2[^>]*>4\.\s+[^<]*GOVERNING/i.test(html)) {
     html = html.replace(
       /(<p>[\s\S]*?)(To be selected in review\.)/i,
       (_m, before, mid) => `${before}${mid}${premiumCalloutInline("Select jurisdiction before signing.")}`,

@@ -53,10 +53,18 @@ export function PaidProCanonicalPlainReviewDocument({
             );
           }
           if (lines.length === 1 && SECTION_HEADING_RE.test(firstLine)) {
-            return <h2 key={`block-${index}`}>{firstLine}</h2>;
+            return (
+              <h2 key={`block-${index}`} className="premium-doc-section-heading">
+                {firstLine}
+              </h2>
+            );
           }
           if (/^Section\s+\d+\./i.test(firstLine) && lines.length === 1) {
-            return <h2 key={`block-${index}`}>{firstLine}</h2>;
+            return (
+              <h2 key={`block-${index}`} className="premium-doc-section-heading">
+                {firstLine}
+              </h2>
+            );
           }
           return (
             <p key={`block-${index}`} className="whitespace-pre-wrap">

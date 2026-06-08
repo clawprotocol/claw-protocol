@@ -6,14 +6,18 @@ import { AppDashboard } from "./AppDashboard";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
-import * as creatorDashboardPrepareSignatureLinks from "./creatorDashboardPrepareSignatureLinks";
+import * as agreementToVs01SigningBridge from "./simpleProduct/agreementToVs01SigningBridge";
+import { AGREEMENT_CREATE_REVIEW_RESUME_KEY } from "../components/agreements/agreementIntakeStorage";
+import { LAWDOG_ENTRY_CONTEXT_KEY } from "./lawdogEntryContext";
+
+const mockNavigate = vi.fn();
 
 vi.mock("./LaunchNavContext", () => ({
   useLaunchNav: () => ({
     pathname: "/app",
     search: "",
     hash: "",
-    navigate: vi.fn(),
+    navigate: mockNavigate,
   }),
 }));
 
@@ -70,6 +74,8 @@ describe("AppDashboard creator-centric surface", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    sessionStorage.clear();
+    mockNavigate.mockClear();
   });
 
   it("shows dashboard copy and prepare signature links CTA after both approvals", async () => {
@@ -93,8 +99,11 @@ describe("AppDashboard creator-centric surface", () => {
       screen.getByText("Track agreements you created, review approvals, and signing readiness."),
     ).toBeTruthy();
     expect(screen.getByTestId("creator-dashboard-primary")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
-    expect(screen.getByText("Reviews complete")).toBeTruthy();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+    });
+    expect(screen.getByText("Reviews approved")).toBeTruthy();
     expect(screen.getByText(/Next action:/)).toBeTruthy();
     expect(screen.getByText(/2 of 2 approved/)).toBeTruthy();
     expect(screen.getByText(/Signature links not prepared yet/)).toBeTruthy();
@@ -104,9 +113,18 @@ describe("AppDashboard creator-centric surface", () => {
     expect(screen.getByText(/Iron Vale Systems Inc — Approved/)).toBeTruthy();
   });
 
-  it("routes Prepare signature links to signature prep", async () => {
-    const prepareSpy = vi.spyOn(creatorDashboardPrepareSignatureLinks, "navigateCreatorPrepareSignatureLinks")
-      .mockResolvedValue(undefined);
+  it("routes Prepare signature links through VS01 bridge with correct agreementId", async () => {
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+      lockedVersionId: null,
+    });
+    const vs01Spy = vi
+      .spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign")
+      .mockImplementation(async (options) => {
+        options.navigate("/app/esign/doc_bridge_test?agreement_bridge=1");
+        return true;
+      });
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [indexRow({ id: "ag_ready" })],
       error: null,
@@ -124,9 +142,209 @@ describe("AppDashboard creator-centric surface", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Prepare signature links" }));
-    expect(prepareSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ agreementId: "ag_ready" }),
+
+    await waitFor(() => {
+      expect(vs01Spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agreementId: "ag_ready",
+          logReason: "creator_dashboard_prepare_signature_links",
+          reviewerApprovedCleanHandoff: true,
+        }),
+      );
+      expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_bridge_test?agreement_bridge=1");
+    });
+  });
+
+  it("does not call VS01 bridge when only one party approved", async () => {
+    const partialDraft = {
+      ...draftWithParties(),
+      audit_log: [{ event_type: "recipient_approved", at: "2026-05-01T11:00:00.000Z" }],
+    } as AgreementDraft;
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: partialDraft,
+      lockedVersionId: null,
+    });
+    const vs01Spy = vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign")
+      .mockResolvedValue(true);
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [
+        indexRow({
+          id: "ag_partial",
+          reviewer_approved: true,
+          review_approvals_required: 1,
+          review_approvals_completed: 1,
+          all_reviewers_approved: false,
+        }),
+      ],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: {
+        ...partialDraft,
+        parties: [
+          { name: "Blue Canyon Analytics LLC", role: "owner", id: "p1" },
+          { name: "Iron Vale Systems Inc", role: "party", id: "p2" },
+        ],
+        audit_log: [
+          { event_type: "recipient_approved", at: "2026-05-01T11:00:00.000Z", value: { participant_id: "p1" } },
+        ],
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 of 2 approved/)).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Prepare signature links" }));
+    expect(vs01Spy).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(screen.getByTestId("creator-dashboard-prepare-blocked-notice-ag_partial").textContent).toContain(
+      "Signature links are available after all parties approve the review.",
     );
+  });
+
+  it("shows bridge failure notice on dashboard instead of bouncing through done page", async () => {
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign").mockResolvedValue(
+      false,
+    );
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [indexRow({ id: "ag_ready" })],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    const user = userEvent.setup();
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Prepare signature links" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("creator-dashboard-prepare-notice-ag_ready")).toBeTruthy();
+    });
+    expect(screen.getByTestId("creator-dashboard-prepare-notice-ag_ready").textContent).toContain(
+      "Open review link page",
+    );
+    expect(mockNavigate).not.toHaveBeenCalledWith("/app/done/ag_ready");
+  });
+
+  it("falls back to review link page when VS01 bridge fails with legacy fallback enabled", async () => {
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign").mockResolvedValue(
+      false,
+    );
+
+    const mockLegacyNavigate = vi.fn();
+    const { navigateCreatorPrepareSignatureLinks } = await import("./creatorDashboardPrepareSignatureLinks");
+    const result = await navigateCreatorPrepareSignatureLinks({
+      agreementId: "ag_ready",
+      navigate: mockLegacyNavigate,
+      draft: draftWithParties(),
+      navigateOnBridgeFailure: true,
+    });
+
+    expect(result.destination).toBe("/app/done/ag_ready");
+    expect(mockLegacyNavigate).toHaveBeenCalledWith("/app/done/ag_ready");
+  });
+
+  it("prepare click uses cached review rows when signing-lock draft omits party approvals", async () => {
+    const draftWithoutAudit = {
+      ...draftWithParties(),
+      audit_log: [],
+      parties: [{ name: "Blue Canyon Analytics LLC", role: "owner" }, { name: "Iron Vale Systems Inc", role: "party" }],
+    } as AgreementDraft;
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: draftWithoutAudit,
+      lockedVersionId: null,
+    });
+    const vs01Spy = vi
+      .spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign")
+      .mockImplementation(async (options) => {
+        options.navigate("/app/esign/doc_cached_rows?agreement_bridge=1");
+        return true;
+      });
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [indexRow({ id: "ag_ready" })],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    const user = userEvent.setup();
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/2 of 2 approved/)).toBeTruthy();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Prepare signature links" }));
+
+    await waitFor(() => {
+      expect(vs01Spy).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_cached_rows?agreement_bridge=1");
+    });
+  });
+
+  it("hides stale QA agreements for first-time dashboard focus", async () => {
+    sessionStorage.setItem(LAWDOG_ENTRY_CONTEXT_KEY, "new");
+    sessionStorage.setItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY, "ag_ready");
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [
+        indexRow({
+          id: "ag_stale",
+          title: "Old QA draft",
+          updated_at: "2026-06-01T00:00:00.000Z",
+          review_sent_at: null,
+          reviewer_approved: false,
+          all_reviewers_approved: false,
+          review_approvals_completed: 0,
+        }),
+        indexRow({ id: "ag_ready" }),
+        indexRow({
+          id: "ag_old_done",
+          completed_signed: true,
+          updated_at: "2026-04-01T00:00:00.000Z",
+        }),
+      ],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("creator-dashboard-agreement-ag_ready")).toBeTruthy();
+    });
+
+    expect(screen.queryByTestId("creator-dashboard-agreement-ag_stale")).toBeNull();
+    expect(screen.queryByTestId("creator-dashboard-agreement-ag_old_done")).toBeNull();
+    expect(screen.queryByText("Other agreements")).toBeNull();
   });
 
   it("shows the requested empty state", async () => {

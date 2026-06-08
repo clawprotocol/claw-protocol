@@ -23,6 +23,19 @@ describe("buildPremiumAgreementReadonlyHtml", () => {
     expect(html).toContain("PAYMENT");
   });
 
+  it("renders numbered section headings with legal section class", () => {
+    const html = buildPremiumAgreementReadonlyHtml(
+      "MUTUAL CONSULTING AGREEMENT\n\n1. SCOPE OF SERVICES\n\nProvider delivers.",
+      {
+        signatureSectionMode: "collaboration",
+        partyNames: ["A", "B"],
+      },
+    );
+    expect(html).toContain('class="premium-doc-section-heading"');
+    expect(html).toContain("1. SCOPE OF SERVICES");
+    expect(html).toContain("<h1>");
+  });
+
   it("renders executive framing callout under title when hints provided", () => {
     const html = buildPremiumAgreementReadonlyHtml("INFLUENCER SERVICES AGREEMENT\n\n1. SCOPE", {
       signatureSectionMode: "collaboration",

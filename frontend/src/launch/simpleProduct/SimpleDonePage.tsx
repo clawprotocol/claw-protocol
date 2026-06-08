@@ -105,6 +105,8 @@ import {
   REVIEW_LINK_READY_BACK_TO_DASHBOARD_LABEL,
   logReviewLinkReadyAllApproved,
 } from "../creatorDashboardCopy";
+import { resolveAllReviewPartiesApproved } from "../../agreement/recipientApprovedWaitingPresentation";
+import { shouldCreatorRedirectPreSignatureDoneToDashboard } from "../creatorDashboardPresentation";
 import {
   buildOwnerQaReviewAbsoluteLink,
   buildOwnerQaReviewDonePath,
@@ -239,7 +241,8 @@ export function SimpleDonePage(props: { agreementId: string }) {
     reviewRecipientHandoff?.intent === "review" &&
     (reviewRecipientHandoff.reviewLinksPending === true || reviewHandoffRows.length === 0);
   const isPaidProReviewDonePath =
-    Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review");
+    Boolean(confirmedSend && !signed && reviewRecipientHandoff?.intent === "review") ||
+    Boolean(confirmedSend && !signed && resolveAllReviewPartiesApproved(ownerHandoffDraft));
   const ownerReviewFirstDisplayCorpus = useMemo(
     () => resolveReviewFirstDisplayCorpus(ownerHandoffDraft),
     [ownerHandoffDraft],
@@ -272,7 +275,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
   }, [agreementId, isPaidProReviewDonePath, ownerHandoffDraft, ownerReviewFirstDisplayCorpus]);
 
   useEffect(() => {
-    if (!isPaidProReviewDonePath) return;
+    if (signed) return;
     let cancel = false;
     const run = async () => {
       const { ok, draft, lockedVersionId } = await fetchAgreementDraftWithSigningLock(agreementId);
@@ -282,6 +285,9 @@ export function SimpleDonePage(props: { agreementId: string }) {
       setOwnerSigningLockVid(lockedVersionId && lockedVersionId.trim() ? lockedVersionId.trim() : null);
     };
     void run();
+    if (!isPaidProReviewDonePath) return () => {
+      cancel = true;
+    };
     const id = window.setInterval(() => void run(), 12_000);
     const onVis = () => {
       if (document.visibilityState === "visible") void run();
@@ -292,7 +298,24 @@ export function SimpleDonePage(props: { agreementId: string }) {
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [agreementId, isPaidProReviewDonePath]);
+  }, [agreementId, isPaidProReviewDonePath, signed]);
+
+  useEffect(() => {
+    if (signed !== false) return;
+    const signingLockActive = Boolean((ownerSigningLockVid || "").trim());
+    if (
+      !shouldCreatorRedirectPreSignatureDoneToDashboard({
+        signed,
+        signingLockActive,
+        draft: ownerHandoffDraft,
+        isPaidProReviewDonePath,
+        confirmedSend,
+      })
+    ) {
+      return;
+    }
+    navigate("/app");
+  }, [agreementId, isPaidProReviewDonePath, navigate, ownerHandoffDraft, ownerSigningLockVid, signed]);
 
   useEffect(() => {
     ownerSuccessLoggedRef.current = null;
@@ -1147,11 +1170,37 @@ export function SimpleDonePage(props: { agreementId: string }) {
     );
   }
 
+  const signingLockActivePreProof = Boolean((ownerSigningLockVid || "").trim());
+  const redirectPreSignatureDoneToDashboard =
+    signed === false &&
+    shouldCreatorRedirectPreSignatureDoneToDashboard({
+      signed,
+      signingLockActive: signingLockActivePreProof,
+      draft: ownerHandoffDraft,
+      isPaidProReviewDonePath,
+      confirmedSend,
+    });
+
+  if (redirectPreSignatureDoneToDashboard) {
+    return (
+      <SimpleFlowShell
+        step={lifecycleStepForStage("review")}
+        progressLabels={AGREEMENT_LIFECYCLE_PROGRESS_LABELS}
+        title="Dashboard"
+        subtitle="All reviews are approved."
+      >
+        <p className="text-sm text-slate-400" data-testid="simple-done-redirect-dashboard">
+          Returning to your dashboard…
+        </p>
+      </SimpleFlowShell>
+    );
+  }
+
   return (
     <SimpleFlowShell
       step={lifecycleStepForStage("proof")}
       progressLabels={AGREEMENT_LIFECYCLE_PROGRESS_LABELS}
-      title="Agreement complete"
+      title={signed ? "Agreement complete" : confirmedSend ? "Agreement ready" : "Next step"}
       subtitle={title ? `“${title}”` : JOY_COPY.taglineMoveWithProof}
     >
       <div className="vs01-card vs01-card--envelope space-y-6 text-center sm:text-left">
@@ -1445,25 +1494,29 @@ export function SimpleDonePage(props: { agreementId: string }) {
               Send this agreement
             </button>
           ) : null}
-          <button
-            type="button"
-            className="vs01-btn vs01-btn--primary"
-            disabled={!signed && !confirmedSend}
-            title={!signed && !confirmedSend ? "Send the agreement from the Send step first." : undefined}
-            onClick={() => {
-              emitActionCompleted("proof", { agreementId, meta: { surface: "done_cta_verify" } });
-              navigate(`/app/verification/${encodeURIComponent(agreementId)}`);
-            }}
-          >
-            View verification
-          </button>
-          <button
-            type="button"
-            className="vs01-btn vs01-btn--secondary"
-            onClick={() => navigate(`/app/agreements/${encodeURIComponent(agreementId)}`)}
-          >
-            Open full editor
-          </button>
+          {signed || confirmedSend ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--primary"
+              disabled={!signed && !confirmedSend}
+              title={!signed && !confirmedSend ? "Send the agreement from the Send step first." : undefined}
+              onClick={() => {
+                emitActionCompleted("proof", { agreementId, meta: { surface: "done_cta_verify" } });
+                navigate(`/app/verification/${encodeURIComponent(agreementId)}`);
+              }}
+            >
+              View verification
+            </button>
+          ) : null}
+          {signed || confirmedSend ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary"
+              onClick={() => navigate(`/app/agreements/${encodeURIComponent(agreementId)}`)}
+            >
+              Open full editor
+            </button>
+          ) : null}
         </div>
       </div>
     </SimpleFlowShell>
