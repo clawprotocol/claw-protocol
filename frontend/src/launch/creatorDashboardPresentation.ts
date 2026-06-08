@@ -10,6 +10,7 @@ import {
   formatCreatorReviewProgressLabel,
   resolveCreatorDashboardReviewGate,
   creatorDashboardWaitingOnReviewer,
+  type CreatorDashboardReviewGate,
 } from "./creatorDashboardReviewGate";
 import {
   isAgreementFullySignedLocal,

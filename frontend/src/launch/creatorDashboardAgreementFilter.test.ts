@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { AGREEMENT_CREATE_REVIEW_RESUME_KEY } from "../components/agreements/agreementIntakeStorage";
 import { LAWDOG_ENTRY_CONTEXT_KEY } from "./lawdogEntryContext";

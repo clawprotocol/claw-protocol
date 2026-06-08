@@ -2273,7 +2273,7 @@ export function AgreementRecipientReview({
     recipientAcceptedAwaitingLock,
   ]);
 
-  const [postApprovalActionBusy, setPostApprovalActionBusy] = useState(false);
+  const [postApprovalActionBusy] = useState(false);
   const handlePostApprovalAction = useCallback(
     async (kind: PostApprovalPanelActionKind) => {
       switch (kind) {
