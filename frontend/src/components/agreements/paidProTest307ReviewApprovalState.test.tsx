@@ -139,6 +139,33 @@ describe("Test307 reviewer approval state", () => {
     expect(countOwnerReviewPartyApproved(rows)).toBe(1);
   });
 
+  it("shows changes_accepted for proposer after owner accepts proposal", () => {
+    const draft: AgreementDraft = {
+      ...baseDraft,
+      audit_log: [
+        {
+          event_type: "recipient_proposal_pending",
+          at: "2026-06-07T21:00:00.000Z",
+          value: {
+            proposal_id: "prop-iron",
+            proposer_id: "p-iron",
+            instruction: "Renumber",
+            draft: { purpose: "Updated body" },
+          },
+        },
+        {
+          event_type: "recipient_proposal_applied",
+          at: "2026-06-07T22:00:00.000Z",
+          value: { proposal_id: "prop-iron" },
+        },
+      ],
+    };
+    const rows = deriveOwnerReviewPartyStatusRows(draft);
+    expect(rows.find((r) => r.displayName === IRON)?.status).toBe("changes_accepted");
+    expect(rows.find((r) => r.displayName === IRON)?.statusLabel).toBe("Changes accepted");
+    expect(rows.find((r) => r.displayName === BLUE)?.status).toBe("not_reviewed");
+  });
+
   it("QA reviewer panel builds one opener row per party", () => {
     const rows = buildReviewLinkPartySimulationRows(baseDraft);
     expect(rows.length).toBe(2);

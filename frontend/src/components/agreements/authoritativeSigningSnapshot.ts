@@ -25,8 +25,13 @@ import {
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import {
+  extractPartyAddressesFromExecutionBlockCorpus,
+} from "../../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
+import {
   readConsumedPaidProSignerMetadataAuthority,
   recipientMetadataToAuthorityParties,
+  setConsumedPaidProSignerMetadataAuthority,
+  buildSnapshotPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
 
 export type PaidProSigningAuthorityPhase =
@@ -199,6 +204,60 @@ export function createAuthoritativeSigningSnapshot(
     sourceAfter: authoritativeSigningSnapshot.source,
   });
   return authoritativeSigningSnapshot;
+}
+
+function normalizeSnapshotEntityKey(name: string): string {
+  return (name || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/[.,;:]+$/g, "");
+}
+
+/**
+ * After owner accepts a reviewer proposal, sync Address for Notice values from the accepted
+ * corpus into snapshot signer metadata so post-finalize hydration does not revert edits.
+ */
+export function syncAuthoritativeSigningSnapshotMetadataFromCorpus(corpus: string): boolean {
+  if (!authoritativeSigningSnapshot) return false;
+  const extracted = extractPartyAddressesFromExecutionBlockCorpus(corpus);
+  if (extracted.size === 0) return false;
+
+  const meta = { ...authoritativeSigningSnapshot.signerMetadata };
+  const partyAddresses = [...(meta.partyAddresses ?? [])];
+  while (partyAddresses.length < 2) partyAddresses.push("");
+
+  const pairs: Array<[number, string]> = [
+    [0, meta.recipient1Name],
+    [1, meta.recipient2Name],
+  ];
+  let changed = false;
+  for (const [idx, legalName] of pairs) {
+    const key = normalizeSnapshotEntityKey(legalName);
+    if (!key) continue;
+    for (const [entityKey, addr] of extracted) {
+      if (
+        entityKey === key ||
+        entityKey.includes(key) ||
+        key.includes(entityKey)
+      ) {
+        if (partyAddresses[idx] !== addr) {
+          partyAddresses[idx] = addr;
+          changed = true;
+        }
+        break;
+      }
+    }
+  }
+  if (!changed) return false;
+
+  authoritativeSigningSnapshot = {
+    ...authoritativeSigningSnapshot,
+    signerMetadata: { ...meta, partyAddresses },
+  };
+  const authority = buildSnapshotPaidProSignerMetadataAuthority();
+  if (authority) setConsumedPaidProSignerMetadataAuthority(authority);
+  return true;
 }
 
 /**

@@ -1,15 +1,21 @@
 /**
  * Visible paid Pro document shell — owns the #fadeWrapper document body when
- * SimpleProFinalReviewScreen is bypassed. Forces canonical plain from frozen SoT.
+ * SimpleProFinalReviewScreen is bypassed. Forces canonical plain from paid Pro display authority.
  */
 
 import { useEffect, useRef } from "react";
 import { getAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
-import { getAuthoritativeAgreementText } from "./authoritativeAgreementDocument";
-import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { PaidProCanonicalPlainReviewDocument } from "./paidProCanonicalPlainReviewDocument";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
+import {
+  logTest310BlockClassification,
+  logTest310DisplaySource,
+  logTest313HeadingRenderSource,
+  logTest314HeadingInvariant,
+  resolvePaidProFirstReviewVisibleDisplayPlain,
+  type PaidProFirstReviewVisibleDisplayArgs,
+} from "./paidProFirstReviewDisplayAuthority";
 import {
   auditPaidProPostFinalizeVisibleSurface,
   logPaidProPostFinalizeVisibleSurfaceMismatch,
@@ -34,29 +40,29 @@ export function resetPaidProVisibleDocumentShellLogsForTests(): void {
   mountedLogKeys.clear();
 }
 
-export function resolveCanonicalPlainForVisibleShell(): { plain: string; source: string } {
-  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const locked = resolvePaidProPostFinalizeReviewPlain();
-    if (locked.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
-      return { plain: locked, source: "authoritative_signing_snapshot" };
+export function resolveCanonicalPlainForVisibleShell(
+  args: PaidProFirstReviewVisibleDisplayArgs = {},
+): { plain: string; source: string } {
+  const resolution = resolvePaidProFirstReviewVisibleDisplayPlain(args);
+  logTest310DisplaySource(resolution);
+  if (resolution.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+    if (resolution.plain.length >= 80) {
+      logTest310BlockClassification(resolution.plain);
     }
+    logTest313HeadingRenderSource({
+      source: resolution.source,
+      plain: resolution.plain,
+      paidProActive: resolution.paidProActive,
+      forbiddenSourceBlocked: resolution.forbiddenSourceBlocked,
+    });
+    logTest314HeadingInvariant({
+      source: resolution.source,
+      renderer: "resolver",
+      plain: resolution.plain,
+    });
+    return { plain: resolution.plain, source: resolution.source };
   }
-  if (hasPaidProSourceOfTruth()) {
-    const sot = getPaidProSourceOfTruthText().trim();
-    if (sot.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
-      return { plain: sot, source: "paidProSourceOfTruth" };
-    }
-  }
-  const authoritative = getAuthoritativeAgreementText().trim();
-  if (authoritative.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
-    return { plain: authoritative, source: "authoritativeAgreementDocument" };
-  }
-  const frozen = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
-  const frozenPlain = frozen?.canonicalText?.trim() ?? "";
-  if (frozenPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
-    return { plain: frozenPlain, source: "frozenCanonicalCorpus" };
-  }
-  return { plain: "", source: "none" };
+  return { plain: "", source: resolution.source || "none" };
 }
 
 export function resolvePaidProVisibleShellRenderBranch(args: {
@@ -65,8 +71,21 @@ export function resolvePaidProVisibleShellRenderBranch(args: {
   htmlLen: number;
   canonicalPlainLen?: number;
   canonicalPlainSource?: string;
+  paidProFirstReviewActive?: boolean;
 }): { branch: PaidProVisibleShellRenderBranch; reason: string } {
   const canonicalPlainLen = args.canonicalPlainLen ?? 0;
+  if (args.paidProFirstReviewActive) {
+    if (canonicalPlainLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+      return {
+        branch: "canonical_plain_forced",
+        reason:
+          args.canonicalPlainSource === "authoritative_signing_snapshot"
+            ? "post_finalize_hydrated_snapshot_plain"
+            : "paid_pro_first_review_display_authority",
+      };
+    }
+    return { branch: "empty", reason: "paid_pro_awaiting_display_authority" };
+  }
   if (
     args.canonicalPlainSource === "authoritative_signing_snapshot" &&
     canonicalPlainLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
@@ -123,6 +142,7 @@ type Props = {
   compactDocumentTopPadding?: boolean;
   visibleProPaperTrace?: VisibleProPaperDiagnosticsTrace;
   authoritativeSource?: string;
+  displayContext?: PaidProFirstReviewVisibleDisplayArgs;
 };
 
 export function PaidProVisibleDocumentShell({
@@ -131,19 +151,22 @@ export function PaidProVisibleDocumentShell({
   compactDocumentTopPadding = false,
   visibleProPaperTrace,
   authoritativeSource = "paidProSourceOfTruth",
+  displayContext,
 }: Props) {
   const shellRef = useRef<HTMLDivElement>(null);
   const hasSoT = hasPaidProSourceOfTruth();
   const sotPlain = hasSoT ? getPaidProSourceOfTruthText().trim() : "";
   const sotLen = sotPlain.length;
   const htmlLen = html.trim().length;
-  const canonicalPlain = resolveCanonicalPlainForVisibleShell();
+  const paidProFirstReviewActive = Boolean(displayContext?.paidProActive ?? displayContext?.premiumPaidDocumentSurface);
+  const canonicalPlain = resolveCanonicalPlainForVisibleShell(displayContext ?? {});
   const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
     hasSoT,
     sotLen,
     htmlLen,
     canonicalPlainLen: canonicalPlain.plain.length,
     canonicalPlainSource: canonicalPlain.source,
+    paidProFirstReviewActive,
   });
   const renderPlain =
     branch === "canonical_plain_forced"

@@ -126,6 +126,8 @@ import {
 } from "./recipientApprovedWaitingPresentation";
 import { deriveOwnerReviewPartyStatusRows } from "../launch/simpleProduct/ownerReviewPartyStatusChecklist";
 import { useLaunchNav } from "../launch/LaunchNavContext";
+import { navigateCreatorPrepareSignatureLinks } from "../launch/creatorDashboardPrepareSignatureLinks";
+import { logCreatorReviewCompletePrepareClick } from "../launch/creatorDashboardCopy";
 import { recipientReviewDevInfo, recipientReviewDevWarn } from "./recipientReviewDevLog";
 import { JoyMilestoneMark } from "../joy/JoyMilestone";
 import { emitActionCompleted } from "../joy/joyTelemetry";
@@ -136,6 +138,10 @@ import { postProRedlineReviewerSuggestion } from "./proRedlineReviewApi";
 import { isPaidProAgreementAuthoritative } from "../components/agreements/paidProAgreementAuthority";
 import { RecipientWantACopyStrip } from "./recipientWantACopyStrip";
 import { cloneDraftForRecipientPreview } from "./recipientPreviewBaseline";
+import {
+  logCopyExportCorpus,
+  logReviewCorpusAuthority,
+} from "./reviewCorpusAuthority";
 import {
   logReviewFirstDisplayCorpusSelected,
   resolveReviewFirstDisplayCorpus,
@@ -310,6 +316,12 @@ import {
   logReviewerProposalSubmitted,
 } from "./ownerProposalReviewQa";
 import { buildReviewFirstDocumentDisplayHtml } from "./reviewFirstDocumentDisplay";
+import {
+  analyzeSection9StageContent,
+  fingerprintStageText,
+  logTest323LiveSection9Trace,
+} from "./reviewFirstDocumentDisplaySection9Trace";
+import { logTest320ReviewVisibleExecutionMetadata } from "../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
 import { PremiumAgreementReadonlyView } from "../components/agreements/PremiumAgreementReadonlyView";
 import { ReviewFirstChangeCard } from "./ReviewFirstChangeCard";
 import { stripClausePreambleFromRevisedPair, stripRecipientQaDraftNoiseLines } from "./recipientRevisionPreambleStrip";
@@ -2083,7 +2095,7 @@ export function AgreementRecipientReview({
       }
       const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
       const html = String(rp?.rendered_html || "");
-      const reviewFirstCorpus = resolveReviewFirstDisplayCorpus(d);
+      const reviewFirstCorpus = resolveReviewFirstDisplayCorpus(d, "reviewer");
       const effectiveHtml =
         reviewFirstCorpus && reviewFirstCorpus.text.trim().length >= 500
           ? renderReviewFirstCorpusHtml(reviewFirstCorpus.text)
@@ -2094,6 +2106,12 @@ export function AgreementRecipientReview({
           corpus: reviewFirstCorpus,
           surface: "reviewer",
           fallbackPreview: !effectiveHtml.trim(),
+        });
+        logReviewCorpusAuthority({
+          agreementId,
+          source: reviewFirstCorpus.source,
+          corpusHash: reviewFirstCorpus.hash,
+          surface: "reviewer_view",
         });
       }
       setRenderedHtml(effectiveHtml);
@@ -2168,17 +2186,37 @@ export function AgreementRecipientReview({
     [renderedHtml, draftSanitizeContext, authoritativePartyNames],
   );
   const reviewFirstDocumentHtml = useMemo(() => {
-    const corpus = resolveReviewFirstDisplayCorpus(draft)?.text.trim();
+    const corpusResult = resolveReviewFirstDisplayCorpus(draft, "reviewer");
+    const corpus = corpusResult?.text.trim();
     return buildReviewFirstDocumentDisplayHtml({
       serverHtml: renderedHtmlDisplay,
       corpusText: corpus,
       partyNames: authoritativePartyNames,
+      draft,
+      surface: "reviewer",
+      selectedCorpusSource: corpusResult?.source,
+      agreementId,
     });
-  }, [authoritativePartyNames, draft, renderedHtmlDisplay]);
+  }, [agreementId, authoritativePartyNames, draft, renderedHtmlDisplay]);
   const reviewFirstUsesPremiumDocument = useMemo(() => {
-    const corpus = resolveReviewFirstDisplayCorpus(draft)?.text.trim() || "";
+    const corpus = resolveReviewFirstDisplayCorpus(draft, "reviewer")?.text.trim() || "";
     return corpus.length >= 500;
   }, [draft]);
+
+  useLayoutEffect(() => {
+    if (entry.kind !== "review" || viewerLike || !reviewFirstUsesPremiumDocument) return;
+    const domText = recipientReadDocAnchorRef.current?.textContent ?? "";
+    if (!domText.trim()) return;
+    const stage = analyzeSection9StageContent(domText);
+    logTest323LiveSection9Trace({
+      stage: "mounted_dom",
+      agreementId,
+      surface: "reviewer",
+      source: "recipient-document-shell",
+      htmlHash: fingerprintStageText(domText),
+      ...stage,
+    });
+  }, [agreementId, entry.kind, reviewFirstDocumentHtml, reviewFirstUsesPremiumDocument, viewerLike]);
 
   const scrubAgreementHtml = useCallback(
     (html: string) =>
@@ -2197,7 +2235,7 @@ export function AgreementRecipientReview({
   }, [recipientBaselineHtmlSource, draftSanitizeContext, authoritativePartyNames]);
 
   const directCompareDefault = useMemo(() => {
-    const corpus = resolveReviewFirstDisplayCorpus(draft)?.text.trim();
+    const corpus = resolveReviewFirstDisplayCorpus(draft, "copy_export")?.text.trim();
     if (corpus) return formatAgreementPlainTextForEditing(corpus);
     const fromHtml = htmlToPlainTextForLegalRedline(scrubbedOriginalDraftHtmlForPdfExport || "").trim();
     return formatAgreementPlainTextForEditing(
@@ -2205,11 +2243,22 @@ export function AgreementRecipientReview({
     );
   }, [draft, scrubbedOriginalDraftHtmlForPdfExport]);
   const reviewFirstComparisonBaseline = useMemo(
-    () => resolveReviewFirstDisplayCorpus(draft)?.text.trim() || directCompareDefault,
+    () => resolveReviewFirstDisplayCorpus(draft, "copy_export")?.text.trim() || directCompareDefault,
     [directCompareDefault, draft],
   );
   const directCompareDefaultRef = useRef(directCompareDefault);
   directCompareDefaultRef.current = directCompareDefault;
+
+  useEffect(() => {
+    if (entry.kind !== "review" || !draft) return;
+    const corpus = resolveReviewFirstDisplayCorpus(draft, "copy_export");
+    if (!corpus?.text.trim()) return;
+    logCopyExportCorpus({
+      agreementId,
+      source: corpus.source,
+      corpusHash: corpus.hash,
+    });
+  }, [agreementId, directCompareDefault, draft, entry.kind]);
 
   useEffect(() => {
     void refresh();
@@ -2280,9 +2329,22 @@ export function AgreementRecipientReview({
         case "return_dashboard":
           navigate("/app");
           return;
-        case "prepare_signature_links":
-          navigate("/app");
+        case "prepare_signature_links": {
+          logCreatorReviewCompletePrepareClick({
+            agreementId,
+            hasDraft: Boolean(draft),
+            allReviewsComplete: resolveAllReviewPartiesApproved(draft),
+          });
+          await navigateCreatorPrepareSignatureLinks({
+            agreementId,
+            navigate: (path) => navigate(path),
+            draft,
+            lockedVersionId: bundle?.signingLock?.lockedVersionId ?? null,
+            navigateOnBridgeFailure: false,
+            logSource: "creator_review_complete",
+          });
           return;
+        }
         case "done":
           if (onClose) onClose();
           else navigate("/");
@@ -2291,7 +2353,7 @@ export function AgreementRecipientReview({
           return;
       }
     },
-    [agreementId, navigate, onClose],
+    [agreementId, bundle?.signingLock?.lockedVersionId, draft, navigate, onClose],
   );
 
   const recipientAcceptedNoEditsBanner =
@@ -2350,6 +2412,19 @@ export function AgreementRecipientReview({
     reviewerOwnerCtaHiddenLoggedRef.current = true;
     logReviewerOwnerCtaHidden({ agreementId, surface: "AgreementRecipientReview" });
   }, [agreementId, entry.kind, viewerLike]);
+  useEffect(() => {
+    if (entry.kind !== "review" || viewerLike || !draft) return;
+    const corpusResult = resolveReviewFirstDisplayCorpus(draft, "reviewer");
+    const plain = corpusResult?.text.trim() ?? "";
+    if (!plain) return;
+    logTest320ReviewVisibleExecutionMetadata({
+      surface: "reviewer",
+      selectedCorpusSource: corpusResult?.source ?? "none",
+      visiblePlain: plain,
+      visibleHtml: reviewFirstDocumentHtml,
+      draft,
+    });
+  }, [draft, entry.kind, reviewFirstDocumentHtml, viewerLike]);
   useEffect(() => {
     if (entry.kind !== "review" || viewerLike || !draft) return;
     const copyCorpus = directCompareDefault;
@@ -2513,6 +2588,7 @@ export function AgreementRecipientReview({
     () =>
       resolveReviewFirstSubmitAuthority({
         agreementId,
+        draft,
         diff: reviewFirstConfirmedDiff ?? reviewFirstTextDiff,
         needsPersonalizedLink,
         participantPid,
@@ -2531,6 +2607,7 @@ export function AgreementRecipientReview({
       recipientAccessToken,
       recipientPreview,
       bundleSigningLocked,
+      draft,
     ],
   );
   const reviewFirstHasMaterialChanges = Boolean(

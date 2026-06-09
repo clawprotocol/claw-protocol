@@ -1495,7 +1495,13 @@ def _premium_full_draft_system_prompt() -> str:
         "If the user asked for ownership, confidentiality, reporting, spend approval, term/termination, FTC or industry rules, make explicit sections for those asks.\n"
         "- Add restrictive covenants (non-compete, exclusivity, non-circumvent) only if requested in the materials or "
         "clearly central to the stated deal. Otherwise omit or use light, mutual commercial boilerplate if appropriate.\n"
-        "- Use clear numbering (1., 1.1, (a)…) and professional headings.\n"
+        "- **HOUSE STYLE — SECTION NUMBERING (document structure only):** Do not create subsection numbering unless at least "
+        "two sibling subsections exist within the same section. Avoid orphan subsections. A section containing only one provision "
+        "should render as a main heading followed by body paragraph text—not a lone N.1 label (e.g. use "
+        "\"7. Governing Law\\n\\nThis Agreement shall be governed by…\" rather than \"7. Governing Law\\n\\n7.1 This Agreement…\"). "
+        "Use subsection numbering only when multiple sibling subsections are present (e.g. 7.1, 7.2, 7.3). "
+        "This instruction applies to document structure only; do not change substantive legal content.\n"
+        "- Use clear numbering (1., 1.1, (a)…) and professional headings consistent with the house style above.\n"
         "- **Contextual standard commercial terms:** Use the intake and any structured `agreement_family` / deal labels in the JSON `context` "
         "to decide which standard clauses to weave in. Do not include every item below in every document—**select** based on "
         "relevance (e.g., SaaS, agency, referral, influencer, contractor, NDA, partnership, services retainer, trustee/fiduciary-style duties).\n"
@@ -5438,61 +5444,89 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     subject = resolve_subject_from_request(request)
     folder_names = _folder_name_map_for_subject(subject)
     summaries: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, str]] = []
     for aid in list_draft_agreement_ids_newest_first():
         if not workspace_lists_agreement_for_subject(aid, subject):
             continue
         try:
             d = load_draft(aid)
-        except Exception:
+        except Exception as exc:
+            reason = f"load_draft_failed:{type(exc).__name__}"
+            skipped.append({"id": aid, "reason": reason})
+            log.warning("[dashboard-workspace-index-row] skipped agreement_id=%s reason=%s", aid, reason)
             continue
-        parties = d.get("parties") or []
-        signers = sum(
-            1 for p in parties if str((p or {}).get("role") or "").lower() == "signer"
-        )
-        audit = d.get("audit_log") or []
-        signed = any(
-            isinstance(e, dict) and str(e.get("event_type") or "") == "signed"
-            for e in audit
-        )
-        reviewer_approved = any(
-            isinstance(e, dict)
-            and str(e.get("event_type") or "")
-            in ("recipient_approved", "participant_approved")
-            for e in audit
-        )
-        appr_done, appr_req, all_reviewers_approved = _workspace_review_approval_rollups(d)
-        lock = read_signing_lock(aid)
-        lv_raw = str((lock or {}).get("locked_version_id") or "").strip()
-        lv: Optional[str] = lv_raw or None
-        wfid_raw = str(d.get("workspace_folder_id") or "").strip()
-        wfid: Optional[str] = wfid_raw or None
-        tags_raw = d.get("workspace_tags")
-        tags_out: List[str] = []
-        if isinstance(tags_raw, list):
-            tags_out = _normalize_workspace_tags(list(tags_raw))
-        summaries.append(
-            {
-                "id": aid,
-                "title": (str(d.get("title") or "").strip() or "Untitled agreement"),
-                "updated_at": str(d.get("updated_at") or d.get("created_at") or ""),
-                "party_count": len(parties),
-                "signer_count": signers,
-                "version_ledger_count": len(d.get("versions") or []),
-                "completed_signed": signed,
-                "has_server_signing_lock": lock is not None and bool(lv),
-                "locked_version_id": lv,
-                "workspace_archived_at": d.get("workspace_archived_at"),
-                "review_sent_at": d.get("review_sent_at"),
-                "reviewer_approved": reviewer_approved,
-                "review_approvals_completed": appr_done,
-                "review_approvals_required": appr_req,
-                "all_reviewers_approved": all_reviewers_approved,
-                "workspace_folder_id": wfid,
-                "workspace_folder_name": (folder_names.get(wfid) if wfid else None),
-                "workspace_tags": tags_out,
-            }
-        )
-    return {"agreements": summaries}
+        try:
+            parties = d.get("parties") or []
+            signers = sum(
+                1 for p in parties if str((p or {}).get("role") or "").lower() == "signer"
+            )
+            audit = d.get("audit_log") or []
+            signed = any(
+                isinstance(e, dict) and str(e.get("event_type") or "") == "signed"
+                for e in audit
+            )
+            reviewer_approved = any(
+                isinstance(e, dict)
+                and str(e.get("event_type") or "")
+                in ("recipient_approved", "participant_approved")
+                for e in audit
+            )
+            appr_done, appr_req, all_reviewers_approved = _workspace_review_approval_rollups(d)
+            lock = read_signing_lock(aid)
+            lv_raw = str((lock or {}).get("locked_version_id") or "").strip()
+            lv: Optional[str] = lv_raw or None
+            wfid_raw = str(d.get("workspace_folder_id") or "").strip()
+            wfid: Optional[str] = wfid_raw or None
+            tags_raw = d.get("workspace_tags")
+            tags_out: List[str] = []
+            if isinstance(tags_raw, list):
+                tags_out = _normalize_workspace_tags(list(tags_raw))
+            review_status = "review_approved" if all_reviewers_approved else (
+                "in_review" if reviewer_approved or d.get("review_sent_at") else "draft"
+            )
+            signing_status = "fully_signed" if signed else (
+                "signing_locked" if lock is not None and bool(lv) else "unsigned"
+            )
+            log.info(
+                "[dashboard-workspace-index-row] agreement_id=%s source=workspace_index "
+                "review_status=%s signing_status=%s skipped=false",
+                aid,
+                review_status,
+                signing_status,
+            )
+            summaries.append(
+                {
+                    "id": aid,
+                    "title": (str(d.get("title") or "").strip() or "Untitled agreement"),
+                    "created_at": str(d.get("created_at") or ""),
+                    "updated_at": str(d.get("updated_at") or d.get("created_at") or ""),
+                    "party_count": len(parties),
+                    "signer_count": signers,
+                    "version_ledger_count": len(d.get("versions") or []),
+                    "completed_signed": signed,
+                    "has_server_signing_lock": lock is not None and bool(lv),
+                    "locked_version_id": lv,
+                    "workspace_archived_at": d.get("workspace_archived_at"),
+                    "review_sent_at": d.get("review_sent_at"),
+                    "reviewer_approved": reviewer_approved,
+                    "review_approvals_completed": appr_done,
+                    "review_approvals_required": appr_req,
+                    "all_reviewers_approved": all_reviewers_approved,
+                    "workspace_folder_id": wfid,
+                    "workspace_folder_name": (folder_names.get(wfid) if wfid else None),
+                    "workspace_tags": tags_out,
+                }
+            )
+        except Exception as exc:
+            reason = f"summary_build_failed:{type(exc).__name__}"
+            skipped.append({"id": aid, "reason": reason})
+            log.exception(
+                "[dashboard-workspace-index-row] skipped agreement_id=%s reason=%s",
+                aid,
+                reason,
+            )
+            continue
+    return {"agreements": summaries, "skipped": skipped}
 
 
 @router.put("/{agreement_id}/signing-lock")
@@ -7839,7 +7873,11 @@ def _workspace_review_approval_rollups(d: Dict[str, Any]) -> tuple[int, int, boo
             approved = 1
             break
     open_props = len(_open_recipient_proposal_payloads(audit)) > 0
-    all_done = (not open_props) and approved >= required and approved > 0
+    proposal_applied = any(
+        isinstance(e, dict) and str(e.get("event_type") or "") == "recipient_proposal_applied"
+        for e in (audit or [])
+    )
+    all_done = (not open_props) and approved >= required and (approved > 0 or proposal_applied)
     return approved, required, all_done
 
 
@@ -8599,6 +8637,19 @@ def apply_recipient_proposal(
                 },
             )
         )
+    accepted_corpus = (body_create.purpose or "").strip()
+    pro_redline = (
+        dict(current.pro_redline_v1 or {})
+        if isinstance(current.pro_redline_v1, dict)
+        else {}
+    )
+    if len(accepted_corpus) >= 80:
+        pro_redline["review_first_final_corpus"] = {
+            "text": accepted_corpus,
+            "source": "recipient_proposal_applied",
+            "hash": _corpus_fingerprint(accepted_corpus),
+            "persisted_at": now,
+        }
     next_draft = AgreementDraft(
         id=current.id,
         created_at=current.created_at,
@@ -8619,6 +8670,7 @@ def apply_recipient_proposal(
         effective_date=body_create.effective_date,
         payment_request=current.payment_request,
         payment_required=current.payment_required,
+        pro_redline_v1=pro_redline if pro_redline else current.pro_redline_v1,
     )
     save_draft(next_draft.model_dump())
     previous_hash = _corpus_fingerprint(current.purpose or "")

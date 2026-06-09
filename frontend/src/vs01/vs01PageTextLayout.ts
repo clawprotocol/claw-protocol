@@ -4,7 +4,7 @@
 
 import { signaturePatchStartIndex } from "../components/agreements/guidedDealCompletion/signatureRegion";
 
-export type Vs01TextRectKind = "body" | "heading" | "signature_label" | "footer";
+export type Vs01TextRectKind = "body" | "heading" | "document_title" | "signature_label" | "footer";
 
 export type Vs01NormTextRect = {
   x: number;

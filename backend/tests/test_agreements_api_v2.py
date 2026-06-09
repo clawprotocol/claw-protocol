@@ -660,6 +660,61 @@ def test_workspace_index_multi_reviewer_partial_rollup(monkeypatch, tmp_path):
     assert mine.get("all_reviewers_approved") is False
 
 
+def test_workspace_index_skips_malformed_agreement_without_500(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_PROOF_LAYER_DB_PATH", str(tmp_path / "proof_layer.sqlite3"))
+    client = TestClient(app)
+    good_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Good agreement",
+            "jurisdiction": "TX",
+            "parties": [{"name": "A", "role": "owner"}],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert good_res.status_code == 200
+    good_id = good_res.json()["id"]
+    bad_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Bad agreement",
+            "jurisdiction": "TX",
+            "parties": [{"name": "B", "role": "owner"}],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert bad_res.status_code == 200
+    bad_id = bad_res.json()["id"]
+    orig_load = ads.load_draft
+
+    def load_draft_side(aid: str):
+        if aid == bad_id:
+            raise ValueError("corrupt_draft")
+        return orig_load(aid)
+
+    monkeypatch.setattr("backend.routers.agreements_v2_api.load_draft", load_draft_side)
+    idx = client.get("/api/agreements/workspace-index", headers=_ORG_H)
+    assert idx.status_code == 200
+    body = idx.json()
+    ids = [r["id"] for r in body["agreements"]]
+    assert good_id in ids
+    assert bad_id not in ids
+    skipped = body.get("skipped") or []
+    assert any(s.get("id") == bad_id for s in skipped)
+
+
 def test_review_delivery_dry_run_payload_count(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))

@@ -12,6 +12,7 @@ describe("resolvePremiumSenderFirstSigningPath", () => {
     vi.restoreAllMocks();
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [],
+      skipped: [],
       error: null,
     });
   });
@@ -78,6 +79,7 @@ describe("resolvePremiumSenderFirstSigningPath", () => {
           review_sent_at: null,
         },
       ],
+      skipped: [],
       error: null,
     });
     vi.stubGlobal(
@@ -171,6 +173,7 @@ describe("waitForSigningLockLockedVersionId", () => {
   it("returns locked version once GET includes signing_lock", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [],
+      skipped: [],
       error: null,
     });
     vi.stubGlobal(

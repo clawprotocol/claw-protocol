@@ -2,11 +2,14 @@
  * Canonical paid Pro plain-text review — styled legal document block (paragraph breaks preserved).
  */
 
-import { useId } from "react";
+import { useEffect, useId } from "react";
 import { PREMIUM_READONLY_DOC_STYLES } from "./PremiumAgreementReadonlyView";
-import { splitCanonicalPlainIntoBlocks } from "./paidProFirstReviewRenderGuard";
-
-const SECTION_HEADING_RE = /^(?:\d+\.\s+)?[A-Z][A-Z0-9\s/&,\-]{3,}$/;
+import {
+  classifyPaidProDocumentBlocks,
+  detectPaidProPlainParagraphHeadingLeaks,
+  isMainSectionHeadingLine,
+} from "./paidProDocumentBlockClassifier";
+import { logTest314HeadingInvariant } from "./paidProFirstReviewDisplayAuthority";
 
 type Props = {
   plain: string;
@@ -22,7 +25,31 @@ export function PaidProCanonicalPlainReviewDocument({
   authoritativeSource,
 }: Props) {
   const sid = useId().replace(/:/g, "");
-  const blocks = splitCanonicalPlainIntoBlocks(plain);
+  const blocks = classifyPaidProDocumentBlocks(plain);
+
+  useEffect(() => {
+    if (typeof import.meta === "undefined" || !import.meta.env?.DEV) return;
+    const leaks = detectPaidProPlainParagraphHeadingLeaks(plain);
+    const sectionOneEl = blocks.find(
+      (b) => /^1\.\s+/.test(b.firstLine.trim()) && isMainSectionHeadingLine(b.firstLine.trim()),
+    );
+    logTest314HeadingInvariant({
+      source: authoritativeSource,
+      renderer: "react",
+      plain,
+      sectionOneClass:
+        sectionOneEl?.kind === "main_section_heading" || sectionOneEl?.kind === "legacy_section_heading"
+          ? "premium-doc-section-heading"
+          : sectionOneEl?.kind ?? null,
+    });
+    if (leaks.plainParagraphHeadingLeakCount <= 0) return;
+    // eslint-disable-next-line no-console
+    console.warn("[test313-heading-render-leak]", {
+      source: authoritativeSource,
+      plainParagraphHeadingLeakCount: leaks.plainParagraphHeadingLeakCount,
+      leakedLines: leaks.leakedLines.slice(0, 8),
+    });
+  }, [plain, authoritativeSource, blocks]);
 
   return (
     <>
@@ -37,37 +64,23 @@ export function PaidProCanonicalPlainReviewDocument({
       data-paid-pro-authoritative-source={authoritativeSource}
     >
       <div className="premium-doc-body" data-testid="simple-pro-final-review-paid-sot-body">
-        {blocks.map((block, index) => {
-          const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
-          const firstLine = lines[0] ?? "";
-          const isDocumentTitle =
-            index === 0 &&
-            firstLine.length >= 8 &&
-            firstLine.length <= 160 &&
-            (firstLine === firstLine.toUpperCase() || /^[A-Z][^.!?]{12,}$/.test(firstLine));
-          if (isDocumentTitle && lines.length === 1) {
+        {blocks.map(({ block, blockIndex, kind, firstLine }) => {
+          if (kind === "document_title") {
             return (
-              <h1 key={`block-${index}`} className="text-center uppercase tracking-[0.04em]">
+              <h1 key={`block-${blockIndex}`} className="text-center uppercase tracking-[0.04em]">
                 {firstLine}
               </h1>
             );
           }
-          if (lines.length === 1 && SECTION_HEADING_RE.test(firstLine)) {
+          if (kind === "main_section_heading" || kind === "legacy_section_heading") {
             return (
-              <h2 key={`block-${index}`} className="premium-doc-section-heading">
-                {firstLine}
-              </h2>
-            );
-          }
-          if (/^Section\s+\d+\./i.test(firstLine) && lines.length === 1) {
-            return (
-              <h2 key={`block-${index}`} className="premium-doc-section-heading">
+              <h2 key={`block-${blockIndex}`} className="premium-doc-section-heading">
                 {firstLine}
               </h2>
             );
           }
           return (
-            <p key={`block-${index}`} className="whitespace-pre-wrap">
+            <p key={`block-${blockIndex}`} className="whitespace-pre-wrap">
               {block.trim()}
             </p>
           );

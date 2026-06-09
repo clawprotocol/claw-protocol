@@ -1,4 +1,6 @@
 import type { ReviewFirstTextDiffSummary } from "./reviewFirstTextDiff";
+import { logReviewProposalGate, resolveReviewProposalGate } from "./reviewProposalGate";
+import type { AgreementDraft } from "./agreementTypes";
 
 export type ReviewFirstSubmitBlockReason =
   | "ready"
@@ -10,7 +12,11 @@ export type ReviewFirstSubmitBlockReason =
   | "signing_lock_active"
   | "proposal_not_ready"
   | "proposal_id_missing_before_post"
-  | "proposer_id_missing_before_stage";
+  | "proposer_id_missing_before_stage"
+  | "awaiting_other_party_review";
+
+export const REVIEW_FIRST_SUBMIT_AWAITING_OTHER_PARTY_MESSAGE =
+  "Your last suggested changes were accepted. Wait for another reviewer to respond before submitting new changes.";
 
 export type ReviewFirstSubmitAuthority = {
   canSubmit: boolean;
@@ -29,6 +35,7 @@ export const REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE =
 
 export function resolveReviewFirstSubmitAuthority(args: {
   agreementId?: string;
+  draft?: AgreementDraft | null;
   diff: ReviewFirstTextDiffSummary | null;
   /** @deprecated Prefer recipientAccessToken — preview-only when no token and no participant. */
   needsPersonalizedLink?: boolean;
@@ -47,6 +54,18 @@ export function resolveReviewFirstSubmitAuthority(args: {
       canSubmit: false,
       reason: "signing_lock_active",
       userMessage: "Review is closed on this agreement — you can still read the document.",
+    };
+  }
+  const proposalGate = resolveReviewProposalGate({
+    draft: args.draft ?? null,
+    requesterPartyId: args.participantPid,
+  });
+  logReviewProposalGate(proposalGate);
+  if (!proposalGate.allowed) {
+    return {
+      canSubmit: false,
+      reason: "awaiting_other_party_review",
+      userMessage: REVIEW_FIRST_SUBMIT_AWAITING_OTHER_PARTY_MESSAGE,
     };
   }
   if (!args.diff?.hasMaterialChanges) {

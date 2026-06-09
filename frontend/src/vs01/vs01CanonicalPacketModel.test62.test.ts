@@ -7,6 +7,7 @@ import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import {
   buildVs01SigningPacketModel,
   canonicalFlowStackBottomNorm,
+  isWitnessSigningPacketPage,
   signatureFieldRectOnUnderlineAnchor,
   VS01_PACKET_INITIALS_BAND_PT,
 } from "./buildVs01SigningPacketModel";
@@ -95,6 +96,10 @@ describe("test62 canonical VS01 e-sign packet render", () => {
     expect(model.allowed).toBe(true);
     expect(model.pages.length).toBeGreaterThan(1);
     for (const page of model.pages) {
+      if (isWitnessSigningPacketPage(page)) {
+        expect(page.initialsBandRect.height).toBeLessThan(0.001);
+        continue;
+      }
       expect(page.initialsBandRect.height).toBeCloseTo(VS01_PACKET_INITIALS_BAND_PT / 792, 3);
       const textBottom = Math.max(0, ...page.textBlocks.map((b) => b.y + b.height));
       expect(textBottom).toBeLessThanOrEqual(page.initialsBandRect.y);

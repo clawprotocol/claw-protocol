@@ -60,7 +60,10 @@ export function isAgreementPacketPrepared(agreementId: string): boolean {
 
 export function isAgreementFullySignedLocal(agreementId: string): boolean {
   const snap = readSigningPacketStatus(agreementId);
-  return Boolean(snap?.fullySigned);
+  if (!snap) return false;
+  if (snap.fullySigned) return true;
+  const values = Object.values(snap.bySignerKey);
+  return values.length >= 2 && values.every((status) => status === "signed");
 }
 
 /**

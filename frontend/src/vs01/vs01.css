@@ -3748,6 +3748,15 @@ button.vs01-upload-btn:disabled {
   letter-spacing: 0.005em;
 }
 
+.vs01-canonical-flow-line--document_title {
+  font-weight: 700;
+  font-size: 1.28em;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  margin-bottom: 0.35em;
+}
+
 .vs01-canonical-flow-line--signature {
   white-space: nowrap;
   margin-bottom: calc(var(--vs01-execution-signature-margin-bottom-em, -0.04) * 1em);

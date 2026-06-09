@@ -45,6 +45,13 @@ export function writeSigningPacketStatus(snapshot: Vs01SigningPacketStatusSnapsh
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.setItem(storageKey(snapshot.agreementId), JSON.stringify(snapshot));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("vs01-signing-packet-status-changed", {
+          detail: { agreementId: snapshot.agreementId },
+        }),
+      );
+    }
   } catch {
     /* ignore */
   }

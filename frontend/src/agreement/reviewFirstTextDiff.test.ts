@@ -32,6 +32,26 @@ describe("reviewFirstTextDiff", () => {
     expect(diff.hasMaterialChanges).toBe(false);
   });
 
+  it("classifies section numbering-only edits as non-material with compressed presentation", () => {
+    const previous = [
+      "8. Notices",
+      "8.1 All notices required or permitted under this Agreement shall be in writing.",
+    ].join("\n");
+    const proposed = [
+      "8. Notices",
+      "All notices required or permitted under this Agreement shall be in writing.",
+    ].join("\n");
+
+    const diff = buildReviewFirstTextDiffSummary(previous, proposed);
+    const section = diff.changedSections[0];
+
+    expect(diff.hasMaterialChanges).toBe(false);
+    expect(diff.hasNonMaterialChangesOnly).toBe(true);
+    expect(diff.summary).toContain("numbering");
+    expect(section?.presentationKind).toBe("numbering");
+    expect(section?.title).toBe("Section numbering updated");
+  });
+
   it("classifies thirty (30) → fifteen (15) days as Payment timing changed with phrase-level delta", () => {
     const previous = BASE_AGREEMENT;
     const proposed = BASE_AGREEMENT.replace(

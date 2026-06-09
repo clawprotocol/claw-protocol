@@ -9,6 +9,7 @@ import {
   type PaidProVisibleShellRenderBranch,
 } from "./paidProVisibleDocumentShell";
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
+import type { PaidProFirstReviewVisibleDisplayArgs } from "./paidProFirstReviewDisplayAuthority";
 import {
   getAuthoritativeAgreementText,
   hasAuthoritativeAgreementDocument,
@@ -119,6 +120,7 @@ type ForcedRouteProps = {
   authoritativeSource?: string;
   /** Inside the paid Pro white review card — skip duplicate outer frame chrome. */
   embedded?: boolean;
+  displayContext?: PaidProFirstReviewVisibleDisplayArgs;
 };
 
 export function PaidProDocumentBodyForcedRoute({
@@ -129,6 +131,7 @@ export function PaidProDocumentBodyForcedRoute({
   visibleProPaperTrace,
   authoritativeSource = "paidProSourceOfTruth",
   embedded = false,
+  displayContext,
 }: ForcedRouteProps) {
   useEffect(() => {
     logPaidProDocumentBodyRouter({
@@ -146,6 +149,7 @@ export function PaidProDocumentBodyForcedRoute({
       compactDocumentTopPadding={compactDocumentTopPadding}
       visibleProPaperTrace={visibleProPaperTrace}
       authoritativeSource={authoritativeSource}
+      displayContext={displayContext}
     />
   );
 

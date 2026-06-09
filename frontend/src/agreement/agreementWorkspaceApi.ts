@@ -7,6 +7,7 @@ import { apiUrl, logClawClientWarning, resolveApiBase } from "../lib/clawApi";
 export type WorkspaceIndexAgreement = {
   id: string;
   title: string;
+  created_at?: string;
   updated_at: string;
   party_count: number;
   signer_count: number;
@@ -30,8 +31,14 @@ export type WorkspaceIndexAgreement = {
 
 const base = () => resolveApiBase().replace(/\/$/, "");
 
+export type WorkspaceIndexSkippedRow = {
+  id: string;
+  reason: string;
+};
+
 export type WorkspaceIndexResult = {
   agreements: WorkspaceIndexAgreement[];
+  skipped: WorkspaceIndexSkippedRow[];
   error: string | null;
 };
 
@@ -44,21 +51,27 @@ export async function fetchWorkspaceIndex(): Promise<WorkspaceIndexResult> {
       logClawClientWarning("agreements.workspace-index", { status: res.status, url });
       return {
         agreements: [],
+        skipped: [],
         error:
           res.status >= 500
             ? "We couldn’t reach the agreements service. Try again in a moment."
             : `Could not load your agreements (HTTP ${res.status}).`,
       };
     }
-    const j = (await res.json()) as { agreements?: WorkspaceIndexAgreement[] };
+    const j = (await res.json()) as {
+      agreements?: WorkspaceIndexAgreement[];
+      skipped?: WorkspaceIndexSkippedRow[];
+    };
     return {
       agreements: Array.isArray(j.agreements) ? j.agreements : [],
+      skipped: Array.isArray(j.skipped) ? j.skipped : [],
       error: null,
     };
   } catch (e) {
     logClawClientWarning("agreements.workspace-index", { error: String(e), url });
     return {
       agreements: [],
+      skipped: [],
       error:
         "Network error — is the API running on port 8000? Start the backend so this page can list agreements.",
     };

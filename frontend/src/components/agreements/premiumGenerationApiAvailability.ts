@@ -46,6 +46,7 @@ export function isForbiddenPaidProDisplayRenderSource(source: string | null | un
     s === "none" ||
     s === "free_starter" ||
     s === "free_starter_paid_pro_baseline" ||
+    s === "starter_preview" ||
     s === "rendered_preview" ||
     s === "renderedAgreementPreview" ||
     s === "accepted_review" ||

@@ -41,6 +41,7 @@ export { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureName
 import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity";
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
+import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { applySignerPartyIdentityToAuthoritativeAgreement } from "./guidedDealCompletion/signerPartyIdentity";
@@ -455,6 +456,14 @@ export function guardPaidProReviewRenderCorpus(
   let text = sigOrder.text;
   let repaired = sigOrder.repairs.length > 0;
 
+  const orphanSubs = normalizePaidProOrphanSubsections(text, {
+    source: "paid_pro_review_render_guard",
+  });
+  if (orphanSubs.orphanSectionsRepaired > 0) {
+    text = orphanSubs.text;
+    repaired = true;
+  }
+
   const authParties = parties ?? readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
   if (!corpusContainsFusedPartyLegalName(text)) {
     fusedPartyRepairCache = { inputHash, text };
@@ -672,7 +681,7 @@ export function resolvePaidProReviewRenderPlain(
   const memoKey = buildPaidProReviewPlainMemoKey(seedForMemo, surface);
   const memoHit = readMemoizedPaidProReviewPlain(memoKey);
   if (memoHit != null && !needsSignerOverlay) {
-    return memoHit;
+    return normalizePaidProOrphanSubsections(memoHit, { source: `${surface}:memo` }).text;
   }
 
   let rendered: string;
@@ -723,7 +732,7 @@ export function resolvePaidProReviewRenderPlain(
     auditPaidProReviewRenderCorpus(rendered);
     auditPaidProReviewRenderSotParity({ reviewPlain: rendered, surface: "paid_pro_review_render_plain" });
   }
-  return rendered;
+  return normalizePaidProOrphanSubsections(rendered, { source: surface }).text;
 }
 
 function resolvePaidProReviewRenderPlainInner(

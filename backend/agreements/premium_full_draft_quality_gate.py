@@ -418,6 +418,10 @@ def premium_full_draft_repair_system_prompt() -> str:
         "- If intake flagged exclusive vs non-exclusive conflict: choose **one** binding grant in operative text; "
         "do not grant both exclusive and non-exclusive rights as binding law in the same document.\n"
         "- If `length_repair_directive` is present, follow it: shorten bloat while keeping required operative clauses.\n"
+        "- **HOUSE STYLE — SECTION NUMBERING (document structure only):** Do not create subsection numbering unless at least "
+        "two sibling subsections exist within the same section. Avoid orphan subsections. A single provision under a main heading "
+        "should be body paragraph text—not a lone N.1 label. Use subsection numbering only when multiple sibling subsections exist "
+        "(e.g. 7.1, 7.2). This applies to structure only; do not change substantive legal content.\n"
     )
 
 

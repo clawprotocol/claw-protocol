@@ -302,4 +302,21 @@ describe("polishProAgreementDisplayLayer", () => {
     });
     expect(text).not.toMatch(/\[address\]|\[corporation\]|principal office:\s*_/i);
   });
+
+  it("does not treat miscellaneous integration clause as duplicate opening", () => {
+    const integrationClause =
+      "This Agreement constitutes the entire agreement between the parties and supersedes all prior agreements.";
+    const body = [
+      "1. Scope. Services.",
+      "9. MISCELLANEOUS",
+      integrationClause,
+      "10. ELECTRONIC SIGNATURES",
+      "The parties may execute electronically.",
+    ].join("\n\n");
+    const { text } = normalizeAgreementOpeningStructure(body, {
+      reviewDisplayMode: true,
+      retainSignatureExecutionBlock: true,
+    });
+    expect(text).toContain(integrationClause);
+  });
 });

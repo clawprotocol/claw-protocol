@@ -15,7 +15,7 @@ import {
   type ResolveFinalVs01CorpusOrBlockArgs,
 } from "./vs01SigningCorpus";
 import type { Vs01NormalizedRect } from "./vs01FieldCssGeometry";
-import { buildFlowLineDescriptors, flowLinesForPage } from "./vs01CanonicalTextLayout";
+import { buildFlowLineDescriptors, flowLinesForPage, isCanonicalDocumentTitleLine } from "./vs01CanonicalTextLayout";
 import {
   parseSignatureLineWidth,
   signatureLinePrefixNormX,
@@ -72,6 +72,8 @@ export const VS01_PACKET_MARGIN_RIGHT_PT = 54;
 export const VS01_PACKET_MARGIN_BOTTOM_PT = 20;
 /** Compact footer reservation: enough for auto-initials without creating a half-empty page. */
 export const VS01_PACKET_INITIALS_BAND_PT = 64;
+/** Witness-only pages skip initials — keep modest legal bottom margin instead. */
+export const VS01_PACKET_WITNESS_BOTTOM_MARGIN_PT = 28;
 export const VS01_PACKET_LINE_HEIGHT_PT = 17.5;
 /** Extra lines withheld from pagination so DOM flow does not spill into the initials band. */
 export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 2;
@@ -94,11 +96,15 @@ const CHARS_PER_LINE = Math.floor(
   VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT,
 );
 
+/** Execution-block metadata rows — must stay on separate flow lines (not paragraph-merged). */
+const EXECUTION_METADATA_FIELD_LINE_RE =
+  /^(?:By|Signature|Name|Title|Date|Email\s+for\s+Notices?|Address\s+for\s+Notices?)\s*:/i;
+
 function isStandaloneCanonicalLine(line: string): boolean {
   const t = line.trim();
   return (
     /^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t) ||
-    /^(?:By|Signature|Name|Title|Date)\s*:/i.test(t) ||
+    EXECUTION_METADATA_FIELD_LINE_RE.test(t) ||
     /^IN WITNESS WHEREOF/i.test(t) ||
     /^\d+(?:\.\d+)*\.\s+[A-Z]/.test(t) ||
     /^[-*]\s+/.test(t)
@@ -125,7 +131,7 @@ function canonicalFlowLineHeightUnits(line: string): number {
   if (!t) return 0.5;
   if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t)) return 1.02;
   if (/^IN WITNESS WHEREOF/i.test(t)) return 1.08;
-  if (/^(?:By|Signature|Name|Title|Date)\s*:/i.test(t)) return 1.02;
+  if (EXECUTION_METADATA_FIELD_LINE_RE.test(t)) return 1.02;
   if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return 1.04;
   return 1;
 }
@@ -155,10 +161,10 @@ export const VS01_CANONICAL_SIGNATURE_UNDERLINE_WIDTH_NORM = 190 / VS01_PACKET_P
  * Do not use pagination textRects — they use different line-height units and drift from flow render.
  */
 export function findSignatureLinePlacementsFromFlowPage(
-  page: Pick<Vs01SigningPacketPage, "flowLines" | "contentRect" | "textBlocks">,
+  page: Pick<Vs01SigningPacketPage, "flowLines" | "contentRect" | "textBlocks" | "pageIndex">,
 ): Vs01ByLinePlacement[] {
   const flowLines = flowLinesForPage(page);
-  const descriptors = buildFlowLineDescriptors(flowLines);
+  const descriptors = buildFlowLineDescriptors(flowLines, { pageIndex: page.pageIndex ?? 0 });
   const contentTop = page.contentRect.y;
   const contentX = page.contentRect.x;
   let cursorY = contentTop;
@@ -233,6 +239,12 @@ function normalizeLines(corpus: string): string[] {
   return out;
 }
 
+/** Test/diagnostic entry: corpus → standalone flow lines before pagination (Prepare packet path). */
+export function normalizeSigningPacketCorpusLines(corpus: string): string[] {
+  const instructionStripped = stripGuidedInstructionLeakLines(corpus);
+  return normalizeLines(instructionStripped.text);
+}
+
 function canonicalWitnessBlockFromRoles(roles: readonly Vs01PrepareSigningRole[]): string {
   const [owner, ...others] = roles;
   const blocks: string[] = ["IN WITNESS WHEREOF, the Parties execute this Agreement."];
@@ -279,13 +291,52 @@ function ensureWitnessBlockFromRoles(corpus: string, roles: readonly Vs01Prepare
   return `${cleaned.replace(/\n+$/g, "")}\n\n${canonicalWitnessBlockFromRoles(roles)}`.trim();
 }
 
-function classifyText(line: string): Vs01NormTextRect["kind"] {
+function classifyText(line: string, options?: { allowDocumentTitle?: boolean }): Vs01NormTextRect["kind"] {
   const t = line.trim();
+  if (options?.allowDocumentTitle && isCanonicalDocumentTitleLine(t)) return "document_title";
   if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t)) return "heading";
-  if (/^(?:By|Signature|Name|Title|Date)\s*:/i.test(t)) return "signature_label";
+  if (EXECUTION_METADATA_FIELD_LINE_RE.test(t)) return "signature_label";
   if (/^IN WITNESS WHEREOF/i.test(t)) return "heading";
   if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return "heading";
   return "body";
+}
+
+export function isWitnessSigningPacketPage(page: Pick<Vs01SigningPacketPage, "flowLines">): boolean {
+  return page.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line));
+}
+
+/** Normalized blank below witness flow stack — for layout regression tests. */
+export function witnessPageTrailingBlankNorm(
+  page: Pick<Vs01SigningPacketPage, "flowLines" | "contentRect" | "textBlocks">,
+): number {
+  const stackBottom = canonicalFlowStackBottomNorm(page);
+  const pageBottom = page.contentRect.y + page.contentRect.height;
+  const marginNorm = VS01_PACKET_WITNESS_BOTTOM_MARGIN_PT / VS01_PACKET_PAGE_HEIGHT_PT;
+  return Math.max(0, pageBottom - stackBottom - marginNorm);
+}
+
+function compactWitnessPageLayout(page: Vs01SigningPacketPage): Vs01SigningPacketPage {
+  if (!isWitnessSigningPacketPage(page)) return page;
+  const stackBottom = canonicalFlowStackBottomNorm(page);
+  const compactBottom = Math.min(
+    FOOTER_TOP,
+    stackBottom + VS01_PACKET_WITNESS_BOTTOM_MARGIN_PT / VS01_PACKET_PAGE_HEIGHT_PT,
+  );
+  const collapsedBand = {
+    x: CONTENT_X,
+    y: compactBottom,
+    width: CONTENT_WIDTH,
+    height: 0,
+  };
+  return {
+    ...page,
+    contentRect: {
+      ...page.contentRect,
+      height: compactBottom - page.contentRect.y,
+    },
+    initialsBandRect: collapsedBand,
+    reservedInitialsBandRect: collapsedBand,
+  };
 }
 
 function lineWidth(line: string): number {
@@ -322,6 +373,8 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
   let pageLines: string[] = [];
   let rects: Vs01NormTextRect[] = [];
 
+  let documentTitleAssigned = false;
+
   const flush = () => {
     pages.push({ pageIndex, flowLines: pageLines, textRects: rects });
     pageIndex += 1;
@@ -343,7 +396,7 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
       /^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed);
     const startsSectionHeading =
       /^[A-Z][A-Z0-9 ,;:'"()/&.-]{3,}$/.test(trimmed) && trimmed.length <= 90;
-    const nextStartsExecutionLine = /^(?:By|Signature|Name|Title|Date)\s*:/i.test(nextNonBlank);
+    const nextStartsExecutionLine = EXECUTION_METADATA_FIELD_LINE_RE.test(nextNonBlank);
     const witnessLinesRemaining = /^IN WITNESS WHEREOF/i.test(trimmed)
       ? lines.slice(i).filter((l) => l.trim()).length
       : 0;
@@ -372,13 +425,16 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     if (lineInPage >= maxLinesPerPage || lineWouldEnterInitialsBand(line)) flush();
     pageLines.push(line);
     if (line.trim()) {
+      const allowDocumentTitle = pageIndex === 0 && !documentTitleAssigned;
+      const kind = classifyText(line, { allowDocumentTitle });
+      if (kind === "document_title") documentTitleAssigned = true;
       rects.push({
         x: CONTENT_X,
         y: CONTENT_TOP + lineInPage * LINE_HEIGHT,
         width: lineWidth(line),
         height: LINE_HEIGHT * 0.72,
         text: line,
-        kind: classifyText(line),
+        kind,
       });
     }
     lineInPage += canonicalFlowLineHeightUnits(line);
@@ -582,6 +638,7 @@ export function buildVs01SigningPacketModel(args: {
   const fields: PlacedSigningField[] = [];
   const pages: Vs01SigningPacketPage[] = layouts.map((slice) => {
     const signatureLineAnchors = findSignatureLinePlacementsFromFlowPage({
+      pageIndex: slice.pageIndex,
       flowLines: slice.flowLines,
       textBlocks: slice.textRects,
       contentRect: {
@@ -603,7 +660,7 @@ export function buildVs01SigningPacketModel(args: {
       width: CONTENT_WIDTH,
       height: BAND_HEIGHT,
     };
-    return {
+    return compactWitnessPageLayout({
       pageIndex: slice.pageIndex,
       contentRect,
       flowLines: slice.flowLines,
@@ -618,7 +675,7 @@ export function buildVs01SigningPacketModel(args: {
         width: CONTENT_WIDTH,
         height: VS01_PACKET_MARGIN_BOTTOM_PT / VS01_PACKET_PAGE_HEIGHT_PT,
       },
-    };
+    });
   });
 
   for (const role of roles) {

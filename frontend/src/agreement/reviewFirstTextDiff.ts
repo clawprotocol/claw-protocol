@@ -19,6 +19,8 @@ export type ReviewFirstChangedSection = {
   phrasePreviousParts: ReviewFirstDiffPart[];
   phraseProposedParts: ReviewFirstDiffPart[];
   changeMagnitude: ReviewFirstChangeMagnitude;
+  /** Presentation tier — raw diff data preserved regardless. */
+  presentationKind: "material" | "formatting" | "numbering";
   /** One-line clause preview for optional expansion. */
   clauseContextSnippet: string;
   previous: string;
@@ -39,6 +41,8 @@ export type ReviewFirstDiffPart = {
 
 export type ReviewFirstTextDiffSummary = {
   hasMaterialChanges: boolean;
+  /** True when every detected change is numbering/formatting-only. */
+  hasNonMaterialChangesOnly: boolean;
   status: "empty" | "no_change" | "changed";
   summary: string;
   changedSections: ReviewFirstChangedSection[];
@@ -317,6 +321,43 @@ function sectionLabel(
   return { label: "Agreement wording changed", priority: 90 };
 }
 
+function stripClauseNumbering(text: string): string {
+  return (text || "")
+    .replace(/^\s*\d+(?:\.\d+)*\.?\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isNumberingOnlyDiff(before: string, after: string): boolean {
+  const strippedBefore = stripClauseNumbering(before);
+  const strippedAfter = stripClauseNumbering(after);
+  if (!strippedBefore || !strippedAfter) return false;
+  return normalizeReviewTextForComparison(strippedBefore) === normalizeReviewTextForComparison(strippedAfter);
+}
+
+function isWhitespaceOrFormattingOnlyDiff(before: string, after: string): boolean {
+  if (normalizeReviewTextForComparison(before) === normalizeReviewTextForComparison(after)) return true;
+  const collapse = (s: string) =>
+    (s || "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  return normalizeReviewTextForComparison(collapse(before)) === normalizeReviewTextForComparison(collapse(after));
+}
+
+function classifyChangePresentation(before: string, after: string): "material" | "formatting" | "numbering" {
+  if (isNumberingOnlyDiff(before, after)) return "numbering";
+  if (isWhitespaceOrFormattingOnlyDiff(before, after)) return "formatting";
+  return "material";
+}
+
+function presentationTitle(kind: "material" | "formatting" | "numbering", materialLabel: string): string {
+  if (kind === "numbering") return "Section numbering updated";
+  if (kind === "formatting") return "Formatting change detected";
+  return materialLabel;
+}
+
 function buildChangedSection(args: {
   changedPrevious: string;
   changedProposed: string;
@@ -349,9 +390,11 @@ function buildChangedSection(args: {
       proposed: args.fullProposedText ?? changedProposed,
       changedPhrase: phrase.beforePhrase || phrase.afterPhrase,
     }) || rawTitle;
+  const presentationKind = classifyChangePresentation(changedPrevious, changedProposed);
+  const displayTitle = presentationTitle(presentationKind, label.label);
   return {
-    title: label.label,
-    summary: label.label,
+    title: displayTitle,
+    summary: displayTitle,
     clauseTitle: rawTitle,
     clauseLabel,
     beforePhrase: phrase.beforePhrase,
@@ -359,6 +402,7 @@ function buildChangedSection(args: {
     phrasePreviousParts: phrase.phrasePreviousParts,
     phraseProposedParts: phrase.phraseProposedParts,
     changeMagnitude: phrase.changeMagnitude,
+    presentationKind,
     clauseContextSnippet: clauseContextSnippet(
       args.fullProposedText || changedProposed || changedPrevious,
       140,
@@ -450,6 +494,7 @@ export function buildReviewFirstTextDiffSummary(previousText: string, proposedTe
   if (!normalizedProposed) {
     return {
       hasMaterialChanges: false,
+      hasNonMaterialChangesOnly: false,
       status: "empty",
       summary: "Paste the complete updated agreement to compare wording changes.",
       changedSections: [],
@@ -461,6 +506,7 @@ export function buildReviewFirstTextDiffSummary(previousText: string, proposedTe
   if (normalizedPrevious === normalizedProposed) {
     return {
       hasMaterialChanges: false,
+      hasNonMaterialChangesOnly: false,
       status: "no_change",
       summary: "No wording changes found.",
       changedSections: [],
@@ -470,11 +516,30 @@ export function buildReviewFirstTextDiffSummary(previousText: string, proposedTe
     };
   }
   const changedSections = getChangedReviewSections(preparedPrevious.text, preparedProposed.text);
-  const count = changedSections.length || 1;
+  const materialSections = changedSections.filter((s) => s.presentationKind === "material");
+  const nonMaterialSections = changedSections.filter((s) => s.presentationKind !== "material");
+  const hasMaterialChanges = materialSections.length > 0;
+  const hasNonMaterialChangesOnly = !hasMaterialChanges && nonMaterialSections.length > 0;
+  const count = hasMaterialChanges ? materialSections.length : nonMaterialSections.length || 1;
+  let summary: string;
+  if (hasNonMaterialChangesOnly) {
+    const numberingCount = nonMaterialSections.filter((s) => s.presentationKind === "numbering").length;
+    summary =
+      numberingCount === nonMaterialSections.length
+        ? numberingCount === 1
+          ? "Section numbering updated."
+          : `${numberingCount} section numbering updates found.`
+        : nonMaterialSections.length === 1
+          ? "Formatting change detected."
+          : `${nonMaterialSections.length} formatting updates found.`;
+  } else {
+    summary = count === 1 ? "1 material wording update found." : `${count} material wording updates found.`;
+  }
   return {
-    hasMaterialChanges: true,
+    hasMaterialChanges,
+    hasNonMaterialChangesOnly,
     status: "changed",
-    summary: count === 1 ? "1 material wording update found." : `${count} material wording updates found.`,
+    summary,
     changedSections,
     normalizedPrevious,
     normalizedProposed,
@@ -486,7 +551,11 @@ export function canReviewChanges(args: {
   diff: ReviewFirstTextDiffSummary | null;
   proposedText: string;
 }): boolean {
-  return Boolean(args.proposedText.trim() && args.diff?.hasMaterialChanges);
+  return Boolean(
+    args.proposedText.trim() &&
+      args.diff &&
+      (args.diff.hasMaterialChanges || args.diff.hasNonMaterialChangesOnly),
+  );
 }
 
 export function canSubmitReviewFirstProposal(args: {

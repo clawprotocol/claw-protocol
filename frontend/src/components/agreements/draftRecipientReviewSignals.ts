@@ -1,6 +1,7 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { approvedParticipantIds, normalizeWorkflowRoleForNegotiation } from "../../agreement/participantModel";
 import { findOpenRecipientProposals } from "../../agreement/recipientProposal";
+import { findLastAcceptedProposalProposer } from "../../agreement/reviewCorpusAuthority";
 import {
   deriveReviewerLinkRowApprovalStatus,
   type ReviewerLinkRow,
@@ -80,7 +81,16 @@ export function computeReviewApprovalStatus(
   const anyReviewerApproval =
     approved > 0 || (legacy && Boolean(d && draftAuditHasRecipientRecordedApproval(d)));
   const open = d ? findOpenRecipientProposals(d.audit_log).length > 0 : false;
-  const allReviewersApproved = !open && approved >= required && anyReviewerApproval;
+  const lastAccepted = findLastAcceptedProposalProposer(d?.audit_log);
+  if (!open && lastAccepted?.proposerId) {
+    const pid = lastAccepted.proposerId;
+    if (!approvedIds.has(pid)) {
+      const proposerIsReviewer =
+        reviewerPartyIds.length === 0 || reviewerPartyIds.includes(pid);
+      if (proposerIsReviewer) approved += 1;
+    }
+  }
+  const allReviewersApproved = !open && approved >= required && (approved > 0 || Boolean(lastAccepted));
   const hasOpenChangeRequests = open;
   let aggregateStatus: ReviewApprovalAggregateStatus;
   if (hasOpenChangeRequests) aggregateStatus = "changes_pending";
@@ -143,7 +153,9 @@ function buildMultiReviewerAggregateFromRowStatuses(
   draftSignalsBaseline: ReviewApprovalAggregate,
 ): ReviewApprovalAggregate {
   const required = normalizedRows.length;
-  const approved = rowStatuses.filter((s) => s === "approved").length;
+  const approved = rowStatuses.filter(
+    (s) => s === "approved" || s === "changes_accepted",
+  ).length;
   const hasRowLevelChangeRequest = rowStatuses.some((s) => s === "requested_changes");
   const globalOpenProposals = d ? findOpenRecipientProposals(d.audit_log).length > 0 : false;
   const hasOpenChangeRequests = hasRowLevelChangeRequest || globalOpenProposals;

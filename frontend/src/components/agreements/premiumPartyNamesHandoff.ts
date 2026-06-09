@@ -340,7 +340,17 @@ export function writePremiumRecipientHandoffExact(
   partyIndexSlots?: PremiumRecipientHandoffSlot[],
 ): void {
   try {
-    const extra = (partyIndexSlots ?? []).filter((s) => s && (s.name || s.email));
+    const extra = (partyIndexSlots ?? []).filter(
+      (s) => s && (s.name || s.email || s.partyAddress),
+    );
+    const mapExtraSlot = (s: PremiumRecipientHandoffSlot): PremiumRecipientHandoffSlot => ({
+      name: String(s.name ?? "").trim(),
+      email: String(s.email ?? "").trim(),
+      role: String(s.role ?? "").trim() || "party",
+      signerName: String(s.signerName ?? "").trim(),
+      signerTitle: String(s.signerTitle ?? "").trim(),
+      partyAddress: String(s.partyAddress ?? "").trim(),
+    });
     const payload: PremiumRecipientHandoffV2 = {
       v: 2,
       party1: {
@@ -349,6 +359,7 @@ export function writePremiumRecipientHandoffExact(
         role: String(party1.role ?? "").trim() || "party",
         signerName: String(party1.signerName ?? "").trim(),
         signerTitle: String(party1.signerTitle ?? "").trim(),
+        partyAddress: String(party1.partyAddress ?? "").trim(),
       },
       party2: {
         name: String(party2.name ?? "").trim(),
@@ -356,9 +367,10 @@ export function writePremiumRecipientHandoffExact(
         role: String(party2.role ?? "").trim() || "party",
         signerName: String(party2.signerName ?? "").trim(),
         signerTitle: String(party2.signerTitle ?? "").trim(),
+        partyAddress: String(party2.partyAddress ?? "").trim(),
       },
       savedAt: Date.now(),
-      ...(extra.length > 0 ? { partyIndexSlots: extra } : {}),
+      ...(extra.length > 0 ? { partyIndexSlots: extra.map(mapExtraSlot) } : {}),
     };
     if (
       !payload.party1.name &&

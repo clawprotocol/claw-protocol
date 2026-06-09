@@ -89,6 +89,10 @@ import {
   clearPaidProSignerStagingDisplayCorpus,
 } from "./paidProSignerStagingDisplayCorpus";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
+import {
+  detectPaidProOrphanSubsections,
+  normalizePaidProOrphanSubsections,
+} from "./normalizePaidProOrphanSubsections";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -343,6 +347,21 @@ export function establishPaidProSourceOfTruth(args: {
         args.intakeText ?? null,
       ).text;
     }
+  }
+  const orphanDetect = detectPaidProOrphanSubsections(safeForCommit);
+  if (orphanDetect.orphanSectionsFound > 0) {
+    const orphanRepair = normalizePaidProOrphanSubsections(safeForCommit, {
+      source: "establish_paid_pro_source_of_truth_pre_freeze",
+    });
+    safeForCommit = orphanRepair.text;
+    logProCorpusSourceMap({
+      stage: "pre_freeze_orphan_subsection_repair",
+      source: args.source ?? "server_full_draft",
+      len: safeForCommit.length,
+      text: safeForCommit,
+      allowedToOverride: false,
+      reason: `orphan_sections=${orphanRepair.sectionNumbers.join(",")}`,
+    });
   }
   const parties: CanonicalAgreementSnapshotParty[] = (args.draft?.parties ?? [])
     .map((p) => ({

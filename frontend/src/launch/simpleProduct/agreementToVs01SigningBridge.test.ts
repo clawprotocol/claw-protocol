@@ -24,6 +24,7 @@ import {
   readPaidProAgreementBridgeSkipMarker,
   recipientSetupPlausibleInputFlags,
   resolveRecipientSetupForVs01Bridge,
+  getLastVs01BridgeRecipientSetupSource,
   setPaidProAgreementBridgeSkipMarker,
 } from "./agreementToVs01SigningBridge";
 import { writePremiumRecipientHandoffLinear } from "../../components/agreements/premiumPartyNamesHandoff";
@@ -377,6 +378,51 @@ describe("mergePaidProRecipientSetupEmailsIntoDraft + paid Pro sender-first brid
     );
     spy.mockRestore();
     vi.unstubAllGlobals();
+  });
+
+  it("resolveRecipientSetupForVs01Bridge extracts signer metadata from execution block corpus when draft parties lack fields", () => {
+    const blue = "Blue Canyon Analytics LLC";
+    const iron = "Iron Vale Systems Inc.";
+    const corpus = [
+      "CONSULTING AGREEMENT",
+      ...Array.from({ length: 40 }, (_, i) => `Section ${i + 1}. Operative clause text for length.`),
+      "",
+      "CLIENT:",
+      blue,
+      "Name: Sarah Mitchell",
+      "Title: CEO",
+      "",
+      "SERVICE PROVIDER:",
+      iron,
+      "Name: Michael Torres",
+      "Title: President",
+    ].join("\n");
+    const draft = {
+      title: "T",
+      parties: [
+        { id: "p0", name: blue, role: "owner", email: "sarah@blue.com" },
+        { id: "p1", name: iron, role: "party", email: "michael@iron.com" },
+      ],
+      server_full_document_text: corpus,
+    } as AgreementDraft;
+    const resolved = resolveRecipientSetupForVs01Bridge(draft, null);
+    const counts = countRecipientSetupSignerMetadata(resolved);
+    expect(counts.partyCount).toBe(2);
+    expect(counts.slotsWithSignerName).toBe(2);
+    expect(counts.slotsWithSignerTitle).toBe(2);
+    expect(resolved?.recipientPartyEmails?.[0]).toBe("sarah@blue.com");
+    expect(resolved?.recipientPartyEmails?.[1]).toBe("michael@iron.com");
+    const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(draft, null);
+    const bridge = buildAgreementVs01BridgeSession({
+      agreementId: "ag-corpus-bridge",
+      vs01DocumentId: "doc-corpus",
+      draft: merged,
+    });
+    expect(bridge.creatorSignerName).toBe("Sarah Mitchell");
+    expect(bridge.creatorSignerTitle).toBe("CEO");
+    expect(bridge.counterparties[0]?.signerName).toBe("Michael Torres");
+    expect(bridge.counterparties[0]?.signerTitle).toBe("President");
+    expect(getLastVs01BridgeRecipientSetupSource()).toBe("execution_block_corpus");
   });
 
   it("mergeLiveDraft applies recipientPartyEmails by party index for five parties", () => {

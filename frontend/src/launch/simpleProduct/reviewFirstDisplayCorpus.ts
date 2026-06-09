@@ -13,6 +13,19 @@ import { resolvePaidProPostFinalizeReviewPlain } from "../../components/agreemen
 import { readConsumedPaidProSignerMetadataAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
 import { getPaidProDocumentForSurface, hashPaidProCorpus } from "../../components/agreements/paidProSourceOfTruth";
 import { peekReviewFirstPinnedCorpus } from "./reviewFirstSendSurface";
+import {
+  logReviewCorpusAuthority,
+  resolveAcceptedReviewCorpusFromDraft,
+} from "../../agreement/reviewCorpusAuthority";
+import {
+  applyReviewReadyMetadataBackfill,
+  collectReviewReadyCorpusHints,
+  corpusHasHydratedSignerMetadata,
+  isReviewTrackHydrationSurface,
+  logTest315ReviewCopyHydration,
+  resolveReviewReadyRecipientMetadata,
+  type ReviewReadyHydratedDisplayCorpusSurface,
+} from "./reviewReadyHydratedDisplayCorpus";
 
 export type ReviewFirstDisplayCorpusSource =
   | "review_first_final_corpus"
@@ -70,46 +83,147 @@ function reviewRouteHashInvariant(args: {
   }
 }
 
-function finalizeReviewFirstCorpusText(text: string): string {
+function finalizeReviewFirstCorpusText(
+  text: string,
+  draft?: AgreementDraft | null,
+  surface: ReviewReadyHydratedDisplayCorpusSurface = "owner_done",
+  selectedSource?: string,
+): string {
   const body = (text || "").trim();
   if (body.length < 80) return body;
-  if (!detectExecutionHeadingMetadataLeak(body).leak) return body;
+  const corpusHints = collectReviewReadyCorpusHints(body, draft ?? null);
+  const reviewTrack = isReviewTrackHydrationSurface(surface);
+
+  if (reviewTrack) {
+    const hydrated = applyReviewReadyMetadataBackfill(body, draft ?? null, {
+      corpusHints,
+      surface,
+      selectedSource,
+    });
+    if (!detectExecutionHeadingMetadataLeak(hydrated).leak) return hydrated;
+    const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
+    return repairExecutionBlockEntityHeadingLines(hydrated, parties).text.trim();
+  }
+
+  const meta = resolveReviewReadyRecipientMetadata(draft ?? null, { corpusHints });
+  if (corpusHasHydratedSignerMetadata(body, meta, { reviewTrackSurface: false })) return body;
+  const hydrated = applyReviewReadyMetadataBackfill(body, draft ?? null, {
+    corpusHints,
+    surface,
+    selectedSource,
+  });
+  if (!detectExecutionHeadingMetadataLeak(hydrated).leak) return hydrated;
   const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
-  return repairExecutionBlockEntityHeadingLines(body, parties).text.trim();
+  return repairExecutionBlockEntityHeadingLines(hydrated, parties).text.trim();
 }
 
-export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): ReviewFirstDisplayCorpus | null {
+function wrapReviewFirstCorpus(
+  corpus: ReviewFirstDisplayCorpus,
+  draft: AgreementDraft,
+  surface: ReviewReadyHydratedDisplayCorpusSurface = "owner_done",
+): ReviewFirstDisplayCorpus {
+  const text = finalizeReviewFirstCorpusText(corpus.text, draft, surface, corpus.source);
+  const wrapped = {
+    text,
+    source: corpus.source,
+    hash: hashPaidProCorpus(text),
+  };
+  logTest315ReviewCopyHydration({
+    surface,
+    source: wrapped.source,
+    plain: wrapped.text,
+    draft,
+  });
+  return wrapped;
+}
+
+function commitReviewFirstCorpus(
+  corpus: ReviewFirstDisplayCorpus,
+  draft: AgreementDraft,
+  surface: ReviewReadyHydratedDisplayCorpusSurface = "owner_done",
+): ReviewFirstDisplayCorpus {
+  const wrapped = wrapReviewFirstCorpus(corpus, draft, surface);
+  logReviewCorpusAuthority({
+    agreementId: String(draft.id ?? "").trim(),
+    source: wrapped.source,
+    corpusHash: wrapped.hash,
+    surface: surface === "reviewer" ? "reviewer_view" : "owner_done",
+  });
+  return wrapped;
+}
+
+export function resolveReviewFirstDisplayCorpus(
+  draft: AgreementDraft | null,
+  surface: ReviewReadyHydratedDisplayCorpusSurface = "owner_done",
+): ReviewFirstDisplayCorpus | null {
   if (!draft) return null;
 
+  const agreementId = String(draft.id ?? "").trim();
+
+  const acceptedCorpus = resolveAcceptedReviewCorpusFromDraft(draft);
+  if (acceptedCorpus) {
+    return commitReviewFirstCorpus(
+      {
+        text: acceptedCorpus.text,
+        source: acceptedCorpus.source,
+        hash: acceptedCorpus.hash,
+      },
+      draft,
+      surface,
+    );
+  }
+
+  const sessionPinned = agreementId ? peekReviewFirstPinnedCorpus(agreementId) : null;
+  if (sessionPinned && sessionPinned.trim().length >= 500) {
+    return commitReviewFirstCorpus(
+      {
+        text: sessionPinned.trim(),
+        source: "review_first_pinned_corpus",
+        hash: corpusHash(sessionPinned.trim()),
+      },
+      draft,
+      surface,
+    );
+  }
+
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const snapshotPlain = resolvePaidProPostFinalizeReviewPlain().trim();
+    const snapshotPlain = resolvePaidProPostFinalizeReviewPlain(draft).trim();
     if (snapshotPlain.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
-      const text = finalizeReviewFirstCorpusText(snapshotPlain);
-      return {
-        text,
-        source: "authoritative_signing_snapshot",
-        hash: hashPaidProCorpus(text),
-      };
+      return commitReviewFirstCorpus(
+        {
+          text: snapshotPlain,
+          source: "authoritative_signing_snapshot",
+          hash: hashPaidProCorpus(snapshotPlain),
+        },
+        draft,
+        surface,
+      );
     }
   }
 
-  const agreementId = String(draft.id ?? "").trim();
-  if (agreementId) {
-    const pinned = peekReviewFirstPinnedCorpus(agreementId);
-    if (pinned && pinned.trim().length >= 500) {
-      const text = finalizeReviewFirstCorpusText(pinned.trim());
-      return { text, source: "review_first_pinned_corpus", hash: corpusHash(text) };
+  for (const source of [
+    "server_full_document_text",
+    "premium_server_full_document_text",
+    "premium_full_document_text",
+  ] as const) {
+    const text = stringField(draft, source);
+    if (text.length >= 500) {
+      return commitReviewFirstCorpus({ text, source, hash: corpusHash(text) }, draft, surface);
     }
   }
 
   if (!isPaidProPostFinalizeHydratedCorpusLocked()) {
     const paidPro = getPaidProDocumentForSurface("review");
     if (paidPro && paidPro.text.trim().length >= 500) {
-      return {
-        text: paidPro.text,
-        source: "authoritative_agreement_document",
-        hash: paidPro.hash,
-      };
+      return commitReviewFirstCorpus(
+        {
+          text: paidPro.text,
+          source: "authoritative_agreement_document",
+          hash: paidPro.hash,
+        },
+        draft,
+        surface,
+      );
     }
     const authoritative = authoritativeDocumentForSurface("review_route");
     if (authoritative?.fullCorpusText) {
@@ -119,11 +233,15 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
         authoritativeHash: authoritative.authoritativeHash,
         userEdited: authoritative.explicitUserEditState.edited,
       });
-      return {
-        text: authoritative.fullCorpusText,
-        source: "authoritative_agreement_document",
-        hash: authoritative.authoritativeHash,
-      };
+      return commitReviewFirstCorpus(
+        {
+          text: authoritative.fullCorpusText,
+          source: "authoritative_agreement_document",
+          hash: authoritative.authoritativeHash,
+        },
+        draft,
+        surface,
+      );
     }
   }
 
@@ -135,8 +253,11 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
   if (rf && typeof rf === "object" && !Array.isArray(rf)) {
     const raw = String((rf as Record<string, unknown>).text ?? "").trim();
     if (raw) {
-      const text = finalizeReviewFirstCorpusText(raw);
-      return { text, source: "review_first_final_corpus", hash: corpusHash(text) };
+      return commitReviewFirstCorpus(
+        { text: raw, source: "review_first_final_corpus", hash: corpusHash(raw) },
+        draft,
+        surface,
+      );
     }
   }
 
@@ -150,7 +271,9 @@ export function resolveReviewFirstDisplayCorpus(draft: AgreementDraft | null): R
     "rendered_document_text",
   ] as const) {
     const text = stringField(draft, source).trim();
-    if (text) return { text, source, hash: corpusHash(text) };
+    if (text) {
+      return commitReviewFirstCorpus({ text, source, hash: corpusHash(text) }, draft, surface);
+    }
   }
   return null;
 }
@@ -171,7 +294,10 @@ export function logReviewFirstDisplayCorpusSelected(args: {
   };
   if (args.surface === "reviewer") {
     // eslint-disable-next-line no-console
-    console.info("[review-first-reviewer-corpus-selected]", payload);
+    console.info("[review-first-reviewer-corpus-selected]", {
+      ...payload,
+      reviewerHydrationHash: payload.hash,
+    });
   } else {
     // eslint-disable-next-line no-console
     console.info("[review-first-display-corpus-selected]", payload);

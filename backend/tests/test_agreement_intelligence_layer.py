@@ -181,3 +181,5 @@ def test_prompt_declares_authoritative_draft_and_sparse_questions() -> None:
     assert "authoritative_draft" in prompt
     assert "Duplicate or unnecessary clarification questions are harmful UX" in prompt
     assert "Do NOT ask about governing law, payment structure, or ownership when already clearly supplied" in prompt
+    assert "HOUSE STYLE" in prompt
+    assert "Avoid orphan subsections" in prompt

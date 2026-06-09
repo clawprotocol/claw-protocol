@@ -52,14 +52,17 @@ export function resolveVs01PreparePacketReadiness(args: {
   if (!args.placementCanFinish) {
     return { packetReady: false, reason: "missing_required_signature_fields" };
   }
-  if (!args.initialsSummary?.complete) {
-    return { packetReady: false, reason: "initials_validation_incomplete" };
-  }
-  if (args.initialsSummary.unsafeSignatureCount > 0) {
-    return { packetReady: false, reason: "unsafe_signature_fields" };
-  }
-  if (args.initialsSummary.unsafeInitialsCount > 0) {
-    return { packetReady: false, reason: "unsafe_initials_fields" };
+  // initialsSummary is null when "Initials on each page" is off — do not require initials placement then.
+  if (args.initialsSummary != null) {
+    if (!args.initialsSummary.complete) {
+      return { packetReady: false, reason: "initials_validation_incomplete" };
+    }
+    if (args.initialsSummary.unsafeSignatureCount > 0) {
+      return { packetReady: false, reason: "unsafe_signature_fields" };
+    }
+    if (args.initialsSummary.unsafeInitialsCount > 0) {
+      return { packetReady: false, reason: "unsafe_initials_fields" };
+    }
   }
   return { packetReady: true, reason: null };
 }

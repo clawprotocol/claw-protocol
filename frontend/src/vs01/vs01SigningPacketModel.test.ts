@@ -4,6 +4,7 @@ import { updateLastKnownGoodAuthoritativeDraftRef } from "../components/agreemen
 import { buildVs01PrepareSigningRoles } from "./vs01SignerFieldAssignment";
 import {
   buildVs01SigningPacketModel,
+  isWitnessSigningPacketPage,
   validateVs01SigningPacketGeometry,
   VS01_PACKET_INITIALS_BAND_PT,
 } from "./buildVs01SigningPacketModel";
@@ -32,12 +33,16 @@ Acme LLC
 By: ______________________
 Name: Anthem H Blanchard
 Title: Manager
+Email for Notice: anthem@example.test
+Address for Notice: 1027 S. Rainbow Blvd., #124, Las Vegas, NV 89111
 Date: ____________________
 
 SERVICE PROVIDER:
 Joe Smith
 Signature: _______________
 Name: Joe Smith
+Email for Notice: joe@example.test
+Address for Notice: 1 High Street, Benning, GA 31222
 Date: ____________________`;
 }
 
@@ -88,6 +93,10 @@ describe("VS01 canonical signing packet model (test61)", () => {
     expect(model.allowed).toBe(true);
     expect(model.pages.length).toBeGreaterThan(1);
     for (const page of model.pages) {
+      if (isWitnessSigningPacketPage(page)) {
+        expect(page.reservedInitialsBandRect.height).toBeLessThan(0.001);
+        continue;
+      }
       expect(page.reservedInitialsBandRect.height).toBeCloseTo(VS01_PACKET_INITIALS_BAND_PT / 792, 3);
       const textBottom = Math.max(0, ...page.textBlocks.map((b) => b.y + b.height));
       expect(textBottom).toBeLessThanOrEqual(page.reservedInitialsBandRect.y);
@@ -138,5 +147,27 @@ describe("VS01 canonical signing packet model (test61)", () => {
       roleCount: roles().length,
     });
     expect(errors).toContain("text_intersects_initials_band");
+  });
+
+  it("keeps Email for Notice and Address for Notice on separate witness flow lines", () => {
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: premiumCorpus(),
+      roles: roles(),
+      corpusGateArgs: { freeBaselinePlain: SHORT_STARTER },
+    });
+    expect(model.allowed).toBe(true);
+    const witnessPage = model.pages.find((p) =>
+      p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)),
+    );
+    expect(witnessPage).toBeTruthy();
+    const flow = witnessPage!.flowLines.map((line) => line.trim()).filter(Boolean);
+    const emailLines = flow.filter((line) => /^Email for Notice:/i.test(line));
+    const addressLines = flow.filter((line) => /^Address for Notice:/i.test(line));
+    expect(emailLines.length).toBe(2);
+    expect(addressLines.length).toBe(2);
+    for (const line of emailLines) {
+      expect(line).not.toMatch(/Address for Notice:/i);
+    }
   });
 });

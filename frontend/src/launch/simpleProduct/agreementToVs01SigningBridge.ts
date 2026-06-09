@@ -2,6 +2,7 @@ import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTy
 import {
   agreementParticipantToVs01Counterparty,
   assertSignerMetadataPreserved,
+  countParticipantSignerMetadata,
   logAgreementParticipantNormalization,
   participantsFromAgreementDraft,
   type AgreementParticipant,
@@ -25,6 +26,7 @@ import {
   VS01_SIGNING_CORPUS_MIN_LEN,
 } from "../../vs01/vs01SigningCorpus";
 import { readRecipientSetupArraysFromConsumedAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
+import { extractExecutionBlockSignerLines } from "../../components/agreements/paidProSignerMetadataHandoffExtract";
 import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
 import type { Vs01Counterparty } from "../../vs01/types";
@@ -286,6 +288,54 @@ function pickSignerSlotValue(
   return fromExplicit || fromHandoff || fromDraft || "";
 }
 
+let lastVs01BridgeRecipientSetupSource = "unknown";
+
+/** Diagnostic: where {@link resolveRecipientSetupForVs01Bridge} last sourced signer slots. */
+export function getLastVs01BridgeRecipientSetupSource(): string {
+  return lastVs01BridgeRecipientSetupSource;
+}
+
+function setVs01BridgeRecipientSetupSource(source: string): void {
+  lastVs01BridgeRecipientSetupSource = source;
+}
+
+function applyExecutionBlockCorpusFallbackToRecipientSetup(
+  draft: AgreementDraft | null,
+  partyCount: number,
+  recipientPartySignerNames: string[],
+  recipientPartySignerTitles: string[],
+): boolean {
+  const missingSigner =
+    recipientPartySignerNames.slice(0, partyCount).every((name) => !name.trim()) &&
+    recipientPartySignerTitles.slice(0, partyCount).every((title) => !title.trim());
+  if (!missingSigner) return false;
+
+  const corpus = resolveBridgeAgreementCorpusFromDraft(draft);
+  if (!corpus.trim()) return false;
+
+  const parties = (draft?.parties ?? []) as AgreementParty[];
+  let applied = false;
+  for (let i = 0; i < partyCount; i++) {
+    const entity = (parties[i]?.name || "").trim();
+    const extracted = extractExecutionBlockSignerLines(corpus, i);
+    if (!recipientPartySignerNames[i]?.trim()) {
+      const name = explicitSignerNameForEntity(extracted.nameLine, entity) ?? "";
+      if (name) {
+        recipientPartySignerNames[i] = name;
+        applied = true;
+      }
+    }
+    if (!recipientPartySignerTitles[i]?.trim()) {
+      const title = normalizeSignerMetadataForSave(extracted.titleLine) ?? "";
+      if (title) {
+        recipientPartySignerTitles[i] = title;
+        applied = true;
+      }
+    }
+  }
+  return applied;
+}
+
 /**
  * Resolve recipient-setup signer/email arrays from explicit UI input, session handoff, and draft parties.
  * Handoff is authoritative when the live draft was hydrated without representative fields (common after review links).
@@ -296,6 +346,7 @@ export function resolveRecipientSetupForVs01Bridge(
 ): RecipientSetupEmailInput | null {
   const fromAuthority = readRecipientSetupArraysFromConsumedAuthority();
   if (fromAuthority) {
+    setVs01BridgeRecipientSetupSource("consumed_authority");
     return {
       recipientPartySignerNames: fromAuthority.recipientPartySignerNames,
       recipientPartySignerTitles: fromAuthority.recipientPartySignerTitles,
@@ -350,10 +401,28 @@ export function resolveRecipientSetupForVs01Bridge(
     recipientPartyEmails.push(fromEx || fromLegacy || (isPlausibleEmail(hoEm) ? hoEm : "") || draftEm || "");
   }
 
-  const hasSigner =
+  let hasSigner =
     recipientPartySignerNames.some(Boolean) || recipientPartySignerTitles.some(Boolean);
   const hasEmail = recipientPartyEmails.some((e) => isPlausibleEmail(e));
-  if (!hasSigner && !hasEmail && !explicit) return null;
+  if (!hasSigner) {
+    const corpusApplied = applyExecutionBlockCorpusFallbackToRecipientSetup(
+      draft,
+      partyCount,
+      recipientPartySignerNames,
+      recipientPartySignerTitles,
+    );
+    if (corpusApplied) {
+      hasSigner = true;
+      setVs01BridgeRecipientSetupSource("execution_block_corpus");
+    }
+  }
+  if (!hasSigner && !hasEmail && !explicit) {
+    setVs01BridgeRecipientSetupSource("none");
+    return null;
+  }
+  if (lastVs01BridgeRecipientSetupSource === "unknown") {
+    setVs01BridgeRecipientSetupSource(hasSigner ? "handoff_draft" : "draft_emails");
+  }
 
   return {
     recipient1Email: recipientPartyEmails[0] || explicit?.recipient1Email,
@@ -482,14 +551,29 @@ function inferBridgeCreatorEmail(
   return "";
 }
 
+export function logVs01BridgeBuild(
+  participants: readonly AgreementParticipant[],
+  meta?: { source?: string },
+): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const counts = countParticipantSignerMetadata(participants);
+  // eslint-disable-next-line no-console
+  console.info("[vs01-bridge-build]", {
+    participantCount: participants.length,
+    ...counts,
+    source: meta?.source ?? getLastVs01BridgeRecipientSetupSource(),
+  });
+}
+
 function bridgeParticipantsFromDraft(draft: AgreementDraft | null): AgreementParticipant[] {
   const parties = (draft?.parties ?? []) as AgreementParty[];
   const canonical = participantsFromAgreementDraft(parties);
+  logVs01BridgeBuild(canonical);
   logAgreementParticipantNormalization("vs01-bridge-build", canonical);
   return canonical;
 }
 
-function resolveBridgeAgreementCorpusFromDraft(draft: AgreementDraft | null): string {
+export function resolveBridgeAgreementCorpusFromDraft(draft: AgreementDraft | null): string {
   const d = draft as {
     server_full_document_text?: string | null;
     premium_server_full_document_text?: string | null;
@@ -848,5 +932,19 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     ownerIsPreparingPacket: bridge.ownerIsPreparingPacket ?? null,
   });
   void options.navigate(route);
+  if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
+    const parties = (mergedWithCorpus?.parties ?? []) as AgreementParty[];
+    const participants = participantsFromAgreementDraft(parties);
+    const counts = countParticipantSignerMetadata(participants);
+    // eslint-disable-next-line no-console
+    console.info("[vs01-bridge-navigation-success]", {
+      agreementId: id,
+      route,
+      reason: options.logReason,
+      source: getLastVs01BridgeRecipientSetupSource(),
+      participantCount: participants.length,
+      ...counts,
+    });
+  }
   return true;
 }

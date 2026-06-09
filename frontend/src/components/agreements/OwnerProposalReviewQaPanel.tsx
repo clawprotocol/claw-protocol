@@ -22,11 +22,16 @@ import {
 } from "../../agreement/recipientProposalHistory";
 import { ReviewFirstChangeCard } from "../../agreement/ReviewFirstChangeCard";
 import { buildReviewFirstTextDiffSummary } from "../../agreement/reviewFirstTextDiff";
-import { resolveReviewFirstDisplayCorpus } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
+import {
+  acceptedProposalCorpusText,
+  logReviewStatusTransition,
+  promoteAcceptedReviewCorpus,
+} from "../../agreement/reviewCorpusAuthority";
 import {
   OWNER_CTA_ACCEPT_AND_CONTINUE,
   OWNER_CTA_REJECT_SUGGESTIONS,
 } from "../../agreement/ownerRecipientSuggestedEditsCopy";
+import { resolveReviewFirstDisplayCorpus } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
 
 function proposalCorpusText(record: RecipientProposalRecord): string {
   const inner = record.draft as Record<string, unknown> | undefined;
@@ -155,15 +160,40 @@ export function OwnerProposalReviewQaPanel(props: Props) {
       const r = await applyRecipientProposalApi(agreementId, selected.proposal_id);
       if (!r.ok) throw new Error(r.error || "accept_failed");
       const nextDraft = (r.draft as AgreementDraft | undefined) ?? (await refreshDraft());
+      const acceptedPlain =
+        acceptedProposalCorpusText(selected.draft) ||
+        String(nextDraft?.purpose ?? "").trim() ||
+        resolveReviewFirstDisplayCorpus(nextDraft)?.text.trim() ||
+        "";
+      const promotion = acceptedPlain.trim()
+        ? promoteAcceptedReviewCorpus({
+            agreementId,
+            corpusText: acceptedPlain,
+            source: "review_first_final_corpus",
+            surface: "proposal_accept",
+            beforeAcceptHash: previousHash,
+            draft: nextDraft ?? null,
+          })
+        : null;
+      const proposerId = String(selected.proposer_id || "").trim();
+      if (proposerId) {
+        logReviewStatusTransition({
+          agreementId,
+          partyId: proposerId,
+          from: "requested_changes",
+          to: "changes_accepted",
+          reason: "recipient_proposal_applied",
+        });
+      }
       const nextCorpus =
-        resolveReviewFirstDisplayCorpus(nextDraft)?.text.trim() || String(nextDraft?.purpose ?? "").trim();
+        resolveReviewFirstDisplayCorpus(nextDraft)?.text.trim() || acceptedPlain;
       const updatedHash = corpusFingerprint(nextCorpus);
       logOwnerProposalAccepted({
         agreementId,
         proposalId: selected.proposal_id,
         previousCorpusHash: previousHash,
         updatedCorpusHash: updatedHash,
-        acceptedCorpusHash: updatedHash,
+        acceptedCorpusHash: promotion?.acceptedProposalHash ?? updatedHash,
       });
       logOwnerCorpusUpdated({
         agreementId,

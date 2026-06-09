@@ -1,6 +1,7 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { approvedParticipantIds } from "../../agreement/participantModel";
 import { openRecipientProposalsForParticipant } from "../../agreement/recipientProposal";
+import { findLastAcceptedProposalProposer } from "../../agreement/reviewCorpusAuthority";
 
 /** Session handoff + mint metadata for one reviewer-specific review link (owner-only). */
 export type ReviewerLinkRow = {
@@ -20,12 +21,18 @@ export type ReviewerLinkRow = {
   last_opened_at?: string;
 };
 
-export type ReviewerLinkRowApprovalStatus = "waiting" | "approved" | "requested_changes" | "not_participating";
+export type ReviewerLinkRowApprovalStatus =
+  | "waiting"
+  | "approved"
+  | "requested_changes"
+  | "changes_accepted"
+  | "not_participating";
 
 const STATUS_LABEL: Record<ReviewerLinkRowApprovalStatus, string> = {
   waiting: "Waiting",
   approved: "Approved",
   requested_changes: "Requested changes",
+  changes_accepted: "Changes accepted",
   not_participating: "Not participating",
 };
 
@@ -77,6 +84,8 @@ export function deriveReviewerLinkRowApprovalStatus(
   }
   const approved = approvedParticipantIds(audit);
   if (pid && approved.has(pid)) return "approved";
+  const lastAccepted = findLastAcceptedProposalProposer(audit);
+  if (pid && lastAccepted?.proposerId === pid) return "changes_accepted";
   if (opts.legacyGlobalApproval && opts.rowIndex === 0) return "approved";
   return "waiting";
 }

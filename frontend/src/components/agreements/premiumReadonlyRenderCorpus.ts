@@ -377,6 +377,37 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       },
     };
   }
+  if (args.premiumCheckoutCompleted && !getPaidProSourceOfTruth()) {
+    const draftFull = [
+      args.draft?.premium_server_full_document_text,
+      (args.draft as { server_full_document_text?: string | null } | null | undefined)
+        ?.server_full_document_text,
+      args.draft?.premium_full_document_text,
+    ]
+      .map((s) => (s || "").trim())
+      .find((t) => t.length >= PAID_PRO_AUTHORITY_MIN_LEN);
+    if (draftFull) {
+      const nonThin =
+        draftFull.length >= 1200 || premiumReadonlyCorpusSignalHits(draftFull) >= 3;
+      return {
+        plainText: draftFull,
+        sourceUsed: "server_full_document_text",
+        audit: {
+          selected: "server_full_document_text",
+          forcedPremiumSource: true,
+          candidates: [
+            {
+              source: "server_full_document_text",
+              len: draftFull.length,
+              nonThin,
+              eligible: true,
+              reason: "draft_server_full_before_live_preview",
+            },
+          ],
+        },
+      };
+    }
+  }
   if (args.premiumCheckoutCompleted && isPremiumGenerationApiUnavailablePipelineSource(pipeSrc)) {
     const priorServerBodies = [
       authHydr,

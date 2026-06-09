@@ -5,8 +5,13 @@ import {
   participantDisplayName,
 } from "../../agreement/participantModel";
 import { openRecipientProposalsForParticipant } from "../../agreement/recipientProposal";
+import { findLastAcceptedProposalProposer } from "../../agreement/reviewCorpusAuthority";
 
-export type OwnerReviewPartyStatus = "approved" | "not_reviewed" | "requested_changes";
+export type OwnerReviewPartyStatus =
+  | "approved"
+  | "not_reviewed"
+  | "requested_changes"
+  | "changes_accepted";
 
 export type OwnerReviewPartyStatusRow = {
   partyIndex: number;
@@ -21,6 +26,7 @@ const STATUS_LABEL: Record<OwnerReviewPartyStatus, string> = {
   approved: "Approved",
   not_reviewed: "Not reviewed",
   requested_changes: "Requested changes",
+  changes_accepted: "Changes accepted",
 };
 
 export function ownerReviewPartyStatusLabel(status: OwnerReviewPartyStatus): string {
@@ -34,6 +40,7 @@ export function deriveOwnerReviewPartyStatusRows(
   const parties = draft?.parties ?? [];
   if (!parties.length) return [];
   const audit = draft?.audit_log;
+  const lastAccepted = findLastAcceptedProposalProposer(audit);
   const rows: OwnerReviewPartyStatusRow[] = [];
   let reviewerOrdinal = 0;
   for (let i = 0; i < parties.length; i += 1) {
@@ -48,6 +55,8 @@ export function deriveOwnerReviewPartyStatusRows(
       status = "requested_changes";
     } else if (auditHasRecipientApprovalForParticipant(audit, partyId)) {
       status = "approved";
+    } else if (partyId && lastAccepted?.proposerId === partyId) {
+      status = "changes_accepted";
     }
     rows.push({
       partyIndex: i,
@@ -107,7 +116,9 @@ export function OwnerReviewPartyStatusChecklist({ rows }: OwnerReviewPartyStatus
                   ? "text-emerald-700"
                   : row.status === "requested_changes"
                     ? "text-amber-700"
-                    : "text-slate-500"
+                    : row.status === "changes_accepted"
+                      ? "text-sky-700"
+                      : "text-slate-500"
               }
             >
               {row.statusLabel}

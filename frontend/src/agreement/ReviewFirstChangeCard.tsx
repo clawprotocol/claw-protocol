@@ -22,18 +22,60 @@ function renderPhraseDiffParts(parts: ReviewFirstDiffPart[] | null | undefined, 
   });
 }
 
+function ExactChangeDisclosure({ section }: { section: ReviewFirstChangedSection }) {
+  return (
+    <details className="mt-3 text-xs text-slate-600" data-testid="recipient-review-first-exact-change">
+      <summary className="cursor-pointer font-medium text-slate-500">Show exact change</summary>
+      <div className="mt-2 space-y-2.5">
+        <div className="min-w-0 rounded-lg border border-rose-100 bg-white px-3 py-2.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Previous</div>
+          <p className="mt-1 break-words text-sm font-medium leading-snug text-slate-900">{section.fullPrevious}</p>
+        </div>
+        <div className="min-w-0 rounded-lg border border-emerald-100 bg-white px-3 py-2.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Updated</div>
+          <p className="mt-1 break-words text-sm font-medium leading-snug text-slate-900">{section.fullProposed}</p>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 /**
  * Change-first review card — exact wording delta is primary; clause context is secondary/collapsed.
  */
 export function ReviewFirstChangeCard({ section }: Props) {
   const clauseLabel = section.clauseLabel || section.clauseTitle;
-  const showPhrase = section.changeMagnitude !== "section" || section.beforePhrase.length < 200;
+  const isNonMaterial = section.presentationKind !== "material";
+  const showPhrase = !isNonMaterial && (section.changeMagnitude !== "section" || section.beforePhrase.length < 200);
+
+  if (isNonMaterial) {
+    return (
+      <article
+        className="min-w-0 max-w-full rounded-xl border border-slate-200 bg-slate-50/90 p-3 sm:p-4"
+        data-testid="recipient-review-first-change-card"
+        data-change-magnitude={section.changeMagnitude}
+        data-presentation-kind={section.presentationKind}
+      >
+        <h3
+          className="text-base font-semibold tracking-tight text-slate-950 sm:text-lg"
+          data-testid="recipient-review-first-change-title"
+        >
+          {section.title}
+        </h3>
+        {clauseLabel ? (
+          <p className="mt-2 break-words text-sm text-slate-600">{clauseLabel}</p>
+        ) : null}
+        <ExactChangeDisclosure section={section} />
+      </article>
+    );
+  }
 
   return (
     <article
       className="min-w-0 max-w-full rounded-xl border border-slate-200 bg-slate-50/90 p-3 sm:p-4"
       data-testid="recipient-review-first-change-card"
       data-change-magnitude={section.changeMagnitude}
+      data-presentation-kind={section.presentationKind}
     >
       <h3
         className="text-base font-semibold tracking-tight text-slate-950 sm:text-lg"

@@ -28,6 +28,11 @@ import { SIMPLE_HOME_REVISION_COMPARE_ANCHOR_ID } from "./simpleHomeRevisionComp
 import { substitutePartyPlaceholdersInUserFacingText } from "../../agreement/partyPlaceholderDisplay";
 import { isOwnerProposalReviewQaEnabled } from "../../agreement/ownerProposalReviewQa";
 import { OwnerProposalReviewQaPanel } from "./OwnerProposalReviewQaPanel";
+import {
+  acceptedProposalCorpusText,
+  logReviewStatusTransition,
+  promoteAcceptedReviewCorpus,
+} from "../../agreement/reviewCorpusAuthority";
 import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormalize";
 import { normalizeAgreementDisplayTitle } from "./canonicalAgreementTitle";
 import {
@@ -1632,6 +1637,28 @@ const AgreementReview: React.FC<Props> = ({
         );
       }
       trackAgreementFunnelEvent("owner_applied_edits", { surface: "agreement_review" }, { planTier: String(access.tier), agreementId });
+      const acceptedPlain =
+        acceptedProposalCorpusText(openRecipientProposal.draft as Record<string, unknown>) ||
+        String((r.draft as AgreementDraft | undefined)?.purpose ?? "").trim();
+      if (acceptedPlain) {
+        promoteAcceptedReviewCorpus({
+          agreementId,
+          corpusText: acceptedPlain,
+          source: "review_first_final_corpus",
+          surface: "proposal_accept",
+          draft: (r.draft as AgreementDraft | undefined) ?? null,
+        });
+      }
+      const proposerId = String(openRecipientProposal.proposer_id || "").trim();
+      if (proposerId) {
+        logReviewStatusTransition({
+          agreementId,
+          partyId: proposerId,
+          from: "requested_changes",
+          to: "changes_accepted",
+          reason: "recipient_proposal_applied",
+        });
+      }
       await loadDraft({ silent: true });
       await loadRendered();
       setOwnerMakeMoreChangesHint(false);

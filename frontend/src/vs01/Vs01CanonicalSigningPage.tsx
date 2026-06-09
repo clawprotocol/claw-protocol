@@ -46,7 +46,10 @@ export function Vs01CanonicalSigningPage({
   const { contentRect, initialsBandRect } = page;
   const { lineHeightPx, fontSizePx } = canonicalPageTypographyPx(pageWidthPx);
   const flowLines = useMemo(() => flowLinesForPage(page), [page]);
-  const lineDescriptors = useMemo(() => buildFlowLineDescriptors(flowLines), [flowLines]);
+  const lineDescriptors = useMemo(
+    () => buildFlowLineDescriptors(flowLines, { pageIndex: page.pageIndex }),
+    [flowLines, page.pageIndex],
+  );
   const flowBodyStyle: CSSProperties = {
     left: pct(contentRect.x),
     top: pct(contentRect.y),
@@ -105,16 +108,18 @@ export function Vs01CanonicalSigningPage({
           );
         })}
       </div>
-      <div
-        className="vs01-canonical-initials-band"
-        aria-hidden
-        style={{
-          left: pct(initialsBandRect.x),
-          top: pct(initialsBandRect.y),
-          width: pct(initialsBandRect.width),
-          height: pct(initialsBandRect.height),
-        }}
-      />
+      {initialsBandRect.height > 0.0001 ? (
+        <div
+          className="vs01-canonical-initials-band"
+          aria-hidden
+          style={{
+            left: pct(initialsBandRect.x),
+            top: pct(initialsBandRect.y),
+            width: pct(initialsBandRect.width),
+            height: pct(initialsBandRect.height),
+          }}
+        />
+      ) : null}
     </div>
   );
 }

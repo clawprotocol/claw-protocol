@@ -50,6 +50,18 @@ describe("VS01 prepare packet readiness gate", () => {
     expect(readiness.packetReady).toBe(true);
   });
 
+  it("allows continue when initials are disabled (initialsSummary null)", () => {
+    const readiness = resolveVs01PreparePacketReadiness({
+      corpusGate: { allowed: true },
+      placementCanFinish: true,
+      initialsSummary: null,
+      canonicalTextRendered: true,
+      canonicalSignatureLinesRendered: true,
+    });
+    expect(readiness.packetReady).toBe(true);
+    expect(readiness.reason).toBeNull();
+  });
+
   it("maps packet block reasons to safe debug labels without PII", () => {
     expect(formatVs01PacketReadyDebugLabel("unsafe_initials_fields")).toBe("initials_overlap_or_oob");
     expect(formatVs01PacketReadyDebugLabel("initials_validation_incomplete")).toBe("initials_incomplete");

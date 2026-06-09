@@ -2,91 +2,56 @@
  * Post-signer-finalize paid Pro review surfaces — locked hydrated signing snapshot only.
  */
 
+import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
-  getAuthoritativeSigningSnapshot,
   readAuthoritativeSigningCorpus,
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
-import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
-import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import {
   countBlankSignerMetadataLinesInExecutionBlock,
-  hydratePaidProExecutionBlockWithSignerMetadata,
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN,
   readPaidProPinnedSignerAppliedCorpus,
 } from "./paidProFinalHydratedCorpus";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
-import {
-  detectExecutionHeadingMetadataLeak,
-  repairExecutionBlockEntityHeadingLines,
-} from "./paidProExecutionBlockEntityHeading";
-import {
-  authorityPartiesToRecipientMetadata,
-  readConsumedPaidProSignerMetadataAuthority,
-  recipientMetadataToAuthorityParties,
-} from "./paidProSignerMetadataAuthority";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
-import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
-import { ensureExecutionBlockNoticeContactFieldLines } from "./paidProPartyNoticeDetails";
-
-function resolvePostFinalizeRecipientMetadata(): AuthoritativeSigningSnapshotRecipientMetadata | null {
-  const snapshot = getAuthoritativeSigningSnapshot();
-  if (snapshot?.signerMetadata) return snapshot.signerMetadata;
-  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
-  if (!parties?.length) return null;
-  return authorityPartiesToRecipientMetadata(parties);
-}
+import {
+  applyReviewReadyMetadataBackfill,
+  collectReviewReadyCorpusHints,
+} from "../../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
 
 /** Render-time enrichment — does not mutate the frozen signing snapshot store. */
-export function enrichPaidProPostFinalizeDisplayCorpus(plain: string): string {
+export function enrichPaidProPostFinalizeDisplayCorpus(
+  plain: string,
+  draft?: AgreementDraft | null,
+): string {
   const body = (plain || "").trim();
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
-
-  const parties =
-    readConsumedPaidProSignerMetadataAuthority()?.parties ??
-    (() => {
-      const meta = resolvePostFinalizeRecipientMetadata();
-      return meta ? recipientMetadataToAuthorityParties(meta) : [];
-    })();
-
-  let out = body;
-  if (parties.length >= 2) {
-    out = repairMalformedPaidProAgreementRecital(out, parties).text;
-  }
-
-  const recipientMeta = resolvePostFinalizeRecipientMetadata();
-  if (recipientMeta && signerMetadataAuthorityHasHydratableFields(recipientMeta) && parties.length >= 2) {
-    out = ensureExecutionBlockNoticeContactFieldLines(out).text;
-    out = finalizePaidProSigningCorpusText(out, parties, { acceptedCorpus: body }).text;
-    const hydration = hydratePaidProExecutionBlockWithSignerMetadata(out, recipientMeta, {
-      acceptedCorpus: body,
-    });
-    if (hydration.applied) {
-      out = hydration.corpus;
-    }
-  }
-
-  if (!detectExecutionHeadingMetadataLeak(out).leak) return out.trim();
-  return repairExecutionBlockEntityHeadingLines(out, parties).text.trim();
+  const corpusHints = collectReviewReadyCorpusHints(body, draft ?? null);
+  return applyReviewReadyMetadataBackfill(body, draft ?? null, {
+    corpusHints,
+    surface: "owner_done",
+    selectedSource: "authoritative_signing_snapshot",
+  });
 }
 
-function finalizePostFinalizeReviewPlain(plain: string): string {
-  const body = enrichPaidProPostFinalizeDisplayCorpus(plain);
+function finalizePostFinalizeReviewPlain(plain: string, draft?: AgreementDraft | null): string {
+  const body = enrichPaidProPostFinalizeDisplayCorpus(plain, draft);
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
   return body;
 }
 
-export function resolvePaidProPostFinalizeReviewPlain(): string {
+export function resolvePaidProPostFinalizeReviewPlain(draft?: AgreementDraft | null): string {
   const snapshot = readAuthoritativeSigningCorpus().trim();
   if (snapshot.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
-    return finalizePostFinalizeReviewPlain(snapshot);
+    return finalizePostFinalizeReviewPlain(snapshot, draft);
   }
   const pinned = readPaidProPinnedSignerAppliedCorpus().trim();
   if (pinned.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
-    return finalizePostFinalizeReviewPlain(pinned);
+    return finalizePostFinalizeReviewPlain(pinned, draft);
   }
   return "";
 }

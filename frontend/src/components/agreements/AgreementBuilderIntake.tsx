@@ -657,6 +657,7 @@ import {
   hasRenderablePaidProFirstReviewCorpus,
   shouldBlockPaidProReviewShellWithoutCanonicalCorpus,
 } from "./paidProPostCheckoutRenderGate";
+import { resolvePaidProFirstReviewVisibleDisplayPlain } from "./paidProFirstReviewDisplayAuthority";
 import {
   logPaidProApiFailureNoCanonicalFreeze,
   logPaidProAuthorityBlockedAfterApiFailure,
@@ -14991,6 +14992,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             audit: { ...pick.audit, selected: "server_full_document_text", forcedPremiumSource: true },
           };
         }
+        const visibleAuthority = resolvePaidProFirstReviewVisibleDisplayPlain({
+          draft: draft ?? null,
+          intakeText: intakeProbe,
+          premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+          premiumCheckoutCompleted: premiumPersistedFlowActive || premiumPaidDocumentSurface || Boolean(snapObj),
+          premiumPaidDocumentSurface,
+          pickerPlain: pick.plainText,
+          pickerSource: pick.sourceUsed,
+          paidProActive: true,
+        });
+        if (visibleAuthority.plain.length >= 500) {
+          return {
+            ...pick,
+            plainText: visibleAuthority.plain,
+            sourceUsed: visibleAuthority.source as typeof pick.sourceUsed,
+            audit: {
+              ...pick.audit,
+              selected: visibleAuthority.source,
+              forcedPremiumSource: true,
+            },
+          };
+        }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[premium-readonly] fact gate blocked display corpus", { reasons: vPick.reasons });
@@ -15035,6 +15058,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     proFullDraftQualityRetry,
     premiumTruthPipelineSource,
   ]);
+
+  const paidProFirstReviewDisplayContext = useMemo(
+    () => ({
+      draft: (reviewDraft ?? draft) ?? null,
+      intakeText: (currentPremiumMergedIntakeKey || intakeCombined || "").trim(),
+      premiumRenderSource:
+        premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+      premiumCheckoutCompleted,
+      premiumPaidDocumentSurface,
+      pickerPlain: premiumPaidReadonlyPick.plainText,
+      pickerSource: premiumPaidReadonlyPick.sourceUsed,
+      paidProActive: paidProFirstReviewDisplayActive,
+    }),
+    [
+      reviewDraft,
+      draft,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      premiumTruthPipelineSource,
+      premiumCheckoutCompleted,
+      premiumPaidDocumentSurface,
+      premiumPaidReadonlyPick.plainText,
+      premiumPaidReadonlyPick.sourceUsed,
+      paidProFirstReviewDisplayActive,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
+  );
 
   const paidProStarterBaselinePlain = useMemo(
     () => buildFreeStarterBaselinePlain(draft),
@@ -19622,6 +19673,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const displayPolishedPaidProPlain = useMemo(() => {
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const signingSnapshotActive = hasAuthoritativeSigningSnapshot();
+    const firstReviewAuthority = paidProFirstReviewDisplayActive
+      ? resolvePaidProFirstReviewVisibleDisplayPlain(paidProFirstReviewDisplayContext)
+      : null;
     const paidProDisplay = getPaidProDocumentForSurface("display", {
       ...paidProReviewSurfaceOpts,
       intakeText: intakeForPolish,
@@ -19630,10 +19684,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       (isPaidProPostFinalizeHydratedCorpusLocked()
         ? resolvePaidProPostFinalizeReviewPlain()
         : "") ||
+      firstReviewAuthority?.plain ||
       paidProSignerHydratedPreviewPlain.trim() ||
       (signingSnapshotActive ? readAuthoritativeSigningCorpus() : "") ||
       paidProDisplay?.text ||
-      (hasPaidProSourceOfTruth() ? "" : (premiumPaidReadonlyPick.plainText || "").trim())
+      (hasPaidProSourceOfTruth() || paidProFirstReviewDisplayActive
+        ? ""
+        : (premiumPaidReadonlyPick.plainText || "").trim())
     ).trim();
     if (!raw || raw.length < 200) return raw;
     const polished = polishProAgreementDisplayLayer(raw, {
@@ -19678,6 +19735,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewDocRefreshTick,
     suppressProDocumentEmbeddedSignatures,
     paidProSignerHydratedPreviewPlain,
+    paidProFirstReviewDisplayActive,
+    paidProFirstReviewDisplayContext,
   ]);
 
   const simpleProFinalReviewDisplayPlain = useMemo(() => {
@@ -28079,6 +28138,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             suppressEmptyFallback={blockProEmptyDocumentFallback}
                                             compactDocumentTopPadding={paidProReviewCompactChrome}
                                             visibleProPaperTrace={visibleProPaperTrace}
+                                            displayContext={paidProFirstReviewDisplayContext}
                                             authoritativeSource={
                                               isPaidProPostFinalizeHydratedCorpusLocked()
                                                 ? "authoritative_signing_snapshot"

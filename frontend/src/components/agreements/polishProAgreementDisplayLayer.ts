@@ -26,7 +26,7 @@ import {
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
-import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
+import { repairPaidProSignatureSectionOrdering, isStandaloneSignaturesHeadingLine } from "./paidProSignatureSectionOrdering";
 import {
   buildCorpusRoleIdentitiesForExecutionReconcile,
   detectExecutionBlockRoleInversion,
@@ -161,11 +161,17 @@ export function stripUnsuppliedPartyAddressPlaceholders(
     /\b(?:corporation|limited liability company|company)\s+organized\s+under\s+the\s+laws\s+of\s+\[?[A-Za-z\s]*\]?/i,
     /\b(?:principal\s+office|mailing\s+address|notice\s+address)\s*(?:is|:)?\s*(?:\[.*?\]|to\s+be\s+provided|not\s+supplied|________________)/i,
     /\b(?:at|located\s+at)\s+\[?(?:address|principal office|mailing address)\]?/i,
-    /\b\[?(?:corporation|entity type|address|principal office|mailing address)\]?\b/i,
+    /\[(?:corporation|entity type|address|principal office|mailing address)\]/i,
   ];
   const kept = text.split("\n").filter((line) => {
     const t = line.trim();
     if (!t) return true;
+    if (/^address\s+for\s+notices?\s*:/i.test(t)) {
+      const value = t.replace(/^address\s+for\s+notices?\s*:\s*/i, "").trim();
+      if (value && !/^_{4,}$/.test(value) && !/\[.*?\]|to\s+be\s+provided/i.test(value)) {
+        return true;
+      }
+    }
     if (allowAddress && !/\[.*?\]|to\s+be\s+provided|________________/i.test(t)) return true;
     for (const re of lineRes) {
       if (re.test(t)) {
@@ -191,17 +197,35 @@ function isAgreementTitleParagraph(part: string): boolean {
 }
 
 function isOpeningParagraph(part: string): boolean {
-  return /\bThis\s+(?:Services\s+)?Agreement\b/i.test(part) && /\bbetween\b/i.test(part);
+  const t = part.trim();
+  if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return false;
+  if (/^This\s+(?:Services\s+)?Agreement\s+(?:constitutes|may\s+be\s+amended|is\s+governed)\b/i.test(t)) {
+    return false;
+  }
+  if (!/\bThis\s+(?:Services\s+)?Agreement\b/i.test(t) || !/\bbetween\b/i.test(t)) return false;
+  if (/^(?:This\s+(?:Services\s+)?Agreement|This\s+Agreement)\s+is\s+(?:entered\s+into|between)/i.test(t)) {
+    return true;
+  }
+  if (/\bThis\s+Agreement\s+is\s+entered\s+into\b[\s\S]{0,180}?\bThis\s+Agreement\s+is\s+between\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+function isExecutionParagraph(part: string): boolean {
+  const firstLine = part.trim().split("\n")[0]?.trim() ?? "";
+  if (/^\s*IN WITNESS WHEREOF\b/i.test(firstLine)) return true;
+  if (/^\s*EXECUTION\s*[—-]\s*SIGNATURES?\b/i.test(firstLine)) return true;
+  if (isStandaloneSignaturesHeadingLine(firstLine)) return true;
+  if (/^\s*(?:By|Signature)\s*:\s*_{2,}/i.test(firstLine)) return true;
+  if (/^\s*(?:CLIENT|SERVICE\s+PROVIDER)\s*:/i.test(firstLine)) return true;
+  if (/^\s*Name\s*:\s*_{2,}/i.test(firstLine)) return true;
+  if (/^\s*Title\s*:\s*_{2,}/i.test(firstLine)) return true;
+  return false;
 }
 
 function isBodySectionParagraph(part: string): boolean {
   return /^(?:#{1,3}\s+)?(?:\d+(?:\.\d+)?\.?\s+|[A-Z][A-Za-z\s]{2,60}:)/.test(part.trim());
-}
-
-function isExecutionParagraph(part: string): boolean {
-  return /\b(?:IN\s+WITNESS\s+WHEREOF|EXECUTION|SIGNATURES?|By:\s*_{2,}|Name:\s*(?:_{2,}|\S)|Title:\s*(?:_{2,}|\S)|^CLIENT\s*:|^SERVICE\s+PROVIDER\s*:)\b/im.test(
-    part,
-  );
 }
 
 function normalizedOpeningParagraph(

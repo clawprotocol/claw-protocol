@@ -30,6 +30,10 @@ import {
   logExecutionBlockLocation,
   logPostFreezeCorpusDrift,
 } from "./paidProExecutionBlockInstrumentation";
+import {
+  classifyPaidProDocumentBlocks,
+  premiumDocSignatureClassForBlockKind,
+} from "./paidProDocumentBlockClassifier";
 
 export function escapeHtml(s: string): string {
   return (s || "")
@@ -40,15 +44,9 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** Numbered section labels from buildAgreementPreviewText (e.g. "1. SCOPE OF SERVICES · PURPOSE"). */
-const SECTION_HEADING = /^\d+\.\s+[A-Z0-9 ·\/—–'\-,&]+$/;
-
-function isStandaloneTitleLine(s: string): boolean {
-  const t = s.trim();
-  if (t.length < 4 || t.length > 96) return false;
-  if (/^\d+\./.test(t)) return false;
-  if (/[a-z]/.test(t)) return false;
-  return /^[A-Z]/.test(t);
+/** Display-only: signature region lines use uniform legal-document weight (no per-field bold). */
+function formatSignatureRegionLineHtml(line: string): string {
+  return escapeHtml(line);
 }
 
 function premiumCallout(text: string): string {
@@ -57,35 +55,6 @@ function premiumCallout(text: string): string {
 
 function premiumCalloutInline(text: string): string {
   return `<span class="premium-doc-callout-inline" role="note">${escapeHtml(text)}</span>`;
-}
-
-const SIGNATURE_PARTY_HEADER_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:?\s*$/i;
-const SIGNATURE_NOTICE_EMAIL_RE = /^email(?:\s+for\s+notices?)?\s*:/i;
-const SIGNATURE_ENTITY_LINE_RE =
-  /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
-
-/** Display-only: signature region lines use uniform legal-document weight (no per-field bold). */
-function formatSignatureRegionLineHtml(line: string): string {
-  return escapeHtml(line);
-}
-
-function paragraphClassForSignatureChunk(chunk: string, inSignatureRegion: boolean): string | null {
-  if (!inSignatureRegion) return null;
-  const firstLine = chunk.split("\n")[0]?.trim() ?? "";
-  if (SIGNATURE_PARTY_HEADER_RE.test(firstLine)) return "premium-doc-signature-party-start";
-  if (
-    firstLine.length >= 4 &&
-    firstLine.length <= 120 &&
-    SIGNATURE_ENTITY_LINE_RE.test(firstLine) &&
-    !/^(?:by|name|title|date|email|address|signature)\s*:/i.test(firstLine)
-  ) {
-    return "premium-doc-signature-entity-name";
-  }
-  if (SIGNATURE_NOTICE_EMAIL_RE.test(firstLine)) return "premium-doc-signature-notice";
-  if (/^(?:by|name|title|date|address|signature)\s*:/i.test(firstLine)) {
-    return "premium-doc-signature-field";
-  }
-  return null;
 }
 
 export type PremiumSignatureSectionMode = "collaboration" | "execution";
@@ -324,27 +293,20 @@ function buildPremiumAgreementReadonlyHtmlCore(
       source: "premium_agreement_readonly_html",
     }).text;
   }
-  const chunks = raw.split(/\n\n+/);
+  const classifiedBlocks = classifyPaidProDocumentBlocks(raw);
   const out: string[] = [];
-  const signatureRegionStart = findSignatureRegionStart(raw);
-  let chunkOffset = 0;
 
-  for (const part of chunks) {
-    const chunk = part.trim();
-    if (!chunk) {
-      chunkOffset += part.length + 2;
-      continue;
-    }
-    const inSignatureRegion = signatureRegionStart >= 0 && chunkOffset >= signatureRegionStart;
-    chunkOffset += part.length + 2;
+  for (const entry of classifiedBlocks) {
+    const { block, kind, inSignatureRegion } = entry;
+    const chunk = block.trim();
+    if (!chunk) continue;
     const lines = chunk.split("\n");
-    const oneLine = lines.length === 1;
 
-    if (oneLine && inSignatureRegion && SIGNATURE_PARTY_HEADER_RE.test(chunk)) {
+    if (kind === "signature_party_start") {
       out.push(`<p class="premium-doc-signature-party-start">${escapeHtml(chunk)}</p>`);
       continue;
     }
-    if (oneLine && SECTION_HEADING.test(chunk)) {
+    if (kind === "main_section_heading" || kind === "legacy_section_heading") {
       out.push(`<h2 class="premium-doc-section-heading">${escapeHtml(chunk)}</h2>`);
       if (hints?.paymentNeedsFinalNumbers && /^2\.\s+PAYMENT\b/i.test(chunk)) {
         out.push(
@@ -356,7 +318,7 @@ function buildPremiumAgreementReadonlyHtmlCore(
       }
       continue;
     }
-    if (oneLine && isStandaloneTitleLine(chunk) && !(inSignatureRegion && SIGNATURE_PARTY_HEADER_RE.test(chunk))) {
+    if (kind === "document_title") {
       out.push(`<h1>${escapeHtml(chunk)}</h1>`);
       if (hints?.executiveFramingLine) {
         out.push(premiumCallout(hints.executiveFramingLine));
@@ -372,7 +334,7 @@ function buildPremiumAgreementReadonlyHtmlCore(
     const inner = inSignatureRegion
       ? lines.map((ln) => formatSignatureRegionLineHtml(ln)).join("<br />")
       : lines.map((ln) => escapeHtml(ln)).join("<br />");
-    const sigClass = paragraphClassForSignatureChunk(chunk, inSignatureRegion);
+    const sigClass = premiumDocSignatureClassForBlockKind(kind);
     if (
       inSignatureRegion &&
       sigClass === "premium-doc-signature-notice" &&

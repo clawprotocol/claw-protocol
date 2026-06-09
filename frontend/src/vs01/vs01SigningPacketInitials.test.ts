@@ -84,6 +84,15 @@ describe("summarizeCanonicalSigningPacketInitials", () => {
       pages: model.pages,
     });
     expect(summary.initialsFieldCount).toBe(0);
+    const readiness = resolveVs01PreparePacketReadiness({
+      corpusGate: { allowed: true },
+      placementCanFinish: true,
+      initialsSummary: null,
+      canonicalTextRendered: true,
+      canonicalSignatureLinesRendered: true,
+    });
+    expect(readiness.packetReady).toBe(true);
+    expect(readiness.reason).toBeNull();
   });
 
   it("packet readiness stays true across repeated canonical summaries (no flicker)", () => {
