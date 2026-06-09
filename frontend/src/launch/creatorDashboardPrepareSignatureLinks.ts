@@ -3,11 +3,9 @@ import { fetchAgreementDraftWithSigningLock } from "../agreement/agreementWorksp
 import { findOpenRecipientProposals } from "../agreement/recipientProposal";
 import { resolveGuidedVs01SigningHandoffForBridge } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
 import {
-  linearPremiumRecipientSlots,
-  MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
-  readPremiumRecipientHandoff,
-} from "../components/agreements/premiumPartyNamesHandoff";
-import { tryNavigatePaidProAgreementSenderFirstVs01Esign } from "./simpleProduct/agreementToVs01SigningBridge";
+  resolveBridgeAgreementCorpusFromDraft,
+  tryNavigatePaidProAgreementSenderFirstVs01Esign,
+} from "./simpleProduct/agreementToVs01SigningBridge";
 import { mergeReviewLinkRecipientEmailsOntoHydratedDraft } from "./simpleProduct/reviewLinkRecipientEmailMerge";
 
 export type CreatorPrepareSignatureLinksResult = {
@@ -18,7 +16,7 @@ export type CreatorPrepareSignatureLinksResult = {
   vs01RouteAttempted: boolean;
 };
 
-/** Resume creator signature prep from dashboard — same VS01 bridge path as Review Link Ready. */
+/** Resume creator signature prep from dashboard or review-complete — same VS01 bridge path as Review Link Ready. */
 export async function navigateCreatorPrepareSignatureLinks(options: {
   agreementId: string;
   navigate: (path: string) => void | Promise<void>;
@@ -27,6 +25,8 @@ export async function navigateCreatorPrepareSignatureLinks(options: {
   lockedVersionId?: string | null;
   /** When false, do not fall back to /app/done on bridge failure (dashboard shows inline notice). */
   navigateOnBridgeFailure?: boolean;
+  /** Diagnostic source label (dashboard vs review-complete). */
+  logSource?: "creator_dashboard" | "creator_review_complete";
 }): Promise<CreatorPrepareSignatureLinksResult> {
   const id = options.agreementId.trim();
   if (!id) {
@@ -83,30 +83,21 @@ export async function navigateCreatorPrepareSignatureLinks(options: {
   }
 
   const emailMergedDraft = mergeReviewLinkRecipientEmailsOntoHydratedDraft(draft, null);
-  const handoff = readPremiumRecipientHandoff();
-  const partyCap = Math.min((emailMergedDraft.parties ?? []).length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
-  const recipientSetup =
-    handoff && partyCap > 0
-      ? {
-          recipientPartyEmails: linearPremiumRecipientSlots(handoff, partyCap).map((s) => s.email || ""),
-          recipientPartySignerNames: linearPremiumRecipientSlots(handoff, partyCap).map(
-            (s) => s.signerName || "",
-          ),
-          recipientPartySignerTitles: linearPremiumRecipientSlots(handoff, partyCap).map(
-            (s) => s.signerTitle || "",
-          ),
-        }
-      : null;
-
+  const agreementCorpusText = resolveBridgeAgreementCorpusFromDraft(emailMergedDraft);
   const guidedSigningHandoff = resolveGuidedVs01SigningHandoffForBridge(null);
 
   const navigated = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
     navigate: options.navigate,
     agreementId: id,
     draft: emailMergedDraft,
-    logReason: signingLockActive ? "creator_dashboard_continue_vs01" : "creator_dashboard_prepare_signature_links",
+    logReason: signingLockActive
+      ? "creator_dashboard_continue_vs01"
+      : options.logSource === "creator_review_complete"
+        ? "creator_review_complete_prepare_signature_links"
+        : "creator_dashboard_prepare_signature_links",
     reviewerApprovedCleanHandoff: true,
-    recipientSetup,
+    recipientSetup: null,
+    agreementCorpusText: agreementCorpusText || null,
     guidedSigningHandoff,
   });
 

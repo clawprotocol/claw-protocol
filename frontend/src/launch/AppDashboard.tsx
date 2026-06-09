@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
 import { useLaunchNav } from "./LaunchNavContext";
+import { resolveCurrentUser } from "../account/currentUser";
 import {
   fetchWorkspaceIndex,
   fetchAgreementDraft,
@@ -15,9 +16,18 @@ import {
 } from "./lawdogEntryContext";
 import { canAccessOperatorGrowthDashboard } from "./ops/OperatorGrowthDashboard";
 import { CreatorDashboardAgreementList } from "./CreatorDashboardAgreementList";
+import { LawdogAgreementsTable } from "./LawdogAgreementsTable";
+import { DashboardKpiCards } from "./DashboardKpiCards";
+import { LawdogDashboardLayout } from "./LawdogProductNav";
+import {
+  countLawdogDashboardKpis,
+  lawdogAgreementNeedsAttention,
+} from "./lawdogDashboardPresentation";
 import {
   creatorDashboardReviewRowsFromDraft,
+  deriveCreatorDashboardStatus,
   deriveCreatorDashboardStatusPillFromGate,
+  deriveCreatorNextActionLabel,
   resolveCreatorDashboardIndexPreviewForDiagnostics,
   resolveEffectiveCreatorDashboardReviewRows,
   sortCreatorDashboardRows,
@@ -44,20 +54,14 @@ import {
 import { navigateCreatorPrepareSignatureLinks } from "./creatorDashboardPrepareSignatureLinks";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import { workspaceAgreementStatusBadge } from "./workspaceAgreementCard";
+import { initializeNewAgreementSession } from "./newAgreementSessionReset";
+import {
+  buildDashboardWorkspaceIndexRowDiagnostic,
+  logDashboardWorkspaceIndexRow,
+  logDashboardWorkspaceIndexSkippedRow,
+} from "./dashboardWorkspaceIndexDiagnostics";
 
 export type WorkspaceMode = "empty" | "active" | "power";
-
-/** Lightweight workspace phase from data already on the dashboard (no new APIs). */
-export function getWorkspaceMode(
-  recent: WorkspaceIndexAgreement[],
-  indexLoading: boolean,
-): WorkspaceMode {
-  if (indexLoading) return "active";
-  const n = recent.length;
-  if (n === 0) return "empty";
-  if (n >= 4) return "power";
-  return "active";
-}
 
 /** Status line for recent-agreement rows (workspace index). */
 export function workspaceAgreementStatusLabel(r: WorkspaceIndexAgreement): string {
@@ -74,13 +78,25 @@ export function AppDashboard() {
   >({});
   const [prepareBusyAgreementId, setPrepareBusyAgreementId] = useState<string | null>(null);
   const [prepareNoticeByAgreementId, setPrepareNoticeByAgreementId] = useState<Record<string, string>>({});
+  const [signingStatusEpoch, setSigningStatusEpoch] = useState(0);
   const draftingRedirectedRef = useRef(false);
 
   const reloadWorkspaceIndex = useCallback(async () => {
     setIndexLoading(true);
     setIndexError(null);
-    const { agreements, error } = await fetchWorkspaceIndex();
+    const { agreements, skipped, error } = await fetchWorkspaceIndex();
     setRows(dedupeWorkspaceIndexAgreements(agreements));
+    for (const row of agreements) {
+      logDashboardWorkspaceIndexRow(
+        buildDashboardWorkspaceIndexRowDiagnostic(row),
+      );
+    }
+    for (const skip of skipped) {
+      logDashboardWorkspaceIndexSkippedRow({
+        agreementId: skip.id,
+        skippedReason: skip.reason,
+      });
+    }
     setIndexError(error);
     setIndexLoading(false);
   }, []);
@@ -89,23 +105,40 @@ export function AppDashboard() {
     void reloadWorkspaceIndex();
   }, [reloadWorkspaceIndex]);
 
+  useEffect(() => {
+    const bumpSigningStatus = () => setSigningStatusEpoch((epoch) => epoch + 1);
+    const onStorage = (ev: StorageEvent) => {
+      const key = ev.key ?? "";
+      if (
+        key.startsWith("vs01_signing_packet_status_v1:") ||
+        key.startsWith("vs01_packet_prepared_v1:")
+      ) {
+        bumpSigningStatus();
+      }
+    };
+    const onSigningStatusChanged = () => bumpSigningStatus();
+    window.addEventListener("focus", bumpSigningStatus);
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("vs01-signing-packet-status-changed", onSigningStatusChanged);
+    return () => {
+      window.removeEventListener("focus", bumpSigningStatus);
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("vs01-signing-packet-status-changed", onSigningStatusChanged);
+    };
+  }, []);
+
   const filteredDashboard = useMemo(() => filterCreatorDashboardAgreements(rows), [rows]);
   const safeRecent = useMemo(
     () => sortCreatorDashboardRows(filteredDashboard.visibleRows),
     [filteredDashboard.visibleRows],
   );
-  const mode = useMemo(() => getWorkspaceMode(safeRecent, indexLoading), [safeRecent, indexLoading]);
-  const primaryRow = useMemo(() => {
-    const featuredId = filteredDashboard.featuredAgreementId;
-    if (featuredId) {
-      const featured = safeRecent.find((row) => row.id === featuredId);
-      if (featured) return featured;
-    }
-    return safeRecent[0] ?? null;
-  }, [filteredDashboard.featuredAgreementId, safeRecent]);
-  const otherRows = useMemo(
-    () => (primaryRow ? safeRecent.filter((row) => row.id !== primaryRow.id) : []),
-    [primaryRow, safeRecent],
+  const dashboardKpis = useMemo(() => countLawdogDashboardKpis(safeRecent), [safeRecent]);
+  const attentionRows = useMemo(
+    () =>
+      safeRecent.filter((row) =>
+        lawdogAgreementNeedsAttention(row, deriveCreatorDashboardStatus(row)),
+      ),
+    [safeRecent],
   );
 
   const entryResolved = useMemo(
@@ -216,15 +249,30 @@ export function AppDashboard() {
         agreementId: row.id,
         approvedCount: reviewGate.approvedCount,
         partyCount: reviewGate.requiredPartyCount,
-        nextAction: "prepare_signature_links",
+        nextAction: deriveCreatorNextActionLabel(row, reviewGate)
+          .toLowerCase()
+          .replace(/\s+/g, "_"),
       });
     }
-  }, [indexLoading, safeRecent, reviewRowsByAgreementId]);
+  }, [indexLoading, safeRecent, reviewRowsByAgreementId, signingStatusEpoch]);
 
   const withClearEntry = useCallback((fn: () => void) => {
     clearLawdogEntryContext();
     fn();
   }, []);
+
+  const navigateToCreateNewAgreement = useCallback(() => {
+    initializeNewAgreementSession();
+    setLawdogFocusCreateIntakeAfterNavigation();
+    navigate("/app/create");
+  }, [navigate]);
+
+  const currentUser = useMemo(() => resolveCurrentUser(), []);
+  const greetingHeadline = useMemo(() => {
+    const hour = new Date().getHours();
+    const salutation = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+    return `${salutation}, ${currentUser.displayName}`;
+  }, [currentUser]);
 
   const handlePrepareSignatureLinks = useCallback(
     async (agreementId: string) => {
@@ -351,26 +399,54 @@ export function AppDashboard() {
   return (
     <AppShell
       title="Dashboard"
-      subtitle="Track agreements you created, review approvals, and signing readiness."
+      subtitle={
+        <>
+          <span className="block text-base font-medium text-slate-200" data-testid="dashboard-greeting">
+            {greetingHeadline}
+          </span>
+          <span className="mt-1 block text-sm text-slate-500">
+            What agreements do you have, what needs attention, and how much value you&apos;ve generated.
+          </span>
+        </>
+      }
     >
-      {indexError ? (
-        <div
-          className="mb-6 rounded-xl border border-amber-800/40 bg-amber-950/25 px-4 py-3 text-sm text-amber-100"
-          role="alert"
-        >
-          <p className="font-medium">We couldn&apos;t refresh your agreement list.</p>
-          <p className="mt-1 text-amber-100/90">{indexError}</p>
-          <button
-            type="button"
-            className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
-            onClick={() => void reloadWorkspaceIndex()}
+      <LawdogDashboardLayout activeId="dashboard">
+        {indexError ? (
+          <div
+            className="mb-6 rounded-xl border border-amber-800/40 bg-amber-950/25 px-4 py-3 text-sm text-amber-100"
+            role="alert"
           >
-            Retry
-          </button>
-        </div>
-      ) : null}
+            <p className="font-medium">We couldn&apos;t refresh your agreement list.</p>
+            <p className="mt-1 text-amber-100/90">{indexError}</p>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
+              onClick={() => void reloadWorkspaceIndex()}
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
 
-      <div className="mx-auto w-full max-w-3xl">
+        {!indexLoading && safeRecent.length > 0 ? (
+          <>
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-slate-400" data-testid="dashboard-agreement-count">
+                {safeRecent.length} agreement{safeRecent.length === 1 ? "" : "s"}
+              </p>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--primary vs01-btn--compact"
+                data-testid="dashboard-create-new-agreement"
+                onClick={() => withClearEntry(navigateToCreateNewAgreement)}
+              >
+                Create new agreement
+              </button>
+            </div>
+            <DashboardKpiCards kpis={dashboardKpis} />
+          </>
+        ) : null}
+
         {indexLoading ? (
           <p className="text-sm text-slate-400">Loading agreements…</p>
         ) : safeRecent.length === 0 ? (
@@ -383,66 +459,43 @@ export function AppDashboard() {
             <button
               type="button"
               className="vs01-btn vs01-btn--primary mt-5"
-              onClick={() => withClearEntry(() => navigate("/app/create"))}
+              data-testid="dashboard-create-first-agreement"
+              onClick={() => withClearEntry(navigateToCreateNewAgreement)}
             >
-              Create agreement
+              Create new agreement
             </button>
           </div>
         ) : (
-          <>
-            <section aria-label="Current agreement" data-testid="creator-dashboard-primary">
-              <CreatorDashboardAgreementList
-                rows={primaryRow ? [primaryRow] : []}
-                reviewRowsByAgreementId={reviewRowsByAgreementId}
-                onNavigate={(path) => withClearEntry(() => navigate(path))}
-                onPrepareSignatureLinks={handlePrepareSignatureLinks}
-                prepareBusyAgreementId={prepareBusyAgreementId}
-                prepareNoticeByAgreementId={prepareNoticeByAgreementId}
-                featured
-              />
-            </section>
-            {otherRows.length > 0 ? (
-              <section className="mt-8" aria-labelledby="creator-dashboard-other-agreements-heading">
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                  <h2
-                    id="creator-dashboard-other-agreements-heading"
-                    className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500"
-                  >
-                    Other agreements
-                  </h2>
-                  {mode !== "empty" ? (
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                      onClick={() => withClearEntry(() => navigate("/app/create"))}
-                    >
-                      New agreement
-                    </button>
-                  ) : null}
-                </div>
+          <div className="mt-8 space-y-8">
+            {attentionRows.length > 0 ? (
+              <section aria-label="Agreements needing attention" data-testid="creator-dashboard-primary">
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  Needs your attention
+                </h2>
                 <CreatorDashboardAgreementList
-                  rows={otherRows}
+                  rows={attentionRows}
                   reviewRowsByAgreementId={reviewRowsByAgreementId}
                   onNavigate={(path) => withClearEntry(() => navigate(path))}
                   onPrepareSignatureLinks={handlePrepareSignatureLinks}
                   prepareBusyAgreementId={prepareBusyAgreementId}
                   prepareNoticeByAgreementId={prepareNoticeByAgreementId}
+                  featured
                 />
               </section>
-            ) : (
-              <div className="mt-6 flex justify-end">
-                <button
-                  type="button"
-                  className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                  onClick={() => withClearEntry(() => navigate("/app/create"))}
-                >
-                  New agreement
-                </button>
-              </div>
-            )}
-          </>
+            ) : null}
+            <section aria-label="All agreements">
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
+                All agreements
+              </h2>
+              <LawdogAgreementsTable
+                rows={safeRecent}
+                onNavigate={(path) => withClearEntry(() => navigate(path))}
+                onArchiveComplete={() => void reloadWorkspaceIndex()}
+              />
+            </section>
+          </div>
         )}
-      </div>
+      </LawdogDashboardLayout>
 
       {canAccessOperatorGrowthDashboard() ? (
         <p className="mt-10 text-center text-[11px] text-slate-600">

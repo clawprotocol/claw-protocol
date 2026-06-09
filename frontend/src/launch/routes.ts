@@ -10,6 +10,9 @@ export type AppSection =
   | { kind: "agreements"; sub: "list" | "new" | { id: string } }
   | { kind: "esign"; sub: "new" | { id: string } }
   | { kind: "billing" }
+  | { kind: "affiliate" }
+  | { kind: "settings" }
+  | { kind: "signatures" }
   | { kind: "opportunity" }
   | { kind: "agreementMemory" }
   | { kind: "integrations" }
@@ -26,9 +29,13 @@ export type AppSection =
 
 export function matchAppPath(pathname: string): AppSection | null {
   const p = (pathname.replace(/\/$/, "") || "/").split("?")[0];
+  if (p === "/dashboard") return { kind: "dashboard" };
   if (!p.startsWith("/app")) return null;
   if (p === "/app") return { kind: "dashboard" };
   if (p === "/app/billing") return { kind: "billing" };
+  if (p === "/app/affiliate") return { kind: "affiliate" };
+  if (p === "/app/settings") return { kind: "settings" };
+  if (p === "/app/signatures") return { kind: "signatures" };
   if (p === "/app/opportunity") return { kind: "opportunity" };
   if (p === "/app/agreement-memory") return { kind: "agreementMemory" };
   if (p === "/app/integrations") return { kind: "integrations" };

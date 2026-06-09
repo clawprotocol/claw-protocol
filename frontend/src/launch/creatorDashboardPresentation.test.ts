@@ -1,11 +1,20 @@
+/** @vitest-environment jsdom */
 import { describe, expect, it } from "vitest";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import {
   countCreatorDashboardMetrics,
   creatorDashboardPrimaryAction,
   deriveCreatorDashboardStatus,
+  deriveCreatorNextActionLabel,
+  deriveCreatorSigningStatusLabel,
   shouldCreatorRedirectPreSignatureDoneToDashboard,
 } from "./creatorDashboardPresentation";
+import { resolveCreatorDashboardReviewGate } from "./creatorDashboardReviewGate";
+import {
+  ensureSigningPacketStatusFromHandoff,
+  patchSignerPacketStatus,
+} from "../vs01/vs01SigningPacketStatusStore";
+import type { PaidProVs01PostSignHandoffV1 } from "../vs01/vs01PaidProPostSignHandoff";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 
 function row(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement {
@@ -70,7 +79,9 @@ describe("creatorDashboardPresentation", () => {
     expect(creatorDashboardPrimaryAction(row({ has_server_signing_lock: true })).label).toBe(
       "View Signing Status",
     );
-    expect(creatorDashboardPrimaryAction(row({ completed_signed: true })).label).toBe("View Agreement");
+    expect(creatorDashboardPrimaryAction(row({ completed_signed: true })).label).toBe(
+      "Open agreement workspace",
+    );
   });
 
   it("treats partial reviewer approval as in_review, not ready_for_signing", () => {
@@ -86,6 +97,53 @@ describe("creatorDashboardPresentation", () => {
         }),
       ),
     ).toBe("in_review");
+  });
+
+  it("reports fully signed from local VS01 packet status when workspace index is stale", () => {
+    const agreementId = "ag_local_signed";
+    const handoff: PaidProVs01PostSignHandoffV1 = {
+      v: 1,
+      agreementId,
+      agreementTitle: "Consulting Agreement",
+      vs01DocumentId: "doc_test322",
+      receiptId: "",
+      receiptHashSha256: null,
+      savedAt: new Date().toISOString(),
+      signers: [
+        {
+          counterpartyId: "cp1",
+          displayName: "Counterparty",
+          email: "cp@example.test",
+          signingUrl: "https://example.test/cp",
+          signerRoleId: "role_cp1",
+        },
+      ],
+      ownerSignerRoleId: "role_owner",
+      ownerSigningUrl: "https://example.test/sign",
+      packetPrepareOnly: true,
+      senderMustSignFirst: true,
+    };
+    localStorage.clear();
+    const snap = ensureSigningPacketStatusFromHandoff(handoff, "role_owner");
+    for (const key of Object.keys(snap.bySignerKey)) {
+      patchSignerPacketStatus(agreementId, key, "signed");
+    }
+
+    const approvedRow = row({
+      id: agreementId,
+      all_reviewers_approved: true,
+      reviewer_approved: true,
+      review_approvals_required: 2,
+      review_approvals_completed: 2,
+      completed_signed: false,
+      has_server_signing_lock: false,
+    });
+    const reviewGate = resolveCreatorDashboardReviewGate(approvedRow, []);
+
+    expect(deriveCreatorDashboardStatus(approvedRow)).toBe("completed");
+    expect(deriveCreatorSigningStatusLabel(approvedRow)).toBe("Fully signed");
+    expect(deriveCreatorNextActionLabel(approvedRow, reviewGate)).toBe("Open agreement workspace");
+    expect(creatorDashboardPrimaryAction(approvedRow).label).toBe("Open agreement workspace");
   });
 
   it("redirects creator from pre-signature done page when all reviews are approved", () => {

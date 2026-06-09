@@ -13,8 +13,10 @@ import {
 import {
   creatorDashboardPrimaryAction,
   creatorDashboardShowsReviewPanel,
+  creatorDashboardSupplementalActions,
   deriveCreatorDashboardStatus,
   deriveCreatorDashboardStatusPillFromGate,
+  deriveCreatorNextActionLabel,
   deriveCreatorReviewProgressLabel,
   deriveCreatorSigningStatusLabel,
   displayCreatorAgreementTitle,
@@ -135,17 +137,21 @@ export function CreatorDashboardAgreementList(props: Props) {
         const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows);
         const allApproved = reviewGate.allRequiredReviewPartiesApproved;
         const waitingOnReviewer = creatorDashboardWaitingOnReviewer(reviewGate);
-        const readyForSigning = allApproved && status !== "completed" && status !== "signing_in_progress";
+        const signingComplete = status === "completed";
+        const signingStarted = status === "signing_in_progress";
+        const readyForSigning = allApproved && !signingComplete && !signingStarted;
         const showReview = creatorDashboardShowsReviewPanel(status) || waitingOnReviewer || readyForSigning;
         const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate);
         const reviewProgress = deriveCreatorReviewProgressLabel(row, reviewRows);
         const signingStatus = deriveCreatorSigningStatusLabel(row);
+        const nextActionLabel = deriveCreatorNextActionLabel(row, reviewGate);
         const featured = featuredSection && (readyForSigning || waitingOnReviewer);
         const donePath = `/app/done/${encodeURIComponent(row.id)}`;
         const prepareBusy = prepareBusyAgreementId === row.id;
         const prepareNotice = prepareNoticeByAgreementId[row.id] ?? null;
         const prepareSignatureLinksVisible = readyForSigning || waitingOnReviewer;
         const prepareSignatureLinksEnabled = readyForSigning;
+        const supplementalActions = creatorDashboardSupplementalActions(row);
 
         return (
           <li
@@ -221,8 +227,8 @@ export function CreatorDashboardAgreementList(props: Props) {
                     </p>
                   </>
                 ) : (
-                  <p className="mt-2 text-sm text-slate-300">
-                    Next action: <span className="text-slate-100">{action.label}</span>
+                  <p className="mt-2 text-sm text-slate-300" data-testid={`creator-dashboard-next-action-${row.id}`}>
+                    Next action: <span className="text-slate-100">{nextActionLabel}</span>
                   </p>
                 )}
                 {reviewProgress ? (
@@ -297,6 +303,17 @@ export function CreatorDashboardAgreementList(props: Props) {
                     {action.label}
                   </button>
                 )}
+                {supplementalActions.map((sup) => (
+                  <button
+                    key={sup.testIdSuffix}
+                    type="button"
+                    className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0 min-w-[10rem]"
+                    data-testid={`creator-dashboard-${sup.testIdSuffix}-${row.id}`}
+                    onClick={() => onNavigate(sup.path)}
+                  >
+                    {sup.label}
+                  </button>
+                ))}
               </div>
             </div>
           </li>

@@ -20,6 +20,7 @@ import {
   CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
   CREATOR_REVIEWS_APPROVED_PILL,
   CREATOR_WAITING_ON_REVIEWER_PILL,
+  CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
 } from "./creatorDashboardCopy";
 
 export type CreatorDashboardStatus =
@@ -120,18 +121,57 @@ export function creatorDashboardPrimaryAction(
   const status = deriveCreatorDashboardStatus(row);
   switch (status) {
     case "completed":
-      return { label: "View Agreement", path: `/app/done/${id}`, emphasis: "secondary" };
+      return {
+        label: CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
+        path: `/app/done/${id}`,
+        emphasis: "primary",
+      };
     case "signing_in_progress":
       return { label: "View Signing Status", path: `/app/send/${id}`, emphasis: "primary" };
     case "ready_for_signing":
     case "review_approved":
       return { label: CREATOR_PREPARE_SIGNATURE_LINKS_LABEL, path: "/app", emphasis: "primary" };
     case "in_review":
-      return { label: "View Review Status", path: "/app", emphasis: "secondary" };
+      return { label: "View Review Status", path: `/app/done/${id}`, emphasis: "secondary" };
     case "draft":
     default:
       return { label: "Continue Editing", path: `/app/send/${id}`, emphasis: "secondary" };
   }
+}
+
+export type CreatorDashboardSupplementalAction = {
+  label: string;
+  path: string;
+  testIdSuffix: string;
+};
+
+/** Secondary row actions on dashboard agreement cards — does not replace primary CTA. */
+export function creatorDashboardSupplementalActions(
+  row: WorkspaceIndexAgreement,
+): CreatorDashboardSupplementalAction[] {
+  const id = encodeURIComponent(row.id);
+  const status = deriveCreatorDashboardStatus(row);
+  const out: CreatorDashboardSupplementalAction[] = [
+    { label: "Open workspace", path: `/app/done/${id}`, testIdSuffix: "open-workspace" },
+  ];
+  if (status === "draft" || status === "in_review") {
+    out.push({ label: "Continue review", path: `/app/send/${id}`, testIdSuffix: "continue-review" });
+  }
+  if (status === "signing_in_progress") {
+    out.push({
+      label: "Open signing packet",
+      path: `/app/send/${id}`,
+      testIdSuffix: "open-signing-packet",
+    });
+  }
+  if (status === "completed") {
+    out.push({
+      label: "Download final",
+      path: `/app/done/${id}`,
+      testIdSuffix: "download-final",
+    });
+  }
+  return out;
 }
 
 export function creatorDashboardShowsReviewPanel(status: CreatorDashboardStatus): boolean {
@@ -199,6 +239,18 @@ export function deriveCreatorSigningStatusLabel(row: WorkspaceIndexAgreement): s
   if (row.completed_signed || isAgreementFullySignedLocal(row.id)) return "Fully signed";
   if (row.has_server_signing_lock || isAgreementPacketPrepared(row.id)) return "Signature links ready";
   return "Signature links not prepared yet";
+}
+
+export function deriveCreatorNextActionLabel(
+  row: WorkspaceIndexAgreement,
+  reviewGate: CreatorDashboardReviewGate,
+): string {
+  const status = deriveCreatorDashboardStatus(row);
+  if (status === "completed") return CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE;
+  if (status === "signing_in_progress") return "View signing status";
+  if (reviewGate.allRequiredReviewPartiesApproved) return CREATOR_PREPARE_SIGNATURE_LINKS_LABEL;
+  if (creatorDashboardWaitingOnReviewer(reviewGate)) return "Wait for remaining reviewer approval";
+  return creatorDashboardPrimaryAction(row).label;
 }
 
 export function deriveCreatorReviewProgressLabel(

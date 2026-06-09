@@ -9,6 +9,11 @@ import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
 import * as agreementToVs01SigningBridge from "./simpleProduct/agreementToVs01SigningBridge";
 import { AGREEMENT_CREATE_REVIEW_RESUME_KEY } from "../components/agreements/agreementIntakeStorage";
 import { LAWDOG_ENTRY_CONTEXT_KEY } from "./lawdogEntryContext";
+import {
+  ensureSigningPacketStatusFromHandoff,
+  patchSignerPacketStatus,
+} from "../vs01/vs01SigningPacketStatusStore";
+import type { PaidProVs01PostSignHandoffV1 } from "../vs01/vs01PaidProPostSignHandoff";
 
 const mockNavigate = vi.fn();
 
@@ -81,6 +86,7 @@ describe("AppDashboard creator-centric surface", () => {
   it("shows dashboard copy and prepare signature links CTA after both approvals", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [indexRow({ id: "ag_ready" })],
+      skipped: [],
       error: null,
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
@@ -96,7 +102,7 @@ describe("AppDashboard creator-centric surface", () => {
 
     expect(screen.getByRole("heading", { name: "Dashboard" })).toBeTruthy();
     expect(
-      screen.getByText("Track agreements you created, review approvals, and signing readiness."),
+      screen.getByText("What agreements do you have, what needs attention, and how much value you've generated."),
     ).toBeTruthy();
     expect(screen.getByTestId("creator-dashboard-primary")).toBeTruthy();
 
@@ -127,6 +133,7 @@ describe("AppDashboard creator-centric surface", () => {
       });
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [indexRow({ id: "ag_ready" })],
+      skipped: [],
       error: null,
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
@@ -149,6 +156,7 @@ describe("AppDashboard creator-centric surface", () => {
           agreementId: "ag_ready",
           logReason: "creator_dashboard_prepare_signature_links",
           reviewerApprovedCleanHandoff: true,
+          recipientSetup: null,
         }),
       );
       expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_bridge_test?agreement_bridge=1");
@@ -177,6 +185,7 @@ describe("AppDashboard creator-centric surface", () => {
           all_reviewers_approved: false,
         }),
       ],
+      skipped: [],
       error: null,
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
@@ -219,6 +228,7 @@ describe("AppDashboard creator-centric surface", () => {
     );
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [indexRow({ id: "ag_ready" })],
+      skipped: [],
       error: null,
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
@@ -286,6 +296,7 @@ describe("AppDashboard creator-centric surface", () => {
       });
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [indexRow({ id: "ag_ready" })],
+      skipped: [],
       error: null,
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
@@ -329,6 +340,7 @@ describe("AppDashboard creator-centric surface", () => {
           updated_at: "2026-04-01T00:00:00.000Z",
         }),
       ],
+      skipped: [],
       error: null,
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
@@ -347,9 +359,62 @@ describe("AppDashboard creator-centric surface", () => {
     expect(screen.queryByText("Other agreements")).toBeNull();
   });
 
+  it("shows fully signed dashboard card when local VS01 packet is complete", async () => {
+    const agreementId = "ag_ready";
+    const handoff: PaidProVs01PostSignHandoffV1 = {
+      v: 1,
+      agreementId,
+      agreementTitle: "Services Agreement",
+      vs01DocumentId: "doc_ready",
+      receiptId: "",
+      receiptHashSha256: null,
+      savedAt: new Date().toISOString(),
+      signers: [
+        {
+          counterpartyId: "cp1",
+          displayName: "Iron Vale Systems Inc",
+          email: "cp@example.test",
+          signingUrl: "https://example.test/cp",
+          signerRoleId: "role_cp1",
+        },
+      ],
+      ownerSignerRoleId: "role_owner",
+      ownerSigningUrl: "https://example.test/sign",
+      packetPrepareOnly: true,
+      senderMustSignFirst: true,
+    };
+    localStorage.clear();
+    const snap = ensureSigningPacketStatusFromHandoff(handoff, "role_owner");
+    for (const key of Object.keys(snap.bySignerKey)) {
+      patchSignerPacketStatus(agreementId, key, "signed");
+    }
+
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [indexRow({ id: agreementId })],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`creator-dashboard-signing-status-${agreementId}`)).toBeTruthy();
+    });
+
+    expect(screen.getByText(/Fully signed/)).toBeTruthy();
+    expect(screen.queryByText(/Signature links not prepared yet/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Open agreement workspace" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Prepare signature links" })).toBeNull();
+  });
+
   it("shows the requested empty state", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [],
+      skipped: [],
       error: null,
     });
 
@@ -361,6 +426,6 @@ describe("AppDashboard creator-centric surface", () => {
 
     expect(screen.getByText("No agreements yet")).toBeTruthy();
     expect(screen.getByText("Create your first agreement to begin.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create agreement" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create new agreement" })).toBeTruthy();
   });
 });

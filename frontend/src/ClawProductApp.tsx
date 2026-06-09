@@ -19,6 +19,10 @@ import { AdvancedWorkProductPage } from "./launch/AdvancedWorkProductPage";
 import { AffiliateLandingPage } from "./launch/affiliate/AffiliateLandingPage";
 import { parseAffiliateLandingPath } from "./launch/affiliate/affiliateLandingRoutes";
 import { ClawOpportunityPage } from "./launch/affiliate/ClawOpportunityPage";
+import { LawdogAffiliatePage } from "./launch/LawdogAffiliatePage";
+import { LawdogSettingsPage } from "./launch/LawdogSettingsPage";
+import { LawdogSignaturesPage } from "./launch/LawdogSignaturesPage";
+import { LawdogReferralRedirect, parseLawdogReferralPath } from "./launch/LawdogReferralRedirect";
 import { AffiliatePayoutOpsPage } from "./launch/affiliate/AffiliatePayoutOpsPage";
 import { GenesisAffiliateDashboardPage } from "./launch/genesisReferral/GenesisAffiliateDashboardPage";
 import { GenesisReferralOpsPage } from "./launch/genesisReferral/GenesisReferralOpsPage";
@@ -433,6 +437,7 @@ export function ClawProductApp() {
   const appMatch = matchAppPath(pathname);
   const pathNorm = (pathname.replace(/\/$/, "") || "/").split("?")[0];
   const affiliateLanding = parseAffiliateLandingPath(pathNorm);
+  const lawdogReferralSlug = parseLawdogReferralPath(pathNorm);
 
   if (import.meta.env.DEV && pathNorm === "/dev/qa/paid-pro-review-ux") {
     return <PaidProReviewUxVisualPage />;
@@ -548,6 +553,10 @@ export function ClawProductApp() {
     return <AffiliateLandingPage mode={affiliateLanding.mode} usernameSlug={affiliateLanding.usernameSlug} />;
   }
 
+  if (lawdogReferralSlug) {
+    return <LawdogReferralRedirect userSlug={lawdogReferralSlug} />;
+  }
+
   if (appMatch?.kind === "adminConsole" && !featureFlags.adminConsoleUi) {
     return (
       <AppShell
@@ -628,6 +637,12 @@ export function ClawProductApp() {
         return <AppDashboard />;
       case "billing":
         return <BillingPage />;
+      case "affiliate":
+        return <LawdogAffiliatePage />;
+      case "settings":
+        return <LawdogSettingsPage />;
+      case "signatures":
+        return <LawdogSignaturesPage />;
       case "agreementMemory":
         return <AgreementMemoryPage />;
       case "integrations":

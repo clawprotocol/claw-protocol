@@ -4,6 +4,7 @@ import { matchAppPath } from "./routes";
 describe("matchAppPath", () => {
   it("maps launch IA paths", () => {
     expect(matchAppPath("/app")).toEqual({ kind: "dashboard" });
+    expect(matchAppPath("/dashboard")).toEqual({ kind: "dashboard" });
     expect(matchAppPath("/app/billing")).toEqual({ kind: "billing" });
     expect(matchAppPath("/app/opportunity")).toEqual({ kind: "opportunity" });
     expect(matchAppPath("/app/agreements")).toEqual({ kind: "agreements", sub: "list" });
@@ -18,6 +19,9 @@ describe("matchAppPath", () => {
     expect(matchAppPath("/app/ops/growth")).toEqual({ kind: "opsGrowth" });
     expect(matchAppPath("/app/ops/starter-pro-refine")).toEqual({ kind: "opsStarterProRefine" });
     expect(matchAppPath("/app/admin")).toEqual({ kind: "adminConsole" });
+    expect(matchAppPath("/app/affiliate")).toEqual({ kind: "affiliate" });
+    expect(matchAppPath("/app/settings")).toEqual({ kind: "settings" });
+    expect(matchAppPath("/app/signatures")).toEqual({ kind: "signatures" });
     expect(matchAppPath("/app/create")).toEqual({ kind: "simpleCreate" });
     expect(matchAppPath("/app/quick")).toEqual({ kind: "quickSend" });
     expect(matchAppPath("/app/ready/ag_1")).toEqual({ kind: "simpleReady", agreementId: "ag_1" });

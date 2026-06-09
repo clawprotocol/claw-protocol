@@ -145,4 +145,5 @@ data/agreements/*.json
 data/agreements/
 tmp_claw_data/
 frontend/test-results/
+frontend/manual-qa-report.json
 frontend/.playwright-browsers/

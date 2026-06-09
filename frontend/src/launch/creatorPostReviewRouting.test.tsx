@@ -6,6 +6,7 @@ import type { AgreementDraft } from "../agreement/agreementTypes";
 import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
 import * as agreementPublicVerify from "../agreement/agreementPublicVerify";
 import type { PublicVerifyPayload } from "../agreement/agreementPublicVerify";
+import * as agreementToVs01SigningBridge from "./simpleProduct/agreementToVs01SigningBridge";
 import { SimpleDonePage } from "./simpleProduct/SimpleDonePage";
 import { AppDashboard } from "./AppDashboard";
 import { AgreementRecipientReview } from "../agreement/AgreementRecipientReview";
@@ -26,9 +27,13 @@ vi.mock("./ops/OperatorGrowthDashboard", () => ({
   canAccessOperatorGrowthDashboard: () => false,
 }));
 
-vi.mock("./simpleProduct/agreementToVs01SigningBridge", () => ({
-  tryNavigatePaidProAgreementSenderFirstVs01Esign: vi.fn(async () => false),
-}));
+vi.mock("./simpleProduct/agreementToVs01SigningBridge", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./simpleProduct/agreementToVs01SigningBridge")>();
+  return {
+    ...actual,
+    tryNavigatePaidProAgreementSenderFirstVs01Esign: vi.fn(async () => false),
+  };
+});
 
 vi.mock("../monetization/usePowerGatedNavigation", () => ({
   usePowerGatedNavigation: () => ({
@@ -124,6 +129,7 @@ describe("creator post-review routing", () => {
           all_reviewers_approved: true,
         },
       ],
+      skipped: [],
       error: null,
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
@@ -145,12 +151,18 @@ describe("creator post-review routing", () => {
     expect(screen.queryByText("Send this agreement")).toBeNull();
   });
 
-  it("routes creator post-approval prepare action to dashboard, not proof page", async () => {
+  it("routes creator post-approval prepare action to VS01 signature prep, not dashboard", async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
     });
     const agreementId = "ag_creator_prepare";
+    vi.mocked(agreementToVs01SigningBridge.tryNavigatePaidProAgreementSenderFirstVs01Esign).mockImplementation(
+      async (options) => {
+        options.navigate("/app/esign/doc_creator_prepare?agreement_bridge=1");
+        return true;
+      },
+    );
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
         typeof input === "string"
@@ -193,8 +205,63 @@ describe("creator post-review routing", () => {
     });
 
     await userEvent.click(screen.getByRole("button", { name: "Prepare signature links" }));
-    expect(mockNavigate).toHaveBeenCalledWith("/app");
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_creator_prepare?agreement_bridge=1");
+    });
+    expect(mockNavigate).not.toHaveBeenCalledWith("/app");
     expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/done/"));
+  });
+
+  it("routes creator post-approval return action to dashboard", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const agreementId = "ag_creator_return";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof Request !== "undefined" && input instanceof Request
+              ? input.url
+              : String(input);
+      const method = (
+        init?.method ||
+        (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      if (method === "POST" && url.includes("/render")) {
+        return jsonResponse({ rendered_html: "<p>Services Agreement</p><p>Body.</p>" });
+      }
+      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
+        return jsonResponse({
+          draft: allApprovedDraft(agreementId),
+          signing_lock: null,
+        });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    render(
+      <AccessProvider>
+        <AgreementRecipientReview
+          agreementId={agreementId}
+          recipientAccessToken="tok_test"
+          participantPartyId="p1"
+          recipientViewerContext="qa_recipient_simulation"
+          qaOwnerReturnPath={`/app/done/${agreementId}`}
+        />
+      </AccessProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Return to dashboard" })).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Return to dashboard" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/app");
+    expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/esign/"));
   });
 
   it("keeps public recipient review-complete screen unchanged", async () => {

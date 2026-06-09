@@ -53,6 +53,7 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
         agreementId: "ag_ready",
         logReason: "creator_dashboard_prepare_signature_links",
         reviewerApprovedCleanHandoff: true,
+        recipientSetup: null,
       }),
     );
     expect(result.navigated).toBe(true);

@@ -2,6 +2,8 @@ export const CREATOR_PREPARE_SIGNATURE_LINKS_LABEL = "Prepare signature links";
 
 export const CREATOR_NEXT_ACTION_PREPARE_SIGNATURE_LINKS = "Prepare signature links";
 
+export const CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE = "Open agreement workspace";
+
 export const CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL = "Open review link page";
 
 export const CREATOR_REVIEWS_APPROVED_PILL = "Reviews approved";
@@ -130,6 +132,21 @@ export function logCreatorDashboardPrepareBridgeResult(payload: {
 }
 
 let lastCreatorDashboardPrepareNavigationBlockedLogKey = "";
+
+export function logCreatorReviewCompletePrepareClick(payload: {
+  agreementId: string;
+  hasDraft: boolean;
+  allReviewsComplete: boolean;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const id = payload.agreementId.trim();
+  // eslint-disable-next-line no-console
+  console.info("[creator-review-complete-prepare-click]", {
+    agreementIdShort: id.length <= 12 ? id : `${id.slice(0, 8)}…`,
+    hasDraft: payload.hasDraft,
+    allReviewsComplete: payload.allReviewsComplete,
+  });
+}
 
 export function logCreatorDashboardPrepareNavigationBlocked(payload: {
   agreementId: string;
