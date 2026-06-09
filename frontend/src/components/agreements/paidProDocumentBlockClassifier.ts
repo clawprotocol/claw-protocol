@@ -58,8 +58,9 @@ export function isMainSectionHeadingLine(line: string): boolean {
   if (body.length < 3 || body.length > 160) return false;
   // "10. HEADING. Sentence body on same line" is not a pure heading line.
   if (/\.\s+[A-Za-z]/.test(body)) return false;
-  if (/^[A-Z0-9 ·\/—–'\-,&()]+$/.test(body)) return true;
-  if (/^[A-Z][a-zA-Z0-9\s/&,\-'—–().]+$/.test(body)) {
+  // Title punctuation allowed in major headings (semicolons common in compound titles).
+  if (/^[A-Z0-9 ·\/—–'\-,&();:]+$/.test(body)) return true;
+  if (/^[A-Z][a-zA-Z0-9\s/&,\-'—–().;:]+$/.test(body)) {
     if (/\.\s+[a-z]/.test(body)) return false;
     return body.split(/\s+/).length <= 16;
   }
