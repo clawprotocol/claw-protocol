@@ -152,6 +152,7 @@ export function CreatorDashboardAgreementList(props: Props) {
         const prepareSignatureLinksVisible = readyForSigning || waitingOnReviewer;
         const prepareSignatureLinksEnabled = readyForSigning;
         const supplementalActions = creatorDashboardSupplementalActions(row);
+        const contentUnavailable = row.content_unavailable === true;
 
         return (
           <li
@@ -169,6 +170,7 @@ export function CreatorDashboardAgreementList(props: Props) {
             data-creator-dashboard-review-gate-all-approved={allApproved ? "true" : "false"}
             data-creator-dashboard-prepare-enabled={prepareSignatureLinksEnabled ? "true" : "false"}
             data-creator-dashboard-review-source={reviewGate.source}
+            data-lawdog-content-unavailable={contentUnavailable ? "true" : "false"}
           >
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start">
               <div className="min-w-0">
@@ -196,6 +198,14 @@ export function CreatorDashboardAgreementList(props: Props) {
                 <p className="mt-1.5 text-sm text-slate-500" data-testid={`creator-dashboard-updated-${row.id}`}>
                   {formatCreatorDashboardUpdated(row.updated_at)}
                 </p>
+                {contentUnavailable ? (
+                  <p
+                    className="mt-2 text-sm text-amber-200/90"
+                    data-testid={`creator-dashboard-content-unavailable-${row.id}`}
+                  >
+                    Agreement content unavailable — metadata only.
+                  </p>
+                ) : null}
                 {readyForSigning ? (
                   <>
                     <p className="mt-3 text-sm text-slate-300" data-testid={`creator-dashboard-next-action-${row.id}`}>
@@ -252,11 +262,15 @@ export function CreatorDashboardAgreementList(props: Props) {
                         prepareSignatureLinksEnabled ? "vs01-btn--primary" : "vs01-btn--secondary opacity-70"
                       }`}
                       data-testid={`creator-dashboard-action-${row.id}`}
-                      disabled={prepareBusy}
-                      aria-disabled={prepareSignatureLinksEnabled ? undefined : true}
+                      disabled={prepareBusy || contentUnavailable}
+                      aria-disabled={
+                        contentUnavailable || !prepareSignatureLinksEnabled ? true : undefined
+                      }
                       onClick={() => {
-                        if (!prepareSignatureLinksEnabled) {
-                          setPrepareBlockedNoticeAgreementId(row.id);
+                        if (contentUnavailable || !prepareSignatureLinksEnabled) {
+                          if (!contentUnavailable) {
+                            setPrepareBlockedNoticeAgreementId(row.id);
+                          }
                           return;
                         }
                         setPrepareBlockedNoticeAgreementId(null);
@@ -286,7 +300,10 @@ export function CreatorDashboardAgreementList(props: Props) {
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0 min-w-[10rem]"
                       data-testid={`creator-dashboard-open-review-${row.id}`}
-                      onClick={() => onNavigate(donePath)}
+                      disabled={contentUnavailable}
+                      onClick={() => {
+                        if (!contentUnavailable) onNavigate(donePath);
+                      }}
                     >
                       {CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL}
                     </button>
@@ -298,7 +315,10 @@ export function CreatorDashboardAgreementList(props: Props) {
                       action.emphasis === "primary" ? "vs01-btn--primary" : "vs01-btn--secondary"
                     }`}
                     data-testid={`creator-dashboard-action-${row.id}`}
-                    onClick={() => onNavigate(action.path)}
+                    disabled={contentUnavailable}
+                    onClick={() => {
+                      if (!contentUnavailable) onNavigate(action.path);
+                    }}
                   >
                     {action.label}
                   </button>
@@ -309,7 +329,10 @@ export function CreatorDashboardAgreementList(props: Props) {
                     type="button"
                     className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0 min-w-[10rem]"
                     data-testid={`creator-dashboard-${sup.testIdSuffix}-${row.id}`}
-                    onClick={() => onNavigate(sup.path)}
+                    disabled={contentUnavailable}
+                    onClick={() => {
+                      if (!contentUnavailable) onNavigate(sup.path);
+                    }}
                   >
                     {sup.label}
                   </button>

@@ -321,6 +321,32 @@ describe("dashboard account foundation", () => {
     expect(user.id).toBe("local-org");
   });
 
+  it("dashboard refresh retains Agreement #1 from workspace index", async () => {
+    const agreementOne = indexRow({ id: "ag_1", title: "Agreement #1" });
+    const fetchMock = vi
+      .spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex")
+      .mockResolvedValueOnce({
+        agreements: [agreementOne],
+        skipped: [],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        agreements: [agreementOne],
+        skipped: [],
+        error: null,
+      });
+    const { unmount } = render(<AppDashboard />);
+    await waitFor(() => {
+      expect(screen.getByText("Agreement #1")).toBeTruthy();
+    });
+    unmount();
+    render(<AppDashboard />);
+    await waitFor(() => {
+      expect(screen.getByText("Agreement #1")).toBeTruthy();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("/dashboard alias routes to dashboard kind", () => {
     expect(matchAppPath("/dashboard")).toEqual({ kind: "dashboard" });
     expect(matchAppPath("/app/affiliate")).toEqual({ kind: "affiliate" });

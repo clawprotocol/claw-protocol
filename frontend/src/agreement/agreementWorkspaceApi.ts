@@ -27,6 +27,11 @@ export type WorkspaceIndexAgreement = {
   workspace_folder_id?: string | null;
   workspace_folder_name?: string | null;
   workspace_tags?: string[];
+  /** When true, canonical draft JSON is missing; row metadata may come from Supabase only. */
+  content_unavailable?: boolean;
+  content_unavailable_reason?: string;
+  /** `draft` = built from load_draft(); `supabase_fallback` = draft load failed. */
+  dashboard_source?: "draft" | "supabase_fallback";
 };
 
 const base = () => resolveApiBase().replace(/\/$/, "");

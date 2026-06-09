@@ -120,7 +120,7 @@ from backend.config.agreement_signing_token import (
 from backend.config.feed_anchor_policy import settlement_anchor_network_hint
 from backend.proof_status.store import ProofLayerStore
 from backend.services import document_service
-from backend.services.agreement_draft_store import list_draft_agreement_ids_newest_first, load_draft, save_draft
+from backend.services.agreement_draft_store import list_draft_agreement_ids_newest_first, load_draft
 from backend.services.agreement_pdf_story_capability import (
     RECIPIENT_PREVIEW_PDF_STORY_RENDER_MODES,
     assess_agreement_pdf_story_capability,
@@ -129,7 +129,7 @@ from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_
 from backend.services.claw_feed_service import record_public_feed_event_if_applicable
 from backend.services.claw_feed_store import get_claw_feed_store
 from backend.treasury.treasury_usage_hooks import record_usage_ledger_event
-from backend.utils.enforce import resolve_subject_from_request
+from backend.utils.enforce import org_id_from_subject, resolve_subject_from_request
 from backend.usage_economics.constants import WATERMARK_LABEL
 from backend.usage_economics.policy import (
     assert_can_complete_agreement,
@@ -146,8 +146,27 @@ from backend.usage_economics.policy import (
     workspace_lists_agreement_for_subject,
 )
 from backend.utils.canon_json import canon_json_bytes, canon_sha256_hex, sha256_hex
+from backend.lawdog_dashboard.draft_persistence import save_draft_and_sync_dashboard_metadata
+from backend.lawdog_dashboard.workspace_index import (
+    fallback_summary_from_supabase_row,
+    merge_workspace_index_agreement_ids,
+    supabase_rows_by_id_for_subject,
+)
 
 log = logging.getLogger(__name__)
+
+
+def _save_draft_sync(
+    draft: Dict[str, Any],
+    request: Optional[Request] = None,
+    *,
+    subject_ref: Optional[str] = None,
+) -> None:
+    """Persist draft JSON and sync Phase A Supabase dashboard metadata when org is known."""
+    subj = (subject_ref or "").strip() or None
+    if not subj and request is not None:
+        subj = resolve_subject_from_request(request)
+    save_draft_and_sync_dashboard_metadata(draft, subject_ref=subj)
 
 
 def _openai_key_diagnostics() -> Dict[str, Any]:
@@ -5073,7 +5092,7 @@ def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict
         audit_log=[AuditEvent(event_type="created", at=now)],
     )
     dump = draft.model_dump()
-    save_draft(dump)
+    _save_draft_sync(dump, request)
     record_public_feed_event_if_applicable(draft_dict=dump, event_type="created", at=now)
     record_usage_ledger_event(
         subject_ref=subject,
@@ -5180,7 +5199,7 @@ def create_draft_from_prior_agreement(body: AgreementDraftForkRequest, request: 
         workspace_archived_at=None,
     )
     dump = draft.model_dump()
-    save_draft(dump)
+    _save_draft_sync(dump, request)
     record_public_feed_event_if_applicable(draft_dict=dump, event_type="created", at=now)
     record_usage_ledger_event(
         subject_ref=subject,
@@ -5302,6 +5321,7 @@ def _persist_review_first_final_corpus_if_supplied(
     body: RecipientAccessMintRequest,
     *,
     locked_version_id: str,
+    subject_ref: Optional[str] = None,
 ) -> None:
     if body.mode != "review":
         return
@@ -5361,7 +5381,7 @@ def _persist_review_first_final_corpus_if_supplied(
         audit_log=audit,
         versions=versions,
     )
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), subject_ref=subject_ref)
     log.info(
         "[review-first-backend-corpus-persisted] agreement_id_short=%s len=%s hash=%s source=%s",
         agreement_id[:8],
@@ -5445,12 +5465,28 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     folder_names = _folder_name_map_for_subject(subject)
     summaries: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
-    for aid in list_draft_agreement_ids_newest_first():
-        if not workspace_lists_agreement_for_subject(aid, subject):
+    local_ids = list_draft_agreement_ids_newest_first()
+    agreement_ids = merge_workspace_index_agreement_ids(
+        subject_ref=subject,
+        local_ids_newest_first=local_ids,
+    )
+    supabase_rows = supabase_rows_by_id_for_subject(subject)
+    for aid in agreement_ids:
+        if aid not in supabase_rows and not workspace_lists_agreement_for_subject(aid, subject):
             continue
         try:
             d = load_draft(aid)
         except Exception as exc:
+            sb_row = supabase_rows.get(aid)
+            if sb_row:
+                summaries.append(fallback_summary_from_supabase_row(sb_row))
+                log.info(
+                    "[dashboard-workspace-index-row] agreement_id=%s source=supabase_fallback "
+                    "load_draft_failed=%s skipped=false",
+                    aid,
+                    type(exc).__name__,
+                )
+                continue
             reason = f"load_draft_failed:{type(exc).__name__}"
             skipped.append({"id": aid, "reason": reason})
             log.warning("[dashboard-workspace-index-row] skipped agreement_id=%s reason=%s", aid, reason)
@@ -5515,6 +5551,8 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                     "workspace_folder_id": wfid,
                     "workspace_folder_name": (folder_names.get(wfid) if wfid else None),
                     "workspace_tags": tags_out,
+                    "dashboard_source": "draft",
+                    "content_unavailable": False,
                 }
             )
         except Exception as exc:
@@ -5613,7 +5651,7 @@ def post_signing_ceremony_start(
         ).model_dump()
     )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     return {
         "ok": True,
         "locked_version_id": lv,
@@ -5679,7 +5717,7 @@ def post_signing_ceremony_complete(
         )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
     dump = next_draft.model_dump()
-    save_draft(dump)
+    _save_draft_sync(dump, request)
     if fully:
         record_agreement_finalized(agreement_id=agreement_id)
         record_public_feed_event_if_applicable(draft_dict=dump, event_type="signed", at=now)
@@ -5794,6 +5832,7 @@ def post_recipient_access_token(
         agreement_id,
         body,
         locked_version_id=lv,
+        subject_ref=resolve_subject_from_request(request),
     )
     return {
         "token": token,
@@ -5838,7 +5877,7 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
     next_data["review_sent_at"] = now
     next_data["updated_at"] = now
     next_draft = AgreementDraft.model_validate(next_data)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     try:
         from backend.integrations.hooks_emit import claw_emit_integration_event_from_subject
 
@@ -5875,7 +5914,7 @@ def patch_agreement_workspace_archive(
     next_data["workspace_archived_at"] = now if body.archived else None
     next_data["updated_at"] = now
     next_draft = AgreementDraft.model_validate(next_data)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     return {"ok": True, "draft": next_draft.model_dump()}
 
 
@@ -5899,7 +5938,7 @@ def patch_agreement_workspace_folder(
     next_data["workspace_folder_id"] = fid
     next_data["updated_at"] = now
     next_draft = AgreementDraft.model_validate(next_data)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     return {"ok": True, "draft": next_draft.model_dump()}
 
 
@@ -5916,7 +5955,7 @@ def patch_agreement_workspace_tags(
     next_data["workspace_tags"] = _normalize_workspace_tags(list(body.tags or []))
     next_data["updated_at"] = now
     next_draft = AgreementDraft.model_validate(next_data)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     return {"ok": True, "draft": next_draft.model_dump()}
 
 
@@ -6188,7 +6227,7 @@ def update_agreement_field(
     )
     next_data["audit_log"] = audit_log
     next_draft = AgreementDraft.model_validate(next_data)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     try:
         from backend.integrations.hooks_emit import claw_emit_integration_event_from_subject
 
@@ -6778,7 +6817,7 @@ def pro_redline_import_text(agreement_id: str, body: ProRedlineImportTextBody, r
     )
     _pro_redline_set(raw, pr)
     raw["updated_at"] = now
-    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    _save_draft_sync(AgreementDraft.model_validate(raw).model_dump(), request)
     log.info(
         "[pro-redline-import] agreementIdShort=%s baseLen=%s importedLen=%s changedBlockCount=%s",
         _agreement_id_short(agreement_id),
@@ -6894,7 +6933,7 @@ def pro_redline_accept_import(agreement_id: str, request: Request) -> Dict[str, 
         ).model_dump()
     )
     raw["audit_log"] = audit
-    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    _save_draft_sync(AgreementDraft.model_validate(raw).model_dump(), request)
     log.info(
         "[pro-redline-accept] agreementIdShort=%s fromVersion=%s toVersion=%s",
         _agreement_id_short(agreement_id),
@@ -6935,7 +6974,7 @@ def pro_redline_reject_import(agreement_id: str, request: Request) -> Dict[str, 
         ).model_dump()
     )
     raw["audit_log"] = audit
-    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    _save_draft_sync(AgreementDraft.model_validate(raw).model_dump(), request)
     log.info(
         "[pro-redline-reject] agreementIdShort=%s pendingRevisionId=%s",
         _agreement_id_short(agreement_id),
@@ -6999,7 +7038,7 @@ def pro_redline_reviewer_suggestion(
         ).model_dump()
     )
     raw["audit_log"] = audit
-    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    _save_draft_sync(AgreementDraft.model_validate(raw).model_dump(), request)
     log.info(
         "[pro-redline-suggestion-submit] agreementIdShort=%s actorType=%s suggestionLen=%s",
         _agreement_id_short(agreement_id),
@@ -7047,7 +7086,7 @@ def pro_redline_suggestion_reject(agreement_id: str, suggestion_id: str, request
     )
     _pro_redline_set(raw, pr)
     raw["updated_at"] = now
-    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    _save_draft_sync(AgreementDraft.model_validate(raw).model_dump(), request)
     return {"ok": True, "draft": AgreementDraft.model_validate(raw).model_dump()}
 
 
@@ -7125,7 +7164,7 @@ def pro_redline_suggestion_mark_applied(
     )
     _pro_redline_set(raw, pr)
     raw["updated_at"] = now
-    save_draft(AgreementDraft.model_validate(raw).model_dump())
+    _save_draft_sync(AgreementDraft.model_validate(raw).model_dump(), request)
     return {"ok": True, "draft": AgreementDraft.model_validate(raw).model_dump()}
 
 
@@ -7141,7 +7180,7 @@ def export_agreement_docx(agreement_id: str, request: Request) -> Dict[str, Any]
     audit_log.append(AuditEvent(event_type="export_docx", at=now).model_dump())
     next_data["audit_log"] = audit_log
     next_draft = AgreementDraft.model_validate(next_data)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     wm = _watermark_active_for_agreement(agreement_id)
     return {
         "id": agreement_id,
@@ -7605,7 +7644,7 @@ def revise_agreement(
         ),
     )
     if persist:
-        save_draft(next_draft.model_dump())
+        _save_draft_sync(next_draft.model_dump(), request)
     else:
         record_usage_ledger_event(
             subject_ref=resolve_subject_from_request(request),
@@ -7708,7 +7747,7 @@ def commit_agreement_revision(agreement_id: str, body: AgreementCommitRevisionRe
         feed_anchor_network=coalesced.feed_anchor_network,
     )
     nd = next_draft.model_dump()
-    save_draft(nd)
+    _save_draft_sync(nd, request)
     record_public_feed_event_if_applicable(draft_dict=nd, event_type="revision_applied", at=now)
     wm = _watermark_active_for_agreement(agreement_id)
     return {
@@ -8140,7 +8179,7 @@ def _persist_party_id_backfill(draft: AgreementDraft) -> AgreementDraft:
     parties = _ensure_agreement_parties_have_ids(list(draft.parties or []))
     now = _utc_now_iso()
     next_draft = _merge_agreement_draft(draft, updated_at=now, parties=parties)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump())
     return next_draft
 
 
@@ -8388,7 +8427,7 @@ def _persist_staged_recipient_proposal(
     staged[proposal_id] = payload
     pro_redline[STAGED_RECIPIENT_PROPOSALS_KEY] = staged
     next_draft = _merge_agreement_draft(draft, updated_at=now, pro_redline_v1=pro_redline)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     return next_draft
 
 
@@ -8404,7 +8443,7 @@ def _pop_staged_recipient_proposal(draft: AgreementDraft, proposal_id: str) -> O
     pro_redline = dict(draft.pro_redline_v1 or {})
     pro_redline[STAGED_RECIPIENT_PROPOSALS_KEY] = staged
     next_draft = _merge_agreement_draft(draft, updated_at=now, pro_redline_v1=pro_redline)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     return payload if isinstance(payload, dict) else None
 
 
@@ -8457,7 +8496,7 @@ def _queue_recipient_proposal_from_payload(
         )
     )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     return next_draft
 
 
@@ -8571,7 +8610,7 @@ def reject_recipient_proposal(
         )
     )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     rejected_hash = _corpus_fingerprint(next_draft.purpose or "")
     log.info(
         "[owner-proposal-rejected] agreement_id=%s proposal_id=%s proposal_status=rejected previous_corpus_hash=%s rejected_corpus_hash=%s",
@@ -8672,7 +8711,7 @@ def apply_recipient_proposal(
         payment_required=current.payment_required,
         pro_redline_v1=pro_redline if pro_redline else current.pro_redline_v1,
     )
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     previous_hash = _corpus_fingerprint(current.purpose or "")
     updated_hash = _corpus_fingerprint(next_draft.purpose or "")
     log.info(
@@ -8764,7 +8803,7 @@ def recipient_approve_agreement(
         )
     )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
-    save_draft(next_draft.model_dump())
+    _save_draft_sync(next_draft.model_dump(), request)
     return {"ok": True, "draft": next_draft.model_dump()}
 
 

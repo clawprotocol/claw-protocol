@@ -79,7 +79,22 @@ Copy templates:
 
 ## Supabase
 
-LawDog does not use the Supabase JS client. Use **Supabase Postgres** by setting `CLAW_DATABASE_URL` to the Supabase connection string (pooler URL recommended for serverless).
+LawDog Phase A uses the Supabase REST client when configured:
+
+| Variable | Where | Purpose |
+|----------|--------|---------|
+| `SUPABASE_URL` | Backend | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Backend (secret) | Service role for dashboard writes/reads |
+| `VITE_SUPABASE_URL` | Frontend build | Public project URL (optional Phase A) |
+| `VITE_SUPABASE_ANON_KEY` | Frontend build | Anon key (optional Phase A) |
+
+Aliases: `CLAW_SUPABASE_URL`, `CLAW_SUPABASE_SERVICE_ROLE_KEY`.
+
+Apply dashboard schema: `backend/lawdog_dashboard/migrations/postgres/001_phase_a_dashboard.sql` in the Supabase SQL editor (or via `CLAW_DATABASE_URL` psql when using the same Postgres).
+
+When Supabase env vars are **unset**, dashboard uses the existing local/file workspace-index fallback.
+
+You can also use **Supabase Postgres** for draft JSON by setting `CLAW_DATABASE_URL` to the Supabase connection string (pooler URL recommended for serverless).
 
 ## What must never be in frontend
 

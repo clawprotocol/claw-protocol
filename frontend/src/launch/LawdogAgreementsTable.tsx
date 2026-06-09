@@ -46,6 +46,7 @@ export function LawdogAgreementsTable(props: Props) {
             const productStatus = deriveLawdogProductStatus(row);
             const donePath = `/app/done/${encodeURIComponent(row.id)}`;
             const canDownload = internalStatus === "completed";
+            const contentUnavailable = row.content_unavailable === true;
 
             return (
               <tr
@@ -53,9 +54,19 @@ export function LawdogAgreementsTable(props: Props) {
                 className="border-b border-slate-800/50 last:border-b-0"
                 data-testid={`lawdog-agreement-row-${row.id}`}
                 data-lawdog-product-status={productStatus}
+                data-lawdog-dashboard-source={row.dashboard_source ?? "draft"}
+                data-lawdog-content-unavailable={contentUnavailable ? "true" : "false"}
               >
                 <td className="px-4 py-3 font-medium text-slate-100">
                   {displayCreatorAgreementTitle(row.title)}
+                  {contentUnavailable ? (
+                    <p
+                      className="mt-1 text-xs font-normal text-amber-200/90"
+                      data-testid={`lawdog-agreement-content-unavailable-${row.id}`}
+                    >
+                      Agreement content unavailable — metadata only.
+                    </p>
+                  ) : null}
                 </td>
                 <td className="px-4 py-3 text-slate-400">{lawdogAgreementTypeLabel(row)}</td>
                 <td className="hidden px-4 py-3 text-slate-400 sm:table-cell">
@@ -78,7 +89,10 @@ export function LawdogAgreementsTable(props: Props) {
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
                       data-testid={`lawdog-action-open-${row.id}`}
-                      onClick={() => onNavigate(donePath)}
+                      disabled={contentUnavailable}
+                      onClick={() => {
+                        if (!contentUnavailable) onNavigate(donePath);
+                      }}
                     >
                       Open
                     </button>
@@ -86,7 +100,9 @@ export function LawdogAgreementsTable(props: Props) {
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
                       data-testid={`lawdog-action-duplicate-${row.id}`}
+                      disabled={contentUnavailable}
                       onClick={() => {
+                        if (contentUnavailable) return;
                         initializeNewAgreementSession({ priorAgreementId: row.id });
                         onNavigate("/app/create");
                       }}
@@ -108,8 +124,9 @@ export function LawdogAgreementsTable(props: Props) {
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
                       data-testid={`lawdog-action-archive-${row.id}`}
-                      disabled={Boolean(row.workspace_archived_at)}
+                      disabled={Boolean(row.workspace_archived_at) || contentUnavailable}
                       onClick={() => {
+                        if (contentUnavailable) return;
                         void (async () => {
                           const ok = await patchWorkspaceArchive(row.id, true);
                           if (ok) onArchiveComplete?.();
