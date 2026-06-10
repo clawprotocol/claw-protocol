@@ -75,7 +75,7 @@ export function PaidProForcedFirstReviewChrome({
 
   const showSignerSavedBanner =
     signerMetadataFinalized && signersReady && signerSavedMappings.length > 0;
-  const actionsDisabled = sendDisabled || hydrationBlocked;
+  const primaryActionsDisabled = sendDisabled || hydrationBlocked;
 
   const logPostFinalizeAction = (action: string) => {
     if (!signerMetadataFinalized || !postFinalizeCorpusHash) return;
@@ -122,7 +122,7 @@ export function PaidProForcedFirstReviewChrome({
         <button
           type="button"
           className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-          disabled={actionsDisabled}
+          disabled={primaryActionsDisabled}
           onClick={() => {
             logPostFinalizeAction("prepare_for_signing");
             onPrepareSignatures();
@@ -138,7 +138,7 @@ export function PaidProForcedFirstReviewChrome({
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={actionsDisabled || reviewBusy}
+            disabled={primaryActionsDisabled || reviewBusy}
             onClick={() => {
               logPostFinalizeAction("send_for_review");
               onShareForReview();
@@ -150,14 +150,14 @@ export function PaidProForcedFirstReviewChrome({
           <PremiumAgreementCopyButton
             getPlainText={getCopyPlainText}
             onCopyIntent={() => logPostFinalizeAction("copy_agreement")}
-            disabled={copyDisabled || hydrationBlocked}
+            disabled={copyDisabled}
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
             data-testid="paid-pro-forced-copy-agreement"
           />
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={exportBusy || copyDisabled || hydrationBlocked}
+            disabled={exportBusy || copyDisabled}
             onClick={() => {
               logPostFinalizeAction("download_export");
               onExportAgreement();
@@ -169,7 +169,7 @@ export function PaidProForcedFirstReviewChrome({
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={editDisabled || hydrationBlocked}
+            disabled={editDisabled}
             onClick={() => {
               logPostFinalizeAction("edit_agreement_text");
               onEditAgreement();

@@ -684,7 +684,6 @@ import {
   normalizePaidProCorpusSourceLabel,
 } from "./paidProRuntimeAuthorityEstablishment";
 import {
-  getFrozenCanonicalAgreementCorpus,
   hasFrozenCanonicalAgreementCorpus,
   logAuthoritativeCorpusInvariant,
 } from "./canonicalAgreementSnapshot";
@@ -819,6 +818,7 @@ import {
   resolvePaidProPostFinalizeReviewHash,
   resolvePaidProPostFinalizeReviewPlain,
 } from "./paidProPostFinalizeReviewSurface";
+import { resolvePaidProSignerFinalizeRawCorpus } from "./paidProSignerFinalizeRawCorpus";
 import {
   auditPaidProReviewLinkCorpusParity,
   logPaidProReviewLinkCorpusParity,
@@ -24314,12 +24314,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText: intakeForHydration,
       draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
     });
-    const rawCorpus = (
-      getFrozenCanonicalAgreementCorpus()?.canonicalText?.trim() ||
-      getPaidProSourceOfTruthText() ||
-      authoritativePaidProReviewPlain ||
-      simpleProFinalReviewCorpus.plainText
-    ).trim();
+    const rawCorpusResolution = resolvePaidProSignerFinalizeRawCorpus({
+      authoritativePaidProReviewPlain,
+      simpleProFinalReviewPlain: simpleProFinalReviewCorpus.plainText,
+    });
+    const rawCorpus = rawCorpusResolution.corpus;
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
       rawCorpus,
       authority,
@@ -28184,7 +28183,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               upgradeLockActive ||
                                               loading ||
                                               (isPaidProPostFinalizeHydratedCorpusLocked()
-                                                ? !paidProPostFinalizeActionsReady
+                                                ? !paidProPostFinalizeActionsReady &&
+                                                  !paidProPostFinalizeHydrationBlocked
                                                 : !draft)
                                             }
                                             signerSavedMappings={paidProSignerSavedMappings}

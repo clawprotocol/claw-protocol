@@ -4,13 +4,17 @@
 
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
+  getAuthoritativeSigningSnapshot,
   readAuthoritativeSigningCorpus,
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
 import {
   countBlankSignerMetadataLinesInExecutionBlock,
+  hydratePaidProExecutionBlockWithSignerMetadata,
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import { applySignatureNoticeContactFieldsToCorpus } from "./paidProPartyNoticeDetails";
+import { recipientMetadataToAuthorityParties } from "./paidProSignerMetadataAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN,
@@ -28,8 +32,26 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
   plain: string,
   draft?: AgreementDraft | null,
 ): string {
-  const body = (plain || "").trim();
+  let body = (plain || "").trim();
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
+
+  const snap = getAuthoritativeSigningSnapshot();
+  const meta = snap?.signerMetadata ?? null;
+  if (
+    meta &&
+    signerMetadataAuthorityHasHydratableFields(meta) &&
+    countBlankSignerMetadataLinesInExecutionBlock(body) > 0
+  ) {
+    const parties = recipientMetadataToAuthorityParties(meta);
+    const roleContext = { acceptedCorpus: body };
+    const hydration = hydratePaidProExecutionBlockWithSignerMetadata(body, meta, roleContext);
+    if (hydration.applied) body = hydration.corpus.trim();
+    const notice = applySignatureNoticeContactFieldsToCorpus(body, parties, roleContext);
+    if (notice.applied) body = notice.text.trim();
+    const retry = hydratePaidProExecutionBlockWithSignerMetadata(body, meta, roleContext);
+    if (retry.applied) body = retry.corpus.trim();
+  }
+
   const corpusHints = collectReviewReadyCorpusHints(body, draft ?? null);
   return applyReviewReadyMetadataBackfill(body, draft ?? null, {
     corpusHints,

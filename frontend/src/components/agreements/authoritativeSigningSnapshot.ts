@@ -24,6 +24,9 @@ import {
   countBlankSignerMetadataLinesInExecutionBlock,
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import { applySignatureNoticeContactFieldsToCorpus } from "./paidProPartyNoticeDetails";
+import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   extractPartyAddressesFromExecutionBlockCorpus,
 } from "../../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
@@ -154,18 +157,34 @@ export function createAuthoritativeSigningSnapshot(
     { acceptedCorpus: rawInput },
   ).text.trim();
   if (signerMetadataAuthorityHasHydratableFields(signerMetadata)) {
-    const hydration = hydratePaidProExecutionBlockWithSignerMetadata(corpus, signerMetadata, {
-      acceptedCorpus: (args.corpus || "").trim(),
-    });
+    const roleContext = { acceptedCorpus: (args.corpus || "").trim() };
+    const hydrateFrom = (input: string) =>
+      hydratePaidProExecutionBlockWithSignerMetadata(input, signerMetadata, roleContext);
+    const hydration = hydrateFrom(corpus);
     if (hydration.applied) {
       corpus = hydration.corpus.trim();
     } else if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0) {
-      const retry = hydratePaidProExecutionBlockWithSignerMetadata(
-        (args.corpus || "").trim(),
-        signerMetadata,
-        { acceptedCorpus: (args.corpus || "").trim() },
-      );
+      const retry = hydrateFrom((args.corpus || "").trim());
       if (retry.applied) corpus = retry.corpus.trim();
+    }
+    if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0 && hasPaidProSourceOfTruth()) {
+      const sot = getPaidProSourceOfTruthText().trim();
+      if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN && sot !== corpus) {
+        const sotHydration = hydrateFrom(sot);
+        if (
+          sotHydration.applied &&
+          countBlankSignerMetadataLinesInExecutionBlock(sotHydration.corpus) <
+            countBlankSignerMetadataLinesInExecutionBlock(corpus)
+        ) {
+          corpus = sotHydration.corpus.trim();
+        }
+      }
+    }
+    if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0 && parties.length >= 2) {
+      const notice = applySignatureNoticeContactFieldsToCorpus(corpus, parties, roleContext);
+      if (notice.applied) corpus = notice.text.trim();
+      const finalHydration = hydrateFrom(corpus);
+      if (finalHydration.applied) corpus = finalHydration.corpus.trim();
     }
   }
   const hash = hashPaidProCorpus(corpus);
