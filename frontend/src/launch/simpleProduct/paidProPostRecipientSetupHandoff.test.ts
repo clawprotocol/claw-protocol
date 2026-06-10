@@ -16,6 +16,8 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("mergeAgreementDraftWithGuidedSigningHandoff");
     expect(s).toContain("mintSimpleDoneReviewRecipientLinkRows");
     expect(s).toContain("resolveReviewFirstMintPolicyGate");
+    expect(s).toContain("postReviewSentServer");
+    expect(s).toContain("maybePostReviewSentAfterReviewFirstHandoff");
     expect(s).toContain("/app/done/");
     expect(s).not.toContain("/app/send/");
   });

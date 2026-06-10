@@ -5872,6 +5872,7 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
         raise HTTPException(status_code=403, detail="verifier_only")
     _owner_mutation_guards(request, agreement_id, surface="review_sent")
     draft = _load_or_404(agreement_id)
+    already_review_sent = bool((draft.review_sent_at or "").strip())
     now = _utc_now_iso()
     next_data = draft.model_dump()
     next_data["review_sent_at"] = now
@@ -5896,6 +5897,16 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
 
         subj = resolve_subject_from_request(request)
         maybe_record_agreement_sent_influence(org_id_from_subject(subj))
+    except Exception:
+        pass
+    try:
+        from backend.services.email.review_delivery import maybe_send_review_invites_after_review_sent
+
+        if not already_review_sent:
+            maybe_send_review_invites_after_review_sent(
+                agreement_id=agreement_id,
+                draft=next_draft.model_dump(mode="json"),
+            )
     except Exception:
         pass
     return {"ok": True, "draft": next_draft.model_dump()}

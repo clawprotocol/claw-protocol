@@ -96,6 +96,19 @@ When Supabase env vars are **unset**, dashboard uses the existing local/file wor
 
 You can also use **Supabase Postgres** for draft JSON by setting `CLAW_DATABASE_URL` to the Supabase connection string (pooler URL recommended for serverless).
 
+## Review invitation email (Resend)
+
+Server-side review invites send only when `CLAW_REVIEW_DELIVERY_MODE` is `email` or `manual_and_email` **and** all three vars below are set. Default mode is `manual` (copy/share links only; zero outbound email).
+
+| Variable | Where | Purpose |
+|----------|--------|---------|
+| `RESEND_API_KEY` | Backend (secret) | Resend API bearer token |
+| `EMAIL_FROM` | Backend | Verified sender address in Resend (e.g. `LawDog <noreply@yourdomain.com>`) |
+| `CLAW_APP_PUBLIC_ORIGIN` | Backend | SPA origin for absolute review links (scheme + host, no trailing slash) |
+| `CLAW_REVIEW_DELIVERY_MODE` | Backend | `manual` (default), `email`, or `manual_and_email` |
+
+`GET /admin/runtime-summary` exposes `email_configured: true/false` (never the API key). Sends are non-fatal: `POST …/review-sent` succeeds even when Resend fails or email is not configured.
+
 ## What must never be in frontend
 
 - `CLAW_ADMIN_SECRET`

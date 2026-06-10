@@ -18,6 +18,7 @@ from backend.config.feed_anchor_policy import (
     feed_public_api_enabled,
     settlement_anchor_network_hint,
 )
+from backend.config.email_config import email_configured
 from backend.config.runtime_environment import (
     anchor_mode,
     data_dir,
@@ -106,6 +107,7 @@ def public_runtime_summary() -> Dict[str, Any]:
         "feed_public_api_enabled": feed_public_api_enabled(),
         "recipient_access_token_required": recipient_access_token_required(),
         "review_delivery_mode": review_delivery_mode(),
+        "email_configured": email_configured(),
         "recipient_token_ttl_seconds": {
             "min": recipient_token_ttl_min_seconds(),
             "max": recipient_token_ttl_max_seconds(),

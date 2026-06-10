@@ -1,4 +1,5 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
 import {
   assertGuidedProVs01BridgeCorpusReady,
   logGuidedProVs01BridgeCorpusBlocked,
@@ -180,6 +181,32 @@ async function mintAndPersistReviewLinksForHandoff(
   return { ok: true };
 }
 
+/** Notify server that review was sent (sets review_sent_at, webhooks, optional Resend). Skips if already sent. */
+export async function maybePostReviewSentAfterReviewFirstHandoff(
+  agreementId: string,
+  draft: AgreementDraft,
+  logSource?: string,
+): Promise<void> {
+  const id = agreementId.trim();
+  if (!id) return;
+  if ((draft.review_sent_at || "").trim()) {
+    // eslint-disable-next-line no-console
+    console.info("[review-first-review-sent-skipped]", {
+      agreementId: id,
+      reason: "already_sent",
+      source: logSource ?? null,
+    });
+    return;
+  }
+  const ok = await postReviewSentServer(id);
+  // eslint-disable-next-line no-console
+  console.info("[review-first-review-sent]", {
+    agreementId: id,
+    ok,
+    source: logSource ?? null,
+  });
+}
+
 /**
  * After paid Pro recipient setup + intake confirm: mint review links when needed, then VS01 (sender-first)
  * or owner done page (review). Skips the redundant `/app/send` interstitial.
@@ -245,6 +272,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
         options.agreementCorpusSource,
       );
       if (!minted.ok) return { ok: false, failure: minted.failure };
+      await maybePostReviewSentAfterReviewFirstHandoff(id, options.draft, options.logSource);
       markSimpleFlowSent(id);
       emitActionCompleted("send", { agreementId: id });
       void options.navigate(`/app/done/${encodeURIComponent(id)}`);
