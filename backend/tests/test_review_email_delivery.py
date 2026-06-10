@@ -150,6 +150,52 @@ def test_missing_email_config_does_not_fail_review_sent(monkeypatch: pytest.Monk
     mock_client.post.assert_not_called()
 
 
+def test_paid_pro_corpus_persist_then_review_sent_still_sends_emails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Paid Pro: token mint corpus persist sets review_sent_at before review-sent; emails still send once."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-review-email-paid-pro")
+    monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "manual_and_email")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
+    monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
+
+    mock_client = _mock_resend_success()
+    client = TestClient(app)
+    aid = _create_agreement_with_reviewers(client)
+    final_corpus = "PAID_PRO_REVIEW_CORPUS\n" + ("review body text " * 40)
+
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG_H,
+        json={
+            "mode": "review",
+            "role": "reviewer",
+            "recipient_party_id": "p_r1",
+            "review_first_document_text": final_corpus,
+            "review_first_document_source": "unit_test_paid_pro",
+        },
+    )
+    assert mint.status_code == 200
+
+    got = client.get(f"/api/agreements/{aid}", headers=_ORG_H)
+    assert got.status_code == 200
+    draft = got.json()["draft"]
+    assert draft.get("review_sent_at")
+
+    with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+        res = client.post(f"/api/agreements/{aid}/review-sent", headers=_ORG_H, json={})
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ok") is True
+    assert mock_client.post.call_count == 2
+    assert body["draft"].get("review_invite_emails_sent_at")
+
+
 def test_duplicate_review_sent_does_not_resend_emails(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))

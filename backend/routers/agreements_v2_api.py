@@ -563,6 +563,8 @@ class AgreementDraft(AgreementDraftCreate):
     versions: List[VersionSnapshot] = Field(default_factory=list)
     audit_log: List[AuditEvent] = Field(default_factory=list)
     review_sent_at: Optional[str] = None
+    """Set when review invite Resend delivery orchestration completed (idempotent email guard)."""
+    review_invite_emails_sent_at: Optional[str] = None
     workspace_archived_at: Optional[str] = None
     workspace_folder_id: Optional[str] = None
     workspace_tags: List[str] = Field(default_factory=list)
@@ -5872,7 +5874,7 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
         raise HTTPException(status_code=403, detail="verifier_only")
     _owner_mutation_guards(request, agreement_id, surface="review_sent")
     draft = _load_or_404(agreement_id)
-    already_review_sent = bool((draft.review_sent_at or "").strip())
+    invite_emails_already_sent = bool((draft.review_invite_emails_sent_at or "").strip())
     now = _utc_now_iso()
     next_data = draft.model_dump()
     next_data["review_sent_at"] = now
@@ -5902,12 +5904,24 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
     try:
         from backend.services.email.review_delivery import maybe_send_review_invites_after_review_sent
 
-        if not already_review_sent:
-            maybe_send_review_invites_after_review_sent(
+        if invite_emails_already_sent:
+            log.info(
+                "[review-email-delivery] skipped agreement_id=%s org_id=%s skip_reason=invite_emails_already_sent",
+                agreement_id,
+                resolve_subject_from_request(request),
+            )
+        else:
+            delivery_marker = maybe_send_review_invites_after_review_sent(
                 agreement_id=agreement_id,
                 draft=next_draft.model_dump(mode="json"),
                 org_id=resolve_subject_from_request(request),
             )
+            if delivery_marker:
+                marked = next_draft.model_dump()
+                marked["review_invite_emails_sent_at"] = delivery_marker
+                marked["updated_at"] = _utc_now_iso()
+                next_draft = AgreementDraft.model_validate(marked)
+                _save_draft_sync(next_draft.model_dump(), request)
     except Exception:
         pass
     return {"ok": True, "draft": next_draft.model_dump()}

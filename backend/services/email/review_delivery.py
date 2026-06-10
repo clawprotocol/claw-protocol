@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 from urllib.parse import quote
 
@@ -42,11 +43,14 @@ def maybe_send_review_invites_after_review_sent(
     agreement_id: str,
     draft: Dict[str, Any],
     org_id: str | None = None,
-) -> None:
+) -> str | None:
     """
     Send review invites when delivery mode allows and Resend is configured.
 
     Never raises — failures are logged only.
+
+    Returns an ISO timestamp to persist on ``review_invite_emails_sent_at`` when at least one
+    Resend send was attempted (idempotent guard for duplicate ``review-sent`` calls).
     """
     aid = (agreement_id or "").strip()
     oid = (org_id or "").strip() or None
@@ -76,7 +80,7 @@ def maybe_send_review_invites_after_review_sent(
             oid or "",
             mode,
         )
-        return
+        return None
 
     if not configured:
         _log.warning(
@@ -90,7 +94,7 @@ def maybe_send_review_invites_after_review_sent(
             email_from_present,
             origin_present,
         )
-        return
+        return None
 
     origin = app_public_origin()
     if not origin:
@@ -102,7 +106,7 @@ def maybe_send_review_invites_after_review_sent(
             oid or "",
             mode,
         )
-        return
+        return None
 
     targets = _review_invite_targets_from_draft(draft)
     recipient_row_count = len(targets)
@@ -114,7 +118,7 @@ def maybe_send_review_invites_after_review_sent(
             oid or "",
             mode,
         )
-        return
+        return None
 
     try:
         secret = resolve_signing_token_secret_raw().encode("utf-8")
@@ -127,7 +131,7 @@ def maybe_send_review_invites_after_review_sent(
             mode,
             recipient_row_count,
         )
-        return
+        return None
 
     lock = read_signing_lock(agreement_id)
     locked_version_id = str((lock or {}).get("locked_version_id") or "")
@@ -188,6 +192,9 @@ def maybe_send_review_invites_after_review_sent(
         sent,
         failed,
     )
+    if send_attempt_count < 1:
+        return None
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _review_invite_targets_from_draft(d: Dict[str, Any]) -> List[ReviewInviteTarget]:
