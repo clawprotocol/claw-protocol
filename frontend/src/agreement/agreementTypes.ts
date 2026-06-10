@@ -31,6 +31,8 @@ export type AgreementDraft = {
   versions: Array<{ version: number; created_at: string; note?: string | null }>;
   audit_log: Array<{ event_type: string; at: string; field?: string | null; value?: unknown }>;
   review_sent_at?: string | null;
+  /** ISO timestamp when review invite emails were successfully sent (idempotency guard). */
+  review_invite_emails_sent_at?: string | null;
   workspace_archived_at?: string | null;
   /** Proof-layer folder id (flat folders); optional manual filing. */
   workspace_folder_id?: string | null;

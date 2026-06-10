@@ -1,5 +1,5 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import { postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
+import { fetchAgreementDraft, postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
 import {
   assertGuidedProVs01BridgeCorpusReady,
   logGuidedProVs01BridgeCorpusBlocked,
@@ -186,31 +186,60 @@ async function mintAndPersistReviewLinksForHandoff(
   return { ok: true };
 }
 
-/** Notify server that review was sent (sets review_sent_at, webhooks, optional Resend). Skips if already sent. */
+export type ReviewSentHandoffResult = {
+  attempted: boolean;
+  ok: boolean;
+  inviteEmailsSent: boolean;
+  skipped?: "invite_emails_already_sent";
+};
+
+export function reviewInviteEmailsAlreadySent(draft: AgreementDraft | null | undefined): boolean {
+  return Boolean(String(draft?.review_invite_emails_sent_at ?? "").trim());
+}
+
+/** Notify server that review was sent (sets review_sent_at, webhooks, optional Resend). */
 export async function maybePostReviewSentAfterReviewFirstHandoff(
   agreementId: string,
   draft: AgreementDraft,
   logSource?: string,
-): Promise<boolean> {
+): Promise<ReviewSentHandoffResult> {
   const id = agreementId.trim();
-  if (!id) return false;
-  if ((draft.review_sent_at || "").trim()) {
+  if (!id) return { attempted: false, ok: false, inviteEmailsSent: false };
+
+  const { ok: fetchOk, draft: serverDraft } = await fetchAgreementDraft(id);
+  const draftForCheck = fetchOk && serverDraft ? serverDraft : draft;
+
+  if (reviewInviteEmailsAlreadySent(draftForCheck)) {
     // eslint-disable-next-line no-console
     console.info("[review-first-review-sent-skipped]", {
       agreementId: id,
-      reason: "already_sent",
+      reason: "invite_emails_already_sent",
+      reviewSentAtPresent: Boolean((draftForCheck.review_sent_at || "").trim()),
       source: logSource ?? null,
     });
-    return true;
+    return {
+      attempted: false,
+      ok: true,
+      inviteEmailsSent: true,
+      skipped: "invite_emails_already_sent",
+    };
   }
-  const ok = await postReviewSentServer(id);
+
+  // Mint may have set review_sent_at during corpus persist; still POST so email delivery runs once.
+  const result = await postReviewSentServer(id);
   // eslint-disable-next-line no-console
   console.info("[review-first-review-sent]", {
     agreementId: id,
-    ok,
+    ok: result.ok,
+    inviteEmailsSent: result.inviteEmailsSent,
+    reviewSentAtPresent: Boolean((draftForCheck.review_sent_at || "").trim()),
     source: logSource ?? null,
   });
-  return ok;
+  return {
+    attempted: true,
+    ok: result.ok,
+    inviteEmailsSent: result.inviteEmailsSent,
+  };
 }
 
 /**
@@ -296,20 +325,30 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
           source: options.logSource,
         });
       }
-      const reviewSentOk = await maybePostReviewSentAfterReviewFirstHandoff(
+      const reviewSent = await maybePostReviewSentAfterReviewFirstHandoff(
         id,
         rolePersist.draft,
         options.logSource,
       );
       markSimpleFlowSent(id);
       emitActionCompleted("send", { agreementId: id });
-      const route = resolveOwnerPostReviewSendRoute(id, { reviewSentOk });
+      const deliveryCompleted =
+        reviewSent.inviteEmailsSent ||
+        reviewSent.skipped === "invite_emails_already_sent";
+      const route = resolveOwnerPostReviewSendRoute(id, {
+        reviewSentOk: reviewSent.ok && deliveryCompleted,
+        reviewEmailDeliveryAttempted:
+          reviewSent.attempted || reviewSent.skipped === "invite_emails_already_sent",
+        reviewInviteEmailsSent: deliveryCompleted,
+      });
       logReviewFirstOwnerRouteResolved({
         agreementId: id,
         destination: route.destination,
         reason: route.reason,
         deliveryMode: route.deliveryMode,
-        reviewSentOk,
+        reviewSentOk: reviewSent.ok,
+        reviewEmailDeliveryAttempted: reviewSent.attempted,
+        reviewInviteEmailsSent: reviewSent.inviteEmailsSent,
       });
       void options.navigate(route.path);
       return { ok: true, destination: route.destination, ownerRoutePath: route.path };

@@ -14,7 +14,8 @@ export type OwnerPostReviewRouteReason =
   | "explicit_manual_mode"
   | "delivery_mode_email"
   | "review_sent_ok"
-  | "review_sent_failed_fallback";
+  | "review_sent_failed_fallback"
+  | "review_email_delivery_incomplete";
 
 export type OwnerPostReviewDestination = "dashboard" | "done";
 
@@ -29,6 +30,10 @@ export type OwnerPostReviewRouteDecision = {
 export type ResolveOwnerPostReviewSendPathOptions = {
   mode?: ReviewDeliveryMode;
   reviewSentOk?: boolean;
+  /** POST /review-sent was invoked (or invites were already sent on a prior attempt). */
+  reviewEmailDeliveryAttempted?: boolean;
+  /** Server persisted review_invite_emails_sent_at after a successful delivery attempt. */
+  reviewInviteEmailsSent?: boolean;
 };
 
 export function resolveOwnerPostReviewSendRoute(
@@ -37,6 +42,8 @@ export function resolveOwnerPostReviewSendRoute(
 ): OwnerPostReviewRouteDecision {
   const mode = options?.mode ?? readReviewDeliveryMode();
   const reviewSentOk = options?.reviewSentOk === true;
+  const deliveryAttempted = options?.reviewEmailDeliveryAttempted === true;
+  const inviteEmailsSent = options?.reviewInviteEmailsSent === true;
   const id = agreementId.trim();
   const donePath = `/app/done/${encodeURIComponent(id)}`;
 
@@ -50,6 +57,24 @@ export function resolveOwnerPostReviewSendRoute(
     };
   }
   if (reviewDeliveryModeAllowsEmailSend(mode)) {
+    if (!deliveryAttempted) {
+      return {
+        path: donePath,
+        destination: "done",
+        reason: "review_sent_failed_fallback",
+        deliveryMode: mode,
+        reviewSentOk: false,
+      };
+    }
+    if (!inviteEmailsSent) {
+      return {
+        path: donePath,
+        destination: "done",
+        reason: "review_email_delivery_incomplete",
+        deliveryMode: mode,
+        reviewSentOk: false,
+      };
+    }
     return {
       path: "/app",
       destination: "dashboard",
@@ -99,6 +124,8 @@ export function logReviewFirstOwnerRouteResolved(payload: {
   reason: OwnerPostReviewRouteReason;
   deliveryMode: ReviewDeliveryMode;
   reviewSentOk: boolean;
+  reviewEmailDeliveryAttempted?: boolean;
+  reviewInviteEmailsSent?: boolean;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

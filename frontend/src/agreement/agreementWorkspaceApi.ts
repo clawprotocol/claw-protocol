@@ -83,15 +83,25 @@ export async function fetchWorkspaceIndex(): Promise<WorkspaceIndexResult> {
   }
 }
 
-export async function postReviewSentServer(agreementId: string): Promise<boolean> {
+export type PostReviewSentServerResult = {
+  ok: boolean;
+  inviteEmailsSent: boolean;
+};
+
+export async function postReviewSentServer(agreementId: string): Promise<PostReviewSentServerResult> {
   try {
     const res = await fetch(
       `${base()}/api/agreements/${encodeURIComponent(agreementId)}/review-sent`,
-      { method: "POST", headers: clawAgreementHeaders() }
+      { method: "POST", headers: clawAgreementHeaders() },
     );
-    return res.ok;
+    if (!res.ok) return { ok: false, inviteEmailsSent: false };
+    const j = (await res.json().catch(() => ({}))) as {
+      draft?: { review_invite_emails_sent_at?: string | null };
+    };
+    const marker = String(j?.draft?.review_invite_emails_sent_at ?? "").trim();
+    return { ok: true, inviteEmailsSent: Boolean(marker) };
   } catch {
-    return false;
+    return { ok: false, inviteEmailsSent: false };
   }
 }
 

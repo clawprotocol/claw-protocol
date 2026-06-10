@@ -65,7 +65,8 @@ def maybe_send_review_invites_after_review_sent(
 
     _log.info(
         "[review-email-delivery] start agreement_id=%s org_id=%s delivery_mode=%s "
-        "resend_api_key_present=%s email_from_present=%s app_public_origin_present=%s email_configured=%s",
+        "resend_api_key_present=%s email_from_present=%s app_public_origin_present=%s email_configured=%s "
+        "review_sent_at_present=%s review_invite_emails_sent_at_present=%s",
         aid,
         oid or "",
         mode,
@@ -73,7 +74,10 @@ def maybe_send_review_invites_after_review_sent(
         email_from_present,
         origin_present,
         configured,
+        bool(str(draft.get("review_sent_at") or "").strip()),
+        bool(str(draft.get("review_invite_emails_sent_at") or "").strip()),
     )
+    _log_party_contact_snapshot(aid, oid, draft)
 
     if mode not in ("email", "manual_and_email"):
         _log.info(
@@ -124,6 +128,14 @@ def maybe_send_review_invites_after_review_sent(
     targets = _live_resend_review_invite_targets_from_draft(draft)
     recipient_row_count = len(targets)
     _log_review_invite_target_policy(aid, oid, draft, targets)
+    _log.info(
+        "[review-email-delivery] recipients agreement_id=%s org_id=%s recipient_count=%s "
+        "recipient_emails_redacted=%s",
+        aid,
+        oid or "",
+        recipient_row_count,
+        _redact_recipient_emails(targets),
+    )
     if not targets:
         parties = draft.get("parties") or []
         party_count = len(parties) if isinstance(parties, list) else 0
@@ -132,15 +144,16 @@ def maybe_send_review_invites_after_review_sent(
             for p in parties
             if isinstance(p, dict) and str(p.get("email") or "").strip()
         )
-        _log.info(
+        _log.warning(
             "[review-email-delivery] skipped agreement_id=%s org_id=%s skip_reason=no_eligible_recipients "
             "delivery_mode=%s party_count=%s party_email_count=%s recipient_row_count=0 "
-            "send_attempt_count=0 sent_count=0 failed_count=0",
+            "party_snapshot=%s send_attempt_count=0 sent_count=0 failed_count=0",
             aid,
             oid or "",
             mode,
             party_count,
             party_email_count,
+            _party_contact_snapshot_for_log(parties),
         )
         return None
 
@@ -207,11 +220,12 @@ def maybe_send_review_invites_after_review_sent(
 
     _log.info(
         "[review-email-delivery] complete agreement_id=%s org_id=%s delivery_mode=%s "
-        "recipient_row_count=%s send_attempt_count=%s sent_count=%s failed_count=%s",
+        "recipient_count=%s recipient_emails_redacted=%s send_attempt_count=%s sent_count=%s failed_count=%s",
         aid,
         oid or "",
         mode,
         recipient_row_count,
+        _redact_recipient_emails(targets),
         send_attempt_count,
         sent,
         failed,
@@ -538,3 +552,36 @@ def _redact_to(email: str) -> str:
     if not local:
         return f"***@{domain}"
     return f"{local[0]}***@{domain}"
+
+
+def _redact_recipient_emails(targets: List[ReviewInviteTarget]) -> str:
+    if not targets:
+        return "none"
+    return ",".join(_redact_to(t.to) for t in targets)
+
+
+def _party_contact_snapshot_for_log(parties: Any) -> str:
+    if not isinstance(parties, list):
+        return "none"
+    parts: List[str] = []
+    for i, party in enumerate(parties):
+        if not isinstance(party, dict):
+            continue
+        role = str(party.get("role") or "").strip() or "party"
+        email = str(party.get("email") or "").strip()
+        parts.append(
+            f"i={i}:role={role}:email_present={bool(email)}:email={_redact_to(email) if email else 'none'}"
+        )
+    return ";".join(parts) if parts else "none"
+
+
+def _log_party_contact_snapshot(agreement_id: str, org_id: str | None, draft: Dict[str, Any]) -> None:
+    parties = draft.get("parties") or []
+    party_count = len(parties) if isinstance(parties, list) else 0
+    _log.info(
+        "[review-email-delivery] party_snapshot agreement_id=%s org_id=%s party_count=%s snapshot=%s",
+        agreement_id,
+        org_id or "",
+        party_count,
+        _party_contact_snapshot_for_log(parties),
+    )

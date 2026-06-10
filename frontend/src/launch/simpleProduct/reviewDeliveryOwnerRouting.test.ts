@@ -12,13 +12,42 @@ describe("reviewDeliveryOwnerRouting", () => {
     vi.unstubAllEnvs();
   });
 
-  it("routes owner to dashboard when email delivery mode is active", () => {
+  it("routes owner to dashboard when email delivery mode is active and invites sent", () => {
     expect(ownerPostReviewSendUsesDashboard("manual_and_email")).toBe(true);
-    expect(resolveOwnerPostReviewSendPath("ag_email_1", "manual_and_email")).toBe("/app");
-    expect(resolveOwnerPostReviewSendPath("ag_email_1", "email")).toBe("/app");
-    expect(resolveOwnerPostReviewSendRoute("ag_email_1", { mode: "email", reviewSentOk: false }).reason).toBe(
-      "delivery_mode_email",
-    );
+    expect(
+      resolveOwnerPostReviewSendPath("ag_email_1", {
+        mode: "manual_and_email",
+        reviewEmailDeliveryAttempted: true,
+        reviewInviteEmailsSent: true,
+      }),
+    ).toBe("/app");
+    expect(
+      resolveOwnerPostReviewSendRoute("ag_email_1", {
+        mode: "email",
+        reviewEmailDeliveryAttempted: true,
+        reviewInviteEmailsSent: true,
+      }).reason,
+    ).toBe("delivery_mode_email");
+  });
+
+  it("routes to done when email mode delivery was not attempted", () => {
+    const route = resolveOwnerPostReviewSendRoute("ag_email_skip", {
+      mode: "email",
+      reviewEmailDeliveryAttempted: false,
+      reviewInviteEmailsSent: false,
+    });
+    expect(route.path).toBe("/app/done/ag_email_skip");
+    expect(route.reason).toBe("review_sent_failed_fallback");
+  });
+
+  it("routes to done when email mode delivery attempted but no invite marker", () => {
+    const route = resolveOwnerPostReviewSendRoute("ag_email_incomplete", {
+      mode: "email",
+      reviewEmailDeliveryAttempted: true,
+      reviewInviteEmailsSent: false,
+    });
+    expect(route.path).toBe("/app/done/ag_email_incomplete");
+    expect(route.reason).toBe("review_email_delivery_incomplete");
   });
 
   it("routes owner to review link ready page when manual mode is explicit", () => {

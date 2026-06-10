@@ -787,6 +787,78 @@ def test_owner_at_index_1_counterparty_invited_integration(
     assert res.json()["draft"].get("review_invite_emails_sent_at")
 
 
+def test_mint_preset_review_sent_at_still_requires_review_sent_for_email_delivery(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Regression: corpus mint sets review_sent_at early; review-sent must still run email delivery."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-review-email-paid-pro")
+    monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "manual_and_email")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
+    monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
+
+    mock_client = _mock_resend_success()
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Mint preset review_sent_at",
+            "jurisdiction": "TX",
+            "parties": [
+                {
+                    "id": "p_client",
+                    "name": "Blue Canyon Analytics LLC",
+                    "role": "owner",
+                    "email": "owner-user@example.com",
+                },
+                {
+                    "id": "p_provider",
+                    "name": "Iron Vale Systems Inc.",
+                    "role": "reviewer",
+                    "email": "external-reviewer@example.com",
+                },
+            ],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    final_corpus = "PRESET_REVIEW_SENT_AT_CORPUS\n" + ("review body text " * 40)
+
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG_H,
+        json={
+            "mode": "review",
+            "role": "reviewer",
+            "recipient_party_id": "p_provider",
+            "review_first_document_text": final_corpus,
+            "review_first_document_source": "unit_test_preset_review_sent_at",
+        },
+    )
+    assert mint.status_code == 200
+    got = client.get(f"/api/agreements/{aid}", headers=_ORG_H)
+    assert got.status_code == 200
+    assert got.json()["draft"].get("review_sent_at")
+    assert not got.json()["draft"].get("review_invite_emails_sent_at")
+
+    with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+        res = client.post(f"/api/agreements/{aid}/review-sent", headers=_ORG_H, json={})
+
+    assert res.status_code == 200
+    assert mock_client.post.call_count == 1
+    assert mock_client.post.call_args_list[0][1]["json"]["to"] == ["external-reviewer@example.com"]
+    assert res.json()["draft"].get("review_invite_emails_sent_at")
+
+
 def test_owner_in_middle_of_four_party_list_integration(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

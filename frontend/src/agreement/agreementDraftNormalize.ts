@@ -156,6 +156,10 @@ export function normalizeAgreementDraftFromApi(
     audit_log: normAudit,
     review_sent_at:
       r.review_sent_at == null || r.review_sent_at === "" ? null : coerceNullStr(r.review_sent_at),
+    review_invite_emails_sent_at:
+      r.review_invite_emails_sent_at == null || r.review_invite_emails_sent_at === ""
+        ? null
+        : coerceNullStr(r.review_invite_emails_sent_at),
     workspace_archived_at:
       r.workspace_archived_at == null || r.workspace_archived_at === ""
         ? null

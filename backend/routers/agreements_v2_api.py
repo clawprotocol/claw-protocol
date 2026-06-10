@@ -5875,6 +5875,14 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
     _owner_mutation_guards(request, agreement_id, surface="review_sent")
     draft = _load_or_404(agreement_id)
     invite_emails_already_sent = bool((draft.review_invite_emails_sent_at or "").strip())
+    log.info(
+        "[review-sent] start agreement_id=%s org_id=%s review_sent_at_present=%s "
+        "review_invite_emails_sent_at_present=%s",
+        agreement_id,
+        resolve_subject_from_request(request),
+        bool((draft.review_sent_at or "").strip()),
+        invite_emails_already_sent,
+    )
     now = _utc_now_iso()
     next_data = draft.model_dump()
     next_data["review_sent_at"] = now

@@ -105,5 +105,7 @@ export async function persistReviewEmailPartyRolesOnServer(
 
   const ok = await patchAgreementField(id, "parties", parties);
   if (!ok) return { ok: false, draft: nextDraft, rolesPersisted: false };
-  return { ok: true, draft: nextDraft, rolesPersisted: true };
+  const refreshed = await fetchAgreementDraft(id);
+  const persistedDraft = refreshed.ok && refreshed.draft ? refreshed.draft : nextDraft;
+  return { ok: true, draft: persistedDraft, rolesPersisted: true };
 }

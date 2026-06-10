@@ -10,8 +10,11 @@ import {
 } from "./reviewFirstSendSurface";
 import { markSimpleFlowSent } from "../simpleFlowSent";
 
+const reviewSentSuccess = { ok: true, inviteEmailsSent: true };
+const reviewSentNoInvite = { ok: true, inviteEmailsSent: false };
+
 vi.mock("../../agreement/agreementWorkspaceApi", () => ({
-  postReviewSentServer: vi.fn(async () => true),
+  postReviewSentServer: vi.fn(async () => reviewSentSuccess),
   patchAgreementField: vi.fn(async () => true),
   fetchAgreementDraft: vi.fn(async () => ({ ok: true, draft: null })),
 }));
@@ -80,7 +83,7 @@ describe("paid Pro review-first review-sent handoff", () => {
     vi.mocked(peekReviewFirstMintInFlight).mockReturnValue(false);
     vi.mocked(reviewLinkMintHasUsableUrls).mockReturnValue(true);
     vi.mocked(resolveReviewFirstMintPolicyGate).mockResolvedValue({ ok: true, policy: null });
-    vi.mocked(postReviewSentServer).mockResolvedValue(true);
+    vi.mocked(postReviewSentServer).mockResolvedValue(reviewSentSuccess);
     vi.mocked(fetchAgreementDraft).mockResolvedValue({ ok: true, draft: null });
   });
 
@@ -124,7 +127,7 @@ describe("paid Pro review-first review-sent handoff", () => {
     expect(navigate).toHaveBeenCalledWith("/app/done/ag_review_1");
   });
 
-  it("routes owner to dashboard when email delivery mode env is active", async () => {
+  it("routes owner to dashboard when email delivery mode env is active and invite sent", async () => {
     vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual_and_email");
     const navigate = vi.fn();
     const result = await executePaidProPostRecipientSetupHandoff({
@@ -139,9 +142,30 @@ describe("paid Pro review-first review-sent handoff", () => {
     expect(navigate).toHaveBeenCalledWith("/app");
   });
 
+  it("routes to done in email mode when review-sent ok but no invite marker", async () => {
+    vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual_and_email");
+    vi.mocked(postReviewSentServer).mockResolvedValue(reviewSentNoInvite);
+    const navigate = vi.fn();
+
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate,
+      agreementId: "ag_review_no_invite",
+      draft: baseDraft,
+      premiumSendIntent: "review",
+      logSource: "simple_pro_send_for_review",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.destination).toBe("done");
+      expect(result.ownerRoutePath).toBe("/app/done/ag_review_no_invite");
+    }
+    expect(navigate).toHaveBeenCalledWith("/app/done/ag_review_no_invite");
+  });
+
   it("review-sent failure routes to done when env is unset", async () => {
     vi.unstubAllEnvs();
-    vi.mocked(postReviewSentServer).mockResolvedValue(false);
+    vi.mocked(postReviewSentServer).mockResolvedValue({ ok: false, inviteEmailsSent: false });
     const navigate = vi.fn();
 
     const result = await executePaidProPostRecipientSetupHandoff({
@@ -157,21 +181,45 @@ describe("paid Pro review-first review-sent handoff", () => {
     expect(navigate).toHaveBeenCalledWith("/app/done/ag_review_fail_sent");
   });
 
-  it("maybePostReviewSentAfterReviewFirstHandoff skips when review_sent_at already set", async () => {
-    const ok = await maybePostReviewSentAfterReviewFirstHandoff(
+  it("maybePostReviewSentAfterReviewFirstHandoff still posts when mint preset review_sent_at", async () => {
+    vi.mocked(fetchAgreementDraft).mockResolvedValue({
+      ok: true,
+      draft: {
+        ...baseDraft,
+        review_sent_at: "2026-06-01T00:00:00.000Z",
+      },
+    });
+    const result = await maybePostReviewSentAfterReviewFirstHandoff(
       "ag_review_2",
       { ...baseDraft, review_sent_at: "2026-06-01T00:00:00.000Z" },
       "test",
     );
+    expect(postReviewSentServer).toHaveBeenCalledTimes(1);
+    expect(result.attempted).toBe(true);
+    expect(result.ok).toBe(true);
+  });
+
+  it("maybePostReviewSentAfterReviewFirstHandoff skips when invite emails already sent", async () => {
+    vi.mocked(fetchAgreementDraft).mockResolvedValue({
+      ok: true,
+      draft: {
+        ...baseDraft,
+        review_sent_at: "2026-06-01T00:00:00.000Z",
+        review_invite_emails_sent_at: "2026-06-02T00:00:00.000Z",
+      },
+    });
+    const result = await maybePostReviewSentAfterReviewFirstHandoff("ag_review_2", baseDraft, "test");
     expect(postReviewSentServer).not.toHaveBeenCalled();
-    expect(ok).toBe(true);
+    expect(result.skipped).toBe("invite_emails_already_sent");
+    expect(result.inviteEmailsSent).toBe(true);
   });
 
   it("maybePostReviewSentAfterReviewFirstHandoff posts when review_sent_at is unset", async () => {
-    const ok = await maybePostReviewSentAfterReviewFirstHandoff("ag_review_3", baseDraft, "test");
+    const result = await maybePostReviewSentAfterReviewFirstHandoff("ag_review_3", baseDraft, "test");
     expect(postReviewSentServer).toHaveBeenCalledTimes(1);
     expect(postReviewSentServer).toHaveBeenCalledWith("ag_review_3");
-    expect(ok).toBe(true);
+    expect(result.attempted).toBe(true);
+    expect(result.ok).toBe(true);
   });
 
   it("does not call postReviewSentServer when mint fails", async () => {
@@ -212,6 +260,7 @@ describe("paid Pro review-first review-sent handoff", () => {
       ok: true,
       draft: {
         ...paidProDraft,
+        review_sent_at: "2026-06-01T00:00:00.000Z",
         parties: [
           {
             id: "p_client",
