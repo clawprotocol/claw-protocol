@@ -25,8 +25,11 @@ from backend.security.recipient_access_token import RecipientRole, mint_recipien
 from backend.services.agreement_signing_lock_store import read_signing_lock
 from backend.services.email.delivery import send_email_non_fatal
 from backend.services.email.templates.review_invite import build_review_invite_email
+from backend.services.email.templates.review_owner_notification import build_review_owner_notification_email
 
 _log = logging.getLogger(__name__)
+
+OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT = "owner_review_approval_notified"
 
 
 @dataclass(frozen=True)
@@ -206,6 +209,194 @@ def maybe_send_review_invites_after_review_sent(
     if send_attempt_count < 1:
         return None
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def maybe_notify_owner_after_reviewer_approval(
+    *,
+    agreement_id: str,
+    draft: Dict[str, Any],
+    approver_participant_id: str | None,
+    approver_display_name: str | None,
+    org_id: str | None = None,
+) -> Dict[str, Any] | None:
+    """
+    Notify the agreement owner that an external reviewer approved.
+
+    Never raises. Returns an audit event dict to append when a send was attempted;
+    returns None when skipped or when email delivery is not configured.
+    """
+    aid = (agreement_id or "").strip()
+    oid = (org_id or "").strip() or None
+    participant_id = (approver_participant_id or "").strip()
+    reviewer_name = (approver_display_name or "").strip()
+
+    _log.info(
+        "[review-owner-notification] start agreement_id=%s org_id=%s approver_participant_id=%s",
+        aid,
+        oid or "",
+        participant_id or "none",
+    )
+
+    if not participant_id:
+        _log.info(
+            "[review-owner-notification] skipped agreement_id=%s org_id=%s skip_reason=participant_id_missing sent_count=0",
+            aid,
+            oid or "",
+        )
+        return None
+
+    audit_log = draft.get("audit_log") or []
+    if _owner_notification_already_sent(audit_log, participant_id):
+        _log.info(
+            "[review-owner-notification] skipped agreement_id=%s org_id=%s skip_reason=already_notified "
+            "participant_id=%s sent_count=0",
+            aid,
+            oid or "",
+            participant_id,
+        )
+        return None
+
+    if not email_configured():
+        _log.info(
+            "[review-owner-notification] skipped agreement_id=%s org_id=%s skip_reason=email_not_configured sent_count=0",
+            aid,
+            oid or "",
+        )
+        return None
+
+    origin = app_public_origin()
+    if not origin:
+        _log.info(
+            "[review-owner-notification] skipped agreement_id=%s org_id=%s skip_reason=app_public_origin_missing sent_count=0",
+            aid,
+            oid or "",
+        )
+        return None
+
+    owner_party = _owner_party_from_draft(draft)
+    if not owner_party:
+        _log.info(
+            "[review-owner-notification] skipped agreement_id=%s org_id=%s skip_reason=owner_party_missing sent_count=0",
+            aid,
+            oid or "",
+        )
+        return None
+
+    owner_email = str(owner_party.get("email") or "").strip().lower()
+    owner_name = str(owner_party.get("name") or "").strip()
+    if not owner_email or "@" not in owner_email:
+        _log.info(
+            "[review-owner-notification] skipped agreement_id=%s org_id=%s skip_reason=owner_email_missing sent_count=0",
+            aid,
+            oid or "",
+        )
+        return None
+
+    approver_party = _party_by_id(draft, participant_id)
+    if approver_party and _normalize_workflow_role(str(approver_party.get("role") or "")) == "owner":
+        _log.info(
+            "[review-owner-notification] skipped agreement_id=%s org_id=%s skip_reason=approver_is_owner sent_count=0",
+            aid,
+            oid or "",
+        )
+        return None
+
+    if not reviewer_name and approver_party:
+        reviewer_name = str(approver_party.get("name") or "").strip()
+    if not reviewer_name:
+        reviewer_name = "A reviewer"
+
+    title = str(draft.get("title") or "").strip() or "Untitled agreement"
+    dashboard_url = _build_owner_dashboard_url(origin, aid)
+    email = build_review_owner_notification_email(
+        owner_name=owner_name,
+        agreement_title=title,
+        reviewer_display_name=reviewer_name,
+        dashboard_url=dashboard_url,
+    )
+    result = send_email_non_fatal(
+        to=owner_email,
+        subject=email.subject,
+        html=email.html,
+        text=email.text,
+        context="review_owner_notification",
+    )
+    sent_count = 1 if result.ok else 0
+    _log.info(
+        "[review-owner-notification] complete agreement_id=%s org_id=%s participant_id=%s "
+        "owner_email_present=true sent_count=%s failed=%s",
+        aid,
+        oid or "",
+        participant_id,
+        sent_count,
+        not result.ok,
+    )
+    if not result.ok:
+        return None
+
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return {
+        "event_type": OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT,
+        "at": now,
+        "field": "owner_notification",
+        "value": {
+            "participant_id": participant_id,
+            "approver_display_name": reviewer_name,
+            "owner_email_redacted": _redact_to(owner_email),
+        },
+    }
+
+
+def _owner_notification_already_sent(audit_log: Any, participant_id: str) -> bool:
+    if not isinstance(audit_log, list):
+        return False
+    pid = (participant_id or "").strip()
+    if not pid:
+        return False
+    for event in audit_log:
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("event_type") or "") != OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT:
+            continue
+        value = event.get("value")
+        if isinstance(value, dict) and str(value.get("participant_id") or "").strip() == pid:
+            return True
+    return False
+
+
+def _owner_party_from_draft(d: Dict[str, Any]) -> Dict[str, Any] | None:
+    parties = d.get("parties") or []
+    if not isinstance(parties, list):
+        return None
+    client_fallback: Dict[str, Any] | None = None
+    for party in parties:
+        if not isinstance(party, dict):
+            continue
+        raw_role = str(party.get("role") or "").strip().lower()
+        if _normalize_workflow_role(raw_role) == "owner":
+            return party
+        if raw_role == "client" and client_fallback is None:
+            client_fallback = party
+    return client_fallback
+
+
+def _party_by_id(d: Dict[str, Any], participant_id: str) -> Dict[str, Any] | None:
+    parties = d.get("parties") or []
+    if not isinstance(parties, list):
+        return None
+    pid = (participant_id or "").strip()
+    for party in parties:
+        if not isinstance(party, dict):
+            continue
+        if str(party.get("id") or "").strip() == pid:
+            return party
+    return None
+
+
+def _build_owner_dashboard_url(origin: str, agreement_id: str) -> str:
+    base = origin.rstrip("/")
+    aid = quote(agreement_id.strip(), safe="")
+    return f"{base}/app?focus={aid}"
 
 
 def _draft_has_explicit_owner_party(d: Dict[str, Any]) -> bool:
