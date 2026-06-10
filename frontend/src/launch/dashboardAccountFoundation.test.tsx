@@ -75,10 +75,10 @@ describe("dashboard account foundation", () => {
     });
     render(<AppDashboard />);
     await waitFor(() => {
-      expect(screen.getByTestId("creator-dashboard-empty")).toBeTruthy();
+      expect(screen.getByTestId("dashboard-first-user-onboarding")).toBeTruthy();
     });
     expect(screen.getByTestId("dashboard-create-first-agreement").textContent).toContain(
-      "Create new agreement",
+      "Create first agreement",
     );
   });
 
@@ -288,8 +288,9 @@ describe("dashboard account foundation", () => {
     });
     render(<AppDashboard />);
     await waitFor(() => {
-      expect(screen.getByText("Good Agreement")).toBeTruthy();
+      expect(screen.getByTestId("lawdog-agreement-row-ag_good")).toBeTruthy();
     });
+    expect(screen.getAllByText("Good Agreement").length).toBeGreaterThan(0);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -339,12 +340,12 @@ describe("dashboard account foundation", () => {
       });
     const { unmount } = render(<AppDashboard />);
     await waitFor(() => {
-      expect(screen.getByText("Agreement #1")).toBeTruthy();
+      expect(screen.getAllByText("Agreement #1").length).toBeGreaterThan(0);
     });
     unmount();
     render(<AppDashboard />);
     await waitFor(() => {
-      expect(screen.getByText("Agreement #1")).toBeTruthy();
+      expect(screen.getAllByText("Agreement #1").length).toBeGreaterThan(0);
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });

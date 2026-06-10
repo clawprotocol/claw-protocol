@@ -3,11 +3,12 @@ import { useLaunchNav } from "./LaunchNavContext";
 
 export type LawdogNavItemId =
   | "dashboard"
+  | "create"
   | "agreements"
   | "signatures"
   | "affiliate"
-  | "billing"
-  | "settings";
+  | "settings"
+  | "billing";
 
 type NavItem = {
   id: LawdogNavItemId;
@@ -18,16 +19,16 @@ type NavItem = {
 
 export const LAWDOG_NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", path: "/app", testId: "lawdog-nav-dashboard" },
+  { id: "create", label: "Create", path: "/app/create", testId: "lawdog-nav-create" },
   { id: "agreements", label: "Agreements", path: "/app/agreements", testId: "lawdog-nav-agreements" },
   { id: "signatures", label: "Signatures", path: "/app/signatures", testId: "lawdog-nav-signatures" },
   { id: "affiliate", label: "Affiliate", path: "/app/affiliate", testId: "lawdog-nav-affiliate" },
-  { id: "billing", label: "Billing", path: "/app/billing", testId: "lawdog-nav-billing" },
-  { id: "settings", label: "Settings", path: "/app/settings", testId: "lawdog-nav-settings" },
 ];
 
 export function resolveLawdogNavActiveId(pathname: string): LawdogNavItemId {
   const p = (pathname || "").replace(/\/$/, "") || "/";
   if (p === "/dashboard" || p === "/app") return "dashboard";
+  if (p.startsWith("/app/create")) return "create";
   if (p.startsWith("/app/agreements")) return "agreements";
   if (p.startsWith("/app/signatures")) return "signatures";
   if (p === "/app/affiliate" || p === "/app/opportunity") return "affiliate";
@@ -66,6 +67,16 @@ export function LawdogProductNav(props: { activeId?: LawdogNavItemId }) {
           </button>
         );
       })}
+      <div className="mt-4 border-t border-slate-800/80 pt-3">
+        <button
+          type="button"
+          className="w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-500 transition-colors hover:bg-slate-900/60 hover:text-slate-300"
+          data-testid="lawdog-nav-settings"
+          onClick={() => navigate("/app/settings")}
+        >
+          Settings
+        </button>
+      </div>
     </nav>
   );
 }

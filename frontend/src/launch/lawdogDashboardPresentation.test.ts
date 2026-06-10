@@ -4,7 +4,6 @@ import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi
 import {
   countLawdogDashboardKpis,
   deriveLawdogProductStatus,
-  LAWDOG_LEGAL_FEES_SAVED_PER_SIGNED_USD,
   LAWDOG_PRODUCT_STATUS_LABEL,
 } from "./lawdogDashboardPresentation";
 import { deriveCreatorDashboardStatus } from "./creatorDashboardPresentation";
@@ -46,18 +45,23 @@ describe("lawdogDashboardPresentation", () => {
     );
   });
 
-  it("computes dashboard KPI totals", () => {
+  it("computes actionable dashboard KPI totals", () => {
     const rows = [
       row({ id: "d1" }),
       row({ id: "d2", review_sent_at: "2026-01-01T00:00:00Z" }),
-      row({ id: "d3", has_server_signing_lock: true, locked_version_id: "v1" }),
+      row({
+        id: "d3",
+        all_reviewers_approved: true,
+        review_approvals_completed: 2,
+        review_approvals_required: 2,
+      }),
       row({ id: "d4", completed_signed: true }),
     ];
     expect(countLawdogDashboardKpis(rows)).toEqual({
-      agreementsCreated: 4,
-      agreementsSent: 2,
-      agreementsSigned: 1,
-      estimatedLegalFeesSavedUsd: LAWDOG_LEGAL_FEES_SAVED_PER_SIGNED_USD,
+      activeAgreements: 4,
+      awaitingReview: 1,
+      readyForSignature: 1,
+      completedAgreements: 1,
     });
   });
 

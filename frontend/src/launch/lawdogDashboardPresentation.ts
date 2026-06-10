@@ -29,13 +29,17 @@ export const LAWDOG_PRODUCT_STATUS_LABEL: Record<LawdogProductStatus, string> = 
 };
 
 export type LawdogDashboardKpis = {
-  agreementsCreated: number;
-  agreementsSent: number;
-  agreementsSigned: number;
-  estimatedLegalFeesSavedUsd: number;
+  /** Non-archived agreements in the workspace (replaces opaque "created" count). */
+  activeAgreements: number;
+  /** Agreements waiting on external review approvals. */
+  awaitingReview: number;
+  /** Reviews complete; owner can prepare signature links. */
+  readyForSignature: number;
+  /** Fully signed agreements. */
+  completedAgreements: number;
 };
 
-/** Default per-agreement legal fee savings estimate for KPI display. */
+/** @deprecated Legacy KPI — kept for migration references only. */
 export const LAWDOG_LEGAL_FEES_SAVED_PER_SIGNED_USD = 2_500;
 
 export function isAgreementPartiallySignedLocal(agreementId: string): boolean {
@@ -83,20 +87,31 @@ export function resolveLawdogAgreementCreatedAt(row: WorkspaceIndexAgreement): s
 }
 
 export function countLawdogDashboardKpis(rows: readonly WorkspaceIndexAgreement[]): LawdogDashboardKpis {
-  let agreementsSent = 0;
-  let agreementsSigned = 0;
+  let awaitingReview = 0;
+  let readyForSignature = 0;
+  let completedAgreements = 0;
+  let activeAgreements = 0;
+
   for (const row of rows) {
-    const status = deriveLawdogProductStatus(row);
-    if (status === "sent" || status === "partially_signed" || status === "signed") {
-      agreementsSent += 1;
+    if (row.workspace_archived_at) continue;
+    activeAgreements += 1;
+    const internal = deriveCreatorDashboardStatus(row);
+    if (internal === "completed") {
+      completedAgreements += 1;
+      continue;
     }
-    if (status === "signed") agreementsSigned += 1;
+    if (internal === "ready_for_signing" || internal === "review_approved") {
+      readyForSignature += 1;
+      continue;
+    }
+    if (internal === "in_review") awaitingReview += 1;
   }
+
   return {
-    agreementsCreated: rows.length,
-    agreementsSent,
-    agreementsSigned,
-    estimatedLegalFeesSavedUsd: agreementsSigned * LAWDOG_LEGAL_FEES_SAVED_PER_SIGNED_USD,
+    activeAgreements,
+    awaitingReview,
+    readyForSignature,
+    completedAgreements,
   };
 }
 

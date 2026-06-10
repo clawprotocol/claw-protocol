@@ -45,7 +45,7 @@ describe("AppShell creator owner home routing", () => {
     );
 
     const nav = screen.getByTestId("app-shell-primary-nav");
-    await user.click(within(nav).getByRole("button", { name: /^Home$/ }));
+    await user.click(within(nav).getByRole("button", { name: /^Dashboard$/ }));
     expect(mockNavigate).toHaveBeenCalledWith("/app");
     expect(mockNavigate).not.toHaveBeenCalledWith("/");
   });

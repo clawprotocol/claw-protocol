@@ -97,26 +97,20 @@ describe("AppDashboard creator-centric surface", () => {
     render(<AppDashboard />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("creator-dashboard-agreement-list")).toBeTruthy();
+      expect(screen.getByText("All reviews complete")).toBeTruthy();
     });
 
     expect(screen.getByRole("heading", { name: "Dashboard" })).toBeTruthy();
     expect(
-      screen.getByText("What agreements do you have, what needs attention, and how much value you've generated."),
+      screen.getByText("See what you're working on, what to do next, and how close each agreement is to signing."),
     ).toBeTruthy();
-    expect(screen.getByTestId("creator-dashboard-primary")).toBeTruthy();
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
-    });
-    expect(screen.getByText("Reviews approved")).toBeTruthy();
-    expect(screen.getByText(/Next action:/)).toBeTruthy();
-    expect(screen.getByText(/2 of 2 approved/)).toBeTruthy();
-    expect(screen.getByText(/Signature links not prepared yet/)).toBeTruthy();
-    await waitFor(() => {
-      expect(screen.getByText(/Blue Canyon Analytics LLC — Approved/)).toBeTruthy();
-    });
-    expect(screen.getByText(/Iron Vale Systems Inc — Approved/)).toBeTruthy();
+    expect(screen.getByTestId("dashboard-whats-next-panel").getAttribute("data-creator-dashboard-primary")).toBe(
+      "true",
+    );
+    expect(screen.getByTestId("creator-dashboard-action-ag_ready")).toBeTruthy();
+    expect(screen.getByText("All reviews complete")).toBeTruthy();
+    expect(screen.getByText(/Next step:/)).toBeTruthy();
+    expect(screen.getByTestId("agreement-progress-timeline")).toBeTruthy();
   });
 
   it("routes Prepare signature links through VS01 bridge with correct agreementId", async () => {
@@ -305,7 +299,7 @@ describe("AppDashboard creator-centric surface", () => {
     render(<AppDashboard />);
 
     await waitFor(() => {
-      expect(screen.getByText(/2 of 2 approved/)).toBeTruthy();
+      expect(screen.getByText(/All required reviews are complete|2 of 2 approved/)).toBeTruthy();
     });
 
     await user.click(screen.getByRole("button", { name: "Prepare signature links" }));
@@ -348,8 +342,10 @@ describe("AppDashboard creator-centric surface", () => {
     render(<AppDashboard />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("creator-dashboard-agreement-ag_ready")).toBeTruthy();
+      expect(screen.getByTestId("dashboard-whats-next-panel")).toBeTruthy();
     });
+
+    expect(screen.getByTestId("dashboard-whats-next-panel").getAttribute("data-agreement-id")).toBe("ag_ready");
 
     expect(screen.queryByTestId("creator-dashboard-agreement-ag_stale")).toBeNull();
     expect(screen.queryByTestId("creator-dashboard-agreement-ag_old_done")).toBeNull();
@@ -418,11 +414,10 @@ describe("AppDashboard creator-centric surface", () => {
     render(<AppDashboard />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("creator-dashboard-empty")).toBeTruthy();
+      expect(screen.getByTestId("dashboard-first-user-onboarding")).toBeTruthy();
     });
 
-    expect(screen.getByText("No agreements yet")).toBeTruthy();
-    expect(screen.getByText("Create your first agreement to begin.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create new agreement" })).toBeTruthy();
+    expect(screen.getByText("Create your first agreement")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create first agreement" })).toBeTruthy();
   });
 });

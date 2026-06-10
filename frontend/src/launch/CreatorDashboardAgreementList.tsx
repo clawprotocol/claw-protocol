@@ -38,6 +38,7 @@ type Props = {
   prepareBusyAgreementId?: string | null;
   prepareNoticeByAgreementId?: Readonly<Record<string, string>>;
   featured?: boolean;
+  compact?: boolean;
   manualReviewLinkPage?: boolean;
 };
 
@@ -114,6 +115,7 @@ export function CreatorDashboardAgreementList(props: Props) {
     prepareBusyAgreementId = null,
     prepareNoticeByAgreementId = {},
     featured: featuredSection = false,
+    compact = false,
     manualReviewLinkPage = creatorDashboardUsesManualReviewLinkPage(),
   } = props;
   const [prepareBlockedNoticeAgreementId, setPrepareBlockedNoticeAgreementId] = useState<string | null>(
@@ -210,9 +212,11 @@ export function CreatorDashboardAgreementList(props: Props) {
                     </span>
                   ) : null}
                 </div>
-                <p className="mt-1.5 text-sm text-slate-500" data-testid={`creator-dashboard-updated-${row.id}`}>
-                  {formatCreatorDashboardUpdated(row.updated_at)}
-                </p>
+                {!compact ? (
+                  <p className="mt-1.5 text-sm text-slate-500" data-testid={`creator-dashboard-updated-${row.id}`}>
+                    {formatCreatorDashboardUpdated(row.updated_at)}
+                  </p>
+                ) : null}
                 {contentUnavailable ? (
                   <p
                     className="mt-2 text-sm text-amber-200/90"
@@ -256,15 +260,17 @@ export function CreatorDashboardAgreementList(props: Props) {
                     Next action: <span className="text-slate-100">{nextActionLabel}</span>
                   </p>
                 )}
-                {reviewProgress ? (
+                {reviewProgress && !compact ? (
                   <p className="mt-2 text-sm text-slate-400" data-testid={`creator-dashboard-review-progress-${row.id}`}>
                     Review progress: <span className="text-slate-200">{reviewProgress}</span>
                   </p>
                 ) : null}
-                <p className="mt-1 text-sm text-slate-400" data-testid={`creator-dashboard-signing-status-${row.id}`}>
-                  Signing status: <span className="text-slate-200">{signingStatus}</span>
-                </p>
-                {showReview ? (
+                {!compact ? (
+                  <p className="mt-1 text-sm text-slate-400" data-testid={`creator-dashboard-signing-status-${row.id}`}>
+                    Signing status: <span className="text-slate-200">{signingStatus}</span>
+                  </p>
+                ) : null}
+                {showReview && !compact ? (
                   <ReviewStatusPanel rows={reviewRows} allApproved={allApproved} />
                 ) : null}
               </div>

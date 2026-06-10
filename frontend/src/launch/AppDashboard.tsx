@@ -18,6 +18,9 @@ import { canAccessOperatorGrowthDashboard } from "./ops/OperatorGrowthDashboard"
 import { CreatorDashboardAgreementList } from "./CreatorDashboardAgreementList";
 import { LawdogAgreementsTable } from "./LawdogAgreementsTable";
 import { DashboardKpiCards } from "./DashboardKpiCards";
+import { DashboardWhatsNextPanel } from "./DashboardWhatsNextPanel";
+import { DashboardFirstUserOnboarding } from "./DashboardFirstUserOnboarding";
+import { resolveDashboardFeaturedAgreementId } from "./dashboardWhatsNextPresentation";
 import { LawdogDashboardLayout } from "./LawdogProductNav";
 import {
   countLawdogDashboardKpis,
@@ -28,6 +31,7 @@ import {
   deriveCreatorDashboardStatus,
   deriveCreatorDashboardStatusPillFromGate,
   deriveCreatorNextActionLabel,
+  creatorDashboardPrimaryAction,
   resolveCreatorDashboardIndexPreviewForDiagnostics,
   resolveEffectiveCreatorDashboardReviewRows,
   sortCreatorDashboardRows,
@@ -139,6 +143,18 @@ export function AppDashboard() {
         lawdogAgreementNeedsAttention(row, deriveCreatorDashboardStatus(row)),
       ),
     [safeRecent],
+  );
+  const featuredAgreementId = useMemo(
+    () => resolveDashboardFeaturedAgreementId(filteredDashboard.featuredAgreementId, attentionRows, safeRecent),
+    [filteredDashboard.featuredAgreementId, attentionRows, safeRecent],
+  );
+  const featuredRow = useMemo(
+    () => safeRecent.find((row) => row.id === featuredAgreementId) ?? null,
+    [safeRecent, featuredAgreementId],
+  );
+  const secondaryAttentionRows = useMemo(
+    () => attentionRows.filter((row) => row.id !== featuredAgreementId),
+    [attentionRows, featuredAgreementId],
   );
 
   const entryResolved = useMemo(
@@ -418,6 +434,18 @@ export function AppDashboard() {
     [navigate, prepareBusyAgreementId, reviewRowsByAgreementId, rows],
   );
 
+  const handleWhatsNextPrimaryAction = useCallback(
+    (row: WorkspaceIndexAgreement) => {
+      const action = creatorDashboardPrimaryAction(row);
+      if (action.kind === "focus_review_status") {
+        handleFocusAgreementReviewStatus(row.id);
+        return;
+      }
+      withClearEntry(() => navigate(action.path));
+    },
+    [handleFocusAgreementReviewStatus, navigate, withClearEntry],
+  );
+
   return (
     <AppShell
       title="Dashboard"
@@ -427,7 +455,7 @@ export function AppDashboard() {
             {greetingHeadline}
           </span>
           <span className="mt-1 block text-sm text-slate-500">
-            What agreements do you have, what needs attention, and how much value you&apos;ve generated.
+            See what you&apos;re working on, what to do next, and how close each agreement is to signing.
           </span>
         </>
       }
@@ -472,37 +500,44 @@ export function AppDashboard() {
         {indexLoading ? (
           <p className="text-sm text-slate-400">Loading agreements…</p>
         ) : safeRecent.length === 0 ? (
-          <div
-            className="rounded-2xl border border-dashed border-slate-800/80 bg-slate-950/20 px-6 py-10 text-center"
-            data-testid="creator-dashboard-empty"
-          >
-            <p className="text-base font-medium text-slate-200">No agreements yet</p>
-            <p className="mt-2 text-sm text-slate-500">Create your first agreement to begin.</p>
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--primary mt-5"
-              data-testid="dashboard-create-first-agreement"
-              onClick={() => withClearEntry(navigateToCreateNewAgreement)}
-            >
-              Create new agreement
-            </button>
-          </div>
+          <DashboardFirstUserOnboarding
+            agreementCount={0}
+            onCreateAgreement={() => withClearEntry(navigateToCreateNewAgreement)}
+          />
         ) : (
-          <div className="mt-8 space-y-8">
-            {attentionRows.length > 0 ? (
-              <section aria-label="Agreements needing attention" data-testid="creator-dashboard-primary">
+          <div className="mt-2 space-y-8">
+            {featuredRow ? (
+              <DashboardWhatsNextPanel
+                row={featuredRow}
+                reviewRows={reviewRowsByAgreementId[featuredRow.id] ?? []}
+                onPrimaryAction={handleWhatsNextPrimaryAction}
+                onPrepareSignatureLinks={handlePrepareSignatureLinks}
+                prepareBusy={prepareBusyAgreementId === featuredRow.id}
+                prepareNotice={prepareNoticeByAgreementId[featuredRow.id] ?? null}
+              />
+            ) : null}
+
+            {safeRecent.length <= 3 ? (
+              <DashboardFirstUserOnboarding
+                agreementCount={safeRecent.length}
+                onCreateAgreement={() => withClearEntry(navigateToCreateNewAgreement)}
+              />
+            ) : null}
+
+            {secondaryAttentionRows.length > 0 ? (
+              <section aria-label="Other agreements needing attention" data-testid="creator-dashboard-primary">
                 <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  Needs your attention
+                  Also needs attention
                 </h2>
                 <CreatorDashboardAgreementList
-                  rows={attentionRows}
+                  rows={secondaryAttentionRows}
                   reviewRowsByAgreementId={reviewRowsByAgreementId}
                   onNavigate={(path) => withClearEntry(() => navigate(path))}
                   onFocusReviewStatus={handleFocusAgreementReviewStatus}
                   onPrepareSignatureLinks={handlePrepareSignatureLinks}
                   prepareBusyAgreementId={prepareBusyAgreementId}
                   prepareNoticeByAgreementId={prepareNoticeByAgreementId}
-                  featured
+                  compact
                 />
               </section>
             ) : null}

@@ -1,0 +1,99 @@
+import { describe, expect, it } from "vitest";
+import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
+import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
+import {
+  deriveAgreementProgressTimeline,
+  deriveDashboardWhatsNextPresentation,
+  deriveWhatsNextHeadline,
+} from "./dashboardWhatsNextPresentation";
+import { resolveCreatorDashboardReviewGate } from "./creatorDashboardReviewGate";
+
+function row(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement {
+  return {
+    id: "ag_test",
+    title: "Consulting Agreement",
+    updated_at: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
+    party_count: 2,
+    signer_count: 2,
+    version_ledger_count: 1,
+    completed_signed: false,
+    has_server_signing_lock: false,
+    locked_version_id: null,
+    workspace_archived_at: null,
+    review_sent_at: "2026-01-02T00:00:00Z",
+    reviewer_approved: false,
+    review_approvals_required: 2,
+    review_approvals_completed: 1,
+    all_reviewers_approved: false,
+    ...p,
+  };
+}
+
+function reviewRows(): OwnerReviewPartyStatusRow[] {
+  return [
+    {
+      partyIndex: 0,
+      partyId: "p0",
+      partyLabel: "Party 1",
+      displayName: "Blue Canyon Analytics LLC",
+      status: "approved",
+      statusLabel: "Approved",
+    },
+    {
+      partyIndex: 1,
+      partyId: "p1",
+      partyLabel: "Party 2",
+      displayName: "Iron Vale Systems Inc",
+      status: "not_reviewed",
+      statusLabel: "Not reviewed",
+    },
+  ];
+}
+
+describe("dashboardWhatsNextPresentation", () => {
+  it("headline names pending reviewer during in_review", () => {
+    const gate = resolveCreatorDashboardReviewGate(row({}), reviewRows());
+    expect(deriveWhatsNextHeadline(row({}), gate)).toBe("Review requested from Iron Vale Systems Inc");
+  });
+
+  it("timeline marks review sent current when approvals incomplete", () => {
+    const gate = resolveCreatorDashboardReviewGate(row({}), reviewRows());
+    const timeline = deriveAgreementProgressTimeline(row({}), gate);
+    expect(timeline.find((s) => s.id === "review_sent")?.state).toBe("complete");
+    expect(timeline.find((s) => s.id === "reviews_approved")?.state).toBe("current");
+  });
+
+  it("presentation surfaces next step for partial review", () => {
+    const gate = resolveCreatorDashboardReviewGate(row({}), reviewRows());
+    const presentation = deriveDashboardWhatsNextPresentation(row({}), gate);
+    expect(presentation.progressLine).toBe("1 of 2 approved");
+    expect(presentation.nextStepLabel).toBe("Wait for remaining reviewer");
+  });
+
+  it("ready for signing headline and next step", () => {
+    const approvedRows: OwnerReviewPartyStatusRow[] = [
+      {
+        partyIndex: 0,
+        partyId: "p0",
+        partyLabel: "Party 1",
+        displayName: "Blue Canyon Analytics LLC",
+        status: "approved",
+        statusLabel: "Approved",
+      },
+      {
+        partyIndex: 1,
+        partyId: "p1",
+        partyLabel: "Party 2",
+        displayName: "Iron Vale Systems Inc",
+        status: "approved",
+        statusLabel: "Approved",
+      },
+    ];
+    const r = row({ all_reviewers_approved: true, review_approvals_completed: 2 });
+    const gate = resolveCreatorDashboardReviewGate(r, approvedRows);
+    const presentation = deriveDashboardWhatsNextPresentation(r, gate);
+    expect(presentation.headline).toBe("All reviews complete");
+    expect(presentation.nextStepLabel).toBe("Prepare signature links");
+  });
+});

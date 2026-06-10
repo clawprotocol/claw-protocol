@@ -1,5 +1,4 @@
 import type { LawdogDashboardKpis } from "./lawdogDashboardPresentation";
-import { formatLawdogKpiCurrency } from "./lawdogDashboardPresentation";
 
 type Props = {
   kpis: LawdogDashboardKpis;
@@ -9,31 +8,26 @@ const KPI_ITEMS: {
   key: keyof LawdogDashboardKpis;
   label: string;
   testId: string;
-  format: (value: number) => string;
 }[] = [
   {
-    key: "agreementsCreated",
-    label: "Agreements Created",
-    testId: "dashboard-kpi-created",
-    format: (v) => String(v),
+    key: "activeAgreements",
+    label: "Active Agreements",
+    testId: "dashboard-kpi-active",
   },
   {
-    key: "agreementsSent",
-    label: "Agreements Sent",
-    testId: "dashboard-kpi-sent",
-    format: (v) => String(v),
+    key: "awaitingReview",
+    label: "Awaiting Review",
+    testId: "dashboard-kpi-awaiting-review",
   },
   {
-    key: "agreementsSigned",
-    label: "Agreements Signed",
-    testId: "dashboard-kpi-signed",
-    format: (v) => String(v),
+    key: "readyForSignature",
+    label: "Ready for Signature",
+    testId: "dashboard-kpi-ready-signature",
   },
   {
-    key: "estimatedLegalFeesSavedUsd",
-    label: "Estimated Legal Fees Saved",
-    testId: "dashboard-kpi-fees-saved",
-    format: formatLawdogKpiCurrency,
+    key: "completedAgreements",
+    label: "Completed Agreements",
+    testId: "dashboard-kpi-completed",
   },
 ];
 
@@ -53,7 +47,7 @@ export function DashboardKpiCards(props: Props) {
         >
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{item.label}</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-100">
-            {item.format(kpis[item.key])}
+            {String(kpis[item.key])}
           </p>
         </div>
       ))}
