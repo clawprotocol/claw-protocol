@@ -5906,6 +5906,7 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
             maybe_send_review_invites_after_review_sent(
                 agreement_id=agreement_id,
                 draft=next_draft.model_dump(mode="json"),
+                org_id=resolve_subject_from_request(request),
             )
     except Exception:
         pass
