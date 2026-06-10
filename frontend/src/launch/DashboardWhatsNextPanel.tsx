@@ -1,9 +1,8 @@
+import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import { AgreementProgressTimeline } from "./AgreementProgressTimeline";
 import {
-  creatorDashboardPrimaryAction,
-  creatorDashboardShouldPrepareSignatureLinks,
   CREATOR_DASHBOARD_STATUS_LABEL,
   deriveCreatorDashboardStatusPillFromGate,
   deriveCreatorSigningStatusLabel,
@@ -15,11 +14,17 @@ import {
   resolveCreatorDashboardReviewGate,
 } from "./creatorDashboardReviewGate";
 import { deriveDashboardWhatsNextPresentation } from "./dashboardWhatsNextPresentation";
+import {
+  creatorDashboardShouldPrepareSignatureLinksFromTrack,
+  resolveCreatorDashboardSignatureTrackAction,
+} from "./creatorDashboardSignatureTrack";
 
 type Props = {
   row: WorkspaceIndexAgreement;
   reviewRows: readonly OwnerReviewPartyStatusRow[];
+  draft?: AgreementDraft | null;
   onPrimaryAction: (row: WorkspaceIndexAgreement) => void;
+  onNavigate?: (path: string) => void;
   onPrepareSignatureLinks?: (agreementId: string) => void;
   prepareBusy?: boolean;
   prepareNotice?: string | null;
@@ -29,13 +34,15 @@ export function DashboardWhatsNextPanel(props: Props) {
   const {
     row,
     reviewRows,
+    draft = null,
     onPrimaryAction,
+    onNavigate,
     onPrepareSignatureLinks,
     prepareBusy = false,
     prepareNotice = null,
   } = props;
 
-  if (creatorDashboardReviewHydrationPending(row, reviewRows)) {
+  if (creatorDashboardReviewHydrationPending(row, reviewRows, draft)) {
     return (
       <section
         className="rounded-2xl border border-slate-800/70 bg-slate-950/40 px-5 py-6"
@@ -48,31 +55,41 @@ export function DashboardWhatsNextPanel(props: Props) {
     );
   }
 
-  const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows);
+  const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows, { draft });
   const presentation = deriveDashboardWhatsNextPresentation(row, reviewGate);
   const manualReviewLinkPage = creatorDashboardUsesManualReviewLinkPage();
-  const action = creatorDashboardPrimaryAction(row, { manualReviewLinkPage });
+  const trackAction = resolveCreatorDashboardSignatureTrackAction(row, reviewGate, {
+    draft,
+    manualReviewLinkPage,
+  });
   const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate);
   const signingStatus = deriveCreatorSigningStatusLabel(row);
   const showPrepare =
     Boolean(onPrepareSignatureLinks) &&
-    creatorDashboardShouldPrepareSignatureLinks(row, reviewGate);
+    creatorDashboardShouldPrepareSignatureLinksFromTrack(row, reviewGate, draft);
 
   const handleCtaClick = () => {
+    logDashboardWhatsNextCtaClick({
+      agreementId: row.id,
+      action: trackAction.kind,
+      targetRoute: trackAction.path,
+    });
     if (showPrepare && onPrepareSignatureLinks) {
-      logDashboardWhatsNextCtaClick({
-        agreementId: row.id,
-        action: "prepare_signature_links",
-        targetRoute: "creator_prepare_signature_links",
-      });
       onPrepareSignatureLinks(row.id);
       return;
     }
-    logDashboardWhatsNextCtaClick({
-      agreementId: row.id,
-      action: action.kind ?? "navigate",
-      targetRoute: action.path,
-    });
+    if (trackAction.kind === "focus_review_status") {
+      onPrimaryAction(row);
+      return;
+    }
+    if (trackAction.kind === "prepare_signature_links" && onPrepareSignatureLinks) {
+      onPrepareSignatureLinks(row.id);
+      return;
+    }
+    if (onNavigate) {
+      onNavigate(trackAction.path);
+      return;
+    }
     onPrimaryAction(row);
   };
 
@@ -122,7 +139,7 @@ export function DashboardWhatsNextPanel(props: Props) {
             type="button"
             className="vs01-btn vs01-btn--primary vs01-btn--compact min-w-[11rem]"
             data-testid={`creator-dashboard-action-${row.id}`}
-            data-dashboard-whats-next-cta={showPrepare ? "prepare_signature_links" : action.kind ?? "navigate"}
+            data-dashboard-whats-next-cta={trackAction.kind}
             disabled={showPrepare ? prepareBusy : false}
             onClick={(event) => {
               event.preventDefault();
@@ -130,11 +147,7 @@ export function DashboardWhatsNextPanel(props: Props) {
               handleCtaClick();
             }}
           >
-            {showPrepare
-              ? prepareBusy
-                ? "Preparing…"
-                : "Prepare signature links"
-              : action.label}
+            {showPrepare && prepareBusy ? "Preparing…" : trackAction.label}
           </button>
           {prepareNotice ? (
             <p

@@ -31,7 +31,6 @@ import {
   deriveCreatorDashboardStatus,
   deriveCreatorDashboardStatusPillFromGate,
   deriveCreatorNextActionLabel,
-  creatorDashboardPrimaryAction,
   resolveCreatorDashboardIndexPreviewForDiagnostics,
   resolveEffectiveCreatorDashboardReviewRows,
   sortCreatorDashboardRows,
@@ -56,7 +55,10 @@ import {
   logDashboardPostReviewGateState,
 } from "./creatorDashboardCopy";
 import { navigateCreatorPrepareSignatureLinks } from "./creatorDashboardPrepareSignatureLinks";
+import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
+import { draftAuditHasRecipientRecordedApproval } from "../components/agreements/draftRecipientReviewSignals";
+import { resolveCreatorDashboardSignatureTrackAction } from "./creatorDashboardSignatureTrack";
 import { workspaceAgreementStatusBadge } from "./workspaceAgreementCard";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 import {
@@ -80,6 +82,7 @@ export function AppDashboard() {
   const [reviewRowsByAgreementId, setReviewRowsByAgreementId] = useState<
     Record<string, OwnerReviewPartyStatusRow[]>
   >({});
+  const [draftByAgreementId, setDraftByAgreementId] = useState<Record<string, AgreementDraft | null>>({});
   const [prepareBusyAgreementId, setPrepareBusyAgreementId] = useState<string | null>(null);
   const [prepareNoticeByAgreementId, setPrepareNoticeByAgreementId] = useState<Record<string, string>>({});
   const [signingStatusEpoch, setSigningStatusEpoch] = useState(0);
@@ -187,32 +190,66 @@ export function AppDashboard() {
     });
   }, [indexLoading, rows.length, filteredDashboard]);
 
+  const refreshDashboardReviewHydration = useCallback(async () => {
+    if (indexLoading || safeRecent.length === 0) return;
+    const targets = safeRecent.filter((row) => creatorDashboardNeedsAuthoritativeReviewHydration(row));
+    if (targets.length === 0) return;
+    const entries = await Promise.all(
+      targets.map(async (row) => {
+        const { draft } = await fetchAgreementDraft(row.id);
+        return [row.id, draft, creatorDashboardReviewRowsFromDraft(draft)] as const;
+      }),
+    );
+    setReviewRowsByAgreementId((prev) => {
+      const next = { ...prev };
+      for (const [id, , reviewRows] of entries) {
+        next[id] = reviewRows;
+      }
+      return next;
+    });
+    setDraftByAgreementId((prev) => {
+      const next = { ...prev };
+      for (const [id, draft] of entries) {
+        next[id] = draft;
+      }
+      return next;
+    });
+  }, [indexLoading, safeRecent]);
+
+  useEffect(() => {
+    void refreshDashboardReviewHydration();
+  }, [refreshDashboardReviewHydration]);
+
   useEffect(() => {
     if (indexLoading || safeRecent.length === 0) return;
-    let cancel = false;
-    void (async () => {
-      const targets = safeRecent.filter((row) => creatorDashboardNeedsAuthoritativeReviewHydration(row));
-      const missing = targets.filter((row) => !(reviewRowsByAgreementId[row.id]?.length));
-      if (missing.length === 0) return;
-      const entries = await Promise.all(
-        missing.map(async (row) => {
-          const { draft } = await fetchAgreementDraft(row.id);
-          return [row.id, creatorDashboardReviewRowsFromDraft(draft)] as const;
-        }),
-      );
-      if (cancel) return;
-      setReviewRowsByAgreementId((prev) => {
-        const next = { ...prev };
-        for (const [id, reviewRows] of entries) {
-          next[id] = reviewRows;
-        }
-        return next;
-      });
-    })();
-    return () => {
-      cancel = true;
+    const targets = safeRecent.filter((row) => creatorDashboardNeedsAuthoritativeReviewHydration(row));
+    if (targets.length === 0) return;
+    const intervalId =
+      typeof import.meta !== "undefined" && import.meta.env?.MODE === "test"
+        ? null
+        : window.setInterval(() => {
+            void refreshDashboardReviewHydration();
+          }, 12_000);
+    const refreshOnReturn = () => {
+      void reloadWorkspaceIndex();
+      void refreshDashboardReviewHydration();
     };
-  }, [indexLoading, safeRecent, reviewRowsByAgreementId]);
+    const onVis = () => {
+      if (document.visibilityState === "visible") refreshOnReturn();
+    };
+    const onFocus = () => {
+      refreshOnReturn();
+    };
+    if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
+      document.addEventListener("visibilitychange", onVis);
+      window.addEventListener("focus", onFocus);
+    }
+    return () => {
+      if (intervalId !== null) window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [indexLoading, safeRecent, refreshDashboardReviewHydration, reloadWorkspaceIndex]);
 
   useEffect(() => {
     if (indexLoading) return;
@@ -234,7 +271,9 @@ export function AppDashboard() {
     if (indexLoading) return;
     for (const row of safeRecent) {
       const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
-      const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows);
+      const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows, {
+        draft: draftByAgreementId[row.id] ?? null,
+      });
       if (!reviewGate.authoritative) continue;
       const waitingOnReviewer = reviewGate.approvedCount > 0 && !reviewGate.allRequiredReviewPartiesApproved;
       const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate);
@@ -270,7 +309,7 @@ export function AppDashboard() {
           .replace(/\s+/g, "_"),
       });
     }
-  }, [indexLoading, safeRecent, reviewRowsByAgreementId, signingStatusEpoch]);
+  }, [indexLoading, safeRecent, reviewRowsByAgreementId, draftByAgreementId, signingStatusEpoch]);
 
   const handleFocusAgreementReviewStatus = useCallback((agreementId: string) => {
     const id = agreementId.trim();
@@ -331,6 +370,8 @@ export function AppDashboard() {
         const fetchedReviewRows = creatorDashboardReviewRowsFromDraft(draft);
         const reviewRows = resolveEffectiveCreatorDashboardReviewRows(draft, cachedReviewRows);
         const usedCachedReviewRows = fetchedReviewRows.length === 0 && cachedReviewRows.length > 0;
+        const draftForReviewGate =
+          ok && draft && draftAuditHasRecipientRecordedApproval(draft) ? draft : null;
         const reviewGate = resolveCreatorDashboardReviewGate(
           indexRow ?? {
             id,
@@ -346,6 +387,7 @@ export function AppDashboard() {
             review_sent_at: null,
           },
           reviewRows,
+          draftForReviewGate ? { draft: draftForReviewGate } : undefined,
         );
         const hasSnapshot = Boolean(
           (draft?.premium_full_document_text || "").trim() ||
@@ -436,19 +478,28 @@ export function AppDashboard() {
 
   const handleWhatsNextPrimaryAction = useCallback(
     (row: WorkspaceIndexAgreement) => {
-      const status = deriveCreatorDashboardStatus(row);
-      if (status === "ready_for_signing" || status === "review_approved") {
+      const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
+      const draft = draftByAgreementId[row.id] ?? null;
+      const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows, { draft });
+      const action = resolveCreatorDashboardSignatureTrackAction(row, reviewGate, { draft });
+      if (action.kind === "prepare_signature_links") {
         void handlePrepareSignatureLinks(row.id);
         return;
       }
-      const action = creatorDashboardPrimaryAction(row);
       if (action.kind === "focus_review_status") {
         handleFocusAgreementReviewStatus(row.id);
         return;
       }
       withClearEntry(() => navigate(action.path));
     },
-    [handleFocusAgreementReviewStatus, handlePrepareSignatureLinks, navigate, withClearEntry],
+    [
+      draftByAgreementId,
+      handleFocusAgreementReviewStatus,
+      handlePrepareSignatureLinks,
+      navigate,
+      reviewRowsByAgreementId,
+      withClearEntry,
+    ],
   );
 
   return (
@@ -515,7 +566,9 @@ export function AppDashboard() {
               <DashboardWhatsNextPanel
                 row={featuredRow}
                 reviewRows={reviewRowsByAgreementId[featuredRow.id] ?? []}
+                draft={draftByAgreementId[featuredRow.id] ?? null}
                 onPrimaryAction={handleWhatsNextPrimaryAction}
+                onNavigate={(path) => withClearEntry(() => navigate(path))}
                 onPrepareSignatureLinks={handlePrepareSignatureLinks}
                 prepareBusy={prepareBusyAgreementId === featuredRow.id}
                 prepareNotice={prepareNoticeByAgreementId[featuredRow.id] ?? null}

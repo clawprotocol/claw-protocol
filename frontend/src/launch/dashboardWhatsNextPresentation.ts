@@ -1,10 +1,10 @@
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import {
-  deriveCreatorDashboardStatus,
   deriveCreatorNextActionLabel,
   displayCreatorAgreementTitle,
   type CreatorDashboardStatus,
 } from "./creatorDashboardPresentation";
+import { deriveCreatorDashboardEffectiveStatus } from "./creatorDashboardSignatureTrack";
 import {
   creatorDashboardWaitingOnReviewer,
   type CreatorDashboardReviewGate,
@@ -65,11 +65,18 @@ function pendingReviewerNames(reviewGate: CreatorDashboardReviewGate): string[] 
     .filter(Boolean);
 }
 
+function effectiveStatus(
+  row: WorkspaceIndexAgreement,
+  reviewGate: CreatorDashboardReviewGate,
+): CreatorDashboardStatus {
+  return deriveCreatorDashboardEffectiveStatus(row, reviewGate);
+}
+
 export function deriveWhatsNextHeadline(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
 ): string {
-  const status = deriveCreatorDashboardStatus(row);
+  const status = effectiveStatus(row, reviewGate);
   const title = displayCreatorAgreementTitle(row.title);
 
   if (status === "completed") return `${title} is fully signed`;
@@ -90,7 +97,7 @@ export function deriveWhatsNextProgressLine(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
 ): string | null {
-  const status = deriveCreatorDashboardStatus(row);
+  const status = effectiveStatus(row, reviewGate);
   if (status === "in_review" && reviewGate.authoritative && reviewGate.requiredPartyCount > 0) {
     return formatCreatorReviewProgressLabel(reviewGate);
   }
@@ -106,7 +113,7 @@ export function deriveWhatsNextNextStep(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
 ): string {
-  const status = deriveCreatorDashboardStatus(row);
+  const status = effectiveStatus(row, reviewGate);
   if (status === "signing_in_progress") return "Wait for remaining signatures";
   if (status === "ready_for_signing" || status === "review_approved") {
     return "Prepare signature links";
@@ -165,7 +172,7 @@ export function deriveDashboardWhatsNextPresentation(
   return {
     agreementId: row.id,
     agreementTitle: displayCreatorAgreementTitle(row.title),
-    status: deriveCreatorDashboardStatus(row),
+    status: effectiveStatus(row, reviewGate),
     headline: deriveWhatsNextHeadline(row, reviewGate),
     progressLine: deriveWhatsNextProgressLine(row, reviewGate),
     nextStepLabel: deriveWhatsNextNextStep(row, reviewGate),

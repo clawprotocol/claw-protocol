@@ -115,6 +115,10 @@ import {
   resolveAutoSignaturePacketMode,
 } from "./vs01AutoSignaturePacket";
 import {
+  readVs01SigningPackagePreferences,
+  writeVs01SigningPackagePreferences,
+} from "./vs01SigningPackagePreferences";
+import {
   formatVs01InitialsOnlyStatusLine,
   summarizeCanonicalSigningPacketInitials,
   summarizeVs01SigningPacketInitials,
@@ -405,7 +409,11 @@ export function StepPrepareSignature({
   activeToolForEmailLogRef.current = activeTool;
   armedToolForEmailLogRef.current = armedTool;
 
-  const [autoInitialsEveryPage, setAutoInitialsEveryPage] = useState(false);
+  const [autoInitialsEveryPage, setAutoInitialsEveryPage] = useState(() => {
+    const id = (prepareAgreementId || "").trim();
+    if (!id) return false;
+    return readVs01SigningPackagePreferences(id)?.autoInitialsEveryPage ?? false;
+  });
   const [skippedAutoInitialsSlots, setSkippedAutoInitialsSlots] = useState<Set<string>>(() => new Set());
   const [signatureMode, setSignatureMode] = useState<SignatureMode>("type");
   const [typedName, setTypedName] = useState(() => nameFromSignerRef(defaultSignerRef));
@@ -914,6 +922,12 @@ export function StepPrepareSignature({
   useEffect(() => {
     onPrepareInitialsEnabledChange?.(autoInitialsEveryPage);
   }, [autoInitialsEveryPage, onPrepareInitialsEnabledChange]);
+
+  useEffect(() => {
+    const id = (prepareAgreementId || "").trim();
+    if (!id) return;
+    writeVs01SigningPackagePreferences(id, { autoInitialsEveryPage });
+  }, [prepareAgreementId, autoInitialsEveryPage]);
 
   const canonicalFieldsForGate =
     agreementBridgePlacementCopy && signingPacketModel?.allowed ? signingPacketModel.fields : fields;

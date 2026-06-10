@@ -1,8 +1,12 @@
+import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
+import { computeReviewApprovalStatus } from "../components/agreements/draftRecipientReviewSignals";
 import {
   countOwnerReviewPartyApproved,
+  deriveOwnerReviewPartyStatusRows,
   type OwnerReviewPartyStatusRow,
 } from "./simpleProduct/ownerReviewPartyStatusChecklist";
+import { readSimpleDoneReviewRecipientLinks } from "./simpleProduct/simpleDoneReviewRecipientLinks";
 
 export type CreatorDashboardReviewGateSource =
   | "draft_parties"
@@ -52,7 +56,60 @@ export type CreatorDashboardReviewGate = {
   source: CreatorDashboardReviewGateSource;
   /** False until draft party rows hydrate — UI must not render review counts/CTAs from index. */
   authoritative: boolean;
+  /** Open recipient proposals block signature-prep advancement. */
+  hasOpenChangeRequests?: boolean;
 };
+
+export type ResolveCreatorDashboardReviewGateOptions = {
+  draft?: AgreementDraft | null;
+  mintedReviewerLinkCount?: number;
+};
+
+function reviewGateFromDraftApprovalAggregate(
+  row: WorkspaceIndexAgreement,
+  draft: AgreementDraft,
+  reviewRows: readonly OwnerReviewPartyStatusRow[],
+  mintedReviewerLinkCount?: number,
+): CreatorDashboardReviewGate {
+  const agg = computeReviewApprovalStatus(draft, {
+    mintedReviewerLinkCount:
+      mintedReviewerLinkCount ?? readSimpleDoneReviewRecipientLinks(row.id)?.recipients.length ?? 0,
+  });
+  const displayRows =
+    reviewRows.length > 0 ? reviewRows : deriveOwnerReviewPartyStatusRows(draft);
+  const displayApproved = countOwnerReviewPartyApproved(displayRows);
+  const displayRequired = displayRows.length;
+  let requiredPartyCount = agg.requiredReviewerCount;
+  let approvedCount = agg.approvedReviewerCount;
+  let allRequiredReviewPartiesApproved = agg.allReviewersApproved && !agg.hasOpenChangeRequests;
+  if (
+    !allRequiredReviewPartiesApproved &&
+    displayRequired > requiredPartyCount &&
+    displayApproved < displayRequired
+  ) {
+    requiredPartyCount = displayRequired;
+    approvedCount = displayApproved;
+    allRequiredReviewPartiesApproved = false;
+  }
+  if (!allRequiredReviewPartiesApproved && row.all_reviewers_approved && !agg.hasOpenChangeRequests) {
+    requiredPartyCount = Math.max(requiredPartyCount, displayRequired, resolveRequiredPartyCountFromIndex(row, displayRequired));
+    approvedCount = requiredPartyCount;
+    allRequiredReviewPartiesApproved = true;
+  }
+  return {
+    requiredPartyCount,
+    approvedCount,
+    allRequiredReviewPartiesApproved,
+    hasOpenChangeRequests: agg.hasOpenChangeRequests,
+    partyStatuses: displayRows.map((partyRow) => ({
+      displayName: partyRow.displayName,
+      statusLabel: partyRow.statusLabel,
+      status: partyRow.status,
+    })),
+    source: "draft_parties",
+    authoritative: true,
+  };
+}
 
 /** Agreements in an active review/signing-prep path need draft party rows before review UI renders. */
 export function creatorDashboardNeedsAuthoritativeReviewHydration(
@@ -75,7 +132,13 @@ export function creatorDashboardNeedsAuthoritativeReviewHydration(
 export function resolveCreatorDashboardReviewGate(
   row: WorkspaceIndexAgreement,
   reviewRows: readonly OwnerReviewPartyStatusRow[],
+  options?: ResolveCreatorDashboardReviewGateOptions,
 ): CreatorDashboardReviewGate {
+  const draft = options?.draft ?? null;
+  if (draft) {
+    return reviewGateFromDraftApprovalAggregate(row, draft, reviewRows, options?.mintedReviewerLinkCount);
+  }
+
   if (reviewRows.length > 0) {
     const approvedCount = countOwnerReviewPartyApproved(reviewRows);
     const requiredPartyCount = reviewRows.length;
@@ -133,10 +196,27 @@ export function creatorDashboardWaitingOnReviewer(gate: CreatorDashboardReviewGa
   return gate.approvedCount > 0 && !gate.allRequiredReviewPartiesApproved;
 }
 
+/** Lifecycle status using draft-backed review gate when index is stale. */
+export function deriveCreatorDashboardEffectiveStatus(
+  row: WorkspaceIndexAgreement,
+  reviewGate: CreatorDashboardReviewGate,
+  indexStatus: import("./creatorDashboardPresentation").CreatorDashboardStatus,
+): import("./creatorDashboardPresentation").CreatorDashboardStatus {
+  if (indexStatus === "completed" || indexStatus === "signing_in_progress") return indexStatus;
+  if (reviewGate.hasOpenChangeRequests) return "in_review";
+  if (reviewGate.allRequiredReviewPartiesApproved || row.all_reviewers_approved === true) {
+    return "ready_for_signing";
+  }
+  if (row.review_sent_at || reviewGate.approvedCount > 0) return "in_review";
+  return indexStatus;
+}
+
 export function creatorDashboardReviewHydrationPending(
   row: WorkspaceIndexAgreement,
   reviewRows: readonly OwnerReviewPartyStatusRow[],
+  draft?: AgreementDraft | null,
 ): boolean {
+  if (draft) return false;
   return (
     creatorDashboardNeedsAuthoritativeReviewHydration(row) &&
     resolveCreatorDashboardReviewGate(row, reviewRows).source === "pending_hydration"

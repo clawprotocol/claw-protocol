@@ -113,6 +113,51 @@ describe("AppDashboard creator-centric surface", () => {
     expect(screen.getByTestId("agreement-progress-timeline")).toBeTruthy();
   });
 
+  it("shows Prepare signature links when reviewer approved on draft but index still in_review", async () => {
+    const reviewerApprovedDraft = {
+      ...draftWithParties(),
+      parties: [
+        { name: "Blue Canyon Analytics LLC", role: "party", id: "p1" },
+        { name: "Iron Vale Systems Inc", role: "reviewer", email: "iron@example.test", id: "p2" },
+      ],
+      audit_log: [
+        {
+          event_type: "participant_approved",
+          at: "2026-05-01T11:30:00.000Z",
+          value: { participant_id: "p2" },
+        },
+      ],
+    } as AgreementDraft;
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [
+        indexRow({
+          id: "ag_ready",
+          all_reviewers_approved: false,
+          review_approvals_completed: 0,
+          reviewer_approved: true,
+        }),
+      ],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: reviewerApprovedDraft,
+    });
+
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByText("All reviews complete")).toBeTruthy();
+    });
+
+    expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Track review status" })).toBeNull();
+    expect(screen.getByTestId("creator-dashboard-status-pill-ag_ready").textContent).toBe(
+      "Ready for Signing",
+    );
+  });
+
   it("prepare CTA routes to signature prep when index is approved but draft rows lag", async () => {
     const partialDraft = {
       ...draftWithParties(),
@@ -136,7 +181,7 @@ describe("AppDashboard creator-centric surface", () => {
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
       ok: true,
-      draft: partialDraft,
+      draft: draftWithParties(),
     });
 
     const homeCreateSpy = vi.spyOn(console, "info").mockImplementation(() => {});
@@ -150,8 +195,11 @@ describe("AppDashboard creator-centric surface", () => {
     expect(screen.getByTestId("creator-dashboard-status-pill-ag_ready").textContent).toBe("Ready for Signing");
     expect(screen.queryByText("Waiting on reviewer")).toBeNull();
 
-    const cta = screen.getByRole("button", { name: "Prepare signature links" });
-    expect(cta.getAttribute("data-dashboard-whats-next-cta")).toBe("prepare_signature_links");
+    const cta = await waitFor(() => {
+      const button = screen.getByRole("button", { name: "Prepare signature links" });
+      expect(button.getAttribute("data-dashboard-whats-next-cta")).toBe("prepare_signature_links");
+      return button;
+    });
 
     await user.click(cta);
 
@@ -360,9 +408,12 @@ describe("AppDashboard creator-centric surface", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/All required reviews are complete|2 of 2 approved/)).toBeTruthy();
+      expect(screen.getByTestId("creator-dashboard-action-ag_ready").getAttribute("data-dashboard-whats-next-cta")).toBe(
+        "prepare_signature_links",
+      );
     });
 
-    await user.click(screen.getByRole("button", { name: "Prepare signature links" }));
+    await user.click(screen.getByTestId("creator-dashboard-action-ag_ready"));
 
     await waitFor(() => {
       expect(vs01Spy).toHaveBeenCalled();

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import {
@@ -77,6 +78,37 @@ describe("creatorDashboardReviewGate", () => {
     expect(gate.requiredPartyCount).toBe(2);
     expect(gate.approvedCount).toBe(2);
     expect(creatorDashboardWaitingOnReviewer(gate)).toBe(false);
+  });
+
+  it("uses draft approval aggregate when only reviewer party approved", () => {
+    const draft: AgreementDraft = {
+      id: "ag_gate",
+      title: "Consulting Agreement",
+      jurisdiction: "CA",
+      parties: [
+        { id: "p1", name: "Blue Canyon Analytics LLC", role: "party" },
+        { id: "p2", name: "Iron Vale Systems Inc.", role: "reviewer", email: "iron@example.test" },
+      ],
+      purpose: "Services",
+      payment_terms: "Net 30",
+      duration: "1y",
+      due_date: null,
+      effective_date: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T12:00:00.000Z",
+      versions: [{ version: 1, created_at: "2026-01-01T00:00:00.000Z" }],
+      audit_log: [
+        {
+          event_type: "participant_approved",
+          at: "2026-06-07T00:00:00.000Z",
+          value: { participant_id: "p2", message: "approved_current_draft" },
+        },
+      ],
+    };
+    const gate = resolveCreatorDashboardReviewGate(indexRow({}), partyOneApprovedRows, { draft });
+    expect(gate.allRequiredReviewPartiesApproved).toBe(true);
+    expect(gate.approvedCount).toBe(1);
+    expect(gate.requiredPartyCount).toBe(1);
   });
 
   it("uses workspace index summary when draft rows are still hydrating", () => {

@@ -1339,6 +1339,7 @@ import {
   isAgreementPacketPrepared,
   readAgreementFieldsPlacedCount,
 } from "../../vs01/vs01WorkspaceSigningStatus";
+import { Vs01SigningPackageInitialsPreference } from "../../vs01/Vs01SigningPackageInitialsPreference";
 import { logUxTrustEvent } from "../../lib/uxTrustAssertions";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
 import {
@@ -1990,6 +1991,7 @@ type CreateFlowSendRecipientsPanelProps = {
     raw: string;
     inputEventKind: "change" | "blur";
   }) => void;
+  agreementId?: string | null;
 };
 
 function CreateFlowSendRecipientsPanel({
@@ -2044,6 +2046,7 @@ function CreateFlowSendRecipientsPanel({
   onSignerMetadataSessionInput,
   onSignerMetadataForensicInput,
   onPaidProSignerMetadataFieldDiagnostics,
+  agreementId = null,
 }: CreateFlowSendRecipientsPanelProps) {
   const [recipientEmailTouched, setRecipientEmailTouched] = useState<Record<number, boolean>>({});
   const resolvedSendMode: PremiumSendIntent =
@@ -2626,6 +2629,9 @@ function CreateFlowSendRecipientsPanel({
             ? "Nothing is emailed from LawDog until you create links and share them yourself."
             : <>Nothing is sent to recipients until you confirm{sendRequiresConfirmStep ? " on the next screen" : ""} and share a link yourself.</>}
       </p>
+      {signaturePrepMode && (agreementId || "").trim() ? (
+        <Vs01SigningPackageInitialsPreference agreementId={(agreementId || "").trim()} />
+      ) : null}
       {!recipientBlockForceExpanded ? (
         <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
           <button
@@ -26182,6 +26188,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return (
         <CreateFlowSendRecipientsPanel
           variant="staged"
+          agreementId={reviewAgreementId}
           isPremiumRecipientSurface={isPremiumRecipientSurface}
           showProTierAdvanced={showProTierAdvanced}
           productionReadyForPersist={productionReadyForPersist}
@@ -28213,6 +28220,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           >
                                             <CreateFlowSendRecipientsPanel
                                               variant="workspace"
+                                              agreementId={reviewAgreementId}
                                               paidProInlineRecipientShell
                                               hidePrimarySendCta={Boolean(
                                                 paidProCanonicalStickyCta?.showStickyBar,
@@ -28316,6 +28324,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         >
                                           <CreateFlowSendRecipientsPanel
                                             variant="workspace"
+                                            agreementId={reviewAgreementId}
                                             paidProInlineRecipientShell
                                             isPremiumRecipientSurface={premiumSignersSurfaceReady}
                                             showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
@@ -28698,6 +28707,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           >
                                             <CreateFlowSendRecipientsPanel
                                               variant="workspace"
+                                              agreementId={reviewAgreementId}
                                               paidProInlineRecipientShell
                                               hidePrimarySendCta={Boolean(
                                                 paidProCanonicalStickyCta?.showStickyBar,
@@ -29505,6 +29515,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   <div className="mt-5 w-full sm:pr-0 md:max-w-3xl" id="claw-recipient-setup">
                                     <CreateFlowSendRecipientsPanel
                                       variant="workspace"
+                                      agreementId={reviewAgreementId}
                                       paidProInlineRecipientShell
                                       isPremiumRecipientSurface={premiumSignersSurfaceReady}
                                       showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
@@ -29810,6 +29821,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     <div className="mb-4">
                       <CreateFlowSendRecipientsPanel
                         variant="workspace"
+                        agreementId={reviewAgreementId}
                         paidProInlineRecipientShell={paidProRecipientSetupOnDraft}
                         isPremiumRecipientSurface={premiumSignersSurfaceReady}
                         showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
