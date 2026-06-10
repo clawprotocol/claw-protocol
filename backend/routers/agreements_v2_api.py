@@ -6188,13 +6188,21 @@ def update_agreement_field(
         prior_ids = {(p.id or "").strip() for p in (draft.parties or []) if (p.id or "").strip()}
         parties_raw: List[AgreementParty] = []
         if isinstance(body.value, list):
+            prior_by_id = {(p.id or "").strip(): p for p in (draft.parties or []) if (p.id or "").strip()}
             for p in body.value:
                 if not isinstance(p, dict):
                     continue
                 name = str(p.get("name") or "").strip()
                 role = str(p.get("role") or "party").strip() or "party"
                 pid = str(p.get("id") or "").strip() or str(uuid.uuid4())
-                parties_raw.append(AgreementParty(name=name, role=role, id=pid))
+                prior = prior_by_id.get(pid)
+                email_raw = str(p.get("email") or "").strip()
+                email = email_raw or (str(prior.email or "").strip() if prior else "") or None
+                phone_raw = str(p.get("phone") or "").strip()
+                phone = phone_raw or (str(prior.phone or "").strip() if prior else "") or None
+                parties_raw.append(
+                    AgreementParty(name=name, role=role, id=pid, email=email, phone=phone)
+                )
         parties = _ensure_agreement_parties_have_ids(parties_raw)
         next_data["parties"] = [p.model_dump() for p in parties]
         for ap in parties:

@@ -270,6 +270,134 @@ def test_duplicate_review_sent_does_not_resend_emails(monkeypatch: pytest.Monkey
         assert mock_client.post.call_count == 2
 
 
+def test_paid_pro_client_service_provider_roles_skip_without_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Paid Pro drafts often use client/service_provider — not owner-normalized — until frontend persists roles."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
+    monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
+
+    mock_client = _mock_resend_success()
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Consulting Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {
+                    "id": "p_client",
+                    "name": "Blue Canyon Analytics LLC",
+                    "role": "client",
+                    "email": "owner-user@example.com",
+                },
+                {
+                    "id": "p_provider",
+                    "name": "Iron Vale Systems Inc.",
+                    "role": "service_provider",
+                    "email": "external-reviewer@example.com",
+                },
+            ],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+
+    with caplog.at_level("INFO"):
+        with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+            res = client.post(f"/api/agreements/{aid}/review-sent", headers=_ORG_H, json={})
+
+    assert res.status_code == 200
+    mock_client.post.assert_not_called()
+    assert not res.json().get("draft", {}).get("review_invite_emails_sent_at")
+    assert any("skip_reason=owner_role_missing" in r.message for r in caplog.records)
+
+
+def test_explicit_owner_role_after_party_patch_sends_invite(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """After parties carry explicit owner role, Resend targets external reviewer only."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
+    monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
+
+    mock_client = _mock_resend_success()
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Consulting Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {
+                    "id": "p_client",
+                    "name": "Blue Canyon Analytics LLC",
+                    "role": "client",
+                    "email": "owner-user@example.com",
+                },
+                {
+                    "id": "p_provider",
+                    "name": "Iron Vale Systems Inc.",
+                    "role": "service_provider",
+                    "email": "external-reviewer@example.com",
+                },
+            ],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+
+    patch_res = client.post(
+        f"/api/agreements/{aid}/update-field",
+        headers=_ORG_H,
+        json={
+            "field": "parties",
+            "value": [
+                {
+                    "id": "p_client",
+                    "name": "Blue Canyon Analytics LLC",
+                    "role": "owner",
+                    "email": "owner-user@example.com",
+                },
+                {
+                    "id": "p_provider",
+                    "name": "Iron Vale Systems Inc.",
+                    "role": "reviewer",
+                    "email": "external-reviewer@example.com",
+                },
+            ],
+        },
+    )
+    assert patch_res.status_code == 200
+
+    with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+        res = client.post(f"/api/agreements/{aid}/review-sent", headers=_ORG_H, json={})
+
+    assert res.status_code == 200
+    assert mock_client.post.call_count == 1
+    assert mock_client.post.call_args_list[0][1]["json"]["to"] == ["external-reviewer@example.com"]
+    assert res.json()["draft"].get("review_invite_emails_sent_at")
+
+
 def test_review_invite_template_excludes_agreement_body() -> None:
     from backend.services.email.templates.review_invite import build_review_invite_email
 

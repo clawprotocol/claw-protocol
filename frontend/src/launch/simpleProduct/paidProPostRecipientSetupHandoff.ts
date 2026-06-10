@@ -29,12 +29,14 @@ import {
   reviewLinkMintHasUsableUrls,
   writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
+import { resolveOwnerPostReviewSendPath } from "./reviewDeliveryOwnerRouting";
 import {
   logReviewFirstMintError,
   logReviewFirstMintStart,
   logReviewFirstMintSuccess,
 } from "../../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
 import { resolveReviewFirstMintPolicyGate } from "./reviewFirstAccessPolicy";
+import { persistReviewEmailPartyRolesOnServer } from "./reviewEmailPartyRoles";
 import {
   clearReviewFirstMintInFlight,
   mergeDraftWithReviewFirstPinnedCorpus,
@@ -272,10 +274,25 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
         options.agreementCorpusSource,
       );
       if (!minted.ok) return { ok: false, failure: minted.failure };
-      await maybePostReviewSentAfterReviewFirstHandoff(id, options.draft, options.logSource);
+      const rolePersist = await persistReviewEmailPartyRolesOnServer(id, options.draft);
+      if (!rolePersist.ok) {
+        // eslint-disable-next-line no-console
+        console.warn("[review-email-party-roles-persist-failed]", {
+          agreementId: id,
+          source: options.logSource,
+        });
+      } else if (rolePersist.rolesPersisted) {
+        // eslint-disable-next-line no-console
+        console.info("[review-email-party-roles-persisted]", {
+          agreementId: id,
+          source: options.logSource,
+        });
+      }
+      await maybePostReviewSentAfterReviewFirstHandoff(id, rolePersist.draft, options.logSource);
       markSimpleFlowSent(id);
       emitActionCompleted("send", { agreementId: id });
-      void options.navigate(`/app/done/${encodeURIComponent(id)}`);
+      const destinationPath = resolveOwnerPostReviewSendPath(id);
+      void options.navigate(destinationPath);
       return { ok: true, destination: "done" };
     } finally {
       clearReviewFirstMintInFlight();

@@ -95,6 +95,25 @@ export async function postReviewSentServer(agreementId: string): Promise<boolean
   }
 }
 
+export async function patchAgreementField(
+  agreementId: string,
+  field: string,
+  value: unknown,
+): Promise<boolean> {
+  const id = encodeURIComponent(agreementId.trim());
+  if (!id) return false;
+  try {
+    const res = await fetch(`${base()}/api/agreements/${id}/update-field`, {
+      method: "POST",
+      headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ field, value }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Merge server draft audit into index row for routing (e.g. signed before index refresh). */
 export async function fetchAgreementAuditSignedFlag(agreementId: string): Promise<boolean> {
   try {

@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import { postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
+import { patchAgreementField, postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
 import {
   executePaidProPostRecipientSetupHandoff,
   maybePostReviewSentAfterReviewFirstHandoff,
 } from "./paidProPostRecipientSetupHandoff";
+import * as reviewDeliveryOwnerRouting from "./reviewDeliveryOwnerRouting";
 import {
   mintSimpleDoneReviewRecipientLinkRows,
   reviewLinkMintHasUsableUrls,
@@ -19,6 +20,7 @@ import { markSimpleFlowSent } from "../simpleFlowSent";
 
 vi.mock("../../agreement/agreementWorkspaceApi", () => ({
   postReviewSentServer: vi.fn(async () => true),
+  patchAgreementField: vi.fn(async () => true),
 }));
 
 vi.mock("./simpleDoneReviewRecipientLinks", () => ({
@@ -76,12 +78,14 @@ const baseDraft = {
 describe("paid Pro review-first review-sent handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     vi.mocked(peekReviewFirstMintInFlight).mockReturnValue(false);
     vi.mocked(reviewLinkMintHasUsableUrls).mockReturnValue(true);
     vi.mocked(resolveReviewFirstMintPolicyGate).mockResolvedValue({ ok: true, policy: null });
   });
 
   it("executePaidProPostRecipientSetupHandoff calls postReviewSentServer exactly once after mint", async () => {
+    vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual");
     const navigate = vi.fn();
     const result = await executePaidProPostRecipientSetupHandoff({
       navigate,
@@ -100,6 +104,25 @@ describe("paid Pro review-first review-sent handoff", () => {
     expect(navigate).toHaveBeenCalledWith("/app/done/ag_review_1");
     expect(setReviewFirstMintInFlight).toHaveBeenCalledWith("ag_review_1");
     expect(clearReviewFirstMintInFlight).toHaveBeenCalled();
+  });
+
+  it("routes owner to dashboard when email delivery mode is active", async () => {
+    const routingSpy = vi
+      .spyOn(reviewDeliveryOwnerRouting, "resolveOwnerPostReviewSendPath")
+      .mockReturnValue("/app");
+    const navigate = vi.fn();
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate,
+      agreementId: "ag_review_email",
+      draft: baseDraft,
+      premiumSendIntent: "review",
+      logSource: "simple_pro_send_for_review",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(routingSpy).toHaveBeenCalledWith("ag_review_email");
+    expect(navigate).toHaveBeenCalledWith("/app");
+    routingSpy.mockRestore();
   });
 
   it("maybePostReviewSentAfterReviewFirstHandoff skips when review_sent_at already set", async () => {
@@ -128,5 +151,47 @@ describe("paid Pro review-first review-sent handoff", () => {
     });
     expect(result.ok).toBe(false);
     expect(postReviewSentServer).not.toHaveBeenCalled();
+    expect(patchAgreementField).not.toHaveBeenCalled();
+  });
+
+  it("persists explicit owner role before review-sent for paid Pro client/service_provider parties", async () => {
+    vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual");
+    const paidProDraft = {
+      ...baseDraft,
+      parties: [
+        {
+          id: "p_client",
+          name: "Blue Canyon Analytics LLC",
+          role: "client",
+          email: "owner-user@example.com",
+        },
+        {
+          id: "p_provider",
+          name: "Iron Vale Systems Inc.",
+          role: "service_provider",
+          email: "external-reviewer@example.com",
+        },
+      ],
+    } as unknown as AgreementDraft;
+
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate: vi.fn(),
+      agreementId: "ag_review_roles",
+      draft: paidProDraft,
+      premiumSendIntent: "review",
+      logSource: "simple_pro_send_for_review",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(patchAgreementField).toHaveBeenCalledTimes(1);
+    expect(patchAgreementField).toHaveBeenCalledWith(
+      "ag_review_roles",
+      "parties",
+      expect.arrayContaining([
+        expect.objectContaining({ id: "p_client", role: "owner" }),
+        expect.objectContaining({ id: "p_provider", role: "reviewer" }),
+      ]),
+    );
+    expect(postReviewSentServer).toHaveBeenCalledWith("ag_review_roles");
   });
 });
