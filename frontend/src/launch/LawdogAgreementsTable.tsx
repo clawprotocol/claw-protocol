@@ -1,9 +1,11 @@
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { patchWorkspaceArchive } from "../agreement/agreementWorkspaceApi";
 import {
+  creatorDashboardPrimaryAction,
   deriveCreatorDashboardStatus,
   displayCreatorAgreementTitle,
 } from "./creatorDashboardPresentation";
+import { creatorDashboardReviewLinkReadyPath } from "./creatorDashboardReviewLinkRouting";
 import {
   deriveLawdogProductStatus,
   formatLawdogDashboardDate,
@@ -16,11 +18,12 @@ import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 type Props = {
   rows: readonly WorkspaceIndexAgreement[];
   onNavigate: (path: string) => void;
+  onFocusReviewStatus?: (agreementId: string) => void;
   onArchiveComplete?: () => void;
 };
 
 export function LawdogAgreementsTable(props: Props) {
-  const { rows, onNavigate, onArchiveComplete } = props;
+  const { rows, onNavigate, onFocusReviewStatus, onArchiveComplete } = props;
 
   if (rows.length === 0) return null;
 
@@ -44,7 +47,8 @@ export function LawdogAgreementsTable(props: Props) {
           {rows.map((row) => {
             const internalStatus = deriveCreatorDashboardStatus(row);
             const productStatus = deriveLawdogProductStatus(row);
-            const donePath = `/app/done/${encodeURIComponent(row.id)}`;
+            const openAction = creatorDashboardPrimaryAction(row);
+            const donePath = creatorDashboardReviewLinkReadyPath(row.id);
             const canDownload = internalStatus === "completed";
             const contentUnavailable = row.content_unavailable === true;
 
@@ -91,7 +95,12 @@ export function LawdogAgreementsTable(props: Props) {
                       data-testid={`lawdog-action-open-${row.id}`}
                       disabled={contentUnavailable}
                       onClick={() => {
-                        if (!contentUnavailable) onNavigate(donePath);
+                        if (contentUnavailable) return;
+                        if (openAction.kind === "focus_review_status") {
+                          onFocusReviewStatus?.(row.id);
+                          return;
+                        }
+                        onNavigate(openAction.path);
                       }}
                     >
                       Open

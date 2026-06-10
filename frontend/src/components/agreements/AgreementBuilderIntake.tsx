@@ -1353,7 +1353,7 @@ import {
   writeUploadedSourceDocument,
 } from "./uploadedSourceDocumentStorage";
 import { SourceComparisonReviewPanel } from "./SourceComparisonReviewPanel";
-import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
+import { looksLikeEmail, shouldShowRecipientEmailFormatError, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
   countDistinctValidRecipientEmails,
   premiumReviewMintConfirmModalTitle,
@@ -2045,6 +2045,7 @@ function CreateFlowSendRecipientsPanel({
   onSignerMetadataForensicInput,
   onPaidProSignerMetadataFieldDiagnostics,
 }: CreateFlowSendRecipientsPanelProps) {
+  const [recipientEmailTouched, setRecipientEmailTouched] = useState<Record<number, boolean>>({});
   const resolvedSendMode: PremiumSendIntent =
     finalReviewSendIntent === "review_only"
       ? "review"
@@ -2076,11 +2077,11 @@ function CreateFlowSendRecipientsPanel({
         String((cappedParties[1] as { name?: string } | undefined)?.name ?? "").trim() ||
         "Party 2"
       : "";
-  const r1Invalid = r1e.length > 0 && !looksLikeEmail(r1e);
-  const r2Invalid = r2e.length > 0 && !looksLikeEmail(r2e);
-  const extraInvalidIdx = extraPartyReviewEmails.findIndex((raw) => {
+  const r1Invalid = shouldShowRecipientEmailFormatError(r1e, { touched: recipientEmailTouched[0] });
+  const r2Invalid = shouldShowRecipientEmailFormatError(r2e, { touched: recipientEmailTouched[1] });
+  const extraInvalidIdx = extraPartyReviewEmails.findIndex((raw, idx) => {
     const e = stripRecipientEmailNoise(raw);
-    return e.length > 0 && !looksLikeEmail(e);
+    return shouldShowRecipientEmailFormatError(e, { touched: recipientEmailTouched[idx + 2] });
   });
   const primaryEmailLine = looksLikeEmail(r1e)
     ? r1e
@@ -2420,6 +2421,9 @@ function CreateFlowSendRecipientsPanel({
                 }
                 value={emailVal}
                 onChange={(e) => onEmailChange(e.target.value)}
+                onBlur={() => {
+                  setRecipientEmailTouched((prev) => ({ ...prev, [idx]: true }));
+                }}
                 className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
                 autoComplete={idx === 0 ? "email" : "off"}
               />

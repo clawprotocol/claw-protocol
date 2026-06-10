@@ -69,7 +69,7 @@ export function workspaceAgreementStatusLabel(r: WorkspaceIndexAgreement): strin
 }
 
 export function AppDashboard() {
-  const { navigate, pathname } = useLaunchNav();
+  const { navigate, pathname, search } = useLaunchNav();
   const [rows, setRows] = useState<WorkspaceIndexAgreement[]>([]);
   const [indexError, setIndexError] = useState<string | null>(null);
   const [indexLoading, setIndexLoading] = useState(true);
@@ -255,6 +255,28 @@ export function AppDashboard() {
       });
     }
   }, [indexLoading, safeRecent, reviewRowsByAgreementId, signingStatusEpoch]);
+
+  const handleFocusAgreementReviewStatus = useCallback((agreementId: string) => {
+    const id = agreementId.trim();
+    if (!id) return;
+    const el = document.querySelector(`[data-testid="creator-dashboard-agreement-${id}"]`);
+    if (el instanceof HTMLElement) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.focus({ preventScroll: true });
+      return;
+    }
+    navigate(`/app?focus=${encodeURIComponent(id)}`);
+  }, [navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    const focusId = params.get("focus")?.trim();
+    if (!focusId || indexLoading) return;
+    const timer = window.setTimeout(() => {
+      handleFocusAgreementReviewStatus(focusId);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [search, indexLoading, handleFocusAgreementReviewStatus]);
 
   const withClearEntry = useCallback((fn: () => void) => {
     clearLawdogEntryContext();
@@ -476,6 +498,7 @@ export function AppDashboard() {
                   rows={attentionRows}
                   reviewRowsByAgreementId={reviewRowsByAgreementId}
                   onNavigate={(path) => withClearEntry(() => navigate(path))}
+                  onFocusReviewStatus={handleFocusAgreementReviewStatus}
                   onPrepareSignatureLinks={handlePrepareSignatureLinks}
                   prepareBusyAgreementId={prepareBusyAgreementId}
                   prepareNoticeByAgreementId={prepareNoticeByAgreementId}
@@ -490,6 +513,7 @@ export function AppDashboard() {
               <LawdogAgreementsTable
                 rows={safeRecent}
                 onNavigate={(path) => withClearEntry(() => navigate(path))}
+                onFocusReviewStatus={handleFocusAgreementReviewStatus}
                 onArchiveComplete={() => void reloadWorkspaceIndex()}
               />
             </section>

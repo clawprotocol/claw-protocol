@@ -22,6 +22,7 @@ import {
   displayCreatorAgreementTitle,
   formatCreatorDashboardUpdated,
 } from "./creatorDashboardPresentation";
+import { creatorDashboardUsesManualReviewLinkPage, creatorDashboardReviewLinkReadyPath } from "./creatorDashboardReviewLinkRouting";
 import {
   creatorDashboardReviewHydrationPending,
   creatorDashboardWaitingOnReviewer,
@@ -32,10 +33,12 @@ type Props = {
   rows: readonly WorkspaceIndexAgreement[];
   reviewRowsByAgreementId: Readonly<Record<string, OwnerReviewPartyStatusRow[]>>;
   onNavigate: (path: string) => void;
+  onFocusReviewStatus?: (agreementId: string) => void;
   onPrepareSignatureLinks: (agreementId: string) => void | Promise<void>;
   prepareBusyAgreementId?: string | null;
   prepareNoticeByAgreementId?: Readonly<Record<string, string>>;
   featured?: boolean;
+  manualReviewLinkPage?: boolean;
 };
 
 function ReviewStatusPanel(props: {
@@ -106,10 +109,12 @@ export function CreatorDashboardAgreementList(props: Props) {
     rows,
     reviewRowsByAgreementId,
     onNavigate,
+    onFocusReviewStatus,
     onPrepareSignatureLinks,
     prepareBusyAgreementId = null,
     prepareNoticeByAgreementId = {},
     featured: featuredSection = false,
+    manualReviewLinkPage = creatorDashboardUsesManualReviewLinkPage(),
   } = props;
   const [prepareBlockedNoticeAgreementId, setPrepareBlockedNoticeAgreementId] = useState<string | null>(
     null,
@@ -133,7 +138,7 @@ export function CreatorDashboardAgreementList(props: Props) {
         }
 
         const status = deriveCreatorDashboardStatus(row);
-        const action = creatorDashboardPrimaryAction(row);
+        const action = creatorDashboardPrimaryAction(row, { manualReviewLinkPage });
         const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows);
         const allApproved = reviewGate.allRequiredReviewPartiesApproved;
         const waitingOnReviewer = creatorDashboardWaitingOnReviewer(reviewGate);
@@ -146,13 +151,22 @@ export function CreatorDashboardAgreementList(props: Props) {
         const signingStatus = deriveCreatorSigningStatusLabel(row);
         const nextActionLabel = deriveCreatorNextActionLabel(row, reviewGate);
         const featured = featuredSection && (readyForSigning || waitingOnReviewer);
-        const donePath = `/app/done/${encodeURIComponent(row.id)}`;
+        const donePath = creatorDashboardReviewLinkReadyPath(row.id);
         const prepareBusy = prepareBusyAgreementId === row.id;
         const prepareNotice = prepareNoticeByAgreementId[row.id] ?? null;
-        const prepareSignatureLinksVisible = readyForSigning || waitingOnReviewer;
+        const inReviewEmailDashboard = status === "in_review" && !manualReviewLinkPage;
+        const prepareSignatureLinksVisible =
+          readyForSigning || (waitingOnReviewer && !inReviewEmailDashboard);
         const prepareSignatureLinksEnabled = readyForSigning;
-        const supplementalActions = creatorDashboardSupplementalActions(row);
+        const supplementalActions = creatorDashboardSupplementalActions(row, { manualReviewLinkPage });
         const contentUnavailable = row.content_unavailable === true;
+        const runDashboardAction = () => {
+          if (action.kind === "focus_review_status") {
+            onFocusReviewStatus?.(row.id);
+            return;
+          }
+          onNavigate(action.path);
+        };
 
         return (
           <li
@@ -171,6 +185,7 @@ export function CreatorDashboardAgreementList(props: Props) {
             data-creator-dashboard-prepare-enabled={prepareSignatureLinksEnabled ? "true" : "false"}
             data-creator-dashboard-review-source={reviewGate.source}
             data-lawdog-content-unavailable={contentUnavailable ? "true" : "false"}
+            tabIndex={-1}
           >
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start">
               <div className="min-w-0">
@@ -296,17 +311,19 @@ export function CreatorDashboardAgreementList(props: Props) {
                         {CREATOR_PREPARE_SIGNATURE_LINKS_BLOCKED_NOTICE}
                       </p>
                     ) : null}
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0 min-w-[10rem]"
-                      data-testid={`creator-dashboard-open-review-${row.id}`}
-                      disabled={contentUnavailable}
-                      onClick={() => {
-                        if (!contentUnavailable) onNavigate(donePath);
-                      }}
-                    >
-                      {CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL}
-                    </button>
+                    {manualReviewLinkPage ? (
+                      <button
+                        type="button"
+                        className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0 min-w-[10rem]"
+                        data-testid={`creator-dashboard-open-review-${row.id}`}
+                        disabled={contentUnavailable}
+                        onClick={() => {
+                          if (!contentUnavailable) onNavigate(donePath);
+                        }}
+                      >
+                        {CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL}
+                      </button>
+                    ) : null}
                   </>
                 ) : (
                   <button
@@ -317,7 +334,7 @@ export function CreatorDashboardAgreementList(props: Props) {
                     data-testid={`creator-dashboard-action-${row.id}`}
                     disabled={contentUnavailable}
                     onClick={() => {
-                      if (!contentUnavailable) onNavigate(action.path);
+                      if (!contentUnavailable) runDashboardAction();
                     }}
                   >
                     {action.label}

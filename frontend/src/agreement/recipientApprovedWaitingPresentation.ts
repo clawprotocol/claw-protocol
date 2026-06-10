@@ -31,7 +31,7 @@ export const CREATOR_EVERYONE_APPROVED_SUBTITLE =
 export const PUBLIC_REVIEW_SUBMITTED_HERO = "Review submitted";
 
 export const PUBLIC_REVIEW_SUBMITTED_BODY =
-  "Your approval has been recorded. We're waiting for the remaining reviewer(s) before signing can begin.";
+  "Your review has been recorded. You can close this page. The agreement owner will continue the signing process.";
 
 export const PUBLIC_ALL_REVIEWS_COMPLETE_HERO = "All reviews complete 🎉";
 

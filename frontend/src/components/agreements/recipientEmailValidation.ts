@@ -16,3 +16,33 @@ export function looksLikeEmail(s: string): boolean {
   if (domain.includes(".")) return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
   return domain.length >= 4;
 }
+
+/** Incomplete address the user may still be typing — suppress eager inline errors. */
+export function isRecipientEmailTypingInProgress(s: string): boolean {
+  const t = stripRecipientEmailNoise(s);
+  if (!t) return false;
+  if (t.endsWith("@") || t.endsWith(".")) return true;
+  const at = t.lastIndexOf("@");
+  if (at <= 0) return false;
+  const domain = t.slice(at + 1);
+  if (!domain) return true;
+  if (domain.endsWith(".") && !/\.[^\s.@]{2,}$/.test(domain)) return true;
+  return false;
+}
+
+export type RecipientEmailFormatErrorOptions = {
+  /** When true, show invalid format even if the value looks in-progress. */
+  touched?: boolean;
+};
+
+/** Whether to surface a visible email format error (blur, finalize, or clearly invalid mid-typing). */
+export function shouldShowRecipientEmailFormatError(
+  s: string,
+  options?: RecipientEmailFormatErrorOptions,
+): boolean {
+  const t = stripRecipientEmailNoise(s);
+  if (!t) return false;
+  if (looksLikeEmail(t)) return false;
+  if (!options?.touched && isRecipientEmailTypingInProgress(t)) return false;
+  return true;
+}

@@ -99,6 +99,11 @@ import {
 import { OwnerProposalReviewQaPanel } from "../../components/agreements/OwnerProposalReviewQaPanel";
 import { OWNER_CTA_REVIEW_SUGGESTED_CHANGES } from "../../agreement/ownerRecipientSuggestedEditsCopy";
 import {
+  REVIEW_INVITATIONS_SENT_BODY,
+  REVIEW_INVITATIONS_SENT_TITLE,
+  ownerPostReviewSendUsesDashboard,
+} from "./reviewDeliveryOwnerRouting";
+import {
   CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
   REVIEW_LINK_READY_ALL_APPROVED_BODY,
   REVIEW_LINK_READY_ALL_APPROVED_TITLE,
@@ -845,14 +850,19 @@ export function SimpleDonePage(props: { agreementId: string }) {
       });
     };
     const showReviewFlowDiagPanel = reviewFlowDiagLocal;
+    const emailDeliveryActive = ownerPostReviewSendUsesDashboard();
     const reviewReadyTitle =
-      reviewLinksReady && anyReviewHref && reviewApprovalAgg.flowShellTitle === "Review link created"
-        ? "Review link ready"
-        : flowShellTitle;
+      emailDeliveryActive && reviewLinksReady && anyReviewHref
+        ? REVIEW_INVITATIONS_SENT_TITLE
+        : reviewLinksReady && anyReviewHref && reviewApprovalAgg.flowShellTitle === "Review link created"
+          ? "Review link ready"
+          : flowShellTitle;
     const reviewReadyDescription =
-      reviewReadyTitle === "Review link ready"
-        ? "Send this private link to the reviewer. Nothing is signed until all parties approve the same final draft."
-        : reviewApprovalAgg.ownerStatusLine;
+      reviewReadyTitle === REVIEW_INVITATIONS_SENT_TITLE
+        ? REVIEW_INVITATIONS_SENT_BODY
+        : reviewReadyTitle === "Review link ready"
+          ? "Send this private link to the reviewer. Nothing is signed until all parties approve the same final draft."
+          : reviewApprovalAgg.ownerStatusLine;
 
     return (
       <SimpleFlowShell title={reviewReadyTitle} hideHeader>

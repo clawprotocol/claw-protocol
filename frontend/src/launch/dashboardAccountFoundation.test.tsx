@@ -198,7 +198,7 @@ describe("dashboard account foundation", () => {
     });
   });
 
-  it("in-review agreement shows View Review Status", async () => {
+  it("in-review agreement shows Track review status for email-mode dashboard", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [
         indexRow({
@@ -227,12 +227,14 @@ describe("dashboard account foundation", () => {
     render(<AppDashboard />);
     await waitFor(() => {
       expect(screen.getByTestId("creator-dashboard-action-ag_review").textContent).toContain(
-        "View Review Status",
+        "Track review status",
       );
     });
     expect(screen.getByTestId("creator-dashboard-status-pill-ag_review").textContent).toContain(
       "In Review",
     );
+    expect(screen.queryByRole("button", { name: "Continue review" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open review link page" })).toBeNull();
   });
 
   it("multiple agreements render independently", async () => {

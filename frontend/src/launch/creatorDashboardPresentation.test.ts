@@ -4,6 +4,7 @@ import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi
 import {
   countCreatorDashboardMetrics,
   creatorDashboardPrimaryAction,
+  creatorDashboardSupplementalActions,
   deriveCreatorDashboardStatus,
   deriveCreatorNextActionLabel,
   deriveCreatorSigningStatusLabel,
@@ -63,9 +64,21 @@ describe("creatorDashboardPresentation", () => {
 
   it("surfaces action-oriented CTAs per status", () => {
     expect(creatorDashboardPrimaryAction(row({})).label).toBe("Continue Editing");
-    expect(creatorDashboardPrimaryAction(row({ review_sent_at: "2026-01-01T00:00:00Z" })).label).toBe(
-      "View Review Status",
-    );
+    expect(
+      creatorDashboardPrimaryAction(row({ review_sent_at: "2026-01-01T00:00:00Z" }), {
+        manualReviewLinkPage: false,
+      }),
+    ).toEqual({
+      label: "Track review status",
+      path: "/app?focus=ag_test",
+      emphasis: "primary",
+      kind: "focus_review_status",
+    });
+    expect(
+      creatorDashboardPrimaryAction(row({ review_sent_at: "2026-01-01T00:00:00Z" }), {
+        manualReviewLinkPage: true,
+      }).label,
+    ).toBe("View Review Status");
     expect(
       creatorDashboardPrimaryAction(
         row({
@@ -82,6 +95,18 @@ describe("creatorDashboardPresentation", () => {
     expect(creatorDashboardPrimaryAction(row({ completed_signed: true })).label).toBe(
       "Open agreement workspace",
     );
+  });
+
+  it("hides obsolete in_review supplemental actions for email-mode dashboard", () => {
+    const inReview = row({ review_sent_at: "2026-01-01T00:00:00Z" });
+    expect(creatorDashboardSupplementalActions(inReview, { manualReviewLinkPage: false })).toEqual([]);
+    expect(creatorDashboardSupplementalActions(inReview, { manualReviewLinkPage: true })).toEqual([
+      {
+        label: "Open review link page",
+        path: "/app/done/ag_test",
+        testIdSuffix: "open-review-link",
+      },
+    ]);
   });
 
   it("treats partial reviewer approval as in_review, not ready_for_signing", () => {

@@ -64,10 +64,14 @@ export function RecipientPublicReviewRoute(props: Props) {
       hero={hero}
       headerAside={resolveRecipientReviewHeaderAside(props.viewerContext)}
       logoHomeHref={resolveRecipientLogoHomeHref(props.viewerContext)}
-      productNav={{
-        label: productNavAction.label,
-        onClick: () => navigate(productNavAction.path),
-      }}
+      productNav={
+        productNavAction
+          ? {
+              label: productNavAction.label,
+              onClick: () => navigate(productNavAction.path),
+            }
+          : undefined
+      }
       footerEvidenceSentence={LAWDOG_FOOTER_EVIDENCE_SENTENCE}
       recipientPublicFooter
     >

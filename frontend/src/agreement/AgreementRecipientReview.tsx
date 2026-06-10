@@ -2346,6 +2346,9 @@ export function AgreementRecipientReview({
           return;
         }
         case "done":
+          if (recipientViewerContext === "public_recipient") {
+            return;
+          }
           if (onClose) onClose();
           else navigate("/");
           return;
@@ -2353,7 +2356,7 @@ export function AgreementRecipientReview({
           return;
       }
     },
-    [agreementId, bundle?.signingLock?.lockedVersionId, draft, navigate, onClose],
+    [agreementId, bundle?.signingLock?.lockedVersionId, draft, navigate, onClose, recipientViewerContext],
   );
 
   const recipientAcceptedNoEditsBanner =

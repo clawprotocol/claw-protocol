@@ -84,6 +84,7 @@ describe("CreatorDashboardAgreementList", () => {
         }}
         onNavigate={vi.fn()}
         onPrepareSignatureLinks={vi.fn()}
+        manualReviewLinkPage
         featured
       />,
     );
@@ -102,6 +103,58 @@ describe("CreatorDashboardAgreementList", () => {
     expect(
       screen.getByText("Everyone approved this draft. Prepare signature links to start signing."),
     ).toBeTruthy();
+  });
+
+  it("in_review email-mode card uses track review status without done/send links", () => {
+    const onNavigate = vi.fn();
+    const onFocus = vi.fn();
+    render(
+      <CreatorDashboardAgreementList
+        rows={[
+          indexRow({
+            id: "ag_in_review",
+            reviewer_approved: false,
+            review_approvals_required: 2,
+            review_approvals_completed: 0,
+            all_reviewers_approved: false,
+          }),
+        ]}
+        reviewRowsByAgreementId={{
+          ag_in_review: [
+            {
+              partyIndex: 0,
+              partyLabel: "Party 1",
+              displayName: "Owner Co",
+              partyId: "p1",
+              status: "approved",
+              statusLabel: "Approved",
+            },
+            {
+              partyIndex: 1,
+              partyLabel: "Party 2",
+              displayName: "Reviewer Co",
+              partyId: "p2",
+              status: "not_reviewed",
+              statusLabel: "Not reviewed",
+            },
+          ],
+        }}
+        onNavigate={onNavigate}
+        onFocusReviewStatus={onFocus}
+        onPrepareSignatureLinks={vi.fn()}
+        manualReviewLinkPage={false}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Track review status" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open workspace" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue review" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open review link page" })).toBeNull();
+
+    fireEvent.click(screen.getByTestId("creator-dashboard-action-ag_in_review"));
+    expect(onFocus).toHaveBeenCalledWith("ag_in_review");
+    expect(onNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/done/"));
+    expect(onNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/send/"));
   });
 
   it("shows waiting-on-reviewer state when only party 1 approved", () => {
@@ -185,6 +238,7 @@ describe("CreatorDashboardAgreementList", () => {
         }}
         onNavigate={vi.fn()}
         onPrepareSignatureLinks={onPrepare}
+        manualReviewLinkPage
         featured
       />,
     );

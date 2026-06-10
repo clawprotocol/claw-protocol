@@ -202,19 +202,16 @@ describe("AppDashboard creator-centric surface", () => {
       },
     });
 
-    const user = userEvent.setup();
     render(<AppDashboard />);
 
     await waitFor(() => {
       expect(screen.getByText(/1 of 2 approved/)).toBeTruthy();
     });
 
-    await user.click(screen.getByRole("button", { name: "Prepare signature links" }));
+    expect(screen.getByRole("button", { name: "Track review status" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Prepare signature links" })).toBeNull();
     expect(vs01Spy).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(screen.getByTestId("creator-dashboard-prepare-blocked-notice-ag_partial").textContent).toContain(
-      "Signature links are available after all parties approve the review.",
-    );
   });
 
   it("shows bridge failure notice on dashboard instead of bouncing through done page", async () => {

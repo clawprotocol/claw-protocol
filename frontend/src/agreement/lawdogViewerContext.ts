@@ -37,7 +37,10 @@ export function resolveRecipientLogoHomeHref(_viewerContext: LawdogViewerContext
 export function resolveRecipientProductNavAction(
   viewerContext: LawdogViewerContext,
   ownerReturnPath: string | null,
-): { label: string; path: string } {
+): { label: string; path: string } | null {
+  if (viewerContext === "public_recipient") {
+    return null;
+  }
   if (viewerContext === "qa_recipient_simulation" && ownerReturnPath) {
     return { label: "← Review Link Ready", path: ownerReturnPath };
   }

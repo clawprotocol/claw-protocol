@@ -21,7 +21,14 @@ import {
   CREATOR_REVIEWS_APPROVED_PILL,
   CREATOR_WAITING_ON_REVIEWER_PILL,
   CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
+  CREATOR_TRACK_REVIEW_STATUS_LABEL,
+  CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL,
 } from "./creatorDashboardCopy";
+import {
+  creatorDashboardFocusAgreementPath,
+  creatorDashboardReviewLinkReadyPath,
+  creatorDashboardUsesManualReviewLinkPage,
+} from "./creatorDashboardReviewLinkRouting";
 
 export type CreatorDashboardStatus =
   | "draft"
@@ -33,10 +40,13 @@ export type CreatorDashboardStatus =
 
 export type CreatorDashboardMetricKey = "drafts" | "in_review" | "ready_for_signing" | "completed";
 
+export type CreatorDashboardActionKind = "navigate" | "focus_review_status";
+
 export type CreatorDashboardAction = {
   label: string;
   path: string;
   emphasis: "primary" | "secondary";
+  kind?: CreatorDashboardActionKind;
 };
 
 export const CREATOR_DASHBOARD_STATUS_LABEL: Record<CreatorDashboardStatus, string> = {
@@ -116,14 +126,16 @@ export function countCreatorDashboardMetrics(rows: readonly WorkspaceIndexAgreem
 
 export function creatorDashboardPrimaryAction(
   row: WorkspaceIndexAgreement,
+  options?: { manualReviewLinkPage?: boolean },
 ): CreatorDashboardAction {
   const id = encodeURIComponent(row.id);
+  const manualReviewLinkPage = options?.manualReviewLinkPage ?? creatorDashboardUsesManualReviewLinkPage();
   const status = deriveCreatorDashboardStatus(row);
   switch (status) {
     case "completed":
       return {
         label: CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
-        path: `/app/done/${id}`,
+        path: creatorDashboardReviewLinkReadyPath(row.id),
         emphasis: "primary",
       };
     case "signing_in_progress":
@@ -132,7 +144,19 @@ export function creatorDashboardPrimaryAction(
     case "review_approved":
       return { label: CREATOR_PREPARE_SIGNATURE_LINKS_LABEL, path: "/app", emphasis: "primary" };
     case "in_review":
-      return { label: "View Review Status", path: `/app/done/${id}`, emphasis: "secondary" };
+      if (manualReviewLinkPage) {
+        return {
+          label: "View Review Status",
+          path: creatorDashboardReviewLinkReadyPath(row.id),
+          emphasis: "secondary",
+        };
+      }
+      return {
+        label: CREATOR_TRACK_REVIEW_STATUS_LABEL,
+        path: creatorDashboardFocusAgreementPath(row.id),
+        emphasis: "primary",
+        kind: "focus_review_status",
+      };
     case "draft":
     default:
       return { label: "Continue Editing", path: `/app/send/${id}`, emphasis: "secondary" };
@@ -148,13 +172,33 @@ export type CreatorDashboardSupplementalAction = {
 /** Secondary row actions on dashboard agreement cards — does not replace primary CTA. */
 export function creatorDashboardSupplementalActions(
   row: WorkspaceIndexAgreement,
+  options?: { manualReviewLinkPage?: boolean },
 ): CreatorDashboardSupplementalAction[] {
   const id = encodeURIComponent(row.id);
+  const manualReviewLinkPage = options?.manualReviewLinkPage ?? creatorDashboardUsesManualReviewLinkPage();
   const status = deriveCreatorDashboardStatus(row);
-  const out: CreatorDashboardSupplementalAction[] = [
-    { label: "Open workspace", path: `/app/done/${id}`, testIdSuffix: "open-workspace" },
-  ];
-  if (status === "draft" || status === "in_review") {
+  const out: CreatorDashboardSupplementalAction[] = [];
+
+  if (status === "in_review") {
+    if (manualReviewLinkPage) {
+      out.push({
+        label: CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL,
+        path: creatorDashboardReviewLinkReadyPath(row.id),
+        testIdSuffix: "open-review-link",
+      });
+    }
+    return out;
+  }
+
+  if (status === "completed" || status === "signing_in_progress" || manualReviewLinkPage) {
+    out.push({
+      label: "Open workspace",
+      path: creatorDashboardReviewLinkReadyPath(row.id),
+      testIdSuffix: "open-workspace",
+    });
+  }
+
+  if (status === "draft" && manualReviewLinkPage) {
     out.push({ label: "Continue review", path: `/app/send/${id}`, testIdSuffix: "continue-review" });
   }
   if (status === "signing_in_progress") {
@@ -167,7 +211,7 @@ export function creatorDashboardSupplementalActions(
   if (status === "completed") {
     out.push({
       label: "Download final",
-      path: `/app/done/${id}`,
+      path: creatorDashboardReviewLinkReadyPath(row.id),
       testIdSuffix: "download-final",
     });
   }

@@ -28,10 +28,7 @@ describe("lawdogViewerContext", () => {
   });
 
   it("routes QA simulation Home to Review Link Ready when ownerReturn is present", () => {
-    expect(resolveRecipientProductNavAction("public_recipient", null)).toEqual({
-      label: "← Home",
-      path: "/",
-    });
+    expect(resolveRecipientProductNavAction("public_recipient", null)).toBeNull();
     expect(
       resolveRecipientProductNavAction("qa_recipient_simulation", "/app/done/ag_test"),
     ).toEqual({

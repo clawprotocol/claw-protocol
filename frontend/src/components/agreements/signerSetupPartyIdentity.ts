@@ -15,7 +15,7 @@ import {
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
-import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
+import { looksLikeEmail, shouldShowRecipientEmailFormatError, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { isRecipientHandoffSeedDisposable } from "./reviewPlaceholderGuard";
 import {
   hasSignerPartyLegalEntityDisplayPollution,
@@ -440,13 +440,17 @@ export function resolvePaidProSignerDetailsGate(
   }
 
   const complete = blockers.length === 0;
-  const firstBlocker = blockers[0] ?? null;
+  const visibleBlockers = blockers.filter((blocker) => {
+    if (blocker.field !== "email" || blocker.reason !== "invalid_email") return true;
+    return shouldShowRecipientEmailFormatError(paidProEmailForIndex(args, blocker.partyIndex));
+  });
+  const firstBlocker = visibleBlockers[0] ?? null;
   return {
     complete,
     requiredCount,
     legalEntityNames,
     blockers,
-    blockerMessage: formatPaidProSignerDetailsBlockerMessage(blockers, legalEntityNames),
+    blockerMessage: formatPaidProSignerDetailsBlockerMessage(visibleBlockers, legalEntityNames),
     firstIncompleteFieldKey: firstBlocker
       ? signerDetailsFieldKey(firstBlocker.partyIndex, firstBlocker.field)
       : null,

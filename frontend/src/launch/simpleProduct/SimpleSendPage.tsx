@@ -65,6 +65,7 @@ import {
   executePaidProPostRecipientSetupHandoff,
   shouldSkipPaidProPrepareReviewLinkInterstitial,
 } from "./paidProPostRecipientSetupHandoff";
+import { resolveOwnerPostReviewSendPath } from "./reviewDeliveryOwnerRouting";
 import {
   linearPremiumRecipientSlots,
   MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
@@ -999,7 +1000,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
               });
               markSimpleFlowSent(agreementId);
               emitActionCompleted("send", { agreementId });
-              navigate(`/app/done/${encodeURIComponent(id || agreementId)}`);
+              navigate(resolveOwnerPostReviewSendPath(id || agreementId));
               return;
             }
 
@@ -1009,7 +1010,7 @@ export function SimpleSendPage(props: { agreementId: string }) {
             }
             markSimpleFlowSent(agreementId);
             emitActionCompleted("send", { agreementId });
-            navigate(`/app/done/${encodeURIComponent(id || agreementId)}`);
+            navigate(resolveOwnerPostReviewSendPath(id || agreementId));
           }}
           onSimpleFlowBack={() => {
             if (simpleFlowPhase === "send") {

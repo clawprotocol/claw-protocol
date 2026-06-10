@@ -557,6 +557,22 @@ describe("signerSetupPartyIdentity", () => {
     expect(gate.firstIncompleteFieldKey).toBe("r2-signer-name");
   });
 
+  it("signer details gate suppresses invalid-email helper while domain is still being typed", () => {
+    const gate = resolvePaidProSignerDetailsGate({
+      partyCount: 2,
+      draftPartyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      partySignerNames: ["Alex Client", "Priya Provider"],
+      recipient1Name: "Red Mesa Logistics LLC",
+      recipient2Name: "Harbor Peak Automation LLC",
+      recipient1Email: "alex@redmesa.test",
+      recipient2Email: "crypto@domain.",
+      extraPartyReviewEmails: [],
+    });
+    expect(gate.complete).toBe(false);
+    expect(gate.blockers.some((b) => b.field === "email" && b.reason === "invalid_email")).toBe(true);
+    expect(gate.blockerMessage).not.toContain("valid signer email");
+  });
+
   it("signer details gate CTA becomes review-decision continue once complete", () => {
     const gate = resolvePaidProSignerDetailsGate({
       partyCount: 2,

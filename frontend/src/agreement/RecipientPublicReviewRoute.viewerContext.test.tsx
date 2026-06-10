@@ -41,10 +41,10 @@ describe("RecipientPublicReviewRoute viewer context chrome", () => {
 
     assertNoCreatorChrome();
     expect(screen.getByTestId("recipient-review-active")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "← Home" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "← Home" })).toBeNull();
   });
 
-  it("public Party 2 Home navigates to homepage", () => {
+  it("public Party 2 has no Home navigation to owner routes", () => {
     render(
       <AccessProvider>
         <RecipientPublicReviewRoute
@@ -56,8 +56,8 @@ describe("RecipientPublicReviewRoute viewer context chrome", () => {
       </AccessProvider>,
     );
 
-    screen.getByRole("button", { name: "← Home" }).click();
-    expect(mockNavigate).toHaveBeenCalledWith("/");
+    expect(screen.queryByRole("button", { name: "← Home" })).toBeNull();
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it("QA Party 1 simulation never renders Account/Dashboard and Home returns to Review Link Ready", () => {
@@ -92,7 +92,7 @@ describe("RecipientPublicReviewRoute viewer context chrome", () => {
       statusBanner: null,
       waitingPanel: {
         header: "Review submitted",
-        body: "Your approval has been recorded. We're waiting for the remaining reviewer(s) before signing can begin.",
+        body: "Your review has been recorded. You can close this page. The agreement owner will continue the signing process.",
         actions: [{ kind: "done", label: "Done", emphasis: "primary" }],
         pollHint: null,
       },

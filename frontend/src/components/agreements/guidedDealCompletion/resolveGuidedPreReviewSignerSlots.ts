@@ -3,7 +3,7 @@
  */
 
 import { isPlaceholderPartyName } from "../starterPartyLimits";
-import { looksLikeEmail, stripRecipientEmailNoise } from "../recipientEmailValidation";
+import { looksLikeEmail, shouldShowRecipientEmailFormatError, stripRecipientEmailNoise } from "../recipientEmailValidation";
 
 export type PremiumSendModeForSignerGate = "signature" | "review";
 
@@ -136,6 +136,10 @@ export function resolveGuidedPreReviewSignerSlots(
 ): GuidedPreReviewSignerSlotsResolution {
   const requiredCount = Math.max(args.partyCount, 2);
   const blockers = describeGuidedSignerSetupBlockers(args);
+  const visibleBlockers = blockers.filter((blocker) => {
+    if (blocker.field !== "email" || blocker.reason !== "invalid_email") return true;
+    return shouldShowRecipientEmailFormatError(emailForPartyIndex(args, blocker.partyIndex));
+  });
   const incompleteIndices = [...new Set(blockers.map((b) => b.partyIndex))];
   const filledCount = requiredCount - incompleteIndices.length;
 
@@ -145,6 +149,6 @@ export function resolveGuidedPreReviewSignerSlots(
     filledCount,
     incompleteIndices,
     blockers,
-    blockerMessage: formatGuidedSignerSetupBlockerMessage(blockers),
+    blockerMessage: formatGuidedSignerSetupBlockerMessage(visibleBlockers),
   };
 }
