@@ -53,7 +53,7 @@ def maybe_send_review_invites_after_review_sent(
     Never raises — failures are logged only.
 
     Returns an ISO timestamp to persist on ``review_invite_emails_sent_at`` when at least one
-    Resend send was attempted (idempotent guard for duplicate ``review-sent`` calls).
+    Resend send succeeded (idempotent guard for duplicate ``review-sent`` calls).
     """
     aid = (agreement_id or "").strip()
     oid = (org_id or "").strip() or None
@@ -125,12 +125,22 @@ def maybe_send_review_invites_after_review_sent(
     recipient_row_count = len(targets)
     _log_review_invite_target_policy(aid, oid, draft, targets)
     if not targets:
+        parties = draft.get("parties") or []
+        party_count = len(parties) if isinstance(parties, list) else 0
+        party_email_count = sum(
+            1
+            for p in parties
+            if isinstance(p, dict) and str(p.get("email") or "").strip()
+        )
         _log.info(
             "[review-email-delivery] skipped agreement_id=%s org_id=%s skip_reason=no_eligible_recipients "
-            "delivery_mode=%s recipient_row_count=0 send_attempt_count=0 sent_count=0 failed_count=0",
+            "delivery_mode=%s party_count=%s party_email_count=%s recipient_row_count=0 "
+            "send_attempt_count=0 sent_count=0 failed_count=0",
             aid,
             oid or "",
             mode,
+            party_count,
+            party_email_count,
         )
         return None
 
@@ -206,7 +216,7 @@ def maybe_send_review_invites_after_review_sent(
         sent,
         failed,
     )
-    if send_attempt_count < 1:
+    if sent < 1:
         return None
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 

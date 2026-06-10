@@ -278,7 +278,11 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
         options.agreementCorpusSource,
       );
       if (!minted.ok) return { ok: false, failure: minted.failure };
-      const rolePersist = await persistReviewEmailPartyRolesOnServer(id, options.draft);
+      const rolePersist = await persistReviewEmailPartyRolesOnServer(
+        id,
+        options.draft,
+        options.recipientSetup ?? null,
+      );
       if (!rolePersist.ok) {
         // eslint-disable-next-line no-console
         console.warn("[review-email-party-roles-persist-failed]", {

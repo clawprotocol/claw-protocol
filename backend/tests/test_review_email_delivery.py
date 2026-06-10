@@ -128,6 +128,187 @@ def test_resend_failure_does_not_fail_review_sent(monkeypatch: pytest.MonkeyPatc
     assert res.status_code == 200
     assert res.json().get("ok") is True
     assert "review_sent_at" in (res.json().get("draft") or {})
+    assert not res.json().get("draft", {}).get("review_invite_emails_sent_at")
+
+
+def test_resend_failure_leaves_invite_marker_unset_and_allows_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Failed Resend attempts must not set review_invite_emails_sent_at so review-sent can retry."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
+    monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
+
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_response.text = "server error"
+    mock_client = MagicMock()
+    mock_client.post.return_value = mock_response
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+
+    client = TestClient(app)
+    aid = _create_agreement_with_reviewers(client)
+
+    with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+        first = client.post(f"/api/agreements/{aid}/review-sent", headers=_ORG_H, json={})
+        assert first.status_code == 200
+        assert not first.json().get("draft", {}).get("review_invite_emails_sent_at")
+
+        success_client = _mock_resend_success()
+        with patch("backend.services.email.resend_client.httpx.Client", return_value=success_client):
+            second = client.post(f"/api/agreements/{aid}/review-sent", headers=_ORG_H, json={})
+
+    assert second.status_code == 200
+    assert success_client.post.call_count == 2
+    assert second.json()["draft"].get("review_invite_emails_sent_at")
+
+
+def test_paid_pro_mint_then_role_email_patch_review_sent_sends_one_external_invite(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Paid Pro handoff: server draft lacks emails until PATCH; review-sent sends one external invite."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-review-email-paid-pro")
+    monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "manual_and_email")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
+    monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
+
+    mock_client = _mock_resend_success()
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Paid Pro Review",
+            "jurisdiction": "TX",
+            "parties": [
+                {
+                    "id": "p_client",
+                    "name": "Blue Canyon Analytics LLC",
+                    "role": "client",
+                },
+                {
+                    "id": "p_provider",
+                    "name": "Iron Vale Systems Inc.",
+                    "role": "service_provider",
+                },
+            ],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG_H,
+        json={
+            "mode": "review",
+            "role": "reviewer",
+            "recipient_party_id": "p_provider",
+            "review_first_document_text": "PAID_PRO_REVIEW_CORPUS",
+            "review_first_document_source": "unit_test_paid_pro",
+        },
+    )
+    assert mint.status_code == 200
+
+    patch_res = client.post(
+        f"/api/agreements/{aid}/update-field",
+        headers=_ORG_H,
+        json={
+            "field": "parties",
+            "value": [
+                {
+                    "id": "p_client",
+                    "name": "Blue Canyon Analytics LLC",
+                    "role": "owner",
+                    "email": "owner-user@example.com",
+                },
+                {
+                    "id": "p_provider",
+                    "name": "Iron Vale Systems Inc.",
+                    "role": "reviewer",
+                    "email": "external-reviewer@example.com",
+                },
+            ],
+        },
+    )
+    assert patch_res.status_code == 200
+
+    with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+        res = client.post(f"/api/agreements/{aid}/review-sent", headers=_ORG_H, json={})
+
+    assert res.status_code == 200
+    assert mock_client.post.call_count == 1
+    assert mock_client.post.call_args_list[0][1]["json"]["to"] == ["external-reviewer@example.com"]
+    assert res.json()["draft"].get("review_invite_emails_sent_at")
+
+
+def test_roles_only_patch_without_emails_skips_resend_and_leaves_marker_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Roles without persisted emails: no Resend, no idempotency marker."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
+    monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
+
+    mock_client = _mock_resend_success()
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Roles only",
+            "jurisdiction": "TX",
+            "parties": [
+                {"id": "p_client", "name": "Owner LLC", "role": "client"},
+                {"id": "p_provider", "name": "Reviewer Inc", "role": "service_provider"},
+            ],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+
+    patch_res = client.post(
+        f"/api/agreements/{aid}/update-field",
+        headers=_ORG_H,
+        json={
+            "field": "parties",
+            "value": [
+                {"id": "p_client", "name": "Owner LLC", "role": "owner"},
+                {"id": "p_provider", "name": "Reviewer Inc", "role": "reviewer"},
+            ],
+        },
+    )
+    assert patch_res.status_code == 200
+
+    with caplog.at_level("INFO"):
+        with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+            res = client.post(f"/api/agreements/{aid}/review-sent", headers=_ORG_H, json={})
+
+    assert res.status_code == 200
+    mock_client.post.assert_not_called()
+    assert not res.json().get("draft", {}).get("review_invite_emails_sent_at")
+    assert any("skip_reason=no_eligible_recipients" in r.message for r in caplog.records)
 
 
 def test_missing_email_config_does_not_fail_review_sent(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

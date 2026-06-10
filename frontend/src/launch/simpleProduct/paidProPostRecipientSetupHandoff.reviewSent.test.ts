@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import { patchAgreementField, postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
-import {
-  executePaidProPostRecipientSetupHandoff,
-  maybePostReviewSentAfterReviewFirstHandoff,
-} from "./paidProPostRecipientSetupHandoff";
+import { fetchAgreementDraft, patchAgreementField, postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
 import {
   reviewLinkMintHasUsableUrls,
 } from "./simpleDoneReviewRecipientLinks";
@@ -17,7 +13,13 @@ import { markSimpleFlowSent } from "../simpleFlowSent";
 vi.mock("../../agreement/agreementWorkspaceApi", () => ({
   postReviewSentServer: vi.fn(async () => true),
   patchAgreementField: vi.fn(async () => true),
+  fetchAgreementDraft: vi.fn(async () => ({ ok: true, draft: null })),
 }));
+
+import {
+  executePaidProPostRecipientSetupHandoff,
+  maybePostReviewSentAfterReviewFirstHandoff,
+} from "./paidProPostRecipientSetupHandoff";
 
 vi.mock("./simpleDoneReviewRecipientLinks", () => ({
   mintSimpleDoneReviewRecipientLinkRows: vi.fn(async () => ({
@@ -79,6 +81,7 @@ describe("paid Pro review-first review-sent handoff", () => {
     vi.mocked(reviewLinkMintHasUsableUrls).mockReturnValue(true);
     vi.mocked(resolveReviewFirstMintPolicyGate).mockResolvedValue({ ok: true, policy: null });
     vi.mocked(postReviewSentServer).mockResolvedValue(true);
+    vi.mocked(fetchAgreementDraft).mockResolvedValue({ ok: true, draft: null });
   });
 
   it("routes to dashboard after successful review-sent when delivery env is unset", async () => {
@@ -205,16 +208,44 @@ describe("paid Pro review-first review-sent handoff", () => {
       ],
     } as unknown as AgreementDraft;
 
+    vi.mocked(fetchAgreementDraft).mockResolvedValue({
+      ok: true,
+      draft: {
+        ...paidProDraft,
+        parties: [
+          {
+            id: "p_client",
+            name: "Blue Canyon Analytics LLC",
+            role: "client",
+          },
+          {
+            id: "p_provider",
+            name: "Iron Vale Systems Inc.",
+            role: "service_provider",
+          },
+        ],
+      } as AgreementDraft,
+    });
+
     const result = await executePaidProPostRecipientSetupHandoff({
       navigate: vi.fn(),
       agreementId: "ag_review_roles",
       draft: paidProDraft,
       premiumSendIntent: "review",
+      recipientSetup: {
+        recipient1Email: "owner-user@example.com",
+        recipient2Email: "external-reviewer@example.com",
+      },
       logSource: "simple_pro_send_for_review",
     });
 
     expect(result.ok).toBe(true);
     expect(patchAgreementField).toHaveBeenCalledTimes(1);
+    const patchedParties = vi.mocked(patchAgreementField).mock.calls[0]?.[2] as Array<{ role: string; email?: string }>;
+    expect(patchedParties[0]?.role).toBe("owner");
+    expect(patchedParties[0]?.email).toBe("owner-user@example.com");
+    expect(patchedParties[1]?.role).toBe("reviewer");
+    expect(patchedParties[1]?.email).toBe("external-reviewer@example.com");
     expect(postReviewSentServer).toHaveBeenCalledWith("ag_review_roles");
     expect(markSimpleFlowSent).toHaveBeenCalledWith("ag_review_roles");
   });

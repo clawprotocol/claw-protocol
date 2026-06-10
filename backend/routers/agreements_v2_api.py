@@ -5911,9 +5911,10 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
                 resolve_subject_from_request(request),
             )
         else:
+            email_draft = _load_or_404(agreement_id).model_dump(mode="json")
             delivery_marker = maybe_send_review_invites_after_review_sent(
                 agreement_id=agreement_id,
-                draft=next_draft.model_dump(mode="json"),
+                draft=email_draft,
                 org_id=resolve_subject_from_request(request),
             )
             if delivery_marker:

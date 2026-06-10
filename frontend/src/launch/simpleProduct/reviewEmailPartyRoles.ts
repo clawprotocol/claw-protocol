@@ -1,6 +1,14 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
-import { patchAgreementField } from "../../agreement/agreementWorkspaceApi";
-import { resolveReviewLinkAssumedOwnerPartyIndex } from "./reviewLinkRecipientEmailMerge";
+import {
+  fetchAgreementDraft,
+  patchAgreementField,
+} from "../../agreement/agreementWorkspaceApi";
+import type { RecipientSetupEmailInput } from "./agreementToVs01SigningBridge";
+import {
+  mergeLiveDraftWithRecipientSetupForReviewLinks,
+  mergeReviewLinkRecipientEmailsOntoHydratedDraft,
+  resolveReviewLinkAssumedOwnerPartyIndex,
+} from "./reviewLinkRecipientEmailMerge";
 
 const OWNER_NORMALIZED = new Set(["owner", "sender", "landlord"]);
 
@@ -41,21 +49,58 @@ export function reviewEmailPartyRolesNeedPersist(
   before: readonly AgreementParty[],
   after: readonly AgreementParty[],
 ): boolean {
-  if (before.length !== after.length) return true;
-  return after.some((p, i) => String(before[i]?.role ?? "") !== String(p.role ?? ""));
+  return reviewEmailPartyContactNeedPersist(before, after);
 }
 
-/** PATCH ``parties`` on the server draft when review-email roles are missing. */
+/** True when server parties need a PATCH for review-email roles and/or contact emails. */
+export function reviewEmailPartyContactNeedPersist(
+  serverParties: readonly AgreementParty[],
+  preparedParties: readonly AgreementParty[],
+): boolean {
+  if (serverParties.length !== preparedParties.length) return true;
+  return preparedParties.some((p, i) => {
+    const prev = serverParties[i];
+    const roleChanged = String(prev?.role ?? "") !== String(p.role ?? "");
+    const emailChanged =
+      String(prev?.email ?? "").trim().toLowerCase() !== String(p.email ?? "").trim().toLowerCase();
+    return roleChanged || emailChanged;
+  });
+}
+
+function mergeLocalRecipientContactOntoDraft(
+  draft: AgreementDraft,
+  recipientSetup?: RecipientSetupEmailInput | null,
+): AgreementDraft {
+  if (!recipientSetup) return draft;
+  return mergeLiveDraftWithRecipientSetupForReviewLinks(draft, recipientSetup) ?? draft;
+}
+
+/** Merge session/local contact fields onto the server draft, then normalize review-email roles. */
+export function prepareReviewEmailPartyRowsForServer(
+  serverDraft: AgreementDraft,
+  localDraft: AgreementDraft,
+  recipientSetup?: RecipientSetupEmailInput | null,
+): AgreementParty[] {
+  const localWithContact = mergeLocalRecipientContactOntoDraft(localDraft, recipientSetup);
+  const merged = mergeReviewLinkRecipientEmailsOntoHydratedDraft(serverDraft, localWithContact);
+  return ensureExplicitReviewEmailPartyRoles(merged.parties ?? []);
+}
+
+/** PATCH ``parties`` on the server draft when review-email roles or emails are missing. */
 export async function persistReviewEmailPartyRolesOnServer(
   agreementId: string,
   draft: AgreementDraft,
+  recipientSetup?: RecipientSetupEmailInput | null,
 ): Promise<{ ok: boolean; draft: AgreementDraft; rolesPersisted: boolean }> {
   const id = agreementId.trim();
-  const parties = ensureExplicitReviewEmailPartyRoles(draft.parties ?? []);
-  const nextDraft = { ...draft, parties };
-  if (!id) return { ok: false, draft: nextDraft, rolesPersisted: false };
+  if (!id) return { ok: false, draft, rolesPersisted: false };
 
-  const needPersist = reviewEmailPartyRolesNeedPersist(draft.parties ?? [], parties);
+  const { ok: fetchOk, draft: serverDraft } = await fetchAgreementDraft(id);
+  const serverBase = fetchOk && serverDraft ? serverDraft : draft;
+  const parties = prepareReviewEmailPartyRowsForServer(serverBase, draft, recipientSetup);
+  const nextDraft = { ...serverBase, parties };
+
+  const needPersist = reviewEmailPartyContactNeedPersist(serverBase.parties ?? [], parties);
   if (!needPersist) return { ok: true, draft: nextDraft, rolesPersisted: false };
 
   const ok = await patchAgreementField(id, "parties", parties);
