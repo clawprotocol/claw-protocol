@@ -37,6 +37,16 @@ export const REVIEW_LINK_READY_ALL_APPROVED_BODY =
 
 export const REVIEW_LINK_READY_BACK_TO_DASHBOARD_LABEL = "Back to dashboard";
 
+export function logDashboardWhatsNextCtaClick(payload: {
+  agreementId: string;
+  action: string;
+  targetRoute: string;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[dashboard-whats-next-cta-click]", payload);
+}
+
 let lastCreatorDashboardStatusLogKey = "";
 
 export function logCreatorDashboardAgreementStatusLoaded(payload: {

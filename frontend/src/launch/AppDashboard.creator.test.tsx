@@ -113,6 +113,66 @@ describe("AppDashboard creator-centric surface", () => {
     expect(screen.getByTestId("agreement-progress-timeline")).toBeTruthy();
   });
 
+  it("prepare CTA routes to signature prep when index is approved but draft rows lag", async () => {
+    const partialDraft = {
+      ...draftWithParties(),
+      audit_log: [{ event_type: "recipient_approved", at: "2026-05-01T11:00:00.000Z" }],
+    } as AgreementDraft;
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: partialDraft,
+      lockedVersionId: null,
+    });
+    const vs01Spy = vi
+      .spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign")
+      .mockImplementation(async (options) => {
+        options.navigate("/app/esign/doc_index_lag?agreement_bridge=1");
+        return true;
+      });
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [indexRow({ id: "ag_ready" })],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: partialDraft,
+    });
+
+    const homeCreateSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const user = userEvent.setup();
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByText("All reviews complete")).toBeTruthy();
+    });
+
+    expect(screen.getByTestId("creator-dashboard-status-pill-ag_ready").textContent).toBe("Ready for Signing");
+    expect(screen.queryByText("Waiting on reviewer")).toBeNull();
+
+    const cta = screen.getByRole("button", { name: "Prepare signature links" });
+    expect(cta.getAttribute("data-dashboard-whats-next-cta")).toBe("prepare_signature_links");
+
+    await user.click(cta);
+
+    await waitFor(() => {
+      expect(vs01Spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agreementId: "ag_ready",
+          logReason: "creator_dashboard_prepare_signature_links",
+        }),
+      );
+      expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_index_lag?agreement_bridge=1");
+    });
+
+    const homeCreateCalls = homeCreateSpy.mock.calls.filter(
+      (call) => call[0] === "[home-create-submit]",
+    );
+    expect(homeCreateCalls).toHaveLength(0);
+    expect(mockNavigate).not.toHaveBeenCalledWith("/app/create");
+    homeCreateSpy.mockRestore();
+  });
+
   it("routes Prepare signature links through VS01 bridge with correct agreementId", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
       ok: true,

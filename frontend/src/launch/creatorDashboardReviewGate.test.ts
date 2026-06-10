@@ -68,6 +68,27 @@ describe("creatorDashboardReviewGate", () => {
     expect(creatorDashboardWaitingOnReviewer(gate)).toBe(false);
   });
 
+  it("trusts workspace index when all reviewers approved but draft rows lag", () => {
+    const gate = resolveCreatorDashboardReviewGate(
+      indexRow({ all_reviewers_approved: true, review_approvals_completed: 2 }),
+      partyOneApprovedRows,
+    );
+    expect(gate.allRequiredReviewPartiesApproved).toBe(true);
+    expect(gate.requiredPartyCount).toBe(2);
+    expect(gate.approvedCount).toBe(2);
+    expect(creatorDashboardWaitingOnReviewer(gate)).toBe(false);
+  });
+
+  it("uses workspace index summary when draft rows are still hydrating", () => {
+    const gate = resolveCreatorDashboardReviewGate(
+      indexRow({ all_reviewers_approved: true, review_approvals_completed: 2 }),
+      [],
+    );
+    expect(gate.source).toBe("workspace_index_summary");
+    expect(gate.allRequiredReviewPartiesApproved).toBe(true);
+    expect(gate.requiredPartyCount).toBe(2);
+  });
+
   it("marks all approved when every draft party row is approved", () => {
     const gate = resolveCreatorDashboardReviewGate(
       indexRow({ all_reviewers_approved: true, review_approvals_completed: 2 }),

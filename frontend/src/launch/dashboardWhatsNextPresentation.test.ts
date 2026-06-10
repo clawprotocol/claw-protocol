@@ -6,6 +6,7 @@ import {
   deriveDashboardWhatsNextPresentation,
   deriveWhatsNextHeadline,
 } from "./dashboardWhatsNextPresentation";
+import { deriveCreatorDashboardStatusPillFromGate } from "./creatorDashboardPresentation";
 import { resolveCreatorDashboardReviewGate } from "./creatorDashboardReviewGate";
 
 function row(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement {
@@ -69,6 +70,17 @@ describe("dashboardWhatsNextPresentation", () => {
     const presentation = deriveDashboardWhatsNextPresentation(row({}), gate);
     expect(presentation.progressLine).toBe("1 of 2 approved");
     expect(presentation.nextStepLabel).toBe("Wait for remaining reviewer");
+  });
+
+  it("does not show waiting-on-reviewer pill when index says all reviewers approved", () => {
+    const r = row({ all_reviewers_approved: true, review_approvals_completed: 2 });
+    const gate = resolveCreatorDashboardReviewGate(r, reviewRows());
+    const presentation = deriveDashboardWhatsNextPresentation(r, gate);
+    const pill = deriveCreatorDashboardStatusPillFromGate(r, gate);
+    expect(presentation.headline).toBe("All reviews complete");
+    expect(presentation.nextStepLabel).toBe("Prepare signature links");
+    expect(pill).toBe("Ready for Signing");
+    expect(pill).not.toBe("Waiting on reviewer");
   });
 
   it("ready for signing headline and next step", () => {

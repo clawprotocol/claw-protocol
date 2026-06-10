@@ -436,6 +436,11 @@ export function AppDashboard() {
 
   const handleWhatsNextPrimaryAction = useCallback(
     (row: WorkspaceIndexAgreement) => {
+      const status = deriveCreatorDashboardStatus(row);
+      if (status === "ready_for_signing" || status === "review_approved") {
+        void handlePrepareSignatureLinks(row.id);
+        return;
+      }
       const action = creatorDashboardPrimaryAction(row);
       if (action.kind === "focus_review_status") {
         handleFocusAgreementReviewStatus(row.id);
@@ -443,7 +448,7 @@ export function AppDashboard() {
       }
       withClearEntry(() => navigate(action.path));
     },
-    [handleFocusAgreementReviewStatus, navigate, withClearEntry],
+    [handleFocusAgreementReviewStatus, handlePrepareSignatureLinks, navigate, withClearEntry],
   );
 
   return (

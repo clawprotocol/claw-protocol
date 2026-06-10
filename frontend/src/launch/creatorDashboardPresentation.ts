@@ -315,10 +315,23 @@ export function deriveCreatorDashboardStatusPillFromGate(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
 ): string | null {
+  const indexStatus = deriveCreatorDashboardStatus(row);
+  if (indexStatus === "ready_for_signing" || indexStatus === "review_approved") {
+    return CREATOR_DASHBOARD_STATUS_LABEL.ready_for_signing;
+  }
   if (!reviewGate.authoritative) return null;
   if (reviewGate.allRequiredReviewPartiesApproved) return CREATOR_REVIEWS_APPROVED_PILL;
   if (creatorDashboardWaitingOnReviewer(reviewGate)) return CREATOR_WAITING_ON_REVIEWER_PILL;
-  return CREATOR_DASHBOARD_STATUS_LABEL[deriveCreatorDashboardStatus(row)];
+  return CREATOR_DASHBOARD_STATUS_LABEL[indexStatus];
+}
+
+export function creatorDashboardShouldPrepareSignatureLinks(
+  row: WorkspaceIndexAgreement,
+  reviewGate: CreatorDashboardReviewGate,
+): boolean {
+  const status = deriveCreatorDashboardStatus(row);
+  if (status === "signing_in_progress" || status === "completed") return false;
+  return reviewGate.allRequiredReviewPartiesApproved || row.all_reviewers_approved === true;
 }
 
 /** Workspace-index snapshot for diagnostics only — never used for rendered review UI. */

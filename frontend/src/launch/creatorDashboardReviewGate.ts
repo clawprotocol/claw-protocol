@@ -4,7 +4,39 @@ import {
   type OwnerReviewPartyStatusRow,
 } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 
-export type CreatorDashboardReviewGateSource = "draft_parties" | "pending_hydration" | "no_review_activity";
+export type CreatorDashboardReviewGateSource =
+  | "draft_parties"
+  | "pending_hydration"
+  | "no_review_activity"
+  | "workspace_index_summary";
+
+function resolveRequiredPartyCountFromIndex(
+  row: WorkspaceIndexAgreement,
+  reviewRowCount: number,
+): number {
+  return Math.max(reviewRowCount, row.review_approvals_required ?? 0, row.party_count ?? 0, 1);
+}
+
+/** Workspace index is authoritative for review completion when server marks all reviewers approved. */
+function reviewGateFromWorkspaceIndexSummary(
+  row: WorkspaceIndexAgreement,
+  reviewRows: readonly OwnerReviewPartyStatusRow[],
+  source: Extract<CreatorDashboardReviewGateSource, "draft_parties" | "pending_hydration" | "workspace_index_summary">,
+): CreatorDashboardReviewGate {
+  const requiredPartyCount = resolveRequiredPartyCountFromIndex(row, reviewRows.length);
+  return {
+    requiredPartyCount,
+    approvedCount: requiredPartyCount,
+    allRequiredReviewPartiesApproved: true,
+    partyStatuses: reviewRows.map((partyRow) => ({
+      displayName: partyRow.displayName,
+      statusLabel: partyRow.statusLabel,
+      status: partyRow.status,
+    })),
+    source,
+    authoritative: true,
+  };
+}
 
 export type CreatorDashboardReviewPartyStatus = {
   displayName: string;
@@ -47,12 +79,16 @@ export function resolveCreatorDashboardReviewGate(
   if (reviewRows.length > 0) {
     const approvedCount = countOwnerReviewPartyApproved(reviewRows);
     const requiredPartyCount = reviewRows.length;
+    const allRequiredReviewPartiesApproved =
+      approvedCount === requiredPartyCount &&
+      reviewRows.every((partyRow) => partyRow.status === "approved");
+    if (!allRequiredReviewPartiesApproved && row.all_reviewers_approved) {
+      return reviewGateFromWorkspaceIndexSummary(row, reviewRows, "draft_parties");
+    }
     return {
       requiredPartyCount,
       approvedCount,
-      allRequiredReviewPartiesApproved:
-        approvedCount === requiredPartyCount &&
-        reviewRows.every((partyRow) => partyRow.status === "approved"),
+      allRequiredReviewPartiesApproved,
       partyStatuses: reviewRows.map((partyRow) => ({
         displayName: partyRow.displayName,
         statusLabel: partyRow.statusLabel,
@@ -64,6 +100,9 @@ export function resolveCreatorDashboardReviewGate(
   }
 
   if (creatorDashboardNeedsAuthoritativeReviewHydration(row)) {
+    if (row.all_reviewers_approved) {
+      return reviewGateFromWorkspaceIndexSummary(row, reviewRows, "workspace_index_summary");
+    }
     return {
       requiredPartyCount: 0,
       approvedCount: 0,

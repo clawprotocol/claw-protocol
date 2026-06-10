@@ -3,10 +3,12 @@ import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewParty
 import { AgreementProgressTimeline } from "./AgreementProgressTimeline";
 import {
   creatorDashboardPrimaryAction,
+  creatorDashboardShouldPrepareSignatureLinks,
   CREATOR_DASHBOARD_STATUS_LABEL,
   deriveCreatorDashboardStatusPillFromGate,
   deriveCreatorSigningStatusLabel,
 } from "./creatorDashboardPresentation";
+import { logDashboardWhatsNextCtaClick } from "./creatorDashboardCopy";
 import { creatorDashboardUsesManualReviewLinkPage } from "./creatorDashboardReviewLinkRouting";
 import {
   creatorDashboardReviewHydrationPending,
@@ -52,12 +54,27 @@ export function DashboardWhatsNextPanel(props: Props) {
   const action = creatorDashboardPrimaryAction(row, { manualReviewLinkPage });
   const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate);
   const signingStatus = deriveCreatorSigningStatusLabel(row);
-  const readyForSigning = reviewGate.allRequiredReviewPartiesApproved;
   const showPrepare =
-    readyForSigning &&
-    onPrepareSignatureLinks &&
-    presentation.status !== "signing_in_progress" &&
-    presentation.status !== "completed";
+    Boolean(onPrepareSignatureLinks) &&
+    creatorDashboardShouldPrepareSignatureLinks(row, reviewGate);
+
+  const handleCtaClick = () => {
+    if (showPrepare && onPrepareSignatureLinks) {
+      logDashboardWhatsNextCtaClick({
+        agreementId: row.id,
+        action: "prepare_signature_links",
+        targetRoute: "creator_prepare_signature_links",
+      });
+      onPrepareSignatureLinks(row.id);
+      return;
+    }
+    logDashboardWhatsNextCtaClick({
+      agreementId: row.id,
+      action: action.kind ?? "navigate",
+      targetRoute: action.path,
+    });
+    onPrimaryAction(row);
+  };
 
   return (
     <section
@@ -101,26 +118,24 @@ export function DashboardWhatsNextPanel(props: Props) {
           </div>
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:items-end">
-          {showPrepare ? (
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--primary vs01-btn--compact min-w-[11rem]"
-              data-testid={`creator-dashboard-action-${row.id}`}
-              disabled={prepareBusy}
-              onClick={() => onPrepareSignatureLinks(row.id)}
-            >
-              {prepareBusy ? "Preparing…" : "Prepare signature links"}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--primary vs01-btn--compact min-w-[11rem]"
-              data-testid={`creator-dashboard-action-${row.id}`}
-              onClick={() => onPrimaryAction(row)}
-            >
-              {action.label}
-            </button>
-          )}
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--primary vs01-btn--compact min-w-[11rem]"
+            data-testid={`creator-dashboard-action-${row.id}`}
+            data-dashboard-whats-next-cta={showPrepare ? "prepare_signature_links" : action.kind ?? "navigate"}
+            disabled={showPrepare ? prepareBusy : false}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleCtaClick();
+            }}
+          >
+            {showPrepare
+              ? prepareBusy
+                ? "Preparing…"
+                : "Prepare signature links"
+              : action.label}
+          </button>
           {prepareNotice ? (
             <p
               className="max-w-xs text-sm text-amber-100/95"
