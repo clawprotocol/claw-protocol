@@ -8,14 +8,11 @@ import {
 import {
   mintSimpleDoneReviewRecipientLinkRows,
   reviewLinkMintHasUsableUrls,
-  writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
 import { resolveReviewFirstMintPolicyGate } from "./reviewFirstAccessPolicy";
 import {
   clearReviewFirstMintInFlight,
-  mergeDraftWithReviewFirstPinnedCorpus,
   peekReviewFirstMintInFlight,
-  peekReviewFirstPinnedCorpus,
   setReviewFirstMintInFlight,
 } from "./reviewFirstSendSurface";
 import { markSimpleFlowSent } from "../simpleFlowSent";
@@ -37,7 +34,7 @@ vi.mock("./simpleDoneReviewRecipientLinks", () => ({
 }));
 
 vi.mock("./reviewFirstAccessPolicy", () => ({
-  resolveReviewFirstMintPolicyGate: vi.fn(async () => ({ ok: true as const })),
+  resolveReviewFirstMintPolicyGate: vi.fn(async () => ({ ok: true as const, policy: null })),
 }));
 
 vi.mock("./reviewFirstSendSurface", () => ({
@@ -81,7 +78,7 @@ describe("paid Pro review-first review-sent handoff", () => {
     vi.clearAllMocks();
     vi.mocked(peekReviewFirstMintInFlight).mockReturnValue(false);
     vi.mocked(reviewLinkMintHasUsableUrls).mockReturnValue(true);
-    vi.mocked(resolveReviewFirstMintPolicyGate).mockResolvedValue({ ok: true });
+    vi.mocked(resolveReviewFirstMintPolicyGate).mockResolvedValue({ ok: true, policy: null });
   });
 
   it("executePaidProPostRecipientSetupHandoff calls postReviewSentServer exactly once after mint", async () => {
