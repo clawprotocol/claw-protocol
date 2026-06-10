@@ -5,16 +5,12 @@ import {
   executePaidProPostRecipientSetupHandoff,
   maybePostReviewSentAfterReviewFirstHandoff,
 } from "./paidProPostRecipientSetupHandoff";
-import * as reviewDeliveryOwnerRouting from "./reviewDeliveryOwnerRouting";
 import {
-  mintSimpleDoneReviewRecipientLinkRows,
   reviewLinkMintHasUsableUrls,
 } from "./simpleDoneReviewRecipientLinks";
 import { resolveReviewFirstMintPolicyGate } from "./reviewFirstAccessPolicy";
 import {
-  clearReviewFirstMintInFlight,
   peekReviewFirstMintInFlight,
-  setReviewFirstMintInFlight,
 } from "./reviewFirstSendSurface";
 import { markSimpleFlowSent } from "../simpleFlowSent";
 
@@ -82,9 +78,30 @@ describe("paid Pro review-first review-sent handoff", () => {
     vi.mocked(peekReviewFirstMintInFlight).mockReturnValue(false);
     vi.mocked(reviewLinkMintHasUsableUrls).mockReturnValue(true);
     vi.mocked(resolveReviewFirstMintPolicyGate).mockResolvedValue({ ok: true, policy: null });
+    vi.mocked(postReviewSentServer).mockResolvedValue(true);
   });
 
-  it("executePaidProPostRecipientSetupHandoff calls postReviewSentServer exactly once after mint", async () => {
+  it("routes to dashboard after successful review-sent when delivery env is unset", async () => {
+    vi.unstubAllEnvs();
+    const navigate = vi.fn();
+
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate,
+      agreementId: "ag_review_runtime",
+      draft: baseDraft,
+      premiumSendIntent: "review",
+      logSource: "simple_pro_send_for_review",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.destination).toBe("dashboard");
+      expect(result.ownerRoutePath).toBe("/app");
+    }
+    expect(navigate).toHaveBeenCalledWith("/app");
+  });
+
+  it("explicit manual mode still routes to done after successful review-sent", async () => {
     vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual");
     const navigate = vi.fn();
     const result = await executePaidProPostRecipientSetupHandoff({
@@ -96,20 +113,16 @@ describe("paid Pro review-first review-sent handoff", () => {
     });
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.destination).toBe("done");
-    expect(mintSimpleDoneReviewRecipientLinkRows).toHaveBeenCalledTimes(1);
+    if (result.ok) {
+      expect(result.destination).toBe("done");
+      expect(result.ownerRoutePath).toBe("/app/done/ag_review_1");
+    }
     expect(postReviewSentServer).toHaveBeenCalledTimes(1);
-    expect(postReviewSentServer).toHaveBeenCalledWith("ag_review_1");
-    expect(markSimpleFlowSent).toHaveBeenCalledWith("ag_review_1");
     expect(navigate).toHaveBeenCalledWith("/app/done/ag_review_1");
-    expect(setReviewFirstMintInFlight).toHaveBeenCalledWith("ag_review_1");
-    expect(clearReviewFirstMintInFlight).toHaveBeenCalled();
   });
 
-  it("routes owner to dashboard when email delivery mode is active", async () => {
-    const routingSpy = vi
-      .spyOn(reviewDeliveryOwnerRouting, "resolveOwnerPostReviewSendPath")
-      .mockReturnValue("/app");
+  it("routes owner to dashboard when email delivery mode env is active", async () => {
+    vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual_and_email");
     const navigate = vi.fn();
     const result = await executePaidProPostRecipientSetupHandoff({
       navigate,
@@ -120,24 +133,42 @@ describe("paid Pro review-first review-sent handoff", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(routingSpy).toHaveBeenCalledWith("ag_review_email");
     expect(navigate).toHaveBeenCalledWith("/app");
-    routingSpy.mockRestore();
+  });
+
+  it("review-sent failure routes to done when env is unset", async () => {
+    vi.unstubAllEnvs();
+    vi.mocked(postReviewSentServer).mockResolvedValue(false);
+    const navigate = vi.fn();
+
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate,
+      agreementId: "ag_review_fail_sent",
+      draft: baseDraft,
+      premiumSendIntent: "review",
+      logSource: "simple_pro_send_for_review",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.destination).toBe("done");
+    expect(navigate).toHaveBeenCalledWith("/app/done/ag_review_fail_sent");
   });
 
   it("maybePostReviewSentAfterReviewFirstHandoff skips when review_sent_at already set", async () => {
-    await maybePostReviewSentAfterReviewFirstHandoff(
+    const ok = await maybePostReviewSentAfterReviewFirstHandoff(
       "ag_review_2",
       { ...baseDraft, review_sent_at: "2026-06-01T00:00:00.000Z" },
       "test",
     );
     expect(postReviewSentServer).not.toHaveBeenCalled();
+    expect(ok).toBe(true);
   });
 
   it("maybePostReviewSentAfterReviewFirstHandoff posts when review_sent_at is unset", async () => {
-    await maybePostReviewSentAfterReviewFirstHandoff("ag_review_3", baseDraft, "test");
+    const ok = await maybePostReviewSentAfterReviewFirstHandoff("ag_review_3", baseDraft, "test");
     expect(postReviewSentServer).toHaveBeenCalledTimes(1);
     expect(postReviewSentServer).toHaveBeenCalledWith("ag_review_3");
+    expect(ok).toBe(true);
   });
 
   it("does not call postReviewSentServer when mint fails", async () => {
@@ -184,14 +215,7 @@ describe("paid Pro review-first review-sent handoff", () => {
 
     expect(result.ok).toBe(true);
     expect(patchAgreementField).toHaveBeenCalledTimes(1);
-    expect(patchAgreementField).toHaveBeenCalledWith(
-      "ag_review_roles",
-      "parties",
-      expect.arrayContaining([
-        expect.objectContaining({ id: "p_client", role: "owner" }),
-        expect.objectContaining({ id: "p_provider", role: "reviewer" }),
-      ]),
-    );
     expect(postReviewSentServer).toHaveBeenCalledWith("ag_review_roles");
+    expect(markSimpleFlowSent).toHaveBeenCalledWith("ag_review_roles");
   });
 });

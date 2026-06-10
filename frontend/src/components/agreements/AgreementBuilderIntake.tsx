@@ -23782,7 +23782,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           classification: reviewLinkGenAudit?.classification ?? null,
         });
 
-        const donePath = `/app/done/${encodeURIComponent(id)}`;
         logReviewFirstMintStart({
           source,
           agreementId: id,
@@ -23817,7 +23816,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           source,
           canonicalHash: reviewTrackCanonicalHash,
         });
-        logReviewFirstNavigateDone({ agreementId: id, path: donePath, source });
+        logReviewFirstNavigateDone({ agreementId: id, path: result.ownerRoutePath, source });
         clearPremiumSendIntent();
         clearReviewFirstHandoffSource();
         clearPersistedSimpleSendPhase(id);

@@ -29,7 +29,10 @@ import {
   reviewLinkMintHasUsableUrls,
   writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
-import { resolveOwnerPostReviewSendPath } from "./reviewDeliveryOwnerRouting";
+import {
+  logReviewFirstOwnerRouteResolved,
+  resolveOwnerPostReviewSendRoute,
+} from "./reviewDeliveryOwnerRouting";
 import {
   logReviewFirstMintError,
   logReviewFirstMintStart,
@@ -57,7 +60,7 @@ export type PaidProPostRecipientSetupFailure = {
 };
 
 export type PaidProPostRecipientSetupResult =
-  | { ok: true; destination: "vs01" | "done" }
+  | { ok: true; destination: "vs01" | "done" | "dashboard"; ownerRoutePath: string }
   | { ok: false; failure: PaidProPostRecipientSetupFailure };
 
 /** Paid/pro paths that already confirmed recipients in intake — skip `/app/send` “Prepare review link”. */
@@ -188,9 +191,9 @@ export async function maybePostReviewSentAfterReviewFirstHandoff(
   agreementId: string,
   draft: AgreementDraft,
   logSource?: string,
-): Promise<void> {
+): Promise<boolean> {
   const id = agreementId.trim();
-  if (!id) return;
+  if (!id) return false;
   if ((draft.review_sent_at || "").trim()) {
     // eslint-disable-next-line no-console
     console.info("[review-first-review-sent-skipped]", {
@@ -198,7 +201,7 @@ export async function maybePostReviewSentAfterReviewFirstHandoff(
       reason: "already_sent",
       source: logSource ?? null,
     });
-    return;
+    return true;
   }
   const ok = await postReviewSentServer(id);
   // eslint-disable-next-line no-console
@@ -207,6 +210,7 @@ export async function maybePostReviewSentAfterReviewFirstHandoff(
     ok,
     source: logSource ?? null,
   });
+  return ok;
 }
 
 /**
@@ -288,12 +292,23 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
           source: options.logSource,
         });
       }
-      await maybePostReviewSentAfterReviewFirstHandoff(id, rolePersist.draft, options.logSource);
+      const reviewSentOk = await maybePostReviewSentAfterReviewFirstHandoff(
+        id,
+        rolePersist.draft,
+        options.logSource,
+      );
       markSimpleFlowSent(id);
       emitActionCompleted("send", { agreementId: id });
-      const destinationPath = resolveOwnerPostReviewSendPath(id);
-      void options.navigate(destinationPath);
-      return { ok: true, destination: "done" };
+      const route = resolveOwnerPostReviewSendRoute(id, { reviewSentOk });
+      logReviewFirstOwnerRouteResolved({
+        agreementId: id,
+        destination: route.destination,
+        reason: route.reason,
+        deliveryMode: route.deliveryMode,
+        reviewSentOk,
+      });
+      void options.navigate(route.path);
+      return { ok: true, destination: route.destination, ownerRoutePath: route.path };
     } finally {
       clearReviewFirstMintInFlight();
     }
@@ -370,7 +385,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   if (vs01Ok) {
     // eslint-disable-next-line no-console
     console.info("[send-flow-vs01-bridge-success]", { agreementId: id, source: options.logSource });
-    return { ok: true, destination: "vs01" };
+    return { ok: true, destination: "vs01", ownerRoutePath: "" };
   }
 
   // eslint-disable-next-line no-console
