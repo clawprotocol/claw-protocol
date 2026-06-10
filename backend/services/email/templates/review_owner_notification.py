@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from backend.services.email.templates.email_layout import (
+    email_document_shell,
+    html_escape,
+    render_cta_button,
+    render_fallback_link_block,
+    render_paragraph,
+    render_summary_panel,
+)
+
 
 @dataclass(frozen=True)
 class ReviewOwnerNotificationEmail:
@@ -25,31 +34,33 @@ def build_review_owner_notification_email(
     url = (dashboard_url or "").strip()
     subject = f"Review update: {reviewer} approved {title}"
 
-    html = f"""<!DOCTYPE html>
-<html>
-<body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
-  <p>Hi { _html_escape(owner) },</p>
-  <p><strong>{ _html_escape(reviewer) }</strong> approved <strong>{ _html_escape(title) }</strong>.</p>
-  <p>Track review progress and next steps from your dashboard.</p>
-  <p><a href="{ _html_escape(url) }" style="display:inline-block;padding:12px 20px;background:#111;color:#fff;text-decoration:none;border-radius:6px;">Open dashboard</a></p>
-  <p style="font-size:14px;color:#555;">Or copy this link into your browser:<br><a href="{ _html_escape(url) }">{ _html_escape(url) }</a></p>
-</body>
-</html>"""
+    summary_rows = [
+        ("Agreement type", title),
+        ("Approved by", reviewer),
+        ("Status", "Reviewer approved — track next steps on your dashboard"),
+    ]
+    inner = (
+        render_paragraph(f"Hi {html_escape(owner)},")
+        + render_paragraph(
+            f"<strong style=\"color:inherit;\">{html_escape(reviewer)}</strong> approved "
+            f"<strong style=\"color:inherit;\">{html_escape(title)}</strong>."
+        )
+        + render_summary_panel(summary_rows)
+        + render_paragraph(
+            "Track review progress, see who still needs to respond, and take the next step from your dashboard.",
+            secondary=True,
+        )
+        + render_cta_button(href=url, label="Open dashboard")
+        + render_fallback_link_block(href=url, heading="Secure dashboard link (fallback)")
+    )
+    html = email_document_shell(inner_html=inner)
 
     text = (
         f"Hi {owner},\n\n"
         f"{reviewer} approved {title}.\n\n"
+        f"Agreement type: {title}\n"
+        f"Approved by: {reviewer}\n\n"
         f"Track review progress from your dashboard:\n{url}\n"
     )
 
     return ReviewOwnerNotificationEmail(subject=subject, html=html, text=text)
-
-
-def _html_escape(value: str) -> str:
-    return (
-        (value or "")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )

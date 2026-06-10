@@ -204,6 +204,8 @@ def maybe_send_review_invites_after_review_sent(
             party_name=target.party_name,
             agreement_title=target.agreement_title,
             review_url=review_url,
+            requesting_party_name=_owner_display_name_from_draft(draft),
+            party_names=_party_display_names_from_draft(draft),
         )
         send_attempt_count += 1
         result = send_email_non_fatal(
@@ -386,6 +388,27 @@ def _owner_notification_already_sent(audit_log: Any, participant_id: str) -> boo
         if isinstance(value, dict) and str(value.get("participant_id") or "").strip() == pid:
             return True
     return False
+
+
+def _owner_display_name_from_draft(d: Dict[str, Any]) -> str:
+    owner = _owner_party_from_draft(d)
+    if not owner:
+        return ""
+    return str(owner.get("name") or "").strip()
+
+
+def _party_display_names_from_draft(d: Dict[str, Any]) -> List[str]:
+    parties = d.get("parties") or []
+    if not isinstance(parties, list):
+        return []
+    out: List[str] = []
+    for party in parties:
+        if not isinstance(party, dict):
+            continue
+        name = str(party.get("name") or "").strip()
+        if name:
+            out.append(name)
+    return out
 
 
 def _owner_party_from_draft(d: Dict[str, Any]) -> Dict[str, Any] | None:

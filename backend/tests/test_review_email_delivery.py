@@ -98,8 +98,8 @@ def test_email_mode_sends_review_invites(monkeypatch: pytest.MonkeyPatch, tmp_pa
     recipients = {call[1]["json"]["to"][0] for call in mock_client.post.call_args_list}
     assert recipients == {"r1@example.com", "r2@example.com"}
     first_payload = mock_client.post.call_args_list[0][1]["json"]
-    assert first_payload["subject"].startswith("Review requested:")
-    assert "Open review" in first_payload["html"]
+    assert first_payload["subject"].startswith("Action required: Review")
+    assert "Open secure review" in first_payload["html"]
     assert "https://app.example.com/agreements/" in first_payload["html"]
 
 
@@ -586,11 +586,15 @@ def test_review_invite_template_excludes_agreement_body() -> None:
         party_name="Pat",
         agreement_title="NDA",
         review_url="https://app.example.com/agreements/a/review?t=abc",
+        requesting_party_name="Owner LLC",
+        party_names=["Owner LLC", "Pat"],
     )
-    assert email.subject == "Review requested: NDA"
+    assert email.subject == "Action required: Review NDA"
     assert "NDA" in email.html
     assert "Pat" in email.html
-    assert "Open review" in email.html
+    assert "Open secure review" in email.html
+    assert "Nothing is signed yet" in email.html
+    assert "Secure review link (fallback)" in email.html
     assert "payment_terms" not in email.html.lower()
     assert "purpose" not in email.text.lower()
 

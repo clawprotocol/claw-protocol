@@ -118,7 +118,7 @@ def test_external_reviewer_approval_sends_owner_status_email_once(
     assert mock_client.post.call_count == 1
     payload = mock_client.post.call_args_list[0][1]["json"]
     assert payload["to"] == ["owner@example.com"]
-    assert payload["subject"].startswith("Review update:")
+    assert payload["subject"] == "Review update: Iron Vale Systems Inc approved Consulting Agreement"
     assert "Open dashboard" in payload["html"]
     assert "https://app.example.com/app?focus=" in payload["html"]
     assert "/review?t=" not in payload["html"]
