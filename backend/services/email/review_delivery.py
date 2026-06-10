@@ -108,8 +108,19 @@ def maybe_send_review_invites_after_review_sent(
         )
         return None
 
-    targets = _review_invite_targets_from_draft(draft)
+    if not _draft_has_explicit_owner_party(draft):
+        _log.info(
+            "[review-email-delivery] skipped agreement_id=%s org_id=%s skip_reason=owner_role_missing "
+            "delivery_mode=%s recipient_row_count=0 send_attempt_count=0 sent_count=0 failed_count=0",
+            aid,
+            oid or "",
+            mode,
+        )
+        return None
+
+    targets = _live_resend_review_invite_targets_from_draft(draft)
     recipient_row_count = len(targets)
+    _log_review_invite_target_policy(aid, oid, draft, targets)
     if not targets:
         _log.info(
             "[review-email-delivery] skipped agreement_id=%s org_id=%s skip_reason=no_eligible_recipients "
@@ -197,33 +208,44 @@ def maybe_send_review_invites_after_review_sent(
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _review_invite_targets_from_draft(d: Dict[str, Any]) -> List[ReviewInviteTarget]:
+def _draft_has_explicit_owner_party(d: Dict[str, Any]) -> bool:
+    """True when at least one party has an owner-normalized role (owner/sender/landlord)."""
+    parties = d.get("parties") or []
+    if not isinstance(parties, list):
+        return False
+    for party in parties:
+        if not isinstance(party, dict):
+            continue
+        if _normalize_workflow_role(str(party.get("role") or "")) == "owner":
+            return True
+    return False
+
+
+def _live_resend_review_invite_targets_from_draft(d: Dict[str, Any]) -> List[ReviewInviteTarget]:
+    """
+    Live Resend review invite recipients only.
+
+    Requires an explicit owner-normalized party role on the draft (see ``_draft_has_explicit_owner_party``).
+    Excludes owner-normalized parties by role metadata only — never by array index fallback.
+    """
     parties = d.get("parties") or []
     if not isinstance(parties, list) or not parties:
         return []
+    if not _draft_has_explicit_owner_party(d):
+        return []
 
-    owner_idx = next(
-        (
-            i
-            for i, p in enumerate(parties)
-            if isinstance(p, dict) and _normalize_workflow_role(str(p.get("role") or "")) == "owner"
-        ),
-        0,
-    )
     title = str(d.get("title") or "").strip() or "Untitled agreement"
     out: List[ReviewInviteTarget] = []
 
-    for i, party in enumerate(parties):
-        if i == owner_idx:
-            continue
+    for party in parties:
         if not isinstance(party, dict):
+            continue
+        role = _normalize_workflow_role(str(party.get("role") or ""))
+        if role == "owner":
             continue
         name = str(party.get("name") or "").strip()
         email = str(party.get("email") or "").strip().lower()
         if not name or not email or "@" not in email:
-            continue
-        role = _normalize_workflow_role(str(party.get("role") or ""))
-        if role == "owner":
             continue
         party_id = str(party.get("id") or "").strip() or None
         mint_role: RecipientRole = "reviewer" if role == "reviewer" else "recipient"
@@ -237,6 +259,48 @@ def _review_invite_targets_from_draft(d: Dict[str, Any]) -> List[ReviewInviteTar
             )
         )
     return out
+
+
+def _log_review_invite_target_policy(
+    agreement_id: str,
+    org_id: str | None,
+    draft: Dict[str, Any],
+    targets: List[ReviewInviteTarget],
+) -> None:
+    """Log owner exclusion vs external reviewer eligibility (no full emails)."""
+    parties = draft.get("parties") or []
+    owner_idx = next(
+        (
+            i
+            for i, p in enumerate(parties)
+            if isinstance(p, dict) and _normalize_workflow_role(str(p.get("role") or "")) == "owner"
+        ),
+        -1,
+    )
+    owner_party = (
+        parties[owner_idx]
+        if isinstance(parties, list) and owner_idx >= 0 and len(parties) > owner_idx
+        else {}
+    )
+    owner_email = ""
+    owner_name = ""
+    if isinstance(owner_party, dict):
+        owner_email = str(owner_party.get("email") or "").strip().lower()
+        owner_name = str(owner_party.get("name") or "").strip()
+    owner_domain = owner_email.split("@", 1)[1] if "@" in owner_email else ""
+    _log.info(
+        "[review-email-delivery] recipient_policy agreement_id=%s org_id=%s owner_excluded=true "
+        "owner_party_index=%s owner_name=%s owner_email_present=%s owner_email_domain=%s "
+        "external_invite_count=%s external_invite_domains=%s",
+        agreement_id,
+        org_id or "",
+        owner_idx,
+        owner_name[:80] or "unknown",
+        bool(owner_email),
+        owner_domain or "none",
+        len(targets),
+        sorted({t.to.split("@", 1)[1] for t in targets if "@" in t.to}),
+    )
 
 
 def _build_absolute_review_url(origin: str, agreement_id: str, token: str) -> str:
