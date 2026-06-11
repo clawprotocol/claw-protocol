@@ -11,6 +11,7 @@ import { FieldReviewPage } from "./launch/documentLayout/FieldReviewPage";
 import { QuickSendPage } from "./launch/simpleProduct/QuickSendPage";
 import { SimpleCreatePage } from "./launch/simpleProduct/SimpleCreatePage";
 import { SimpleDonePage } from "./launch/simpleProduct/SimpleDonePage";
+import { OwnerProposalReviewPage } from "./launch/simpleProduct/OwnerProposalReviewPage";
 import { SimpleCheckoutPage } from "./launch/simpleProduct/SimpleCheckoutPage";
 import { SimpleReadyToSendPage } from "./launch/simpleProduct/SimpleReadyToSendPage";
 import { SimpleSendPage } from "./launch/simpleProduct/SimpleSendPage";
@@ -629,6 +630,8 @@ export function ClawProductApp() {
         return <SimpleSendPage agreementId={appMatch.agreementId} />;
       case "simpleDone":
         return <SimpleDonePage agreementId={appMatch.agreementId} />;
+      case "ownerProposalReview":
+        return <OwnerProposalReviewPage agreementId={appMatch.agreementId} />;
       case "simpleVerification":
         return <SimpleVerificationPage agreementId={appMatch.agreementId} />;
       case "quickSend":

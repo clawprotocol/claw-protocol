@@ -12,9 +12,7 @@ describe("OwnerProposalReviewQaPanel wiring", () => {
     expect(readFileSync(join(__dirname, "OwnerProposalReviewQaPanel.tsx"), "utf8")).toContain(
       "owner-proposal-review-qa-panel",
     );
-    expect(readFileSync(join(__dirname, "OwnerProposalReviewQaPanel.tsx"), "utf8")).toContain(
-      "No suggested changes are pending for this agreement",
-    );
+    expect(done).toContain("buildOwnerProposalReviewPath");
   });
 
   it("AgreementReview mounts QA panel in workspace when flag enabled", () => {
@@ -24,13 +22,17 @@ describe("OwnerProposalReviewQaPanel wiring", () => {
   });
 
   it("panel exposes proposal metadata, diff, and accept/reject actions", () => {
-    const panel = readFileSync(join(__dirname, "OwnerProposalReviewQaPanel.tsx"), "utf8");
+    const panel = readFileSync(join(__dirname, "OwnerProposalReviewPanel.tsx"), "utf8");
     const qaLog = readFileSync(join(__dirname, "../../agreement/ownerProposalReviewQa.ts"), "utf8");
-    expect(panel).toContain("owner-proposal-qa-metadata");
-    expect(panel).toContain("owner-proposal-qa-diff");
+    expect(panel).toContain("owner-proposal-review-metadata");
+    expect(panel).toContain("owner-proposal-review-diff");
     expect(panel).toContain("ReviewFirstChangeCard");
-    expect(panel).toContain("logOwnerProposalAccepted");
-    expect(panel).toContain("logOwnerProposalRejected");
+    expect(readFileSync(join(__dirname, "OwnerProposalReviewPanel.tsx"), "utf8")).toContain(
+      "logOwnerProposalAccept",
+    );
+    expect(readFileSync(join(__dirname, "OwnerProposalReviewPanel.tsx"), "utf8")).toContain(
+      "logOwnerProposalDecline",
+    );
     expect(qaLog).toContain("[owner-review-opened]");
     expect(qaLog).toContain("[qa-owner-review-link-built]");
     expect(qaLog).toContain("[reviewer-proposal-submitted]");

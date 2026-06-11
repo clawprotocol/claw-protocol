@@ -5,6 +5,7 @@ export type AppSection =
   | { kind: "simpleCheckout"; agreementId: string }
   | { kind: "simpleSend"; agreementId: string }
   | { kind: "simpleDone"; agreementId: string }
+  | { kind: "ownerProposalReview"; agreementId: string }
   | { kind: "simpleVerification"; agreementId: string }
   | { kind: "quickSend" }
   | { kind: "agreements"; sub: "list" | "new" | { id: string } }
@@ -61,6 +62,11 @@ export function matchAppPath(pathname: string): AppSection | null {
 
   const doneM = /^\/app\/done\/([^/]+)$/.exec(p);
   if (doneM) return { kind: "simpleDone", agreementId: decodeURIComponent(doneM[1]) };
+
+  const reviewChangesM = /^\/app\/review-changes\/([^/]+)$/.exec(p);
+  if (reviewChangesM) {
+    return { kind: "ownerProposalReview", agreementId: decodeURIComponent(reviewChangesM[1]) };
+  }
 
   const verM = /^\/app\/verification\/([^/]+)$/.exec(p);
   if (verM) return { kind: "simpleVerification", agreementId: decodeURIComponent(verM[1]) };

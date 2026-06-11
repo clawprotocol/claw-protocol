@@ -136,9 +136,9 @@ describe("creatorDashboardSignatureTrack", () => {
     expect(gate.hasOpenChangeRequests).toBe(true);
     expect(gate.allRequiredReviewPartiesApproved).toBe(false);
     const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft });
-    expect(action.kind).toBe("navigate");
+    expect(action.kind).toBe("review_suggested_changes");
     expect(action.label).toBe(CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL);
-    expect(action.path).toBe("/app/done/ag_track");
+    expect(action.path).toBe("/app/review-changes/ag_track");
     expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(true);
   });
 

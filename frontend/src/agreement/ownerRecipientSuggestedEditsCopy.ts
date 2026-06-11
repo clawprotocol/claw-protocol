@@ -15,6 +15,14 @@ export const OWNER_SUGGESTED_CHANGES_NOT_SIGNED_LINE =
 
 export const OWNER_CTA_REVIEW_SUGGESTED_CHANGES = "Review suggested changes";
 
+export const OWNER_SUGGESTED_CHANGES_NEED_REVIEW = "Suggested changes need your review";
+
+export const OWNER_NO_PENDING_SUGGESTED_CHANGES = "No suggested changes are pending.";
+
+export const OWNER_CTA_ACCEPT_PROPOSED_CHANGES = "Accept proposed changes";
+
+export const OWNER_CTA_DECLINE_PROPOSED_CHANGES = "Decline changes";
+
 export const OWNER_CTA_ACCEPT_AND_CONTINUE = "Accept and continue";
 
 export const OWNER_CTA_MAKE_MORE_CHANGES = "Make more changes";

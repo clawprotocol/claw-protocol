@@ -15,6 +15,7 @@ import {
   creatorDashboardReviewLinkReadyPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
+import { buildOwnerProposalReviewPath } from "./ownerProposalReviewRouting";
 import {
   deriveCreatorDashboardStatus,
   type CreatorDashboardStatus,
@@ -32,6 +33,7 @@ export type CreatorDashboardSignatureTrackActionKind =
   | "prepare_signature_links"
   | "open_signature_links"
   | "complete_signer_details"
+  | "review_suggested_changes"
   | "track_review_status"
   | "focus_review_status"
   | "navigate";
@@ -140,9 +142,9 @@ export function resolveCreatorDashboardSignatureTrackAction(
   if (effectiveStatus === "in_review") {
     if (reviewGate.hasOpenChangeRequests) {
       return {
-        kind: "navigate",
+        kind: "review_suggested_changes",
         label: CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL,
-        path: creatorDashboardReviewLinkReadyPath(row.id),
+        path: buildOwnerProposalReviewPath(row.id),
         emphasis: "primary",
       };
     }

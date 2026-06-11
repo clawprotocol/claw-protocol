@@ -119,6 +119,7 @@ import {
   isOwnerProposalReviewQaEnabled,
   logOwnerReviewLinkBuilt,
 } from "../../agreement/ownerProposalReviewQa";
+import { buildOwnerProposalReviewPath } from "../ownerProposalReviewRouting";
 
 const EMPTY_REVIEW_HANDOFF_RECIPIENTS: SimpleDoneReviewRecipientLinkRow[] = [];
 
@@ -797,23 +798,15 @@ export function SimpleDonePage(props: { agreementId: string }) {
       showTopContinueSigning ||
       showTopReviewSuggestedChanges ||
       showTopFinalizeForSigning;
-    const openOwnerQaReview = () => {
-      enableOwnerProposalReviewQaLocal();
-      const path = buildOwnerQaReviewDonePath(agreementId);
-      const absoluteUrl = buildOwnerQaReviewAbsoluteLink(agreementId);
+    const openOwnerProposalReview = () => {
+      const path = buildOwnerProposalReviewPath(agreementId);
       logOwnerReviewLinkBuilt({
         agreementId,
         path,
-        absoluteUrl,
+        absoluteUrl: buildOwnerQaReviewAbsoluteLink(agreementId),
         source: "review_suggested_changes_cta",
       });
       void navigate(path);
-      window.requestAnimationFrame(() => {
-        const panel = document.querySelector('[data-testid="owner-proposal-review-qa-panel"]');
-        if (panel && typeof panel.scrollIntoView === "function") {
-          panel.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-      });
     };
     const copyOwnerQaReviewLink = () => {
       enableOwnerProposalReviewQaLocal();
@@ -972,7 +965,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                         type="button"
                         className="vs01-btn vs01-btn--primary min-h-[2.5rem] px-4 text-sm"
                         data-testid="simple-done-review-suggested-changes"
-                        onClick={openOwnerQaReview}
+                        onClick={openOwnerProposalReview}
                       >
                         {OWNER_CTA_REVIEW_SUGGESTED_CHANGES}
                       </button>

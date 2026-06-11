@@ -196,7 +196,7 @@ describe("SimpleDonePage owner approval UX", () => {
 
     await userEvent.click(screen.getByTestId("simple-done-review-suggested-changes"));
     expect(mockTryNavigatePaidProVs01).not.toHaveBeenCalled();
-    expect(mockNavigate).toHaveBeenCalledWith(`/app/done/${encodeURIComponent(agreementId)}?qaReview=1`);
+    expect(mockNavigate).toHaveBeenCalledWith(`/app/review-changes/${encodeURIComponent(agreementId)}`);
   });
 
   it("with 4 review links and one approval, does not show Finalize or ready-to-sign for all reviewers", async () => {

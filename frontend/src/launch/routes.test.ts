@@ -28,6 +28,10 @@ describe("matchAppPath", () => {
     expect(matchAppPath("/app/checkout/deal-1")).toEqual({ kind: "simpleCheckout", agreementId: "deal-1" });
     expect(matchAppPath("/app/send/ag_1")).toEqual({ kind: "simpleSend", agreementId: "ag_1" });
     expect(matchAppPath("/app/done/ag_1")).toEqual({ kind: "simpleDone", agreementId: "ag_1" });
+    expect(matchAppPath("/app/review-changes/ag_1")).toEqual({
+      kind: "ownerProposalReview",
+      agreementId: "ag_1",
+    });
     expect(matchAppPath("/app/verification/ag_1")).toEqual({
       kind: "simpleVerification",
       agreementId: "ag_1",

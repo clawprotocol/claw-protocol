@@ -98,6 +98,15 @@ export function logOwnerProposalSelected(payload: {
   logOwnerReview("[owner-proposal-selected]", payload);
 }
 
+export function logOwnerProposalAccept(payload: {
+  agreementId: string;
+  proposalId: string;
+  previousCorpusHash: string;
+  updatedCorpusHash: string;
+}): void {
+  logOwnerReview("[owner-proposal-accept]", payload);
+}
+
 export function logOwnerProposalAccepted(payload: {
   agreementId: string;
   proposalId: string;
@@ -106,6 +115,15 @@ export function logOwnerProposalAccepted(payload: {
   acceptedCorpusHash: string;
 }): void {
   logOwnerReview("[owner-proposal-accepted]", payload);
+}
+
+export function logOwnerProposalDecline(payload: {
+  agreementId: string;
+  proposalId: string;
+  previousCorpusHash: string;
+  declinedCorpusHash: string;
+}): void {
+  logOwnerReview("[owner-proposal-decline]", payload);
 }
 
 export function logOwnerProposalRejected(payload: {

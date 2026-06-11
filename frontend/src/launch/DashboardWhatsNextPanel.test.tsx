@@ -130,8 +130,8 @@ describe("DashboardWhatsNextPanel", () => {
     );
 
     const button = screen.getByRole("button", { name: "Review suggested changes" });
-    expect(button.getAttribute("data-dashboard-whats-next-cta")).toBe("navigate");
+    expect(button.getAttribute("data-dashboard-whats-next-cta")).toBe("review_suggested_changes");
     fireEvent.click(button);
-    expect(onNavigate).toHaveBeenCalledWith("/app/done/ag_whats_next");
+    expect(onNavigate).toHaveBeenCalledWith("/app/review-changes/ag_whats_next");
   });
 });
