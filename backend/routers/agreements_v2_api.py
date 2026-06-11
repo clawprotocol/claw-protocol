@@ -8693,6 +8693,13 @@ def reject_recipient_proposal(
     _save_draft_sync(next_draft.model_dump(), request)
     rejected_hash = _corpus_fingerprint(next_draft.purpose or "")
     log.info(
+        "[owner-proposal-decline] agreement_id=%s proposal_id=%s previous_corpus_hash=%s declined_corpus_hash=%s",
+        agreement_id,
+        pid,
+        previous_hash,
+        rejected_hash,
+    )
+    log.info(
         "[owner-proposal-rejected] agreement_id=%s proposal_id=%s proposal_status=rejected previous_corpus_hash=%s rejected_corpus_hash=%s",
         agreement_id,
         pid,
