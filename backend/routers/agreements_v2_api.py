@@ -8462,7 +8462,10 @@ def _staged_recipient_proposals_map(draft: AgreementDraft) -> Dict[str, Any]:
 
 
 def _persist_staged_recipient_proposal(
-    draft: AgreementDraft, proposal_id: str, payload: Dict[str, Any]
+    draft: AgreementDraft,
+    proposal_id: str,
+    payload: Dict[str, Any],
+    request: Optional[Request] = None,
 ) -> AgreementDraft:
     now = _utc_now_iso()
     pro_redline = dict(draft.pro_redline_v1 or {})
@@ -8474,7 +8477,11 @@ def _persist_staged_recipient_proposal(
     return next_draft
 
 
-def _pop_staged_recipient_proposal(draft: AgreementDraft, proposal_id: str) -> Optional[Dict[str, Any]]:
+def _pop_staged_recipient_proposal(
+    draft: AgreementDraft,
+    proposal_id: str,
+    request: Optional[Request] = None,
+) -> Optional[Dict[str, Any]]:
     pid = (proposal_id or "").strip()
     if not pid:
         return None
@@ -8505,7 +8512,9 @@ def _proposal_value_for_id(audit: Any, proposal_id: str) -> Optional[Dict[str, A
 
 
 def _queue_recipient_proposal_from_payload(
-    draft: AgreementDraft, payload: Dict[str, Any]
+    draft: AgreementDraft,
+    payload: Dict[str, Any],
+    request: Optional[Request] = None,
 ) -> AgreementDraft:
     proposal_id = str(payload.get("proposal_id") or "").strip()
     proposer_key = str(payload.get("proposer_id") or "").strip()
@@ -8548,52 +8557,80 @@ def stage_recipient_proposal(
     agreement_id: str, body: RecipientProposalRequest, request: Request
 ) -> Dict[str, Any]:
     """Stage a recipient proposal payload; finalize with POST /recipient-proposal + proposal_id."""
-    assert_free_incomplete_draft_not_expired(agreement_id, surface="recipient_proposal_stage")
-    draft = _load_or_404(agreement_id)
-    lock = read_signing_lock(agreement_id)
-    if lock and bool((lock or {}).get("locked_version_id")):
-        raise HTTPException(status_code=400, detail="negotiation_locked")
-    draft = _persist_party_id_backfill(draft)
-    proposer, proposer_source = _resolve_recipient_proposer_with_source(
-        request, agreement_id, draft, body.proposer_id
-    )
-    assert_agreement_recipient_write_allowed(
-        request,
-        agreement_id,
-        allowed_modes=("review",),
-        bind_participant_id=(proposer.id or "").strip(),
-    )
-    instruction = (body.instruction or "").strip()
-    if not instruction:
-        raise HTTPException(status_code=400, detail="instruction_required")
-    proposal_id = str(uuid.uuid4())
-    now = _utc_now_iso()
-    dname = (body.proposer_display_name or "").strip() or proposer.name
-    proposer_id = (proposer.id or "").strip()
-    payload: Dict[str, Any] = {
-        "proposal_id": proposal_id,
-        "instruction": instruction,
-        "draft": body.draft.model_dump(),
-        "rendered_html": (body.rendered_html or "").strip(),
-        "staged_at": now,
-        "proposer_id": proposer_id,
-        "proposer_display_name": dname,
-    }
-    _persist_staged_recipient_proposal(draft, proposal_id, payload)
-    log.info(
-        "[recipient-proposal-stage] agreement_id=%s proposal_id=%s proposer_id=%s proposer_id_source=%s",
-        agreement_id,
-        proposal_id,
-        proposer_id,
-        proposer_source,
-    )
-    return {
-        "ok": True,
-        "proposal_id": proposal_id,
-        "staged": True,
-        "proposer_id": proposer_id,
-        "proposer_id_source": proposer_source,
-    }
+    log.info("[recipient-proposal-stage] start agreement_id=%s", agreement_id)
+    try:
+        assert_free_incomplete_draft_not_expired(agreement_id, surface="recipient_proposal_stage")
+        draft = _load_or_404(agreement_id)
+        lock = read_signing_lock(agreement_id)
+        if lock and bool((lock or {}).get("locked_version_id")):
+            raise HTTPException(status_code=400, detail="negotiation_locked")
+        draft = _persist_party_id_backfill(draft)
+        proposer, proposer_source = _resolve_recipient_proposer_with_source(
+            request, agreement_id, draft, body.proposer_id
+        )
+        proposer_id = (proposer.id or "").strip()
+        log.info(
+            "[recipient-proposal-stage] participant resolved agreement_id=%s proposer_id=%s proposer_id_source=%s",
+            agreement_id,
+            proposer_id,
+            proposer_source,
+        )
+        assert_agreement_recipient_write_allowed(
+            request,
+            agreement_id,
+            allowed_modes=("review",),
+            bind_participant_id=proposer_id,
+        )
+        instruction = (body.instruction or "").strip()
+        if not instruction:
+            raise HTTPException(status_code=400, detail="instruction_required")
+        proposed_purpose = (body.draft.purpose or "").strip()
+        if not proposed_purpose:
+            raise HTTPException(status_code=400, detail="proposed_draft_purpose_required")
+        proposal_id = str(uuid.uuid4())
+        now = _utc_now_iso()
+        dname = (body.proposer_display_name or "").strip() or proposer.name
+        payload: Dict[str, Any] = {
+            "proposal_id": proposal_id,
+            "instruction": instruction,
+            "draft": body.draft.model_dump(),
+            "rendered_html": (body.rendered_html or "").strip(),
+            "staged_at": now,
+            "proposer_id": proposer_id,
+            "proposer_display_name": dname,
+        }
+        log.info(
+            "[recipient-proposal-stage] payload summary agreement_id=%s proposal_id=%s instruction_len=%s proposed_purpose_len=%s rendered_html_len=%s canonical_purpose_len=%s",
+            agreement_id,
+            proposal_id,
+            len(instruction),
+            len(proposed_purpose),
+            len(payload["rendered_html"]),
+            len((draft.purpose or "").strip()),
+        )
+        _persist_staged_recipient_proposal(draft, proposal_id, payload, request)
+        log.info(
+            "[recipient-proposal-stage] stored agreement_id=%s proposal_id=%s proposer_id=%s",
+            agreement_id,
+            proposal_id,
+            proposer_id,
+        )
+        return {
+            "ok": True,
+            "proposal_id": proposal_id,
+            "staged": True,
+            "proposer_id": proposer_id,
+            "proposer_id_source": proposer_source,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception(
+            "[recipient-proposal-stage] failed agreement_id=%s error=%s",
+            agreement_id,
+            exc,
+        )
+        raise HTTPException(status_code=500, detail="recipient_proposal_stage_failed") from exc
 
 
 @router.post("/{agreement_id}/recipient-proposal")
@@ -8610,7 +8647,7 @@ def submit_recipient_proposal(
     if lock and bool((lock or {}).get("locked_version_id")):
         raise HTTPException(status_code=400, detail="negotiation_locked")
     draft = _persist_party_id_backfill(draft)
-    staged = _pop_staged_recipient_proposal(draft, proposal_id)
+    staged = _pop_staged_recipient_proposal(draft, proposal_id, request)
     if not staged:
         raise HTTPException(status_code=400, detail="proposal_not_staged")
     proposer_id = str(staged.get("proposer_id") or "").strip()
@@ -8621,7 +8658,7 @@ def submit_recipient_proposal(
         bind_participant_id=proposer_id,
     )
     staged["submitted_at"] = _utc_now_iso()
-    next_draft = _queue_recipient_proposal_from_payload(draft, staged)
+    next_draft = _queue_recipient_proposal_from_payload(draft, staged, request)
     return {"ok": True, "proposal_id": proposal_id, "draft": next_draft.model_dump()}
 
 
