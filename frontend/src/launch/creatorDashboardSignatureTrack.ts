@@ -15,6 +15,7 @@ import {
   creatorDashboardReviewLinkReadyPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
+import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
 import { buildOwnerProposalReviewPath } from "./ownerProposalReviewRouting";
 import {
   deriveCreatorDashboardStatus,
@@ -183,9 +184,9 @@ export function creatorDashboardWhatsNextShowPrimaryCta(
   return true;
 }
 
-/** Read-only owner workspace — current review corpus without send/sign/mutate flows. */
+/** Read-only owner agreement view — current review corpus without negotiate workspace chrome. */
 export function resolveCreatorDashboardViewAgreementPath(agreementId: string): string {
-  return `/app/agreements/${encodeURIComponent(String(agreementId || "").trim())}`;
+  return buildOwnerAgreementReadOnlyPath(agreementId);
 }
 
 /** Secondary action while waiting on reviewer approval (primary CTA intentionally hidden). */

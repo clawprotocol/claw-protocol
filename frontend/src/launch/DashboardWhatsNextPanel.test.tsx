@@ -104,7 +104,7 @@ describe("DashboardWhatsNextPanel", () => {
     const viewAgreement = screen.getByRole("button", { name: "View agreement" });
     expect(viewAgreement.getAttribute("data-dashboard-whats-next-cta")).toBe("view_agreement");
     fireEvent.click(viewAgreement);
-    expect(onNavigate).toHaveBeenCalledWith("/app/agreements/ag_whats_next");
+    expect(onNavigate).toHaveBeenCalledWith("/app/agreements/ag_whats_next/view");
   });
 
   it("shows Prepare signature links CTA when ready for signing", () => {

@@ -154,7 +154,7 @@ describe("creatorDashboardSignatureTrack", () => {
     const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft: pendingDraft });
     expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(false);
     expect(creatorDashboardWhatsNextShowViewAgreement(row, gate, action)).toBe(true);
-    expect(resolveCreatorDashboardViewAgreementPath(row.id)).toBe("/app/agreements/ag_track");
+    expect(resolveCreatorDashboardViewAgreementPath(row.id)).toBe("/app/agreements/ag_track/view");
   });
 
   it("hides dead Track review status CTA during normal pending review", () => {

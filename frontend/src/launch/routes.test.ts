@@ -9,6 +9,10 @@ describe("matchAppPath", () => {
     expect(matchAppPath("/app/opportunity")).toEqual({ kind: "opportunity" });
     expect(matchAppPath("/app/agreements")).toEqual({ kind: "agreements", sub: "list" });
     expect(matchAppPath("/app/agreements/new")).toEqual({ kind: "agreements", sub: "new" });
+    expect(matchAppPath("/app/agreements/abc-123/view")).toEqual({
+      kind: "ownerAgreementView",
+      agreementId: "abc-123",
+    });
     expect(matchAppPath("/app/agreements/abc-123")).toEqual({
       kind: "agreements",
       sub: { id: "abc-123" },
