@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { PremiumAgreementReadonlyView } from "../../components/agreements/PremiumAgreementReadonlyView";
 import { computeReviewApprovalStatus } from "../../components/agreements/draftRecipientReviewSignals";
 import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
 import { useLaunchNav } from "../LaunchNavContext";
@@ -16,6 +17,7 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [title, setTitle] = useState("Agreement");
   const [previewHtml, setPreviewHtml] = useState("");
+  const [usesPremiumDocument, setUsesPremiumDocument] = useState(false);
   const [progressLine, setProgressLine] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -36,6 +38,7 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
       setProgressLine(null);
     }
     setPreviewHtml(loaded.html);
+    setUsesPremiumDocument(loaded.usesPremiumDocument);
     setLoading(false);
   }, [agreementId]);
 
@@ -94,10 +97,19 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
             aria-label="Agreement document preview"
           >
             {previewHtml.trim() ? (
-              <div
-                className="premium-doc premium-doc--read-only mx-auto max-w-[48rem]"
-                dangerouslySetInnerHTML={{ __html: previewHtml }}
-              />
+              usesPremiumDocument ? (
+                <PremiumAgreementReadonlyView
+                  html={previewHtml}
+                  fullDocumentFlow
+                  compactDocumentTopPadding
+                />
+              ) : (
+                <div
+                  className="mx-auto max-w-[48rem]"
+                  data-testid="owner-agreement-readonly-fallback-html"
+                  dangerouslySetInnerHTML={{ __html: previewHtml }}
+                />
+              )
             ) : (
               <p className="text-sm text-slate-600">No agreement text is available yet.</p>
             )}

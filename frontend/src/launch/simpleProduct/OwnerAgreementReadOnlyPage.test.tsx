@@ -44,17 +44,25 @@ describe("OwnerAgreementReadOnlyPage", () => {
     mockNavigate.mockClear();
   });
 
-  it("renders read-only preview without negotiate workspace chrome", async () => {
+  it("renders canonical Pro document surface without negotiate workspace chrome", async () => {
     const draft = pendingReviewDraft();
+    const premiumHtml =
+      '<h1>MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT</h1>' +
+      '<h2 class="premium-doc-section-heading">1. Services and Deliverables</h2>' +
+      "<p>Service Provider shall deliver consulting services.</p>" +
+      '<p class="premium-doc-signature-party-start">CLIENT: Blue Canyon Analytics LLC</p>';
+
     vi.spyOn(ownerAgreementReadOnlyView, "loadOwnerAgreementReadOnlyPreview").mockResolvedValue({
       draft,
-      html: "<p>Agreement body</p>",
+      html: premiumHtml,
+      corpusText: "fixture corpus",
+      usesPremiumDocument: true,
     });
 
     render(<OwnerAgreementReadOnlyPage agreementId="ag_view" />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("owner-agreement-readonly-document")).toBeTruthy();
+      expect(screen.getByTestId("premium-agreement-readonly-article")).toBeTruthy();
     });
 
     expect(screen.getByTestId("owner-agreement-readonly-page")).toBeTruthy();
@@ -65,9 +73,10 @@ describe("OwnerAgreementReadOnlyPage", () => {
     expect(screen.queryByText("Negotiate draft")).toBeNull();
     expect(screen.queryByText("Reset draft")).toBeNull();
     expect(screen.queryByText("Agreement Memory")).toBeNull();
-    expect(screen.getByTestId("owner-agreement-readonly-document").innerHTML).toContain(
-      "Agreement body",
-    );
+
+    const article = screen.getByTestId("premium-agreement-readonly-article");
+    expect(article.querySelector("h1")?.textContent).toContain("MUTUAL CONSULTING");
+    expect(article.querySelectorAll("h2.premium-doc-section-heading").length).toBeGreaterThanOrEqual(1);
 
     fireEvent.click(screen.getByTestId("owner-agreement-readonly-back"));
     expect(mockNavigate).toHaveBeenCalledWith("/app");
