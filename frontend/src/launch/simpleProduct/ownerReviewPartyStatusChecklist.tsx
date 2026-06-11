@@ -1,4 +1,4 @@
-import type { AgreementDraft } from "../../agreement/agreementTypes";
+import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import {
   auditHasRecipientApprovalForParticipant,
   normalizeWorkflowRoleForNegotiation,
@@ -6,6 +6,10 @@ import {
 } from "../../agreement/participantModel";
 import { openRecipientProposalsForParticipant } from "../../agreement/recipientProposal";
 import { findLastAcceptedProposalProposer } from "../../agreement/reviewCorpusAuthority";
+import {
+  resolveReviewLinkAssumedOwnerPartyIndex,
+  rowReadyForReviewLinkInvite,
+} from "./reviewLinkRecipientEmailMerge";
 
 export type OwnerReviewPartyStatus =
   | "approved"
@@ -33,7 +37,37 @@ export function ownerReviewPartyStatusLabel(status: OwnerReviewPartyStatus): str
   return STATUS_LABEL[status];
 }
 
-/** Per-party review rollup for owner Review Link Ready — all non-owner parties on the draft. */
+/** Whether this party must complete review before owner signature prep (excludes author/owner by default). */
+export function partyRequiresReviewApproval(
+  party: AgreementParty,
+  partyIndex: number,
+  parties: readonly AgreementParty[],
+): boolean {
+  const role = normalizeWorkflowRoleForNegotiation(String(party.role ?? ""));
+  if (role === "viewer" || role === "owner") return false;
+  if (role === "reviewer") return true;
+  const hasExplicitReviewer = parties.some(
+    (entry) => normalizeWorkflowRoleForNegotiation(String(entry.role ?? "")) === "reviewer",
+  );
+  if (hasExplicitReviewer) return false;
+  const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(parties);
+  if (partyIndex === ownerIdx) return false;
+  return rowReadyForReviewLinkInvite(party, partyIndex, parties);
+}
+
+/** Required reviewer rows for owner dashboard / signature-prep gating — excludes author/owner unless reviewer role. */
+export function deriveRequiredReviewerPartyStatusRows(
+  draft: AgreementDraft | null | undefined,
+): OwnerReviewPartyStatusRow[] {
+  const parties = draft?.parties ?? [];
+  return deriveOwnerReviewPartyStatusRows(draft).filter((row) => {
+    const party = parties[row.partyIndex];
+    if (!party) return false;
+    return partyRequiresReviewApproval(party, row.partyIndex, parties);
+  });
+}
+
+/** Per-party review rollup for owner Review Link Ready — all non-viewer parties on the draft. */
 export function deriveOwnerReviewPartyStatusRows(
   draft: AgreementDraft | null | undefined,
 ): OwnerReviewPartyStatusRow[] {

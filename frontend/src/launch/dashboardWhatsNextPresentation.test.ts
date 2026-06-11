@@ -72,6 +72,31 @@ describe("dashboardWhatsNextPresentation", () => {
     expect(presentation.nextStepLabel).toBe("Wait for remaining reviewer");
   });
 
+  it("two-party reviewer approval shows all reviews complete presentation", () => {
+    const draft = {
+      parties: [
+        { id: "p-blue", name: "Blue Canyon Analytics LLC", role: "party" },
+        { id: "p-iron", name: "Iron Vale Systems Inc", role: "reviewer", email: "iron@example.test" },
+      ],
+      audit_log: [
+        {
+          event_type: "participant_approved",
+          at: "2026-06-07T00:00:00.000Z",
+          value: { participant_id: "p-iron" },
+        },
+      ],
+    } as import("../agreement/agreementTypes").AgreementDraft;
+    const r = row({ all_reviewers_approved: false, review_approvals_completed: 0 });
+    const gate = resolveCreatorDashboardReviewGate(r, [], { draft });
+    const presentation = deriveDashboardWhatsNextPresentation(r, gate);
+    const pill = deriveCreatorDashboardStatusPillFromGate(r, gate);
+    expect(gate.requiredPartyCount).toBe(1);
+    expect(gate.approvedCount).toBe(1);
+    expect(presentation.headline).toBe("All reviews complete");
+    expect(presentation.nextStepLabel).toBe("Prepare signature links");
+    expect(pill).toBe("Ready for Signing");
+  });
+
   it("does not show waiting-on-reviewer pill when index says all reviewers approved", () => {
     const r = row({ all_reviewers_approved: true, review_approvals_completed: 2 });
     const gate = resolveCreatorDashboardReviewGate(r, reviewRows());

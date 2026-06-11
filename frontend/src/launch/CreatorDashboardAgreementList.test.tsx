@@ -99,7 +99,7 @@ describe("CreatorDashboardAgreementList", () => {
     expect(screen.getByText(/Next action:/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open review link page" })).toBeTruthy();
-    expect(screen.getByText("Reviews approved")).toBeTruthy();
+    expect(screen.getByText("Ready for Signing")).toBeTruthy();
     expect(
       screen.getByText("Everyone approved this draft. Prepare signature links to start signing."),
     ).toBeTruthy();
@@ -157,13 +157,13 @@ describe("CreatorDashboardAgreementList", () => {
     expect(onNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/send/"));
   });
 
-  it("shows waiting-on-reviewer state when only party 1 approved", () => {
+  it("shows waiting-on-reviewer state when one required reviewer still pending", () => {
     render(
       <CreatorDashboardAgreementList
         rows={[
           indexRow({
             reviewer_approved: true,
-            review_approvals_required: 1,
+            review_approvals_required: 2,
             review_approvals_completed: 1,
             all_reviewers_approved: false,
           }),
@@ -173,16 +173,16 @@ describe("CreatorDashboardAgreementList", () => {
             {
               partyIndex: 0,
               partyLabel: "Party 1",
-              displayName: "Blue Canyon Analytics LLC",
-              partyId: "p1",
+              displayName: "Iron Vale Systems Inc.",
+              partyId: "p-rev-1",
               status: "approved",
               statusLabel: "Approved",
             },
             {
               partyIndex: 1,
               partyLabel: "Party 2",
-              displayName: "Iron Vale Systems Inc.",
-              partyId: "p2",
+              displayName: "North Ridge Consulting LLC",
+              partyId: "p-rev-2",
               status: "not_reviewed",
               statusLabel: "Not reviewed",
             },
@@ -197,21 +197,21 @@ describe("CreatorDashboardAgreementList", () => {
     expect(screen.getByText("Waiting on reviewer")).toBeTruthy();
     expect(screen.getByText(/Review progress:/)).toBeTruthy();
     expect(screen.getByText(/1 of 2 approved/)).toBeTruthy();
-    expect(screen.getByText(/Iron Vale Systems Inc\. — Not reviewed/)).toBeTruthy();
+    expect(screen.getByText(/North Ridge Consulting LLC — Not reviewed/)).toBeTruthy();
     expect(screen.getByText(/Signature links unlock after all parties approve\./)).toBeTruthy();
     expect(screen.getByTestId("creator-dashboard-agreement-ag_ready").getAttribute("data-creator-dashboard-prepare-enabled")).toBe(
       "false",
     );
   });
 
-  it("shows blocked notice when prepare is clicked before all parties approve", () => {
+  it("shows blocked notice when prepare is clicked before all required reviewers approve", () => {
     const onPrepare = vi.fn();
     render(
       <CreatorDashboardAgreementList
         rows={[
           indexRow({
             reviewer_approved: true,
-            review_approvals_required: 1,
+            review_approvals_required: 2,
             review_approvals_completed: 1,
             all_reviewers_approved: false,
           }),
@@ -221,16 +221,16 @@ describe("CreatorDashboardAgreementList", () => {
             {
               partyIndex: 0,
               partyLabel: "Party 1",
-              displayName: "Blue Canyon Analytics LLC",
-              partyId: "p1",
+              displayName: "Iron Vale Systems Inc.",
+              partyId: "p-rev-1",
               status: "approved",
               statusLabel: "Approved",
             },
             {
               partyIndex: 1,
               partyLabel: "Party 2",
-              displayName: "Iron Vale Systems Inc.",
-              partyId: "p2",
+              displayName: "North Ridge Consulting LLC",
+              partyId: "p-rev-2",
               status: "not_reviewed",
               statusLabel: "Not reviewed",
             },

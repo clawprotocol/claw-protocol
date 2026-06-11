@@ -49,13 +49,13 @@ const partyOneApprovedRows: OwnerReviewPartyStatusRow[] = [
 ];
 
 describe("creatorDashboardReviewGate", () => {
-  it("uses authoritative party count from draft rows, not approved count", () => {
+  it("counts only required reviewer parties, not owner/client", () => {
     const gate = resolveCreatorDashboardReviewGate(indexRow({}), partyOneApprovedRows);
-    expect(gate.requiredPartyCount).toBe(2);
-    expect(gate.approvedCount).toBe(1);
+    expect(gate.requiredPartyCount).toBe(1);
+    expect(gate.approvedCount).toBe(0);
     expect(gate.allRequiredReviewPartiesApproved).toBe(false);
-    expect(formatCreatorReviewProgressLabel(gate)).toBe("1 of 2 approved");
-    expect(creatorDashboardWaitingOnReviewer(gate)).toBe(true);
+    expect(formatCreatorReviewProgressLabel(gate)).toBe("0 of 1 approved");
+    expect(creatorDashboardWaitingOnReviewer(gate)).toBe(false);
   });
 
   it("returns pending hydration without index fallback when draft rows are missing", () => {
@@ -71,12 +71,12 @@ describe("creatorDashboardReviewGate", () => {
 
   it("trusts workspace index when all reviewers approved but draft rows lag", () => {
     const gate = resolveCreatorDashboardReviewGate(
-      indexRow({ all_reviewers_approved: true, review_approvals_completed: 2 }),
+      indexRow({ all_reviewers_approved: true, review_approvals_completed: 1 }),
       partyOneApprovedRows,
     );
     expect(gate.allRequiredReviewPartiesApproved).toBe(true);
-    expect(gate.requiredPartyCount).toBe(2);
-    expect(gate.approvedCount).toBe(2);
+    expect(gate.requiredPartyCount).toBe(1);
+    expect(gate.approvedCount).toBe(1);
     expect(creatorDashboardWaitingOnReviewer(gate)).toBe(false);
   });
 
@@ -113,22 +113,57 @@ describe("creatorDashboardReviewGate", () => {
 
   it("uses workspace index summary when draft rows are still hydrating", () => {
     const gate = resolveCreatorDashboardReviewGate(
-      indexRow({ all_reviewers_approved: true, review_approvals_completed: 2 }),
+      indexRow({ all_reviewers_approved: true, review_approvals_completed: 1 }),
       [],
     );
     expect(gate.source).toBe("workspace_index_summary");
     expect(gate.allRequiredReviewPartiesApproved).toBe(true);
-    expect(gate.requiredPartyCount).toBe(2);
+    expect(gate.requiredPartyCount).toBe(1);
   });
 
-  it("marks all approved when every draft party row is approved", () => {
+  it("marks all approved when required reviewer party is approved", () => {
     const gate = resolveCreatorDashboardReviewGate(
-      indexRow({ all_reviewers_approved: true, review_approvals_completed: 2 }),
+      indexRow({ all_reviewers_approved: true, review_approvals_completed: 1 }),
       partyOneApprovedRows.map((row, index) =>
         index === 1 ? { ...row, status: "approved", statusLabel: "Approved" } : row,
       ),
     );
     expect(gate.allRequiredReviewPartiesApproved).toBe(true);
-    expect(formatCreatorReviewProgressLabel(gate)).toBe("2 of 2 approved");
+    expect(formatCreatorReviewProgressLabel(gate)).toBe("1 of 1 approved");
+  });
+
+  it("blocks signature prep when reviewer requested changes", () => {
+    const draft: AgreementDraft = {
+      id: "ag_gate",
+      title: "Consulting Agreement",
+      jurisdiction: "CA",
+      parties: [
+        { id: "p1", name: "Blue Canyon Analytics LLC", role: "party" },
+        { id: "p2", name: "Iron Vale Systems Inc.", role: "reviewer", email: "iron@example.test" },
+      ],
+      purpose: "Services",
+      payment_terms: "Net 30",
+      duration: "1y",
+      due_date: null,
+      effective_date: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T12:00:00.000Z",
+      versions: [{ version: 1, created_at: "2026-01-01T00:00:00.000Z" }],
+      audit_log: [
+        {
+          event_type: "recipient_proposal_pending",
+          at: "2026-06-07T21:00:00.000Z",
+          value: {
+            proposal_id: "prop-2",
+            proposer_id: "p2",
+            instruction: "Update terms",
+            draft: { purpose: "Updated" },
+          },
+        },
+      ],
+    };
+    const gate = resolveCreatorDashboardReviewGate(indexRow({}), [], { draft });
+    expect(gate.hasOpenChangeRequests).toBe(true);
+    expect(gate.allRequiredReviewPartiesApproved).toBe(false);
   });
 });

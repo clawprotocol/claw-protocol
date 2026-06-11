@@ -3,7 +3,7 @@ import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi
 import { computeReviewApprovalStatus } from "../components/agreements/draftRecipientReviewSignals";
 import {
   countOwnerReviewPartyApproved,
-  deriveOwnerReviewPartyStatusRows,
+  deriveRequiredReviewerPartyStatusRows,
   type OwnerReviewPartyStatusRow,
 } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import { readSimpleDoneReviewRecipientLinks } from "./simpleProduct/simpleDoneReviewRecipientLinks";
@@ -18,7 +18,20 @@ function resolveRequiredPartyCountFromIndex(
   row: WorkspaceIndexAgreement,
   reviewRowCount: number,
 ): number {
-  return Math.max(reviewRowCount, row.review_approvals_required ?? 0, row.party_count ?? 0, 1);
+  return Math.max(reviewRowCount, row.review_approvals_required ?? 0, 1);
+}
+
+/** Hydrated rows without draft: drop assumed owner row when others carry review responsibility. */
+function resolveHydratedRequiredReviewerRows(
+  reviewRows: readonly OwnerReviewPartyStatusRow[],
+): OwnerReviewPartyStatusRow[] {
+  if (reviewRows.length <= 1) return [...reviewRows];
+  const ownerRow = reviewRows.find((entry) => entry.partyIndex === 0);
+  const nonOwner = reviewRows.filter((entry) => entry.partyIndex !== 0);
+  if (ownerRow && ownerRow.status === "not_reviewed" && nonOwner.length > 0) {
+    return nonOwner;
+  }
+  return [...reviewRows];
 }
 
 /** Workspace index is authoritative for review completion when server marks all reviewers approved. */
@@ -68,31 +81,22 @@ export type ResolveCreatorDashboardReviewGateOptions = {
 function reviewGateFromDraftApprovalAggregate(
   row: WorkspaceIndexAgreement,
   draft: AgreementDraft,
-  reviewRows: readonly OwnerReviewPartyStatusRow[],
   mintedReviewerLinkCount?: number,
 ): CreatorDashboardReviewGate {
   const agg = computeReviewApprovalStatus(draft, {
     mintedReviewerLinkCount:
       mintedReviewerLinkCount ?? readSimpleDoneReviewRecipientLinks(row.id)?.recipients.length ?? 0,
   });
-  const displayRows =
-    reviewRows.length > 0 ? reviewRows : deriveOwnerReviewPartyStatusRows(draft);
-  const displayApproved = countOwnerReviewPartyApproved(displayRows);
-  const displayRequired = displayRows.length;
+  const requiredRows = deriveRequiredReviewerPartyStatusRows(draft);
   let requiredPartyCount = agg.requiredReviewerCount;
   let approvedCount = agg.approvedReviewerCount;
   let allRequiredReviewPartiesApproved = agg.allReviewersApproved && !agg.hasOpenChangeRequests;
-  if (
-    !allRequiredReviewPartiesApproved &&
-    displayRequired > requiredPartyCount &&
-    displayApproved < displayRequired
-  ) {
-    requiredPartyCount = displayRequired;
-    approvedCount = displayApproved;
-    allRequiredReviewPartiesApproved = false;
-  }
   if (!allRequiredReviewPartiesApproved && row.all_reviewers_approved && !agg.hasOpenChangeRequests) {
-    requiredPartyCount = Math.max(requiredPartyCount, displayRequired, resolveRequiredPartyCountFromIndex(row, displayRequired));
+    requiredPartyCount = Math.max(
+      requiredPartyCount,
+      requiredRows.length,
+      resolveRequiredPartyCountFromIndex(row, requiredRows.length),
+    );
     approvedCount = requiredPartyCount;
     allRequiredReviewPartiesApproved = true;
   }
@@ -101,7 +105,7 @@ function reviewGateFromDraftApprovalAggregate(
     approvedCount,
     allRequiredReviewPartiesApproved,
     hasOpenChangeRequests: agg.hasOpenChangeRequests,
-    partyStatuses: displayRows.map((partyRow) => ({
+    partyStatuses: requiredRows.map((partyRow) => ({
       displayName: partyRow.displayName,
       statusLabel: partyRow.statusLabel,
       status: partyRow.status,
@@ -136,23 +140,30 @@ export function resolveCreatorDashboardReviewGate(
 ): CreatorDashboardReviewGate {
   const draft = options?.draft ?? null;
   if (draft) {
-    return reviewGateFromDraftApprovalAggregate(row, draft, reviewRows, options?.mintedReviewerLinkCount);
+    return reviewGateFromDraftApprovalAggregate(row, draft, options?.mintedReviewerLinkCount);
   }
 
   if (reviewRows.length > 0) {
-    const approvedCount = countOwnerReviewPartyApproved(reviewRows);
-    const requiredPartyCount = reviewRows.length;
+    let requiredRows = resolveHydratedRequiredReviewerRows(reviewRows);
+    const indexRequired = Math.max(row.review_approvals_required ?? 0, 0);
+    if (indexRequired > 0 && requiredRows.length > indexRequired) {
+      const nonOwner = requiredRows.filter((entry) => entry.partyIndex !== 0);
+      if (nonOwner.length > 0) requiredRows = nonOwner;
+    }
+    const approvedCount = countOwnerReviewPartyApproved(requiredRows);
+    const requiredPartyCount = requiredRows.length;
     const allRequiredReviewPartiesApproved =
+      requiredPartyCount > 0 &&
       approvedCount === requiredPartyCount &&
-      reviewRows.every((partyRow) => partyRow.status === "approved");
+      requiredRows.every((partyRow) => partyRow.status === "approved");
     if (!allRequiredReviewPartiesApproved && row.all_reviewers_approved) {
-      return reviewGateFromWorkspaceIndexSummary(row, reviewRows, "draft_parties");
+      return reviewGateFromWorkspaceIndexSummary(row, requiredRows, "draft_parties");
     }
     return {
       requiredPartyCount,
       approvedCount,
       allRequiredReviewPartiesApproved,
-      partyStatuses: reviewRows.map((partyRow) => ({
+      partyStatuses: requiredRows.map((partyRow) => ({
         displayName: partyRow.displayName,
         statusLabel: partyRow.statusLabel,
         status: partyRow.status,

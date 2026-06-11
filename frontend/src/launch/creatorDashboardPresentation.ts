@@ -2,7 +2,7 @@ import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { resolveAllReviewPartiesApproved } from "../agreement/recipientApprovedWaitingPresentation";
 import {
-  deriveOwnerReviewPartyStatusRows,
+  deriveRequiredReviewerPartyStatusRows,
   countOwnerReviewPartyApproved,
   type OwnerReviewPartyStatusRow,
 } from "./simpleProduct/ownerReviewPartyStatusChecklist";
@@ -226,7 +226,7 @@ export function creatorDashboardShowsReviewPanel(status: CreatorDashboardStatus)
 export function creatorDashboardReviewRowsFromDraft(
   draft: AgreementDraft | null | undefined,
 ): OwnerReviewPartyStatusRow[] {
-  return deriveOwnerReviewPartyStatusRows(draft);
+  return deriveRequiredReviewerPartyStatusRows(draft);
 }
 
 /** Prefer fresh draft party rows; fall back to dashboard-hydrated rows when draft lags approvals. */

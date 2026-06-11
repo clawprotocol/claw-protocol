@@ -3,7 +3,7 @@ import type { LawdogViewerContext } from "./lawdogViewerContext";
 import { CREATOR_PREPARE_SIGNATURE_LINKS_LABEL } from "../launch/creatorDashboardCopy";
 import {
   countOwnerReviewPartyApproved,
-  deriveOwnerReviewPartyStatusRows,
+  deriveRequiredReviewerPartyStatusRows,
 } from "../launch/simpleProduct/ownerReviewPartyStatusChecklist";
 
 export const CREATOR_REVIEW_COMPLETE_HERO = "Your review is complete 🎉";
@@ -134,7 +134,7 @@ export function resolvePostApprovalPresentationAudience(args: {
 }
 
 export function resolveAllReviewPartiesApproved(draft: AgreementDraft | null | undefined): boolean {
-  const rows = deriveOwnerReviewPartyStatusRows(draft);
+  const rows = deriveRequiredReviewerPartyStatusRows(draft);
   if (rows.length === 0) return false;
   return rows.every((row) => row.status === "approved");
 }
@@ -271,7 +271,7 @@ export function resolveRecipientApprovedWaitingPanelCopy(
 }
 
 export function countApprovedReviewParties(draft: AgreementDraft | null | undefined): number {
-  return countOwnerReviewPartyApproved(deriveOwnerReviewPartyStatusRows(draft));
+  return countOwnerReviewPartyApproved(deriveRequiredReviewerPartyStatusRows(draft));
 }
 
 let lastRecipientApprovedWaitingLogKey = "";

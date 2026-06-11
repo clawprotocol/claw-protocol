@@ -265,10 +265,21 @@ describe("AppDashboard creator-centric surface", () => {
     });
   });
 
-  it("does not call VS01 bridge when only one party approved", async () => {
+  it("does not call VS01 bridge when only one required reviewer approved", async () => {
     const partialDraft = {
       ...draftWithParties(),
-      audit_log: [{ event_type: "recipient_approved", at: "2026-05-01T11:00:00.000Z" }],
+      parties: [
+        { name: "Blue Canyon Analytics LLC", role: "owner", id: "p-owner" },
+        { name: "Iron Vale Systems Inc", role: "reviewer", id: "p-rev-1" },
+        { name: "North Ridge Consulting LLC", role: "reviewer", id: "p-rev-2" },
+      ],
+      audit_log: [
+        {
+          event_type: "participant_approved",
+          at: "2026-05-01T11:00:00.000Z",
+          value: { participant_id: "p-rev-1" },
+        },
+      ],
     } as AgreementDraft;
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
       ok: true,
@@ -282,7 +293,7 @@ describe("AppDashboard creator-centric surface", () => {
         indexRow({
           id: "ag_partial",
           reviewer_approved: true,
-          review_approvals_required: 1,
+          review_approvals_required: 2,
           review_approvals_completed: 1,
           all_reviewers_approved: false,
         }),
@@ -292,16 +303,7 @@ describe("AppDashboard creator-centric surface", () => {
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
       ok: true,
-      draft: {
-        ...partialDraft,
-        parties: [
-          { name: "Blue Canyon Analytics LLC", role: "owner", id: "p1" },
-          { name: "Iron Vale Systems Inc", role: "party", id: "p2" },
-        ],
-        audit_log: [
-          { event_type: "recipient_approved", at: "2026-05-01T11:00:00.000Z", value: { participant_id: "p1" } },
-        ],
-      },
+      draft: partialDraft,
     });
 
     render(<AppDashboard />);

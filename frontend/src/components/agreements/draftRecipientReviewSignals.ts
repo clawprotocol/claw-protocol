@@ -3,6 +3,10 @@ import { approvedParticipantIds, normalizeWorkflowRoleForNegotiation } from "../
 import { findOpenRecipientProposals } from "../../agreement/recipientProposal";
 import { findLastAcceptedProposalProposer } from "../../agreement/reviewCorpusAuthority";
 import {
+  countReadyReviewLinkInviteParties,
+  rowReadyForReviewLinkInvite,
+} from "../../launch/simpleProduct/reviewLinkRecipientEmailMerge";
+import {
   deriveReviewerLinkRowApprovalStatus,
   type ReviewerLinkRow,
   type ReviewerLinkRowApprovalStatus,
@@ -71,11 +75,25 @@ export function computeReviewApprovalStatus(
     .filter((p) => normalizeWorkflowRoleForNegotiation(String(p?.role ?? "")) === "reviewer")
     .map((p) => String(p?.id ?? "").trim())
     .filter(Boolean);
-  const required = Math.max(minted, reviewerPartyIds.length, 1);
+  let required = Math.max(minted, reviewerPartyIds.length);
   const approvedIds = approvedParticipantIds(audit);
   let approved = reviewerPartyIds.filter((id) => approvedIds.has(id)).length;
   const legacy = Boolean(d && legacyRecipientApprovalWithoutParticipantId(d));
-  if (legacy && approved === 0) {
+  if (required <= 0) {
+    const counterpartyReviewCount = countReadyReviewLinkInviteParties(parties);
+    if (counterpartyReviewCount > 0) {
+      required = counterpartyReviewCount;
+      approved = parties.reduce((count, party, index) => {
+        if (!rowReadyForReviewLinkInvite(party, index, parties)) return count;
+        const id = String(party.id ?? "").trim();
+        return id && approvedIds.has(id) ? count + 1 : count;
+      }, 0);
+      if (legacy && approved === 0) approved = 1;
+    } else if (legacy || (d && draftAuditHasRecipientRecordedApproval(d))) {
+      required = 1;
+      if (approved === 0) approved = 1;
+    }
+  } else if (legacy && approved === 0) {
     approved = 1;
   }
   const anyReviewerApproval =
@@ -90,7 +108,8 @@ export function computeReviewApprovalStatus(
       if (proposerIsReviewer) approved += 1;
     }
   }
-  const allReviewersApproved = !open && approved >= required && (approved > 0 || Boolean(lastAccepted));
+  const allReviewersApproved =
+    required > 0 && !open && approved >= required && (approved > 0 || Boolean(lastAccepted));
   const hasOpenChangeRequests = open;
   let aggregateStatus: ReviewApprovalAggregateStatus;
   if (hasOpenChangeRequests) aggregateStatus = "changes_pending";
