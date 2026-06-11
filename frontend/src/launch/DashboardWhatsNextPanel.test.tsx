@@ -80,12 +80,14 @@ describe("DashboardWhatsNextPanel", () => {
   });
 
   it("shows status and timeline without dead Track review status CTA while waiting", () => {
+    const onNavigate = vi.fn();
     render(
       <DashboardWhatsNextPanel
         row={indexRow({})}
         reviewRows={[]}
         draft={pendingReviewerDraft}
         onPrimaryAction={vi.fn()}
+        onNavigate={onNavigate}
       />,
     );
 
@@ -97,6 +99,12 @@ describe("DashboardWhatsNextPanel", () => {
     );
     expect(screen.getByTestId("creator-dashboard-action-hidden-ag_whats_next")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Track review status" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Prepare signature links" })).toBeNull();
+
+    const viewAgreement = screen.getByRole("button", { name: "View agreement" });
+    expect(viewAgreement.getAttribute("data-dashboard-whats-next-cta")).toBe("view_agreement");
+    fireEvent.click(viewAgreement);
+    expect(onNavigate).toHaveBeenCalledWith("/app/agreements/ag_whats_next");
   });
 
   it("shows Prepare signature links CTA when ready for signing", () => {
@@ -133,5 +141,6 @@ describe("DashboardWhatsNextPanel", () => {
     expect(button.getAttribute("data-dashboard-whats-next-cta")).toBe("review_suggested_changes");
     fireEvent.click(button);
     expect(onNavigate).toHaveBeenCalledWith("/app/review-changes/ag_whats_next");
+    expect(screen.queryByRole("button", { name: "View agreement" })).toBeNull();
   });
 });

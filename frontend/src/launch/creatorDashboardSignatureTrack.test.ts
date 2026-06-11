@@ -7,8 +7,10 @@ import {
   CREATOR_CONTINUE_SIGNING_LABEL,
   CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL,
   creatorDashboardWhatsNextShowPrimaryCta,
+  creatorDashboardWhatsNextShowViewAgreement,
   deriveCreatorDashboardEffectiveStatus,
   resolveCreatorDashboardSignatureTrackAction,
+  resolveCreatorDashboardViewAgreementPath,
 } from "./creatorDashboardSignatureTrack";
 import {
   CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
@@ -140,6 +142,19 @@ describe("creatorDashboardSignatureTrack", () => {
     expect(action.label).toBe(CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL);
     expect(action.path).toBe("/app/review-changes/ag_track");
     expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(true);
+  });
+
+  it("offers view agreement path during normal pending review", () => {
+    const pendingDraft: AgreementDraft = {
+      ...partyTwoApprovedDraft,
+      audit_log: [],
+    };
+    const row = indexRow({ review_approvals_completed: 0 });
+    const gate = resolveCreatorDashboardReviewGate(row, [], { draft: pendingDraft });
+    const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft: pendingDraft });
+    expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(false);
+    expect(creatorDashboardWhatsNextShowViewAgreement(row, gate, action)).toBe(true);
+    expect(resolveCreatorDashboardViewAgreementPath(row.id)).toBe("/app/agreements/ag_track");
   });
 
   it("hides dead Track review status CTA during normal pending review", () => {

@@ -152,6 +152,10 @@ describe("AppDashboard creator-centric surface", () => {
     expect(whatsNext.querySelector('[data-dashboard-whats-next-cta="hidden"]')).toBeTruthy();
     expect(whatsNext.querySelector('button[data-dashboard-whats-next-cta="focus_review_status"]')).toBeNull();
     expect(screen.getByTestId("dashboard-whats-next-step").textContent).toContain("Wait for reviewer approval");
+    expect(screen.getByRole("button", { name: "View agreement" })).toBeTruthy();
+    expect(screen.getByTestId("creator-dashboard-view-agreement-ag_pending").getAttribute("data-dashboard-whats-next-cta")).toBe(
+      "view_agreement",
+    );
   });
 
   it("shows Prepare signature links when reviewer approved on draft but index still in_review", async () => {

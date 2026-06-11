@@ -182,3 +182,19 @@ export function creatorDashboardWhatsNextShowPrimaryCta(
   if (action.kind === "navigate" && action.label === "View Review Status") return false;
   return true;
 }
+
+/** Read-only owner workspace — current review corpus without send/sign/mutate flows. */
+export function resolveCreatorDashboardViewAgreementPath(agreementId: string): string {
+  return `/app/agreements/${encodeURIComponent(String(agreementId || "").trim())}`;
+}
+
+/** Secondary action while waiting on reviewer approval (primary CTA intentionally hidden). */
+export function creatorDashboardWhatsNextShowViewAgreement(
+  row: WorkspaceIndexAgreement,
+  reviewGate: CreatorDashboardReviewGate,
+  action: CreatorDashboardSignatureTrackAction,
+): boolean {
+  if (!reviewGate.authoritative) return false;
+  if (creatorDashboardWhatsNextShowPrimaryCta(reviewGate, action)) return false;
+  return deriveCreatorDashboardEffectiveStatus(row, reviewGate) === "in_review";
+}

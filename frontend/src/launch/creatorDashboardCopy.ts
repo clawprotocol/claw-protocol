@@ -8,6 +8,8 @@ export const CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL = "Open review link page";
 
 export const CREATOR_TRACK_REVIEW_STATUS_LABEL = "Track review status";
 
+export const CREATOR_VIEW_AGREEMENT_LABEL = "View agreement";
+
 export const CREATOR_REVIEWS_APPROVED_PILL = "Reviews approved";
 
 export const CREATOR_WAITING_ON_REVIEWER_PILL = "Waiting on reviewer";

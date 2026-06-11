@@ -7,7 +7,7 @@ import {
   deriveCreatorDashboardStatusPillFromGate,
   deriveCreatorSigningStatusLabel,
 } from "./creatorDashboardPresentation";
-import { logDashboardWhatsNextCtaClick } from "./creatorDashboardCopy";
+import { CREATOR_VIEW_AGREEMENT_LABEL, logDashboardWhatsNextCtaClick } from "./creatorDashboardCopy";
 import { creatorDashboardUsesManualReviewLinkPage } from "./creatorDashboardReviewLinkRouting";
 import {
   creatorDashboardReviewHydrationPending,
@@ -17,7 +17,9 @@ import { deriveDashboardWhatsNextPresentation } from "./dashboardWhatsNextPresen
 import {
   creatorDashboardShouldPrepareSignatureLinksFromTrack,
   creatorDashboardWhatsNextShowPrimaryCta,
+  creatorDashboardWhatsNextShowViewAgreement,
   resolveCreatorDashboardSignatureTrackAction,
+  resolveCreatorDashboardViewAgreementPath,
 } from "./creatorDashboardSignatureTrack";
 
 type Props = {
@@ -69,6 +71,7 @@ export function DashboardWhatsNextPanel(props: Props) {
     Boolean(onPrepareSignatureLinks) &&
     creatorDashboardShouldPrepareSignatureLinksFromTrack(row, reviewGate, draft);
   const showPrimaryCta = creatorDashboardWhatsNextShowPrimaryCta(reviewGate, trackAction);
+  const showViewAgreement = creatorDashboardWhatsNextShowViewAgreement(row, reviewGate, trackAction);
 
   const handleCtaClick = () => {
     logDashboardWhatsNextCtaClick({
@@ -90,6 +93,20 @@ export function DashboardWhatsNextPanel(props: Props) {
     }
     if (onNavigate) {
       onNavigate(trackAction.path);
+      return;
+    }
+    onPrimaryAction(row);
+  };
+
+  const handleViewAgreementClick = () => {
+    const path = resolveCreatorDashboardViewAgreementPath(row.id);
+    logDashboardWhatsNextCtaClick({
+      agreementId: row.id,
+      action: "view_agreement",
+      targetRoute: path,
+    });
+    if (onNavigate) {
+      onNavigate(path);
       return;
     }
     onPrimaryAction(row);
@@ -161,6 +178,21 @@ export function DashboardWhatsNextPanel(props: Props) {
               No action while waiting for reviewer
             </span>
           )}
+          {showViewAgreement ? (
+            <button
+              type="button"
+              className="text-sm font-medium text-slate-300 underline-offset-4 transition-colors hover:text-white hover:underline"
+              data-testid={`creator-dashboard-view-agreement-${row.id}`}
+              data-dashboard-whats-next-cta="view_agreement"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleViewAgreementClick();
+              }}
+            >
+              {CREATOR_VIEW_AGREEMENT_LABEL}
+            </button>
+          ) : null}
           {prepareNotice ? (
             <p
               className="max-w-xs text-sm text-amber-100/95"
