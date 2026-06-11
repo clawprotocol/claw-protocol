@@ -5,6 +5,8 @@ import { resolveCreatorDashboardReviewGate } from "./creatorDashboardReviewGate"
 import {
   CREATOR_COMPLETE_SIGNER_DETAILS_LABEL,
   CREATOR_CONTINUE_SIGNING_LABEL,
+  CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL,
+  creatorDashboardWhatsNextShowPrimaryCta,
   deriveCreatorDashboardEffectiveStatus,
   resolveCreatorDashboardSignatureTrackAction,
 } from "./creatorDashboardSignatureTrack";
@@ -113,7 +115,7 @@ describe("creatorDashboardSignatureTrack", () => {
     expect(action.label).toBe(CREATOR_COMPLETE_SIGNER_DETAILS_LABEL);
   });
 
-  it("does not advance to signature prep when open change requests exist", () => {
+  it("routes revision requests to review suggested changes on done page", () => {
     const draft: AgreementDraft = {
       ...partyTwoApprovedDraft,
       audit_log: [
@@ -134,6 +136,22 @@ describe("creatorDashboardSignatureTrack", () => {
     expect(gate.hasOpenChangeRequests).toBe(true);
     expect(gate.allRequiredReviewPartiesApproved).toBe(false);
     const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft });
+    expect(action.kind).toBe("navigate");
+    expect(action.label).toBe(CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL);
+    expect(action.path).toBe("/app/done/ag_track");
+    expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(true);
+  });
+
+  it("hides dead Track review status CTA during normal pending review", () => {
+    const pendingDraft: AgreementDraft = {
+      ...partyTwoApprovedDraft,
+      audit_log: [],
+    };
+    const row = indexRow({ review_approvals_completed: 0 });
+    const gate = resolveCreatorDashboardReviewGate(row, [], { draft: pendingDraft });
+    const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft: pendingDraft });
     expect(action.kind).toBe("focus_review_status");
+    expect(action.label).toBe(CREATOR_TRACK_REVIEW_STATUS_LABEL);
+    expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(false);
   });
 });

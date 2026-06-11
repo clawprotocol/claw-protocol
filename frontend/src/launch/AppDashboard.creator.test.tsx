@@ -113,6 +113,47 @@ describe("AppDashboard creator-centric surface", () => {
     expect(screen.getByTestId("agreement-progress-timeline")).toBeTruthy();
   });
 
+  it("hides dead Track review status CTA while waiting on reviewer approval", async () => {
+    const pendingDraft = {
+      ...draftWithParties(),
+      parties: [
+        { name: "Blue Canyon Analytics LLC", role: "party", id: "p1" },
+        { name: "Iron Vale Systems Inc", role: "reviewer", email: "iron@example.test", id: "p2" },
+      ],
+      audit_log: [],
+    } as AgreementDraft;
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [
+        indexRow({
+          id: "ag_pending",
+          all_reviewers_approved: false,
+          review_approvals_completed: 0,
+          review_approvals_required: 1,
+          reviewer_approved: false,
+        }),
+      ],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: pendingDraft,
+    });
+
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Review requested from Iron Vale Systems Inc")).toBeTruthy();
+    });
+
+    const whatsNext = screen.getByTestId("dashboard-whats-next-panel");
+    expect(screen.getByText("0 of 1 approved")).toBeTruthy();
+    expect(screen.getByTestId("agreement-progress-timeline")).toBeTruthy();
+    expect(whatsNext.querySelector('[data-dashboard-whats-next-cta="hidden"]')).toBeTruthy();
+    expect(whatsNext.querySelector('button[data-dashboard-whats-next-cta="focus_review_status"]')).toBeNull();
+    expect(screen.getByTestId("dashboard-whats-next-step").textContent).toContain("Wait for reviewer approval");
+  });
+
   it("shows Prepare signature links when reviewer approved on draft but index still in_review", async () => {
     const reviewerApprovedDraft = {
       ...draftWithParties(),
@@ -312,7 +353,9 @@ describe("AppDashboard creator-centric surface", () => {
       expect(screen.getByText(/1 of 2 approved/)).toBeTruthy();
     });
 
-    expect(screen.getByRole("button", { name: "Track review status" })).toBeTruthy();
+    const whatsNext = screen.getByTestId("dashboard-whats-next-panel");
+    expect(whatsNext.querySelector('[data-dashboard-whats-next-cta="hidden"]')).toBeTruthy();
+    expect(whatsNext.querySelector('[data-dashboard-whats-next-cta="focus_review_status"]')).toBeNull();
     expect(screen.queryByRole("button", { name: "Prepare signature links" })).toBeNull();
     expect(vs01Spy).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();

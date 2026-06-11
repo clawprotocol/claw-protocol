@@ -26,6 +26,7 @@ import {
 export const CREATOR_OPEN_SIGNATURE_LINKS_LABEL = "Open signature links";
 export const CREATOR_CONTINUE_SIGNING_LABEL = "Continue signing";
 export const CREATOR_COMPLETE_SIGNER_DETAILS_LABEL = PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA;
+export const CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL = "Review suggested changes";
 
 export type CreatorDashboardSignatureTrackActionKind =
   | "prepare_signature_links"
@@ -137,6 +138,14 @@ export function resolveCreatorDashboardSignatureTrackAction(
   }
 
   if (effectiveStatus === "in_review") {
+    if (reviewGate.hasOpenChangeRequests) {
+      return {
+        kind: "navigate",
+        label: CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL,
+        path: creatorDashboardReviewLinkReadyPath(row.id),
+        emphasis: "primary",
+      };
+    }
     if (manualReviewLinkPage) {
       return {
         kind: "navigate",
@@ -159,4 +168,15 @@ export function resolveCreatorDashboardSignatureTrackAction(
     path: `/app/send/${id}`,
     emphasis: "secondary",
   };
+}
+
+/** What's Next hides non-functional pending-review CTAs; status/timeline carry the wait state. */
+export function creatorDashboardWhatsNextShowPrimaryCta(
+  reviewGate: CreatorDashboardReviewGate,
+  action: CreatorDashboardSignatureTrackAction,
+): boolean {
+  if (reviewGate.hasOpenChangeRequests) return true;
+  if (action.kind === "focus_review_status") return false;
+  if (action.kind === "navigate" && action.label === "View Review Status") return false;
+  return true;
 }

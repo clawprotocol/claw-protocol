@@ -16,6 +16,7 @@ import {
 import { deriveDashboardWhatsNextPresentation } from "./dashboardWhatsNextPresentation";
 import {
   creatorDashboardShouldPrepareSignatureLinksFromTrack,
+  creatorDashboardWhatsNextShowPrimaryCta,
   resolveCreatorDashboardSignatureTrackAction,
 } from "./creatorDashboardSignatureTrack";
 
@@ -67,6 +68,7 @@ export function DashboardWhatsNextPanel(props: Props) {
   const showPrepare =
     Boolean(onPrepareSignatureLinks) &&
     creatorDashboardShouldPrepareSignatureLinksFromTrack(row, reviewGate, draft);
+  const showPrimaryCta = creatorDashboardWhatsNextShowPrimaryCta(reviewGate, trackAction);
 
   const handleCtaClick = () => {
     logDashboardWhatsNextCtaClick({
@@ -135,20 +137,30 @@ export function DashboardWhatsNextPanel(props: Props) {
           </div>
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:items-end">
-          <button
-            type="button"
-            className="vs01-btn vs01-btn--primary vs01-btn--compact min-w-[11rem]"
-            data-testid={`creator-dashboard-action-${row.id}`}
-            data-dashboard-whats-next-cta={trackAction.kind}
-            disabled={showPrepare ? prepareBusy : false}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              handleCtaClick();
-            }}
-          >
-            {showPrepare && prepareBusy ? "Preparing…" : trackAction.label}
-          </button>
+          {showPrimaryCta ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--primary vs01-btn--compact min-w-[11rem]"
+              data-testid={`creator-dashboard-action-${row.id}`}
+              data-dashboard-whats-next-cta={trackAction.kind}
+              disabled={showPrepare ? prepareBusy : false}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleCtaClick();
+              }}
+            >
+              {showPrepare && prepareBusy ? "Preparing…" : trackAction.label}
+            </button>
+          ) : (
+            <span
+              className="sr-only"
+              data-testid={`creator-dashboard-action-hidden-${row.id}`}
+              data-dashboard-whats-next-cta="hidden"
+            >
+              No action while waiting for reviewer
+            </span>
+          )}
           {prepareNotice ? (
             <p
               className="max-w-xs text-sm text-amber-100/95"

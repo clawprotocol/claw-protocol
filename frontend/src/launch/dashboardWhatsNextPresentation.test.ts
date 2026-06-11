@@ -108,6 +108,33 @@ describe("dashboardWhatsNextPresentation", () => {
     expect(pill).not.toBe("Waiting on reviewer");
   });
 
+  it("pending reviewer with zero approvals suggests waiting, not track review", () => {
+    const draft = {
+      id: "ag_test",
+      title: "Consulting Agreement",
+      jurisdiction: "CA",
+      parties: [
+        { id: "p-blue", name: "Blue Canyon Analytics LLC", role: "party" },
+        { id: "p-iron", name: "Iron Vale Systems Inc", role: "reviewer", email: "iron@example.test" },
+      ],
+      purpose: "Services",
+      payment_terms: "Net 30",
+      duration: "1y",
+      due_date: null,
+      effective_date: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T12:00:00.000Z",
+      versions: [{ version: 1, created_at: "2026-01-01T00:00:00.000Z" }],
+      audit_log: [],
+    } as import("../agreement/agreementTypes").AgreementDraft;
+    const r = row({ review_approvals_completed: 0, reviewer_approved: false });
+    const gate = resolveCreatorDashboardReviewGate(r, [], { draft });
+    const presentation = deriveDashboardWhatsNextPresentation(r, gate);
+    expect(presentation.headline).toBe("Review requested from Iron Vale Systems Inc");
+    expect(presentation.progressLine).toBe("0 of 1 approved");
+    expect(presentation.nextStepLabel).toBe("Wait for reviewer approval");
+  });
+
   it("ready for signing headline and next step", () => {
     const approvedRows: OwnerReviewPartyStatusRow[] = [
       {

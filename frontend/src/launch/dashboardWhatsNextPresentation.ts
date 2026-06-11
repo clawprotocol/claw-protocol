@@ -118,8 +118,16 @@ export function deriveWhatsNextNextStep(
   if (status === "ready_for_signing" || status === "review_approved") {
     return "Prepare signature links";
   }
-  if (status === "in_review" && creatorDashboardWaitingOnReviewer(reviewGate)) {
-    return "Wait for remaining reviewer";
+  if (status === "in_review") {
+    if (reviewGate.hasOpenChangeRequests) return "Review suggested changes";
+    if (creatorDashboardWaitingOnReviewer(reviewGate)) return "Wait for remaining reviewer";
+    if (
+      reviewGate.authoritative &&
+      reviewGate.requiredPartyCount > 0 &&
+      reviewGate.approvedCount < reviewGate.requiredPartyCount
+    ) {
+      return "Wait for reviewer approval";
+    }
   }
   if (status === "completed") return "Open agreement workspace";
   return deriveCreatorNextActionLabel(row, reviewGate);
