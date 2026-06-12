@@ -381,7 +381,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     surface: "pro_review",
     source: "premium_readonly_pick",
     renderedText: "",
-    paidProAccepted: Boolean(args.premiumCheckoutCompleted && !hasAcceptedCandidate),
+    paidProAccepted: false,
     minLen: 500,
   });
   if (args.premiumCheckoutCompleted && !hasAcceptedCandidate && !lockedReviewCorpus.ok) {

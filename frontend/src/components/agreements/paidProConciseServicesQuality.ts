@@ -23,7 +23,7 @@ import { stripMalformedProReviewDisplayArtifacts } from "./polishProAgreementDis
 import {
   assessProMinimumSubstanceCached,
   hasPaidProAuthoritativeValidationPassed,
-  hasPaidProPipelineValidationForCorpus,
+  hasPaidProPipelineSessionAcceptance,
   markPaidProAuthoritativeValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import { corpusHashForScanCache, runCachedCorpusScan } from "./paidProCorpusScanCache";
@@ -224,7 +224,7 @@ export function validateProMinimumSubstance(args: {
   const source = args.source ?? "unknown";
   if (
     hasPaidProAuthoritativeValidationPassed({ text: args.text, source }) ||
-    hasPaidProPipelineValidationForCorpus({ text: args.text, source })
+    hasPaidProPipelineSessionAcceptance({ text: args.text, source })
   ) {
     markPaidProAuthoritativeValidationPassed({ text: args.text, source });
     return {

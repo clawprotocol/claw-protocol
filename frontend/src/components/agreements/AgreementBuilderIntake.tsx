@@ -578,6 +578,7 @@ import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import { PaidProVisibleDocumentShell } from "./paidProVisibleDocumentShell";
 import {
   hasCanonicalReviewCorpusForRender,
+  PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
   PaidProDocumentBodyForcedRoute,
   resolveCanonicalReviewCorpusLenForRender,
   resolvePaidProDocumentBodyRouter,
@@ -632,7 +633,7 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
-  hasPaidProPipelineValidationForCorpus,
+  hasPaidProPipelineSessionAcceptance,
   markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import { resolvePaidProAuthoritativeDisplayPlain } from "./paidProAuthoritativeRenderGate";
@@ -7463,7 +7464,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             const establishMsg =
               establishErr instanceof Error ? establishErr.message : String(establishErr);
             const pipelineValidatedForRecovery =
-              hasPaidProPipelineValidationForCorpus({
+              hasPaidProPipelineSessionAcceptance({
                 text: snapshotPlain,
                 source: paidProSotSource,
               }) && snapshotPlain.trim().length >= 500;
@@ -7950,7 +7951,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const latchedRecovery = getLatchedAcceptedServerFullDraftAuthority();
           const canRecoverFromLatchedAuthority =
             Boolean(latchedRecovery) &&
-            hasPaidProPipelineValidationForCorpus({
+            hasPaidProPipelineSessionAcceptance({
               text: latchedRecovery!.body,
               source: latchedRecovery!.source,
             }) &&
@@ -22690,7 +22691,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       path === "forced_embedded" ||
       path === "forced_standalone" ||
       path === "legacy_simple_review" ||
-      path === "legacy_premium_readonly";
+      path === "legacy_premium_readonly" ||
+      (showPaidProReviewDocumentCard &&
+        paidProCanonicalReviewCorpusReady &&
+        paidProCanonicalReviewCorpusLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN);
     const chromeMounted =
       path === "forced_embedded" ||
       path === "legacy_simple_review" ||
@@ -22719,6 +22723,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleProFinalReviewShellActive,
     paidProCanonicalReviewSignerSetupActive,
     canDisplayPaidProAgreementDocument,
+    showPaidProReviewDocumentCard,
     paidProCanonicalReviewCorpusReady,
     paidProCanonicalReviewCorpusLen,
     premiumPaidDocumentSurface,

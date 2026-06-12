@@ -20,7 +20,7 @@ import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycleDiff";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
 import {
-  hasPaidProPipelineValidationForCorpus,
+  hasPaidProPipelineSessionAcceptance,
   markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
@@ -312,16 +312,16 @@ export function establishPaidProSourceOfTruth(args: {
         intakeText: args.intakeText ?? null,
         surface: "establish_paid_pro_source_of_truth",
       }).text;
-  const pipelineValidatedBeforeSubstance =
-    hasPaidProPipelineValidationForCorpus({
+  const pipelineSessionAccepted =
+    hasPaidProPipelineSessionAcceptance({
       text: authorityText,
       source: requestedSource,
     }) ||
-    hasPaidProPipelineValidationForCorpus({
+    hasPaidProPipelineSessionAcceptance({
       text: trim(args.text),
       source: requestedSource,
     });
-  if (pipelineValidatedBeforeSubstance && safe !== authorityText) {
+  if (pipelineSessionAccepted && safe !== authorityText) {
     markPaidProPipelineValidationPassed({ text: safe, source: requestedSource });
   }
   const minimumSubstance = validateProMinimumSubstance({
@@ -333,8 +333,14 @@ export function establishPaidProSourceOfTruth(args: {
   const intakeHasConcreteServicesFacts =
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.intakeText ?? "") &&
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.draft?.purpose ?? "");
+  const pipelineAcceptedAfterSubstance =
+    pipelineSessionAccepted ||
+    hasPaidProPipelineSessionAcceptance({ text: safe, source: requestedSource });
   if (minimumSubstance.applies && !minimumSubstance.ok && intakeHasConcreteServicesFacts) {
-    if (!pipelineValidatedBeforeSubstance) {
+    const emptyUnknownSubstanceFailure = minimumSubstance.missingSections.length === 0;
+    const advisoryOnly =
+      pipelineAcceptedAfterSubstance && emptyUnknownSubstanceFailure;
+    if (!advisoryOnly) {
       throw new Error(
         `[pro-minimum-substance-blocked] missingSections=${minimumSubstance.missingSections.join(",") || "unknown"}`,
       );

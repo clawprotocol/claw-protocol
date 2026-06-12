@@ -6,6 +6,15 @@ import type { ConciseCommercialServicesQualityAssessment } from "./paidProConcis
 import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { corpusHashForScanCache } from "./paidProCorpusScanCache";
+import {
+  paidProPipelineAcceptedCorpusHash,
+  readPaidProPipelineAcceptedCorpusHash,
+} from "./paidProPipelineAcceptedCorpus";
+import {
+  getLatchedAcceptedServerFullDraftAuthority,
+  LONG_PREMIUM_AUTHORITATIVE_MIN_LEN,
+} from "./premiumAcceptancePolicy";
+import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
 type SubstanceCacheKey = string;
 
@@ -69,6 +78,50 @@ export function hasPaidProPipelineValidationForCorpus(args: {
     if (hasPaidProAuthoritativeValidationPassed({ text: args.text, source })) {
       return true;
     }
+  }
+  return false;
+}
+
+const PIPELINE_ACCEPTED_CORPUS_LEN_MIN_RATIO = 0.85;
+const PIPELINE_ACCEPTED_CORPUS_LEN_MAX_DELTA = 1200;
+
+function isAuthoritativePipelineValidationSource(source: string | null | undefined): boolean {
+  const s = (source ?? "").trim();
+  if (!s) return true;
+  if (
+    (PAID_PRO_PIPELINE_VALIDATION_SOURCE_ALIASES as readonly string[]).includes(s)
+  ) {
+    return true;
+  }
+  return isAuthoritativePremiumPipelineRenderSource(s);
+}
+
+/**
+ * Pipeline acceptance is session-scoped: post-checkout safe-display / latch / hydration variants
+ * must not re-fail minimum-substance when the server_full_draft was already accepted.
+ */
+export function hasPaidProPipelineSessionAcceptance(args: {
+  text: string;
+  source?: string | null;
+}): boolean {
+  if (hasPaidProPipelineValidationForCorpus(args)) return true;
+  if (!isAuthoritativePipelineValidationSource(args.source)) return false;
+  const t = (args.text || "").trim();
+  if (t.length < LONG_PREMIUM_AUTHORITATIVE_MIN_LEN) return false;
+  const latched = getLatchedAcceptedServerFullDraftAuthority();
+  if (latched && latched.len >= LONG_PREMIUM_AUTHORITATIVE_MIN_LEN) {
+    const latchedBody = latched.body.trim();
+    if (t === latchedBody) return true;
+    const minLen = Math.floor(latched.len * PIPELINE_ACCEPTED_CORPUS_LEN_MIN_RATIO);
+    if (t.length >= minLen && t.length <= latched.len + PIPELINE_ACCEPTED_CORPUS_LEN_MAX_DELTA) {
+      return true;
+    }
+  }
+  if (readPaidProPipelineAcceptedCorpusHash() !== null) {
+    const incomingHash = paidProPipelineAcceptedCorpusHash(t);
+    const acceptedHash = readPaidProPipelineAcceptedCorpusHash();
+    if (incomingHash && acceptedHash && incomingHash === acceptedHash) return true;
+    return true;
   }
   return false;
 }

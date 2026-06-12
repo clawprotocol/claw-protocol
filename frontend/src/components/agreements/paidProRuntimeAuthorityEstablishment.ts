@@ -22,6 +22,7 @@ import {
 } from "./paidProApiFailureAuthorityGuard";
 import { MIN_PAID_PRO_AUTHORITY_LEN } from "./premiumGenerationApiAvailability";
 import { resolvePaidProPostCheckoutRecoveryDisplayPlain } from "./paidProPostCheckoutRenderGate";
+import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 
 export { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 
@@ -142,10 +143,13 @@ export function assessPaidProRuntimeAuthority(args: {
       intakeText: args.intakeText,
       premiumRenderSource: args.premiumPipelineSource ?? args.premiumRenderSourceResolved,
     });
+  const latchedAccepted = getLatchedAcceptedServerFullDraftAuthority();
+  const latchedAcceptedLen = latchedAccepted?.body.trim().length ?? 0;
   const corpusLen = Math.max(
     paidTruthText.length,
     authoritativeText.length,
     recoveryPlain.length,
+    latchedAcceptedLen,
     materialPremiumPipelineCorpusMaxLen(args.draft ?? null),
   );
   const forbiddenRender = isForbiddenPaidProDisplayRenderSource(renderSource);
@@ -185,6 +189,14 @@ export function assessPaidProRuntimeAuthority(args: {
   } else if (!paidEstablished && recoveryPlain.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
     established = true;
     reason = "post_checkout_local_recovery_display";
+  } else if (
+    !paidEstablished &&
+    latchedAccepted &&
+    latchedAcceptedLen >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN &&
+    isAuthoritativePremiumPipelineRenderSource(latchedAccepted.source)
+  ) {
+    established = true;
+    reason = "server_full_document_on_draft";
   } else if (corpusLen > 0 && corpusLen < PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
     reason = "empty_corpus";
   }

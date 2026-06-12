@@ -235,6 +235,10 @@ export function requireAuthoritativeCorpusForSurface(args: {
     return { ok: true, text: rendered, hash: hash(rendered) };
   }
   if (!lock.authoritativeText || lock.authoritativeText.length < (args.minLen ?? 500)) {
+    const renderedAwaiting = trim(args.renderedText);
+    if (!renderedAwaiting) {
+      return { ok: false, reason: "authoritative_corpus_unavailable" };
+    }
     logAuthoritativeCorpusDivergenceBlocked({
       surface: args.surface,
       source: args.source,
