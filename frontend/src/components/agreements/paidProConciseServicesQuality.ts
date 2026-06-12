@@ -35,6 +35,7 @@ import {
   isGenericPaidProAcceptanceManifestFallback,
   manifestRecordsForPaidProAcceptance,
 } from "./paidProAcceptanceExecutionBlockInvariant";
+import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 
 export type ConciseCommercialServicesFactId =
   | "party_names"
@@ -394,6 +395,12 @@ function preparePaidProServerDocumentForAcceptanceCore(
   const tailArtifacts = stripMalformedProReviewDisplayArtifacts(out);
   out = tailArtifacts.text;
   repairs.push(...tailArtifacts.repairs);
+
+  const displayPrep = preparePaidProReviewDisplayPlain(out);
+  if (displayPrep.text !== out) {
+    out = displayPrep.text;
+    repairs.push(...displayPrep.repairs);
+  }
 
   if (records.length >= 2 && !isGenericPaidProAcceptanceManifestFallback(records)) {
     const execution = ensurePaidProAcceptanceExecutionBlockInvariant(out, records);

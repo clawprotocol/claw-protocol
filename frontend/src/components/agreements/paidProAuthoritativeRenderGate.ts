@@ -19,6 +19,7 @@ import { resolvePaidProFrozenDisplayPlain } from "./paidProPostFreezeCorpusInvar
 import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRenderParties";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
+import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import {
   hasSignerMetadataForExecutionOverlay,
   shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
@@ -42,7 +43,7 @@ export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
 export function resolvePaidProAuthoritativeDisplayPlain(
   args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
 ): string {
-  const base = resolvePaidProFrozenDisplayPlain();
+  const base = preparePaidProReviewDisplayPlain(resolvePaidProFrozenDisplayPlain()).text;
   const parties = resolvePartiesForReviewRender(args);
   const needsOverlay =
     isPaidProReviewSignerMetadataSessionActive() ||

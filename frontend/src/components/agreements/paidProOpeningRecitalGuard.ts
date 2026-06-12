@@ -66,8 +66,27 @@ function isStandalonePartyEntityLine(line: string, legalNames: ReadonlySet<strin
   return legalNames.has(trimmed.toLowerCase());
 }
 
+const OPENING_SECTION_ONE_SCAN_MAX = 8_000;
+
+/** Section 1 anchors used for opening repair must live in the opening region, not late quality-floor inserts before witness. */
+function findOpeningSectionOneIndex(text: string): number {
+  const head = (text || "").replace(/\r\n/g, "\n").slice(0, OPENING_SECTION_ONE_SCAN_MAX);
+  return head.search(/^\s*1\.\s+(?!\d)/m);
+}
+
+function splitOperativeAndExecutionTail(body: string): { operative: string; executionTail: string } {
+  const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) {
+    return { operative: body, executionTail: "" };
+  }
+  return {
+    operative: body.slice(0, witnessIdx).trimEnd(),
+    executionTail: body.slice(witnessIdx).trimStart(),
+  };
+}
+
 function openingSliceBeforeSection1(text: string): string {
-  const match = text.replace(/\r\n/g, "\n").search(/^\s*1\.\s+/m);
+  const match = findOpeningSectionOneIndex(text);
   return match >= 0 ? text.slice(0, match) : text.slice(0, 2_500);
 }
 
@@ -113,7 +132,7 @@ export function detectPaidProMalformedServicesOpening(
   }
 
   const preSec1 = openingSliceBeforeSection1(body);
-  const sec1Idx = body.search(/^\s*1\.\s+/m);
+  const sec1Idx = findOpeningSectionOneIndex(body);
   if (sec1Idx < 0) {
     return !/entered\s+into/i.test(body.slice(0, 2_500));
   }
@@ -178,7 +197,7 @@ export function isPaidProOpeningStructurallyValid(
     return false;
   }
 
-  const sec1Idx = body.search(/^\s*1\.\s+/m);
+  const sec1Idx = findOpeningSectionOneIndex(body);
   const enteredIdx = head.search(/entered\s+into/i);
   if (sec1Idx >= 0 && (enteredIdx < 0 || enteredIdx > sec1Idx)) {
     return false;
@@ -245,8 +264,12 @@ export function repairPaidProServicesAgreementOpening(
     return { text: body, repairs };
   }
 
-  const sec1Idx = body.search(/^\s*1\.\s+/m);
-  const remainder = sec1Idx >= 0 ? body.slice(sec1Idx).trim() : body;
+  const { operative, executionTail } = splitOperativeAndExecutionTail(body);
+  const sec1Idx = findOpeningSectionOneIndex(operative);
+  const operativeRemainder = sec1Idx >= 0 ? operative.slice(sec1Idx).trim() : operative;
+  const remainder = executionTail
+    ? `${operativeRemainder}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
+    : operativeRemainder;
   const opening = buildCanonicalPaidProServicesOpeningRecital(client, provider, intakeText);
   repairs.push("opening:prepend_canonical_services_recital");
   return { text: `${opening}${remainder}`, repairs };

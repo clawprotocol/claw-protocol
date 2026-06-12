@@ -42,6 +42,7 @@ import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity"
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
+import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { applySignerPartyIdentityToAuthoritativeAgreement } from "./guidedDealCompletion/signerPartyIdentity";
@@ -728,11 +729,14 @@ export function resolvePaidProReviewRenderPlain(
   if (!needsSignerOverlay) {
     writeMemoizedPaidProReviewPlain(memoKey, rendered);
   }
+  const orphanNormalized = normalizePaidProOrphanSubsections(rendered, { source: surface }).text;
+  const displayPrepared = preparePaidProReviewDisplayPlain(orphanNormalized);
+  rendered = displayPrepared.text;
   if (rendered.length >= 200 && hasPaidProSourceOfTruth()) {
     auditPaidProReviewRenderCorpus(rendered);
     auditPaidProReviewRenderSotParity({ reviewPlain: rendered, surface: "paid_pro_review_render_plain" });
   }
-  return normalizePaidProOrphanSubsections(rendered, { source: surface }).text;
+  return rendered;
 }
 
 function resolvePaidProReviewRenderPlainInner(

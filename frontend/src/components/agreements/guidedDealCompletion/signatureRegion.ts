@@ -8,6 +8,7 @@ export const SIGNATURE_REGION_MIN_FRACTION = 0.45;
 const WITNESS_RE = /\bIN WITNESS WHEREOF\b/gi;
 const CLIENT_BLOCK_RE = /\n\s*CLIENT\s*:\s*(?:\n|$)/i;
 const SIG_HEADING_RE = /\n\s*SIGNATURES?\s*:?\s*(?:\n|$)/gi;
+const INLINE_STALE_SIG_RE = /\bSIGNATURES\b\s+(?:The\s+parties|have\s+caused)/gi;
 
 /**
  * Index where signature-block patching may begin, or -1 if no safe anchor.
@@ -36,6 +37,12 @@ export function findSignatureRegionStart(text: string): number {
   const headingMatches = [...text.matchAll(SIG_HEADING_RE)];
   for (let i = headingMatches.length - 1; i >= 0; i--) {
     const idx = headingMatches[i].index ?? -1;
+    if (idx >= minPos) return idx;
+  }
+
+  const inlineStaleMatches = [...text.matchAll(INLINE_STALE_SIG_RE)];
+  for (let i = inlineStaleMatches.length - 1; i >= 0; i--) {
+    const idx = inlineStaleMatches[i].index ?? -1;
     if (idx >= minPos) return idx;
   }
 

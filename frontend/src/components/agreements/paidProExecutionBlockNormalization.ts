@@ -20,6 +20,7 @@ import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
 } from "./paidProExecutionBlockInstrumentation";
+import { stripInlineStaleServerSignatureTailBeforeWitness } from "./paidProFlattenedDocumentNormalize";
 
 export {
   isRecitalFragmentExecutionPartyLine,
@@ -141,12 +142,13 @@ function sanitizeRoleAssignments(corpus: string): AcceptedCorpusRoleAssignment[]
 }
 
 function operativeBodyWithoutExecutionTails(text: string): string {
-  const firstWitness = text.search(/\bIN WITNESS WHEREOF\b/i);
-  let prefix = firstWitness >= 0 ? text.slice(0, firstWitness) : text;
-  const stripped = stripPreWitnessExecutionPollutionFromPrefix(prefix);
-  prefix = stripped.text;
+  const inlineStripped = stripInlineStaleServerSignatureTailBeforeWitness(text);
+  const firstWitness = inlineStripped.text.search(/\bIN WITNESS WHEREOF\b/i);
+  let prefix = firstWitness >= 0 ? inlineStripped.text.slice(0, firstWitness) : inlineStripped.text;
+  const pollutionStripped = stripPreWitnessExecutionPollutionFromPrefix(prefix);
+  prefix = pollutionStripped.text;
   if (firstWitness >= 0) return prefix.trimEnd();
-  const sigStart = prefix.search(/\n\s*(?:CLIENT|SERVICE\s+PROVIDER)\s*:\s*(?:\n|$)/i);
+  const sigStart = prefix.search(/(?:^|\n)\s*(?:CLIENT|SERVICE\s+PROVIDER)\s*:\s*(?:\n|$)/im);
   if (sigStart >= 0) return prefix.slice(0, sigStart).trimEnd();
   return prefix.trimEnd();
 }
@@ -269,6 +271,12 @@ export function enforcePaidProSingleExecutionBlock(
   if (spacingRepair.repairs > 0) {
     text = spacingRepair.text;
     repairs.push(`execution_block:orphan_suffix_spacing:${spacingRepair.repairs}`);
+  }
+
+  const inlineStaleStrip = stripInlineStaleServerSignatureTailBeforeWitness(text);
+  if (inlineStaleStrip.text !== text) {
+    text = inlineStaleStrip.text;
+    repairs.push(...inlineStaleStrip.repairs);
   }
 
   const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);

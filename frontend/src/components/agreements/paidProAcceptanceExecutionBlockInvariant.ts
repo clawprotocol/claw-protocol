@@ -15,6 +15,7 @@ import {
   countPaidProExecutionBlocks,
 } from "./paidProExecutionBlockAuthority";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
+import { stripInlineStaleServerSignatureTailBeforeWitness } from "./paidProFlattenedDocumentNormalize";
 
 export const PAID_PRO_ACCEPTANCE_WITNESS_LINE =
   "IN WITNESS WHEREOF, the Parties execute this Agreement.";
@@ -142,13 +143,18 @@ function countWitnessClauses(text: string): number {
 }
 
 function operativePrefixWithoutExecution(text: string): string {
-  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
-  let prefix = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
+  const stripped = stripInlineStaleServerSignatureTailBeforeWitness(text);
+  const witnessIdx = stripped.text.search(/\bIN WITNESS WHEREOF\b/i);
+  let prefix = witnessIdx >= 0 ? stripped.text.slice(0, witnessIdx) : stripped.text;
   const sigStart = prefix.search(
-    /\n\s*(?:CLIENT|SERVICE\s+PROVIDER|BUYER|SELLER|LENDER|BORROWER|LANDLORD|TENANT)\s*:\s*(?:\n|$)/i,
+    /(?:^|\n)\s*(?:CLIENT|SERVICE\s+PROVIDER|BUYER|SELLER|LENDER|BORROWER|LANDLORD|TENANT)\s*:\s*(?:\n|$)/im,
   );
   if (sigStart >= 0 && witnessIdx < 0) {
     prefix = prefix.slice(0, sigStart);
+  }
+  const inlineSig = prefix.search(/\bSIGNATURES\b\s+(?:The\s+parties\s+have\s+caused|have\s+caused)/i);
+  if (inlineSig >= 0) {
+    prefix = prefix.slice(0, inlineSig);
   }
   return prefix.trimEnd();
 }
