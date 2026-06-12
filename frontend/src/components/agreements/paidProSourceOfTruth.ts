@@ -19,6 +19,10 @@ import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelin
 import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycleDiff";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
+import {
+  hasPaidProPipelineValidationForCorpus,
+  markPaidProPipelineValidationPassed,
+} from "./paidProPostAcceptanceValidatorCache";
 import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { logFalseProAuthorityBlocked } from "./paidProRuntimeAuthorityEstablishment";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
@@ -308,19 +312,41 @@ export function establishPaidProSourceOfTruth(args: {
         intakeText: args.intakeText ?? null,
         surface: "establish_paid_pro_source_of_truth",
       }).text;
+  const pipelineValidatedBeforeSubstance =
+    hasPaidProPipelineValidationForCorpus({
+      text: authorityText,
+      source: requestedSource,
+    }) ||
+    hasPaidProPipelineValidationForCorpus({
+      text: trim(args.text),
+      source: requestedSource,
+    });
+  if (pipelineValidatedBeforeSubstance && safe !== authorityText) {
+    markPaidProPipelineValidationPassed({ text: safe, source: requestedSource });
+  }
   const minimumSubstance = validateProMinimumSubstance({
     text: safe,
     rawIntake: args.intakeText ?? "",
     draft: args.draft ?? null,
-    source: args.source ?? "server_full_draft",
+    source: requestedSource,
   });
   const intakeHasConcreteServicesFacts =
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.intakeText ?? "") &&
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.draft?.purpose ?? "");
   if (minimumSubstance.applies && !minimumSubstance.ok && intakeHasConcreteServicesFacts) {
-    throw new Error(
-      `[pro-minimum-substance-blocked] missingSections=${minimumSubstance.missingSections.join(",") || "unknown"}`,
-    );
+    if (!pipelineValidatedBeforeSubstance) {
+      throw new Error(
+        `[pro-minimum-substance-blocked] missingSections=${minimumSubstance.missingSections.join(",") || "unknown"}`,
+      );
+    }
+    logProCorpusSourceMap({
+      stage: "client_gates_passed",
+      source: requestedSource,
+      len: safe.length,
+      text: safe,
+      allowedToOverride: false,
+      reason: `minimum_substance_advisory_after_pipeline_accept;malformedOpening=${minimumSubstance.malformedOpening};missing=${minimumSubstance.missingSections.join(",") || "unknown"}`,
+    });
   }
   logProCorpusSourceMap({
     stage: "client_gates_passed",

@@ -26,6 +26,7 @@ import {
   hashPaidProCorpus,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import {
   hasPaidPremiumCompletionSession,
   readPremiumCompletionSnapshot,
@@ -177,6 +178,18 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
       plain: draftServerFull,
       source: "server_full_document_text",
       fallbackReason: "draft_server_full_document",
+      hasSoT,
+      hasServerFullDoc,
+      paidProActive,
+    };
+  }
+
+  const latched = getLatchedAcceptedServerFullDraftAuthority();
+  if (latched && latched.body.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return {
+      plain: latched.body,
+      source: "server_full_document_text",
+      fallbackReason: "latched_pipeline_accepted_server_full_draft",
       hasSoT,
       hasServerFullDoc,
       paidProActive,

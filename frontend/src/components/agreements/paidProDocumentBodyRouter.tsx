@@ -22,6 +22,7 @@ import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 
 /** Minimum frozen SoT length to force visible document shell (inclusive). */
 export const PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN = 1000;
@@ -34,14 +35,18 @@ export function resolveCanonicalReviewCorpusLenForRender(): number {
   const authoritative = getAuthoritativeAgreementText().trim();
   if (authoritative.length > 0) return authoritative.length;
   const frozen = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
-  return frozen?.canonicalText?.trim().length ?? 0;
+  if (frozen?.canonicalText?.trim()) return frozen.canonicalText.trim().length;
+  const latched = getLatchedAcceptedServerFullDraftAuthority();
+  return latched?.body.trim().length ?? 0;
 }
 
 export function hasCanonicalReviewCorpusForRender(): boolean {
+  const latchedLen = getLatchedAcceptedServerFullDraftAuthority()?.body.trim().length ?? 0;
   return (
     hasFrozenCanonicalAgreementCorpus() ||
     hasAuthoritativeAgreementDocument() ||
-    hasPaidProSourceOfTruth()
+    hasPaidProSourceOfTruth() ||
+    latchedLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
   );
 }
 

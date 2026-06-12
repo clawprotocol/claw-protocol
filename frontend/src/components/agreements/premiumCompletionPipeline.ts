@@ -155,7 +155,7 @@ import {
   logPaidProJsonParseDegradedDiagnostics,
 } from "./paidProJsonParseDegradedDiagnostics";
 import { shouldSkipPremiumStructuralRetryForDegradedDisplay } from "./paidProPostCheckoutRenderGate";
-import { markPaidProAuthoritativeValidationPassed } from "./paidProPostAcceptanceValidatorCache";
+import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import type { PremiumNetworkCallReason } from "./paidProPremiumGenerationCallAudit";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryable";
@@ -2691,7 +2691,7 @@ async function runPremiumCompletionInner(
           doc,
           usedClientRetry ? "server_full_draft_retry" : "server_full_draft",
         );
-        markPaidProAuthoritativeValidationPassed({
+        markPaidProPipelineValidationPassed({
           text: doc,
           source: premiumRenderSource,
         });

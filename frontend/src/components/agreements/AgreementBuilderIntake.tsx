@@ -610,7 +610,10 @@ import {
   acceptedProDraftSafeDespiteFinalizationFailure,
   resolveAuthoritativePremiumSnapshotPlain,
 } from "./premiumAuthoritativeBodyPreservation";
-import { resolvePremiumBodyAgainstSessionFreeze } from "./premiumAcceptancePolicy";
+import {
+  getLatchedAcceptedServerFullDraftAuthority,
+  resolvePremiumBodyAgainstSessionFreeze,
+} from "./premiumAcceptancePolicy";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import {
   getAcceptedPremiumCanonicalCorpus,
@@ -628,6 +631,10 @@ import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import {
+  hasPaidProPipelineValidationForCorpus,
+  markPaidProPipelineValidationPassed,
+} from "./paidProPostAcceptanceValidatorCache";
 import { resolvePaidProAuthoritativeDisplayPlain } from "./paidProAuthoritativeRenderGate";
 import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRenderParties";
 import {
@@ -7425,10 +7432,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 ? "server_full_document_text"
                 : result.premiumRenderSource,
           });
+          const paidProSotSource = result.premiumRenderSource || "server_full_draft";
           try {
             establishPaidProSourceOfTruth({
               text: snapshotPlain,
-              source: "server_full_draft",
+              source: paidProSotSource,
               draft: mergedDraftPersist,
               intakeText: mergedIntake,
               agreementGenerationId: sessionGenId,
@@ -7452,24 +7460,65 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               });
             }
           } catch (establishErr) {
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.warn("[premium-handoff] establishPaidProSourceOfTruth blocked", establishErr);
+            const establishMsg =
+              establishErr instanceof Error ? establishErr.message : String(establishErr);
+            const pipelineValidatedForRecovery =
+              hasPaidProPipelineValidationForCorpus({
+                text: snapshotPlain,
+                source: paidProSotSource,
+              }) && snapshotPlain.trim().length >= 500;
+            if (
+              pipelineValidatedForRecovery &&
+              establishMsg.includes("[pro-minimum-substance-blocked]")
+            ) {
+              try {
+                markPaidProPipelineValidationPassed({
+                  text: snapshotPlain,
+                  source: paidProSotSource,
+                });
+                establishPaidProSourceOfTruth({
+                  text: snapshotPlain,
+                  source: paidProSotSource,
+                  draft: mergedDraftPersist,
+                  intakeText: mergedIntake,
+                  agreementGenerationId: sessionGenId,
+                  generationOutcome: generationOutcomeLabel,
+                });
+                commitPaidProAcceptanceStorageHygiene();
+                bumpPremiumSurfaceGateTick();
+                setGuidedCompletionPhase("applied");
+                setGuidedFinalReviewExplicitlyOpened(true);
+                guidedFinalReviewExplicitlyUnlockedRef.current = true;
+                setDisplayPhase("review");
+                setCreateFlowPhaseGuarded("draft_ready_for_review");
+                setPreviewPaneRevealed(true);
+              } catch (recoveryErr) {
+                if (import.meta.env.DEV) {
+                  // eslint-disable-next-line no-console
+                  console.warn("[premium-handoff] pipeline-validated SoT recovery failed", recoveryErr);
+                }
+              }
             }
-            setProFullDraftQualityRetry(true);
-            setPremiumPersistedFlowActive(false);
-            setPremiumSendPathUnlocked(false);
-            setPremiumPostCheckoutPhase("processing");
-            setProFullDraftCustomGateMessage(
-              "LawDog could not lock your Pro agreement for review. Tap **Retry Pro draft** to regenerate.",
-            );
-            logPremiumCompletionDebug({
-              stage: "ui_apply_blocked_sot_establish_failed",
-              snapshotWritten: false,
-              accepted: false,
-              premiumRenderSource: result.premiumRenderSource,
-            });
-            return;
+            if (!hasPaidProSourceOfTruth()) {
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.warn("[premium-handoff] establishPaidProSourceOfTruth blocked", establishErr);
+              }
+              setProFullDraftQualityRetry(true);
+              setPremiumPersistedFlowActive(false);
+              setPremiumSendPathUnlocked(false);
+              setPremiumPostCheckoutPhase("processing");
+              setProFullDraftCustomGateMessage(
+                "LawDog could not lock your Pro agreement for review. Tap **Retry Pro draft** to regenerate.",
+              );
+              logPremiumCompletionDebug({
+                stage: "ui_apply_blocked_sot_establish_failed",
+                snapshotWritten: false,
+                accepted: false,
+                premiumRenderSource: result.premiumRenderSource,
+              });
+              return;
+            }
           }
         }
         const finalDoc = guardPaidProAcceptedServerFullDraftCommit({
@@ -7898,6 +7947,49 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         } catch (applyErr: unknown) {
           const serialized = serializeProgressionError(applyErr);
+          const latchedRecovery = getLatchedAcceptedServerFullDraftAuthority();
+          const canRecoverFromLatchedAuthority =
+            Boolean(latchedRecovery) &&
+            hasPaidProPipelineValidationForCorpus({
+              text: latchedRecovery!.body,
+              source: latchedRecovery!.source,
+            }) &&
+            !hasPaidProSourceOfTruth();
+          if (canRecoverFromLatchedAuthority && latchedRecovery) {
+            try {
+              establishPaidProSourceOfTruth({
+                text: latchedRecovery.body,
+                source: latchedRecovery.source,
+                draft: result.premiumDraft,
+                intakeText: mergedIntake,
+                agreementGenerationId:
+                  result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
+                generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
+              });
+              hydratedPremiumBodyRef.current = latchedRecovery.body;
+              lastPremiumWinningCorpusRef.current = latchedRecovery.body;
+              setAgreementDocumentText(latchedRecovery.body);
+              setHardError(null);
+              setProFullDraftQualityRetry(false);
+              setProFullDraftCustomGateMessage(null);
+              setPremiumPostCheckoutPhase(null);
+              setDisplayPhase("review");
+              setPreviewPaneRevealed(true);
+              bumpPremiumSurfaceGateTick();
+              logPaymentFlowStage("checkout_complete", {
+                agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+                premiumUnlocked: true,
+                corpusIntegrity: "ok",
+                paymentState: `recovered_latched_${latchedRecovery.source}`,
+              });
+              return;
+            } catch (recoveryErr) {
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.warn("[premium-handoff] applySuccess latched-authority recovery failed", recoveryErr);
+              }
+            }
+          }
           logPaymentFlowStage("signing_prepare_failed", {
             agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
             error: serialized.message,

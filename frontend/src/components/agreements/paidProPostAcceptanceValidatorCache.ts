@@ -12,6 +12,13 @@ type SubstanceCacheKey = string;
 const substanceByKey = new Map<SubstanceCacheKey, ConciseCommercialServicesQualityAssessment>();
 const authoritativeValidationKeys = new Set<string>();
 
+/** Pipeline acceptance may be keyed by any of these equivalent render sources. */
+export const PAID_PRO_PIPELINE_VALIDATION_SOURCE_ALIASES = [
+  "server_full_draft",
+  "server_full_draft_retry",
+  "server_full_document_text",
+] as const;
+
 function substanceKey(source: string, text: string): SubstanceCacheKey {
   const t = (text || "").trim();
   return `${source}|${corpusHashForScanCache(t)}|${t.length}`;
@@ -33,11 +40,37 @@ export function markPaidProAuthoritativeValidationPassed(args: {
   authoritativeValidationKeys.add(authoritativeKey(args.text, args.source));
 }
 
+export function markPaidProPipelineValidationPassed(args: { text: string; source: string }): void {
+  const sources = new Set<string>([
+    args.source,
+    ...PAID_PRO_PIPELINE_VALIDATION_SOURCE_ALIASES,
+  ]);
+  for (const source of sources) {
+    markPaidProAuthoritativeValidationPassed({ text: args.text, source });
+  }
+}
+
 export function hasPaidProAuthoritativeValidationPassed(args: {
   text: string;
   source: string;
 }): boolean {
   return authoritativeValidationKeys.has(authoritativeKey(args.text, args.source));
+}
+
+export function hasPaidProPipelineValidationForCorpus(args: {
+  text: string;
+  source?: string | null;
+}): boolean {
+  const sources = new Set<string>([
+    args.source ?? "unknown",
+    ...PAID_PRO_PIPELINE_VALIDATION_SOURCE_ALIASES,
+  ]);
+  for (const source of sources) {
+    if (hasPaidProAuthoritativeValidationPassed({ text: args.text, source })) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function assessProMinimumSubstanceCached(args: {

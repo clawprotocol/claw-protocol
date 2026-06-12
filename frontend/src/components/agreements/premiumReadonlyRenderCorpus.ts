@@ -38,6 +38,7 @@ import {
 } from "./proCorpusSourcePath";
 import { requireAuthoritativeCorpusForSurface } from "./authoritativeAgreementDocument";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
+import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 
 /** @deprecated Use PremiumRenderResolveSource — kept as alias for gradual migration. */
 export type PremiumPaidReadonlySourceUsed = PremiumRenderResolveSource;
@@ -290,6 +291,29 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       };
     }
   }
+  const latchedAccepted = getLatchedAcceptedServerFullDraftAuthority();
+  if (latchedAccepted && latchedAccepted.body.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    const display = latchedAccepted.body.trim();
+    const nonThin =
+      display.length >= 1200 || premiumReadonlyCorpusSignalHits(display) >= 3;
+    return {
+      plainText: display,
+      sourceUsed: "server_full_document_text",
+      audit: {
+        selected: "server_full_document_text",
+        forcedPremiumSource: true,
+        candidates: [
+          {
+            source: "server_full_document_text",
+            len: display.length,
+            nonThin,
+            eligible: true,
+            reason: "latched_pipeline_accepted_server_full_draft",
+          },
+        ],
+      },
+    };
+  }
   const paidProRecord = getPaidProSourceOfTruth();
   if (paidProRecord) {
     const reviewDoc = getPaidProDocumentForSurface("review", {
@@ -346,11 +370,13 @@ export function pickPremiumPaidReadonlyPlainText(args: {
 
   const pipeSrc = (args.lastPremiumPipelineRenderSource || "").trim();
   const authHydr = (args.authoritativeHydratedPlainText || "").trim();
+  const latchedPipelineBody = getLatchedAcceptedServerFullDraftAuthority()?.body.trim() ?? "";
   const hasAcceptedCandidate =
     authHydr.length >= 500 ||
     (args.stickyAuthoritativePlainText || "").trim().length >= 500 ||
     (args.paidAuthoritativeProBody || "").trim().length >= 500 ||
-    (args.premiumWinningBodyText || "").trim().length >= MIN_PAID_PRO_AUTHORITY_LEN;
+    (args.premiumWinningBodyText || "").trim().length >= MIN_PAID_PRO_AUTHORITY_LEN ||
+    latchedPipelineBody.length >= MIN_PAID_PRO_AUTHORITY_LEN;
   const lockedReviewCorpus = requireAuthoritativeCorpusForSurface({
     surface: "pro_review",
     source: "premium_readonly_pick",
