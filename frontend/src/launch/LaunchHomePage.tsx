@@ -4,7 +4,11 @@ import "./launch.css";
 import { useLaunchNav } from "./LaunchNavContext";
 import { DisclosureFooter } from "../compliance/DisclosureFooter";
 import { JoySocialFooter } from "../joy/JoySocialFooter";
-import { mergeHomeHeroDraftForHandoff, stashHeroIntakePrefill } from "./heroIntakePrefill";
+import {
+  mergeHomeHeroDraftForHandoff,
+  resolveHomeHeroSubmitText,
+  stashHeroIntakePrefill,
+} from "./heroIntakePrefill";
 import { HeroVoiceInputBar } from "./HeroVoiceInputBar";
 import { useHeroMediaDictation } from "./useHeroMediaDictation";
 import "../joy/joy.css";
@@ -139,7 +143,7 @@ export function LaunchHomePage() {
 
   async function startDrafting() {
     if (handoffBusy) return;
-    const typedBefore = heroInput.trim();
+    const typedBefore = resolveHomeHeroSubmitText(heroInput, intakeRef.current?.value);
     let merged = typedBefore;
     let voiceFinalize = false;
 

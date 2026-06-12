@@ -22,6 +22,7 @@ import {
   forbidPaidProExecutionBlockSynthesis,
   logPaidProExecutionBlockSynthesisBlocked,
 } from "../paidProExecutionBlockAuthority";
+import { reconcileExecutionBlockToRoleIdentities } from "../paidProSignerMetadataMergeGate";
 import { repairPaidProSignatureSectionOrdering } from "../paidProSignatureSectionOrdering";
 import { partyLegalNamesMatch } from "../paidProAcceptedCorpusPartyRoles";
 import { sortIdentitiesForExecutionBlockOrder } from "../paidProSignerMetadataMergeGate";
@@ -386,6 +387,10 @@ export function rebuildSignatureBlocksWithPartyIdentities(
       surface: "rebuildSignatureBlocksWithPartyIdentities",
       reason: "authoritative_execution_block_present",
     });
+    const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
+    if (reconciled.repairs > 0) {
+      return { text: reconciled.text, count: reconciled.repairs };
+    }
     return { text, count: 0 };
   }
   const { blocks, count } = buildSignatureBlocks(identities);
@@ -397,13 +402,12 @@ export function rebuildSignatureBlocksWithPartyIdentities(
   const signatureTail = `${witnessLine}\n\n${blocks.join("\n\n")}\n`;
 
   if (marker < 0) {
-    const witnessAlready = /\bIN WITNESS WHEREOF\b/i.test(trimmed.slice(-1200));
-    return {
-      text: witnessAlready
-        ? `${trimmed}\n\n${blocks.join("\n\n")}\n`
-        : `${trimmed}\n\n${signatureTail}`,
-      count,
-    };
+    const witnessIdx = trimmed.search(/\bIN WITNESS WHEREOF\b/i);
+    if (witnessIdx >= 0) {
+      const before = trimmed.slice(0, witnessIdx).trimEnd();
+      return { text: `${before}\n\n${signatureTail}`, count };
+    }
+    return { text: `${trimmed}\n\n${signatureTail}`, count };
   }
 
   const patchEnd = findSignatureRegionEnd(trimmed, marker);
@@ -437,11 +441,14 @@ function polishSignatureBlocksWithPartyIdentities(
 
   if (hasPlaceholderSig && marker < 0) {
     const trimmed = text.trimEnd();
-    const witnessAlready = /\bIN WITNESS WHEREOF\b/i.test(trimmed.slice(-1200));
-    const appended = witnessAlready
-      ? `${trimmed}\n\n${blocks.join("\n\n")}\n`
-      : `${trimmed}\n\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\n${blocks.join("\n\n")}\n`;
-    return { text: appended, count: blockCount };
+    const witnessIdx = trimmed.search(/\bIN WITNESS WHEREOF\b/i);
+    const witnessLine = "IN WITNESS WHEREOF, the Parties execute this Agreement.";
+    const signatureTail = `${witnessLine}\n\n${blocks.join("\n\n")}\n`;
+    if (witnessIdx >= 0) {
+      const before = trimmed.slice(0, witnessIdx).trimEnd();
+      return { text: `${before}\n\n${signatureTail}`, count: blockCount };
+    }
+    return { text: `${trimmed}\n\n${signatureTail}`, count: blockCount };
   }
 
   const filled = fillSignatureNameUnderscoreLines(text, identities);

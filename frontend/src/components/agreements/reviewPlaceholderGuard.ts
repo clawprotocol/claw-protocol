@@ -13,7 +13,10 @@ import {
   isHighConfidencePartyNameForAutoPopulation,
   isProsePollutedPartyName,
 } from "./partyNameConfidence";
-import { collapseDraftPartyRows } from "./partySlotIdentityNormalize";
+import {
+  collapseDraftPartyRows,
+  repairDraftPartiesFromIntakeAuthority,
+} from "./partySlotIdentityNormalize";
 import { readPremiumPartyNamesHandoff } from "./premiumPartyNamesHandoff";
 import { resolveSignerSetupPartyIdentity } from "./signerSetupPartyIdentity";
 import { textContainsUnresolvedIdentityPlaceholders } from "../../agreement/partyPlaceholderDisplay";
@@ -277,7 +280,8 @@ export function mergePremiumDraftPartiesWithRecipientPriority(
   if (parties[1]) parties[1] = { ...parties[1], name: displayName2 };
   else if (displayName2) parties.push({ name: displayName2, role: "party" });
   const collapsedParties = collapseDraftPartyRows(parties, intakeText ?? undefined);
-  parties = collapsedParties.map((row) => ({
+  const repairedParties = repairDraftPartiesFromIntakeAuthority(collapsedParties, intakeText ?? undefined);
+  parties = repairedParties.map((row) => ({
     name: row.name,
     role: row.role || "party",
     ...(row.email ? { email: row.email } : {}),

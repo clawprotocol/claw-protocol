@@ -212,16 +212,25 @@ export function applyPaidProSignerMetadataMergeGate(args: {
     repairs.push(`strip_signer_summary_blocks:${summaryStrip.removed}`);
   }
 
-  if (identities.length >= 2 && signaturePatchStartIndex(text) >= 0) {
-    const execInvariant = analyzePaidProExecutionBlockInvariant(text, {
-      expectedParties: canonicalPartyCount,
-    });
-    if (execInvariant.executionBlockCount === 1 && detectExecutionBlockRoleInversion(text)) {
-      const reconcileIdentities = buildCorpusRoleIdentitiesForExecutionReconcile(text);
-      const reconciled = reconcileExecutionBlockToRoleIdentities(text, reconcileIdentities);
+  if (identities.length >= 2) {
+    const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+    if (witnessIdx >= 0) {
+      const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
       if (reconciled.repairs > 0) {
         text = reconciled.text;
-        repairs.push("reconcile_execution_block_roles");
+        repairs.push("reconcile_execution_block_from_signer_authority");
+      }
+    } else if (signaturePatchStartIndex(text) >= 0) {
+      const execInvariant = analyzePaidProExecutionBlockInvariant(text, {
+        expectedParties: canonicalPartyCount,
+      });
+      if (execInvariant.executionBlockCount === 1 && detectExecutionBlockRoleInversion(text)) {
+        const reconcileIdentities = buildCorpusRoleIdentitiesForExecutionReconcile(text);
+        const reconciled = reconcileExecutionBlockToRoleIdentities(text, reconcileIdentities);
+        if (reconciled.repairs > 0) {
+          text = reconciled.text;
+          repairs.push("reconcile_execution_block_roles");
+        }
       }
     }
   }

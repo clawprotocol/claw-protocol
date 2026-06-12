@@ -38,6 +38,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("resolveHomeHeroSubmitText", () => {
+  it("prefers the longer DOM textarea value when state lags dictation append", async () => {
+    const hero = await import("./heroIntakePrefill");
+    const dom =
+      "Create a services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC.";
+    const state = "Create a services agreement between Red Mesa";
+    expect(hero.resolveHomeHeroSubmitText(state, dom)).toBe(dom);
+  });
+
+  it("falls back to state when DOM is empty", async () => {
+    const hero = await import("./heroIntakePrefill");
+    expect(hero.resolveHomeHeroSubmitText("typed only", "")).toBe("typed only");
+  });
+});
+
 describe("mergeHomeHeroDraftForHandoff (Start drafting while recording)", () => {
   it("appends finalized transcript to typed hero text", async () => {
     const hero = await import("./heroIntakePrefill");
@@ -134,6 +149,7 @@ describe("heroIntakePrefill", () => {
       text: "",
       fromHome: true,
       voiceFinalize: false,
+      autoGenerate: false,
     });
   });
 
@@ -148,6 +164,7 @@ describe("heroIntakePrefill", () => {
       text: "party A pays party B",
       fromHome: true,
       voiceFinalize: true,
+      autoGenerate: false,
     });
   });
 });

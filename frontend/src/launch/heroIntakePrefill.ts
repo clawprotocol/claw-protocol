@@ -38,6 +38,22 @@ function trimOrNull(s: string | null | undefined): string | null {
   return t || null;
 }
 
+/**
+ * Prefer the freshest visible hero textarea value on submit.
+ * React state can lag behind the DOM while dictation appends transcript chunks.
+ */
+export function resolveHomeHeroSubmitText(stateText: string, domText?: string | null): string {
+  const state = (stateText || "").trim();
+  const dom = (domText ?? "").trim();
+  if (!dom) return state;
+  if (!state) return dom;
+  if (dom === state) return state;
+  if (dom.startsWith(state) || state.startsWith(dom)) {
+    return dom.length >= state.length ? dom : state;
+  }
+  return dom.length >= state.length ? dom : state;
+}
+
 /** Merge typed hero text with a finalized transcript (Start drafting while recording). */
 export function mergeHomeHeroDraftForHandoff(
   typedTrimmed: string,

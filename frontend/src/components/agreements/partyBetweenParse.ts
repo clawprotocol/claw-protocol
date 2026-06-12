@@ -34,6 +34,26 @@ const TAIL_STOP =
 const SENTENCE_BOUNDARY_FIELD_STOP =
   /\.\s+(?:\$|Fee\b|Payment\b|Compensation\b|Price\b|Term\b|Scope\b|Purpose\b|Effective\b|Closing\b|Property\b|Premises\b|Rent\b|Deposit\b|Governing\b|Jurisdiction\b|Venue\b|Confidential|Termination\b|Notice\b|Services?\b|Deliverables?\b)/i;
 
+/** Truncate after the first complete party clause when the next sentence starts a new thought. */
+const GENERAL_BETWEEN_SENTENCE_END_RE = /\.\s+(?=[A-Z])/;
+
+function isOxfordCommaPartyList(tail: string): boolean {
+  return /,/.test(tail) && /\s+and\s+\S/i.test(tail);
+}
+
+function truncateBetweenTailAtSentenceBoundary(tail: string): string {
+  let out = tail;
+  const sentStop = SENTENCE_BOUNDARY_FIELD_STOP.exec(out);
+  if (sentStop && sentStop.index !== undefined && sentStop.index > 0) {
+    out = out.slice(0, sentStop.index);
+  }
+  const genStop = GENERAL_BETWEEN_SENTENCE_END_RE.exec(out);
+  if (genStop && genStop.index !== undefined && genStop.index > 0) {
+    out = out.slice(0, genStop.index);
+  }
+  return out.trim();
+}
+
 function trimBetweenPartyFragment(s: string): string {
   // Strip list punctuation only — preserve "Inc." / "Corp." terminal periods.
   const cleaned = sanitizePartyLegalNameFromIntakeFragment(s.replace(/[,;:]+$/g, "").trim());
@@ -51,20 +71,11 @@ function sliceBetweenPartyClauseTail(raw: string): string | null {
   tail = truncatePartyClauseTailAtLabeledFields(tail);
   const stop = TAIL_STOP.exec(tail);
   if (stop && stop.index !== undefined && stop.index > 0) tail = tail.slice(0, stop.index);
-  const sentStop = SENTENCE_BOUNDARY_FIELD_STOP.exec(tail);
-  if (sentStop && sentStop.index !== undefined && sentStop.index > 0) tail = tail.slice(0, sentStop.index);
-  tail = tail.trim();
+  tail = truncateBetweenTailAtSentenceBoundary(tail);
   return tail.length >= 3 ? tail : null;
 }
 
-/**
- * Ordered party names after "between …" (2+ parties). Normalizes each name individually so
- * entity suffix dedupe never strips LLC/Inc. from later parties in a comma-separated list.
- */
-export function extractBetweenPartyNameList(raw: string): string[] {
-  const tail = sliceBetweenPartyClauseTail(raw);
-  if (!tail) return [];
-
+function extractBetweenPartyNameListFromOxfordTail(tail: string): string[] {
   const segments = tail.split(/\s+and\s+/i).filter((s) => s.trim().length > 0);
   if (segments.length < 2) return [];
 
@@ -79,6 +90,38 @@ export function extractBetweenPartyNameList(raw: string): string[] {
     right.length >= 2 ? [...leftNames, normalizeAgreementPartyName(right)] : leftNames,
   );
   return names.length >= 2 ? names : [];
+}
+
+/** Two-party between clause: split on the first " and ", not later service-list conjunctions. */
+function extractBetweenPartyNameListFromFirstAndPair(tail: string): string[] {
+  const truncated = truncateBetweenTailAtSentenceBoundary(tail);
+  const andIdx = truncated.search(/\s+and\s+/i);
+  if (andIdx < 0) return [];
+  const leftRaw = truncated.slice(0, andIdx);
+  const rightRaw = truncated.slice(andIdx).replace(/^\s+and\s+/i, "");
+  const leftNames = splitCommaSeparatedPartyNames(leftRaw)
+    .map(trimBetweenPartyFragment)
+    .map(normalizeAgreementPartyName)
+    .filter((n) => n.length >= 2);
+  const right = trimBetweenPartyFragment(rightRaw.replace(/[.,;:]+$/g, "").trim());
+  const names = collapsePartySlotCandidates(
+    right.length >= 2 ? [...leftNames, normalizeAgreementPartyName(right)] : leftNames,
+  );
+  return names.length >= 2 ? names.slice(0, 2) : [];
+}
+
+/**
+ * Ordered party names after "between …" (2+ parties). Normalizes each name individually so
+ * entity suffix dedupe never strips LLC/Inc. from later parties in a comma-separated list.
+ */
+export function extractBetweenPartyNameList(raw: string): string[] {
+  const tail = sliceBetweenPartyClauseTail(raw);
+  if (!tail) return [];
+
+  if (isOxfordCommaPartyList(tail)) {
+    return extractBetweenPartyNameListFromOxfordTail(tail);
+  }
+  return extractBetweenPartyNameListFromFirstAndPair(tail);
 }
 
 /**

@@ -73,6 +73,41 @@ export function isInvalidPartySlotLegalEntity(name: string): boolean {
 }
 
 /** When intake/free-starter manifest has exactly two legal entities, cap signer setup at two. */
+/** When draft/API parties are service phrases but intake has two legal entities, restore intake authority. */
+export function repairDraftPartiesFromIntakeAuthority<T extends DraftPartyRowLike>(
+  parties: readonly T[],
+  intakeContext?: string | null,
+): T[] {
+  if (!parties.length) return [];
+  const intake = String(intakeContext || "").trim();
+  if (!intake) return [...parties];
+
+  const intakeNames = collapsePartySlotCandidates(extractBetweenPartyNameList(intake)).filter(
+    isAuthoritativeLegalEntityName,
+  );
+  if (intakeNames.length !== 2) return [...parties];
+
+  const currentInvalid = parties.some((row) => {
+    const name = normalizeAgreementPartyName(row.name);
+    return (
+      !name ||
+      isInvalidPartySlotLegalEntity(name) ||
+      isDisallowedPartyPhrase(name) ||
+      !isAuthoritativeLegalEntityName(name)
+    );
+  });
+  if (!currentInvalid) return [...parties];
+
+  return intakeNames.map((name, index) => {
+    const prev = parties[index] ?? parties.find((p) => partyLegalNamesMatch(p.name, name)) ?? parties[0];
+    return {
+      ...prev,
+      name,
+      role: prev?.role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
+    } as T;
+  });
+}
+
 export function resolveAuthoritativePartySlotCount(args: {
   intakeText?: string | null;
   draftPartyNames?: readonly string[];

@@ -51,6 +51,8 @@ const DISALLOWED_PARTY_PHRASE_RE: readonly RegExp[] = [
   /^process\s+documentation$/i,
   /^configuration\s+assistance$/i,
   /^training\s+services\b/i,
+  /^staff\s+training\b/i,
+  /^automation\s+deployment\s+services\b/i,
   /^ai\s+workflow\s+consulting$/i,
   /\bwill\s+(?:sign|provide)\b/i,
   /\bengagement\s+term\b/i,

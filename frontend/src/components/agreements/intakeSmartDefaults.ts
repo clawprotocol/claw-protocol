@@ -4,6 +4,8 @@ import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 import { extractBetweenPartyNameList, extractBetweenPartyPair } from "./partyBetweenParse";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { repairDraftPartiesFromIntakeAuthority } from "./partySlotIdentityNormalize";
 import { stripSignerInstructionClausesFromIntake } from "./intakeSignerInstructionParse";
 import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
 import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
@@ -124,8 +126,11 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   const betweenLegalEntities = extractBetweenPartyNameList(
     stripSignerInstructionClausesFromIntake(intakeText),
   );
-  if (betweenLegalEntities.length >= 2) {
-    next.parties = betweenLegalEntities.slice(0, 12).map((name, index) => ({
+  const authoritativeBetween = betweenLegalEntities.filter(isAuthoritativeLegalEntityName);
+  const partySeed =
+    authoritativeBetween.length >= 2 ? authoritativeBetween : betweenLegalEntities;
+  if (partySeed.length >= 2) {
+    next.parties = partySeed.slice(0, 12).map((name, index) => ({
       name: name.slice(0, MAX_PARTY_NAME_LEN),
       role: next.parties?.[index]?.role || "party",
     }));
@@ -208,6 +213,17 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   }
 
   if ((next.parties || []).length >= 2) {
+    const repaired = repairDraftPartiesFromIntakeAuthority(next.parties ?? [], intakeText);
+    if (repaired.length >= 2) {
+      next = {
+        ...next,
+        parties: repaired.map((p) => ({
+          name: p.name.slice(0, MAX_PARTY_NAME_LEN),
+          role: p.role || "party",
+          ...(p.email ? { email: p.email } : {}),
+        })),
+      };
+    }
     const legalEntities = (next.parties || [])
       .map((p) => String(p.name || "").trim())
       .filter((n) => n.length >= 2);

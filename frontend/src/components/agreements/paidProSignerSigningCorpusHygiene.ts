@@ -120,7 +120,9 @@ export function finalizePaidProSigningCorpusText(
     repairs.push(`strip_signer_summary_blocks:${stripped.removed}`);
   }
 
-  const execution = enforcePaidProSingleExecutionBlock(text);
+  const execution = enforcePaidProSingleExecutionBlock(text, {
+    authorityParties: parties?.map((p) => ({ partyLegalName: p.partyLegalName })),
+  });
   if (execution.text !== text) {
     text = execution.text;
     repairs.push(...execution.repairs);

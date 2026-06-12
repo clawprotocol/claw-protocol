@@ -247,7 +247,15 @@ function stripRecitalFragmentExecutionLinesFromTail(text: string, repairs: strin
  * Collapse duplicate witness / fragment-derived execution blocks to one canonical tail from SoT roles.
  * Operative body before the first IN WITNESS WHEREOF is preserved unchanged.
  */
-export function enforcePaidProSingleExecutionBlock(corpus: string): { text: string; repairs: string[] } {
+export type EnforcePaidProSingleExecutionBlockOpts = {
+  /** User-finalized signer authority overrides corpus-derived role labels. */
+  authorityParties?: readonly { legalName?: string | null; partyLegalName?: string | null }[];
+};
+
+export function enforcePaidProSingleExecutionBlock(
+  corpus: string,
+  opts?: EnforcePaidProSingleExecutionBlockOpts,
+): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   let text = String(corpus || "").replace(/\r\n/g, "\n").trim();
   if (!text) return { text, repairs };
@@ -278,7 +286,20 @@ export function enforcePaidProSingleExecutionBlock(corpus: string): { text: stri
     }
   }
 
-  const roles = sanitizeRoleAssignments(text);
+  const authorityParties = (opts?.authorityParties ?? [])
+    .map((p) => String(p.partyLegalName ?? p.legalName ?? "").replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 3);
+  const roles =
+    authorityParties.length >= 2
+      ? ([
+          { role: "client" as const, legalName: authorityParties[0]!, roleLabel: "Client" as const },
+          {
+            role: "service_provider" as const,
+            legalName: authorityParties[1]!,
+            roleLabel: "Service Provider" as const,
+          },
+        ] satisfies AcceptedCorpusRoleAssignment[])
+      : sanitizeRoleAssignments(text);
   const client = roles.find((r) => r.role === "client");
   const provider = roles.find((r) => r.role === "service_provider");
   if (!client || !provider) {
