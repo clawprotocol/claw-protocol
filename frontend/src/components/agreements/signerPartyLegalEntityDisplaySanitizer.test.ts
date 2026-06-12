@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   hasSignerPartyLegalEntityDisplayPollution,
+  hasTrailingJurisdictionClausePollution,
   isCleanSignerPartyLegalEntityDisplay,
   sanitizeSignerPartyLegalEntityDisplay,
+  stripTrailingJurisdictionClause,
 } from "./signerPartyLegalEntityDisplaySanitizer";
 
 const PARTY_1 = "Blue Canyon Analytics LLC";
@@ -40,5 +42,15 @@ describe("signerPartyLegalEntityDisplaySanitizer", () => {
     expect(isCleanSignerPartyLegalEntityDisplay(PARTY_1)).toBe(true);
     expect(isCleanSignerPartyLegalEntityDisplay("engages Iron Vale Systems Inc")).toBe(true);
     expect(isCleanSignerPartyLegalEntityDisplay("1 Parties. Blue Canyon Analytics LLC")).toBe(true);
+  });
+
+  it("strips trailing jurisdiction prose accidentally merged into party labels", () => {
+    expect(hasTrailingJurisdictionClausePollution("Jane Donaldson, Oklahoma law")).toBe(true);
+    expect(stripTrailingJurisdictionClause("Jane Donaldson, Oklahoma law")).toBe("Jane Donaldson");
+    expect(sanitizeSignerPartyLegalEntityDisplay("Jane Donaldson, Oklahoma law", { log: false })).toBe(
+      "Jane Donaldson",
+    );
+    expect(hasSignerPartyLegalEntityDisplayPollution("Jane Donaldson, Oklahoma law")).toBe(true);
+    expect(hasSignerPartyLegalEntityDisplayPollution("Jane Donaldson")).toBe(false);
   });
 });

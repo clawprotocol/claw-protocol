@@ -22,6 +22,10 @@ const ROLE_IS_PREFIX_RE =
 const TRAILING_LEGAL_ENTITY_RE =
   /\b([A-Z][\w.&'’\-]+(?:\s+[A-Z][\w.&'’\-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)\.?)\s*$/i;
 
+/** Jurisdiction prose accidentally merged into a party label, e.g. "Jane Donaldson, Oklahoma law". */
+const TRAILING_JURISDICTION_CLAUSE_RE =
+  /,\s*(?:[A-Z][\w.'’\-]+(?:\s+[A-Z][\w.'’\-]+)*\s+)?law\.?\s*$/i;
+
 const loggedSanitizerEvents = new Set<string>();
 
 function norm(s: string): string {
@@ -40,11 +44,22 @@ function hasRawDisplayPollutionMarkers(t: string): boolean {
   );
 }
 
+/** True when a party label ends with governing-law / jurisdiction prose instead of an entity name. */
+export function hasTrailingJurisdictionClausePollution(name: string): boolean {
+  const t = norm(name);
+  if (!t) return false;
+  return TRAILING_JURISDICTION_CLAUSE_RE.test(t);
+}
+
+export function stripTrailingJurisdictionClause(name: string): string {
+  return norm(name).replace(TRAILING_JURISDICTION_CLAUSE_RE, "").trim();
+}
+
 /** True when raw text still carries heading/prose pollution before or after sanitization heuristics. */
 export function hasSignerPartyLegalEntityDisplayPollution(name: string): boolean {
   const t = norm(name);
   if (!t) return false;
-  return hasRawDisplayPollutionMarkers(t);
+  return hasRawDisplayPollutionMarkers(t) || hasTrailingJurisdictionClausePollution(t);
 }
 
 /** @deprecated Prefer {@link hasSignerPartyLegalEntityDisplayPollution}. */
@@ -85,6 +100,9 @@ export function sanitizeSignerPartyLegalEntityDisplay(
   if (!s) return s;
   const before = s;
   s = stripHeadingAndProsePrefixes(s);
+  if (hasTrailingJurisdictionClausePollution(s)) {
+    s = stripTrailingJurisdictionClause(s);
+  }
   if (s && hasRawDisplayPollutionMarkers(s)) {
     s = extractTrailingLegalEntity(s);
   }

@@ -118,19 +118,11 @@ function isDeliberateSignerLegalEntityUserOverride(
   slotIdentities: readonly SignerSetupPartyIdentity[],
 ): boolean {
   if (!current || current === canonical) return false;
-  if (candidateContainsMultipleEntities(current)) return false;
-  if (containsOtherSlotCanonicalLegalEntity(current, slotIndex, slotIdentities)) return false;
-  if (
-    containsMultipleCanonicalLegalEntities(
-      current,
-      slotIdentities.map((s) => s.legalEntityName),
-    )
-  ) {
-    return false;
-  }
-  if (hasSignerPartyLegalEntityDisplayPollution(current)) return false;
-  if (!hasLegalEntitySuffix(current)) return false;
   if (partyLegalNamesMatch(current, canonical)) return false;
+  const contamination = detectSignerSlotContamination(slotIndex, current, slotIdentities);
+  if (contamination.contaminated) return false;
+  if (hasSignerPartyLegalEntityDisplayPollution(canonical)) return true;
+  if (!hasLegalEntitySuffix(current)) return false;
   return true;
 }
 
@@ -281,6 +273,16 @@ export function resolveSignerSetupAutoCorrectTarget(args: {
   const canonical = safeSignerSlotCanonicalEntity(args.slotIndex, args.slotIdentities);
   if (!canonical || isRecitalSentenceFragmentPartyName(canonical)) return null;
   if (current === canonical) return null;
+  if (
+    isDeliberateSignerLegalEntityUserOverride(
+      current,
+      canonical,
+      args.slotIndex,
+      args.slotIdentities,
+    )
+  ) {
+    return null;
+  }
   if (
     hasLegalEntitySuffix(current) &&
     !isRecitalSentenceFragmentPartyName(current) &&
@@ -1201,6 +1203,7 @@ export function shouldUpgradeRecipientNameToLegalEntity(
   if (hasSignerPartyLegalEntityDisplayPollution(current)) return true;
   if (isRecitalSentenceFragmentPartyName(current)) return true;
   if (isRecipientHandoffSeedDisposable(current)) return true;
+  if (hasSignerPartyLegalEntityDisplayPollution(legal)) return false;
   if (isShortPrefixOfFullLegal(current, legal)) return true;
   if (candidateContainsMultipleEntities(current)) return true;
   return false;

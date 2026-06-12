@@ -791,6 +791,7 @@ import {
   paidProSignerMetadataForensicLineageEnabled,
   readConsumedPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
+  type LiveSignerMetadataUiState,
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
@@ -801,6 +802,7 @@ import {
   shouldDeferPaidProReviewRenderSignerRepair,
   shouldStagePaidProSignerMetadataLocally,
 } from "./paidProSignerMetadataCommitPolicy";
+import { mergeLiveSignerMetadataUiWithDomCommit } from "./paidProSignerMetadataDomCommit";
 import { PaidProPostFinalizeAgreementEditor } from "./paidProPostFinalizeAgreementEditor";
 import {
   logPaidProPostFinalizeEditBlocked,
@@ -2169,10 +2171,9 @@ function CreateFlowSendRecipientsPanel({
                 source: "signer_setup_input_render",
               })
             : null;
-        const legalEntityFieldValue = signerRenderSlot?.canonicalLegalEntity ?? "";
-        // Summary line + inputs must use canonical/sanitized legal entity — never raw clause prose.
+        // Summary line uses sanitized canonical; inputs bind to live user state so edits are not snapped back.
         const partyLine =
-          legalEntityFieldValue ||
+          (signerRenderSlot?.canonicalLegalEntity ?? "") ||
           (idx === 0 || idx === 1
             ? resolveSignerPartyLegalEntityDisplayValue({
                 slotIndex: idx,
@@ -2351,7 +2352,7 @@ function CreateFlowSendRecipientsPanel({
                 <input
                   type="text"
                   data-claw-recipient-field="r1-name"
-                  value={legalEntityFieldValue}
+                  value={legalEntityValue}
                   onChange={(e) => {
                     notifySignerMetadataFieldEdit({
                       partyIndex: 0,
@@ -2375,7 +2376,7 @@ function CreateFlowSendRecipientsPanel({
                 <input
                   type="text"
                   data-claw-recipient-field="r2-name"
-                  value={legalEntityFieldValue}
+                  value={legalEntityValue}
                   onChange={(e) => {
                     notifySignerMetadataFieldEdit({
                       partyIndex: 1,
@@ -19338,14 +19339,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedPendingAutoApplyRef.current = false;
   }, [guidedCompletionPhase, guidedAnswerApplyStatus, handleGuidedBulkApply, guidedCompletionSession]);
 
-  const flushGuidedSignerMetadataBeforeFinalReview = React.useCallback(() => {
+  const flushGuidedSignerMetadataBeforeFinalReview = React.useCallback((): LiveSignerMetadataUiState => {
     window.clearTimeout(guidedSignerMetadataDebounceRef.current);
     guidedSignerMetadataDebouncingRef.current = false;
+    const committed = mergeLiveSignerMetadataUiWithDomCommit(liveSignerMetadataUiState);
+    recipient1NameRef.current = committed.recipient1Name;
+    recipient2NameRef.current = committed.recipient2Name;
+    recipient1EmailRef.current = committed.recipient1Email;
+    recipient2EmailRef.current = committed.recipient2Email;
+    partySignerNamesRef.current = [...committed.partySignerNames];
+    partySignerTitlesRef.current = [...committed.partySignerTitles];
+    partyAddressesRef.current = [...committed.partyAddresses];
     if (draft) {
-      persistPremiumRecipientHandoffFromDraftAndUi(draft);
+      persistPremiumRecipientHandoffFromDraftAndUi(draft, {
+        displayName1: committed.recipient1Name,
+        displayName2: committed.recipient2Name,
+      });
       logSignerSetupFieldPersisted("recipient_metadata");
     }
-  }, [draft, persistPremiumRecipientHandoffFromDraftAndUi]);
+    return committed;
+  }, [draft, liveSignerMetadataUiState, persistPremiumRecipientHandoffFromDraftAndUi]);
 
   React.useEffect(() => {
     const applying =
@@ -24312,9 +24325,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       scrollGuidedSignerSetupIntoView();
       return;
     }
-    flushGuidedSignerMetadataBeforeFinalReview();
+    const committedSignerUi = flushGuidedSignerMetadataBeforeFinalReview();
     const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
+    const authority = buildLivePaidProSignerMetadataAuthority(committedSignerUi);
     setConsumedPaidProSignerMetadataAuthority(authority);
     const partyManifest = buildCanonicalFinalPartyManifestFromAuthority(authority, {
       intakeText: intakeForHydration,

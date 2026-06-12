@@ -29,6 +29,8 @@ import {
   resolveSignerSetupPartyIdentities,
   resolveSignerSetupPartyIdentity,
   resolveSignerPartyLegalEntityDisplayValue,
+  resolveSignerSetupAutoCorrectTarget,
+  clearSignerSetupAutoCorrectLatch,
   shouldUpgradeRecipientNameToLegalEntity,
   signerDetailsFieldKey,
   slotIsolatedCanonicalEntity,
@@ -1326,5 +1328,63 @@ describe("signer party legal entity display sanitizer (Paid Pro signer details)"
       source: "user_correction",
     });
     expect(display).toBe("Iron Vale Systems Inc");
+  });
+
+  it("jurisdiction contamination: corrected Party 2 legal entity without LLC suffix wins", () => {
+    const contaminated = "Jane Donaldson, Oklahoma law";
+    const identities: SignerSetupPartyIdentity[] = [
+      { legalEntityName: PARTY_1, displayName: PARTY_1, source: "authoritative_manifest" },
+      {
+        legalEntityName: contaminated,
+        displayName: "Jane Donaldson",
+        source: "canonical_resolver",
+      },
+    ];
+    const edited = resolveEditableSignerLegalEntityForSlot({
+      slotIndex: 1,
+      currentInputValue: "Jane Donaldson",
+      slotIdentities: identities,
+    });
+    expect(edited).toBe("Jane Donaldson");
+    expect(edited).not.toMatch(/Oklahoma/i);
+
+    const persisted = assertSignerSlotLegalEntityForPersist({
+      slotIndex: 1,
+      attemptedValue: "Jane Donaldson",
+      slotIdentities: identities,
+      source: "user_correction",
+    });
+    expect(persisted).toBe("Jane Donaldson");
+
+    const display = resolveSignerPartyLegalEntityDisplayValue({
+      slotIndex: 1,
+      currentInputValue: "Jane Donaldson",
+      slotIdentities: identities,
+      source: "user_correction",
+    });
+    expect(display).toBe("Jane Donaldson");
+  });
+
+  it("auto-correct does not snap user-corrected Party 2 legal entity back to jurisdiction-polluted canonical", () => {
+    clearSignerSetupAutoCorrectLatch();
+    const contaminated = "Jane Donaldson, Oklahoma law";
+    const identities: SignerSetupPartyIdentity[] = [
+      { legalEntityName: PARTY_1, displayName: PARTY_1, source: "authoritative_manifest" },
+      {
+        legalEntityName: contaminated,
+        displayName: "Jane Donaldson",
+        source: "canonical_resolver",
+      },
+    ];
+    expect(
+      shouldUpgradeRecipientNameToLegalEntity("Jane Donaldson", contaminated),
+    ).toBe(false);
+    expect(
+      resolveSignerSetupAutoCorrectTarget({
+        slotIndex: 1,
+        currentRecipientName: "Jane Donaldson",
+        slotIdentities: identities,
+      }),
+    ).toBeNull();
   });
 });
