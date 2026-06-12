@@ -24,7 +24,7 @@ const TRAILING_LEGAL_ENTITY_RE =
 
 /** Jurisdiction prose accidentally merged into a party label, e.g. "Jane Donaldson, Oklahoma law". */
 const TRAILING_JURISDICTION_CLAUSE_RE =
-  /,\s*(?:[A-Z][\w.'’\-]+(?:\s+[A-Z][\w.'’\-]+)*\s+)?law\.?\s*$/i;
+  /,\s*(?:[A-Z][\w.'’\-]+(?:\s+[A-Z][\w.'’\-]+)*\s+)?law(?:\s+governs)?\.?\s*$/i;
 
 const loggedSanitizerEvents = new Set<string>();
 

@@ -13,6 +13,11 @@ import {
   hydratePaidProExecutionBlockWithSignerMetadata,
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import {
+  detectExecutionHeadingMetadataLeak,
+  repairExecutionBlockEntityHeadingLines,
+} from "./paidProExecutionBlockEntityHeading";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { applySignatureNoticeContactFieldsToCorpus } from "./paidProPartyNoticeDetails";
 import { recipientMetadataToAuthorityParties } from "./paidProSignerMetadataAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
@@ -53,11 +58,20 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
   }
 
   const corpusHints = collectReviewReadyCorpusHints(body, draft ?? null);
-  return applyReviewReadyMetadataBackfill(body, draft ?? null, {
+  body = applyReviewReadyMetadataBackfill(body, draft ?? null, {
     corpusHints,
     surface: "owner_done",
     selectedSource: "authoritative_signing_snapshot",
   });
+
+  const authorityParties =
+    (meta ? recipientMetadataToAuthorityParties(meta) : null) ??
+    readConsumedPaidProSignerMetadataAuthority()?.parties ??
+    [];
+  if (body.length >= 80 && authorityParties.length >= 2 && detectExecutionHeadingMetadataLeak(body).leak) {
+    body = repairExecutionBlockEntityHeadingLines(body, authorityParties).text.trim();
+  }
+  return body;
 }
 
 function finalizePostFinalizeReviewPlain(plain: string, draft?: AgreementDraft | null): string {

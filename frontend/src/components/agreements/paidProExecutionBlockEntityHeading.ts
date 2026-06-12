@@ -12,6 +12,10 @@ import type { AuthoritativeSigningSnapshotRecipientMetadata } from "./authoritat
 import { partyLegalNamesMatch } from "./paidProSignerMetadataAuthority";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
+import {
+  hasTrailingJurisdictionClausePollution,
+  stripTrailingJurisdictionClause,
+} from "./signerPartyLegalEntityDisplaySanitizer";
 
 const PARTY_ROLE_HEADING_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*(.*)$/i;
 const SIG_FIELD_RE =
@@ -37,6 +41,29 @@ export type ExecutionBlockDisplayIntegrityAudit = {
   invariantOk: boolean;
 };
 
+function executionPartyLabelNeedsAuthorityRepair(
+  label: string,
+  authorityName: string,
+): boolean {
+  const inline = (label || "").replace(/\s+/g, " ").trim();
+  const authority = (authorityName || "").replace(/\s+/g, " ").trim();
+  if (!inline || !authority) return false;
+  if (hasTrailingJurisdictionClausePollution(inline)) return true;
+  if (EXECUTION_HEADING_METADATA_LEAK_MARKERS.some((re) => re.test(inline))) return true;
+  const stripped = stripTrailingJurisdictionClause(inline);
+  return partyLegalNamesMatch(stripped, authority) && !partyLegalNamesMatch(inline, authority);
+}
+
+function resolveExecutionBlockPartyIndex(
+  roleLabel: string,
+  partyHeadingCounter: number,
+): number {
+  const role = roleLabel.trim().toUpperCase();
+  if (role === "CLIENT") return 0;
+  if (role.includes("SERVICE") && role.includes("PROVIDER")) return 1;
+  return partyHeadingCounter;
+}
+
 export function detectExecutionHeadingMetadataLeak(text: string): {
   leak: boolean;
   markers: string[];
@@ -57,6 +84,8 @@ export function detectExecutionHeadingMetadataLeak(text: string): {
       const inline = trimmed.replace(/^[^:]+:\s*/, "").trim();
       if (inline && EXECUTION_HEADING_METADATA_LEAK_MARKERS.some((re) => re.test(inline))) {
         markers.push("inline_role_heading_leak");
+      } else if (inline && hasTrailingJurisdictionClausePollution(inline)) {
+        markers.push("inline_jurisdiction_clause_pollution");
       }
       continue;
     }
@@ -67,6 +96,9 @@ export function detectExecutionHeadingMetadataLeak(text: string): {
       if (dupEntity) markers.push("duplicated_party_entity_line");
       if (EXECUTION_HEADING_METADATA_LEAK_MARKERS.some((re) => re.test(trimmed))) {
         markers.push("entity_line_metadata_leak");
+      }
+      if (hasTrailingJurisdictionClausePollution(trimmed)) {
+        markers.push("entity_line_jurisdiction_clause_pollution");
       }
     }
   }
@@ -79,6 +111,10 @@ export function extractCleanLegalEntityFromExecutionLine(
 ): string {
   let trimmed = (line || "").replace(/\s+/g, " ").trim();
   if (!trimmed) return "";
+
+  if (hasTrailingJurisdictionClausePollution(trimmed)) {
+    trimmed = stripTrailingJurisdictionClause(trimmed);
+  }
 
   if (EXECUTION_HEADING_METADATA_LEAK_MARKERS.some((re) => re.test(trimmed))) {
     const entityOnly = trimmed.match(
@@ -124,6 +160,8 @@ export function repairExecutionBlockEntityHeadingLines(
   const repairs: string[] = [];
   let witnessLineIndex = -1;
   let expectEntityLine = false;
+  let partyHeadingCounter = 0;
+  let activePartyIndex = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = (lines[i] ?? "").trim();
@@ -138,16 +176,30 @@ export function repairExecutionBlockEntityHeadingLines(
     if (inlineHeading) {
       const role = trimmed.replace(/:.*/, "").trim();
       const inline = (inlineHeading[1] ?? "").trim();
+      const partyIdx = resolveExecutionBlockPartyIndex(role, partyHeadingCounter);
+      if (/^PARTY(?:\s+\d+)?$/i.test(role.trim())) partyHeadingCounter += 1;
+      activePartyIndex = partyIdx;
+      const authorityName = (parties ?? [])[partyIdx]?.partyLegalName?.trim() ?? "";
       if (inline) {
         const inlineLeak = EXECUTION_HEADING_METADATA_LEAK_MARKERS.some((re) => re.test(inline));
+        const jurisdictionPollution = hasTrailingJurisdictionClausePollution(inline);
+        const needsAuthorityRepair =
+          authorityName && executionPartyLabelNeedsAuthorityRepair(inline, authorityName);
         if (inlineLeak) {
           const indent = lines[i].match(/^\s*/)?.[0] ?? "";
           lines[i] = `${indent}${role}:`;
-          const cleaned = extractCleanLegalEntityFromExecutionLine(inline, legalNames);
+          const cleaned = authorityName || extractCleanLegalEntityFromExecutionLine(inline, legalNames);
           lines.splice(i + 1, 0, `${indent}${cleaned}`);
           repairs.push("execution:split_inline_role_heading");
           expectEntityLine = false;
           i += 1;
+        } else if (jurisdictionPollution || needsAuthorityRepair) {
+          const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+          const cleaned =
+            authorityName || extractCleanLegalEntityFromExecutionLine(inline, legalNames);
+          lines[i] = `${indent}${role}: ${cleaned}`;
+          repairs.push("execution:repair_inline_party_label_pollution");
+          expectEntityLine = false;
         } else {
           expectEntityLine = false;
         }
@@ -158,12 +210,19 @@ export function repairExecutionBlockEntityHeadingLines(
     }
 
     if (/^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*$/i.test(trimmed)) {
+      const role = trimmed.replace(/:.*/, "").trim();
+      activePartyIndex = resolveExecutionBlockPartyIndex(role, partyHeadingCounter);
+      if (/^PARTY(?:\s+\d+)?$/i.test(role.trim())) partyHeadingCounter += 1;
       expectEntityLine = true;
       continue;
     }
 
     if (expectEntityLine && trimmed && !SIG_FIELD_RE.test(trimmed)) {
-      const cleaned = extractCleanLegalEntityFromExecutionLine(trimmed, legalNames);
+      const authorityName = (parties ?? [])[activePartyIndex]?.partyLegalName?.trim() ?? "";
+      const cleaned =
+        authorityName && executionPartyLabelNeedsAuthorityRepair(trimmed, authorityName)
+          ? authorityName
+          : extractCleanLegalEntityFromExecutionLine(trimmed, legalNames);
       if (cleaned && cleaned !== trimmed) {
         const indent = lines[i].match(/^\s*/)?.[0] ?? "";
         lines[i] = `${indent}${cleaned}`;

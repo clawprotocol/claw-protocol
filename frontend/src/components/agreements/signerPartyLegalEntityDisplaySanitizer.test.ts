@@ -46,10 +46,21 @@ describe("signerPartyLegalEntityDisplaySanitizer", () => {
 
   it("strips trailing jurisdiction prose accidentally merged into party labels", () => {
     expect(hasTrailingJurisdictionClausePollution("Jane Donaldson, Oklahoma law")).toBe(true);
+    expect(hasTrailingJurisdictionClausePollution("Harbor Peak Automation LLC, Oklahoma law governs")).toBe(
+      true,
+    );
     expect(stripTrailingJurisdictionClause("Jane Donaldson, Oklahoma law")).toBe("Jane Donaldson");
+    expect(stripTrailingJurisdictionClause("Harbor Peak Automation LLC, Oklahoma law governs")).toBe(
+      "Harbor Peak Automation LLC",
+    );
     expect(sanitizeSignerPartyLegalEntityDisplay("Jane Donaldson, Oklahoma law", { log: false })).toBe(
       "Jane Donaldson",
     );
+    expect(
+      sanitizeSignerPartyLegalEntityDisplay("Harbor Peak Automation LLC, Oklahoma law governs", {
+        log: false,
+      }),
+    ).toBe("Harbor Peak Automation LLC");
     expect(hasSignerPartyLegalEntityDisplayPollution("Jane Donaldson, Oklahoma law")).toBe(true);
     expect(hasSignerPartyLegalEntityDisplayPollution("Jane Donaldson")).toBe(false);
   });

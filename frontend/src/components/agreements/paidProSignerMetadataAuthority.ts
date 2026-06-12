@@ -350,7 +350,8 @@ export function authorityPartiesToCanonicalPartyIdentities(
     source: "authoritative_manifest",
   }));
   return parties.map((p) => {
-    const legal = slotIsolatedCanonicalEntity(p.partyIndex, slots);
+    const authorityLegal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
+    const legal = authorityLegal || slotIsolatedCanonicalEntity(p.partyIndex, slots);
     const isIndividual = legal ? isIndividualPartyName(legal) : false;
     const roleLabel = resolveRoleLabelForAuthorityParty(legal, p.partyIndex, roleContext);
     const blockHeading = blockHeadingFromRoleLabel(roleLabel, p.partyIndex);

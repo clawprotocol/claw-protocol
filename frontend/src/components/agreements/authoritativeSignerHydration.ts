@@ -46,6 +46,7 @@ import {
   logPaidProSignerMetadataHydrationApplied,
   logPaidProSignerMetadataHydrationMissing,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import { repairExecutionBlockEntityHeadingLines } from "./paidProExecutionBlockEntityHeading";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
 
@@ -290,6 +291,20 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
         corpus: finalized.text,
         signaturePolishCount: result.signaturePolishCount + finalized.repairs.length,
         partyNoticeApplied: false,
+      };
+    }
+  }
+
+  if (!result.rejected && result.corpus && args.authority.parties.length >= 2) {
+    const headingRepair = repairExecutionBlockEntityHeadingLines(
+      result.corpus,
+      args.authority.parties,
+    );
+    if (headingRepair.repairs.length > 0) {
+      result = {
+        ...result,
+        corpus: headingRepair.text,
+        signaturePolishCount: result.signaturePolishCount + headingRepair.repairs.length,
       };
     }
   }
