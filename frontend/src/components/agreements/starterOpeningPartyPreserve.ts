@@ -8,6 +8,52 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
 
+const GENERIC_STARTER_PARTY_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
+
+function isStarterServicesAgreementLike(
+  draft: ParsedDraftShape,
+  intakeText: string | null | undefined,
+): boolean {
+  const family = String(draft.agreement_family || "").toLowerCase();
+  if (
+    ["residential_lease", "commercial_lease", "nda", "operating_agreement", "generic_business_agreement"].includes(
+      family,
+    )
+  ) {
+    return false;
+  }
+  if (["services_agreement", "consulting_agreement", "independent_contractor_agreement"].includes(family)) {
+    return true;
+  }
+  const blob = [draft.title, intakeText].filter(Boolean).join(" ");
+  return /\b(?:services?\s+agreement|consulting|contractor|provider|will\s+provide|perform|setup|implementation|workflow)\b/i.test(
+    blob,
+  );
+}
+
+/**
+ * Two-party commercial services starters: map generic draft roles to Client / Service Provider.
+ */
+export function inferStarterCommercialPartyRoles(
+  draft: ParsedDraftShape,
+  intakeText: string | null | undefined,
+): ParsedDraftShape {
+  const parties = Array.isArray(draft.parties) ? [...draft.parties] : [];
+  if (parties.length !== 2) return draft;
+  if (!isStarterServicesAgreementLike(draft, intakeText)) return draft;
+  return {
+    ...draft,
+    parties: parties.map((party, index) => {
+      const role = String(party?.role ?? "").trim().toLowerCase();
+      if (!GENERIC_STARTER_PARTY_ROLE.has(role)) return party;
+      return {
+        ...party,
+        role: index === 0 ? "Client" : "Service Provider",
+      };
+    }),
+  };
+}
+
 function resolveFullLegalPartiesForStarterPreview(
   partyNames: readonly string[],
   intakeRaw: string | null | undefined,
@@ -42,14 +88,15 @@ export function enrichStarterPreviewPartiesFromIntake(
   draft: ParsedDraftShape,
   intakeText: string | null | undefined,
 ): ParsedDraftShape {
-  const parties = Array.isArray(draft.parties) ? [...draft.parties] : [];
-  if (parties.length < 2) return draft;
+  const withRoles = inferStarterCommercialPartyRoles(draft, intakeText);
+  const parties = Array.isArray(withRoles.parties) ? [...withRoles.parties] : [];
+  if (parties.length < 2) return withRoles;
 
   const fullNames = resolveFullLegalPartiesForStarterPreview(
     parties.map((p) => String(p?.name ?? "")),
     intakeText,
   );
-  if (fullNames.length < 2) return draft;
+  if (fullNames.length < 2) return withRoles;
 
   const enriched = parties.map((party, idx) => {
     const current = String(party?.name ?? "").replace(/\s+/g, " ").trim();
@@ -64,5 +111,5 @@ export function enrichStarterPreviewPartiesFromIntake(
     return party;
   });
 
-  return { ...draft, parties: enriched };
+  return { ...withRoles, parties: enriched };
 }

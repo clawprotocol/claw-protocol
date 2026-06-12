@@ -432,6 +432,13 @@ const STARTER_DISPLAY_ROLE_TOKENS = new Set([
   "notary",
   "notary public",
   "broker",
+  "client",
+  "customer",
+  "service provider",
+  "provider",
+  "consultant",
+  "contractor",
+  "vendor",
 ]);
 
 function partyEntryWithRoleConfidence(p: { name: string; role?: string }, starterPreview: boolean): PartyEntry {

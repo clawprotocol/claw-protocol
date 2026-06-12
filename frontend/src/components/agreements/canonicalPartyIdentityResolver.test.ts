@@ -108,6 +108,20 @@ describe("canonicalPartyIdentityResolver", () => {
     );
   });
 
+  it("maps generic draft party roles to Client / Service Provider in manifest", () => {
+    const records = resolveCanonicalPartyIdentitiesFromIntake(
+      INTAKE,
+      ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+      ["party", "party"],
+    );
+    expect(records[0]?.roleLabel).toBe("Client");
+    expect(records[1]?.roleLabel).toBe("Service Provider");
+    const line = definedOpeningLine(records[0]!, records[1]!);
+    expect(line).not.toMatch(/\("party"\)/i);
+    expect(line).toContain('("Client")');
+    expect(line).toContain('("Service Provider")');
+  });
+
   it("replaces truncated party names in body with role labels", () => {
     const records = resolveCanonicalPartyIdentitiesFromIntake(INTAKE)!;
     const body =

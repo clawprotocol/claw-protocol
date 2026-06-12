@@ -137,9 +137,21 @@ function norm(s: string): string {
   return s.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+const GENERIC_PARTY_ROLE_LABELS = new Set([
+  "",
+  "party",
+  "parties",
+  "signer",
+  "signatory",
+]);
+
+function isGenericPartyRoleLabel(role: string | null | undefined): boolean {
+  return GENERIC_PARTY_ROLE_LABELS.has(norm(role || ""));
+}
+
 function roleLabelForIndex(index: number, explicit?: string): string {
   const t = (explicit || "").trim();
-  if (t.length >= 2 && !isInternalPartyAliasRole(t)) return t;
+  if (t.length >= 2 && !isInternalPartyAliasRole(t) && !isGenericPartyRoleLabel(t)) return t;
   return DEFAULT_ROLE_LABELS[index] ?? `Party ${index + 1}`;
 }
 
@@ -821,13 +833,15 @@ export function repairCanonicalPartyIdentityInCorpus(
   const openingRe =
     /(?:this\s+agreement\s+is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]{0,400}?(?=\n\n|\n\s*\d+\.|\n[A-Z][A-Z\s]{6,}|$)/i;
   const preservePaidProOpening = shouldPreservePaidProMutualConsultingOpening(head, records);
-  if (!preservePaidProOpening && openingRe.test(head)) {
+  const twoPartyCommercialOpening = records.length === 2;
+  if (!preservePaidProOpening && twoPartyCommercialOpening && openingRe.test(head)) {
     head = head.replace(openingRe, () => {
       repairs.push("party_identity:defined_opening");
       return openingLine;
     });
   } else if (
     !preservePaidProOpening &&
+    twoPartyCommercialOpening &&
     (!head.includes(client.fullLegalName) || !head.includes(provider.fullLegalName))
   ) {
     const titleMatch = head.match(/^[\s\S]{0,800}?(?:AGREEMENT|CONTRACT)\s*$/im);
