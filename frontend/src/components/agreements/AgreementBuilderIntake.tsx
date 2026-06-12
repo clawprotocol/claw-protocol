@@ -400,9 +400,14 @@ import {
   agreementIdShort,
   logReviewRefreshRegenerationSkipped,
   logReviewRefreshRestore,
+  shouldHydrateStoredAgreementResumeId,
   shouldRestoreStoredCreateReviewDraftSnapshot,
   shouldSkipHomeAutoGenerateForStoredReview,
 } from "./createReviewRefreshRestore";
+import {
+  markCurrentSessionProEntitlementComplete,
+  markCurrentSessionProIntent,
+} from "./paidProSessionEligibility";
 import {
   hasAcceptedPaidProAuthority,
   isAuthoritativePaidProReview,
@@ -5693,6 +5698,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    */
   const runEntitledPremiumImprovementRewrite = React.useCallback(async () => {
     if (entitledPremiumRewriteInFlightRef.current) return;
+    markCurrentSessionProIntent();
+    markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
     entitledPremiumRewriteInFlightRef.current = true;
     const gateDraft = draftSnapshotRef.current ?? draft ?? readCreateComplexityResume()?.pending ?? null;
     const raw = resolveRawIntakeForPremiumCheckout(gateDraft);
@@ -8966,6 +8973,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     console.info("[premium-flow] button_click", { button: "upgrade_to_full_draft_modal" });
+    markCurrentSessionProIntent();
     logProductEvent("upgrade_clicked", { surface: "agreement_optional_full_draft", intent: "full_draft_upgrade" });
     trackAgreementFunnelEvent(
       "premium_upgrade_clicked",
@@ -9131,6 +9139,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
     if (fromHomeHandoff) {
       resetStalePaidReviewShellForFreeStarter("home_create_submit");
+      clearCreateReviewAgreementResumeId();
+      productionResumeHydratedRef.current = false;
+      setReviewAgreementId(null);
       lastKnownGoodAuthoritativeDraftRef.current = "";
       hydratedPremiumBodyRef.current = "";
       lastPremiumWinningCorpusRef.current = "";
@@ -9815,6 +9826,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     },
   ) => {
     console.info("[premium-flow] button_click", { button: "unlock_premium_rewrite_checkout" });
+    markCurrentSessionProIntent();
     const gateDraft = draftOverride ?? draft;
     const resumeSnap = readCreateComplexityResume();
     const pending =
@@ -13356,7 +13368,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (!createProductionTwoPane) return;
     const id = reviewAgreementId?.trim();
-    if (id) writeCreateReviewAgreementResumeId(id);
+    if (!id) return;
+    if (!shouldHydrateStoredAgreementResumeId()) return;
+    writeCreateReviewAgreementResumeId(id);
   }, [createProductionTwoPane, reviewAgreementId]);
 
   useEffect(() => {
@@ -13407,6 +13421,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (checkoutBackRestoreActive) return;
     if (draft != null) return;
     if (productionResumeHydratedRef.current) return;
+    if (!shouldHydrateStoredAgreementResumeId()) return;
     const hid = readCreateReviewAgreementResumeId();
     if (!hid) return;
     productionResumeHydratedRef.current = true;

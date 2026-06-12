@@ -93,6 +93,10 @@ import {
   detectPaidProOrphanSubsections,
   normalizePaidProOrphanSubsections,
 } from "./normalizePaidProOrphanSubsections";
+import {
+  evaluatePaidProSourceOfTruthEstablishment,
+  logPaidProSourceOfTruthEstablishmentAttempt,
+} from "./paidProSessionEligibility";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -220,6 +224,25 @@ export function establishPaidProSourceOfTruth(args: {
   // how long its body is — this is the last line of defense against a short rejected corpus leaking in.
   if (FORBIDDEN_PAID_PRO_SOT_SOURCES.has(requestedSource)) {
     throw new Error(`[paid-pro-sot-commit-blocked] forbidden source: ${requestedSource}`);
+  }
+  const establishmentGate = evaluatePaidProSourceOfTruthEstablishment({
+    source: requestedSource,
+    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    allowUserApprovedRevision: Boolean(args.allowShorterOverwrite),
+    hasExistingSourceOfTruth: Boolean(paidProSourceOfTruth?.text),
+  });
+  logPaidProSourceOfTruthEstablishmentAttempt({
+    source: requestedSource,
+    allowed: establishmentGate.allowed,
+    reason: establishmentGate.reason,
+    hasProEntitlement: establishmentGate.hasProEntitlement,
+    hasFreeStarterSession: establishmentGate.hasFreeStarterSession,
+    generationId: establishmentGate.generationId,
+    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    textLen: trim(args.text).length,
+  });
+  if (!establishmentGate.allowed) {
+    throw new Error(`[paid-pro-sot-establishment-suppressed] ${establishmentGate.reason}`);
   }
   // First-authoritative-success-wins latch: once a substantive SoT is committed, a later automated
   // premium response (e.g. a duplicate request that came back degraded/json_parse) must never
@@ -506,10 +529,26 @@ export function hydratePaidProSourceOfTruth(args: {
   accepted_at?: number | null;
   source?: string | null;
   reviewSessionId?: string | null;
+  agreementGenerationId?: string | null;
 }): PaidProSourceOfTruth | null {
   const text = trim(args.text);
   if (text.length < 500) return null;
   if ((args.source || "server_full_draft") !== "server_full_draft") return null;
+  const establishmentGate = evaluatePaidProSourceOfTruthEstablishment({
+    source: args.source ?? "server_full_draft",
+    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+  });
+  logPaidProSourceOfTruthEstablishmentAttempt({
+    source: "hydratePaidProSourceOfTruth",
+    allowed: establishmentGate.allowed,
+    reason: establishmentGate.reason,
+    hasProEntitlement: establishmentGate.hasProEntitlement,
+    hasFreeStarterSession: establishmentGate.hasFreeStarterSession,
+    generationId: establishmentGate.generationId,
+    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    textLen: text.length,
+  });
+  if (!establishmentGate.allowed) return null;
   const snapshot = buildCanonicalAgreementSnapshot({
     surface: "paid_pro_source_of_truth_hydrate",
     tier: "pro",

@@ -13,6 +13,10 @@ import {
   applyPremiumRecipientHandoffReadGate,
   resetPaidProPremiumRecipientHandoffReadGateForTests,
 } from "./paidProPremiumRecipientHandoffReadGate";
+import {
+  hasCurrentSessionFreeStarterIntent,
+  hasCurrentSessionProEntitlement,
+} from "./paidProSessionEligibility";
 
 const LEGACY_KEY = "claw_premium_party_names_handoff_v1";
 const KEY_V2 = "claw_premium_recipient_handoff_v2";
@@ -60,6 +64,15 @@ export type PremiumRecipientHandoffV2 = {
 
 function emptySlot(): PremiumRecipientHandoffSlot {
   return { name: "", email: "", role: "", signerName: "", signerTitle: "", partyAddress: "" };
+}
+
+function stripStalePremiumHandoffExtraSlots(
+  handoff: PremiumRecipientHandoffV2,
+): PremiumRecipientHandoffV2 {
+  if (!handoff.partyIndexSlots?.length) return handoff;
+  if (hasCurrentSessionProEntitlement()) return handoff;
+  if (!hasCurrentSessionFreeStarterIntent()) return handoff;
+  return { ...handoff, partyIndexSlots: undefined };
 }
 
 function readLegacyPartyNamesOnly(): { party1: string; party2: string } | null {
@@ -117,8 +130,9 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
           savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : Date.now(),
           ...(partyIndexSlots ? { partyIndexSlots } : {}),
         };
-        const gated = applyPremiumRecipientHandoffReadGate(handoff, {
-          partySlotCount: 2 + (partyIndexSlots?.length ?? 0),
+        const stripped = stripStalePremiumHandoffExtraSlots(handoff);
+        const gated = applyPremiumRecipientHandoffReadGate(stripped, {
+          partySlotCount: 2 + (stripped.partyIndexSlots?.length ?? 0),
         });
         if (gated) logReviewLinkSignerMetadataHandoffRead(gated);
         return gated;

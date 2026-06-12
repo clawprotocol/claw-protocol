@@ -5,6 +5,7 @@ import {
   readCreateReviewAgreementResumeId,
   readCreateReviewDraftReadyMarker,
 } from "./agreementIntakeStorage";
+import { hasCurrentSessionFreeStarterIntent } from "./paidProSessionEligibility";
 
 export type ReviewRefreshRegenerationSkipReason =
   | "stored_agreement_resume_id"
@@ -33,11 +34,19 @@ export function logReviewRefreshRegenerationSkipped(reason: ReviewRefreshRegener
 
 /** Do not hydrate stored free starter snapshot when paid SoT already exists. */
 export function shouldRestoreStoredCreateReviewDraftSnapshot(): boolean {
+  if (hasCurrentSessionFreeStarterIntent()) {
+    return false;
+  }
   if (paidProAuthorityBlocksStarterReviewRestore()) {
     logReviewRefreshRegenerationSkipped("paid_pro_authority_blocks_starter_restore");
     return false;
   }
   return readCreateReviewDraftReadyMarker() || hasStoredCreateReviewState();
+}
+
+export function shouldHydrateStoredAgreementResumeId(opts?: SkipHomeAutoGenerateOptions): boolean {
+  if (opts?.freshHomeHeroHandoff || hasCurrentSessionFreeStarterIntent()) return false;
+  return Boolean(readCreateReviewAgreementResumeId());
 }
 
 export type SkipHomeAutoGenerateOptions = {
@@ -55,8 +64,11 @@ export function shouldSkipHomeAutoGenerateForStoredReview(opts?: SkipHomeAutoGen
     logReviewRefreshRegenerationSkipped("stored_draft_ready_marker");
     return true;
   }
+  if (opts?.freshHomeHeroHandoff || hasCurrentSessionFreeStarterIntent()) {
+    return false;
+  }
   if (!hasStoredCreateReviewState()) return false;
-  if (readCreateReviewAgreementResumeId()) {
+  if (shouldHydrateStoredAgreementResumeId(opts)) {
     logReviewRefreshRegenerationSkipped("stored_agreement_resume_id");
     return true;
   }

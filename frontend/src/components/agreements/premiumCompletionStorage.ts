@@ -16,6 +16,7 @@ import {
   clearPremiumSendIntent,
 } from "../../launch/simpleProduct/premiumSendIntent";
 import { clearAcceptedPremiumCanonicalCorpus } from "./acceptedPremiumCanonicalCorpus";
+import { markCurrentSessionProEntitlementComplete } from "./paidProSessionEligibility";
 
 const KEY = "claw_premium_completion_snapshot_v1";
 
@@ -42,6 +43,9 @@ export function markPaidPremiumCompletionSession(options?: { source?: PaidPremiu
       markedAt: Date.now(),
     };
     sessionStorage.setItem(PAID_PREMIUM_COMPLETION_SESSION_KEY, JSON.stringify(marker));
+    markCurrentSessionProEntitlementComplete({
+      source: marker.source === "qa_bypass" ? "qa_bypass" : "settled_checkout",
+    });
   } catch {
     /* ignore */
   }

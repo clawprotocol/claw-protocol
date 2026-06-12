@@ -18,7 +18,12 @@ import {
   clearPremiumCompletionSnapshot,
   hasPremiumCheckoutReturnInUrl,
 } from "../components/agreements/premiumCompletionStorage";
+import { clearPaidProPremiumRecipientHandoffReadGate } from "../components/agreements/paidProPremiumRecipientHandoffReadGate";
 import { clearPremiumPartyNamesHandoff } from "../components/agreements/premiumPartyNamesHandoff";
+import {
+  bumpAgreementGenerationIdForFreshSession,
+  clearCurrentSessionProEntitlementMarkers,
+} from "../components/agreements/paidProSessionEligibility";
 import { resetHeroHandoffForCreateNavigationWithoutPayload } from "./heroIntakePrefill";
 import { clearLawdogEntryContext, setLawdogEntryContext } from "./lawdogEntryContext";
 import { clearAgreementVs01BridgeSession } from "./simpleProduct/agreementToVs01SigningBridge";
@@ -97,6 +102,7 @@ export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
   preserveCheckoutReturn?: boolean;
 }): void {
   if (opts?.preserveCheckoutReturn !== false && hasPremiumCheckoutReturnInUrl()) return;
+  clearPaidProPremiumRecipientHandoffReadGate();
   clearPaidProSourceOfTruth();
   clearConsumedPaidProSignerMetadataAuthority();
   clearAuthoritativeSigningSnapshot();
@@ -126,6 +132,9 @@ export function initializeNewAgreementSession(opts?: {
   clearLawdogEntryContext();
   clearAgreementVs01BridgeSession();
   clearPremiumPartyNamesHandoff();
+  clearPaidProPremiumRecipientHandoffReadGate();
+  bumpAgreementGenerationIdForFreshSession();
+  clearCurrentSessionProEntitlementMarkers();
 
   const clearedInMemoryModules: string[] = [];
   clearStalePaidProAuthorityForFreshFreeStarter({ preserveCheckoutReturn: false });

@@ -164,6 +164,11 @@ export function readPaidProHandoffReadGateStateForTests(): {
 }
 
 export function resetPaidProPremiumRecipientHandoffReadGateForTests(): void {
+  clearPaidProPremiumRecipientHandoffReadGate();
+}
+
+/** Clears in-memory signer handoff latch (fresh free starter / new agreement session). */
+export function clearPaidProPremiumRecipientHandoffReadGate(): void {
   lastPopulatedHandoff = null;
   sessionEverHadPopulatedHandoff = false;
   latchedCorpusHash = "";

@@ -11,10 +11,12 @@ import { persistStarterReviewBeforeCheckout } from "./checkoutBackRestore";
 import { establishPaidProSourceOfTruth, clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import {
   logReviewRefreshRegenerationSkipped,
+  shouldHydrateStoredAgreementResumeId,
   shouldRestoreStoredCreateReviewDraftSnapshot,
   shouldSkipHomeAutoGenerateForStoredReview,
 } from "./createReviewRefreshRestore";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { markCurrentSessionFreeStarterIntent } from "./paidProSessionEligibility";
 
 describe("createReviewRefreshRestore", () => {
   beforeEach(() => {
@@ -108,5 +110,17 @@ describe("createReviewRefreshRestore", () => {
       source: "server_full_draft",
     });
     expect(shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })).toBe(false);
+  });
+
+  it("fresh homepage hero handoff ignores stored agreement resume id", () => {
+    writeCreateReviewAgreementResumeId("agr-stale-332");
+    expect(shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })).toBe(false);
+    expect(shouldHydrateStoredAgreementResumeId({ freshHomeHeroHandoff: true })).toBe(false);
+  });
+
+  it("free starter session blocks stored draft snapshot restore", () => {
+    writeCreateReviewDraftReadyMarker();
+    markCurrentSessionFreeStarterIntent();
+    expect(shouldRestoreStoredCreateReviewDraftSnapshot()).toBe(false);
   });
 });

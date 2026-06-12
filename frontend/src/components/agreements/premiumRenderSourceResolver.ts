@@ -5,6 +5,7 @@ import {
   establishAcceptedPremiumCanonicalCorpus,
   getAcceptedPremiumCanonicalText,
 } from "./acceptedPremiumCanonicalCorpus";
+import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
 import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 import { shouldPreserveAcceptedServerFullDraftText } from "./proCorpusSourcePath";
@@ -327,6 +328,24 @@ function devWarnLiveWhileAuthoritativeCorpusExists(
  * Single deterministic premium plain-text resolver.
  * Order: (A) structurally valid server full → (B) valid repair → (C) live preview → (D) legacy snapshot.
  */
+function maybeEstablishAcceptedPremiumCanonicalText(args: {
+  rawAcceptedBody: string;
+  draft?: ParsedDraftShape | null;
+  intakeText?: string | null;
+}): string {
+  const raw = trim(args.rawAcceptedBody);
+  if (raw.length < 500) return raw;
+  const existing = getAcceptedPremiumCanonicalText();
+  if (existing.length >= 500) return existing;
+  if (!hasCurrentSessionProEntitlement()) return raw;
+  return establishAcceptedPremiumCanonicalCorpus({
+    rawAcceptedBody: raw,
+    draft: args.draft,
+    intakeText: args.intakeText,
+    pipelineSource: "server_full_draft",
+  }).text;
+}
+
 function preferLongerAuthoritativeServerBody(
   primary: string,
   winningFallback: string,
@@ -336,16 +355,11 @@ function preferLongerAuthoritativeServerBody(
   const a = trim(primary);
   const b = trim(winningFallback);
   if (b.length > a.length && b.length >= 500) {
-    const established =
-      getAcceptedPremiumCanonicalText().length >= 500
-        ? getAcceptedPremiumCanonicalText()
-        : establishAcceptedPremiumCanonicalCorpus({
-            rawAcceptedBody: b,
-            draft,
-            intakeText,
-            pipelineSource: "server_full_draft",
-          }).text;
-    return established;
+    return maybeEstablishAcceptedPremiumCanonicalText({
+      rawAcceptedBody: b,
+      draft,
+      intakeText,
+    });
   }
   return a;
 }
@@ -365,15 +379,11 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
   }
   const paidAuthoritative = trim(args.paidAuthoritativeProBody);
   if (paidAuthoritative.length >= 500) {
-    const authoritativePaid =
-      getAcceptedPremiumCanonicalText().length >= 500
-        ? getAcceptedPremiumCanonicalText()
-        : establishAcceptedPremiumCanonicalCorpus({
-            rawAcceptedBody: paidAuthoritative,
-            draft: args.draft,
-            intakeText: args.intakeText,
-            pipelineSource: "server_full_draft",
-          }).text;
+    const authoritativePaid = maybeEstablishAcceptedPremiumCanonicalText({
+      rawAcceptedBody: paidAuthoritative,
+      draft: args.draft,
+      intakeText: args.intakeText,
+    });
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.info("[premium-success-hydrate]", {
@@ -458,15 +468,11 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
   if (bConcise) return bConcise;
 
   if (winningFallbackRaw.length >= 500) {
-    const establishedWin =
-      getAcceptedPremiumCanonicalText().length >= 500
-        ? getAcceptedPremiumCanonicalText()
-        : establishAcceptedPremiumCanonicalCorpus({
-            rawAcceptedBody: winningFallbackRaw,
-            draft,
-            intakeText: args.intakeText,
-            pipelineSource: "server_full_draft",
-          }).text;
+    const establishedWin = maybeEstablishAcceptedPremiumCanonicalText({
+      rawAcceptedBody: winningFallbackRaw,
+      draft,
+      intakeText: args.intakeText,
+    });
     const winTry = tryServer(establishedWin, "server_full_document_text");
     if (winTry) {
       return {

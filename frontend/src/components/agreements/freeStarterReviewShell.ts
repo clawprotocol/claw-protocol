@@ -4,6 +4,7 @@
 
 import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import { clearStalePaidProAuthorityForFreshFreeStarter } from "../../launch/newAgreementSessionReset";
+import { markCurrentSessionFreeStarterIntent } from "./paidProSessionEligibility";
 import {
   isAuthoritativePaidProReview,
   PAID_PRO_REVIEW_BADGE,
@@ -158,6 +159,7 @@ export function resetStalePaidReviewShellForFreeStarter(source: FreeReviewSurfac
     }
   }
   clearStalePaidProAuthorityForFreshFreeStarter();
+  markCurrentSessionFreeStarterIntent();
 }
 
 export function logFreeReviewShellResolved(args: {
