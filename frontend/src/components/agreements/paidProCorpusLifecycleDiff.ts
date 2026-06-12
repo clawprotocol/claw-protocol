@@ -10,6 +10,7 @@ import {
   isPostFreezeAuthorizedSignerOverlayDrift,
   isSignatureRegionOnlyCorpusShrink,
 } from "./paidProPostFreezeCorpusInvariant";
+import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { classifyPaidProNormalizedSurfaceDiff } from "./paidProNormalizedSurfaceDiff";
 import { normalizeCorpusForCopyCompare } from "./qa/paidProCorpusIntegrity/paidProCorpusIntegrityMetrics";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
@@ -83,6 +84,12 @@ export function classifyPaidProCorpusLifecycleDiff(
   const before = (beforeText || "").replace(/\r\n/g, "\n");
   const after = (afterText || "").replace(/\r\n/g, "\n");
   if (before === after) return "identical";
+
+  const displayPreparedBefore = preparePaidProReviewDisplayPlain(before).text.trim();
+  const displayPreparedAfter = preparePaidProReviewDisplayPlain(after).text.trim();
+  if (displayPreparedBefore === displayPreparedAfter) {
+    return "display_normalization_only";
+  }
 
   const normalizedSurface = classifyPaidProNormalizedSurfaceDiff(before, after);
   if (normalizedSurface === "whitespace_only") return "whitespace_or_line_width_only";

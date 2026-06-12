@@ -3,6 +3,7 @@
  */
 
 import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
+import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { getPaidProSourceOfTruthText, hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -48,17 +49,27 @@ export function auditPaidProReviewRenderSotParity(args: {
     if (frozen && frozen.length >= 80) return frozen;
     return getPaidProSourceOfTruthText().trim();
   })();
+  const canonicalDisplayPlain = canonicalPlain
+    ? preparePaidProReviewDisplayPlain(canonicalPlain).text.trim()
+    : "";
+  const canonicalDisplayHash =
+    canonicalDisplayPlain.length >= 80 ? hashPaidProCorpus(canonicalDisplayPlain) : "";
   const classification =
     canonicalPlain && review
       ? classifyPaidProCorpusLifecycleDiff(canonicalPlain, review)
       : null;
+  const displayNormalizationDelta = Boolean(
+    canonicalDisplayHash && reviewHash && canonicalDisplayHash === reviewHash,
+  );
   const signerFieldOnlyDelta = Boolean(
-    classification && SIGNER_FIELD_ONLY_CLASSIFICATIONS.has(classification),
+    (classification && SIGNER_FIELD_ONLY_CLASSIFICATIONS.has(classification)) ||
+      displayNormalizationDelta,
   );
   const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(review);
   const hashMatch = Boolean(canonicalHash && reviewHash && canonicalHash === reviewHash);
   const invariantOk =
     hashMatch ||
+    displayNormalizationDelta ||
     (signerFieldOnlyDelta && blankSignerLinesRemaining === 0);
   if (reviewHash) {
     logPaidProReviewSotParity({

@@ -96,6 +96,8 @@ export function splitSinglePaidProDocumentBlock(block: string): string[] {
   if (!trimmed) return [];
 
   if (!trimmed.includes("\n")) {
+    const glued = splitGluedMainAndSubsectionHeadingLine(trimmed);
+    if (glued) return glued;
     const embedded = extractMainSectionHeadingPrefix(trimmed);
     if (embedded?.remainder) return [embedded.heading, embedded.remainder];
     if (embedded?.heading) return [embedded.heading];
@@ -114,6 +116,13 @@ export function splitSinglePaidProDocumentBlock(block: string): string[] {
 
   for (const line of lines) {
     const t = line.trim();
+    const glued = splitGluedMainAndSubsectionHeadingLine(t);
+    if (glued) {
+      flushCurrent();
+      segments.push(glued[0]!);
+      current.push(glued[1]!);
+      continue;
+    }
     if (isMainSectionHeadingLine(t)) {
       flushCurrent();
       segments.push(t);
@@ -152,6 +161,17 @@ export function splitPaidProDocumentBlocks(raw: string): string[] {
 
 const MAIN_SECTION_LINE_LEAK_RE = /^\d+\.\s+\S+/;
 
+/** Main section heading glued to immediate subsection on one line (test337). */
+export const GLUED_MAIN_AND_SUBSECTION_HEADING_RE = /^\d+\.\s+(?!\d+\.\d).+\s+\d+\.\d+\s+/;
+
+export function splitGluedMainAndSubsectionHeadingLine(line: string): string[] | null {
+  const t = line.trim();
+  if (!GLUED_MAIN_AND_SUBSECTION_HEADING_RE.test(t)) return null;
+  const m = t.match(/^(\d+\.\s+(?!\d+\.\d).+?)\s+(\d+\.\d+\s+.*)$/);
+  if (!m?.[1] || !m[2]) return null;
+  return [m[1].trim(), m[2].trim()];
+}
+
 export function detectPaidProPlainParagraphHeadingLeaks(plain: string): {
   plainParagraphHeadingLeakCount: number;
   leakedLines: string[];
@@ -166,6 +186,10 @@ export function detectPaidProPlainParagraphHeadingLeaks(plain: string): {
       if (/^section\s+\d+(?:\.\d+)*/i.test(t)) continue;
       if (isMainSectionHeadingLine(t)) {
         leakedLines.push(t);
+        continue;
+      }
+      if (GLUED_MAIN_AND_SUBSECTION_HEADING_RE.test(t)) {
+        leakedLines.push(t.slice(0, 160));
         continue;
       }
       if (MAIN_SECTION_LINE_LEAK_RE.test(t) && extractMainSectionHeadingPrefix(t)) {
