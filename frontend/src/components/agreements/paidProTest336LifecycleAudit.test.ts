@@ -9,8 +9,8 @@ import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import { resolvePaidProAuthoritativeDisplayPlain } from "./paidProAuthoritativeRenderGate";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
+  buildLivePaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
-  type PaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 import { resolveAuthoritativePartySlotCount } from "./partySlotIdentityNormalize";
@@ -116,31 +116,21 @@ function auditRow(stage: string, text: string, prior?: LifecycleAuditRow): Lifec
   return row;
 }
 
-function test336SignerAuthority(): PaidProSignerMetadataAuthority {
-  return {
-    parties: [
-      {
-        partyLegalName: RED_MESA,
-        legalName: RED_MESA,
-        signerName: "Jordan Lee",
-        signerTitle: "CEO",
-        signerEmail: "jordan@redmesa.test",
-        partyAddress: "100 Logistics Way, Oklahoma City, OK",
-        roleLabel: "Client",
-      },
-      {
-        partyLegalName: HARBOR_PEAK,
-        legalName: HARBOR_PEAK,
-        signerName: "Avery Chen",
-        signerTitle: "President",
-        signerEmail: "avery@harborpeak.test",
-        partyAddress: "200 Automation Blvd, Tulsa, OK",
-        roleLabel: "Service Provider",
-      },
+function test336SignerAuthority() {
+  return buildLivePaidProSignerMetadataAuthority({
+    partyCount: 2,
+    recipient1Name: RED_MESA,
+    recipient2Name: HARBOR_PEAK,
+    recipient1Email: "jordan@redmesa.test",
+    recipient2Email: "avery@harborpeak.test",
+    extraPartyReviewEmails: [],
+    partySignerNames: ["Jordan Lee", "Avery Chen"],
+    partySignerTitles: ["CEO", "President"],
+    partyAddresses: [
+      "100 Logistics Way, Oklahoma City, OK",
+      "200 Automation Blvd, Tulsa, OK",
     ],
-    source: "test336_audit",
-    latchedAt: Date.now(),
-  };
+  });
 }
 
 afterEach(() => {
