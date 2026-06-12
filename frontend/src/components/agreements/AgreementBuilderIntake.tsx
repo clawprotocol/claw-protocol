@@ -405,6 +405,8 @@ import {
   shouldSkipHomeAutoGenerateForStoredReview,
 } from "./createReviewRefreshRestore";
 import {
+  hasCurrentSessionFreeStarterIntent,
+  hasCurrentSessionProEntitlement,
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
@@ -5516,6 +5518,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   /** Rehydrate paid premium state from session snapshot (refresh / return navigation). */
   function applyHydrationFromPremiumSnapshot(snap: PremiumCompletionSnapshot): void {
+    if (hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) return;
     hydrateAcceptedPremiumCanonicalCorpusFromSnapshot(snap);
     setPremiumRefineReview(snap.premiumReview ?? null);
     setPremiumFinalizeAudit(snap.premiumFinalizeAudit ?? null);
@@ -12037,16 +12040,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   premiumPaidDocumentSurfaceRef.current = premiumPaidDocumentSurface;
 
   /** Latched paid completion: checkout return, stored paid session, persisted premium flow, or SoT. */
-  const premiumCheckoutCompleted = useMemo(
-    () =>
-      Boolean(
-        hasPaidProSourceOfTruth() ||
-          hasPaidPremiumCompletionSession() ||
-          premiumPersistedFlowActive ||
-          premiumSendPathUnlocked,
-      ),
-    [premiumPersistedFlowActive, premiumSendPathUnlocked, reviewDocRefreshTick, premiumSurfaceGateTick],
-  );
+  const premiumCheckoutCompleted = useMemo(() => {
+    const paidSessionSignals =
+      hasPaidPremiumCompletionSession() &&
+      !(hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement());
+    return Boolean(
+      hasPaidProSourceOfTruth() ||
+        paidSessionSignals ||
+        premiumPersistedFlowActive ||
+        premiumSendPathUnlocked,
+    );
+  }, [premiumPersistedFlowActive, premiumSendPathUnlocked, reviewDocRefreshTick, premiumSurfaceGateTick]);
 
   const paidProPostCheckoutFirstReviewActive = useMemo(
     () =>
@@ -18614,7 +18618,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const acceptedPremiumCorpusPickOpts = useMemo((): PickBestAuthoritativeCorpusOpts => {
-    const snap = readPremiumCompletionSnapshot();
+    const snap =
+      hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()
+        ? null
+        : readPremiumCompletionSnapshot();
     if (snap) hydrateAcceptedPremiumCanonicalCorpusFromSnapshot(snap);
     const accepted = (
       getAcceptedPremiumDisplayText() ||

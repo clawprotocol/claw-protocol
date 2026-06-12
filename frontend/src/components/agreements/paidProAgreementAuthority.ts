@@ -7,6 +7,10 @@ import {
 } from "./premiumCompletionStorage";
 import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  hasCurrentSessionFreeStarterIntent,
+  hasCurrentSessionProEntitlement,
+} from "./paidProSessionEligibility";
 
 /** Minimum plain length to treat premium/server fields as authoritative Pro (aligns with send handoff). */
 export const PAID_PRO_AUTHORITY_MIN_LEN = 500;
@@ -84,7 +88,10 @@ export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuth
   const premium_render_source = rsRaw || null;
 
   const hasStoredPaidSession = hasStoredPaidPremiumCompletionSession();
-  if (hasStoredPaidSession) {
+  if (
+    hasStoredPaidSession &&
+    !(hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement())
+  ) {
     return { authoritative: true, reason: "paid_premium_completion_session", corpusLen, premium_render_source };
   }
   if (input.premiumSendPathUnlocked) {
@@ -104,7 +111,10 @@ export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuth
   ) {
     return { authoritative: true, reason: "local_storage_premium_completed_marker", corpusLen, premium_render_source };
   }
-  if (snapshotAcceptedLong(input.premiumCompletionSnapshot ?? null)) {
+  if (
+    snapshotAcceptedLong(input.premiumCompletionSnapshot ?? null) &&
+    !(hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement())
+  ) {
     return { authoritative: true, reason: "premium_snapshot_accepted_long_corpus", corpusLen, premium_render_source };
   }
   if (!d) {

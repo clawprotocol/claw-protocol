@@ -10,6 +10,7 @@ import {
   getAcceptedPremiumDisplayText,
 } from "./acceptedPremiumCanonicalCorpus";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
+import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
 export const AUTHORITATIVE_BODY_PRESERVE_MIN_WINNING_LEN = 1500;
@@ -98,13 +99,18 @@ export function polishAcceptedPremiumAuthoritativeBody(
 ): string {
   const established = getAcceptedPremiumCanonicalText();
   if (established.length >= 500) return established;
-  const record = establishAcceptedPremiumCanonicalCorpus({
-    rawAcceptedBody: raw,
-    draft: opts?.draft ?? null,
-    intakeText: opts?.intakeText ?? null,
-    pipelineSource: "server_full_draft",
-  });
-  return record.text;
+  if (!hasCurrentSessionProEntitlement()) return raw.trim();
+  try {
+    const record = establishAcceptedPremiumCanonicalCorpus({
+      rawAcceptedBody: raw,
+      draft: opts?.draft ?? null,
+      intakeText: opts?.intakeText ?? null,
+      pipelineSource: "server_full_draft",
+    });
+    return record.text;
+  } catch {
+    return raw.trim();
+  }
 }
 
 export function resolveAuthoritativePremiumSnapshotPlain(args: {
@@ -131,24 +137,40 @@ export function resolveAuthoritativePremiumSnapshotPlain(args: {
 
   const attemptedDowngrade = wouldMateriallyShrinkAuthoritativeBody(winning.length, resolved.length);
 
-  const established = establishAcceptedPremiumCanonicalCorpus({
-    rawAcceptedBody: winning,
-    intakeText: args.intakeText,
-    draft: args.draft ?? null,
-    pipelineSource: args.pipelineSource,
-  });
+  const establishedText = (() => {
+    if (!hasCurrentSessionProEntitlement()) return winning;
+    try {
+      return establishAcceptedPremiumCanonicalCorpus({
+        rawAcceptedBody: winning,
+        intakeText: args.intakeText,
+        draft: args.draft ?? null,
+        pipelineSource: args.pipelineSource,
+      }).text;
+    } catch {
+      return winning;
+    }
+  })();
+  const established = { text: establishedText };
 
   if (
     args.allowValidatedRepairSuccess &&
     resolved.length > established.text.length &&
     resolved.length >= winning.length
   ) {
-    const upgraded = establishAcceptedPremiumCanonicalCorpus({
-      rawAcceptedBody: resolved,
-      intakeText: args.intakeText,
-      draft: args.draft ?? null,
-      pipelineSource: args.pipelineSource,
-    });
+    const upgradedText = (() => {
+      if (!hasCurrentSessionProEntitlement()) return resolved;
+      try {
+        return establishAcceptedPremiumCanonicalCorpus({
+          rawAcceptedBody: resolved,
+          intakeText: args.intakeText,
+          draft: args.draft ?? null,
+          pipelineSource: args.pipelineSource,
+        }).text;
+      } catch {
+        return resolved;
+      }
+    })();
+    const upgraded = { text: upgradedText };
     return {
       text: upgraded.text,
       preserved: false,
