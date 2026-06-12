@@ -27,6 +27,14 @@ export function isPaidProApiFailureBlockingPaidProAuthority(
   });
 }
 
+/** Minimum paid Pro recovery corpus — aligns with {@link PAID_PRO_RECOVERY_MIN_DISPLAY_LEN}. */
+const PAID_PRO_RECOVERY_CORPUS_MIN_LEN = 4_000;
+
+const REJECTED_PAID_CORPUS_PIPELINE_SOURCES = new Set<string>([
+  "rejected_paid_corpus",
+  "premium_generation_retryable",
+]);
+
 /** True when canonical_working_draft / Pro freeze must not run on this corpus. */
 export function shouldBlockPaidProCanonicalFreezeOnApiFailure(args: {
   premiumRenderSource?: string | null;
@@ -34,8 +42,23 @@ export function shouldBlockPaidProCanonicalFreezeOnApiFailure(args: {
   corpusLen: number;
   hasPaidProSourceOfTruth?: boolean;
   corpusSource?: string | null;
+  hasEligibleRecoveryCorpus?: boolean;
 }): boolean {
   if (args.hasPaidProSourceOfTruth ?? hasPaidProSourceOfTruth()) return false;
+  const pipeline = String(args.premiumRenderSource || "").trim();
+  if (
+    REJECTED_PAID_CORPUS_PIPELINE_SOURCES.has(pipeline) &&
+    !args.hasEligibleRecoveryCorpus
+  ) {
+    return true;
+  }
+  if (
+    pipeline === "premium_degraded_server_local_recovery" &&
+    args.corpusLen < PAID_PRO_RECOVERY_CORPUS_MIN_LEN &&
+    !args.hasEligibleRecoveryCorpus
+  ) {
+    return true;
+  }
   if (!isPaidProApiFailureBlockingPaidProAuthority(args)) return false;
   if (args.corpusLen >= MIN_PAID_PRO_AUTHORITY_LEN) return false;
   if (

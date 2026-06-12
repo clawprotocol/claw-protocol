@@ -36,6 +36,43 @@ import {
   manifestRecordsForPaidProAcceptance,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { insertBeforeExecutionTail } from "./paidProMutualConsultingQualityFloorInsert";
+
+function intakeJurisdictionFromSources(
+  intakeText: string,
+  draft: ParsedDraftShape | null | undefined,
+): string | null {
+  const fromDraft = String(draft?.jurisdiction || "").trim();
+  if (fromDraft) return fromDraft;
+  const m = intakeText.match(/\b([A-Za-z][A-Za-z\s]{2,30}?)\s+law\b/i);
+  return m ? m[1].replace(/\s+/g, " ").trim() : null;
+}
+
+function nextAgreementSectionNumber(text: string): number {
+  const nums = [...(text || "").matchAll(/^\s*(\d{1,2})\.\s+[A-Z]/gm)]
+    .map((m) => Number(m[1]))
+    .filter(Number.isFinite);
+  return nums.length ? Math.max(...nums) + 1 : 1;
+}
+
+function ensureIntakeGoverningLawInAcceptanceCorpus(
+  text: string,
+  intakeText: string,
+  draft: ParsedDraftShape | null | undefined,
+): { text: string; repairs: string[] } {
+  const jurisdiction = intakeJurisdictionFromSources(intakeText, draft);
+  if (!jurisdiction) return { text, repairs: [] };
+  const bodyLow = (text || "").toLowerCase();
+  if (bodyLow.includes(jurisdiction.toLowerCase())) return { text, repairs: [] };
+  const insertion = [
+    `${nextAgreementSectionNumber(text)}. GOVERNING LAW`,
+    `This Agreement shall be governed by the laws of ${jurisdiction}, without regard to conflict-of-law principles.`,
+  ].join("\n");
+  return {
+    text: insertBeforeExecutionTail(text, insertion),
+    repairs: ["quality:ensure_intake_governing_law"],
+  };
+}
 
 export type ConciseCommercialServicesFactId =
   | "party_names"
@@ -427,6 +464,12 @@ function preparePaidProServerDocumentForAcceptanceCore(
       out = orphanFix.text;
       repairs.push(...orphanFix.repairs);
     }
+  }
+
+  const governingLaw = ensureIntakeGoverningLawInAcceptanceCorpus(out, intakeText, draft);
+  if (governingLaw.text !== out) {
+    out = governingLaw.text;
+    repairs.push(...governingLaw.repairs);
   }
 
   return { text: out.trim(), repairs: [...new Set(repairs)] };

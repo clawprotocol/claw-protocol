@@ -1631,6 +1631,7 @@ async function runPremiumCompletionInner(
     effGen: string;
   } | null = null;
   let pipelineNormalizedAuthoritativeText = "";
+  let rejectedPaidCorpusDueToClientGates = false;
 
   try {
     const mergedForApi = stripClientPremiumArtifactBlocksFromDraft(merged);
@@ -2861,6 +2862,7 @@ async function runPremiumCompletionInner(
           });
         } else if (acc.ok || founderDetailsGateMessage || proIntentGateMessage) {
           premiumRenderSource = "rejected_paid_corpus";
+          rejectedPaidCorpusDueToClientGates = true;
         }
       }
     }
@@ -3172,6 +3174,7 @@ async function runPremiumCompletionInner(
   }
   if (premiumRenderSource === "rejected_paid_corpus") {
     const suppressDegradedLocalRecovery =
+      !rejectedPaidCorpusDueToClientGates &&
       pipelineNormalizedAuthoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN;
     if (suppressDegradedLocalRecovery) {
       if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;

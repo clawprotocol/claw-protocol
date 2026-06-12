@@ -831,14 +831,21 @@ export function repairCanonicalPartyIdentityInCorpus(
   const rest = out.slice(headLen);
   const openingLine = definedOpeningLine(client, provider);
   const openingRe =
-    /(?:this\s+agreement\s+is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]{0,400}?(?=\n\n|\n\s*\d+\.|\n[A-Z][A-Z\s]{6,}|$)/i;
+    /(?:this\s+agreement\s*(?:\([^)]*\))?\s*is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]*?\.\s*(?=\n\n|\n\s*\d+\.\s+|\(collectively|\[SIGNATURE|$)/i;
   const preservePaidProOpening = shouldPreservePaidProMutualConsultingOpening(head, records);
   const twoPartyCommercialOpening = records.length === 2;
   if (!preservePaidProOpening && twoPartyCommercialOpening && openingRe.test(head)) {
-    head = head.replace(openingRe, () => {
-      repairs.push("party_identity:defined_opening");
-      return openingLine;
-    });
+    const openingMatch = head.match(openingRe);
+    if (
+      openingMatch &&
+      openingMatch[0].length <= 380 &&
+      !/\d+\.\s+[A-Za-z]/.test(openingMatch[0])
+    ) {
+      head = head.replace(openingRe, () => {
+        repairs.push("party_identity:defined_opening");
+        return openingLine;
+      });
+    }
   } else if (
     !preservePaidProOpening &&
     twoPartyCommercialOpening &&

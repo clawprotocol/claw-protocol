@@ -67,8 +67,12 @@ export function assessPaidProMutualConsultingProfessionalStructure(args: {
   const text = (args.text || "").trim();
   const intake = (args.rawIntake || "").trim();
   const numberedSectionCount = countNumberedAgreementSections(text);
+  const aiWorkflowServices =
+    /\b(?:ai|automation|workflow|configuration|implementation|setup)\b/i.test(intake) &&
+    /\bservices?\b/i.test(intake);
   const applies =
     isCommercialServicesIntake(intake) &&
+    !aiWorkflowServices &&
     ((/\bmutual\s+consulting\b/i.test(intake) && /\bimplementation\b/i.test(intake)) ||
       (numberedSectionCount > 0 && numberedSectionCount <= MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING));
   if (!applies) {

@@ -5119,11 +5119,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : proReviewDisplay && premiumFullOnDraft.length >= 500
               ? premiumFullOnDraft
               : buildPreviewForCurrentTier(nextDraft);
+      const hasEligibleRecoveryCorpus =
+        recoveryDisplayPlain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
+        recoveryFromDraftPremiumFull.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
+        premiumFullOnDraft.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
       const blockPaidProCanonicalFreeze = shouldBlockPaidProCanonicalFreezeOnApiFailure({
         premiumRenderSource: pipelineForCanonical,
         premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
         corpusLen: canonicalReviewPlain.length,
         corpusSource: proReviewDisplay ? "canonical_working_draft" : "free_starter",
+        hasEligibleRecoveryCorpus,
       });
       const effectiveProCanonicalTier = proReviewDisplay && !blockPaidProCanonicalFreeze;
       if (blockPaidProCanonicalFreeze) {

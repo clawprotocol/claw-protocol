@@ -26,6 +26,8 @@ import {
 } from "./premiumNetworkRecoveryLocalDraft";
 import { isNonfatalGenerationFailureCode } from "./premiumAcceptancePolicy";
 import { shouldBlockPaidProReviewReadinessFromFallbackCorpus } from "./paidProApiFailureAuthorityGuard";
+import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
 /** Minimum plain length for a displayable degraded/local recovery Pro agreement on first review. */
 export const PAID_PRO_RECOVERY_MIN_DISPLAY_LEN = 4_000;
@@ -104,19 +106,58 @@ export function shouldSkipPremiumStructuralRetryForDegradedDisplay(args: {
   return meetsPaidProDegradedRecoveryDisplayRequirements(doc, args.intakeText);
 }
 
+function normRecoveryPartyToken(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function recoveryBodyContainsParty(bodyLower: string, partyName: string): boolean {
+  const n = normRecoveryPartyToken(partyName);
+  if (!n || n.length < 4) return false;
+  if (bodyLower.includes(n)) return true;
+  const parts = n.split(/\s+/).filter((p) => p.length >= 3);
+  if (parts.length >= 2) return parts.every((p) => bodyLower.includes(p));
+  return false;
+}
+
+function intakeJurisdictionAnchor(intake: string): string | null {
+  const m = intake.match(/\b([A-Za-z][A-Za-z\s]{2,30}?)\s+law\b/i);
+  return m ? m[1].replace(/\s+/g, " ").trim().toLowerCase() : null;
+}
+
+function recoveryBodySatisfiesIntakePayment(bodyLower: string, intakeLower: string): boolean {
+  const m = intakeLower.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
+  if (!m) return /\$\s*[\d,]+|(?:fee|payment|compensation|consideration)\b/i.test(bodyLower);
+  const plain = m[1].replace(/,/g, "");
+  const withComma = m[1];
+  if (bodyLower.includes(plain) || bodyLower.includes(withComma)) return true;
+  const formatted = plain.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return bodyLower.includes(formatted);
+}
+
 export function meetsPaidProDegradedRecoveryDisplayRequirements(
   body: string,
   intakeText?: string | null,
 ): boolean {
   const t = (body || "").trim();
-  if (t.length <= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) return false;
-  const lower = `${t}\n${intakeText || ""}`.toLowerCase();
-  if (!/blue canyon analytics/i.test(lower)) return false;
-  if (!/iron vale systems/i.test(lower)) return false;
-  if (!/delaware/i.test(lower)) return false;
-  if (!/(?:\$|usd\s*)?8[,.]?500|\b8500\b/i.test(lower)) return false;
+  if (t.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) return false;
+  const intake = (intakeText || "").trim();
+  const bodyLower = t.toLowerCase();
+  const intakeLower = intake.toLowerCase();
+
+  const parties = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
+  if (parties.length >= 2) {
+    if (!parties.slice(0, 2).every((p) => recoveryBodyContainsParty(bodyLower, p))) return false;
+  } else if (!/\b(agreement|consulting|services)\b/i.test(t)) {
+    return false;
+  }
+
+  const jurisdiction = intakeJurisdictionAnchor(intake);
+  if (jurisdiction && !bodyLower.includes(jurisdiction)) return false;
+
+  if (!recoveryBodySatisfiesIntakePayment(bodyLower, intakeLower)) return false;
+
   if (countPaidProExecutionBlocks(t) !== 1) return false;
-  if (!/\b(agreement|consulting)\b/i.test(t)) return false;
+  if (!/\b(agreement|consulting|services)\b/i.test(t)) return false;
   return true;
 }
 
