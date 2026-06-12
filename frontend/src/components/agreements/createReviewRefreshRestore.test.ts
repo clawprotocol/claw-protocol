@@ -101,4 +101,12 @@ describe("createReviewRefreshRestore", () => {
       reason: "paid_pro_authority_blocks_starter_restore",
     });
   });
+
+  it("fresh homepage hero handoff bypasses stale paid SoT auto-generate skip", () => {
+    establishPaidProSourceOfTruth({
+      text: `Paid agreement. ${"x".repeat(600)}`,
+      source: "server_full_draft",
+    });
+    expect(shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })).toBe(false);
+  });
 });

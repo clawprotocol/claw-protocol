@@ -30,6 +30,7 @@ import { LawdogBrand } from "../components/ui/LawdogBrand";
 import { PricingGuaranteePanel } from "./LaunchOfferBlocks";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import { markLawdogFunnelStep } from "../tracking/lawdogSession";
+import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 import { prepareFreshMarketingEntry } from "./marketingSession";
 import {
   getLawdogEntryContextStored,
@@ -109,6 +110,7 @@ export function LaunchHomePage() {
   const allowNavigateWithoutInput = entryStored === "returning" || entryStored === "drafting";
 
   const openCleanCreateIntake = useCallback(() => {
+    initializeNewAgreementSession();
     prepareFreshMarketingEntry();
     setLawdogEntryContext("new");
     clearCreateComplexityResume();
@@ -170,6 +172,7 @@ export function LaunchHomePage() {
     setHomeTransitionActive(true);
     setHandoffBusy(true);
     try {
+      initializeNewAgreementSession();
       prepareFreshMarketingEntry();
       clearCreateComplexityResume();
       setLawdogEntryContext("drafting");

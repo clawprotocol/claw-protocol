@@ -9129,21 +9129,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const handoffSource = opts?.handoffSource ?? "runProductionLocalDraftParse";
     const fromHomeHandoff =
       handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
-    if (
-      shouldBlockStarterRegenerationAfterPaidAuthority({
-        draft: draft ?? null,
-        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
-      })
-    ) {
-      if (fromHomeHandoff) {
-        logHomeAutoGenerateSkipped("paid_pro_authority_active");
-        homeAutoGenerateConsumedRef.current = true;
-      }
-      return true;
-    }
     if (fromHomeHandoff) {
       resetStalePaidReviewShellForFreeStarter("home_create_submit");
       lastKnownGoodAuthoritativeDraftRef.current = "";
+      hydratedPremiumBodyRef.current = "";
+      lastPremiumWinningCorpusRef.current = "";
+      premiumPipelineOutputBodyRef.current = "";
       setGuidedCompletionSession(null);
       if (homeAutoGenerateConsumedRef.current) {
         logHomeAutoGenerateSkipped("already_consumed");
@@ -9157,6 +9148,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         homeAutoGenerateConsumedRef.current = true;
         return true;
       }
+    }
+    if (
+      !fromHomeHandoff &&
+      shouldBlockStarterRegenerationAfterPaidAuthority({
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      })
+    ) {
+      return true;
     }
     if (paidProEditReturnResumeActive && handoffSource !== "inline_wording_submit") {
       const hid = (reviewAgreementIdRef.current || "").trim();
@@ -9353,17 +9353,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
-    if (
-      shouldBlockStarterRegenerationAfterPaidAuthority({
-        draft: draft ?? null,
-        intakeText: (initialIntakeText ?? intakeStepBufferRef.current ?? "").trim() || intakeCombined,
-      })
-    ) {
-      homeAutoGenerateConsumedRef.current = true;
-      logHomeAutoGenerateSkipped("paid_pro_authority_active");
-      return;
-    }
-    if (shouldSkipHomeAutoGenerateForStoredReview()) {
+    resetStalePaidReviewShellForFreeStarter("home_create_submit");
+  }, [homeHeroAutoGenerate, checkoutBackRestoreActive, paidProEditReturnResumeActive]);
+
+  useLayoutEffect(() => {
+    if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
+    if (paidProEditReturnResumeActive) return;
+    if (shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })) {
       homeAutoGenerateConsumedRef.current = true;
       return;
     }

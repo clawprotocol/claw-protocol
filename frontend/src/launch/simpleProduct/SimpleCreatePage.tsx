@@ -102,7 +102,7 @@ export function SimpleCreatePage() {
   const homeHeroAutoGenerate =
     heroHandoff?.autoGenerate === true &&
     Boolean((heroHandoff?.text || "").trim()) &&
-    !shouldSkipHomeAutoGenerateForStoredReview() &&
+    !shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: handoffFromHome }) &&
     !checkoutBackRestoreActive;
   const quickSendTypedArrival =
     heroHandoff?.quickSendTypedHandoff === true && Boolean((heroHandoff?.text || "").trim());

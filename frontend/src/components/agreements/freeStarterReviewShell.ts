@@ -2,13 +2,8 @@
  * Free/starter review shell identity — isolated from paid Pro guided render authority.
  */
 
-import { clearPersistedGuidedSession } from "./guidedDealCompletion/guidedSessionPersistence";
-import {
-  clearPaidPremiumCompletionSession,
-  clearPremiumCompletionDoneInLocalStorage,
-  clearPremiumCompletionSnapshot,
-  hasPaidPremiumCompletionSession,
-} from "./premiumCompletionStorage";
+import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
+import { clearStalePaidProAuthorityForFreshFreeStarter } from "../../launch/newAgreementSessionReset";
 import {
   isAuthoritativePaidProReview,
   PAID_PRO_REVIEW_BADGE,
@@ -18,7 +13,6 @@ import {
 import type { FreeReviewSurfaceSource } from "./freeStreamlineDraftReview";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
-import { shouldBlockStarterRegenerationAfterPaidAuthority } from "./paidProPostAcceptanceStateGuard";
 import { isPaidProFirstReviewDisplayActive } from "./paidProPostCheckoutRenderGate";
 
 export const FREE_STARTER_REVIEW_TITLE = "Review your draft";
@@ -157,17 +151,13 @@ export function preservePremiumCheckoutReturnInUrl(): boolean {
 
 /** Clear stale paid/guided shell state when starting a new free starter review (not checkout return). */
 export function resetStalePaidReviewShellForFreeStarter(source: FreeReviewSurfaceSource): void {
-  if (shouldBlockStarterRegenerationAfterPaidAuthority()) return;
   if (preservePremiumCheckoutReturnInUrl()) return;
   if (source !== "home_create_submit" && source !== "local_parse" && source !== "create_submit") {
     if (source !== "complexity_gate_starter" && source !== "api_hydrate" && source !== "api_late_merge") {
       return;
     }
   }
-  clearPaidPremiumCompletionSession();
-  clearPremiumCompletionSnapshot();
-  clearPremiumCompletionDoneInLocalStorage();
-  clearPersistedGuidedSession();
+  clearStalePaidProAuthorityForFreshFreeStarter();
 }
 
 export function logFreeReviewShellResolved(args: {

@@ -3,12 +3,22 @@
  * Preserves per-agreement localStorage (VS01 packet status, reviewer approvals) and account org id.
  */
 
-import { clearAgreementCreatorIntakeStorage, clearCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
+import { clearAgreementCreatorIntakeStorage, clearCreateReviewAgreementResumeId, clearCreateReviewDraftReadyMarker } from "../components/agreements/agreementIntakeStorage";
 import { clearAuthoritativeSigningSnapshot } from "../components/agreements/authoritativeSigningSnapshot";
+import { clearFrozenCanonicalAgreementCorpus } from "../components/agreements/canonicalAgreementSnapshot";
 import { clearPaidProPinnedSignerAppliedCorpus } from "../components/agreements/paidProFinalHydratedCorpus";
 import { clearPaidProReviewRenderFusedRepairCache } from "../components/agreements/paidProReviewRenderCorpus";
 import { clearConsumedPaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
 import { clearPaidProSourceOfTruth } from "../components/agreements/paidProSourceOfTruth";
+import { clearPaidProVisibleRenderMemo } from "../components/agreements/paidProVisibleRenderMemo";
+import { clearPersistedGuidedSession } from "../components/agreements/guidedDealCompletion/guidedSessionPersistence";
+import {
+  clearPaidPremiumCompletionSession,
+  clearPremiumCompletionDoneInLocalStorage,
+  clearPremiumCompletionSnapshot,
+  hasPremiumCheckoutReturnInUrl,
+} from "../components/agreements/premiumCompletionStorage";
+import { clearPremiumPartyNamesHandoff } from "../components/agreements/premiumPartyNamesHandoff";
 import { resetHeroHandoffForCreateNavigationWithoutPayload } from "./heroIntakePrefill";
 import { clearLawdogEntryContext, setLawdogEntryContext } from "./lawdogEntryContext";
 import { clearAgreementVs01BridgeSession } from "./simpleProduct/agreementToVs01SigningBridge";
@@ -30,6 +40,7 @@ const SESSION_PREFIXES_TO_CLEAR = [
   "claw_guided_vs01_signing_handoff_v1",
   "claw_premium_completion_snapshot_v1",
   "claw_premium_recipients_surface_released_v1",
+  "claw_premium_recipient_handoff",
   "claw_paid_premium_completion_session_v1",
   "claw_paid_pro_vs01_post_sign_v1",
   "claw_agreement_vs01_bridge_handoff_v1",
@@ -81,6 +92,25 @@ export function clearVs01DraftSessionForDocument(documentId: string): void {
   }
 }
 
+/** Drop in-memory + session paid Pro authority so a fresh free starter submit cannot inherit prior Pro QA. */
+export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
+  preserveCheckoutReturn?: boolean;
+}): void {
+  if (opts?.preserveCheckoutReturn !== false && hasPremiumCheckoutReturnInUrl()) return;
+  clearPaidProSourceOfTruth();
+  clearConsumedPaidProSignerMetadataAuthority();
+  clearAuthoritativeSigningSnapshot();
+  clearPaidProPinnedSignerAppliedCorpus();
+  clearPaidProReviewRenderFusedRepairCache();
+  clearFrozenCanonicalAgreementCorpus();
+  clearPaidProVisibleRenderMemo();
+  clearPaidPremiumCompletionSession();
+  clearPremiumCompletionSnapshot();
+  clearPremiumCompletionDoneInLocalStorage();
+  clearPremiumPartyNamesHandoff();
+  clearPersistedGuidedSession();
+}
+
 /**
  * Reset global create-flow state before navigating to /app/create.
  * Does not remove vs01_signing_packet_status_v1:{agreementId} or other per-agreement keys.
@@ -91,21 +121,26 @@ export function initializeNewAgreementSession(opts?: {
   const clearedSessionKeys = clearMatchingSessionStoragePrefixes(SESSION_PREFIXES_TO_CLEAR);
   clearAgreementCreatorIntakeStorage();
   clearCreateReviewAgreementResumeId();
+  clearCreateReviewDraftReadyMarker();
   resetHeroHandoffForCreateNavigationWithoutPayload();
   clearLawdogEntryContext();
   clearAgreementVs01BridgeSession();
+  clearPremiumPartyNamesHandoff();
 
   const clearedInMemoryModules: string[] = [];
-  clearPaidProSourceOfTruth();
-  clearedInMemoryModules.push("paidProSourceOfTruth");
-  clearConsumedPaidProSignerMetadataAuthority();
-  clearedInMemoryModules.push("paidProSignerMetadataAuthority");
-  clearAuthoritativeSigningSnapshot();
-  clearedInMemoryModules.push("authoritativeSigningSnapshot");
-  clearPaidProPinnedSignerAppliedCorpus();
-  clearedInMemoryModules.push("paidProPinnedSignerAppliedCorpus");
-  clearPaidProReviewRenderFusedRepairCache();
-  clearedInMemoryModules.push("paidProReviewRenderFusedRepairCache");
+  clearStalePaidProAuthorityForFreshFreeStarter({ preserveCheckoutReturn: false });
+  clearedInMemoryModules.push(
+    "paidProSourceOfTruth",
+    "paidProSignerMetadataAuthority",
+    "authoritativeSigningSnapshot",
+    "paidProPinnedSignerAppliedCorpus",
+    "paidProReviewRenderFusedRepairCache",
+    "frozenCanonicalAgreementCorpus",
+    "paidProVisibleRenderMemo",
+    "premiumCompletionSnapshot",
+    "premiumRecipientHandoff",
+    "persistedGuidedSession",
+  );
 
   if (opts?.priorAgreementId?.trim()) {
     clearVs01DraftSessionForDocument(opts.priorAgreementId.trim());

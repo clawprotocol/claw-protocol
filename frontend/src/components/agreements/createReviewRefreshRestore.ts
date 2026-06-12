@@ -40,9 +40,14 @@ export function shouldRestoreStoredCreateReviewDraftSnapshot(): boolean {
   return readCreateReviewDraftReadyMarker() || hasStoredCreateReviewState();
 }
 
+export type SkipHomeAutoGenerateOptions = {
+  /** Fresh homepage hero submit — must not inherit stale paid Pro authority from a prior tab session. */
+  freshHomeHeroHandoff?: boolean;
+};
+
 /** Skip home hero auto-generate when an in-tab review draft can be restored. */
-export function shouldSkipHomeAutoGenerateForStoredReview(): boolean {
-  if (paidProAuthorityBlocksStarterReviewRestore()) {
+export function shouldSkipHomeAutoGenerateForStoredReview(opts?: SkipHomeAutoGenerateOptions): boolean {
+  if (!opts?.freshHomeHeroHandoff && paidProAuthorityBlocksStarterReviewRestore()) {
     logReviewRefreshRegenerationSkipped("paid_pro_authority_blocks_starter_restore");
     return true;
   }
