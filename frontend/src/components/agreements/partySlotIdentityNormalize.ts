@@ -6,6 +6,10 @@
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import {
+  isAuthoritativeLegalEntityName,
+  isDisallowedPartyPhrase,
+} from "./paidProPartyNamePreserve";
 
 const STANDALONE_SUFFIX_RE =
   /^(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?$/i;
@@ -64,7 +68,32 @@ export function isInvalidPartySlotLegalEntity(name: string): boolean {
   if (!t || t.length < 3) return true;
   if (isStandaloneLegalEntitySuffix(t)) return true;
   if (isInternalPartyAliasToken(t)) return true;
+  if (isDisallowedPartyPhrase(t)) return true;
   return false;
+}
+
+/** When intake/free-starter manifest has exactly two legal entities, cap signer setup at two. */
+export function resolveAuthoritativePartySlotCount(args: {
+  intakeText?: string | null;
+  draftPartyNames?: readonly string[];
+  rawPartyCount?: number;
+}): number {
+  const intakeNames = collapsePartySlotCandidates(
+    extractBetweenPartyNameList(String(args.intakeText ?? "")),
+  );
+  const intakeAuthoritative = intakeNames.filter(isAuthoritativeLegalEntityName);
+  if (intakeAuthoritative.length === 2) return 2;
+
+  const rowNames = args.draftPartyNames ?? [];
+  const hasDrift = partySlotListHasDriftFragments(rowNames);
+  const collapsed = selectAuthoritativeTwoPartySlots(rowNames);
+  if (hasDrift && collapsed.length === 2) return 2;
+  if (hasDrift && intakeNames.length === 2) return 2;
+
+  const validCollapsed = collapsePartySlotCandidates(rowNames);
+  if (rowNames.length > 2 && validCollapsed.length === 2) return 2;
+
+  return Math.max(args.rawPartyCount ?? rowNames.length, 2);
 }
 
 function tokenContinuesEntitySuffix(token: string): boolean {
@@ -140,7 +169,17 @@ export function selectAuthoritativeTwoPartySlots(names: readonly string[]): stri
 export type DraftPartyRowLike = { name: string; role?: string; email?: string; id?: string };
 
 export function partySlotListHasDriftFragments(names: readonly string[]): boolean {
-  return names.some((raw) => isInvalidPartySlotLegalEntity(normalizeAgreementPartyName(raw)));
+  if (names.some((raw) => isInvalidPartySlotLegalEntity(normalizeAgreementPartyName(raw)))) {
+    return true;
+  }
+  if (names.length > 2) {
+    const collapsed = collapsePartySlotCandidates(names);
+    if (collapsed.length === 2) {
+      const withSuffix = collapsed.filter((n) => PARTY_ENTITY_SUFFIX_RE.test(n));
+      if (withSuffix.length >= 2) return true;
+    }
+  }
+  return false;
 }
 
 export function collapseDraftPartyRows(
@@ -150,17 +189,25 @@ export function collapseDraftPartyRows(
   if (!parties.length) return [];
 
   const rowNames = parties.map((p) => normalizeAgreementPartyName(p.name));
+  const intake = String(intakeContext || "").trim();
+  const fromIntake = intake ? extractBetweenPartyNameList(intake) : [];
+  const intakeCollapsed =
+    fromIntake.length >= 2 ? collapsePartySlotCandidates(fromIntake) : [];
+  const intakeAuthoritative = intakeCollapsed.filter(isAuthoritativeLegalEntityName);
   const hasDrift = partySlotListHasDriftFragments(rowNames);
-  if (!hasDrift) {
+  const collapseToKnownTwoPartyAuthority =
+    intakeAuthoritative.length === 2 && parties.length > 2;
+
+  if (!hasDrift && !collapseToKnownTwoPartyAuthority) {
     return parties.map((p) => ({ ...p, name: normalizeAgreementPartyName(p.name) }));
   }
 
-  const intake = String(intakeContext || "").trim();
-  const fromIntake = intake ? extractBetweenPartyNameList(intake) : [];
   const collapsedNames =
-    fromIntake.length >= 2
-      ? collapsePartySlotCandidates(fromIntake)
-      : selectAuthoritativeTwoPartySlots(parties.map((p) => p.name));
+    intakeAuthoritative.length >= 2
+      ? intakeAuthoritative
+      : intakeCollapsed.length >= 2
+        ? intakeCollapsed
+        : selectAuthoritativeTwoPartySlots(parties.map((p) => p.name));
 
   if (collapsedNames.length < 2) {
     return parties

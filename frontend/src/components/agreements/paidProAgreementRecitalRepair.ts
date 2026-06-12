@@ -44,7 +44,24 @@ export function repairMalformedPaidProAgreementRecital(
   out = dup.text;
   repairs.push(...dup.repairs);
 
+  const servicePartyLabels = stripServiceScopePartyPlaceholderLabels(out);
+  out = servicePartyLabels.text;
+  repairs.push(...servicePartyLabels.repairs);
+
   out = stripPremiumIntelligenceCalloutsFromCorpus(out);
 
+  return { text: out, repairs };
+}
+
+/** Remove ("party") labels the model attached to service deliverables in malformed Pro recitals. */
+export function stripServiceScopePartyPlaceholderLabels(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = text;
+  const before = out;
+  out = out.replace(
+    /(\b(?:AI\s+workflow\s+consulting|implementation\s+support|process\s+documentation|configuration\s+assistance|training\s+services)\b)\s*\(\s*["']party["']\s*\)/gi,
+    "$1",
+  );
+  if (out !== before) repairs.push("recital:strip_service_scope_party_placeholder");
   return { text: out, repairs };
 }

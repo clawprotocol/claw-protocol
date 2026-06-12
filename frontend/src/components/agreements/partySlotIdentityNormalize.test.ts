@@ -45,6 +45,14 @@ describe("partySlotIdentityNormalize", () => {
     expect(extractBetweenPartyNameList(intake)).toHaveLength(5);
   });
 
+  it("rejects service-scope deliverables mistaken for legal entities", () => {
+    expect(isInvalidPartySlotLegalEntity("implementation support")).toBe(true);
+    expect(isInvalidPartySlotLegalEntity("process documentation")).toBe(true);
+    expect(isInvalidPartySlotLegalEntity("configuration assistance")).toBe(true);
+    expect(isInvalidPartySlotLegalEntity("training services")).toBe(true);
+    expect(isInvalidPartySlotLegalEntity(RED_MESA)).toBe(false);
+  });
+
   it("collapseDraftPartyRows repairs three-row draft with standalone LLC slot", () => {
     const collapsed = collapseDraftPartyRows(
       [

@@ -23,9 +23,14 @@ import {
 } from "./signerPartyLegalEntityDisplaySanitizer";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
+  isAuthoritativeLegalEntityName,
+  isDisallowedPartyPhrase,
+} from "./paidProPartyNamePreserve";
+import {
   collapsePartySlotCandidates,
   isInvalidPartySlotLegalEntity,
   partySlotListHasDriftFragments,
+  resolveAuthoritativePartySlotCount,
   selectAuthoritativeTwoPartySlots,
 } from "./partySlotIdentityNormalize";
 
@@ -186,6 +191,9 @@ export function isRecitalSentenceFragmentPartyName(name: string): boolean {
   if (!t) return false;
   if (RECITAL_PARTY_NAME_PREFIX_RE.test(t)) return true;
   if (/^this agreement is between\b/i.test(t)) return true;
+  if (isDisallowedPartyPhrase(t)) return true;
+  if (/\bwill\s+(?:sign|provide)\b/i.test(t)) return true;
+  if (/\bengagement\s+term\b/i.test(t)) return true;
   return false;
 }
 
@@ -357,6 +365,7 @@ function paidProLegalEntityForIndex(args: ResolvePaidProSignerDetailsGateArgs, i
     args.signerSetupPartyIdentities ??
     resolveSignerSetupPartyIdentities({
       parties: args.draftPartyNames.map((name) => ({ name })),
+      intakeText: args.intakeText,
     });
   const fromRecipient =
     index === 0 ? args.recipient1Name : index === 1 ? args.recipient2Name : "";
@@ -413,6 +422,7 @@ function formatPaidProSignerDetailsBlockerMessage(
 
 export type ResolvePaidProSignerDetailsGateArgs = {
   partyCount: number;
+  intakeText?: string | null;
   signerSetupPartyIdentities?: readonly SignerSetupPartyIdentity[];
   draftPartyNames: readonly string[];
   partySignerNames: readonly string[];
@@ -430,7 +440,11 @@ export type ResolvePaidProSignerDetailsGateArgs = {
 export function resolvePaidProSignerDetailsGate(
   args: ResolvePaidProSignerDetailsGateArgs,
 ): PaidProSignerDetailsGate {
-  const requiredCount = Math.max(args.partyCount, 2);
+  const requiredCount = resolveAuthoritativePartySlotCount({
+    intakeText: args.intakeText,
+    draftPartyNames: args.draftPartyNames,
+    rawPartyCount: args.partyCount,
+  });
   const legalEntityNames: string[] = [];
   const blockers: PaidProSignerDetailsBlocker[] = [];
 
@@ -829,7 +843,10 @@ export function extractSignerEntitiesFromSignatureBlock(
       afterRoleHeading = false;
       continue;
     }
-    const candidate = norm(line.replace(SIG_ROLE_TAG_TAIL_RE, ""));
+    const inlineParty = line.match(/^PARTY(?:\s+\d+)?\s*:\s*(.+)$/i);
+    const candidate = norm(
+      (inlineParty ? inlineParty[1] : line).replace(SIG_ROLE_TAG_TAIL_RE, ""),
+    );
     const isEntity =
       candidate.length >= 2 &&
       candidate.length <= 90 &&
@@ -857,14 +874,22 @@ export function resolveSignerSetupPartyIdentities(args: {
   const intakeNames = collapsePartySlotCandidates(
     extractBetweenPartyNameList(String(args.intakeText ?? "")),
   );
+  const intakeAuthoritative = intakeNames.filter(isAuthoritativeLegalEntityName);
   const collapsedRows = collapsePartySlotCandidates(rowNames);
   const draftPartyNames =
-    hasDrift && intakeNames.length >= 2
-      ? intakeNames
-      : hasDrift && collapsedRows.length >= 2
-        ? selectAuthoritativeTwoPartySlots(collapsedRows)
-        : rowNames;
-  return draftPartyNames.map((name, i) =>
+    intakeAuthoritative.length === 2
+      ? intakeAuthoritative
+      : hasDrift && intakeNames.length >= 2
+        ? intakeNames
+        : hasDrift && collapsedRows.length >= 2
+          ? selectAuthoritativeTwoPartySlots(collapsedRows)
+          : rowNames;
+  const slotCount = resolveAuthoritativePartySlotCount({
+    intakeText: args.intakeText,
+    draftPartyNames,
+    rawPartyCount: draftPartyNames.length,
+  });
+  return draftPartyNames.slice(0, slotCount).map((name, i) =>
     resolveSignerSetupPartyIdentity({
       partyIndex: i,
       draftPartyName: name,
@@ -887,6 +912,7 @@ function pickBestLegalCandidate(
       (c) =>
         c.name.length >= 2 &&
         !isInvalidPartySlotLegalEntity(c.name) &&
+        !isDisallowedPartyPhrase(c.name) &&
         !isRecipientHandoffSeedDisposable(c.name) &&
         !looksLikeJoinedPartyList(c.name) &&
         !candidateContainsMultipleEntities(c.name) &&
@@ -1008,12 +1034,21 @@ export function resolveSignerSetupPartyIdentity(
   // never collapse Party 2 into Party 1 once the document itself names them distinctly.
   const signatureEntities = extractSignerEntitiesFromSignatureBlock(bodyText);
   const signatureSlotEntity = norm(signatureEntities[index] ?? "");
+  const signatureEntitiesClean = signatureEntities.filter(
+    (entity) =>
+      hasLegalEntitySuffix(entity) &&
+      !isDisallowedPartyPhrase(entity) &&
+      !isInvalidPartySlotLegalEntity(entity) &&
+      !candidateContainsMultipleEntities(entity),
+  );
   const signatureBlockAuthoritative =
+    signatureEntitiesClean.length >= 2 &&
     signatureEntities.length > index &&
     signatureSlotEntity.length >= 2 &&
     hasLegalEntitySuffix(signatureSlotEntity) &&
     !candidateContainsMultipleEntities(signatureSlotEntity) &&
-    new Set(signatureEntities.map((e) => e.toLowerCase())).size >= Math.min(2, signatureEntities.length);
+    !isDisallowedPartyPhrase(signatureSlotEntity) &&
+    new Set(signatureEntitiesClean.map((e) => e.toLowerCase())).size >= 2;
   if (signatureBlockAuthoritative) {
     legalEntityName = signatureSlotEntity;
   }

@@ -4,7 +4,10 @@
  */
 
 import { signerMetadataInputRaw } from "../../../agreement/signerMetadataNormalize";
-import { isDisallowedPartyPhrase } from "../paidProPartyNamePreserve";
+import {
+  isAuthoritativeLegalEntityName,
+  isDisallowedPartyPhrase,
+} from "../paidProPartyNamePreserve";
 import { extractBetweenPartyNameList } from "../partyBetweenParse";
 import {
   collapsePartySlotCandidates,
@@ -114,12 +117,15 @@ function resolvePartyNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, i
   );
   const collapsedDraft = selectAuthoritativeTwoPartySlots(args.draftPartyNames ?? []);
   const hasDrift = partySlotListHasDriftFragments(args.draftPartyNames ?? []);
+  const intakeAuthoritative = intakeNames.filter(isAuthoritativeLegalEntityName);
   const draftPartyNames =
-    hasDrift && intakeNames.length >= 2
-      ? intakeNames
-      : hasDrift && collapsedDraft.length >= 2
-        ? collapsedDraft
-        : args.draftPartyNames ?? [];
+    intakeAuthoritative.length === 2
+      ? intakeAuthoritative
+      : hasDrift && intakeNames.length >= 2
+        ? intakeNames
+        : hasDrift && collapsedDraft.length >= 2
+          ? collapsedDraft
+          : args.draftPartyNames ?? [];
   const slotCount = Math.max(draftPartyNames.length, 2);
   const slot = handoff ? linearPremiumRecipientSlots(handoff, slotCount)[index] : undefined;
   const identity = resolveSignerSetupPartyIdentity({
@@ -203,8 +209,10 @@ function resolveCanonicalFinalPartyManifestUncached(
   );
   const collapsedDraft = selectAuthoritativeTwoPartySlots(args.draftPartyNames ?? []);
   const hasDrift = partySlotListHasDriftFragments(args.draftPartyNames ?? []);
+  const intakeAuthoritative = intakeNames.filter(isAuthoritativeLegalEntityName);
   let slotCount = Math.max(args.partyCount, 2);
-  if (hasDrift && intakeNames.length === 2) slotCount = 2;
+  if (intakeAuthoritative.length === 2) slotCount = 2;
+  else if (hasDrift && intakeNames.length === 2) slotCount = 2;
   else if (hasDrift && collapsedDraft.length === 2 && slotCount > 2) slotCount = 2;
   const handoffSlots = handoff ? linearPremiumRecipientSlots(handoff, slotCount) : [];
   const parties: CanonicalFinalPartyEntry[] = [];

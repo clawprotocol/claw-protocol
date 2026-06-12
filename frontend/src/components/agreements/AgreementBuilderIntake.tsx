@@ -5594,6 +5594,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       snap.recipientCandidates[1]?.name,
       modalParty1NameRef.current,
       modalParty2NameRef.current,
+      intakeCombinedRef.current || intakeCombined,
     );
 
     const raw = buildReviewCoercionRawIntakeFromDraft(merged.draft, "");
@@ -5812,6 +5813,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         result.recipientCandidates[1]?.name,
         modalParty1NameRef.current,
         modalParty2NameRef.current,
+        mergedIntake,
       );
       const winning = (result.winningPremiumBodyText || "").trim();
       const usePaidAuthoritativeBody =
@@ -6613,6 +6615,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               result.recipientCandidates[1]?.name,
               modalParty1NameRef.current,
               modalParty2NameRef.current,
+              mergedIntake,
             );
             const rc0 = result.recipientCandidates[0] ?? { name: "", email: "", role: "Party" };
             const rc1 = result.recipientCandidates[1] ?? { name: "", email: "", role: "Party" };
@@ -6795,6 +6798,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               result.recipientCandidates[1]?.name,
               modalParty1NameRef.current,
               modalParty2NameRef.current,
+              mergedIntake,
             );
             const rc0 = result.recipientCandidates[0] ?? { name: "", email: "", role: "Party" };
             const rc1 = result.recipientCandidates[1] ?? { name: "", email: "", role: "Party" };
@@ -7006,6 +7010,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             result.recipientCandidates[1]?.name,
             modalParty1NameRef.current,
             modalParty2NameRef.current,
+            mergedIntake,
           );
           commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(mergedF.draft), {
             forceReviewDisplay: true,
@@ -7048,6 +7053,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           result.recipientCandidates[1]?.name,
           modalParty1NameRef.current,
           modalParty2NameRef.current,
+          mergedIntake,
         );
         premiumPipelineOutputBodyRef.current = (result.winningPremiumBodyText || "").trim();
         console.info("[premium-flow] payment_success", { path: "premium_rewrite_apply_success" });
@@ -7952,6 +7958,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           recipientCandidates[1]?.name,
           modalParty1NameRef.current,
           modalParty2NameRef.current,
+          intakeCombinedRef.current || intakeCombined,
         );
         const mergedRc = [
           { ...recipientCandidates[0], name: merged.displayName1 },
@@ -14502,6 +14509,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     () =>
       resolvePaidProSignerDetailsGate({
         partyCount: draft?.parties?.length ?? 2,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
         partySignerNames,
         recipient1Name,
@@ -14512,6 +14520,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }),
     [
       draft?.parties,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
       partySignerNames,
       recipient1Name,
       recipient2Name,

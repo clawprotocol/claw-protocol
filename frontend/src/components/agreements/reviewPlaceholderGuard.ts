@@ -13,6 +13,7 @@ import {
   isHighConfidencePartyNameForAutoPopulation,
   isProsePollutedPartyName,
 } from "./partyNameConfidence";
+import { collapseDraftPartyRows } from "./partySlotIdentityNormalize";
 import { readPremiumPartyNamesHandoff } from "./premiumPartyNamesHandoff";
 import { resolveSignerSetupPartyIdentity } from "./signerSetupPartyIdentity";
 import { textContainsUnresolvedIdentityPlaceholders } from "../../agreement/partyPlaceholderDisplay";
@@ -223,6 +224,7 @@ export function mergePremiumDraftPartiesWithRecipientPriority(
   snapName2: string | null | undefined,
   modalParty1?: string | null,
   modalParty2?: string | null,
+  intakeText?: string | null,
 ): { draft: ParsedDraftShape; displayName1: string; displayName2: string } {
   const ho = readPremiumPartyNamesHandoff();
   const ho1 = ho?.party1?.trim() ? ho.party1 : undefined;
@@ -269,11 +271,17 @@ export function mergePremiumDraftPartiesWithRecipientPriority(
       draftPartyNames: partyNames,
       log: false,
     }).legalEntityName || legacyDisplayName2;
-  const parties = [...(premiumDraft.parties || [])];
+  let parties = [...(premiumDraft.parties || [])];
   if (parties[0]) parties[0] = { ...parties[0], name: displayName1 };
   else if (displayName1) parties[0] = { name: displayName1, role: "party" };
   if (parties[1]) parties[1] = { ...parties[1], name: displayName2 };
   else if (displayName2) parties.push({ name: displayName2, role: "party" });
+  const collapsedParties = collapseDraftPartyRows(parties, intakeText ?? undefined);
+  parties = collapsedParties.map((row) => ({
+    name: row.name,
+    role: row.role || "party",
+    ...(row.email ? { email: row.email } : {}),
+  }));
   return { draft: { ...premiumDraft, parties }, displayName1, displayName2 };
 }
 
