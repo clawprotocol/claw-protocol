@@ -4,6 +4,12 @@
  */
 
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import {
+  collapsePartySlotCandidates,
+  isInternalPartyAliasRole,
+  isInvalidPartySlotLegalEntity,
+  normalizeAgreementPartyName,
+} from "./partySlotIdentityNormalize";
 import { extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { logPaidProEntityMap } from "./paidProPlaceholderAttributionLog";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
@@ -133,7 +139,7 @@ function norm(s: string): string {
 
 function roleLabelForIndex(index: number, explicit?: string): string {
   const t = (explicit || "").trim();
-  if (t.length >= 2) return t;
+  if (t.length >= 2 && !isInternalPartyAliasRole(t)) return t;
   return DEFAULT_ROLE_LABELS[index] ?? `Party ${index + 1}`;
 }
 
@@ -192,6 +198,7 @@ function containsMultipleKnownPartyNames(name: string, knownPartyTokens?: readon
 function isInvalidCanonicalPartyName(name: string, knownPartyTokens?: readonly string[]): boolean {
   const t = normalizedName(name);
   if (!t || t.length < 3) return true;
+  if (isInvalidPartySlotLegalEntity(t)) return true;
   if (/^(?:party|parties|client|service provider|provider|contractor|company)$/i.test(t)) return true;
   if (INVALID_CANONICAL_PARTY_PHRASE_RE.test(t)) return true;
   if (SECTION_HEADING_PARTY_PREFIX_RE.test(t)) return true;
@@ -297,8 +304,11 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
   source?: string;
   surface?: string;
 }): CanonicalPartyIdentityRecord[] {
-  const starterAuthoritative = authoritativeNamesFromPartyNames(args.starterNames);
-  const starterNames = rawStarterNames(args.starterNames);
+  const collapsedStarterNames = collapsePartySlotCandidates(
+    (args.starterNames ?? []).map((n) => normalizeAgreementPartyName(String(n || ""))),
+  );
+  const starterAuthoritative = authoritativeNamesFromPartyNames(collapsedStarterNames);
+  const starterNames = rawStarterNames(collapsedStarterNames);
   const rawIntakeNames = canonicalEntityNamesFromText(args.rawIntake, {
     allowBetweenWithoutSuffix: true,
     knownPartyTokens: starterNames,
@@ -307,8 +317,8 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
   const roleLabelsIn = args.roleLabels ?? [];
   const fullCandidatesEarly = [...rawIntakeNames, ...starterAuthoritative];
   const trustedPartyTokensEarly = [...fullCandidatesEarly, ...starterNames];
-  if ((args.starterNames?.length ?? 0) >= 2 && roleLabelsIn.length >= 2) {
-    const manifestNames = (args.starterNames ?? [])
+  if (collapsedStarterNames.length >= 2 && roleLabelsIn.length >= 2) {
+    const manifestNames = collapsedStarterNames
       .map((n) => {
         const norm = normalizedName(String(n));
         const fromIntakeCandidates = rawIntakeNames
@@ -335,7 +345,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
         legalEntities: manifestNames,
         intakeText: args.rawIntake,
         corpusText: args.generatedBody,
-        draftParties: args.starterNames?.map((name) => ({ name })),
+        draftParties: collapsedStarterNames.map((name) => ({ name })),
       });
       return manifestNames.slice(0, 12).map((fullLegalName, index) => {
         const full = cleanManifestLegalName(fullLegalName);
@@ -399,7 +409,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     legalEntities: fullNames,
     intakeText: args.rawIntake,
     corpusText: args.generatedBody,
-    draftParties: args.starterNames?.map((name) => ({ name })),
+    draftParties: collapsedStarterNames.map((name) => ({ name })),
   });
   return fullNames.slice(0, 12).map((fullLegalName, index) => {
     const full = fullLegalName.replace(/\s+/g, " ").trim();

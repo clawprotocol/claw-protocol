@@ -21,6 +21,13 @@ import {
   hasSignerPartyLegalEntityDisplayPollution,
   sanitizeSignerPartyLegalEntityDisplay,
 } from "./signerPartyLegalEntityDisplaySanitizer";
+import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import {
+  collapsePartySlotCandidates,
+  isInvalidPartySlotLegalEntity,
+  partySlotListHasDriftFragments,
+  selectAuthoritativeTwoPartySlots,
+} from "./partySlotIdentityNormalize";
 
 export type SignerIdentitySource =
   | "sot_signature_block"
@@ -845,11 +852,22 @@ export function resolveSignerSetupPartyIdentities(args: {
   agreementBodyText?: string | null;
   handoffSlots?: readonly { name?: string | null }[];
 }): SignerSetupPartyIdentity[] {
-  const draftPartyNames = args.parties.map((p) => p?.name);
-  return args.parties.map((p, i) =>
+  const rowNames = args.parties.map((p) => String(p?.name ?? "").trim()).filter(Boolean);
+  const hasDrift = partySlotListHasDriftFragments(rowNames);
+  const intakeNames = collapsePartySlotCandidates(
+    extractBetweenPartyNameList(String(args.intakeText ?? "")),
+  );
+  const collapsedRows = collapsePartySlotCandidates(rowNames);
+  const draftPartyNames =
+    hasDrift && intakeNames.length >= 2
+      ? intakeNames
+      : hasDrift && collapsedRows.length >= 2
+        ? selectAuthoritativeTwoPartySlots(collapsedRows)
+        : rowNames;
+  return draftPartyNames.map((name, i) =>
     resolveSignerSetupPartyIdentity({
       partyIndex: i,
-      draftPartyName: p?.name,
+      draftPartyName: name,
       handoffName: args.handoffSlots?.[i]?.name,
       intakeText: args.intakeText,
       agreementBodyText: args.agreementBodyText,
@@ -868,6 +886,7 @@ function pickBestLegalCandidate(
     .filter(
       (c) =>
         c.name.length >= 2 &&
+        !isInvalidPartySlotLegalEntity(c.name) &&
         !isRecipientHandoffSeedDisposable(c.name) &&
         !looksLikeJoinedPartyList(c.name) &&
         !candidateContainsMultipleEntities(c.name) &&

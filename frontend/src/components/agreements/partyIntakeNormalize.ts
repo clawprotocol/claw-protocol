@@ -4,7 +4,13 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { dedupeEntitySuffixes, US_STATE_NAMES_ENGLISH } from "./partyFormat";
+import {
+  collapsePartySlotCandidates,
+  normalizeAgreementPartyName,
+  splitCommaSeparatedPartyNames,
+} from "./partySlotIdentityNormalize";
 
 const MAX_PARTY_INLINE_LEN = 280;
 
@@ -31,13 +37,28 @@ export function sanitizePartiesInput(input: string): string {
 export function parsePartiesFromUserInput(s: string): { name: string; role: string }[] | null {
   const t = sanitizePartiesInput(s.trim());
   if (!t) return null;
-  const comma = t.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean);
+  const between = extractBetweenPartyNameList(t);
+  if (between.length >= 2) {
+    return collapsePartySlotCandidates(between).map((name) => ({
+      name: name.slice(0, MAX_PARTY_INLINE_LEN),
+      role: "party",
+    }));
+  }
+  const comma = splitCommaSeparatedPartyNames(t)
+    .map((x) => normalizeAgreementPartyName(x))
+    .filter(Boolean);
   if (comma.length >= 2) {
-    return comma.map((name) => ({ name: name.slice(0, MAX_PARTY_INLINE_LEN), role: "party" }));
+    return collapsePartySlotCandidates(comma).map((name) => ({
+      name: name.slice(0, MAX_PARTY_INLINE_LEN),
+      role: "party",
+    }));
   }
   const and = t.split(/\s+and\s+/i).map((x) => x.trim()).filter(Boolean);
   if (and.length >= 2) {
-    return and.map((name) => ({ name: name.slice(0, MAX_PARTY_INLINE_LEN), role: "party" }));
+    return collapsePartySlotCandidates(and).map((name) => ({
+      name: name.slice(0, MAX_PARTY_INLINE_LEN),
+      role: "party",
+    }));
   }
   return null;
 }
@@ -121,7 +142,7 @@ export function splitTwoPartiesFromJoinedLine(line: string): StructuredTwoPartie
 export function splitPartyLineForHandoffFirstTwo(line: string): StructuredTwoParties | null {
   const s = sanitizePartiesInput((line || "").trim());
   if (!s) return null;
-  const byComma = s.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean);
+  const byComma = splitCommaSeparatedPartyNames(s);
   if (byComma.length >= 2) return { party_1: byComma[0], party_2: byComma[1] };
   const byAmp = s.split(/\s*&\s*/).map((x) => x.trim()).filter(Boolean);
   if (byAmp.length >= 2) return { party_1: byAmp[0], party_2: byAmp[1] };

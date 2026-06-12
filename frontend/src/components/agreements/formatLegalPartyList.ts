@@ -12,7 +12,17 @@ export type PartyEntry = {
   role?: string;
 };
 
-const GENERIC_ROLES = new Set(["party", "parties", "signer", "signatory", ""]);
+const GENERIC_ROLES = new Set([
+  "party",
+  "parties",
+  "signer",
+  "signatory",
+  "party_a",
+  "party_b",
+  "partya",
+  "partyb",
+  "",
+]);
 
 function isGenericRole(role: string | undefined): boolean {
   return !role || GENERIC_ROLES.has(role.toLowerCase().trim());

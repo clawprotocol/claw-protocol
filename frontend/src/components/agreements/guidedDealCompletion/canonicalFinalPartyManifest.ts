@@ -5,6 +5,14 @@
 
 import { signerMetadataInputRaw } from "../../../agreement/signerMetadataNormalize";
 import { isDisallowedPartyPhrase } from "../paidProPartyNamePreserve";
+import { extractBetweenPartyNameList } from "../partyBetweenParse";
+import {
+  collapsePartySlotCandidates,
+  isInvalidPartySlotLegalEntity,
+  normalizeAgreementPartyName,
+  partySlotListHasDriftFragments,
+  selectAuthoritativeTwoPartySlots,
+} from "../partySlotIdentityNormalize";
 import { looksLikeEmail, stripRecipientEmailNoise } from "../recipientEmailValidation";
 import { isPlaceholderPartyName } from "../starterPartyLimits";
 import {
@@ -44,6 +52,7 @@ export type ResolveCanonicalFinalPartyManifestArgs = ResolveGuidedPreReviewSigne
   draftPartyRoles?: readonly string[];
   partySignerTitles?: readonly string[];
   handoff?: PremiumRecipientHandoffV2 | null;
+  intakeText?: string | null;
 };
 
 export type GuidedFinalReviewPartyBlockReason =
@@ -80,8 +89,9 @@ function normLoose(s: string): string {
 }
 
 function usablePartyName(raw: string | null | undefined): string {
-  const t = (raw || "").trim();
+  const t = normalizeAgreementPartyName((raw || "").trim());
   if (t.length < 2) return "";
+  if (isInvalidPartySlotLegalEntity(t)) return "";
   if (isTemplatePartyPlaceholderName(t)) return "";
   if (isEmailLikePartyName(t)) return "";
   if (isDisallowedPartyPhrase(t)) return "";
@@ -99,13 +109,26 @@ function roleForIndex(index: number, roleLabel?: string): CanonicalFinalPartyRol
 
 function resolvePartyNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, index: number): string {
   const handoff = args.handoff ?? readPremiumRecipientHandoff();
-  const slot = handoff ? linearPremiumRecipientSlots(handoff, Math.max(args.partyCount, 2))[index] : undefined;
+  const intakeNames = collapsePartySlotCandidates(
+    extractBetweenPartyNameList(String(args.intakeText ?? "")),
+  );
+  const collapsedDraft = selectAuthoritativeTwoPartySlots(args.draftPartyNames ?? []);
+  const hasDrift = partySlotListHasDriftFragments(args.draftPartyNames ?? []);
+  const draftPartyNames =
+    hasDrift && intakeNames.length >= 2
+      ? intakeNames
+      : hasDrift && collapsedDraft.length >= 2
+        ? collapsedDraft
+        : args.draftPartyNames ?? [];
+  const slotCount = Math.max(draftPartyNames.length, 2);
+  const slot = handoff ? linearPremiumRecipientSlots(handoff, slotCount)[index] : undefined;
   const identity = resolveSignerSetupPartyIdentity({
     partyIndex: index,
-    draftPartyName: args.draftPartyNames[index],
+    draftPartyName: draftPartyNames[index] ?? args.draftPartyNames[index],
     recipientDisplayName: "",
     handoffName: slot?.name,
-    draftPartyNames: args.draftPartyNames,
+    draftPartyNames,
+    intakeText: args.intakeText,
     log: false,
   });
   const legal = usablePartyName(identity.legalEntityName);
@@ -175,7 +198,14 @@ function resolveCanonicalFinalPartyManifestUncached(
   args: ResolveCanonicalFinalPartyManifestArgs,
 ): CanonicalFinalPartyManifest {
   const handoff = args.handoff ?? readPremiumRecipientHandoff();
-  const slotCount = Math.max(args.partyCount, 2);
+  const intakeNames = collapsePartySlotCandidates(
+    extractBetweenPartyNameList(String(args.intakeText ?? "")),
+  );
+  const collapsedDraft = selectAuthoritativeTwoPartySlots(args.draftPartyNames ?? []);
+  const hasDrift = partySlotListHasDriftFragments(args.draftPartyNames ?? []);
+  let slotCount = Math.max(args.partyCount, 2);
+  if (hasDrift && intakeNames.length === 2) slotCount = 2;
+  else if (hasDrift && collapsedDraft.length === 2 && slotCount > 2) slotCount = 2;
   const handoffSlots = handoff ? linearPremiumRecipientSlots(handoff, slotCount) : [];
   const parties: CanonicalFinalPartyEntry[] = [];
 

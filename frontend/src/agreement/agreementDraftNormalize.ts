@@ -7,6 +7,7 @@ import {
   substitutePartyPlaceholdersInUserFacingText,
   textContainsUnresolvedIdentityPlaceholders,
 } from "./partyPlaceholderDisplay";
+import { collapseDraftPartyRows } from "../components/agreements/partySlotIdentityNormalize";
 
 function coerceStr(v: unknown): string {
   if (v == null) return "";
@@ -48,8 +49,8 @@ function buildDefaultPartyNameContext(r: Record<string, unknown>, override?: str
 }
 
 function fallbackRoleForPartyIndex(idx: number): string {
-  if (idx === 0) return "party_a";
-  if (idx === 1) return "party_b";
+  if (idx === 0) return "Client";
+  if (idx === 1) return "Service Provider";
   return "party";
 }
 
@@ -98,6 +99,17 @@ export function normalizeAgreementDraftFromApi(
     if (textContainsUnresolvedIdentityPlaceholders(next))
       next = substitutePartyPlaceholdersInUserFacingText(row.name, intakeHeavy, undefined);
     parties[i] = { ...row, name: next };
+  }
+
+  const collapsedParties = collapseDraftPartyRows(parties, intakeHeavy);
+  parties.length = 0;
+  for (const row of collapsedParties) {
+    parties.push({
+      name: row.name,
+      role: row.role || "party",
+      email: row.email,
+      ...(row.id ? { id: row.id } : {}),
+    });
   }
 
   const enrichedContext = [partyNameContext, ...parties.map((p) => p.name)].join("\n");

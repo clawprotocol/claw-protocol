@@ -11,6 +11,10 @@
 
 import { extractBetweenPartyNameList } from "../components/agreements/partyBetweenParse";
 import {
+  isStandaloneLegalEntitySuffix,
+  normalizeAgreementPartyName,
+} from "../components/agreements/partySlotIdentityNormalize";
+import {
   countIdentityPlaceholders,
   inferOrgSlotOriginMetadata,
   listUnresolvedIdentityPlaceholderTokens,
@@ -47,7 +51,11 @@ function pushUnique(out: string[], seen: Set<string>, raw: string) {
 }
 
 function stripParenClauses(s: string): string {
-  return s.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+  return s
+    .replace(/\s*\(\s*["'“”]?party[_\s-]?[ab]\d*["'“”]?\s*\)\s*/gi, " ")
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -104,7 +112,7 @@ function slotFallback(idx: number): string {
  * Used by {@link textContainsUnresolvedIdentityPlaceholders} for regression tests.
  */
 export const UNRESOLVED_IDENTITY_PLACEHOLDER_RE =
-  /\[\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\]|\(\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\)|\b(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)[1-9]\d*\b|\b(?:ORG|PARTY|COMPANY)[1-9]\d*\b|\borg(?:[_\s\-]+)[1-9]\d*\b|\bparty(?:[_\s\-]+)[1-9]\d*\b|\borg[1-9]\d*\b|\bparty[1-9]\d*\b|\{\{\s*(?:party|entity|organization)(?:[_\s\-]+)?[1-9]\d*\s*\}\}|\b__(?:ORG|PERSON|PARTY|ENTITY)__\b/gi;
+  /\[\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\]|\(\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)?[1-9]\d*\s*\)|\(\s*["'“”]?party[_\s-]?[ab]\d*["'“”]?\s*\)|\b(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\s\-]+)[1-9]\d*\b|\b(?:ORG|PARTY|COMPANY)[1-9]\d*\b|\borg(?:[_\s\-]+)[1-9]\d*\b|\bparty(?:[_\s\-]+)[1-9]\d*\b|\bparty[_\s-]?[ab]\d*\b|\borg[1-9]\d*\b|\bparty[1-9]\d*\b|\{\{\s*(?:party|entity|organization)(?:[_\s\-]+)?[1-9]\d*\s*\}\}|\b__(?:ORG|PERSON|PARTY|ENTITY)__\b/gi;
 
 export function textContainsUnresolvedIdentityPlaceholders(text: string | null | undefined): boolean {
   const t = text || "";
@@ -143,26 +151,68 @@ export function substitutePartyPlaceholdersInUserFacingText(
     return candidates[idx] ?? slotFallback(idx);
   };
 
-  let out = substitutePlaceholderTokensWithFn(t, replacer);
+  let out = auth.length >= 2 ? repairKnownPartyAliasDisplayFragments(t, auth) : t;
+  out = substitutePlaceholderTokensWithFn(out, replacer);
   // Second pass: catch any bracket / mustache forms the primary pass might miss, or
   // mixed corruption (e.g. "Smith & [ORG_4]") after partial replacement.
   if (textContainsUnresolvedIdentityPlaceholders(out)) {
     out = substitutePlaceholderTokensWithFn(out, replacer);
   }
+  if (auth.length >= 2) {
+    out = repairKnownPartyAliasDisplayFragments(out, auth);
+  }
   return repairDuplicatedEntityPunctuationInDisplay(out);
 }
 
 const PARTY_PLACEHOLDER_TOKEN_SOURCE =
-  "\\[\\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\\s\\-]+)?[1-9]\\d*\\s*\\]|\\(\\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\\s\\-]+)?[1-9]\\d*\\s*\\)|\\b(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\\s\\-]+)[1-9]\\d*\\b|\\b(?:ORG|PARTY|COMPANY)[1-9]\\d*\\b|\\borg(?:[_\\s\\-]+)[1-9]\\d*\\b|\\bparty(?:[_\\s\\-]+)[1-9]\\d*\\b|\\borg[1-9]\\d*\\b|\\bparty[1-9]\\d*\\b|\\{\\{\\s*(?:party|entity|organization)(?:[_\\s\\-]+)?[1-9]\\d*\\s*\\}\\}|\\b__(?:ORG|PERSON|PARTY|ENTITY)__(?:[_\\s\\-]+)?[1-9]\\d*\\b|\\b__(?:ORG|PERSON|PARTY|ENTITY)__\\b";
+  "\\[\\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\\s\\-]+)?[1-9]\\d*\\s*\\]|\\(\\s*(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\\s\\-]+)?[1-9]\\d*\\s*\\)|\\(\\s*[\"'“”]?party[_\\s-]?[ab]\\d*[\"'“”]?\\s*\\)|\\b(?:ORG|PARTY|PERSON|ENTITY|CLIENT|COMPANY|ORGANIZATION)(?:[_\\s\\-]+)[1-9]\\d*\\b|\\b(?:ORG|PARTY|COMPANY)[1-9]\\d*\\b|\\borg(?:[_\\s\\-]+)[1-9]\\d*\\b|\\bparty(?:[_\\s\\-]+)[1-9]\\d*\\b|\\bparty[_\\s-]?[ab]\\d*\\b|\\borg[1-9]\\d*\\b|\\bparty[1-9]\\d*\\b|\\{\\{\\s*(?:party|entity|organization)(?:[_\\s\\-]+)?[1-9]\\d*\\s*\\}\\}|\\b__(?:ORG|PERSON|PARTY|ENTITY)__(?:[_\\s\\-]+)?[1-9]\\d*\\b|\\b__(?:ORG|PERSON|PARTY|ENTITY)__\\b";
+
+function slotIndexFromPlaceholderMatch(match: string): number {
+  const m = match.trim();
+  if (/party[_\s-]?a\b/i.test(m)) return 1;
+  if (/party[_\s-]?b\b/i.test(m)) return 2;
+  const num = m.match(/([1-9]\d*)/);
+  return num ? parseInt(num[1], 10) : 1;
+}
 
 function substitutePlaceholderTokensWithFn(text: string, replacer: (slot: number) => string): string {
   const re = new RegExp(PARTY_PLACEHOLDER_TOKEN_SOURCE, "gi");
   return text.replace(re, (match, offset, whole) => {
-    const num = match.match(/([1-9]\d*)/);
-    const slot = num ? parseInt(num[1], 10) : 1;
+    const slot = slotIndexFromPlaceholderMatch(match);
     const replacement = replacer(Number.isFinite(slot) && slot > 0 ? slot : 1);
     return dedupeAmpersandPrefixBeforePlaceholder(whole.slice(0, offset), replacement);
   });
+}
+
+function repairKnownPartyAliasDisplayFragments(
+  text: string,
+  authoritativePartyNames: readonly string[],
+): string {
+  const auth = authoritativePartyNames
+    .map((n) => normalizeAgreementPartyName(String(n ?? "")))
+    .filter((n) => n.length >= 2);
+  if (auth.length < 2) return text;
+  let out = text;
+  out = out.replace(/\s*\(\s*["'“”]?party[_\s-]?a\d*["'“”]?\s*\)/gi, "");
+  out = out.replace(/\s*\(\s*["'“”]?party[_\s-]?b\d*["'“”]?\s*\)/gi, "");
+  if (/\band\s+LLC\b/i.test(out) && auth[1] && !isStandaloneLegalEntitySuffix(auth[1])) {
+    out = out.replace(/\band\s+LLC\b/i, `and ${auth[1]}`);
+  }
+  for (const full of auth) {
+    const base = full.replace(
+      /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\.?$/i,
+      "",
+    );
+    if (base.length < 4 || base === full) continue;
+    const re = new RegExp(
+      `\\b${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b(?!\\s+(?:LLC|L\\.L\\.C\\.|Inc\\.?|Corp\\.?|Corporation|Ltd\\.?|Limited))`,
+      "i",
+    );
+    if (re.test(out) && !out.includes(full)) {
+      out = out.replace(re, full);
+    }
+  }
+  return out.replace(/\s+/g, " ").trim();
 }
 
 /** A candidate is a usable real party name (not blank, not another placeholder, not a generic word). */

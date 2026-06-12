@@ -16,6 +16,11 @@ import {
   hasTrailingJurisdictionClausePollution,
   stripTrailingJurisdictionClause,
 } from "./signerPartyLegalEntityDisplaySanitizer";
+import {
+  isInvalidPartySlotLegalEntity,
+  isStandaloneLegalEntitySuffix,
+  stripInternalPartyAliasParentheticals,
+} from "./partySlotIdentityNormalize";
 
 const PARTY_ROLE_HEADING_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*(.*)$/i;
 const SIG_FIELD_RE =
@@ -50,7 +55,16 @@ function executionPartyLabelNeedsAuthorityRepair(
   if (!inline || !authority) return false;
   if (hasTrailingJurisdictionClausePollution(inline)) return true;
   if (EXECUTION_HEADING_METADATA_LEAK_MARKERS.some((re) => re.test(inline))) return true;
-  const stripped = stripTrailingJurisdictionClause(inline);
+  if (/\bparty[_\s-]?[ab]\b/i.test(inline)) return true;
+  if (isStandaloneLegalEntitySuffix(inline) || isInvalidPartySlotLegalEntity(inline)) return true;
+  if (/\band\b/i.test(inline) && !partyLegalNamesMatch(inline, authority)) return true;
+  if (
+    authority.length > inline.length &&
+    authority.toLowerCase().startsWith(`${inline.toLowerCase()} `)
+  ) {
+    return true;
+  }
+  const stripped = stripTrailingJurisdictionClause(stripInternalPartyAliasParentheticals(inline));
   return partyLegalNamesMatch(stripped, authority) && !partyLegalNamesMatch(inline, authority);
 }
 

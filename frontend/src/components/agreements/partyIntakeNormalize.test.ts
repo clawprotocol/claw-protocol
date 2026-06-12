@@ -38,6 +38,15 @@ describe("parsePartiesFromUserInput", () => {
     expect(parsed![1].name).toMatch(/Mary Jane/i);
     expect(parsed![1].name).not.toMatch(/Party A|Party B|edit in review/i);
   });
+
+  it("parses comma-before-LLC entities as two parties, not three", () => {
+    const raw =
+      'Red Mesa Logistics, LLC ("party_a") and Harbor Peak Automation, LLC ("party_b")';
+    const parsed = parsePartiesFromUserInput(raw);
+    expect(parsed).toHaveLength(2);
+    expect(parsed![0].name).toBe("Red Mesa Logistics LLC");
+    expect(parsed![1].name).toBe("Harbor Peak Automation LLC");
+  });
 });
 
 describe("getRecipientHandoffNamesFromDraft", () => {

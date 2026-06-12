@@ -95,6 +95,9 @@ describe("isPlaceholderPartyName", () => {
     expect(isPlaceholderPartyName("   ")).toBe(true);
     expect(isPlaceholderPartyName("Party A")).toBe(true);
     expect(isPlaceholderPartyName("party b")).toBe(true);
+    expect(isPlaceholderPartyName("party_a")).toBe(true);
+    expect(isPlaceholderPartyName("party_b")).toBe(true);
+    expect(isPlaceholderPartyName("LLC")).toBe(true);
     expect(isPlaceholderPartyName("Party 3")).toBe(true);
     expect(isPlaceholderPartyName("Signer 2")).toBe(true);
     expect(isPlaceholderPartyName("Recipient")).toBe(true);

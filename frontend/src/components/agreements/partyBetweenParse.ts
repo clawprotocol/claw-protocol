@@ -8,6 +8,11 @@ import {
   stripSignerInstructionClausesFromIntake,
 } from "./intakeSignerInstructionParse";
 import { normalizePartyNameFragment } from "./partyIntakeNormalize";
+import {
+  collapsePartySlotCandidates,
+  normalizeAgreementPartyName,
+  splitCommaSeparatedPartyNames,
+} from "./partySlotIdentityNormalize";
 import { truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 
 const TAIL_STOP =
@@ -65,12 +70,14 @@ export function extractBetweenPartyNameList(raw: string): string[] {
 
   const right = trimBetweenPartyFragment(segments[segments.length - 1]);
   const leftCsv = segments.slice(0, -1).join(" and ");
-  const leftNames = leftCsv
-    .split(/\s*,\s*/)
+  const leftNames = splitCommaSeparatedPartyNames(leftCsv)
     .map(trimBetweenPartyFragment)
+    .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2);
 
-  const names = right.length >= 2 ? [...leftNames, right] : leftNames;
+  const names = collapsePartySlotCandidates(
+    right.length >= 2 ? [...leftNames, normalizeAgreementPartyName(right)] : leftNames,
+  );
   return names.length >= 2 ? names : [];
 }
 
