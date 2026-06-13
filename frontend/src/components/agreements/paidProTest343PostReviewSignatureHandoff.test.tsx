@@ -13,7 +13,7 @@ import {
 import { navigateCreatorPrepareSignatureLinks } from "../../launch/creatorDashboardPrepareSignatureLinks";
 import { resolveVs01EsignShellCopy } from "../../vs01/vs01EsignShellCopy";
 import {
-  PREPARE_PACKET_BRIDGE_PRIMARY_CTA_SENDER_FIRST,
+  PREPARE_PACKET_BRIDGE_PRIMARY_CTA_PARALLEL,
   resolvePreparePacketBridgePrimaryCta,
 } from "../../vs01/vs01PreparePacketCompletion";
 import { handlePreparePacketContinue } from "../../vs01/vs01PreparePacketContinue";
@@ -129,15 +129,12 @@ describe("test343 post-review / signature handoff UX", () => {
       vs01Step: 2,
     });
     expect(copy.title).toBe("Prepare signature links");
-    expect(copy.subtitle).toMatch(/LawDog placed required signature fields/i);
-    expect(copy.subtitle).not.toMatch(/Place required signature fields/i);
+    expect(copy.subtitle).toMatch(/send signing links to all parties/i);
   });
 
-  it("prepare bridge primary CTA is sender-first open signing view (no implied auto-email)", () => {
-    expect(
-      resolvePreparePacketBridgePrimaryCta({ senderMustSignFirst: true, packetPrepareOnly: true }),
-    ).toBe(PREPARE_PACKET_BRIDGE_PRIMARY_CTA_SENDER_FIRST);
-    expect(PREPARE_PACKET_BRIDGE_PRIMARY_CTA_SENDER_FIRST).toBe("Open my signing view");
+  it("prepare bridge primary CTA sends signing links in parallel mode", () => {
+    expect(resolvePreparePacketBridgePrimaryCta()).toBe(PREPARE_PACKET_BRIDGE_PRIMARY_CTA_PARALLEL);
+    expect(PREPARE_PACKET_BRIDGE_PRIMARY_CTA_PARALLEL).toBe("Send signing links");
   });
 
   it("dashboard prepare signature links seeds VS01 bridge with two participants", async () => {
@@ -210,7 +207,7 @@ describe("test343 post-review / signature handoff UX", () => {
     expect(result.handoff.ownerSigningUrl).toMatch(/doc_343/);
     expect(result.handoff.signers[0]?.email).toBe("counterparty@example.com");
     expect(result.handoff.signers[0]?.signingUrl).toMatch(/doc_343/);
-    expect(result.handoff.senderMustSignFirst).toBe(true);
+    expect(result.handoff.senderMustSignFirst).toBe(false);
     expect(result.handoff.signers[0]?.signingUrl).not.toBe(result.handoff.ownerSigningUrl);
   });
 

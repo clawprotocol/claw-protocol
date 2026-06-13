@@ -28,7 +28,7 @@ export type PaidProVs01PostSignHandoffV1 = {
   signers: PaidProVs01PostSignSignerRow[];
   /** Owner/sender role id for status tracking. */
   ownerSignerRoleId?: string;
-  /** When true, sender should sign before sharing counterparty links. */
+  /** Explicit opt-in ordered signing only — default is parallel (see vs01SigningOrderPolicy). */
   senderMustSignFirst?: boolean;
   /** Owner/sender deep link for packet-prepare-only flows. */
   ownerSigningUrl?: string;

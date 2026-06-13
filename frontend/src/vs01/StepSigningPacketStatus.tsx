@@ -250,7 +250,7 @@ export function StepSigningPacketStatus({
     <section className="vs01-step vs01-signing-packet-status" aria-labelledby="vs01-packet-status-title">
       <header className="vs01-step-header vs01-packet-status-header">
         <h1 id="vs01-packet-status-title" className="vs01-step-title">
-          Signing packet ready
+          Signature links are ready
         </h1>
         <p className="vs01-packet-status-summary" role="status">
           {signed} / {total} signed
@@ -258,9 +258,7 @@ export function StepSigningPacketStatus({
         <p className="vs01-step-lead">
           {fullySigned
             ? "Fully signed — download the final PDF and proof record from your agreement workspace."
-            : ownerCard?.hint
-              ? "Sign as the sender first, then share each counterparty link."
-              : "Share each signing link and track progress below."}
+            : "LawDog sent signing links to all parties. Each party can sign independently — the agreement is complete after everyone signs."}
         </p>
       </header>
 

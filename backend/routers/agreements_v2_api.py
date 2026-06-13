@@ -2896,6 +2896,19 @@ class SigningCeremonyCompleteBody(BaseModel):
     locked_version_id: str = ""
 
 
+class SigningInviteTargetBody(BaseModel):
+    email: str = ""
+    display_name: str = ""
+    signing_url: str = ""
+    signer_role_id: str = ""
+    is_owner: bool = False
+
+
+class SigningLinksSentBody(BaseModel):
+    packet_revision: Optional[str] = None
+    targets: List[SigningInviteTargetBody] = Field(default_factory=list)
+
+
 NegotiationPosture = Literal[
     "cooperative",
     "firm",
@@ -5934,6 +5947,51 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
     except Exception:
         pass
     return {"ok": True, "draft": next_draft.model_dump()}
+
+
+@router.post("/{agreement_id}/signing-links-sent")
+def post_agreement_signing_links_sent(
+    agreement_id: str,
+    request: Request,
+    body: SigningLinksSentBody = SigningLinksSentBody(),
+) -> Dict[str, Any]:
+    """Owner-triggered VS01 signing invite emails after packet prepare (parallel signing default)."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="signing_links_sent")
+    draft = _load_or_404(agreement_id)
+    sent_count = 0
+    skip_reason: str | None = None
+    try:
+        from backend.services.email.signing_delivery import maybe_send_signing_invites_after_packet_prepared
+
+        notify_audit = maybe_send_signing_invites_after_packet_prepared(
+            agreement_id=agreement_id,
+            draft=draft.model_dump(mode="json"),
+            targets=[t.model_dump() for t in (body.targets or [])],
+            packet_revision=(body.packet_revision or "").strip() or None,
+            org_id=resolve_subject_from_request(request),
+        )
+        if notify_audit:
+            value = notify_audit.get("value") if isinstance(notify_audit.get("value"), dict) else {}
+            sent_count = int(value.get("sent_count") or 0)
+            audit = [*(draft.audit_log or []), AuditEvent.model_validate(notify_audit)]
+            next_draft = _merge_agreement_draft(draft, updated_at=_utc_now_iso(), audit_log=audit)
+            _save_draft_sync(next_draft.model_dump(), request)
+            return {"ok": True, "sent_count": sent_count, "skip_reason": None, "draft": next_draft.model_dump()}
+        skip_reason = "not_sent"
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "signing_invite_delivery_hook_failed agreement_id=%s",
+            agreement_id,
+        )
+        skip_reason = "delivery_error"
+    return {
+        "ok": True,
+        "sent_count": sent_count,
+        "skip_reason": skip_reason,
+        "draft": draft.model_dump(),
+    }
 
 
 @router.patch("/{agreement_id}/workspace-archive")

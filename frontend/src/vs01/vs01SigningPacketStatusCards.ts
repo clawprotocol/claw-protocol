@@ -51,7 +51,6 @@ export function buildPacketStatusCards(args: {
   const ownerKey = args.handoff.ownerSignerRoleId ?? ownerRole.roleId;
   const ownerUrl = (args.handoff.ownerSigningUrl ?? args.ownerSigningUrl).trim();
   const ownerStatus = args.statusByKey[ownerKey] ?? "waiting";
-  const senderMustSignFirst = Boolean(args.handoff.senderMustSignFirst && args.handoff.packetPrepareOnly);
 
   const out: PacketStatusCardRow[] = [
     {
@@ -74,9 +73,7 @@ export function buildPacketStatusCards(args: {
       statusPill: statusPillLabel(ownerStatus),
       primaryLabel: "Open my signing view",
       secondaryLabel: "Copy my signing link",
-      hint: senderMustSignFirst && ownerStatus !== "signed"
-        ? "Sign first from your sender link."
-        : null,
+      hint: null,
     },
   ];
 

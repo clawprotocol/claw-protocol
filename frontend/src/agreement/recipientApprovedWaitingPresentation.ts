@@ -36,7 +36,7 @@ export const PUBLIC_REVIEW_SUBMITTED_BODY =
 export const PUBLIC_ALL_REVIEWS_COMPLETE_HERO = "All reviews complete 🎉";
 
 export const PUBLIC_ALL_REVIEWS_COMPLETE_BODY =
-  "Everyone has approved the agreement. The sender is now preparing signature links. You'll receive your signing link when signing begins.";
+  "Everyone has approved the agreement. The sender is preparing signature links — each party will receive a signing link when they are ready.";
 
 export const RECIPIENT_SIGNING_LINKS_READY_HEADER = "Signing links are ready";
 

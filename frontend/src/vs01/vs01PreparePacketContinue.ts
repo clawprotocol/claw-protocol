@@ -30,6 +30,7 @@ import {
 } from "./vs01SignerFieldAssignment";
 import type { PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
 import { ensureSigningPacketStatusFromHandoff } from "./vs01SigningPacketStatusStore";
+import { resolveVs01SenderMustSignFirst } from "./vs01SigningOrderPolicy";
 
 export type PreparePacketContinueInput = {
   agreementId: string;
@@ -194,7 +195,7 @@ export function handlePreparePacketContinue(
     savedAt: new Date().toISOString(),
     signers,
     ownerSignerRoleId: ownerRole.roleId,
-    senderMustSignFirst: !rid,
+    senderMustSignFirst: resolveVs01SenderMustSignFirst(false),
     ownerSigningUrl,
     packetRevision: packetRevision ?? undefined,
     initialsEnabled,

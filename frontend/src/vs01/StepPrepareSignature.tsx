@@ -98,6 +98,7 @@ import {
   PREPARE_PACKET_INITIALS_TOGGLE_HINT,
   PREPARE_PACKET_INITIALS_SUPPRESSED_HINT,
 } from "./vs01PreparePacketCompletion";
+import { resolveVs01SenderMustSignFirst } from "./vs01SigningOrderPolicy";
 import {
   logVs01ActiveRoleAfterPlace,
   logVs01ActiveRoleBeforePlace,
@@ -2800,8 +2801,7 @@ export function StepPrepareSignature({
                 : agreementBridgePlacementCopy
                   ? packetReady
                     ? resolvePreparePacketBridgePrimaryCta({
-                        senderMustSignFirst: true,
-                        packetPrepareOnly: !receiptId,
+                        senderMustSignFirst: resolveVs01SenderMustSignFirst(),
                       })
                     : "Preparing agreement..."
                   : busySession

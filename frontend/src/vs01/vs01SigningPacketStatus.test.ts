@@ -43,7 +43,7 @@ function buildRolesAndHandoff() {
     packetPrepareOnly: true,
     savedAt: new Date().toISOString(),
     ownerSignerRoleId: owner.roleId,
-    senderMustSignFirst: true,
+    senderMustSignFirst: false,
     ownerSigningUrl: "https://example.com/?vs01_recipient_sign=1",
     signers: roles.slice(1).map((r) => ({
       counterpartyId: r.vs01CounterpartyId!,
@@ -115,7 +115,7 @@ describe("vs01 signing packet status cards", () => {
       packetPrepareOnly: true,
       savedAt: new Date().toISOString(),
       ownerSignerRoleId: owner.roleId,
-      senderMustSignFirst: true,
+      senderMustSignFirst: false,
       ownerSigningUrl: "https://example.com/?vs01_recipient_sign=1",
       signers: [
         {
@@ -160,7 +160,7 @@ describe("vs01 signing packet status cards", () => {
     }
   });
 
-  it("owner card includes sign-first hint", () => {
+  it("owner card has no sender-first hint in parallel mode", () => {
     const roles = buildVs01PrepareSigningRoles({
       agreementId: AG,
       creatorName: "Redwood Peak Ventures LLC",
@@ -174,7 +174,7 @@ describe("vs01 signing packet status cards", () => {
       statusByKey: {},
       ownerSigningUrl: h.ownerSigningUrl ?? "",
     });
-    expect(cards[0]?.hint).toContain("Sign first from your sender link");
+    expect(cards[0]?.hint).toBeNull();
   });
 });
 

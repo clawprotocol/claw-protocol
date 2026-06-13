@@ -100,7 +100,6 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
 
   const title = handoff.agreementTitle.trim() || "Agreement";
   const signers = handoff.signers;
-  const senderMustSignFirst = Boolean(handoff.senderMustSignFirst);
   const primaryForLink = signers.find((s) => s.signingUrl?.trim()) ?? signers[0];
   const packetPrepare = Boolean(handoff.packetPrepareOnly) || !handoff.receiptId?.trim();
   const firstSigningUrl = packetPrepare
@@ -109,16 +108,13 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
 
   const namedPending = signers.filter((s) => s.displayName?.trim().length);
   const firstNamed = namedPending[0];
+  const totalSigners = signers.length + (handoff.ownerSigningUrl?.trim() ? 1 : 0);
   const completionLine = packetPrepare
     ? signers.length === 0
-      ? "Signing packet ready. Add signing recipients from the workspace when you have their details."
-      : senderMustSignFirst
-        ? signers.length === 1
-          ? `Signing packet ready. Sign first — then share ${firstNamed?.displayName?.trim() || "the counterparty"}'s link. LawDog does not email signers automatically.`
-          : `Signing packet ready. Sign first — then share each counterparty link. LawDog does not email signers automatically.`
-        : signers.length === 1
-          ? "Signing packet ready. 0 of 1 signers have signed — share the signing link below."
-          : `Signing packet ready. 0 of ${signers.length} signers have signed — share each signing link below.`
+      ? "Signature links are ready. Add signing recipients from the workspace when you have their details."
+      : totalSigners === 1
+        ? "Signature links are ready. LawDog sent a signing link — track progress below."
+        : "Signature links are ready. LawDog sent signing links to all parties. Each party can sign independently."
     : signers.length === 0
       ? "Your signature is complete. Add recipients from the workspace when you are ready to collect remaining signatures."
       : namedPending.length === 1
@@ -136,7 +132,7 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
         <LawdogRecordedMark size="sm" />
         <div className="min-w-0 flex-1 space-y-2">
           <h3 id={`${panelId}-title`} className="text-base font-semibold tracking-tight text-emerald-100">
-            {packetPrepare ? "Signing packet ready" : "Saved in LawDog"}
+            {packetPrepare ? "Signature links are ready" : "Saved in LawDog"}
           </h3>
           <p className="text-sm font-medium text-slate-100">{completionLine}</p>
           <p className="text-xs text-slate-500">{title}</p>
@@ -173,12 +169,9 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
       </div>
 
       {signers.length > 0 ? (
-        <details
-          className="mt-4 border-t border-slate-800/60 pt-4"
-          open={senderMustSignFirst && signers.length === 1}
-        >
+        <details className="mt-4 border-t border-slate-800/60 pt-4" open={signers.length === 1}>
           <summary className="cursor-pointer text-xs font-medium text-slate-400">
-            {senderMustSignFirst ? "Counterparty signing links (share after you sign)" : "Other signing links"}
+            All signing links
           </summary>
           <ul className="mt-3 space-y-3">
             {signers.map((s) => (

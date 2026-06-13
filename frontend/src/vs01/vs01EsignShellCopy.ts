@@ -54,7 +54,7 @@ export function resolveVs01EsignShellCopy(args: {
     return {
       title: "Signature links ready",
       subtitle:
-        "Share each signing link with the matching signer. Your proof record is being prepared.",
+        "LawDog sent signing links to all parties. Each party can sign independently — the agreement is complete after everyone signs.",
       agreementBridgeEffective: true,
       copyVariant: "bridge_reviewer_approved",
       navVariant: "esign_bridge_focused",
@@ -62,11 +62,12 @@ export function resolveVs01EsignShellCopy(args: {
   }
 
   const reviewer = Boolean(bridgeMatches && bridge?.reviewerApprovedCleanHandoff);
+  const parallelLead =
+    "LawDog placed required signature fields for each signer. Review placement, then send signing links to all parties.";
   if (reviewer) {
     return {
       title: "Prepare signature links",
-      subtitle:
-        "LawDog placed required signature fields for each signer. Review placement, then open your signing view or share links.",
+      subtitle: parallelLead,
       agreementBridgeEffective: true,
       copyVariant: "bridge_reviewer_approved",
       navVariant: "esign_bridge_focused",
@@ -75,8 +76,7 @@ export function resolveVs01EsignShellCopy(args: {
 
   return {
     title: "Prepare signature links",
-    subtitle:
-      "LawDog placed required signature fields for each signer. Review placement, then open your signing view or share links.",
+    subtitle: parallelLead,
     agreementBridgeEffective: true,
     copyVariant: "bridge_sender_first",
     navVariant: "esign_bridge_focused",

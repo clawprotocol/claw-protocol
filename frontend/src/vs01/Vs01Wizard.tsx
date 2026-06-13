@@ -64,6 +64,7 @@ import {
   logVs01PrepareFinishBlocked,
 } from "./vs01PreparePacketCompletion";
 import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
+import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
 import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
 import {
@@ -497,8 +498,26 @@ export function Vs01Wizard({
       documentIdShort: did.slice(0, 8),
       counterpartySignerCount: result.handoff.signers.length,
       totalParticipantCount: result.handoff.signers.length + 1,
-      senderMustSignFirst: result.handoff.senderMustSignFirst,
+      senderMustSignFirst: result.handoff.senderMustSignFirst ?? false,
       fieldsPlacedCount: placedCount,
+    });
+    const roles = buildVs01PrepareSigningRoles({
+      agreementId: linkedAgreementId,
+      creatorName,
+      creatorEmail,
+      ownerSignerName: creatorSignerName,
+      ownerSignerTitle: creatorSignerTitle,
+      counterparties,
+    });
+    void dispatchSigningInvitesFromHandoff(result.handoff, roles).then((delivery) => {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-signing-invites-dispatched]", {
+        agreementIdShort: linkedAgreementId.slice(0, 16),
+        attempted: delivery.attempted,
+        ok: delivery.ok,
+        sentCount: delivery.sentCount,
+        skipReason: delivery.skipReason,
+      });
     });
     goToStep(3);
   }, [
@@ -1358,7 +1377,7 @@ export function Vs01Wizard({
                 documentIdShort: did.slice(0, 8),
                 counterpartySignerCount: signers.length,
                 totalParticipantCount: signers.length + 1,
-                senderMustSignFirst: true,
+                senderMustSignFirst: false,
                 signingLinkCount: signers.filter((s) => s.signingUrl?.trim()).length,
               });
               // eslint-disable-next-line no-console

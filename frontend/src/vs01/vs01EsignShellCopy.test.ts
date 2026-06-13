@@ -55,8 +55,7 @@ describe("resolveVs01EsignShellCopy", () => {
       bridge: bridge({ reviewerApprovedCleanHandoff: true }),
     });
     expect(r.title).toBe("Prepare signature links");
-    expect(r.subtitle).toMatch(/LawDog placed required signature fields/i);
-    expect(r.subtitle).not.toMatch(/Place required signature fields/i);
+    expect(r.subtitle).toMatch(/send signing links to all parties/i);
     expect(r.copyVariant).toBe("bridge_reviewer_approved");
     expect(r.navVariant).toBe("esign_bridge_focused");
   });
@@ -68,7 +67,7 @@ describe("resolveVs01EsignShellCopy", () => {
       bridge: bridge(),
     });
     expect(r.title).toBe("Prepare signature links");
-    expect(r.subtitle).toMatch(/LawDog placed required signature fields/i);
+    expect(r.subtitle).toMatch(/send signing links to all parties/i);
     expect(r.subtitle).not.toContain("prior step");
     expect(r.copyVariant).toBe("bridge_sender_first");
     expect(r.navVariant).toBe("esign_bridge_focused");
@@ -94,7 +93,7 @@ describe("resolveVs01EsignShellCopy", () => {
     expect(r.agreementBridgeEffective).toBe(true);
     expect(r.copyVariant).toBe("bridge_reviewer_approved");
     expect(r.title).toBe("Prepare signature links");
-    expect(r.subtitle).toMatch(/LawDog placed required signature fields/i);
+    expect(r.subtitle).toMatch(/send signing links to all parties/i);
     expect(r.navVariant).toBe("esign_bridge_focused");
   });
 
@@ -130,7 +129,7 @@ describe("resolveVs01EsignShellCopy", () => {
     expect(r.agreementBridgeEffective).toBe(true);
     expect(r.title).not.toBe("Prepare for e-signing");
     expect(r.title).toContain("ready");
-    expect(r.subtitle).toMatch(/signer/i);
+    expect(r.subtitle).toMatch(/sent signing links to all parties/i);
   });
 
   it("bridge flow at setup step (vs01Step < 4) still shows 'Prepare for e-signing'", () => {
@@ -141,7 +140,7 @@ describe("resolveVs01EsignShellCopy", () => {
       vs01Step: 2,
     });
     expect(r.title).toBe("Prepare signature links");
-    expect(r.subtitle).toMatch(/LawDog placed required signature fields/i);
+    expect(r.subtitle).toMatch(/send signing links to all parties/i);
   });
 });
 

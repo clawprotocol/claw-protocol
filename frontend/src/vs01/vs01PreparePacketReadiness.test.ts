@@ -75,7 +75,7 @@ describe("VS01 prepare packet readiness gate", () => {
     expect(src).not.toContain("Rebuild signing packet");
     expect(src).toMatch(/packetReady[\s\S]{0,80}PREPARE_PACKET_BRIDGE_HEADLINE_READY/);
     expect(src).toContain("PREPARE_PACKET_BRIDGE_HEADLINE_BLOCKED");
-    expect(completion).toContain("Open my signing view");
+    expect(completion).toContain("Send signing links");
     expect(completion).toContain("Initials are enabled on each page");
   });
 });

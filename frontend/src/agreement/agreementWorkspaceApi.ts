@@ -88,6 +88,53 @@ export type PostReviewSentServerResult = {
   inviteEmailsSent: boolean;
 };
 
+export type PostSigningLinksSentResult = {
+  ok: boolean;
+  sent_count: number;
+  skip_reason: string | null;
+};
+
+export type SigningInviteTargetPayload = {
+  email: string;
+  display_name: string;
+  signing_url: string;
+  signer_role_id: string;
+  is_owner: boolean;
+};
+
+export async function postSigningLinksSent(
+  agreementId: string,
+  body: {
+    packet_revision?: string | null;
+    targets: SigningInviteTargetPayload[];
+  },
+): Promise<PostSigningLinksSentResult> {
+  const id = agreementId.trim();
+  if (!id) return { ok: false, sent_count: 0, skip_reason: "missing_agreement_id" };
+  try {
+    const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}/signing-links-sent`, {
+      method: "POST",
+      headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        packet_revision: body.packet_revision ?? null,
+        targets: body.targets,
+      }),
+    });
+    if (!res.ok) return { ok: false, sent_count: 0, skip_reason: `http_${res.status}` };
+    const j = (await res.json().catch(() => ({}))) as {
+      sent_count?: number;
+      skip_reason?: string | null;
+    };
+    return {
+      ok: true,
+      sent_count: Number(j.sent_count ?? 0),
+      skip_reason: j.skip_reason ?? null,
+    };
+  } catch {
+    return { ok: false, sent_count: 0, skip_reason: "network_error" };
+  }
+}
+
 export async function postReviewSentServer(agreementId: string): Promise<PostReviewSentServerResult> {
   try {
     const res = await fetch(
