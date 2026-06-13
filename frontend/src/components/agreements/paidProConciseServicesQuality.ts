@@ -36,6 +36,7 @@ import {
   manifestRecordsForPaidProAcceptance,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { preserveFullLegalPartyNames } from "./paidProPartyNamePreserve";
 import { insertBeforeExecutionTail } from "./paidProMutualConsultingQualityFloorInsert";
 
 function intakeJurisdictionFromSources(
@@ -470,6 +471,12 @@ function preparePaidProServerDocumentForAcceptanceCore(
   if (governingLaw.text !== out) {
     out = governingLaw.text;
     repairs.push(...governingLaw.repairs);
+  }
+
+  const preservedLegal = preserveFullLegalPartyNames(out, partyLegalNames, intakeText);
+  if (preservedLegal !== out) {
+    out = preservedLegal;
+    repairs.push("party_identity:preserve_full_legal_names");
   }
 
   return { text: out.trim(), repairs: [...new Set(repairs)] };

@@ -3,6 +3,7 @@
  */
 
 import { collectForbiddenTemplateFragments } from "../agreementTemplatePlaceholderSafety";
+import { repairGluedSectionHeadingsInText, splitGluedSectionHeadingFromLine } from "../documentSectionHeadingSplit";
 import { repairMalformedSectionNumbering } from "../starterPreviewFormatting";
 import { parseAgreementSections } from "../proOperationalSynthesis/sectionPurityValidator";
 import { suppressRepeatedBoilerplate } from "./boilerplateContaminationGuard";
@@ -21,15 +22,24 @@ const MALFORMED_DOUBLE_NUM_LINE_RE = /^\s*\d+\.\s+\d+\.\s+\S/m;
 const COLLAPSED_HEADING_BODY_RE = /^\s*\d+\.\s+[^.\n]{2,72}\.\s+[A-Z][a-z]/m;
 
 function repairCollapsedHeadingLines(text: string): { text: string; fixed: number } {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const before = text;
+  const repaired = repairGluedSectionHeadingsInText(text);
+  const lines = repaired.replace(/\r\n/g, "\n").split("\n");
   let fixed = 0;
   const out = lines.map((line) => {
+    const split = splitGluedSectionHeadingFromLine(line);
+    if (split !== line) {
+      fixed += 1;
+      return split;
+    }
     const m = line.match(/^(\s*\d+\.\s+[^.\n]{2,72})\.\s+([A-Z][a-z].+)$/);
     if (!m) return line;
     fixed += 1;
     return `${m[1]}\n${m[2]}`;
   });
-  return { text: out.join("\n"), fixed };
+  const joined = out.join("\n");
+  if (joined !== before) fixed = Math.max(fixed, 1);
+  return { text: joined, fixed };
 }
 
 function detectMissingSubsectionNumbers(text: string): IntegrityIssue[] {

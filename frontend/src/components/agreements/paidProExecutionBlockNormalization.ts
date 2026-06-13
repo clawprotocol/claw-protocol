@@ -15,12 +15,14 @@ import {
   repairOrphanedLegalEntitySuffixSpacingInCorpus,
 } from "./paidProLegalEntityNameHygiene";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
+import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import { isStandaloneSignaturesHeadingLine } from "./paidProSignatureSectionOrdering";
 import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
 } from "./paidProExecutionBlockInstrumentation";
 import { stripInlineStaleServerSignatureTailBeforeWitness } from "./paidProFlattenedDocumentNormalize";
+import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 
 export {
   isRecitalFragmentExecutionPartyLine,
@@ -252,6 +254,8 @@ function stripRecitalFragmentExecutionLinesFromTail(text: string, repairs: strin
 export type EnforcePaidProSingleExecutionBlockOpts = {
   /** User-finalized signer authority overrides corpus-derived role labels. */
   authorityParties?: readonly { legalName?: string | null; partyLegalName?: string | null }[];
+  intakeText?: string | null;
+  draftPartyNames?: readonly string[] | null;
 };
 
 export function enforcePaidProSingleExecutionBlock(
@@ -297,13 +301,24 @@ export function enforcePaidProSingleExecutionBlock(
   const authorityParties = (opts?.authorityParties ?? [])
     .map((p) => String(p.partyLegalName ?? p.legalName ?? "").replace(/\s+/g, " ").trim())
     .filter((n) => n.length >= 3);
+  const intakeManifest =
+    authorityParties.length < 2 && (opts?.intakeText || "").trim()
+      ? resolveCanonicalPartyIdentitiesFromIntake(
+          opts?.intakeText ?? "",
+          opts?.draftPartyNames ?? null,
+        )
+      : [];
+  const manifestLegalNames =
+    intakeManifest.length >= 2
+      ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
+      : authorityParties;
   const roles =
-    authorityParties.length >= 2
+    manifestLegalNames.length >= 2
       ? ([
-          { role: "client" as const, legalName: authorityParties[0]!, roleLabel: "Client" as const },
+          { role: "client" as const, legalName: manifestLegalNames[0]!, roleLabel: "Client" as const },
           {
             role: "service_provider" as const,
-            legalName: authorityParties[1]!,
+            legalName: manifestLegalNames[1]!,
             roleLabel: "Service Provider" as const,
           },
         ] satisfies AcceptedCorpusRoleAssignment[])
@@ -322,9 +337,33 @@ export function enforcePaidProSingleExecutionBlock(
 
   const body = operativeBodyWithoutExecutionTails(text);
 
-  const identities = buildCorpusRoleIdentitiesForExecutionReconcile(
-    `${body}\n\nThis Agreement is between ${client.legalName} ("Client") and ${provider.legalName} ("Service Provider").`,
-  );
+  const identities: CanonicalPartyIdentity[] =
+    manifestLegalNames.length >= 2
+      ? [
+          {
+            index: 0,
+            partyDisplayName: client.legalName,
+            blockHeading: "CLIENT",
+            email: "",
+            partyAddress: null,
+            representativeName: null,
+            title: null,
+            isIndividual: false,
+          },
+          {
+            index: 1,
+            partyDisplayName: provider.legalName,
+            blockHeading: "SERVICE PROVIDER",
+            email: "",
+            partyAddress: null,
+            representativeName: null,
+            title: null,
+            isIndividual: false,
+          },
+        ]
+      : buildCorpusRoleIdentitiesForExecutionReconcile(
+          `${body}\n\nThis Agreement is between ${client.legalName} ("Client") and ${provider.legalName} ("Service Provider").`,
+        );
   const stub = [
     body,
     "",

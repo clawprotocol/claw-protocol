@@ -68,10 +68,14 @@ function isStandalonePartyEntityLine(line: string, legalNames: ReadonlySet<strin
 
 const OPENING_SECTION_ONE_SCAN_MAX = 8_000;
 
-/** Section 1 anchors used for opening repair must live in the opening region, not late quality-floor inserts before witness. */
+/** Section 1 anchors used for opening repair — line-start or inline in flattened server bodies. */
 function findOpeningSectionOneIndex(text: string): number {
   const head = (text || "").replace(/\r\n/g, "\n").slice(0, OPENING_SECTION_ONE_SCAN_MAX);
-  return head.search(/^\s*1\.\s+(?!\d)/m);
+  const lineStart = head.search(/^\s*1\.\s+(?!\d)/m);
+  if (lineStart >= 0) return lineStart;
+  const inline = head.match(/(?:^|\s)(1\.\s+(?!\d+\.\d)[A-Z])/);
+  if (!inline || inline.index == null) return -1;
+  return inline.index + inline[0].length - inline[1].length;
 }
 
 function splitOperativeAndExecutionTail(body: string): { operative: string; executionTail: string } {
@@ -133,6 +137,20 @@ export function detectPaidProMalformedServicesOpening(
 
   const preSec1 = openingSliceBeforeSection1(body);
   const sec1Idx = findOpeningSectionOneIndex(body);
+  const openingScanRegion = sec1Idx >= 0 ? preSec1 : body.slice(0, 4_000);
+  const titleCount = (openingScanRegion.match(PAID_PRO_CANONICAL_TITLE_RE) ?? []).length;
+  const enteredCount = (openingScanRegion.match(/\bentered\s+into\b/gi) ?? []).length;
+  const betweenCount = (openingScanRegion.match(/\bis\s+between\b/gi) ?? []).length;
+  if (titleCount > 1 || enteredCount > 1 || betweenCount > 1) {
+    return true;
+  }
+  if (/\bSERVICES\s+AGREEMENT\s+This\s+Agreement\b/i.test(openingScanRegion)) {
+    return true;
+  }
+  if (/This\s+[\w\s]+Agreement[\s\S]{0,160}?This\s+Agreement\s+is\s+between/i.test(openingScanRegion)) {
+    return true;
+  }
+
   if (sec1Idx < 0) {
     return !/entered\s+into/i.test(body.slice(0, 2_500));
   }

@@ -175,8 +175,10 @@ export function ensurePaidProAcceptanceExecutionBlockInvariant(
   const executionBlockCount = countPaidProExecutionBlocks(out);
   const invariant = analyzePaidProExecutionBlockInvariant(out);
 
+  const authorityParties = records.map((rec) => ({ partyLegalName: rec.fullLegalName }));
+
   if (witnessCount === 1 && executionBlockCount === 1 && invariant.ok) {
-    const normalized = enforcePaidProSingleExecutionBlock(out);
+    const normalized = enforcePaidProSingleExecutionBlock(out, { authorityParties });
     if (normalized.text !== out) {
       repairs.push(...normalized.repairs);
       out = normalized.text;
@@ -190,7 +192,7 @@ export function ensurePaidProAcceptanceExecutionBlockInvariant(
     out = `${prefix}\n\n${tail}\n`.replace(/\n{3,}/g, "\n\n").trim();
     repairs.push("acceptance_execution_block:appended_canonical_tail");
   } else {
-    const normalized = enforcePaidProSingleExecutionBlock(out);
+    const normalized = enforcePaidProSingleExecutionBlock(out, { authorityParties });
     if (normalized.text !== out) {
       out = normalized.text;
       repairs.push(...normalized.repairs, "acceptance_execution_block:deduped_to_single");

@@ -13,6 +13,7 @@ import {
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
+import { preserveFullLegalPartyNames } from "./paidProPartyNamePreserve";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   authorityPartiesToCanonicalPartyIdentities,
@@ -398,6 +399,14 @@ export function applyPaidProReviewRenderSanitizer(
     repaired = true;
   }
 
+  if (legalNames.length >= 2) {
+    const preserved = preserveFullLegalPartyNames(text, legalNames, ctx?.intakeText ?? null);
+    if (preserved !== text) {
+      text = preserved;
+      repaired = true;
+    }
+  }
+
   const guarded = guardPaidProReviewRenderCorpus(text, parties);
   let out = guarded.text.trimEnd() + (guarded.text.endsWith("\n") ? "" : "\n");
   if (parties.length >= 2) {
@@ -418,10 +427,21 @@ export function applyPaidProReviewRenderSanitizer(
       out = ensurePaidProServicesAgreementOpening(out, records, ctx?.intakeText ?? null).text;
     }
   }
-  const execution = enforcePaidProSingleExecutionBlock(out);
+  const execution = enforcePaidProSingleExecutionBlock(out, {
+    authorityParties: parties,
+    intakeText: ctx?.intakeText ?? null,
+    draftPartyNames: ctx?.draftPartyNames ?? parties.map((p) => p.partyLegalName),
+  });
   if (execution.text !== out) {
     out = execution.text;
     repaired = true;
+  }
+  if (parties.length >= 2) {
+    const entityLines = repairExecutionBlockEntityHeadingLines(out, parties);
+    if (entityLines.repairs.length > 0) {
+      out = entityLines.text;
+      repaired = true;
+    }
   }
   const finalized = finalizePaidProSigningCorpusText(out, parties, ctx);
   if (finalized.text !== out) {

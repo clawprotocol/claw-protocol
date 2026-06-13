@@ -2,6 +2,8 @@
  * Starter/free preview block layout — preserves semantic boundaries (no wall-of-text collapse).
  */
 
+import { repairGluedSectionHeadingsInText, splitGluedSectionHeadingFromLine } from "./documentSectionHeadingSplit";
+
 const NUMBERED_HEADING_LINE_RE = /^(\d+)\.\s+(.+)$/;
 const MALFORMED_DOUBLE_NUM_RE = /^(\d+)\.\s+(\d+)\.\s+(.+)$/;
 const BLANK_NUMBERED_LINE_RE = /^(\d+)\.\s*$/;
@@ -16,7 +18,7 @@ const INLINE_SECTION_GLUE_RE = /([^\n])\s+(\d+\.\s+[A-Z])/g;
  * Repair collapsed inline layout before block normalization (production blob cases).
  */
 export function repairInlineCollapsedStarterLayout(text: string): string {
-  let t = (text || "").replace(/\r\n/g, "\n");
+  let t = repairGluedSectionHeadingsInText(text || "");
   t = t.replace(INLINE_SECTION_RE, "$1\n\n$2");
   t = t.replace(INLINE_SECTION_GLUE_RE, "$1\n\n$2");
   const lines = t.split("\n");
@@ -92,23 +94,27 @@ export function normalizeStarterPreviewBlockLayout(text: string): string {
   };
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      flush();
-      continue;
+    const expanded = splitGluedSectionHeadingFromLine(line);
+    const lineParts = expanded.includes("\n") ? expanded.split("\n") : [line];
+    for (const part of lineParts) {
+      const trimmed = part.trim();
+      if (!trimmed) {
+        flush();
+        continue;
+      }
+      if (ALL_CAPS_TITLE_RE.test(trimmed) && buf.length > 0) {
+        flush();
+      }
+      const isHeading = NUMBERED_HEADING_LINE_RE.test(trimmed) && trimmed.length < 120;
+      const isEsign = ESIGN_LINE_RE.test(trimmed);
+      if (isHeading || isEsign) {
+        flush();
+        buf.push(part);
+        flush();
+        continue;
+      }
+      buf.push(part);
     }
-    if (ALL_CAPS_TITLE_RE.test(trimmed) && buf.length > 0) {
-      flush();
-    }
-    const isHeading = NUMBERED_HEADING_LINE_RE.test(trimmed) && trimmed.length < 90;
-    const isEsign = ESIGN_LINE_RE.test(trimmed);
-    if (isHeading || isEsign) {
-      flush();
-      buf.push(line);
-      flush();
-      continue;
-    }
-    buf.push(line);
   }
   flush();
 
@@ -123,7 +129,23 @@ export function formatStarterPreviewForDisplay(text: string): string {
 }
 
 /** True when text has starter-style section breaks suitable for review UI. */
+export function starterPreviewHasGluedSectionHeadings(text: string): boolean {
+  const t = (text || "").replace(/\r\n/g, "\n");
+  for (const line of t.split("\n")) {
+    const trimmed = line.trim();
+    if (!/^\d+\.\s+/.test(trimmed)) continue;
+    if (trimmed.length > 88) return true;
+    if (splitGluedSectionHeadingFromLine(line) !== line) return true;
+  }
+  return false;
+}
+
+/** True when text has starter-style section breaks suitable for review UI. */
 export function starterPreviewHasParagraphSectionBreaks(text: string): boolean {
   const t = (text || "").replace(/\r\n/g, "\n");
-  return /\n\n\d+\.\s+/m.test(t) && !/\bSERVICES AGREEMENT This Agreement\b/i.test(t);
+  return (
+    /\n\n\d+\.\s+/m.test(t) &&
+    !/\bSERVICES AGREEMENT This Agreement\b/i.test(t) &&
+    !starterPreviewHasGluedSectionHeadings(t)
+  );
 }

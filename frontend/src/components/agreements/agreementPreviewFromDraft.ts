@@ -56,7 +56,6 @@ import { stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
 import { stripDuplicateSignatureBlocksForPreview } from "./signaturePreviewArchitecture";
 import {
   formatStarterPreviewForDisplay,
-  starterPreviewHasParagraphSectionBreaks,
 } from "./starterPreviewFormatting";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
 import { formatMilestonePaymentTermsFromIntake } from "./intakeCurrencyParse";
@@ -917,7 +916,7 @@ function applyAgreementPreviewPlaceholderGate(
       hasDraftPayload: placeholderCtx.hasDraftPayload,
       authoritativeSource: placeholderCtx.authoritativeSource ?? null,
     });
-    if (tier === "starter" && !starterPreviewHasParagraphSectionBreaks(display)) {
+    if (tier === "starter") {
       return formatStarterPreviewForDisplay(display);
     }
     return display;
@@ -935,7 +934,7 @@ function applyAgreementPreviewPlaceholderGate(
     surface === "preview_structured" || surface === "preview_starter"
       ? stripManualExecutionBlockPreservePreviewNotice(gate.text)
       : gate.text;
-  if (tier === "starter" && !starterPreviewHasParagraphSectionBreaks(signatureStripped)) {
+  if (tier === "starter") {
     return formatStarterPreviewForDisplay(signatureStripped);
   }
   return signatureStripped;

@@ -122,6 +122,8 @@ export function finalizePaidProSigningCorpusText(
 
   const execution = enforcePaidProSingleExecutionBlock(text, {
     authorityParties: parties?.map((p) => ({ partyLegalName: p.partyLegalName })),
+    intakeText: roleContext?.intakeText ?? null,
+    draftPartyNames: roleContext?.draftPartyNames ?? parties?.map((p) => p.partyLegalName) ?? null,
   });
   if (execution.text !== text) {
     text = execution.text;
