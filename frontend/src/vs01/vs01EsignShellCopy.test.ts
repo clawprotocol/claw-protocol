@@ -55,7 +55,7 @@ describe("resolveVs01EsignShellCopy", () => {
       bridge: bridge({ reviewerApprovedCleanHandoff: true }),
     });
     expect(r.title).toBe("Prepare signature links");
-    expect(r.subtitle).toMatch(/send signing links to all parties/i);
+    expect(r.subtitle).toMatch(/LawDog sends signing links to all parties/i);
     expect(r.copyVariant).toBe("bridge_reviewer_approved");
     expect(r.navVariant).toBe("esign_bridge_focused");
   });
@@ -67,7 +67,7 @@ describe("resolveVs01EsignShellCopy", () => {
       bridge: bridge(),
     });
     expect(r.title).toBe("Prepare signature links");
-    expect(r.subtitle).toMatch(/send signing links to all parties/i);
+    expect(r.subtitle).toMatch(/LawDog sends signing links to all parties/i);
     expect(r.subtitle).not.toContain("prior step");
     expect(r.copyVariant).toBe("bridge_sender_first");
     expect(r.navVariant).toBe("esign_bridge_focused");
@@ -93,7 +93,7 @@ describe("resolveVs01EsignShellCopy", () => {
     expect(r.agreementBridgeEffective).toBe(true);
     expect(r.copyVariant).toBe("bridge_reviewer_approved");
     expect(r.title).toBe("Prepare signature links");
-    expect(r.subtitle).toMatch(/send signing links to all parties/i);
+    expect(r.subtitle).toMatch(/LawDog sends signing links to all parties/i);
     expect(r.navVariant).toBe("esign_bridge_focused");
   });
 
@@ -140,7 +140,7 @@ describe("resolveVs01EsignShellCopy", () => {
       vs01Step: 2,
     });
     expect(r.title).toBe("Prepare signature links");
-    expect(r.subtitle).toMatch(/send signing links to all parties/i);
+    expect(r.subtitle).toMatch(/LawDog sends signing links to all parties/i);
   });
 });
 

@@ -88,7 +88,7 @@ describe("creatorDashboardPresentation", () => {
           review_approvals_completed: 2,
         }),
       ),
-    ).toEqual({ label: "Prepare signature links", path: "/app", emphasis: "primary" });
+    ).toEqual({ label: "Prepare and send signing links", path: "/app", emphasis: "primary" });
     expect(creatorDashboardPrimaryAction(row({ has_server_signing_lock: true })).label).toBe(
       "View Signing Status",
     );

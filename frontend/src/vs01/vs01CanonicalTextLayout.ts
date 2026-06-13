@@ -1,5 +1,6 @@
 import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
 import type { Vs01NormTextRect } from "./vs01PageTextLayout";
+import { splitGluedSectionHeadingFromLine } from "../components/agreements/documentSectionHeadingSplit";
 
 /** First-page agreement title — mirrors paid Pro document_title classification. */
 export function isCanonicalDocumentTitleLine(line: string): boolean {
@@ -58,7 +59,8 @@ export function buildFlowLineDescriptors(
   let documentTitleAssigned = false;
   const allowDocumentTitle = (options?.pageIndex ?? 0) === 0;
   const out: Vs01CanonicalFlowLineDescriptor[] = [];
-  for (const text of flowLines) {
+
+  const pushDescriptor = (text: string) => {
     const trimmed = text.trim();
     if (trimmed) {
       for (const h of BLOCK_HEADING_RES) {
@@ -94,6 +96,22 @@ export function buildFlowLineDescriptors(
       partyIndex,
       blockHeading: current?.blockHeading ?? null,
     });
+  };
+
+  for (const text of flowLines) {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      pushDescriptor(text);
+      continue;
+    }
+    const split = splitGluedSectionHeadingFromLine(trimmed);
+    if (split.includes("\n")) {
+      for (const part of split.split("\n")) {
+        pushDescriptor(part);
+      }
+      continue;
+    }
+    pushDescriptor(text);
   }
   return out;
 }

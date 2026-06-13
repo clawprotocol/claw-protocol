@@ -129,7 +129,7 @@ describe("test343 post-review / signature handoff UX", () => {
       vs01Step: 2,
     });
     expect(copy.title).toBe("Prepare signature links");
-    expect(copy.subtitle).toMatch(/send signing links to all parties/i);
+    expect(copy.subtitle).toMatch(/LawDog sends signing links to all parties/i);
   });
 
   it("prepare bridge primary CTA sends signing links in parallel mode", () => {

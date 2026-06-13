@@ -142,3 +142,56 @@ def test_signing_links_sent_is_idempotent_per_packet_revision(
         client.post(f"/api/agreements/{aid}/signing-links-sent", headers=_ORG_H, json=body)
         client.post(f"/api/agreements/{aid}/signing-links-sent", headers=_ORG_H, json=body)
     assert mock_client.post.call_count == 1
+
+
+def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _env_common(monkeypatch, tmp_path)
+    mock_client = _mock_resend_success()
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    portable = {
+        "v": 1,
+        "seed": {
+            "v": 1,
+            "documentId": "doc_test346",
+            "agreementId": aid,
+            "corpusHash": "abc123",
+            "corpusPlain": "x" * 1600,
+        },
+        "fields": [{"id": "f1", "type": "signature", "page": 0, "x": 0.1, "y": 0.1, "width": 0.2, "height": 0.05, "counterpartyId": "owner"}],
+        "roles": [{"roleId": "role_owner", "vs01CounterpartyId": "owner", "partyIndex": 0}],
+        "fieldCount": 1,
+        "initialsPolicy": {"enabled": True},
+    }
+    body = {
+        "packet_revision": "rev_test346",
+        "document_id": "doc_test346",
+        "portable_packet": portable,
+        "targets": [
+            {
+                "email": "owner@example.com",
+                "display_name": "Red Mesa Logistics LLC",
+                "signing_url": "https://app.example.com/sign?vs01_recipient_sign=1",
+                "signer_role_id": "role_owner",
+                "is_owner": True,
+            },
+        ],
+    }
+    with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+        res = client.post(
+            f"/api/agreements/{aid}/signing-links-sent",
+            headers=_ORG_H,
+            json=body,
+        )
+    assert res.status_code == 200
+    get_res = client.get(
+        f"/api/agreements/public/{aid}/vs01-signing-packet",
+        params={"document_id": "doc_test346", "packet_revision": "rev_test346"},
+    )
+    assert get_res.status_code == 200
+    payload = get_res.json()
+    assert payload.get("ok") is True
+    assert payload.get("portable", {}).get("v") == 1
+    assert payload["portable"]["seed"]["documentId"] == "doc_test346"

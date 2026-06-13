@@ -142,9 +142,9 @@ describe("creator post-review routing", () => {
     await waitFor(() => {
       expect(screen.getByText("Reviews approved")).toBeTruthy();
     });
-    expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
     expect(
-      screen.getByText("Everyone approved this draft. Prepare signature links to start signing."),
+      screen.getByText("Everyone approved this draft. Review field placement, then LawDog sends signing links to all parties."),
     ).toBeTruthy();
     expect(screen.queryByText("Agreement complete")).toBeNull();
     expect(screen.queryByText("View verification")).toBeNull();
@@ -201,10 +201,10 @@ describe("creator post-review routing", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "Prepare signature links" }));
+    await userEvent.click(screen.getByRole("button", { name: "Prepare and send signing links" }));
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_creator_prepare?agreement_bridge=1");
     });
@@ -313,6 +313,6 @@ describe("creator post-review routing", () => {
     });
     expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Return to dashboard" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Prepare signature links" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Prepare and send signing links" })).toBeNull();
   });
 });

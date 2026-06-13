@@ -55,7 +55,7 @@ describe("CreatorDashboardAgreementList", () => {
     expect(screen.queryByText("Ready for Signing")).toBeNull();
     expect(screen.queryByText("1 of 1 approved")).toBeNull();
     expect(screen.queryByText("Reviews approved")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Prepare signature links" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Prepare and send signing links" })).toBeNull();
   });
 
   it("shows per-party review status and prepare signature CTA when all approved", () => {
@@ -97,11 +97,11 @@ describe("CreatorDashboardAgreementList", () => {
       "Iron Vale Systems Inc.",
     );
     expect(screen.getByText(/Next action:/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open review link page" })).toBeTruthy();
     expect(screen.getByText("Ready for Signing")).toBeTruthy();
     expect(
-      screen.getByText("Everyone approved this draft. Prepare signature links to start signing."),
+      screen.getByText("Everyone approved this draft. Review field placement, then LawDog sends signing links to all parties."),
     ).toBeTruthy();
   });
 

@@ -63,7 +63,7 @@ export function resolveVs01EsignShellCopy(args: {
 
   const reviewer = Boolean(bridgeMatches && bridge?.reviewerApprovedCleanHandoff);
   const parallelLead =
-    "LawDog placed required signature fields for each signer. Review placement, then send signing links to all parties.";
+    "Review field placement, then LawDog sends signing links to all parties.";
   if (reviewer) {
     return {
       title: "Prepare signature links",

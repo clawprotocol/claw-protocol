@@ -11,6 +11,7 @@ import {
   loadVs01CanonicalPacketPortable,
   resolveCanonicalPacketUrlRefs,
   storeVs01CanonicalPacketSeed,
+  type Vs01CanonicalPacketPortableV1,
 } from "./vs01CanonicalPacketSeed";
 import { VS01_PACKET_MANIFEST_SCOPE, storeRecipientManifest } from "./StepReceipt";
 import {
@@ -52,7 +53,12 @@ export type PreparePacketContinueInput = {
 };
 
 export type PreparePacketContinueResult =
-  | { ok: true; handoff: PaidProVs01PostSignHandoffV1; gate: SigningPacketPrepareGate }
+  | {
+      ok: true;
+      handoff: PaidProVs01PostSignHandoffV1;
+      gate: SigningPacketPrepareGate;
+      portablePacket: Vs01CanonicalPacketPortableV1 | null;
+    }
   | { ok: false; finish: Extract<PrepareFinishClickResult, { allowed: false }> };
 
 export function recomputePreparePacketGate(input: PreparePacketContinueInput): {
@@ -95,6 +101,7 @@ export function handlePreparePacketContinue(
   let canonicalPacketPayload: string | null = null;
   let canonicalPacketStored = false;
   let packetRevision: string | null = null;
+  let portablePacket: Vs01CanonicalPacketPortableV1 | null = null;
   if (corpusPlain.length >= 1500) {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
@@ -134,6 +141,7 @@ export function handlePreparePacketContinue(
         canonicalPacketPayload = urlRefs.encodedInline;
         canonicalPacketStored = urlRefs.storedOnly;
         packetRevision = urlRefs.packetRevision;
+        portablePacket = portable;
       }
     }
   }
@@ -218,7 +226,7 @@ export function handlePreparePacketContinue(
     documentId: input.documentId,
   });
 
-  return { ok: true, handoff, gate };
+  return { ok: true, handoff, gate, portablePacket };
 }
 
 /** Rebuild signing URLs from the latest stored canonical portable packet (avoids stale handoff links). */

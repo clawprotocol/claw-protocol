@@ -55,6 +55,10 @@ export type Vs01UrlBootstrapResult = {
   recipientManifestParamPresent: boolean;
   /** Set when the manifest param could not be decoded; do not treat as “no fields”. */
   recipientManifestDecodeError: string | null;
+  /** From `packet_revision` when portable packet is stored-only in URL. */
+  packetRevision: string | null;
+  /** True when URL references stored canonical packet (vs01_cpacket_stored=1). */
+  canonicalPacketStored: boolean;
 };
 
 let memo: Vs01UrlBootstrapResult | null | undefined;
@@ -242,13 +246,16 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   }
 
   if (recipientHydratedFields.length === 0 && !recipientManifestDecodeError && recipientManifestParamPresent) {
-    // eslint-disable-next-line no-console
-    console.warn("[vs01-recipient-hydration-miss]", {
-      documentId,
-      counterpartyId: lockedId,
-      reason: manifestRaw ? "decode_returned_empty" : "storage_miss",
-      hint: "Fields were placed but could not be loaded. Recipient may see empty state.",
-    });
+    const canServerHydrate = Boolean(recipientAgreementId);
+    if (!canServerHydrate) {
+      // eslint-disable-next-line no-console
+      console.warn("[vs01-recipient-hydration-miss]", {
+        documentId,
+        counterpartyId: lockedId,
+        reason: manifestRaw ? "decode_returned_empty" : "storage_miss",
+        hint: "Fields were placed but could not be loaded. Recipient may see empty state.",
+      });
+    }
   }
 
   memo = {
@@ -264,6 +271,8 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     recipientHydratedFields,
     recipientManifestParamPresent,
     recipientManifestDecodeError,
+    packetRevision: packetRevisionFromUrl || null,
+    canonicalPacketStored,
   };
 
   const path = window.location.pathname + window.location.hash;

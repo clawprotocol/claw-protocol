@@ -93,7 +93,7 @@ describe("dashboardWhatsNextPresentation", () => {
     expect(gate.requiredPartyCount).toBe(1);
     expect(gate.approvedCount).toBe(1);
     expect(presentation.headline).toBe("All reviews complete");
-    expect(presentation.nextStepLabel).toBe("Prepare signature links");
+    expect(presentation.nextStepLabel).toBe("Prepare and send signing links");
     expect(pill).toBe("Ready for Signing");
   });
 
@@ -103,7 +103,7 @@ describe("dashboardWhatsNextPresentation", () => {
     const presentation = deriveDashboardWhatsNextPresentation(r, gate);
     const pill = deriveCreatorDashboardStatusPillFromGate(r, gate);
     expect(presentation.headline).toBe("All reviews complete");
-    expect(presentation.nextStepLabel).toBe("Prepare signature links");
+    expect(presentation.nextStepLabel).toBe("Prepare and send signing links");
     expect(pill).toBe("Ready for Signing");
     expect(pill).not.toBe("Waiting on reviewer");
   });
@@ -158,6 +158,6 @@ describe("dashboardWhatsNextPresentation", () => {
     const gate = resolveCreatorDashboardReviewGate(r, approvedRows);
     const presentation = deriveDashboardWhatsNextPresentation(r, gate);
     expect(presentation.headline).toBe("All reviews complete");
-    expect(presentation.nextStepLabel).toBe("Prepare signature links");
+    expect(presentation.nextStepLabel).toBe("Prepare and send signing links");
   });
 });

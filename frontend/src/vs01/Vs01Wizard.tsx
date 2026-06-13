@@ -65,6 +65,7 @@ import {
 } from "./vs01PreparePacketCompletion";
 import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
 import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
+import { hydrateVs01RecipientFromServerPacket } from "./vs01RecipientServerHydration";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
 import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
 import {
@@ -126,6 +127,12 @@ const INITIAL_RECIPIENT_FIELDS: Vs01RecipientPlacedField[] =
   RECIPIENT_SIGNER_DEEP_LINK && VS01_URL_BOOT?.recipientHydratedFields
     ? VS01_URL_BOOT.recipientHydratedFields
     : [];
+
+const RECIPIENT_NEEDS_SERVER_HYDRATION =
+  RECIPIENT_SIGNER_DEEP_LINK &&
+  INITIAL_RECIPIENT_FIELDS.length === 0 &&
+  Boolean(RECIPIENT_AGREEMENT_ID) &&
+  (VS01_URL_BOOT?.recipientManifestParamPresent ?? false);
 
 export type Vs01WizardProps = {
   /** Reserved for future controlled mode; shell ignores if unset. */
@@ -194,6 +201,9 @@ export function Vs01Wizard({
   const [recipientPlacedFields, setRecipientPlacedFields] = useState<Vs01RecipientPlacedField[]>(
     () => INITIAL_RECIPIENT_FIELDS
   );
+  const [recipientServerHydrationPending, setRecipientServerHydrationPending] = useState(
+    () => RECIPIENT_NEEDS_SERVER_HYDRATION,
+  );
   const [recipientSigningFinished, setRecipientSigningFinished] = useState(false);
   const [senderPlacedFields, setSenderPlacedFields] = useState<PlacedSigningField[]>([]);
   const [senderSignatureRef, setSenderSignatureRef] = useState<Vs01SenderSignatureRef | null>(null);
@@ -260,7 +270,7 @@ export function Vs01Wizard({
           ? RECIPIENT_LOCKED_SIGNER_ROLE_ID.slice(0, 16)
           : null,
       });
-      if (INITIAL_RECIPIENT_FIELDS.length === 0 && VS01_URL_BOOT?.recipientManifestParamPresent) {
+      if (INITIAL_RECIPIENT_FIELDS.length === 0 && VS01_URL_BOOT?.recipientManifestParamPresent && !RECIPIENT_AGREEMENT_ID) {
         // eslint-disable-next-line no-console
         console.warn("[vs01-recipient-field-mismatch]", {
           reason: "zero_fields_despite_manifest_param",
@@ -271,6 +281,75 @@ export function Vs01Wizard({
       }
     }
   }, [seedDocumentId, hideStepper]);
+
+  useEffect(() => {
+    if (!RECIPIENT_SIGNER_DEEP_LINK || !RECIPIENT_LOCKED_CP_ID) return;
+    if (recipientPlacedFields.length > 0) {
+      setRecipientServerHydrationPending(false);
+      return;
+    }
+    const agreementId = RECIPIENT_AGREEMENT_ID;
+    const did = (documentId ?? VS01_URL_BOOT?.documentId ?? "").trim();
+    if (!agreementId || !did) {
+      setRecipientServerHydrationPending(false);
+      return;
+    }
+    if (!VS01_URL_BOOT?.recipientManifestParamPresent) {
+      setRecipientServerHydrationPending(false);
+      return;
+    }
+    let cancelled = false;
+    setRecipientServerHydrationPending(true);
+    const lockedCp = RECIPIENT_LOCKED_CP_ID;
+    const recipientName =
+      (VS01_URL_BOOT?.counterparties.find((c) => c.id === lockedCp)?.name ?? "").trim() ||
+      (counterparties.find((c) => c.id === lockedCp)?.name ?? "").trim();
+    const recipientEmail =
+      (VS01_URL_BOOT?.counterparties.find((c) => c.id === lockedCp)?.email ?? "").trim() ||
+      (counterparties.find((c) => c.id === lockedCp)?.email ?? "").trim();
+    void hydrateVs01RecipientFromServerPacket({
+      agreementId,
+      documentId: did,
+      packetRevision: VS01_URL_BOOT?.packetRevision ?? null,
+      lockedCounterpartyId: lockedCp,
+      lockedSignerRoleId: RECIPIENT_LOCKED_SIGNER_ROLE_ID,
+      recipientName: recipientName || "Recipient",
+      recipientEmail,
+    }).then((result) => {
+      if (cancelled) return;
+      setRecipientServerHydrationPending(false);
+      if (result.ok && result.fields.length > 0) {
+        setRecipientPlacedFields(result.fields);
+        if (result.counterparties.length > 0) {
+          setCounterparties(result.counterparties);
+        }
+        if (!vs01LinkedAgreementId) {
+          setVs01LinkedAgreementId(agreementId);
+        }
+        // eslint-disable-next-line no-console
+        console.info("[vs01-recipient-server-hydration]", {
+          agreementIdShort: agreementId.slice(0, 16),
+          documentIdShort: did.slice(0, 8),
+          fieldCount: result.fields.length,
+          source: result.source,
+        });
+      } else if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn("[vs01-recipient-server-hydration-miss]", {
+          agreementIdShort: agreementId.slice(0, 16),
+          documentIdShort: did.slice(0, 8),
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    recipientPlacedFields.length,
+    documentId,
+    counterparties,
+    vs01LinkedAgreementId,
+  ]);
 
   useEffect(() => {
     bridgeHandoffSnapshotRef.current = null;
@@ -509,7 +588,10 @@ export function Vs01Wizard({
       ownerSignerTitle: creatorSignerTitle,
       counterparties,
     });
-    void dispatchSigningInvitesFromHandoff(result.handoff, roles).then((delivery) => {
+    void dispatchSigningInvitesFromHandoff(result.handoff, roles, {
+      portablePacket: result.portablePacket,
+      documentId: did,
+    }).then((delivery) => {
       // eslint-disable-next-line no-console
       console.info("[vs01-signing-invites-dispatched]", {
         agreementIdShort: linkedAgreementId.slice(0, 16),
@@ -1019,6 +1101,7 @@ export function Vs01Wizard({
               }}
               manifestDecodeError={VS01_URL_BOOT?.recipientManifestDecodeError ?? null}
               manifestParamPresent={VS01_URL_BOOT?.recipientManifestParamPresent ?? false}
+              serverHydrationPending={recipientServerHydrationPending}
             />
           )}
         </div>

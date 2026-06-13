@@ -158,7 +158,7 @@ describe("AppDashboard creator-centric surface", () => {
     );
   });
 
-  it("shows Prepare signature links when reviewer approved on draft but index still in_review", async () => {
+  it("shows Prepare and send signing links when reviewer approved on draft but index still in_review", async () => {
     const reviewerApprovedDraft = {
       ...draftWithParties(),
       parties: [
@@ -196,7 +196,7 @@ describe("AppDashboard creator-centric surface", () => {
       expect(screen.getByText("All reviews complete")).toBeTruthy();
     });
 
-    expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Track review status" })).toBeNull();
     expect(screen.getByTestId("creator-dashboard-status-pill-ag_ready").textContent).toBe(
       "Ready for Signing",
@@ -241,7 +241,7 @@ describe("AppDashboard creator-centric surface", () => {
     expect(screen.queryByText("Waiting on reviewer")).toBeNull();
 
     const cta = await waitFor(() => {
-      const button = screen.getByRole("button", { name: "Prepare signature links" });
+      const button = screen.getByRole("button", { name: "Prepare and send signing links" });
       expect(button.getAttribute("data-dashboard-whats-next-cta")).toBe("prepare_signature_links");
       return button;
     });
@@ -266,7 +266,7 @@ describe("AppDashboard creator-centric surface", () => {
     homeCreateSpy.mockRestore();
   });
 
-  it("routes Prepare signature links through VS01 bridge with correct agreementId", async () => {
+  it("routes Prepare and send signing links through VS01 bridge with correct agreementId", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
       ok: true,
       draft: draftWithParties(),
@@ -292,10 +292,10 @@ describe("AppDashboard creator-centric surface", () => {
     render(<AppDashboard />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
     });
 
-    await user.click(screen.getByRole("button", { name: "Prepare signature links" }));
+    await user.click(screen.getByRole("button", { name: "Prepare and send signing links" }));
 
     await waitFor(() => {
       expect(vs01Spy).toHaveBeenCalledWith(
@@ -360,7 +360,7 @@ describe("AppDashboard creator-centric surface", () => {
     const whatsNext = screen.getByTestId("dashboard-whats-next-panel");
     expect(whatsNext.querySelector('[data-dashboard-whats-next-cta="hidden"]')).toBeTruthy();
     expect(whatsNext.querySelector('[data-dashboard-whats-next-cta="focus_review_status"]')).toBeNull();
-    expect(screen.queryByRole("button", { name: "Prepare signature links" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Prepare and send signing links" })).toBeNull();
     expect(vs01Spy).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
@@ -388,10 +388,10 @@ describe("AppDashboard creator-centric surface", () => {
     render(<AppDashboard />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
     });
 
-    await user.click(screen.getByRole("button", { name: "Prepare signature links" }));
+    await user.click(screen.getByRole("button", { name: "Prepare and send signing links" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("creator-dashboard-prepare-notice-ag_ready")).toBeTruthy();
@@ -561,7 +561,7 @@ describe("AppDashboard creator-centric surface", () => {
     expect(screen.getByText(/Fully signed/)).toBeTruthy();
     expect(screen.queryByText(/Signature links not prepared yet/)).toBeNull();
     expect(screen.getByRole("button", { name: "Open agreement workspace" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Prepare signature links" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Prepare and send signing links" })).toBeNull();
   });
 
   it("shows the requested empty state", async () => {

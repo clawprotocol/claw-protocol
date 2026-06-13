@@ -165,7 +165,7 @@ describe("dashboard account foundation", () => {
     expect(screen.getByTestId(`lawdog-action-open-${agreementId}`)).toBeTruthy();
   });
 
-  it("review-approved agreement shows Prepare signature links", async () => {
+  it("review-approved agreement shows Prepare and send signing links", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [
         indexRow({
@@ -194,7 +194,7 @@ describe("dashboard account foundation", () => {
     });
     render(<AppDashboard />);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Prepare signature links" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
     });
   });
 

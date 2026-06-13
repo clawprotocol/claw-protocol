@@ -116,7 +116,7 @@ export function deriveWhatsNextNextStep(
   const status = effectiveStatus(row, reviewGate);
   if (status === "signing_in_progress") return "Wait for remaining signatures";
   if (status === "ready_for_signing" || status === "review_approved") {
-    return "Prepare signature links";
+    return "Prepare and send signing links";
   }
   if (status === "in_review") {
     if (reviewGate.hasOpenChangeRequests) return "Review suggested changes";

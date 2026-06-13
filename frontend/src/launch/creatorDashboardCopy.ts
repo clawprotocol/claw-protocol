@@ -1,6 +1,6 @@
-export const CREATOR_PREPARE_SIGNATURE_LINKS_LABEL = "Prepare signature links";
+export const CREATOR_PREPARE_SIGNATURE_LINKS_LABEL = "Prepare and send signing links";
 
-export const CREATOR_NEXT_ACTION_PREPARE_SIGNATURE_LINKS = "Prepare signature links";
+export const CREATOR_NEXT_ACTION_PREPARE_SIGNATURE_LINKS = "Prepare and send signing links";
 
 export const CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE = "Open agreement workspace";
 
@@ -27,15 +27,15 @@ export const CREATOR_PREPARE_BRIDGE_FAILED_NOTICE =
 export const CREATOR_REVIEWS_COMPLETE_PILL = CREATOR_REVIEWS_APPROVED_PILL;
 
 export const CREATOR_ALL_REVIEWERS_APPROVED_HELPER =
-  "Everyone approved this draft. Prepare signature links to start signing.";
+  "Everyone approved this draft. Review field placement, then LawDog sends signing links to all parties.";
 
 export const CREATOR_ALL_REVIEWERS_APPROVED_HELPER_EXTENDED =
-  "Everyone approved this draft. Prepare signature links to start signing.";
+  "Everyone approved this draft. Review field placement, then LawDog sends signing links to all parties.";
 
 export const REVIEW_LINK_READY_ALL_APPROVED_TITLE = "All reviewers approved";
 
 export const REVIEW_LINK_READY_ALL_APPROVED_BODY =
-  "All reviewers approved. Prepare signature links when you're ready. Nothing is signed until signature links are prepared and completed.";
+  "All reviewers approved. Review field placement, then LawDog sends signing links to all parties. Nothing is signed until everyone completes signing.";
 
 export const REVIEW_LINK_READY_BACK_TO_DASHBOARD_LABEL = "Back to dashboard";
 

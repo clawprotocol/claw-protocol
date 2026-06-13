@@ -99,7 +99,7 @@ describe("DashboardWhatsNextPanel", () => {
     );
     expect(screen.getByTestId("creator-dashboard-action-hidden-ag_whats_next")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Track review status" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Prepare signature links" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Prepare and send signing links" })).toBeNull();
 
     const viewAgreement = screen.getByRole("button", { name: "View agreement" });
     expect(viewAgreement.getAttribute("data-dashboard-whats-next-cta")).toBe("view_agreement");
@@ -107,7 +107,7 @@ describe("DashboardWhatsNextPanel", () => {
     expect(onNavigate).toHaveBeenCalledWith("/app/agreements/ag_whats_next/view");
   });
 
-  it("shows Prepare signature links CTA when ready for signing", () => {
+  it("shows Prepare and send signing links CTA when ready for signing", () => {
     const onPrepare = vi.fn();
     render(
       <DashboardWhatsNextPanel
@@ -119,7 +119,7 @@ describe("DashboardWhatsNextPanel", () => {
       />,
     );
 
-    const button = screen.getByRole("button", { name: "Prepare signature links" });
+    const button = screen.getByRole("button", { name: "Prepare and send signing links" });
     expect(button.getAttribute("data-dashboard-whats-next-cta")).toBe("prepare_signature_links");
     fireEvent.click(button);
     expect(onPrepare).toHaveBeenCalledWith("ag_whats_next");

@@ -2,6 +2,7 @@ import { postSigningLinksSent } from "../agreement/agreementWorkspaceApi";
 import type { PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { resolveVs01SenderMustSignFirst } from "./vs01SigningOrderPolicy";
+import type { Vs01CanonicalPacketPortableV1 } from "./vs01CanonicalPacketSeed";
 
 export type SigningInviteDispatchResult = {
   attempted: boolean;
@@ -68,6 +69,10 @@ export function buildSigningInviteTargetsFromHandoff(
 export async function dispatchSigningInvitesFromHandoff(
   handoff: PaidProVs01PostSignHandoffV1,
   roles: readonly Vs01PrepareSigningRole[],
+  opts?: {
+    portablePacket?: Vs01CanonicalPacketPortableV1 | null;
+    documentId?: string | null;
+  },
 ): Promise<SigningInviteDispatchResult> {
   const senderMustSignFirst = resolveVs01SenderMustSignFirst(handoff.senderMustSignFirst);
   if (senderMustSignFirst) {
@@ -82,6 +87,8 @@ export async function dispatchSigningInvitesFromHandoff(
   try {
     const res = await postSigningLinksSent(handoff.agreementId, {
       packet_revision: handoff.packetRevision ?? null,
+      document_id: (opts?.documentId ?? handoff.vs01DocumentId ?? "").trim() || null,
+      portable_packet: opts?.portablePacket ? (opts.portablePacket as unknown as Record<string, unknown>) : null,
       targets,
     });
     return {

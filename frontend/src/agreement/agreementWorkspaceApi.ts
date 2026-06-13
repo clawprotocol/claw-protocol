@@ -106,6 +106,8 @@ export async function postSigningLinksSent(
   agreementId: string,
   body: {
     packet_revision?: string | null;
+    document_id?: string | null;
+    portable_packet?: Record<string, unknown> | null;
     targets: SigningInviteTargetPayload[];
   },
 ): Promise<PostSigningLinksSentResult> {
@@ -117,6 +119,8 @@ export async function postSigningLinksSent(
       headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         packet_revision: body.packet_revision ?? null,
+        document_id: body.document_id ?? null,
+        portable_packet: body.portable_packet ?? null,
         targets: body.targets,
       }),
     });

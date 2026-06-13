@@ -80,6 +80,8 @@ export type RecipientSigningViewProps = {
   manifestDecodeError?: string | null;
   /** True when the URL included a signing-layout manifest query param (`vs01_rmanifest`). */
   manifestParamPresent?: boolean;
+  /** Server packet fetch in flight — suppress false hydration-miss UI. */
+  serverHydrationPending?: boolean;
 };
 
 function formatIsoDateDisplay(iso: string): string {
@@ -168,6 +170,7 @@ export function RecipientSigningView({
   onFinishSigning,
   manifestDecodeError = null,
   manifestParamPresent = false,
+  serverHydrationPending = false,
 }: RecipientSigningViewProps) {
   const cpById = useMemo(() => {
     const m = new Map<string, Vs01Counterparty>();
@@ -516,8 +519,14 @@ export function RecipientSigningView({
   const placementSurface =
     useCanonicalDocument || Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
 
+  const docLoading = previewLoading || serverHydrationPending;
+
   const genuinelyNoFields = !manifestDecodeError && myFields.length === 0 && !manifestParamPresent;
-  const hydrationMiss = !manifestDecodeError && myFields.length === 0 && manifestParamPresent;
+  const hydrationMiss =
+    !serverHydrationPending &&
+    !manifestDecodeError &&
+    myFields.length === 0 &&
+    manifestParamPresent;
   const showEmptyFieldsHint = genuinelyNoFields || hydrationMiss;
 
   const emptyFieldsMessage = hydrationMiss
@@ -593,7 +602,7 @@ export function RecipientSigningView({
       ) : null}
 
       <div className="vs01-recipient-signing-doc-wrap">
-        {placementSurface && !previewLoading ? (
+        {placementSurface && !docLoading ? (
           <div className="vs01-sign-page-bar" aria-label="Page navigation">
             <button
               type="button"
@@ -630,9 +639,9 @@ export function RecipientSigningView({
         ) : null}
 
         <div className="vs01-sign-scroll vs01-recipient-signing-scroll">
-          {previewLoading ? (
+          {docLoading ? (
             <div className="vs01-sign-preview-fallback" role="status">
-              Loading document…
+              {serverHydrationPending ? "Loading signing fields…" : "Loading document…"}
             </div>
           ) : useCanonicalDocument && canonicalPacket ? (
             <div
@@ -893,14 +902,14 @@ export function RecipientSigningView({
           )}
         </div>
 
-        {showEmptyFieldsHint && placementSurface && !previewLoading ? (
+        {showEmptyFieldsHint && placementSurface && !docLoading ? (
           <p className="vs01-recipient-signing-empty" role="status">
             {emptyFieldsMessage}
           </p>
         ) : null}
 
         <p className="vs01-sign-doc-foot-hint vs01-recipient-signing-foot">
-          {placementSurface && !previewLoading && !manifestDecodeError
+          {placementSurface && !docLoading && !manifestDecodeError
             ? "Review the document, sign the highlighted signature box, and add initials if shown."
             : null}
         </p>

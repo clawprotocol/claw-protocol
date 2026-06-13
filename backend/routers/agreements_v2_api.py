@@ -565,6 +565,8 @@ class AgreementDraft(AgreementDraftCreate):
     review_sent_at: Optional[str] = None
     """Set when review invite Resend delivery orchestration completed (idempotent email guard)."""
     review_invite_emails_sent_at: Optional[str] = None
+    """VS01 prepared signing packet for cross-browser recipient hydration (test346)."""
+    vs01_signing_packet_v1: Optional[Dict[str, Any]] = None
     workspace_archived_at: Optional[str] = None
     workspace_folder_id: Optional[str] = None
     workspace_tags: List[str] = Field(default_factory=list)
@@ -2906,6 +2908,8 @@ class SigningInviteTargetBody(BaseModel):
 
 class SigningLinksSentBody(BaseModel):
     packet_revision: Optional[str] = None
+    document_id: Optional[str] = None
+    portable_packet: Optional[Dict[str, Any]] = None
     targets: List[SigningInviteTargetBody] = Field(default_factory=list)
 
 
@@ -5962,6 +5966,25 @@ def post_agreement_signing_links_sent(
     draft = _load_or_404(agreement_id)
     sent_count = 0
     skip_reason: str | None = None
+    portable = body.portable_packet if isinstance(body.portable_packet, dict) else None
+    document_id = (body.document_id or "").strip() or None
+    packet_revision = (body.packet_revision or "").strip() or None
+    if portable and document_id:
+        try:
+            stored = {
+                "v": 1,
+                "document_id": document_id,
+                "packet_revision": packet_revision,
+                "portable": portable,
+                "stored_at": _utc_now_iso(),
+            }
+            draft = _merge_agreement_draft(draft, vs01_signing_packet_v1=stored, updated_at=_utc_now_iso())
+            _save_draft_sync(draft.model_dump(), request)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "vs01_signing_packet_persist_failed agreement_id=%s",
+                agreement_id,
+            )
     try:
         from backend.services.email.signing_delivery import maybe_send_signing_invites_after_packet_prepared
 
@@ -6196,6 +6219,40 @@ def get_public_agreement_verify(agreement_id: str) -> Dict[str, Any]:
         return _public_agreement_verify_payload(aid, draft)
     except Exception:
         return _public_agreement_verify_pending_payload(aid, draft)
+
+
+@router.get("/public/{agreement_id}/vs01-signing-packet")
+def get_public_vs01_signing_packet(
+    agreement_id: str,
+    document_id: str,
+    packet_revision: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Public VS01 signing packet for emailed recipient links (no auth; fields + corpus seed only)."""
+    aid = (agreement_id or "").strip()
+    did = (document_id or "").strip()
+    if not aid or not did:
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        raw = load_draft(aid)
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        draft = AgreementDraft.model_validate(raw)
+    except ValidationError:
+        raise HTTPException(status_code=404, detail="not_found")
+    stored = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else None
+    if not stored:
+        raise HTTPException(status_code=404, detail="packet_not_found")
+    if (stored.get("document_id") or "").strip() != did:
+        raise HTTPException(status_code=404, detail="packet_document_mismatch")
+    rev = (packet_revision or "").strip()
+    stored_rev = (stored.get("packet_revision") or "").strip()
+    if rev and stored_rev and rev != stored_rev:
+        raise HTTPException(status_code=404, detail="packet_revision_mismatch")
+    portable = stored.get("portable")
+    if not isinstance(portable, dict):
+        raise HTTPException(status_code=404, detail="packet_invalid")
+    return {"ok": True, "portable": portable}
 
 
 @router.get("/{agreement_id}")

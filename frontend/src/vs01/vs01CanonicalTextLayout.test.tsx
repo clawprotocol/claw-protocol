@@ -62,6 +62,33 @@ describe("VS01 canonical text flow layout", () => {
     expect(descriptors[2]?.isSignatureExecutionLine).toBe(true);
   });
 
+  it("splits glued section headings for bold heading line + body line (test346)", () => {
+    const glued =
+      "2. Deliverables and Acceptance To the extent deliverables are provided, Client will review within ten days.";
+    const descriptors = buildFlowLineDescriptors([glued]);
+    expect(descriptors).toHaveLength(2);
+    expect(descriptors[0]?.kind).toBe("heading");
+    expect(descriptors[1]?.kind).toBe("body");
+    const { container } = render(
+      <Vs01CanonicalSigningPage
+        page={{
+          pageIndex: 0,
+          contentRect: { x: 0.088, y: 0.056, width: 0.824, height: 0.84 },
+          flowLines: [glued],
+          textBlocks: [],
+          initialsBandRect: { x: 0.088, y: 0.9, width: 0.824, height: 0.06 },
+          reservedInitialsBandRect: { x: 0.088, y: 0.9, width: 0.824, height: 0.06 },
+          signatureAnchorRects: [],
+          signatureLineAnchors: [],
+          footerRect: { x: 0.088, y: 0.96, width: 0.824, height: 0.02 },
+        }}
+        pageWidthPx={612}
+      />,
+    );
+    expect(container.querySelector(".vs01-canonical-flow-line--heading")).toBeTruthy();
+    expect(container.querySelector(".vs01-canonical-flow-line--body")).toBeTruthy();
+  });
+
   it("paginates dense text across pages without sharing flow lines", () => {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
