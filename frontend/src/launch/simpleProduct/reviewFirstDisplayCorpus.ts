@@ -12,6 +12,7 @@ import {
 import { resolvePaidProPostFinalizeReviewPlain } from "../../components/agreements/paidProPostFinalizeReviewSurface";
 import { readConsumedPaidProSignerMetadataAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
 import { getPaidProDocumentForSurface, hashPaidProCorpus } from "../../components/agreements/paidProSourceOfTruth";
+import { preparePaidProReviewDisplayPlain } from "../../components/agreements/paidProFlattenedDocumentNormalize";
 import { peekReviewFirstPinnedCorpus } from "./reviewFirstSendSurface";
 import {
   logReviewCorpusAuthority,
@@ -83,6 +84,13 @@ function reviewRouteHashInvariant(args: {
   }
 }
 
+/** Display-only Pro section formatting — matches owner review render prep without mutating SoT. */
+export function applyReviewTrackDisplayFormatting(text: string): string {
+  const body = (text || "").trim();
+  if (body.length < 80) return body;
+  return preparePaidProReviewDisplayPlain(body).text.trimEnd();
+}
+
 function finalizeReviewFirstCorpusText(
   text: string,
   draft?: AgreementDraft | null,
@@ -94,27 +102,32 @@ function finalizeReviewFirstCorpusText(
   const corpusHints = collectReviewReadyCorpusHints(body, draft ?? null);
   const reviewTrack = isReviewTrackHydrationSurface(surface);
 
+  let hydrated: string;
   if (reviewTrack) {
-    const hydrated = applyReviewReadyMetadataBackfill(body, draft ?? null, {
+    hydrated = applyReviewReadyMetadataBackfill(body, draft ?? null, {
       corpusHints,
       surface,
       selectedSource,
     });
-    if (!detectExecutionHeadingMetadataLeak(hydrated).leak) return hydrated;
-    const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
-    return repairExecutionBlockEntityHeadingLines(hydrated, parties).text.trim();
+  } else {
+    const meta = resolveReviewReadyRecipientMetadata(draft ?? null, { corpusHints });
+    if (corpusHasHydratedSignerMetadata(body, meta, { reviewTrackSurface: false })) {
+      hydrated = body;
+    } else {
+      hydrated = applyReviewReadyMetadataBackfill(body, draft ?? null, {
+        corpusHints,
+        surface,
+        selectedSource,
+      });
+    }
   }
 
-  const meta = resolveReviewReadyRecipientMetadata(draft ?? null, { corpusHints });
-  if (corpusHasHydratedSignerMetadata(body, meta, { reviewTrackSurface: false })) return body;
-  const hydrated = applyReviewReadyMetadataBackfill(body, draft ?? null, {
-    corpusHints,
-    surface,
-    selectedSource,
-  });
-  if (!detectExecutionHeadingMetadataLeak(hydrated).leak) return hydrated;
-  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
-  return repairExecutionBlockEntityHeadingLines(hydrated, parties).text.trim();
+  if (detectExecutionHeadingMetadataLeak(hydrated).leak) {
+    const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
+    hydrated = repairExecutionBlockEntityHeadingLines(hydrated, parties).text.trim();
+  }
+
+  return applyReviewTrackDisplayFormatting(hydrated);
 }
 
 function wrapReviewFirstCorpus(

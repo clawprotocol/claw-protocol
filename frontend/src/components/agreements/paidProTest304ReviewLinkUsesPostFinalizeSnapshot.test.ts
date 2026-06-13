@@ -33,7 +33,7 @@ import {
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import { clearPaidProPinnedSignerAppliedCorpus, setPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
-import { resolveReviewFirstDisplayCorpus } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
+import { resolveReviewFirstDisplayCorpus, applyReviewTrackDisplayFormatting } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
 import {
   clearReviewFirstHandoffSource,
   peekReviewFirstPinnedCorpus,
@@ -193,8 +193,11 @@ describe("Test304 review link uses post-finalize signing snapshot", () => {
 
     const display = resolveReviewFirstDisplayCorpus(draftWithStaleReviewFallback());
     expect(display?.source === "authoritative_signing_snapshot" || display?.source === "review_first_pinned_corpus").toBe(true);
-    expect(display?.text).toBe(creatorPlain);
-    expect(display?.hash).toBe(hashPaidProCorpus(creatorPlain));
+    const expectedDisplayText = applyReviewTrackDisplayFormatting(creatorPlain);
+    expect(display?.text).toBe(expectedDisplayText);
+    expect(display?.hash).toBe(hashPaidProCorpus(expectedDisplayText));
+    expect(display?.text).toMatch(/fifteen \(15\) days/i);
+    expect(display?.text).toMatch(/Sarah Mitchell/i);
     expect(display?.text).not.toContain("CANONICAL_SOT_WITHOUT_HYDRATION");
 
     const mintBody = buildRecipientAccessMintBody({

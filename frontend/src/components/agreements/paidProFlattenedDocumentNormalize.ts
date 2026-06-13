@@ -34,7 +34,7 @@ export function normalizeFlattenedPaidProDocumentBlocks(text: string): {
   out = repairGluedSectionHeadingsInText(out);
 
   out = out.replace(
-    /^([A-Z][A-Z0-9\s/&—–'()-]{4,80})\s+(This\s+(?:Services\s+)?Agreement\b)/,
+    /^((?:CONSULTING AND IMPLEMENTATION|MUTUAL CONSULTING AND IMPLEMENTATION|SERVICES) AGREEMENT)\s+(This\b)/i,
     "$1\n\n$2",
   );
 
