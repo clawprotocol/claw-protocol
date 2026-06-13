@@ -5344,6 +5344,7 @@ export function AgreementRecipientReview({
       />
 
       <ReviewMetaGrid
+        tone="recipientDark"
         testId="recipient-summary-card"
         items={[
           { label: "Agreement", value: recipientAgreementTitleForDisplay(draft.title) || activeSummaryType },

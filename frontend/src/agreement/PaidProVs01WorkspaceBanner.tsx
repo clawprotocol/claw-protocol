@@ -100,6 +100,7 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
 
   const title = handoff.agreementTitle.trim() || "Agreement";
   const signers = handoff.signers;
+  const senderMustSignFirst = Boolean(handoff.senderMustSignFirst);
   const primaryForLink = signers.find((s) => s.signingUrl?.trim()) ?? signers[0];
   const packetPrepare = Boolean(handoff.packetPrepareOnly) || !handoff.receiptId?.trim();
   const firstSigningUrl = packetPrepare
@@ -111,9 +112,13 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
   const completionLine = packetPrepare
     ? signers.length === 0
       ? "Signing packet ready. Add signing recipients from the workspace when you have their details."
-      : signers.length === 1
-        ? "Signing packet ready. 0 of 1 signers have signed — share the signing link below."
-        : `Signing packet ready. 0 of ${signers.length} signers have signed — share each signing link below.`
+      : senderMustSignFirst
+        ? signers.length === 1
+          ? `Signing packet ready. Sign first — then share ${firstNamed?.displayName?.trim() || "the counterparty"}'s link. LawDog does not email signers automatically.`
+          : `Signing packet ready. Sign first — then share each counterparty link. LawDog does not email signers automatically.`
+        : signers.length === 1
+          ? "Signing packet ready. 0 of 1 signers have signed — share the signing link below."
+          : `Signing packet ready. 0 of ${signers.length} signers have signed — share each signing link below.`
     : signers.length === 0
       ? "Your signature is complete. Add recipients from the workspace when you are ready to collect remaining signatures."
       : namedPending.length === 1
@@ -149,7 +154,7 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
                 className="vs01-btn vs01-btn--secondary vs01-btn--auto min-h-[2.5rem] px-4 text-sm"
                 onClick={() => window.open(firstSigningUrl, "_blank", "noopener,noreferrer")}
               >
-                {packetPrepare ? "Open my signing link" : "Open signing link"}
+                {packetPrepare ? "Open my signing view" : "Open signing link"}
               </button>
               <button
                 type="button"
@@ -167,9 +172,14 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
         </button>
       </div>
 
-      {signers.length > 1 ? (
-        <details className="mt-4 border-t border-slate-800/60 pt-4">
-          <summary className="cursor-pointer text-xs font-medium text-slate-400">Other signing links</summary>
+      {signers.length > 0 ? (
+        <details
+          className="mt-4 border-t border-slate-800/60 pt-4"
+          open={senderMustSignFirst && signers.length === 1}
+        >
+          <summary className="cursor-pointer text-xs font-medium text-slate-400">
+            {senderMustSignFirst ? "Counterparty signing links (share after you sign)" : "Other signing links"}
+          </summary>
           <ul className="mt-3 space-y-3">
             {signers.map((s) => (
               <li key={s.counterpartyId} className="rounded-lg border border-slate-800/80 bg-slate-950/40 p-3">

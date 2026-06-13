@@ -118,8 +118,9 @@ def test_external_reviewer_approval_sends_owner_status_email_once(
     assert mock_client.post.call_count == 1
     payload = mock_client.post.call_args_list[0][1]["json"]
     assert payload["to"] == ["owner@example.com"]
-    assert payload["subject"] == "Review update: Iron Vale Systems Inc approved Consulting Agreement"
-    assert "Open dashboard" in payload["html"]
+    assert payload["subject"] == "Review complete: prepare to sign Consulting Agreement"
+    assert "Prepare signature links" in payload["html"]
+    assert f"https://app.example.com/app/done/{aid}" in payload["html"]
     assert "https://app.example.com/app?focus=" in payload["html"]
     assert "/review?t=" not in payload["html"]
 
@@ -233,7 +234,7 @@ def test_initial_review_invite_still_excludes_owner(
     assert mock_client.post.call_count == 2
     owner_payload = mock_client.post.call_args_list[1][1]["json"]
     assert owner_payload["to"] == ["owner@example.com"]
-    assert owner_payload["subject"].startswith("Review update:")
+    assert owner_payload["subject"].startswith("Review complete:")
 
 
 def test_client_role_owner_email_receives_notification(
@@ -284,3 +285,56 @@ def test_client_role_owner_email_receives_notification(
 
     assert mock_client.post.call_count == 1
     assert mock_client.post.call_args_list[0][1]["json"]["to"] == ["owner@example.com"]
+
+
+def test_partial_reviewer_approval_uses_dashboard_notification(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _env_common(monkeypatch, tmp_path)
+    mock_client = _mock_resend_success()
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Multi Review Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {
+                    "id": "p_owner",
+                    "name": "Blue Canyon Analytics LLC",
+                    "role": "owner",
+                    "email": "owner@example.com",
+                },
+                {
+                    "id": "p_r1",
+                    "name": "Iron Vale Systems Inc",
+                    "role": "reviewer",
+                    "email": "r1@example.com",
+                },
+                {
+                    "id": "p_r2",
+                    "name": "Northwind LLC",
+                    "role": "reviewer",
+                    "email": "r2@example.com",
+                },
+            ],
+            "purpose": "Services",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    token = _mint_reviewer_token(client, aid, party_id="p_r1")
+
+    with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+        _approve_as_reviewer(client, aid, token, participant_id="p_r1", display_name="Iron Vale Systems Inc")
+
+    assert mock_client.post.call_count == 1
+    payload = mock_client.post.call_args_list[0][1]["json"]
+    assert payload["subject"].startswith("Review update:")
+    assert "Open dashboard" in payload["html"]
+    assert f"/app/done/{aid}" not in payload["html"]

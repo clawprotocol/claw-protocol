@@ -50,16 +50,31 @@ export function ReviewHeader(props: {
   );
 }
 
-export function ReviewMetaGrid(props: { items: Array<{ label: ReactNode; value: ReactNode }>; className?: string; testId?: string }) {
+export function ReviewMetaGrid(props: {
+  items: Array<{ label: ReactNode; value: ReactNode }>;
+  className?: string;
+  testId?: string;
+  /** Dark VS01 recipient shell — high-contrast labels/values without touching owner Pro document paper. */
+  tone?: "default" | "recipientDark";
+}) {
+  const labelClass =
+    props.tone === "recipientDark"
+      ? "text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400"
+      : "text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500";
+  const valueClass =
+    props.tone === "recipientDark"
+      ? "mt-1 text-sm font-medium text-slate-100"
+      : "mt-1 text-sm font-medium text-slate-900";
   return (
     <dl
       className={`grid gap-3 px-1 py-1 text-left sm:grid-cols-3 ${props.className ?? ""}`}
       data-testid={props.testId}
+      data-review-meta-tone={props.tone ?? "default"}
     >
       {props.items.map((item, idx) => (
         <div key={idx} className="min-w-0">
-          <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{item.label}</dt>
-          <dd className="mt-1 text-sm font-medium text-slate-900">{item.value}</dd>
+          <dt className={labelClass}>{item.label}</dt>
+          <dd className={valueClass}>{item.value}</dd>
         </div>
       ))}
     </dl>

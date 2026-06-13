@@ -54,9 +54,9 @@ describe("resolveVs01EsignShellCopy", () => {
       seedDocumentId: doc,
       bridge: bridge({ reviewerApprovedCleanHandoff: true }),
     });
-    expect(r.title).toBe("Prepare for e-signing");
-    expect(r.subtitle).toMatch(/reviewers already approved/i);
-    expect(r.subtitle).not.toContain("prior step");
+    expect(r.title).toBe("Prepare signature links");
+    expect(r.subtitle).toMatch(/LawDog placed required signature fields/i);
+    expect(r.subtitle).not.toMatch(/Place required signature fields/i);
     expect(r.copyVariant).toBe("bridge_reviewer_approved");
     expect(r.navVariant).toBe("esign_bridge_focused");
   });
@@ -67,8 +67,8 @@ describe("resolveVs01EsignShellCopy", () => {
       seedDocumentId: doc,
       bridge: bridge(),
     });
-    expect(r.title).toBe("Prepare for e-signing");
-    expect(r.subtitle).toContain("LawDog send");
+    expect(r.title).toBe("Prepare signature links");
+    expect(r.subtitle).toMatch(/LawDog placed required signature fields/i);
     expect(r.subtitle).not.toContain("prior step");
     expect(r.copyVariant).toBe("bridge_sender_first");
     expect(r.navVariant).toBe("esign_bridge_focused");
@@ -82,7 +82,7 @@ describe("resolveVs01EsignShellCopy", () => {
       bridge: bridge({ reviewerApprovedCleanHandoff: true }),
     });
     expect(r.agreementBridgeEffective).toBe(true);
-    expect(r.title).toBe("Prepare for e-signing");
+    expect(r.title).toBe("Prepare signature links");
   });
 
   it("session-only (no query, no marker) still resolves bridge shell on refresh", () => {
@@ -93,8 +93,8 @@ describe("resolveVs01EsignShellCopy", () => {
     });
     expect(r.agreementBridgeEffective).toBe(true);
     expect(r.copyVariant).toBe("bridge_reviewer_approved");
-    expect(r.title).toBe("Prepare for e-signing");
-    expect(r.subtitle).toMatch(/reviewers already approved/i);
+    expect(r.title).toBe("Prepare signature links");
+    expect(r.subtitle).toMatch(/LawDog placed required signature fields/i);
     expect(r.navVariant).toBe("esign_bridge_focused");
   });
 
@@ -130,7 +130,7 @@ describe("resolveVs01EsignShellCopy", () => {
     expect(r.agreementBridgeEffective).toBe(true);
     expect(r.title).not.toBe("Prepare for e-signing");
     expect(r.title).toContain("ready");
-    expect(r.subtitle).toContain("recipient");
+    expect(r.subtitle).toMatch(/signer/i);
   });
 
   it("bridge flow at setup step (vs01Step < 4) still shows 'Prepare for e-signing'", () => {
@@ -140,8 +140,8 @@ describe("resolveVs01EsignShellCopy", () => {
       bridge: bridge({ reviewerApprovedCleanHandoff: true }),
       vs01Step: 2,
     });
-    expect(r.title).toBe("Prepare for e-signing");
-    expect(r.subtitle).toMatch(/reviewers already approved/i);
+    expect(r.title).toBe("Prepare signature links");
+    expect(r.subtitle).toMatch(/LawDog placed required signature fields/i);
   });
 });
 

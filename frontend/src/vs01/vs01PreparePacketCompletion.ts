@@ -18,14 +18,27 @@ export const PREPARE_PACKET_READY_COPY = "Your agreement is ready for signing.";
 export const PREPARE_PACKET_BRIDGE_HEADLINE_READY = "Signature fields are ready";
 export const PREPARE_PACKET_BRIDGE_HEADLINE_BLOCKED = "Review placement before sending";
 export const PREPARE_PACKET_BRIDGE_LEAD_READY =
-  "LawDog placed signature fields for each signer. Continue when placement looks right.";
+  "LawDog placed required signature fields for each signer. Review placement, then send or open signing links.";
 export const PREPARE_PACKET_BRIDGE_LEAD_BLOCKED =
   "LawDog found a placement issue. Rebuild the packet or edit placement.";
 /** @deprecated Use {@link PREPARE_PACKET_BRIDGE_HEADLINE_READY} with packetReady. */
 export const PREPARE_PACKET_BRIDGE_HEADLINE = PREPARE_PACKET_BRIDGE_HEADLINE_READY;
 /** @deprecated Use ready/blocked lead constants with packetReady. */
 export const PREPARE_PACKET_BRIDGE_LEAD = PREPARE_PACKET_BRIDGE_LEAD_READY;
-export const PREPARE_PACKET_BRIDGE_PRIMARY_CTA = "Continue to signing links";
+/** Sender-first prepare-only packets — owner signs before sharing counterparty links. */
+export const PREPARE_PACKET_BRIDGE_PRIMARY_CTA_SENDER_FIRST = "Open my signing view";
+/** @deprecated Prefer {@link resolvePreparePacketBridgePrimaryCta}. */
+export const PREPARE_PACKET_BRIDGE_PRIMARY_CTA = PREPARE_PACKET_BRIDGE_PRIMARY_CTA_SENDER_FIRST;
+
+export function resolvePreparePacketBridgePrimaryCta(options?: {
+  senderMustSignFirst?: boolean;
+  packetPrepareOnly?: boolean;
+}): string {
+  if (options?.senderMustSignFirst || options?.packetPrepareOnly) {
+    return PREPARE_PACKET_BRIDGE_PRIMARY_CTA_SENDER_FIRST;
+  }
+  return "Create signing links";
+}
 export const PREPARE_PACKET_BRIDGE_SECONDARY_CTA = "Edit field placement";
 export const PREPARE_PACKET_INITIALS_TOGGLE_LABEL = "Initials on each page";
 export const PREPARE_PACKET_INITIALS_SUPPRESSED_HINT =

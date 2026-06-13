@@ -25,7 +25,10 @@ from backend.security.recipient_access_token import RecipientRole, mint_recipien
 from backend.services.agreement_signing_lock_store import read_signing_lock
 from backend.services.email.delivery import send_email_non_fatal
 from backend.services.email.templates.review_invite import build_review_invite_email
-from backend.services.email.templates.review_owner_notification import build_review_owner_notification_email
+from backend.services.email.templates.review_owner_notification import (
+    build_review_owner_notification_email,
+    build_review_owner_signing_ready_notification_email,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -334,12 +337,23 @@ def maybe_notify_owner_after_reviewer_approval(
 
     title = str(draft.get("title") or "").strip() or "Untitled agreement"
     dashboard_url = _build_owner_dashboard_url(origin, aid)
-    email = build_review_owner_notification_email(
-        owner_name=owner_name,
-        agreement_title=title,
-        reviewer_display_name=reviewer_name,
-        dashboard_url=dashboard_url,
-    )
+    signing_prep_url = _build_owner_signing_prep_url(origin, aid)
+    all_reviews_complete = _all_required_review_parties_approved(draft)
+    if all_reviews_complete:
+        email = build_review_owner_signing_ready_notification_email(
+            owner_name=owner_name,
+            agreement_title=title,
+            reviewer_display_name=reviewer_name,
+            signing_prep_url=signing_prep_url,
+            dashboard_url=dashboard_url,
+        )
+    else:
+        email = build_review_owner_notification_email(
+            owner_name=owner_name,
+            agreement_title=title,
+            reviewer_display_name=reviewer_name,
+            dashboard_url=dashboard_url,
+        )
     result = send_email_non_fatal(
         to=owner_email,
         subject=email.subject,
@@ -444,6 +458,108 @@ def _build_owner_dashboard_url(origin: str, agreement_id: str) -> str:
     base = origin.rstrip("/")
     aid = quote(agreement_id.strip(), safe="")
     return f"{base}/app?focus={aid}"
+
+
+def _build_owner_signing_prep_url(origin: str, agreement_id: str) -> str:
+    base = origin.rstrip("/")
+    aid = quote(agreement_id.strip(), safe="")
+    return f"{base}/app/done/{aid}"
+
+
+def _approved_participant_ids_from_audit(audit: Any) -> set[str]:
+    out: set[str] = set()
+    if not isinstance(audit, list):
+        return out
+    for event in audit:
+        if not isinstance(event, dict):
+            continue
+        et = str(event.get("event_type") or "")
+        if et not in ("participant_approved", "recipient_approved"):
+            continue
+        val = event.get("value") or {}
+        if not isinstance(val, dict):
+            continue
+        pid = str(val.get("participant_id") or "").strip()
+        if pid:
+            out.add(pid)
+    return out
+
+
+def _open_recipient_proposals_exist(audit: Any) -> bool:
+    if not isinstance(audit, list):
+        return False
+    open_ids: set[str] = set()
+    closed_ids: set[str] = set()
+    for event in audit:
+        if not isinstance(event, dict):
+            continue
+        et = str(event.get("event_type") or "")
+        val = event.get("value") or {}
+        if not isinstance(val, dict):
+            continue
+        pid = str(val.get("proposal_id") or "").strip()
+        if not pid:
+            continue
+        if et == "recipient_proposal_pending":
+            open_ids.add(pid)
+        elif et in ("recipient_proposal_applied", "recipient_proposal_rejected", "recipient_proposal_withdrawn"):
+            closed_ids.add(pid)
+    return bool(open_ids - closed_ids)
+
+
+def _resolve_owner_party_index(parties: list[Any]) -> int:
+    for i, party in enumerate(parties):
+        if not isinstance(party, dict):
+            continue
+        if _normalize_workflow_role(str(party.get("role") or "")) == "owner":
+            return i
+    return 0
+
+
+def _party_requires_review_approval(
+    party: Dict[str, Any],
+    party_index: int,
+    parties: list[Any],
+) -> bool:
+    role = _normalize_workflow_role(str(party.get("role") or ""))
+    if role in ("viewer", "owner"):
+        return False
+    if role == "reviewer":
+        return True
+    has_explicit_reviewer = any(
+        isinstance(p, dict) and _normalize_workflow_role(str(p.get("role") or "")) == "reviewer"
+        for p in parties
+    )
+    if has_explicit_reviewer:
+        return False
+    if party_index == _resolve_owner_party_index(parties):
+        return False
+    name = str(party.get("name") or "").strip()
+    email = str(party.get("email") or "").strip().lower()
+    return bool(name and email and "@" in email)
+
+
+def _all_required_review_parties_approved(draft: Dict[str, Any]) -> bool:
+    parties = draft.get("parties") or []
+    if not isinstance(parties, list) or not parties:
+        return False
+    audit = draft.get("audit_log") or []
+    if _open_recipient_proposals_exist(audit):
+        return False
+    approved_ids = _approved_participant_ids_from_audit(audit)
+    required: list[str] = []
+    for i, party in enumerate(parties):
+        if not isinstance(party, dict):
+            continue
+        if not _party_requires_review_approval(party, i, parties):
+            continue
+        party_id = str(party.get("id") or "").strip()
+        if not party_id:
+            return False
+        required.append(party_id)
+    if not required:
+        return False
+    return all(pid in approved_ids for pid in required)
 
 
 def _draft_has_explicit_owner_party(d: Dict[str, Any]) -> bool:

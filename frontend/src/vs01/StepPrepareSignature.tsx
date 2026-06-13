@@ -93,6 +93,7 @@ import {
   PREPARE_PACKET_BRIDGE_LEAD_READY,
   PREPARE_PACKET_BRIDGE_PRIMARY_CTA,
   PREPARE_PACKET_BRIDGE_SECONDARY_CTA,
+  resolvePreparePacketBridgePrimaryCta,
   PREPARE_PACKET_INITIALS_TOGGLE_LABEL,
   PREPARE_PACKET_INITIALS_TOGGLE_HINT,
   PREPARE_PACKET_INITIALS_SUPPRESSED_HINT,
@@ -2798,7 +2799,10 @@ export function StepPrepareSignature({
                 ? "Signature added ✓"
                 : agreementBridgePlacementCopy
                   ? packetReady
-                    ? PREPARE_PACKET_BRIDGE_PRIMARY_CTA
+                    ? resolvePreparePacketBridgePrimaryCta({
+                        senderMustSignFirst: true,
+                        packetPrepareOnly: !receiptId,
+                      })
                     : "Preparing agreement..."
                   : busySession
                     ? "Working…"

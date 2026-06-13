@@ -495,7 +495,9 @@ export function Vs01Wizard({
     console.info("[vs01-packet-prepared]", {
       agreementId: linkedAgreementId,
       documentIdShort: did.slice(0, 8),
-      signerCount: result.handoff.signers.length,
+      counterpartySignerCount: result.handoff.signers.length,
+      totalParticipantCount: result.handoff.signers.length + 1,
+      senderMustSignFirst: result.handoff.senderMustSignFirst,
       fieldsPlacedCount: placedCount,
     });
     goToStep(3);
@@ -1284,7 +1286,7 @@ export function Vs01Wizard({
                 return {
                   counterpartyId: c.id,
                   displayName: c.name.trim(),
-                  email: c.email.trim(),
+                  email: (role?.signerEmail ?? c.email).trim(),
                   signingUrl: buildVs01RecipientSigningUrl({
                     recipientIndex,
                     recipientName: c.name.trim(),
@@ -1354,7 +1356,9 @@ export function Vs01Wizard({
               console.info("[vs01-packet-prepared]", {
                 agreementId: linkedAgreementId,
                 documentIdShort: did.slice(0, 8),
-                signerCount: signers.length,
+                counterpartySignerCount: signers.length,
+                totalParticipantCount: signers.length + 1,
+                senderMustSignFirst: true,
                 signingLinkCount: signers.filter((s) => s.signingUrl?.trim()).length,
               });
               // eslint-disable-next-line no-console

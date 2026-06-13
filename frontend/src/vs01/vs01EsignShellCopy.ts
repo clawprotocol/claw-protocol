@@ -52,9 +52,9 @@ export function resolveVs01EsignShellCopy(args: {
 
   if (step >= 4) {
     return {
-      title: "E-signing package ready",
+      title: "Signature links ready",
       subtitle:
-        "Share the signing link with the recipient. Your proof record is being prepared.",
+        "Share each signing link with the matching signer. Your proof record is being prepared.",
       agreementBridgeEffective: true,
       copyVariant: "bridge_reviewer_approved",
       navVariant: "esign_bridge_focused",
@@ -64,9 +64,9 @@ export function resolveVs01EsignShellCopy(args: {
   const reviewer = Boolean(bridgeMatches && bridge?.reviewerApprovedCleanHandoff);
   if (reviewer) {
     return {
-      title: "Prepare for e-signing",
+      title: "Prepare signature links",
       subtitle:
-        "Place required signature fields for each party. Reviewers already approved this draft — you are preparing the signing packet, not signing yet.",
+        "LawDog placed required signature fields for each signer. Review placement, then open your signing view or share links.",
       agreementBridgeEffective: true,
       copyVariant: "bridge_reviewer_approved",
       navVariant: "esign_bridge_focused",
@@ -74,9 +74,9 @@ export function resolveVs01EsignShellCopy(args: {
   }
 
   return {
-    title: "Prepare for e-signing",
+    title: "Prepare signature links",
     subtitle:
-      "Place required signature fields for each party. Signer details from your LawDog send apply to this packet.",
+      "LawDog placed required signature fields for each signer. Review placement, then open your signing view or share links.",
     agreementBridgeEffective: true,
     copyVariant: "bridge_sender_first",
     navVariant: "esign_bridge_focused",
