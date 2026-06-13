@@ -4,6 +4,7 @@
 
 import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { getPaidProSourceOfTruthText, hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -61,17 +62,27 @@ export function auditPaidProReviewRenderSotParity(args: {
   const displayNormalizationDelta = Boolean(
     canonicalDisplayHash && reviewHash && canonicalDisplayHash === reviewHash,
   );
+  const snapshotPlain = readAuthoritativeSigningCorpus()?.trim() ?? "";
+  const snapshotDisplayHash =
+    snapshotPlain.length >= 80
+      ? hashPaidProCorpus(preparePaidProReviewDisplayPlain(snapshotPlain).text.trim())
+      : "";
+  const reviewMatchesSnapshotDisplay = Boolean(
+    snapshotDisplayHash && reviewHash && snapshotDisplayHash === reviewHash,
+  );
   const signerFieldOnlyDelta = Boolean(
     (classification && SIGNER_FIELD_ONLY_CLASSIFICATIONS.has(classification)) ||
-      displayNormalizationDelta,
+      displayNormalizationDelta ||
+      reviewMatchesSnapshotDisplay,
   );
   const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(review);
   const hashMatch = Boolean(canonicalHash && reviewHash && canonicalHash === reviewHash);
   const invariantOk =
     hashMatch ||
     displayNormalizationDelta ||
+    reviewMatchesSnapshotDisplay ||
     (signerFieldOnlyDelta && blankSignerLinesRemaining === 0);
-  if (reviewHash) {
+  if (reviewHash && !invariantOk) {
     logPaidProReviewSotParity({
       canonicalHash,
       reviewHash,

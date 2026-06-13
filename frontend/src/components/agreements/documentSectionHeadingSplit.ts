@@ -16,7 +16,42 @@ const MAIN_SECTION_GLUE_RE = new RegExp(
 );
 
 const SUBSECTION_PERIOD_GLUE_RE = /^(\d+\.\d+(?:\.\d+)*\s+[^.\n]{3,120}?)\.\s+(.+)$/s;
+const SUBSECTION_SPACE_GLUE_RE =
+  /^(\d+\.\d+(?:\.\d+)*\s+[A-Z][^.\n]{2,90}?)\s+((?:Either|The|Upon|If|When|Each|Any|Neither|One|Both|Client|Service\s+Provider|Unless|Notwithstanding|During|Within|After|Before|Party|Neither\s+party|In\s+the|No\s+party|This|All|Some|Such|Where|As\s+a|A\s+party).+)$/s;
 const MAIN_PERIOD_GLUE_RE = /^(\d+\.\s+(?!\d+\.\d)[^.\n]{3,120}?)\.\s+([A-Z].+)$/s;
+
+const INLINE_LETTERED_ENUM_TAIL_RE = /\([a-z]\)/i;
+
+/** Split inline lower-alpha enumerations `(a)… (b)… (c)…` onto separate lines/blocks. */
+export function splitInlineLetteredEnumerationsInLine(line: string): string {
+  const trimmed = line.trim();
+  if (!trimmed || !INLINE_LETTERED_ENUM_TAIL_RE.test(trimmed)) return line;
+  const markers = trimmed.match(/\([a-z]\)/gi) ?? [];
+  if (markers.length < 2) return line;
+
+  let out = trimmed
+    .replace(/:\s+\(([a-z])\)\s+/gi, ":\n\n($1) ")
+    .replace(/;\s+and\s+\(([a-z])\)\s+/gi, ";\nand ($1) ")
+    .replace(/;\s+\(([b-z])\)\s+/gi, ";\n\n($1) ")
+    .replace(/([.?!])\s+\(([b-z])\)\s+/gi, "$1\n\n($2) ")
+    .replace(/\s+\(([b-z])\)\s+(?=[A-Z"(])/gi, "\n\n($1) ");
+  return out;
+}
+
+/** Repair inline `(a)/(b)/(c)` lists in operative text (never in witness / signature tail). */
+export function repairInlineLetteredEnumerationsInText(text: string): string {
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+
+  const expanded: string[] = [];
+  for (const line of head.split("\n")) {
+    const split = splitInlineLetteredEnumerationsInLine(line);
+    expanded.push(...split.split("\n"));
+  }
+  const merged = expanded.join("\n").replace(/\n{3,}/g, "\n\n");
+  return tail ? `${merged}${merged.endsWith("\n") ? "" : "\n\n"}${tail}` : merged;
+}
 
 /** Split one line when a numbered heading and body sentence are glued together. */
 export function splitGluedSectionHeadingFromLine(line: string): string {
@@ -26,6 +61,15 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
   const subPeriod = trimmed.match(SUBSECTION_PERIOD_GLUE_RE);
   if (subPeriod?.[1] && subPeriod[2]?.trim()) {
     return `${subPeriod[1]}.\n${subPeriod[2].trim()}`;
+  }
+
+  const subSpace = trimmed.match(SUBSECTION_SPACE_GLUE_RE);
+  if (subSpace?.[1] && subSpace[2]?.trim()) {
+    const heading = subSpace[1].trim();
+    const body = subSpace[2].trim();
+    if (heading.length >= 8 && heading.length <= 110 && body.length >= 8) {
+      return `${heading}\n${body}`;
+    }
   }
 
   const namedSub = trimmed.match(MAIN_PLUS_NAMED_SUBSECTION_GLUE_RE);
@@ -77,6 +121,8 @@ export function repairGluedSectionHeadingsInText(text: string): string {
   t = t.replace(/(\d+\.\s+(?!\d+\.\d)[^\n]{3,110}?)\s+(\d+\.\d+\s+)/g, "$1\n\n$2");
   t = t.replace(/(\d+\.\d+\s+[^.\n]{4,120}?\.?)\s+(\d+\.\d+\s+)/g, "$1\n\n$2");
   t = t.replace(/(\d+\.\d+\s+[^.\n]{4,120}?\.?)\s+(\d+\.\s+(?!\d+\.\d))/g, "$1\n\n$2");
+
+  t = repairInlineLetteredEnumerationsInText(t);
 
   return t.replace(/\n{3,}/g, "\n\n");
 }
