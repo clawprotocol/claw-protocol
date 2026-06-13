@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { RecipientControlCenter } from "../agreement/RecipientControlCenter";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import {
@@ -272,6 +273,14 @@ export function CreatorDashboardAgreementList(props: Props) {
                 ) : null}
                 {showReview && !compact ? (
                   <ReviewStatusPanel rows={reviewRows} allApproved={allApproved} />
+                ) : null}
+                {featured && waitingOnReviewer && !compact ? (
+                  <RecipientControlCenter
+                    agreementId={row.id}
+                    phase="review"
+                    title="Recipient delivery"
+                    compact
+                  />
                 ) : null}
               </div>
               <div className="flex flex-col gap-2 md:items-end">

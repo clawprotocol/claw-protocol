@@ -24,6 +24,8 @@ export type Vs01RecipientServerHydrationResult = {
   fields: Vs01RecipientPlacedField[];
   counterparties: Vs01Counterparty[];
   source: "server_packet" | "miss";
+  inviteSuperseded?: boolean;
+  inviteSupersededMessage?: string;
 };
 
 function hydrateFieldsFromPortable(args: {
@@ -103,14 +105,28 @@ export async function hydrateVs01RecipientFromServerPacket(args: {
   recipientName: string;
   recipientEmail: string;
 }): Promise<Vs01RecipientServerHydrationResult> {
-  const portable = await fetchPublicVs01SigningPacket({
+  const portableResult = await fetchPublicVs01SigningPacket({
     agreementId: args.agreementId,
     documentId: args.documentId,
     packetRevision: args.packetRevision,
+    recipientEmail: args.recipientEmail,
+    participantId: args.lockedCounterpartyId,
   });
-  if (!portable) return { ok: false, fields: [], counterparties: [], source: "miss" };
+  if (!portableResult.ok) {
+    if (portableResult.reason === "invite_superseded") {
+      return {
+        ok: false,
+        fields: [],
+        counterparties: [],
+        source: "miss",
+        inviteSuperseded: true,
+        inviteSupersededMessage: portableResult.message,
+      };
+    }
+    return { ok: false, fields: [], counterparties: [], source: "miss" };
+  }
   return hydrateFieldsFromPortable({
-    portable,
+    portable: portableResult.portable,
     documentId: args.documentId,
     lockedCounterpartyId: args.lockedCounterpartyId,
     lockedSignerRoleId: args.lockedSignerRoleId,

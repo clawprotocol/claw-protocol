@@ -567,6 +567,8 @@ class AgreementDraft(AgreementDraftCreate):
     review_invite_emails_sent_at: Optional[str] = None
     """VS01 prepared signing packet for cross-browser recipient hydration (test346)."""
     vs01_signing_packet_v1: Optional[Dict[str, Any]] = None
+    """Per-recipient invite delivery registry (JTIs, timestamps, resend counts)."""
+    recipient_delivery_v1: Optional[Dict[str, Any]] = None
     workspace_archived_at: Optional[str] = None
     workspace_folder_id: Optional[str] = None
     workspace_tags: List[str] = Field(default_factory=list)
@@ -2925,6 +2927,13 @@ class SigningRecipientEmailCorrectBody(BaseModel):
     signer_role_id: Optional[str] = None
     signing_url: Optional[str] = None
     resend_invite: bool = True
+
+
+class RecipientInviteResendBody(BaseModel):
+    phase: str = ""
+    participant_id: str = ""
+    signing_url: Optional[str] = None
+    signer_role_id: Optional[str] = None
 
 
 NegotiationPosture = Literal[
@@ -5479,6 +5488,28 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
         consume_single_use=False,
         log_validation=log_ok,
     )
+    try:
+        from backend.services.agreement_draft_store import load_draft, save_draft
+        from backend.services.recipient_delivery_registry import extract_jti_from_token, record_invite_opened
+
+        aid = str(out.get("agreement_id") or "").strip()
+        pid = str(out.get("recipient_party_id") or "").strip()
+        mode = str(out.get("mode") or "").strip()
+        if aid and pid and mode in ("review", "sign"):
+            phase = "review" if mode == "review" else "signing"
+            raw = load_draft(aid)
+            audit = list(raw.get("audit_log") or [])
+            record_invite_opened(
+                raw,
+                phase=phase,
+                participant_id=pid,
+                jti=extract_jti_from_token(token),
+                audit_log=audit,
+            )
+            raw["audit_log"] = audit
+            save_draft({**raw, "id": aid})
+    except Exception:
+        pass
     return {
         "ok": True,
         "agreement_id": out["agreement_id"],
@@ -5960,6 +5991,10 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
                 marked = next_draft.model_dump()
                 marked["review_invite_emails_sent_at"] = delivery_marker
                 marked["updated_at"] = _utc_now_iso()
+                if email_draft.get("recipient_delivery_v1"):
+                    marked["recipient_delivery_v1"] = email_draft["recipient_delivery_v1"]
+                if email_draft.get("audit_log"):
+                    marked["audit_log"] = email_draft["audit_log"]
                 next_draft = AgreementDraft.model_validate(marked)
                 _save_draft_sync(next_draft.model_dump(), request)
     except Exception:
@@ -6002,9 +6037,10 @@ def post_agreement_signing_links_sent(
     try:
         from backend.services.email.signing_delivery import maybe_send_signing_invites_after_packet_prepared
 
+        email_draft = draft.model_dump(mode="json")
         notify_audit = maybe_send_signing_invites_after_packet_prepared(
             agreement_id=agreement_id,
-            draft=draft.model_dump(mode="json"),
+            draft=email_draft,
             targets=[t.model_dump() for t in (body.targets or [])],
             packet_revision=(body.packet_revision or "").strip() or None,
             org_id=resolve_subject_from_request(request),
@@ -6013,7 +6049,12 @@ def post_agreement_signing_links_sent(
             value = notify_audit.get("value") if isinstance(notify_audit.get("value"), dict) else {}
             sent_count = int(value.get("sent_count") or 0)
             audit = [*(draft.audit_log or []), AuditEvent.model_validate(notify_audit)]
-            next_draft = _merge_agreement_draft(draft, updated_at=_utc_now_iso(), audit_log=audit)
+            merge_fields: Dict[str, Any] = {"updated_at": _utc_now_iso(), "audit_log": audit}
+            if email_draft.get("recipient_delivery_v1"):
+                merge_fields["recipient_delivery_v1"] = email_draft["recipient_delivery_v1"]
+            if len(email_draft.get("audit_log") or []) > len(audit) - 1:
+                merge_fields["audit_log"] = email_draft["audit_log"]
+            next_draft = _merge_agreement_draft(draft, **merge_fields)
             _save_draft_sync(next_draft.model_dump(), request)
             return {"ok": True, "sent_count": sent_count, "skip_reason": None, "draft": next_draft.model_dump()}
         skip_reason = "not_sent"
@@ -6029,6 +6070,46 @@ def post_agreement_signing_links_sent(
         "skip_reason": skip_reason,
         "draft": draft.model_dump(),
     }
+
+
+@router.get("/{agreement_id}/recipient-delivery-status")
+def get_recipient_delivery_status(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Owner-facing per-recipient review/signing delivery rows."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="recipient_delivery_status")
+    draft = _load_or_404(agreement_id)
+    from backend.services.recipient_delivery_status import build_recipient_delivery_status
+
+    return build_recipient_delivery_status(draft.model_dump(mode="json"))
+
+
+@router.post("/{agreement_id}/recipient-invite-resend")
+def post_recipient_invite_resend(
+    agreement_id: str,
+    request: Request,
+    body: RecipientInviteResendBody = RecipientInviteResendBody(),
+) -> Dict[str, Any]:
+    """Resend a review or signing invite without changing email or agreement corpus."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="recipient_invite_resend")
+    draft = _load_or_404(agreement_id)
+    _assert_negotiation_not_locked(agreement_id)
+    from backend.services.recipient_invite_resend import resend_recipient_invite
+
+    next_data, meta = resend_recipient_invite(
+        agreement_id=agreement_id,
+        draft=draft.model_dump(mode="json"),
+        phase=body.phase,
+        participant_id=body.participant_id,
+        signing_url=body.signing_url,
+        signer_role_id=body.signer_role_id,
+        org_id=resolve_subject_from_request(request),
+    )
+    next_draft = AgreementDraft.model_validate(next_data)
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {"ok": True, "draft": next_draft.model_dump(), **meta}
 
 
 @router.post("/{agreement_id}/review-recipient-email")
@@ -6297,6 +6378,8 @@ def get_public_vs01_signing_packet(
     agreement_id: str,
     document_id: str,
     packet_revision: Optional[str] = None,
+    recipient_email: Optional[str] = None,
+    participant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Public VS01 signing packet for emailed recipient links (no auth; fields + corpus seed only)."""
     aid = (agreement_id or "").strip()
@@ -6311,6 +6394,22 @@ def get_public_vs01_signing_packet(
         draft = AgreementDraft.model_validate(raw)
     except ValidationError:
         raise HTTPException(status_code=404, detail="not_found")
+
+    pid = (participant_id or "").strip()
+    remail = (recipient_email or "").strip()
+    if pid and remail:
+        from backend.services.recipient_delivery_registry import is_signing_email_superseded
+        from backend.security.recipient_access_token import RECIPIENT_INVITE_SUPERSEDED
+
+        if is_signing_email_superseded(raw, pid, remail):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "invite_superseded",
+                    "message": RECIPIENT_INVITE_SUPERSEDED,
+                },
+            )
+
     stored = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else None
     if not stored:
         raise HTTPException(status_code=404, detail="packet_not_found")

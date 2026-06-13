@@ -8,6 +8,11 @@ from typing import Any, Dict, Optional, Tuple
 
 from fastapi import HTTPException
 
+from backend.services.recipient_delivery_registry import (
+    RECIPIENT_EMAIL_CORRECTED,
+    record_invite_sent,
+    supersede_active_invite,
+)
 from backend.services.email.review_delivery import send_review_invite_to_participant
 from backend.services.email.signing_delivery import (
     SIGNING_INVITE_EMAILS_SENT_EVENT,
@@ -166,6 +171,19 @@ def correct_review_recipient_email(
 
     audit_log.append(
         {
+            "event_type": RECIPIENT_EMAIL_CORRECTED,
+            "at": now,
+            "field": "parties",
+            "value": {
+                "phase": "review",
+                "participant_id": resolved_pid,
+                "old_email_redacted": _redact_email(old_email),
+                "new_email_redacted": _redact_email(email),
+            },
+        }
+    )
+    audit_log.append(
+        {
             "event_type": REVIEW_RECIPIENT_EMAIL_CORRECTED,
             "at": now,
             "field": "parties",
@@ -182,13 +200,27 @@ def correct_review_recipient_email(
     if resend_invite:
         if not str(draft.get("review_sent_at") or "").strip():
             raise HTTPException(status_code=400, detail="review_not_sent_yet")
-        sent_invite = send_review_invite_to_participant(
+        supersede_active_invite(
+            next_draft,
+            phase="review",
+            participant_id=resolved_pid,
+            audit_log=audit_log,
+        )
+        sent_invite, jti = send_review_invite_to_participant(
             agreement_id=agreement_id,
             draft=next_draft,
             participant_id=resolved_pid,
             org_id=org_id,
         )
         if sent_invite:
+            record_invite_sent(
+                next_draft,
+                phase="review",
+                participant_id=resolved_pid,
+                jti=jti,
+                email=email,
+                audit_log=audit_log,
+            )
             audit_log.append(
                 {
                     "event_type": REVIEW_EMAIL_RESENT,
@@ -244,6 +276,20 @@ def correct_signing_recipient_email(
 
     audit_log.append(
         {
+            "event_type": RECIPIENT_EMAIL_CORRECTED,
+            "at": now,
+            "field": "parties",
+            "value": {
+                "phase": "signing",
+                "participant_id": resolved_pid,
+                "signer_role_id": (signer_role_id or "").strip() or None,
+                "old_email_redacted": _redact_email(old_email),
+                "new_email_redacted": _redact_email(email),
+            },
+        }
+    )
+    audit_log.append(
+        {
             "event_type": SIGNING_RECIPIENT_EMAIL_CORRECTED,
             "at": now,
             "field": "parties",
@@ -260,6 +306,12 @@ def correct_signing_recipient_email(
     packet_revision = _latest_signing_packet_revision(draft.get("audit_log"))
     next_draft = {**draft, "parties": parties, "audit_log": audit_log, "updated_at": now}
     if resend_invite and signing_invites_sent and url:
+        supersede_active_invite(
+            next_draft,
+            phase="signing",
+            participant_id=resolved_pid,
+            audit_log=audit_log,
+        )
         if old_email:
             audit_log.append(
                 {
@@ -282,11 +334,19 @@ def correct_signing_recipient_email(
                 "display_name": str(party.get("name") or "").strip() or email.split("@", 1)[0],
                 "signing_url": url,
                 "signer_role_id": (signer_role_id or "").strip(),
+                "participant_id": resolved_pid,
             },
             packet_revision=packet_revision,
             org_id=org_id,
         )
         if sent_invite:
+            record_invite_sent(
+                next_draft,
+                phase="signing",
+                participant_id=resolved_pid,
+                email=email,
+                audit_log=audit_log,
+            )
             audit_log.append(
                 {
                     "event_type": SIGNING_INVITE_RESENT,

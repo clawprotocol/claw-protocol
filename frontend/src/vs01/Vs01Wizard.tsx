@@ -333,6 +333,11 @@ export function Vs01Wizard({
           fieldCount: result.fields.length,
           source: result.source,
         });
+      } else if (result.inviteSuperseded) {
+        setError(
+          result.inviteSupersededMessage?.trim() ||
+            "This invite was replaced. Ask the sender for the latest link.",
+        );
       } else if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.warn("[vs01-recipient-server-hydration-miss]", {

@@ -166,6 +166,20 @@ def validate_recipient_access_token_for_agreement(
         if not _recipient_party_id_on_draft(draft_body, party_id):
             raise _rfail("recipient_not_assigned")
 
+    if jti:
+        from backend.services.recipient_delivery_registry import is_jti_superseded
+        from backend.security.recipient_access_token import RECIPIENT_INVITE_SUPERSEDED
+
+        phase = "review" if mode == "review" else "signing"
+        if is_jti_superseded(draft_body, jti, phase, party_id):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "invite_superseded",
+                    "message": RECIPIENT_INVITE_SUPERSEDED,
+                },
+            )
+
     if log_validation and jti:
         append_usage_record({"jti": jti, "aid": aid, "mode": mode, "pid": party_id or None})
 

@@ -17,6 +17,9 @@ RecipientRole = Literal["recipient", "reviewer", "signer"]
 RECIPIENT_LINK_INVALID_OR_EXPIRED = (
     "This link is invalid or expired. Request a new link from the sender."
 )
+RECIPIENT_INVITE_SUPERSEDED = (
+    "This invite was replaced. Ask the sender for the latest link."
+)
 
 
 def _b64u_encode(raw: bytes) -> str:

@@ -170,9 +170,10 @@ describe("vs01 test346 signing packet hydration (Red Mesa / Harbor Peak)", () =>
     localStorage.clear();
     sessionStorage.clear();
 
-    vi.spyOn(signingPacketServer, "fetchPublicVs01SigningPacket").mockResolvedValue(
-      prepared.portablePacket,
-    );
+    vi.spyOn(signingPacketServer, "fetchPublicVs01SigningPacket").mockResolvedValue({
+      ok: true,
+      portable: prepared.portablePacket,
+    });
 
     const ownerRole = r[0]!;
     const ownerHydration = await hydrateVs01RecipientFromServerPacket({

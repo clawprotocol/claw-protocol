@@ -858,10 +858,10 @@ async function completeVs01SigningInPage(signPage: Page, assignedPartyIndex?: nu
 }
 
 async function assertVs01PrepareBridgeReady(page: Page) {
-  await expect(page.getByRole("heading", { name: "Prepare for e-signing" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Prepare signature links" })).toBeVisible({
     timeout: 90_000,
   });
-  const continueBtn = page.getByRole("button", { name: "Continue to signing links" });
+  const continueBtn = page.getByRole("button", { name: "Send signing links" });
   await expect
     .poll(
       async () => {

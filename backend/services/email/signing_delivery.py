@@ -104,6 +104,19 @@ def maybe_send_signing_invites_after_packet_prepared(
             rid = str(target.get("signer_role_id") or "").strip()
             if rid:
                 sent_role_ids.append(rid)
+            from backend.services.recipient_delivery_registry import record_invite_sent
+
+            participant_id = str(target.get("participant_id") or "").strip()
+            if not participant_id:
+                participant_id = _participant_id_for_email(draft, target["email"])
+            if participant_id:
+                record_invite_sent(
+                    draft,
+                    phase="signing",
+                    participant_id=participant_id,
+                    email=target["email"],
+                    audit_log=draft.setdefault("audit_log", []),
+                )
         else:
             failed_count += 1
 
@@ -154,6 +167,16 @@ def _signing_invites_already_sent(audit_log: Any, packet_revision: str | None) -
     return False
 
 
+def _participant_id_for_email(draft: Dict[str, Any], email: str) -> str:
+    want = (email or "").strip().lower()
+    for p in draft.get("parties") or []:
+        if not isinstance(p, dict):
+            continue
+        if str(p.get("email") or "").strip().lower() == want:
+            return str(p.get("id") or "").strip()
+    return ""
+
+
 def _normalize_signing_invite_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
     seen: set[str] = set()
@@ -176,6 +199,7 @@ def _normalize_signing_invite_targets(targets: List[Dict[str, Any]]) -> List[Dic
                 "display_name": display_name,
                 "signing_url": url,
                 "signer_role_id": str(raw.get("signer_role_id") or "").strip(),
+                "participant_id": str(raw.get("participant_id") or "").strip(),
             }
         )
     return out
@@ -241,4 +265,17 @@ def send_signing_invite_to_target(
             (packet_revision or "").strip() or "none",
             row.get("signer_role_id") or "",
         )
+        participant_id = str(target.get("participant_id") or "").strip()
+        if not participant_id:
+            participant_id = _participant_id_for_email(draft, row["email"])
+        if participant_id:
+            from backend.services.recipient_delivery_registry import record_invite_sent
+
+            record_invite_sent(
+                draft,
+                phase="signing",
+                participant_id=participant_id,
+                email=row["email"],
+                audit_log=draft.setdefault("audit_log", []),
+            )
     return bool(result.ok)

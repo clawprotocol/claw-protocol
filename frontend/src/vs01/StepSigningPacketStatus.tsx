@@ -6,6 +6,8 @@ import {
   recipientEmailCorrectionErrorMessage,
   SIGNER_ALREADY_SIGNED_EMAIL_BLOCK,
 } from "../agreement/recipientEmailCorrection";
+import { RecipientControlCenter } from "../agreement/RecipientControlCenter";
+import { recipientDeliveryLinkKey } from "../agreement/recipientDeliveryStatus";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
 import { vs01DevMarkSignedEnabled } from "./vs01PreparePacketChecklist";
 import type { PlacedSigningField } from "./signingFields";
@@ -308,6 +310,24 @@ export function StepSigningPacketStatus({
   const ownerCard = cards.find((c) => c.isOwner);
   const counterpartyCards = cards.filter((c) => !c.isOwner);
 
+  const signingLinkByKey = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const card of cards) {
+      const pid = card.participantId.trim();
+      const url = card.signingUrl.trim();
+      if (pid && url) map[recipientDeliveryLinkKey("signing", pid)] = url;
+    }
+    return map;
+  }, [cards]);
+
+  const signingRoleIdForRow = useCallback(
+    (row: { participant_id: string }) => {
+      const card = cards.find((c) => c.participantId === row.participant_id);
+      return card?.roleId ?? null;
+    },
+    [cards],
+  );
+
   return (
     <section className="vs01-step vs01-signing-packet-status" aria-labelledby="vs01-packet-status-title">
       <header className="vs01-step-header vs01-packet-status-header">
@@ -323,6 +343,16 @@ export function StepSigningPacketStatus({
             : "LawDog sent signing links to all parties. Each party can sign independently — the agreement is complete after everyone signs."}
         </p>
       </header>
+
+      <RecipientControlCenter
+        agreementId={handoff.agreementId}
+        phase="signing"
+        title="Signer delivery"
+        linkByParticipantKey={signingLinkByKey}
+        signerRoleIdForRow={signingRoleIdForRow}
+        onDraftUpdated={() => refreshStatus()}
+        className="vs01-packet-recipient-control"
+      />
 
       {ownerCard ? (
         <ul className="vs01-packet-status-cards vs01-packet-status-cards--owner" aria-label="Sender">

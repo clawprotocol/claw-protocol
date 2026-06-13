@@ -220,6 +220,16 @@ def maybe_send_review_invites_after_review_sent(
         )
         if result.ok:
             sent += 1
+            from backend.services.recipient_delivery_registry import extract_jti_from_token, record_invite_sent
+
+            record_invite_sent(
+                draft,
+                phase="review",
+                participant_id=target.recipient_party_id or "",
+                jti=extract_jti_from_token(token),
+                email=target.to,
+                audit_log=draft.setdefault("audit_log", []),
+            )
         else:
             failed += 1
 
@@ -705,34 +715,34 @@ def send_review_invite_to_participant(
     draft: Dict[str, Any],
     participant_id: str,
     org_id: str | None = None,
-) -> bool:
+) -> tuple[bool, str | None]:
     """
     Send a single review invite to one party (used after email correction / resend).
 
-    Never raises. Returns True when Resend accepted the send.
+    Never raises. Returns (sent_ok, jti) when Resend accepted the send.
     """
     aid = (agreement_id or "").strip()
     pid = (participant_id or "").strip()
     if not aid or not pid:
-        return False
+        return False, None
 
     mode = review_delivery_mode()
     if mode not in ("email", "manual_and_email") or not email_configured():
-        return False
+        return False, None
 
     origin = app_public_origin()
     if not origin or not _draft_has_explicit_owner_party(draft):
-        return False
+        return False, None
 
     targets = _live_resend_review_invite_targets_from_draft(draft)
     target = next((t for t in targets if (t.recipient_party_id or "") == pid), None)
     if not target:
-        return False
+        return False, None
 
     try:
         secret = resolve_signing_token_secret_raw().encode("utf-8")
     except SigningTokenSecretMissingInProductionError:
-        return False
+        return False, None
 
     lock = read_signing_lock(agreement_id)
     locked_version_id = str((lock or {}).get("locked_version_id") or "")
@@ -749,7 +759,11 @@ def send_review_invite_to_participant(
             recipient_party_id=target.recipient_party_id,
         )
     except Exception:  # noqa: BLE001
-        return False
+        return False, None
+
+    from backend.services.recipient_delivery_registry import extract_jti_from_token
+
+    jti = extract_jti_from_token(token)
 
     review_url = _build_absolute_review_url(origin, agreement_id, token)
     email = build_review_invite_email(
@@ -766,7 +780,7 @@ def send_review_invite_to_participant(
         text=email.text,
         context="review_invite_resend",
     )
-    return bool(result.ok)
+    return bool(result.ok), jti if result.ok else None
 
 
 def _party_contact_snapshot_for_log(parties: Any) -> str:

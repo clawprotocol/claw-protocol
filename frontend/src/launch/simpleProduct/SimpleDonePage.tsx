@@ -34,14 +34,9 @@ import {
   readSimpleDoneReviewRecipientLinks,
   writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
+import { RecipientControlCenter } from "../../agreement/RecipientControlCenter";
+import { recipientDeliveryLinkKey } from "../../agreement/recipientDeliveryStatus";
 import { extractReviewLinkTokenFromHref, normalizeHandoffToReviewerLinkRows } from "./reviewerLinkRowModel";
-import { PaidProReviewReviewerLinksTable } from "./PaidProReviewReviewerLinksTable";
-import { RecipientEmailCorrectionModal } from "../../agreement/RecipientEmailCorrectionModal";
-import {
-  canCorrectReviewRecipientEmail,
-  postReviewRecipientEmailCorrection,
-  recipientEmailCorrectionErrorMessage,
-} from "../../agreement/recipientEmailCorrection";
 import { SimpleDoneReviewFlowDiagPanel } from "./SimpleDoneReviewFlowDiagPanel";
 import {
   canContinueLockedSigningFromDonePage,
@@ -52,12 +47,11 @@ import {
   logOwnerReviewLinkStatus,
   shouldWritePaidProEditReturnHandoffAfterReview,
 } from "../../components/agreements/draftRecipientReviewSignals";
-import { logReviewApprovalStatus, logReviewLinkRowOpen } from "../../components/agreements/reviewFlowDebugLog";
+import { logReviewApprovalStatus } from "../../components/agreements/reviewFlowDebugLog";
 import {
   logPaidProReviewTrackLifecycle,
   logReviewLinkOpen,
 } from "../../components/agreements/paidProReviewTrackLifecycle";
-import { recipientLinkTokenFingerprint } from "../../agreement/recipientLinkTokenFingerprint";
 import {
   clearPaidProEditReturnHandoff,
   paidProEditReturnHasRecoverableBody,
@@ -154,13 +148,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const [ownerHandoffDraft, setOwnerHandoffDraft] = useState<AgreementDraft | null>(null);
   const [ownerSigningLockVid, setOwnerSigningLockVid] = useState<string | null>(null);
   const [finalizeNavigating, setFinalizeNavigating] = useState(false);
-  const [rowCopyFlashByKey, setRowCopyFlashByKey] = useState<Record<string, boolean>>({});
-  const [reviewEmailCorrection, setReviewEmailCorrection] = useState<{
-    participantId: string;
-    partyName: string;
-    currentEmail: string;
-  } | null>(null);
-  const [reviewEmailCorrectionBusy, setReviewEmailCorrectionBusy] = useState(false);
   const [reviewFlowDiagLocal, setReviewFlowDiagLocal] = useState(false);
   const [ownerQaLinkCopyFlash, setOwnerQaLinkCopyFlash] = useState(false);
   const ownerSuccessLoggedRef = useRef<string | null>(null);
@@ -252,6 +239,16 @@ export function SimpleDonePage(props: { agreementId: string }) {
     [ownerHandoffDraft, reviewHandoffRows],
   );
   const reviewApprovalAgg = ownerReviewPresentation.aggregate;
+  const reviewRecipientLinkByKey = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const r of ownerReviewPresentation.normalizedReviewerRows) {
+      const pid = (r.recipientPartyId || r.reviewer_id || "").trim();
+      if (pid && r.reviewHref.trim()) {
+        map[recipientDeliveryLinkKey("review", pid)] = r.reviewHref.trim();
+      }
+    }
+    return map;
+  }, [ownerReviewPresentation.normalizedReviewerRows]);
 
   const reviewLinksReady = confirmedSend && reviewHandoffRows.length > 0;
   const reviewLinksPending =
@@ -546,21 +543,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
       setRemintBusy(false);
     }
   }, [agreementId, remintBusy]);
-
-  const copyRowReviewLink = useCallback((rowKey: string, href: string) => {
-    const t = href.trim();
-    if (!t) return;
-    void navigator.clipboard.writeText(t).then(() => {
-      setRowCopyFlashByKey((prev) => ({ ...prev, [rowKey]: true }));
-      window.setTimeout(() => {
-        setRowCopyFlashByKey((prev) => {
-          const n = { ...prev };
-          delete n[rowKey];
-          return n;
-        });
-      }, 2000);
-    });
-  }, []);
 
   const backToDraft = useCallback(async () => {
     const id = agreementId.trim();
@@ -1042,36 +1024,14 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   onOpenParty={(row) => openPartyReviewerSimulation(row.partyIndex, row.displayName)}
                 />
                 {multiReviewer ? (
-                  <PaidProReviewReviewerLinksTable
-                    rows={normalizedReviewerRows}
-                    statuses={reviewerRowStatuses}
-                    rowCopyFlashByKey={rowCopyFlashByKey}
-                    onCopyRow={(k, href) => copyRowReviewLink(k, href)}
-                    onOpenRow={(href, ctx) => {
-                      const id = agreementId.trim();
-                      const agreementIdShort = id.length <= 12 ? id : `${id.slice(0, 8)}…`;
-                      const tok = extractReviewLinkTokenFromHref(href);
-                      logReviewLinkRowOpen({
-                        agreementIdShort,
-                        partyIndex: ctx.partyIndex ?? ctx.rowIndex,
-                        recipientId: (ctx.recipientId || "").trim() || "(none)",
-                        hasToken: Boolean(tok),
-                        tokenHashShort: recipientLinkTokenFingerprint(tok),
-                      });
-                      if (href.trim()) window.open(href, "_blank", "noopener,noreferrer");
-                    }}
-                    canCorrectEmail={(_i, status) => status === "waiting"}
-                    onCorrectEmail={(ctx) => {
-                      const gate = canCorrectReviewRecipientEmail({
-                        draft: ownerHandoffDraft,
-                        participantId: ctx.participantId,
-                      });
-                      if (!gate.allowed) return;
-                      setReviewEmailCorrection({
-                        participantId: ctx.participantId,
-                        partyName: ctx.partyName,
-                        currentEmail: ctx.currentEmail,
-                      });
+                  <RecipientControlCenter
+                    agreementId={agreementId}
+                    phase="review"
+                    title="Recipient delivery"
+                    linkByParticipantKey={reviewRecipientLinkByKey}
+                    onDraftUpdated={(draft) => {
+                      setOwnerHandoffDraft(draft);
+                      setReviewLinksTick((t) => t + 1);
                     }}
                   />
                 ) : null}
@@ -1194,37 +1154,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
             />
           ) : null}
         </ReviewShell>
-        <RecipientEmailCorrectionModal
-          open={Boolean(reviewEmailCorrection)}
-          phase="review"
-          partyName={reviewEmailCorrection?.partyName ?? ""}
-          currentEmail={reviewEmailCorrection?.currentEmail ?? ""}
-          busy={reviewEmailCorrectionBusy}
-          onClose={() => {
-            if (!reviewEmailCorrectionBusy) setReviewEmailCorrection(null);
-          }}
-          onConfirm={async (newEmail) => {
-            const target = reviewEmailCorrection;
-            if (!target) return;
-            setReviewEmailCorrectionBusy(true);
-            try {
-              const result = await postReviewRecipientEmailCorrection({
-                agreementId,
-                participantId: target.participantId,
-                newEmail,
-                resendInvite: true,
-              });
-              if (!result.ok) {
-                throw new Error(recipientEmailCorrectionErrorMessage(result.error));
-              }
-              if (result.draft) setOwnerHandoffDraft(result.draft);
-              setReviewEmailCorrection(null);
-              setReviewLinksTick((t) => t + 1);
-            } finally {
-              setReviewEmailCorrectionBusy(false);
-            }
-          }}
-        />
       </SimpleFlowShell>
     );
   }
