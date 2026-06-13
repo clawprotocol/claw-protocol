@@ -8,6 +8,31 @@ const TOP_LEVEL_RE = /^(\d+)\.\s+(?!\d)(.+)$/;
 const SUB_LEVEL_RE = /^(\d+)\.(\d+)\.?\s*(.*)$/;
 const WITNESS_RE = /\bIN WITNESS WHEREOF\b/i;
 
+/** True when N.1 remainder is only a short subsection title, not operative body text. */
+function isSubsectionHeadingOnlyLabel(bodyText: string): boolean {
+  const t = bodyText.trim();
+  if (!t) return true;
+  const labelBody = t.match(/^([A-Za-z][A-Za-z\s/&,\-'—–().]{2,56}\.)\s+(.+)$/s);
+  if (labelBody?.[2]?.trim()) {
+    return isSubsectionHeadingOnlyLabel(labelBody[1]);
+  }
+  if (t.length > 72) return false;
+  if (!/^[A-Z]/.test(t) || !/\.$/.test(t)) return false;
+  if (/\b(?:shall|will|must|may|is|are|has|have|been|during|upon|unless|if|when|the|this|each|either|agreement|party|parties)\b/i.test(t)) {
+    return false;
+  }
+  return /^[A-Z][A-Za-z\s/&,\-'—–().]+\.$/.test(t);
+}
+
+function subsectionRemainderAfterCollapse(rawRemainder: string): string | null {
+  const t = rawRemainder.trim();
+  if (!t) return null;
+  const inline = t.match(/^([A-Za-z][A-Za-z\s/&,\-'—–().]{2,56}\.)\s+((?:During|The|Each|Either|Upon|Unless|If|When|Client|Service|This|In|For|All|Any|Neither|Notwithstanding).+)/s);
+  if (inline?.[2]?.trim()) return inline[2].trim();
+  if (isSubsectionHeadingOnlyLabel(t)) return null;
+  return t;
+}
+
 export type PaidProOrphanSubsectionScanResult = {
   orphanSectionsFound: number;
   sectionNumbers: number[];
@@ -167,8 +192,8 @@ function normalizeOrphansInBody(body: string): PaidProOrphanSubsectionNormalizat
       for (const sectionLine of sectionLines) {
         const subMatch = sectionLine.trim().match(SUB_LEVEL_RE);
         if (subMatch && Number(subMatch[1]) === sectionNum && Number(subMatch[2]) === 1) {
-          const bodyText = subMatch[3]?.trim() ?? "";
-          if (bodyText) out.push(bodyText);
+          const remainder = subsectionRemainderAfterCollapse(subMatch[3] ?? "");
+          if (remainder) out.push(remainder);
           continue;
         }
         out.push(sectionLine);

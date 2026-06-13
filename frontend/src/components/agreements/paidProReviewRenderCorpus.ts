@@ -749,8 +749,7 @@ export function resolvePaidProReviewRenderPlain(
   if (!needsSignerOverlay) {
     writeMemoizedPaidProReviewPlain(memoKey, rendered);
   }
-  const orphanNormalized = normalizePaidProOrphanSubsections(rendered, { source: surface }).text;
-  const displayPrepared = preparePaidProReviewDisplayPlain(orphanNormalized);
+  const displayPrepared = preparePaidProReviewDisplayPlain(rendered);
   rendered = displayPrepared.text;
   if (rendered.length >= 200 && hasPaidProSourceOfTruth()) {
     auditPaidProReviewRenderCorpus(rendered);
