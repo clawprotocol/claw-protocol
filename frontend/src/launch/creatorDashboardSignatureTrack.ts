@@ -189,6 +189,26 @@ export function resolveCreatorDashboardViewAgreementPath(agreementId: string): s
   return buildOwnerAgreementReadOnlyPath(agreementId);
 }
 
+/** Owner can fix mistyped emails / resend while review is outstanding (including 0 approvals). */
+export function creatorDashboardShowManageRecipients(
+  row: WorkspaceIndexAgreement,
+  reviewGate: CreatorDashboardReviewGate,
+): boolean {
+  if (reviewGate.allRequiredReviewPartiesApproved || row.all_reviewers_approved === true) {
+    return false;
+  }
+  if (deriveCreatorDashboardEffectiveStatus(row, reviewGate) === "in_review") {
+    return true;
+  }
+  if (
+    Boolean((row.review_sent_at || "").trim()) &&
+    deriveCreatorDashboardStatus(row) === "in_review"
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Secondary action while waiting on reviewer approval (primary CTA intentionally hidden). */
 export function creatorDashboardWhatsNextShowViewAgreement(
   row: WorkspaceIndexAgreement,

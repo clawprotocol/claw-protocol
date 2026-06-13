@@ -69,10 +69,10 @@ describe("creatorDashboardPresentation", () => {
         manualReviewLinkPage: false,
       }),
     ).toEqual({
-      label: "Track review status",
+      label: "Manage recipients",
       path: "/app?focus=ag_test",
       emphasis: "primary",
-      kind: "focus_review_status",
+      kind: "manage_recipients",
     });
     expect(
       creatorDashboardPrimaryAction(row({ review_sent_at: "2026-01-01T00:00:00Z" }), {
@@ -173,10 +173,12 @@ describe("creatorDashboardPresentation", () => {
 
   it("redirects creator from pre-signature done page when all reviews are approved", () => {
     const draft = {
-      parties: [{ id: "p1" }, { id: "p2" }],
+      parties: [
+        { id: "p1", name: "Owner Co", role: "owner", email: "owner@example.com" },
+        { id: "p2", name: "Reviewer Co", role: "reviewer", email: "reviewer@example.com" },
+      ],
       audit_log: [
-        { event_type: "recipient_approved", value: { participant_id: "p1" } },
-        { event_type: "recipient_approved", value: { participant_id: "p2" } },
+        { event_type: "participant_approved", value: { participant_id: "p2" } },
       ],
     } as AgreementDraft;
     expect(

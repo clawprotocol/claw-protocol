@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { RecipientControlCenter } from "../../agreement/RecipientControlCenter";
 import { PremiumAgreementReadonlyView } from "../../components/agreements/PremiumAgreementReadonlyView";
 import { computeReviewApprovalStatus } from "../../components/agreements/draftRecipientReviewSignals";
 import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
+import { CREATOR_MANAGE_RECIPIENTS_LABEL } from "../creatorDashboardCopy";
 import { useLaunchNav } from "../LaunchNavContext";
 import { loadOwnerAgreementReadOnlyPreview } from "../ownerAgreementReadOnlyView";
 import { AppShell } from "../AppShell";
@@ -10,15 +13,31 @@ type Props = {
   agreementId: string;
 };
 
+function recipientsPanelInitiallyOpen(search: string): boolean {
+  const raw = search?.startsWith("?") ? search.slice(1) : search || "";
+  const sp = new URLSearchParams(raw);
+  return sp.get("recipients") === "1";
+}
+
 export function OwnerAgreementReadOnlyPage(props: Props) {
   const { agreementId } = props;
-  const { navigate } = useLaunchNav();
+  const { navigate, search } = useLaunchNav();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [title, setTitle] = useState("Agreement");
   const [previewHtml, setPreviewHtml] = useState("");
   const [usesPremiumDocument, setUsesPremiumDocument] = useState(false);
   const [progressLine, setProgressLine] = useState<string | null>(null);
+  const [draft, setDraft] = useState<AgreementDraft | null>(null);
+  const [manageRecipientsOpen, setManageRecipientsOpen] = useState(() =>
+    recipientsPanelInitiallyOpen(search),
+  );
+
+  const canManageRecipients = useMemo(() => {
+    if (!draft) return false;
+    const agg = computeReviewApprovalStatus(draft);
+    return agg.requiredReviewerCount > 0 && agg.approvedReviewerCount < agg.requiredReviewerCount;
+  }, [draft]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -27,9 +46,11 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
     if (!loaded) {
       setLoadError("Could not load this agreement.");
       setPreviewHtml("");
+      setDraft(null);
       setLoading(false);
       return;
     }
+    setDraft(loaded.draft);
     setTitle(displayCreatorAgreementTitle(loaded.draft.title ?? ""));
     const agg = computeReviewApprovalStatus(loaded.draft);
     if (agg.requiredReviewerCount > 0) {
@@ -45,6 +66,12 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (recipientsPanelInitiallyOpen(search)) {
+      setManageRecipientsOpen(true);
+    }
+  }, [search]);
 
   const goDashboard = useCallback(() => {
     navigate("/app");
@@ -72,7 +99,27 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
               Review progress: <span className="text-slate-200">{progressLine}</span>
             </p>
           ) : null}
+          {canManageRecipients ? (
+            <button
+              type="button"
+              className="text-sm font-medium text-amber-200/95 underline-offset-4 hover:text-amber-100 hover:underline"
+              data-testid="owner-agreement-manage-recipients"
+              aria-expanded={manageRecipientsOpen}
+              onClick={() => setManageRecipientsOpen((open) => !open)}
+            >
+              {manageRecipientsOpen ? "Hide recipients" : CREATOR_MANAGE_RECIPIENTS_LABEL}
+            </button>
+          ) : null}
         </div>
+
+        {canManageRecipients && manageRecipientsOpen ? (
+          <div
+            className="rounded-2xl border border-slate-800/70 bg-slate-950/40 px-4 py-4"
+            data-testid="owner-agreement-recipient-control"
+          >
+            <RecipientControlCenter agreementId={agreementId} phase="review" title="Recipient delivery" />
+          </div>
+        ) : null}
 
         {loadError ? (
           <div

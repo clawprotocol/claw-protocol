@@ -50,9 +50,33 @@ export function filterCreatorDashboardAgreements(
 ): CreatorDashboardAgreementFilterResult {
   const sorted = sortCreatorDashboardRows(rows);
   const featuredAgreementId = resolveCreatorDashboardFeaturedAgreementId(sorted);
+  const resumeId = (readCreateReviewAgreementResumeId() || "").trim();
   const focusSingle = shouldFocusCreatorDashboardOnSingleAgreement();
 
-  if (!focusSingle) {
+  if (resumeId && focusSingle) {
+    const featured = featuredAgreementId && sorted.some((row) => row.id === featuredAgreementId)
+      ? featuredAgreementId
+      : resumeId;
+    const visibleRows = sorted.filter((row) => row.id === featured);
+    return {
+      featuredAgreementId: featured,
+      visibleRows,
+      hiddenStaleCount: Math.max(0, sorted.length - visibleRows.length),
+    };
+  }
+
+  const featuredRow = featuredAgreementId
+    ? sorted.find((row) => row.id === featuredAgreementId) ?? null
+    : null;
+  const trimStaleDrafts =
+    focusSingle ||
+    Boolean(
+      featuredRow &&
+        isLegitimateAdditionalCreatorDashboardAgreement(featuredRow) &&
+        Boolean((featuredRow.review_sent_at || "").trim()),
+    );
+
+  if (!trimStaleDrafts) {
     return {
       featuredAgreementId,
       visibleRows: sorted,

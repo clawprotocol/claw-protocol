@@ -1,8 +1,20 @@
 /** @vitest-environment jsdom */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CreatorDashboardAgreementList } from "./CreatorDashboardAgreementList";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
+
+const mockFetchDeliveryStatus = vi.hoisted(() => vi.fn());
+
+vi.mock("../agreement/recipientDeliveryStatus", async () => {
+  const actual = await vi.importActual<typeof import("../agreement/recipientDeliveryStatus")>(
+    "../agreement/recipientDeliveryStatus",
+  );
+  return {
+    ...actual,
+    fetchRecipientDeliveryStatus: mockFetchDeliveryStatus,
+  };
+});
 
 function indexRow(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement {
   return {
@@ -26,6 +38,16 @@ function indexRow(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement 
 }
 
 describe("CreatorDashboardAgreementList", () => {
+  beforeEach(() => {
+    mockFetchDeliveryStatus.mockReset();
+    mockFetchDeliveryStatus.mockResolvedValue({
+      ok: true,
+      review_sent: true,
+      signing_invites_sent: false,
+      recipients: [],
+    });
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -105,7 +127,7 @@ describe("CreatorDashboardAgreementList", () => {
     ).toBeTruthy();
   });
 
-  it("in_review email-mode card uses track review status without done/send links", () => {
+  it("in_review email-mode card uses Manage recipients primary action", async () => {
     const onNavigate = vi.fn();
     const onFocus = vi.fn();
     render(
@@ -146,13 +168,16 @@ describe("CreatorDashboardAgreementList", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Track review status" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Manage recipients" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Open workspace" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Continue review" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Open review link page" })).toBeNull();
 
     fireEvent.click(screen.getByTestId("creator-dashboard-action-ag_in_review"));
-    expect(onFocus).toHaveBeenCalledWith("ag_in_review");
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-control-center")).toBeTruthy();
+    });
+    expect(onFocus).not.toHaveBeenCalled();
     expect(onNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/done/"));
     expect(onNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/send/"));
   });

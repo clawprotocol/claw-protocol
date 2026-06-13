@@ -14,6 +14,7 @@ import { orderedAuthoritativePartyDisplayNames } from "../../agreement/handoffPa
 import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
 import { emitActionCompleted } from "../../joy/joyTelemetry";
 import { markSimpleFlowSent } from "../simpleFlowSent";
+import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
 import {
   tryNavigatePaidProAgreementSenderFirstVs01Esign,
   type RecipientSetupEmailInput,
@@ -350,6 +351,9 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
         reviewEmailDeliveryAttempted: reviewSent.attempted,
         reviewInviteEmailsSent: reviewSent.inviteEmailsSent,
       });
+      if (route.destination === "dashboard") {
+        writeCreateReviewAgreementResumeId(id);
+      }
       void options.navigate(route.path);
       return { ok: true, destination: route.destination, ownerRoutePath: route.path };
     } finally {

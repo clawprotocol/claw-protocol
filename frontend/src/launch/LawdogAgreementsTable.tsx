@@ -5,7 +5,9 @@ import {
   deriveCreatorDashboardStatus,
   displayCreatorAgreementTitle,
 } from "./creatorDashboardPresentation";
+import { CREATOR_MANAGE_RECIPIENTS_LABEL } from "./creatorDashboardCopy";
 import { creatorDashboardReviewLinkReadyPath } from "./creatorDashboardReviewLinkRouting";
+import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
 import {
   deriveLawdogProductStatus,
   formatLawdogDashboardDate,
@@ -100,11 +102,29 @@ export function LawdogAgreementsTable(props: Props) {
                           onFocusReviewStatus?.(row.id);
                           return;
                         }
+                        if (openAction.kind === "manage_recipients") {
+                          onNavigate(`${buildOwnerAgreementReadOnlyPath(row.id)}?recipients=1`);
+                          return;
+                        }
                         onNavigate(openAction.path);
                       }}
                     >
                       Open
                     </button>
+                    {internalStatus === "in_review" ? (
+                      <button
+                        type="button"
+                        className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
+                        data-testid={`lawdog-action-manage-recipients-${row.id}`}
+                        disabled={contentUnavailable}
+                        onClick={() => {
+                          if (contentUnavailable) return;
+                          onNavigate(`${buildOwnerAgreementReadOnlyPath(row.id)}?recipients=1`);
+                        }}
+                      >
+                        {CREATOR_MANAGE_RECIPIENTS_LABEL}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"

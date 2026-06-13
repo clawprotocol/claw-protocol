@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import * as ownerAgreementReadOnlyView from "../ownerAgreementReadOnlyView";
 import { OwnerAgreementReadOnlyPage } from "./OwnerAgreementReadOnlyPage";
 
 const mockNavigate = vi.fn();
+const mockFetchDeliveryStatus = vi.hoisted(() => vi.fn());
 
 vi.mock("../LaunchNavContext", () => ({
   useLaunchNav: () => ({
@@ -15,6 +16,16 @@ vi.mock("../LaunchNavContext", () => ({
     navigate: mockNavigate,
   }),
 }));
+
+vi.mock("../../agreement/recipientDeliveryStatus", async () => {
+  const actual = await vi.importActual<typeof import("../../agreement/recipientDeliveryStatus")>(
+    "../../agreement/recipientDeliveryStatus",
+  );
+  return {
+    ...actual,
+    fetchRecipientDeliveryStatus: mockFetchDeliveryStatus,
+  };
+});
 
 function pendingReviewDraft(): AgreementDraft {
   return {
@@ -38,6 +49,34 @@ function pendingReviewDraft(): AgreementDraft {
 }
 
 describe("OwnerAgreementReadOnlyPage", () => {
+  beforeEach(() => {
+    mockFetchDeliveryStatus.mockReset();
+    mockFetchDeliveryStatus.mockResolvedValue({
+      ok: true,
+      review_sent: true,
+      signing_invites_sent: false,
+      recipients: [
+        {
+          phase: "review",
+          participant_id: "p2",
+          entity_name: "Iron Vale Systems Inc",
+          human_name: null,
+          email: "anthamhayek@me.com",
+          role: "reviewer",
+          status: "sent",
+          last_sent_at: "2026-06-07T12:00:00Z",
+          last_opened_at: null,
+          resent_count: 0,
+          locked: false,
+          lock_reason: null,
+          can_correct_email: true,
+          can_resend_invite: true,
+          can_copy_link: false,
+        },
+      ],
+    });
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -80,5 +119,28 @@ describe("OwnerAgreementReadOnlyPage", () => {
 
     fireEvent.click(screen.getByTestId("owner-agreement-readonly-back"));
     expect(mockNavigate).toHaveBeenCalledWith("/app");
+  });
+
+  it("shows Manage recipients for pending review agreements", async () => {
+    const draft = pendingReviewDraft();
+    vi.spyOn(ownerAgreementReadOnlyView, "loadOwnerAgreementReadOnlyPreview").mockResolvedValue({
+      draft,
+      html: "<p>Agreement body</p>",
+      corpusText: "fixture corpus",
+      usesPremiumDocument: false,
+    });
+
+    render(<OwnerAgreementReadOnlyPage agreementId="ag_view" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("owner-agreement-manage-recipients")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("owner-agreement-manage-recipients"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-control-center")).toBeTruthy();
+    });
+    expect(screen.getByText("anthamhayek@me.com")).toBeTruthy();
   });
 });

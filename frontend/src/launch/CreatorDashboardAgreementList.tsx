@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { RecipientControlCenter } from "../agreement/RecipientControlCenter";
+import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import {
   CREATOR_ALL_REVIEWERS_APPROVED_HELPER,
   CREATOR_ALL_REVIEWERS_APPROVED_HELPER_EXTENDED,
+  CREATOR_MANAGE_RECIPIENTS_LABEL,
   CREATOR_NEXT_ACTION_PREPARE_SIGNATURE_LINKS,
   CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL,
   CREATOR_PREPARE_SIGNATURE_LINKS_BLOCKED_NOTICE,
@@ -29,10 +31,12 @@ import {
   creatorDashboardWaitingOnReviewer,
   resolveCreatorDashboardReviewGate,
 } from "./creatorDashboardReviewGate";
+import { creatorDashboardShowManageRecipients } from "./creatorDashboardSignatureTrack";
 
 type Props = {
   rows: readonly WorkspaceIndexAgreement[];
   reviewRowsByAgreementId: Readonly<Record<string, OwnerReviewPartyStatusRow[]>>;
+  draftByAgreementId?: Readonly<Record<string, AgreementDraft | null>>;
   onNavigate: (path: string) => void;
   onFocusReviewStatus?: (agreementId: string) => void;
   onPrepareSignatureLinks: (agreementId: string) => void | Promise<void>;
@@ -110,6 +114,7 @@ export function CreatorDashboardAgreementList(props: Props) {
   const {
     rows,
     reviewRowsByAgreementId,
+    draftByAgreementId = {},
     onNavigate,
     onFocusReviewStatus,
     onPrepareSignatureLinks,
@@ -122,6 +127,9 @@ export function CreatorDashboardAgreementList(props: Props) {
   const [prepareBlockedNoticeAgreementId, setPrepareBlockedNoticeAgreementId] = useState<string | null>(
     null,
   );
+  const [manageRecipientsOpenByAgreementId, setManageRecipientsOpenByAgreementId] = useState<
+    Record<string, boolean>
+  >({});
 
   return (
     <ul
@@ -130,7 +138,8 @@ export function CreatorDashboardAgreementList(props: Props) {
     >
       {rows.map((row) => {
         const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
-        if (creatorDashboardReviewHydrationPending(row, reviewRows)) {
+        const rowDraft = draftByAgreementId[row.id] ?? null;
+        if (creatorDashboardReviewHydrationPending(row, reviewRows, rowDraft)) {
           return (
             <CreatorDashboardAgreementCardSkeleton
               key={row.id}
@@ -142,7 +151,7 @@ export function CreatorDashboardAgreementList(props: Props) {
 
         const status = deriveCreatorDashboardStatus(row);
         const action = creatorDashboardPrimaryAction(row, { manualReviewLinkPage });
-        const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows);
+        const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows, { draft: rowDraft });
         const allApproved = reviewGate.allRequiredReviewPartiesApproved;
         const waitingOnReviewer = creatorDashboardWaitingOnReviewer(reviewGate);
         const signingComplete = status === "completed";
@@ -163,7 +172,16 @@ export function CreatorDashboardAgreementList(props: Props) {
         const prepareSignatureLinksEnabled = readyForSigning;
         const supplementalActions = creatorDashboardSupplementalActions(row, { manualReviewLinkPage });
         const contentUnavailable = row.content_unavailable === true;
+        const showManageRecipients = creatorDashboardShowManageRecipients(row, reviewGate);
+        const manageRecipientsOpen = Boolean(manageRecipientsOpenByAgreementId[row.id]);
         const runDashboardAction = () => {
+          if (action.kind === "manage_recipients") {
+            setManageRecipientsOpenByAgreementId((prev) => ({
+              ...prev,
+              [row.id]: !prev[row.id],
+            }));
+            return;
+          }
           if (action.kind === "focus_review_status") {
             onFocusReviewStatus?.(row.id);
             return;
@@ -274,12 +292,12 @@ export function CreatorDashboardAgreementList(props: Props) {
                 {showReview && !compact ? (
                   <ReviewStatusPanel rows={reviewRows} allApproved={allApproved} />
                 ) : null}
-                {featured && waitingOnReviewer && !compact ? (
+                {showManageRecipients && manageRecipientsOpen ? (
                   <RecipientControlCenter
                     agreementId={row.id}
                     phase="review"
                     title="Recipient delivery"
-                    compact
+                    compact={compact}
                   />
                 ) : null}
               </div>
@@ -369,6 +387,22 @@ export function CreatorDashboardAgreementList(props: Props) {
                     {sup.label}
                   </button>
                 ))}
+                {showManageRecipients && action.kind !== "manage_recipients" ? (
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0 min-w-[10rem]"
+                    data-testid={`creator-dashboard-manage-recipients-${row.id}`}
+                    aria-expanded={manageRecipientsOpen}
+                    onClick={() =>
+                      setManageRecipientsOpenByAgreementId((prev) => ({
+                        ...prev,
+                        [row.id]: !prev[row.id],
+                      }))
+                    }
+                  >
+                    {manageRecipientsOpen ? "Hide recipients" : CREATOR_MANAGE_RECIPIENTS_LABEL}
+                  </button>
+                ) : null}
               </div>
             </div>
           </li>

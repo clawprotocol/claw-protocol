@@ -93,4 +93,30 @@ describe("creatorDashboardAgreementFilter", () => {
     expect(filtered.hiddenStaleCount).toBe(0);
     expect(isLegitimateAdditionalCreatorDashboardAgreement(rows[1]!)).toBe(true);
   });
+
+  it("shows only the resume agreement when session resume id is set", () => {
+    sessionStorage.setItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY, "ag_active");
+    const rows = [
+      row({ id: "ag_stale_draft", updated_at: "2026-06-01T00:00:00.000Z", title: "Old QA draft" }),
+      row({
+        id: "ag_active",
+        updated_at: "2026-05-01T00:00:00.000Z",
+        review_sent_at: "2026-05-01T00:00:00.000Z",
+        reviewer_approved: false,
+        review_approvals_required: 1,
+        review_approvals_completed: 0,
+      }),
+      row({
+        id: "ag_other_review",
+        updated_at: "2026-05-02T00:00:00.000Z",
+        review_sent_at: "2026-05-02T00:00:00.000Z",
+        reviewer_approved: false,
+      }),
+    ];
+
+    const filtered = filterCreatorDashboardAgreements(rows);
+    expect(filtered.featuredAgreementId).toBe("ag_active");
+    expect(filtered.visibleRows.map((r) => r.id)).toEqual(["ag_active"]);
+    expect(filtered.hiddenStaleCount).toBe(2);
+  });
 });

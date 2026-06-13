@@ -590,6 +590,7 @@ export function AppDashboard() {
                 <CreatorDashboardAgreementList
                   rows={secondaryAttentionRows}
                   reviewRowsByAgreementId={reviewRowsByAgreementId}
+                  draftByAgreementId={draftByAgreementId}
                   onNavigate={(path) => withClearEntry(() => navigate(path))}
                   onFocusReviewStatus={handleFocusAgreementReviewStatus}
                   onPrepareSignatureLinks={handlePrepareSignatureLinks}

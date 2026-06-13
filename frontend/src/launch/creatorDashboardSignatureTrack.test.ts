@@ -6,6 +6,7 @@ import {
   CREATOR_COMPLETE_SIGNER_DETAILS_LABEL,
   CREATOR_CONTINUE_SIGNING_LABEL,
   CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL,
+  creatorDashboardShowManageRecipients,
   creatorDashboardWhatsNextShowPrimaryCta,
   creatorDashboardWhatsNextShowViewAgreement,
   deriveCreatorDashboardEffectiveStatus,
@@ -168,5 +169,32 @@ describe("creatorDashboardSignatureTrack", () => {
     expect(action.kind).toBe("focus_review_status");
     expect(action.label).toBe(CREATOR_TRACK_REVIEW_STATUS_LABEL);
     expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(false);
+  });
+
+  it("shows manage recipients when in_review with zero approvals", () => {
+    const pendingDraft: AgreementDraft = {
+      ...partyTwoApprovedDraft,
+      audit_log: [],
+    };
+    const row = indexRow({ review_approvals_completed: 0 });
+    const gate = resolveCreatorDashboardReviewGate(row, [], { draft: pendingDraft });
+    expect(creatorDashboardShowManageRecipients(row, gate)).toBe(true);
+  });
+
+  it("hides manage recipients when all reviewers approved", () => {
+    const row = indexRow({});
+    const gate = resolveCreatorDashboardReviewGate(row, [], { draft: partyTwoApprovedDraft });
+    expect(creatorDashboardShowManageRecipients(row, gate)).toBe(false);
+  });
+
+  it("shows manage recipients from index while draft hydration is pending", () => {
+    const row = indexRow({
+      review_approvals_completed: 0,
+      reviewer_approved: false,
+      all_reviewers_approved: false,
+    });
+    const gate = resolveCreatorDashboardReviewGate(row, [], { draft: null });
+    expect(gate.authoritative).toBe(false);
+    expect(creatorDashboardShowManageRecipients(row, gate)).toBe(true);
   });
 });

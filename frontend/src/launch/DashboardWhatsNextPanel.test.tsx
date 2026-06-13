@@ -1,9 +1,32 @@
 /** @vitest-environment jsdom */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { DashboardWhatsNextPanel } from "./DashboardWhatsNextPanel";
+
+const mockFetchDeliveryStatus = vi.hoisted(() => vi.fn());
+const mockPostReviewEmailCorrection = vi.hoisted(() => vi.fn());
+
+vi.mock("../agreement/recipientDeliveryStatus", async () => {
+  const actual = await vi.importActual<typeof import("../agreement/recipientDeliveryStatus")>(
+    "../agreement/recipientDeliveryStatus",
+  );
+  return {
+    ...actual,
+    fetchRecipientDeliveryStatus: mockFetchDeliveryStatus,
+  };
+});
+
+vi.mock("../agreement/recipientEmailCorrection", async () => {
+  const actual = await vi.importActual<typeof import("../agreement/recipientEmailCorrection")>(
+    "../agreement/recipientEmailCorrection",
+  );
+  return {
+    ...actual,
+    postReviewRecipientEmailCorrection: mockPostReviewEmailCorrection,
+  };
+});
 
 function indexRow(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement {
   return {
@@ -74,6 +97,40 @@ const revisionRequestedDraft: AgreementDraft = {
 };
 
 describe("DashboardWhatsNextPanel", () => {
+  beforeEach(() => {
+    mockFetchDeliveryStatus.mockReset();
+    mockPostReviewEmailCorrection.mockReset();
+    mockFetchDeliveryStatus.mockResolvedValue({
+      ok: true,
+      review_sent: true,
+      signing_invites_sent: false,
+      recipients: [
+        {
+          phase: "review",
+          participant_id: "p-iron",
+          entity_name: "Iron Vale Systems Inc",
+          human_name: "Hester Pointer",
+          email: "anthamhayek@me.com",
+          role: "reviewer",
+          status: "sent",
+          last_sent_at: "2026-06-07T12:00:00Z",
+          last_opened_at: null,
+          resent_count: 0,
+          locked: false,
+          lock_reason: null,
+          can_correct_email: true,
+          can_resend_invite: true,
+          can_copy_link: false,
+        },
+      ],
+    });
+    mockPostReviewEmailCorrection.mockResolvedValue({
+      ok: true,
+      sentInvite: true,
+      draft: pendingReviewerDraft,
+    });
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -105,6 +162,70 @@ describe("DashboardWhatsNextPanel", () => {
     expect(viewAgreement.getAttribute("data-dashboard-whats-next-cta")).toBe("view_agreement");
     fireEvent.click(viewAgreement);
     expect(onNavigate).toHaveBeenCalledWith("/app/agreements/ag_whats_next/view");
+  });
+
+  it("shows Manage recipients on in_review featured card with zero approvals", async () => {
+    const onNavigate = vi.fn();
+    render(
+      <DashboardWhatsNextPanel
+        row={indexRow({})}
+        reviewRows={[]}
+        draft={pendingReviewerDraft}
+        onPrimaryAction={vi.fn()}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const manageBtn = screen.getByRole("button", { name: "Manage recipients" });
+    expect(manageBtn.getAttribute("data-dashboard-whats-next-cta")).toBe("manage_recipients");
+    expect(screen.getByRole("button", { name: "View agreement" })).toBeTruthy();
+
+    fireEvent.click(manageBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-control-center")).toBeTruthy();
+    });
+    expect(screen.getByTestId("recipient-control-status-review-p-iron").textContent).toMatch(/Sent/);
+    expect(screen.getByText("anthamhayek@me.com")).toBeTruthy();
+  });
+
+  it("opens correction modal and calls review-recipient-email API", async () => {
+    render(
+      <DashboardWhatsNextPanel
+        row={indexRow({})}
+        reviewRows={[]}
+        draft={pendingReviewerDraft}
+        onPrimaryAction={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage recipients" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-control-correct-review:p-iron")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("recipient-control-correct-review:p-iron"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeTruthy();
+    });
+
+    const emailInput = screen.getByLabelText("New email");
+    fireEvent.change(emailInput, { target: { value: "anthemhayek@me.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save and resend" }));
+
+    await waitFor(() => {
+      expect(mockPostReviewEmailCorrection).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agreementId: "ag_whats_next",
+          participantId: "p-iron",
+          newEmail: "anthemhayek@me.com",
+          resendInvite: true,
+        }),
+      );
+    });
   });
 
   it("shows Prepare and send signing links CTA when ready for signing", () => {

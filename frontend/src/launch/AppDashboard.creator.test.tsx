@@ -153,6 +153,10 @@ describe("AppDashboard creator-centric surface", () => {
     expect(whatsNext.querySelector('button[data-dashboard-whats-next-cta="focus_review_status"]')).toBeNull();
     expect(screen.getByTestId("dashboard-whats-next-step").textContent).toContain("Wait for reviewer approval");
     expect(screen.getByRole("button", { name: "View agreement" })).toBeTruthy();
+    expect(screen.getByTestId("creator-dashboard-manage-recipients-ag_pending")).toBeTruthy();
+    expect(screen.getByTestId("creator-dashboard-manage-recipients-ag_pending").getAttribute("data-dashboard-whats-next-cta")).toBe(
+      "manage_recipients",
+    );
     expect(screen.getByTestId("creator-dashboard-view-agreement-ag_pending").getAttribute("data-dashboard-whats-next-cta")).toBe(
       "view_agreement",
     );

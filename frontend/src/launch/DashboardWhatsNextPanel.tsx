@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { AgreementDraft } from "../agreement/agreementTypes";
+import { RecipientControlCenter } from "../agreement/RecipientControlCenter";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import { AgreementProgressTimeline } from "./AgreementProgressTimeline";
@@ -7,7 +9,11 @@ import {
   deriveCreatorDashboardStatusPillFromGate,
   deriveCreatorSigningStatusLabel,
 } from "./creatorDashboardPresentation";
-import { CREATOR_VIEW_AGREEMENT_LABEL, logDashboardWhatsNextCtaClick } from "./creatorDashboardCopy";
+import {
+  CREATOR_MANAGE_RECIPIENTS_LABEL,
+  CREATOR_VIEW_AGREEMENT_LABEL,
+  logDashboardWhatsNextCtaClick,
+} from "./creatorDashboardCopy";
 import { creatorDashboardUsesManualReviewLinkPage } from "./creatorDashboardReviewLinkRouting";
 import {
   creatorDashboardReviewHydrationPending,
@@ -16,6 +22,7 @@ import {
 import { deriveDashboardWhatsNextPresentation } from "./dashboardWhatsNextPresentation";
 import {
   creatorDashboardShouldPrepareSignatureLinksFromTrack,
+  creatorDashboardShowManageRecipients,
   creatorDashboardWhatsNextShowPrimaryCta,
   creatorDashboardWhatsNextShowViewAgreement,
   resolveCreatorDashboardSignatureTrackAction,
@@ -44,6 +51,7 @@ export function DashboardWhatsNextPanel(props: Props) {
     prepareBusy = false,
     prepareNotice = null,
   } = props;
+  const [manageRecipientsOpen, setManageRecipientsOpen] = useState(false);
 
   if (creatorDashboardReviewHydrationPending(row, reviewRows, draft)) {
     return (
@@ -72,6 +80,7 @@ export function DashboardWhatsNextPanel(props: Props) {
     creatorDashboardShouldPrepareSignatureLinksFromTrack(row, reviewGate, draft);
   const showPrimaryCta = creatorDashboardWhatsNextShowPrimaryCta(reviewGate, trackAction);
   const showViewAgreement = creatorDashboardWhatsNextShowViewAgreement(row, reviewGate, trackAction);
+  const showManageRecipients = creatorDashboardShowManageRecipients(row, reviewGate);
 
   const handleCtaClick = () => {
     logDashboardWhatsNextCtaClick({
@@ -110,6 +119,15 @@ export function DashboardWhatsNextPanel(props: Props) {
       return;
     }
     onPrimaryAction(row);
+  };
+
+  const handleManageRecipientsClick = () => {
+    logDashboardWhatsNextCtaClick({
+      agreementId: row.id,
+      action: "manage_recipients",
+      targetRoute: "",
+    });
+    setManageRecipientsOpen((open) => !open);
   };
 
   return (
@@ -193,6 +211,22 @@ export function DashboardWhatsNextPanel(props: Props) {
               {CREATOR_VIEW_AGREEMENT_LABEL}
             </button>
           ) : null}
+          {showManageRecipients ? (
+            <button
+              type="button"
+              className="text-sm font-medium text-amber-200/95 underline-offset-4 transition-colors hover:text-amber-100 hover:underline"
+              data-testid={`creator-dashboard-manage-recipients-${row.id}`}
+              data-dashboard-whats-next-cta="manage_recipients"
+              aria-expanded={manageRecipientsOpen}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleManageRecipientsClick();
+              }}
+            >
+              {manageRecipientsOpen ? "Hide recipients" : CREATOR_MANAGE_RECIPIENTS_LABEL}
+            </button>
+          ) : null}
           {prepareNotice ? (
             <p
               className="max-w-xs text-sm text-amber-100/95"
@@ -203,6 +237,11 @@ export function DashboardWhatsNextPanel(props: Props) {
           ) : null}
         </div>
       </div>
+      {showManageRecipients && manageRecipientsOpen ? (
+        <div className="mt-5 border-t border-slate-800/80 pt-5" data-testid={`dashboard-whats-next-recipients-${row.id}`}>
+          <RecipientControlCenter agreementId={row.id} phase="review" title="Recipient delivery" />
+        </div>
+      ) : null}
     </section>
   );
 }

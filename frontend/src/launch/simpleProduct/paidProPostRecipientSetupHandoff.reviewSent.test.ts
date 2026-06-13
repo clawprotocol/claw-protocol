@@ -23,6 +23,7 @@ import {
   executePaidProPostRecipientSetupHandoff,
   maybePostReviewSentAfterReviewFirstHandoff,
 } from "./paidProPostRecipientSetupHandoff";
+import * as agreementIntakeStorage from "../../components/agreements/agreementIntakeStorage";
 
 vi.mock("./simpleDoneReviewRecipientLinks", () => ({
   mintSimpleDoneReviewRecipientLinkRows: vi.fn(async () => ({
@@ -105,6 +106,23 @@ describe("paid Pro review-first review-sent handoff", () => {
       expect(result.ownerRoutePath).toBe("/app");
     }
     expect(navigate).toHaveBeenCalledWith("/app");
+  });
+
+  it("persists dashboard resume id after email review send routes to dashboard", async () => {
+    const writeResumeSpy = vi.spyOn(agreementIntakeStorage, "writeCreateReviewAgreementResumeId");
+    const navigate = vi.fn();
+
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate,
+      agreementId: "ag_review_resume",
+      draft: baseDraft,
+      premiumSendIntent: "review",
+      logSource: "simple_pro_send_for_review",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(writeResumeSpy).toHaveBeenCalledWith("ag_review_resume");
+    writeResumeSpy.mockRestore();
   });
 
   it("explicit manual mode still routes to done after successful review-sent", async () => {

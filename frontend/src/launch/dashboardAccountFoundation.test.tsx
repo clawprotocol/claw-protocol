@@ -183,8 +183,8 @@ describe("dashboard account foundation", () => {
       draft: {
         id: "ag_ready",
         parties: [
-          { name: "A", role: "owner" },
-          { name: "B", role: "party" },
+          { name: "Owner Co", role: "owner" },
+          { name: "Reviewer Co", role: "party" },
         ],
         audit_log: [
           { event_type: "recipient_approved" },
@@ -198,7 +198,7 @@ describe("dashboard account foundation", () => {
     });
   });
 
-  it("in-review agreement shows Track review status for email-mode dashboard", async () => {
+  it("in-review agreement shows Manage recipients for email-mode dashboard", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [
         indexRow({
@@ -226,9 +226,10 @@ describe("dashboard account foundation", () => {
     });
     render(<AppDashboard />);
     await waitFor(() => {
-      expect(screen.getByTestId("creator-dashboard-action-ag_review").textContent).toContain(
-        "Track review status",
-      );
+      expect(screen.getByTestId("dashboard-whats-next-panel")).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("creator-dashboard-manage-recipients-ag_review")).toBeTruthy();
     });
     expect(screen.getByTestId("creator-dashboard-status-pill-ag_review").textContent).toContain(
       "In Review",

@@ -24,6 +24,7 @@ import {
   CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
   CREATOR_TRACK_REVIEW_STATUS_LABEL,
   CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL,
+  CREATOR_MANAGE_RECIPIENTS_LABEL,
 } from "./creatorDashboardCopy";
 import {
   creatorDashboardFocusAgreementPath,
@@ -41,7 +42,7 @@ export type CreatorDashboardStatus =
 
 export type CreatorDashboardMetricKey = "drafts" | "in_review" | "ready_for_signing" | "completed";
 
-export type CreatorDashboardActionKind = "navigate" | "focus_review_status";
+export type CreatorDashboardActionKind = "navigate" | "focus_review_status" | "manage_recipients";
 
 export type CreatorDashboardAction = {
   label: string;
@@ -150,6 +151,14 @@ export function creatorDashboardPrimaryAction(
           label: "View Review Status",
           path: creatorDashboardReviewLinkReadyPath(row.id),
           emphasis: "secondary",
+        };
+      }
+      if (Boolean((row.review_sent_at || "").trim())) {
+        return {
+          label: CREATOR_MANAGE_RECIPIENTS_LABEL,
+          path: creatorDashboardFocusAgreementPath(row.id),
+          emphasis: "primary",
+          kind: "manage_recipients",
         };
       }
       return {
