@@ -104,7 +104,7 @@ describe("VS01 parallel signing default", () => {
 
   it("Party 2 can complete before Party 1 without blocking", () => {
     const { roles, handoff } = twoPartyHandoff();
-    const snap = ensureSigningPacketStatusFromHandoff(handoff, roles[0]!.roleId);
+    ensureSigningPacketStatusFromHandoff(handoff, roles[0]!.roleId);
     const ownerKey = roles[0]!.roleId;
     const cpKey = handoff.signers[0]!.signerRoleId!;
     patchSignerPacketStatus(AG, cpKey, "signed");
