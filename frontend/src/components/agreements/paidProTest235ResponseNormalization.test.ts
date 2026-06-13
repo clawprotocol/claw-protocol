@@ -171,6 +171,28 @@ describe("paidPro Test235 premium response normalization", () => {
     expect(premiumApiResultHasAuthoritativeServerCorpus(normalized.wire)).toBe(false);
   });
 
+  it("unwraps nested operative document from a JSON envelope in document_text", () => {
+    const valid = buildTest235ValidBody(5_547);
+    const wrapper = JSON.stringify({
+      title: "Mutual Consulting and Implementation Agreement",
+      agreement_family: "services_agreement",
+      generation_outcome: "degraded",
+      server_generation_failure_code: "json_parse",
+      document_text: valid,
+      server_full_document_text: "",
+    });
+    const normalized = normalizePremiumFullDraftResponsePayload({
+      server_full_document_text: "",
+      document_text: wrapper,
+      generation_outcome: "degraded",
+      server_generation_failure_code: "json_parse",
+    });
+    expect(normalized.sourceField).toBe("json_envelope.document_text");
+    expect(normalized.authoritativeText).toBe(valid);
+    expect(normalized.authoritativeText.length).toBeGreaterThanOrEqual(5_400);
+    expect(premiumApiResultHasAuthoritativeServerCorpus(normalized.wire)).toBe(true);
+  });
+
   it("logPremiumApiResultFromWire uses normalized corpus when server_full is missing", () => {
     const valid = buildTest235ValidBody(6_380);
     logPremiumApiResultFromWire({

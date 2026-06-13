@@ -85,7 +85,7 @@ export function rejectPremiumWireDocumentCandidate(text: string): PremiumWireDoc
   return null;
 }
 
-function pickAuthoritativePremiumWireDocument(
+function pickAuthoritativePremiumWireDocumentFields(
   raw: Record<string, unknown>,
 ): { text: string; sourceField: string | null; rejectedCandidates: PremiumWireDocumentRejection[] } {
   const rejectedCandidates: PremiumWireDocumentRejection[] = [];
@@ -101,6 +101,58 @@ function pickAuthoritativePremiumWireDocument(
     return { text: candidate, sourceField: fieldLabel, rejectedCandidates };
   }
   return { text: "", sourceField: null, rejectedCandidates };
+}
+
+function pickAuthoritativePremiumWireDocument(
+  raw: Record<string, unknown>,
+): { text: string; sourceField: string | null; rejectedCandidates: PremiumWireDocumentRejection[] } {
+  const picked = pickAuthoritativePremiumWireDocumentFields(raw);
+  if (picked.text) return picked;
+  const jsonEnvelopeSource = readWireStringField(raw, ["document_text", "documentText"]);
+  if (jsonEnvelopeSource && looksLikePremiumResponseJsonWrapper(jsonEnvelopeSource)) {
+    const unwrapped = tryUnwrapPremiumJsonEnvelopeDocument(jsonEnvelopeSource);
+    if (unwrapped) {
+      return {
+        text: unwrapped.text,
+        sourceField: unwrapped.sourceField,
+        rejectedCandidates: picked.rejectedCandidates,
+      };
+    }
+  }
+  return picked;
+}
+
+/** When the wire puts the full API JSON envelope in document_text, extract nested operative prose. */
+export function tryUnwrapPremiumJsonEnvelopeDocument(
+  text: string,
+): { text: string; sourceField: string } | null {
+  const trimmed = String(text || "").trim();
+  if (!looksLikePremiumResponseJsonWrapper(trimmed)) return null;
+  let raw = trimmed;
+  if (raw.startsWith("```")) {
+    raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  }
+  if (!raw.startsWith("{")) {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start >= 0 && end > start) raw = raw.slice(start, end + 1);
+  }
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      parsed = value as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  if (!parsed) return null;
+  const nested = pickAuthoritativePremiumWireDocumentFields(parsed);
+  if (!nested.text || !nested.sourceField) return null;
+  return {
+    text: nested.text,
+    sourceField: `json_envelope.${nested.sourceField}`,
+  };
 }
 
 /**

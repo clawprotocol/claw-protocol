@@ -102,7 +102,11 @@ import {
   clearPremiumParseSessionGuard,
   markPremiumAuthoritativeServerCorpusAccepted,
 } from "./premiumParseSessionGuard";
-import { normalizePremiumFullDraftResponsePayload } from "./premiumFullDraftResponseNormalization";
+import {
+  looksLikePremiumResponseJsonWrapper,
+  normalizePremiumFullDraftResponsePayload,
+  tryUnwrapPremiumJsonEnvelopeDocument,
+} from "./premiumFullDraftResponseNormalization";
 import { logDevPostPremiumFullDraftPipelineReturn } from "./premiumFullDraftPostResponseTrace";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import {
@@ -154,7 +158,10 @@ import {
   buildPaidProJsonParseDegradedDiagnostics,
   logPaidProJsonParseDegradedDiagnostics,
 } from "./paidProJsonParseDegradedDiagnostics";
-import { shouldSkipPremiumStructuralRetryForDegradedDisplay } from "./paidProPostCheckoutRenderGate";
+import {
+  meetsPaidProDegradedRecoveryDisplayRequirements,
+  shouldSkipPremiumStructuralRetryForDegradedDisplay,
+} from "./paidProPostCheckoutRenderGate";
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import type { PremiumNetworkCallReason } from "./paidProPremiumGenerationCallAudit";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
@@ -199,6 +206,7 @@ import {
   freezeAcceptedPremiumBodyForSession,
   getFrozenPremiumBodyForSession,
   isLongCommerciallyUsablePremiumBody,
+  isNonfatalGenerationFailureCode,
   isNonfatalParseDegradedPaidAccept,
   logPremiumAcceptanceDecision,
   partyPlaceholderRepairYieldsAuthoritativePaidBody,
@@ -1133,6 +1141,33 @@ export async function runPremiumCompletion(input: PremiumCompletionInput): Promi
   }
 }
 
+function premiumStructuralRetryShouldKeepPriorDocument(
+  priorDoc: string,
+  nextDoc: string,
+  premiumRejectCtx: Parameters<typeof rejectPremiumBodyForProRender>[1],
+): boolean {
+  const prior = priorDoc.trim();
+  const next = nextDoc.trim();
+  if (!prior) return false;
+  if (!next) return true;
+  const priorFillerOk = rejectPremiumDegradedFiller(prior).ok;
+  const nextFillerOk = rejectPremiumDegradedFiller(next).ok;
+  if (priorFillerOk && !nextFillerOk) return true;
+  if (next.length < prior.length * 0.85) return true;
+  const priorAcc = rejectPremiumBodyForProRender(prior, premiumRejectCtx);
+  const nextAcc = rejectPremiumBodyForProRender(next, premiumRejectCtx);
+  if (priorAcc.ok && !nextAcc.ok) return true;
+  if (
+    !priorAcc.ok &&
+    !nextAcc.ok &&
+    prior.length > next.length &&
+    priorFillerOk
+  ) {
+    return true;
+  }
+  return false;
+}
+
 async function runPremiumCompletionInner(
   input: PremiumCompletionInput,
   traceCtx: { traceId: string; intakeFingerprintEarly: string },
@@ -2038,7 +2073,21 @@ async function runPremiumCompletionInner(
           });
         }
         const hard0 = c0 === "airlock_blocked" || c0 === "dev_context_leak";
-        const authoritativeCandidate = (pipelineNormalizedAuthoritativeText || doc).trim();
+        let authoritativeCandidate = (pipelineNormalizedAuthoritativeText || doc).trim();
+        if (
+          !authoritativeCandidate ||
+          looksLikePremiumResponseJsonWrapper(authoritativeCandidate) ||
+          !rejectPremiumDegradedFiller(authoritativeCandidate).ok
+        ) {
+          const unwrapSource = String(
+            full.document_text ?? effectiveFull.document_text ?? doc ?? "",
+          ).trim();
+          const unwrapped = tryUnwrapPremiumJsonEnvelopeDocument(unwrapSource);
+          if (unwrapped?.text) {
+            authoritativeCandidate = unwrapped.text;
+            pipelineNormalizedAuthoritativeText = unwrapped.text;
+          }
+        }
         if (hard0 || !rejectPremiumDegradedFiller(authoritativeCandidate).ok) {
           doc = "";
           effectiveFull = { ...full, document_text: "" };
@@ -2214,6 +2263,8 @@ async function runPremiumCompletionInner(
           !isLongCommerciallyUsablePremiumBody(doc.length) &&
           !skipStructuralRetry
         ) {
+          const preStructuralRetryDoc = doc;
+          const preStructuralRetryFull = effectiveFull;
           const freeSimBaseline = buildAgreementPreviewText(input.structuredDraft, { starterPreview: true });
           logPremiumSecondGenerationBeforePost({
             reason: "degraded_structural_retry",
@@ -2242,9 +2293,20 @@ async function runPremiumCompletionInner(
               nextDoc,
               "server_full_draft_retry",
             );
-            doc = frozen.body;
-            usedClientRetry = true;
-            effectiveFull = full2;
+            if (
+              premiumStructuralRetryShouldKeepPriorDocument(
+                preStructuralRetryDoc,
+                frozen.body,
+                premiumRejectCtx,
+              )
+            ) {
+              doc = preStructuralRetryDoc;
+              effectiveFull = preStructuralRetryFull;
+            } else {
+              doc = frozen.body;
+              usedClientRetry = true;
+              effectiveFull = full2;
+            }
           } catch {
             /* keep first doc */
           }
@@ -2590,6 +2652,20 @@ async function runPremiumCompletionInner(
             draft: mergedForApi,
           }),
         });
+      const hardAccRejection = acc.reasons.some(
+        (r) =>
+          r.startsWith("banned_substring:") ||
+          r.startsWith("degraded_filler:") ||
+          r === "empty_body",
+      );
+      const jsonParseDisplayRecoverableAccept =
+        !standardClientGatesPass &&
+        !longAdvisoryAccept &&
+        !jsonParseNonfatalAccept &&
+        placeholderClientOk &&
+        !hardAccRejection &&
+        isNonfatalGenerationFailureCode((effectiveFull.server_generation_failure_code || "").trim()) &&
+        meetsPaidProDegradedRecoveryDisplayRequirements(doc, rawForSoT || rawIntake);
       // A validated long server_full_document_text wins over soft vPaid failures too.
       const serverFullDocumentWins = serverFullDocumentAuthoritative && placeholderClientOk;
       // A deterministically party-placeholder-repaired body (only gap was a known party name) is
@@ -2611,9 +2687,18 @@ async function runPremiumCompletionInner(
           }),
         });
       const advisoryAccept =
-        longAdvisoryAccept || jsonParseNonfatalAccept || serverFullDocumentWins || partyPlaceholderRepairAccept;
+        longAdvisoryAccept ||
+        jsonParseNonfatalAccept ||
+        jsonParseDisplayRecoverableAccept ||
+        serverFullDocumentWins ||
+        partyPlaceholderRepairAccept;
       if (advisoryAccept && (!vPaid.ok || !placeholderClientOk)) {
-        if (jsonParseNonfatalAccept || serverFullDocumentWins || partyPlaceholderRepairAccept) {
+        if (
+          jsonParseNonfatalAccept ||
+          jsonParseDisplayRecoverableAccept ||
+          serverFullDocumentWins ||
+          partyPlaceholderRepairAccept
+        ) {
           // The body is authoritative; only the intelligence metadata / soft gate failed. Override any
           // earlier "degraded" classification so the surface treats this as a complete paid draft.
           premiumCompletionOutcome = "authoritative_draft_complete_with_recommended_clarifications";
@@ -2716,7 +2801,9 @@ async function runPremiumCompletionInner(
               ? "party_placeholder_repaired_authoritative"
               : jsonParseNonfatalAccept
                 ? "json_parse_nonfatal_body_authoritative"
-                : longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
+                : jsonParseDisplayRecoverableAccept
+                  ? "json_parse_display_recoverable_authoritative"
+                  : longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
                   ? "long_body_advisory_accept"
                   : "client_gates_passed",
           bodyLen: doc.length,
@@ -2741,7 +2828,7 @@ async function runPremiumCompletionInner(
           generationOutcome: (effectiveFull.generation_outcome || "").trim(),
           degraded: serverGenDegraded,
           failureCode:
-            serverGenDegraded || jsonParseNonfatalAccept
+            serverGenDegraded || jsonParseNonfatalAccept || jsonParseDisplayRecoverableAccept
               ? (effectiveFull.server_generation_failure_code || "").trim()
               : undefined,
           accepted: true,

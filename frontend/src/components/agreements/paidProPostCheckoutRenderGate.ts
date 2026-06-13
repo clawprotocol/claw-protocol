@@ -102,7 +102,7 @@ export function shouldSkipPremiumStructuralRetryForDegradedDisplay(args: {
   const fc = (args.failureCode || "").trim();
   if (fc !== "json_parse" && !isNonfatalGenerationFailureCode(fc)) return false;
   const doc = (args.documentText || "").trim();
-  if (doc.length < 6_000) return false;
+  if (doc.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) return false;
   return meetsPaidProDegradedRecoveryDisplayRequirements(doc, args.intakeText);
 }
 

@@ -113,8 +113,8 @@ describe("paidProPostCheckoutRenderGate", () => {
         patch: { failureCode: "airlock_blocked" },
       },
       {
-        label: "documentText under 6000 chars",
-        patch: { documentText: buildBlueCanyonDegradedBody(6_220).slice(0, 5_999) },
+        label: "documentText under recovery display minimum",
+        patch: { documentText: buildBlueCanyonDegradedBody(6_220).slice(0, PAID_PRO_RECOVERY_MIN_DISPLAY_LEN - 1) },
       },
       {
         label: "generationOutcome not degraded",
