@@ -8,12 +8,21 @@ const MAIN_PLUS_NAMED_SUBSECTION_GLUE_RE =
 
 /** Body sentence starters that follow a glued heading title (not part of the title). */
 const GLUED_BODY_SENTENCE_START =
-  "(?:AI|The|This|Each|Either|Upon|Unless|If\\s|When|Where|As\\s|An\\s|A\\s|In\\s|For\\s|Client|Provider|Service\\s+Provider|Fixed|Payment|Termination|Both|All|Any|Neither|Notwithstanding|During|Within|After|Before|Red\\s|Mile|Harbor|Process|Not\\s|No\\s|One\\s|Party\\s|Neither\\s+party)";
+  "(?:To\\s+the|During\\s+the\\s+Term|AI|The|This|Each|Either|Upon|Unless|If\\s|When|Where|As\\s|An\\s|A\\s|In\\s|For\\s|Client|Provider|Service\\s+Provider|Fixed|Termination|Both|All|Any|Neither|Notwithstanding|During|Within|After|Before|Red\\s|Mile|Harbor|Process|Not\\s|No\\s|One\\s|Party\\s|Neither\\s+party)";
 
 const MAIN_SECTION_GLUE_RE = new RegExp(
   `^(\\d+\\.\\s+(?!\\d+\\.\\d).+?)\\s+(${GLUED_BODY_SENTENCE_START}\\b.+)`,
   "s",
 );
+
+/** Main section heading immediately followed by subsection on same line (test337/test345). */
+const MAIN_THEN_SUBSECTION_GLUE_RE = /^(\d+\.\s+(?!\d+\.\d).+?)\s+(\d+\.\d+\s+.+)$/s;
+
+/** Explicit body cues after a glued main heading title (test345 short titles). */
+const MAIN_HEADING_BODY_CUE_RE =
+  /^(\d+\.\s+(?!\d+\.\d)(?:[A-Z][a-zA-Z]*(?:\s+(?:and|of|for|the|to|on|in|or|by|at|from|upon|with)\s+)*[A-Za-z][a-zA-Z]+)+)\s+((?:To the extent|The term(?:\s+of)?|Either party|Neither party|During the Term|Client will|Service Provider will|Upon full|If the|Where the|As used|For purposes).+)$/s;
+
+const MIN_MAIN_HEADING_LEN = 6;
 
 const SUBSECTION_PERIOD_GLUE_RE = /^(\d+\.\d+(?:\.\d+)*\s+[^.\n]{3,120}?)\.\s+(.+)$/s;
 const SUBSECTION_SPACE_GLUE_RE =
@@ -67,7 +76,25 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
   if (subSpace?.[1] && subSpace[2]?.trim()) {
     const heading = subSpace[1].trim();
     const body = subSpace[2].trim();
-    if (heading.length >= 8 && heading.length <= 110 && body.length >= 8) {
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && body.length >= 8) {
+      return `${heading}\n${body}`;
+    }
+  }
+
+  const mainThenSub = trimmed.match(MAIN_THEN_SUBSECTION_GLUE_RE);
+  if (mainThenSub?.[1] && mainThenSub[2]?.trim()) {
+    const heading = mainThenSub[1].trim();
+    const subsection = mainThenSub[2].trim();
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && subsection.length >= 8) {
+      return `${heading}\n${subsection}`;
+    }
+  }
+
+  const bodyCue = trimmed.match(MAIN_HEADING_BODY_CUE_RE);
+  if (bodyCue?.[1] && bodyCue[2]?.trim()) {
+    const heading = bodyCue[1].trim();
+    const body = bodyCue[2].trim();
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && body.length >= 8) {
       return `${heading}\n${body}`;
     }
   }
@@ -86,7 +113,7 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
   if (glued?.[1] && glued[2]?.trim()) {
     const heading = glued[1].trim();
     const body = glued[2].trim();
-    if (heading.length >= 8 && heading.length <= 110 && body.length >= 8) {
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && body.length >= 8) {
       return `${heading}\n${body}`;
     }
   }
