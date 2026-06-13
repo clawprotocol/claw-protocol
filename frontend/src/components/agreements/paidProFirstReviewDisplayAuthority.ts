@@ -21,6 +21,9 @@ import {
   resolvePaidProPostCheckoutFirstReviewPlain,
 } from "./paidProPostCheckoutRenderGate";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
+import {
+  resolvePaidProPostFinalizeUserVisiblePlain,
+} from "./paidProDisplayPlainAuthority";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import {
   hashPaidProCorpus,
@@ -128,8 +131,9 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const locked = resolvePaidProPostFinalizeReviewPlain().trim();
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      const plain = resolvePaidProPostFinalizeUserVisiblePlain(locked, draft as import("../../agreement/agreementTypes").AgreementDraft | null);
       return {
-        plain: locked,
+        plain,
         source: "authoritative_signing_snapshot",
         fallbackReason: null,
         hasSoT,

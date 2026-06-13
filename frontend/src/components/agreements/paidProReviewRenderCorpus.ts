@@ -43,7 +43,7 @@ import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity"
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
-import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { applyPaidProUserVisibleDisplayPrep } from "./paidProDisplayPlainAuthority";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { applySignerPartyIdentityToAuthoritativeAgreement } from "./guidedDealCompletion/signerPartyIdentity";
@@ -573,6 +573,8 @@ export function syncConsumedAuthoritySignerTitlesFromCorpus(corpus: string): voi
 export type ResolvePaidProReviewRenderPlainArgs = ResolvePaidProReviewRenderPartiesArgs & {
   /** When true, return frozen SoT/review corpus without signer-driven repair or opening guards. */
   deferSignerMetadataRepair?: boolean;
+  /** VS01 / transport paths — skip display-only section prep. */
+  skipUserVisibleDisplayPrep?: boolean;
 };
 
 function paidProPartyRoleContextFromArgs(
@@ -677,12 +679,19 @@ export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
   const surface = "paid_pro_review_render_plain";
+  const finishUserVisiblePlain = (plain: string): string => {
+    const body = (plain || "").trim();
+    if (body.length < PAID_PRO_AUTHORITY_MIN_LEN) return body;
+    if (args?.skipUserVisibleDisplayPrep) return body;
+    return applyPaidProUserVisibleDisplayPrep(body);
+  };
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const locked = resolvePaidProPostFinalizeReviewPlain();
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      auditPaidProReviewRenderCorpus(locked);
-      auditPaidProReviewRenderSotParity({ reviewPlain: locked, surface: "paid_pro_post_finalize_locked" });
-      return locked;
+      const visible = finishUserVisiblePlain(locked);
+      auditPaidProReviewRenderCorpus(visible);
+      auditPaidProReviewRenderSotParity({ reviewPlain: visible, surface: "paid_pro_post_finalize_locked" });
+      return visible;
     }
   }
   const partiesForRender = resolvePartiesForReviewRender(args);
@@ -702,7 +711,9 @@ export function resolvePaidProReviewRenderPlain(
   const memoKey = buildPaidProReviewPlainMemoKey(seedForMemo, surface);
   const memoHit = readMemoizedPaidProReviewPlain(memoKey);
   if (memoHit != null && !needsSignerOverlay) {
-    return normalizePaidProOrphanSubsections(memoHit, { source: `${surface}:memo` }).text;
+    return finishUserVisiblePlain(
+      normalizePaidProOrphanSubsections(memoHit, { source: `${surface}:memo` }).text,
+    );
   }
 
   let rendered: string;
@@ -749,13 +760,12 @@ export function resolvePaidProReviewRenderPlain(
   if (!needsSignerOverlay) {
     writeMemoizedPaidProReviewPlain(memoKey, rendered);
   }
-  const displayPrepared = preparePaidProReviewDisplayPlain(rendered);
-  rendered = displayPrepared.text;
-  if (rendered.length >= 200 && hasPaidProSourceOfTruth()) {
-    auditPaidProReviewRenderCorpus(rendered);
-    auditPaidProReviewRenderSotParity({ reviewPlain: rendered, surface: "paid_pro_review_render_plain" });
+  const visible = finishUserVisiblePlain(rendered);
+  if (visible.length >= 200 && hasPaidProSourceOfTruth()) {
+    auditPaidProReviewRenderCorpus(visible);
+    auditPaidProReviewRenderSotParity({ reviewPlain: visible, surface: "paid_pro_review_render_plain" });
   }
-  return rendered;
+  return visible;
 }
 
 function resolvePaidProReviewRenderPlainInner(

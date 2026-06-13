@@ -21,6 +21,7 @@ import {
   logPaidProPostFinalizeVisibleSurfaceMismatch,
   resolvePaidProPostFinalizeReviewPlain,
 } from "./paidProPostFinalizeReviewSurface";
+import { resolvePaidProPostFinalizeUserVisiblePlain } from "./paidProDisplayPlainAuthority";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
 import {
@@ -191,7 +192,9 @@ export function PaidProVisibleDocumentShell({
 
   useEffect(() => {
     if (!isPaidProPostFinalizeHydratedCorpusLocked()) return;
-    const expectedPlain = resolvePaidProPostFinalizeReviewPlain();
+    const expectedPlain = resolvePaidProPostFinalizeUserVisiblePlain(
+      resolvePaidProPostFinalizeReviewPlain(),
+    );
     if (expectedPlain.length < PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) return;
     if (countBlankSignerMetadataLinesInExecutionBlock(expectedPlain) > 0) return;
     const visibleText = shellRef.current?.innerText?.trim() ?? "";

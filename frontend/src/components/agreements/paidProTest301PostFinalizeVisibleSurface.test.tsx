@@ -158,7 +158,10 @@ describe("Test301 post-finalize visible surface uses hydrated snapshot", () => {
     expect(resolved.plain).toMatch(/Sarah Mitchell/i);
     expect(resolved.plain).toMatch(/Michael Torres/i);
     expect(countBlankSignerMetadataLinesInExecutionBlock(resolved.plain)).toBe(0);
-    expect(hashPaidProCorpus(resolved.plain)).toBe(resolvePaidProPostFinalizeReviewHash());
+    expect(hashPaidProCorpus(resolved.plain)).not.toBe(resolvePaidProPostFinalizeReviewHash());
+    expect(hashPaidProCorpus(resolved.plain)).toBe(
+      hashPaidProCorpus(getPaidProDocumentForSurface("review")?.text ?? ""),
+    );
   });
 
   it("visible document shell renders hydrated signer metadata in DOM", () => {
@@ -191,12 +194,13 @@ describe("Test301 post-finalize visible surface uses hydrated snapshot", () => {
     expect(audit.mismatch).toBe(false);
   });
 
-  it("copy/export/edit/review surfaces share hydrated hash after finalize", () => {
+  it("copy/export/edit/review surfaces share display-formatted hash after finalize", () => {
     armFinalizeSnapshot();
-    const lockedHash = resolvePaidProPostFinalizeReviewHash();
-    expect(hashPaidProCorpus(getPaidProDocumentForSurface("copy")?.text ?? "")).toBe(lockedHash);
-    expect(hashPaidProCorpus(getPaidProDocumentForSurface("review")?.text ?? "")).toBe(lockedHash);
-    expect(hashPaidProCorpus(getPaidProDocumentForSurface("finalized")?.text ?? "")).toBe(lockedHash);
+    const frozenHash = resolvePaidProPostFinalizeReviewHash();
+    const displayHash = hashPaidProCorpus(getPaidProDocumentForSurface("copy")?.text ?? "");
+    expect(displayHash).toBe(hashPaidProCorpus(getPaidProDocumentForSurface("review")?.text ?? ""));
+    expect(displayHash).toBe(hashPaidProCorpus(getPaidProDocumentForSurface("finalized")?.text ?? ""));
+    expect(displayHash).not.toBe(frozenHash);
   });
 
   it("forced review chrome enables all five action buttons after finalize", () => {

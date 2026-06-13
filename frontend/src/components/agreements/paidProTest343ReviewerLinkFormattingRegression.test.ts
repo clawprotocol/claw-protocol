@@ -30,7 +30,14 @@ import {
   resolveReviewFirstDisplayCorpus,
 } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
 import { clearReviewFirstHandoffSource } from "../../launch/simpleProduct/reviewFirstSendSurface";
-import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import {
+  clearPaidProSourceOfTruth,
+  establishPaidProSourceOfTruth,
+  getPaidProDocumentForSurface,
+  hashPaidProCorpus,
+} from "./paidProSourceOfTruth";
+import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
+import { resolvePaidProReviewLinkCorpusPlain } from "./paidProReviewLinkCorpusParity";
 
 const RED_MESA = "Red Mesa Logistics LLC";
 const HARBOR_PEAK = "Harbor Peak Automation LLC";
@@ -87,6 +94,11 @@ function qaAuthority() {
 
 function armFlattenedFinalizeSnapshot(flattenedCorpus: string) {
   const authority = qaAuthority();
+  establishPaidProSourceOfTruth({
+    text: flattenedCorpus,
+    source: "server_full_draft",
+    intakeText: "consulting between Red Mesa and Harbor Peak",
+  });
   setConsumedPaidProSignerMetadataAuthority(authority);
   const identities = authorityPartiesToCanonicalPartyIdentities(authority.parties);
   createAuthoritativeSigningSnapshot({
@@ -148,6 +160,7 @@ function assertReviewerDisplayFormatting(text: string): void {
 describe("paidProTest343ReviewerLinkFormattingRegression", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    clearPaidProSourceOfTruth();
     clearAuthoritativeSigningSnapshot();
     clearConsumedPaidProSignerMetadataAuthority();
     clearPaidProPinnedSignerAppliedCorpus();
@@ -203,5 +216,35 @@ describe("paidProTest343ReviewerLinkFormattingRegression", () => {
     const copyPlain = formatAgreementPlainTextForEditing(copyExport?.text ?? "");
     expect(copyPlain).toMatch(/\n\n1\.\s+Services and Deliverables/);
     expect(copyPlain).toContain("Sidney Thomas");
+  });
+
+  it("owner post-finalize review and copy surfaces match reviewer display; transport bytes stay frozen", () => {
+    const flattened = buildTest343FlattenedReviewerSnapshotCorpus();
+    armFlattenedFinalizeSnapshot(flattened);
+    const draft = reviewerDraft();
+    const frozenSnapshot = readAuthoritativeSigningCorpus();
+    const frozenHash = hashPaidProCorpus(frozenSnapshot);
+    const handoffPlain = resolvePaidProPostFinalizeReviewPlain();
+    const linkCorpus = resolvePaidProReviewLinkCorpusPlain();
+
+    const reviewer = resolveReviewFirstDisplayCorpus(draft, "reviewer");
+    const copyExport = resolveReviewFirstDisplayCorpus(draft, "copy_export");
+    const ownerReview = getPaidProDocumentForSurface("review")?.text ?? "";
+    const ownerCopy = getPaidProDocumentForSurface("copy")?.text ?? "";
+    const vs01 = getPaidProDocumentForSurface("vs01")?.text ?? "";
+
+    assertReviewerDisplayFormatting(reviewer?.text ?? "");
+    expect(ownerReview).toBe(reviewer?.text);
+    expect(ownerCopy).toBe(copyExport?.text);
+    expect(ownerCopy).toBe(reviewer?.text);
+
+    expect(hashPaidProCorpus(handoffPlain)).toBe(frozenHash);
+    expect(linkCorpus?.plain).toBe(handoffPlain);
+    expect(hashPaidProCorpus(linkCorpus?.plain ?? "")).toBe(frozenHash);
+    expect(readAuthoritativeSigningCorpus()).toBe(frozenSnapshot);
+    expect(hashPaidProCorpus(vs01)).toBe(frozenHash);
+    expect(vs01).not.toMatch(/\n\n1\.\s+Services and Deliverables\n/);
+    expect(vs01).toContain(HARBOR_PEAK);
+    expect((vs01.match(/\bIN WITNESS WHEREOF\b/gi) ?? []).length).toBe(1);
   });
 });

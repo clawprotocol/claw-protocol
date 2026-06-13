@@ -7,6 +7,7 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   applyAcceptedProCorpusSafeDisplay,
 } from "./acceptedProCorpusSafeDisplay";
@@ -70,6 +71,10 @@ import {
   resolvePartiesForReviewRender,
   resolvePaidProReviewRenderPlain,
 } from "./paidProReviewRenderCorpus";
+import {
+  isPaidProUserVisibleDocumentSurface,
+  resolvePaidProDisplayPlainForSurface,
+} from "./paidProDisplayPlainAuthority";
 import { paidProSignerExecutionCorpusIsFrozen } from "./paidProFinalHydratedCorpus";
 import { logPaidProDriftCorpusCaptureOnce } from "./paidProDriftCorpusCapture";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
@@ -716,6 +721,7 @@ export function getPaidProDocumentForSurface(
   ) {
     const reviewCopyPlain = resolvePaidProReviewRenderPlain({
       ...opts,
+      skipUserVisibleDisplayPrep: surface === "vs01",
       deferSignerMetadataRepair: shouldDeferPaidProReviewRenderSignerRepair({
         signerMetadataSessionActive: isPaidProReviewSignerMetadataSessionActive(),
       }),
@@ -744,6 +750,20 @@ export function getPaidProDocumentForSurface(
         draftPartyNames:
           opts?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
       }).text.trim();
+      hash = hashPaidProCorpus(text);
+    }
+  }
+
+  if (isPaidProUserVisibleDocumentSurface(surface)) {
+    const displayPlain = resolvePaidProDisplayPlainForSurface({
+      surface,
+      sourcePlain: text,
+      draft: (opts?.draft ?? null) as AgreementDraft | null,
+      applySignerHydration: false,
+      selectedSource: corpusSource,
+    });
+    if (displayPlain.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
+      text = displayPlain;
       hash = hashPaidProCorpus(text);
     }
   }

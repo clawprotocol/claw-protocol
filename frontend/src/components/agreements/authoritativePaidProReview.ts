@@ -31,6 +31,10 @@ import {
 } from "./paidProSourceOfTruth";
 import { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS } from "./paidProReviewTrustUx";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
+import {
+  resolvePaidProDisplayPlainForSurface,
+  resolvePaidProPostFinalizeUserVisiblePlain,
+} from "./paidProDisplayPlainAuthority";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 
 export { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS };
@@ -76,13 +80,20 @@ export type AuthoritativePaidProReviewInput = {
 function finalizeAuthoritativePaidProReviewPlain(text: string): string {
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const locked = resolvePaidProPostFinalizeReviewPlain();
-    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
+    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      return resolvePaidProPostFinalizeUserVisiblePlain(locked);
+    }
   }
   const trimmed = text.trim();
   if (trimmed.length < PAID_PRO_AUTHORITY_MIN_LEN) return trimmed;
   const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
   const repaired = repairMalformedPaidProAgreementRecital(trimmed, parties).text.trim();
-  return stripPremiumIntelligenceCalloutsFromCorpus(repaired);
+  const stripped = stripPremiumIntelligenceCalloutsFromCorpus(repaired);
+  return resolvePaidProDisplayPlainForSurface({
+    surface: "review",
+    sourcePlain: stripped,
+    applySignerHydration: false,
+  });
 }
 
 export function resolveAuthoritativePaidProReviewPlain(
@@ -90,7 +101,9 @@ export function resolveAuthoritativePaidProReviewPlain(
 ): string {
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const locked = resolvePaidProPostFinalizeReviewPlain();
-    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
+    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      return resolvePaidProPostFinalizeUserVisiblePlain(locked, args?.draft ?? null);
+    }
   }
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
     return resolvePaidProAuthoritativeDisplayPlain({

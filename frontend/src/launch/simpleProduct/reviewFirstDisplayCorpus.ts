@@ -12,7 +12,7 @@ import {
 import { resolvePaidProPostFinalizeReviewPlain } from "../../components/agreements/paidProPostFinalizeReviewSurface";
 import { readConsumedPaidProSignerMetadataAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
 import { getPaidProDocumentForSurface, hashPaidProCorpus } from "../../components/agreements/paidProSourceOfTruth";
-import { preparePaidProReviewDisplayPlain } from "../../components/agreements/paidProFlattenedDocumentNormalize";
+import { applyPaidProUserVisibleDisplayPrep } from "../../components/agreements/paidProDisplayPlainAuthority";
 import { peekReviewFirstPinnedCorpus } from "./reviewFirstSendSurface";
 import {
   logReviewCorpusAuthority,
@@ -86,9 +86,7 @@ function reviewRouteHashInvariant(args: {
 
 /** Display-only Pro section formatting — matches owner review render prep without mutating SoT. */
 export function applyReviewTrackDisplayFormatting(text: string): string {
-  const body = (text || "").trim();
-  if (body.length < 80) return body;
-  return preparePaidProReviewDisplayPlain(body).text.trimEnd();
+  return applyPaidProUserVisibleDisplayPrep(text);
 }
 
 function finalizeReviewFirstCorpusText(

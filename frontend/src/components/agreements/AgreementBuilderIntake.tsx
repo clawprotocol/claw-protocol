@@ -835,6 +835,10 @@ import {
   resolvePaidProPostFinalizeReviewHash,
   resolvePaidProPostFinalizeReviewPlain,
 } from "./paidProPostFinalizeReviewSurface";
+import {
+  resolvePaidProDisplayPlainForSurface,
+  resolvePaidProPostFinalizeUserVisiblePlain,
+} from "./paidProDisplayPlainAuthority";
 import { resolvePaidProSignerFinalizeRawCorpus } from "./paidProSignerFinalizeRawCorpus";
 import {
   auditPaidProReviewLinkCorpusParity,
@@ -19892,7 +19896,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const intakeForPolish = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     if (isPaidProPostFinalizeHydratedCorpusLocked()) {
       const locked = resolvePaidProPostFinalizeReviewPlain();
-      if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
+      if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+        return resolvePaidProPostFinalizeUserVisiblePlain(locked, draft ?? null);
+      }
     }
     if (hasPaidProSourceOfTruth() || hasAuthoritativeSigningSnapshot()) {
       const renderPlain = resolvePaidProReviewRenderPlain({
@@ -19925,20 +19931,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ""
     ).trim();
     if (!raw) return "";
-    const polished = polishProAgreementDisplayLayer(raw, {
+    const displayPrepped = resolvePaidProDisplayPlainForSurface({
+      surface: "review",
+      sourcePlain: stripPremiumIntelligenceCalloutsFromCorpus(
+        sanitizeProReviewDisplayText(raw, {
+          source: paidProReview ? "paid_pro_review_surface" : "simple_pro_final_review",
+          retainSignatureExecutionBlock: signingSnapshotActive,
+        }).text,
+      ),
       draft: draft ?? null,
-      intakeText: intakeForPolish,
-      reviewDisplayMode: true,
-      retainSignatureExecutionBlock: signingSnapshotActive,
-    }).text;
-    const sanitized = stripPremiumIntelligenceCalloutsFromCorpus(
-      sanitizeProReviewDisplayText(polished, {
-        source: paidProReview ? "paid_pro_review_surface" : "simple_pro_final_review",
-        retainSignatureExecutionBlock: signingSnapshotActive,
-      }).text,
-    );
+      applySignerHydration: false,
+      selectedSource: paidProReview ? "paid_pro_review_surface" : simpleProFinalReviewCorpus.source,
+    });
     const boundary = resolveVisibleProPaperBoundary({
-      visiblePlain: sanitized,
+      visiblePlain: displayPrepped,
       declaredSource: paidProReview ? "paid_pro_review_surface" : simpleProFinalReviewCorpus.source,
       candidates: proVisiblePaperCandidates,
       intakeText: intakeForPolish,
@@ -19949,7 +19955,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draft: draft ?? null,
       intakeText: intakeForPolish,
       boundaryPlain: boundary.plain,
-      displayCandidatePlain: sanitized,
+      displayCandidatePlain: displayPrepped,
     });
   }, [
     proVisiblePaperCandidates,
