@@ -10,6 +10,14 @@ export type PaidProReviewReviewerLinksTableProps = {
     href: string,
     ctx: { rowIndex: number; partyIndex?: number; recipientId?: string },
   ) => void;
+  /** When set, shows Correct email for rows still waiting on review. */
+  onCorrectEmail?: (ctx: {
+    rowIndex: number;
+    participantId: string;
+    partyName: string;
+    currentEmail: string;
+  }) => void;
+  canCorrectEmail?: (rowIndex: number, status: ReviewerLinkRowApprovalStatus) => boolean;
 };
 
 function rowKey(i: number): string {
@@ -17,7 +25,8 @@ function rowKey(i: number): string {
 }
 
 export function PaidProReviewReviewerLinksTable(props: PaidProReviewReviewerLinksTableProps) {
-  const { rows, statuses, rowCopyFlashByKey, onCopyRow, onOpenRow } = props;
+  const { rows, statuses, rowCopyFlashByKey, onCopyRow, onOpenRow, onCorrectEmail, canCorrectEmail } =
+    props;
   if (rows.length <= 1) return null;
   return (
     <div className="mt-5 space-y-3" data-testid="paid-pro-reviewer-links-table">
@@ -74,6 +83,25 @@ export function PaidProReviewReviewerLinksTable(props: PaidProReviewReviewerLink
                           ? "Open reviewer view"
                           : "Open preview (read-only)"}
                       </button>
+                      {onCorrectEmail &&
+                      (canCorrectEmail?.(i, st) ?? st === "waiting") &&
+                      (r.recipientPartyId || r.reviewer_id) ? (
+                        <button
+                          type="button"
+                          className="rounded-md border border-amber-700/60 bg-amber-950/30 px-2.5 py-1 text-xs font-medium text-amber-100 hover:border-amber-600"
+                          data-testid={`paid-pro-reviewer-correct-email-${i}`}
+                          onClick={() =>
+                            onCorrectEmail({
+                              rowIndex: i,
+                              participantId: (r.recipientPartyId || r.reviewer_id || "").trim(),
+                              partyName: partyLabel,
+                              currentEmail: email === "—" ? "" : email,
+                            })
+                          }
+                        >
+                          Correct email
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>

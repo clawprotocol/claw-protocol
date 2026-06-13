@@ -2913,6 +2913,20 @@ class SigningLinksSentBody(BaseModel):
     targets: List[SigningInviteTargetBody] = Field(default_factory=list)
 
 
+class ReviewRecipientEmailCorrectBody(BaseModel):
+    participant_id: str = ""
+    new_email: str = ""
+    resend_invite: bool = True
+
+
+class SigningRecipientEmailCorrectBody(BaseModel):
+    participant_id: str = ""
+    new_email: str = ""
+    signer_role_id: Optional[str] = None
+    signing_url: Optional[str] = None
+    resend_invite: bool = True
+
+
 NegotiationPosture = Literal[
     "cooperative",
     "firm",
@@ -6015,6 +6029,63 @@ def post_agreement_signing_links_sent(
         "skip_reason": skip_reason,
         "draft": draft.model_dump(),
     }
+
+
+@router.post("/{agreement_id}/review-recipient-email")
+def post_review_recipient_email_correction(
+    agreement_id: str,
+    request: Request,
+    body: ReviewRecipientEmailCorrectBody = ReviewRecipientEmailCorrectBody(),
+) -> Dict[str, Any]:
+    """Owner corrects a reviewer's mistyped email before approval; optionally resends review invite."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="review_recipient_email")
+    draft = _load_or_404(agreement_id)
+    _assert_negotiation_not_locked(agreement_id)
+    _assert_draft_mutable_after_signatures(draft)
+    from backend.services.recipient_email_correction import correct_review_recipient_email
+
+    next_data, meta = correct_review_recipient_email(
+        agreement_id=agreement_id,
+        draft=draft.model_dump(mode="json"),
+        participant_id=body.participant_id,
+        new_email=body.new_email,
+        resend_invite=body.resend_invite,
+        org_id=resolve_subject_from_request(request),
+    )
+    next_draft = AgreementDraft.model_validate(next_data)
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {"ok": True, "draft": next_draft.model_dump(), **meta}
+
+
+@router.post("/{agreement_id}/signing-recipient-email")
+def post_signing_recipient_email_correction(
+    agreement_id: str,
+    request: Request,
+    body: SigningRecipientEmailCorrectBody = SigningRecipientEmailCorrectBody(),
+) -> Dict[str, Any]:
+    """Owner corrects a signer's mistyped email; optionally resends that signer's signing invite."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="signing_recipient_email")
+    draft = _load_or_404(agreement_id)
+    _assert_negotiation_not_locked(agreement_id)
+    from backend.services.recipient_email_correction import correct_signing_recipient_email
+
+    next_data, meta = correct_signing_recipient_email(
+        agreement_id=agreement_id,
+        draft=draft.model_dump(mode="json"),
+        participant_id=body.participant_id,
+        new_email=body.new_email,
+        signer_role_id=body.signer_role_id,
+        signing_url=body.signing_url,
+        resend_invite=body.resend_invite,
+        org_id=resolve_subject_from_request(request),
+    )
+    next_draft = AgreementDraft.model_validate(next_data)
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {"ok": True, "draft": next_draft.model_dump(), **meta}
 
 
 @router.patch("/{agreement_id}/workspace-archive")

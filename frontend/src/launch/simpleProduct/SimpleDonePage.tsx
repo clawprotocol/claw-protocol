@@ -36,6 +36,12 @@ import {
 } from "./simpleDoneReviewRecipientLinks";
 import { extractReviewLinkTokenFromHref, normalizeHandoffToReviewerLinkRows } from "./reviewerLinkRowModel";
 import { PaidProReviewReviewerLinksTable } from "./PaidProReviewReviewerLinksTable";
+import { RecipientEmailCorrectionModal } from "../../agreement/RecipientEmailCorrectionModal";
+import {
+  canCorrectReviewRecipientEmail,
+  postReviewRecipientEmailCorrection,
+  recipientEmailCorrectionErrorMessage,
+} from "../../agreement/recipientEmailCorrection";
 import { SimpleDoneReviewFlowDiagPanel } from "./SimpleDoneReviewFlowDiagPanel";
 import {
   canContinueLockedSigningFromDonePage,
@@ -149,6 +155,12 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const [ownerSigningLockVid, setOwnerSigningLockVid] = useState<string | null>(null);
   const [finalizeNavigating, setFinalizeNavigating] = useState(false);
   const [rowCopyFlashByKey, setRowCopyFlashByKey] = useState<Record<string, boolean>>({});
+  const [reviewEmailCorrection, setReviewEmailCorrection] = useState<{
+    participantId: string;
+    partyName: string;
+    currentEmail: string;
+  } | null>(null);
+  const [reviewEmailCorrectionBusy, setReviewEmailCorrectionBusy] = useState(false);
   const [reviewFlowDiagLocal, setReviewFlowDiagLocal] = useState(false);
   const [ownerQaLinkCopyFlash, setOwnerQaLinkCopyFlash] = useState(false);
   const ownerSuccessLoggedRef = useRef<string | null>(null);
@@ -1048,6 +1060,19 @@ export function SimpleDonePage(props: { agreementId: string }) {
                       });
                       if (href.trim()) window.open(href, "_blank", "noopener,noreferrer");
                     }}
+                    canCorrectEmail={(_i, status) => status === "waiting"}
+                    onCorrectEmail={(ctx) => {
+                      const gate = canCorrectReviewRecipientEmail({
+                        draft: ownerHandoffDraft,
+                        participantId: ctx.participantId,
+                      });
+                      if (!gate.allowed) return;
+                      setReviewEmailCorrection({
+                        participantId: ctx.participantId,
+                        partyName: ctx.partyName,
+                        currentEmail: ctx.currentEmail,
+                      });
+                    }}
                   />
                 ) : null}
                 <ReviewActions className="mt-4">
@@ -1169,6 +1194,37 @@ export function SimpleDonePage(props: { agreementId: string }) {
             />
           ) : null}
         </ReviewShell>
+        <RecipientEmailCorrectionModal
+          open={Boolean(reviewEmailCorrection)}
+          phase="review"
+          partyName={reviewEmailCorrection?.partyName ?? ""}
+          currentEmail={reviewEmailCorrection?.currentEmail ?? ""}
+          busy={reviewEmailCorrectionBusy}
+          onClose={() => {
+            if (!reviewEmailCorrectionBusy) setReviewEmailCorrection(null);
+          }}
+          onConfirm={async (newEmail) => {
+            const target = reviewEmailCorrection;
+            if (!target) return;
+            setReviewEmailCorrectionBusy(true);
+            try {
+              const result = await postReviewRecipientEmailCorrection({
+                agreementId,
+                participantId: target.participantId,
+                newEmail,
+                resendInvite: true,
+              });
+              if (!result.ok) {
+                throw new Error(recipientEmailCorrectionErrorMessage(result.error));
+              }
+              if (result.draft) setOwnerHandoffDraft(result.draft);
+              setReviewEmailCorrection(null);
+              setReviewLinksTick((t) => t + 1);
+            } finally {
+              setReviewEmailCorrectionBusy(false);
+            }
+          }}
+        />
       </SimpleFlowShell>
     );
   }

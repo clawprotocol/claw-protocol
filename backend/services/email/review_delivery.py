@@ -699,6 +699,76 @@ def _redact_recipient_emails(targets: List[ReviewInviteTarget]) -> str:
     return ",".join(_redact_to(t.to) for t in targets)
 
 
+def send_review_invite_to_participant(
+    *,
+    agreement_id: str,
+    draft: Dict[str, Any],
+    participant_id: str,
+    org_id: str | None = None,
+) -> bool:
+    """
+    Send a single review invite to one party (used after email correction / resend).
+
+    Never raises. Returns True when Resend accepted the send.
+    """
+    aid = (agreement_id or "").strip()
+    pid = (participant_id or "").strip()
+    if not aid or not pid:
+        return False
+
+    mode = review_delivery_mode()
+    if mode not in ("email", "manual_and_email") or not email_configured():
+        return False
+
+    origin = app_public_origin()
+    if not origin or not _draft_has_explicit_owner_party(draft):
+        return False
+
+    targets = _live_resend_review_invite_targets_from_draft(draft)
+    target = next((t for t in targets if (t.recipient_party_id or "") == pid), None)
+    if not target:
+        return False
+
+    try:
+        secret = resolve_signing_token_secret_raw().encode("utf-8")
+    except SigningTokenSecretMissingInProductionError:
+        return False
+
+    lock = read_signing_lock(agreement_id)
+    locked_version_id = str((lock or {}).get("locked_version_id") or "")
+    ttl = _default_recipient_token_ttl_seconds()
+
+    try:
+        token = mint_recipient_access_token(
+            secret=secret,
+            agreement_id=agreement_id,
+            locked_version_id=locked_version_id,
+            mode="review",
+            role=target.mint_role,
+            ttl_seconds=ttl,
+            recipient_party_id=target.recipient_party_id,
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+    review_url = _build_absolute_review_url(origin, agreement_id, token)
+    email = build_review_invite_email(
+        party_name=target.party_name,
+        agreement_title=target.agreement_title,
+        review_url=review_url,
+        requesting_party_name=_owner_display_name_from_draft(draft),
+        party_names=_party_display_names_from_draft(draft),
+    )
+    result = send_email_non_fatal(
+        to=target.to,
+        subject=email.subject,
+        html=email.html,
+        text=email.text,
+        context="review_invite_resend",
+    )
+    return bool(result.ok)
+
+
 def _party_contact_snapshot_for_log(parties: Any) -> str:
     if not isinstance(parties, list):
         return "none"

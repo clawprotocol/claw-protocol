@@ -17,6 +17,7 @@ export function shouldShowPacketSignerMetaLine(args: {
 export type PacketStatusCardRow = {
   key: string;
   roleId: string;
+  participantId: string;
   partyIndex: number;
   isOwner: boolean;
   roleLabel: string | null;
@@ -56,6 +57,7 @@ export function buildPacketStatusCards(args: {
     {
       key: ownerKey,
       roleId: ownerRole.roleId,
+      participantId: (ownerRole.partyId ?? "owner").trim(),
       partyIndex: ownerRole.partyIndex,
       isOwner: true,
       roleLabel: "Client",
@@ -88,6 +90,7 @@ export function buildPacketStatusCards(args: {
     out.push({
       key,
       roleId: role?.roleId ?? row.signerRoleId ?? key,
+      participantId: (row.counterpartyId ?? role?.vs01CounterpartyId ?? role?.partyId ?? "").trim(),
       partyIndex: role?.partyIndex ?? 0,
       isOwner: false,
       roleLabel: role?.kind === "counterparty" ? "Counterparty" : null,

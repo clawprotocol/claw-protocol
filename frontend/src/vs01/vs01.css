@@ -5568,3 +5568,73 @@ button.vs01-upload-btn:disabled {
 }
 
 /* Agreement landing sections use shared `DocumentListSectionGroup` / Tailwind (see `DocumentWorkspaceListUi.tsx`). */
+
+.vs01-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.72);
+}
+
+.vs01-modal {
+  width: min(100%, 28rem);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 1.25rem 1.35rem 1.1rem;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.vs01-modal-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.vs01-modal-help {
+  margin: 0 0 0.65rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #94a3b8;
+}
+
+.vs01-modal-footnote {
+  margin: 0.75rem 0 0;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.vs01-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.vs01-recipient-email-correction-k {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 0.15rem;
+}
+
+.vs01-recipient-email-correction-party,
+.vs01-recipient-email-correction-change {
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+}
+
+.vs01-error-inline {
+  margin: 0.5rem 0 0;
+  color: #fca5a5;
+  font-size: 0.85rem;
+}
