@@ -143,6 +143,7 @@ def finalize_document(
     content: bytes,
     *,
     content_type: Optional[str] = None,
+    agreement_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Write finalized bytes and return stable identifiers (``document_id``, ``content_sha256``, ...).
@@ -160,6 +161,9 @@ def finalize_document(
         "size_bytes": len(content),
         "content_type": ct,
     }
+    aid = (agreement_id or "").strip()
+    if aid:
+        meta["agreement_id"] = aid
 
     for base in _legacy_storage_bases():
         try:
@@ -179,6 +183,7 @@ def finalize_document(
                 data=content,
                 content_type=ct,
                 visibility="downloadable",
+                agreement_id=aid or None,
                 metadata={"role": "signed_document_body"},
             )
             meta_json = json.dumps(

@@ -21,6 +21,7 @@ from backend.build_info import (
     git_commit_short,
     is_recipient_delivery_status_path,
 )
+from backend.utils import metrics
 from backend.handlers.receipt_handler import build_receipt
 from backend.handlers.verify_handler import (
     VerifyReceiptRequest,
@@ -338,7 +339,7 @@ async def claw_cors_api_acao_fallback(request: Request, call_next):
 
     if (
         request.method.upper() == "OPTIONS"
-        and path.startswith("/api/")
+        and (path.startswith("/api/") or path.startswith("/v1/"))
         and origin
         and origin_is_allowed(origin)
     ):
@@ -351,7 +352,7 @@ async def claw_cors_api_acao_fallback(request: Request, call_next):
         return preflight
 
     response = await call_next(request)
-    if not path.startswith("/api/"):
+    if not (path.startswith("/api/") or path.startswith("/v1/")):
         return response
     if not origin:
         return response
@@ -708,9 +709,10 @@ def llm_test():
 
 def _attach_api_cors(request: Request, response: JSONResponse) -> JSONResponse:
     origin = normalize_cors_origin(request.headers.get("origin") or "")
-    if request.url.path.startswith("/api/") and origin:
+    path = request.url.path
+    if (path.startswith("/api/") or path.startswith("/v1/")) and origin:
         apply_cors_headers_to_response(response, origin)
-        if should_log_cors_proof_for_path(request.url.path, request.method):
+        if should_log_cors_proof_for_path(path, request.method):
             log_premium_full_draft_cors_proof(
                 request, response, note="exception_handler_layer"
             )
@@ -721,12 +723,15 @@ def _attach_api_cors(request: Request, response: JSONResponse) -> JSONResponse:
 async def _http_exception_handler(request: Request, exc: HTTPException):
     if request.url.path.startswith("/v1"):
         trace_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
-        return _error_response(
-            status_code=exc.status_code,
-            error_code="http_error",
-            message=str(exc.detail),
-            detail=exc.detail,
-            trace_id=trace_id,
+        return _attach_api_cors(
+            request,
+            _error_response(
+                status_code=exc.status_code,
+                error_code="http_error",
+                message=str(exc.detail),
+                detail=exc.detail,
+                trace_id=trace_id,
+            ),
         )
     return _attach_api_cors(
         request,
@@ -738,12 +743,15 @@ async def _http_exception_handler(request: Request, exc: HTTPException):
 async def _validation_exception_handler(request: Request, exc: RequestValidationError):
     if request.url.path.startswith("/v1"):
         trace_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
-        return _error_response(
-            status_code=422,
-            error_code="validation_error",
-            message="Invalid request",
-            detail=exc.errors(),
-            trace_id=trace_id,
+        return _attach_api_cors(
+            request,
+            _error_response(
+                status_code=422,
+                error_code="validation_error",
+                message="Invalid request",
+                detail=exc.errors(),
+                trace_id=trace_id,
+            ),
         )
     return _attach_api_cors(request, JSONResponse(status_code=422, content={"detail": exc.errors()}))
 
@@ -758,12 +766,15 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
         response = recipient_delivery_global_fallback_response(aid, exc=exc)
         return _attach_api_cors(request, response)
     if request.url.path.startswith("/v1"):
-        return _error_response(
-            status_code=500,
-            error_code="internal_error",
-            message="Internal server error",
-            detail=str(exc),
-            trace_id=trace_id,
+        return _attach_api_cors(
+            request,
+            _error_response(
+                status_code=500,
+                error_code="internal_error",
+                message="Internal server error",
+                detail=str(exc),
+                trace_id=trace_id,
+            ),
         )
     return _attach_api_cors(
         request,

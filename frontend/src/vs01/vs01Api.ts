@@ -1,4 +1,4 @@
-import { resolveApiBase } from "../lib/clawApi";
+import { apiUrl, resolveApiBase } from "../lib/clawApi";
 
 function apiBase(): string {
   return resolveApiBase().replace(/\/$/, "");
@@ -119,9 +119,8 @@ export async function createSignSession(
  * GET /v1/documents/{document_id}/content — raw document bytes (e.g. PDF for preview).
  */
 export async function fetchDocumentContent(documentId: string): Promise<Blob> {
-  const base = apiBase();
   const enc = encodeURIComponent(documentId.trim());
-  const url = `${base}/v1/documents/${enc}/content`;
+  const url = apiUrl(`/v1/documents/${enc}/content`);
 
   const res = await fetch(url, { method: "GET" });
 

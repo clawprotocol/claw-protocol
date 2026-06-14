@@ -7005,7 +7005,7 @@ def post_agreement_vs01_signing_seed(
     # --- finalize_document ---
     try:
         meta = document_service.finalize_document(
-            built.pdf_bytes, content_type="application/pdf"
+            built.pdf_bytes, content_type="application/pdf", agreement_id=aid
         )
     except Exception as exc:
         _seed_store_ctx = document_service.document_storage_seed_error_context()

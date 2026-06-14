@@ -3,14 +3,22 @@ VS01-B06: minimal HTTP surface for document finalize and sign preparation.
 """
 from __future__ import annotations
 
+import logging
+import traceback
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.services import document_service, signature_service
+from backend.services.vs01_document_content import (
+    content_type_for_meta,
+    load_document_content,
+)
 
 router = APIRouter(prefix="/v1/documents", tags=["documents"])
+_log = logging.getLogger("claw.vs01_documents_api")
 
 
 class FinalizeDocumentRequest(BaseModel):
@@ -75,13 +83,34 @@ def api_get_document(document_id: str) -> Dict[str, Any]:
 
 
 @router.get("/{document_id}/content")
-def api_get_document_content(document_id: str) -> Response:
-    raw = document_service.get_document_bytes(document_id)
-    if raw is None:
-        raise HTTPException(status_code=404, detail="document_not_found")
-    meta = document_service.get_document_meta(document_id) or {}
-    ct = meta.get("content_type") or "application/octet-stream"
-    return Response(content=raw, media_type=str(ct))
+def api_get_document_content(document_id: str, request: Request) -> Response:
+    did = (document_id or "").strip()
+    try:
+        raw, meta = load_document_content(did)
+        if raw is None:
+            raise HTTPException(status_code=404, detail="document_not_found")
+        ct = content_type_for_meta(meta)
+        return Response(content=raw, media_type=ct)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.error(
+            "[vs01-document-content-error] document_id=%s exception_type=%s exception_message=%s "
+            "stage=route traceback=%s",
+            did,
+            type(exc).__name__,
+            str(exc)[:500],
+            traceback.format_exc(),
+        )
+        return JSONResponse(
+            status_code=404,
+            content={
+                "ok": False,
+                "error": "document_content_unavailable",
+                "document_id": did,
+                "degraded": True,
+            },
+        )
 
 
 @router.post("/{document_id}/sign-prep")
