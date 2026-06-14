@@ -234,3 +234,61 @@ def test_approved_recipient_locked_in_delivery_status(
     assert row.get("status") == "approved"
     assert row.get("locked") is True
     assert row.get("can_correct_email") is False
+
+
+def test_recipient_delivery_status_fresh_review_without_registry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """test350: review-sent drafts without recipient_delivery_v1 must return usable rows."""
+    _env_common(monkeypatch, tmp_path)
+    client = TestClient(app)
+    with patch("backend.services.email.resend_client.httpx.Client", return_value=_mock_resend_success()):
+        aid, cp_id = _create_agreement(client, monkeypatch_resend=False)
+    draft = load_draft(aid)
+    draft.pop("recipient_delivery_v1", None)
+    save_draft({**draft, "id": aid})
+
+    res = client.get(f"/api/agreements/{aid}/recipient-delivery-status", headers=_ORG_H)
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("review_sent") is True
+    row = next(
+        r
+        for r in body.get("recipients") or []
+        if r.get("participant_id") == cp_id and r.get("phase") == "review"
+    )
+    assert row.get("email")
+    assert row.get("status") in ("sent", "opened", "not_sent")
+    assert row.get("can_resend_invite") is True
+
+
+def test_recipient_delivery_status_tolerates_legacy_audit_and_malformed_registry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _env_common(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid, cp_id = _create_agreement(client, monkeypatch_resend=False)
+    draft = load_draft(aid)
+    draft["audit_log"] = [
+        {"event_type": "invite_sent", "value": {"participant_id": cp_id}},
+        *(draft.get("audit_log") or []),
+    ]
+    draft["recipient_delivery_v1"] = {
+        "v": 1,
+        "recipients": {
+            "review:p_cp": {"resent_count": {"bad": 1}, "last_sent_at": "2026-06-07T00:00:00Z"},
+            "not-a-dict": "skip",
+        },
+        "recipients_list_typo": [],
+    }
+    save_draft({**draft, "id": aid})
+
+    res = client.get(f"/api/agreements/{aid}/recipient-delivery-status", headers=_ORG_H)
+    assert res.status_code == 200
+    row = next(
+        r
+        for r in res.json().get("recipients") or []
+        if r.get("participant_id") == cp_id and r.get("phase") == "review"
+    )
+    assert row.get("resent_count") == 0
+    assert row.get("can_correct_email") is True

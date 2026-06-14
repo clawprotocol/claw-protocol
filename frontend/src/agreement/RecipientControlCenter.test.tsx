@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockFetchStatus = vi.hoisted(() => vi.fn());
@@ -18,6 +18,7 @@ import { RecipientControlCenter } from "./RecipientControlCenter";
 
 describe("RecipientControlCenter", () => {
   beforeEach(() => {
+    cleanup();
     mockFetchStatus.mockReset();
     mockFetchStatus.mockResolvedValue({
       ok: true,
@@ -77,5 +78,18 @@ describe("RecipientControlCenter", () => {
     expect(screen.getByTestId("recipient-control-status-review-p_owner2").textContent).toMatch(/Approved/);
     expect(screen.getByTestId("recipient-control-resend-review:p_cp")).toBeTruthy();
     expect(screen.queryByTestId("recipient-control-correct-review:p_owner2")).toBeNull();
+  });
+
+  it("shows inline error when delivery status API fails", async () => {
+    mockFetchStatus.mockResolvedValue(null);
+    render(<RecipientControlCenter agreementId="ag_fail" phase="review" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recipient-control-center-error").textContent).toMatch(
+        /Could not load recipient status/i,
+      );
+    });
+    expect(screen.getByTestId("recipient-control-center-retry").textContent).toMatch(/Retry/i);
+    expect(screen.queryByTestId("recipient-control-row-review-p_cp")).toBeNull();
   });
 });

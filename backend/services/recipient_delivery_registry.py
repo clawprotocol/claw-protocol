@@ -37,6 +37,9 @@ def _jti_fingerprint(jti: str) -> str:
 def get_registry(draft: Dict[str, Any]) -> Dict[str, Any]:
     reg = draft.get("recipient_delivery_v1")
     if isinstance(reg, dict) and reg.get("v") == 1:
+        recipients = reg.get("recipients")
+        if not isinstance(recipients, dict):
+            return {"v": 1, "recipients": {}}
         return reg
     return {"v": 1, "recipients": {}}
 

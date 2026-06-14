@@ -11,6 +11,26 @@ RecipientPhase = str  # "review" | "signing"
 RecipientStatus = str  # not_sent | sent | opened | approved | signed | replaced | blocked
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+    return default
+
+
 def _normalize_role(role: str) -> str:
     r = (role or "").strip().lower()
     if r in ("owner", "sender", "landlord", "client"):
@@ -65,12 +85,20 @@ def _signing_invites_sent(audit: Any) -> bool:
 
 def _registry_row(draft: Dict[str, Any], phase: str, participant_id: str) -> Dict[str, Any]:
     reg = get_registry(draft)
-    recipients = reg.get("recipients") or {}
+    recipients = reg.get("recipients")
     if not isinstance(recipients, dict):
         return {}
     key = f"{phase}:{participant_id}"
     row = recipients.get(key)
     return row if isinstance(row, dict) else {}
+
+
+def _review_display_role(normalized_role: str) -> str:
+    if normalized_role == "owner":
+        return "owner"
+    if normalized_role == "counterparty":
+        return "counterparty"
+    return "reviewer"
 
 
 def _review_status(
@@ -146,7 +174,7 @@ def build_recipient_delivery_status(draft: Dict[str, Any]) -> Dict[str, Any]:
                     entity_name=entity_name,
                     human_name=human_name,
                     email=email,
-                    role="reviewer" if role == "counterparty" else role,
+                    role=_review_display_role(role),
                     status=status,
                     reg=reg,
                     locked=locked,
@@ -198,7 +226,7 @@ def _row_dict(
     locked: bool,
     lock_reason: Optional[str],
 ) -> Dict[str, Any]:
-    resent_count = int(reg.get("resent_count") or 0)
+    resent_count = _safe_int(reg.get("resent_count"))
     can_correct = not locked and status not in ("approved", "signed")
     can_resend = not locked and status in ("sent", "opened", "not_sent", "replaced")
     return {

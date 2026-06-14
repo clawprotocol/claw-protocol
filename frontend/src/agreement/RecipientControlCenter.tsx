@@ -183,8 +183,34 @@ export function RecipientControlCenter(props: RecipientControlCenterProps) {
     );
   }
 
-  if (!loading && visibleRows.length === 0) {
+  if (!loading && visibleRows.length === 0 && !error) {
     return null;
+  }
+
+  if (!loading && visibleRows.length === 0 && error) {
+    return (
+      <div
+        className={`recipient-control-center mt-5 space-y-3 ${className}`.trim()}
+        data-testid="recipient-control-center"
+      >
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            {title}
+          </h3>
+          <button
+            type="button"
+            className="text-xs text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline"
+            data-testid="recipient-control-center-retry"
+            onClick={() => void refresh()}
+          >
+            Retry
+          </button>
+        </div>
+        <p className="text-sm text-rose-300" data-testid="recipient-control-center-error">
+          {error}
+        </p>
+      </div>
+    );
   }
 
   return (

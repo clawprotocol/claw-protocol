@@ -4170,6 +4170,17 @@ def _load_or_404(agreement_id: str) -> AgreementDraft:
         raise HTTPException(status_code=404, detail="agreement_not_found")
 
 
+def _load_draft_dict_or_404(agreement_id: str) -> Dict[str, Any]:
+    """Load raw draft JSON for read-only surfaces that must not 500 on legacy audit shapes."""
+    try:
+        raw = load_draft(agreement_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="agreement_not_found")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=404, detail="agreement_not_found")
+    return raw
+
+
 def _parse_intake_system_prompt_basic() -> str:
     """Standard create-flow parse (unchanged)."""
     return (
@@ -6078,10 +6089,10 @@ def get_recipient_delivery_status(agreement_id: str, request: Request) -> Dict[s
     if not _agreements_write_allowed():
         raise HTTPException(status_code=403, detail="verifier_only")
     _owner_mutation_guards(request, agreement_id, surface="recipient_delivery_status")
-    draft = _load_or_404(agreement_id)
+    raw = _load_draft_dict_or_404(agreement_id)
     from backend.services.recipient_delivery_status import build_recipient_delivery_status
 
-    return build_recipient_delivery_status(draft.model_dump(mode="json"))
+    return build_recipient_delivery_status(raw)
 
 
 @router.post("/{agreement_id}/recipient-invite-resend")
