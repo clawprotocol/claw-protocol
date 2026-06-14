@@ -6088,20 +6088,27 @@ def post_agreement_signing_links_sent(
 
 @router.get("/{agreement_id}/recipient-delivery-status")
 def get_recipient_delivery_status(agreement_id: str, request: Request) -> JSONResponse:
-    """Owner-facing per-recipient review/signing delivery rows."""
+    """Owner-facing per-recipient review/signing delivery rows — never HTTP 500."""
     aid = (agreement_id or "").strip()
+    from backend.build_info import RECIPIENT_DELIVERY_STATUS_HANDLER_REV, git_commit_short
     from backend.services.recipient_delivery_status import (
         build_recipient_delivery_status,
+        degraded_recipient_delivery_payload,
         draft_diagnostic_types,
-        empty_recipient_delivery_payload,
-        encode_recipient_delivery_json,
+        recipient_delivery_json_response,
         _log_stage,
     )
 
-    def _json_response(payload: Dict[str, Any]) -> JSONResponse:
-        body = encode_recipient_delivery_json(payload, agreement_id=aid)
-        return JSONResponse(status_code=200, content=json.loads(body))
+    _log_stage(
+        agreement_id=aid,
+        stage="handler_enter",
+        extra={
+            "handler_rev": RECIPIENT_DELIVERY_STATUS_HANDLER_REV,
+            "git_commit": git_commit_short(),
+        },
+    )
 
+    draft: Optional[Dict[str, Any]] = None
     try:
         if not _agreements_write_allowed():
             raise HTTPException(status_code=403, detail="verifier_only")
@@ -6109,17 +6116,32 @@ def get_recipient_delivery_status(agreement_id: str, request: Request) -> JSONRe
         _owner_mutation_guards(request, aid, surface="recipient_delivery_status")
         _log_stage(agreement_id=aid, stage="load_draft")
         raw = _load_draft_dict_or_404(aid)
+        draft = raw
         _log_stage(agreement_id=aid, stage="load_draft_ok", draft=raw, extra=draft_diagnostic_types(raw))
         payload = build_recipient_delivery_status(raw, agreement_id=aid)
+        payload["agreement_id"] = aid
+        payload["degraded"] = False
         _log_stage(
             agreement_id=aid,
             stage="serialize_response",
             draft=raw,
             extra={"recipient_row_count": len(payload.get("recipients") or [])},
         )
-        return _json_response(payload)
-    except HTTPException:
-        raise
+        return recipient_delivery_json_response(payload, agreement_id=aid)
+    except HTTPException as exc:
+        if exc.status_code in (401, 403):
+            raise
+        _agreements_log.warning(
+            "[recipient-delivery-status-error] agreement_id=%s exception_type=HTTPException "
+            "status_code=%s stage=route_http detail=%s",
+            aid,
+            exc.status_code,
+            str(exc.detail)[:300],
+        )
+        return recipient_delivery_json_response(
+            degraded_recipient_delivery_payload(aid, draft, error="recipient_status_degraded"),
+            agreement_id=aid,
+        )
     except Exception as exc:
         _agreements_log.error(
             "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s "
@@ -6129,22 +6151,34 @@ def get_recipient_delivery_status(agreement_id: str, request: Request) -> JSONRe
             str(exc)[:500],
             traceback.format_exc(),
         )
+        if draft is None:
+            try:
+                from backend.services.agreement_draft_store import load_draft
+
+                raw = load_draft(aid)
+                if isinstance(raw, dict):
+                    draft = raw
+            except Exception:
+                draft = None
         try:
-            raw = _load_draft_dict_or_404(aid)
-            payload = build_recipient_delivery_status(raw, agreement_id=aid)
-            return _json_response(payload)
-        except HTTPException:
-            raise
-        except Exception as inner_exc:
+            if isinstance(draft, dict):
+                payload = build_recipient_delivery_status(draft, agreement_id=aid)
+                payload["agreement_id"] = aid
+                payload["degraded"] = False
+                return recipient_delivery_json_response(payload, agreement_id=aid)
+        except Exception as retry_exc:
             _agreements_log.error(
                 "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s "
                 "stage=route_retry traceback=%s",
                 aid,
-                type(inner_exc).__name__,
-                str(inner_exc)[:500],
+                type(retry_exc).__name__,
+                str(retry_exc)[:500],
                 traceback.format_exc(),
             )
-            return _json_response(empty_recipient_delivery_payload())
+        return recipient_delivery_json_response(
+            degraded_recipient_delivery_payload(aid, draft, error="recipient_status_degraded"),
+            agreement_id=aid,
+        )
 
 
 @router.post("/{agreement_id}/recipient-invite-resend")

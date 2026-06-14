@@ -4,8 +4,7 @@
 
 import type { AgreementDraft } from "./agreementTypes";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
-
-const base = () => (typeof window !== "undefined" ? window.location.origin : "");
+import { apiUrl } from "../lib/clawApi";
 
 export type RecipientDeliveryPhase = "review" | "signing";
 
@@ -54,7 +53,7 @@ export async function fetchRecipientDeliveryStatus(
   if (!id) return null;
   try {
     const res = await fetch(
-      `${base()}/api/agreements/${encodeURIComponent(id)}/recipient-delivery-status`,
+      apiUrl(`/api/agreements/${encodeURIComponent(id)}/recipient-delivery-status`),
       { headers: clawAgreementHeaders() },
     );
     if (!res.ok) return null;
@@ -74,7 +73,7 @@ export async function postRecipientInviteResend(args: {
   const id = args.agreementId.trim();
   if (!id) return { ok: false, error: "missing_agreement_id" };
   try {
-    const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}/recipient-invite-resend`, {
+    const res = await fetch(apiUrl(`/api/agreements/${encodeURIComponent(id)}/recipient-invite-resend`), {
       method: "POST",
       headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({

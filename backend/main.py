@@ -14,7 +14,13 @@ from starlette.responses import Response
 from pydantic import BaseModel
 
 from backend.agreements.paid_pro_server_timing import CORS_EXPOSE_PAID_PRO_HEADERS
-from backend.utils import metrics
+from backend.build_info import (
+    RECIPIENT_DELIVERY_STATUS_HANDLER_REV,
+    agreement_id_from_recipient_delivery_status_path,
+    git_commit_sha,
+    git_commit_short,
+    is_recipient_delivery_status_path,
+)
 from backend.handlers.receipt_handler import build_receipt
 from backend.handlers.verify_handler import (
     VerifyReceiptRequest,
@@ -631,6 +637,9 @@ async def version():
             "environment": _environment(),
             "debug": _debug_enabled(),
             "node_mode": _node_mode(),
+            "git_commit": git_commit_sha(),
+            "git_commit_short": git_commit_short(),
+            "recipient_delivery_status_handler_rev": RECIPIENT_DELIVERY_STATUS_HANDLER_REV,
             "protocol_version": CLAW_PROTOCOL_VERSION,
             "api_version": CLAW_API_VERSION,
             "x402_payment_header": os.getenv("CLAW_X402_PAYMENT_HEADER", "X-PAYMENT"),
@@ -742,6 +751,12 @@ async def _validation_exception_handler(request: Request, exc: RequestValidation
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception):
     trace_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
+    if is_recipient_delivery_status_path(request.url.path):
+        from backend.services.recipient_delivery_status import recipient_delivery_global_fallback_response
+
+        aid = agreement_id_from_recipient_delivery_status_path(request.url.path)
+        response = recipient_delivery_global_fallback_response(aid, exc=exc)
+        return _attach_api_cors(request, response)
     if request.url.path.startswith("/v1"):
         return _error_response(
             status_code=500,

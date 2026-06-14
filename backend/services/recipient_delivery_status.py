@@ -8,6 +8,14 @@ import traceback
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
+from fastapi.responses import JSONResponse
+
+from backend.build_info import (
+    RECIPIENT_DELIVERY_STATUS_HANDLER_REV,
+    git_commit_sha,
+    git_commit_short,
+)
+
 from backend.services.email.signing_delivery import SIGNING_INVITE_EMAILS_SENT_EVENT
 from backend.services.recipient_delivery_registry import INVITE_SENT, INVITE_RESENT, get_registry
 from backend.services.recipient_party_identity import (
@@ -568,18 +576,126 @@ def _sanitize_delivery_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "can_copy_link": bool(row.get("can_copy_link")),
             }
         )
-    return {
+    out: Dict[str, Any] = {
         "ok": True,
         "review_sent": bool(payload.get("review_sent")),
         "signing_invites_sent": bool(payload.get("signing_invites_sent")),
         "recipients": safe_rows,
     }
+    aid = _safe_text(payload.get("agreement_id"))
+    if aid:
+        out["agreement_id"] = aid
+    if payload.get("degraded"):
+        out["degraded"] = True
+        err = _safe_text(payload.get("error"))
+        if err:
+            out["error"] = err
+    return out
 
 
-def empty_recipient_delivery_payload() -> Dict[str, Any]:
-    return {
+def empty_recipient_delivery_payload(*, agreement_id: str = "") -> Dict[str, Any]:
+    return degraded_recipient_delivery_payload(agreement_id, error="recipient_status_empty")
+
+
+def degraded_recipient_delivery_payload(
+    agreement_id: str,
+    draft: Optional[Dict[str, Any]] = None,
+    *,
+    error: str = "recipient_status_degraded",
+) -> Dict[str, Any]:
+    """Owner dashboard safe payload — always JSON-serializable, never raises."""
+    aid = (agreement_id or "").strip()
+    payload: Dict[str, Any] = {
         "ok": True,
+        "agreement_id": aid,
+        "degraded": True,
+        "error": error,
         "review_sent": False,
         "signing_invites_sent": False,
         "recipients": [],
     }
+    if not isinstance(draft, dict):
+        return payload
+    try:
+        review_sent = bool(_safe_iso_or_none(draft.get("review_sent_at")))
+        payload["review_sent"] = review_sent
+        payload["signing_invites_sent"] = _signing_invites_sent(draft.get("audit_log"))
+        payload["recipients"] = _fallback_review_rows(draft, review_sent=review_sent)
+    except Exception:
+        _log.exception(
+            "[recipient-delivery-status-error] agreement_id=%s stage=degraded_infer_rows",
+            aid,
+        )
+    return _sanitize_delivery_payload(payload)
+
+
+def recipient_delivery_json_response(
+    payload: Dict[str, Any],
+    *,
+    agreement_id: str,
+) -> JSONResponse:
+    """Serialize recipient status — must never raise or return non-200 for owner display."""
+    aid = (agreement_id or str(payload.get("agreement_id") or "")).strip()
+    degraded = bool(payload.get("degraded"))
+    try:
+        body = encode_recipient_delivery_json(payload, agreement_id=aid)
+        content = json.loads(body)
+    except Exception as exc:
+        _log.error(
+            "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s "
+            "stage=make_response traceback=%s",
+            aid,
+            type(exc).__name__,
+            str(exc)[:500],
+            traceback.format_exc(),
+        )
+        content = degraded_recipient_delivery_payload(aid, error="recipient_status_serialize_failed")
+        degraded = True
+    response = JSONResponse(status_code=200, content=content)
+    response.headers["X-Claw-Recipient-Status-Handler"] = RECIPIENT_DELIVERY_STATUS_HANDLER_REV
+    response.headers["X-Claw-Git-Commit"] = git_commit_short()
+    if degraded:
+        response.headers["X-Claw-Recipient-Status-Degraded"] = "1"
+    return response
+
+
+def recipient_delivery_global_fallback_response(
+    agreement_id: str,
+    *,
+    exc: Optional[BaseException] = None,
+) -> JSONResponse:
+    """Last-resort handler for uncaught exceptions on this route (incl. legacy deployments)."""
+    aid = (agreement_id or "").strip()
+    draft: Optional[Dict[str, Any]] = None
+    if exc is not None:
+        _log.error(
+            "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s "
+            "stage=global_handler handler_rev=%s git_commit=%s traceback=%s",
+            aid,
+            type(exc).__name__,
+            str(exc)[:500],
+            RECIPIENT_DELIVERY_STATUS_HANDLER_REV,
+            git_commit_sha(),
+            traceback.format_exc(),
+        )
+    try:
+        from backend.services.agreement_draft_store import load_draft
+
+        raw = load_draft(aid)
+        if isinstance(raw, dict):
+            draft = raw
+    except Exception:
+        pass
+    _log_stage(
+        agreement_id=aid,
+        stage="global_fallback",
+        draft=draft,
+        extra={
+            "handler_rev": RECIPIENT_DELIVERY_STATUS_HANDLER_REV,
+            "git_commit": git_commit_short(),
+        },
+    )
+    return recipient_delivery_json_response(
+        degraded_recipient_delivery_payload(aid, draft, error="recipient_status_degraded"),
+        agreement_id=aid,
+    )

@@ -4,8 +4,7 @@
 
 import type { AgreementDraft } from "./agreementTypes";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
-
-const base = () => (typeof window !== "undefined" ? window.location.origin : "");
+import { apiUrl } from "../lib/clawApi";
 
 export const RECIPIENT_EMAIL_CORRECTION_HELPER =
   "Fix a mistyped email without changing the agreement.";
@@ -96,7 +95,7 @@ export async function postReviewRecipientEmailCorrection(args: {
   const id = args.agreementId.trim();
   if (!id) return { ok: false, error: "missing_agreement_id" };
   try {
-    const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}/review-recipient-email`, {
+    const res = await fetch(apiUrl(`/api/agreements/${encodeURIComponent(id)}/review-recipient-email`), {
       method: "POST",
       headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
@@ -131,7 +130,7 @@ export async function postSigningRecipientEmailCorrection(args: {
   const id = args.agreementId.trim();
   if (!id) return { ok: false, error: "missing_agreement_id" };
   try {
-    const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}/signing-recipient-email`, {
+    const res = await fetch(apiUrl(`/api/agreements/${encodeURIComponent(id)}/signing-recipient-email`), {
       method: "POST",
       headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
