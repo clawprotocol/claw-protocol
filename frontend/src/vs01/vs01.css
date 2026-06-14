@@ -3597,6 +3597,15 @@ button.vs01-upload-btn:disabled {
   justify-content: center;
 }
 
+.vs01-sign-workspace--prepare .vs01-sign-page-stack {
+  scroll-margin-top: 0.65rem;
+  scroll-margin-bottom: 0.65rem;
+}
+
+.vs01-sign-workspace--prepare .vs01-sign-page-surface--canonical {
+  flex-shrink: 0;
+}
+
 .vs01-sign-page-surface {
   position: relative;
   display: inline-block;
@@ -3711,6 +3720,15 @@ button.vs01-upload-btn:disabled {
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.72),
     0 18px 48px rgba(15, 23, 42, 0.18);
+  contain: layout;
+}
+
+/* Canonical flow pages reserve initials via model band — never apply PDF footer inset fade. */
+.vs01-sign-page-surface--canonical.vs01-sign-page-surface--footer-safe,
+.vs01-sign-doc-surface .vs01-sign-page-surface--canonical.vs01-sign-page-surface--footer-safe {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.72),
+    0 18px 48px rgba(15, 23, 42, 0.18);
 }
 
 .vs01-canonical-page-content {
@@ -3726,7 +3744,8 @@ button.vs01-upload-btn:disabled {
 .vs01-canonical-flow-body {
   position: absolute;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
+  padding-bottom: 2px;
   color: #111827;
   font-family: Georgia, "Times New Roman", serif;
   text-rendering: optimizeLegibility;

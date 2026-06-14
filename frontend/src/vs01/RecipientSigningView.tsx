@@ -668,7 +668,7 @@ export function RecipientSigningView({
                       data-vs01-sign-page={page.pageIndex}
                     >
                       <div
-                        className="vs01-sign-page-surface vs01-sign-page-surface--footer-safe vs01-sign-page-surface--canonical"
+                        className="vs01-sign-page-surface vs01-sign-page-surface--canonical"
                         style={{
                           width: VS01_PACKET_PAGE_WIDTH_PT,
                           height: VS01_PACKET_PAGE_HEIGHT_PT,

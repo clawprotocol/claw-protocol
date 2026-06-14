@@ -133,6 +133,10 @@ import {
 import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
 import { Vs01SignatureDomFieldShell } from "./Vs01SignatureDomFieldShell";
 import { signingPacketHasVisibleText } from "./vs01CanonicalPageRender";
+import {
+  logVs01PreviewViewportGeometry,
+  readPreparePreviewViewportGeometry,
+} from "./vs01PreparePreviewViewport";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
 import {
   formatVs01PacketReadyDebugLabel,
@@ -679,6 +683,17 @@ export function StepPrepareSignature({
       return [...manualNonAuto, ...signingPacketModel.fields];
     });
   }, [agreementBridgePlacementCopy, signingPacketModel, setFields]);
+
+  useLayoutEffect(() => {
+    if (!agreementBridgePlacementCopy || !signingPacketModel?.allowed) return;
+    const scrollEl = pagesInnerRef.current?.closest(".vs01-sign-scroll") as HTMLElement | null;
+    const firstSurface = pageSurfaceRefs.current.get(0);
+    if (!scrollEl || !firstSurface) return;
+    logVs01PreviewViewportGeometry(
+      0,
+      readPreparePreviewViewportGeometry({ scrollEl, pageSurfaceEl: firstSurface }),
+    );
+  }, [agreementBridgePlacementCopy, signingPacketModel]);
 
   useEffect(() => {
     return () => {
@@ -1884,7 +1899,7 @@ export function StepPrepareSignature({
                       >
                         <div
                           ref={(el) => registerPageSurface(page.pageIndex, el)}
-                          className="vs01-sign-page-surface vs01-sign-page-surface--footer-safe vs01-sign-page-surface--canonical"
+                          className="vs01-sign-page-surface vs01-sign-page-surface--canonical"
                           style={{
                             width: VS01_PACKET_PAGE_WIDTH_PT,
                             height: VS01_PACKET_PAGE_HEIGHT_PT,

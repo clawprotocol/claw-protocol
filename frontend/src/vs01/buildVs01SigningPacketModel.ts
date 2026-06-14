@@ -86,7 +86,7 @@ export const VS01_PACKET_LINE_HEIGHT_PT = 17.5;
 /** Extra lines withheld from pagination estimates (DOM flow pad; primary guard is safety margin). */
 export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 1;
 /** Conservative clearance between flow stack bottom and initials band top (in line heights). */
-export const VS01_PACKET_PAGINATION_SAFETY_MARGIN_LINE_HEIGHTS = 1.25;
+export const VS01_PACKET_PAGINATION_SAFETY_MARGIN_LINE_HEIGHTS = 1.5;
 export const VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT = 6.3;
 
 const CONTENT_X = VS01_PACKET_MARGIN_LEFT_PT / VS01_PACKET_PAGE_WIDTH_PT;
@@ -169,7 +169,7 @@ function domVisualStackPadUnits(line: string): number {
     return Math.max(0, domWrap - corpusWrap) * 0.95;
   }
   if (t.length > VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE) {
-    return 0.9;
+    return 1.0;
   }
   return 0;
 }

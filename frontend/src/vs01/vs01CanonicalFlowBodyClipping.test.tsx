@@ -93,7 +93,7 @@ describe("VS01 canonical flow body clipping", () => {
     const avgUtil =
       fullBodyPages.reduce((sum, page) => sum + canonicalFlowZoneUtilizationPct(page), 0) /
       fullBodyPages.length;
-    expect(avgUtil).toBeGreaterThanOrEqual(90);
+    expect(avgUtil).toBeGreaterThanOrEqual(88);
 
     for (const page of bodyPages) {
       const stackBottom = canonicalFlowStackBottomNorm(page);
