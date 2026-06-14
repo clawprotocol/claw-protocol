@@ -50,7 +50,7 @@ describe("vs01 pagination density", () => {
     expect(VS01_PACKET_MARGIN_TOP_PT).toBeLessThanOrEqual(48);
     expect(VS01_PACKET_LINE_HEIGHT_PT).toBeGreaterThanOrEqual(16.5);
     expect(VS01_PACKET_LINE_HEIGHT_PT).toBeLessThanOrEqual(18.5);
-    expect(maxFlowLinesPerSigningPacketPage()).toBeGreaterThanOrEqual(33);
+    expect(maxFlowLinesPerSigningPacketPage()).toBeGreaterThanOrEqual(35);
   });
 
   it("paginates a consulting-length corpus efficiently without clipping witness block", () => {

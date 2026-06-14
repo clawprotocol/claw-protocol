@@ -83,8 +83,10 @@ export const VS01_PACKET_INITIALS_BAND_PT = 80;
 /** Witness-only pages skip initials — keep modest legal bottom margin instead. */
 export const VS01_PACKET_WITNESS_BOTTOM_MARGIN_PT = 28;
 export const VS01_PACKET_LINE_HEIGHT_PT = 17.5;
-/** Extra lines withheld from pagination so DOM flow does not spill into the initials band. */
-export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 4;
+/** Extra lines withheld from pagination estimates (DOM flow pad; primary guard is safety margin). */
+export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 1;
+/** Conservative clearance between flow stack bottom and initials band top (in line heights). */
+export const VS01_PACKET_PAGINATION_SAFETY_MARGIN_LINE_HEIGHTS = 0.75;
 export const VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT = 6.3;
 
 const CONTENT_X = VS01_PACKET_MARGIN_LEFT_PT / VS01_PACKET_PAGE_WIDTH_PT;
@@ -100,6 +102,9 @@ export const VS01_PACKET_RESERVED_INITIALS_BAND_TOP_NORM = BAND_TOP;
 const FOOTER_TOP = (VS01_PACKET_PAGE_HEIGHT_PT - VS01_PACKET_MARGIN_BOTTOM_PT) / VS01_PACKET_PAGE_HEIGHT_PT;
 const LINE_HEIGHT = VS01_PACKET_LINE_HEIGHT_PT / VS01_PACKET_PAGE_HEIGHT_PT;
 const CONTENT_BOTTOM_LIMIT = BAND_TOP;
+const PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM =
+  BAND_TOP - VS01_PACKET_PAGINATION_SAFETY_MARGIN_LINE_HEIGHTS * LINE_HEIGHT;
+export const VS01_PACKET_PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM = PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM;
 const CHARS_PER_LINE = Math.floor(
   (VS01_PACKET_PAGE_WIDTH_PT - VS01_PACKET_MARGIN_LEFT_PT - VS01_PACKET_MARGIN_RIGHT_PT) /
   VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT,
@@ -145,13 +150,15 @@ function canonicalFlowLineHeightUnits(line: string): number {
   return 1;
 }
 
-/** DOM flow stack units — must stay in sync with Vs01CanonicalSigningPage CSS + word wrap. */
+/** DOM flow stack units — must stay in sync with Vs01CanonicalSigningPage CSS (pre-wrapped flow lines). */
 export function canonicalFlowLineStackStepUnits(line: string): number {
   const t = line.trim();
   if (!t) return VS01_EXECUTION_SPACER_FRAC;
   let units = canonicalFlowLineHeightUnits(line);
-  const wrapLines = Math.max(1, Math.ceil(t.length / (CHARS_PER_LINE * 0.9)));
-  if (wrapLines > 1) units *= wrapLines;
+  // normalizeLines/wrapCanonicalTextLine already wrap body copy at CHARS_PER_LINE.
+  if (t.length > CHARS_PER_LINE) {
+    units *= Math.max(1, Math.ceil(t.length / CHARS_PER_LINE));
+  }
   if (isCanonicalDocumentTitleLine(t)) units += 0.42;
   if (/^\d+(?:\.\d+)*\.\s+/.test(t)) units += 0.06;
   return units;
@@ -166,6 +173,20 @@ export function canonicalFlowStackBottomNorm(
     0,
   );
   return page.contentRect.y + stackHeight;
+}
+
+/** Flow-zone fill percentage (stack bottom vs content rect height above initials band). */
+export function canonicalFlowZoneUtilizationPct(
+  page: Pick<Vs01SigningPacketPage, "flowLines" | "contentRect" | "textBlocks">,
+): number {
+  const zoneHeight = page.contentRect.height;
+  if (zoneHeight <= 0.0001) return 0;
+  const stackBottom = canonicalFlowStackBottomNorm(page);
+  return ((stackBottom - page.contentRect.y) / zoneHeight) * 100;
+}
+
+export function vs01PaginationTextRectBottomLimitNorm(initialsBandTop: number): number {
+  return initialsBandTop - VS01_PACKET_PAGINATION_SAFETY_MARGIN_LINE_HEIGHTS * LINE_HEIGHT;
 }
 
 const SIGNATURE_UNDERLINE_BASELINE_FRAC = 0.8;
@@ -375,15 +396,14 @@ type PaginatedCorpusSlice = {
 };
 
 export function maxFlowLinesPerSigningPacketPage(): number {
-  const raw = Math.floor((CONTENT_BOTTOM_LIMIT - CONTENT_TOP) / LINE_HEIGHT);
+  const raw = Math.floor((PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM - CONTENT_TOP) / LINE_HEIGHT);
   return Math.max(1, raw - VS01_PACKET_FLOW_LINE_DOM_BUFFER);
 }
 
 function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
   const instructionStripped = stripGuidedInstructionLeakLines(corpus);
   const lines = normalizeLines(instructionStripped.text);
-  const maxStackUnitsPerPage =
-    (CONTENT_BOTTOM_LIMIT - CONTENT_TOP) / LINE_HEIGHT - VS01_PACKET_FLOW_LINE_DOM_BUFFER;
+  const maxStackUnitsPerPage = (PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM - CONTENT_TOP) / LINE_HEIGHT;
   const pages: PaginatedCorpusSlice[] = [];
   let pageIndex = 0;
   let stackUnits = 0;
@@ -400,9 +420,11 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     rects = [];
   };
 
-  const lineWouldEnterInitialsBand = (line: string) =>
-    CONTENT_TOP + (stackUnits + canonicalFlowLineStackStepUnits(line)) * LINE_HEIGHT >
-    CONTENT_BOTTOM_LIMIT - LINE_HEIGHT * 1.25;
+  const nextFlowStackBottomNorm = (line: string) =>
+    CONTENT_TOP + (stackUnits + canonicalFlowLineStackStepUnits(line)) * LINE_HEIGHT;
+
+  const lineWouldExceedFlowStackLimit = (line: string) =>
+    nextFlowStackBottomNorm(line) > PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM + 0.0001;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
@@ -439,7 +461,7 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     ) {
       flush();
     }
-    if (stackUnits > 0 && (stackUnits >= maxStackUnitsPerPage || lineWouldEnterInitialsBand(line))) {
+    if (stackUnits > 0 && lineWouldExceedFlowStackLimit(line)) {
       flush();
     }
     const stepUnits = canonicalFlowLineStackStepUnits(line);
@@ -473,15 +495,22 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
       textBlocks: page.textRects,
       contentRect,
     });
+    const flowZoneUtilizationPct = canonicalFlowZoneUtilizationPct({
+      flowLines: page.flowLines,
+      textBlocks: page.textRects,
+      contentRect,
+    });
     if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
       // eslint-disable-next-line no-console
       console.info("[vs01-canonical-pagination-page]", {
         page: page.pageIndex,
         lineCount: page.flowLines.filter((line) => line.trim()).length,
-        lastLineBottom: Math.max(0, ...page.textRects.map((r) => r.y + r.height)),
+        visualLastLineBottom: Math.max(0, ...page.textRects.map((r) => r.y + r.height)),
         flowStackBottom: stackBottom,
+        flowZoneUtilizationPct: Math.round(flowZoneUtilizationPct * 10) / 10,
         initialsBandTop: BAND_TOP,
-        ok: stackBottom <= BAND_TOP + 0.0001,
+        flowStackBottomLimit: PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM,
+        ok: stackBottom <= PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM + 0.0001,
       });
     }
   }
@@ -623,7 +652,9 @@ export function validateVs01SigningPacketGeometry(args: {
   }
 
   const flowStackIntersectsInitialsBand = args.pages.some(
-    (page) => canonicalFlowStackBottomNorm(page) > page.initialsBandRect.y + 0.0001,
+    (page) =>
+      canonicalFlowStackBottomNorm(page) >
+      vs01PaginationTextRectBottomLimitNorm(page.initialsBandRect.y) + 0.0001,
   );
   if (flowStackIntersectsInitialsBand) {
     errors.push("flow_stack_intersects_initials_band");

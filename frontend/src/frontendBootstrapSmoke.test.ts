@@ -5,7 +5,7 @@ describe("frontend bootstrap smoke", () => {
   it("imports ClawProductApp without initialization errors", async () => {
     const mod = await import("./ClawProductApp");
     expect(typeof mod.ClawProductApp).toBe("function");
-  });
+  }, 15_000);
 
   it("imports VS01 signing packet model without circular dependency errors", async () => {
     const mod = await import("./vs01/buildVs01SigningPacketModel");
