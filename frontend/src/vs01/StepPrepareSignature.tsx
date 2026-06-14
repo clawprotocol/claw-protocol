@@ -136,6 +136,7 @@ import { signingPacketHasVisibleText } from "./vs01CanonicalPageRender";
 import {
   logVs01PreviewViewportGeometry,
   readPreparePreviewViewportGeometry,
+  resetPrepareCanonicalPreviewScroll,
 } from "./vs01PreparePreviewViewport";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
 import {
@@ -687,7 +688,13 @@ export function StepPrepareSignature({
   useLayoutEffect(() => {
     if (!agreementBridgePlacementCopy || !signingPacketModel?.allowed) return;
     const scrollEl = pagesInnerRef.current?.closest(".vs01-sign-scroll") as HTMLElement | null;
+    const firstStack = pageStackRefs.current.get(0);
     const firstSurface = pageSurfaceRefs.current.get(0);
+    if (scrollEl) {
+      resetPrepareCanonicalPreviewScroll(scrollEl);
+    }
+    setCurrentPage(1);
+    firstStack?.scrollIntoView({ block: "start", inline: "nearest" });
     if (!scrollEl || !firstSurface) return;
     logVs01PreviewViewportGeometry(
       0,

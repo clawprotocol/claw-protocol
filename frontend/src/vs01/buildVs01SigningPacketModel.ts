@@ -86,7 +86,7 @@ export const VS01_PACKET_LINE_HEIGHT_PT = 17.5;
 /** Extra lines withheld from pagination estimates (DOM flow pad; primary guard is safety margin). */
 export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 1;
 /** Conservative clearance between flow stack bottom and initials band top (in line heights). */
-export const VS01_PACKET_PAGINATION_SAFETY_MARGIN_LINE_HEIGHTS = 1.5;
+export const VS01_PACKET_PAGINATION_SAFETY_MARGIN_LINE_HEIGHTS = 1.25;
 export const VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT = 6.3;
 
 const CONTENT_X = VS01_PACKET_MARGIN_LEFT_PT / VS01_PACKET_PAGE_WIDTH_PT;
@@ -163,13 +163,13 @@ function canonicalFlowLineHeightUnits(line: string): number {
 function domVisualStackPadUnits(line: string): number {
   const t = line.trim();
   if (!t) return 0;
-  if (t.length > CHARS_PER_LINE) {
-    const corpusWrap = Math.max(1, Math.ceil(t.length / CHARS_PER_LINE));
-    const domWrap = domVisualWrapLineCount(t);
-    return Math.max(0, domWrap - corpusWrap) * 0.95;
+  const domWrap = domVisualWrapLineCount(t);
+  const corpusWrap = Math.max(1, Math.ceil(t.length / CHARS_PER_LINE));
+  if (domWrap > corpusWrap) {
+    return (domWrap - corpusWrap) * 0.55;
   }
-  if (t.length > VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE) {
-    return 1.0;
+  if (domWrap > 1 && t.length > VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE) {
+    return (domWrap - 1) * 0.35;
   }
   return 0;
 }
@@ -424,6 +424,20 @@ export function maxFlowLinesPerSigningPacketPage(): number {
   return Math.max(1, raw - VS01_PACKET_FLOW_LINE_DOM_BUFFER);
 }
 
+export function isNumberedSectionMarkerOnlyLine(line: string): boolean {
+  return /^\d+(?:\.\d+)*\.\s*$/.test(line.trim());
+}
+
+/** Body page ends with a stranded section number (e.g. "12.") with no following text on the same page. */
+export function bodyPageHasSectionMarkerOrphan(
+  page: Pick<Vs01SigningPacketPage, "flowLines" | "initialsBandRect">,
+): boolean {
+  if (page.initialsBandRect.height < 0.001) return false;
+  const meaningful = page.flowLines.map((l) => l.trim()).filter(Boolean);
+  if (meaningful.length === 0) return false;
+  return isNumberedSectionMarkerOnlyLine(meaningful[meaningful.length - 1]!);
+}
+
 function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
   const instructionStripped = stripGuidedInstructionLeakLines(corpus);
   const lines = normalizeLines(instructionStripped.text);
@@ -435,6 +449,18 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
   let rects: Vs01NormTextRect[] = [];
 
   let documentTitleAssigned = false;
+  const carryLines: string[] = [];
+
+  const pullTrailingOrphanSectionMarkers = () => {
+    while (pageLines.length > 0) {
+      const last = pageLines[pageLines.length - 1] ?? "";
+      if (!isNumberedSectionMarkerOnlyLine(last)) break;
+      const popped = pageLines.pop()!;
+      stackUnits -= canonicalFlowLineStackStepUnits(popped);
+      if (rects.length > 0) rects.pop();
+      carryLines.unshift(popped);
+    }
+  };
 
   const flush = () => {
     pages.push({ pageIndex, flowLines: pageLines, textRects: rects });
@@ -451,6 +477,28 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     nextFlowStackBottomNorm(line) > PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM + 0.0001;
 
   for (let i = 0; i < lines.length; i += 1) {
+    if (carryLines.length > 0) {
+      for (const carried of carryLines) {
+        const carriedUnits = canonicalFlowLineStackStepUnits(carried);
+        pageLines.push(carried);
+        if (carried.trim()) {
+          const allowDocumentTitle = pageIndex === 0 && !documentTitleAssigned;
+          const kind = classifyText(carried, { allowDocumentTitle });
+          if (kind === "document_title") documentTitleAssigned = true;
+          rects.push({
+            x: CONTENT_X,
+            y: CONTENT_TOP + stackUnits * LINE_HEIGHT,
+            width: lineWidth(carried),
+            height: LINE_HEIGHT * Math.min(carriedUnits, 1.35) * 0.72,
+            text: carried,
+            kind,
+          });
+        }
+        stackUnits += carriedUnits;
+      }
+      carryLines.length = 0;
+    }
+
     const line = lines[i]!;
     const trimmed = line.trim();
     const nextNonBlank = lines.slice(i + 1).find((l) => l.trim())?.trim() ?? "";
@@ -459,6 +507,8 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
       /^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed);
     const startsSectionHeading =
       /^[A-Z][A-Z0-9 ,;:'"()/&.-]{3,}$/.test(trimmed) && trimmed.length <= 90;
+    const startsNumberedSection =
+      /^\d+(?:\.\d+)*\.\s+\S/.test(trimmed) && !EXECUTION_METADATA_FIELD_LINE_RE.test(trimmed);
     const nextStartsExecutionLine = EXECUTION_METADATA_FIELD_LINE_RE.test(nextNonBlank);
     const witnessLinesRemaining = /^IN WITNESS WHEREOF/i.test(trimmed)
       ? lines.slice(i).filter((l) => l.trim()).length
@@ -469,7 +519,9 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
         ? 7
         : startsSectionHeading
           ? 3
-          : nextStartsExecutionLine
+          : startsNumberedSection
+            ? 2
+            : nextStartsExecutionLine
             ? 4
             : 0;
     if (/^IN WITNESS WHEREOF/i.test(trimmed) && stackUnits > 0) {
@@ -483,9 +535,11 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
       minKeepTogether > 0 &&
       maxStackUnitsPerPage - stackUnits < minKeepTogether * 1.05
     ) {
+      pullTrailingOrphanSectionMarkers();
       flush();
     }
     if (stackUnits > 0 && lineWouldExceedFlowStackLimit(line)) {
+      pullTrailingOrphanSectionMarkers();
       flush();
     }
     const stepUnits = canonicalFlowLineStackStepUnits(line);
@@ -504,6 +558,27 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
       });
     }
     stackUnits += stepUnits;
+  }
+  if (carryLines.length > 0) {
+    for (const carried of carryLines) {
+      const carriedUnits = canonicalFlowLineStackStepUnits(carried);
+      pageLines.push(carried);
+      if (carried.trim()) {
+        const allowDocumentTitle = pageIndex === 0 && !documentTitleAssigned;
+        const kind = classifyText(carried, { allowDocumentTitle });
+        if (kind === "document_title") documentTitleAssigned = true;
+        rects.push({
+          x: CONTENT_X,
+          y: CONTENT_TOP + stackUnits * LINE_HEIGHT,
+          width: lineWidth(carried),
+          height: LINE_HEIGHT * Math.min(carriedUnits, 1.35) * 0.72,
+          text: carried,
+          kind,
+        });
+      }
+      stackUnits += carriedUnits;
+    }
+    carryLines.length = 0;
   }
   flush();
   const finalPages = pages.length ? pages : [{ pageIndex: 0, flowLines: [], textRects: [] }];

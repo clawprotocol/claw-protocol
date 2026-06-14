@@ -34,6 +34,11 @@ export function readPreparePreviewViewportGeometry(args: {
   };
 }
 
+export function resetPrepareCanonicalPreviewScroll(scrollEl: HTMLElement): void {
+  scrollEl.scrollTop = 0;
+  scrollEl.scrollLeft = 0;
+}
+
 export function logVs01PreviewViewportGeometry(
   pageIndex: number,
   geometry: Vs01PreparePreviewViewportGeometry,
