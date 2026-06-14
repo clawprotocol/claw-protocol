@@ -6088,13 +6088,51 @@ def post_agreement_signing_links_sent(
 @router.get("/{agreement_id}/recipient-delivery-status")
 def get_recipient_delivery_status(agreement_id: str, request: Request) -> Dict[str, Any]:
     """Owner-facing per-recipient review/signing delivery rows."""
-    if not _agreements_write_allowed():
-        raise HTTPException(status_code=403, detail="verifier_only")
-    _owner_mutation_guards(request, agreement_id, surface="recipient_delivery_status")
-    raw = _load_draft_dict_or_404(agreement_id)
-    from backend.services.recipient_delivery_status import build_recipient_delivery_status
+    aid = (agreement_id or "").strip()
+    draft_keys: List[str] = []
+    try:
+        if not _agreements_write_allowed():
+            raise HTTPException(status_code=403, detail="verifier_only")
+        _owner_mutation_guards(request, aid, surface="recipient_delivery_status")
+        raw = _load_draft_dict_or_404(aid)
+        from backend.services.recipient_delivery_status import (
+            build_recipient_delivery_status,
+            draft_keys_present,
+        )
 
-    return build_recipient_delivery_status(raw)
+        draft_keys = draft_keys_present(raw)
+        return build_recipient_delivery_status(raw)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _agreements_log.error(
+            "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s draft_keys=%s",
+            aid,
+            type(exc).__name__,
+            str(exc)[:500],
+            ",".join(draft_keys) if draft_keys else "unloaded",
+        )
+        try:
+            raw = _load_draft_dict_or_404(aid)
+            from backend.services.recipient_delivery_status import build_recipient_delivery_status
+
+            return build_recipient_delivery_status(raw)
+        except HTTPException:
+            raise
+        except Exception as inner_exc:
+            _agreements_log.error(
+                "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s draft_keys=%s",
+                aid,
+                type(inner_exc).__name__,
+                str(inner_exc)[:500],
+                ",".join(draft_keys) if draft_keys else "unloaded",
+            )
+            return {
+                "ok": True,
+                "review_sent": False,
+                "signing_invites_sent": False,
+                "recipients": [],
+            }
 
 
 @router.post("/{agreement_id}/recipient-invite-resend")
