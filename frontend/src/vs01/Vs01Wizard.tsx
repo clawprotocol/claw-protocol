@@ -15,7 +15,7 @@ import { StepPrepareSignature } from "./StepPrepareSignature";
 import { detailsStepIsValid } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
-import { markAgreementFieldsPlacedCount } from "./vs01WorkspaceSigningStatus";
+import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, getReceipt } from "./vs01Api";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
@@ -65,6 +65,7 @@ import {
 } from "./vs01PreparePacketCompletion";
 import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
 import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
+import { paidProPacketReadyDashboardPath } from "./vs01PaidProPacketReadyNavigation";
 import { hydrateVs01RecipientFromServerPacket } from "./vs01RecipientServerHydration";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
 import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
@@ -605,8 +606,19 @@ export function Vs01Wizard({
         sentCount: delivery.sentCount,
         skipReason: delivery.skipReason,
       });
+      markAgreementPacketPrepared(linkedAgreementId);
+      clearAgreementVs01BridgeSession();
+      clearPaidProAgreementBridgeSkipMarker();
+      // eslint-disable-next-line no-console
+      console.info("[vs01-paid-pro-workspace-navigate]", {
+        agreementId: linkedAgreementId,
+        packetPrepareOnly: true,
+        signerCount: result.handoff.signers.length,
+        vs01DocumentId: did,
+        destination: paidProPacketReadyDashboardPath(),
+      });
+      navigate(paidProPacketReadyDashboardPath());
     });
-    goToStep(3);
   }, [
     vs01LinkedAgreementId,
     documentId,
@@ -620,7 +632,8 @@ export function Vs01Wizard({
     recipientPlacedFields,
     receiptId,
     receiptHashSha256,
-    goToStep,
+    navigate,
+    prepareCorpusText,
   ]);
 
   useEffect(() => {

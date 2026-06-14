@@ -111,7 +111,7 @@ describe("test64 canonical signing document text render", () => {
   it("uses fixed readable px typography", () => {
     const { fontSizePx, lineHeightPx } = canonicalPageTypographyPx(612);
     expect(fontSizePx).toBe(13);
-    expect(lineHeightPx).toBe(19);
+    expect(lineHeightPx).toBe(17.5);
   });
 
   it("keeps initials band reserved and forbids decorative fallback for guided Pro", () => {

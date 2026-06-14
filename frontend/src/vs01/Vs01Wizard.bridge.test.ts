@@ -20,7 +20,7 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("vs01_packet_ready=1");
     expect(s).toContain("[vs01-packet-prepared]");
     expect(s).toContain("[vs01-paid-pro-workspace-navigate]");
-    expect(s).toContain("/app/agreements/");
+    expect(s).toContain("paidProPacketReadyDashboardPath");
     expect(s).toContain("vs01_saved=1");
     expect(s).toContain("[vs01-recipient-route-guard]");
     expect(s).toContain("onStepChange");

@@ -3726,7 +3726,7 @@ button.vs01-upload-btn:disabled {
 .vs01-canonical-flow-body {
   position: absolute;
   box-sizing: border-box;
-  overflow: visible;
+  overflow: hidden;
   color: #111827;
   font-family: Georgia, "Times New Roman", serif;
   text-rendering: optimizeLegibility;
@@ -3922,10 +3922,10 @@ button.vs01-upload-btn:disabled {
 
 .vs01-canonical-initials-band {
   position: absolute;
-  border-top: 1px solid rgba(203, 213, 225, 0.22);
-  background: transparent;
+  border-top: 1px solid rgba(203, 213, 225, 0.35);
+  background: #fff;
   pointer-events: none;
-  z-index: 0;
+  z-index: 2;
 }
 
 /* Sender fields from Step 3 — read-only reference under recipient placement (Step 4). */
