@@ -31,7 +31,16 @@ import {
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { PREPARE_FIELD_ASSIGNMENT_SOURCE } from "./vs01PrepareFieldPlacement";
 import { defaultPrepareTemplateStoredValue } from "./vs01PrepareTemplateField";
-import { VS01_EXECUTION_SPACER_FRAC } from "./vs01VisualConstants";
+import {
+  VS01_EXECUTION_SPACER_FRAC,
+  VS01_PACKET_PAGE_HEIGHT_PT,
+  VS01_PACKET_PAGE_WIDTH_PT,
+} from "./vs01PacketLayoutConstants";
+
+export {
+  VS01_PACKET_PAGE_HEIGHT_PT,
+  VS01_PACKET_PAGE_WIDTH_PT,
+} from "./vs01PacketLayoutConstants";
 
 export type Vs01SigningPacketMode = "guided_pro" | "free" | "uploaded_pdf";
 
@@ -65,8 +74,6 @@ export type Vs01SigningPacketModel = {
   diagnostics: Vs01SigningPacketDiagnostics;
 };
 
-export const VS01_PACKET_PAGE_WIDTH_PT = 612;
-export const VS01_PACKET_PAGE_HEIGHT_PT = 792;
 export const VS01_PACKET_MARGIN_LEFT_PT = 54;
 export const VS01_PACKET_MARGIN_TOP_PT = 44;
 export const VS01_PACKET_MARGIN_RIGHT_PT = 54;

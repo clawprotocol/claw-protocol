@@ -8,7 +8,7 @@
 import {
   VS01_PACKET_PAGE_HEIGHT_PT,
   VS01_PACKET_PAGE_WIDTH_PT,
-} from "./buildVs01SigningPacketModel";
+} from "./vs01PacketLayoutConstants";
 
 /** Canonical page box (612×792 pt letter). */
 export const VS01_VISUAL_PAGE_WIDTH_PT = VS01_PACKET_PAGE_WIDTH_PT;
@@ -91,7 +91,7 @@ export const VS01_EXECUTION_LABEL_ROW_MARGIN_TOP_EM = 0.08;
 
 export const VS01_EXECUTION_SIGNATURE_MARGIN_BOTTOM_EM = 0.38;
 
-export const VS01_EXECUTION_SPACER_FRAC = 0.55;
+export { VS01_EXECUTION_SPACER_FRAC } from "./vs01PacketLayoutConstants";
 
 /** Playwright max gap between execution-stack lines (px). */
 export const VS01_EXECUTION_MAX_LABEL_GAP_PX = 28;
