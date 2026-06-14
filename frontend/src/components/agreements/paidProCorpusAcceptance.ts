@@ -20,7 +20,10 @@ import {
 } from "./premiumFullDraftClientAcceptance";
 import { rejectDevContextLeakInPremiumBody } from "./premiumOutputDevContextGuard";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
-import { isLongCommerciallyUsablePremiumBody } from "./premiumAcceptancePolicy";
+import {
+  isLongCommerciallyUsablePremiumBody,
+  PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+} from "./premiumAcceptancePolicy";
 import {
   assessConciseCommercialServicesProQuality,
   logPaidProValidationDecision,
@@ -197,9 +200,12 @@ export function validatePaidProOutput(args: {
   agreementValidation?: AgreementValidationResult | null;
 }): { ok: boolean; reasons: string[] } {
   const t = args.text || "";
+  const docLen = t.trim().length;
   const rawI = String(args.rawIntake || "");
   const pipelineSource = args.premiumPipelineSource ?? null;
-  const serverFullDocExists = isAuthoritativePremiumPipelineProvenance(pipelineSource);
+  const serverFullDocExists =
+    isAuthoritativePremiumPipelineProvenance(pipelineSource) &&
+    docLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
   const conciseQuality = assessConciseCommercialServicesProQuality({
     text: t,
     rawIntake: rawI,
@@ -210,9 +216,13 @@ export function validatePaidProOutput(args: {
     logPaidProValidationDecision({
       accepted,
       reasons,
-      docLen: t.length,
+      docLen,
       source: pipelineSource,
       serverFullDocExists,
+      serverLen: docLen,
+      recoveryCandidateLen: docLen,
+      acceptedSource: accepted ? pipelineSource : null,
+      rejectedReason: accepted ? null : reasons[0] ?? "validation_failed",
       requiredFactsFound: conciseQuality.requiredFactsFound,
       requiredFactsMissing: conciseQuality.requiredFactsMissing,
     });

@@ -320,6 +320,10 @@ export function logPaidProValidationDecision(payload: {
   docLen: number;
   source?: string | null;
   serverFullDocExists?: boolean;
+  serverLen?: number;
+  recoveryCandidateLen?: number;
+  acceptedSource?: string | null;
+  rejectedReason?: string | null;
   requiredFactsFound?: string[];
   requiredFactsMissing?: string[];
 }): void {
