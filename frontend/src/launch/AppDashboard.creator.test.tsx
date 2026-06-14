@@ -96,6 +96,7 @@ describe("AppDashboard creator-centric surface", () => {
 
   it("auto-launches VS01 from owner email prepare_signature_links deep link and clears query", async () => {
     launchNavState.search = "?prepare_signature_links=ag_ready";
+    window.history.replaceState(null, "", "/app?prepare_signature_links=ag_ready");
     const replaceState = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
     vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign")
       .mockImplementation(async (options) => {
@@ -396,6 +397,70 @@ describe("AppDashboard creator-centric surface", () => {
       );
       expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_bridge_test?agreement_bridge=1");
     });
+  });
+
+  it("QA359: dashboard CTA bridge navigation is not undone by post-bridge replaceState to /app", async () => {
+    const esignRoute = "/app/esign/doc_qa359?agreement_bridge=1";
+    const replaceStateCalls: string[] = [];
+    const pushStateCalls: string[] = [];
+    vi.spyOn(window.history, "replaceState").mockImplementation((_state, _title, url) => {
+      if (typeof url === "string") replaceStateCalls.push(url);
+    });
+    vi.spyOn(window.history, "pushState").mockImplementation((_state, _title, url) => {
+      if (typeof url === "string") {
+        pushStateCalls.push(url);
+        const parsed = new URL(url, "http://localhost");
+        launchNavState.pathname = parsed.pathname;
+        launchNavState.search = parsed.search;
+      }
+    });
+    mockNavigate.mockImplementation((to: string) => {
+      window.history.pushState(null, "", to);
+    });
+
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign")
+      .mockImplementation(async (options) => {
+        options.navigate(esignRoute);
+        return true;
+      });
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [indexRow({ id: "ag_ready" })],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    launchNavState.pathname = "/app";
+    launchNavState.search = "";
+    window.history.replaceState(null, "", "/app");
+
+    const user = userEvent.setup();
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
+    });
+
+    replaceStateCalls.length = 0;
+
+    await user.click(screen.getByRole("button", { name: "Prepare and send signing links" }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(esignRoute);
+    });
+
+    expect(pushStateCalls).toContain(esignRoute);
+    expect(launchNavState.pathname).toBe("/app/esign/doc_qa359");
+    expect(launchNavState.search).toBe("?agreement_bridge=1");
+    expect(replaceStateCalls).not.toContain("/app");
   });
 
   it("does not call VS01 bridge when only one required reviewer approved", async () => {

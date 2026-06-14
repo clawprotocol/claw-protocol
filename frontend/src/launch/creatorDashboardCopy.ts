@@ -123,6 +123,45 @@ export function logCreatorDashboardPrepareClick(payload: {
 
 let lastCreatorDashboardPrepareBridgeResultLogKey = "";
 
+export function logCreatorDashboardPrepareBridgeNavigateStart(payload: {
+  agreementId: string;
+  pathname: string;
+  search: string;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const id = payload.agreementId.trim();
+  // eslint-disable-next-line no-console
+  console.info("[creator-dashboard-prepare-bridge-navigate-start]", {
+    agreementIdShort: id.length <= 12 ? id : `${id.slice(0, 8)}…`,
+    pathname: payload.pathname,
+    search: payload.search,
+  });
+}
+
+let lastCreatorDashboardPrepareQueryCleanupLogKey = "";
+
+export function logCreatorDashboardPrepareQueryCleanup(payload: {
+  agreementId: string;
+  pathnameBefore: string;
+  searchBefore: string;
+  cleanPath: string | null;
+  skippedReason: string | null;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const key = JSON.stringify(payload);
+  if (key === lastCreatorDashboardPrepareQueryCleanupLogKey) return;
+  lastCreatorDashboardPrepareQueryCleanupLogKey = key;
+  const id = payload.agreementId.trim();
+  // eslint-disable-next-line no-console
+  console.info("[creator-dashboard-prepare-query-cleanup]", {
+    agreementIdShort: id.length <= 12 ? id : `${id.slice(0, 8)}…`,
+    pathnameBefore: payload.pathnameBefore,
+    searchBefore: payload.searchBefore,
+    cleanPath: payload.cleanPath,
+    skippedReason: payload.skippedReason,
+  });
+}
+
 export function logCreatorDashboardPrepareBridgeResult(payload: {
   agreementId: string;
   navigated: boolean;

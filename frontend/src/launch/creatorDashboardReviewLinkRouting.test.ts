@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   creatorDashboardCompletedProofPath,
@@ -5,7 +6,9 @@ import {
   creatorDashboardPrepareSignatureLinksPath,
   creatorDashboardReviewLinkReadyPath,
   creatorDashboardUsesManualReviewLinkPage,
+  isAppDashboardPathname,
   shouldRedirectLegacyDoneToPrepareSignatureLinks,
+  stripPrepareSignatureLinksQueryFromDashboardUrl,
 } from "./creatorDashboardReviewLinkRouting";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 
@@ -68,5 +71,27 @@ describe("creatorDashboardReviewLinkRouting", () => {
         draft,
       }),
     ).toBe(false);
+  });
+
+  it("strips prepare_signature_links query only on /app dashboard pathname", () => {
+    window.history.replaceState(null, "", "/app?prepare_signature_links=ag_1&focus=ag_1");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
+    expect(stripPrepareSignatureLinksQueryFromDashboardUrl()).toBe("/app?focus=ag_1");
+    expect(replaceState).toHaveBeenCalledWith(window.history.state, "", "/app?focus=ag_1");
+
+    replaceState.mockClear();
+    window.history.replaceState(null, "", "/app/esign/doc_1?agreement_bridge=1");
+    replaceState.mockClear();
+    expect(stripPrepareSignatureLinksQueryFromDashboardUrl()).toBeNull();
+    expect(replaceState).not.toHaveBeenCalled();
+
+    replaceState.mockRestore();
+  });
+
+  it("detects dashboard pathname", () => {
+    expect(isAppDashboardPathname("/app")).toBe(true);
+    expect(isAppDashboardPathname("/app/")).toBe(true);
+    expect(isAppDashboardPathname("/app/esign/doc_1")).toBe(false);
   });
 });

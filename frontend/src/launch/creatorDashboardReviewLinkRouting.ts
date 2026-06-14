@@ -34,6 +34,31 @@ export function creatorDashboardPrepareSignatureLinksPath(agreementId: string): 
   return `/app?prepare_signature_links=${encodeURIComponent(agreementId.trim())}`;
 }
 
+export function normalizeAppDashboardPathname(pathname?: string | null): string {
+  const raw = pathname ?? (typeof window !== "undefined" ? window.location.pathname : "");
+  return raw.replace(/\/$/, "") || "/";
+}
+
+export function isAppDashboardPathname(pathname?: string | null): boolean {
+  return normalizeAppDashboardPathname(pathname) === "/app";
+}
+
+/**
+ * Strip prepare_signature_links only while the browser is still on /app.
+ * Call before VS01 bridge navigation — never after a successful /app/esign handoff.
+ */
+export function stripPrepareSignatureLinksQueryFromDashboardUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  if (!isAppDashboardPathname()) return null;
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("prepare_signature_links")) return null;
+  params.delete("prepare_signature_links");
+  const nextSearch = params.toString();
+  const cleanPath = nextSearch ? `/app?${nextSearch}` : "/app";
+  window.history.replaceState(window.history.state, "", cleanPath);
+  return cleanPath;
+}
+
 /** Legacy /app/done/:id bookmark — all reviews approved, unsigned → canonical signature-prep handoff. */
 export function shouldRedirectLegacyDoneToPrepareSignatureLinks(args: {
   signed: boolean | null;

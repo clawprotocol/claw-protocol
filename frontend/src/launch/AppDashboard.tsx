@@ -47,14 +47,20 @@ import {
   CREATOR_PREPARE_BRIDGE_FAILED_NOTICE,
   CREATOR_PREPARE_SIGNATURE_LINKS_BLOCKED_NOTICE,
   logCreatorDashboardAgreementStatusLoaded,
+  logCreatorDashboardPrepareBridgeNavigateStart,
   logCreatorDashboardPrepareBridgeResult,
   logCreatorDashboardPrepareClick,
   logCreatorDashboardPrepareNavigationBlocked,
+  logCreatorDashboardPrepareQueryCleanup,
   logCreatorDashboardReviewGate,
   logDashboardInitialState,
   logDashboardPostReviewGateState,
 } from "./creatorDashboardCopy";
 import { navigateCreatorPrepareSignatureLinks } from "./creatorDashboardPrepareSignatureLinks";
+import {
+  isAppDashboardPathname,
+  stripPrepareSignatureLinksQueryFromDashboardUrl,
+} from "./creatorDashboardReviewLinkRouting";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import { draftAuditHasRecipientRecordedApproval } from "../components/agreements/draftRecipientReviewSignals";
@@ -436,6 +442,25 @@ export function AppDashboard() {
         }
 
         clearLawdogEntryContext();
+        const pathnameBeforeBridge =
+          typeof window !== "undefined" ? window.location.pathname : "";
+        const searchBeforeBridge = typeof window !== "undefined" ? window.location.search : "";
+        logCreatorDashboardPrepareBridgeNavigateStart({
+          agreementId: id,
+          pathname: pathnameBeforeBridge,
+          search: searchBeforeBridge,
+        });
+        const cleanedPathBeforeBridge = stripPrepareSignatureLinksQueryFromDashboardUrl();
+        if (cleanedPathBeforeBridge) {
+          logCreatorDashboardPrepareQueryCleanup({
+            agreementId: id,
+            pathnameBefore: pathnameBeforeBridge,
+            searchBefore: searchBeforeBridge,
+            cleanPath: cleanedPathBeforeBridge,
+            skippedReason: null,
+          });
+        }
+
         const bridgeResult = await navigateCreatorPrepareSignatureLinks({
           agreementId: id,
           navigate: (path) => navigate(path),
@@ -454,12 +479,26 @@ export function AppDashboard() {
         });
 
         if (bridgeResult.navigated && bridgeResult.vs01RouteAttempted) {
-          const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-          params.delete("prepare_signature_links");
-          const nextSearch = params.toString();
-          const cleanPath = nextSearch ? `/app?${nextSearch}` : "/app";
-          if (typeof window !== "undefined") {
-            window.history.replaceState(window.history.state, "", cleanPath);
+          const pathnameAfterBridge =
+            typeof window !== "undefined" ? window.location.pathname : "";
+          const searchAfterBridge = typeof window !== "undefined" ? window.location.search : "";
+          if (isAppDashboardPathname(pathnameAfterBridge)) {
+            const cleanedPathAfterBridge = stripPrepareSignatureLinksQueryFromDashboardUrl();
+            logCreatorDashboardPrepareQueryCleanup({
+              agreementId: id,
+              pathnameBefore: pathnameAfterBridge,
+              searchBefore: searchAfterBridge,
+              cleanPath: cleanedPathAfterBridge,
+              skippedReason: cleanedPathAfterBridge ? null : "no_query_on_dashboard",
+            });
+          } else {
+            logCreatorDashboardPrepareQueryCleanup({
+              agreementId: id,
+              pathnameBefore: pathnameAfterBridge,
+              searchBefore: searchAfterBridge,
+              cleanPath: null,
+              skippedReason: "not_on_dashboard_after_bridge",
+            });
           }
           return;
         }
@@ -481,7 +520,7 @@ export function AppDashboard() {
         setPrepareBusyAgreementId(null);
       }
     },
-    [navigate, prepareBusyAgreementId, reviewRowsByAgreementId, rows, search],
+    [navigate, prepareBusyAgreementId, reviewRowsByAgreementId, rows],
   );
 
   useEffect(() => {
