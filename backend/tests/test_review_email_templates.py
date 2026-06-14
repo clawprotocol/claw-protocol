@@ -9,7 +9,10 @@ from backend.services.email.templates.email_layout import (
     COLOR_TEXT_PRIMARY,
 )
 from backend.services.email.templates.review_invite import build_review_invite_email
-from backend.services.email.templates.review_owner_notification import build_review_owner_notification_email
+from backend.services.email.templates.review_owner_notification import (
+    build_review_owner_notification_email,
+    build_review_owner_signing_ready_notification_email,
+)
 
 
 def test_review_invite_subject_and_context() -> None:
@@ -67,3 +70,20 @@ def test_review_owner_notification_subject_and_layout() -> None:
     assert "Secure dashboard link (fallback)" in email.html
     assert 'name="color-scheme" content="light"' in email.html
     assert "/review?t=" not in email.html
+
+
+def test_review_owner_signing_ready_uses_prepare_signature_links_dashboard_handoff() -> None:
+    prep_url = "https://app.example.com/app?prepare_signature_links=ag-1"
+    email = build_review_owner_signing_ready_notification_email(
+        owner_name="Owner Co",
+        agreement_title="Consulting Agreement",
+        reviewer_display_name="Iron Vale Systems Inc",
+        signing_prep_url=prep_url,
+        dashboard_url="https://app.example.com/app?focus=ag-1",
+    )
+    assert email.subject == "Review complete: prepare to sign Consulting Agreement"
+    assert "Prepare signature links" in email.html
+    assert "/app/done/" not in email.html
+    assert email.html.count(prep_url) >= 2
+    assert prep_url in email.text
+    assert "/app/done/" not in email.text

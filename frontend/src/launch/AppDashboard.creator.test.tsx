@@ -7,6 +7,7 @@ import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
 import * as agreementToVs01SigningBridge from "./simpleProduct/agreementToVs01SigningBridge";
+import * as creatorDashboardPrepareSignatureLinks from "./creatorDashboardPrepareSignatureLinks";
 import { AGREEMENT_CREATE_REVIEW_RESUME_KEY } from "../components/agreements/agreementIntakeStorage";
 import { LAWDOG_ENTRY_CONTEXT_KEY } from "./lawdogEntryContext";
 import {
@@ -17,11 +18,17 @@ import type { PaidProVs01PostSignHandoffV1 } from "../vs01/vs01PaidProPostSignHa
 
 const mockNavigate = vi.fn();
 
+const launchNavState = vi.hoisted(() => ({
+  pathname: "/app",
+  search: "",
+  hash: "",
+}));
+
 vi.mock("./LaunchNavContext", () => ({
   useLaunchNav: () => ({
-    pathname: "/app",
-    search: "",
-    hash: "",
+    pathname: launchNavState.pathname,
+    search: launchNavState.search,
+    hash: launchNavState.hash,
     navigate: mockNavigate,
   }),
 }));
@@ -79,8 +86,12 @@ describe("AppDashboard creator-centric surface", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     sessionStorage.clear();
     mockNavigate.mockClear();
+    launchNavState.pathname = "/app";
+    launchNavState.search = "";
+    launchNavState.hash = "";
   });
 
   it("shows dashboard copy and prepare signature links CTA after both approvals", async () => {
@@ -268,6 +279,47 @@ describe("AppDashboard creator-centric surface", () => {
     expect(homeCreateCalls).toHaveLength(0);
     expect(mockNavigate).not.toHaveBeenCalledWith("/app/create");
     homeCreateSpy.mockRestore();
+  });
+
+  it("auto-launches prepare signature links when opened via review-complete email deep link", async () => {
+    launchNavState.search = "?prepare_signature_links=ag_ready";
+    const prepareSpy = vi
+      .spyOn(creatorDashboardPrepareSignatureLinks, "navigateCreatorPrepareSignatureLinks")
+      .mockResolvedValue({
+        navigated: true,
+        destination: "/app/esign/doc_email_handoff?agreement_bridge=1",
+        bridgeAttempted: true,
+        blockReason: null,
+        vs01RouteAttempted: true,
+      });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [indexRow({ id: "ag_ready" })],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    render(<AppDashboard />);
+
+    await waitFor(
+      () => {
+        expect(prepareSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            agreementId: "ag_ready",
+            navigateOnBridgeFailure: false,
+          }),
+        );
+      },
+      { timeout: 3000 },
+    );
   });
 
   it("routes Prepare and send signing links through VS01 bridge with correct agreementId", async () => {

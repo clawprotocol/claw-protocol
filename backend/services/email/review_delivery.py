@@ -473,7 +473,7 @@ def _build_owner_dashboard_url(origin: str, agreement_id: str) -> str:
 def _build_owner_signing_prep_url(origin: str, agreement_id: str) -> str:
     base = origin.rstrip("/")
     aid = quote(agreement_id.strip(), safe="")
-    return f"{base}/app/done/{aid}"
+    return f"{base}/app?prepare_signature_links={aid}"
 
 
 def _approved_participant_ids_from_audit(audit: Any) -> set[str]:

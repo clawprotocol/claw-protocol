@@ -87,6 +87,7 @@ export function AppDashboard() {
   const [prepareNoticeByAgreementId, setPrepareNoticeByAgreementId] = useState<Record<string, string>>({});
   const [signingStatusEpoch, setSigningStatusEpoch] = useState(0);
   const draftingRedirectedRef = useRef(false);
+  const prepareSignatureLinksLaunchRef = useRef<string | null>(null);
 
   const reloadWorkspaceIndex = useCallback(async () => {
     setIndexLoading(true);
@@ -475,6 +476,18 @@ export function AppDashboard() {
     },
     [navigate, prepareBusyAgreementId, reviewRowsByAgreementId, rows],
   );
+
+  useEffect(() => {
+    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    const prepareId = params.get("prepare_signature_links")?.trim();
+    if (!prepareId || indexLoading) return;
+    if (prepareSignatureLinksLaunchRef.current === prepareId) return;
+    const timer = window.setTimeout(() => {
+      prepareSignatureLinksLaunchRef.current = prepareId;
+      void handlePrepareSignatureLinks(prepareId);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [search, indexLoading, handlePrepareSignatureLinks]);
 
   const handleWhatsNextPrimaryAction = useCallback(
     (row: WorkspaceIndexAgreement) => {

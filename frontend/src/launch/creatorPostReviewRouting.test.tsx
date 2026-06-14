@@ -87,6 +87,7 @@ describe("creator post-review routing", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     mockNavigate.mockClear();
   });
 

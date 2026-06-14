@@ -120,8 +120,11 @@ def test_external_reviewer_approval_sends_owner_status_email_once(
     assert payload["to"] == ["owner@example.com"]
     assert payload["subject"] == "Review complete: prepare to sign Consulting Agreement"
     assert "Prepare signature links" in payload["html"]
-    assert f"https://app.example.com/app/done/{aid}" in payload["html"]
-    assert "https://app.example.com/app?focus=" in payload["html"]
+    prep_url = f"https://app.example.com/app?prepare_signature_links={aid}"
+    assert prep_url in payload["html"]
+    assert payload["html"].count(prep_url) >= 2
+    assert "/app/done/" not in payload["html"]
+    assert "https://app.example.com/app?focus=" not in payload["html"]
     assert "/review?t=" not in payload["html"]
 
     audit_types = [e.get("event_type") for e in body["draft"].get("audit_log") or []]

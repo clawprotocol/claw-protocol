@@ -79,7 +79,7 @@ def build_review_owner_signing_ready_notification_email(
     title = (agreement_title or "").strip() or "Untitled agreement"
     reviewer = (reviewer_display_name or "").strip() or "A reviewer"
     prep_url = (signing_prep_url or "").strip()
-    dash_url = (dashboard_url or "").strip()
+    _dash_url = (dashboard_url or "").strip()
     subject = f"Review complete: prepare to sign {title}"
 
     summary_rows = [
@@ -102,7 +102,7 @@ def build_review_owner_signing_ready_notification_email(
             secondary=True,
         )
         + render_cta_button(href=prep_url, label="Prepare signature links")
-        + render_fallback_link_block(href=dash_url, heading="Dashboard link (fallback)")
+        + render_fallback_link_block(href=prep_url, heading="Secure link (fallback)")
     )
     html = email_document_shell(inner_html=inner)
 
@@ -110,8 +110,7 @@ def build_review_owner_signing_ready_notification_email(
         f"Hi {owner},\n\n"
         f"All required reviews are complete for {title}.\n"
         f"Latest approval: {reviewer}\n\n"
-        f"Prepare signature links and start signing:\n{prep_url}\n\n"
-        f"Dashboard (fallback):\n{dash_url}\n"
+        f"Prepare signature links and start signing:\n{prep_url}\n"
     )
 
     return ReviewOwnerNotificationEmail(subject=subject, html=html, text=text)
