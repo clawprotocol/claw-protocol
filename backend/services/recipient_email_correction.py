@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from fastapi import HTTPException
 
+from backend.services.recipient_party_identity import find_party_dict_by_participant_id
 from backend.services.recipient_delivery_registry import (
     RECIPIENT_EMAIL_CORRECTED,
     record_invite_sent,
@@ -107,9 +108,9 @@ def _party_dict_by_id(draft: Dict[str, Any], participant_id: str) -> Dict[str, A
             if isinstance(p, dict) and _is_owner_party(p):
                 return p
         raise HTTPException(status_code=404, detail="participant_not_found")
-    for p in draft.get("parties") or []:
-        if isinstance(p, dict) and str(p.get("id") or "").strip() == pid:
-            return p
+    party = find_party_dict_by_participant_id(draft, pid)
+    if party:
+        return party
     raise HTTPException(status_code=404, detail="participant_not_found")
 
 

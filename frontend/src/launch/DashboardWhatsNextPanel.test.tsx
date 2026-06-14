@@ -186,6 +186,7 @@ describe("DashboardWhatsNextPanel", () => {
       expect(screen.getByTestId("recipient-control-center")).toBeTruthy();
     });
     expect(screen.getByTestId("recipient-control-status-review-p-iron").textContent).toMatch(/Sent/);
+    expect(screen.getByText("Reviewer")).toBeTruthy();
     expect(screen.getByText("anthamhayek@me.com")).toBeTruthy();
   });
 

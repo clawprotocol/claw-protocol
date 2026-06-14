@@ -292,3 +292,105 @@ def test_recipient_delivery_status_tolerates_legacy_audit_and_malformed_registry
     )
     assert row.get("resent_count") == 0
     assert row.get("can_correct_email") is True
+
+
+def test_recipient_delivery_status_paid_pro_reviewer_without_party_ids(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """test351: Harbor Peak-style reviewer row without persisted party ids."""
+    _env_common(monkeypatch, tmp_path)
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Services Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {"name": "Red Mesa Logistics LLC", "role": "owner", "email": "owner@example.com"},
+                {
+                    "name": "Harbor Peak Automation LLC",
+                    "role": "reviewer",
+                    "email": "reviewer@harborpeak.test",
+                },
+            ],
+            "purpose": "Services",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    draft = load_draft(aid)
+    for party in draft.get("parties") or []:
+        if isinstance(party, dict):
+            party.pop("id", None)
+    draft["review_sent_at"] = "2026-06-07T12:00:00Z"
+    draft["review_invite_emails_sent_at"] = "2026-06-07T12:00:00Z"
+    draft.pop("recipient_delivery_v1", None)
+    save_draft({**draft, "id": aid})
+
+    res = client.get(f"/api/agreements/{aid}/recipient-delivery-status", headers=_ORG_H)
+    assert res.status_code == 200
+    review_rows = [r for r in res.json().get("recipients") or [] if r.get("phase") == "review"]
+    assert len(review_rows) == 1
+    row = review_rows[0]
+    assert row.get("participant_id") == "party_index_1"
+    assert row.get("entity_name") == "Harbor Peak Automation LLC"
+    assert row.get("email") == "reviewer@harborpeak.test"
+    assert row.get("role") == "reviewer"
+    assert row.get("status") == "sent"
+    assert row.get("can_correct_email") is True
+    assert row.get("can_resend_invite") is True
+
+
+def test_recipient_delivery_status_client_service_provider_roles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _env_common(monkeypatch, tmp_path)
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Consulting Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {
+                    "id": "p_client",
+                    "name": "Blue Canyon Analytics LLC",
+                    "role": "client",
+                    "email": "owner-user@example.com",
+                },
+                {
+                    "id": "p_provider",
+                    "name": "Harbor Peak Automation LLC",
+                    "role": "service_provider",
+                    "email": "external-reviewer@example.com",
+                },
+            ],
+            "purpose": "Services",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    draft = load_draft(aid)
+    draft["review_sent_at"] = "2026-06-07T12:00:00Z"
+    draft["review_invite_emails_sent_at"] = "2026-06-07T12:00:00Z"
+    save_draft({**draft, "id": aid})
+
+    res = client.get(f"/api/agreements/{aid}/recipient-delivery-status", headers=_ORG_H)
+    assert res.status_code == 200
+    row = next(
+        r
+        for r in res.json().get("recipients") or []
+        if r.get("participant_id") == "p_provider" and r.get("phase") == "review"
+    )
+    assert row.get("role") == "reviewer"
+    assert row.get("status") == "sent"

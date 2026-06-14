@@ -12,6 +12,7 @@ from backend.services.email.signing_delivery import (
     SIGNING_INVITE_EMAILS_SENT_EVENT,
     send_signing_invite_to_target,
 )
+from backend.services.recipient_party_identity import find_party_dict_by_participant_id
 from backend.services.recipient_delivery_registry import record_invite_sent, supersede_active_invite
 
 
@@ -37,10 +38,9 @@ def _latest_signing_packet_revision(audit: Any) -> str | None:
 
 
 def _party_by_id(draft: Dict[str, Any], participant_id: str) -> Dict[str, Any]:
-    pid = (participant_id or "").strip()
-    for p in draft.get("parties") or []:
-        if isinstance(p, dict) and str(p.get("id") or "").strip() == pid:
-            return p
+    party = find_party_dict_by_participant_id(draft, participant_id)
+    if party:
+        return party
     raise HTTPException(status_code=404, detail="participant_not_found")
 
 

@@ -4176,6 +4176,8 @@ def _load_draft_dict_or_404(agreement_id: str) -> Dict[str, Any]:
         raw = load_draft(agreement_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="agreement_not_found")
+    except ValueError:
+        raise HTTPException(status_code=404, detail="agreement_not_found")
     if not isinstance(raw, dict):
         raise HTTPException(status_code=404, detail="agreement_not_found")
     return raw

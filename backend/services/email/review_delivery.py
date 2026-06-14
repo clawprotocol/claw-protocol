@@ -601,7 +601,7 @@ def _live_resend_review_invite_targets_from_draft(d: Dict[str, Any]) -> List[Rev
     title = str(d.get("title") or "").strip() or "Untitled agreement"
     out: List[ReviewInviteTarget] = []
 
-    for party in parties:
+    for i, party in enumerate(parties):
         if not isinstance(party, dict):
             continue
         role = _normalize_workflow_role(str(party.get("role") or ""))
@@ -611,7 +611,9 @@ def _live_resend_review_invite_targets_from_draft(d: Dict[str, Any]) -> List[Rev
         email = str(party.get("email") or "").strip().lower()
         if not name or not email or "@" not in email:
             continue
-        party_id = str(party.get("id") or "").strip() or None
+        from backend.services.recipient_party_identity import participant_id_for_party
+
+        party_id = participant_id_for_party(party, i)
         mint_role: RecipientRole = "reviewer" if role == "reviewer" else "recipient"
         out.append(
             ReviewInviteTarget(
