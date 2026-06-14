@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +19,81 @@ RecipientPhase = str  # "review" | "signing"
 RecipientStatus = str  # not_sent | sent | opened | approved | signed | replaced | blocked
 
 _log = logging.getLogger("claw.recipient_delivery_status")
+
+
+def _log_stage(
+    *,
+    agreement_id: str,
+    stage: str,
+    draft: Optional[Dict[str, Any]] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    diag = draft_diagnostic_types(draft) if isinstance(draft, dict) else {}
+    parts = [
+        "[recipient-status-stage]",
+        f"agreement_id={agreement_id or 'unknown'}",
+        f"stage={stage}",
+    ]
+    if diag:
+        parts.append(f"draft_keys={','.join(diag.get('draft_keys') or [])}")
+        parts.append(f"audit_log_type={diag.get('audit_log_type')}")
+        parts.append(f"parties_type={diag.get('parties_type')}")
+        parts.append(f"recipient_delivery_v1_type={diag.get('recipient_delivery_v1_type')}")
+        parts.append(f"review_registry_type={diag.get('review_registry_type')}")
+        parts.append(f"review_events_type={diag.get('review_events_type')}")
+    if extra:
+        for key, value in extra.items():
+            if isinstance(value, list):
+                rendered = ",".join(str(v) for v in value)
+            else:
+                rendered = str(value)
+            parts.append(f"{key}={rendered}")
+    _log.info(" ".join(parts))
+
+
+def draft_diagnostic_types(draft: Dict[str, Any]) -> Dict[str, Any]:
+    audit = draft.get("audit_log")
+    parties = draft.get("parties")
+    reg = draft.get("recipient_delivery_v1")
+    review_events = None
+    if isinstance(reg, dict):
+        recipients = reg.get("recipients")
+        if isinstance(recipients, dict):
+            review_events = recipients.get("review") or recipients.get("review:party_index_1")
+    return {
+        "draft_keys": draft_keys_present(draft),
+        "audit_log_type": type(audit).__name__,
+        "parties_type": type(parties).__name__,
+        "recipient_delivery_v1_type": type(reg).__name__,
+        "review_registry_type": type(reg).__name__ if reg is not None else "NoneType",
+        "review_events_type": type(review_events).__name__ if review_events is not None else "NoneType",
+    }
+
+
+def draft_keys_present(draft: Dict[str, Any]) -> List[str]:
+    return sorted(str(k) for k in draft.keys())[:40]
+
+
+def encode_recipient_delivery_json(payload: Dict[str, Any], *, agreement_id: str) -> str:
+    """Prove JSON serializability before FastAPI sends the response."""
+    try:
+        return json.dumps(payload, default=str, ensure_ascii=False)
+    except Exception as exc:
+        _log.error(
+            "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s "
+            "stage=serialize_response traceback=%s",
+            agreement_id,
+            type(exc).__name__,
+            str(exc)[:500],
+            traceback.format_exc(),
+        )
+        fallback = {
+            "ok": True,
+            "review_sent": bool(payload.get("review_sent")),
+            "signing_invites_sent": bool(payload.get("signing_invites_sent")),
+            "recipients": [],
+        }
+        return json.dumps(fallback)
 
 
 def _coerce_audit_log(audit: Any) -> List[Dict[str, Any]]:
@@ -259,12 +335,31 @@ def _signing_status(
     return "sent"
 
 
-def build_recipient_delivery_status(draft: Dict[str, Any]) -> Dict[str, Any]:
+def build_recipient_delivery_status(
+    draft: Dict[str, Any],
+    *,
+    agreement_id: str = "",
+) -> Dict[str, Any]:
     """Return { ok, review_sent, signing_invites_sent, recipients: [...] }."""
+    aid = (agreement_id or str(draft.get("id") or "")).strip()
+    _log_stage(agreement_id=aid, stage="coerce_audit", draft=draft)
+    _coerce_audit_log(draft.get("audit_log"))
+    _log_stage(agreement_id=aid, stage="coerce_parties", draft=draft)
+    _coerce_parties(draft.get("parties"))
     try:
+        _log_stage(agreement_id=aid, stage="build_registry", draft=draft)
+        get_registry(draft)
+        _log_stage(agreement_id=aid, stage="build_response", draft=draft)
         return _sanitize_delivery_payload(_build_recipient_delivery_status(draft))
-    except Exception:
-        _log.exception("recipient_delivery_status_build_failed")
+    except Exception as exc:
+        _log.error(
+            "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s "
+            "stage=build_response traceback=%s",
+            aid,
+            type(exc).__name__,
+            str(exc)[:500],
+            traceback.format_exc(),
+        )
         return _sanitize_delivery_payload(_emergency_delivery_payload(draft))
 
 
@@ -481,5 +576,10 @@ def _sanitize_delivery_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def draft_keys_present(draft: Dict[str, Any]) -> List[str]:
-    return sorted(str(k) for k in draft.keys())[:40]
+def empty_recipient_delivery_payload() -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "review_sent": False,
+        "signing_invites_sent": False,
+        "recipients": [],
+    }

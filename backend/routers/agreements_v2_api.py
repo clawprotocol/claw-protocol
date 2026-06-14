@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import time
+import traceback
 import uuid
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
@@ -6086,53 +6087,64 @@ def post_agreement_signing_links_sent(
 
 
 @router.get("/{agreement_id}/recipient-delivery-status")
-def get_recipient_delivery_status(agreement_id: str, request: Request) -> Dict[str, Any]:
+def get_recipient_delivery_status(agreement_id: str, request: Request) -> JSONResponse:
     """Owner-facing per-recipient review/signing delivery rows."""
     aid = (agreement_id or "").strip()
-    draft_keys: List[str] = []
+    from backend.services.recipient_delivery_status import (
+        build_recipient_delivery_status,
+        draft_diagnostic_types,
+        empty_recipient_delivery_payload,
+        encode_recipient_delivery_json,
+        _log_stage,
+    )
+
+    def _json_response(payload: Dict[str, Any]) -> JSONResponse:
+        body = encode_recipient_delivery_json(payload, agreement_id=aid)
+        return JSONResponse(status_code=200, content=json.loads(body))
+
     try:
         if not _agreements_write_allowed():
             raise HTTPException(status_code=403, detail="verifier_only")
+        _log_stage(agreement_id=aid, stage="guards_start")
         _owner_mutation_guards(request, aid, surface="recipient_delivery_status")
+        _log_stage(agreement_id=aid, stage="load_draft")
         raw = _load_draft_dict_or_404(aid)
-        from backend.services.recipient_delivery_status import (
-            build_recipient_delivery_status,
-            draft_keys_present,
+        _log_stage(agreement_id=aid, stage="load_draft_ok", draft=raw, extra=draft_diagnostic_types(raw))
+        payload = build_recipient_delivery_status(raw, agreement_id=aid)
+        _log_stage(
+            agreement_id=aid,
+            stage="serialize_response",
+            draft=raw,
+            extra={"recipient_row_count": len(payload.get("recipients") or [])},
         )
-
-        draft_keys = draft_keys_present(raw)
-        return build_recipient_delivery_status(raw)
+        return _json_response(payload)
     except HTTPException:
         raise
     except Exception as exc:
         _agreements_log.error(
-            "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s draft_keys=%s",
+            "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s "
+            "stage=route traceback=%s",
             aid,
             type(exc).__name__,
             str(exc)[:500],
-            ",".join(draft_keys) if draft_keys else "unloaded",
+            traceback.format_exc(),
         )
         try:
             raw = _load_draft_dict_or_404(aid)
-            from backend.services.recipient_delivery_status import build_recipient_delivery_status
-
-            return build_recipient_delivery_status(raw)
+            payload = build_recipient_delivery_status(raw, agreement_id=aid)
+            return _json_response(payload)
         except HTTPException:
             raise
         except Exception as inner_exc:
             _agreements_log.error(
-                "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s draft_keys=%s",
+                "[recipient-delivery-status-error] agreement_id=%s exception_type=%s exception_message=%s "
+                "stage=route_retry traceback=%s",
                 aid,
                 type(inner_exc).__name__,
                 str(inner_exc)[:500],
-                ",".join(draft_keys) if draft_keys else "unloaded",
+                traceback.format_exc(),
             )
-            return {
-                "ok": True,
-                "review_sent": False,
-                "signing_invites_sent": False,
-                "recipients": [],
-            }
+            return _json_response(empty_recipient_delivery_payload())
 
 
 @router.post("/{agreement_id}/recipient-invite-resend")
