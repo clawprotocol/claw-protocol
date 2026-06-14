@@ -1,6 +1,11 @@
-import { useMemo, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
+import { canonicalFlowStackBottomNorm } from "./buildVs01SigningPacketModel";
 import { canonicalPageTypographyPx } from "./vs01CanonicalPageRender";
+import {
+  logVs01CanonicalFlowBodyDomDiagnostics,
+  measureCanonicalFlowBodyDom,
+} from "./vs01CanonicalFlowBodyDomMeasure";
 import {
   buildFlowLineDescriptors,
   flowLinesForPage,
@@ -44,6 +49,7 @@ export function Vs01CanonicalSigningPage({
   pageWidthPx,
 }: Vs01CanonicalSigningPageProps) {
   const { contentRect, initialsBandRect } = page;
+  const flowBodyRef = useRef<HTMLDivElement>(null);
   const { lineHeightPx, fontSizePx } = canonicalPageTypographyPx(pageWidthPx);
   const flowLines = useMemo(() => flowLinesForPage(page), [page]);
   const lineDescriptors = useMemo(
@@ -70,6 +76,17 @@ export function Vs01CanonicalSigningPage({
     "--vs01-signature-signed-ink-weight": String(VS01_SIGNATURE_SIGNED_INK_FONT_WEIGHT),
   } as CSSProperties;
 
+  useLayoutEffect(() => {
+    const flowBody = flowBodyRef.current;
+    if (!flowBody) return;
+    const metrics = measureCanonicalFlowBodyDom(flowBody, page, pageWidthPx);
+    logVs01CanonicalFlowBodyDomDiagnostics(
+      page.pageIndex,
+      metrics,
+      canonicalFlowStackBottomNorm(page),
+    );
+  }, [page, pageWidthPx]);
+
   return (
     <div
       className="vs01-canonical-page-content"
@@ -77,6 +94,7 @@ export function Vs01CanonicalSigningPage({
       data-vs01-canonical-layout-mode="flow"
     >
       <div
+        ref={flowBodyRef}
         className="vs01-canonical-flow-body"
         style={flowBodyStyle}
       >

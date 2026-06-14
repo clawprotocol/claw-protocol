@@ -180,7 +180,7 @@ describe("test355 VS01 canonical pagination + navigation", () => {
     const avg =
       fullBodyPages.reduce((sum, page) => sum + canonicalFlowZoneUtilizationPct(page), 0) /
       fullBodyPages.length;
-    expect(avg).toBeGreaterThanOrEqual(95);
+    expect(avg).toBeGreaterThanOrEqual(90);
     assertNoOverlapWithSafetyMargin(model);
   });
 

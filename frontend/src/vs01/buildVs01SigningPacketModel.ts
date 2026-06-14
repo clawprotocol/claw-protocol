@@ -86,7 +86,7 @@ export const VS01_PACKET_LINE_HEIGHT_PT = 17.5;
 /** Extra lines withheld from pagination estimates (DOM flow pad; primary guard is safety margin). */
 export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 1;
 /** Conservative clearance between flow stack bottom and initials band top (in line heights). */
-export const VS01_PACKET_PAGINATION_SAFETY_MARGIN_LINE_HEIGHTS = 0.75;
+export const VS01_PACKET_PAGINATION_SAFETY_MARGIN_LINE_HEIGHTS = 1.25;
 export const VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT = 6.3;
 
 const CONTENT_X = VS01_PACKET_MARGIN_LEFT_PT / VS01_PACKET_PAGE_WIDTH_PT;
@@ -109,6 +109,16 @@ const CHARS_PER_LINE = Math.floor(
   (VS01_PACKET_PAGE_WIDTH_PT - VS01_PACKET_MARGIN_LEFT_PT - VS01_PACKET_MARGIN_RIGHT_PT) /
   VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT,
 );
+/** Georgia 13px @ canonical content width — DOM pre-wrap wraps sooner than corpus CHARS_PER_LINE. */
+export const VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE = Math.floor(
+  (VS01_PACKET_PAGE_WIDTH_PT - VS01_PACKET_MARGIN_LEFT_PT - VS01_PACKET_MARGIN_RIGHT_PT) / 7.0,
+);
+
+function domVisualWrapLineCount(line: string): number {
+  const t = line.trim();
+  if (!t) return 1;
+  return Math.max(1, Math.ceil(t.length / VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE));
+}
 
 /** Execution-block metadata rows — must stay on separate flow lines (not paragraph-merged). */
 const EXECUTION_METADATA_FIELD_LINE_RE =
@@ -150,15 +160,29 @@ function canonicalFlowLineHeightUnits(line: string): number {
   return 1;
 }
 
+function domVisualStackPadUnits(line: string): number {
+  const t = line.trim();
+  if (!t) return 0;
+  if (t.length > CHARS_PER_LINE) {
+    const corpusWrap = Math.max(1, Math.ceil(t.length / CHARS_PER_LINE));
+    const domWrap = domVisualWrapLineCount(t);
+    return Math.max(0, domWrap - corpusWrap) * 0.95;
+  }
+  if (t.length > VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE) {
+    return 0.9;
+  }
+  return 0;
+}
+
 /** DOM flow stack units — must stay in sync with Vs01CanonicalSigningPage CSS (pre-wrapped flow lines). */
 export function canonicalFlowLineStackStepUnits(line: string): number {
   const t = line.trim();
   if (!t) return VS01_EXECUTION_SPACER_FRAC;
   let units = canonicalFlowLineHeightUnits(line);
-  // normalizeLines/wrapCanonicalTextLine already wrap body copy at CHARS_PER_LINE.
   if (t.length > CHARS_PER_LINE) {
     units *= Math.max(1, Math.ceil(t.length / CHARS_PER_LINE));
   }
+  units += domVisualStackPadUnits(line);
   if (isCanonicalDocumentTitleLine(t)) units += 0.42;
   if (/^\d+(?:\.\d+)*\.\s+/.test(t)) units += 0.06;
   return units;
