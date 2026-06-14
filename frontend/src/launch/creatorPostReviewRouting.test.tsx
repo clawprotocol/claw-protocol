@@ -102,7 +102,7 @@ describe("creator post-review routing", () => {
     render(<SimpleDonePage agreementId="ag_post_review" />);
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/app");
+      expect(mockNavigate).toHaveBeenCalledWith("/app?prepare_signature_links=ag_post_review");
     });
     expect(screen.queryByText("Agreement complete")).toBeNull();
     expect(screen.queryByRole("button", { name: "View verification" })).toBeNull();
@@ -141,12 +141,12 @@ describe("creator post-review routing", () => {
     render(<AppDashboard />);
 
     await waitFor(() => {
-      expect(screen.getByText("Reviews approved")).toBeTruthy();
+      expect(screen.getByText("All reviews complete")).toBeTruthy();
     });
-    expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
-    expect(
-      screen.getByText("Everyone approved this draft. Review field placement, then LawDog sends signing links to all parties."),
-    ).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Prepare and send signing links" })).toBeTruthy();
+    });
+    expect(screen.getByText("All required reviews are complete")).toBeTruthy();
     expect(screen.queryByText("Agreement complete")).toBeNull();
     expect(screen.queryByText("View verification")).toBeNull();
     expect(screen.queryByText("Send this agreement")).toBeNull();
@@ -263,6 +263,28 @@ describe("creator post-review routing", () => {
     await userEvent.click(screen.getByRole("button", { name: "Return to dashboard" }));
     expect(mockNavigate).toHaveBeenCalledWith("/app");
     expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/esign/"));
+  });
+
+  it("keeps completed signed proof on done page without redirecting to prepare handoff", async () => {
+    const signedPayload = {
+      ...verifyPayload,
+      agreement_id: "ag_signed_proof",
+      signature_status: { fully_executed: true },
+    };
+    vi.spyOn(agreementPublicVerify, "fetchPublicAgreementVerify").mockResolvedValue(signedPayload);
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: allApprovedDraft("ag_signed_proof"),
+      lockedVersionId: "v1",
+    });
+
+    render(<SimpleDonePage agreementId="ag_signed_proof" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Agreement complete")).toBeTruthy();
+    });
+    expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining("prepare_signature_links"));
+    expect(mockNavigate).not.toHaveBeenCalledWith("/app");
   });
 
   it("keeps public recipient review-complete screen unchanged", async () => {

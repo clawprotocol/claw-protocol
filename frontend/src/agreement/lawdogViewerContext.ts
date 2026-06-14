@@ -54,7 +54,7 @@ export function appendQaRecipientSimulationQueryToReviewHref(
   const id = agreementId.trim();
   const href = reviewHref.trim();
   if (!href || !id) return reviewHref;
-  const ownerReturn = `/app/done/${encodeURIComponent(id)}`;
+  const ownerReturn = `/app?focus=${encodeURIComponent(id)}`;
   try {
     const base = typeof window !== "undefined" ? window.location.origin : "https://lawdog.local";
     const url = new URL(href, base);

@@ -28,7 +28,7 @@ import {
 } from "./creatorDashboardCopy";
 import {
   creatorDashboardFocusAgreementPath,
-  creatorDashboardReviewLinkReadyPath,
+  creatorDashboardCompletedProofPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
 
@@ -137,7 +137,7 @@ export function creatorDashboardPrimaryAction(
     case "completed":
       return {
         label: CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
-        path: creatorDashboardReviewLinkReadyPath(row.id),
+        path: creatorDashboardCompletedProofPath(row.id),
         emphasis: "primary",
       };
     case "signing_in_progress":
@@ -148,9 +148,10 @@ export function creatorDashboardPrimaryAction(
     case "in_review":
       if (manualReviewLinkPage) {
         return {
-          label: "View Review Status",
-          path: creatorDashboardReviewLinkReadyPath(row.id),
-          emphasis: "secondary",
+          label: CREATOR_TRACK_REVIEW_STATUS_LABEL,
+          path: creatorDashboardFocusAgreementPath(row.id),
+          emphasis: "primary",
+          kind: "focus_review_status",
         };
       }
       if (Boolean((row.review_sent_at || "").trim())) {
@@ -193,17 +194,17 @@ export function creatorDashboardSupplementalActions(
     if (manualReviewLinkPage) {
       out.push({
         label: CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL,
-        path: creatorDashboardReviewLinkReadyPath(row.id),
+        path: creatorDashboardFocusAgreementPath(row.id),
         testIdSuffix: "open-review-link",
       });
     }
     return out;
   }
 
-  if (status === "completed" || status === "signing_in_progress" || manualReviewLinkPage) {
+  if (status === "completed" || status === "signing_in_progress") {
     out.push({
       label: "Open workspace",
-      path: creatorDashboardReviewLinkReadyPath(row.id),
+      path: creatorDashboardCompletedProofPath(row.id),
       testIdSuffix: "open-workspace",
     });
   }
@@ -221,7 +222,7 @@ export function creatorDashboardSupplementalActions(
   if (status === "completed") {
     out.push({
       label: "Download final",
-      path: creatorDashboardReviewLinkReadyPath(row.id),
+      path: creatorDashboardCompletedProofPath(row.id),
       testIdSuffix: "download-final",
     });
   }
@@ -372,16 +373,12 @@ export function resolveCreatorDashboardIndexPreviewForDiagnostics(row: Workspace
   };
 }
 
-/** Creator proof/done page should not replace the dashboard before signing completes. */
+/** Legacy /app/done bookmark — redirect to canonical signature-prep when all reviews approved and unsigned. */
 export function shouldCreatorRedirectPreSignatureDoneToDashboard(args: {
   signed: boolean | null;
   signingLockActive: boolean;
   draft: AgreementDraft | null | undefined;
-  isPaidProReviewDonePath: boolean;
-  confirmedSend?: boolean;
 }): boolean {
-  if (args.isPaidProReviewDonePath) return false;
-  if (args.confirmedSend) return false;
   if (args.signed === true) return false;
   if (args.signingLockActive) return false;
   return resolveAllReviewPartiesApproved(args.draft);

@@ -3,11 +3,10 @@ import type { AgreementDraft } from "../agreement/agreementTypes";
 import {
   isReviewDeliveryModeExplicitlyManual,
   readReviewDeliveryMode,
-  reviewDeliveryModeAllowsEmailSend,
   type ReviewDeliveryMode,
 } from "./simpleProduct/reviewDeliveryConfig";
 
-/** Owner dashboard should surface /app/done/{id} only when review delivery is explicitly manual. */
+/** @deprecated Pre-signature review tracking uses dashboard focus; retained for env diagnostics only. */
 export function creatorDashboardUsesManualReviewLinkPage(
   mode: ReviewDeliveryMode = readReviewDeliveryMode(),
 ): boolean {
@@ -15,8 +14,14 @@ export function creatorDashboardUsesManualReviewLinkPage(
   return isReviewDeliveryModeExplicitlyManual();
 }
 
-export function creatorDashboardReviewLinkReadyPath(agreementId: string): string {
+/** Completed / signed agreement proof surface (legacy route). */
+export function creatorDashboardCompletedProofPath(agreementId: string): string {
   return `/app/done/${encodeURIComponent(agreementId.trim())}`;
+}
+
+/** @deprecated Use creatorDashboardCompletedProofPath for signed proof only. */
+export function creatorDashboardReviewLinkReadyPath(agreementId: string): string {
+  return creatorDashboardCompletedProofPath(agreementId);
 }
 
 /** In-app focus target for dashboard review status (scroll, no obsolete done page). */
@@ -29,18 +34,16 @@ export function creatorDashboardPrepareSignatureLinksPath(agreementId: string): 
   return `/app?prepare_signature_links=${encodeURIComponent(agreementId.trim())}`;
 }
 
-/** Legacy /app/done/:id without local send state — route to modern signature-prep dashboard handoff. */
+/** Legacy /app/done/:id bookmark — all reviews approved, unsigned → canonical signature-prep handoff. */
 export function shouldRedirectLegacyDoneToPrepareSignatureLinks(args: {
   signed: boolean | null;
   draft: AgreementDraft | null | undefined;
-  confirmedSend: boolean;
+  confirmedSend?: boolean;
   mode?: ReviewDeliveryMode;
 }): boolean {
-  if (args.confirmedSend) return false;
+  void args.confirmedSend;
+  void args.mode;
   if (args.signed === true) return false;
   if (!args.draft) return false;
-  if (!resolveAllReviewPartiesApproved(args.draft)) return false;
-  const mode = args.mode ?? readReviewDeliveryMode();
-  if (isReviewDeliveryModeExplicitlyManual()) return false;
-  return reviewDeliveryModeAllowsEmailSend(mode);
+  return resolveAllReviewPartiesApproved(args.draft);
 }

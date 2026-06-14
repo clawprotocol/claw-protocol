@@ -454,6 +454,13 @@ export function AppDashboard() {
         });
 
         if (bridgeResult.navigated && bridgeResult.vs01RouteAttempted) {
+          const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+          params.delete("prepare_signature_links");
+          const nextSearch = params.toString();
+          const cleanPath = nextSearch ? `/app?${nextSearch}` : "/app";
+          if (typeof window !== "undefined") {
+            window.history.replaceState(window.history.state, "", cleanPath);
+          }
           return;
         }
 
@@ -474,7 +481,7 @@ export function AppDashboard() {
         setPrepareBusyAgreementId(null);
       }
     },
-    [navigate, prepareBusyAgreementId, reviewRowsByAgreementId, rows],
+    [navigate, prepareBusyAgreementId, reviewRowsByAgreementId, rows, search],
   );
 
   useEffect(() => {

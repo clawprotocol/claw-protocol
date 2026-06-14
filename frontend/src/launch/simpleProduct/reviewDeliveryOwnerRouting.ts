@@ -1,9 +1,8 @@
 import {
-  isReviewDeliveryModeExplicitlyManual,
   readReviewDeliveryMode,
-  reviewDeliveryModeAllowsEmailSend,
   type ReviewDeliveryMode,
 } from "./reviewDeliveryConfig";
+import { creatorDashboardFocusAgreementPath } from "../creatorDashboardReviewLinkRouting";
 
 export const REVIEW_INVITATIONS_SENT_TITLE = "Review invitations sent";
 
@@ -17,7 +16,7 @@ export type OwnerPostReviewRouteReason =
   | "review_sent_failed_fallback"
   | "review_email_delivery_incomplete";
 
-export type OwnerPostReviewDestination = "dashboard" | "done";
+export type OwnerPostReviewDestination = "dashboard";
 
 export type OwnerPostReviewRouteDecision = {
   path: string;
@@ -45,57 +44,23 @@ export function resolveOwnerPostReviewSendRoute(
   const deliveryAttempted = options?.reviewEmailDeliveryAttempted === true;
   const inviteEmailsSent = options?.reviewInviteEmailsSent === true;
   const id = agreementId.trim();
-  const donePath = `/app/done/${encodeURIComponent(id)}`;
+  const dashboardPath = "/app";
+  const focusPath = creatorDashboardFocusAgreementPath(id);
 
-  if (isReviewDeliveryModeExplicitlyManual()) {
+  if (!deliveryAttempted || !inviteEmailsSent) {
     return {
-      path: donePath,
-      destination: "done",
-      reason: "explicit_manual_mode",
-      deliveryMode: mode,
-      reviewSentOk,
-    };
-  }
-  if (reviewDeliveryModeAllowsEmailSend(mode)) {
-    if (!deliveryAttempted) {
-      return {
-        path: donePath,
-        destination: "done",
-        reason: "review_sent_failed_fallback",
-        deliveryMode: mode,
-        reviewSentOk: false,
-      };
-    }
-    if (!inviteEmailsSent) {
-      return {
-        path: donePath,
-        destination: "done",
-        reason: "review_email_delivery_incomplete",
-        deliveryMode: mode,
-        reviewSentOk: false,
-      };
-    }
-    return {
-      path: "/app",
+      path: focusPath,
       destination: "dashboard",
-      reason: "delivery_mode_email",
+      reason: !deliveryAttempted ? "review_sent_failed_fallback" : "review_email_delivery_incomplete",
       deliveryMode: mode,
-      reviewSentOk,
+      reviewSentOk: false,
     };
   }
-  if (reviewSentOk) {
-    return {
-      path: "/app",
-      destination: "dashboard",
-      reason: "review_sent_ok",
-      deliveryMode: mode,
-      reviewSentOk,
-    };
-  }
+
   return {
-    path: donePath,
-    destination: "done",
-    reason: "review_sent_failed_fallback",
+    path: dashboardPath,
+    destination: "dashboard",
+    reason: reviewSentOk ? "review_sent_ok" : "delivery_mode_email",
     deliveryMode: mode,
     reviewSentOk,
   };
@@ -113,9 +78,9 @@ export function resolveOwnerPostReviewSendPath(
 }
 
 export function ownerPostReviewSendUsesDashboard(
-  mode: ReviewDeliveryMode = readReviewDeliveryMode(),
+  _mode: ReviewDeliveryMode = readReviewDeliveryMode(),
 ): boolean {
-  return reviewDeliveryModeAllowsEmailSend(mode);
+  return true;
 }
 
 export function logReviewFirstOwnerRouteResolved(payload: {

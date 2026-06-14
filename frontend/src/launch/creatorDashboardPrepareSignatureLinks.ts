@@ -23,7 +23,10 @@ export async function navigateCreatorPrepareSignatureLinks(options: {
   /** When already loaded (dashboard hydration / prepare click), skip redundant fetch. */
   draft?: AgreementDraft | null;
   lockedVersionId?: string | null;
-  /** When false, do not fall back to /app/done on bridge failure (dashboard shows inline notice). */
+  /**
+   * When true, navigate to negotiation workspace on missing draft / bridge failure (legacy tests only).
+   * Default false — production surfaces show inline notices or stay put.
+   */
   navigateOnBridgeFailure?: boolean;
   /** Diagnostic source label (dashboard vs review-complete). */
   logSource?: "creator_dashboard" | "creator_review_complete";
@@ -46,8 +49,8 @@ export async function navigateCreatorPrepareSignatureLinks(options: {
     draft = fetched.draft;
     lockedVersionId = fetched.lockedVersionId;
     if (!fetched.ok || !draft) {
-      const destination = `/app/done/${encodeURIComponent(id)}`;
-      if (options.navigateOnBridgeFailure !== false) {
+      const destination = `/app/agreements/${encodeURIComponent(id)}`;
+      if (options.navigateOnBridgeFailure === true) {
         void options.navigate(destination);
         return {
           navigated: true,
@@ -111,8 +114,8 @@ export async function navigateCreatorPrepareSignatureLinks(options: {
     };
   }
 
-  if (options.navigateOnBridgeFailure !== false) {
-    const destination = `/app/done/${encodeURIComponent(id)}`;
+  if (options.navigateOnBridgeFailure === true) {
+    const destination = `/app/agreements/${encodeURIComponent(id)}`;
     void options.navigate(destination);
     return {
       navigated: true,

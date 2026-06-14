@@ -15,9 +15,9 @@ describe("lawdogViewerContext", () => {
     expect(resolveLawdogViewerContextFromReviewRoute(`?t=abc&${LAWDOG_QA_RECIPIENT_SIM_QUERY}=1`)).toBe(
       "qa_recipient_simulation",
     );
-    expect(parseRecipientReviewRouteFlags(`?${LAWDOG_QA_RECIPIENT_SIM_QUERY}=1&${LAWDOG_QA_OWNER_RETURN_QUERY}=%2Fapp%2Fdone%2Fag_1`)).toEqual({
+    expect(parseRecipientReviewRouteFlags(`?${LAWDOG_QA_RECIPIENT_SIM_QUERY}=1&${LAWDOG_QA_OWNER_RETURN_QUERY}=%2Fapp%3Ffocus%3Dag_1`)).toEqual({
       qaRecipientSimulation: true,
-      ownerReturnPath: "/app/done/ag_1",
+      ownerReturnPath: "/app?focus=ag_1",
     });
   });
 
@@ -27,13 +27,13 @@ describe("lawdogViewerContext", () => {
     expect(showCreatorAccountChrome("qa_recipient_simulation")).toBe(false);
   });
 
-  it("routes QA simulation Home to Review Link Ready when ownerReturn is present", () => {
+  it("routes QA simulation Home to dashboard focus when ownerReturn is present", () => {
     expect(resolveRecipientProductNavAction("public_recipient", null)).toBeNull();
     expect(
-      resolveRecipientProductNavAction("qa_recipient_simulation", "/app/done/ag_test"),
+      resolveRecipientProductNavAction("qa_recipient_simulation", "/app?focus=ag_test"),
     ).toEqual({
       label: "← Review Link Ready",
-      path: "/app/done/ag_test",
+      path: "/app?focus=ag_test",
     });
     expect(resolveRecipientProductNavAction("qa_recipient_simulation", null)).toEqual({
       label: "← Home",
@@ -47,6 +47,6 @@ describe("lawdogViewerContext", () => {
       "ag_qa",
     );
     expect(href).toContain(`${LAWDOG_QA_RECIPIENT_SIM_QUERY}=1`);
-    expect(href).toContain(`${LAWDOG_QA_OWNER_RETURN_QUERY}=%2Fapp%2Fdone%2Fag_qa`);
+    expect(href).toContain(`${LAWDOG_QA_OWNER_RETURN_QUERY}=%2Fapp%3Ffocus%3Dag_qa`);
   });
 });

@@ -123,6 +123,22 @@ describe("creatorDashboardSignatureTrack", () => {
     expect(action.label).toBe(CREATOR_COMPLETE_SIGNER_DETAILS_LABEL);
   });
 
+  it("uses dashboard focus for manual in-review tracking instead of done page", () => {
+    const pendingDraft: AgreementDraft = {
+      ...partyTwoApprovedDraft,
+      audit_log: [],
+    };
+    const row = indexRow({ review_approvals_completed: 0 });
+    const gate = resolveCreatorDashboardReviewGate(row, [], { draft: pendingDraft });
+    const action = resolveCreatorDashboardSignatureTrackAction(row, gate, {
+      draft: pendingDraft,
+      manualReviewLinkPage: true,
+    });
+    expect(action.kind).toBe("focus_review_status");
+    expect(action.path).toBe("/app?focus=ag_track");
+    expect(action.path).not.toContain("/app/done/");
+  });
+
   it("routes revision requests to review suggested changes on done page", () => {
     const draft: AgreementDraft = {
       ...partyTwoApprovedDraft,

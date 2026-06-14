@@ -4,6 +4,7 @@ import { LawdogDashboardLayout } from "./LawdogProductNav";
 import { fetchWorkspaceIndex, type WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { dedupeWorkspaceIndexAgreements } from "./workspaceIndexDedupe";
 import { deriveCreatorDashboardStatus, displayCreatorAgreementTitle } from "./creatorDashboardPresentation";
+import { creatorDashboardCompletedProofPath } from "./creatorDashboardReviewLinkRouting";
 import {
   deriveLawdogProductStatus,
   formatLawdogDashboardDate,
@@ -66,7 +67,14 @@ export function LawdogSignaturesPage() {
                 <button
                   type="button"
                   className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                  onClick={() => navigate(`/app/done/${encodeURIComponent(row.id)}`)}
+                  onClick={() => {
+                    const status = deriveCreatorDashboardStatus(row);
+                    if (status === "completed") {
+                      navigate(creatorDashboardCompletedProofPath(row.id));
+                      return;
+                    }
+                    navigate(`/app/send/${encodeURIComponent(row.id)}`);
+                  }}
                 >
                   Open
                 </button>

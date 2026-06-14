@@ -30,53 +30,85 @@ describe("reviewDeliveryOwnerRouting", () => {
     ).toBe("delivery_mode_email");
   });
 
-  it("routes to done when email mode delivery was not attempted", () => {
+  it("routes to dashboard focus when email mode delivery was not attempted", () => {
     const route = resolveOwnerPostReviewSendRoute("ag_email_skip", {
       mode: "email",
       reviewEmailDeliveryAttempted: false,
       reviewInviteEmailsSent: false,
     });
-    expect(route.path).toBe("/app/done/ag_email_skip");
+    expect(route.path).toBe("/app?focus=ag_email_skip");
+    expect(route.destination).toBe("dashboard");
     expect(route.reason).toBe("review_sent_failed_fallback");
   });
 
-  it("routes to done when email mode delivery attempted but no invite marker", () => {
+  it("routes to dashboard focus when email mode delivery attempted but no invite marker", () => {
     const route = resolveOwnerPostReviewSendRoute("ag_email_incomplete", {
       mode: "email",
       reviewEmailDeliveryAttempted: true,
       reviewInviteEmailsSent: false,
     });
-    expect(route.path).toBe("/app/done/ag_email_incomplete");
+    expect(route.path).toBe("/app?focus=ag_email_incomplete");
     expect(route.reason).toBe("review_email_delivery_incomplete");
   });
 
-  it("routes owner to review link ready page when manual mode is explicit", () => {
+  it("routes owner to dashboard when manual mode sends review successfully", () => {
     vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual");
-    expect(ownerPostReviewSendUsesDashboard("manual")).toBe(false);
-    expect(resolveOwnerPostReviewSendPath("ag_manual_1", "manual")).toBe("/app/done/ag_manual_1");
+    expect(ownerPostReviewSendUsesDashboard("manual")).toBe(true);
     expect(
-      resolveOwnerPostReviewSendRoute("ag_manual_1", { reviewSentOk: true }).reason,
-    ).toBe("explicit_manual_mode");
+      resolveOwnerPostReviewSendPath("ag_manual_1", {
+        mode: "manual",
+        reviewEmailDeliveryAttempted: true,
+        reviewInviteEmailsSent: true,
+        reviewSentOk: true,
+      }),
+    ).toBe("/app");
+    expect(
+      resolveOwnerPostReviewSendRoute("ag_manual_1", {
+        reviewEmailDeliveryAttempted: true,
+        reviewInviteEmailsSent: true,
+        reviewSentOk: true,
+      }).reason,
+    ).toBe("review_sent_ok");
+  });
+
+  it("routes manual mode without delivery markers to dashboard focus, not done", () => {
+    vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual");
+    expect(
+      resolveOwnerPostReviewSendPath("ag_manual_pending", {
+        mode: "manual",
+        reviewEmailDeliveryAttempted: false,
+      }),
+    ).toBe("/app?focus=ag_manual_pending");
   });
 
   it("routes to dashboard when review-sent ok and delivery env is unset", () => {
     vi.unstubAllEnvs();
-    const route = resolveOwnerPostReviewSendRoute("ag_runtime_1", { reviewSentOk: true });
+    const route = resolveOwnerPostReviewSendRoute("ag_runtime_1", {
+      reviewSentOk: true,
+      reviewEmailDeliveryAttempted: true,
+      reviewInviteEmailsSent: true,
+    });
     expect(route.path).toBe("/app");
     expect(route.destination).toBe("dashboard");
     expect(route.reason).toBe("review_sent_ok");
   });
 
-  it("missing VITE_REVIEW_DELIVERY_MODE with review-sent ok does not route to done", () => {
+  it("missing VITE_REVIEW_DELIVERY_MODE with review-sent ok routes to dashboard", () => {
     vi.unstubAllEnvs();
-    expect(resolveOwnerPostReviewSendPath("ag_missing_env", { reviewSentOk: true })).toBe("/app");
+    expect(
+      resolveOwnerPostReviewSendPath("ag_missing_env", {
+        reviewSentOk: true,
+        reviewEmailDeliveryAttempted: true,
+        reviewInviteEmailsSent: true,
+      }),
+    ).toBe("/app");
   });
 
-  it("falls back to done when review-sent failed and env is unset", () => {
+  it("falls back to dashboard focus when review-sent failed and env is unset", () => {
     vi.unstubAllEnvs();
     const route = resolveOwnerPostReviewSendRoute("ag_fail_1", { reviewSentOk: false });
-    expect(route.path).toBe("/app/done/ag_fail_1");
-    expect(route.destination).toBe("done");
+    expect(route.path).toBe("/app?focus=ag_fail_1");
+    expect(route.destination).toBe("dashboard");
     expect(route.reason).toBe("review_sent_failed_fallback");
   });
 

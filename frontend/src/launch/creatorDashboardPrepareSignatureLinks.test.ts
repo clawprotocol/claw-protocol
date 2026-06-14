@@ -62,7 +62,7 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
     expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/done/"));
   });
 
-  it("falls back to review link page when VS01 seed fails and fallback enabled", async () => {
+  it("falls back to negotiation workspace when VS01 seed fails and legacy fallback enabled", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
       ok: true,
       draft: baseDraft(),
@@ -79,9 +79,29 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
     });
 
     expect(result.navigated).toBe(true);
-    expect(result.destination).toBe("/app/done/ag_ready");
+    expect(result.destination).toBe("/app/agreements/ag_ready");
     expect(result.blockReason).toBe("vs01_bridge_failed");
-    expect(mockNavigate).toHaveBeenCalledWith("/app/done/ag_ready");
+    expect(mockNavigate).toHaveBeenCalledWith("/app/agreements/ag_ready");
+  });
+
+  it("does not fall back to /app/done by default when VS01 seed fails", async () => {
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: baseDraft(),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign").mockResolvedValue(
+      false,
+    );
+
+    const result = await navigateCreatorPrepareSignatureLinks({
+      agreementId: "ag_ready",
+      navigate: mockNavigate,
+    });
+
+    expect(result.navigated).toBe(false);
+    expect(result.blockReason).toBe("vs01_bridge_failed");
+    expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/done/"));
   });
 
   it("stays put when VS01 seed fails and dashboard disables fallback", async () => {

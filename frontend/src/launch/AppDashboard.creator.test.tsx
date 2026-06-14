@@ -94,6 +94,38 @@ describe("AppDashboard creator-centric surface", () => {
     launchNavState.hash = "";
   });
 
+  it("auto-launches VS01 from owner email prepare_signature_links deep link and clears query", async () => {
+    launchNavState.search = "?prepare_signature_links=ag_ready";
+    const replaceState = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
+    vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign")
+      .mockImplementation(async (options) => {
+        options.navigate("/app/esign/doc_email_cta?agreement_bridge=1");
+        return true;
+      });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [indexRow({ id: "ag_ready" })],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_email_cta?agreement_bridge=1");
+    });
+    expect(replaceState).toHaveBeenCalledWith(window.history.state, "", "/app");
+    replaceState.mockRestore();
+  });
+
   it("shows dashboard copy and prepare signature links CTA after both approvals", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [indexRow({ id: "ag_ready" })],
@@ -458,7 +490,7 @@ describe("AppDashboard creator-centric surface", () => {
     expect(mockNavigate).not.toHaveBeenCalledWith("/app/done/ag_ready");
   });
 
-  it("falls back to review link page when VS01 bridge fails with legacy fallback enabled", async () => {
+  it("falls back to negotiation workspace when VS01 bridge fails with legacy fallback enabled", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
       ok: true,
       draft: draftWithParties(),
@@ -477,8 +509,8 @@ describe("AppDashboard creator-centric surface", () => {
       navigateOnBridgeFailure: true,
     });
 
-    expect(result.destination).toBe("/app/done/ag_ready");
-    expect(mockLegacyNavigate).toHaveBeenCalledWith("/app/done/ag_ready");
+    expect(result.destination).toBe("/app/agreements/ag_ready");
+    expect(mockLegacyNavigate).toHaveBeenCalledWith("/app/agreements/ag_ready");
   });
 
   it("prepare click uses cached review rows when signing-lock draft omits party approvals", async () => {

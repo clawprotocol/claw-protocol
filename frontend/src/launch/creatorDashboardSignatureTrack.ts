@@ -12,7 +12,7 @@ import {
 } from "./creatorDashboardCopy";
 import {
   creatorDashboardFocusAgreementPath,
-  creatorDashboardReviewLinkReadyPath,
+  creatorDashboardCompletedProofPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
 import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
@@ -108,7 +108,7 @@ export function resolveCreatorDashboardSignatureTrackAction(
     return {
       kind: "navigate",
       label: CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
-      path: creatorDashboardReviewLinkReadyPath(row.id),
+      path: creatorDashboardCompletedProofPath(row.id),
       emphasis: "primary",
     };
   }
@@ -151,10 +151,10 @@ export function resolveCreatorDashboardSignatureTrackAction(
     }
     if (manualReviewLinkPage) {
       return {
-        kind: "navigate",
-        label: "View Review Status",
-        path: creatorDashboardReviewLinkReadyPath(row.id),
-        emphasis: "secondary",
+        kind: "focus_review_status",
+        label: CREATOR_TRACK_REVIEW_STATUS_LABEL,
+        path: creatorDashboardFocusAgreementPath(row.id),
+        emphasis: "primary",
       };
     }
     return {

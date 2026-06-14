@@ -112,7 +112,6 @@ import {
 } from "../creatorDashboardCopy";
 import {
   creatorDashboardPrepareSignatureLinksPath,
-  shouldRedirectLegacyDoneToPrepareSignatureLinks,
 } from "../creatorDashboardReviewLinkRouting";
 import { resolveAllReviewPartiesApproved } from "../../agreement/recipientApprovedWaitingPresentation";
 import { shouldCreatorRedirectPreSignatureDoneToDashboard } from "../creatorDashboardPresentation";
@@ -327,21 +326,13 @@ export function SimpleDonePage(props: { agreementId: string }) {
         signed,
         signingLockActive,
         draft: ownerHandoffDraft,
-        isPaidProReviewDonePath,
-        confirmedSend,
       })
     ) {
       return;
     }
-    const destination = shouldRedirectLegacyDoneToPrepareSignatureLinks({
-      signed,
-      draft: ownerHandoffDraft,
-      confirmedSend,
-    })
-      ? creatorDashboardPrepareSignatureLinksPath(agreementId)
-      : "/app";
+    const destination = creatorDashboardPrepareSignatureLinksPath(agreementId);
     navigate(destination);
-  }, [agreementId, confirmedSend, isPaidProReviewDonePath, navigate, ownerHandoffDraft, ownerSigningLockVid, signed]);
+  }, [agreementId, navigate, ownerHandoffDraft, ownerSigningLockVid, signed]);
 
   useEffect(() => {
     ownerSuccessLoggedRef.current = null;
@@ -1176,8 +1167,6 @@ export function SimpleDonePage(props: { agreementId: string }) {
       signed,
       signingLockActive: signingLockActivePreProof,
       draft: ownerHandoffDraft,
-      isPaidProReviewDonePath,
-      confirmedSend,
     });
 
   if (redirectPreSignatureDoneToDashboard) {

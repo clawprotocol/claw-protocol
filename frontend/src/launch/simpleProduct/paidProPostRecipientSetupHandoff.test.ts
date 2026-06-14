@@ -18,7 +18,7 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("resolveReviewFirstMintPolicyGate");
     expect(s).toContain("postReviewSentServer");
     expect(s).toContain("maybePostReviewSentAfterReviewFirstHandoff");
-    expect(s).toContain("/app/done/");
+    expect(s).not.toContain('path: "/app/done/');
     expect(s).not.toContain("/app/send/");
   });
 

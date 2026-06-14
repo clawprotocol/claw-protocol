@@ -125,7 +125,7 @@ describe("paid Pro review-first review-sent handoff", () => {
     writeResumeSpy.mockRestore();
   });
 
-  it("explicit manual mode still routes to done after successful review-sent", async () => {
+  it("explicit manual mode routes to dashboard after successful review-sent", async () => {
     vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual");
     const navigate = vi.fn();
     const result = await executePaidProPostRecipientSetupHandoff({
@@ -138,11 +138,12 @@ describe("paid Pro review-first review-sent handoff", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.destination).toBe("done");
-      expect(result.ownerRoutePath).toBe("/app/done/ag_review_1");
+      expect(result.destination).toBe("dashboard");
+      expect(result.ownerRoutePath).toBe("/app");
     }
     expect(postReviewSentServer).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith("/app/done/ag_review_1");
+    expect(navigate).toHaveBeenCalledWith("/app");
+    expect(navigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/done/"));
   });
 
   it("routes owner to dashboard when email delivery mode env is active and invite sent", async () => {
@@ -160,7 +161,7 @@ describe("paid Pro review-first review-sent handoff", () => {
     expect(navigate).toHaveBeenCalledWith("/app");
   });
 
-  it("routes to done in email mode when review-sent ok but no invite marker", async () => {
+  it("routes to dashboard focus in email mode when review-sent ok but no invite marker", async () => {
     vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual_and_email");
     vi.mocked(postReviewSentServer).mockResolvedValue(reviewSentNoInvite);
     const navigate = vi.fn();
@@ -175,13 +176,13 @@ describe("paid Pro review-first review-sent handoff", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.destination).toBe("done");
-      expect(result.ownerRoutePath).toBe("/app/done/ag_review_no_invite");
+      expect(result.destination).toBe("dashboard");
+      expect(result.ownerRoutePath).toBe("/app?focus=ag_review_no_invite");
     }
-    expect(navigate).toHaveBeenCalledWith("/app/done/ag_review_no_invite");
+    expect(navigate).toHaveBeenCalledWith("/app?focus=ag_review_no_invite");
   });
 
-  it("review-sent failure routes to done when env is unset", async () => {
+  it("review-sent failure routes to dashboard focus when env is unset", async () => {
     vi.unstubAllEnvs();
     vi.mocked(postReviewSentServer).mockResolvedValue({ ok: false, inviteEmailsSent: false });
     const navigate = vi.fn();
@@ -195,8 +196,8 @@ describe("paid Pro review-first review-sent handoff", () => {
     });
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.destination).toBe("done");
-    expect(navigate).toHaveBeenCalledWith("/app/done/ag_review_fail_sent");
+    if (result.ok) expect(result.destination).toBe("dashboard");
+    expect(navigate).toHaveBeenCalledWith("/app?focus=ag_review_fail_sent");
   });
 
   it("maybePostReviewSentAfterReviewFirstHandoff still posts when mint preset review_sent_at", async () => {

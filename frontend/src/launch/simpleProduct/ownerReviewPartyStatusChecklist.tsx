@@ -8,7 +8,6 @@ import { openRecipientProposalsForParticipant } from "../../agreement/recipientP
 import { findLastAcceptedProposalProposer } from "../../agreement/reviewCorpusAuthority";
 import {
   resolveReviewLinkAssumedOwnerPartyIndex,
-  rowReadyForReviewLinkInvite,
 } from "./reviewLinkRecipientEmailMerge";
 
 export type OwnerReviewPartyStatus =
@@ -52,7 +51,8 @@ export function partyRequiresReviewApproval(
   if (hasExplicitReviewer) return false;
   const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(parties);
   if (partyIndex === ownerIdx) return false;
-  return rowReadyForReviewLinkInvite(party, partyIndex, parties);
+  // Manual review links do not require email on draft; any named counterparty must approve.
+  return Boolean((party.name || "").trim());
 }
 
 /** Required reviewer rows for owner dashboard / signature-prep gating — excludes author/owner unless reviewer role. */

@@ -6,7 +6,7 @@ import {
   displayCreatorAgreementTitle,
 } from "./creatorDashboardPresentation";
 import { CREATOR_MANAGE_RECIPIENTS_LABEL } from "./creatorDashboardCopy";
-import { creatorDashboardReviewLinkReadyPath } from "./creatorDashboardReviewLinkRouting";
+import { creatorDashboardCompletedProofPath } from "./creatorDashboardReviewLinkRouting";
 import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
 import {
   deriveLawdogProductStatus,
@@ -50,7 +50,7 @@ export function LawdogAgreementsTable(props: Props) {
             const internalStatus = deriveCreatorDashboardStatus(row);
             const productStatus = deriveLawdogProductStatus(row);
             const openAction = creatorDashboardPrimaryAction(row);
-            const donePath = creatorDashboardReviewLinkReadyPath(row.id);
+            const donePath = creatorDashboardCompletedProofPath(row.id);
             const canDownload = internalStatus === "completed";
             const contentUnavailable = row.content_unavailable === true;
 

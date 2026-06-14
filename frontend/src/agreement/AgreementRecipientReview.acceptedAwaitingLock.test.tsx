@@ -106,10 +106,8 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
     });
 
     expect(screen.getByTestId("recipient-accepted-awaiting-lock-root")).toBeTruthy();
-    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review submitted");
-    expect(screen.getByTestId("recipient-approved-waiting-body").textContent).toContain(
-      "remaining reviewer(s)",
-    );
+    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("All reviews complete");
+    expect(screen.getByTestId("recipient-approved-waiting-body").textContent).toMatch(/signature links/i);
     expect(screen.getByTestId("recipient-approved-waiting-body").textContent).not.toMatch(
       /sender will finalize/i,
     );
@@ -291,7 +289,7 @@ describe("AgreementRecipientReview post-accept awaiting signing_lock", () => {
       expect(screen.getByTestId("recipient-accepted-awaiting-lock-root")).toBeTruthy();
     });
 
-    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review submitted");
+    expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("All reviews complete");
     expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Check for updates" })).toBeNull();
     expect(screen.queryByText("Account")).toBeNull();

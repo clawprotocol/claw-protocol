@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  creatorDashboardCompletedProofPath,
   creatorDashboardFocusAgreementPath,
   creatorDashboardPrepareSignatureLinksPath,
   creatorDashboardReviewLinkReadyPath,
@@ -27,7 +28,8 @@ describe("creatorDashboardReviewLinkRouting", () => {
     expect(creatorDashboardUsesManualReviewLinkPage()).toBe(false);
   });
 
-  it("builds dashboard focus and done paths", () => {
+  it("builds dashboard focus, prepare, and completed proof paths", () => {
+    expect(creatorDashboardCompletedProofPath("ag_1")).toBe("/app/done/ag_1");
     expect(creatorDashboardReviewLinkReadyPath("ag_1")).toBe("/app/done/ag_1");
     expect(creatorDashboardFocusAgreementPath("ag_1")).toBe("/app?focus=ag_1");
     expect(creatorDashboardPrepareSignatureLinksPath("ag_1")).toBe(
@@ -35,7 +37,7 @@ describe("creatorDashboardReviewLinkRouting", () => {
     );
   });
 
-  it("redirects legacy done bookmarks when email delivery and all reviews approved", () => {
+  it("redirects legacy done bookmarks when all reviews approved and unsigned", () => {
     const draft = {
       parties: [
         { id: "p1", name: "Owner", role: "owner", email: "o@example.com" },
@@ -49,23 +51,21 @@ describe("creatorDashboardReviewLinkRouting", () => {
       shouldRedirectLegacyDoneToPrepareSignatureLinks({
         signed: false,
         draft,
-        confirmedSend: false,
       }),
     ).toBe(true);
-    expect(
-      shouldRedirectLegacyDoneToPrepareSignatureLinks({
-        signed: false,
-        draft,
-        confirmedSend: true,
-      }),
-    ).toBe(false);
 
     vi.stubEnv("VITE_REVIEW_DELIVERY_MODE", "manual");
     expect(
       shouldRedirectLegacyDoneToPrepareSignatureLinks({
         signed: false,
         draft,
-        confirmedSend: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldRedirectLegacyDoneToPrepareSignatureLinks({
+        signed: true,
+        draft,
       }),
     ).toBe(false);
   });

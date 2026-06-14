@@ -25,7 +25,7 @@ import {
   displayCreatorAgreementTitle,
   formatCreatorDashboardUpdated,
 } from "./creatorDashboardPresentation";
-import { creatorDashboardUsesManualReviewLinkPage, creatorDashboardReviewLinkReadyPath } from "./creatorDashboardReviewLinkRouting";
+import { creatorDashboardUsesManualReviewLinkPage, creatorDashboardFocusAgreementPath } from "./creatorDashboardReviewLinkRouting";
 import {
   creatorDashboardReviewHydrationPending,
   creatorDashboardWaitingOnReviewer,
@@ -163,7 +163,7 @@ export function CreatorDashboardAgreementList(props: Props) {
         const signingStatus = deriveCreatorSigningStatusLabel(row);
         const nextActionLabel = deriveCreatorNextActionLabel(row, reviewGate);
         const featured = featuredSection && (readyForSigning || waitingOnReviewer);
-        const donePath = creatorDashboardReviewLinkReadyPath(row.id);
+        const reviewFocusPath = creatorDashboardFocusAgreementPath(row.id);
         const prepareBusy = prepareBusyAgreementId === row.id;
         const prepareNotice = prepareNoticeByAgreementId[row.id] ?? null;
         const inReviewEmailDashboard = status === "in_review" && !manualReviewLinkPage;
@@ -351,7 +351,7 @@ export function CreatorDashboardAgreementList(props: Props) {
                         data-testid={`creator-dashboard-open-review-${row.id}`}
                         disabled={contentUnavailable}
                         onClick={() => {
-                          if (!contentUnavailable) onNavigate(donePath);
+                          if (!contentUnavailable) onNavigate(reviewFocusPath);
                         }}
                       >
                         {CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL}

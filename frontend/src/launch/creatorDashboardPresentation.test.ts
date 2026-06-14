@@ -78,7 +78,7 @@ describe("creatorDashboardPresentation", () => {
       creatorDashboardPrimaryAction(row({ review_sent_at: "2026-01-01T00:00:00Z" }), {
         manualReviewLinkPage: true,
       }).label,
-    ).toBe("View Review Status");
+    ).toBe("Track review status");
     expect(
       creatorDashboardPrimaryAction(
         row({
@@ -103,7 +103,7 @@ describe("creatorDashboardPresentation", () => {
     expect(creatorDashboardSupplementalActions(inReview, { manualReviewLinkPage: true })).toEqual([
       {
         label: "Open review link page",
-        path: "/app/done/ag_test",
+        path: "/app?focus=ag_test",
         testIdSuffix: "open-review-link",
       },
     ]);
@@ -186,24 +186,13 @@ describe("creatorDashboardPresentation", () => {
         signed: false,
         signingLockActive: false,
         draft,
-        isPaidProReviewDonePath: false,
       }),
     ).toBe(true);
-    expect(
-      shouldCreatorRedirectPreSignatureDoneToDashboard({
-        signed: false,
-        signingLockActive: false,
-        draft,
-        isPaidProReviewDonePath: false,
-        confirmedSend: true,
-      }),
-    ).toBe(false);
     expect(
       shouldCreatorRedirectPreSignatureDoneToDashboard({
         signed: true,
         signingLockActive: false,
         draft,
-        isPaidProReviewDonePath: false,
       }),
     ).toBe(false);
   });
