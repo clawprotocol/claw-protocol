@@ -88,6 +88,7 @@ import {
 } from "./agreementToVs01SigningBridge";
 import { getPricingCadencePreference } from "../pricingCadenceStorage";
 import { useLaunchNav } from "../LaunchNavContext";
+import { resolveCompletedAgreementRoute } from "../creatorDashboardAgreementCompletion";
 import { SimpleFlowShell } from "./SimpleFlowShell";
 import { SendConversionModal } from "./SendConversionModal";
 import { PAYWALL_SEND_FINAL_HEADLINE, PAYWALL_SEND_FINAL_SUB } from "../paywallMessaging";
@@ -136,6 +137,7 @@ function formatVs01SeedFailureDetail(detail: unknown): string {
 export function SimpleSendPage(props: { agreementId: string }) {
   const { agreementId } = props;
   const { navigate, pathname } = useLaunchNav();
+  const [completionGate, setCompletionGate] = useState<"pending" | "open">("pending");
   const [flash, setFlash] = useState<"draft_ready" | null>(null);
   /** Inline error when review-link mint yields no usable URLs (paid Pro review-first — no generic send shell). */
   const [reviewLinkMintFailure, setReviewLinkMintFailure] = useState<string | null>(null);
@@ -176,6 +178,21 @@ export function SimpleSendPage(props: { agreementId: string }) {
   const initialDraftSnapshot = sendLanding.primed;
   /** Live draft from {@link AgreementReview} (recipient emails); falls back to handoff primed snapshot. */
   const bridgeHandoffDraftRef = useRef<AgreementDraft | null>((initialDraftSnapshot as AgreementDraft | null) ?? null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const donePath = await resolveCompletedAgreementRoute(agreementId);
+      if (cancelled) return;
+      if (donePath) {
+        navigate(donePath);
+        return;
+      }
+      setCompletionGate("open");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [agreementId, navigate]);
   useEffect(() => {
     bridgeHandoffDraftRef.current = (initialDraftSnapshot as AgreementDraft | null) ?? null;
   }, [initialDraftSnapshot]);
@@ -646,6 +663,21 @@ export function SimpleSendPage(props: { agreementId: string }) {
     initialDraftSnapshot,
     senderFirstRouteRetryTick,
   ]);
+
+  if (completionGate === "pending") {
+    return (
+      <SimpleFlowShell
+        step={lifecycleStepForStage("proof") as 1 | 2 | 3 | 4}
+        progressLabels={FLOW_PROGRESS}
+        title="Your agreement"
+        subtitle="Checking signing status…"
+      >
+        <p className="text-sm text-slate-400" role="status">
+          Loading agreement…
+        </p>
+      </SimpleFlowShell>
+    );
+  }
 
   if (paidProReviewFirstRoute) {
     return (

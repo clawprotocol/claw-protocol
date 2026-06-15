@@ -2,7 +2,9 @@ export const CREATOR_PREPARE_SIGNATURE_LINKS_LABEL = "Prepare and send signing l
 
 export const CREATOR_NEXT_ACTION_PREPARE_SIGNATURE_LINKS = "Prepare and send signing links";
 
-export const CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE = "Open agreement workspace";
+export const CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE = "View completed agreement";
+export const CREATOR_VIEW_PROOF_RECORD_LABEL = "View proof record";
+export const CREATOR_DOWNLOAD_COMPLETED_AGREEMENT_LABEL = "Download completed agreement";
 
 export const CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL = "Open review link page";
 

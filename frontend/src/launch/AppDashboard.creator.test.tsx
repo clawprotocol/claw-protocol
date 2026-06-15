@@ -713,8 +713,39 @@ describe("AppDashboard creator-centric surface", () => {
 
     expect(screen.getByText(/Fully signed/)).toBeTruthy();
     expect(screen.queryByText(/Signature links not prepared yet/)).toBeNull();
-    expect(screen.getByRole("button", { name: "Open agreement workspace" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View completed agreement" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Prepare and send signing links" })).toBeNull();
+  });
+
+  it("promotes audit-signed agreements to completed when workspace index is stale", async () => {
+    const agreementId = "ag_audit_signed";
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [
+        indexRow({
+          id: agreementId,
+          has_server_signing_lock: true,
+          all_reviewers_approved: true,
+          completed_signed: false,
+        }),
+      ],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementAuditSignedFlag").mockResolvedValue(true);
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Fully signed/)).toBeTruthy();
+      expect(screen.getByTestId(`lawdog-agreement-status-${agreementId}`).textContent).toContain("Signed");
+    });
+
+    expect(screen.queryByRole("button", { name: "Continue signing" })).toBeNull();
+    expect(screen.getByRole("button", { name: "View completed agreement" })).toBeTruthy();
   });
 
   it("shows the requested empty state", async () => {

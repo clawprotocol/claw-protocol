@@ -13,8 +13,8 @@ import {
   creatorDashboardWaitingOnReviewer,
   type CreatorDashboardReviewGate,
 } from "./creatorDashboardReviewGate";
+import { isAgreementCompletedForDashboard } from "./creatorDashboardAgreementCompletion";
 import {
-  isAgreementFullySignedLocal,
   isAgreementPacketPrepared,
 } from "../vs01/vs01WorkspaceSigningStatus";
 import {
@@ -81,7 +81,7 @@ export function resolveCreatorGreetingHeadline(now = new Date()): string {
 }
 
 export function deriveCreatorDashboardStatus(row: WorkspaceIndexAgreement): CreatorDashboardStatus {
-  if (row.completed_signed || isAgreementFullySignedLocal(row.id)) return "completed";
+  if (isAgreementCompletedForDashboard(row)) return "completed";
   if (row.has_server_signing_lock || isAgreementPacketPrepared(row.id)) return "signing_in_progress";
   if (row.all_reviewers_approved) return "ready_for_signing";
   const required = Math.max(row.review_approvals_required ?? 0, row.party_count ?? 0);
@@ -141,7 +141,7 @@ export function creatorDashboardPrimaryAction(
         emphasis: "primary",
       };
     case "signing_in_progress":
-      return { label: "View Signing Status", path: `/app/send/${id}`, emphasis: "primary" };
+      return { label: "View signing status", path: `/app/send/${id}`, emphasis: "primary" };
     case "ready_for_signing":
     case "review_approved":
       return { label: CREATOR_PREPARE_SIGNATURE_LINKS_LABEL, path: "/app", emphasis: "primary" };
@@ -291,7 +291,7 @@ export function sortCreatorDashboardRows(
 }
 
 export function deriveCreatorSigningStatusLabel(row: WorkspaceIndexAgreement): string {
-  if (row.completed_signed || isAgreementFullySignedLocal(row.id)) return "Fully signed";
+  if (isAgreementCompletedForDashboard(row)) return "Fully signed";
   if (row.has_server_signing_lock || isAgreementPacketPrepared(row.id)) return "Signature links ready";
   return "Signature links not prepared yet";
 }

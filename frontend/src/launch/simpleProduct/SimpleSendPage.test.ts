@@ -36,6 +36,13 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("paidProSendBranch.paidProSendAllowed");
   });
 
+  it("redirects completed agreements away from editable /app/send workspace", () => {
+    const p = join(__dirname, "SimpleSendPage.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("resolveCompletedAgreementRoute");
+    expect(s).toContain("completionGate");
+  });
+
   it("sender-first paid Pro uses VS01 seed only: no /agreements sign, no /app/send navigate, hard-block UI on seed failure", () => {
     const p = join(__dirname, "SimpleSendPage.tsx");
     const s = readFileSync(p, "utf8");
@@ -107,6 +114,6 @@ describe("SimpleSendPage + AgreementReview integration (static)", () => {
     expect(s).toContain("reviewLinkMintHasUsableUrls");
     expect(s).not.toContain("[review-link-created]");
     expect(s).toContain("markSimpleFlowSent(agreementId)");
-    expect(s).toContain("navigate(`/app/done/${encodeURIComponent(id || agreementId)}`)");
+    expect(s).toContain("resolveCompletedAgreementRoute");
   });
 });

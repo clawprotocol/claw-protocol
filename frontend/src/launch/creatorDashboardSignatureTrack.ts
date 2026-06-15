@@ -102,7 +102,8 @@ export function resolveCreatorDashboardSignatureTrackAction(
   const manualReviewLinkPage = options?.manualReviewLinkPage ?? creatorDashboardUsesManualReviewLinkPage();
   const effectiveStatus = deriveCreatorDashboardEffectiveStatus(row, reviewGate);
   const signingLinksExist =
-    row.has_server_signing_lock || isAgreementPacketPrepared(row.id) || effectiveStatus === "signing_in_progress";
+    effectiveStatus !== "completed" &&
+    (row.has_server_signing_lock || isAgreementPacketPrepared(row.id) || effectiveStatus === "signing_in_progress");
 
   if (effectiveStatus === "completed") {
     return {

@@ -6,6 +6,7 @@ import {
   fetchWorkspaceIndex,
   fetchAgreementDraft,
   fetchAgreementDraftWithSigningLock,
+  fetchAgreementAuditSignedFlag,
   type WorkspaceIndexAgreement,
 } from "../agreement/agreementWorkspaceApi";
 import { dedupeWorkspaceIndexAgreements } from "./workspaceIndexDedupe";
@@ -72,6 +73,11 @@ import {
   logDashboardWorkspaceIndexRow,
   logDashboardWorkspaceIndexSkippedRow,
 } from "./dashboardWorkspaceIndexDiagnostics";
+import {
+  mergeWorkspaceAgreementCompletion,
+  workspaceRowNeedsCompletionAuditHydration,
+} from "./creatorDashboardAgreementCompletion";
+import { readSigningPacketStatus } from "../vs01/vs01SigningPacketStatusStore";
 
 export type WorkspaceMode = "empty" | "active" | "power";
 
@@ -92,14 +98,34 @@ export function AppDashboard() {
   const [prepareBusyAgreementId, setPrepareBusyAgreementId] = useState<string | null>(null);
   const [prepareNoticeByAgreementId, setPrepareNoticeByAgreementId] = useState<Record<string, string>>({});
   const [signingStatusEpoch, setSigningStatusEpoch] = useState(0);
+  const [auditCompletedByAgreementId, setAuditCompletedByAgreementId] = useState<Record<string, boolean>>({});
   const draftingRedirectedRef = useRef(false);
   const prepareSignatureLinksLaunchRef = useRef<string | null>(null);
+
+  const hydrateAuditCompletionFlags = useCallback(async (sourceRows: readonly WorkspaceIndexAgreement[]) => {
+    const candidates = sourceRows.filter(workspaceRowNeedsCompletionAuditHydration);
+    if (candidates.length === 0) return;
+    const flags = await Promise.all(
+      candidates.map(async (row) => {
+        const signed = await fetchAgreementAuditSignedFlag(row.id);
+        return signed ? row.id : null;
+      }),
+    );
+    const next: Record<string, boolean> = {};
+    for (const id of flags) {
+      if (id) next[id] = true;
+    }
+    if (Object.keys(next).length > 0) {
+      setAuditCompletedByAgreementId((prev) => ({ ...prev, ...next }));
+    }
+  }, []);
 
   const reloadWorkspaceIndex = useCallback(async () => {
     setIndexLoading(true);
     setIndexError(null);
     const { agreements, skipped, error } = await fetchWorkspaceIndex();
-    setRows(dedupeWorkspaceIndexAgreements(agreements));
+    const deduped = dedupeWorkspaceIndexAgreements(agreements);
+    setRows(deduped);
     for (const row of agreements) {
       logDashboardWorkspaceIndexRow(
         buildDashboardWorkspaceIndexRowDiagnostic(row),
@@ -113,7 +139,8 @@ export function AppDashboard() {
     }
     setIndexError(error);
     setIndexLoading(false);
-  }, []);
+    void hydrateAuditCompletionFlags(deduped);
+  }, [hydrateAuditCompletionFlags]);
 
   useEffect(() => {
     void reloadWorkspaceIndex();
@@ -130,18 +157,43 @@ export function AppDashboard() {
         bumpSigningStatus();
       }
     };
-    const onSigningStatusChanged = () => bumpSigningStatus();
-    window.addEventListener("focus", bumpSigningStatus);
+    const onSigningStatusChanged = (ev: Event) => {
+      bumpSigningStatus();
+      const agreementId = String((ev as CustomEvent<{ agreementId?: string }>).detail?.agreementId ?? "").trim();
+      if (!agreementId) return;
+      const snap = readSigningPacketStatus(agreementId);
+      if (snap?.fullySigned) {
+        void reloadWorkspaceIndex();
+      } else {
+        void hydrateAuditCompletionFlags(rows);
+      }
+    };
+    const onFocus = () => {
+      bumpSigningStatus();
+      void hydrateAuditCompletionFlags(rows);
+    };
+    window.addEventListener("focus", onFocus);
     window.addEventListener("storage", onStorage);
     window.addEventListener("vs01-signing-packet-status-changed", onSigningStatusChanged);
     return () => {
-      window.removeEventListener("focus", bumpSigningStatus);
+      window.removeEventListener("focus", onFocus);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("vs01-signing-packet-status-changed", onSigningStatusChanged);
     };
-  }, []);
+  }, [hydrateAuditCompletionFlags, reloadWorkspaceIndex, rows]);
 
-  const filteredDashboard = useMemo(() => filterCreatorDashboardAgreements(rows), [rows]);
+  const mergedDashboardRows = useMemo(
+    () =>
+      rows.map((row) =>
+        mergeWorkspaceAgreementCompletion(row, auditCompletedByAgreementId[row.id] === true),
+      ),
+    [rows, auditCompletedByAgreementId, signingStatusEpoch],
+  );
+
+  const filteredDashboard = useMemo(
+    () => filterCreatorDashboardAgreements(mergedDashboardRows),
+    [mergedDashboardRows],
+  );
   const safeRecent = useMemo(
     () => sortCreatorDashboardRows(filteredDashboard.visibleRows),
     [filteredDashboard.visibleRows],
@@ -371,7 +423,7 @@ export function AppDashboard() {
       });
 
       try {
-        const indexRow = rows.find((entry) => entry.id === id);
+        const indexRow = mergedDashboardRows.find((entry) => entry.id === id);
         const cachedReviewRows = reviewRowsByAgreementId[id] ?? [];
         const { ok, draft, lockedVersionId } = await fetchAgreementDraftWithSigningLock(id);
         const fetchedReviewRows = creatorDashboardReviewRowsFromDraft(draft);
@@ -520,7 +572,7 @@ export function AppDashboard() {
         setPrepareBusyAgreementId(null);
       }
     },
-    [navigate, prepareBusyAgreementId, reviewRowsByAgreementId, rows],
+    [mergedDashboardRows, navigate, prepareBusyAgreementId, reviewRowsByAgreementId],
   );
 
   useEffect(() => {

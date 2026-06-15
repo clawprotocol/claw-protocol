@@ -10,7 +10,9 @@ import {
   type CreatorDashboardReviewGate,
 } from "./creatorDashboardReviewGate";
 import {
-  isAgreementFullySignedLocal,
+  isAgreementCompletedForDashboard,
+} from "./creatorDashboardAgreementCompletion";
+import {
   isAgreementPacketPrepared,
 } from "../vs01/vs01WorkspaceSigningStatus";
 import { formatCreatorReviewProgressLabel } from "./creatorDashboardReviewGate";
@@ -129,7 +131,7 @@ export function deriveWhatsNextNextStep(
       return "Wait for reviewer approval";
     }
   }
-  if (status === "completed") return "Open agreement workspace";
+  if (status === "completed") return "View proof record or download final copy";
   return deriveCreatorNextActionLabel(row, reviewGate);
 }
 
@@ -144,7 +146,7 @@ function stepComplete(id: AgreementTimelineStepId, row: WorkspaceIndexAgreement,
     case "signature_links_prepared":
       return row.has_server_signing_lock || isAgreementPacketPrepared(row.id);
     case "signed":
-      return row.completed_signed || isAgreementFullySignedLocal(row.id);
+      return isAgreementCompletedForDashboard(row);
     default:
       return false;
   }
