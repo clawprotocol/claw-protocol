@@ -6,7 +6,6 @@ import { buildVs01SigningPacketModel } from "./buildVs01SigningPacketModel";
 import { buildFullPacketManifestFromCanonicalModel } from "./vs01SigningPacketManifest";
 import { resolveRecipientCanonicalSigningPacket } from "./resolveRecipientCanonicalSigningPacket";
 import {
-  buildVs01CanonicalPacketPortable,
   buildVs01CanonicalPacketSeed,
   storeVs01CanonicalPacketPortable,
 } from "./vs01CanonicalPacketSeed";
