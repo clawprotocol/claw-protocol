@@ -68,7 +68,8 @@ import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
 import { paidProPacketReadyDashboardPath } from "./vs01PaidProPacketReadyNavigation";
 import { hydrateVs01RecipientFromServerPacket } from "./vs01RecipientServerHydration";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
-import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
+import { patchSignerPacketStatus, readSigningPacketStatus } from "./vs01SigningPacketStatusStore";
+import { partyIndexFromSignerRoleId } from "./vs01RecipientFieldScope";
 import {
   clearVs01DraftState,
   loadVs01DraftState,
@@ -1102,12 +1103,31 @@ export function Vs01Wizard({
                 const roleKey = (RECIPIENT_LOCKED_SIGNER_ROLE_ID ?? "").trim();
                 if (aid && roleKey) {
                   const next = patchSignerPacketStatus(aid, roleKey, "signed");
+                  const snap = next ?? readSigningPacketStatus(aid);
+                  const remainingSigners = snap
+                    ? Object.entries(snap.bySignerKey).filter(([, status]) => status !== "signed").length
+                    : null;
                   logVs01LifecycleEvent({
                     event: "vs01_signer_completed",
                     agreementId: aid,
                     documentId: documentId ?? undefined,
                     signerRoleId: roleKey,
+                    partyIndex: partyIndexFromSignerRoleId(roleKey),
+                    fieldType: "signature",
+                    status: "signed",
                   });
+                  if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+                    // eslint-disable-next-line no-console
+                    console.info("[vs01_signer_completed]", {
+                      agreement_id: aid.slice(0, 16),
+                      document_id: documentId?.slice(0, 16) ?? null,
+                      signer_role_id: roleKey.slice(0, 24),
+                      party_index: partyIndexFromSignerRoleId(roleKey),
+                      field_type: "signature",
+                      signed_by: roleKey.slice(0, 24),
+                      remaining_signers: remainingSigners,
+                    });
+                  }
                   if (next?.fullySigned) {
                     logVs01LifecycleEvent({
                       event: "vs01_packet_fully_signed",

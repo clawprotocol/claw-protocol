@@ -216,11 +216,13 @@ export function recipientFieldBelongsToLockedSigner(
   lockedCounterpartyId: string,
   lockedSignerRoleId: string | null,
 ): boolean {
-  if (f.counterpartyId !== lockedCounterpartyId) return false;
-  if (!lockedSignerRoleId?.trim()) return true;
-  const eff = (f.assignedSignerRoleId || "").trim();
-  if (!eff) return true;
-  return eff === lockedSignerRoleId.trim();
+  const lock = (lockedSignerRoleId ?? "").trim();
+  if (lock) {
+    const eff = (f.assignedSignerRoleId ?? "").trim();
+    if (eff) return eff === lock;
+    return f.counterpartyId.trim() === lockedCounterpartyId.trim();
+  }
+  return f.counterpartyId.trim() === lockedCounterpartyId.trim();
 }
 
 export function senderTemplateFieldVisibleToRecipientSigner(

@@ -31,6 +31,7 @@ import {
   creatorDashboardWaitingOnReviewer,
   resolveCreatorDashboardReviewGate,
 } from "./creatorDashboardReviewGate";
+import type { CreatorSigningProgressSnapshot } from "./creatorDashboardSigningProgress";
 import { creatorDashboardShowManageRecipients } from "./creatorDashboardSignatureTrack";
 
 type Props = {
@@ -42,6 +43,7 @@ type Props = {
   onPrepareSignatureLinks: (agreementId: string) => void | Promise<void>;
   prepareBusyAgreementId?: string | null;
   prepareNoticeByAgreementId?: Readonly<Record<string, string>>;
+  signingProgressByAgreementId?: Readonly<Record<string, CreatorSigningProgressSnapshot>>;
   featured?: boolean;
   compact?: boolean;
   manualReviewLinkPage?: boolean;
@@ -120,6 +122,7 @@ export function CreatorDashboardAgreementList(props: Props) {
     onPrepareSignatureLinks,
     prepareBusyAgreementId = null,
     prepareNoticeByAgreementId = {},
+    signingProgressByAgreementId = {},
     featured: featuredSection = false,
     compact = false,
     manualReviewLinkPage = creatorDashboardUsesManualReviewLinkPage(),
@@ -158,9 +161,10 @@ export function CreatorDashboardAgreementList(props: Props) {
         const signingStarted = status === "signing_in_progress";
         const readyForSigning = allApproved && !signingComplete && !signingStarted;
         const showReview = creatorDashboardShowsReviewPanel(status) || waitingOnReviewer || readyForSigning;
-        const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate);
+        const rowProgress = signingProgressByAgreementId[row.id] ?? null;
+        const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate, rowProgress);
         const reviewProgress = deriveCreatorReviewProgressLabel(row, reviewRows);
-        const signingStatus = deriveCreatorSigningStatusLabel(row);
+        const signingStatus = deriveCreatorSigningStatusLabel(row, rowProgress);
         const nextActionLabel = deriveCreatorNextActionLabel(row, reviewGate);
         const featured = featuredSection && (readyForSigning || waitingOnReviewer);
         const reviewFocusPath = creatorDashboardFocusAgreementPath(row.id);

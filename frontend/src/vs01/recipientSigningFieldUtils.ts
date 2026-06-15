@@ -177,6 +177,25 @@ export function recipientFieldStatusPillLabel(pill: RecipientFieldStatusPill): s
   }
 }
 
+/** Clear signature/initials values for the locked signer unless that signer already finished (fresh session). */
+export function stripLockedSignerEditableValuesOnHydrate(
+  fields: Vs01RecipientPlacedField[],
+  agreementId: string | null | undefined,
+  lockedSignerRoleId: string | null,
+): Vs01RecipientPlacedField[] {
+  const lock = (lockedSignerRoleId ?? "").trim();
+  if (!lock) return fields;
+  const signerComplete = isRecipientSignerMarkedComplete(agreementId, lock);
+  return fields.map((f) => {
+    const eff = (f.assignedSignerRoleId ?? "").trim();
+    const belongsToLock = eff ? eff === lock : true;
+    if (!belongsToLock || !isRecipientSigningEditableType(f.type)) return f;
+    if (signerComplete) return f;
+    const v = typeof f.value === "string" ? f.value.trim() : "";
+    return v ? { ...f, value: "" } : f;
+  });
+}
+
 /** Hydrate read-only metadata values; keep signature/initials empty for signer entry. */
 export function hydrateRecipientSigningFields(
   fields: Vs01RecipientPlacedField[],

@@ -262,6 +262,8 @@ export function RecipientSigningView({
   ]);
 
   const documentFields = useMemo(() => {
+    const lock = (lockedSignerRoleId ?? "").trim();
+    if (lock) return recipientFields;
     if (!prepareRoles?.length) return recipientFields;
     if (!senderPlacedFields.length) return recipientFields;
     const ownerRole = prepareRoles[0];
@@ -272,7 +274,7 @@ export function RecipientSigningView({
       recipientPlacedFields: recipientFields,
       senderPlacedFields,
     });
-  }, [recipientFields, senderPlacedFields, prepareRoles]);
+  }, [recipientFields, senderPlacedFields, prepareRoles, lockedSignerRoleId]);
 
   const portablePacket = useMemo(() => {
     const did = documentId?.trim() ?? "";

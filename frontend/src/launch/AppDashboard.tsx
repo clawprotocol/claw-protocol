@@ -77,6 +77,11 @@ import {
   mergeWorkspaceAgreementCompletion,
   workspaceRowNeedsCompletionAuditHydration,
 } from "./creatorDashboardAgreementCompletion";
+import {
+  fetchServerSigningProgressSnapshot,
+  workspaceRowNeedsSigningProgressHydration,
+  type CreatorSigningProgressSnapshot,
+} from "./creatorDashboardSigningProgress";
 import { readSigningPacketStatus } from "../vs01/vs01SigningPacketStatusStore";
 
 export type WorkspaceMode = "empty" | "active" | "power";
@@ -99,6 +104,9 @@ export function AppDashboard() {
   const [prepareNoticeByAgreementId, setPrepareNoticeByAgreementId] = useState<Record<string, string>>({});
   const [signingStatusEpoch, setSigningStatusEpoch] = useState(0);
   const [auditCompletedByAgreementId, setAuditCompletedByAgreementId] = useState<Record<string, boolean>>({});
+  const [signingProgressByAgreementId, setSigningProgressByAgreementId] = useState<
+    Record<string, CreatorSigningProgressSnapshot>
+  >({});
   const draftingRedirectedRef = useRef(false);
   const prepareSignatureLinksLaunchRef = useRef<string | null>(null);
 
@@ -117,6 +125,24 @@ export function AppDashboard() {
     }
     if (Object.keys(next).length > 0) {
       setAuditCompletedByAgreementId((prev) => ({ ...prev, ...next }));
+    }
+  }, []);
+
+  const hydrateSigningProgressFlags = useCallback(async (sourceRows: readonly WorkspaceIndexAgreement[]) => {
+    const candidates = sourceRows.filter(workspaceRowNeedsSigningProgressHydration);
+    if (candidates.length === 0) return;
+    const entries = await Promise.all(
+      candidates.map(async (row) => {
+        const snap = await fetchServerSigningProgressSnapshot(row.id);
+        return snap ? ([row.id, snap] as const) : null;
+      }),
+    );
+    const next: Record<string, CreatorSigningProgressSnapshot> = {};
+    for (const entry of entries) {
+      if (entry) next[entry[0]] = entry[1];
+    }
+    if (Object.keys(next).length > 0) {
+      setSigningProgressByAgreementId((prev) => ({ ...prev, ...next }));
     }
   }, []);
 
@@ -140,7 +166,8 @@ export function AppDashboard() {
     setIndexError(error);
     setIndexLoading(false);
     void hydrateAuditCompletionFlags(deduped);
-  }, [hydrateAuditCompletionFlags]);
+    void hydrateSigningProgressFlags(deduped);
+  }, [hydrateAuditCompletionFlags, hydrateSigningProgressFlags]);
 
   useEffect(() => {
     void reloadWorkspaceIndex();
@@ -160,17 +187,26 @@ export function AppDashboard() {
     const onSigningStatusChanged = (ev: Event) => {
       bumpSigningStatus();
       const agreementId = String((ev as CustomEvent<{ agreementId?: string }>).detail?.agreementId ?? "").trim();
-      if (!agreementId) return;
-      const snap = readSigningPacketStatus(agreementId);
-      if (snap?.fullySigned) {
-        void reloadWorkspaceIndex();
-      } else {
-        void hydrateAuditCompletionFlags(rows);
+      if (agreementId) {
+        void fetchServerSigningProgressSnapshot(agreementId).then((snap) => {
+          if (!snap) return;
+          setSigningProgressByAgreementId((prev) => ({ ...prev, [agreementId]: snap }));
+        });
       }
+      if (agreementId) {
+        const snap = readSigningPacketStatus(agreementId);
+        if (snap?.fullySigned) {
+          void reloadWorkspaceIndex();
+          return;
+        }
+      }
+      void hydrateAuditCompletionFlags(rows);
+      void hydrateSigningProgressFlags(rows);
     };
     const onFocus = () => {
       bumpSigningStatus();
       void hydrateAuditCompletionFlags(rows);
+      void hydrateSigningProgressFlags(rows);
     };
     window.addEventListener("focus", onFocus);
     window.addEventListener("storage", onStorage);
@@ -180,7 +216,7 @@ export function AppDashboard() {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("vs01-signing-packet-status-changed", onSigningStatusChanged);
     };
-  }, [hydrateAuditCompletionFlags, reloadWorkspaceIndex, rows]);
+  }, [hydrateAuditCompletionFlags, hydrateSigningProgressFlags, reloadWorkspaceIndex, rows]);
 
   const mergedDashboardRows = useMemo(
     () =>
@@ -592,7 +628,10 @@ export function AppDashboard() {
       const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
       const draft = draftByAgreementId[row.id] ?? null;
       const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows, { draft });
-      const action = resolveCreatorDashboardSignatureTrackAction(row, reviewGate, { draft });
+      const action = resolveCreatorDashboardSignatureTrackAction(row, reviewGate, {
+        draft,
+        signingProgress: signingProgressByAgreementId[row.id] ?? null,
+      });
       if (action.kind === "prepare_signature_links") {
         void handlePrepareSignatureLinks(row.id);
         return;
@@ -609,6 +648,7 @@ export function AppDashboard() {
       handlePrepareSignatureLinks,
       navigate,
       reviewRowsByAgreementId,
+      signingProgressByAgreementId,
       withClearEntry,
     ],
   );
@@ -683,6 +723,7 @@ export function AppDashboard() {
                 onPrepareSignatureLinks={handlePrepareSignatureLinks}
                 prepareBusy={prepareBusyAgreementId === featuredRow.id}
                 prepareNotice={prepareNoticeByAgreementId[featuredRow.id] ?? null}
+                signingProgress={signingProgressByAgreementId[featuredRow.id] ?? null}
               />
             ) : null}
 
@@ -707,6 +748,7 @@ export function AppDashboard() {
                   onPrepareSignatureLinks={handlePrepareSignatureLinks}
                   prepareBusyAgreementId={prepareBusyAgreementId}
                   prepareNoticeByAgreementId={prepareNoticeByAgreementId}
+                  signingProgressByAgreementId={signingProgressByAgreementId}
                   compact
                 />
               </section>
@@ -717,6 +759,7 @@ export function AppDashboard() {
               </h2>
               <LawdogAgreementsTable
                 rows={safeRecent}
+                signingProgressByAgreementId={signingProgressByAgreementId}
                 onNavigate={(path) => withClearEntry(() => navigate(path))}
                 onFocusReviewStatus={handleFocusAgreementReviewStatus}
                 onArchiveComplete={() => void reloadWorkspaceIndex()}

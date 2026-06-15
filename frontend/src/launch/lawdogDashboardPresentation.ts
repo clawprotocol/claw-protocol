@@ -4,9 +4,8 @@ import {
   type CreatorDashboardStatus,
 } from "./creatorDashboardPresentation";
 import {
-  isAgreementFullySignedLocal,
+  isAgreementPartiallySignedLocal,
 } from "../vs01/vs01WorkspaceSigningStatus";
-import { readSigningPacketStatus } from "../vs01/vs01SigningPacketStatusStore";
 
 /** Product-facing agreement status labels for LawDog Dashboard v1. */
 export type LawdogProductStatus =
@@ -42,21 +41,15 @@ export type LawdogDashboardKpis = {
 /** @deprecated Legacy KPI — kept for migration references only. */
 export const LAWDOG_LEGAL_FEES_SAVED_PER_SIGNED_USD = 2_500;
 
-export function isAgreementPartiallySignedLocal(agreementId: string): boolean {
-  if (isAgreementFullySignedLocal(agreementId)) return false;
-  const snap = readSigningPacketStatus(agreementId);
-  if (!snap) return false;
-  const values = Object.values(snap.bySignerKey);
-  if (values.length === 0) return false;
-  const signedCount = values.filter((status) => status === "signed").length;
-  return signedCount > 0 && signedCount < values.length;
-}
-
-export function deriveLawdogProductStatus(row: WorkspaceIndexAgreement): LawdogProductStatus {
+export function deriveLawdogProductStatus(
+  row: WorkspaceIndexAgreement,
+  progress?: import("../vs01/vs01WorkspaceSigningStatus").SigningProgressSnapshot | null,
+): LawdogProductStatus {
   if (row.workspace_archived_at) return "archived";
   const internal = deriveCreatorDashboardStatus(row);
   if (internal === "completed") return "signed";
   if (internal === "signing_in_progress") {
+    if (progress?.partiallySigned) return "partially_signed";
     if (isAgreementPartiallySignedLocal(row.id)) return "partially_signed";
     return "sent";
   }

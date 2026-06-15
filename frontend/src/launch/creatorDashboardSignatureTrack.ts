@@ -4,6 +4,10 @@ import {
   type ResolvePaidProSignerDetailsGateArgs,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
 } from "../components/agreements/signerSetupPartyIdentity";
+import {
+  creatorDashboardHasPartialSigningProgress,
+  type CreatorSigningProgressSnapshot,
+} from "./creatorDashboardSigningProgress";
 import { isAgreementPacketPrepared } from "../vs01/vs01WorkspaceSigningStatus";
 import {
   CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
@@ -96,6 +100,7 @@ export function resolveCreatorDashboardSignatureTrackAction(
   options?: {
     draft?: AgreementDraft | null;
     manualReviewLinkPage?: boolean;
+    signingProgress?: CreatorSigningProgressSnapshot | null;
   },
 ): CreatorDashboardSignatureTrackAction {
   const id = encodeURIComponent(row.id);
@@ -115,10 +120,11 @@ export function resolveCreatorDashboardSignatureTrackAction(
   }
 
   if (effectiveStatus === "signing_in_progress" || signingLinksExist) {
+    const partial = creatorDashboardHasPartialSigningProgress(row, options?.signingProgress);
     return {
       kind: "open_signature_links",
-      label: CREATOR_CONTINUE_SIGNING_LABEL,
-      path: `/app/send/${id}`,
+      label: partial ? "View signing status" : CREATOR_CONTINUE_SIGNING_LABEL,
+      path: partial ? creatorDashboardFocusAgreementPath(row.id) : `/app/send/${id}`,
       emphasis: "primary",
     };
   }

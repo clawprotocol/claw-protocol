@@ -13,6 +13,10 @@ import {
   isAgreementCompletedForDashboard,
 } from "./creatorDashboardAgreementCompletion";
 import {
+  creatorDashboardHasPartialSigningProgress,
+  type CreatorSigningProgressSnapshot,
+} from "./creatorDashboardSigningProgress";
+import {
   isAgreementPacketPrepared,
 } from "../vs01/vs01WorkspaceSigningStatus";
 import { formatCreatorReviewProgressLabel } from "./creatorDashboardReviewGate";
@@ -77,12 +81,18 @@ function effectiveStatus(
 export function deriveWhatsNextHeadline(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
+  serverProgress?: CreatorSigningProgressSnapshot | null,
 ): string {
   const status = effectiveStatus(row, reviewGate);
   const title = displayCreatorAgreementTitle(row.title);
 
   if (status === "completed") return `${title} is fully signed`;
-  if (status === "signing_in_progress") return "Signature links sent";
+  if (status === "signing_in_progress") {
+    if (creatorDashboardHasPartialSigningProgress(row, serverProgress)) {
+      return "Partially signed";
+    }
+    return "Signature links sent";
+  }
   if (status === "ready_for_signing" || status === "review_approved") {
     return "All reviews complete";
   }
@@ -98,6 +108,7 @@ export function deriveWhatsNextHeadline(
 export function deriveWhatsNextProgressLine(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
+  serverProgress?: CreatorSigningProgressSnapshot | null,
 ): string | null {
   const status = effectiveStatus(row, reviewGate);
   if (status === "in_review" && reviewGate.authoritative && reviewGate.requiredPartyCount > 0) {
@@ -106,7 +117,12 @@ export function deriveWhatsNextProgressLine(
   if (status === "ready_for_signing" || status === "review_approved") {
     return "All required reviews are complete";
   }
-  if (status === "signing_in_progress") return "Waiting for signatures";
+  if (status === "signing_in_progress") {
+    if (creatorDashboardHasPartialSigningProgress(row, serverProgress)) {
+      return "Waiting for remaining signatures";
+    }
+    return "Waiting for signatures";
+  }
   if (status === "completed") return "Agreement fully executed";
   return null;
 }
@@ -178,13 +194,14 @@ export function deriveAgreementProgressTimeline(
 export function deriveDashboardWhatsNextPresentation(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
+  serverProgress?: CreatorSigningProgressSnapshot | null,
 ): DashboardWhatsNextPresentation {
   return {
     agreementId: row.id,
     agreementTitle: displayCreatorAgreementTitle(row.title),
     status: effectiveStatus(row, reviewGate),
-    headline: deriveWhatsNextHeadline(row, reviewGate),
-    progressLine: deriveWhatsNextProgressLine(row, reviewGate),
+    headline: deriveWhatsNextHeadline(row, reviewGate, serverProgress),
+    progressLine: deriveWhatsNextProgressLine(row, reviewGate, serverProgress),
     nextStepLabel: deriveWhatsNextNextStep(row, reviewGate),
     timeline: deriveAgreementProgressTimeline(row, reviewGate),
   };

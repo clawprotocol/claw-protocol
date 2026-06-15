@@ -16,7 +16,7 @@ import {
   normalizeRecipientManifestCounterparties,
 } from "./recipientManifestUrl";
 import { filterPacketManifestFieldsForRole } from "./vs01SigningPacketManifest";
-import { hydrateRecipientSigningFields } from "./recipientSigningFieldUtils";
+import { hydrateRecipientSigningFields, stripLockedSignerEditableValuesOnHydrate } from "./recipientSigningFieldUtils";
 import type { Vs01Counterparty } from "./types";
 
 export type Vs01RecipientServerHydrationResult = {
@@ -46,9 +46,9 @@ function hydrateFieldsFromPortable(args: {
   storeRecipientManifest(documentId, VS01_PACKET_MANIFEST_SCOPE, manifestFields);
 
   const role =
-    portable.roles.find((r) => r.roleId === lockedSignerRoleId) ??
-    portable.roles.find((r) => r.vs01CounterpartyId === lockedCounterpartyId) ??
-    null;
+    (lockedSignerRoleId?.trim()
+      ? portable.roles.find((r) => r.roleId === lockedSignerRoleId.trim())
+      : null) ?? null;
   const scoped = role
     ? filterPacketManifestFieldsForRole(manifestFields, {
         roleId: role.roleId,
@@ -66,7 +66,9 @@ function hydrateFieldsFromPortable(args: {
         vs01CounterpartyId: role.vs01CounterpartyId,
         kind: role.kind,
       })
-    : manifestFields.filter((f) => f.counterpartyId.trim() === lockedCounterpartyId);
+    : lockedSignerRoleId?.trim()
+      ? manifestFields.filter((f) => (f.assignedSignerRoleId ?? "").trim() === lockedSignerRoleId.trim())
+      : manifestFields.filter((f) => f.counterpartyId.trim() === lockedCounterpartyId);
 
   const normalized = normalizeRecipientManifestCounterparties(scoped, lockedCounterpartyId);
   const cps = counterpartiesFromRecipientManifestFields(
@@ -77,9 +79,13 @@ function hydrateFieldsFromPortable(args: {
   );
   const cpMap = new Map(cps.map((c) => [c.id, c]));
   const fields = hydrateRecipientSigningFields(
-    ensureRecipientFieldDefaults(normalized, recipientName, recipientEmail, {
-      signerName: cps.find((c) => c.id === lockedCounterpartyId)?.signerName,
-    }),
+    stripLockedSignerEditableValuesOnHydrate(
+      ensureRecipientFieldDefaults(normalized, recipientName, recipientEmail, {
+        signerName: cps.find((c) => c.id === lockedCounterpartyId)?.signerName,
+      }),
+      portable.seed.agreementId,
+      lockedSignerRoleId,
+    ),
     cpMap,
   );
   return { ok: fields.length > 0, fields, counterparties: cps, source: fields.length > 0 ? "server_packet" : "miss" };

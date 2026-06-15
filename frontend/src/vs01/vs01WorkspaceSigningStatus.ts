@@ -66,12 +66,58 @@ export function isAgreementFullySignedLocal(agreementId: string): boolean {
   return values.length >= 2 && values.every((status) => status === "signed");
 }
 
+export type SigningProgressSnapshot = {
+  signedCount: number;
+  requiredCount: number;
+  partiallySigned: boolean;
+  fullySigned: boolean;
+};
+
+export function readLocalSigningProgressSnapshot(agreementId: string): SigningProgressSnapshot | null {
+  const id = agreementId.trim();
+  if (!id) return null;
+  const snap = readSigningPacketStatus(id);
+  if (!snap) return null;
+  const values = Object.values(snap.bySignerKey);
+  if (values.length === 0) return null;
+  const signedCount = values.filter((s) => s === "signed").length;
+  const requiredCount = values.length;
+  const fullySigned = snap.fullySigned || signedCount >= requiredCount;
+  return {
+    signedCount,
+    requiredCount,
+    partiallySigned: signedCount > 0 && signedCount < requiredCount,
+    fullySigned,
+  };
+}
+
+export function formatSigningProgressLabel(progress: SigningProgressSnapshot): string {
+  if (progress.fullySigned) return "Fully signed";
+  if (progress.partiallySigned && progress.requiredCount > 0) {
+    return `${progress.signedCount} of ${progress.requiredCount} signed`;
+  }
+  return "Signature links ready";
+}
+
+export function isAgreementPartiallySignedLocal(agreementId: string): boolean {
+  const progress = readLocalSigningProgressSnapshot(agreementId);
+  return Boolean(progress?.partiallySigned);
+}
+
 /**
- * Workspace/dashboard label: server index first, then local packet status snapshot.
+ * Workspace/dashboard label: server index first, then optional hydrated progress, then local packet status snapshot.
  */
-export function workspaceSigningStatusLabel(row: WorkspaceIndexAgreement): string {
+export function workspaceSigningStatusLabel(
+  row: WorkspaceIndexAgreement,
+  progress?: SigningProgressSnapshot | null,
+): string {
   if (row.completed_signed) return "Fully signed";
   if (isAgreementFullySignedLocal(row.id)) return "Fully signed";
+  if (progress?.fullySigned) return "Fully signed";
+  if (progress?.partiallySigned) return formatSigningProgressLabel(progress);
+  const local = readLocalSigningProgressSnapshot(row.id);
+  if (local?.fullySigned) return "Fully signed";
+  if (local?.partiallySigned) return formatSigningProgressLabel(local);
   if (row.has_server_signing_lock) return "Signing in progress";
   if (isAgreementPacketPrepared(row.id)) return "Signing in progress";
   if (row.all_reviewers_approved) return "Ready to prepare signing";

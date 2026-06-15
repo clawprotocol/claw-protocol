@@ -26,7 +26,8 @@ import {
   normalizeRecipientManifestCounterparties,
   VS01_RECIPIENT_MANIFEST_QUERY,
 } from "./recipientManifestUrl";
-import { hydrateRecipientSigningFields } from "./recipientSigningFieldUtils";
+import { hydrateRecipientSigningFields, stripLockedSignerEditableValuesOnHydrate } from "./recipientSigningFieldUtils";
+import { scopeRecipientManifestToLockedSigner } from "./vs01RecipientFieldScope";
 
 function newCpId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -123,6 +124,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     storeVs01CanonicalPacketSeed(canonicalPacket.seed);
     storeVs01CanonicalPacketPortable(documentId, canonicalPacket);
   }
+  const portableRoles = canonicalPacket?.roles;
   const recipientManifestParamPresent =
     manifestRaw !== null ||
     manifestStored ||
@@ -136,7 +138,13 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   if (manifestRaw) {
     const decoded = decodeRecipientManifestParam(manifestRaw);
     if (decoded.ok) {
-      const normalized = normalizeRecipientManifestCounterparties(decoded.fields, lockedId);
+      const scoped = scopeRecipientManifestToLockedSigner({
+        fields: decoded.fields,
+        lockedCounterpartyId: lockedId,
+        lockedSignerRoleId: recipientLockedSignerRoleId,
+        portableRoles,
+      });
+      const normalized = normalizeRecipientManifestCounterparties(scoped, lockedId);
       const cps = counterpartiesFromRecipientManifestFields(
         normalized,
         lockedId,
@@ -145,11 +153,15 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
       );
       const cpMap = new Map(cps.map((c) => [c.id, c]));
       recipientHydratedFields = hydrateRecipientSigningFields(
-        ensureRecipientFieldDefaults(
-          normalized,
-          recipientName || "Recipient",
-          recipientEmail || undefined,
-          { signerName: cps.find((c) => c.id === lockedId)?.signerName },
+        stripLockedSignerEditableValuesOnHydrate(
+          ensureRecipientFieldDefaults(
+            normalized,
+            recipientName || "Recipient",
+            recipientEmail || undefined,
+            { signerName: cps.find((c) => c.id === lockedId)?.signerName },
+          ),
+          recipientAgreementId,
+          recipientLockedSignerRoleId,
         ),
         cpMap,
       );
@@ -161,7 +173,13 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     const manifestFields = canonicalPacket.initialsPolicy.enabled
       ? canonicalPacket.fields
       : canonicalPacket.fields.filter((f) => f.type !== "initials");
-    const normalized = normalizeRecipientManifestCounterparties(manifestFields, lockedId);
+    const scoped = scopeRecipientManifestToLockedSigner({
+      fields: manifestFields,
+      lockedCounterpartyId: lockedId,
+      lockedSignerRoleId: recipientLockedSignerRoleId,
+      portableRoles,
+    });
+    const normalized = normalizeRecipientManifestCounterparties(scoped, lockedId);
     const cps = counterpartiesFromRecipientManifestFields(
       normalized,
       lockedId,
@@ -170,11 +188,15 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     );
     const cpMap = new Map(cps.map((c) => [c.id, c]));
     recipientHydratedFields = hydrateRecipientSigningFields(
-      ensureRecipientFieldDefaults(
-        normalized,
-        recipientName || "Recipient",
-        recipientEmail || undefined,
-        { signerName: cps.find((c) => c.id === lockedId)?.signerName },
+      stripLockedSignerEditableValuesOnHydrate(
+        ensureRecipientFieldDefaults(
+          normalized,
+          recipientName || "Recipient",
+          recipientEmail || undefined,
+          { signerName: cps.find((c) => c.id === lockedId)?.signerName },
+        ),
+        recipientAgreementId,
+        recipientLockedSignerRoleId,
       ),
       cpMap,
     );
@@ -184,7 +206,13 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     const packetStored = loadRecipientManifest(documentId, VS01_PACKET_MANIFEST_SCOPE);
     const stored = packetStored ?? loadRecipientManifest(documentId, lookupId);
     if (stored && stored.length > 0) {
-      const normalized = normalizeRecipientManifestCounterparties(stored, lockedId);
+      const scoped = scopeRecipientManifestToLockedSigner({
+        fields: stored,
+        lockedCounterpartyId: lockedId,
+        lockedSignerRoleId: recipientLockedSignerRoleId,
+        portableRoles,
+      });
+      const normalized = normalizeRecipientManifestCounterparties(scoped, lockedId);
       const cps = counterpartiesFromRecipientManifestFields(
         normalized,
         lockedId,
@@ -193,11 +221,15 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
       );
       const cpMap = new Map(cps.map((c) => [c.id, c]));
       recipientHydratedFields = hydrateRecipientSigningFields(
-        ensureRecipientFieldDefaults(
-          normalized,
-          recipientName || "Recipient",
-          recipientEmail || undefined,
-          { signerName: cps.find((c) => c.id === lockedId)?.signerName },
+        stripLockedSignerEditableValuesOnHydrate(
+          ensureRecipientFieldDefaults(
+            normalized,
+            recipientName || "Recipient",
+            recipientEmail || undefined,
+            { signerName: cps.find((c) => c.id === lockedId)?.signerName },
+          ),
+          recipientAgreementId,
+          recipientLockedSignerRoleId,
         ),
         cpMap,
       );

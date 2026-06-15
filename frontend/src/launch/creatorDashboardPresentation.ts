@@ -15,6 +15,12 @@ import {
 } from "./creatorDashboardReviewGate";
 import { isAgreementCompletedForDashboard } from "./creatorDashboardAgreementCompletion";
 import {
+  creatorDashboardHasPartialSigningProgress,
+  formatCreatorSigningProgressLabel,
+  resolveCreatorSigningProgressSnapshot,
+  type CreatorSigningProgressSnapshot,
+} from "./creatorDashboardSigningProgress";
+import {
   isAgreementPacketPrepared,
 } from "../vs01/vs01WorkspaceSigningStatus";
 import {
@@ -290,8 +296,15 @@ export function sortCreatorDashboardRows(
   });
 }
 
-export function deriveCreatorSigningStatusLabel(row: WorkspaceIndexAgreement): string {
+export function deriveCreatorSigningStatusLabel(
+  row: WorkspaceIndexAgreement,
+  serverProgress?: CreatorSigningProgressSnapshot | null,
+): string {
   if (isAgreementCompletedForDashboard(row)) return "Fully signed";
+  const progress = resolveCreatorSigningProgressSnapshot(row, serverProgress ?? null);
+  if (progress?.partiallySigned || progress?.fullySigned) {
+    return formatCreatorSigningProgressLabel(progress);
+  }
   if (row.has_server_signing_lock || isAgreementPacketPrepared(row.id)) return "Signature links ready";
   return "Signature links not prepared yet";
 }
@@ -325,6 +338,7 @@ export function countCreatorReviewApproved(
 export function deriveCreatorDashboardStatusPillFromGate(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
+  serverProgress?: CreatorSigningProgressSnapshot | null,
 ): string | null {
   const effectiveStatus = deriveCreatorDashboardEffectiveStatus(
     row,
@@ -335,6 +349,9 @@ export function deriveCreatorDashboardStatusPillFromGate(
     return CREATOR_DASHBOARD_STATUS_LABEL.ready_for_signing;
   }
   if (effectiveStatus === "signing_in_progress") {
+    if (creatorDashboardHasPartialSigningProgress(row, serverProgress)) {
+      return "Partially Signed";
+    }
     return CREATOR_DASHBOARD_STATUS_LABEL.signing_in_progress;
   }
   if (!reviewGate.authoritative) return null;

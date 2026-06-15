@@ -225,6 +225,22 @@ export function handlePreparePacketContinue(
     agreementId: input.agreementId,
     documentId: input.documentId,
   });
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+    // eslint-disable-next-line no-console
+    console.info("[vs01-packet-sent-or-links-created]", {
+      agreement_id: input.agreementId.slice(0, 16),
+      document_id: input.documentId.slice(0, 16),
+      signer_targets: [
+        { signer_role_id: ownerRole.roleId, party_index: ownerRole.partyIndex, recipient_index: ownerRole.partyIndex },
+        ...signers.map((s) => ({
+          signer_role_id: s.signerRoleId,
+          party_index: roles.find((r) => r.roleId === s.signerRoleId)?.partyIndex ?? null,
+          recipient_index: roles.find((r) => r.roleId === s.signerRoleId)?.partyIndex ?? null,
+          email: s.email ? "***" : "",
+        })),
+      ],
+    });
+  }
 
   return { ok: true, handoff, gate, portablePacket };
 }

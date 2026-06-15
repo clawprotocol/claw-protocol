@@ -20,6 +20,7 @@ import {
   resolveCreatorDashboardReviewGate,
 } from "./creatorDashboardReviewGate";
 import { deriveDashboardWhatsNextPresentation } from "./dashboardWhatsNextPresentation";
+import type { CreatorSigningProgressSnapshot } from "./creatorDashboardSigningProgress";
 import {
   creatorDashboardShouldPrepareSignatureLinksFromTrack,
   creatorDashboardShowManageRecipients,
@@ -38,6 +39,7 @@ type Props = {
   onPrepareSignatureLinks?: (agreementId: string) => void;
   prepareBusy?: boolean;
   prepareNotice?: string | null;
+  signingProgress?: CreatorSigningProgressSnapshot | null;
 };
 
 export function DashboardWhatsNextPanel(props: Props) {
@@ -50,6 +52,7 @@ export function DashboardWhatsNextPanel(props: Props) {
     onPrepareSignatureLinks,
     prepareBusy = false,
     prepareNotice = null,
+    signingProgress = null,
   } = props;
   const [manageRecipientsOpen, setManageRecipientsOpen] = useState(false);
 
@@ -67,14 +70,15 @@ export function DashboardWhatsNextPanel(props: Props) {
   }
 
   const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows, { draft });
-  const presentation = deriveDashboardWhatsNextPresentation(row, reviewGate);
+  const presentation = deriveDashboardWhatsNextPresentation(row, reviewGate, signingProgress);
   const manualReviewLinkPage = creatorDashboardUsesManualReviewLinkPage();
   const trackAction = resolveCreatorDashboardSignatureTrackAction(row, reviewGate, {
     draft,
     manualReviewLinkPage,
+    signingProgress,
   });
-  const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate);
-  const signingStatus = deriveCreatorSigningStatusLabel(row);
+  const statusPill = deriveCreatorDashboardStatusPillFromGate(row, reviewGate, signingProgress);
+  const signingStatus = deriveCreatorSigningStatusLabel(row, signingProgress);
   const showPrepare =
     Boolean(onPrepareSignatureLinks) &&
     creatorDashboardShouldPrepareSignatureLinksFromTrack(row, reviewGate, draft);

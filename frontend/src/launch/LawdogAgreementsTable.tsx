@@ -19,13 +19,14 @@ import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 
 type Props = {
   rows: readonly WorkspaceIndexAgreement[];
+  signingProgressByAgreementId?: Readonly<Record<string, import("./creatorDashboardSigningProgress").CreatorSigningProgressSnapshot>>;
   onNavigate: (path: string) => void;
   onFocusReviewStatus?: (agreementId: string) => void;
   onArchiveComplete?: () => void;
 };
 
 export function LawdogAgreementsTable(props: Props) {
-  const { rows, onNavigate, onFocusReviewStatus, onArchiveComplete } = props;
+  const { rows, signingProgressByAgreementId = {}, onNavigate, onFocusReviewStatus, onArchiveComplete } = props;
 
   if (rows.length === 0) return null;
 
@@ -47,8 +48,9 @@ export function LawdogAgreementsTable(props: Props) {
         </thead>
         <tbody>
           {rows.map((row) => {
+            const rowProgress = signingProgressByAgreementId[row.id] ?? null;
             const internalStatus = deriveCreatorDashboardStatus(row);
-            const productStatus = deriveLawdogProductStatus(row);
+            const productStatus = deriveLawdogProductStatus(row, rowProgress);
             const openAction = creatorDashboardPrimaryAction(row);
             const donePath = creatorDashboardCompletedProofPath(row.id);
             const canDownload = internalStatus === "completed";

@@ -94,12 +94,29 @@ describe("VS01 parallel signing default", () => {
     );
   });
 
-  it("builds independent signing URLs for owner and counterparty", () => {
+  it("Party 2 signs first: Party 1 field remains waiting in packet status", () => {
+    const { roles, handoff } = twoPartyHandoff();
+    ensureSigningPacketStatusFromHandoff(handoff, roles[0]!.roleId);
+    const ownerKey = roles[0]!.roleId;
+    const cpKey = handoff.signers[0]!.signerRoleId!;
+    patchSignerPacketStatus(AG, cpKey, "signed");
+    const mid = readSigningPacketStatus(AG)!;
+    expect(mid.bySignerKey[cpKey]).toBe("signed");
+    expect(mid.bySignerKey[ownerKey]).toBe("waiting");
+    expect(mid.fullySigned).toBe(false);
+  });
+
+  it("builds independent signing URLs with distinct signer_role_id per party", () => {
     const { handoff } = twoPartyHandoff();
     expect(handoff.ownerSigningUrl).toMatch(/doc_parallel/);
     expect(handoff.signers).toHaveLength(1);
     expect(handoff.signers[0]?.signingUrl).toMatch(/doc_parallel/);
     expect(handoff.signers[0]?.signingUrl).not.toBe(handoff.ownerSigningUrl);
+    const ownerParams = new URL(handoff.ownerSigningUrl ?? "https://x").searchParams;
+    const cpParams = new URL(handoff.signers[0]!.signingUrl).searchParams;
+    expect(ownerParams.get("signer_role_id")).toContain(":i0:");
+    expect(cpParams.get("signer_role_id")).toContain(":i1:");
+    expect(ownerParams.get("signer_role_id")).not.toBe(cpParams.get("signer_role_id"));
   });
 
   it("Party 2 can complete before Party 1 without blocking", () => {
