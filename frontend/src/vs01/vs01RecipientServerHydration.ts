@@ -5,6 +5,7 @@
 import { VS01_PACKET_MANIFEST_SCOPE, storeRecipientManifest } from "./StepReceipt";
 import type { Vs01RecipientPlacedField } from "./types";
 import {
+  markVs01CanonicalPacketFromServer,
   storeVs01CanonicalPacketPortable,
   storeVs01CanonicalPacketSeed,
   type Vs01CanonicalPacketPortableV1,
@@ -40,6 +41,7 @@ function hydrateFieldsFromPortable(args: {
     args;
   storeVs01CanonicalPacketPortable(documentId, portable);
   storeVs01CanonicalPacketSeed(portable.seed);
+  markVs01CanonicalPacketFromServer(documentId);
   const manifestFields = portable.initialsPolicy.enabled
     ? portable.fields
     : portable.fields.filter((f) => f.type !== "initials");

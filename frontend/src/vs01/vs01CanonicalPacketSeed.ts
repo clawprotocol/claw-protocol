@@ -281,6 +281,52 @@ export function decodeVs01CanonicalPacketPortable(raw: string | null): Vs01Canon
   }
 }
 
+const SERVER_CANONICAL_SS_PREFIX = "vs01_recipient_canonical_server_";
+
+/** True when a portable packet or standalone seed exists for this document. */
+export function hasVs01CanonicalPacketCached(documentId: string): boolean {
+  const did = documentId.trim();
+  if (!did) return false;
+  return Boolean(loadVs01CanonicalPacketPortable(did) || loadVs01CanonicalPacketSeed(did));
+}
+
+/** Mark that the canonical packet for this document was hydrated from the server this session. */
+export function markVs01CanonicalPacketFromServer(documentId: string): void {
+  if (typeof window === "undefined") return;
+  const did = documentId.trim();
+  if (!did) return;
+  try {
+    sessionStorage.setItem(`${SERVER_CANONICAL_SS_PREFIX}${did}`, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function wasVs01CanonicalPacketFromServer(documentId: string): boolean {
+  if (typeof window === "undefined") return false;
+  const did = documentId.trim();
+  if (!did) return false;
+  try {
+    return sessionStorage.getItem(`${SERVER_CANONICAL_SS_PREFIX}${did}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function logVs01RecipientCanonicalSource(payload: {
+  source: "portable_packet" | "server_packet" | "fallback_rebuild";
+  pageCount: number | null;
+  fieldCount: number;
+  signerRoleIdShort: string | null;
+  packetHashMatch: boolean | null;
+  preparePacketHash: string | null;
+  fallbackReason?: string;
+}): void {
+  if (import.meta.env.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-recipient-canonical-source]", payload);
+}
+
 export function loadVs01CanonicalPacketSeed(documentId: string): Vs01CanonicalPacketSeedV1 | null {
   if (typeof window === "undefined") return null;
   const key = storageKey(documentId);
@@ -310,7 +356,7 @@ export function logVs01CanonicalPacketSeedUse(payload: {
   documentId: string;
   agreementId: string;
   corpusHash: string;
-  source: "stored_seed" | "bridge_session" | "guided_handoff_session";
+  source: "stored_seed" | "portable_packet" | "bridge_session" | "guided_handoff_session";
   renderMode: "canonical" | "pdf_blocked_fallback";
 }): void {
   if (import.meta.env.MODE === "test") return;

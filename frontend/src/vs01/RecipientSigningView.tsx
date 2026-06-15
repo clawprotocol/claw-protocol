@@ -55,8 +55,11 @@ import {
 } from "./buildVs01SigningPacketModel";
 import { resolveRecipientCanonicalSigningPacket } from "./resolveRecipientCanonicalSigningPacket";
 import {
+  hasVs01CanonicalPacketCached,
   loadVs01CanonicalPacketPortable,
   logVs01CanonicalPacketSeedUse,
+  logVs01RecipientCanonicalSource,
+  wasVs01CanonicalPacketFromServer,
   type Vs01CanonicalPacketPortableRole,
 } from "./vs01CanonicalPacketSeed";
 
@@ -290,8 +293,9 @@ export function RecipientSigningView({
       agreementId: aid,
       roles: prepareRoles,
       initialsEnabled: portablePacket?.initialsPolicy.enabled ?? true,
+      portablePacket,
     });
-  }, [documentId, recipientAgreementId, prepareRoles, portablePacket?.initialsPolicy.enabled]);
+  }, [documentId, recipientAgreementId, prepareRoles, portablePacket]);
 
   const useCanonicalDocument = Boolean(canonicalPacket?.model.allowed);
 
@@ -355,6 +359,11 @@ export function RecipientSigningView({
         return;
       }
 
+      if (serverHydrationPending) {
+        setPreviewLoading(true);
+        return;
+      }
+
       if (useCanonicalDocument && canonicalPacket) {
         setPdfUrl(null);
         setPreviewError(null);
@@ -374,6 +383,16 @@ export function RecipientSigningView({
 
       setPreviewLoading(true);
       setPreviewError(null);
+      if (import.meta.env.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.warn("[vs01-recipient-canonical-fallback]", {
+          documentIdShort: documentId.trim().slice(0, 12),
+          agreementIdShort: (recipientAgreementId ?? "").trim().slice(0, 16) || null,
+          reason: !hasVs01CanonicalPacketCached(documentId.trim())
+            ? "missing_canonical_packet"
+            : "canonical_model_not_allowed",
+        });
+      }
       try {
         const blob = await fetchDocumentContent(documentId.trim());
         if (cancelled) return;
@@ -406,7 +425,51 @@ export function RecipientSigningView({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId]);
+  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId, serverHydrationPending]);
+
+  useEffect(() => {
+    const did = documentId?.trim() ?? "";
+    if (!did || import.meta.env.MODE === "test") return;
+
+    let source: "portable_packet" | "server_packet" | "fallback_rebuild";
+    let fallbackReason: string | undefined;
+    if (useCanonicalDocument && canonicalPacket) {
+      source = wasVs01CanonicalPacketFromServer(did) ? "server_packet" : "portable_packet";
+    } else if (serverHydrationPending) {
+      source = "fallback_rebuild";
+      fallbackReason = "awaiting_server_hydration";
+    } else {
+      source = "fallback_rebuild";
+      if (!(recipientAgreementId ?? "").trim()) fallbackReason = "missing_agreement_id";
+      else if (!prepareRoles || prepareRoles.length < 2) fallbackReason = "insufficient_signing_roles";
+      else if (!hasVs01CanonicalPacketCached(did)) fallbackReason = "missing_canonical_packet";
+      else fallbackReason = "corpus_gate_or_model_blocked";
+    }
+
+    const portable = loadVs01CanonicalPacketPortable(did);
+    const packetHashMatch =
+      portable && canonicalPacket ? portable.seed.corpusHash === canonicalPacket.corpusHash : null;
+
+    logVs01RecipientCanonicalSource({
+      source,
+      pageCount: canonicalPacket?.model.pages.length ?? (numPages > 0 ? numPages : null),
+      fieldCount: documentFields.length,
+      signerRoleIdShort: lockedSignerRoleId ? lockedSignerRoleId.slice(0, 16) : null,
+      packetHashMatch,
+      preparePacketHash: portable?.seed.corpusHash ?? canonicalPacket?.corpusHash ?? null,
+      fallbackReason,
+    });
+  }, [
+    documentId,
+    useCanonicalDocument,
+    canonicalPacket,
+    serverHydrationPending,
+    recipientAgreementId,
+    prepareRoles,
+    numPages,
+    documentFields.length,
+    lockedSignerRoleId,
+  ]);
 
   useLayoutEffect(() => {
     const el = pagesInnerRef.current;

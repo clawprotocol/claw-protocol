@@ -8,8 +8,10 @@ import { fingerprintAgreementBody } from "../components/agreements/guidedDealCom
 import { resolveFinalVs01CorpusOrBlock } from "./vs01SigningCorpus";
 import {
   buildVs01CanonicalPacketSeed,
+  loadVs01CanonicalPacketPortable,
   loadVs01CanonicalPacketSeed,
   logVs01CanonicalPacketSeedUse,
+  type Vs01CanonicalPacketPortableV1,
   type Vs01CanonicalPacketSeedV1,
 } from "./vs01CanonicalPacketSeed";
 import { buildVs01SigningPacketModel, type Vs01SigningPacketModel } from "./buildVs01SigningPacketModel";
@@ -19,7 +21,7 @@ export type ResolvedRecipientCanonicalPacket = {
   seed: Vs01CanonicalPacketSeedV1;
   model: Vs01SigningPacketModel;
   corpusHash: string;
-  seedSource: "stored_seed" | "bridge_session" | "guided_handoff_session";
+  seedSource: "portable_packet" | "stored_seed" | "bridge_session" | "guided_handoff_session";
 };
 
 export function resolveRecipientCanonicalSigningPacket(args: {
@@ -29,6 +31,8 @@ export function resolveRecipientCanonicalSigningPacket(args: {
   freeBaselinePlain?: string | null;
   /** When set (e.g. from portable packet), overrides default initials placement. */
   initialsEnabled?: boolean | null;
+  /** Authoritative prepare/send portable packet when already in memory or storage. */
+  portablePacket?: Vs01CanonicalPacketPortableV1 | null;
 }): ResolvedRecipientCanonicalPacket | null {
   const documentId = args.documentId.trim();
   const agreementId = (args.agreementId ?? "").trim();
@@ -67,6 +71,14 @@ export function resolveRecipientCanonicalSigningPacket(args: {
     });
     return { seed, model, corpusHash: seed.corpusHash, seedSource: source };
   };
+
+  const portable =
+    args.portablePacket ??
+    loadVs01CanonicalPacketPortable(documentId);
+  if (portable && portable.seed.agreementId === agreementId) {
+    const fromPortable = tryBuild(portable.seed.corpusPlain, "portable_packet");
+    if (fromPortable) return fromPortable;
+  }
 
   const stored = loadVs01CanonicalPacketSeed(documentId);
   if (stored && stored.agreementId === agreementId) {

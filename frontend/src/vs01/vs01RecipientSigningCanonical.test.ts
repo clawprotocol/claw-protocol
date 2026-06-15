@@ -15,6 +15,7 @@ import {
   buildVs01CanonicalPacketSeed,
   decodeVs01CanonicalPacketPortable,
   encodeVs01CanonicalPacketPortable,
+  storeVs01CanonicalPacketPortable,
   storeVs01CanonicalPacketSeed,
 } from "./vs01CanonicalPacketSeed";
 import { countRecipientSigningActions } from "./recipientSigningFieldUtils";
@@ -53,7 +54,7 @@ describe("recipient canonical signing packet (test75)", () => {
     expect(src).toContain("useCanonicalDocument");
     expect(src).toContain("resolveRecipientCanonicalSigningPacket");
     expect(src).toContain("Vs01CanonicalSigningPage");
-    expect(src).toContain("canonicalCompact");
+    expect(src).toContain("logVs01RecipientCanonicalSource");
   });
 
   it("prepare and recipient resolve the same corpus hash from stored seed", () => {
@@ -78,6 +79,41 @@ describe("recipient canonical signing packet (test75)", () => {
     expect(resolved!.model.pages.some((p) => p.flowLines.some((l) => /\bIN WITNESS WHEREOF\b/i.test(l)))).toBe(
       true,
     );
+  });
+
+  it("portable packet alone resolves canonical model without standalone seed storage", () => {
+    const r = roles();
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: corpus,
+      roles: r,
+    });
+    expect(model.allowed).toBe(true);
+    const manifest = buildFullPacketManifestFromCanonicalModel({ model, roles: r });
+    const witnessPageIndex = model.pages.findIndex((p) =>
+      p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)),
+    );
+    const seed = buildVs01CanonicalPacketSeed({
+      documentId: "doc_portable_only",
+      agreementId: "ag_test75",
+      corpusPlain: corpus,
+    })!;
+    const portable = buildVs01CanonicalPacketPortable({
+      seed,
+      fields: manifest,
+      roles: r,
+      pageCount: model.pages.length,
+      witnessPageIndex,
+    });
+    storeVs01CanonicalPacketPortable("doc_portable_only", portable);
+    const resolved = resolveRecipientCanonicalSigningPacket({
+      documentId: "doc_portable_only",
+      agreementId: "ag_test75",
+      roles: r,
+      portablePacket: portable,
+    });
+    expect(resolved?.seedSource).toBe("portable_packet");
+    expect(resolved?.model.pages).toHaveLength(model.pages.length);
   });
 
   it("cross-device payload restores seed and manifest after browser storage is cleared", () => {

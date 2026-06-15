@@ -35,7 +35,7 @@ import {
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolveFinalVs01CorpusOrBlock } from "./vs01SigningCorpus";
-import { buildVs01CanonicalPacketSeed, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
+import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
 import {
   clearPaidProVs01PostSignHandoff,
@@ -132,9 +132,11 @@ const INITIAL_RECIPIENT_FIELDS: Vs01RecipientPlacedField[] =
 
 const RECIPIENT_NEEDS_SERVER_HYDRATION =
   RECIPIENT_SIGNER_DEEP_LINK &&
-  INITIAL_RECIPIENT_FIELDS.length === 0 &&
   Boolean(RECIPIENT_AGREEMENT_ID) &&
-  (VS01_URL_BOOT?.recipientManifestParamPresent ?? false);
+  Boolean((VS01_URL_BOOT?.documentId ?? "").trim()) &&
+  (!hasVs01CanonicalPacketCached((VS01_URL_BOOT?.documentId ?? "").trim()) ||
+    (INITIAL_RECIPIENT_FIELDS.length === 0 &&
+      (VS01_URL_BOOT?.recipientManifestParamPresent ?? false)));
 
 export type Vs01WizardProps = {
   /** Reserved for future controlled mode; shell ignores if unset. */
@@ -286,17 +288,16 @@ export function Vs01Wizard({
 
   useEffect(() => {
     if (!RECIPIENT_SIGNER_DEEP_LINK || !RECIPIENT_LOCKED_CP_ID) return;
-    if (recipientPlacedFields.length > 0) {
-      setRecipientServerHydrationPending(false);
-      return;
-    }
     const agreementId = RECIPIENT_AGREEMENT_ID;
     const did = (documentId ?? VS01_URL_BOOT?.documentId ?? "").trim();
     if (!agreementId || !did) {
       setRecipientServerHydrationPending(false);
       return;
     }
-    if (!VS01_URL_BOOT?.recipientManifestParamPresent) {
+    const hasCanonical = hasVs01CanonicalPacketCached(did);
+    const needsFields = recipientPlacedFields.length === 0;
+    const needsCanonical = !hasCanonical;
+    if (!needsFields && !needsCanonical) {
       setRecipientServerHydrationPending(false);
       return;
     }
