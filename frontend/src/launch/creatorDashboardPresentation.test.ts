@@ -89,11 +89,11 @@ describe("creatorDashboardPresentation", () => {
         }),
       ),
     ).toEqual({ label: "Prepare and send signing links", path: "/app", emphasis: "primary" });
-    expect(creatorDashboardPrimaryAction(row({ has_server_signing_lock: true })).label).toBe(
-      "View signing status",
+    expect(creatorDashboardPrimaryAction(row({ has_server_signing_lock: true })).path).toBe(
+      "/app/signing-status/ag_test",
     );
     expect(creatorDashboardPrimaryAction(row({ completed_signed: true })).label).toBe(
-      "View completed agreement",
+      "View signed agreement",
     );
   });
 
@@ -167,8 +167,8 @@ describe("creatorDashboardPresentation", () => {
 
     expect(deriveCreatorDashboardStatus(approvedRow)).toBe("completed");
     expect(deriveCreatorSigningStatusLabel(approvedRow)).toBe("Fully signed");
-    expect(deriveCreatorNextActionLabel(approvedRow, reviewGate)).toBe("View completed agreement");
-    expect(creatorDashboardPrimaryAction(approvedRow).label).toBe("View completed agreement");
+    expect(deriveCreatorNextActionLabel(approvedRow, reviewGate)).toBe("View signed agreement");
+    expect(creatorDashboardPrimaryAction(approvedRow).label).toBe("View signed agreement");
   });
 
   it("redirects creator from pre-signature done page when all reviews are approved", () => {

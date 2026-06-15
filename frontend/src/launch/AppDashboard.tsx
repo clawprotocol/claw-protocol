@@ -77,6 +77,7 @@ import {
   mergeWorkspaceAgreementCompletion,
   workspaceRowNeedsCompletionAuditHydration,
 } from "./creatorDashboardAgreementCompletion";
+import { mergeWorkspaceRowFromSigningProgress } from "./ownerSigningStatusResolver";
 import {
   fetchServerSigningProgressSnapshot,
   workspaceRowNeedsSigningProgressHydration,
@@ -220,10 +221,17 @@ export function AppDashboard() {
 
   const mergedDashboardRows = useMemo(
     () =>
-      rows.map((row) =>
-        mergeWorkspaceAgreementCompletion(row, auditCompletedByAgreementId[row.id] === true),
-      ),
-    [rows, auditCompletedByAgreementId, signingStatusEpoch],
+      rows.map((row) => {
+        const auditMerged = mergeWorkspaceAgreementCompletion(
+          row,
+          auditCompletedByAgreementId[row.id] === true,
+        );
+        return mergeWorkspaceRowFromSigningProgress(
+          auditMerged,
+          signingProgressByAgreementId[row.id] ?? null,
+        );
+      }),
+    [rows, auditCompletedByAgreementId, signingProgressByAgreementId, signingStatusEpoch],
   );
 
   const filteredDashboard = useMemo(

@@ -215,6 +215,50 @@ export function storeVs01CanonicalPacketPortable(
   }
 }
 
+function parsePortableFromRaw(raw: string | null): Vs01CanonicalPacketPortableV1 | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const packet = parsed as Vs01CanonicalPacketPortableV1;
+    if (packet.v !== 1 || !isValidSeed(packet.seed)) return null;
+    if (!Array.isArray(packet.fields) || !Array.isArray(packet.roles)) return null;
+    if (packet.fieldCount !== packet.fields.length) return null;
+    if (typeof packet.pageCount !== "number" || packet.pageCount <= 0) return null;
+    if (typeof packet.witnessPageIndex !== "number" || packet.witnessPageIndex < 0) return null;
+    return packet;
+  } catch {
+    return null;
+  }
+}
+
+/** Scan browser storage for a portable packet tied to an agreement id (post-refresh owner status). */
+export function findVs01CanonicalPacketPortableByAgreementId(
+  agreementId: string,
+): Vs01CanonicalPacketPortableV1 | null {
+  const aid = agreementId.trim();
+  if (!aid || typeof window === "undefined") return null;
+
+  const tryStorage = (storage: Storage, prefix: string): Vs01CanonicalPacketPortableV1 | null => {
+    try {
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i);
+        if (!key?.startsWith(prefix)) continue;
+        const packet = parsePortableFromRaw(storage.getItem(key));
+        if (packet?.seed.agreementId.trim() === aid) return packet;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  };
+
+  return (
+    tryStorage(sessionStorage, PORTABLE_SS_PREFIX) ??
+    tryStorage(localStorage, PORTABLE_LS_PREFIX)
+  );
+}
+
 export function loadVs01CanonicalPacketPortable(documentId: string): Vs01CanonicalPacketPortableV1 | null {
   if (typeof window === "undefined") return null;
   const key = storageKey(documentId);
@@ -232,16 +276,7 @@ export function loadVs01CanonicalPacketPortable(documentId: string): Vs01Canonic
     }
   }
   if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return null;
-    const packet = parsed as Vs01CanonicalPacketPortableV1;
-    if (packet.v !== 1 || !isValidSeed(packet.seed)) return null;
-    if (!Array.isArray(packet.fields) || !Array.isArray(packet.roles)) return null;
-    return packet;
-  } catch {
-    return null;
-  }
+  return parsePortableFromRaw(raw);
 }
 
 /** Persist portable packet and return URL-safe reference params (never embed huge corpus in URL). */

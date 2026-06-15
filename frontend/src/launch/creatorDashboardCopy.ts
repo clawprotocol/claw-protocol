@@ -3,6 +3,9 @@ export const CREATOR_PREPARE_SIGNATURE_LINKS_LABEL = "Prepare and send signing l
 export const CREATOR_NEXT_ACTION_PREPARE_SIGNATURE_LINKS = "Prepare and send signing links";
 
 export const CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE = "View completed agreement";
+export const CREATOR_VIEW_SIGNED_AGREEMENT_LABEL = "View signed agreement";
+export const CREATOR_VIEW_SIGNING_STATUS_LABEL = "View signing status";
+export const CREATOR_DOWNLOAD_PROOF_LABEL = "Download proof";
 export const CREATOR_VIEW_PROOF_RECORD_LABEL = "View proof record";
 export const CREATOR_DOWNLOAD_COMPLETED_AGREEMENT_LABEL = "Download completed agreement";
 
@@ -17,6 +20,8 @@ export const CREATOR_MANAGE_RECIPIENTS_LABEL = "Manage recipients";
 export const CREATOR_REVIEWS_APPROVED_PILL = "Reviews approved";
 
 export const CREATOR_WAITING_ON_REVIEWER_PILL = "Waiting on reviewer";
+
+export const CREATOR_WAITING_FOR_SIGNATURES_PILL = "Waiting for signatures";
 
 export const CREATOR_SIGNATURE_LINKS_LOCKED_HELPER =
   "Signature links unlock after all parties approve.";

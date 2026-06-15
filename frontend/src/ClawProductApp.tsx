@@ -11,6 +11,7 @@ import { FieldReviewPage } from "./launch/documentLayout/FieldReviewPage";
 import { QuickSendPage } from "./launch/simpleProduct/QuickSendPage";
 import { SimpleCreatePage } from "./launch/simpleProduct/SimpleCreatePage";
 import { SimpleDonePage } from "./launch/simpleProduct/SimpleDonePage";
+import { OwnerSigningStatusPage } from "./launch/OwnerSigningStatusPage";
 import { OwnerAgreementReadOnlyPage } from "./launch/simpleProduct/OwnerAgreementReadOnlyPage";
 import { OwnerProposalReviewPage } from "./launch/simpleProduct/OwnerProposalReviewPage";
 import { SimpleCheckoutPage } from "./launch/simpleProduct/SimpleCheckoutPage";
@@ -635,6 +636,8 @@ export function ClawProductApp() {
         return <OwnerProposalReviewPage agreementId={appMatch.agreementId} />;
       case "ownerAgreementView":
         return <OwnerAgreementReadOnlyPage agreementId={appMatch.agreementId} />;
+      case "ownerSigningStatus":
+        return <OwnerSigningStatusPage agreementId={appMatch.agreementId} />;
       case "simpleVerification":
         return <SimpleVerificationPage agreementId={appMatch.agreementId} />;
       case "quickSend":

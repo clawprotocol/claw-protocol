@@ -58,7 +58,7 @@ describe("lawdogDashboardPresentation", () => {
       row({ id: "d4", completed_signed: true }),
     ];
     expect(countLawdogDashboardKpis(rows)).toEqual({
-      activeAgreements: 4,
+      activeAgreements: 3,
       awaitingReview: 1,
       readyForSignature: 1,
       completedAgreements: 1,

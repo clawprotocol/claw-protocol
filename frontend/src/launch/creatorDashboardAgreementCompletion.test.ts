@@ -20,7 +20,7 @@ import {
 } from "../vs01/vs01SigningPacketStatusStore";
 import type { PaidProVs01PostSignHandoffV1 } from "../vs01/vs01PaidProPostSignHandoff";
 import { CREATOR_CONTINUE_SIGNING_LABEL } from "./creatorDashboardSignatureTrack";
-import { CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE } from "./creatorDashboardCopy";
+import { CREATOR_VIEW_SIGNED_AGREEMENT_LABEL } from "./creatorDashboardCopy";
 
 function row(overrides: Partial<WorkspaceIndexAgreement> = {}): WorkspaceIndexAgreement {
   return {
@@ -55,7 +55,7 @@ describe("creatorDashboardAgreementCompletion", () => {
     const merged = mergeWorkspaceAgreementCompletion(row(), true);
     const gate = resolveCreatorDashboardReviewGate(merged, []);
     const action = resolveCreatorDashboardSignatureTrackAction(merged, gate);
-    expect(action.label).toBe(CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE);
+    expect(action.label).toBe(CREATOR_VIEW_SIGNED_AGREEMENT_LABEL);
     expect(action.label).not.toBe(CREATOR_CONTINUE_SIGNING_LABEL);
     expect(action.path).toBe("/app/done/ag_qa362");
   });
@@ -64,7 +64,7 @@ describe("creatorDashboardAgreementCompletion", () => {
     const merged = mergeWorkspaceAgreementCompletion(row(), true);
     const open = creatorDashboardPrimaryAction(merged);
     expect(open.path).toBe("/app/done/ag_qa362");
-    expect(open.label).toBe(CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE);
+    expect(open.label).toBe(CREATOR_VIEW_SIGNED_AGREEMENT_LABEL);
   });
 
   it("detects local VS01 fully signed packet as completed", () => {

@@ -15,7 +15,6 @@ import {
 } from "./creatorDashboardReviewGate";
 import { isAgreementCompletedForDashboard } from "./creatorDashboardAgreementCompletion";
 import {
-  creatorDashboardHasPartialSigningProgress,
   formatCreatorSigningProgressLabel,
   resolveCreatorSigningProgressSnapshot,
   type CreatorSigningProgressSnapshot,
@@ -27,14 +26,17 @@ import {
   CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
   CREATOR_REVIEWS_APPROVED_PILL,
   CREATOR_WAITING_ON_REVIEWER_PILL,
-  CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
+  CREATOR_WAITING_FOR_SIGNATURES_PILL,
   CREATOR_TRACK_REVIEW_STATUS_LABEL,
   CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL,
   CREATOR_MANAGE_RECIPIENTS_LABEL,
+  CREATOR_VIEW_SIGNING_STATUS_LABEL,
+  CREATOR_VIEW_SIGNED_AGREEMENT_LABEL,
 } from "./creatorDashboardCopy";
 import {
   creatorDashboardFocusAgreementPath,
   creatorDashboardCompletedProofPath,
+  creatorDashboardSigningStatusPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
 
@@ -142,12 +144,16 @@ export function creatorDashboardPrimaryAction(
   switch (status) {
     case "completed":
       return {
-        label: CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
+        label: CREATOR_VIEW_SIGNED_AGREEMENT_LABEL,
         path: creatorDashboardCompletedProofPath(row.id),
         emphasis: "primary",
       };
     case "signing_in_progress":
-      return { label: "View signing status", path: `/app/send/${id}`, emphasis: "primary" };
+      return {
+        label: CREATOR_VIEW_SIGNING_STATUS_LABEL,
+        path: creatorDashboardSigningStatusPath(row.id),
+        emphasis: "primary",
+      };
     case "ready_for_signing":
     case "review_approved":
       return { label: CREATOR_PREPARE_SIGNATURE_LINKS_LABEL, path: "/app", emphasis: "primary" };
@@ -220,8 +226,8 @@ export function creatorDashboardSupplementalActions(
   }
   if (status === "signing_in_progress") {
     out.push({
-      label: "Open signing packet",
-      path: `/app/send/${id}`,
+      label: CREATOR_VIEW_SIGNING_STATUS_LABEL,
+      path: creatorDashboardSigningStatusPath(row.id),
       testIdSuffix: "open-signing-packet",
     });
   }
@@ -302,7 +308,7 @@ export function deriveCreatorSigningStatusLabel(
 ): string {
   if (isAgreementCompletedForDashboard(row)) return "Fully signed";
   const progress = resolveCreatorSigningProgressSnapshot(row, serverProgress ?? null);
-  if (progress?.partiallySigned || progress?.fullySigned) {
+  if (progress && (progress.partiallySigned || progress.fullySigned || progress.requiredCount > 0)) {
     return formatCreatorSigningProgressLabel(progress);
   }
   if (row.has_server_signing_lock || isAgreementPacketPrepared(row.id)) return "Signature links ready";
@@ -314,8 +320,8 @@ export function deriveCreatorNextActionLabel(
   reviewGate: CreatorDashboardReviewGate,
 ): string {
   const status = deriveCreatorDashboardStatus(row);
-  if (status === "completed") return CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE;
-  if (status === "signing_in_progress") return "View signing status";
+  if (status === "completed") return CREATOR_VIEW_SIGNED_AGREEMENT_LABEL;
+  if (status === "signing_in_progress") return CREATOR_VIEW_SIGNING_STATUS_LABEL;
   if (reviewGate.allRequiredReviewPartiesApproved) return CREATOR_PREPARE_SIGNATURE_LINKS_LABEL;
   if (creatorDashboardWaitingOnReviewer(reviewGate)) return "Wait for remaining reviewer approval";
   return creatorDashboardPrimaryAction(row).label;
@@ -338,7 +344,7 @@ export function countCreatorReviewApproved(
 export function deriveCreatorDashboardStatusPillFromGate(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
-  serverProgress?: CreatorSigningProgressSnapshot | null,
+  _serverProgress?: CreatorSigningProgressSnapshot | null,
 ): string | null {
   const effectiveStatus = deriveCreatorDashboardEffectiveStatus(
     row,
@@ -349,10 +355,7 @@ export function deriveCreatorDashboardStatusPillFromGate(
     return CREATOR_DASHBOARD_STATUS_LABEL.ready_for_signing;
   }
   if (effectiveStatus === "signing_in_progress") {
-    if (creatorDashboardHasPartialSigningProgress(row, serverProgress)) {
-      return "Partially Signed";
-    }
-    return CREATOR_DASHBOARD_STATUS_LABEL.signing_in_progress;
+    return CREATOR_WAITING_FOR_SIGNATURES_PILL;
   }
   if (!reviewGate.authoritative) return null;
   if (reviewGate.hasOpenChangeRequests) return CREATOR_DASHBOARD_STATUS_LABEL.in_review;

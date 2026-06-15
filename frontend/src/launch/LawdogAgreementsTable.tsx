@@ -10,9 +10,9 @@ import { creatorDashboardCompletedProofPath } from "./creatorDashboardReviewLink
 import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
 import {
   deriveLawdogProductStatus,
+  formatLawdogAgreementStatusLabel,
   formatLawdogDashboardDate,
   lawdogAgreementTypeLabel,
-  LAWDOG_PRODUCT_STATUS_LABEL,
   resolveLawdogAgreementCreatedAt,
 } from "./lawdogDashboardPresentation";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
@@ -88,7 +88,7 @@ export function LawdogAgreementsTable(props: Props) {
                     className="inline-flex rounded-full bg-slate-900/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-300"
                     data-testid={`lawdog-agreement-status-${row.id}`}
                   >
-                    {LAWDOG_PRODUCT_STATUS_LABEL[productStatus]}
+                    {formatLawdogAgreementStatusLabel(row, rowProgress)}
                   </span>
                 </td>
                 <td className="px-4 py-3">

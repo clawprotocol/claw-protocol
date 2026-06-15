@@ -3,8 +3,10 @@ import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { resolveCreatorDashboardReviewGate } from "./creatorDashboardReviewGate";
 import {
+  CREATOR_VIEW_SIGNING_STATUS_LABEL,
+} from "./creatorDashboardCopy";
+import {
   CREATOR_COMPLETE_SIGNER_DETAILS_LABEL,
-  CREATOR_CONTINUE_SIGNING_LABEL,
   CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL,
   creatorDashboardShowManageRecipients,
   creatorDashboardWhatsNextShowPrimaryCta,
@@ -17,7 +19,10 @@ import {
   CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
   CREATOR_TRACK_REVIEW_STATUS_LABEL,
 } from "./creatorDashboardCopy";
-import { creatorDashboardPrepareSignatureLinksPath } from "./creatorDashboardReviewLinkRouting";
+import {
+  creatorDashboardPrepareSignatureLinksPath,
+  creatorDashboardSigningStatusPath,
+} from "./creatorDashboardReviewLinkRouting";
 
 function indexRow(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement {
   return {
@@ -98,14 +103,16 @@ describe("creatorDashboardSignatureTrack", () => {
     expect(action.kind).not.toBe("focus_review_status");
   });
 
-  it("uses Continue signing when signature links already exist", () => {
+  it("routes to signing status when signature links already exist", () => {
     const row = indexRow({ has_server_signing_lock: true });
     const gate = resolveCreatorDashboardReviewGate(row, [], { draft: partyTwoApprovedDraft });
     const action = resolveCreatorDashboardSignatureTrackAction(row, gate, {
       draft: partyTwoApprovedDraft,
     });
-    expect(action.kind).toBe("open_signature_links");
-    expect(action.label).toBe(CREATOR_CONTINUE_SIGNING_LABEL);
+    expect(action.kind).toBe("view_signing_status");
+    expect(action.label).toBe(CREATOR_VIEW_SIGNING_STATUS_LABEL);
+    expect(action.path).toBe(creatorDashboardSigningStatusPath(row.id));
+    expect(action.path).not.toContain("/app/send/");
   });
 
   it("uses Complete signer details when party legal names are missing", () => {

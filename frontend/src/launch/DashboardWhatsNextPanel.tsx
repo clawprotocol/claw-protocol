@@ -12,9 +12,12 @@ import {
 import {
   CREATOR_MANAGE_RECIPIENTS_LABEL,
   CREATOR_VIEW_AGREEMENT_LABEL,
+  CREATOR_DOWNLOAD_PROOF_LABEL,
   logDashboardWhatsNextCtaClick,
 } from "./creatorDashboardCopy";
-import { creatorDashboardUsesManualReviewLinkPage } from "./creatorDashboardReviewLinkRouting";
+import { creatorDashboardCompletedProofPath, creatorDashboardUsesManualReviewLinkPage } from "./creatorDashboardReviewLinkRouting";
+import { openReceiptProofBundleDownload } from "../export/dataExportApi";
+import { readPaidProVs01PostSignHandoff } from "../vs01/vs01PaidProPostSignHandoff";
 import {
   creatorDashboardReviewHydrationPending,
   resolveCreatorDashboardReviewGate,
@@ -85,6 +88,9 @@ export function DashboardWhatsNextPanel(props: Props) {
   const showPrimaryCta = creatorDashboardWhatsNextShowPrimaryCta(reviewGate, trackAction);
   const showViewAgreement = creatorDashboardWhatsNextShowViewAgreement(row, reviewGate, trackAction);
   const showManageRecipients = creatorDashboardShowManageRecipients(row, reviewGate);
+  const completedHandoff =
+    presentation.status === "completed" ? readPaidProVs01PostSignHandoff(row.id) : null;
+  const proofReceiptId = (completedHandoff?.receiptId ?? "").trim();
 
   const handleCtaClick = () => {
     logDashboardWhatsNextCtaClick({
@@ -200,6 +206,26 @@ export function DashboardWhatsNextPanel(props: Props) {
               No action while waiting for reviewer
             </span>
           )}
+          {presentation.status === "completed" && proofReceiptId ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact min-w-[11rem]"
+              data-testid={`creator-dashboard-download-proof-${row.id}`}
+              data-dashboard-whats-next-cta="download_proof"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                logDashboardWhatsNextCtaClick({
+                  agreementId: row.id,
+                  action: "download_proof",
+                  targetRoute: creatorDashboardCompletedProofPath(row.id),
+                });
+                void openReceiptProofBundleDownload(proofReceiptId);
+              }}
+            >
+              {CREATOR_DOWNLOAD_PROOF_LABEL}
+            </button>
+          ) : null}
           {showViewAgreement ? (
             <button
               type="button"

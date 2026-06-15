@@ -19,6 +19,11 @@ export function creatorDashboardCompletedProofPath(agreementId: string): string 
   return `/app/done/${encodeURIComponent(agreementId.trim())}`;
 }
 
+/** Owner VS01 signing progress — per-signer status cards (not legacy /app/send). */
+export function creatorDashboardSigningStatusPath(agreementId: string): string {
+  return `/app/signing-status/${encodeURIComponent(agreementId.trim())}`;
+}
+
 /** @deprecated Use creatorDashboardCompletedProofPath for signed proof only. */
 export function creatorDashboardReviewLinkReadyPath(agreementId: string): string {
   return creatorDashboardCompletedProofPath(agreementId);

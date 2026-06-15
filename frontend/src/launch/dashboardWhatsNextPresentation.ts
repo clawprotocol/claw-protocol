@@ -13,7 +13,8 @@ import {
   isAgreementCompletedForDashboard,
 } from "./creatorDashboardAgreementCompletion";
 import {
-  creatorDashboardHasPartialSigningProgress,
+  formatCreatorSigningProgressLabel,
+  resolveCreatorSigningProgressSnapshot,
   type CreatorSigningProgressSnapshot,
 } from "./creatorDashboardSigningProgress";
 import {
@@ -86,12 +87,13 @@ export function deriveWhatsNextHeadline(
   const status = effectiveStatus(row, reviewGate);
   const title = displayCreatorAgreementTitle(row.title);
 
-  if (status === "completed") return `${title} is fully signed`;
+  if (status === "completed") return "Agreement fully signed";
   if (status === "signing_in_progress") {
-    if (creatorDashboardHasPartialSigningProgress(row, serverProgress)) {
-      return "Partially signed";
+    const progress = resolveCreatorSigningProgressSnapshot(row, serverProgress ?? null);
+    if (progress?.partiallySigned) {
+      return "Waiting for remaining signatures";
     }
-    return "Signature links sent";
+    return "Waiting for signatures";
   }
   if (status === "ready_for_signing" || status === "review_approved") {
     return "All reviews complete";
@@ -118,12 +120,15 @@ export function deriveWhatsNextProgressLine(
     return "All required reviews are complete";
   }
   if (status === "signing_in_progress") {
-    if (creatorDashboardHasPartialSigningProgress(row, serverProgress)) {
-      return "Waiting for remaining signatures";
+    const progress = resolveCreatorSigningProgressSnapshot(row, serverProgress ?? null);
+    if (progress && progress.requiredCount > 0) {
+      return formatCreatorSigningProgressLabel(progress);
     }
-    return "Waiting for signatures";
+    return "Signature links have been sent. Track who has signed and who is still pending.";
   }
-  if (status === "completed") return "Agreement fully executed";
+  if (status === "completed") {
+    return "All required parties have signed. Your proof record is ready.";
+  }
   return null;
 }
 
@@ -132,7 +137,8 @@ export function deriveWhatsNextNextStep(
   reviewGate: CreatorDashboardReviewGate,
 ): string {
   const status = effectiveStatus(row, reviewGate);
-  if (status === "signing_in_progress") return "Wait for remaining signatures";
+  if (status === "signing_in_progress") return "View signing status";
+  if (status === "completed") return "View signed agreement or download proof";
   if (status === "ready_for_signing" || status === "review_approved") {
     return "Prepare and send signing links";
   }
@@ -147,7 +153,6 @@ export function deriveWhatsNextNextStep(
       return "Wait for reviewer approval";
     }
   }
-  if (status === "completed") return "View proof record or download final copy";
   return deriveCreatorNextActionLabel(row, reviewGate);
 }
 

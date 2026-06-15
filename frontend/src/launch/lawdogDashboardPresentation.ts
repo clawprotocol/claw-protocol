@@ -6,6 +6,9 @@ import {
 import {
   isAgreementPartiallySignedLocal,
 } from "../vs01/vs01WorkspaceSigningStatus";
+import {
+  formatCreatorSigningProgressLabel,
+} from "./creatorDashboardSigningProgress";
 
 /** Product-facing agreement status labels for LawDog Dashboard v1. */
 export type LawdogProductStatus =
@@ -60,6 +63,19 @@ export function deriveLawdogProductStatus(
   return "draft";
 }
 
+export function formatLawdogAgreementStatusLabel(
+  row: WorkspaceIndexAgreement,
+  progress?: import("../vs01/vs01WorkspaceSigningStatus").SigningProgressSnapshot | null,
+): string {
+  const productStatus = deriveLawdogProductStatus(row, progress);
+  if (productStatus === "partially_signed" && progress) {
+    return `Signing: ${formatCreatorSigningProgressLabel(progress)}`;
+  }
+  if (productStatus === "sent") return "Waiting for signatures";
+  if (productStatus === "signed") return "Completed";
+  return LAWDOG_PRODUCT_STATUS_LABEL[productStatus];
+}
+
 export function lawdogAgreementTypeLabel(_row: WorkspaceIndexAgreement): string {
   return "Pro Agreement";
 }
@@ -87,12 +103,12 @@ export function countLawdogDashboardKpis(rows: readonly WorkspaceIndexAgreement[
 
   for (const row of rows) {
     if (row.workspace_archived_at) continue;
-    activeAgreements += 1;
     const internal = deriveCreatorDashboardStatus(row);
     if (internal === "completed") {
       completedAgreements += 1;
       continue;
     }
+    activeAgreements += 1;
     if (internal === "ready_for_signing" || internal === "review_approved") {
       readyForSignature += 1;
       continue;

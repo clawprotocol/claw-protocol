@@ -4,19 +4,17 @@ import {
   type ResolvePaidProSignerDetailsGateArgs,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
 } from "../components/agreements/signerSetupPartyIdentity";
-import {
-  creatorDashboardHasPartialSigningProgress,
-  type CreatorSigningProgressSnapshot,
-} from "./creatorDashboardSigningProgress";
 import { isAgreementPacketPrepared } from "../vs01/vs01WorkspaceSigningStatus";
 import {
   CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
   CREATOR_TRACK_REVIEW_STATUS_LABEL,
-  CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
+  CREATOR_VIEW_SIGNING_STATUS_LABEL,
+  CREATOR_VIEW_SIGNED_AGREEMENT_LABEL,
 } from "./creatorDashboardCopy";
 import {
   creatorDashboardFocusAgreementPath,
   creatorDashboardCompletedProofPath,
+  creatorDashboardSigningStatusPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
 import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
@@ -29,14 +27,16 @@ import {
   deriveCreatorDashboardEffectiveStatus as deriveEffectiveStatusFromGate,
   type CreatorDashboardReviewGate,
 } from "./creatorDashboardReviewGate";
+import type { CreatorSigningProgressSnapshot } from "./creatorDashboardSigningProgress";
 export const CREATOR_OPEN_SIGNATURE_LINKS_LABEL = "Open signature links";
+/** @deprecated Use CREATOR_VIEW_SIGNING_STATUS_LABEL */
 export const CREATOR_CONTINUE_SIGNING_LABEL = "Continue signing";
 export const CREATOR_COMPLETE_SIGNER_DETAILS_LABEL = PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA;
 export const CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL = "Review suggested changes";
 
 export type CreatorDashboardSignatureTrackActionKind =
   | "prepare_signature_links"
-  | "open_signature_links"
+  | "view_signing_status"
   | "complete_signer_details"
   | "review_suggested_changes"
   | "track_review_status"
@@ -113,18 +113,17 @@ export function resolveCreatorDashboardSignatureTrackAction(
   if (effectiveStatus === "completed") {
     return {
       kind: "navigate",
-      label: CREATOR_NEXT_ACTION_OPEN_AGREEMENT_WORKSPACE,
+      label: CREATOR_VIEW_SIGNED_AGREEMENT_LABEL,
       path: creatorDashboardCompletedProofPath(row.id),
       emphasis: "primary",
     };
   }
 
   if (effectiveStatus === "signing_in_progress" || signingLinksExist) {
-    const partial = creatorDashboardHasPartialSigningProgress(row, options?.signingProgress);
     return {
-      kind: "open_signature_links",
-      label: partial ? "View signing status" : CREATOR_CONTINUE_SIGNING_LABEL,
-      path: partial ? creatorDashboardFocusAgreementPath(row.id) : `/app/send/${id}`,
+      kind: "view_signing_status",
+      label: CREATOR_VIEW_SIGNING_STATUS_LABEL,
+      path: creatorDashboardSigningStatusPath(row.id),
       emphasis: "primary",
     };
   }

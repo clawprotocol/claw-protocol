@@ -713,7 +713,7 @@ describe("AppDashboard creator-centric surface", () => {
 
     expect(screen.getByText(/Fully signed/)).toBeTruthy();
     expect(screen.queryByText(/Signature links not prepared yet/)).toBeNull();
-    expect(screen.getByRole("button", { name: "View completed agreement" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View signed agreement" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Prepare and send signing links" })).toBeNull();
   });
 
@@ -741,11 +741,11 @@ describe("AppDashboard creator-centric surface", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Fully signed/)).toBeTruthy();
-      expect(screen.getByTestId(`lawdog-agreement-status-${agreementId}`).textContent).toContain("Signed");
+      expect(screen.getByTestId(`lawdog-agreement-status-${agreementId}`).textContent).toContain("Completed");
     });
 
     expect(screen.queryByRole("button", { name: "Continue signing" })).toBeNull();
-    expect(screen.getByRole("button", { name: "View completed agreement" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View signed agreement" })).toBeTruthy();
   });
 
   it("shows the requested empty state", async () => {

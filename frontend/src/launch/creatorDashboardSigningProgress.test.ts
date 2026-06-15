@@ -16,6 +16,7 @@ import {
   CREATOR_CONTINUE_SIGNING_LABEL,
   resolveCreatorDashboardSignatureTrackAction,
 } from "./creatorDashboardSignatureTrack";
+import { CREATOR_WAITING_FOR_SIGNATURES_PILL } from "./creatorDashboardCopy";
 import {
   deriveWhatsNextHeadline,
   deriveWhatsNextProgressLine,
@@ -94,9 +95,9 @@ describe("creatorDashboardSigningProgress (QA363)", () => {
     expect(progress?.signedCount).toBe(1);
     expect(progress?.requiredCount).toBe(2);
     expect(deriveCreatorSigningStatusLabel(row)).toBe("1 of 2 signed");
-    expect(deriveCreatorDashboardStatusPillFromGate(row, gate)).toBe("Partially Signed");
-    expect(deriveWhatsNextHeadline(row, gate)).toBe("Partially signed");
-    expect(deriveWhatsNextProgressLine(row, gate)).toBe("Waiting for remaining signatures");
+    expect(deriveCreatorDashboardStatusPillFromGate(row, gate)).toBe(CREATOR_WAITING_FOR_SIGNATURES_PILL);
+    expect(deriveWhatsNextHeadline(row, gate)).toBe("Waiting for remaining signatures");
+    expect(deriveWhatsNextProgressLine(row, gate)).toBe("1 of 2 signed");
     expect(deriveLawdogProductStatus(row, progress)).toBe("partially_signed");
 
     const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { signingProgress: progress });

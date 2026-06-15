@@ -12,7 +12,12 @@ import {
 } from "./creatorDashboardReviewLinkRouting";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 
+import { creatorDashboardSigningStatusPath } from "./creatorDashboardReviewLinkRouting";
+
 describe("creatorDashboardReviewLinkRouting", () => {
+  it("builds signing status path away from legacy send route", () => {
+    expect(creatorDashboardSigningStatusPath("ag_1")).toBe("/app/signing-status/ag_1");
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
   });
