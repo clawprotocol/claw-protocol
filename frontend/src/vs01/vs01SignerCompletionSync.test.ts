@@ -4,7 +4,10 @@ import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { storeVs01CanonicalPacketPortable } from "./vs01CanonicalPacketSeed";
 import { readSigningPacketStatus, writeSigningPacketStatus } from "./vs01SigningPacketStatusStore";
-import { recordVs01SignerCompletion } from "./vs01SignerCompletionSync";
+import {
+  recordVs01SignerCompletion,
+  resetVs01SignerCompletionInFlightForTests,
+} from "./vs01SignerCompletionSync";
 import type { PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
 import { writePaidProVs01PostSignHandoff } from "./vs01PaidProPostSignHandoff";
 
@@ -98,18 +101,30 @@ describe("recordVs01SignerCompletion (Test361)", () => {
     localStorage.clear();
     sessionStorage.clear();
     vi.restoreAllMocks();
+    resetVs01SignerCompletionInFlightForTests();
     writePaidProVs01PostSignHandoff(handoff());
     seedPortable();
   });
 
-  it("bootstraps packet status and syncs first signer to server", async () => {
-    const post = vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockResolvedValue({
-      ok: true,
-      fully_executed: false,
-      completion_emails_sent: false,
+  it("syncs to server before updating local packet cache", async () => {
+    const order: string[] = [];
+    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockImplementation(async () => {
+      order.push("server");
+      expect(readSigningPacketStatus(AG)?.bySignerKey[OWNER_ROLE]).not.toBe("signed");
+      return {
+        ok: true,
+        fully_executed: false,
+        completion_emails_sent: false,
+      };
+    });
+    const statusStore = await import("./vs01SigningPacketStatusStore");
+    const originalPatch = statusStore.patchSignerPacketStatus;
+    vi.spyOn(statusStore, "patchSignerPacketStatus").mockImplementation((...args) => {
+      order.push("local");
+      return originalPatch(...args);
     });
 
-    const result = await recordVs01SignerCompletion({
+    await recordVs01SignerCompletion({
       agreementId: AG,
       documentId: DOC,
       signerRoleId: OWNER_ROLE,
@@ -118,12 +133,36 @@ describe("recordVs01SignerCompletion (Test361)", () => {
       signingDateIso: "2026-06-07",
     });
 
-    expect(result.serverSynced).toBe(true);
-    expect(result.fullySigned).toBe(false);
-    const snap = readSigningPacketStatus(AG);
-    expect(snap?.bySignerKey[OWNER_ROLE]).toBe("signed");
-    expect(snap?.bySignerKey[CP_ROLE]).toBe("waiting");
-    expect(post).toHaveBeenCalledOnce();
+    expect(order[0]).toBe("server");
+    expect(order).toContain("local");
+  });
+
+  it("dedupes concurrent finish requests for the same signer", async () => {
+    let calls = 0;
+    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockImplementation(async () => {
+      calls += 1;
+      await new Promise((r) => setTimeout(r, 20));
+      return { ok: true, fully_executed: false };
+    });
+    const [a, b] = await Promise.all([
+      recordVs01SignerCompletion({
+        agreementId: AG,
+        documentId: DOC,
+        signerRoleId: OWNER_ROLE,
+        partyIndex: 0,
+        participantId: "owner",
+      }),
+      recordVs01SignerCompletion({
+        agreementId: AG,
+        documentId: DOC,
+        signerRoleId: OWNER_ROLE,
+        partyIndex: 0,
+        participantId: "owner",
+      }),
+    ]);
+    expect(calls).toBe(1);
+    expect(a.serverSynced).toBe(true);
+    expect(b.serverSynced).toBe(true);
   });
 
   it("marks fully signed locally and requests completion emails on final signer", async () => {

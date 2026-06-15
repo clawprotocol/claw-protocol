@@ -6120,27 +6120,14 @@ def post_vs01_signer_complete(
         assert_agreement_recipient_write_allowed(request, aid, allowed_modes=("sign",))
         auth_mode = "recipient"
 
-    draft = _load_or_404(aid)
-    audit = list(draft.audit_log or [])
-
     from backend.services.vs01_signer_completion import (
-        all_signers_signed_from_audit,
-        build_fully_executed_signed_event,
-        build_signature_completed_event,
-        merge_portable_packet_corpus,
+        completion_emails_already_sent,
+        merge_fresh_audit_for_vs01_signer,
+        orchestrate_vs01_signer_complete,
         resolve_participant_id_for_signer_role,
-        signer_role_already_completed,
     )
 
-    if signer_role_already_completed(audit, signer_role_id):
-        fully = all_signers_signed_from_audit(draft.model_dump(), audit)
-        return {
-            "ok": True,
-            "already_signed": True,
-            "fully_executed": fully,
-            "completion_emails_sent": False,
-        }
-
+    draft = _load_or_404(aid)
     now = (body.signed_at or "").strip() or _utc_now_iso()
     participant_id = resolve_participant_id_for_signer_role(
         draft.model_dump(),
@@ -6156,96 +6143,116 @@ def post_vs01_signer_complete(
         if sp:
             display_name = (sp.name or "").strip()
 
-    audit.append(
-        AuditEvent.model_validate(
-            build_signature_completed_event(
-                signer_role_id=signer_role_id,
-                participant_id=participant_id,
-                display_name=display_name,
-                document_id=(body.document_id or "").strip(),
-                signed_at=now,
-                signed_date_iso=(body.signed_date_iso or "").strip(),
-                signed_date_display=(body.signed_date_display or "").strip(),
-                locked_version_id=lv,
-                agreement_version_hash=fp,
-            )
-        ).model_dump()
+    pending = orchestrate_vs01_signer_complete(
+        draft.model_dump(),
+        signer_role_id=signer_role_id,
+        participant_id=participant_id,
+        display_name=display_name,
+        document_id=(body.document_id or "").strip(),
+        signed_at=now,
+        signed_date_iso=(body.signed_date_iso or "").strip(),
+        signed_date_display=(body.signed_date_display or "").strip(),
+        locked_version_id=lv,
+        agreement_version_hash=fp,
+        portable_packet=body.portable_packet if isinstance(body.portable_packet, dict) else None,
     )
 
-    draft_dict = draft.model_dump()
-    if isinstance(body.portable_packet, dict):
-        draft_dict = merge_portable_packet_corpus(draft_dict, body.portable_packet)
+    fresh = _load_or_404(aid)
+    outcome = merge_fresh_audit_for_vs01_signer(
+        fresh.model_dump(),
+        pending,
+        signer_role_id=signer_role_id,
+    )
 
-    fully = all_signers_signed_from_audit(draft_dict, audit)
-    completion_emails_sent = False
-    if fully:
-        assert_can_complete_agreement(agreement_id=aid)
-        audit.append(
-            AuditEvent.model_validate(
-                build_fully_executed_signed_event(
-                    signed_at=now,
-                    agreement_version_hash=fp,
-                )
-            ).model_dump()
+    completion_emails_sent = completion_emails_already_sent(outcome.audit)
+
+    if outcome.audit_mutated:
+        next_draft = _merge_agreement_draft(
+            fresh,
+            updated_at=now,
+            audit_log=outcome.audit,
+            vs01_signing_packet_v1=outcome.draft_dict.get("vs01_signing_packet_v1"),
         )
-        record_agreement_finalized(agreement_id=aid)
-        record_public_feed_event_if_applicable(draft_dict=draft_dict, event_type="signed", at=now)
-        try:
-            from backend.integrations.hooks_emit import (
-                claw_emit_integration_event,
-                claw_org_id_for_registered_agreement,
+        _save_draft_sync(next_draft.model_dump(), request)
+
+        if outcome.newly_finalized:
+            assert_can_complete_agreement(agreement_id=aid)
+            record_agreement_finalized(agreement_id=aid)
+            record_public_feed_event_if_applicable(
+                draft_dict=next_draft.model_dump(),
+                event_type="signed",
+                at=now,
             )
-
-            oid = claw_org_id_for_registered_agreement(aid)
-            if oid:
-                fp_short = fp[:24] if fp else ""
-                claw_emit_integration_event(
-                    oid,
-                    "agreement.signed",
-                    "agreement",
-                    aid,
-                    {"locked_version_id": lv, "agreement_version_hash_prefix": fp_short},
+            try:
+                from backend.integrations.hooks_emit import (
+                    claw_emit_integration_event,
+                    claw_org_id_for_registered_agreement,
                 )
-                claw_emit_integration_event(
-                    oid,
-                    "agreement.completed",
-                    "agreement",
-                    aid,
-                    {"locked_version_id": lv, "lifecycle": "fully_executed"},
-                )
-        except Exception:
-            pass
 
-        try:
-            from backend.services.email.signing_completion_delivery import maybe_send_signing_completion_emails
+                oid = claw_org_id_for_registered_agreement(aid)
+                if oid:
+                    fp_short = fp[:24] if fp else ""
+                    claw_emit_integration_event(
+                        oid,
+                        "agreement.signed",
+                        "agreement",
+                        aid,
+                        {"locked_version_id": lv, "agreement_version_hash_prefix": fp_short},
+                    )
+                    claw_emit_integration_event(
+                        oid,
+                        "agreement.completed",
+                        "agreement",
+                        aid,
+                        {"locked_version_id": lv, "lifecycle": "fully_executed"},
+                    )
+            except Exception:
+                pass
 
-            email_draft = {**draft_dict, "audit_log": audit}
-            notify_audit = maybe_send_signing_completion_emails(
-                agreement_id=aid,
-                draft=email_draft,
-                org_id=resolve_subject_from_request(request),
-            )
-            if notify_audit:
-                audit.append(AuditEvent.model_validate(notify_audit).model_dump())
+    if outcome.fully_executed:
+        from backend.services.vs01_signer_completion import vs01_completion_email_lock
+
+        with vs01_completion_email_lock(aid):
+            reloaded = _load_or_404(aid)
+            reloaded_audit = list(reloaded.model_dump().get("audit_log") or [])
+            if completion_emails_already_sent(reloaded_audit):
                 completion_emails_sent = True
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "vs01_signing_completion_email_failed agreement_id=%s",
-                aid,
-            )
+            else:
+                try:
+                    from backend.services.email.signing_completion_delivery import (
+                        maybe_send_signing_completion_emails,
+                    )
 
-    next_draft = _merge_agreement_draft(
-        draft,
-        updated_at=now,
-        audit_log=audit,
-        vs01_signing_packet_v1=draft_dict.get("vs01_signing_packet_v1"),
-    )
-    _save_draft_sync(next_draft.model_dump(), request)
+                    notify_audit = maybe_send_signing_completion_emails(
+                        agreement_id=aid,
+                        draft={**reloaded.model_dump(), "audit_log": reloaded_audit},
+                        org_id=resolve_subject_from_request(request),
+                    )
+                    if notify_audit:
+                        fresh_for_email = _load_or_404(aid)
+                        fresh_audit = list(fresh_for_email.model_dump().get("audit_log") or [])
+                        if not completion_emails_already_sent(fresh_audit):
+                            email_audit = list(fresh_audit)
+                            email_audit.append(AuditEvent.model_validate(notify_audit).model_dump())
+                            next_email = _merge_agreement_draft(
+                                fresh_for_email,
+                                updated_at=now,
+                                audit_log=email_audit,
+                            )
+                            _save_draft_sync(next_email.model_dump(), request)
+                            completion_emails_sent = True
+                        else:
+                            completion_emails_sent = True
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "vs01_signing_completion_email_failed agreement_id=%s",
+                        aid,
+                    )
 
     return {
         "ok": True,
-        "already_signed": False,
-        "fully_executed": fully,
+        "already_signed": outcome.already_signed,
+        "fully_executed": outcome.fully_executed,
         "completion_emails_sent": completion_emails_sent,
         "auth_mode": auth_mode,
     }

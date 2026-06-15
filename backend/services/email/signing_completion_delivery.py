@@ -95,6 +95,16 @@ def maybe_send_signing_completion_emails(
     if sent_count < 1:
         return None
 
+    if sent_count < len(targets):
+        _log.warning(
+            "[signing-completion-email] partial agreement_id=%s sent_count=%s target_count=%s "
+            "(no audit marker — safe to retry)",
+            aid,
+            sent_count,
+            len(targets),
+        )
+        return None
+
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return {
         "event_type": SIGNING_COMPLETION_EMAILS_SENT_EVENT,

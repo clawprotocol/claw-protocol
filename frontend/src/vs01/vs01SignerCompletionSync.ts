@@ -43,6 +43,8 @@ export type RecordVs01SignerCompletionResult = {
   corpusStamped: boolean;
 };
 
+const completionInFlight = new Map<string, Promise<RecordVs01SignerCompletionResult>>();
+
 function bootstrapSignerKeys(agreementId: string): string[] {
   const handoff = resolveOwnerSigningHandoff(agreementId);
   if (!handoff) return [];
@@ -68,23 +70,21 @@ function ensureSnapshotForSigner(
   }
   const keys = bootstrapSignerKeys(agreementId);
   if (!keys.length) {
-    const snap: Vs01SigningPacketStatusSnapshot = {
+    return {
       agreementId,
       updatedAt: new Date().toISOString(),
       bySignerKey: { [signerRoleId]: "waiting" },
       fullySigned: false,
     };
-    return snap;
   }
   const bySignerKey: Vs01SigningPacketStatusSnapshot["bySignerKey"] = {};
   for (const key of keys) bySignerKey[key] = "waiting";
-  const snap: Vs01SigningPacketStatusSnapshot = {
+  return {
     agreementId,
     updatedAt: new Date().toISOString(),
     bySignerKey,
     fullySigned: false,
   };
-  return snap;
 }
 
 function persistSignedDateToPortablePacket(args: {
@@ -134,8 +134,40 @@ function persistSignedDateToPortablePacket(args: {
   return { portable: nextPortable, corpusStamped };
 }
 
-/** Record VS01 signer completion locally and sync to server when available. */
-export async function recordVs01SignerCompletion(
+function applyLocalSignerPacketStatus(
+  agreementId: string,
+  signerRoleId: string,
+  serverFullyExecuted: boolean,
+): Vs01SigningPacketStatusSnapshot | null {
+  const bootstrap = ensureSnapshotForSigner(agreementId, signerRoleId);
+  if (bootstrap && !readSigningPacketStatus(agreementId)) {
+    writeSigningPacketStatus(bootstrap);
+  }
+  const bootstrapKeys = bootstrapSignerKeys(agreementId);
+  const keys = bootstrapKeys.length ? bootstrapKeys : [signerRoleId];
+  if (serverFullyExecuted) {
+    let snap = readSigningPacketStatus(agreementId);
+    if (!snap && bootstrap) {
+      writeSigningPacketStatus(bootstrap);
+      snap = bootstrap;
+    }
+    if (snap) {
+      const bySignerKey = { ...snap.bySignerKey };
+      for (const key of keys) bySignerKey[key] = "signed";
+      const next: Vs01SigningPacketStatusSnapshot = {
+        ...snap,
+        updatedAt: new Date().toISOString(),
+        bySignerKey,
+        fullySigned: true,
+      };
+      writeSigningPacketStatus(next);
+      return next;
+    }
+  }
+  return patchSignerPacketStatus(agreementId, signerRoleId, "signed", keys);
+}
+
+async function recordVs01SignerCompletionInner(
   args: RecordVs01SignerCompletionArgs,
 ): Promise<RecordVs01SignerCompletionResult> {
   const agreementId = args.agreementId.trim();
@@ -144,11 +176,7 @@ export async function recordVs01SignerCompletion(
   const signingDateIso = (args.signingDateIso ?? "").trim() || todayIsoDateLocal();
   const signedDateDisplay = formatSigningDateDisplayFromIso(signingDateIso);
   const partyIndex = args.partyIndex ?? 0;
-
-  const bootstrap = ensureSnapshotForSigner(agreementId, signerRoleId);
-  if (bootstrap && !readSigningPacketStatus(agreementId)) {
-    writeSigningPacketStatus(bootstrap);
-  }
+  const isLocalBridge = agreementId.startsWith("local_ag_");
 
   const { portable, corpusStamped } = persistSignedDateToPortablePacket({
     documentId,
@@ -158,21 +186,11 @@ export async function recordVs01SignerCompletion(
     recipientFields: args.recipientFields,
   });
 
-  const bootstrapKeys = bootstrapSignerKeys(agreementId);
-  const next = patchSignerPacketStatus(
-    agreementId,
-    signerRoleId,
-    "signed",
-    bootstrapKeys.length ? bootstrapKeys : [signerRoleId],
-  );
-  const snap = next ?? readSigningPacketStatus(agreementId);
-  const fullySigned = Boolean(snap?.fullySigned);
-
   let serverSynced = false;
   let serverFullyExecuted = false;
   let completionEmailsSent = false;
 
-  if (agreementId && !agreementId.startsWith("local_ag_")) {
+  if (agreementId && !isLocalBridge) {
     try {
       const res = await postVs01SignerComplete(
         agreementId,
@@ -195,9 +213,12 @@ export async function recordVs01SignerCompletion(
     }
   }
 
+  const snap = applyLocalSignerPacketStatus(agreementId, signerRoleId, serverFullyExecuted);
+  const localFullySigned = Boolean(snap?.fullySigned);
+
   return {
-    localSnapshot: snap,
-    fullySigned: fullySigned || serverFullyExecuted,
+    localSnapshot: snap ?? readSigningPacketStatus(agreementId),
+    fullySigned: serverFullyExecuted || localFullySigned,
     serverSynced,
     serverFullyExecuted,
     completionEmailsSent,
@@ -205,7 +226,29 @@ export async function recordVs01SignerCompletion(
   };
 }
 
+/**
+ * Record VS01 signer completion — server is authoritative when available; local packet is cache.
+ */
+export async function recordVs01SignerCompletion(
+  args: RecordVs01SignerCompletionArgs,
+): Promise<RecordVs01SignerCompletionResult> {
+  const key = `${args.agreementId.trim()}:${args.signerRoleId.trim()}`;
+  const inflight = completionInFlight.get(key);
+  if (inflight) return inflight;
+
+  const promise = recordVs01SignerCompletionInner(args).finally(() => {
+    completionInFlight.delete(key);
+  });
+  completionInFlight.set(key, promise);
+  return promise;
+}
+
 export function portableCorpusHash(portable: Vs01CanonicalPacketPortableV1 | null): string | null {
   if (!portable?.seed?.corpusPlain) return null;
   return fingerprintAgreementBody(portable.seed.corpusPlain);
+}
+
+/** Test-only: reset in-flight dedupe between cases. */
+export function resetVs01SignerCompletionInFlightForTests(): void {
+  completionInFlight.clear();
 }
