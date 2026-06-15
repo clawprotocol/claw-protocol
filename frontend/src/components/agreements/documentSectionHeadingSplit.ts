@@ -62,6 +62,35 @@ export function repairInlineLetteredEnumerationsInText(text: string): string {
   return tail ? `${merged}${merged.endsWith("\n") ? "" : "\n\n"}${tail}` : merged;
 }
 
+const INLINE_SUBSECTION_MARKER_GLUE_RE = /^(.+?[.!?])\s+(\d+\.\d+(?:\.\d+)*\s+.+)$/s;
+const INLINE_MAIN_SECTION_MARKER_GLUE_RE = /^(.+?[.!?])\s+(\d+\.\s+(?!\d+\.\d).+)$/s;
+
+/** Split inline subsection/main-section markers glued after a completed sentence mid-line. */
+export function splitInlineNumberedSectionMarkerFromLine(line: string): string {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length < 16 || /^\d+\./.test(trimmed)) return line;
+
+  const subsection = trimmed.match(INLINE_SUBSECTION_MARKER_GLUE_RE);
+  if (subsection?.[1] && subsection[2]?.trim()) {
+    const prefix = subsection[1].trim();
+    const marker = subsection[2].trim();
+    if (prefix.length >= 8 && marker.length >= 6) {
+      return `${prefix}\n${marker}`;
+    }
+  }
+
+  const mainSection = trimmed.match(INLINE_MAIN_SECTION_MARKER_GLUE_RE);
+  if (mainSection?.[1] && mainSection[2]?.trim()) {
+    const prefix = mainSection[1].trim();
+    const marker = mainSection[2].trim();
+    if (prefix.length >= 8 && marker.length >= 6) {
+      return `${prefix}\n${marker}`;
+    }
+  }
+
+  return line;
+}
+
 /** Split one line when a numbered heading and body sentence are glued together. */
 export function splitGluedSectionHeadingFromLine(line: string): string {
   const trimmed = line.trim();

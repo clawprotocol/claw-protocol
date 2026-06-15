@@ -70,7 +70,7 @@ describe("test356 VS01 prepare preview viewport", () => {
     expect(css).toMatch(
       /\.vs01-sign-page-surface--canonical\.vs01-sign-page-surface--footer-safe[\s\S]*box-shadow/,
     );
-    expect(css).toMatch(/\.vs01-canonical-flow-body[\s\S]*overflow:\s*visible/);
+    expect(css).toMatch(/\.vs01-canonical-flow-body[\s\S]*overflow:\s*hidden/);
   });
 
   it("renders stacked canonical pages at full letter size without user-visible body clipping", () => {

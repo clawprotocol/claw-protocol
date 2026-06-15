@@ -5,6 +5,7 @@ import {
   decodeVs01CanonicalPacketPortable,
   loadVs01CanonicalPacketPortable,
   storeVs01CanonicalPacketSeed,
+  storeVs01CanonicalPacketPortable,
   type Vs01CanonicalPacketPortableV1,
   VS01_CANONICAL_PACKET_QUERY,
   VS01_CANONICAL_PACKET_STORED_QUERY,
@@ -120,6 +121,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   }
   if (canonicalPacket) {
     storeVs01CanonicalPacketSeed(canonicalPacket.seed);
+    storeVs01CanonicalPacketPortable(documentId, canonicalPacket);
   }
   const recipientManifestParamPresent =
     manifestRaw !== null ||

@@ -1,8 +1,5 @@
 import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
-import {
-  VS01_PACKET_LINE_HEIGHT_PT,
-  VS01_PACKET_PAGE_HEIGHT_PT,
-} from "./buildVs01SigningPacketModel";
+import { canonicalPageTypography } from "./vs01CanonicalPageLayoutContract";
 
 export type Vs01CanonicalPageRenderMetrics = {
   page: number;
@@ -18,11 +15,12 @@ export function canonicalPageTypographyPx(pageWidthPx?: number): {
   lineHeightPx: number;
   fontSizePx: number;
 } {
-  void pageWidthPx;
-  const pageHeightPx = VS01_PACKET_PAGE_HEIGHT_PT;
-  const lineHeightPx = VS01_PACKET_LINE_HEIGHT_PT;
-  const fontSizePx = 13;
-  return { pageHeightPx, lineHeightPx, fontSizePx };
+  const typography = canonicalPageTypography(pageWidthPx);
+  return {
+    pageHeightPx: typography.pageHeightPx,
+    lineHeightPx: typography.lineHeightPx,
+    fontSizePx: typography.fontSizePx,
+  };
 }
 
 export function countCanonicalPageTextMetrics(page: Vs01SigningPacketPage): {

@@ -17,6 +17,11 @@ import {
 import type { Vs01NormalizedRect } from "./vs01FieldCssGeometry";
 import { buildFlowLineDescriptors, flowLinesForPage, isCanonicalDocumentTitleLine } from "./vs01CanonicalTextLayout";
 import {
+  canonicalCorpusLineIncrementalStackUnits,
+  canonicalDescriptorDomStackUnits,
+  canonicalPageRenderStackUnits,
+} from "./vs01CanonicalPageLayoutContract";
+import {
   parseSignatureLineWidth,
   signatureLinePrefixNormX,
   type Vs01ByLinePlacement,
@@ -32,7 +37,11 @@ import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { PREPARE_FIELD_ASSIGNMENT_SOURCE } from "./vs01PrepareFieldPlacement";
 import { defaultPrepareTemplateStoredValue } from "./vs01PrepareTemplateField";
 import {
-  VS01_EXECUTION_SPACER_FRAC,
+  VS01_PACKET_LINE_HEIGHT_PT,
+  VS01_PACKET_MARGIN_BOTTOM_PT,
+  VS01_PACKET_MARGIN_LEFT_PT,
+  VS01_PACKET_MARGIN_RIGHT_PT,
+  VS01_PACKET_MARGIN_TOP_PT,
   VS01_PACKET_PAGE_HEIGHT_PT,
   VS01_PACKET_PAGE_WIDTH_PT,
 } from "./vs01PacketLayoutConstants";
@@ -40,6 +49,11 @@ import {
 export {
   VS01_PACKET_PAGE_HEIGHT_PT,
   VS01_PACKET_PAGE_WIDTH_PT,
+  VS01_PACKET_LINE_HEIGHT_PT,
+  VS01_PACKET_MARGIN_LEFT_PT,
+  VS01_PACKET_MARGIN_TOP_PT,
+  VS01_PACKET_MARGIN_RIGHT_PT,
+  VS01_PACKET_MARGIN_BOTTOM_PT,
 } from "./vs01PacketLayoutConstants";
 
 export type Vs01SigningPacketMode = "guided_pro" | "free" | "uploaded_pdf";
@@ -74,15 +88,10 @@ export type Vs01SigningPacketModel = {
   diagnostics: Vs01SigningPacketDiagnostics;
 };
 
-export const VS01_PACKET_MARGIN_LEFT_PT = 54;
-export const VS01_PACKET_MARGIN_TOP_PT = 44;
-export const VS01_PACKET_MARGIN_RIGHT_PT = 54;
-export const VS01_PACKET_MARGIN_BOTTOM_PT = 20;
 /** Compact footer reservation: enough for auto-initials without creating a half-empty page. */
 export const VS01_PACKET_INITIALS_BAND_PT = 80;
 /** Witness-only pages skip initials — keep modest legal bottom margin instead. */
 export const VS01_PACKET_WITNESS_BOTTOM_MARGIN_PT = 28;
-export const VS01_PACKET_LINE_HEIGHT_PT = 17.5;
 /** Extra lines withheld from pagination estimates (DOM flow pad; primary guard is safety margin). */
 export const VS01_PACKET_FLOW_LINE_DOM_BUFFER = 1;
 /** Conservative clearance between flow stack bottom and initials band top (in line heights). */
@@ -109,16 +118,7 @@ const CHARS_PER_LINE = Math.floor(
   (VS01_PACKET_PAGE_WIDTH_PT - VS01_PACKET_MARGIN_LEFT_PT - VS01_PACKET_MARGIN_RIGHT_PT) /
   VS01_PACKET_ESTIMATED_BODY_CHAR_WIDTH_PT,
 );
-/** Georgia 13px @ canonical content width — DOM pre-wrap wraps sooner than corpus CHARS_PER_LINE. */
-export const VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE = Math.floor(
-  (VS01_PACKET_PAGE_WIDTH_PT - VS01_PACKET_MARGIN_LEFT_PT - VS01_PACKET_MARGIN_RIGHT_PT) / 7.0,
-);
-
-function domVisualWrapLineCount(line: string): number {
-  const t = line.trim();
-  if (!t) return 1;
-  return Math.max(1, Math.ceil(t.length / VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE));
-}
+export { VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE } from "./vs01CanonicalPageLayoutContract";
 
 /** Execution-block metadata rows — must stay on separate flow lines (not paragraph-merged). */
 const EXECUTION_METADATA_FIELD_LINE_RE =
@@ -150,53 +150,26 @@ function wrapCanonicalTextLine(line: string): string[] {
   return out;
 }
 
-function canonicalFlowLineHeightUnits(line: string): number {
-  const t = line.trim();
-  if (!t) return 0.5;
-  if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t)) return 1.02;
-  if (/^IN WITNESS WHEREOF/i.test(t)) return 1.08;
-  if (EXECUTION_METADATA_FIELD_LINE_RE.test(t)) return 1.02;
-  if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return 1.04;
-  return 1;
-}
-
-function domVisualStackPadUnits(line: string): number {
-  const t = line.trim();
-  if (!t) return 0;
-  const domWrap = domVisualWrapLineCount(t);
-  const corpusWrap = Math.max(1, Math.ceil(t.length / CHARS_PER_LINE));
-  if (domWrap > corpusWrap) {
-    return (domWrap - corpusWrap) * 0.55;
-  }
-  if (domWrap > 1 && t.length > VS01_CANONICAL_DOM_VISUAL_CHARS_PER_LINE) {
-    return (domWrap - 1) * 0.35;
-  }
-  return 0;
-}
-
-/** DOM flow stack units — must stay in sync with Vs01CanonicalSigningPage CSS (pre-wrapped flow lines). */
-export function canonicalFlowLineStackStepUnits(line: string): number {
-  const t = line.trim();
-  if (!t) return VS01_EXECUTION_SPACER_FRAC;
-  let units = canonicalFlowLineHeightUnits(line);
-  if (t.length > CHARS_PER_LINE) {
-    units *= Math.max(1, Math.ceil(t.length / CHARS_PER_LINE));
-  }
-  units += domVisualStackPadUnits(line);
-  if (isCanonicalDocumentTitleLine(t)) units += 0.42;
-  if (/^\d+(?:\.\d+)*\.\s+/.test(t)) units += 0.06;
-  return units;
+/** DOM flow stack units for one corpus line — delegates to render-descriptor contract. */
+export function canonicalFlowLineStackStepUnits(
+  line: string,
+  pageIndex = 0,
+  pageLines: readonly string[] = [],
+): number {
+  return canonicalCorpusLineIncrementalStackUnits(pageLines, line, pageIndex);
 }
 
 export function canonicalFlowStackBottomNorm(
-  page: Pick<Vs01SigningPacketPage, "flowLines" | "contentRect" | "textBlocks">,
+  page: Pick<Vs01SigningPacketPage, "flowLines" | "contentRect" | "textBlocks"> & {
+    pageIndex?: number;
+  },
 ): number {
   const flowLines = flowLinesForPage(page);
-  const stackHeight = flowLines.reduce(
-    (sum, line) => sum + canonicalFlowLineStackStepUnits(line) * LINE_HEIGHT,
-    0,
+  const pageIndex = page.pageIndex ?? 0;
+  return (
+    page.contentRect.y +
+    canonicalPageRenderStackUnits(flowLines, pageIndex) * LINE_HEIGHT
   );
-  return page.contentRect.y + stackHeight;
 }
 
 /** Flow-zone fill percentage (stack bottom vs content rect height above initials band). */
@@ -232,7 +205,7 @@ export function findSignatureLinePlacementsFromFlowPage(
   const out: Vs01ByLinePlacement[] = [];
 
   for (const descriptor of descriptors) {
-    const step = canonicalFlowLineStackStepUnits(descriptor.text);
+    const step = canonicalDescriptorDomStackUnits(descriptor);
     const lineTop = cursorY;
     const lineStackHeight = step * LINE_HEIGHT;
 
@@ -451,15 +424,18 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
   let documentTitleAssigned = false;
   const carryLines: string[] = [];
 
+  const measurePageStackUnits = (lines: readonly string[]) =>
+    canonicalPageRenderStackUnits(lines, pageIndex);
+
   const pullTrailingOrphanSectionMarkers = () => {
     while (pageLines.length > 0) {
       const last = pageLines[pageLines.length - 1] ?? "";
       if (!isNumberedSectionMarkerOnlyLine(last)) break;
       const popped = pageLines.pop()!;
-      stackUnits -= canonicalFlowLineStackStepUnits(popped);
       if (rects.length > 0) rects.pop();
       carryLines.unshift(popped);
     }
+    stackUnits = measurePageStackUnits(pageLines);
   };
 
   const flush = () => {
@@ -471,30 +447,34 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
   };
 
   const nextFlowStackBottomNorm = (line: string) =>
-    CONTENT_TOP + (stackUnits + canonicalFlowLineStackStepUnits(line)) * LINE_HEIGHT;
+    CONTENT_TOP + measurePageStackUnits([...pageLines, line]) * LINE_HEIGHT;
 
   const lineWouldExceedFlowStackLimit = (line: string) =>
     nextFlowStackBottomNorm(line) > PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM + 0.0001;
 
+  const appendCorpusLineToPage = (line: string) => {
+    const stepUnits = canonicalCorpusLineIncrementalStackUnits(pageLines, line, pageIndex);
+    pageLines.push(line);
+    if (line.trim()) {
+      const allowDocumentTitle = pageIndex === 0 && !documentTitleAssigned;
+      const kind = classifyText(line, { allowDocumentTitle });
+      if (kind === "document_title") documentTitleAssigned = true;
+      rects.push({
+        x: CONTENT_X,
+        y: CONTENT_TOP + stackUnits * LINE_HEIGHT,
+        width: lineWidth(line),
+        height: LINE_HEIGHT * Math.min(stepUnits, 1.35) * 0.72,
+        text: line,
+        kind,
+      });
+    }
+    stackUnits = measurePageStackUnits(pageLines);
+  };
+
   for (let i = 0; i < lines.length; i += 1) {
     if (carryLines.length > 0) {
       for (const carried of carryLines) {
-        const carriedUnits = canonicalFlowLineStackStepUnits(carried);
-        pageLines.push(carried);
-        if (carried.trim()) {
-          const allowDocumentTitle = pageIndex === 0 && !documentTitleAssigned;
-          const kind = classifyText(carried, { allowDocumentTitle });
-          if (kind === "document_title") documentTitleAssigned = true;
-          rects.push({
-            x: CONTENT_X,
-            y: CONTENT_TOP + stackUnits * LINE_HEIGHT,
-            width: lineWidth(carried),
-            height: LINE_HEIGHT * Math.min(carriedUnits, 1.35) * 0.72,
-            text: carried,
-            kind,
-          });
-        }
-        stackUnits += carriedUnits;
+        appendCorpusLineToPage(carried);
       }
       carryLines.length = 0;
     }
@@ -542,41 +522,11 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
       pullTrailingOrphanSectionMarkers();
       flush();
     }
-    const stepUnits = canonicalFlowLineStackStepUnits(line);
-    pageLines.push(line);
-    if (line.trim()) {
-      const allowDocumentTitle = pageIndex === 0 && !documentTitleAssigned;
-      const kind = classifyText(line, { allowDocumentTitle });
-      if (kind === "document_title") documentTitleAssigned = true;
-      rects.push({
-        x: CONTENT_X,
-        y: CONTENT_TOP + stackUnits * LINE_HEIGHT,
-        width: lineWidth(line),
-        height: LINE_HEIGHT * Math.min(stepUnits, 1.35) * 0.72,
-        text: line,
-        kind,
-      });
-    }
-    stackUnits += stepUnits;
+    appendCorpusLineToPage(line);
   }
   if (carryLines.length > 0) {
     for (const carried of carryLines) {
-      const carriedUnits = canonicalFlowLineStackStepUnits(carried);
-      pageLines.push(carried);
-      if (carried.trim()) {
-        const allowDocumentTitle = pageIndex === 0 && !documentTitleAssigned;
-        const kind = classifyText(carried, { allowDocumentTitle });
-        if (kind === "document_title") documentTitleAssigned = true;
-        rects.push({
-          x: CONTENT_X,
-          y: CONTENT_TOP + stackUnits * LINE_HEIGHT,
-          width: lineWidth(carried),
-          height: LINE_HEIGHT * Math.min(carriedUnits, 1.35) * 0.72,
-          text: carried,
-          kind,
-        });
-      }
-      stackUnits += carriedUnits;
+      appendCorpusLineToPage(carried);
     }
     carryLines.length = 0;
   }
@@ -590,6 +540,7 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
       height: CONTENT_BOTTOM_LIMIT - CONTENT_TOP,
     };
     const stackBottom = canonicalFlowStackBottomNorm({
+      pageIndex: page.pageIndex,
       flowLines: page.flowLines,
       textBlocks: page.textRects,
       contentRect,

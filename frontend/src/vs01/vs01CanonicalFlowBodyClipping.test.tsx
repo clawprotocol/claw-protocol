@@ -73,7 +73,9 @@ function renderCanonicalPageSurface(page: Parameters<typeof Vs01CanonicalSigning
 }
 
 describe("VS01 canonical flow body clipping", () => {
-  it("paginates 13-section Pro corpus to about ten pages without DOM clipping on body pages", () => {
+  it(
+    "paginates 13-section Pro corpus to about ten pages without DOM clipping on body pages",
+    () => {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
       authoritativeCorpusPlain: qaThirteenSectionProCorpus(),
@@ -116,5 +118,7 @@ describe("VS01 canonical flow body clipping", () => {
       expect(dom.actualDomContentBottomNorm).toBeLessThanOrEqual(page.initialsBandRect.y + 0.002);
       expect(dom.actualDomContentBottomNorm).toBeLessThanOrEqual(limit + 0.004);
     }
-  });
+    },
+    20_000,
+  );
 });

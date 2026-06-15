@@ -1,6 +1,6 @@
 import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
 import type { Vs01NormTextRect } from "./vs01PageTextLayout";
-import { splitGluedSectionHeadingFromLine } from "../components/agreements/documentSectionHeadingSplit";
+import { splitGluedSectionHeadingFromLine, splitInlineNumberedSectionMarkerFromLine } from "../components/agreements/documentSectionHeadingSplit";
 
 /** First-page agreement title — mirrors paid Pro document_title classification. */
 export function isCanonicalDocumentTitleLine(line: string): boolean {
@@ -36,7 +36,8 @@ function classifyLineKind(line: string): Vs01NormTextRect["kind"] {
     return "signature_label";
   }
   if (/^IN WITNESS WHEREOF/i.test(t)) return "heading";
-  if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return "heading";
+  if (/^\d+\.\s+(?!\d)/.test(t)) return "heading";
+  if (/^\d+(?:\.\d+)+\s+/.test(t)) return "heading";
   return "body";
 }
 
@@ -104,14 +105,19 @@ export function buildFlowLineDescriptors(
       pushDescriptor(text);
       continue;
     }
-    const split = splitGluedSectionHeadingFromLine(trimmed);
-    if (split.includes("\n")) {
-      for (const part of split.split("\n")) {
-        pushDescriptor(part);
+    const inlineExpanded = splitInlineNumberedSectionMarkerFromLine(trimmed);
+    const parts =
+      inlineExpanded.includes("\n") ? inlineExpanded.split("\n") : [inlineExpanded];
+    for (const part of parts) {
+      const split = splitGluedSectionHeadingFromLine(part);
+      if (split.includes("\n")) {
+        for (const sub of split.split("\n")) {
+          pushDescriptor(sub);
+        }
+      } else {
+        pushDescriptor(part === inlineExpanded ? text : part);
       }
-      continue;
     }
-    pushDescriptor(text);
   }
   return out;
 }

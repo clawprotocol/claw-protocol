@@ -206,7 +206,7 @@ describe("test355 VS01 canonical pagination + navigation", () => {
   it("reserves initials band in CSS and clips flow body overflow", () => {
     const css = readFileSync(join(__dirname, "vs01.css"), "utf8");
     expect(css).toContain(".vs01-canonical-flow-body");
-    expect(css).toMatch(/\.vs01-canonical-flow-body[\s\S]*overflow:\s*visible/);
+    expect(css).toMatch(/\.vs01-canonical-flow-body[\s\S]*overflow:\s*hidden/);
     expect(css).toMatch(/\.vs01-canonical-initials-band[\s\S]*background:\s*#fff/);
     expect(css).toMatch(/\.vs01-canonical-initials-band[\s\S]*z-index:\s*2/);
   });
