@@ -642,6 +642,58 @@ export function logGuidedSignatureTrackFailed(payload: Record<string, unknown>):
   console.info("[guided-signature-track-failed]", payload);
 }
 
+export const GUIDED_SIGNATURE_LOCAL_BRIDGE_WARNING =
+  "Signing prep opened locally; save/sync will retry.";
+
+/** Draft POST statuses that may continue into local VS01 prepare (direct signature track only). */
+export function isGuidedSignatureDraftPersistLocallyContinuable(
+  httpStatus?: number | null,
+  rawMessage?: string | null,
+): boolean {
+  const status =
+    httpStatus ??
+    (() => {
+      const m = /create_failed_http_(\d+)/i.exec(String(rawMessage ?? ""));
+      if (!m) return null;
+      const n = Number(m[1]);
+      return Number.isFinite(n) ? n : null;
+    })();
+  return status === 403 || status === 401;
+}
+
+export function mintGuidedSignatureTrackLocalAgreementId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `local_ag_${crypto.randomUUID()}`;
+  }
+  return `local_ag_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export function canContinueGuidedSignatureTrackWithoutPersist(args: {
+  persistOk: boolean;
+  agreementId: string;
+  corpusText: string;
+  handoffReady: boolean;
+  minCorpusLen?: number;
+}): boolean {
+  if (args.persistOk) return false;
+  if ((args.agreementId || "").trim()) return false;
+  if (!args.handoffReady) return false;
+  const minLen = args.minCorpusLen ?? GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN;
+  return (args.corpusText || "").trim().length >= minLen;
+}
+
+export function logGuidedSignatureTrackLocalBridgeStart(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-signature-track-local-bridge-start]", payload);
+}
+
+export function logGuidedSignatureTrackLocalBridgeSuccess(payload: Record<string, unknown>): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[guided-signature-track-local-bridge-success]", payload);
+}
+
 export function logGuidedSignatureGenericSendBypassed(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   // eslint-disable-next-line no-console

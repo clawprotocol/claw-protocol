@@ -15,6 +15,7 @@ import {
   creatorDashboardFocusAgreementPath,
   creatorDashboardCompletedProofPath,
   creatorDashboardSigningStatusPath,
+  creatorDashboardPrepareSignatureLinksPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
 import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
@@ -141,7 +142,7 @@ export function resolveCreatorDashboardSignatureTrackAction(
     return {
       kind: "prepare_signature_links",
       label: CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
-      path: "/app",
+      path: creatorDashboardPrepareSignatureLinksPath(row.id),
       emphasis: "primary",
     };
   }

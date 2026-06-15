@@ -1,12 +1,23 @@
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import { fetchAgreementDraftWithSigningLock } from "../agreement/agreementWorkspaceApi";
 import { findOpenRecipientProposals } from "../agreement/recipientProposal";
-import { resolveGuidedVs01SigningHandoffForBridge } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
 import {
+  resolveGuidedVs01SigningHandoffForBridge,
+  mergeAgreementDraftWithGuidedSigningHandoff,
+} from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
+import {
+  buildAgreementVs01BridgeSession,
+  fetchAgreementVs01SigningSeed,
   resolveBridgeAgreementCorpusFromDraft,
+  setPaidProAgreementBridgeSkipMarker,
   tryNavigatePaidProAgreementSenderFirstVs01Esign,
+  writeAgreementVs01BridgeSession,
 } from "./simpleProduct/agreementToVs01SigningBridge";
 import { mergeReviewLinkRecipientEmailsOntoHydratedDraft } from "./simpleProduct/reviewLinkRecipientEmailMerge";
+import {
+  buildVs01OwnerPrepareEsignPath,
+  resolveVs01OwnerPrepareEsignRoute,
+} from "./vs01OwnerPrepareRoute";
 
 export type CreatorPrepareSignatureLinksResult = {
   navigated: boolean;
@@ -15,6 +26,32 @@ export type CreatorPrepareSignatureLinksResult = {
   blockReason: string | null;
   vs01RouteAttempted: boolean;
 };
+
+async function tryNavigateVs01PrepareFromPersistedSeed(options: {
+  agreementId: string;
+  draft: AgreementDraft;
+  navigate: (path: string) => void | Promise<void>;
+  reviewerApprovedCleanHandoff: boolean;
+}): Promise<string | null> {
+  const id = options.agreementId.trim();
+  const guidedSigningHandoff = resolveGuidedVs01SigningHandoffForBridge(undefined);
+  const mergedDraft = mergeAgreementDraftWithGuidedSigningHandoff(options.draft, guidedSigningHandoff);
+  const seed = await fetchAgreementVs01SigningSeed(id, mergedDraft);
+  if (!seed.ok || !seed.documentId.trim()) return null;
+  const bridge = buildAgreementVs01BridgeSession({
+    agreementId: id,
+    vs01DocumentId: seed.documentId,
+    draft: mergedDraft,
+    senderFirstLawdogHandoff: true,
+    reviewerApprovedCleanHandoff: options.reviewerApprovedCleanHandoff,
+    agreementCorpusText: resolveBridgeAgreementCorpusFromDraft(mergedDraft) || undefined,
+  });
+  writeAgreementVs01BridgeSession(bridge);
+  setPaidProAgreementBridgeSkipMarker(seed.documentId);
+  const route = buildVs01OwnerPrepareEsignPath(seed.documentId);
+  void options.navigate(route);
+  return route;
+}
 
 /** Resume creator signature prep from dashboard or review-complete — same VS01 bridge path as Review Link Ready. */
 export async function navigateCreatorPrepareSignatureLinks(options: {
@@ -87,7 +124,7 @@ export async function navigateCreatorPrepareSignatureLinks(options: {
 
   const emailMergedDraft = mergeReviewLinkRecipientEmailsOntoHydratedDraft(draft, null);
   const agreementCorpusText = resolveBridgeAgreementCorpusFromDraft(emailMergedDraft);
-  const guidedSigningHandoff = resolveGuidedVs01SigningHandoffForBridge(null);
+  const guidedSigningHandoff = resolveGuidedVs01SigningHandoffForBridge(undefined);
 
   const navigated = await tryNavigatePaidProAgreementSenderFirstVs01Esign({
     navigate: options.navigate,
@@ -108,6 +145,34 @@ export async function navigateCreatorPrepareSignatureLinks(options: {
     return {
       navigated: true,
       destination: null,
+      bridgeAttempted: true,
+      blockReason: null,
+      vs01RouteAttempted: true,
+    };
+  }
+
+  const existingRoute = resolveVs01OwnerPrepareEsignRoute(id);
+  if (existingRoute) {
+    void options.navigate(existingRoute);
+    return {
+      navigated: true,
+      destination: existingRoute,
+      bridgeAttempted: true,
+      blockReason: null,
+      vs01RouteAttempted: true,
+    };
+  }
+
+  const seededRoute = await tryNavigateVs01PrepareFromPersistedSeed({
+    agreementId: id,
+    draft: emailMergedDraft,
+    navigate: options.navigate,
+    reviewerApprovedCleanHandoff: true,
+  });
+  if (seededRoute) {
+    return {
+      navigated: true,
+      destination: seededRoute,
       bridgeAttempted: true,
       blockReason: null,
       vs01RouteAttempted: true,

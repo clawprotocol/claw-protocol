@@ -37,7 +37,6 @@ function classifyLineKind(line: string): Vs01NormTextRect["kind"] {
   }
   if (/^IN WITNESS WHEREOF/i.test(t)) return "heading";
   if (/^\d+\.\s+(?!\d)/.test(t)) return "heading";
-  if (/^\d+(?:\.\d+)+\s+/.test(t)) return "heading";
   return "body";
 }
 

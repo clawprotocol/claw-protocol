@@ -35,7 +35,7 @@ describe("vs01CanonicalPreWrapMeasure", () => {
     expect(descriptors).toHaveLength(2);
     expect(descriptors[0]?.trimmed).toBe("support Client acceptance testing.");
     expect(descriptors[1]?.trimmed).toBe("1.2 Operational terms and cooperation.");
-    expect(descriptors[1]?.kind).toBe("heading");
+    expect(descriptors[1]?.kind).toBe("body");
   });
 
   it("maps descriptor stack units to measured height units for body and title kinds", () => {

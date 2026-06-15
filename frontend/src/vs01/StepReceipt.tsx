@@ -83,8 +83,8 @@ export function buildVs01RecipientSigningUrl(opts: {
   packetRevision?: string | null;
 }): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const path = typeof window !== "undefined" ? window.location.pathname : "/";
   const did = opts.documentId?.trim() ?? "";
+  const path = did ? `/app/esign/${encodeURIComponent(did)}` : typeof window !== "undefined" ? window.location.pathname : "/";
   const cpId = opts.counterpartyId.trim();
   const forSigner = opts.recipientFieldsForSigner ?? [];
 

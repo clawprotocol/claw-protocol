@@ -43,6 +43,7 @@ describe("buildVs01RecipientSigningUrl", () => {
     expect(params.get("receipt_id")).toBe("rcpt_456");
     expect(params.get("counterparty_id")).toBe("cp1");
     expect(params.get("recipient_name")).toBe("Pat");
+    expect(new URL(url, "https://example.test").pathname).toBe("/app/esign/doc_123");
   });
 
   it("stores manifest in sessionStorage and keeps URL length reasonable", () => {

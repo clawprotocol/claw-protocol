@@ -20,7 +20,14 @@ import { normalizeAgreementDisplayTitle } from "../../components/agreements/cano
 import { buildAgreementPreviewText } from "../../components/agreements/agreementPreviewFromDraft";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import type { GuidedVs01SigningHandoff } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
-import { mergeAgreementDraftWithGuidedSigningHandoff } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
+import {
+  assertGuidedProVs01BridgeCorpusReady,
+  logGuidedProVs01BridgeCorpusBlocked,
+} from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
+import {
+  mergeAgreementDraftWithGuidedSigningHandoff,
+  writeGuidedVs01SigningHandoffSession,
+} from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
 import {
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
@@ -947,4 +954,84 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     });
   }
   return true;
+}
+
+export type GuidedSignatureTrackLocalVs01BridgeResult =
+  | { ok: true; route: string; documentId: string; agreementId: string }
+  | { ok: false; reason: string };
+
+/**
+ * Direct signature track: open VS01 prepare from local bridge when draft POST is blocked (e.g. 403).
+ * Does not call server draft or vs01-signing-seed — corpus + signer metadata come from the guided handoff.
+ */
+export function tryNavigateGuidedSignatureTrackLocalVs01Esign(options: {
+  navigate: (to: string) => void | Promise<void>;
+  localAgreementId: string;
+  draft: AgreementDraft | null;
+  logReason: string;
+  recipientSetup?: RecipientSetupEmailInput | null;
+  agreementCorpusText?: string | null;
+  guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
+}): GuidedSignatureTrackLocalVs01BridgeResult {
+  const id = String(options.localAgreementId || "").trim();
+  if (!id) return { ok: false, reason: "missing_local_agreement_id" };
+
+  const handoff = options.guidedSigningHandoff ?? null;
+  if (!handoff) return { ok: false, reason: "missing_handoff" };
+
+  const corpusAssert = assertGuidedProVs01BridgeCorpusReady(handoff);
+  if (!corpusAssert.ok) {
+    logGuidedProVs01BridgeCorpusBlocked({
+      agreementId: id,
+      source: options.logReason,
+      reason: corpusAssert.reason,
+      ...corpusAssert.diagnostics,
+    });
+    return { ok: false, reason: corpusAssert.reason ?? "corpus_not_ready" };
+  }
+
+  const resolvedSetup = resolveRecipientSetupForVs01Bridge(options.draft, options.recipientSetup ?? null);
+  const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(options.draft, resolvedSetup);
+  const mergedWithCorpus = mergeAgreementDraftWithGuidedSigningHandoff(merged ?? ({} as AgreementDraft), handoff);
+  const handoffText = (handoff.corpusText ?? options.agreementCorpusText ?? "").trim();
+  const corpusResolution = resolveFinalVs01CorpusOrBlock({
+    agreementCorpusText: handoffText,
+    guidedSigningHandoff: handoff,
+    draft: mergedWithCorpus,
+    guidedPro: true,
+    premiumComplete: handoffText.length >= VS01_SIGNING_CORPUS_MIN_LEN,
+    signatureRebuilt: handoff.signatureRebuilt,
+  });
+  if (!corpusResolution.allowed) return { ok: false, reason: "corpus_gate_blocked" };
+
+  writeGuidedVs01SigningHandoffSession(handoff);
+
+  const documentId =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? `local_doc_${crypto.randomUUID()}`
+      : `local_doc_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+  const bridge = buildAgreementVs01BridgeSession({
+    agreementId: id,
+    vs01DocumentId: documentId,
+    draft: mergedWithCorpus,
+    senderFirstLawdogHandoff: true,
+    agreementCorpusText: corpusResolution.corpus,
+  });
+  logAgreementVs01BridgePreflight(bridge);
+  logVs01BridgeSignerMetadata(bridge);
+  writeAgreementVs01BridgeSession(bridge);
+  setPaidProAgreementBridgeSkipMarker(documentId);
+
+  const route = `/app/esign/${encodeURIComponent(documentId)}?agreement_bridge=1`;
+  logAgreementToVs01EsignRoute({
+    agreementId: id,
+    seedDocumentId: documentId,
+    route,
+    reason: options.logReason,
+    agreementBridgeMode: bridge.agreementBridgeMode ?? null,
+    ownerIsPreparingPacket: bridge.ownerIsPreparingPacket ?? null,
+  });
+  void options.navigate(route);
+  return { ok: true, route, documentId, agreementId: id };
 }

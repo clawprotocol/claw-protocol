@@ -108,6 +108,10 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
     vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign").mockResolvedValue(
       false,
     );
+    vi.spyOn(agreementToVs01SigningBridge, "fetchAgreementVs01SigningSeed").mockResolvedValue({
+      ok: false,
+      reason: "missing_corpus",
+    });
 
     const result = await navigateCreatorPrepareSignatureLinks({
       agreementId: "ag_ready",
@@ -120,5 +124,39 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
     expect(result.navigated).toBe(false);
     expect(result.blockReason).toBe("vs01_bridge_failed");
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("resumes owner prepare from persisted bridge session when corpus bridge fails", async () => {
+    vi.spyOn(agreementToVs01SigningBridge, "tryNavigatePaidProAgreementSenderFirstVs01Esign").mockResolvedValue(
+      false,
+    );
+    vi.spyOn(agreementToVs01SigningBridge, "fetchAgreementVs01SigningSeed").mockResolvedValue({
+      ok: false,
+      reason: "missing_corpus",
+    });
+    agreementToVs01SigningBridge.writeAgreementVs01BridgeSession({
+      vs01DocumentId: "doc_resume",
+      agreementId: "ag_ready",
+      agreementTitle: "Services Agreement",
+      creatorName: "Owner",
+      creatorEmail: "owner@example.test",
+      counterparties: [],
+      targetStep: 2,
+      senderFirstLawdogHandoff: true,
+      reviewerApprovedCleanHandoff: true,
+    });
+
+    const result = await navigateCreatorPrepareSignatureLinks({
+      agreementId: "ag_ready",
+      navigate: mockNavigate,
+      draft: baseDraft(),
+      lockedVersionId: null,
+      navigateOnBridgeFailure: false,
+    });
+
+    expect(result.navigated).toBe(true);
+    expect(result.destination).toBe("/app/esign/doc_resume?agreement_bridge=1");
+    expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_resume?agreement_bridge=1");
+    expect(result.blockReason).toBeNull();
   });
 });

@@ -34,7 +34,8 @@ import {
   readPaidProAgreementBridgeSkipMarker,
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
-import { resolveFinalVs01CorpusOrBlock } from "./vs01SigningCorpus";
+import { resolveFinalVs01CorpusOrBlock, VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
+import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
 import {
@@ -666,6 +667,117 @@ export function Vs01Wizard({
     if (VS01_URL_BOOT?.documentId?.trim()) return;
     let cancelled = false;
     void (async () => {
+      const hydrateLocalPaidProBridge = (): boolean => {
+        if (!sid.startsWith("local_doc_")) return false;
+        if (bridgeHydratedSeedSid.current === sid) return true;
+        const bridgeParams = new URLSearchParams(window.location.search);
+        const agreementBridgeQuery = bridgeParams.get("agreement_bridge") === "1";
+        const rawBridge = readAgreementVs01BridgeSession();
+        const bridge: AgreementVs01BridgeSession | null =
+          rawBridge && rawBridge.vs01DocumentId.trim() === sid
+            ? rawBridge
+            : bridgeHandoffSnapshotRef.current &&
+                bridgeHandoffSnapshotRef.current.vs01DocumentId.trim() === sid
+              ? bridgeHandoffSnapshotRef.current
+              : null;
+        const paidProAgreementHandoff =
+          hideStepper &&
+          Boolean(sid) &&
+          (readPaidProAgreementBridgeSkipMarker(sid) ||
+            (agreementBridgeQuery &&
+              bridge !== null &&
+              bridge.vs01DocumentId.trim() === sid));
+        if (!paidProAgreementHandoff || !bridge || bridge.vs01DocumentId.trim() !== sid) return false;
+        const corpus = (bridge.agreementCorpusText ?? "").trim();
+        if (corpus.length < VS01_SIGNING_CORPUS_MIN_LEN) return false;
+        if (cancelled) return false;
+        setDocumentId(sid);
+        setContentSha256(`corpus:${fingerprintAgreementBody(corpus)}`);
+        bridgeHandoffSnapshotRef.current = bridge;
+        bridgeHydratedSeedSid.current = sid;
+        logVs01PartySigningRolesForBridgeSession(bridge);
+        const saved = loadVs01DraftState(sid);
+        const bridgeCps =
+          bridge.counterparties?.length > 0 ? bridge.counterparties : initialCounterparties();
+        const cps = saved && saved.counterparties.length > 0
+          ? mergeBridgeMetadataIntoSavedCounterparties(saved.counterparties, bridgeCps)
+          : bridgeCps;
+        const titleForUi = (saved?.agreementTitle || bridge.agreementTitle || "").trim() || "Agreement";
+        const cn = saved?.creatorName || bridge.creatorName || "";
+        const ce = saved?.creatorEmail || bridge.creatorEmail || "";
+        const csn = saved?.creatorSignerName || bridge.creatorSignerName || "";
+        const cst = saved?.creatorSignerTitle || bridge.creatorSignerTitle || "";
+        const rolesForM = buildVs01PrepareSigningRoles({
+          agreementId: bridge.agreementId,
+          creatorName: cn,
+          creatorEmail: ce,
+          ownerSignerName: csn,
+          ownerSignerTitle: cst,
+          counterparties: cps,
+        });
+        const ownerR = rolesForM[0]!;
+        flushSync(() => {
+          setVs01LinkedAgreementId(bridge.agreementId);
+          const signingCorpus = resolveFinalVs01CorpusOrBlock({
+            agreementCorpusText: bridge.agreementCorpusText,
+            bridge,
+            guidedPro: Boolean(bridge.senderFirstLawdogHandoff),
+            premiumComplete: corpus.length >= VS01_SIGNING_CORPUS_MIN_LEN,
+          });
+          setPrepareCorpusText(signingCorpus.corpus.trim() || null);
+          setAgreementTitle(titleForUi);
+          setCreatorName(cn);
+          setCreatorEmail(ce);
+          setCreatorSignerName(csn);
+          setCreatorSignerTitle(cst);
+          setCounterparties(cps);
+          setAgreementTitleUserEdited(Boolean(titleForUi));
+          setDocumentMeta({
+            fileName: `${titleForUi.replace(/[/\\]/g, "-")}.pdf`,
+            source: "upload",
+          });
+          const ownerCtxForSeed = buildOwnerPlacementValueContext({ creatorName: cn, creatorEmail: ce });
+          const seedValueCtx = (role: (typeof rolesForM)[number]) =>
+            role.kind === "owner"
+              ? ownerCtxForSeed
+              : { typedName: "", initials: "", signerEmail: undefined };
+          setSenderPlacedFields((p) =>
+            seedPrepareFieldsFromRoleSignerMetadata(
+              migrateLegacySenderPlacedFields(p, ownerR),
+              rolesForM,
+              seedValueCtx,
+            ),
+          );
+          setRecipientPlacedFields((p) =>
+            seedPrepareFieldsFromRoleSignerMetadata(
+              migrateLegacyRecipientPlacedFields(p, rolesForM),
+              rolesForM,
+              seedValueCtx,
+            ),
+          );
+        });
+        const nextStep: Vs01Step = saved ? saved.step : 2;
+        const fs = (saved ? Math.max(nextStep, saved.furthestStep) : nextStep) as Vs01Step;
+        setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
+        goToStep(nextStep);
+        bridgeParams.delete("agreement_bridge");
+        const qs = bridgeParams.toString();
+        window.setTimeout(() => {
+          try {
+            window.history.replaceState(
+              window.history.state,
+              "",
+              qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
+            );
+          } catch {
+            /* ignore */
+          }
+        }, 0);
+        return true;
+      };
+
+      if (hydrateLocalPaidProBridge()) return;
+
       try {
         const blob = await fetchDocumentContent(sid);
         const buf = await blob.arrayBuffer();
@@ -871,6 +983,7 @@ export function Vs01Wizard({
           goToStep(1);
         }
       } catch (e) {
+        if (hydrateLocalPaidProBridge()) return;
         console.error("[Vs01Wizard] seed document load failed", e);
         if (!cancelled) setError("Could not load this document. Check the link or start a new packet.");
       }

@@ -87,10 +87,7 @@ describe("creatorDashboardSignatureTrack", () => {
     });
     expect(action.kind).toBe("prepare_signature_links");
     expect(action.label).toBe(CREATOR_PREPARE_SIGNATURE_LINKS_LABEL);
-    expect(action.path).toBe("/app");
-    expect(creatorDashboardPrepareSignatureLinksPath(row.id)).toBe(
-      `/app?prepare_signature_links=${row.id}`,
-    );
+    expect(action.path).toBe(creatorDashboardPrepareSignatureLinksPath(row.id));
   });
 
   it("does not show Track review status after all reviewers approved", () => {

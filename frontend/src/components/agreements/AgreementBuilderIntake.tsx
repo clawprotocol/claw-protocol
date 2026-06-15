@@ -475,7 +475,7 @@ import {
   writePremiumSendIntent,
   writePremiumSenderSignFirst,
 } from "../../launch/simpleProduct/premiumSendIntent";
-import { mergeLiveDraftWithRecipientSetupForVs01Bridge } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
+import { mergeLiveDraftWithRecipientSetupForVs01Bridge, tryNavigateGuidedSignatureTrackLocalVs01Esign } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
 import {
   pickBestPaidProAuthoritativeCorpusPlain,
   resolveFinalVs01CorpusOrBlock,
@@ -1286,6 +1286,12 @@ import {
   shouldBypassGenericOnGenerateForGuidedSignature,
   shouldBypassGenericOnGenerateForGuidedReview,
   logGuidedReviewGenericSendBypassed,
+  canContinueGuidedSignatureTrackWithoutPersist,
+  GUIDED_SIGNATURE_LOCAL_BRIDGE_WARNING,
+  isGuidedSignatureDraftPersistLocallyContinuable,
+  logGuidedSignatureTrackLocalBridgeStart,
+  logGuidedSignatureTrackLocalBridgeSuccess,
+  mintGuidedSignatureTrackLocalAgreementId,
   logReviewFirstClick,
   logReviewFirstError,
   logReviewFirstHandoffStart,
@@ -3516,6 +3522,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedFinalReviewRetryPendingRef = useRef(false);
   const guidedFinalReviewTransitionPromiseRef = useRef<Promise<void> | null>(null);
   const guidedSignatureTrackInFlightRef = useRef(false);
+  const guidedSignaturePersistFailureRef = useRef<{ httpStatus?: number | null; rawMessage?: string } | null>(
+    null,
+  );
   const guidedReviewFirstHandoffInFlightRef = useRef(false);
   const finalReviewSendPathChosenRef = useRef(false);
   const [guidedSendIntentSelected, setGuidedSendIntentSelected] = useState(false);
@@ -10454,6 +10463,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
         reviewLinkPersistFailureRef.current = diagnostics;
         logReviewLinkPersistFailure(diagnostics);
+        setHardError(null);
+        setProductionSendBarPhase("idle");
+        setProductionSendBarAgreementId(null);
+        return false;
+      }
+      if (guidedSignatureTrackInFlightRef.current) {
+        const err = e as ReviewFirstPersistHttpError;
+        guidedSignaturePersistFailureRef.current = {
+          httpStatus: err?.httpStatus ?? null,
+          rawMessage: msg,
+        };
         setHardError(null);
         setProductionSendBarPhase("idle");
         setProductionSendBarAgreementId(null);
@@ -24249,6 +24269,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           .join("\n");
         setLoading(true);
         setHardError(null);
+        guidedSignaturePersistFailureRef.current = null;
         const ok = await runPersistAndOpen(mergedDraft, partyCtx, true, "signature", "send");
         setLoading(false);
         restorePinnedFinalizedSignerCorpus("guided_signature_track_persist");
@@ -24261,6 +24282,83 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           draftAgreementId: (mergedDraft as { id?: string | null } | null)?.id ?? null,
           resumeAgreementId: readCreateReviewAgreementResumeId(),
         });
+        const signaturePersistFailure = guidedSignaturePersistFailureRef.current as {
+          httpStatus?: number | null;
+          rawMessage?: string;
+        } | null;
+        if (
+          !id &&
+          canContinueGuidedSignatureTrackWithoutPersist({
+            persistOk: ok,
+            agreementId: id,
+            corpusText,
+            handoffReady: handoffAssert.ok,
+          }) &&
+          isGuidedSignatureDraftPersistLocallyContinuable(
+            signaturePersistFailure?.httpStatus,
+            signaturePersistFailure?.rawMessage,
+          )
+        ) {
+          const localAgreementId = mintGuidedSignatureTrackLocalAgreementId();
+          logGuidedSignatureTrackLocalBridgeStart({
+            localAgreementId,
+            corpusLen: corpusText.length,
+            reason: "draft_persist_failed",
+            httpStatus: signaturePersistFailure?.httpStatus ?? null,
+          });
+          const primedForLocalBridge =
+            mergeLiveDraftWithRecipientSetupForVs01Bridge(
+              mergedDraft as unknown as AgreementDraft,
+              buildRecipientSetupForVs01Bridge(mergedDraft),
+            ) ?? (mergedDraft as unknown as AgreementDraft);
+          const localBridge = tryNavigateGuidedSignatureTrackLocalVs01Esign({
+            navigate: (to) => void navigate(to),
+            localAgreementId,
+            draft: {
+              ...primedForLocalBridge,
+              server_full_document_text: corpusText,
+              premium_full_document_text: corpusText,
+            } as AgreementDraft,
+            recipientSetup: buildRecipientSetupForVs01Bridge(mergedDraft),
+            logReason: "guided_signature_track_local_bridge",
+            agreementCorpusText: corpusText,
+            guidedSigningHandoff: vs01Handoff,
+          });
+          if (localBridge.ok) {
+            logGuidedSignatureTrackLocalBridgeSuccess({
+              localAgreementId,
+              documentId: localBridge.documentId,
+              route: localBridge.route,
+            });
+            setCreateFlowPhase("ready_to_send");
+            markPremiumRecipientsSurfaceReleased();
+            setPremiumRecipientUxActive(true);
+            bumpPremiumSurfaceGateTick();
+            setGuidedSigningConfirmationActive(false);
+            logGuidedSignatureRouteEntered({
+              destination: "vs01",
+              agreementId: localAgreementId,
+              localBridge: true,
+            });
+            if (import.meta.env.MODE !== "test") {
+              // eslint-disable-next-line no-console
+              console.warn("[guided-signature-track-local-bridge-warning]", {
+                message: GUIDED_SIGNATURE_LOCAL_BRIDGE_WARNING,
+              });
+            }
+            if (modalVisible) {
+              setGuidedFinalizeModalStage("signing_packet_ready");
+              logGuidedFinalizeModalStage("signing_packet_ready");
+              window.setTimeout(() => {
+                setGuidedFinalizeModalStage(null);
+                logGuidedFinalizeModalExit();
+              }, 900);
+            } else {
+              setGuidedFinalizeModalStage(null);
+            }
+            return;
+          }
+        }
         if (!ok && !id) {
           logGuidedSignatureTrackFailed({ reason: "persist_failed" });
           showModalIfSlow("blocked");
