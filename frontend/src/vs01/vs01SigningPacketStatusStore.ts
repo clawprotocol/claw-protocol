@@ -84,8 +84,23 @@ export function patchSignerPacketStatus(
   agreementId: string,
   signerKey: string,
   status: Vs01SignerPacketStatus,
+  bootstrapKeys?: readonly string[],
 ): Vs01SigningPacketStatusSnapshot | null {
-  const cur = readSigningPacketStatus(agreementId);
+  let cur = readSigningPacketStatus(agreementId);
+  if (!cur && bootstrapKeys?.length) {
+    const bySignerKey: Record<string, Vs01SignerPacketStatus> = {};
+    for (const key of bootstrapKeys) {
+      if (key.trim()) bySignerKey[key.trim()] = "waiting";
+    }
+    if (signerKey.trim()) bySignerKey[signerKey.trim()] = "waiting";
+    cur = {
+      agreementId: agreementId.trim(),
+      updatedAt: new Date().toISOString(),
+      bySignerKey,
+      fullySigned: false,
+    };
+    writeSigningPacketStatus(cur);
+  }
   if (!cur) return null;
   const next: Vs01SigningPacketStatusSnapshot = {
     ...cur,

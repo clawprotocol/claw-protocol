@@ -24,13 +24,13 @@ import { isAgreementCompletedForDashboard } from "./creatorDashboardAgreementCom
 import type { CreatorSigningProgressSnapshot } from "./creatorDashboardSigningProgress";
 
 /**
- * Owner signing status source-of-truth order (Test359):
- * 1. Workspace index `completed_signed` (Supabase / workspace index)
- * 2. Draft audit signed hydration (merged via `mergeWorkspaceAgreementCompletion`)
- * 3. Public verify `signature_status` + `signature_events` (persisted server state)
- * 4. localStorage signing packet status + portable packet handoff (QA / same-browser fallback)
+ * Owner signing status source-of-truth order (Test361):
+ * 1. Workspace index `completed_signed` / draft audit signed hydration
+ * 2. Public verify `signature_status` + `signature_events` (persisted server state)
+ * 3. VS01 signing packet status store (localStorage)
+ * 4. Portable packet / local fallback when persisted state is unavailable
  *
- * Persisted server progress always wins over stale local when it reports more signatures or full execution.
+ * Local fully-signed or higher signedCount wins over stale server/workspace 0/N progress.
  */
 
 export type OwnerSigningProgressSource =
@@ -106,22 +106,29 @@ function pickAuthoritativeProgress(
       requiredCount,
       partiallySigned: false,
       fullySigned: true,
-      source: server ? "public_verify" : local ? "local_packet" : "index",
+      source: server?.fullySigned ? "public_verify" : local ? "local_packet" : "index",
     };
   }
 
+  if (local?.fullySigned && !server?.fullySigned) {
+    return { ...local, source: "local_packet" };
+  }
   if (server?.fullySigned) return { ...server, source: "public_verify" };
-  if (local?.fullySigned && !server) return { ...local, source: "local_packet" };
 
   if (server && local) {
-    if (server.signedCount > local.signedCount) return { ...server, source: "public_verify" };
-    if (server.signedCount === local.signedCount && server.fullySigned) {
-      return { ...server, source: "public_verify" };
-    }
     if (local.signedCount > server.signedCount) return { ...local, source: "local_packet" };
+    if (server.signedCount > local.signedCount) return { ...server, source: "public_verify" };
+    if (local.fullySigned) return { ...local, source: "local_packet" };
+    if (server.fullySigned) return { ...server, source: "public_verify" };
+    if (local.signedCount > 0 && server.signedCount === 0) {
+      return { ...local, source: "local_packet" };
+    }
     return { ...server, source: "public_verify" };
   }
 
+  if (local && (local.signedCount > 0 || local.fullySigned)) {
+    return { ...local, source: "local_packet" };
+  }
   if (server) return { ...server, source: "public_verify" };
   if (local) return { ...local, source: "local_packet" };
 

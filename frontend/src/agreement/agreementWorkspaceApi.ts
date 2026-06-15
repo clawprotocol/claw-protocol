@@ -600,6 +600,54 @@ export async function postSigningCeremonyComplete(
   }
 }
 
+export async function postVs01SignerComplete(
+  agreementId: string,
+  body: {
+    signer_role_id: string;
+    participant_id?: string;
+    document_id?: string;
+    display_name?: string;
+    signed_at?: string;
+    signed_date_iso?: string;
+    signed_date_display?: string;
+    portable_packet?: Record<string, unknown> | null;
+  },
+  recipientAccessToken?: string | null,
+): Promise<{
+  ok: boolean;
+  already_signed?: boolean;
+  fully_executed?: boolean;
+  completion_emails_sent?: boolean;
+  error?: string;
+}> {
+  try {
+    const res = await fetch(
+      `${base()}/api/agreements/${encodeURIComponent(agreementId)}/vs01-signer-complete`,
+      {
+        method: "POST",
+        headers: {
+          ...clawAgreementHeaders({ "Content-Type": "application/json" }),
+          ...recipientAgreementReadHeaders(agreementId, recipientAccessToken),
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (res.ok) {
+      return {
+        ok: true,
+        already_signed: Boolean(j.already_signed),
+        fully_executed: Boolean(j.fully_executed),
+        completion_emails_sent: Boolean(j.completion_emails_sent),
+      };
+    }
+    const d = j.detail;
+    return { ok: false, error: typeof d === "string" ? d : `error_${res.status}` };
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
 export type AgreementMemoryUsageBlock = {
   tier: "none" | "standard" | "full" | string;
   semantic_search: boolean;

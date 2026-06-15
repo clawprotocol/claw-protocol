@@ -69,7 +69,8 @@ import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
 import { paidProPacketReadyDashboardPath } from "./vs01PaidProPacketReadyNavigation";
 import { hydrateVs01RecipientFromServerPacket } from "./vs01RecipientServerHydration";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
-import { patchSignerPacketStatus, readSigningPacketStatus } from "./vs01SigningPacketStatusStore";
+import { readSigningPacketStatus } from "./vs01SigningPacketStatusStore";
+import { recordVs01SignerCompletion } from "./vs01SignerCompletionSync";
 import { partyIndexFromSignerRoleId } from "./vs01RecipientFieldScope";
 import {
   clearVs01DraftState,
@@ -1216,39 +1217,55 @@ export function Vs01Wizard({
                 const aid = RECIPIENT_AGREEMENT_ID.trim();
                 const roleKey = (RECIPIENT_LOCKED_SIGNER_ROLE_ID ?? "").trim();
                 if (aid && roleKey) {
-                  const next = patchSignerPacketStatus(aid, roleKey, "signed");
-                  const snap = next ?? readSigningPacketStatus(aid);
-                  const remainingSigners = snap
-                    ? Object.entries(snap.bySignerKey).filter(([, status]) => status !== "signed").length
-                    : null;
-                  logVs01LifecycleEvent({
-                    event: "vs01_signer_completed",
+                  void recordVs01SignerCompletion({
                     agreementId: aid,
-                    documentId: documentId ?? undefined,
+                    documentId: documentId ?? "",
                     signerRoleId: roleKey,
                     partyIndex: partyIndexFromSignerRoleId(roleKey),
-                    fieldType: "signature",
-                    status: "signed",
-                  });
-                  if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
-                    // eslint-disable-next-line no-console
-                    console.info("[vs01_signer_completed]", {
-                      agreement_id: aid.slice(0, 16),
-                      document_id: documentId?.slice(0, 16) ?? null,
-                      signer_role_id: roleKey.slice(0, 24),
-                      party_index: partyIndexFromSignerRoleId(roleKey),
-                      field_type: "signature",
-                      signed_by: roleKey.slice(0, 24),
-                      remaining_signers: remainingSigners,
-                    });
-                  }
-                  if (next?.fullySigned) {
+                    participantId: RECIPIENT_LOCKED_CP_ID,
+                    displayName:
+                      VS01_URL_BOOT?.counterparties.find((c) => c.id === RECIPIENT_LOCKED_CP_ID)
+                        ?.signerName ??
+                      VS01_URL_BOOT?.counterparties.find((c) => c.id === RECIPIENT_LOCKED_CP_ID)?.name ??
+                      null,
+                    recipientFields: recipientPlacedFields,
+                  }).then((result) => {
+                    const snap = result.localSnapshot ?? readSigningPacketStatus(aid);
+                    const remainingSigners = snap
+                      ? Object.entries(snap.bySignerKey).filter(([, status]) => status !== "signed").length
+                      : null;
                     logVs01LifecycleEvent({
-                      event: "vs01_packet_fully_signed",
+                      event: "vs01_signer_completed",
                       agreementId: aid,
                       documentId: documentId ?? undefined,
+                      signerRoleId: roleKey,
+                      partyIndex: partyIndexFromSignerRoleId(roleKey),
+                      fieldType: "signature",
+                      status: "signed",
                     });
-                  }
+                    if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+                      // eslint-disable-next-line no-console
+                      console.info("[vs01_signer_completed]", {
+                        agreement_id: aid.slice(0, 16),
+                        document_id: documentId?.slice(0, 16) ?? null,
+                        signer_role_id: roleKey.slice(0, 24),
+                        party_index: partyIndexFromSignerRoleId(roleKey),
+                        field_type: "signature",
+                        signed_by: roleKey.slice(0, 24),
+                        remaining_signers: remainingSigners,
+                        server_synced: result.serverSynced,
+                        fully_signed: result.fullySigned,
+                        completion_emails_sent: result.completionEmailsSent,
+                      });
+                    }
+                    if (result.fullySigned) {
+                      logVs01LifecycleEvent({
+                        event: "vs01_packet_fully_signed",
+                        agreementId: aid,
+                        documentId: documentId ?? undefined,
+                      });
+                    }
+                  });
                 }
               }}
               manifestDecodeError={VS01_URL_BOOT?.recipientManifestDecodeError ?? null}

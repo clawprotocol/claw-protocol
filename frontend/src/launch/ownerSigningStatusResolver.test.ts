@@ -222,4 +222,18 @@ describe("ownerSigningStatusResolver (Test359 follow-up)", () => {
     expect(formatLawdogAgreementStatusLabel(row, server)).toBe("Signing: 1 of 2 signed");
     expect(deriveCreatorSigningStatusLabel(row, server)).toBe("1 of 2 signed");
   });
+
+  it("prefers local 2/2 over stale server 0/2", () => {
+    const handoff = twoPartyHandoff();
+    ensureSigningPacketStatusFromHandoff(handoff, handoff.ownerSignerRoleId!);
+    patchSignerPacketStatus(AG, handoff.ownerSignerRoleId!, "signed");
+    patchSignerPacketStatus(AG, handoff.signers[0]!.signerRoleId!, "signed");
+
+    const server = progressFromPublicVerify(publicVerifyPayload({ signatures_recorded: 0 }) as never);
+    const row = indexRow();
+    const progress = resolveOwnerSigningProgress(row, server);
+    expect(progress?.fullySigned).toBe(true);
+    expect(progress?.signedCount).toBe(2);
+    expect(progress?.source).toBe("local_packet");
+  });
 });

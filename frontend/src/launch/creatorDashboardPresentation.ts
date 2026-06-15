@@ -27,6 +27,7 @@ import {
   CREATOR_REVIEWS_APPROVED_PILL,
   CREATOR_WAITING_ON_REVIEWER_PILL,
   CREATOR_WAITING_FOR_SIGNATURES_PILL,
+  CREATOR_COMPLETED_PILL,
   CREATOR_TRACK_REVIEW_STATUS_LABEL,
   CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL,
   CREATOR_MANAGE_RECIPIENTS_LABEL,
@@ -351,6 +352,9 @@ export function deriveCreatorDashboardStatusPillFromGate(
     reviewGate,
     deriveCreatorDashboardStatus(row),
   );
+  if (effectiveStatus === "completed") {
+    return CREATOR_COMPLETED_PILL;
+  }
   if (effectiveStatus === "ready_for_signing" || effectiveStatus === "review_approved") {
     return CREATOR_DASHBOARD_STATUS_LABEL.ready_for_signing;
   }

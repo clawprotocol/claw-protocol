@@ -23,6 +23,8 @@ export const CREATOR_WAITING_ON_REVIEWER_PILL = "Waiting on reviewer";
 
 export const CREATOR_WAITING_FOR_SIGNATURES_PILL = "Waiting for signatures";
 
+export const CREATOR_COMPLETED_PILL = "Completed";
+
 export const CREATOR_SIGNATURE_LINKS_LOCKED_HELPER =
   "Signature links unlock after all parties approve.";
 
