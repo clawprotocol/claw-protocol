@@ -15,6 +15,7 @@ import { StepPrepareSignature } from "./StepPrepareSignature";
 import { detailsStepIsValid } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
+import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
 import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, getReceipt } from "./vs01Api";
 import { useLaunchNav } from "../launch/LaunchNavContext";
@@ -127,6 +128,13 @@ const RECIPIENT_SIGNER_DEEP_LINK = VS01_URL_BOOT?.recipientSignerMode === true;
 const RECIPIENT_LOCKED_CP_ID = VS01_URL_BOOT?.recipientLockedCounterpartyId ?? null;
 const RECIPIENT_AGREEMENT_ID = (VS01_URL_BOOT?.recipientAgreementId ?? "").trim();
 const RECIPIENT_LOCKED_SIGNER_ROLE_ID = VS01_URL_BOOT?.recipientLockedSignerRoleId ?? null;
+const RECIPIENT_ACCESS_TOKEN = (() => {
+  const aid = (VS01_URL_BOOT?.recipientAgreementId ?? "").trim();
+  if (!aid) return "";
+  const fromBoot = (VS01_URL_BOOT?.recipientAccessToken ?? "").trim();
+  if (fromBoot) return fromBoot;
+  return resolveReviewerEffectiveAccessToken({ agreementId: aid }).token;
+})();
 
 const INITIAL_RECIPIENT_FIELDS: Vs01RecipientPlacedField[] =
   RECIPIENT_SIGNER_DEEP_LINK && VS01_URL_BOOT?.recipientHydratedFields
@@ -1237,6 +1245,7 @@ export function Vs01Wizard({
                       VS01_URL_BOOT?.counterparties.find((c) => c.id === RECIPIENT_LOCKED_CP_ID)?.name ??
                       null,
                     recipientFields: recipientPlacedFields,
+                    recipientAccessToken: RECIPIENT_ACCESS_TOKEN || null,
                   }).then((result) => {
                     const snap = result.localSnapshot ?? readSigningPacketStatus(aid);
                     const remainingSigners = snap

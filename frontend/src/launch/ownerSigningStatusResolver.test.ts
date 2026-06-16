@@ -236,4 +236,19 @@ describe("ownerSigningStatusResolver (Test359 follow-up)", () => {
     expect(progress?.signedCount).toBe(2);
     expect(progress?.source).toBe("local_packet");
   });
+
+  it("prefers server 2/2 completed over stale local 1/2", () => {
+    const handoff = twoPartyHandoff();
+    ensureSigningPacketStatusFromHandoff(handoff, handoff.ownerSignerRoleId!);
+    patchSignerPacketStatus(AG, handoff.ownerSignerRoleId!, "signed");
+
+    const server = progressFromPublicVerify(
+      publicVerifyPayload({ signatures_recorded: 2, fully_executed: true }) as never,
+    );
+    const row = indexRow();
+    const progress = resolveOwnerSigningProgress(row, server);
+    expect(progress?.fullySigned).toBe(true);
+    expect(progress?.signedCount).toBe(2);
+    expect(progress?.source).toBe("public_verify");
+  });
 });

@@ -29,6 +29,12 @@ import {
 import { hydrateRecipientSigningFields, stripLockedSignerEditableValuesOnHydrate } from "./recipientSigningFieldUtils";
 import { normalizeVs01PortableInitialsPolicy, resolveRecipientInitialsEnabled } from "./vs01RecipientSignerMarksHydration";
 import { scopeRecipientManifestToLockedSigner } from "./vs01RecipientFieldScope";
+import { saveRecipientMagicLinkSession } from "../agreement/recipientMagicLinkSession";
+import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
+
+function readRecipientAccessTokenFromSearchParams(params: URLSearchParams): string {
+  return (params.get("t") || params.get("token") || "").trim();
+}
 
 function newCpId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -62,6 +68,8 @@ export type Vs01UrlBootstrapResult = {
   packetRevision: string | null;
   /** True when URL references stored canonical packet (vs01_cpacket_stored=1). */
   canonicalPacketStored: boolean;
+  /** Recipient access token from `t` / `token` query (stripped after bootstrap). */
+  recipientAccessToken: string;
 };
 
 let memo: Vs01UrlBootstrapResult | null | undefined;
@@ -104,6 +112,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   const recipientAgreementId = (params.get("agreement_id") ?? "").trim();
   const recipientLockedSignerRoleIdRaw = (params.get("signer_role_id") ?? "").trim();
   const recipientLockedSignerRoleId = recipientLockedSignerRoleIdRaw || null;
+  const recipientAccessTokenFromUrl = readRecipientAccessTokenFromSearchParams(params);
 
   const lockedId = counterpartyIdFromUrl || newCpId();
 
@@ -303,6 +312,22 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     }
   }
 
+  const recipientAccessToken = recipientAgreementId
+    ? resolveReviewerEffectiveAccessToken({
+        agreementId: recipientAgreementId,
+        urlToken: recipientAccessTokenFromUrl,
+      }).token
+    : recipientAccessTokenFromUrl;
+
+  if (recipientAccessToken && recipientAgreementId) {
+    saveRecipientMagicLinkSession({
+      agreementId: recipientAgreementId,
+      token: recipientAccessToken,
+      recipientPartyId: lockedId || undefined,
+      recipientLinkRole: "signer",
+    });
+  }
+
   memo = {
     documentId,
     receiptId,
@@ -318,6 +343,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     recipientManifestDecodeError,
     packetRevision: packetRevisionFromUrl || null,
     canonicalPacketStored,
+    recipientAccessToken,
   };
 
   const path = window.location.pathname + window.location.hash;

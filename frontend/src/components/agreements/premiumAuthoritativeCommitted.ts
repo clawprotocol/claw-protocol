@@ -10,6 +10,11 @@ import {
   isAuthoritativePremiumPipelineRenderSource,
   type PremiumRenderResolveSource,
 } from "./premiumRenderSourceResolver";
+import { PAID_PRO_RECOVERY_MIN_DISPLAY_LEN } from "./paidProPostCheckoutRenderGate";
+import {
+  PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+  PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
+} from "./premiumNetworkRecoveryLocalDraft";
 
 export type ResolveAuthoritativePremiumCommittedInput = {
   winningPremiumBodyText?: string | null;
@@ -61,9 +66,20 @@ export function resolveAuthoritativePremiumCommitted(
     Boolean(snap?.premiumAccepted) &&
     isAuthoritativePremiumPipelineRenderSource(String(snap?.premiumPipelineRenderSource || "")) &&
     (snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "").trim().length >= MIN_AUTHORITATIVE_BODY_LEN;
+  const recoveryPipelineSource = String(
+    snap?.premiumPipelineRenderSource || input.premiumRenderSource || bodySource || "",
+  ).trim();
+  const recoverySnapAccepted =
+    Boolean(snap?.premiumAccepted) &&
+    body.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+    (recoveryPipelineSource === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE ||
+      recoveryPipelineSource === PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE);
   const committed =
     body.length >= MIN_AUTHORITATIVE_BODY_LEN &&
-    (Boolean(authoritativeSource) || snapAccepted || input.premiumRenderResolveSource === "server_full_document_text");
+    (Boolean(authoritativeSource) ||
+      snapAccepted ||
+      recoverySnapAccepted ||
+      input.premiumRenderResolveSource === "server_full_document_text");
   return {
     committed,
     bodyLen: body.length,

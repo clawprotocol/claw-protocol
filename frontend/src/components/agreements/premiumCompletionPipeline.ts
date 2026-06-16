@@ -160,6 +160,7 @@ import {
 } from "./paidProJsonParseDegradedDiagnostics";
 import {
   meetsPaidProDegradedRecoveryDisplayRequirements,
+  PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
   shouldSkipPremiumStructuralRetryForDegradedDisplay,
 } from "./paidProPostCheckoutRenderGate";
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
@@ -3348,6 +3349,10 @@ async function runPremiumCompletionInner(
   }
   if (premiumRenderSource === "rejected_paid_corpus") {
     const docTrimForSuppress = (winningPremiumBodyText || "").trim();
+    const intakeForRecovery = rawForSoT || rawIntake;
+    const serverRecoveryCandidate = (
+      pipelineNormalizedAuthoritativeText || docTrimForSuppress
+    ).trim();
     const suppressDegradedLocalRecovery =
       !rejectedPaidCorpusDueToClientGates &&
       pipelineNormalizedAuthoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN &&
@@ -3389,6 +3394,54 @@ async function runPremiumCompletionInner(
         serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
         tierADiagnostic: tierADiag,
       };
+    }
+    if (
+      serverRecoveryCandidate.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+      meetsPaidProDegradedRecoveryDisplayRequirements(serverRecoveryCandidate, intakeForRecovery)
+    ) {
+      const serverRecoveryPreview = previewPostCheckoutRecoverySotCommit({
+        body: serverRecoveryCandidate,
+        draft: outMerged,
+        intakeText: intakeForRecovery,
+        premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+      });
+      if (serverRecoveryPreview.eligible) {
+        const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+        if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+        logPremiumCompletionDebug({
+          stage: "premium_degraded_server_local_recovery",
+          recoveryCandidateEligible: true,
+          rejectedReason: undefined,
+          premiumRenderSource: recoverySource,
+          bodyLen: serverRecoveryCandidate.length,
+          displayPlainLen: serverRecoveryPreview.displayPlainLen,
+          lastClientGate: lastClientGateTrace,
+          note: "server_degraded_json_parse_body",
+        });
+        outMerged = stripClientPremiumArtifactBlocksFromDraft({
+          ...outMerged,
+          premium_full_document_text: serverRecoveryCandidate,
+        });
+        return {
+          premiumDraft: outMerged,
+          premiumParties,
+          recipientCandidates,
+          winningPremiumBodyText: serverRecoveryCandidate,
+          premiumRenderSource: recoverySource,
+          premiumReview,
+          premiumFinalizeAudit,
+          premiumReviewRoute,
+          staleIntakeOrGeneration: false,
+          agreementGenerationId: input.agreementGenerationId,
+          premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+          founderDetailsGateMessage: null,
+          proIntentGateMessage: null,
+          serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+          premiumDegradedServerRecoverable: true,
+          premiumDegradedServerLocalRecovery: true,
+          tierADiagnostic: tierADiag,
+        };
+      }
     }
     const localRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
       draft: outMerged,

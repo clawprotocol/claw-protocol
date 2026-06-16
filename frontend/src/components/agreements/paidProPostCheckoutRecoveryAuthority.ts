@@ -7,8 +7,10 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   freezePaidProPostCheckoutRecoveryCanonicalSnapshot,
+  meetsPaidProDegradedRecoveryDisplayRequirements,
   resolvePaidProPostCheckoutRecoveryDisplayPlain,
 } from "./paidProPostCheckoutRenderGate";
+import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import { hasLatchedLongAcceptedServerFullDraft } from "./paidProAcceptedServerFullDraftCommitGuard";
 import {
   establishPaidProSourceOfTruth,
@@ -62,21 +64,30 @@ export function previewPostCheckoutRecoverySotCommit(args: {
     premiumDegradedServerLocalRecovery:
       args.premiumRenderSource === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
   });
-  if (displayPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+  const rawBody = (args.body || "").trim();
+  const resolvedDisplayPlain =
+    displayPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN
+      ? displayPlain
+      : meetsPaidProDegradedRecoveryDisplayRequirements(rawBody, args.intakeText) &&
+          (args.premiumRenderSource === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE ||
+            args.premiumRenderSource === PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE)
+        ? rawBody
+        : "";
+  if (resolvedDisplayPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
     return {
       eligible: false,
-      displayPlain,
+      displayPlain: resolvedDisplayPlain,
       blockReason: "recovery_display_plain_below_review_min",
       rawBodyLen,
-      displayPlainLen: displayPlain.length,
+      displayPlainLen: resolvedDisplayPlain.length,
     };
   }
   return {
     eligible: true,
-    displayPlain,
+    displayPlain: resolvedDisplayPlain,
     blockReason: "",
     rawBodyLen,
-    displayPlainLen: displayPlain.length,
+    displayPlainLen: resolvedDisplayPlain.length,
   };
 }
 
@@ -138,12 +149,17 @@ export function tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth(args: {
     };
   }
   try {
+    markPaidProPipelineValidationPassed({
+      text: preview.displayPlain,
+      source: args.premiumRenderSource,
+    });
     const record = establishPaidProSourceOfTruth({
       text: preview.displayPlain,
       source: "server_full_draft",
       draft: args.draft,
       intakeText: args.intakeText,
       reviewSessionId: args.reviewSessionId ?? null,
+      generationOutcome: "degraded",
     });
     const frozen = freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
       text: record.text,

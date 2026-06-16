@@ -5118,22 +5118,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           })
         : "";
       const premiumFullOnDraft = String(nextDraft.premium_full_document_text ?? "").trim();
+      const recoveryFromRefs =
+        proReviewDisplay &&
+        (hydratedPremiumBodyRef.current.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
+          lastPremiumWinningCorpusRef.current.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN)
+          ? hydratedPremiumBodyRef.current.trim() || lastPremiumWinningCorpusRef.current.trim()
+          : "";
       const recoveryFromDraftPremiumFull =
         proReviewDisplay &&
-        isPaidProPostCheckoutRecoveryPipelineSource(pipelineForCanonical) &&
-        premiumFullOnDraft.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
+        premiumFullOnDraft.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+        (isPaidProPostCheckoutRecoveryPipelineSource(pipelineForCanonical) ||
+          paidCheckoutCompletedRef.current ||
+          hasPaidPremiumCompletionSession())
           ? premiumFullOnDraft
           : "";
       const canonicalReviewPlain =
         recoveryDisplayPlain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
           ? recoveryDisplayPlain
-          : recoveryFromDraftPremiumFull.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
-            ? recoveryFromDraftPremiumFull
-            : proReviewDisplay && premiumFullOnDraft.length >= 500
-              ? premiumFullOnDraft
-              : buildPreviewForCurrentTier(nextDraft);
+          : recoveryFromRefs.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
+            ? recoveryFromRefs
+            : recoveryFromDraftPremiumFull.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
+              ? recoveryFromDraftPremiumFull
+              : proReviewDisplay && premiumFullOnDraft.length >= 500
+                ? premiumFullOnDraft
+                : buildPreviewForCurrentTier(nextDraft);
       const hasEligibleRecoveryCorpus =
         recoveryDisplayPlain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
+        recoveryFromRefs.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
         recoveryFromDraftPremiumFull.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
         premiumFullOnDraft.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
       const blockPaidProCanonicalFreeze = shouldBlockPaidProCanonicalFreezeOnApiFailure({
@@ -6700,6 +6711,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             authoritativeAgreementSnapshotRef.current = committedText;
             acceptedReviewCorpusRef.current = committedText;
             finalizedSigningCorpusRef.current = committedText;
+            setProFullDraftQualityRetry(false);
+            setProFullDraftCustomGateMessage(null);
+            setPremiumServerGenerationDegraded(null);
             logPremiumRecoveryAuthority({
               surface: "applySuccess_network_local_recovery",
               accepted: true,
@@ -6883,6 +6897,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             authoritativeAgreementSnapshotRef.current = committedText;
             acceptedReviewCorpusRef.current = committedText;
             finalizedSigningCorpusRef.current = committedText;
+            setProFullDraftQualityRetry(false);
+            setProFullDraftCustomGateMessage(null);
+            setPremiumServerGenerationDegraded(null);
             logPremiumRecoveryAuthority({
               surface: "applySuccess_degraded_server_local_recovery",
               accepted: true,
@@ -8162,6 +8179,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
             corpusLen: recoveryBodyFb.length,
             corpusSource: "canonical_working_draft",
+            hasEligibleRecoveryCorpus: recoveryBodyFb.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
           });
           if (recoveryBodyFb.length >= 500 && !blockStarterAsPro) {
             draftForReview = {
@@ -8207,6 +8225,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumPostCheckoutPhase: premiumPostCheckoutPhaseRef.current,
             corpusLen: recoveryBodyForDisplay.length,
             corpusSource: "canonical_working_draft",
+            hasEligibleRecoveryCorpus: recoveryBodyForDisplay.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
           });
           if (recoveryBodyForDisplay.length >= 500 && !blockStarterDisplayAsPro) {
             setAgreementDocumentText(recoveryBodyForDisplay);
@@ -10467,6 +10486,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setProductionSendBarPhase("idle");
         setProductionSendBarAgreementId(null);
         return false;
+      }
+      if (
+        paidCheckoutCompletedRef.current &&
+        (hasPaidProSourceOfTruth() ||
+          Boolean(readPremiumCompletionSnapshot()?.premiumAccepted) ||
+          hydratedPremiumBodyRef.current.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
+          lastPremiumWinningCorpusRef.current.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN)
+      ) {
+        setHardError(null);
+        setProductionSendBarPhase("idle");
+        setProductionSendBarAgreementId(null);
+        return true;
       }
       if (guidedSignatureTrackInFlightRef.current) {
         const err = e as ReviewFirstPersistHttpError;

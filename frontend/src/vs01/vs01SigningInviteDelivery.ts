@@ -1,4 +1,8 @@
 import { postSigningLinksSent } from "../agreement/agreementWorkspaceApi";
+import {
+  fetchRecipientAccessPolicy,
+  mintRecipientAccessTokenResult,
+} from "../agreement/recipientAccessApi";
 import type { PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { resolveVs01SenderMustSignFirst } from "./vs01SigningOrderPolicy";
@@ -65,6 +69,52 @@ export function buildSigningInviteTargetsFromHandoff(
   return targets;
 }
 
+function appendSignTokenToSigningUrl(url: string, token: string): string {
+  const tok = token.trim();
+  if (!tok) return url;
+  try {
+    const u = new URL(url, "https://lawdog.local");
+    u.searchParams.set("t", tok);
+    return `${u.pathname}${u.search}${u.hash}`;
+  } catch {
+    return url;
+  }
+}
+
+async function enrichSigningTargetsWithRecipientTokens(
+  agreementId: string,
+  targets: ReturnType<typeof buildSigningInviteTargetsFromHandoff>,
+  roles: readonly Vs01PrepareSigningRole[],
+): Promise<ReturnType<typeof buildSigningInviteTargetsFromHandoff>> {
+  const policy = await fetchRecipientAccessPolicy();
+  const shouldMint =
+    Boolean(policy?.recipient_link_token_required) || Boolean(policy?.signing_token_configured);
+  if (!shouldMint) return targets;
+
+  const out: ReturnType<typeof buildSigningInviteTargetsFromHandoff> = [];
+  for (const target of targets) {
+    if (target.is_owner) {
+      out.push(target);
+      continue;
+    }
+    const role = roles.find((r) => r.roleId === target.signer_role_id);
+    const mint = await mintRecipientAccessTokenResult(agreementId, {
+      mode: "sign",
+      role: "signer",
+      recipient_party_id: role?.partyId ?? role?.vs01CounterpartyId ?? undefined,
+    });
+    if (mint.ok && mint.data.token) {
+      out.push({
+        ...target,
+        signing_url: appendSignTokenToSigningUrl(target.signing_url, mint.data.token),
+      });
+    } else {
+      out.push(target);
+    }
+  }
+  return out;
+}
+
 /** Fire-and-forget signing invite delivery after packet prepare (parallel flow only). */
 export async function dispatchSigningInvitesFromHandoff(
   handoff: PaidProVs01PostSignHandoffV1,
@@ -79,7 +129,11 @@ export async function dispatchSigningInvitesFromHandoff(
     return { attempted: false, ok: false, sentCount: 0, skipReason: "sender_first_explicit" };
   }
 
-  const targets = buildSigningInviteTargetsFromHandoff(handoff, roles);
+  const targets = await enrichSigningTargetsWithRecipientTokens(
+    handoff.agreementId,
+    buildSigningInviteTargetsFromHandoff(handoff, roles),
+    roles,
+  );
   if (!targets.length) {
     return { attempted: false, ok: false, sentCount: 0, skipReason: "no_targets" };
   }

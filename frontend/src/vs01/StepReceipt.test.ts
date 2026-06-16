@@ -46,6 +46,20 @@ describe("buildVs01RecipientSigningUrl", () => {
     expect(new URL(url, "https://example.test").pathname).toBe("/app/esign/doc_123");
   });
 
+  it("includes recipient access token when provided", () => {
+    const url = buildVs01RecipientSigningUrl({
+      recipientIndex: 1,
+      recipientName: "Pat",
+      recipientEmail: "pat@example.com",
+      counterpartyId: "cp1",
+      documentId: "doc_123",
+      receiptId: "rcpt_456",
+      recipientFieldsForSigner: [makeRecipientField("f1", "cp1")],
+      recipientAccessToken: "tok_sign_abc",
+    });
+    expect(new URL(url).searchParams.get("t")).toBe("tok_sign_abc");
+  });
+
   it("stores manifest in sessionStorage and keeps URL length reasonable", () => {
     const fields = Array.from({ length: 20 }, (_, i) =>
       makeRecipientField(`field_${i}`, "cp1"),

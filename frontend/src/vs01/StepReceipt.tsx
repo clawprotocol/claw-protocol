@@ -81,6 +81,8 @@ export function buildVs01RecipientSigningUrl(opts: {
   canonicalPacketStored?: boolean;
   /** Revision token matching stored portable packet (initials toggle / field rebuild). */
   packetRevision?: string | null;
+  /** Minted recipient sign-mode token appended as `t=` for server completion auth. */
+  recipientAccessToken?: string | null;
 }): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const did = opts.documentId?.trim() ?? "";
@@ -129,6 +131,9 @@ export function buildVs01RecipientSigningUrl(opts: {
   } else if (canonicalPacketPayload) {
     params.set(VS01_CANONICAL_PACKET_QUERY, canonicalPacketPayload);
   }
+
+  const accessTok = (opts.recipientAccessToken ?? "").trim();
+  if (accessTok) params.set("t", accessTok);
 
   const url = `${origin}${path}?${params.toString()}`;
 
