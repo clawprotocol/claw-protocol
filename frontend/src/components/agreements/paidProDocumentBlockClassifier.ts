@@ -4,6 +4,7 @@
  */
 
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
+import { splitGluedSectionHeadingFromLine } from "./documentSectionHeadingSplit";
 
 export type PaidProDocumentBlockKind =
   | "document_title"
@@ -27,6 +28,13 @@ export type ClassifiedPaidProDocumentBlock = {
 
 /** Subsection lines like "1.1", "8.1" — remain body paragraphs. */
 const SUBSECTION_HEADING_RE = /^\d+\.\d+(?:\.\d+)*\.?\s+/;
+
+/** Body sentence starters glued after a main heading title (no period separator). */
+const GLUED_MAIN_HEADING_BODY_START_RE =
+  /\s+(?:The|This|Each|Either|Any|Neither|Both|When|If|Unless|Upon|Where|As|An|A|In|For|Client|Service\s+Provider|Neither\s+party|Either\s+party|During|Within|After|Before|One|Party|All|Some|Such|Notwithstanding)\s+/i;
+
+/** Operative verbs that indicate body text, not heading title words. */
+const MAIN_HEADING_BODY_VERB_RE = /\b(?:will|shall|must|may|should|are|is|was|were|have|has|had|agrees?|represents?)\b/i;
 
 const SIGNATURE_PARTY_HEADER_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:?\s*$/i;
 const SIGNATURE_NOTICE_EMAIL_RE = /^email(?:\s+for\s+notices?)?\s*:/i;
@@ -58,6 +66,8 @@ export function isMainSectionHeadingLine(line: string): boolean {
   if (body.length < 3 || body.length > 160) return false;
   // "10. HEADING. Sentence body on same line" is not a pure heading line.
   if (/\.\s+[A-Za-z]/.test(body)) return false;
+  if (MAIN_HEADING_BODY_VERB_RE.test(body)) return false;
+  if (GLUED_MAIN_HEADING_BODY_START_RE.test(body)) return false;
   // Title punctuation allowed in major headings (semicolons common in compound titles).
   if (/^[A-Z0-9 ·\/—–'\-,&();:]+$/.test(body)) return true;
   if (/^[A-Z][a-zA-Z0-9\s/&,\-'—–().;:]+$/.test(body)) {
@@ -81,6 +91,17 @@ export function extractMainSectionHeadingPrefix(
       const remainder = dotSplit[2].trim();
       if (remainder && isMainSectionHeadingLine(heading)) {
         return { heading, remainder };
+      }
+    }
+    const glued = splitGluedSectionHeadingFromLine(t);
+    if (glued.includes("\n")) {
+      const [headingLine, ...rest] = glued
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (headingLine && isMainSectionHeadingLine(headingLine)) {
+        const remainder = rest.join("\n").trim();
+        if (remainder) return { heading: headingLine, remainder };
       }
     }
   }
@@ -116,6 +137,17 @@ export function splitSinglePaidProDocumentBlock(block: string): string[] {
 
   for (const line of lines) {
     const t = line.trim();
+    const repairedLine = splitGluedSectionHeadingFromLine(t);
+    if (repairedLine !== t) {
+      flushCurrent();
+      for (const part of repairedLine
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean)) {
+        segments.push(...splitSinglePaidProDocumentBlock(part));
+      }
+      continue;
+    }
     const glued = splitGluedMainAndSubsectionHeadingLine(t);
     if (glued) {
       flushCurrent();

@@ -163,6 +163,53 @@ describe("paidProDocumentBlockClassifier", () => {
     expect(leaks.leakedLines).not.toContain("1. Scope of Services");
   });
 
+  it("splits section 4 glued heading from first body sentence without period (first Pro run)", () => {
+    const glued =
+      "4. Project Coordination, Reviews and Changes The parties will each designate a primary contact for day-to-day coordination.";
+    expect(isMainSectionHeadingLine(glued)).toBe(false);
+    expect(extractMainSectionHeadingPrefix(glued)).toEqual({
+      heading: "4. Project Coordination, Reviews and Changes",
+      remainder: "The parties will each designate a primary contact for day-to-day coordination.",
+    });
+    expect(splitSinglePaidProDocumentBlock(glued)).toEqual([
+      "4. Project Coordination, Reviews and Changes",
+      "The parties will each designate a primary contact for day-to-day coordination.",
+    ]);
+
+    const plain = [
+      "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+      "This Agreement is entered into as of the Effective Date.",
+      glued,
+      "Service Provider may rely on approvals and feedback provided by Client in good faith.",
+      "5. Ownership and Use of Work Product",
+      "5.1 Client Ownership of Paid Deliverables. Client owns paid deliverables upon payment.",
+    ].join("\n\n");
+
+    const blocks = classifyPaidProDocumentBlocks(plain);
+    const section4 = blocks.find((b) => b.firstLine.startsWith("4. Project Coordination"));
+    expect(section4?.kind).toBe("main_section_heading");
+    expect(section4?.firstLine).toBe("4. Project Coordination, Reviews and Changes");
+    const section4Body = blocks.find((b) =>
+      b.firstLine.startsWith("The parties will each designate a primary contact"),
+    );
+    expect(section4Body?.kind).toBe("body_paragraph");
+
+    const html = buildPremiumAgreementReadonlyHtml(plain, {
+      signatureSectionMode: "collaboration",
+      partyNames: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"],
+    });
+    expect(html).toMatch(
+      /<h2 class="premium-doc-section-heading">4\. Project Coordination, Reviews and Changes<\/h2>/i,
+    );
+    expect(html).toMatch(
+      /<p>The parties will each designate a primary contact for day-to-day coordination\./i,
+    );
+    expect(html).not.toMatch(
+      /<h2[^>]*>4\. Project Coordination, Reviews and Changes The parties will each designate/i,
+    );
+    expect(detectPaidProPlainParagraphHeadingLeaks(plain).plainParagraphHeadingLeakCount).toBe(0);
+  });
+
   it("renders punctuation-rich section 7 and 8 with identical h2 heading treatment", () => {
     const plain = [
       "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
