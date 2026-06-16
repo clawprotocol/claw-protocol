@@ -34,7 +34,8 @@ import {
   readPaidProAgreementBridgeSkipMarker,
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
-import { resolveFinalVs01CorpusOrBlock, VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
+import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
+import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
@@ -727,11 +728,10 @@ export function Vs01Wizard({
         const ownerR = rolesForM[0]!;
         flushSync(() => {
           setVs01LinkedAgreementId(bridge.agreementId);
-          const signingCorpus = resolveFinalVs01CorpusOrBlock({
-            agreementCorpusText: bridge.agreementCorpusText,
+          const signingCorpus = resolvePrepareBridgeSigningCorpus({
+            agreementId: bridge.agreementId,
+            draft: null,
             bridge,
-            guidedPro: Boolean(bridge.senderFirstLawdogHandoff),
-            premiumComplete: corpus.length >= VS01_SIGNING_CORPUS_MIN_LEN,
           });
           setPrepareCorpusText(signingCorpus.corpus.trim() || null);
           setAgreementTitle(titleForUi);
@@ -861,11 +861,10 @@ export function Vs01Wizard({
           const ownerR = rolesForM[0]!;
           flushSync(() => {
             setVs01LinkedAgreementId(bridge.agreementId);
-            const signingCorpus = resolveFinalVs01CorpusOrBlock({
-              agreementCorpusText: bridge.agreementCorpusText,
+            const signingCorpus = resolvePrepareBridgeSigningCorpus({
+              agreementId: bridge.agreementId,
+              draft: null,
               bridge,
-              guidedPro: Boolean(bridge.senderFirstLawdogHandoff),
-              premiumComplete: (bridge.agreementCorpusText ?? "").trim().length >= 1500,
             });
             setPrepareCorpusText(signingCorpus.corpus.trim() || null);
             setAgreementTitle(titleForUi);

@@ -66,6 +66,48 @@ def build_review_owner_notification_email(
     return ReviewOwnerNotificationEmail(subject=subject, html=html, text=text)
 
 
+def build_review_counterparty_signing_ready_notification_email(
+    *,
+    recipient_name: str,
+    agreement_title: str,
+    owner_display_name: str,
+) -> ReviewOwnerNotificationEmail:
+    """Non-owner party: all reviews complete; sender will prepare signing links next."""
+    recipient = (recipient_name or "").strip() or "there"
+    title = (agreement_title or "").strip() or "Untitled agreement"
+    owner = (owner_display_name or "").strip() or "The sender"
+    subject = f"Review complete: {title} is ready for signing"
+
+    summary_rows = [
+        ("Agreement type", title),
+        ("Sender", owner),
+        ("Status", "All reviews complete — signing invitations will follow"),
+    ]
+    inner = (
+        render_paragraph(f"Hi {html_escape(recipient)},")
+        + render_paragraph(
+            f"All required reviews are complete for "
+            f"<strong style=\"color:inherit;\">{html_escape(title)}</strong>."
+        )
+        + render_summary_panel(summary_rows)
+        + render_paragraph(
+            f"{html_escape(owner)} will prepare signature links next. "
+            "You'll receive a signing invitation when it's your turn to sign.",
+            secondary=True,
+        )
+    )
+    html = email_document_shell(inner_html=inner)
+
+    text = (
+        f"Hi {recipient},\n\n"
+        f"All required reviews are complete for {title}.\n"
+        f"Sender: {owner}\n\n"
+        "You'll receive a signing invitation when it's your turn to sign.\n"
+    )
+
+    return ReviewOwnerNotificationEmail(subject=subject, html=html, text=text)
+
+
 def build_review_owner_signing_ready_notification_email(
     *,
     owner_name: str,

@@ -29,6 +29,10 @@ import {
   writeGuidedVs01SigningHandoffSession,
 } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
 import {
+  buildPrepareBridgeCorpusGateArgs,
+  resolveAgreementCorpusForPrepareHandoff,
+} from "../../vs01/vs01PrepareBridgeCorpus";
+import {
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
 } from "../../vs01/vs01SigningCorpus";
@@ -886,7 +890,11 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
         starterPreview: true,
       })
     : "";
-  const handoffText = (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim();
+  const handoffText = resolveAgreementCorpusForPrepareHandoff({
+    agreementId: id,
+    draft: mergedWithCorpus,
+    bridgeCorpusText: (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim() || null,
+  });
   const bridgeDraft = buildAgreementVs01BridgeSession({
     agreementId: id,
     vs01DocumentId: "pending",
@@ -895,15 +903,16 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
     agreementCorpusText: handoffText,
   });
-  const handoffLen = handoffText.length;
   const corpusResolution = resolveFinalVs01CorpusOrBlock({
     agreementCorpusText: handoffText,
-    guidedSigningHandoff: handoff,
-    draft: mergedWithCorpus,
-    bridge: bridgeDraft,
     guidedPro: true,
     freeBaselinePlain,
-    premiumComplete: handoffLen >= VS01_SIGNING_CORPUS_MIN_LEN,
+    ...buildPrepareBridgeCorpusGateArgs({
+      agreementCorpusText: handoffText,
+      bridge: bridgeDraft,
+      draft: mergedWithCorpus,
+    }),
+    guidedSigningHandoff: handoff,
     signatureRebuilt: handoff?.signatureRebuilt,
   });
   if (!corpusResolution.allowed) return false;

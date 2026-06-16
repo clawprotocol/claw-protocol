@@ -13,6 +13,7 @@ import {
   tryNavigatePaidProAgreementSenderFirstVs01Esign,
   writeAgreementVs01BridgeSession,
 } from "./simpleProduct/agreementToVs01SigningBridge";
+import { resolveAgreementCorpusForPrepareHandoff } from "../vs01/vs01PrepareBridgeCorpus";
 import { mergeReviewLinkRecipientEmailsOntoHydratedDraft } from "./simpleProduct/reviewLinkRecipientEmailMerge";
 import {
   buildVs01OwnerPrepareEsignPath,
@@ -123,7 +124,10 @@ export async function navigateCreatorPrepareSignatureLinks(options: {
   }
 
   const emailMergedDraft = mergeReviewLinkRecipientEmailsOntoHydratedDraft(draft, null);
-  const agreementCorpusText = resolveBridgeAgreementCorpusFromDraft(emailMergedDraft);
+  const agreementCorpusText = resolveAgreementCorpusForPrepareHandoff({
+    agreementId: id,
+    draft: emailMergedDraft,
+  });
   const guidedSigningHandoff = resolveGuidedVs01SigningHandoffForBridge(undefined);
 
   const navigated = await tryNavigatePaidProAgreementSenderFirstVs01Esign({

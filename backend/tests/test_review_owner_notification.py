@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.services.email.review_delivery import OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT
+from backend.services.email.review_delivery import (
+    COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT,
+    OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT,
+)
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
@@ -86,6 +91,15 @@ def _mint_reviewer_token(client: TestClient, agreement_id: str, party_id: str = 
     return mint.json()["token"]
 
 
+def _review_token_from_invite_email_payload(payload: dict) -> str:
+    html = str(payload.get("html") or "")
+    match = re.search(r"/review\?t=([^\"'&]+)", html)
+    assert match, "review invite URL missing from email html"
+    from urllib.parse import unquote
+
+    return unquote(match.group(1))
+
+
 def _approve_as_reviewer(
     client: TestClient,
     agreement_id: str,
@@ -103,7 +117,7 @@ def _approve_as_reviewer(
     return res.json()
 
 
-def test_external_reviewer_approval_sends_owner_status_email_once(
+def test_external_reviewer_approval_sends_owner_and_counterparty_status_emails_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     _env_common(monkeypatch, tmp_path)
@@ -115,23 +129,29 @@ def test_external_reviewer_approval_sends_owner_status_email_once(
     with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
         body = _approve_as_reviewer(client, aid, token)
 
-    assert mock_client.post.call_count == 1
-    payload = mock_client.post.call_args_list[0][1]["json"]
-    assert payload["to"] == ["owner@example.com"]
-    assert payload["subject"] == "Review complete: prepare to sign Consulting Agreement"
-    assert "Prepare signature links" in payload["html"]
+    assert mock_client.post.call_count == 2
+    owner_payload = mock_client.post.call_args_list[0][1]["json"]
+    counterparty_payload = mock_client.post.call_args_list[1][1]["json"]
+    assert owner_payload["to"] == ["owner@example.com"]
+    assert owner_payload["subject"] == "Review complete: prepare to sign Consulting Agreement"
+    assert "Prepare signature links" in owner_payload["html"]
     prep_url = f"https://app.example.com/app?prepare_signature_links={aid}"
-    assert prep_url in payload["html"]
-    assert payload["html"].count(prep_url) >= 2
-    assert "/app/done/" not in payload["html"]
-    assert "https://app.example.com/app?focus=" not in payload["html"]
-    assert "/review?t=" not in payload["html"]
+    assert prep_url in owner_payload["html"]
+    assert owner_payload["html"].count(prep_url) >= 2
+    assert "/app/done/" not in owner_payload["html"]
+    assert "https://app.example.com/app?focus=" not in owner_payload["html"]
+    assert "/review?t=" not in owner_payload["html"]
+
+    assert counterparty_payload["to"] == ["reviewer@example.com"]
+    assert counterparty_payload["subject"] == "Review complete: Consulting Agreement is ready for signing"
+    assert "signing invitation" in counterparty_payload["html"].lower()
 
     audit_types = [e.get("event_type") for e in body["draft"].get("audit_log") or []]
     assert OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT in audit_types
+    assert COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT in audit_types
 
 
-def test_duplicate_approval_does_not_resend_owner_notification(
+def test_duplicate_approval_does_not_resend_owner_or_counterparty_notifications(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     _env_common(monkeypatch, tmp_path)
@@ -144,7 +164,7 @@ def test_duplicate_approval_does_not_resend_owner_notification(
         _approve_as_reviewer(client, aid, token)
         _approve_as_reviewer(client, aid, token)
 
-    assert mock_client.post.call_count == 1
+    assert mock_client.post.call_count == 2
 
 
 def test_missing_owner_email_skips_notification_without_failing_approval(
@@ -183,9 +203,12 @@ def test_missing_owner_email_skips_notification_without_failing_approval(
         body = _approve_as_reviewer(client, aid, token)
 
     assert body.get("ok") is True
-    mock_client.post.assert_not_called()
+    assert mock_client.post.call_count == 1
+    counterparty_payload = mock_client.post.call_args_list[0][1]["json"]
+    assert counterparty_payload["to"] == ["reviewer@example.com"]
     audit_types = [e.get("event_type") for e in body["draft"].get("audit_log") or []]
     assert OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT not in audit_types
+    assert COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT in audit_types
 
 
 def test_owner_party_cannot_recipient_approve(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -230,14 +253,17 @@ def test_initial_review_invite_still_excludes_owner(
     assert recipients == {"reviewer@example.com"}
     assert "owner@example.com" not in recipients
 
-    token = _mint_reviewer_token(client, aid)
+    invite_payload = mock_client.post.call_args_list[0][1]["json"]
+    token = _review_token_from_invite_email_payload(invite_payload)
     with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
         _approve_as_reviewer(client, aid, token)
 
-    assert mock_client.post.call_count == 2
+    assert mock_client.post.call_count == 3
     owner_payload = mock_client.post.call_args_list[1][1]["json"]
+    counterparty_payload = mock_client.post.call_args_list[2][1]["json"]
     assert owner_payload["to"] == ["owner@example.com"]
     assert owner_payload["subject"].startswith("Review complete:")
+    assert counterparty_payload["to"] == ["reviewer@example.com"]
 
 
 def test_client_role_owner_email_receives_notification(
@@ -286,8 +312,9 @@ def test_client_role_owner_email_receives_notification(
             display_name="Iron Vale Systems Inc",
         )
 
-    assert mock_client.post.call_count == 1
+    assert mock_client.post.call_count == 2
     assert mock_client.post.call_args_list[0][1]["json"]["to"] == ["owner@example.com"]
+    assert mock_client.post.call_args_list[1][1]["json"]["to"] == ["reviewer@example.com"]
 
 
 def test_partial_reviewer_approval_uses_dashboard_notification(

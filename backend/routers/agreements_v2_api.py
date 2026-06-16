@@ -9549,7 +9549,10 @@ def recipient_approve_agreement(
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
     _save_draft_sync(next_draft.model_dump(), request)
     try:
-        from backend.services.email.review_delivery import maybe_notify_owner_after_reviewer_approval
+        from backend.services.email.review_delivery import (
+            maybe_notify_counterparties_all_reviews_complete,
+            maybe_notify_owner_after_reviewer_approval,
+        )
 
         notify_audit = maybe_notify_owner_after_reviewer_approval(
             agreement_id=agreement_id,
@@ -9557,8 +9560,15 @@ def recipient_approve_agreement(
             approver_participant_id=part_id or None,
             approver_display_name=part_name or None,
         )
-        if notify_audit:
-            audit_with_notify = [*(next_draft.audit_log or []), notify_audit]
+        notify_events = [notify_audit] if notify_audit else []
+        counterparty_audit = maybe_notify_counterparties_all_reviews_complete(
+            agreement_id=agreement_id,
+            draft=next_draft.model_dump(),
+        )
+        if counterparty_audit:
+            notify_events.append(counterparty_audit)
+        if notify_events:
+            audit_with_notify = [*(next_draft.audit_log or []), *notify_events]
             next_draft = _merge_agreement_draft(
                 next_draft,
                 updated_at=_utc_now_iso(),

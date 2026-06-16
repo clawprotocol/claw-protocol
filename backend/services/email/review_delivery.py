@@ -26,6 +26,7 @@ from backend.services.agreement_signing_lock_store import read_signing_lock
 from backend.services.email.delivery import send_email_non_fatal
 from backend.services.email.templates.review_invite import build_review_invite_email
 from backend.services.email.templates.review_owner_notification import (
+    build_review_counterparty_signing_ready_notification_email,
     build_review_owner_notification_email,
     build_review_owner_signing_ready_notification_email,
 )
@@ -33,6 +34,7 @@ from backend.services.email.templates.review_owner_notification import (
 _log = logging.getLogger(__name__)
 
 OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT = "owner_review_approval_notified"
+COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT = "counterparty_reviews_complete_notified"
 
 
 @dataclass(frozen=True)
@@ -393,6 +395,106 @@ def maybe_notify_owner_after_reviewer_approval(
             "participant_id": participant_id,
             "approver_display_name": reviewer_name,
             "owner_email_redacted": _redact_to(owner_email),
+        },
+    }
+
+
+def _counterparty_reviews_complete_notification_already_sent(audit_log: Any) -> bool:
+    if not isinstance(audit_log, list):
+        return False
+    for event in audit_log:
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("event_type") or "") == COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT:
+            return True
+    return False
+
+
+def maybe_notify_counterparties_all_reviews_complete(
+    *,
+    agreement_id: str,
+    draft: Dict[str, Any],
+    org_id: str | None = None,
+) -> Dict[str, Any] | None:
+    """
+    Notify non-owner parties when all required reviews are complete.
+    Never raises. Returns audit event when at least one email was sent.
+    """
+    aid = (agreement_id or "").strip()
+    oid = (org_id or "").strip() or None
+    if not aid or not _all_required_review_parties_approved(draft):
+        return None
+
+    audit_log = draft.get("audit_log") or []
+    if _counterparty_reviews_complete_notification_already_sent(audit_log):
+        _log.info(
+            "[review-counterparty-notification] skipped agreement_id=%s org_id=%s "
+            "skip_reason=already_notified sent_count=0",
+            aid,
+            oid or "",
+        )
+        return None
+
+    if not email_configured():
+        return None
+
+    origin = app_public_origin()
+    if not origin:
+        return None
+
+    owner_party = _owner_party_from_draft(draft)
+    owner_name = str(owner_party.get("name") or "").strip() if owner_party else ""
+    owner_party_id = str(owner_party.get("id") or "").strip() if owner_party else ""
+    title = str(draft.get("title") or "").strip() or "Untitled agreement"
+    parties = draft.get("parties") or []
+    if not isinstance(parties, list):
+        return None
+
+    sent_targets: list[str] = []
+    for party in parties:
+        if not isinstance(party, dict):
+            continue
+        party_id = str(party.get("id") or "").strip()
+        if owner_party_id and party_id == owner_party_id:
+            continue
+        if _normalize_workflow_role(str(party.get("role") or "")) == "owner":
+            continue
+        email = str(party.get("email") or "").strip().lower()
+        if not email or "@" not in email:
+            continue
+        party_name = str(party.get("name") or "").strip() or "there"
+        email_content = build_review_counterparty_signing_ready_notification_email(
+            recipient_name=party_name,
+            agreement_title=title,
+            owner_display_name=owner_name,
+        )
+        result = send_email_non_fatal(
+            to=email,
+            subject=email_content.subject,
+            html=email_content.html,
+            text=email_content.text,
+            context="review_counterparty_notification",
+        )
+        if result.ok:
+            sent_targets.append(_redact_to(email))
+
+    if not sent_targets:
+        return None
+
+    _log.info(
+        "[review-counterparty-notification] complete agreement_id=%s org_id=%s sent_count=%s",
+        aid,
+        oid or "",
+        len(sent_targets),
+    )
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return {
+        "event_type": COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT,
+        "at": now,
+        "field": "counterparty_notification",
+        "value": {
+            "recipient_emails_redacted": sent_targets,
+            "all_reviews_complete": True,
         },
     }
 

@@ -138,6 +138,8 @@ import {
   readPreparePreviewViewportGeometry,
   resetPrepareCanonicalPreviewScroll,
 } from "./vs01PreparePreviewViewport";
+import { readAgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
+import { buildPrepareBridgeCorpusGateArgs } from "./vs01PrepareBridgeCorpus";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
 import {
   formatVs01PacketReadyDebugLabel,
@@ -653,15 +655,32 @@ export function StepPrepareSignature({
     });
   }, [numPages]);
 
+  const bridgeSession = useMemo(
+    () => (agreementBridgePlacementCopy ? readAgreementVs01BridgeSession() : null),
+    [agreementBridgePlacementCopy],
+  );
+
   const signingPacketModel = useMemo(() => {
     if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length) return null;
+    const corpus = (prepareCorpusText ?? "").trim();
     return buildVs01SigningPacketModel({
       mode: "guided_pro",
       authoritativeCorpusPlain: prepareCorpusText,
       roles: prepareSignerRoles,
       initialsEnabled: autoInitialsEveryPage,
+      bridge: bridgeSession,
+      corpusGateArgs: buildPrepareBridgeCorpusGateArgs({
+        agreementCorpusText: corpus,
+        bridge: bridgeSession,
+      }),
     });
-  }, [agreementBridgePlacementCopy, prepareCorpusText, prepareSignerRoles, autoInitialsEveryPage]);
+  }, [
+    agreementBridgePlacementCopy,
+    prepareCorpusText,
+    prepareSignerRoles,
+    autoInitialsEveryPage,
+    bridgeSession,
+  ]);
 
   const canonicalPageLayouts = useMemo(
     () => (signingPacketModel?.allowed ? signingPacketLayoutsFromModel(signingPacketModel) : null),
@@ -938,11 +957,6 @@ export function StepPrepareSignature({
   ]);
 
   useEffect(() => {
-    if (!agreementBridgePlacementCopy || numPages <= 0) return;
-    setAutoInitialsEveryPage(true);
-  }, [agreementBridgePlacementCopy, documentId, numPages]);
-
-  useEffect(() => {
     onPrepareInitialsEnabledChange?.(autoInitialsEveryPage);
   }, [autoInitialsEveryPage, onPrepareInitialsEnabledChange]);
 
@@ -995,12 +1009,16 @@ export function StepPrepareSignature({
   const prepareCorpusGate = useMemo(() => {
     if (!agreementBridgePlacementCopy) return null;
     if (signingPacketModel) return signingPacketModel.diagnostics.corpusGate;
+    const corpus = (prepareCorpusText ?? "").trim();
     return resolveFinalVs01CorpusOrBlock({
       agreementCorpusText: prepareCorpusText,
       guidedPro: true,
-      premiumComplete: (prepareCorpusText ?? "").trim().length >= 1500,
+      ...buildPrepareBridgeCorpusGateArgs({
+        agreementCorpusText: corpus,
+        bridge: bridgeSession,
+      }),
     });
-  }, [agreementBridgePlacementCopy, prepareCorpusText, signingPacketModel]);
+  }, [agreementBridgePlacementCopy, prepareCorpusText, signingPacketModel, bridgeSession]);
 
   const canonicalModelReady = Boolean(
     agreementBridgePlacementCopy &&
