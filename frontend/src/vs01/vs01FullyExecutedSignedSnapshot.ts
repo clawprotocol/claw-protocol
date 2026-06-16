@@ -16,6 +16,7 @@ import {
   stampWitnessBlockPartySignature,
   stampWitnessBlockPartySigningDate,
 } from "./vs01WitnessBlockSigningDate";
+import { sanitizeVs01RenderCorpus } from "./vs01CorpusOrphanSectionSanitizer";
 
 export type Vs01FullyExecutedSignedSnapshotV1 = {
   v: 1;
@@ -147,7 +148,10 @@ export function applySignerCompletionToPortablePacket(args: {
 export function buildFullyExecutedSignedSnapshot(
   portable: Vs01CanonicalPacketPortableV1,
 ): Vs01FullyExecutedSignedSnapshotV1 | null {
-  const corpusPlain = (portable.seed.corpusPlain || "").trim();
+  const rawCorpus = (portable.seed.corpusPlain || "").trim();
+  const corpusPlain = sanitizeVs01RenderCorpus(rawCorpus, {
+    boundary: "vs01_signed_snapshot",
+  }).text.trim();
   if (corpusPlain.length < 80) return null;
   const { signed, total } = countSignedWitnessBlocks(corpusPlain);
   const required = Math.max(total, portable.roles.filter((r) => r.requiresSignature !== false).length, 2);

@@ -6,6 +6,10 @@ import {
   stripStaleExecutionPlacementCorpusCopy,
 } from "../components/agreements/guidedDealCompletion/guidedCorpusLineRepairs";
 import {
+  logVs01OrphanSectionNumberRemoved,
+  sanitizeVs01RenderCorpus,
+} from "./vs01CorpusOrphanSectionSanitizer";
+import {
   corpusHasVisibleSignatureExecutionLines,
   corpusSignatureBlocksHaveRequiredByLines,
 } from "../components/agreements/guidedDealCompletion/signatureRegion";
@@ -276,7 +280,10 @@ function normalizeLines(corpus: string): string[] {
 /** Test/diagnostic entry: corpus → standalone flow lines before pagination (Prepare packet path). */
 export function normalizeSigningPacketCorpusLines(corpus: string): string[] {
   const instructionStripped = stripGuidedInstructionLeakLines(corpus);
-  return normalizeLines(instructionStripped.text);
+  const orphanStripped = sanitizeVs01RenderCorpus(instructionStripped.text, {
+    boundary: "vs01_normalize_signing_packet_lines",
+  });
+  return normalizeLines(orphanStripped.text);
 }
 
 function canonicalWitnessBlockFromRoles(roles: readonly Vs01PrepareSigningRole[]): string {
@@ -413,7 +420,10 @@ export function bodyPageHasSectionMarkerOrphan(
 
 function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
   const instructionStripped = stripGuidedInstructionLeakLines(corpus);
-  const lines = normalizeLines(instructionStripped.text);
+  const orphanStripped = sanitizeVs01RenderCorpus(instructionStripped.text, {
+    boundary: "vs01_paginate_corpus",
+  });
+  const lines = normalizeLines(orphanStripped.text);
   const maxStackUnitsPerPage = (PAGINATION_FLOW_STACK_BOTTOM_LIMIT_NORM - CONTENT_TOP) / LINE_HEIGHT;
   const pages: PaginatedCorpusSlice[] = [];
   let pageIndex = 0;
@@ -431,9 +441,12 @@ function paginateCorpus(corpus: string): PaginatedCorpusSlice[] {
     while (pageLines.length > 0) {
       const last = pageLines[pageLines.length - 1] ?? "";
       if (!isNumberedSectionMarkerOnlyLine(last)) break;
-      const popped = pageLines.pop()!;
+      pageLines.pop();
       if (rects.length > 0) rects.pop();
-      carryLines.unshift(popped);
+      logVs01OrphanSectionNumberRemoved({
+        line: last.trim(),
+        boundary: "vs01_pagination_trailing_orphan",
+      });
     }
     stackUnits = measurePageStackUnits(pageLines);
   };
