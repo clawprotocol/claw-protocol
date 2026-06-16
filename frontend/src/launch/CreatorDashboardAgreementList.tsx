@@ -3,9 +3,11 @@ import { RecipientControlCenter } from "../agreement/RecipientControlCenter";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
+import { downloadCompletedSignedAgreementPdf } from "../agreement/completedSignedAgreementPdfDownload";
 import {
   CREATOR_ALL_REVIEWERS_APPROVED_HELPER,
   CREATOR_ALL_REVIEWERS_APPROVED_HELPER_EXTENDED,
+  CREATOR_DOWNLOAD_PDF_LABEL,
   CREATOR_MANAGE_RECIPIENTS_LABEL,
   CREATOR_NEXT_ACTION_PREPARE_SIGNATURE_LINKS,
   CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL,
@@ -33,6 +35,7 @@ import {
 } from "./creatorDashboardReviewGate";
 import type { CreatorSigningProgressSnapshot } from "./creatorDashboardSigningProgress";
 import { creatorDashboardShowManageRecipients } from "./creatorDashboardSignatureTrack";
+import { loadOwnerSignedAgreementPreview } from "./ownerSignedAgreementView";
 
 type Props = {
   rows: readonly WorkspaceIndexAgreement[];
@@ -133,6 +136,7 @@ export function CreatorDashboardAgreementList(props: Props) {
   const [manageRecipientsOpenByAgreementId, setManageRecipientsOpenByAgreementId] = useState<
     Record<string, boolean>
   >({});
+  const [pdfDownloadBusyId, setPdfDownloadBusyId] = useState<string | null>(null);
 
   return (
     <ul
@@ -391,6 +395,37 @@ export function CreatorDashboardAgreementList(props: Props) {
                     {sup.label}
                   </button>
                 ))}
+                {signingComplete ? (
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0 min-w-[10rem]"
+                    data-testid={`creator-dashboard-download-pdf-${row.id}`}
+                    disabled={contentUnavailable || pdfDownloadBusyId === row.id}
+                    onClick={() => {
+                      if (contentUnavailable || pdfDownloadBusyId === row.id) return;
+                      void (async () => {
+                        setPdfDownloadBusyId(row.id);
+                        try {
+                          const loaded = await loadOwnerSignedAgreementPreview(row.id);
+                          if (!loaded?.html?.trim()) {
+                            throw new Error("Signed agreement is not available to download yet.");
+                          }
+                          await downloadCompletedSignedAgreementPdf({
+                            agreementId: row.id,
+                            html: loaded.html,
+                            title: row.title,
+                          });
+                        } catch {
+                          /* owner can retry from view-signed */
+                        } finally {
+                          setPdfDownloadBusyId(null);
+                        }
+                      })();
+                    }}
+                  >
+                    {pdfDownloadBusyId === row.id ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
+                  </button>
+                ) : null}
                 {showManageRecipients && action.kind !== "manage_recipients" ? (
                   <button
                     type="button"

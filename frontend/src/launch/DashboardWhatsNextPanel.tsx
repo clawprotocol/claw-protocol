@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import { RecipientControlCenter } from "../agreement/RecipientControlCenter";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
+import { downloadCompletedSignedAgreementPdf } from "../agreement/completedSignedAgreementPdfDownload";
 import type { OwnerReviewPartyStatusRow } from "./simpleProduct/ownerReviewPartyStatusChecklist";
 import { AgreementProgressTimeline } from "./AgreementProgressTimeline";
 import {
@@ -14,10 +15,12 @@ import {
   CREATOR_VIEW_AGREEMENT_LABEL,
   CREATOR_VIEW_IN_AGREEMENTS_LABEL,
   CREATOR_DOWNLOAD_PROOF_LABEL,
+  CREATOR_DOWNLOAD_PDF_LABEL,
   logDashboardWhatsNextCtaClick,
 } from "./creatorDashboardCopy";
 import { creatorDashboardCompletedProofPath, creatorDashboardUsesManualReviewLinkPage } from "./creatorDashboardReviewLinkRouting";
 import { openReceiptProofBundleDownload } from "../export/dataExportApi";
+import { loadOwnerSignedAgreementPreview } from "./ownerSignedAgreementView";
 import { readPaidProVs01PostSignHandoff } from "../vs01/vs01PaidProPostSignHandoff";
 import {
   creatorDashboardReviewHydrationPending,
@@ -62,6 +65,7 @@ export function DashboardWhatsNextPanel(props: Props) {
     signingProgress = null,
   } = props;
   const [manageRecipientsOpen, setManageRecipientsOpen] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   if (creatorDashboardReviewHydrationPending(row, reviewRows, draft)) {
     return (
@@ -238,6 +242,44 @@ export function DashboardWhatsNextPanel(props: Props) {
               }}
             >
               {CREATOR_DOWNLOAD_PROOF_LABEL}
+            </button>
+          ) : null}
+          {presentation.status === "completed" ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact min-w-[11rem]"
+              data-testid={`creator-dashboard-download-pdf-${row.id}`}
+              data-dashboard-whats-next-cta="download_pdf"
+              disabled={pdfBusy}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                logDashboardWhatsNextCtaClick({
+                  agreementId: row.id,
+                  action: "download_pdf",
+                  targetRoute: "",
+                });
+                void (async () => {
+                  setPdfBusy(true);
+                  try {
+                    const loaded = await loadOwnerSignedAgreementPreview(row.id);
+                    if (!loaded?.html?.trim()) {
+                      throw new Error("Signed agreement is not available to download yet.");
+                    }
+                    await downloadCompletedSignedAgreementPdf({
+                      agreementId: row.id,
+                      html: loaded.html,
+                      title: row.title,
+                    });
+                  } catch {
+                    /* owner can retry from view-signed */
+                  } finally {
+                    setPdfBusy(false);
+                  }
+                })();
+              }}
+            >
+              {pdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
             </button>
           ) : null}
           {showViewInAgreements ? (

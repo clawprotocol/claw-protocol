@@ -4,6 +4,10 @@ import {
   fetchPublicAgreementVerify,
   type PublicVerifyPayload,
 } from "./agreementPublicVerify";
+import {
+  downloadPublicCompletedSignedAgreementPdf,
+} from "./completedSignedAgreementPdfDownload";
+import { CREATOR_DOWNLOAD_PDF_LABEL } from "../launch/creatorDashboardCopy";
 import { ClawTrustFooter } from "../components/claw/ClawTrustFooter";
 import { type ProofBadgeState, ProofBadge } from "../components/claw/ProofBadge";
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
@@ -47,6 +51,8 @@ function proofStateFromPayload(data: PublicVerifyPayload): ProofBadgeState {
 export function AgreementPublicVerify({ agreementId, onClose }: Props) {
   const [data, setData] = useState<PublicVerifyPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancel = false;
@@ -102,6 +108,7 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
   const recordPending = String(data.record_status || "").trim().toLowerCase() === "pending";
   const versionHistory = data.version_history ?? [];
   const signatureEvents = data.signature_events ?? [];
+  const fullyExecuted = Boolean(sig?.fully_executed);
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
@@ -142,6 +149,29 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
           >
             Copy verification link
           </button>
+          {fullyExecuted ? (
+            <button
+              type="button"
+              className="rounded-lg border border-slate-600 bg-slate-900/60 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800/80"
+              data-testid="public-verify-download-pdf"
+              disabled={pdfBusy}
+              onClick={() => {
+                void (async () => {
+                  setPdfBusy(true);
+                  setPdfError(null);
+                  try {
+                    await downloadPublicCompletedSignedAgreementPdf(agreementId);
+                  } catch (e: unknown) {
+                    setPdfError(e instanceof Error ? e.message : "Could not download PDF.");
+                  } finally {
+                    setPdfBusy(false);
+                  }
+                })();
+              }}
+            >
+              {pdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
+            </button>
+          ) : null}
           {onClose ? (
             <button
               type="button"
@@ -152,6 +182,11 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
             </button>
           ) : null}
         </div>
+        {pdfError ? (
+          <p className="text-xs text-amber-200/95" role="alert" data-testid="public-verify-pdf-error">
+            {pdfError}
+          </p>
+        ) : null}
       </header>
 
       <section aria-labelledby="verify-summary-heading" className="space-y-2">

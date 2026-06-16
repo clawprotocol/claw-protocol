@@ -1,13 +1,16 @@
+import { useState } from "react";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { patchWorkspaceArchive } from "../agreement/agreementWorkspaceApi";
+import { downloadCompletedSignedAgreementPdf } from "../agreement/completedSignedAgreementPdfDownload";
 import {
   creatorDashboardPrimaryAction,
   deriveCreatorDashboardStatus,
   displayCreatorAgreementTitle,
 } from "./creatorDashboardPresentation";
 import { CREATOR_MANAGE_RECIPIENTS_LABEL } from "./creatorDashboardCopy";
-import { CREATOR_DOWNLOAD_COMING_SOON_LABEL } from "./creatorDashboardCopy";
+import { CREATOR_DOWNLOAD_PDF_LABEL } from "./creatorDashboardCopy";
 import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
+import { loadOwnerSignedAgreementPreview } from "./ownerSignedAgreementView";
 import {
   deriveLawdogProductStatus,
   formatLawdogAgreementStatusLabel,
@@ -27,6 +30,7 @@ type Props = {
 
 export function LawdogAgreementsTable(props: Props) {
   const { rows, signingProgressByAgreementId = {}, onNavigate, onFocusReviewStatus, onArchiveComplete } = props;
+  const [pdfDownloadBusyId, setPdfDownloadBusyId] = useState<string | null>(null);
 
   if (rows.length === 0) return null;
 
@@ -52,8 +56,9 @@ export function LawdogAgreementsTable(props: Props) {
             const internalStatus = deriveCreatorDashboardStatus(row);
             const productStatus = deriveLawdogProductStatus(row, rowProgress);
             const openAction = creatorDashboardPrimaryAction(row);
-            const canDownload = false;
             const contentUnavailable = row.content_unavailable === true;
+            const canDownload = internalStatus === "completed" && !contentUnavailable;
+            const downloadBusy = pdfDownloadBusyId === row.id;
 
             return (
               <tr
@@ -143,13 +148,30 @@ export function LawdogAgreementsTable(props: Props) {
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
                       data-testid={`lawdog-action-download-${row.id}`}
-                      disabled={!canDownload || contentUnavailable}
-                      title={!canDownload ? CREATOR_DOWNLOAD_COMING_SOON_LABEL : undefined}
+                      disabled={!canDownload || contentUnavailable || downloadBusy}
                       onClick={() => {
-                        if (!canDownload || contentUnavailable) return;
+                        if (!canDownload || contentUnavailable || downloadBusy) return;
+                        void (async () => {
+                          setPdfDownloadBusyId(row.id);
+                          try {
+                            const loaded = await loadOwnerSignedAgreementPreview(row.id);
+                            if (!loaded?.html?.trim()) {
+                              throw new Error("Signed agreement is not available to download yet.");
+                            }
+                            await downloadCompletedSignedAgreementPdf({
+                              agreementId: row.id,
+                              html: loaded.html,
+                              title: row.title,
+                            });
+                          } catch {
+                            /* surface stays quiet; owner can retry from view-signed */
+                          } finally {
+                            setPdfDownloadBusyId(null);
+                          }
+                        })();
                       }}
                     >
-                      {canDownload ? "Download" : CREATOR_DOWNLOAD_COMING_SOON_LABEL}
+                      {downloadBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
                     </button>
                     <button
                       type="button"

@@ -9,12 +9,15 @@ import {
 import { ensureSigningPacketStatusFromHandoff } from "../vs01/vs01SigningPacketStatusStore";
 import type { Vs01PrepareSigningRole } from "../vs01/vs01SignerFieldAssignment";
 import { fetchPublicAgreementVerify } from "../agreement/agreementPublicVerify";
+import { downloadCompletedSignedAgreementPdf } from "../agreement/completedSignedAgreementPdfDownload";
 import { openReceiptProofBundleDownload } from "../export/dataExportApi";
 import {
+  CREATOR_DOWNLOAD_PDF_LABEL,
   CREATOR_DOWNLOAD_PROOF_LABEL,
   CREATOR_VIEW_SIGNED_AGREEMENT_LABEL,
 } from "./creatorDashboardCopy";
 import { creatorDashboardSignedAgreementViewPath } from "./creatorDashboardReviewLinkRouting";
+import { loadOwnerSignedAgreementPreview } from "./ownerSignedAgreementView";
 import {
   fetchPersistedSigningProgressSnapshot,
   ownerProofReceiptAvailable,
@@ -79,6 +82,27 @@ export function OwnerSigningStatusPage({ agreementId }: OwnerSigningStatusPagePr
   > | null>(null);
   const [verifyLoaded, setVerifyLoaded] = useState(false);
   const [proofAvailable, setProofAvailable] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  const downloadCompletedPdf = useCallback(async () => {
+    if (!aid || pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const loaded = await loadOwnerSignedAgreementPreview(aid);
+      if (!loaded?.html?.trim()) {
+        throw new Error("Signed agreement is not available to download yet.");
+      }
+      await downloadCompletedSignedAgreementPdf({
+        agreementId: aid,
+        html: loaded.html,
+        title: loaded.draft.title ?? handoff?.agreementTitle,
+      });
+    } catch {
+      /* owner can open view-signed and retry */
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [aid, handoff?.agreementTitle, pdfBusy]);
 
   const refreshPersistedState = useCallback(async () => {
     if (!aid) return;
@@ -184,6 +208,15 @@ export function OwnerSigningStatusPage({ agreementId }: OwnerSigningStatusPagePr
             >
               {CREATOR_VIEW_SIGNED_AGREEMENT_LABEL}
             </button>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary"
+              data-testid="owner-signing-status-download-pdf"
+              disabled={pdfBusy}
+              onClick={() => void downloadCompletedPdf()}
+            >
+              {pdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
+            </button>
             {proofAvailable && (handoff.receiptId ?? "").trim() ? (
               <button
                 type="button"
@@ -222,6 +255,15 @@ export function OwnerSigningStatusPage({ agreementId }: OwnerSigningStatusPagePr
             onClick={() => navigate(creatorDashboardSignedAgreementViewPath(aid))}
           >
             {CREATOR_VIEW_SIGNED_AGREEMENT_LABEL}
+          </button>
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--secondary vs01-btn--auto"
+            data-testid="owner-signing-status-download-pdf"
+            disabled={pdfBusy}
+            onClick={() => void downloadCompletedPdf()}
+          >
+            {pdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
           </button>
           {proofAvailable && (handoff.receiptId ?? "").trim() ? (
             <button

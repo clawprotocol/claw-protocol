@@ -8,6 +8,7 @@ export const CREATOR_VIEW_SIGNING_STATUS_LABEL = "View signing status";
 export const CREATOR_DOWNLOAD_PROOF_LABEL = "Download proof";
 export const CREATOR_VIEW_PROOF_RECORD_LABEL = "View proof record";
 export const CREATOR_DOWNLOAD_COMPLETED_AGREEMENT_LABEL = "Download completed agreement";
+export const CREATOR_DOWNLOAD_PDF_LABEL = "Download PDF";
 
 export const CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL = "Open review link page";
 

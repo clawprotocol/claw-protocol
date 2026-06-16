@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { LawdogAgreementsTable } from "./LawdogAgreementsTable";
 import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
+import * as completedPdf from "../agreement/completedSignedAgreementPdfDownload";
+import * as ownerSignedView from "./ownerSignedAgreementView";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 
 vi.mock("./newAgreementSessionReset", () => ({
@@ -45,14 +47,39 @@ describe("LawdogAgreementsTable completed rows (Test362)", () => {
     expect(onNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/done/"));
   });
 
-  it("Download stays disabled and does not navigate", () => {
+  it("Download is enabled for completed rows and exports signed PDF", async () => {
+    vi.spyOn(ownerSignedView, "loadOwnerSignedAgreementPreview").mockResolvedValue({
+      draft: { id: "ag_completed", title: "Services Agreement", parties: [] } as never,
+      html: "<article><p>Signed agreement</p></article>",
+      corpusText: "Signed agreement",
+      usesPremiumDocument: false,
+      corpusSource: "fully_executed_snapshot",
+    });
+    const downloadSpy = vi.spyOn(completedPdf, "downloadCompletedSignedAgreementPdf").mockResolvedValue();
     const onNavigate = vi.fn();
     render(<LawdogAgreementsTable rows={[completedRow()]} onNavigate={onNavigate} />);
 
     const download = screen.getByTestId("lawdog-action-download-ag_completed") as HTMLButtonElement;
-    expect(download.disabled).toBe(true);
+    expect(download.disabled).toBe(false);
     fireEvent.click(download);
+    await waitFor(() => {
+      expect(downloadSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agreementId: "ag_completed",
+          html: "<article><p>Signed agreement</p></article>",
+        }),
+      );
+    });
     expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("Download stays disabled for non-completed rows", () => {
+    const onNavigate = vi.fn();
+    const draftRow = { ...completedRow("ag_draft"), completed_signed: false };
+    render(<LawdogAgreementsTable rows={[draftRow]} onNavigate={onNavigate} />);
+
+    const download = screen.getByTestId("lawdog-action-download-ag_draft") as HTMLButtonElement;
+    expect(download.disabled).toBe(true);
   });
 
   it("Duplicate starts new agreement session without done route", () => {

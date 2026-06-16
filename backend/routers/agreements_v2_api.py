@@ -7052,6 +7052,165 @@ def post_recipient_preview_export_pdf(
     )
 
 
+class CompletedSignedExportBody(BaseModel):
+    """Optional HTML matching the owner signed view; server falls back to stored signed snapshot corpus."""
+
+    html: str = Field(default="", max_length=1_200_000)
+
+    @field_validator("html", mode="before")
+    @classmethod
+    def _trim_completed_signed_html(cls, v: object) -> str:
+        return ("" if v is None else str(v)).strip()
+
+
+def _signed_corpus_plain_to_export_html(corpus_plain: str) -> str:
+    body = html.escape((corpus_plain or "").strip())
+    return (
+        "<article style='max-width:720px;margin:0 auto'>"
+        "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;"
+        "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>"
+        f"{body}</pre></article>"
+    )
+
+
+def _completed_signed_pdf_filename(draft: AgreementDraft) -> str:
+    title = (draft.title or "").strip() or "agreement"
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:80] or "agreement"
+    return f"{slug}-signed.pdf"
+
+
+def _completed_signed_export_pdf_response(
+    *,
+    agreement_id: str,
+    draft: AgreementDraft,
+    html_for_export: str,
+) -> Response:
+    cap = assess_agreement_pdf_story_capability()
+    if not cap.get("available"):
+        log.warning(
+            "[completed-signed-pdf-export] rejected agreement_id=%s reason=%s",
+            agreement_id,
+            (cap.get("reason") or "")[:400],
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "completed_signed_pdf_export_unavailable",
+                "message": _RECIPIENT_PDF_EXPORT_UNAVAILABLE_USER,
+            },
+        )
+
+    party_names_pdf = [str(p.name or "").strip() for p in (draft.parties or []) if str(p.name or "").strip()]
+    scan_plain = strip_html_agreement_scan_text(html_for_export or "")
+    ok_ph_pdf, _, ph_diag_pdf = validate_user_visible_agreement_text(
+        scan_plain,
+        party_names=party_names_pdf,
+        intake_raw=_draft_placeholder_intake_corpus(draft),
+        surface="completed_signed_export_pdf",
+        agreement_family="",
+    )
+    if not ok_ph_pdf:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "agreement_placeholder_blocked",
+                "message": "This export still contains drafting placeholders. Resolve them before creating a PDF.",
+                "placeholder": ph_diag_pdf,
+            },
+        )
+
+    built = agreement_rendered_html_to_pdf_bytes(
+        html_for_export,
+        title=(draft.title or "Agreement").strip() or "Agreement",
+        story_css_profile="recipient",
+    )
+    if built.render_mode not in RECIPIENT_PREVIEW_PDF_STORY_RENDER_MODES:
+        log.warning(
+            "[completed-signed-pdf-export] rejected_non_story_render agreement_id=%s render_mode=%s",
+            agreement_id,
+            built.render_mode,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "completed_signed_pdf_export_unavailable",
+                "message": _RECIPIENT_PDF_EXPORT_UNAVAILABLE_USER,
+            },
+        )
+
+    fn = _completed_signed_pdf_filename(draft)
+    return Response(
+        content=built.pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+    )
+
+
+@router.post("/{agreement_id}/completed-signed-export-pdf")
+def post_completed_signed_export_pdf(
+    agreement_id: str,
+    request: Request,
+    body: CompletedSignedExportBody,
+) -> Response:
+    """Download PDF for a fully executed signed agreement (owner/read auth; signed snapshot or supplied HTML)."""
+    aid = (agreement_id or "").strip()
+    if not aid:
+        raise HTTPException(status_code=400, detail="missing_agreement_id")
+    assert_agreement_full_draft_read_allowed(request, aid)
+    draft = _load_or_404(aid)
+    if not _agreement_draft_fully_executed(draft):
+        raise HTTPException(status_code=403, detail="agreement_not_fully_executed")
+
+    html_for_export = (body.html or "").strip()
+    if not html_for_export:
+        from backend.services.vs01_signer_completion import read_fully_executed_snapshot_from_draft
+
+        snap = read_fully_executed_snapshot_from_draft(draft.model_dump())
+        corpus_plain = str((snap or {}).get("corpus_plain") or "").strip()
+        if len(corpus_plain) < 80:
+            raise HTTPException(status_code=409, detail="signed_snapshot_unavailable")
+        html_for_export = _signed_corpus_plain_to_export_html(corpus_plain)
+
+    return _completed_signed_export_pdf_response(
+        agreement_id=aid,
+        draft=draft,
+        html_for_export=html_for_export,
+    )
+
+
+@router.get("/public/{agreement_id}/completed-signed-export-pdf")
+def get_public_completed_signed_export_pdf(agreement_id: str) -> Response:
+    """Public PDF download for fully executed agreements only (no auth; uses stored signed snapshot)."""
+    if not public_agreement_verify_enabled():
+        raise HTTPException(status_code=404, detail="not_found")
+    aid = (agreement_id or "").strip()
+    if not aid:
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        raw = load_draft(aid)
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        draft = AgreementDraft.model_validate(raw)
+    except ValidationError:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not _agreement_draft_fully_executed(draft):
+        raise HTTPException(status_code=403, detail="agreement_not_fully_executed")
+
+    from backend.services.vs01_signer_completion import read_fully_executed_snapshot_from_draft
+
+    snap = read_fully_executed_snapshot_from_draft(draft.model_dump())
+    corpus_plain = str((snap or {}).get("corpus_plain") or "").strip()
+    if len(corpus_plain) < 80:
+        raise HTTPException(status_code=409, detail="signed_snapshot_unavailable")
+    html_for_export = _signed_corpus_plain_to_export_html(corpus_plain)
+    return _completed_signed_export_pdf_response(
+        agreement_id=aid,
+        draft=draft,
+        html_for_export=html_for_export,
+    )
+
+
 def _draft_placeholder_intake_corpus(draft: AgreementDraft) -> str:
     """Best-effort intake allowlist for placeholder validation (party names, emails, purpose)."""
     parts: List[str] = []

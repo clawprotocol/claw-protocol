@@ -5,9 +5,10 @@ import {
   fetchPublicAgreementVerify,
   type PublicVerifyPayload,
 } from "../../agreement/agreementPublicVerify";
+import { downloadCompletedSignedAgreementPdf } from "../../agreement/completedSignedAgreementPdfDownload";
 import { PremiumAgreementReadonlyView } from "../../components/agreements/PremiumAgreementReadonlyView";
 import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
-import { CREATOR_COMPLETED_PILL } from "../creatorDashboardCopy";
+import { CREATOR_COMPLETED_PILL, CREATOR_DOWNLOAD_PDF_LABEL } from "../creatorDashboardCopy";
 import { useLaunchNav } from "../LaunchNavContext";
 import { loadOwnerSignedAgreementPreview } from "../ownerSignedAgreementView";
 import { AppShell } from "../AppShell";
@@ -39,6 +40,8 @@ export function OwnerSignedAgreementPage(props: Props) {
   const [corpusSource, setCorpusSource] = useState<
     "fully_executed_snapshot" | "reconstructed" | "portable_packet" | "local_portable" | null
   >(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -157,6 +160,31 @@ export function OwnerSignedAgreementPage(props: Props) {
         <div className="flex flex-wrap gap-2 pt-2">
           <button
             type="button"
+            className="vs01-btn vs01-btn--primary vs01-btn--compact"
+            data-testid="owner-signed-agreement-download-pdf"
+            disabled={pdfBusy || loading || !previewHtml.trim()}
+            onClick={() => {
+              void (async () => {
+                setPdfBusy(true);
+                setPdfError(null);
+                try {
+                  await downloadCompletedSignedAgreementPdf({
+                    agreementId,
+                    html: previewHtml,
+                    title,
+                  });
+                } catch (e: unknown) {
+                  setPdfError(e instanceof Error ? e.message : "Could not download PDF.");
+                } finally {
+                  setPdfBusy(false);
+                }
+              })();
+            }}
+          >
+            {pdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
+          </button>
+          <button
+            type="button"
             className="vs01-btn vs01-btn--secondary vs01-btn--compact"
             data-testid="owner-signed-agreement-back"
             onClick={() => navigate("/app")}
@@ -164,6 +192,11 @@ export function OwnerSignedAgreementPage(props: Props) {
             Back to dashboard
           </button>
         </div>
+        {pdfError ? (
+          <p className="text-sm text-amber-200/95" role="alert" data-testid="owner-signed-agreement-pdf-error">
+            {pdfError}
+          </p>
+        ) : null}
         {draft ? (
           <span className="sr-only" data-testid="owner-signed-agreement-draft-loaded">
             loaded
