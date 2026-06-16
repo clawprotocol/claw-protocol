@@ -358,20 +358,40 @@ def merge_fresh_audit_for_vs01_signer(
     pending_outcome: Vs01SignerCompleteOutcome,
     *,
     signer_role_id: str,
+    portable_packet: Optional[Dict[str, Any]] = None,
 ) -> Vs01SignerCompleteOutcome:
     """
-    Reload-merge before write: if another request recorded this signer first, prefer fresh audit.
+    Reload-merge before write: if another request recorded this signer first, prefer fresh audit
+    but still merge portable packet / snapshot when provided.
     """
     fresh_audit = list(fresh_draft.get("audit_log") or [])
     rid = (signer_role_id or "").strip()
+    draft_dict = dict(fresh_draft)
+    packet_mutated = False
+    if isinstance(portable_packet, dict):
+        merged = merge_portable_packet_corpus(draft_dict, portable_packet)
+        packet_mutated = merged.get("vs01_signing_packet_v1") != draft_dict.get("vs01_signing_packet_v1")
+        draft_dict = merged
+
     if signer_role_already_completed(fresh_audit, rid):
-        fully = all_signers_signed_from_audit(fresh_draft, fresh_audit)
+        fully = all_signers_signed_from_audit(draft_dict, fresh_audit)
         return Vs01SignerCompleteOutcome(
-            draft_dict={**fresh_draft, "audit_log": fresh_audit},
+            draft_dict={**draft_dict, "audit_log": fresh_audit},
             audit=fresh_audit,
             already_signed=True,
             fully_executed=fully,
             newly_finalized=False,
-            audit_mutated=False,
+            audit_mutated=packet_mutated,
+        )
+    if packet_mutated and pending_outcome.draft_dict.get("vs01_signing_packet_v1") != draft_dict.get(
+        "vs01_signing_packet_v1"
+    ):
+        return Vs01SignerCompleteOutcome(
+            draft_dict={**pending_outcome.draft_dict, "vs01_signing_packet_v1": draft_dict.get("vs01_signing_packet_v1")},
+            audit=pending_outcome.audit,
+            already_signed=pending_outcome.already_signed,
+            fully_executed=pending_outcome.fully_executed,
+            newly_finalized=pending_outcome.newly_finalized,
+            audit_mutated=True,
         )
     return pending_outcome

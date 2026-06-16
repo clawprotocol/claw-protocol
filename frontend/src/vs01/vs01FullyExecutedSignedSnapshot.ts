@@ -30,6 +30,7 @@ export type Vs01SignatureCompletedEvent = {
   signedDateIso: string;
   signedDateDisplay: string;
   displayName: string;
+  signedAt?: string;
 };
 
 export function parseSignatureCompletedEventsFromAudit(
@@ -48,6 +49,7 @@ export function parseSignatureCompletedEventsFromAudit(
       signedDateIso: String(val.signed_date_iso ?? "").trim(),
       signedDateDisplay: String(val.signed_date_display ?? "").trim(),
       displayName: String(val.participant_display_name ?? "").trim(),
+      signedAt: String((event as { at?: string }).at ?? "").trim(),
     });
   }
   return out;
@@ -225,7 +227,10 @@ export function reconstructSignedCorpusFromAuditAndPortable(args: {
       documentId: portable.seed.documentId,
       signerRoleId: event.signerRoleId,
       partyIndex,
-      signingDateIso: event.signedDateIso || new Date().toISOString().slice(0, 10),
+      signingDateIso:
+        event.signedDateIso ||
+        (event.signedAt ? event.signedAt.slice(0, 10) : "") ||
+        new Date().toISOString().slice(0, 10),
       signatureText: sig,
     });
     portable = applied.portable;
@@ -236,7 +241,7 @@ export function reconstructSignedCorpusFromAuditAndPortable(args: {
 
 export function resolveVs01FullyExecutedSignedCorpus(
   draft: AgreementDraft | null | undefined,
-): { text: string; source: "fully_executed_snapshot" | "reconstructed" } | null {
+): { text: string; source: "fully_executed_snapshot" | "reconstructed" | "portable_packet" } | null {
   const snap = readFullyExecutedSnapshotFromDraft(draft);
   if (snap?.corpusPlain?.trim()) {
     return { text: snap.corpusPlain.trim(), source: "fully_executed_snapshot" };
@@ -248,6 +253,10 @@ export function resolveVs01FullyExecutedSignedCorpus(
     const rebuilt = reconstructSignedCorpusFromAuditAndPortable({ draft: draft!, portable });
     if (rebuilt?.trim()) {
       return { text: rebuilt.trim(), source: "reconstructed" };
+    }
+    const fromPortable = buildFullyExecutedSignedSnapshot(portable);
+    if (fromPortable?.corpusPlain?.trim()) {
+      return { text: fromPortable.corpusPlain.trim(), source: "portable_packet" };
     }
   }
   return null;

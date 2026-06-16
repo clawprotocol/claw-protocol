@@ -226,7 +226,7 @@ async function recordVs01SignerCompletionInner(
       serverFullyExecuted = Boolean(res.fully_executed);
       completionEmailsSent = Boolean(res.completion_emails_sent);
 
-      if (serverFullyExecuted && !portable?.fullyExecutedSnapshot) {
+      if (serverFullyExecuted && (!portable?.fullyExecutedSnapshot || !completionEmailsSent)) {
         const finalized = persistSignerCompletionToPortablePacket({
           documentId,
           agreementId,
@@ -236,8 +236,32 @@ async function recordVs01SignerCompletionInner(
           recipientFields: args.recipientFields,
           attachFinalSnapshot: true,
         });
-        portable = finalized.portable;
+        portable = finalized.portable ?? portable;
         corpusStamped = corpusStamped || finalized.corpusStamped;
+
+        if (portable?.fullyExecutedSnapshot || finalized.signatureStamped || finalized.corpusStamped) {
+          try {
+            const retry = await postVs01SignerComplete(
+              agreementId,
+              {
+                signer_role_id: signerRoleId,
+                participant_id: (args.participantId ?? "").trim(),
+                document_id: documentId,
+                display_name: (args.displayName ?? "").trim(),
+                signed_date_iso: signingDateIso,
+                signed_date_display: signedDateDisplay,
+                portable_packet: portable as unknown as Record<string, unknown>,
+              },
+              args.recipientAccessToken,
+            );
+            if (retry.ok) {
+              serverSynced = true;
+              completionEmailsSent = Boolean(retry.completion_emails_sent) || completionEmailsSent;
+            }
+          } catch {
+            /* non-fatal snapshot/email retry */
+          }
+        }
       }
     } catch {
       serverSynced = false;

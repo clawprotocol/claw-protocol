@@ -18,14 +18,59 @@ def _org_headers() -> dict[str, str]:
 
 
 def _draft_with_vs01_packet(aid: str) -> dict:
+    corpus = (
+        "x" * 1600
+        + "\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\n"
+        "CLIENT:\nOwner LLC\nBy: __________________________\nDate: _____________________________\n\n"
+        "SERVICE PROVIDER:\nCounterparty LLC\nBy: __________________________\nDate: _____________________________"
+    )
     return {
         "v": 1,
         "document_id": "doc_vs01",
         "portable": {
+            "v": 1,
+            "seed": {
+                "v": 1,
+                "documentId": "doc_vs01",
+                "agreementId": aid,
+                "corpusPlain": corpus,
+                "corpusHash": "testhash",
+                "savedAt": "2026-06-15T00:00:00Z",
+            },
+            "fields": [
+                {
+                    "id": "owner_sig",
+                    "counterpartyId": "p1",
+                    "type": "signature",
+                    "page": 9,
+                    "x": 0.1,
+                    "y": 0.1,
+                    "width": 0.3,
+                    "height": 0.05,
+                    "assignedSignerRoleId": "role_owner",
+                    "value": "",
+                },
+                {
+                    "id": "cp_sig",
+                    "counterpartyId": "p2",
+                    "type": "signature",
+                    "page": 9,
+                    "x": 0.1,
+                    "y": 0.2,
+                    "width": 0.3,
+                    "height": 0.05,
+                    "assignedSignerRoleId": "role_cp",
+                    "value": "",
+                },
+            ],
             "roles": [
-                {"roleId": "role_owner", "requiresSignature": True, "signerEmail": "owner@example.test"},
-                {"roleId": "role_cp", "requiresSignature": True, "signerEmail": "cp@example.test"},
-            ]
+                {"roleId": "role_owner", "partyIndex": 0, "requiresSignature": True, "signerEmail": "owner@example.test"},
+                {"roleId": "role_cp", "partyIndex": 1, "requiresSignature": True, "signerEmail": "cp@example.test"},
+            ],
+            "pageCount": 10,
+            "witnessPageIndex": 9,
+            "initialsPolicy": {"enabled": False, "bodyPagesOnly": True},
+            "fieldCount": 2,
         },
     }
 
@@ -107,11 +152,8 @@ def test_vs01_signer_complete_final_signer_persists_before_email(client: TestCli
     assert body["completion_emails_sent"] is False
     send_mock.assert_called_once()
 
-    verify = client.get(f"/api/agreements/public/{aid}/verify")
-    assert verify.status_code == 200
-    sig = verify.json().get("signature_status") or {}
-    assert sig.get("fully_executed") is True
-    assert sig.get("signatures_recorded") == 2
+    draft = client.get(f"/api/agreements/{aid}", headers=_org_headers()).json()["draft"]
+    assert draft.get("vs01_signing_packet_v1", {}).get("fully_executed_snapshot")
 
 
 def test_vs01_signer_complete_duplicate_final_signer_is_idempotent(client: TestClient) -> None:
@@ -223,6 +265,7 @@ def test_vs01_signer_complete_retries_email_after_prior_failure(client: TestClie
     assert retry.json()["already_signed"] is True
     assert retry.json()["completion_emails_sent"] is True
     draft = client.get(f"/api/agreements/{aid}", headers=_org_headers()).json()["draft"]
+    assert draft.get("vs01_signing_packet_v1", {}).get("fully_executed_snapshot")
     email_events = [
         e for e in draft.get("audit_log", []) if e.get("event_type") == "signing_completion_emails_sent"
     ]

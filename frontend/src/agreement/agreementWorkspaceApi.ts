@@ -600,6 +600,39 @@ export async function postSigningCeremonyComplete(
   }
 }
 
+export async function postVs01EnsureSignedSnapshot(
+  agreementId: string,
+): Promise<{
+  ok: boolean;
+  snapshot_ready?: boolean;
+  snapshot_source?: string;
+  completion_emails_sent?: boolean;
+  error?: string;
+}> {
+  try {
+    const res = await fetch(
+      `${base()}/api/agreements/${encodeURIComponent(agreementId)}/vs01-ensure-signed-snapshot`,
+      {
+        method: "POST",
+        headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
+      },
+    );
+    const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (res.ok) {
+      return {
+        ok: true,
+        snapshot_ready: Boolean(j.snapshot_ready),
+        snapshot_source: String(j.snapshot_source ?? ""),
+        completion_emails_sent: Boolean(j.completion_emails_sent),
+      };
+    }
+    const d = j.detail;
+    return { ok: false, error: typeof d === "string" ? d : `error_${res.status}` };
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
 export async function postVs01SignerComplete(
   agreementId: string,
   body: {

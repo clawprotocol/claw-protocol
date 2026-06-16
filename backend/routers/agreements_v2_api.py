@@ -6129,6 +6129,15 @@ def post_vs01_signer_complete(
 
     draft = _load_or_404(aid)
     now = (body.signed_at or "").strip() or _utc_now_iso()
+    signed_date_iso = (body.signed_date_iso or "").strip() or now[:10]
+    signed_date_display = (body.signed_date_display or "").strip()
+    if not signed_date_display and signed_date_iso:
+        try:
+            from backend.services.vs01_fully_executed_snapshot import _format_signing_date_display
+
+            signed_date_display = _format_signing_date_display(signed_date_iso)
+        except Exception:
+            signed_date_display = signed_date_iso
     participant_id = resolve_participant_id_for_signer_role(
         draft.model_dump(),
         signer_role_id,
@@ -6143,6 +6152,8 @@ def post_vs01_signer_complete(
         if sp:
             display_name = (sp.name or "").strip()
 
+    portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
+
     pending = orchestrate_vs01_signer_complete(
         draft.model_dump(),
         signer_role_id=signer_role_id,
@@ -6150,11 +6161,11 @@ def post_vs01_signer_complete(
         display_name=display_name,
         document_id=(body.document_id or "").strip(),
         signed_at=now,
-        signed_date_iso=(body.signed_date_iso or "").strip(),
-        signed_date_display=(body.signed_date_display or "").strip(),
+        signed_date_iso=signed_date_iso,
+        signed_date_display=signed_date_display,
         locked_version_id=lv,
         agreement_version_hash=fp,
-        portable_packet=body.portable_packet if isinstance(body.portable_packet, dict) else None,
+        portable_packet=portable_packet,
     )
 
     fresh = _load_or_404(aid)
@@ -6162,6 +6173,7 @@ def post_vs01_signer_complete(
         fresh.model_dump(),
         pending,
         signer_role_id=signer_role_id,
+        portable_packet=portable_packet,
     )
 
     completion_emails_sent = completion_emails_already_sent(outcome.audit)
@@ -6210,6 +6222,22 @@ def post_vs01_signer_complete(
                 pass
 
     if outcome.fully_executed:
+        from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
+
+        reloaded_for_snap = _load_or_404(aid)
+        ensured = ensure_fully_executed_snapshot_on_draft(
+            reloaded_for_snap.model_dump(),
+            agreement_id=aid,
+        )
+        if ensured.mutated:
+            snap_draft = _merge_agreement_draft(
+                reloaded_for_snap,
+                updated_at=now,
+                vs01_signing_packet_v1=ensured.draft_dict.get("vs01_signing_packet_v1"),
+            )
+            _save_draft_sync(snap_draft.model_dump(), request)
+
+    if outcome.fully_executed:
         from backend.services.vs01_signer_completion import vs01_completion_email_lock
 
         with vs01_completion_email_lock(aid):
@@ -6255,6 +6283,81 @@ def post_vs01_signer_complete(
         "fully_executed": outcome.fully_executed,
         "completion_emails_sent": completion_emails_sent,
         "auth_mode": auth_mode,
+    }
+
+
+@router.post("/{agreement_id}/vs01-ensure-signed-snapshot")
+def post_vs01_ensure_signed_snapshot(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Ensure fully-executed signed snapshot exists; retry completion emails when safe."""
+    aid = (agreement_id or "").strip()
+    if _agreements_write_allowed():
+        _owner_mutation_guards(request, aid, surface="vs01_ensure_signed_snapshot")
+    else:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
+    from backend.services.vs01_signer_completion import (
+        all_signers_signed_from_audit,
+        completion_emails_already_sent,
+        vs01_completion_email_lock,
+    )
+
+    draft = _load_or_404(aid)
+    audit = list(draft.model_dump().get("audit_log") or [])
+    if not all_signers_signed_from_audit(draft.model_dump(), audit):
+        raise HTTPException(status_code=409, detail="agreement_not_fully_executed")
+
+    now = _utc_now_iso()
+    ensured = ensure_fully_executed_snapshot_on_draft(draft.model_dump(), agreement_id=aid)
+    if ensured.mutated:
+        next_draft = _merge_agreement_draft(
+            draft,
+            updated_at=now,
+            vs01_signing_packet_v1=ensured.draft_dict.get("vs01_signing_packet_v1"),
+        )
+        _save_draft_sync(next_draft.model_dump(), request)
+        draft = next_draft
+
+    completion_emails_sent = completion_emails_already_sent(draft.model_dump().get("audit_log") or [])
+    if ensured.snapshot_ready and not completion_emails_sent:
+        with vs01_completion_email_lock(aid):
+            reloaded = _load_or_404(aid)
+            reloaded_audit = list(reloaded.model_dump().get("audit_log") or [])
+            if not completion_emails_already_sent(reloaded_audit):
+                try:
+                    from backend.services.email.signing_completion_delivery import (
+                        maybe_send_signing_completion_emails,
+                    )
+
+                    notify_audit = maybe_send_signing_completion_emails(
+                        agreement_id=aid,
+                        draft={**reloaded.model_dump(), "audit_log": reloaded_audit},
+                        org_id=resolve_subject_from_request(request),
+                    )
+                    if notify_audit:
+                        fresh_for_email = _load_or_404(aid)
+                        fresh_audit = list(fresh_for_email.model_dump().get("audit_log") or [])
+                        if not completion_emails_already_sent(fresh_audit):
+                            email_audit = list(fresh_audit)
+                            email_audit.append(AuditEvent.model_validate(notify_audit).model_dump())
+                            next_email = _merge_agreement_draft(
+                                fresh_for_email,
+                                updated_at=now,
+                                audit_log=email_audit,
+                            )
+                            _save_draft_sync(next_email.model_dump(), request)
+                            completion_emails_sent = True
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "vs01_ensure_signed_snapshot_email_failed agreement_id=%s",
+                        aid,
+                    )
+
+    return {
+        "ok": True,
+        "snapshot_ready": ensured.snapshot_ready,
+        "snapshot_source": ensured.source,
+        "completion_emails_sent": completion_emails_sent,
     }
 
 

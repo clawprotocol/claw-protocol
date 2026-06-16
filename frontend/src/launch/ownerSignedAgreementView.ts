@@ -7,9 +7,55 @@ import {
   ownerAgreementReadOnlyUsesPremiumDocument,
   cloneOwnerReadOnlyDraft,
 } from "./ownerAgreementReadOnlyView";
-import { resolveVs01FullyExecutedSignedCorpus } from "../vs01/vs01FullyExecutedSignedSnapshot";
+import {
+  reconstructSignedCorpusFromAuditAndPortable,
+  resolveVs01FullyExecutedSignedCorpus,
+} from "../vs01/vs01FullyExecutedSignedSnapshot";
+import { findVs01CanonicalPacketPortableByAgreementId } from "../vs01/vs01CanonicalPacketSeed";
+import { postVs01EnsureSignedSnapshot } from "../agreement/agreementWorkspaceApi";
+import { fetchPublicAgreementVerify } from "../agreement/agreementPublicVerify";
 
-export type OwnerSignedAgreementCorpusSource = "fully_executed_snapshot" | "reconstructed";
+export type OwnerSignedAgreementCorpusSource =
+  | "fully_executed_snapshot"
+  | "reconstructed"
+  | "portable_packet"
+  | "local_portable"
+  | "missing";
+
+function logOwnerSignedAgreementViewSource(args: {
+  agreementId: string;
+  corpusSource: OwnerSignedAgreementCorpusSource;
+  snapshotReady: boolean;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[owner-signed-agreement-view]", {
+    agreementId: args.agreementId,
+    corpusSource: args.corpusSource,
+    snapshotReady: args.snapshotReady,
+  });
+}
+
+function resolveSignedCorpusFromDraft(
+  draft: AgreementDraft,
+): { text: string; source: Exclude<OwnerSignedAgreementCorpusSource, "missing"> } | null {
+  return resolveVs01FullyExecutedSignedCorpus(draft);
+}
+
+function resolveSignedCorpusFromLocalPortable(
+  draft: AgreementDraft,
+  agreementId: string,
+): { text: string; source: Exclude<OwnerSignedAgreementCorpusSource, "missing"> } | null {
+  const localPortable = findVs01CanonicalPacketPortableByAgreementId(agreementId);
+  if (!localPortable) return null;
+  const rebuilt = reconstructSignedCorpusFromAuditAndPortable({ draft, portable: localPortable });
+  if (!rebuilt?.trim()) {
+    const snap = localPortable.fullyExecutedSnapshot?.corpusPlain?.trim();
+    if (snap) return { text: snap, source: "local_portable" };
+    return null;
+  }
+  return { text: rebuilt.trim(), source: "local_portable" };
+}
 
 async function fetchAgreementRenderHtml(agreementId: string): Promise<string> {
   try {
@@ -33,7 +79,7 @@ export async function loadOwnerSignedAgreementPreview(
   html: string;
   corpusText: string;
   usesPremiumDocument: boolean;
-  corpusSource: OwnerSignedAgreementCorpusSource;
+  corpusSource: Exclude<OwnerSignedAgreementCorpusSource, "missing">;
 } | null> {
   const id = String(agreementId || "").trim();
   if (!id) return null;
@@ -41,10 +87,49 @@ export async function loadOwnerSignedAgreementPreview(
   if (!res.ok || !res.draft) return null;
   const draft = res.draft as AgreementDraft;
 
-  const signed = resolveVs01FullyExecutedSignedCorpus(draft);
-  if (!signed?.text) return null;
+  let renderBaseDraft = draft;
 
-  const renderDraft = cloneOwnerReadOnlyDraft(draft);
+  let signed = resolveSignedCorpusFromDraft(draft);
+  if (!signed?.text) {
+    signed = resolveSignedCorpusFromLocalPortable(draft, id);
+  }
+
+  if (!signed?.text) {
+    const verify = await fetchPublicAgreementVerify(id);
+    if (verify?.signature_status?.fully_executed) {
+      const ensured = await postVs01EnsureSignedSnapshot(id);
+      if (ensured.ok && ensured.snapshot_ready) {
+        const refreshed = await fetchAgreementDraft(id);
+        if (refreshed.ok && refreshed.draft) {
+          renderBaseDraft = refreshed.draft as AgreementDraft;
+          signed = resolveSignedCorpusFromDraft(renderBaseDraft);
+        }
+      }
+      if (!signed?.text) {
+        logOwnerSignedAgreementViewSource({
+          agreementId: id,
+          corpusSource: "missing",
+          snapshotReady: Boolean(ensured.snapshot_ready),
+        });
+        return null;
+      }
+    } else {
+      logOwnerSignedAgreementViewSource({
+        agreementId: id,
+        corpusSource: "missing",
+        snapshotReady: false,
+      });
+      return null;
+    }
+  }
+
+  logOwnerSignedAgreementViewSource({
+    agreementId: id,
+    corpusSource: signed.source,
+    snapshotReady: true,
+  });
+
+  const renderDraft = cloneOwnerReadOnlyDraft(renderBaseDraft);
   const partyNames = (renderDraft.parties ?? []).map((p) => p.name);
   const serverHtml =
     signed.text.length < 500 ? await fetchAgreementRenderHtml(id) : "";

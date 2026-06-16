@@ -14,6 +14,7 @@ from backend.services.email.review_delivery import (
     _party_display_names_from_draft,
 )
 from backend.services.email.templates.signing_complete import build_signing_complete_email
+from backend.services.vs01_signer_completion import fully_executed_snapshot_ready
 
 _log = logging.getLogger(__name__)
 
@@ -49,8 +50,6 @@ def maybe_send_signing_completion_emails(
             aid,
         )
         return None
-
-    from backend.services.vs01_signer_completion import fully_executed_snapshot_ready
 
     if not fully_executed_snapshot_ready(draft):
         _log.info(

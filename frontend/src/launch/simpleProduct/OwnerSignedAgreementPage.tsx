@@ -36,9 +36,9 @@ export function OwnerSignedAgreementPage(props: Props) {
   const [usesPremiumDocument, setUsesPremiumDocument] = useState(false);
   const [verify, setVerify] = useState<PublicVerifyPayload | null>(null);
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
-  const [corpusSource, setCorpusSource] = useState<"fully_executed_snapshot" | "reconstructed" | null>(
-    null,
-  );
+  const [corpusSource, setCorpusSource] = useState<
+    "fully_executed_snapshot" | "reconstructed" | "portable_packet" | "local_portable" | null
+  >(null);
 
   const load = useCallback(async () => {
     setLoading(true);
