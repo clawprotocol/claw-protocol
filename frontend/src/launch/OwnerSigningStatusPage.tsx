@@ -17,7 +17,6 @@ import {
   CREATOR_VIEW_SIGNED_AGREEMENT_LABEL,
 } from "./creatorDashboardCopy";
 import { creatorDashboardSignedAgreementViewPath } from "./creatorDashboardReviewLinkRouting";
-import { loadOwnerSignedAgreementPreview } from "./ownerSignedAgreementView";
 import {
   fetchPersistedSigningProgressSnapshot,
   ownerProofReceiptAvailable,
@@ -88,14 +87,9 @@ export function OwnerSigningStatusPage({ agreementId }: OwnerSigningStatusPagePr
     if (!aid || pdfBusy) return;
     setPdfBusy(true);
     try {
-      const loaded = await loadOwnerSignedAgreementPreview(aid);
-      if (!loaded?.html?.trim()) {
-        throw new Error("Signed agreement is not available to download yet.");
-      }
       await downloadCompletedSignedAgreementPdf({
         agreementId: aid,
-        html: loaded.html,
-        title: loaded.draft.title ?? handoff?.agreementTitle,
+        title: handoff?.agreementTitle,
       });
     } catch {
       /* owner can open view-signed and retry */

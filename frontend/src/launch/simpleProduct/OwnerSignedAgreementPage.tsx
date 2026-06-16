@@ -170,7 +170,6 @@ export function OwnerSignedAgreementPage(props: Props) {
                 try {
                   await downloadCompletedSignedAgreementPdf({
                     agreementId,
-                    html: previewHtml,
                     title,
                   });
                 } catch (e: unknown) {

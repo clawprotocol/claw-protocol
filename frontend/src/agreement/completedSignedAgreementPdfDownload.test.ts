@@ -26,14 +26,14 @@ describe("downloadCompletedSignedAgreementPdf", () => {
     }
   }
 
-  it("downloads blob when response is application/pdf", async () => {
+  it("uses canonical server export without dashboard HTML body", async () => {
     stubUrlObjectApis();
     const pdf = new Uint8Array(128).fill(37);
     pdf[0] = 0x25;
     pdf[1] = 0x50;
     pdf[2] = 0x44;
     pdf[3] = 0x46;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(pdf, {
         status: 200,
         headers: {
@@ -42,18 +42,18 @@ describe("downloadCompletedSignedAgreementPdf", () => {
         },
       }),
     );
-    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock");
-    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     await downloadCompletedSignedAgreementPdf({
       agreementId: "ag_1",
-      html: "<article><p>Signed</p></article>",
       title: "Services Agreement",
     });
-    expect(createObjectURL).toHaveBeenCalled();
-    expect(click).toHaveBeenCalled();
-    expect(revokeObjectURL).toHaveBeenCalled();
+
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBeUndefined();
   });
 
   it("maps Failed to fetch to friendly unavailable copy", async () => {
@@ -61,7 +61,6 @@ describe("downloadCompletedSignedAgreementPdf", () => {
     await expect(
       downloadCompletedSignedAgreementPdf({
         agreementId: "ag_1",
-        html: "<p>x</p>",
       }),
     ).rejects.toThrow(COMPLETED_SIGNED_PDF_EXPORT_UNAVAILABLE_MESSAGE);
   });

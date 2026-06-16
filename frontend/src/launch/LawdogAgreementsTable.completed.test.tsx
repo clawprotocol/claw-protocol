@@ -5,7 +5,6 @@ import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi
 import { LawdogAgreementsTable } from "./LawdogAgreementsTable";
 import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
 import * as completedPdf from "../agreement/completedSignedAgreementPdfDownload";
-import * as ownerSignedView from "./ownerSignedAgreementView";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 
 vi.mock("./newAgreementSessionReset", () => ({
@@ -47,14 +46,7 @@ describe("LawdogAgreementsTable completed rows (Test362)", () => {
     expect(onNavigate).not.toHaveBeenCalledWith(expect.stringContaining("/app/done/"));
   });
 
-  it("Download is enabled for completed rows and exports signed PDF", async () => {
-    vi.spyOn(ownerSignedView, "loadOwnerSignedAgreementPreview").mockResolvedValue({
-      draft: { id: "ag_completed", title: "Services Agreement", parties: [] } as never,
-      html: "<article><p>Signed agreement</p></article>",
-      corpusText: "Signed agreement",
-      usesPremiumDocument: false,
-      corpusSource: "fully_executed_snapshot",
-    });
+  it("Download is enabled for completed rows and uses canonical server export", async () => {
     const downloadSpy = vi.spyOn(completedPdf, "downloadCompletedSignedAgreementPdf").mockResolvedValue();
     const onNavigate = vi.fn();
     render(<LawdogAgreementsTable rows={[completedRow()]} onNavigate={onNavigate} />);
@@ -66,10 +58,11 @@ describe("LawdogAgreementsTable completed rows (Test362)", () => {
       expect(downloadSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           agreementId: "ag_completed",
-          html: "<article><p>Signed agreement</p></article>",
+          title: "Services Agreement",
         }),
       );
     });
+    expect(downloadSpy.mock.calls[0]?.[0]).not.toHaveProperty("html");
     expect(onNavigate).not.toHaveBeenCalled();
   });
 

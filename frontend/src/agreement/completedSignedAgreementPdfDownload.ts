@@ -68,10 +68,9 @@ async function savePdfResponse(res: Response, filename: string): Promise<void> {
   saveBlob(blob, filename);
 }
 
-/** Owner/read-auth PDF download for a fully executed agreement (optional HTML from signed view). */
+/** Owner/read-auth PDF download — server uses canonical fully_executed_snapshot only. */
 export async function downloadCompletedSignedAgreementPdf(args: {
   agreementId: string;
-  html?: string;
   title?: string;
   readHeaders?: Record<string, string>;
 }): Promise<void> {
@@ -83,11 +82,9 @@ export async function downloadCompletedSignedAgreementPdf(args: {
     res = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/completed-signed-export-pdf`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         ...clawAgreementHeaders(),
         ...(args.readHeaders ?? {}),
       },
-      body: JSON.stringify({ html: (args.html || "").trim() }),
     });
   } catch (e: unknown) {
     const raw = e instanceof Error ? e.message : String(e ?? "");
@@ -112,7 +109,7 @@ export async function downloadCompletedSignedAgreementPdf(args: {
   await savePdfResponse(res, filename);
 }
 
-/** Public PDF download when the agreement is fully executed (server uses signed snapshot). */
+/** Public PDF download when the agreement is fully executed (canonical signed snapshot). */
 export async function downloadPublicCompletedSignedAgreementPdf(agreementId: string): Promise<void> {
   const id = String(agreementId || "").trim();
   if (!id) throw new Error("Missing agreement id.");

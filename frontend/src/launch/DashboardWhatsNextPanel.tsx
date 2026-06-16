@@ -20,7 +20,6 @@ import {
 } from "./creatorDashboardCopy";
 import { creatorDashboardCompletedProofPath, creatorDashboardUsesManualReviewLinkPage } from "./creatorDashboardReviewLinkRouting";
 import { openReceiptProofBundleDownload } from "../export/dataExportApi";
-import { loadOwnerSignedAgreementPreview } from "./ownerSignedAgreementView";
 import { readPaidProVs01PostSignHandoff } from "../vs01/vs01PaidProPostSignHandoff";
 import {
   creatorDashboardReviewHydrationPending,
@@ -262,13 +261,8 @@ export function DashboardWhatsNextPanel(props: Props) {
                 void (async () => {
                   setPdfBusy(true);
                   try {
-                    const loaded = await loadOwnerSignedAgreementPreview(row.id);
-                    if (!loaded?.html?.trim()) {
-                      throw new Error("Signed agreement is not available to download yet.");
-                    }
                     await downloadCompletedSignedAgreementPdf({
                       agreementId: row.id,
-                      html: loaded.html,
                       title: row.title,
                     });
                   } catch {

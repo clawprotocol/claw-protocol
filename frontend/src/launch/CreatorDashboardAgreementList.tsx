@@ -35,7 +35,6 @@ import {
 } from "./creatorDashboardReviewGate";
 import type { CreatorSigningProgressSnapshot } from "./creatorDashboardSigningProgress";
 import { creatorDashboardShowManageRecipients } from "./creatorDashboardSignatureTrack";
-import { loadOwnerSignedAgreementPreview } from "./ownerSignedAgreementView";
 
 type Props = {
   rows: readonly WorkspaceIndexAgreement[];
@@ -406,13 +405,8 @@ export function CreatorDashboardAgreementList(props: Props) {
                       void (async () => {
                         setPdfDownloadBusyId(row.id);
                         try {
-                          const loaded = await loadOwnerSignedAgreementPreview(row.id);
-                          if (!loaded?.html?.trim()) {
-                            throw new Error("Signed agreement is not available to download yet.");
-                          }
                           await downloadCompletedSignedAgreementPdf({
                             agreementId: row.id,
-                            html: loaded.html,
                             title: row.title,
                           });
                         } catch {

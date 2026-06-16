@@ -10,7 +10,6 @@ import {
 import { CREATOR_MANAGE_RECIPIENTS_LABEL } from "./creatorDashboardCopy";
 import { CREATOR_DOWNLOAD_PDF_LABEL } from "./creatorDashboardCopy";
 import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
-import { loadOwnerSignedAgreementPreview } from "./ownerSignedAgreementView";
 import {
   deriveLawdogProductStatus,
   formatLawdogAgreementStatusLabel,
@@ -154,13 +153,8 @@ export function LawdogAgreementsTable(props: Props) {
                         void (async () => {
                           setPdfDownloadBusyId(row.id);
                           try {
-                            const loaded = await loadOwnerSignedAgreementPreview(row.id);
-                            if (!loaded?.html?.trim()) {
-                              throw new Error("Signed agreement is not available to download yet.");
-                            }
                             await downloadCompletedSignedAgreementPdf({
                               agreementId: row.id,
-                              html: loaded.html,
                               title: row.title,
                             });
                           } catch {
