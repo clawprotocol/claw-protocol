@@ -297,7 +297,15 @@ export function Vs01Wizard({
       return;
     }
     const hasCanonical = hasVs01CanonicalPacketCached(did);
-    const needsFields = recipientPlacedFields.length === 0;
+    const lacksSignatureField =
+      recipientPlacedFields.length > 0 &&
+      RECIPIENT_LOCKED_SIGNER_ROLE_ID &&
+      !recipientPlacedFields.some(
+        (f) =>
+          f.type === "signature" &&
+          (f.assignedSignerRoleId ?? "").trim() === RECIPIENT_LOCKED_SIGNER_ROLE_ID.trim(),
+      );
+    const needsFields = recipientPlacedFields.length === 0 || lacksSignatureField;
     const needsCanonical = !hasCanonical;
     if (!needsFields && !needsCanonical) {
       setRecipientServerHydrationPending(false);

@@ -12,6 +12,8 @@ import {
 } from "./vs01CanonicalPacketSeed";
 import { todayIsoDateLocal } from "./vs01FieldValueResolution";
 import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
+import { isRecipientSignerMarkedComplete } from "./recipientSigningFieldUtils";
+import { witnessBlockPartyHasFilledSignature } from "./vs01WitnessBlockSigningDate";
 
 /** True only when packet explicitly enabled initials (initialsOnEachPage / initialsPolicy). */
 export function isVs01InitialsEnabledForPacket(
@@ -27,9 +29,12 @@ export function hydratePortableSignerMarksForRecipientView(args: {
   portable: Vs01CanonicalPacketPortableV1;
   agreementId: string;
   documentId: string;
+  /** Current signer opening the link — never burn or mark this role as completed here. */
+  viewingSignerRoleId?: string | null;
 }): Vs01CanonicalPacketPortableV1 {
   const agreementId = args.agreementId.trim();
   const documentId = args.documentId.trim();
+  const viewingRole = (args.viewingSignerRoleId ?? "").trim();
   if (!agreementId || !documentId) return args.portable;
 
   let portable = args.portable;
@@ -38,9 +43,13 @@ export function hydratePortableSignerMarksForRecipientView(args: {
 
   for (const role of portable.roles) {
     const rid = (role.roleId ?? "").trim();
-    if (!rid) continue;
+    if (!rid || (viewingRole && rid === viewingRole)) continue;
+
+    const partyIndex = role.partyIndex ?? 0;
+    const corpusHasSig = witnessBlockPartyHasFilledSignature(portable.seed.corpusPlain, partyIndex);
+    const markedSigned = isRecipientSignerMarkedComplete(agreementId, rid);
     const sig = signatureTextForSignerRole(portable.fields, rid);
-    if (!sig) continue;
+    if (!sig || (!corpusHasSig && !markedSigned)) continue;
 
     const applied = applySignerCompletionToPortablePacket({
       portable,

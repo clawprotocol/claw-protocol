@@ -259,12 +259,13 @@ export function stripLockedSignerEditableValuesOnHydrate(
   const preserveServer = opts?.hydrationSource === "server_packet";
   return fields.map((f) => {
     const eff = (f.assignedSignerRoleId ?? "").trim();
-    const belongsToLock = eff ? eff === lock : true;
+    const belongsToLock = eff ? eff === lock : false;
     if (!belongsToLock || !isRecipientSigningEditableType(f.type)) return f;
     if (signerComplete) return f;
     const signerKey = signerKeyForRecipientField(f);
     if (isRecipientSignerMarkedComplete(agreementId, signerKey)) return f;
     const v = typeof f.value === "string" ? f.value.trim() : "";
+    if (f.type === "signature" && !v) return { ...f, value: "" };
     if (preserveServer && v) return f;
     return v ? { ...f, value: "" } : f;
   });

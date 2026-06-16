@@ -45,9 +45,13 @@ import {
 } from "./recipientSigningFieldUtils";
 import { isVs01InitialsEnabledForPacket } from "./vs01RecipientSignerMarksHydration";
 import {
-  buildRecipientSigningDocumentFields,
+  logVs01RecipientSignatureFieldMissing,
+  resolveRecipientSigningDocumentFields,
+} from "./vs01RecipientDocumentFields";
+import {
   buildVs01PrepareSigningRoles,
 } from "./vs01SignerFieldAssignment";
+import { partyIndexFromSignerRoleId } from "./vs01RecipientFieldScope";
 import { logVs01PersistedGeometryHash } from "./vs01AutoSignaturePacket";
 import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
 import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
@@ -266,21 +270,6 @@ export function RecipientSigningView({
     lockedSignerRoleId,
   ]);
 
-  const documentFields = useMemo(() => {
-    const lock = (lockedSignerRoleId ?? "").trim();
-    if (lock) return recipientFields;
-    if (!prepareRoles?.length) return recipientFields;
-    if (!senderPlacedFields.length) return recipientFields;
-    const ownerRole = prepareRoles[0];
-    if (!ownerRole) return recipientFields;
-    return buildRecipientSigningDocumentFields({
-      ownerRole,
-      roles: prepareRoles,
-      recipientPlacedFields: recipientFields,
-      senderPlacedFields,
-    });
-  }, [recipientFields, senderPlacedFields, prepareRoles, lockedSignerRoleId]);
-
   const portablePacket = useMemo(() => {
     const did = documentId?.trim() ?? "";
     return did ? loadVs01CanonicalPacketPortable(did) : null;
@@ -303,6 +292,28 @@ export function RecipientSigningView({
 
   const useCanonicalDocument = Boolean(canonicalPacket?.model.allowed);
 
+  const documentFields = useMemo(
+    () =>
+      resolveRecipientSigningDocumentFields({
+        documentId,
+        recipientFields,
+        senderPlacedFields,
+        prepareRoles,
+        lockedCounterpartyId: lockedCp,
+        lockedSignerRoleId,
+        canonicalModel: canonicalPacket?.model ?? null,
+      }),
+    [
+      documentId,
+      recipientFields,
+      senderPlacedFields,
+      prepareRoles,
+      lockedCp,
+      lockedSignerRoleId,
+      canonicalPacket?.model,
+    ],
+  );
+
   const documentFieldsForView = useMemo(() => {
     if (!initialsEnabled) {
       return documentFields.filter((f) => f.type !== "initials");
@@ -322,6 +333,37 @@ export function RecipientSigningView({
       ),
     [documentFieldsForView, lockedCp, lockedSignerRoleId],
   );
+
+  useEffect(() => {
+    if (!lockedSignerRoleId || myFields.some((f) => f.type === "signature")) return;
+    const candidates = documentFieldsForView
+      .filter((f) => f.type === "signature")
+      .map((f) => ({
+        id: f.id,
+        assignedSignerRoleId: f.assignedSignerRoleId ?? null,
+        counterpartyId: f.counterpartyId,
+        page: f.page,
+        filteredReason: recipientFieldBelongsToLockedSigner(f, lockedCp, lockedSignerRoleId)
+          ? "in_document_fields_not_scoped"
+          : "other_party_signature",
+      }));
+    logVs01RecipientSignatureFieldMissing({
+      agreementId: recipientAgreementId,
+      documentId: documentId ?? null,
+      signerRoleId: lockedSignerRoleId,
+      partyIndex: partyIndexFromSignerRoleId(lockedSignerRoleId),
+      totalFieldCount: documentFieldsForView.length,
+      scopedFieldCount: myFields.length,
+      signatureCandidates: candidates,
+    });
+  }, [
+    documentFieldsForView,
+    documentId,
+    lockedCp,
+    lockedSignerRoleId,
+    myFields,
+    recipientAgreementId,
+  ]);
 
   const hydratedRef = useRef(false);
   useEffect(() => {

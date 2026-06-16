@@ -50,6 +50,7 @@ function hydrateFieldsFromPortable(args: {
     portable,
     agreementId,
     documentId,
+    viewingSignerRoleId: lockedSignerRoleId,
   });
   storeVs01CanonicalPacketPortable(documentId, hydratedPortable);
   storeVs01CanonicalPacketSeed(hydratedPortable.seed);
@@ -63,40 +64,39 @@ function hydrateFieldsFromPortable(args: {
     (lockedSignerRoleId?.trim()
       ? hydratedPortable.roles.find((r) => r.roleId === lockedSignerRoleId.trim())
       : null) ?? null;
-  const scoped = role
-    ? filterPacketManifestFieldsForRole(manifestFields, {
-        roleId: role.roleId,
-        partyIndex: role.partyIndex,
-        partyId: role.partyId,
-        entityName: role.entityName,
-        partyName: role.partyName,
-        roleLabel: role.roleLabel,
-        signerName: role.signerName,
-        signerTitle: role.signerTitle,
-        signerEmail: role.signerEmail,
-        reviewEmail: role.reviewEmail,
-        isEntityParty: role.isEntityParty,
-        requiresSignature: role.requiresSignature,
-        vs01CounterpartyId: role.vs01CounterpartyId,
-        kind: role.kind,
-      })
-    : lockedSignerRoleId?.trim()
-      ? manifestFields.filter((f) => (f.assignedSignerRoleId ?? "").trim() === lockedSignerRoleId.trim())
-      : manifestFields.filter((f) => f.counterpartyId.trim() === lockedCounterpartyId);
 
-  const normalized = normalizeRecipientManifestCounterparties(scoped, lockedCounterpartyId);
-  const cps = counterpartiesFromRecipientManifestFields(
-    normalized,
-    lockedCounterpartyId,
-    recipientName,
-    recipientEmail,
-  );
-  const cpMap = new Map(cps.map((c) => [c.id, c]));
-  const fields = hydrateRecipientSigningFields(
+  const counterpartiesFromPortable = (): Vs01Counterparty[] => {
+    const cps: Vs01Counterparty[] = [];
+    for (const roleRow of hydratedPortable.roles) {
+      const cpId = (roleRow.vs01CounterpartyId ?? roleRow.partyId).trim();
+      if (!cpId) continue;
+      cps.push({
+        id: cpId,
+        name: roleRow.entityName?.trim() || roleRow.partyName?.trim() || "Signer",
+        email: (roleRow.signerEmail ?? roleRow.reviewEmail ?? "").trim(),
+        signerName: roleRow.signerName?.trim(),
+        signerTitle: roleRow.signerTitle?.trim(),
+      });
+    }
+    return cps;
+  };
+
+  const allCps = counterpartiesFromPortable();
+  const cpMap = new Map(allCps.map((c) => [c.id, c]));
+  const lock = (lockedSignerRoleId ?? "").trim();
+  const displayFields = hydrateRecipientSigningFields(
     stripLockedSignerEditableValuesOnHydrate(
-      ensureRecipientFieldDefaults(normalized, recipientName, recipientEmail, {
-        signerName: cps.find((c) => c.id === lockedCounterpartyId)?.signerName,
-      }),
+      ensureRecipientFieldDefaults(
+        manifestFields,
+        recipientName,
+        recipientEmail,
+        {
+          signerName:
+            allCps.find((c) => c.id === lockedCounterpartyId)?.signerName ??
+            role?.signerName ??
+            undefined,
+        },
+      ),
       portable.seed.agreementId,
       lockedSignerRoleId,
       { hydrationSource: "server_packet" },
@@ -104,14 +104,12 @@ function hydrateFieldsFromPortable(args: {
     cpMap,
     { preserveEditableValues: true },
   );
-
-  const lock = (lockedSignerRoleId ?? "").trim();
   if (lock && agreementId) {
     const roleKeys = hydratedPortable.roles.map((r) => r.roleId).filter(Boolean);
     for (const roleRow of hydratedPortable.roles) {
       const rid = (roleRow.roleId ?? "").trim();
-      if (!rid) continue;
-      const hasPersistedSignature = fields.some(
+      if (!rid || rid === lock) continue;
+      const hasPersistedSignature = displayFields.some(
         (f) =>
           isRecipientSigningEditableType(f.type) &&
           f.type === "signature" &&
@@ -124,7 +122,39 @@ function hydrateFieldsFromPortable(args: {
       }
     }
   }
-  return { ok: fields.length > 0, fields, counterparties: cps, source: fields.length > 0 ? "server_packet" : "miss" };
+  const cps =
+    allCps.length > 0
+      ? allCps
+      : counterpartiesFromRecipientManifestFields(
+          normalizeRecipientManifestCounterparties(
+            filterPacketManifestFieldsForRole(manifestFields, {
+              roleId: role?.roleId ?? lock,
+              partyIndex: role?.partyIndex ?? 0,
+              partyId: role?.partyId ?? lockedCounterpartyId,
+              entityName: role?.entityName ?? "",
+              partyName: role?.partyName ?? recipientName,
+              roleLabel: role?.roleLabel ?? "",
+              signerName: role?.signerName ?? "",
+              signerTitle: role?.signerTitle ?? "",
+              signerEmail: role?.signerEmail ?? "",
+              reviewEmail: role?.reviewEmail ?? "",
+              isEntityParty: role?.isEntityParty ?? false,
+              requiresSignature: role?.requiresSignature !== false,
+              vs01CounterpartyId: role?.vs01CounterpartyId ?? lockedCounterpartyId,
+              kind: role?.kind ?? "counterparty",
+            }),
+            lockedCounterpartyId,
+          ),
+          lockedCounterpartyId,
+          recipientName,
+          recipientEmail,
+        );
+  return {
+    ok: displayFields.length > 0,
+    fields: displayFields,
+    counterparties: cps,
+    source: displayFields.length > 0 ? "server_packet" : "miss",
+  };
 }
 
 export function applyVs01PortablePacketToRecipientSession(args: {

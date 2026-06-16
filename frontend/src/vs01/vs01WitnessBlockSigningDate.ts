@@ -111,6 +111,34 @@ export function stampWitnessBlockPartySignature(
   return { text: lines.join("\n"), stamped };
 }
 
+/** True when witness-block By: line for partyIndex is filled (prior signer completed). */
+export function witnessBlockPartyHasFilledSignature(corpusPlain: string, partyIndex: number): boolean {
+  const patchStart = signaturePatchStartIndex(corpusPlain);
+  const lines = corpusPlain.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const lineStart = lines.slice(0, i).join("\n").length + (i > 0 ? 1 : 0);
+    if (lineStart < patchStart) continue;
+    const trimmed = lines[i]!.trim();
+    if (!/^by\s*:/i.test(trimmed)) continue;
+    const value = trimmed.replace(/^by\s*:\s*/i, "").trim();
+    if (!value || /_{2,}/.test(value)) continue;
+    let partyIdx = -1;
+    let offset = 0;
+    for (let j = 0; j <= i; j += 1) {
+      if (offset < patchStart) {
+        offset += lines[j]!.length + 1;
+        continue;
+      }
+      if (/^\s*(?:CLIENT|SERVICE\s+PROVIDER|PROVIDER|COUNTERPARTY|PARTY\s+\d+)\s*:?\s*$/i.test(lines[j]!.trim())) {
+        partyIdx += 1;
+      }
+      offset += lines[j]!.length + 1;
+    }
+    if (Math.max(0, partyIdx) === partyIndex) return true;
+  }
+  return false;
+}
+
 /** Count witness blocks with filled By + Date lines (fully executed when signed === total). */
 export function countSignedWitnessBlocks(corpusPlain: string): { signed: number; total: number } {
   const patchStart = signaturePatchStartIndex(corpusPlain);
