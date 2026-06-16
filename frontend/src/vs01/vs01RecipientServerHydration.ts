@@ -102,7 +102,7 @@ function hydrateFieldsFromPortable(args: {
       { hydrationSource: "server_packet" },
     ),
     cpMap,
-    { preserveEditableValues: true },
+    { preserveEditableValues: true, agreementId },
   );
   if (lock && agreementId) {
     const roleKeys = hydratedPortable.roles.map((r) => r.roleId).filter(Boolean);

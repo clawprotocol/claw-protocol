@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { buildVs01SigningPacketModel } from "./buildVs01SigningPacketModel";
 import {
   buildVs01PrepareSigningRoles,
@@ -10,6 +10,7 @@ import {
   countRecipientSigningActions,
   recipientFinishGateComplete,
   recipientFinishGateEditableFields,
+  resolvePersistedSignerFieldDisplayValue,
   stripLockedSignerEditableValuesOnHydrate,
 } from "./recipientSigningFieldUtils";
 import { applyVs01PortablePacketToRecipientSession } from "./vs01RecipientServerHydration";
@@ -25,7 +26,6 @@ import {
   buildVs01CanonicalPacketSeed,
 } from "./vs01CanonicalPacketSeed";
 import { buildFullPacketManifestFromCanonicalModel } from "./vs01SigningPacketManifest";
-import { cleanup } from "@testing-library/react";
 
 const AG = "ag_test366";
 const DOC = "doc_test366";
@@ -192,7 +192,7 @@ describe("Test366 Party 2 signature field after Party 1 signs", () => {
     );
     expect(screen.getByLabelText("Signature")).toBeTruthy();
 
-    patchSignerPacketStatus(AG, ownerRole.roleId, "signed");
+    patchSignerPacketStatus(AG, ownerRole.roleId, "signed", r.map((x) => x.roleId));
     render(
       <RecipientSigningFieldOverlay
         field={{ ...ownerSigField, value: "Caty Biscuit" }}
@@ -246,7 +246,7 @@ describe("Test366 Party 2 signature field after Party 1 signs", () => {
     const cpSig = portable.fields.find(
       (f) => f.assignedSignerRoleId === cpRole.roleId && f.type === "signature",
     )!;
-    patchSignerPacketStatus(AG, ownerRole.roleId, "signed");
+    patchSignerPacketStatus(AG, ownerRole.roleId, "signed", r.map((x) => x.roleId));
 
     const stripped = stripLockedSignerEditableValuesOnHydrate(
       [ownerSig, cpSig],
@@ -256,5 +256,219 @@ describe("Test366 Party 2 signature field after Party 1 signs", () => {
     );
     expect(stripped.find((f) => f.assignedSignerRoleId === ownerRole.roleId)?.value).toBe("Caty Biscuit");
     expect(stripped.find((f) => f.assignedSignerRoleId === cpRole.roleId)?.value).toBe("");
+  });
+});
+
+describe("Test367 signer-role isolation", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    cleanup();
+  });
+
+  it("party 2 opens first: party 1 signature blank/locked, party 2 editable, action count 1", () => {
+    const r = roles();
+    const ownerRole = r[0]!;
+    const cpRole = r[1]!;
+    const portable = buildPreparedPortable();
+    const ownerSigPrepared = portable.fields.find(
+      (f) => f.type === "signature" && f.assignedSignerRoleId === ownerRole.roleId,
+    );
+    expect((ownerSigPrepared?.value ?? "").trim().length).toBeGreaterThan(0);
+
+    const hydrated = applyVs01PortablePacketToRecipientSession({
+      portable,
+      documentId: DOC,
+      lockedCounterpartyId: cpRole.vs01CounterpartyId ?? "cp_harbor",
+      lockedSignerRoleId: cpRole.roleId,
+      recipientName: "Harbor Peak Automation LLC",
+      recipientEmail: CP_EMAIL,
+    });
+    expect(hydrated.ok).toBe(true);
+
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: portable.seed.corpusPlain,
+      roles: r,
+      initialsEnabled: false,
+    });
+    const docFields = resolveRecipientSigningDocumentFields({
+      documentId: DOC,
+      recipientFields: hydrated.fields,
+      senderPlacedFields: [],
+      prepareRoles: r,
+      lockedCounterpartyId: cpRole.vs01CounterpartyId ?? "cp_harbor",
+      lockedSignerRoleId: cpRole.roleId,
+      canonicalModel: model,
+    });
+    const cpById = new Map(hydrated.counterparties.map((c) => [c.id, c]));
+
+    const ownerSig = docFields.find(
+      (f) => f.type === "signature" && f.assignedSignerRoleId === ownerRole.roleId,
+    )!;
+    const cpSig = docFields.find(
+      (f) =>
+        f.type === "signature" &&
+        recipientFieldBelongsToLockedSigner(f, cpRole.vs01CounterpartyId ?? "cp_harbor", cpRole.roleId),
+    )!;
+    expect(ownerSig.value ?? "").toBe("");
+    expect(cpSig.value ?? "").toBe("");
+    expect(resolvePersistedSignerFieldDisplayValue(ownerSig, AG, cpById)).toBe("");
+
+    const myFields = docFields.filter((f) =>
+      recipientFieldBelongsToLockedSigner(f, cpRole.vs01CounterpartyId ?? "cp_harbor", cpRole.roleId),
+    );
+    expect(countRecipientSigningActions(myFields, { initialsEnabled: false })).toBe(1);
+
+    let typed = "";
+    render(
+      <RecipientSigningFieldOverlay
+        field={cpSig}
+        lockedCounterpartyId={cpRole.vs01CounterpartyId ?? "cp_harbor"}
+        lockedSignerRoleId={cpRole.roleId}
+        recipientAgreementId={AG}
+        cpById={cpById}
+        onUpdateValue={(_id, v) => {
+          typed = v;
+        }}
+        canonicalCompact
+      />,
+    );
+    const input = screen.getByLabelText("Signature");
+    fireEvent.change(input, { target: { value: "Ben Reetman" } });
+    expect(typed).toBe("Ben Reetman");
+    expect(recipientFinishGateComplete([{ ...cpSig, value: typed }], { initialsEnabled: false })).toBe(
+      true,
+    );
+  });
+
+  it("party 1 opens first: party 2 blank/locked, party 1 editable", () => {
+    const r = roles();
+    const ownerRole = r[0]!;
+    const cpRole = r[1]!;
+    const portable = buildPreparedPortable();
+
+    const hydrated = applyVs01PortablePacketToRecipientSession({
+      portable,
+      documentId: DOC,
+      lockedCounterpartyId: ownerRole.vs01CounterpartyId ?? "owner",
+      lockedSignerRoleId: ownerRole.roleId,
+      recipientName: "Red Mesa Logistics LLC",
+      recipientEmail: OWNER_EMAIL,
+    });
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: portable.seed.corpusPlain,
+      roles: r,
+      initialsEnabled: false,
+    });
+    const docFields = resolveRecipientSigningDocumentFields({
+      documentId: DOC,
+      recipientFields: hydrated.fields,
+      senderPlacedFields: [],
+      prepareRoles: r,
+      lockedCounterpartyId: ownerRole.vs01CounterpartyId ?? "owner",
+      lockedSignerRoleId: ownerRole.roleId,
+      canonicalModel: model,
+    });
+    const cpById = new Map(hydrated.counterparties.map((c) => [c.id, c]));
+    const ownerSig = docFields.find(
+      (f) =>
+        f.type === "signature" &&
+        recipientFieldBelongsToLockedSigner(f, ownerRole.vs01CounterpartyId ?? "owner", ownerRole.roleId),
+    )!;
+    const cpSig = docFields.find(
+      (f) => f.type === "signature" && f.assignedSignerRoleId === cpRole.roleId,
+    )!;
+    expect(ownerSig.value ?? "").toBe("");
+    expect(cpSig.value ?? "").toBe("");
+    expect(resolvePersistedSignerFieldDisplayValue(cpSig, AG, cpById)).toBe("");
+    const myFields = docFields.filter((f) =>
+      recipientFieldBelongsToLockedSigner(f, ownerRole.vs01CounterpartyId ?? "owner", ownerRole.roleId),
+    );
+    expect(countRecipientSigningActions(myFields, { initialsEnabled: false })).toBe(1);
+    expect(recipientFinishGateEditableFields(myFields, { initialsEnabled: false })[0]?.type).toBe(
+      "signature",
+    );
+  });
+
+  it("party 1 signs then party 2 opens: party 1 signature visible locked, party 2 editable", () => {
+    const r = roles();
+    const ownerRole = r[0]!;
+    const cpRole = r[1]!;
+    let portable = buildPreparedPortable();
+
+    portable = applySignerCompletionToPortablePacket({
+      portable,
+      agreementId: AG,
+      documentId: DOC,
+      signerRoleId: ownerRole.roleId,
+      partyIndex: 0,
+      signingDateIso: "2026-06-15",
+      signatureText: "Caty Biscuit",
+    }).portable;
+    patchSignerPacketStatus(AG, ownerRole.roleId, "signed", r.map((x) => x.roleId));
+
+    const hydrated = applyVs01PortablePacketToRecipientSession({
+      portable,
+      documentId: DOC,
+      lockedCounterpartyId: cpRole.vs01CounterpartyId ?? "cp_harbor",
+      lockedSignerRoleId: cpRole.roleId,
+      recipientName: "Harbor Peak Automation LLC",
+      recipientEmail: CP_EMAIL,
+    });
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: portable.seed.corpusPlain,
+      roles: r,
+      initialsEnabled: false,
+    });
+    const docFields = resolveRecipientSigningDocumentFields({
+      documentId: DOC,
+      recipientFields: hydrated.fields,
+      senderPlacedFields: [],
+      prepareRoles: r,
+      lockedCounterpartyId: cpRole.vs01CounterpartyId ?? "cp_harbor",
+      lockedSignerRoleId: cpRole.roleId,
+      canonicalModel: model,
+    });
+    const cpById = new Map(hydrated.counterparties.map((c) => [c.id, c]));
+    const ownerSig = docFields.find(
+      (f) => f.type === "signature" && f.assignedSignerRoleId === ownerRole.roleId,
+    )!;
+    const cpSig = docFields.find(
+      (f) =>
+        f.type === "signature" &&
+        recipientFieldBelongsToLockedSigner(f, cpRole.vs01CounterpartyId ?? "cp_harbor", cpRole.roleId),
+    )!;
+    expect(resolvePersistedSignerFieldDisplayValue(ownerSig, AG, cpById)).toBe("Caty Biscuit");
+    expect(cpSig.value ?? "").toBe("");
+    expect(recipientFinishGateComplete([cpSig], { initialsEnabled: false })).toBe(false);
+  });
+
+  it("no auto-generated signer name appears in By line before signing", () => {
+    const r = roles();
+    const ownerRole = r[0]!;
+    const cpRole = r[1]!;
+    const portable = buildPreparedPortable();
+    const hydrated = applyVs01PortablePacketToRecipientSession({
+      portable,
+      documentId: DOC,
+      lockedCounterpartyId: cpRole.vs01CounterpartyId ?? "cp_harbor",
+      lockedSignerRoleId: cpRole.roleId,
+      recipientName: "Harbor Peak Automation LLC",
+      recipientEmail: CP_EMAIL,
+    });
+    const cpById = new Map(hydrated.counterparties.map((c) => [c.id, c]));
+    for (const f of hydrated.fields.filter((x) => x.type === "signature")) {
+      expect(resolvePersistedSignerFieldDisplayValue(f, AG, cpById)).toBe("");
+    }
+    const ownerPrepared = portable.fields.find(
+      (f) => f.assignedSignerRoleId === ownerRole.roleId && f.type === "signature",
+    );
+    expect((ownerPrepared?.value ?? "").trim()).toBe("Caty Biscuit");
+    const ownerHydrated = hydrated.fields.find(
+      (f) => f.assignedSignerRoleId === ownerRole.roleId && f.type === "signature",
+    );
+    expect(ownerHydrated?.value ?? "").toBe("");
   });
 });

@@ -141,7 +141,7 @@ describe("recipientSigningFieldUtils", () => {
     const ownerRole = "role_owner";
     const cpRole = "role_cp";
     const ownerField = field("signature", { assignedSignerRoleId: ownerRole, value: "Pat Signer" });
-    patchSignerPacketStatus(AG, ownerRole, "signed");
+    patchSignerPacketStatus(AG, ownerRole, "signed", [ownerRole, cpRole]);
     const stripped = stripLockedSignerEditableValuesOnHydrate([ownerField], AG, cpRole);
     expect(stripped[0]?.value).toBe("Pat Signer");
   });
@@ -149,6 +149,7 @@ describe("recipientSigningFieldUtils", () => {
   it("does not strip server-persisted signature for completed signer on party 2 hydrate", () => {
     const ownerRole = "role_owner";
     const ownerField = field("signature", { assignedSignerRoleId: ownerRole, value: "Pat Signer" });
+    patchSignerPacketStatus(AG, ownerRole, "signed", [ownerRole]);
     const stripped = stripLockedSignerEditableValuesOnHydrate([ownerField], AG, ownerRole, {
       hydrationSource: "server_packet",
     });

@@ -41,7 +41,9 @@ import {
   recipientEditableFieldIsComplete,
   recipientFinishGateComplete,
   recipientFinishGateEditableFields,
+  recipientSignatureFieldKey,
   recipientSigningActionsLabel,
+  stripLockedSignerEditableValuesOnHydrate,
 } from "./recipientSigningFieldUtils";
 import { isVs01InitialsEnabledForPacket } from "./vs01RecipientSignerMarksHydration";
 import {
@@ -370,7 +372,13 @@ export function RecipientSigningView({
     if (hydratedRef.current || documentFields.length === 0) return;
     hydratedRef.current = true;
     logVs01PersistedGeometryHash("recipient_signing_hydration", documentFields);
-    onRecipientFieldsChange((prev) => hydrateRecipientSigningFields(prev, cpById));
+    onRecipientFieldsChange((prev) =>
+      hydrateRecipientSigningFields(
+        stripLockedSignerEditableValuesOnHydrate(prev, recipientAgreementId, lockedSignerRoleId ?? null),
+        cpById,
+        { preserveEditableValues: true, agreementId: recipientAgreementId },
+      ),
+    );
   }, [documentFields.length, cpById, onRecipientFieldsChange, documentFields]);
 
   useEffect(() => {
@@ -554,9 +562,18 @@ export function RecipientSigningView({
   const updateField = useCallback(
     (id: string, patch: Partial<Vs01RecipientPlacedField>) => {
       onRecipientFieldsChange((prev) => {
-        const target = prev.find((f) => f.id === id);
+        let target = prev.find((f) => f.id === id);
+        if (!target) {
+          const fromDoc = documentFields.find((f) => f.id === id);
+          if (!fromDoc) return prev;
+          const key = recipientSignatureFieldKey(fromDoc);
+          target =
+            prev.find(
+              (f) =>
+                isRecipientSigningEditableType(f.type) && recipientSignatureFieldKey(f) === key,
+            ) ?? fromDoc;
+        }
         if (
-          !target ||
           !recipientFieldBelongsToLockedSigner(target, lockedCp, lockedSignerRoleId ?? null) ||
           !isRecipientSigningEditableType(target.type)
         ) {
@@ -565,7 +582,7 @@ export function RecipientSigningView({
           if (diag || dev) {
             // eslint-disable-next-line no-console
             console.warn("[vs01-recipient-role-scope]", {
-          event: "cross_signer_field_blocked",
+              event: "cross_signer_field_blocked",
               fieldIdShort: id.slice(0, 8),
               reason: "not_assigned_to_locked_signer",
             });
@@ -573,7 +590,7 @@ export function RecipientSigningView({
           return prev;
         }
         if (
-          target?.autoInitials &&
+          target.autoInitials &&
           target.type === "initials" &&
           typeof patch.value === "string"
         ) {
@@ -581,13 +598,17 @@ export function RecipientSigningView({
           return prev.map((f) =>
             f.autoInitials && f.type === "initials" && f.counterpartyId === cp
               ? { ...f, value: patch.value }
-              : f
+              : f,
           );
         }
-        return prev.map((f) => (f.id === id ? { ...f, ...patch } : f));
+        const targetId = target.id;
+        if (!prev.some((f) => f.id === targetId)) {
+          return [...prev, { ...target, ...patch }];
+        }
+        return prev.map((f) => (f.id === targetId ? { ...f, ...patch } : f));
       });
     },
-    [onRecipientFieldsChange, lockedCp, lockedSignerRoleId]
+    [onRecipientFieldsChange, lockedCp, lockedSignerRoleId, documentFields],
   );
 
   const goPrev = useCallback(() => {

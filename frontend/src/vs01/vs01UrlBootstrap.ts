@@ -164,6 +164,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
           recipientLockedSignerRoleId,
         ),
         cpMap,
+        { agreementId: recipientAgreementId },
       );
       hydrationSource = "url_manifest";
     } else {
@@ -199,6 +200,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
         recipientLockedSignerRoleId,
       ),
       cpMap,
+      { agreementId: recipientAgreementId },
     );
     hydrationSource = "url_manifest";
   } else {
@@ -232,6 +234,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
           recipientLockedSignerRoleId,
         ),
         cpMap,
+        { agreementId: recipientAgreementId },
       );
       hydrationSource = "stored_manifest";
     }

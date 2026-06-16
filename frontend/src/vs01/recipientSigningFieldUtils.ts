@@ -27,6 +27,15 @@ function counterpartyForField(
   return cpById.get(field.counterpartyId.trim());
 }
 
+/** Stable key for matching signature fields across manifest merges. */
+export function recipientSignatureFieldKey(f: Vs01RecipientPlacedField): string {
+  const rid = (f.assignedSignerRoleId ?? "").trim();
+  if (rid) return `role:${rid}`;
+  const cp = f.counterpartyId.trim();
+  const pi = f.assignedPartyIndex ?? -1;
+  return `party:${pi}:${cp}`;
+}
+
 /** Stable key matching {@link patchSignerPacketStatus} / handoff rows. */
 export function signerKeyForRecipientField(field: Vs01RecipientPlacedField): string {
   const role = (field.assignedSignerRoleId ?? "").trim();
@@ -49,16 +58,20 @@ export function isRecipientSignerMarkedComplete(
 
 /**
  * Resolved display value for read-only metadata fields (printed name, title, email, date).
+ * Signature/initials never auto-fill from metadata or prepare-stored values.
  */
 export function resolveRecipientSigningAutoValue(
   field: Vs01RecipientPlacedField,
   cpById: Map<string, Vs01Counterparty>,
+  agreementId?: string | null,
 ): string {
   const cp = counterpartyForField(field, cpById);
   const partyName = cp?.name.trim() || "";
   const signerName = (cp?.signerName ?? "").trim();
   const signerTitle = (cp?.signerTitle ?? "").trim();
   const email = (cp?.signerEmail ?? cp?.email ?? field.assignedSignerEmail ?? "").trim();
+  const signerKey = signerKeyForRecipientField(field);
+  const signerDone = isRecipientSignerMarkedComplete(agreementId, signerKey);
 
   switch (field.type) {
     case "printed_name":
@@ -68,8 +81,14 @@ export function resolveRecipientSigningAutoValue(
       return typeof field.value === "string" ? field.value.trim() : "";
     case "email":
       return isPlausibleEmail(email) ? email : "";
-    case "date":
-      return todayIsoDate();
+    case "date": {
+      if (!signerDone) return "";
+      const stored = typeof field.value === "string" ? field.value.trim() : "";
+      return stored || todayIsoDate();
+    }
+    case "signature":
+    case "initials":
+      return "";
     default:
       return typeof field.value === "string" ? field.value.trim() : "";
   }
@@ -113,14 +132,12 @@ export function resolvePersistedSignerFieldDisplayValue(
   cpById: Map<string, Vs01Counterparty>,
 ): string {
   if (isRecipientSigningEditableType(field.type)) {
-    const v = typeof field.value === "string" ? field.value.trim() : "";
-    if (v) return v;
     const signerKey = signerKeyForRecipientField(field);
-    if (isRecipientSignerMarkedComplete(agreementId, signerKey)) {
-      return v;
-    }
+    if (!isRecipientSignerMarkedComplete(agreementId, signerKey)) return "";
+    const v = typeof field.value === "string" ? field.value.trim() : "";
+    return v;
   }
-  return resolveRecipientSigningAutoValue(field, cpById);
+  return resolveRecipientSigningAutoValue(field, cpById, agreementId);
 }
 
 /** Count distinct signing actions for the current signer (signature + optional initials). */
@@ -203,11 +220,7 @@ export function recipientFieldStatusPill(args: {
   const signerKey = signerKeyForRecipientField(field);
 
   if (!isCurrentSignerField) {
-    const persisted =
-      isRecipientSigningEditableType(field.type) &&
-      typeof field.value === "string" &&
-      field.value.trim().length > 0;
-    if (persisted || isRecipientSignerMarkedComplete(agreementId, signerKey)) {
+    if (isRecipientSignerMarkedComplete(agreementId, signerKey)) {
       return "signed";
     }
     return "waiting";
@@ -246,44 +259,42 @@ export function recipientFieldStatusPillLabel(pill: RecipientFieldStatusPill): s
 
 export type RecipientSigningHydrationSource = "server_packet" | "local";
 
-/** Clear signature/initials values for the locked signer unless that signer already finished (fresh session). */
+/**
+ * Clear prepare-stored signature/initials for any signer not marked complete.
+ * Never treat owner typedName or metadata as a completed signature before Finish signing.
+ */
 export function stripLockedSignerEditableValuesOnHydrate(
   fields: Vs01RecipientPlacedField[],
   agreementId: string | null | undefined,
-  lockedSignerRoleId: string | null,
-  opts?: { hydrationSource?: RecipientSigningHydrationSource },
+  _lockedSignerRoleId: string | null,
+  _opts?: { hydrationSource?: RecipientSigningHydrationSource },
 ): Vs01RecipientPlacedField[] {
-  const lock = (lockedSignerRoleId ?? "").trim();
-  if (!lock) return fields;
-  const signerComplete = isRecipientSignerMarkedComplete(agreementId, lock);
-  const preserveServer = opts?.hydrationSource === "server_packet";
   return fields.map((f) => {
-    const eff = (f.assignedSignerRoleId ?? "").trim();
-    const belongsToLock = eff ? eff === lock : false;
-    if (!belongsToLock || !isRecipientSigningEditableType(f.type)) return f;
-    if (signerComplete) return f;
+    if (!isRecipientSigningEditableType(f.type)) return f;
     const signerKey = signerKeyForRecipientField(f);
     if (isRecipientSignerMarkedComplete(agreementId, signerKey)) return f;
     const v = typeof f.value === "string" ? f.value.trim() : "";
-    if (f.type === "signature" && !v) return { ...f, value: "" };
-    if (preserveServer && v) return f;
-    return v ? { ...f, value: "" } : f;
+    if (!v) return f;
+    return { ...f, value: "" };
   });
 }
 
-/** Hydrate read-only metadata values; keep signature/initials empty for signer entry. */
+/** Hydrate read-only metadata values; keep signature/initials empty until that signer finishes. */
 export function hydrateRecipientSigningFields(
   fields: Vs01RecipientPlacedField[],
   cpById: Map<string, Vs01Counterparty>,
-  opts?: { preserveEditableValues?: boolean },
+  opts?: { preserveEditableValues?: boolean; agreementId?: string | null },
 ): Vs01RecipientPlacedField[] {
+  const agreementId = opts?.agreementId;
   return fields.map((f) => {
     if (isRecipientSigningEditableType(f.type)) {
+      const signerKey = signerKeyForRecipientField(f);
       const v = typeof f.value === "string" ? f.value.trim() : "";
+      if (isRecipientSignerMarkedComplete(agreementId, signerKey) && v) return f;
       if (opts?.preserveEditableValues && v) return f;
-      return v ? f : { ...f, value: "" };
+      return { ...f, value: "" };
     }
-    const auto = resolveRecipientSigningAutoValue(f, cpById);
+    const auto = resolveRecipientSigningAutoValue(f, cpById, agreementId);
     return { ...f, value: auto };
   });
 }

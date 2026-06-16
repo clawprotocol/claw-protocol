@@ -41,7 +41,7 @@ describe("QA363 signer-role isolation", () => {
     const stripped = stripLockedSignerEditableValuesOnHydrate([ownerField, cpField], AG, cpRole);
     const ownerAfter = stripped.find((f) => f.id === "owner_sig");
     const cpAfter = stripped.find((f) => f.id === "cp_sig");
-    expect(ownerAfter?.value).toBe("Tom Thumb");
+    expect(ownerAfter?.value).toBe("");
     expect(cpAfter?.value).toBe("");
   });
 

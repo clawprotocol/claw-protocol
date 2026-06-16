@@ -8,6 +8,7 @@ import {
   recipientFieldBelongsToLockedSigner,
   type Vs01PrepareSigningRole,
 } from "./vs01SignerFieldAssignment";
+import { stripLockedSignerEditableValuesOnHydrate } from "./recipientSigningFieldUtils";
 import { buildFullPacketManifestFromCanonicalModel } from "./vs01SigningPacketManifest";
 import type { Vs01SigningPacketModel } from "./buildVs01SigningPacketModel";
 import { isVs01InitialsEnabledForPacket } from "./vs01RecipientSignerMarksHydration";
@@ -56,7 +57,12 @@ export function alignRecipientSignatureFieldsToCanonicalModel(args: {
   for (const canon of canonicalSigs) {
     const key = signatureFieldKey(canon);
     if (seenKeys.has(key)) continue;
-    out.push({ ...canon, value: typeof canon.value === "string" ? canon.value : "" });
+    const partyIndex = canon.assignedPartyIndex ?? -1;
+    const partyDup = out.some(
+      (f) => f.type === "signature" && (f.assignedPartyIndex ?? -1) === partyIndex,
+    );
+    if (partyDup) continue;
+    out.push({ ...canon, value: "" });
   }
   return out;
 }
@@ -107,12 +113,21 @@ export function resolveRecipientSigningDocumentFields(args: {
   const did = (args.documentId ?? "").trim();
   const portable = did ? loadVs01CanonicalPacketPortable(did) : null;
   const initialsEnabled = isVs01InitialsEnabledForPacket(portable);
+  const agreementId = portable?.seed.agreementId ?? null;
 
-  let baseFields = args.recipientFields;
-  if (portable?.fields.length) {
-    baseFields = initialsEnabled
-      ? [...portable.fields]
-      : portable.fields.filter((f) => f.type !== "initials");
+  let baseFields: Vs01RecipientPlacedField[];
+  if (args.recipientFields.length > 0) {
+    baseFields = [...args.recipientFields];
+  } else if (portable?.fields.length) {
+    baseFields = stripLockedSignerEditableValuesOnHydrate(
+      initialsEnabled
+        ? [...portable.fields]
+        : portable.fields.filter((f) => f.type !== "initials"),
+      agreementId,
+      args.lockedSignerRoleId,
+    );
+  } else {
+    baseFields = [];
   }
 
   if (!ownerRole || roles.length < 2) {

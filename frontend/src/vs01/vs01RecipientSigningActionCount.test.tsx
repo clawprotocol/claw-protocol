@@ -123,7 +123,7 @@ describe("Test364 recipient signing action counts", () => {
 
   it("shows prior signer signature from persisted field value", () => {
     const ownerSig = sigField("owner_sig", OWNER_ROLE, OWNER_CP, "Hue Lorrey");
-    patchSignerPacketStatus(AG, OWNER_ROLE, "signed");
+    patchSignerPacketStatus(AG, OWNER_ROLE, "signed", [OWNER_ROLE, CP_ROLE]);
     const cpById = new Map([
       [OWNER_CP, { id: OWNER_CP, name: "Owner Co", email: "o@test.com" }],
     ]);
