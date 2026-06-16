@@ -417,7 +417,9 @@ export function AppDashboard() {
   const handleFocusAgreementReviewStatus = useCallback((agreementId: string) => {
     const id = agreementId.trim();
     if (!id) return;
-    const el = document.querySelector(`[data-testid="creator-dashboard-agreement-${id}"]`);
+    const el =
+      document.querySelector(`[data-testid="lawdog-agreement-row-${id}"]`) ??
+      document.querySelector(`[data-testid="creator-dashboard-agreement-${id}"]`);
     if (el instanceof HTMLElement) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.focus({ preventScroll: true });
@@ -728,6 +730,7 @@ export function AppDashboard() {
                 draft={draftByAgreementId[featuredRow.id] ?? null}
                 onPrimaryAction={handleWhatsNextPrimaryAction}
                 onNavigate={(path) => withClearEntry(() => navigate(path))}
+                onFocusAgreement={handleFocusAgreementReviewStatus}
                 onPrepareSignatureLinks={handlePrepareSignatureLinks}
                 prepareBusy={prepareBusyAgreementId === featuredRow.id}
                 prepareNotice={prepareNoticeByAgreementId[featuredRow.id] ?? null}

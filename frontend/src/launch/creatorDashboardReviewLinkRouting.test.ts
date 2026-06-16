@@ -5,6 +5,7 @@ import {
   creatorDashboardFocusAgreementPath,
   creatorDashboardPrepareSignatureLinksPath,
   creatorDashboardReviewLinkReadyPath,
+  creatorDashboardSignedAgreementViewPath,
   creatorDashboardUsesManualReviewLinkPage,
   isAppDashboardPathname,
   shouldRedirectLegacyDoneToPrepareSignatureLinks,
@@ -36,8 +37,9 @@ describe("creatorDashboardReviewLinkRouting", () => {
     expect(creatorDashboardUsesManualReviewLinkPage()).toBe(false);
   });
 
-  it("builds dashboard focus, prepare, and completed proof paths", () => {
+  it("builds dashboard focus, prepare, completed proof, and signed view paths", () => {
     expect(creatorDashboardCompletedProofPath("ag_1")).toBe("/app/done/ag_1");
+    expect(creatorDashboardSignedAgreementViewPath("ag_1")).toBe("/app/agreements/ag_1/view-signed");
     expect(creatorDashboardReviewLinkReadyPath("ag_1")).toBe("/app/done/ag_1");
     expect(creatorDashboardFocusAgreementPath("ag_1")).toBe("/app?focus=ag_1");
     expect(creatorDashboardPrepareSignatureLinksPath("ag_1")).toBe(

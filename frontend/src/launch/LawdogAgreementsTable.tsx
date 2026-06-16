@@ -6,7 +6,7 @@ import {
   displayCreatorAgreementTitle,
 } from "./creatorDashboardPresentation";
 import { CREATOR_MANAGE_RECIPIENTS_LABEL } from "./creatorDashboardCopy";
-import { creatorDashboardCompletedProofPath } from "./creatorDashboardReviewLinkRouting";
+import { CREATOR_DOWNLOAD_COMING_SOON_LABEL } from "./creatorDashboardCopy";
 import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
 import {
   deriveLawdogProductStatus,
@@ -52,8 +52,7 @@ export function LawdogAgreementsTable(props: Props) {
             const internalStatus = deriveCreatorDashboardStatus(row);
             const productStatus = deriveLawdogProductStatus(row, rowProgress);
             const openAction = creatorDashboardPrimaryAction(row);
-            const donePath = creatorDashboardCompletedProofPath(row.id);
-            const canDownload = internalStatus === "completed";
+            const canDownload = false;
             const contentUnavailable = row.content_unavailable === true;
 
             return (
@@ -144,12 +143,13 @@ export function LawdogAgreementsTable(props: Props) {
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
                       data-testid={`lawdog-action-download-${row.id}`}
-                      disabled={!canDownload}
+                      disabled={!canDownload || contentUnavailable}
+                      title={!canDownload ? CREATOR_DOWNLOAD_COMING_SOON_LABEL : undefined}
                       onClick={() => {
-                        if (canDownload) onNavigate(donePath);
+                        if (!canDownload || contentUnavailable) return;
                       }}
                     >
-                      Download
+                      {canDownload ? "Download" : CREATOR_DOWNLOAD_COMING_SOON_LABEL}
                     </button>
                     <button
                       type="button"

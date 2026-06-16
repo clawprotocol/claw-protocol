@@ -11,6 +11,7 @@ import {
   creatorDashboardShowManageRecipients,
   creatorDashboardWhatsNextShowPrimaryCta,
   creatorDashboardWhatsNextShowViewAgreement,
+  creatorDashboardWhatsNextShowViewInAgreements,
   deriveCreatorDashboardEffectiveStatus,
   resolveCreatorDashboardSignatureTrackAction,
   resolveCreatorDashboardViewAgreementPath,
@@ -21,6 +22,7 @@ import {
 } from "./creatorDashboardCopy";
 import {
   creatorDashboardPrepareSignatureLinksPath,
+  creatorDashboardSignedAgreementViewPath,
   creatorDashboardSigningStatusPath,
 } from "./creatorDashboardReviewLinkRouting";
 
@@ -167,7 +169,7 @@ describe("creatorDashboardSignatureTrack", () => {
     expect(action.kind).toBe("review_suggested_changes");
     expect(action.label).toBe(CREATOR_REVIEW_SUGGESTED_CHANGES_LABEL);
     expect(action.path).toBe("/app/review-changes/ag_track");
-    expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(true);
+    expect(creatorDashboardWhatsNextShowPrimaryCta(row, gate, action)).toBe(true);
   });
 
   it("offers view agreement path during normal pending review", () => {
@@ -178,7 +180,7 @@ describe("creatorDashboardSignatureTrack", () => {
     const row = indexRow({ review_approvals_completed: 0 });
     const gate = resolveCreatorDashboardReviewGate(row, [], { draft: pendingDraft });
     const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft: pendingDraft });
-    expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(false);
+    expect(creatorDashboardWhatsNextShowPrimaryCta(row, gate, action)).toBe(false);
     expect(creatorDashboardWhatsNextShowViewAgreement(row, gate, action)).toBe(true);
     expect(resolveCreatorDashboardViewAgreementPath(row.id)).toBe("/app/agreements/ag_track/view");
   });
@@ -193,7 +195,7 @@ describe("creatorDashboardSignatureTrack", () => {
     const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft: pendingDraft });
     expect(action.kind).toBe("focus_review_status");
     expect(action.label).toBe(CREATOR_TRACK_REVIEW_STATUS_LABEL);
-    expect(creatorDashboardWhatsNextShowPrimaryCta(gate, action)).toBe(false);
+    expect(creatorDashboardWhatsNextShowPrimaryCta(row, gate, action)).toBe(false);
   });
 
   it("shows manage recipients when in_review with zero approvals", () => {
@@ -210,6 +212,17 @@ describe("creatorDashboardSignatureTrack", () => {
     const row = indexRow({});
     const gate = resolveCreatorDashboardReviewGate(row, [], { draft: partyTwoApprovedDraft });
     expect(creatorDashboardShowManageRecipients(row, gate)).toBe(false);
+  });
+
+  it("hides primary CTA and shows view-in-agreements for completed agreements", () => {
+    const row = indexRow({ completed_signed: true });
+    const gate = resolveCreatorDashboardReviewGate(row, [], { draft: partyTwoApprovedDraft });
+    const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft: partyTwoApprovedDraft });
+    expect(action.path).toBe(creatorDashboardSignedAgreementViewPath(row.id));
+    expect(action.path).not.toContain("/app/done/");
+    expect(creatorDashboardWhatsNextShowPrimaryCta(row, gate, action)).toBe(false);
+    expect(creatorDashboardWhatsNextShowViewInAgreements(row, gate)).toBe(true);
+    expect(creatorDashboardWhatsNextShowViewAgreement(row, gate, action)).toBe(false);
   });
 
   it("shows manage recipients from index while draft hydration is pending", () => {

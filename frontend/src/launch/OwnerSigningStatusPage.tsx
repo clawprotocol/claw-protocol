@@ -14,7 +14,7 @@ import {
   CREATOR_DOWNLOAD_PROOF_LABEL,
   CREATOR_VIEW_SIGNED_AGREEMENT_LABEL,
 } from "./creatorDashboardCopy";
-import { creatorDashboardCompletedProofPath } from "./creatorDashboardReviewLinkRouting";
+import { creatorDashboardSignedAgreementViewPath } from "./creatorDashboardReviewLinkRouting";
 import {
   fetchPersistedSigningProgressSnapshot,
   ownerProofReceiptAvailable,
@@ -180,7 +180,7 @@ export function OwnerSigningStatusPage({ agreementId }: OwnerSigningStatusPagePr
             <button
               type="button"
               className="vs01-btn vs01-btn--primary"
-              onClick={() => navigate(creatorDashboardCompletedProofPath(aid))}
+              onClick={() => navigate(creatorDashboardSignedAgreementViewPath(aid))}
             >
               {CREATOR_VIEW_SIGNED_AGREEMENT_LABEL}
             </button>
@@ -219,7 +219,7 @@ export function OwnerSigningStatusPage({ agreementId }: OwnerSigningStatusPagePr
           <button
             type="button"
             className="vs01-btn vs01-btn--primary vs01-btn--auto"
-            onClick={() => navigate(creatorDashboardCompletedProofPath(aid))}
+            onClick={() => navigate(creatorDashboardSignedAgreementViewPath(aid))}
           >
             {CREATOR_VIEW_SIGNED_AGREEMENT_LABEL}
           </button>

@@ -13,7 +13,7 @@ import {
 } from "./creatorDashboardCopy";
 import {
   creatorDashboardFocusAgreementPath,
-  creatorDashboardCompletedProofPath,
+  creatorDashboardSignedAgreementViewPath,
   creatorDashboardSigningStatusPath,
   creatorDashboardPrepareSignatureLinksPath,
   creatorDashboardUsesManualReviewLinkPage,
@@ -115,7 +115,7 @@ export function resolveCreatorDashboardSignatureTrackAction(
     return {
       kind: "navigate",
       label: CREATOR_VIEW_SIGNED_AGREEMENT_LABEL,
-      path: creatorDashboardCompletedProofPath(row.id),
+      path: creatorDashboardSignedAgreementViewPath(row.id),
       emphasis: "primary",
     };
   }
@@ -180,15 +180,25 @@ export function resolveCreatorDashboardSignatureTrackAction(
   };
 }
 
-/** What's Next hides non-functional pending-review CTAs; status/timeline carry the wait state. */
+/** What's Next hides non-functional pending-review CTAs; completed agreements are informational only. */
 export function creatorDashboardWhatsNextShowPrimaryCta(
+  row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
   action: CreatorDashboardSignatureTrackAction,
 ): boolean {
+  if (deriveCreatorDashboardEffectiveStatus(row, reviewGate) === "completed") return false;
   if (reviewGate.hasOpenChangeRequests) return true;
   if (action.kind === "focus_review_status") return false;
   if (action.kind === "navigate" && action.label === "View Review Status") return false;
   return true;
+}
+
+/** Low-emphasis link to scroll the All Agreements row after completion. */
+export function creatorDashboardWhatsNextShowViewInAgreements(
+  row: WorkspaceIndexAgreement,
+  reviewGate: CreatorDashboardReviewGate,
+): boolean {
+  return deriveCreatorDashboardEffectiveStatus(row, reviewGate) === "completed";
 }
 
 /** Read-only owner agreement view — current review corpus without negotiate workspace chrome. */
@@ -223,6 +233,6 @@ export function creatorDashboardWhatsNextShowViewAgreement(
   action: CreatorDashboardSignatureTrackAction,
 ): boolean {
   if (!reviewGate.authoritative) return false;
-  if (creatorDashboardWhatsNextShowPrimaryCta(reviewGate, action)) return false;
+  if (creatorDashboardWhatsNextShowPrimaryCta(row, reviewGate, action)) return false;
   return deriveCreatorDashboardEffectiveStatus(row, reviewGate) === "in_review";
 }

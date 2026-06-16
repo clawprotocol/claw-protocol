@@ -19,6 +19,11 @@ export function creatorDashboardCompletedProofPath(agreementId: string): string 
   return `/app/done/${encodeURIComponent(agreementId.trim())}`;
 }
 
+/** Owner read-only signed agreement + proof metadata (dashboard Open / completed view). */
+export function creatorDashboardSignedAgreementViewPath(agreementId: string): string {
+  return `/app/agreements/${encodeURIComponent(agreementId.trim())}/view-signed`;
+}
+
 /** Owner VS01 signing progress — per-signer status cards (not legacy /app/send). */
 export function creatorDashboardSigningStatusPath(agreementId: string): string {
   return `/app/signing-status/${encodeURIComponent(agreementId.trim())}`;

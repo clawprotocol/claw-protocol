@@ -713,7 +713,8 @@ describe("AppDashboard creator-centric surface", () => {
 
     expect(screen.getByText(/Fully signed/)).toBeTruthy();
     expect(screen.queryByText(/Signature links not prepared yet/)).toBeNull();
-    expect(screen.getByRole("button", { name: "View signed agreement" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "View signed agreement" })).toBeNull();
+    expect(screen.getByRole("button", { name: "View in agreements" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Prepare and send signing links" })).toBeNull();
   });
 
@@ -745,7 +746,8 @@ describe("AppDashboard creator-centric surface", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Continue signing" })).toBeNull();
-    expect(screen.getByRole("button", { name: "View signed agreement" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "View signed agreement" })).toBeNull();
+    expect(screen.getByTestId(`lawdog-action-open-${agreementId}`)).toBeTruthy();
   });
 
   it("shows the requested empty state", async () => {

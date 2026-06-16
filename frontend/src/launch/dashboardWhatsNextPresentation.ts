@@ -138,7 +138,7 @@ export function deriveWhatsNextNextStep(
 ): string {
   const status = effectiveStatus(row, reviewGate);
   if (status === "signing_in_progress") return "View signing status";
-  if (status === "completed") return "View signed agreement or download proof";
+  if (status === "completed") return "Signed complete";
   if (status === "ready_for_signing" || status === "review_approved") {
     return "Prepare and send signing links";
   }

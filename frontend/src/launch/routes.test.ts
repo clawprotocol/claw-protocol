@@ -13,6 +13,10 @@ describe("matchAppPath", () => {
       kind: "ownerAgreementView",
       agreementId: "abc-123",
     });
+    expect(matchAppPath("/app/agreements/abc-123/view-signed")).toEqual({
+      kind: "ownerSignedAgreementView",
+      agreementId: "abc-123",
+    });
     expect(matchAppPath("/app/agreements/abc-123")).toEqual({
       kind: "agreements",
       sub: { id: "abc-123" },

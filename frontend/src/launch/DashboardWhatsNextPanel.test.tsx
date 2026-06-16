@@ -265,4 +265,25 @@ describe("DashboardWhatsNextPanel", () => {
     expect(onNavigate).toHaveBeenCalledWith("/app/review-changes/ag_whats_next");
     expect(screen.queryByRole("button", { name: "View agreement" })).toBeNull();
   });
+
+  it("completed agreements hide primary CTA and offer view-in-agreements link", () => {
+    const onFocus = vi.fn();
+    render(
+      <DashboardWhatsNextPanel
+        row={indexRow({ completed_signed: true, all_reviewers_approved: true, reviewer_approved: true })}
+        reviewRows={[]}
+        draft={reviewerApprovedDraft}
+        onPrimaryAction={vi.fn()}
+        onNavigate={vi.fn()}
+        onFocusAgreement={onFocus}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "View signed agreement" })).toBeNull();
+    expect(screen.getByTestId("creator-dashboard-action-hidden-ag_whats_next")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View in agreements" })).toBeTruthy();
+    expect(screen.getByTestId("dashboard-whats-next-step").textContent).toContain("Signed complete");
+    fireEvent.click(screen.getByTestId("creator-dashboard-view-in-agreements-ag_whats_next"));
+    expect(onFocus).toHaveBeenCalledWith("ag_whats_next");
+  });
 });

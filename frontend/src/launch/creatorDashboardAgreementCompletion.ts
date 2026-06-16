@@ -4,7 +4,7 @@ import {
   isAgreementFullySignedLocal,
   isAgreementPacketPrepared,
 } from "../vs01/vs01WorkspaceSigningStatus";
-import { creatorDashboardCompletedProofPath } from "./creatorDashboardReviewLinkRouting";
+import { creatorDashboardSignedAgreementViewPath } from "./creatorDashboardReviewLinkRouting";
 
 /** Canonical dashboard completion: server index flag or local VS01 packet snapshot. */
 export function isAgreementCompletedForDashboard(
@@ -38,9 +38,9 @@ export async function resolveCompletedAgreementRoute(agreementId: string): Promi
   const id = agreementId.trim();
   if (!id) return null;
   if (isAgreementCompletedForDashboard({ id, completed_signed: false })) {
-    return creatorDashboardCompletedProofPath(id);
+    return creatorDashboardSignedAgreementViewPath(id);
   }
   const auditSigned = await fetchAgreementAuditSignedFlag(id);
-  if (auditSigned) return creatorDashboardCompletedProofPath(id);
+  if (auditSigned) return creatorDashboardSignedAgreementViewPath(id);
   return null;
 }

@@ -13,6 +13,7 @@ import { SimpleCreatePage } from "./launch/simpleProduct/SimpleCreatePage";
 import { SimpleDonePage } from "./launch/simpleProduct/SimpleDonePage";
 import { OwnerSigningStatusPage } from "./launch/OwnerSigningStatusPage";
 import { OwnerAgreementReadOnlyPage } from "./launch/simpleProduct/OwnerAgreementReadOnlyPage";
+import { OwnerSignedAgreementPage } from "./launch/simpleProduct/OwnerSignedAgreementPage";
 import { OwnerProposalReviewPage } from "./launch/simpleProduct/OwnerProposalReviewPage";
 import { SimpleCheckoutPage } from "./launch/simpleProduct/SimpleCheckoutPage";
 import { SimpleReadyToSendPage } from "./launch/simpleProduct/SimpleReadyToSendPage";
@@ -636,6 +637,8 @@ export function ClawProductApp() {
         return <OwnerProposalReviewPage agreementId={appMatch.agreementId} />;
       case "ownerAgreementView":
         return <OwnerAgreementReadOnlyPage agreementId={appMatch.agreementId} />;
+      case "ownerSignedAgreementView":
+        return <OwnerSignedAgreementPage agreementId={appMatch.agreementId} />;
       case "ownerSigningStatus":
         return <OwnerSigningStatusPage agreementId={appMatch.agreementId} />;
       case "simpleVerification":

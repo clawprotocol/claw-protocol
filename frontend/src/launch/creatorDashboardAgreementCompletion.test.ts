@@ -57,13 +57,13 @@ describe("creatorDashboardAgreementCompletion", () => {
     const action = resolveCreatorDashboardSignatureTrackAction(merged, gate);
     expect(action.label).toBe(CREATOR_VIEW_SIGNED_AGREEMENT_LABEL);
     expect(action.label).not.toBe(CREATOR_CONTINUE_SIGNING_LABEL);
-    expect(action.path).toBe("/app/done/ag_qa362");
+    expect(action.path).toBe("/app/agreements/ag_qa362/view-signed");
   });
 
   it("opens completed view from All Agreements table", () => {
     const merged = mergeWorkspaceAgreementCompletion(row(), true);
     const open = creatorDashboardPrimaryAction(merged);
-    expect(open.path).toBe("/app/done/ag_qa362");
+    expect(open.path).toBe("/app/agreements/ag_qa362/view-signed");
     expect(open.label).toBe(CREATOR_VIEW_SIGNED_AGREEMENT_LABEL);
   });
 
@@ -101,6 +101,8 @@ describe("creatorDashboardAgreementCompletion", () => {
 
   it("resolveCompletedAgreementRoute uses draft audit signed event", async () => {
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementAuditSignedFlag").mockResolvedValue(true);
-    await expect(resolveCompletedAgreementRoute("ag_audit")).resolves.toBe("/app/done/ag_audit");
+    await expect(resolveCompletedAgreementRoute("ag_audit")).resolves.toBe(
+      "/app/agreements/ag_audit/view-signed",
+    );
   });
 });

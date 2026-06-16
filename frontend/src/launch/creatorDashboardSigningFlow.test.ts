@@ -142,11 +142,12 @@ describe("creator dashboard signing flow (Test359)", () => {
 
     const action = resolveCreatorDashboardSignatureTrackAction(row, gate);
     expect(action.label).toBe(CREATOR_VIEW_SIGNED_AGREEMENT_LABEL);
-    expect(action.path).toContain("/app/done/");
-    expect(action.path).not.toContain("/app/send/");
+    expect(action.path).toBe("/app/agreements/ag_test359/view-signed");
+    expect(action.path).not.toContain("/app/done/");
 
     expect(deriveWhatsNextHeadline(row, gate)).toBe("Agreement fully signed");
     expect(deriveWhatsNextProgressLine(row, gate)).toContain("proof record is ready");
+    expect(deriveDashboardWhatsNextPresentation(row, gate).nextStepLabel).toBe("Signed complete");
 
     const kpis = countLawdogDashboardKpis([row]);
     expect(kpis.completedAgreements).toBe(1);

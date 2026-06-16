@@ -12,6 +12,7 @@ import {
 import {
   CREATOR_MANAGE_RECIPIENTS_LABEL,
   CREATOR_VIEW_AGREEMENT_LABEL,
+  CREATOR_VIEW_IN_AGREEMENTS_LABEL,
   CREATOR_DOWNLOAD_PROOF_LABEL,
   logDashboardWhatsNextCtaClick,
 } from "./creatorDashboardCopy";
@@ -29,6 +30,7 @@ import {
   creatorDashboardShowManageRecipients,
   creatorDashboardWhatsNextShowPrimaryCta,
   creatorDashboardWhatsNextShowViewAgreement,
+  creatorDashboardWhatsNextShowViewInAgreements,
   resolveCreatorDashboardSignatureTrackAction,
   resolveCreatorDashboardViewAgreementPath,
 } from "./creatorDashboardSignatureTrack";
@@ -39,6 +41,7 @@ type Props = {
   draft?: AgreementDraft | null;
   onPrimaryAction: (row: WorkspaceIndexAgreement) => void;
   onNavigate?: (path: string) => void;
+  onFocusAgreement?: (agreementId: string) => void;
   onPrepareSignatureLinks?: (agreementId: string) => void;
   prepareBusy?: boolean;
   prepareNotice?: string | null;
@@ -52,6 +55,7 @@ export function DashboardWhatsNextPanel(props: Props) {
     draft = null,
     onPrimaryAction,
     onNavigate,
+    onFocusAgreement,
     onPrepareSignatureLinks,
     prepareBusy = false,
     prepareNotice = null,
@@ -85,8 +89,9 @@ export function DashboardWhatsNextPanel(props: Props) {
   const showPrepare =
     Boolean(onPrepareSignatureLinks) &&
     creatorDashboardShouldPrepareSignatureLinksFromTrack(row, reviewGate, draft);
-  const showPrimaryCta = creatorDashboardWhatsNextShowPrimaryCta(reviewGate, trackAction);
+  const showPrimaryCta = creatorDashboardWhatsNextShowPrimaryCta(row, reviewGate, trackAction);
   const showViewAgreement = creatorDashboardWhatsNextShowViewAgreement(row, reviewGate, trackAction);
+  const showViewInAgreements = creatorDashboardWhatsNextShowViewInAgreements(row, reviewGate);
   const showManageRecipients = creatorDashboardShowManageRecipients(row, reviewGate);
   const completedHandoff =
     presentation.status === "completed" ? readPaidProVs01PostSignHandoff(row.id) : null;
@@ -138,6 +143,15 @@ export function DashboardWhatsNextPanel(props: Props) {
       targetRoute: "",
     });
     setManageRecipientsOpen((open) => !open);
+  };
+
+  const handleViewInAgreementsClick = () => {
+    logDashboardWhatsNextCtaClick({
+      agreementId: row.id,
+      action: "view_in_agreements",
+      targetRoute: `/app?focus=${encodeURIComponent(row.id)}`,
+    });
+    onFocusAgreement?.(row.id);
   };
 
   return (
@@ -224,6 +238,21 @@ export function DashboardWhatsNextPanel(props: Props) {
               }}
             >
               {CREATOR_DOWNLOAD_PROOF_LABEL}
+            </button>
+          ) : null}
+          {showViewInAgreements ? (
+            <button
+              type="button"
+              className="text-sm font-medium text-slate-300 underline-offset-4 transition-colors hover:text-white hover:underline"
+              data-testid={`creator-dashboard-view-in-agreements-${row.id}`}
+              data-dashboard-whats-next-cta="view_in_agreements"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleViewInAgreementsClick();
+              }}
+            >
+              {CREATOR_VIEW_IN_AGREEMENTS_LABEL}
             </button>
           ) : null}
           {showViewAgreement ? (

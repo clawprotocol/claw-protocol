@@ -14,6 +14,8 @@ export const CREATOR_OPEN_REVIEW_LINK_PAGE_LABEL = "Open review link page";
 export const CREATOR_TRACK_REVIEW_STATUS_LABEL = "Track review status";
 
 export const CREATOR_VIEW_AGREEMENT_LABEL = "View agreement";
+export const CREATOR_VIEW_IN_AGREEMENTS_LABEL = "View in agreements";
+export const CREATOR_DOWNLOAD_COMING_SOON_LABEL = "Download coming soon";
 
 export const CREATOR_MANAGE_RECIPIENTS_LABEL = "Manage recipients";
 

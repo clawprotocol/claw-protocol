@@ -36,7 +36,7 @@ import {
 } from "./creatorDashboardCopy";
 import {
   creatorDashboardFocusAgreementPath,
-  creatorDashboardCompletedProofPath,
+  creatorDashboardSignedAgreementViewPath,
   creatorDashboardSigningStatusPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
@@ -146,7 +146,7 @@ export function creatorDashboardPrimaryAction(
     case "completed":
       return {
         label: CREATOR_VIEW_SIGNED_AGREEMENT_LABEL,
-        path: creatorDashboardCompletedProofPath(row.id),
+        path: creatorDashboardSignedAgreementViewPath(row.id),
         emphasis: "primary",
       };
     case "signing_in_progress":
@@ -214,14 +214,6 @@ export function creatorDashboardSupplementalActions(
     return out;
   }
 
-  if (status === "completed" || status === "signing_in_progress") {
-    out.push({
-      label: "Open workspace",
-      path: creatorDashboardCompletedProofPath(row.id),
-      testIdSuffix: "open-workspace",
-    });
-  }
-
   if (status === "draft" && manualReviewLinkPage) {
     out.push({ label: "Continue review", path: `/app/send/${id}`, testIdSuffix: "continue-review" });
   }
@@ -230,13 +222,6 @@ export function creatorDashboardSupplementalActions(
       label: CREATOR_VIEW_SIGNING_STATUS_LABEL,
       path: creatorDashboardSigningStatusPath(row.id),
       testIdSuffix: "open-signing-packet",
-    });
-  }
-  if (status === "completed") {
-    out.push({
-      label: "Download final",
-      path: creatorDashboardCompletedProofPath(row.id),
-      testIdSuffix: "download-final",
     });
   }
   return out;
