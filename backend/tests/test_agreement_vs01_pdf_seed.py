@@ -4,6 +4,7 @@ import pytest
 
 from backend.services.agreement_vs01_pdf_seed import (
     VS01_SIGNING_STORY_MARGIN_BOTTOM_PT,
+    _completed_signed_export_user_css,
     _recipient_preview_export_user_css,
     _vs01_signing_story_user_css,
     agreement_rendered_html_to_pdf_bytes,
@@ -20,7 +21,16 @@ def test_vs01_signing_story_user_css_has_letter_page_and_bottom_margin() -> None
     css = _vs01_signing_story_user_css()
     assert "@page" in css
     assert "letter" in css
-    assert "72pt" in css
+    assert "300pt" in css
+
+
+def test_completed_signed_export_user_css_bolds_headings_and_script_signatures() -> None:
+    css = _completed_signed_export_user_css()
+    assert "completed-signed-section-heading" in css
+    assert "font-weight:700" in css
+    assert "completed-signed-signature-script" in css
+    assert "Brush Script MT" in css
+    assert "48pt" in css
 
 
 def test_recipient_preview_export_user_css_uses_georgia() -> None:

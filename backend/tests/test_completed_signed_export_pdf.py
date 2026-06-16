@@ -9,7 +9,10 @@ from fastapi.testclient import TestClient
 from backend.routers import agreements_v2_api as av2
 from backend.services.agreement_pdf_story_capability import reset_agreement_pdf_story_capability_cache_for_tests
 from backend.services.agreement_vs01_pdf_seed import AgreementVs01PdfBuild
-from backend.services.completed_signed_pdf_export import build_completed_signed_pdf_bytes
+from backend.services.completed_signed_pdf_export import (
+    build_completed_signed_pdf_bytes,
+    completed_signed_corpus_to_export_html,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -32,13 +35,33 @@ def completed_pdf_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(app)
 
 
-def _fully_executed_draft_dict() -> dict:
-    corpus = (
-        "A" * 120
-        + "\n\nIN WITNESS WHEREOF\n"
-        "CLIENT:\nBy: Alice Example\nDate: June 1, 2026\n"
-        "SERVICE PROVIDER:\nBy: Bob Example\nDate: June 1, 2026\n"
+def _sample_signed_corpus() -> str:
+    return (
+        "CONSULTING AND IMPLEMENTATION AGREEMENT\n\n"
+        "This Agreement is entered into as of the Effective Date by and between the parties.\n\n"
+        "1. Services and Engagement Structure\n"
+        "Service Provider shall perform consulting services as described herein.\n\n"
+        "5. Client Responsibilities and Project Cooperation\n"
+        "Unless Client approves otherwise, milestones apply as stated.\n\n"
+        "5.1 Client Ownership of Paid Deliverables\n"
+        "Client owns paid deliverables upon payment in full.\n\n"
+        "IN WITNESS WHEREOF, the parties execute this Agreement.\n\n"
+        "CLIENT:\n"
+        "Red Mesa Logistics LLC\n"
+        "By: Alice Example\n"
+        "Name: Alice Example\n"
+        "Title: CEO\n"
+        "Date: June 16, 2026\n\n"
+        "SERVICE PROVIDER:\n"
+        "Harbor Peak Automation LLC\n"
+        "By: Bob Example\n"
+        "Name: Bob Example\n"
+        "Title: COO\n"
+        "Date: June 16, 2026"
     )
+
+
+def _fully_executed_draft_dict() -> dict:
     return {
         "id": "ag-signed-1",
         "title": "Services Agreement",
@@ -57,11 +80,40 @@ def _fully_executed_draft_dict() -> dict:
         ],
         "vs01_signing_packet_v1": {
             "fully_executed_snapshot": {
-                "corpus_plain": corpus,
+                "corpus_plain": _sample_signed_corpus(),
                 "captured_at": "2026-06-01T00:00:00Z",
             }
         },
     }
+
+
+def test_completed_signed_export_html_bolds_headings_and_normal_body() -> None:
+    html_out = completed_signed_corpus_to_export_html(_sample_signed_corpus())
+    assert '<h1 class="completed-signed-doc-title">CONSULTING AND IMPLEMENTATION AGREEMENT</h1>' in html_out
+    assert (
+        '<h2 class="completed-signed-section-heading">1. Services and Engagement Structure</h2>' in html_out
+    )
+    assert (
+        '<h2 class="completed-signed-section-heading">5. Client Responsibilities and Project Cooperation</h2>'
+        in html_out
+    )
+    assert (
+        '<h3 class="completed-signed-subsection-heading">5.1 Client Ownership of Paid Deliverables</h3>' in html_out
+    )
+    assert '<p class="completed-signed-body">Service Provider shall perform consulting services' in html_out
+    assert "<pre" not in html_out
+    assert "completed-signed-section-heading" in html_out
+    assert html_out.count("completed-signed-body") >= 2
+
+
+def test_completed_signed_export_html_styles_by_signature_values() -> None:
+    html_out = completed_signed_corpus_to_export_html(_sample_signed_corpus())
+    assert 'class="completed-signed-signature-script">Alice Example</span>' in html_out
+    assert 'class="completed-signed-signature-script">Bob Example</span>' in html_out
+    assert 'class="completed-signed-signature-party">CLIENT:</p>' in html_out
+    assert 'class="completed-signed-signature-party">SERVICE PROVIDER:</p>' in html_out
+    assert "Name: Alice Example" in html_out
+    assert 'Name: <span class="completed-signed-signature-script">' not in html_out
 
 
 def test_completed_signed_export_pdf_403_when_not_fully_executed(
@@ -138,16 +190,16 @@ def test_owner_post_and_public_get_return_identical_canonical_pdf(
     assert owner.content == public.content == fixed
 
 
-def test_build_completed_signed_pdf_bytes_ignores_dashboard_html_input(
+def test_build_completed_signed_pdf_bytes_uses_canonical_html_renderer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from backend.routers.agreements_v2_api import AgreementDraft
 
     draft = AgreementDraft.model_validate(_fully_executed_draft_dict())
-    calls: list[str] = []
+    calls: list[tuple[str, dict]] = []
 
-    def capture_html(html: str, **_k):
-        calls.append(html)
+    def capture_html(html: str, **kwargs):
+        calls.append((html, kwargs))
         return AgreementVs01PdfBuild(pdf_bytes=b"%PDF-1.4" + b"x" * 120, render_mode="story_html")
 
     monkeypatch.setattr(
@@ -161,10 +213,14 @@ def test_build_completed_signed_pdf_bytes_ignores_dashboard_html_input(
 
     build_completed_signed_pdf_bytes(agreement_id="ag-signed-1", draft=draft)
     assert len(calls) == 1
-    assert "Alice Example" in calls[0]
-    assert "Bob Example" in calls[0]
-    assert "<pre" in calls[0]
-    assert "dashboard-live-html" not in calls[0]
+    html_arg, kwargs = calls[0]
+    assert "Alice Example" in html_arg
+    assert "Bob Example" in html_arg
+    assert "completed-signed-section-heading" in html_arg
+    assert "completed-signed-signature-script" in html_arg
+    assert "<pre" not in html_arg
+    assert kwargs.get("story_css_profile") == "completed_signed"
+    assert "dashboard-live-html" not in html_arg
 
 
 def test_public_completed_signed_export_pdf_403_when_not_fully_executed(

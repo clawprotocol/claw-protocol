@@ -106,7 +106,7 @@ def _strip_scripts_and_styles(html: str) -> str:
     return s[:_MAX_HTML_CHARS]
 
 
-StoryCssProfile = Literal["vs01", "recipient"]
+StoryCssProfile = Literal["vs01", "recipient", "completed_signed"]
 
 
 def _vs01_signing_story_user_css() -> str:
@@ -122,6 +122,71 @@ def _vs01_signing_story_user_css() -> str:
         "p{margin:0 0 0.65em;}"
         "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"
         "orphans:3;widows:3;margin-top:16pt;padding-top:8pt;}"
+    )
+
+
+# Legal-document Story placement for recipient / completed-signed exports (no VS01 initials band).
+RECIPIENT_STORY_MARGIN_LEFT_PT: Final[int] = 48
+RECIPIENT_STORY_MARGIN_TOP_PT: Final[int] = 44
+RECIPIENT_STORY_MARGIN_RIGHT_PT: Final[int] = 48
+RECIPIENT_STORY_MARGIN_BOTTOM_PT: Final[int] = 48
+
+
+def _story_placement_rect_for_profile(
+    fitz: object,
+    profile: StoryCssProfile,
+) -> object:
+    mediabox = fitz.paper_rect("letter")
+    if profile == "vs01":
+        return mediabox + (
+            VS01_SIGNING_STORY_MARGIN_LEFT_PT,
+            VS01_SIGNING_STORY_MARGIN_TOP_PT,
+            -VS01_SIGNING_STORY_MARGIN_RIGHT_PT,
+            -VS01_SIGNING_STORY_MARGIN_BOTTOM_PT,
+        )
+    return mediabox + (
+        RECIPIENT_STORY_MARGIN_LEFT_PT,
+        RECIPIENT_STORY_MARGIN_TOP_PT,
+        -RECIPIENT_STORY_MARGIN_RIGHT_PT,
+        -RECIPIENT_STORY_MARGIN_BOTTOM_PT,
+    )
+
+
+def _story_user_css_for_profile(profile: StoryCssProfile) -> str:
+    if profile == "recipient":
+        return _recipient_preview_export_user_css()
+    if profile == "completed_signed":
+        return _completed_signed_export_user_css()
+    return _vs01_signing_story_user_css()
+
+
+def _completed_signed_export_user_css() -> str:
+    """
+    Typography for canonical completed signed PDF export — legal headings, normal body,
+    script-style signature names on By: lines.
+    """
+    return (
+        "@page{size:letter;margin:44pt 48pt 48pt 48pt;}"
+        "body{font-family:Georgia,'Times New Roman',Times,serif;font-size:15px;line-height:1.58;"
+        "color:#0f172a;margin:0;padding:0;}"
+        "article.completed-signed-doc{max-width:42rem;margin:0 auto;}"
+        "h1.completed-signed-doc-title{font-weight:700;font-size:17px;line-height:1.35;"
+        "text-align:center;margin:0 0 1.1em;letter-spacing:0.02em;}"
+        "h2.completed-signed-section-heading{font-weight:700;font-size:15px;line-height:1.45;"
+        "margin:1.05em 0 0.42em;}"
+        "h3.completed-signed-subsection-heading{font-weight:700;font-size:15px;line-height:1.45;"
+        "margin:0.9em 0 0.35em;}"
+        "p.completed-signed-body{margin:0 0 0.62em;font-weight:400;}"
+        "p.completed-signed-witness{font-weight:700;margin:1.35em 0 0.75em;}"
+        "p.completed-signed-signature-party{font-weight:700;margin:1.2em 0 0.35em;"
+        "letter-spacing:0.03em;text-transform:none;}"
+        "p.completed-signed-signature-entity{font-weight:700;margin:0.05em 0 0.55em;}"
+        "p.completed-signed-signature-field{margin:0 0 0.45em;font-weight:400;max-width:26rem;}"
+        "span.completed-signed-signature-script{font-family:'Segoe Script','Brush Script MT',"
+        "'Apple Chancery','Snell Roundhand',cursive;font-size:1.08em;font-weight:400;"
+        "line-height:1.1;color:#111111;}"
+        "footer.ldg-draft-footer{break-inside:avoid;page-break-inside:avoid;"
+        "orphans:3;widows:3;margin-top:20pt;padding-top:10pt;}"
     )
 
 
@@ -204,19 +269,9 @@ def agreement_rendered_html_to_pdf_bytes(
             f"{body_inner}"
             "</body></html>"
         )
-        user_css = (
-            _recipient_preview_export_user_css()
-            if story_css_profile == "recipient"
-            else _vs01_signing_story_user_css()
-        )
+        user_css = _story_user_css_for_profile(story_css_profile)
 
-        mediabox = fitz.paper_rect("letter")
-        where = mediabox + (
-            VS01_SIGNING_STORY_MARGIN_LEFT_PT,
-            VS01_SIGNING_STORY_MARGIN_TOP_PT,
-            -VS01_SIGNING_STORY_MARGIN_RIGHT_PT,
-            -VS01_SIGNING_STORY_MARGIN_BOTTOM_PT,
-        )
+        where = _story_placement_rect_for_profile(fitz, story_css_profile)
 
         try:
             buf = io.BytesIO()
@@ -225,7 +280,7 @@ def agreement_rendered_html_to_pdf_bytes(
             more = True
             pages = 0
             while more and pages < _MAX_STORY_PAGES:
-                dev = writer.begin_page(mediabox)
+                dev = writer.begin_page(fitz.paper_rect("letter"))
                 more, _filled = story.place(where)
                 story.draw(dev)
                 writer.end_page()
