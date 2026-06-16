@@ -272,6 +272,125 @@ def test_vs01_signer_complete_retries_email_after_prior_failure(client: TestClie
     assert len(email_events) == 1
 
 
+def test_vs01_signer_complete_sends_email_for_owner_and_party_roles(client: TestClient) -> None:
+    aid = _create_two_signer_agreement(client)
+    draft = load_draft(aid)
+    draft["parties"] = [
+        {"id": "p1", "name": "Owner LLC", "role": "owner", "email": "owner@example.test"},
+        {"id": "p2", "name": "Counterparty LLC", "role": "party", "email": "cp@example.test"},
+    ]
+    save_draft({**draft, "id": aid})
+
+    client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        headers=_org_headers(),
+        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
+    )
+
+    class _Ok:
+        ok = True
+
+    captured: list[str] = []
+
+    def _capture_send(*, to: str, **kwargs: object) -> _Ok:
+        captured.append(to)
+        return _Ok()
+
+    with patch(
+        "backend.services.email.signing_completion_delivery.fully_executed_snapshot_ready",
+        return_value=True,
+    ), patch(
+        "backend.services.email.signing_completion_delivery.send_email_non_fatal",
+        side_effect=_capture_send,
+    ), patch(
+        "backend.services.email.signing_completion_delivery.email_configured",
+        return_value=True,
+    ), patch(
+        "backend.services.email.signing_completion_delivery.app_public_origin",
+        return_value="https://app.example.test",
+    ):
+        res = client.post(
+            f"/api/agreements/{aid}/vs01-signer-complete",
+            headers=_org_headers(),
+            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["fully_executed"] is True
+    assert body["completion_emails_sent"] is True
+    assert sorted(captured) == ["cp@example.test", "owner@example.test"]
+    draft_after = client.get(f"/api/agreements/{aid}", headers=_org_headers()).json()["draft"]
+    email_events = [
+        e for e in draft_after.get("audit_log", []) if e.get("event_type") == "signing_completion_emails_sent"
+    ]
+    assert len(email_events) == 1
+
+
+def test_vs01_ensure_signed_snapshot_retries_completion_email(client: TestClient) -> None:
+    aid = _create_two_signer_agreement(client)
+    draft = load_draft(aid)
+    draft["parties"] = [
+        {"id": "p1", "name": "Owner LLC", "role": "owner", "email": "owner@example.test"},
+        {"id": "p2", "name": "Counterparty LLC", "role": "party", "email": "cp@example.test"},
+    ]
+    save_draft({**draft, "id": aid})
+    for role, pid in (("role_owner", "p1"), ("role_cp", "p2")):
+        client.post(
+            f"/api/agreements/{aid}/vs01-signer-complete",
+            headers=_org_headers(),
+            json={"signer_role_id": role, "participant_id": pid, "document_id": "doc_vs01"},
+        )
+
+    class _Ok:
+        ok = True
+
+    with patch(
+        "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
+        return_value=None,
+    ):
+        retry_signer = client.post(
+            f"/api/agreements/{aid}/vs01-signer-complete",
+            headers=_org_headers(),
+            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+        )
+    assert retry_signer.json()["completion_emails_sent"] is False
+
+    draft_after_sign = load_draft(aid)
+    snap_corpus = (
+        draft_after_sign["vs01_signing_packet_v1"]["portable"]["seed"]["corpusPlain"]
+        .replace("By: __________________________", "By: Owner LLC", 1)
+        .replace("By: __________________________", "By: Counterparty LLC", 1)
+        .replace("Date: _____________________________", "Date: June 7, 2026", 1)
+        .replace("Date: _____________________________", "Date: June 8, 2026", 1)
+    )
+    stored = dict(draft_after_sign["vs01_signing_packet_v1"])
+    stored["fully_executed_snapshot"] = {
+        "v": 1,
+        "corpus_plain": snap_corpus,
+        "corpus_hash": "testhash",
+        "saved_at": "2026-06-08T00:00:00Z",
+        "signer_role_ids": ["role_owner", "role_cp"],
+    }
+    save_draft({**draft_after_sign, "id": aid, "vs01_signing_packet_v1": stored})
+
+    with patch(
+        "backend.services.email.signing_completion_delivery.send_email_non_fatal",
+        return_value=_Ok(),
+    ), patch(
+        "backend.services.email.signing_completion_delivery.email_configured",
+        return_value=True,
+    ), patch(
+        "backend.services.email.signing_completion_delivery.app_public_origin",
+        return_value="https://app.example.test",
+    ):
+        ensured = client.post(
+            f"/api/agreements/{aid}/vs01-ensure-signed-snapshot",
+            headers=_org_headers(),
+        )
+    assert ensured.status_code == 200
+    assert ensured.json()["completion_emails_sent"] is True
+
+
 def test_vs01_signer_complete_concurrent_final_signer_one_email_set(client: TestClient) -> None:
     from concurrent.futures import ThreadPoolExecutor
 

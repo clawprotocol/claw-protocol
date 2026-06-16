@@ -9,6 +9,7 @@ import pytest
 from backend.services.email.signing_completion_delivery import (
     SIGNING_COMPLETION_EMAILS_SENT_EVENT,
     maybe_send_signing_completion_emails,
+    resolve_signing_completion_email_targets,
 )
 from backend.services.vs01_signer_completion import (
     all_signers_signed_from_audit,
@@ -237,6 +238,99 @@ def test_completion_email_skipped_without_signed_snapshot() -> None:
     ):
         event = maybe_send_signing_completion_emails(agreement_id="ag1", draft=draft)
     assert event is None
+
+
+def test_completion_email_targets_owner_and_party_roles() -> None:
+    draft = {
+        "parties": [
+            {"id": "p1", "name": "Owner LLC", "role": "owner", "email": "owner@example.test"},
+            {"id": "p2", "name": "Counterparty LLC", "role": "party", "email": "cp@example.test"},
+        ],
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "portable": {
+                "roles": [
+                    {
+                        "roleId": "role_owner",
+                        "partyIndex": 0,
+                        "requiresSignature": True,
+                        "signerEmail": "owner@example.test",
+                        "entityName": "Owner LLC",
+                        "signerName": "Pat Owner",
+                    },
+                    {
+                        "roleId": "role_cp",
+                        "partyIndex": 1,
+                        "requiresSignature": True,
+                        "signerEmail": "cp@example.test",
+                        "entityName": "Counterparty LLC",
+                        "signerName": "Pat Counterparty",
+                    },
+                ]
+            },
+        },
+    }
+    targets = resolve_signing_completion_email_targets(draft)
+    emails = sorted(t["email"] for t in targets)
+    assert emails == ["cp@example.test", "owner@example.test"]
+
+
+def test_completion_email_body_includes_completed_timestamp_and_view_link() -> None:
+    draft = _draft_fully_executed_with_snapshot()
+    draft["title"] = "Services Agreement"
+    draft["audit_log"] = [
+        build_signature_completed_event(
+            signer_role_id="role_owner",
+            participant_id="p1",
+            display_name="Pat Owner",
+            document_id="doc1",
+            signed_at="2026-06-07T15:30:00Z",
+            signed_date_iso="2026-06-07",
+            signed_date_display="June 7, 2026",
+            locked_version_id=None,
+            agreement_version_hash=None,
+        ),
+        build_signature_completed_event(
+            signer_role_id="role_cp",
+            participant_id="p2",
+            display_name="Pat Counterparty",
+            document_id="doc1",
+            signed_at="2026-06-08T16:45:00Z",
+            signed_date_iso="2026-06-08",
+            signed_date_display="June 8, 2026",
+            locked_version_id=None,
+            agreement_version_hash=None,
+        ),
+        build_fully_executed_signed_event(signed_at="2026-06-08T16:45:01Z", agreement_version_hash="h"),
+    ]
+
+    captured: list[dict] = []
+
+    class _Ok:
+        ok = True
+
+    def _capture(**kwargs: object) -> _Ok:
+        captured.append(dict(kwargs))
+        return _Ok()
+
+    with patch("backend.services.email.signing_completion_delivery.email_configured", return_value=True), patch(
+        "backend.services.email.signing_completion_delivery.send_email_non_fatal",
+        side_effect=_capture,
+    ), patch(
+        "backend.services.email.signing_completion_delivery.app_public_origin",
+        return_value="https://app.example.test",
+    ):
+        event = maybe_send_signing_completion_emails(agreement_id="ag1", draft=draft)
+    assert event is not None
+    assert captured
+    subject = str(captured[0].get("subject") or "")
+    html = str(captured[0].get("html") or "")
+    text = str(captured[0].get("text") or "")
+    assert subject == "Completed agreement: Services Agreement"
+    assert "view-signed" in html
+    assert "Your agreement is fully signed." in text
+    assert "Completed:" in text
+    assert "Pat Owner" in text or "Owner" in text
 
 
 def test_completion_email_uses_view_signed_url_when_snapshot_ready() -> None:
