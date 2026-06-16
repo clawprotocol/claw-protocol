@@ -50,6 +50,15 @@ def maybe_send_signing_completion_emails(
         )
         return None
 
+    from backend.services.vs01_signer_completion import fully_executed_snapshot_ready
+
+    if not fully_executed_snapshot_ready(draft):
+        _log.info(
+            "[signing-completion-email] skipped agreement_id=%s skip_reason=signed_snapshot_not_ready",
+            aid,
+        )
+        return None
+
     targets = _normalize_signing_completion_targets(draft)
     if not targets:
         _log.info(
@@ -61,7 +70,7 @@ def maybe_send_signing_completion_emails(
     title = str(draft.get("title") or "").strip() or "Untitled agreement"
     party_names = _party_display_names_from_draft(draft)
     origin = (app_public_origin() or "").rstrip("/")
-    proof_url = f"{origin}/app/agreements/{quote(aid)}/verify" if origin else ""
+    proof_url = f"{origin}/app/agreements/{quote(aid)}/view-signed" if origin else ""
 
     sent_count = 0
     failed_count = 0

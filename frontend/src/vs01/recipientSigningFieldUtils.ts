@@ -177,21 +177,26 @@ export function recipientFieldStatusPillLabel(pill: RecipientFieldStatusPill): s
   }
 }
 
+export type RecipientSigningHydrationSource = "server_packet" | "local";
+
 /** Clear signature/initials values for the locked signer unless that signer already finished (fresh session). */
 export function stripLockedSignerEditableValuesOnHydrate(
   fields: Vs01RecipientPlacedField[],
   agreementId: string | null | undefined,
   lockedSignerRoleId: string | null,
+  opts?: { hydrationSource?: RecipientSigningHydrationSource },
 ): Vs01RecipientPlacedField[] {
   const lock = (lockedSignerRoleId ?? "").trim();
   if (!lock) return fields;
   const signerComplete = isRecipientSignerMarkedComplete(agreementId, lock);
+  const preserveServer = opts?.hydrationSource === "server_packet";
   return fields.map((f) => {
     const eff = (f.assignedSignerRoleId ?? "").trim();
     const belongsToLock = eff ? eff === lock : true;
     if (!belongsToLock || !isRecipientSigningEditableType(f.type)) return f;
     if (signerComplete) return f;
     const v = typeof f.value === "string" ? f.value.trim() : "";
+    if (preserveServer && v) return f;
     return v ? { ...f, value: "" } : f;
   });
 }
@@ -200,10 +205,12 @@ export function stripLockedSignerEditableValuesOnHydrate(
 export function hydrateRecipientSigningFields(
   fields: Vs01RecipientPlacedField[],
   cpById: Map<string, Vs01Counterparty>,
+  opts?: { preserveEditableValues?: boolean },
 ): Vs01RecipientPlacedField[] {
   return fields.map((f) => {
     if (isRecipientSigningEditableType(f.type)) {
       const v = typeof f.value === "string" ? f.value.trim() : "";
+      if (opts?.preserveEditableValues && v) return f;
       return v ? f : { ...f, value: "" };
     }
     const auto = resolveRecipientSigningAutoValue(f, cpById);

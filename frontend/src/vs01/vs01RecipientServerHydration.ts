@@ -17,7 +17,12 @@ import {
   normalizeRecipientManifestCounterparties,
 } from "./recipientManifestUrl";
 import { filterPacketManifestFieldsForRole } from "./vs01SigningPacketManifest";
-import { hydrateRecipientSigningFields, stripLockedSignerEditableValuesOnHydrate } from "./recipientSigningFieldUtils";
+import {
+  hydrateRecipientSigningFields,
+  isRecipientSigningEditableType,
+  stripLockedSignerEditableValuesOnHydrate,
+} from "./recipientSigningFieldUtils";
+import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
 import type { Vs01Counterparty } from "./types";
 
 export type Vs01RecipientServerHydrationResult = {
@@ -87,9 +92,26 @@ function hydrateFieldsFromPortable(args: {
       }),
       portable.seed.agreementId,
       lockedSignerRoleId,
+      { hydrationSource: "server_packet" },
     ),
     cpMap,
+    { preserveEditableValues: true },
   );
+
+  const lock = (lockedSignerRoleId ?? "").trim();
+  if (lock && portable.seed.agreementId.trim()) {
+    const hasPersistedSignature = fields.some(
+      (f) =>
+        isRecipientSigningEditableType(f.type) &&
+        (f.assignedSignerRoleId ?? "").trim() === lock &&
+        typeof f.value === "string" &&
+        f.value.trim().length > 0,
+    );
+    if (hasPersistedSignature) {
+      const roleKeys = portable.roles.map((r) => r.roleId).filter(Boolean);
+      patchSignerPacketStatus(portable.seed.agreementId, lock, "signed", roleKeys);
+    }
+  }
   return { ok: fields.length > 0, fields, counterparties: cps, source: fields.length > 0 ? "server_packet" : "miss" };
 }
 

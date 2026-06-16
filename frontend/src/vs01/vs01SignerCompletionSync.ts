@@ -1,7 +1,6 @@
 import { postVs01SignerComplete } from "../agreement/agreementWorkspaceApi";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import {
-  buildVs01CanonicalPacketSeed,
   loadVs01CanonicalPacketPortable,
   storeVs01CanonicalPacketPortable,
   type Vs01CanonicalPacketPortableV1,
@@ -17,10 +16,12 @@ import {
   writeSigningPacketStatus,
   type Vs01SigningPacketStatusSnapshot,
 } from "./vs01SigningPacketStatusStore";
+import { formatSigningDateDisplayFromIso } from "./vs01WitnessBlockSigningDate";
 import {
-  formatSigningDateDisplayFromIso,
-  stampWitnessBlockPartySigningDate,
-} from "./vs01WitnessBlockSigningDate";
+  applySignerCompletionToPortablePacket,
+  attachFullyExecutedSnapshotToPortable,
+  signatureTextForSignerRole,
+} from "./vs01FullyExecutedSignedSnapshot";
 
 export type RecordVs01SignerCompletionArgs = {
   agreementId: string;
@@ -87,51 +88,62 @@ function ensureSnapshotForSigner(
   };
 }
 
-function persistSignedDateToPortablePacket(args: {
+function willCompleteAllSignersAfterThis(agreementId: string, signerRoleId: string): boolean {
+  const keys = bootstrapSignerKeys(agreementId);
+  if (!keys.length) return false;
+  const snap = readSigningPacketStatus(agreementId);
+  for (const key of keys) {
+    if (key === signerRoleId) continue;
+    if (snap?.bySignerKey[key] !== "signed") return false;
+  }
+  return true;
+}
+
+function persistSignerCompletionToPortablePacket(args: {
   documentId: string;
   agreementId: string;
+  signerRoleId: string;
   partyIndex: number;
   signingDateIso: string;
   recipientFields?: readonly Vs01RecipientPlacedField[];
-}): { portable: Vs01CanonicalPacketPortableV1 | null; corpusStamped: boolean } {
+  attachFinalSnapshot: boolean;
+}): {
+  portable: Vs01CanonicalPacketPortableV1 | null;
+  corpusStamped: boolean;
+  signatureStamped: boolean;
+} {
   const did = args.documentId.trim();
-  if (!did) return { portable: null, corpusStamped: false };
+  if (!did) return { portable: null, corpusStamped: false, signatureStamped: false };
   const portable = loadVs01CanonicalPacketPortable(did);
-  if (!portable) return { portable: null, corpusStamped: false };
+  if (!portable) return { portable: null, corpusStamped: false, signatureStamped: false };
 
-  const stamped = stampWitnessBlockPartySigningDate(
-    portable.seed.corpusPlain,
-    args.partyIndex,
-    args.signingDateIso,
+  const signatureText = signatureTextForSignerRole(
+    args.recipientFields ?? portable.fields,
+    args.signerRoleId,
   );
-  let nextCorpus = portable.seed.corpusPlain;
-  let corpusStamped = false;
-  if (stamped.stamped) {
-    nextCorpus = stamped.text;
-    corpusStamped = true;
+
+  const applied = applySignerCompletionToPortablePacket({
+    portable,
+    agreementId: args.agreementId.trim(),
+    documentId: did,
+    signerRoleId: args.signerRoleId,
+    partyIndex: args.partyIndex,
+    signingDateIso: args.signingDateIso,
+    signatureText,
+    recipientFields: args.recipientFields,
+  });
+
+  let nextPortable = applied.portable;
+  if (args.attachFinalSnapshot) {
+    nextPortable = attachFullyExecutedSnapshotToPortable(nextPortable);
   }
 
-  const nextSeed =
-    buildVs01CanonicalPacketSeed({
-      documentId: did,
-      agreementId: args.agreementId.trim(),
-      corpusPlain: nextCorpus,
-    }) ?? portable.seed;
-
-  const nextFields = args.recipientFields
-    ? portable.fields.map((field) => {
-        const updated = args.recipientFields!.find((f) => f.id === field.id);
-        return updated ? { ...field, ...updated } : field;
-      })
-    : portable.fields;
-
-  const nextPortable: Vs01CanonicalPacketPortableV1 = {
-    ...portable,
-    seed: nextSeed,
-    fields: nextFields,
-  };
   storeVs01CanonicalPacketPortable(did, nextPortable);
-  return { portable: nextPortable, corpusStamped };
+  return {
+    portable: nextPortable,
+    corpusStamped: applied.corpusStamped,
+    signatureStamped: applied.signatureStamped,
+  };
 }
 
 function applyLocalSignerPacketStatus(
@@ -178,12 +190,17 @@ async function recordVs01SignerCompletionInner(
   const partyIndex = args.partyIndex ?? 0;
   const isLocalBridge = agreementId.startsWith("local_ag_");
 
-  const { portable, corpusStamped } = persistSignedDateToPortablePacket({
+  const optimisticFinal =
+    willCompleteAllSignersAfterThis(agreementId, signerRoleId);
+
+  let { portable, corpusStamped } = persistSignerCompletionToPortablePacket({
     documentId,
     agreementId,
+    signerRoleId,
     partyIndex,
     signingDateIso,
     recipientFields: args.recipientFields,
+    attachFinalSnapshot: optimisticFinal,
   });
 
   let serverSynced = false;
@@ -208,6 +225,20 @@ async function recordVs01SignerCompletionInner(
       serverSynced = res.ok;
       serverFullyExecuted = Boolean(res.fully_executed);
       completionEmailsSent = Boolean(res.completion_emails_sent);
+
+      if (serverFullyExecuted && !portable?.fullyExecutedSnapshot) {
+        const finalized = persistSignerCompletionToPortablePacket({
+          documentId,
+          agreementId,
+          signerRoleId,
+          partyIndex,
+          signingDateIso,
+          recipientFields: args.recipientFields,
+          attachFinalSnapshot: true,
+        });
+        portable = finalized.portable;
+        corpusStamped = corpusStamped || finalized.corpusStamped;
+      }
     } catch {
       serverSynced = false;
     }

@@ -9,7 +9,7 @@ import { PremiumAgreementReadonlyView } from "../../components/agreements/Premiu
 import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
 import { CREATOR_COMPLETED_PILL } from "../creatorDashboardCopy";
 import { useLaunchNav } from "../LaunchNavContext";
-import { loadOwnerAgreementReadOnlyPreview } from "../ownerAgreementReadOnlyView";
+import { loadOwnerSignedAgreementPreview } from "../ownerSignedAgreementView";
 import { AppShell } from "../AppShell";
 
 type Props = {
@@ -36,18 +36,22 @@ export function OwnerSignedAgreementPage(props: Props) {
   const [usesPremiumDocument, setUsesPremiumDocument] = useState(false);
   const [verify, setVerify] = useState<PublicVerifyPayload | null>(null);
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
+  const [corpusSource, setCorpusSource] = useState<"fully_executed_snapshot" | "reconstructed" | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     const [loaded, publicVerify] = await Promise.all([
-      loadOwnerAgreementReadOnlyPreview(agreementId),
+      loadOwnerSignedAgreementPreview(agreementId),
       fetchPublicAgreementVerify(agreementId),
     ]);
     if (!loaded) {
       setLoadError("Could not load this signed agreement.");
       setPreviewHtml("");
       setDraft(null);
+      setCorpusSource(null);
       setVerify(publicVerify);
       setLoading(false);
       return;
@@ -56,6 +60,7 @@ export function OwnerSignedAgreementPage(props: Props) {
     setTitle(displayCreatorAgreementTitle(loaded.draft.title ?? ""));
     setPreviewHtml(loaded.html);
     setUsesPremiumDocument(loaded.usesPremiumDocument);
+    setCorpusSource(loaded.corpusSource);
     setVerify(publicVerify);
     setLoading(false);
   }, [agreementId]);
@@ -76,6 +81,7 @@ export function OwnerSignedAgreementPage(props: Props) {
         className="space-y-4"
         data-testid="owner-signed-agreement-page"
         data-agreement-id={agreementId}
+        data-corpus-source={corpusSource ?? undefined}
       >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span

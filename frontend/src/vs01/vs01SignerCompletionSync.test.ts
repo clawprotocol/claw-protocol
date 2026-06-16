@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
-import { storeVs01CanonicalPacketPortable } from "./vs01CanonicalPacketSeed";
+import { loadVs01CanonicalPacketPortable, storeVs01CanonicalPacketPortable } from "./vs01CanonicalPacketSeed";
 import { readSigningPacketStatus, writeSigningPacketStatus } from "./vs01SigningPacketStatusStore";
 import {
   recordVs01SignerCompletion,
@@ -19,8 +19,9 @@ const CP_ROLE = "vs01r:ag_test361:i1:cp";
 function witnessCorpus(): string {
   return (
     `${"Paid Pro services agreement corpus. ".repeat(90)}\n\n` +
-    `IN WITNESS WHEREOF\n\nCLIENT:\nOwner Co\nDate: _____________________________\n\n` +
-    `SERVICE PROVIDER:\nCounterparty Co\nDate: _____________________________`
+    `IN WITNESS WHEREOF, the Parties execute this Agreement.\n\nCLIENT:\nOwner Co\n` +
+    `By: __________________________\nDate: _____________________________\n\n` +
+    `SERVICE PROVIDER:\nCounterparty Co\nBy: __________________________\nDate: _____________________________`
   );
 }
 
@@ -60,7 +61,21 @@ function seedPortable(): void {
       corpusHash: fingerprintAgreementBody(corpusPlain),
       savedAt: new Date().toISOString(),
     },
-    fields: [],
+    fields: [
+      {
+        id: "owner_sig",
+        counterpartyId: "owner",
+        type: "signature",
+        page: 9,
+        x: 0.1,
+        y: 0.1,
+        width: 0.3,
+        height: 0.05,
+        assignedPartyIndex: 0,
+        assignedSignerRoleId: OWNER_ROLE,
+        value: "",
+      },
+    ],
     roles: [
       {
         roleId: OWNER_ROLE,
@@ -92,7 +107,7 @@ function seedPortable(): void {
     pageCount: 10,
     witnessPageIndex: 9,
     initialsPolicy: { enabled: false, bodyPagesOnly: true },
-    fieldCount: 0,
+    fieldCount: 1,
   });
 }
 
@@ -206,5 +221,40 @@ describe("recordVs01SignerCompletion (Test361)", () => {
     });
 
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it("persists signer signature and date into portable corpus on finish", async () => {
+    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockResolvedValue({
+      ok: true,
+      fully_executed: false,
+      completion_emails_sent: false,
+    });
+
+    await recordVs01SignerCompletion({
+      agreementId: AG,
+      documentId: DOC,
+      signerRoleId: OWNER_ROLE,
+      partyIndex: 0,
+      participantId: "owner",
+      signingDateIso: "2026-06-07",
+      recipientFields: [
+        {
+          id: "owner_sig",
+          counterpartyId: "owner",
+          type: "signature",
+          page: 9,
+          x: 0.1,
+          y: 0.1,
+          width: 0.3,
+          height: 0.05,
+          assignedSignerRoleId: OWNER_ROLE,
+          value: "Owner Signature",
+        },
+      ],
+    });
+
+    const portable = loadVs01CanonicalPacketPortable(DOC);
+    expect(portable?.seed.corpusPlain).toMatch(/By: Owner Signature/);
+    expect(portable?.seed.corpusPlain).toMatch(/Date: June 7, 2026/);
   });
 });

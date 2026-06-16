@@ -5,6 +5,7 @@ import {
   hydrateRecipientSigningFields,
   isRecipientSigningEditableType,
   isRecipientSignerMarkedComplete,
+  stripLockedSignerEditableValuesOnHydrate,
   recipientEditableFieldIsComplete,
   recipientFieldStatusPill,
   recipientFieldStatusPillLabel,
@@ -134,6 +135,15 @@ describe("recipientSigningFieldUtils", () => {
     ).toBe("ready");
     patchSignerPacketStatus(AG, "role_cp1", "signed");
     expect(isRecipientSignerMarkedComplete(AG, "role_cp1")).toBe(true);
+  });
+
+  it("preserves server-persisted signature values on hydrate", () => {
+    const ownerRole = "role_owner";
+    const ownerField = field("signature", { assignedSignerRoleId: ownerRole, value: "Pat Signer" });
+    const stripped = stripLockedSignerEditableValuesOnHydrate([ownerField], AG, ownerRole, {
+      hydrationSource: "server_packet",
+    });
+    expect(stripped[0]?.value).toBe("Pat Signer");
   });
 
   it("finish gate requires signature and initials only", () => {

@@ -70,3 +70,66 @@ export function stampWitnessBlockPartySigningDate(
 
   return { text: lines.join("\n"), stamped };
 }
+
+function witnessByLineIsBlank(trimmed: string): boolean {
+  if (!/^by\s*:/i.test(trimmed)) return false;
+  const value = trimmed.replace(/^by\s*:\s*/i, "").trim();
+  return !value || /_{2,}/.test(value);
+}
+
+/**
+ * Stamp one party's witness-block By line with the signer's adopted signature text.
+ */
+export function stampWitnessBlockPartySignature(
+  corpusPlain: string,
+  partyIndex: number,
+  signatureText: string,
+): { text: string; stamped: boolean } {
+  const sig = signatureText.trim();
+  if (!sig) return { text: corpusPlain, stamped: false };
+
+  const patchStart = signaturePatchStartIndex(corpusPlain);
+  const lines = corpusPlain.split("\n");
+  let stamped = false;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const lineStart = lines.slice(0, i).join("\n").length + (i > 0 ? 1 : 0);
+    if (lineStart < patchStart) continue;
+
+    const trimmed = lines[i]!.trim();
+    if (!witnessByLineIsBlank(trimmed)) continue;
+
+    const idx = partyIndexAtLine(lines, i, patchStart);
+    if (idx !== partyIndex) continue;
+
+    const indent = lines[i]!.match(/^\s*/)?.[0] ?? "";
+    lines[i] = `${indent}By: ${sig}`;
+    stamped = true;
+    break;
+  }
+
+  return { text: lines.join("\n"), stamped };
+}
+
+/** Count witness blocks with filled By + Date lines (fully executed when signed === total). */
+export function countSignedWitnessBlocks(corpusPlain: string): { signed: number; total: number } {
+  const patchStart = signaturePatchStartIndex(corpusPlain);
+  const lines = corpusPlain.split("\n");
+  const partyBySigned = new Map<number, { by: boolean; date: boolean }>();
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const lineStart = lines.slice(0, i).join("\n").length + (i > 0 ? 1 : 0);
+    if (lineStart < patchStart) continue;
+    const trimmed = lines[i]!.trim();
+    const partyIndex = partyIndexAtLine(lines, i, patchStart);
+    const entry = partyBySigned.get(partyIndex) ?? { by: false, date: false };
+    if (/^by\s*:/i.test(trimmed) && !witnessByLineIsBlank(trimmed)) entry.by = true;
+    if (/^date\s*:/i.test(trimmed) && !witnessDateLineIsBlank(trimmed)) entry.date = true;
+    partyBySigned.set(partyIndex, entry);
+  }
+
+  const blocks = [...partyBySigned.values()];
+  const total = blocks.length;
+  const signed = blocks.filter((b) => b.by && b.date).length;
+  return { signed, total };
+}

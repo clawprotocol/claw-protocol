@@ -4,6 +4,7 @@
  */
 
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
+import type { Vs01FullyExecutedSignedSnapshotV1 } from "./vs01FullyExecutedSignedSnapshot";
 import type { Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
@@ -57,6 +58,8 @@ export type Vs01CanonicalPacketPortableV1 = {
     bodyPagesOnly: boolean;
   };
   fieldCount: number;
+  /** Present after all required signers finish — burned signatures + dates in corpus. */
+  fullyExecutedSnapshot?: Vs01FullyExecutedSignedSnapshotV1;
 };
 
 const SS_PREFIX = "claw_vs01_canonical_seed_ss_";

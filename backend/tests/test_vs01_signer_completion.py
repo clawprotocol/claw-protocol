@@ -17,7 +17,10 @@ from backend.services.vs01_signer_completion import (
     completed_vs01_signer_role_ids,
     completion_emails_already_sent,
     count_signature_completed_events,
+    extract_fully_executed_snapshot_from_portable,
+    fully_executed_snapshot_ready,
     fully_executed_signed_already_recorded,
+    merge_portable_packet_corpus,
     orchestrate_vs01_signer_complete,
     required_vs01_signer_role_ids,
     signer_role_already_completed,
@@ -142,12 +145,23 @@ def test_orchestrate_final_signer_appends_single_signed_event() -> None:
     assert len(signed_events) == 1
 
 
-def test_completion_email_not_marked_on_partial_send() -> None:
+def _draft_fully_executed_with_snapshot() -> dict:
     draft = _draft_with_packet()
-    draft["title"] = "Services Agreement"
     draft["audit_log"] = [
         build_fully_executed_signed_event(signed_at="2026-06-08T00:00:00Z", agreement_version_hash="h"),
     ]
+    draft["vs01_signing_packet_v1"]["fully_executed_snapshot"] = {
+        "v": 1,
+        "corpus_plain": "x" * 200,
+        "corpus_hash": "h",
+        "saved_at": "2026-06-08T00:00:00Z",
+    }
+    return draft
+
+
+def test_completion_email_not_marked_on_partial_send() -> None:
+    draft = _draft_fully_executed_with_snapshot()
+    draft["title"] = "Services Agreement"
 
     class _Result:
         ok = False
@@ -162,6 +176,49 @@ def test_completion_email_not_marked_on_partial_send() -> None:
 
 
 def test_completion_email_marked_only_after_all_targets_sent() -> None:
+    draft = _draft_fully_executed_with_snapshot()
+    draft["title"] = "Services Agreement"
+
+    class _Ok:
+        ok = True
+
+    with patch("backend.services.email.signing_completion_delivery.email_configured", return_value=True), patch(
+        "backend.services.email.signing_completion_delivery.send_email_non_fatal",
+        return_value=_Ok(),
+    ), patch(
+        "backend.services.email.signing_completion_delivery.app_public_origin",
+        return_value="https://app.example.test",
+    ):
+        event = maybe_send_signing_completion_emails(agreement_id="ag1", draft=draft)
+    assert event is not None
+    assert event["event_type"] == SIGNING_COMPLETION_EMAILS_SENT_EVENT
+    assert event["value"]["sent_count"] == 2
+
+
+def test_merge_portable_packet_persists_fully_executed_snapshot() -> None:
+    corpus = "x" * 200 + "\nBy: Owner\nDate: June 15, 2026\nBy: Counterparty\nDate: June 16, 2026"
+    portable = {
+        "v": 1,
+        "fullyExecutedSnapshot": {
+            "v": 1,
+            "corpusPlain": corpus,
+            "corpusHash": "hash123",
+            "savedAt": "2026-06-16T00:00:00Z",
+            "signerRoleIds": ["role_owner", "role_cp"],
+        },
+    }
+    snap = extract_fully_executed_snapshot_from_portable(portable)
+    assert snap is not None
+    assert snap["corpus_plain"] == corpus
+
+    draft = _draft_with_packet()
+    merged = merge_portable_packet_corpus(draft, portable)
+    stored = merged["vs01_signing_packet_v1"]
+    assert stored["fully_executed_snapshot"]["corpus_plain"] == corpus
+    assert fully_executed_snapshot_ready(merged) is True
+
+
+def test_completion_email_skipped_without_signed_snapshot() -> None:
     draft = _draft_with_packet()
     draft["title"] = "Services Agreement"
     draft["audit_log"] = [
@@ -179,6 +236,30 @@ def test_completion_email_marked_only_after_all_targets_sent() -> None:
         return_value="https://app.example.test",
     ):
         event = maybe_send_signing_completion_emails(agreement_id="ag1", draft=draft)
+    assert event is None
+
+
+def test_completion_email_uses_view_signed_url_when_snapshot_ready() -> None:
+    draft = _draft_fully_executed_with_snapshot()
+    draft["title"] = "Services Agreement"
+
+    captured: list[dict] = []
+
+    class _Ok:
+        ok = True
+
+    def _capture(**kwargs: object) -> _Ok:
+        captured.append(dict(kwargs))
+        return _Ok()
+
+    with patch("backend.services.email.signing_completion_delivery.email_configured", return_value=True), patch(
+        "backend.services.email.signing_completion_delivery.send_email_non_fatal",
+        side_effect=_capture,
+    ), patch(
+        "backend.services.email.signing_completion_delivery.app_public_origin",
+        return_value="https://app.example.test",
+    ):
+        event = maybe_send_signing_completion_emails(agreement_id="ag1", draft=draft)
     assert event is not None
-    assert event["event_type"] == SIGNING_COMPLETION_EMAILS_SENT_EVENT
-    assert event["value"]["sent_count"] == 2
+    assert captured
+    assert "view-signed" in str(captured[0].get("html", ""))
