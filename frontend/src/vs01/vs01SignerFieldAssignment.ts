@@ -714,10 +714,13 @@ export function buildRecipientSigningDocumentFields(args: {
   roles: Vs01PrepareSigningRole[];
   recipientPlacedFields: Vs01RecipientPlacedField[];
   senderPlacedFields: PlacedSigningField[];
+  initialsEnabled?: boolean;
 }): Vs01RecipientPlacedField[] {
+  const initialsOn = args.initialsEnabled === true;
   const seen = new Set<string>();
   const out: Vs01RecipientPlacedField[] = [];
   const add = (f: Vs01RecipientPlacedField) => {
+    if (!initialsOn && f.type === "initials") return;
     if (seen.has(f.id)) return;
     seen.add(f.id);
     out.push(f);

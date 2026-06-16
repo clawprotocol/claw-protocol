@@ -20,10 +20,15 @@ import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
 import { applySignerCompletionToPortablePacket } from "./vs01FullyExecutedSignedSnapshot";
 import { resolveRecipientSigningDocumentFields } from "./vs01RecipientDocumentFields";
 import { witnessBlockPartyHasFilledSignature } from "./vs01WitnessBlockSigningDate";
+import {
+  resolveRecipientInitialsEnabled,
+  parseInitialsEnabledFromPacketRevision,
+} from "./vs01RecipientSignerMarksHydration";
 import type { Vs01CanonicalPacketPortableV1 } from "./vs01CanonicalPacketSeed";
 import {
   buildVs01CanonicalPacketPortable,
   buildVs01CanonicalPacketSeed,
+  computeVs01PacketRevision,
 } from "./vs01CanonicalPacketSeed";
 import { buildFullPacketManifestFromCanonicalModel } from "./vs01SigningPacketManifest";
 
@@ -470,5 +475,160 @@ describe("Test367 signer-role isolation", () => {
       (f) => f.assignedSignerRoleId === ownerRole.roleId && f.type === "signature",
     );
     expect(ownerHydrated?.value ?? "").toBe("");
+  });
+});
+
+describe("Test368 party 2 initials policy after party 1 signed", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    cleanup();
+  });
+
+  function buildPollutedServerPortableAfterParty1Signs(): {
+    portable: Vs01CanonicalPacketPortableV1;
+    r: ReturnType<typeof roles>;
+    packetRevision: string;
+  } {
+    const r = roles();
+    const ownerRole = r[0]!;
+    const base = buildPreparedPortable();
+    const preparedRevision = computeVs01PacketRevision({
+      corpusHash: base.seed.corpusHash,
+      initialsEnabled: false,
+      fieldCount: base.fieldCount,
+    });
+    expect(parseInitialsEnabledFromPacketRevision(preparedRevision)).toBe(false);
+
+    const modelWithInitials = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: base.seed.corpusPlain,
+      roles: r,
+      initialsEnabled: true,
+    });
+    if (!modelWithInitials.allowed) throw new Error("model blocked");
+    const witnessPageIndex = modelWithInitials.pages.findIndex((p) =>
+      p.flowLines.some((line) => /\bIN WITNESS WHEREOF\b/i.test(line)),
+    );
+    const manifestWithInitials = buildFullPacketManifestFromCanonicalModel({
+      model: modelWithInitials,
+      roles: r,
+    });
+    let portable = buildVs01CanonicalPacketPortable({
+      seed: base.seed,
+      fields: manifestWithInitials,
+      roles: r,
+      pageCount: modelWithInitials.pages.length,
+      witnessPageIndex,
+      initialsEnabled: true,
+    });
+    expect(portable.initialsPolicy.enabled).toBe(true);
+    expect(portable.fields.some((f) => f.type === "initials")).toBe(true);
+
+    portable = applySignerCompletionToPortablePacket({
+      portable,
+      agreementId: AG,
+      documentId: DOC,
+      signerRoleId: ownerRole.roleId,
+      partyIndex: 0,
+      signingDateIso: "2026-06-15",
+      signatureText: "Caty Biscuit",
+    }).portable;
+    patchSignerPacketStatus(AG, ownerRole.roleId, "signed", r.map((x) => x.roleId));
+
+    return { portable, r, packetRevision: preparedRevision };
+  }
+
+  it("resolveRecipientInitialsEnabled honors prepare revision over polluted portable policy", () => {
+    const { portable, packetRevision } = buildPollutedServerPortableAfterParty1Signs();
+    expect(portable.initialsPolicy.enabled).toBe(true);
+    expect(resolveRecipientInitialsEnabled({ portable, packetRevision })).toBe(false);
+  });
+
+  it("party 2 server hydration with polluted portable + prepare revision → 1 action, no initials", () => {
+    const { portable, r, packetRevision } = buildPollutedServerPortableAfterParty1Signs();
+    const ownerRole = r[0]!;
+    const cpRole = r[1]!;
+
+    const hydrated = applyVs01PortablePacketToRecipientSession({
+      portable,
+      documentId: DOC,
+      lockedCounterpartyId: cpRole.vs01CounterpartyId ?? "cp_harbor",
+      lockedSignerRoleId: cpRole.roleId,
+      recipientName: "Harbor Peak Automation LLC",
+      recipientEmail: CP_EMAIL,
+      packetRevision,
+    });
+    expect(hydrated.ok).toBe(true);
+    expect(hydrated.fields.some((f) => f.type === "initials")).toBe(false);
+
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: portable.seed.corpusPlain,
+      roles: r,
+      initialsEnabled: false,
+    });
+    const docFields = resolveRecipientSigningDocumentFields({
+      documentId: DOC,
+      recipientFields: hydrated.fields,
+      senderPlacedFields: [],
+      prepareRoles: r,
+      lockedCounterpartyId: cpRole.vs01CounterpartyId ?? "cp_harbor",
+      lockedSignerRoleId: cpRole.roleId,
+      canonicalModel: model,
+      packetRevision,
+    });
+    expect(docFields.some((f) => f.type === "initials")).toBe(false);
+
+    const myFields = docFields.filter((f) =>
+      recipientFieldBelongsToLockedSigner(f, cpRole.vs01CounterpartyId ?? "cp_harbor", cpRole.roleId),
+    );
+    const editable = recipientFinishGateEditableFields(myFields, { initialsEnabled: false });
+    expect(countRecipientSigningActions(editable, { initialsEnabled: false })).toBe(1);
+    expect(editable[0]?.type).toBe("signature");
+
+    const ownerSig = docFields.find(
+      (f) => f.type === "signature" && f.assignedSignerRoleId === ownerRole.roleId,
+    )!;
+    const cpSig = editable[0]!;
+    const cpById = new Map(hydrated.counterparties.map((c) => [c.id, c]));
+    expect(resolvePersistedSignerFieldDisplayValue(ownerSig, AG, cpById)).toBe("Caty Biscuit");
+    expect(cpSig.value ?? "").toBe("");
+    expect(recipientFinishGateComplete([{ ...cpSig, value: "Ben Reetman" }], { initialsEnabled: false })).toBe(
+      true,
+    );
+
+    render(
+      <RecipientSigningFieldOverlay
+        field={cpSig}
+        lockedCounterpartyId={cpRole.vs01CounterpartyId ?? "cp_harbor"}
+        lockedSignerRoleId={cpRole.roleId}
+        recipientAgreementId={AG}
+        cpById={cpById}
+        onUpdateValue={() => {}}
+        canonicalCompact
+      />,
+    );
+    expect(screen.getByLabelText("Signature")).toBeTruthy();
+    expect(screen.queryByLabelText("Initials")).toBeNull();
+  });
+
+  it("unsigned party 2 signature does not bleed from prepare-stored values", () => {
+    const { portable, r, packetRevision } = buildPollutedServerPortableAfterParty1Signs();
+    const cpRole = r[1]!;
+    const hydrated = applyVs01PortablePacketToRecipientSession({
+      portable,
+      documentId: DOC,
+      lockedCounterpartyId: cpRole.vs01CounterpartyId ?? "cp_harbor",
+      lockedSignerRoleId: cpRole.roleId,
+      recipientName: "Harbor Peak Automation LLC",
+      recipientEmail: CP_EMAIL,
+      packetRevision,
+    });
+    const cpSig = hydrated.fields.find(
+      (f) =>
+        f.type === "signature" &&
+        recipientFieldBelongsToLockedSigner(f, cpRole.vs01CounterpartyId ?? "cp_harbor", cpRole.roleId),
+    );
+    expect(cpSig?.value ?? "").toBe("");
   });
 });

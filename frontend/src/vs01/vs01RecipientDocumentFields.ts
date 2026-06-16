@@ -11,7 +11,7 @@ import {
 import { stripLockedSignerEditableValuesOnHydrate } from "./recipientSigningFieldUtils";
 import { buildFullPacketManifestFromCanonicalModel } from "./vs01SigningPacketManifest";
 import type { Vs01SigningPacketModel } from "./buildVs01SigningPacketModel";
-import { isVs01InitialsEnabledForPacket } from "./vs01RecipientSignerMarksHydration";
+import { resolveRecipientInitialsEnabled } from "./vs01RecipientSignerMarksHydration";
 import type { Vs01RecipientPlacedField } from "./types";
 import type { PlacedSigningField } from "./signingFields";
 
@@ -107,12 +107,16 @@ export function resolveRecipientSigningDocumentFields(args: {
   lockedCounterpartyId: string;
   lockedSignerRoleId: string | null;
   canonicalModel?: Pick<Vs01SigningPacketModel, "fields"> | null;
+  packetRevision?: string | null;
 }): Vs01RecipientPlacedField[] {
   const roles = args.prepareRoles ?? [];
   const ownerRole = roles[0];
   const did = (args.documentId ?? "").trim();
   const portable = did ? loadVs01CanonicalPacketPortable(did) : null;
-  const initialsEnabled = isVs01InitialsEnabledForPacket(portable);
+  const initialsEnabled = resolveRecipientInitialsEnabled({
+    portable,
+    packetRevision: args.packetRevision,
+  });
   const agreementId = portable?.seed.agreementId ?? null;
 
   let baseFields: Vs01RecipientPlacedField[];
@@ -139,6 +143,7 @@ export function resolveRecipientSigningDocumentFields(args: {
     roles,
     recipientPlacedFields: baseFields,
     senderPlacedFields: args.senderPlacedFields,
+    initialsEnabled,
   });
 
   if (args.canonicalModel) {

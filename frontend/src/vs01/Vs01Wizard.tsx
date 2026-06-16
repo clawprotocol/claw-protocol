@@ -1215,6 +1215,7 @@ export function Vs01Wizard({
               lockedCounterpartyId={RECIPIENT_LOCKED_CP_ID}
               recipientAgreementId={RECIPIENT_AGREEMENT_ID || null}
               lockedSignerRoleId={RECIPIENT_LOCKED_SIGNER_ROLE_ID}
+              packetRevision={VS01_URL_BOOT?.packetRevision ?? null}
               recipientFields={recipientPlacedFields}
               senderPlacedFields={senderPlacedFields}
               senderSignatureRef={senderSignatureRef}

@@ -45,7 +45,7 @@ import {
   recipientSigningActionsLabel,
   stripLockedSignerEditableValuesOnHydrate,
 } from "./recipientSigningFieldUtils";
-import { isVs01InitialsEnabledForPacket } from "./vs01RecipientSignerMarksHydration";
+import { resolveRecipientInitialsEnabled } from "./vs01RecipientSignerMarksHydration";
 import {
   logVs01RecipientSignatureFieldMissing,
   resolveRecipientSigningDocumentFields,
@@ -93,6 +93,8 @@ export type RecipientSigningViewProps = {
   manifestParamPresent?: boolean;
   /** Server packet fetch in flight — suppress false hydration-miss UI. */
   serverHydrationPending?: boolean;
+  /** Prepare-time packet revision from signing URL (`{hash}_{0|1}_{count}`). */
+  packetRevision?: string | null;
 };
 
 function formatIsoDateDisplay(iso: string): string {
@@ -182,6 +184,7 @@ export function RecipientSigningView({
   manifestDecodeError = null,
   manifestParamPresent = false,
   serverHydrationPending = false,
+  packetRevision = null,
 }: RecipientSigningViewProps) {
   const cpById = useMemo(() => {
     const m = new Map<string, Vs01Counterparty>();
@@ -277,7 +280,10 @@ export function RecipientSigningView({
     return did ? loadVs01CanonicalPacketPortable(did) : null;
   }, [documentId]);
 
-  const initialsEnabled = isVs01InitialsEnabledForPacket(portablePacket);
+  const initialsEnabled = resolveRecipientInitialsEnabled({
+    portable: portablePacket,
+    packetRevision,
+  });
 
   const canonicalPacket = useMemo(() => {
     const did = documentId?.trim() ?? "";
@@ -304,6 +310,7 @@ export function RecipientSigningView({
         lockedCounterpartyId: lockedCp,
         lockedSignerRoleId,
         canonicalModel: canonicalPacket?.model ?? null,
+        packetRevision,
       }),
     [
       documentId,
@@ -313,6 +320,7 @@ export function RecipientSigningView({
       lockedCp,
       lockedSignerRoleId,
       canonicalPacket?.model,
+      packetRevision,
     ],
   );
 

@@ -27,6 +27,7 @@ import {
   VS01_RECIPIENT_MANIFEST_QUERY,
 } from "./recipientManifestUrl";
 import { hydrateRecipientSigningFields, stripLockedSignerEditableValuesOnHydrate } from "./recipientSigningFieldUtils";
+import { normalizeVs01PortableInitialsPolicy, resolveRecipientInitialsEnabled } from "./vs01RecipientSignerMarksHydration";
 import { scopeRecipientManifestToLockedSigner } from "./vs01RecipientFieldScope";
 
 function newCpId(): string {
@@ -121,6 +122,9 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     }
   }
   if (canonicalPacket) {
+    canonicalPacket = normalizeVs01PortableInitialsPolicy(canonicalPacket, {
+      packetRevision: packetRevisionFromUrl || null,
+    });
     storeVs01CanonicalPacketSeed(canonicalPacket.seed);
     storeVs01CanonicalPacketPortable(documentId, canonicalPacket);
   }
@@ -171,7 +175,11 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
       recipientManifestDecodeError = decoded.error;
     }
   } else if (canonicalPacket?.fields.length) {
-    const manifestFields = canonicalPacket.initialsPolicy.enabled
+    const initialsEnabled = resolveRecipientInitialsEnabled({
+      portable: canonicalPacket,
+      packetRevision: packetRevisionFromUrl || null,
+    });
+    const manifestFields = initialsEnabled
       ? canonicalPacket.fields
       : canonicalPacket.fields.filter((f) => f.type !== "initials");
     const scoped = scopeRecipientManifestToLockedSigner({

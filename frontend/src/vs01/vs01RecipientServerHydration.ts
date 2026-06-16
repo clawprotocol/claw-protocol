@@ -22,7 +22,11 @@ import {
   isRecipientSigningEditableType,
   stripLockedSignerEditableValuesOnHydrate,
 } from "./recipientSigningFieldUtils";
-import { hydratePortableSignerMarksForRecipientView } from "./vs01RecipientSignerMarksHydration";
+import {
+  hydratePortableSignerMarksForRecipientView,
+  normalizeVs01PortableInitialsPolicy,
+  resolveRecipientInitialsEnabled,
+} from "./vs01RecipientSignerMarksHydration";
 import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
 import type { Vs01Counterparty } from "./types";
 
@@ -42,20 +46,35 @@ function hydrateFieldsFromPortable(args: {
   lockedSignerRoleId: string | null;
   recipientName: string;
   recipientEmail: string;
+  packetRevision?: string | null;
 }): Vs01RecipientServerHydrationResult {
-  const { portable, documentId, lockedCounterpartyId, lockedSignerRoleId, recipientName, recipientEmail } =
-    args;
-  const agreementId = portable.seed.agreementId.trim();
-  const hydratedPortable = hydratePortableSignerMarksForRecipientView({
+  const {
     portable,
-    agreementId,
     documentId,
-    viewingSignerRoleId: lockedSignerRoleId,
-  });
+    lockedCounterpartyId,
+    lockedSignerRoleId,
+    recipientName,
+    recipientEmail,
+    packetRevision,
+  } = args;
+  const agreementId = portable.seed.agreementId.trim();
+  const hydratedPortable = normalizeVs01PortableInitialsPolicy(
+    hydratePortableSignerMarksForRecipientView({
+      portable,
+      agreementId,
+      documentId,
+      viewingSignerRoleId: lockedSignerRoleId,
+    }),
+    { packetRevision },
+  );
   storeVs01CanonicalPacketPortable(documentId, hydratedPortable);
   storeVs01CanonicalPacketSeed(hydratedPortable.seed);
   markVs01CanonicalPacketFromServer(documentId);
-  const manifestFields = hydratedPortable.initialsPolicy.enabled
+  const initialsEnabled = resolveRecipientInitialsEnabled({
+    portable: hydratedPortable,
+    packetRevision,
+  });
+  const manifestFields = initialsEnabled
     ? hydratedPortable.fields
     : hydratedPortable.fields.filter((f) => f.type !== "initials");
   storeRecipientManifest(documentId, VS01_PACKET_MANIFEST_SCOPE, manifestFields);
@@ -164,6 +183,7 @@ export function applyVs01PortablePacketToRecipientSession(args: {
   lockedSignerRoleId: string | null;
   recipientName: string;
   recipientEmail: string;
+  packetRevision?: string | null;
 }): Vs01RecipientServerHydrationResult {
   return hydrateFieldsFromPortable(args);
 }
@@ -204,5 +224,6 @@ export async function hydrateVs01RecipientFromServerPacket(args: {
     lockedSignerRoleId: args.lockedSignerRoleId,
     recipientName: args.recipientName,
     recipientEmail: args.recipientEmail,
+    packetRevision: args.packetRevision,
   });
 }

@@ -22,6 +22,64 @@ export function isVs01InitialsEnabledForPacket(
   return portable?.initialsPolicy?.enabled === true;
 }
 
+/** Parse initials flag from prepare-time packet revision (`{hash}_{0|1}_{count}`). */
+export function parseInitialsEnabledFromPacketRevision(
+  packetRevision: string | null | undefined,
+): boolean | null {
+  const rev = (packetRevision ?? "").trim();
+  // Hash segment may contain underscores after sanitization — read flag from suffix.
+  const match = /_(0|1)_(\d+)$/.exec(rev);
+  if (!match) return null;
+  return match[1] === "1";
+}
+
+function stripInitialsFromPortable(
+  portable: Vs01CanonicalPacketPortableV1,
+): Vs01CanonicalPacketPortableV1 {
+  const fields = portable.fields.filter((f) => f.type !== "initials");
+  return {
+    ...portable,
+    fields,
+    fieldCount: fields.length,
+    initialsPolicy: {
+      enabled: false,
+      bodyPagesOnly: portable.initialsPolicy?.bodyPagesOnly ?? true,
+    },
+  };
+}
+
+/**
+ * Strip initials fields and force policy off unless explicitly enabled.
+ * Prevents stale initials fields from re-enabling initials on later signer hydration.
+ */
+export function normalizeVs01PortableInitialsPolicy(
+  portable: Vs01CanonicalPacketPortableV1,
+  opts?: { packetRevision?: string | null },
+): Vs01CanonicalPacketPortableV1 {
+  const fromRevision = parseInitialsEnabledFromPacketRevision(opts?.packetRevision);
+  if (fromRevision === false) {
+    return stripInitialsFromPortable(portable);
+  }
+  if (portable.initialsPolicy?.enabled === true) {
+    const hasInitials = portable.fields.some((f) => f.type === "initials");
+    if (hasInitials) return portable;
+  }
+  return stripInitialsFromPortable(portable);
+}
+
+/** Authoritative initials gate for recipient signing (portable policy + optional URL revision). */
+export function resolveRecipientInitialsEnabled(args: {
+  portable: Vs01CanonicalPacketPortableV1 | null | undefined;
+  packetRevision?: string | null;
+}): boolean {
+  const fromRevision = parseInitialsEnabledFromPacketRevision(args.packetRevision);
+  if (fromRevision === false) return false;
+  const portable = args.portable
+    ? normalizeVs01PortableInitialsPolicy(args.portable, { packetRevision: args.packetRevision })
+    : null;
+  return isVs01InitialsEnabledForPacket(portable);
+}
+
 /**
  * Burn field-level signature values into corpus and bootstrap packet status for completed signers.
  */
