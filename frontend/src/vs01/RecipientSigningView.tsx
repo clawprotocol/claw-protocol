@@ -37,11 +37,13 @@ import {
   countRecipientSigningActions,
   hydrateRecipientSigningFields,
   isRecipientSigningEditableType,
+  logRecipientSigningActionCounts,
   recipientEditableFieldIsComplete,
   recipientFinishGateComplete,
   recipientFinishGateEditableFields,
   recipientSigningActionsLabel,
 } from "./recipientSigningFieldUtils";
+import { isVs01InitialsEnabledForPacket } from "./vs01RecipientSignerMarksHydration";
 import {
   buildRecipientSigningDocumentFields,
   buildVs01PrepareSigningRoles,
@@ -284,6 +286,8 @@ export function RecipientSigningView({
     return did ? loadVs01CanonicalPacketPortable(did) : null;
   }, [documentId]);
 
+  const initialsEnabled = isVs01InitialsEnabledForPacket(portablePacket);
+
   const canonicalPacket = useMemo(() => {
     const did = documentId?.trim() ?? "";
     const aid = (recipientAgreementId ?? "").trim();
@@ -292,12 +296,19 @@ export function RecipientSigningView({
       documentId: did,
       agreementId: aid,
       roles: prepareRoles,
-      initialsEnabled: portablePacket?.initialsPolicy.enabled ?? true,
+      initialsEnabled,
       portablePacket,
     });
-  }, [documentId, recipientAgreementId, prepareRoles, portablePacket]);
+  }, [documentId, recipientAgreementId, prepareRoles, portablePacket, initialsEnabled]);
 
   const useCanonicalDocument = Boolean(canonicalPacket?.model.allowed);
+
+  const documentFieldsForView = useMemo(() => {
+    if (!initialsEnabled) {
+      return documentFields.filter((f) => f.type !== "initials");
+    }
+    return documentFields;
+  }, [documentFields, initialsEnabled]);
 
   const signer = cpById.get(lockedCp);
   const signerName =
@@ -306,10 +317,10 @@ export function RecipientSigningView({
 
   const myFields = useMemo(
     () =>
-      documentFields.filter((f) =>
+      documentFieldsForView.filter((f) =>
         recipientFieldBelongsToLockedSigner(f, lockedCp, lockedSignerRoleId ?? null),
       ),
-    [documentFields, lockedCp, lockedSignerRoleId],
+    [documentFieldsForView, lockedCp, lockedSignerRoleId],
   );
 
   const hydratedRef = useRef(false);
@@ -573,14 +584,38 @@ export function RecipientSigningView({
     );
   }, [numPages]);
 
+  const signingActionOpts = { initialsEnabled };
+
   const editableMyFields = useMemo(
-    () => recipientFinishGateEditableFields(myFields),
-    [myFields],
+    () => recipientFinishGateEditableFields(myFields, signingActionOpts),
+    [myFields, initialsEnabled],
   );
 
   const allComplete =
-    !manifestDecodeError && myFields.length > 0 && recipientFinishGateComplete(myFields);
-  const signingActionCount = countRecipientSigningActions(editableMyFields);
+    !manifestDecodeError && myFields.length > 0 && recipientFinishGateComplete(myFields, signingActionOpts);
+  const signingActionCount = countRecipientSigningActions(editableMyFields, signingActionOpts);
+
+  useEffect(() => {
+    const missing = editableMyFields
+      .filter((f) => !recipientEditableFieldIsComplete(f))
+      .map((f) => f.id);
+    logRecipientSigningActionCounts({
+      signerRoleId: lockedSignerRoleId,
+      agreementId: recipientAgreementId,
+      totalScopedFields: myFields.length,
+      actionableFields: editableMyFields.length,
+      initialsEnabled,
+      requiredCount: editableMyFields.length,
+      completedCount: editableMyFields.filter((f) => recipientEditableFieldIsComplete(f)).length,
+      missingFieldIds: missing,
+    });
+  }, [
+    editableMyFields,
+    initialsEnabled,
+    lockedSignerRoleId,
+    myFields.length,
+    recipientAgreementId,
+  ]);
   const placementSurface =
     useCanonicalDocument || Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
 
@@ -612,17 +647,31 @@ export function RecipientSigningView({
       return;
     }
     if (!allComplete) {
-      const remaining = editableMyFields.filter((f) => !recipientEditableFieldIsComplete(f)).length;
+      const missing = editableMyFields.filter((f) => !recipientEditableFieldIsComplete(f));
+      const remaining = missing.length;
+      if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-recipient-finish-blocked]", {
+          signerRoleIdShort: lockedSignerRoleId ? lockedSignerRoleId.slice(0, 20) : null,
+          initialsEnabled,
+          missingFieldIds: missing.map((f) => f.id),
+          missingTypes: missing.map((f) => f.type),
+        });
+      }
       onError(
         remaining === 1
-          ? "Review the document, sign the highlighted signature box, and add initials if shown."
-          : `Complete your signature and initials (${remaining} remaining) before finishing.`,
+          ? initialsEnabled
+            ? "Review the document, sign the highlighted signature box, and add initials if shown."
+            : "Review the document and sign the highlighted signature box."
+          : initialsEnabled
+            ? `Complete your signature and initials (${remaining} remaining) before finishing.`
+            : `Complete your signature (${remaining} remaining) before finishing.`,
       );
       return;
     }
     onError(null);
     onFinishSigning();
-  }, [allComplete, editableMyFields, hydrationMiss, manifestDecodeError, myFields.length, onError, onFinishSigning]);
+  }, [allComplete, editableMyFields, hydrationMiss, initialsEnabled, lockedSignerRoleId, manifestDecodeError, myFields.length, onError, onFinishSigning]);
 
   const updateFieldValue = useCallback(
     (id: string, value: string) => updateField(id, { value }),
@@ -639,7 +688,9 @@ export function RecipientSigningView({
           Review and sign
         </h2>
         <p className="vs01-recipient-signing-subtitle">
-          Complete your signature and initials. Other signers&apos; fields are shown for context and stay locked until they sign.
+          {initialsEnabled
+            ? "Complete your signature and initials. Other signers' fields are shown for context and stay locked until they sign."
+            : "Complete your signature. Other signers' fields are shown for context and stay locked until they sign."}
         </p>
         <p className="vs01-recipient-signing-signer">
           <span className="vs01-recipient-signing-name">{signerName}</span>
@@ -654,7 +705,7 @@ export function RecipientSigningView({
           {signingActionCount > 0 ? (
             <span className="vs01-recipient-signing-field-count">
               {" · "}
-              {recipientSigningActionsLabel(signingActionCount)}
+              {recipientSigningActionsLabel(signingActionCount, signingActionOpts)}
             </span>
           ) : null}
         </p>
@@ -715,7 +766,7 @@ export function RecipientSigningView({
             >
               <div ref={pagesInnerRef} className="vs01-sign-pages-inner">
                 {canonicalPacket.model.pages.map((page) => {
-                  const fieldsHere = documentFields.filter((f) => f.page === page.pageIndex);
+                  const fieldsHere = documentFieldsForView.filter((f) => f.page === page.pageIndex);
                   const senderFieldsHere = senderPlacedFields.filter(
                     (f) =>
                       f.page === page.pageIndex &&
@@ -975,7 +1026,9 @@ export function RecipientSigningView({
 
         <p className="vs01-sign-doc-foot-hint vs01-recipient-signing-foot">
           {placementSurface && !docLoading && !manifestDecodeError
-            ? "Review the document, sign the highlighted signature box, and add initials if shown."
+            ? initialsEnabled
+              ? "Review the document, sign the highlighted signature box, and add initials if shown."
+              : "Review the document and sign the highlighted signature box."
             : null}
         </p>
       </div>

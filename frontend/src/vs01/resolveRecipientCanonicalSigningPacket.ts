@@ -58,7 +58,7 @@ export function resolveRecipientCanonicalSigningPacket(args: {
       mode: "guided_pro",
       authoritativeCorpusPlain: corpus,
       roles: args.roles,
-      initialsEnabled: args.initialsEnabled !== false,
+      initialsEnabled: args.initialsEnabled === true,
       corpusGateArgs: { freeBaselinePlain: args.freeBaselinePlain ?? null },
     });
     if (!model.allowed) return null;

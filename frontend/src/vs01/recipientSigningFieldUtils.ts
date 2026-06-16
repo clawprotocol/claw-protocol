@@ -83,36 +83,96 @@ export function recipientEditableFieldIsComplete(field: Vs01RecipientPlacedField
 }
 
 /**
- * Finish gate: only current signer's signature + initials (metadata auto-counts).
+ * Finish gate: only current signer's signature + initials (when enabled).
  */
-export function recipientFinishGateComplete(myFields: Vs01RecipientPlacedField[]): boolean {
-  const editable = myFields.filter((f) => isRecipientSigningEditableType(f.type));
+export function recipientFinishGateComplete(
+  myFields: Vs01RecipientPlacedField[],
+  opts?: { initialsEnabled?: boolean },
+): boolean {
+  const editable = recipientFinishGateEditableFields(myFields, opts);
   if (editable.length === 0) return false;
   return editable.every(recipientEditableFieldIsComplete);
 }
 
 export function recipientFinishGateEditableFields(
   myFields: Vs01RecipientPlacedField[],
+  opts?: { initialsEnabled?: boolean },
 ): Vs01RecipientPlacedField[] {
-  return myFields.filter((f) => isRecipientSigningEditableType(f.type));
+  const initialsOn = opts?.initialsEnabled === true;
+  return myFields.filter((f) => {
+    if (!isRecipientSigningEditableType(f.type)) return false;
+    if (f.type === "initials" && !initialsOn) return false;
+    return true;
+  });
 }
 
-/** Count distinct signing actions (signature + each initials field) for accurate header copy. */
+/** Display value for locked/completed signer signature or initials overlays. */
+export function resolvePersistedSignerFieldDisplayValue(
+  field: Vs01RecipientPlacedField,
+  agreementId: string | null | undefined,
+  cpById: Map<string, Vs01Counterparty>,
+): string {
+  if (isRecipientSigningEditableType(field.type)) {
+    const v = typeof field.value === "string" ? field.value.trim() : "";
+    if (v) return v;
+    const signerKey = signerKeyForRecipientField(field);
+    if (isRecipientSignerMarkedComplete(agreementId, signerKey)) {
+      return v;
+    }
+  }
+  return resolveRecipientSigningAutoValue(field, cpById);
+}
+
+/** Count distinct signing actions for the current signer (signature + optional initials). */
 export function countRecipientSigningActions(
   myFields: readonly Vs01RecipientPlacedField[],
+  opts?: { initialsEnabled?: boolean },
 ): number {
+  const initialsOn = opts?.initialsEnabled === true;
   let count = 0;
   if (myFields.some((f) => f.type === "signature")) count += 1;
-  count += myFields.filter((f) => f.type === "initials").length;
+  if (initialsOn) count += myFields.filter((f) => f.type === "initials").length;
   return count;
 }
 
-export function recipientSigningActionsLabel(actionCount: number): string {
+export function recipientSigningActionsLabel(
+  actionCount: number,
+  opts?: { initialsEnabled?: boolean },
+): string {
   if (actionCount <= 0) return "";
+  const initialsOn = opts?.initialsEnabled === true;
   if (actionCount === 1) {
-    return "1 action required (signature or initials)";
+    return initialsOn
+      ? "1 action required (signature or initials)"
+      : "1 action required (signature)";
   }
-  return `${actionCount} actions required (signature and initials on document pages)`;
+  return initialsOn
+    ? `${actionCount} actions required (signature and initials on document pages)`
+    : `${actionCount} actions required (signature)`;
+}
+
+export function logRecipientSigningActionCounts(args: {
+  signerRoleId: string | null;
+  agreementId: string | null;
+  totalScopedFields: number;
+  actionableFields: number;
+  initialsEnabled: boolean;
+  requiredCount: number;
+  completedCount: number;
+  missingFieldIds: string[];
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[vs01-recipient-signing-action-count]", {
+    signerRoleIdShort: args.signerRoleId ? args.signerRoleId.slice(0, 20) : null,
+    agreementIdShort: args.agreementId ? args.agreementId.slice(0, 16) : null,
+    totalScopedFields: args.totalScopedFields,
+    actionableFields: args.actionableFields,
+    initialsEnabled: args.initialsEnabled,
+    requiredCount: args.requiredCount,
+    completedCount: args.completedCount,
+    missingFieldIds: args.missingFieldIds,
+  });
 }
 
 /** @deprecated Use {@link recipientEditableFieldIsComplete} for finish gate. */
@@ -143,7 +203,14 @@ export function recipientFieldStatusPill(args: {
   const signerKey = signerKeyForRecipientField(field);
 
   if (!isCurrentSignerField) {
-    return isRecipientSignerMarkedComplete(agreementId, signerKey) ? "signed" : "waiting";
+    const persisted =
+      isRecipientSigningEditableType(field.type) &&
+      typeof field.value === "string" &&
+      field.value.trim().length > 0;
+    if (persisted || isRecipientSignerMarkedComplete(agreementId, signerKey)) {
+      return "signed";
+    }
+    return "waiting";
   }
 
   if (!isRecipientSigningEditableType(field.type)) {
@@ -195,6 +262,8 @@ export function stripLockedSignerEditableValuesOnHydrate(
     const belongsToLock = eff ? eff === lock : true;
     if (!belongsToLock || !isRecipientSigningEditableType(f.type)) return f;
     if (signerComplete) return f;
+    const signerKey = signerKeyForRecipientField(f);
+    if (isRecipientSignerMarkedComplete(agreementId, signerKey)) return f;
     const v = typeof f.value === "string" ? f.value.trim() : "";
     if (preserveServer && v) return f;
     return v ? { ...f, value: "" } : f;

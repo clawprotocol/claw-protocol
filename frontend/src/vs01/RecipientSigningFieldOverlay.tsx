@@ -7,7 +7,7 @@ import {
   isRecipientSigningMetadataType,
   recipientFieldStatusPill,
   recipientFieldStatusPillLabel,
-  resolveRecipientSigningAutoValue,
+  resolvePersistedSignerFieldDisplayValue,
 } from "./recipientSigningFieldUtils";
 import { LawDogSigningField } from "./LawDogSigningField";
 import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
@@ -88,7 +88,7 @@ export function RecipientSigningFieldOverlay({
     ? typeof field.value === "string"
       ? field.value
       : ""
-    : resolveRecipientSigningAutoValue(field, cpById);
+    : resolvePersistedSignerFieldDisplayValue(field, recipientAgreementId, cpById);
   const signerLabel =
     field.assignedSignerRoleLabel?.trim() ||
     cpById.get(field.counterpartyId)?.name?.trim() ||

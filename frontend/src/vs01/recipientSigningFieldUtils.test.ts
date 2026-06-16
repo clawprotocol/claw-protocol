@@ -137,7 +137,16 @@ describe("recipientSigningFieldUtils", () => {
     expect(isRecipientSignerMarkedComplete(AG, "role_cp1")).toBe(true);
   });
 
-  it("preserves server-persisted signature values on hydrate", () => {
+  it("preserves completed signer signature values even when hydrating a different locked role", () => {
+    const ownerRole = "role_owner";
+    const cpRole = "role_cp";
+    const ownerField = field("signature", { assignedSignerRoleId: ownerRole, value: "Pat Signer" });
+    patchSignerPacketStatus(AG, ownerRole, "signed");
+    const stripped = stripLockedSignerEditableValuesOnHydrate([ownerField], AG, cpRole);
+    expect(stripped[0]?.value).toBe("Pat Signer");
+  });
+
+  it("does not strip server-persisted signature for completed signer on party 2 hydrate", () => {
     const ownerRole = "role_owner";
     const ownerField = field("signature", { assignedSignerRoleId: ownerRole, value: "Pat Signer" });
     const stripped = stripLockedSignerEditableValuesOnHydrate([ownerField], AG, ownerRole, {
@@ -156,8 +165,8 @@ describe("recipientSigningFieldUtils", () => {
       field("initials", { id: "f2", value: "" }),
     ];
     const hydrated = hydrateRecipientSigningFields(myFields, cpById);
-    expect(recipientFinishGateComplete(hydrated)).toBe(false);
-    const editable = recipientFinishGateEditableFields(hydrated);
+    expect(recipientFinishGateComplete(hydrated, { initialsEnabled: true })).toBe(false);
+    const editable = recipientFinishGateEditableFields(hydrated, { initialsEnabled: true });
     expect(editable).toHaveLength(2);
     expect(editable.every((f) => isRecipientSigningEditableType(f.type))).toBe(true);
     const done = hydrated.map((f) =>
@@ -165,17 +174,18 @@ describe("recipientSigningFieldUtils", () => {
         ? { ...f, value: f.type === "signature" ? "Pat Signer" : "PS" }
         : f,
     );
-    expect(recipientFinishGateComplete(done)).toBe(true);
+    expect(recipientFinishGateComplete(done, { initialsEnabled: true })).toBe(true);
     expect(recipientEditableFieldIsComplete(field("printed_name"))).toBe(true);
   });
 
-  it("countRecipientSigningActions counts signature plus each initials field", () => {
+  it("countRecipientSigningActions counts signature plus each initials field when enabled", () => {
     const fields = [
       field("signature"),
       { ...field("initials"), id: "i1", page: 0 },
       { ...field("initials"), id: "i2", page: 1 },
     ];
-    expect(countRecipientSigningActions(fields)).toBe(3);
-    expect(recipientSigningActionsLabel(3)).toContain("3 actions required");
+    expect(countRecipientSigningActions(fields, { initialsEnabled: true })).toBe(3);
+    expect(countRecipientSigningActions(fields, { initialsEnabled: false })).toBe(1);
+    expect(recipientSigningActionsLabel(3, { initialsEnabled: true })).toContain("3 actions required");
   });
 });

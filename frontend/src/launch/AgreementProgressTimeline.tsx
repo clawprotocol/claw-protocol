@@ -21,13 +21,17 @@ export function AgreementProgressTimeline(props: Props) {
           step.state === "complete"
             ? "bg-emerald-500 ring-emerald-500/30"
             : step.state === "current"
-              ? "bg-amber-400 ring-amber-400/40"
+              ? step.id === "signed"
+                ? "bg-sky-400 ring-sky-400/40"
+                : "bg-amber-400 ring-amber-400/40"
               : "bg-slate-700 ring-slate-700/30";
         const textClass =
           step.state === "complete"
             ? "text-emerald-200"
             : step.state === "current"
-              ? "text-amber-100 font-medium"
+              ? step.id === "signed"
+                ? "text-sky-100 font-medium"
+                : "text-amber-100 font-medium"
               : "text-slate-500";
 
         return (

@@ -117,7 +117,9 @@ describe("recipient canonical placement (test78)", () => {
       />,
     );
 
-    const el = screen.getByLabelText("Signature").closest(".vs01-sign-placement-box--signature") as HTMLElement;
+    const el = screen
+      .getByLabelText("Signature")
+      .closest("[data-vs01-signature-dom-anchored]") as HTMLElement;
     expect(el.style.left).toBe(css.left);
     expect(el.style.top).toBe(css.top);
     expect(el.style.width).toBe(css.width);
@@ -142,7 +144,7 @@ describe("recipient canonical placement (test78)", () => {
     const signatures = editable.filter((f) => f.type === "signature");
     expect(signatures).toHaveLength(1);
     expect(bodyInitials.length).toBe(model.pages.length - 1);
-    expect(countRecipientSigningActions(editable)).toBe(bodyInitials.length + 1);
+    expect(countRecipientSigningActions(editable, { initialsEnabled: true })).toBe(bodyInitials.length + 1);
   });
 
   it("initials off omits initials from manifest and action count", () => {
@@ -162,7 +164,7 @@ describe("recipient canonical placement (test78)", () => {
         (f.assignedSignerRoleId === r[0]!.roleId || f.counterpartyId === ownerCp) &&
         isRecipientSigningEditableType(f.type),
     );
-    expect(countRecipientSigningActions(ownerEditable)).toBe(1);
+    expect(countRecipientSigningActions(ownerEditable, { initialsEnabled: false })).toBe(1);
   });
 });
 

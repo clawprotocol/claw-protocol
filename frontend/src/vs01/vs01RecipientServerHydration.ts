@@ -22,6 +22,7 @@ import {
   isRecipientSigningEditableType,
   stripLockedSignerEditableValuesOnHydrate,
 } from "./recipientSigningFieldUtils";
+import { hydratePortableSignerMarksForRecipientView } from "./vs01RecipientSignerMarksHydration";
 import { patchSignerPacketStatus } from "./vs01SigningPacketStatusStore";
 import type { Vs01Counterparty } from "./types";
 
@@ -44,17 +45,23 @@ function hydrateFieldsFromPortable(args: {
 }): Vs01RecipientServerHydrationResult {
   const { portable, documentId, lockedCounterpartyId, lockedSignerRoleId, recipientName, recipientEmail } =
     args;
-  storeVs01CanonicalPacketPortable(documentId, portable);
-  storeVs01CanonicalPacketSeed(portable.seed);
+  const agreementId = portable.seed.agreementId.trim();
+  const hydratedPortable = hydratePortableSignerMarksForRecipientView({
+    portable,
+    agreementId,
+    documentId,
+  });
+  storeVs01CanonicalPacketPortable(documentId, hydratedPortable);
+  storeVs01CanonicalPacketSeed(hydratedPortable.seed);
   markVs01CanonicalPacketFromServer(documentId);
-  const manifestFields = portable.initialsPolicy.enabled
-    ? portable.fields
-    : portable.fields.filter((f) => f.type !== "initials");
+  const manifestFields = hydratedPortable.initialsPolicy.enabled
+    ? hydratedPortable.fields
+    : hydratedPortable.fields.filter((f) => f.type !== "initials");
   storeRecipientManifest(documentId, VS01_PACKET_MANIFEST_SCOPE, manifestFields);
 
   const role =
     (lockedSignerRoleId?.trim()
-      ? portable.roles.find((r) => r.roleId === lockedSignerRoleId.trim())
+      ? hydratedPortable.roles.find((r) => r.roleId === lockedSignerRoleId.trim())
       : null) ?? null;
   const scoped = role
     ? filterPacketManifestFieldsForRole(manifestFields, {
@@ -99,17 +106,22 @@ function hydrateFieldsFromPortable(args: {
   );
 
   const lock = (lockedSignerRoleId ?? "").trim();
-  if (lock && portable.seed.agreementId.trim()) {
-    const hasPersistedSignature = fields.some(
-      (f) =>
-        isRecipientSigningEditableType(f.type) &&
-        (f.assignedSignerRoleId ?? "").trim() === lock &&
-        typeof f.value === "string" &&
-        f.value.trim().length > 0,
-    );
-    if (hasPersistedSignature) {
-      const roleKeys = portable.roles.map((r) => r.roleId).filter(Boolean);
-      patchSignerPacketStatus(portable.seed.agreementId, lock, "signed", roleKeys);
+  if (lock && agreementId) {
+    const roleKeys = hydratedPortable.roles.map((r) => r.roleId).filter(Boolean);
+    for (const roleRow of hydratedPortable.roles) {
+      const rid = (roleRow.roleId ?? "").trim();
+      if (!rid) continue;
+      const hasPersistedSignature = fields.some(
+        (f) =>
+          isRecipientSigningEditableType(f.type) &&
+          f.type === "signature" &&
+          (f.assignedSignerRoleId ?? "").trim() === rid &&
+          typeof f.value === "string" &&
+          f.value.trim().length > 0,
+      );
+      if (hasPersistedSignature) {
+        patchSignerPacketStatus(agreementId, rid, "signed", roleKeys);
+      }
     }
   }
   return { ok: fields.length > 0, fields, counterparties: cps, source: fields.length > 0 ? "server_packet" : "miss" };

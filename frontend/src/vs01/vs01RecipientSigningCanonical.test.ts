@@ -182,7 +182,7 @@ describe("recipient canonical signing packet (test75)", () => {
         (f.assignedPartyIndex ?? 0) === 0 &&
         (f.type === "signature" || f.type === "initials"),
     );
-    expect(countRecipientSigningActions(party0Editable)).toBeGreaterThan(1);
+    expect(countRecipientSigningActions(party0Editable, { initialsEnabled: true })).toBeGreaterThan(1);
   });
 
   it("buildFullPacketManifestFromCanonicalModel matches geometry of model fields", () => {
