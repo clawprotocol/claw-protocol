@@ -25,6 +25,7 @@ from backend.services.vs01_signer_completion import (
     orchestrate_vs01_signer_complete,
     required_vs01_signer_role_ids,
     signer_role_already_completed,
+    vs01_open_signing_link_completion_allowed,
 )
 
 
@@ -357,3 +358,29 @@ def test_completion_email_uses_view_signed_url_when_snapshot_ready() -> None:
     assert event is not None
     assert captured
     assert "view-signed" in str(captured[0].get("html", ""))
+
+
+def test_vs01_open_signing_link_completion_allowed_matches_prepared_packet() -> None:
+    draft = {
+        **_draft_with_packet(),
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "document_id": "doc_vs01",
+            "portable": _draft_with_packet()["vs01_signing_packet_v1"]["portable"],
+        },
+    }
+    assert vs01_open_signing_link_completion_allowed(
+        draft,
+        signer_role_id="role_cp",
+        document_id="doc_vs01",
+    )
+    assert not vs01_open_signing_link_completion_allowed(
+        draft,
+        signer_role_id="role_unknown",
+        document_id="doc_vs01",
+    )
+    assert not vs01_open_signing_link_completion_allowed(
+        draft,
+        signer_role_id="role_cp",
+        document_id="doc_other",
+    )

@@ -200,6 +200,70 @@ def test_vs01_signer_complete_duplicate_final_signer_is_idempotent(client: TestC
     assert len(email_events) <= 1
 
 
+def test_test371_counterparty_signer_complete_without_token_when_open_signing_link(
+    client: TestClient,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Party 2 completion must persist when signing invite URLs omit t= (production economics on)."""
+    from backend.usage_economics import store as usage_economics_store_mod
+
+    usage_economics_store_mod._store = None  # noqa: SLF001
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage_strict.sqlite3"))
+
+    aid = _create_two_signer_agreement(client)
+    owner = client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        headers=_org_headers(),
+        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
+    )
+    assert owner.status_code == 200
+
+    with patch(
+        "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
+        return_value=None,
+    ):
+        cp = client.post(
+            f"/api/agreements/{aid}/vs01-signer-complete",
+            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+        )
+    assert cp.status_code == 200
+    body = cp.json()
+    assert body["fully_executed"] is True
+    assert body["already_signed"] is False
+
+    draft = client.get(f"/api/agreements/{aid}", headers=_org_headers()).json()["draft"]
+    sig_events = [e for e in draft.get("audit_log", []) if e.get("event_type") == "signature_completed"]
+    assert len(sig_events) == 2
+    role_ids = {e["value"]["signer_role_id"] for e in sig_events}
+    assert role_ids == {"role_owner", "role_cp"}
+
+    verify = client.get(f"/api/agreements/public/{aid}/verify").json()
+    assert verify["signature_status"]["fully_executed"] is True
+    assert verify["signature_status"]["signatures_recorded"] == 2
+
+
+def test_vs01_signer_complete_rejects_unknown_role_without_token_when_strict(
+    client: TestClient,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from backend.usage_economics import store as usage_economics_store_mod
+
+    usage_economics_store_mod._store = None  # noqa: SLF001
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage_strict2.sqlite3"))
+
+    aid = _create_two_signer_agreement(client)
+    res = client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        json={"signer_role_id": "role_unknown", "participant_id": "p9", "document_id": "doc_vs01"},
+    )
+    assert res.status_code == 403
+    assert res.json()["detail"]["code"] == "recipient_token_required"
+
+
 def test_vs01_signer_complete_email_failure_still_completed(client: TestClient) -> None:
     aid = _create_two_signer_agreement(client)
     client.post(

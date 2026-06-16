@@ -49,6 +49,60 @@ def required_vs01_signer_role_ids(draft: Dict[str, Any]) -> Set[str]:
     return out
 
 
+def vs01_packet_document_id(draft: Dict[str, Any]) -> str:
+    stored = draft.get("vs01_signing_packet_v1")
+    if not isinstance(stored, dict):
+        return ""
+    doc = str(stored.get("document_id") or "").strip()
+    if doc:
+        return doc
+    portable = stored.get("portable")
+    if isinstance(portable, dict):
+        seed = portable.get("seed")
+        if isinstance(seed, dict):
+            return str(seed.get("documentId") or "").strip()
+    return ""
+
+
+def vs01_signing_phase_started(draft: Dict[str, Any]) -> bool:
+    from backend.services.email.signing_delivery import SIGNING_INVITE_EMAILS_SENT_EVENT
+
+    for event in draft.get("audit_log") or []:
+        if not isinstance(event, dict):
+            continue
+        et = str(event.get("event_type") or "")
+        if et == SIGNING_INVITE_EMAILS_SENT_EVENT:
+            return True
+        if et == "signature_completed":
+            return True
+    return isinstance(draft.get("vs01_signing_packet_v1"), dict)
+
+
+def vs01_open_signing_link_completion_allowed(
+    draft: Dict[str, Any],
+    *,
+    signer_role_id: str,
+    document_id: str,
+) -> bool:
+    """
+    Allow tokenless VS01 signer completion when the role and document match the prepared packet.
+
+    Covers signing invite links that omit ``t=`` (already delivered) while economics still require
+    recipient tokens for other flows.
+    """
+    rid = (signer_role_id or "").strip()
+    if not rid or not vs01_signing_phase_started(draft):
+        return False
+    required = required_vs01_signer_role_ids(draft)
+    if not required or rid not in required:
+        return False
+    stored_doc = vs01_packet_document_id(draft)
+    req_doc = (document_id or "").strip()
+    if stored_doc and req_doc and stored_doc != req_doc:
+        return False
+    return True
+
+
 def completed_vs01_signer_role_ids(audit: Any) -> Set[str]:
     out: Set[str] = set()
     for event in audit or []:
@@ -81,13 +135,6 @@ def signature_completed_participant_ids(audit: Any) -> Set[str]:
     return out
 
 
-def signer_role_already_completed(audit: Any, signer_role_id: str) -> bool:
-    rid = (signer_role_id or "").strip()
-    if not rid:
-        return False
-    return rid in completed_vs01_signer_role_ids(audit)
-
-
 def fully_executed_signed_already_recorded(audit: Any) -> bool:
     for event in audit or []:
         if not isinstance(event, dict):
@@ -98,6 +145,13 @@ def fully_executed_signed_already_recorded(audit: Any) -> bool:
         if isinstance(val, dict) and val.get("fully_executed"):
             return True
     return False
+
+
+def signer_role_already_completed(audit: Any, signer_role_id: str) -> bool:
+    rid = (signer_role_id or "").strip()
+    if not rid:
+        return False
+    return rid in completed_vs01_signer_role_ids(audit)
 
 
 def completion_emails_already_sent(audit: Any) -> bool:

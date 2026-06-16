@@ -6117,8 +6117,24 @@ def post_vs01_signer_complete(
         except HTTPException:
             auth_mode = None
     if not auth_mode:
-        assert_agreement_recipient_write_allowed(request, aid, allowed_modes=("sign",))
-        auth_mode = "recipient"
+        from backend.security.agreement_read_scope import recipient_access_token_from_request
+        from backend.services.vs01_signer_completion import vs01_open_signing_link_completion_allowed
+
+        tok = recipient_access_token_from_request(request)
+        if tok:
+            assert_agreement_recipient_write_allowed(request, aid, allowed_modes=("sign",))
+            auth_mode = "recipient"
+        else:
+            draft_for_auth = _load_or_404(aid)
+            if vs01_open_signing_link_completion_allowed(
+                draft_for_auth.model_dump(),
+                signer_role_id=signer_role_id,
+                document_id=(body.document_id or "").strip(),
+            ):
+                auth_mode = "signing_link"
+            else:
+                assert_agreement_recipient_write_allowed(request, aid, allowed_modes=("sign",))
+                auth_mode = "recipient"
 
     from backend.services.vs01_signer_completion import (
         completion_emails_already_sent,
