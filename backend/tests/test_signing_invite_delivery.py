@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.services.email.review_delivery import COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT
 from backend.services.email.signing_delivery import SIGNING_INVITE_EMAILS_SENT_EVENT
 
 pytestmark = pytest.mark.unit
@@ -195,3 +196,112 @@ def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
     assert payload.get("ok") is True
     assert payload.get("portable", {}).get("v") == 1
     assert payload["portable"]["seed"]["documentId"] == "doc_test346"
+
+
+def test_test370_review_complete_then_signing_invite_owner_gets_only_action_required_email(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """After all reviews approve, owner gets signing invite only — not legacy prepare email."""
+    _env_common(monkeypatch, tmp_path)
+    mock_client = _mock_resend_success()
+    client = TestClient(app)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Services Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {
+                    "id": "p_owner",
+                    "name": "Red Mesa Logistics LLC",
+                    "role": "owner",
+                    "email": "owner@example.com",
+                },
+                {
+                    "id": "p_cp",
+                    "name": "Harbor Peak Automation LLC",
+                    "role": "party",
+                    "email": "cp@example.com",
+                },
+            ],
+            "purpose": "Services",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG_H,
+        json={"mode": "review", "role": "reviewer", "recipient_party_id": "p_cp"},
+    )
+    assert mint.status_code == 200
+    review_token = mint.json()["token"]
+
+    signing_url = (
+        "https://app.example.com/app/esign/doc_test370?vs01_recipient_sign=1"
+        f"&recipient_index=0&signer_role_id=vs01r%3A{aid}"
+    )
+    with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
+        approve_res = client.post(
+            f"/api/agreements/{aid}/recipient-approve",
+            headers={"X-Claw-Recipient-Access-Token": review_token},
+            json={
+                "participant_id": "p_cp",
+                "participant_display_name": "Harbor Peak Automation LLC",
+            },
+        )
+        assert approve_res.status_code == 200
+        assert mock_client.post.call_count == 1
+        counterparty_payload = mock_client.post.call_args_list[0][1]["json"]
+        assert counterparty_payload["to"] == ["cp@example.com"]
+        assert "prepare_signature_links" not in counterparty_payload["html"]
+
+        send_res = client.post(
+            f"/api/agreements/{aid}/signing-links-sent",
+            headers=_ORG_H,
+            json={
+                "packet_revision": "rev_test370",
+                "targets": [
+                    {
+                        "email": "owner@example.com",
+                        "display_name": "Red Mesa Logistics LLC",
+                        "signing_url": signing_url,
+                        "signer_role_id": "role_owner",
+                        "is_owner": True,
+                    },
+                    {
+                        "email": "cp@example.com",
+                        "display_name": "Harbor Peak Automation LLC",
+                        "signing_url": signing_url.replace("recipient_index=0", "recipient_index=1"),
+                        "signer_role_id": "role_cp",
+                        "is_owner": False,
+                    },
+                ],
+            },
+        )
+    assert send_res.status_code == 200
+    assert send_res.json().get("sent_count") == 2
+    assert mock_client.post.call_count == 3
+
+    owner_emails = [
+        call[1]["json"]
+        for call in mock_client.post.call_args_list
+        if call[1]["json"]["to"] == ["owner@example.com"]
+    ]
+    assert len(owner_emails) == 1
+    owner_payload = owner_emails[0]
+    assert owner_payload["subject"] == "Action required: Sign Services Agreement"
+    assert "Open signing link" in owner_payload["html"]
+    assert "vs01_recipient_sign=1" in owner_payload["html"]
+    assert "prepare_signature_links" not in owner_payload["html"]
+    assert "Prepare signature links" not in owner_payload["html"]
+
+    approve_audit_types = [
+        e.get("event_type") for e in approve_res.json()["draft"].get("audit_log") or []
+    ]
+    assert COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT in approve_audit_types

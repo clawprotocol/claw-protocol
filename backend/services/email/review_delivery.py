@@ -28,7 +28,6 @@ from backend.services.email.templates.review_invite import build_review_invite_e
 from backend.services.email.templates.review_owner_notification import (
     build_review_counterparty_signing_ready_notification_email,
     build_review_owner_notification_email,
-    build_review_owner_signing_ready_notification_email,
 )
 
 _log = logging.getLogger(__name__)
@@ -349,23 +348,24 @@ def maybe_notify_owner_after_reviewer_approval(
 
     title = str(draft.get("title") or "").strip() or "Untitled agreement"
     dashboard_url = _build_owner_dashboard_url(origin, aid)
-    signing_prep_url = _build_owner_signing_prep_url(origin, aid)
     all_reviews_complete = _all_required_review_parties_approved(draft)
     if all_reviews_complete:
-        email = build_review_owner_signing_ready_notification_email(
-            owner_name=owner_name,
-            agreement_title=title,
-            reviewer_display_name=reviewer_name,
-            signing_prep_url=signing_prep_url,
-            dashboard_url=dashboard_url,
+        # VS01 review-first: owner receives the actionable signing invite after packet
+        # prepare ("Action required: Sign …"). Skip legacy prepare_signature_links email.
+        _log.info(
+            "[review-owner-notification] skipped agreement_id=%s org_id=%s "
+            "skip_reason=signing_invite_follows_packet_prepare sent_count=0",
+            aid,
+            oid or "",
         )
-    else:
-        email = build_review_owner_notification_email(
-            owner_name=owner_name,
-            agreement_title=title,
-            reviewer_display_name=reviewer_name,
-            dashboard_url=dashboard_url,
-        )
+        return None
+
+    email = build_review_owner_notification_email(
+        owner_name=owner_name,
+        agreement_title=title,
+        reviewer_display_name=reviewer_name,
+        dashboard_url=dashboard_url,
+    )
     result = send_email_non_fatal(
         to=owner_email,
         subject=email.subject,
@@ -570,12 +570,6 @@ def _build_owner_dashboard_url(origin: str, agreement_id: str) -> str:
     base = origin.rstrip("/")
     aid = quote(agreement_id.strip(), safe="")
     return f"{base}/app?focus={aid}"
-
-
-def _build_owner_signing_prep_url(origin: str, agreement_id: str) -> str:
-    base = origin.rstrip("/")
-    aid = quote(agreement_id.strip(), safe="")
-    return f"{base}/app?prepare_signature_links={aid}"
 
 
 def _approved_participant_ids_from_audit(audit: Any) -> set[str]:

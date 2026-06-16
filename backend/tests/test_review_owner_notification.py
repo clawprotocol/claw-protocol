@@ -117,9 +117,10 @@ def _approve_as_reviewer(
     return res.json()
 
 
-def test_external_reviewer_approval_sends_owner_and_counterparty_status_emails_once(
+def test_final_review_approval_sends_counterparty_only_not_legacy_owner_prepare_email(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
+    """Test370: no owner prepare_signature_links email when all reviews complete."""
     _env_common(monkeypatch, tmp_path)
     mock_client = _mock_resend_success()
     client = TestClient(app)
@@ -129,29 +130,20 @@ def test_external_reviewer_approval_sends_owner_and_counterparty_status_emails_o
     with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
         body = _approve_as_reviewer(client, aid, token)
 
-    assert mock_client.post.call_count == 2
-    owner_payload = mock_client.post.call_args_list[0][1]["json"]
-    counterparty_payload = mock_client.post.call_args_list[1][1]["json"]
-    assert owner_payload["to"] == ["owner@example.com"]
-    assert owner_payload["subject"] == "Review complete: prepare to sign Consulting Agreement"
-    assert "Prepare signature links" in owner_payload["html"]
-    prep_url = f"https://app.example.com/app?prepare_signature_links={aid}"
-    assert prep_url in owner_payload["html"]
-    assert owner_payload["html"].count(prep_url) >= 2
-    assert "/app/done/" not in owner_payload["html"]
-    assert "https://app.example.com/app?focus=" not in owner_payload["html"]
-    assert "/review?t=" not in owner_payload["html"]
-
+    assert mock_client.post.call_count == 1
+    counterparty_payload = mock_client.post.call_args_list[0][1]["json"]
     assert counterparty_payload["to"] == ["reviewer@example.com"]
     assert counterparty_payload["subject"] == "Review complete: Consulting Agreement is ready for signing"
     assert "signing invitation" in counterparty_payload["html"].lower()
+    assert "prepare_signature_links" not in counterparty_payload["html"]
+    assert "Prepare signature links" not in counterparty_payload["html"]
 
     audit_types = [e.get("event_type") for e in body["draft"].get("audit_log") or []]
-    assert OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT in audit_types
+    assert OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT not in audit_types
     assert COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT in audit_types
 
 
-def test_duplicate_approval_does_not_resend_owner_or_counterparty_notifications(
+def test_duplicate_approval_does_not_resend_counterparty_notification(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     _env_common(monkeypatch, tmp_path)
@@ -164,7 +156,7 @@ def test_duplicate_approval_does_not_resend_owner_or_counterparty_notifications(
         _approve_as_reviewer(client, aid, token)
         _approve_as_reviewer(client, aid, token)
 
-    assert mock_client.post.call_count == 2
+    assert mock_client.post.call_count == 1
 
 
 def test_missing_owner_email_skips_notification_without_failing_approval(
@@ -258,12 +250,11 @@ def test_initial_review_invite_still_excludes_owner(
     with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
         _approve_as_reviewer(client, aid, token)
 
-    assert mock_client.post.call_count == 3
-    owner_payload = mock_client.post.call_args_list[1][1]["json"]
-    counterparty_payload = mock_client.post.call_args_list[2][1]["json"]
-    assert owner_payload["to"] == ["owner@example.com"]
-    assert owner_payload["subject"].startswith("Review complete:")
+    assert mock_client.post.call_count == 2
+    counterparty_payload = mock_client.post.call_args_list[1][1]["json"]
     assert counterparty_payload["to"] == ["reviewer@example.com"]
+    assert counterparty_payload["subject"] == "Review complete: Consulting Agreement is ready for signing"
+    assert "prepare_signature_links" not in counterparty_payload["html"]
 
 
 def test_client_role_owner_email_receives_notification(
@@ -312,9 +303,8 @@ def test_client_role_owner_email_receives_notification(
             display_name="Iron Vale Systems Inc",
         )
 
-    assert mock_client.post.call_count == 2
-    assert mock_client.post.call_args_list[0][1]["json"]["to"] == ["owner@example.com"]
-    assert mock_client.post.call_args_list[1][1]["json"]["to"] == ["reviewer@example.com"]
+    assert mock_client.post.call_count == 1
+    assert mock_client.post.call_args_list[0][1]["json"]["to"] == ["reviewer@example.com"]
 
 
 def test_partial_reviewer_approval_uses_dashboard_notification(
