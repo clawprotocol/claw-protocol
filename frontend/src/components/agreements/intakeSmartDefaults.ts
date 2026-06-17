@@ -20,7 +20,7 @@ export type { AgreementFamily } from "./agreementFamilyRouter";
 export type ParsedDraftShape = {
   title: string;
   jurisdiction: string;
-  parties: { name: string; role: string; email?: string }[];
+  parties: { id?: string; name: string; role: string; email?: string }[];
   purpose: string;
   payment_terms: string;
   duration: string | null;
@@ -63,6 +63,8 @@ export type ParsedDraftShape = {
   distributions_summary?: string | null;
   transfer_restrictions_summary?: string | null;
   dissolution_summary?: string | null;
+  /** Creator/admin is coordinating only — not a legal party or signer (client-side). */
+  creator_coordinator_only?: boolean;
 };
 
 const MAX_PARTY_NAME_LEN = 280;

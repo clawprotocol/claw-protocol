@@ -1,4 +1,4 @@
-import type { AgreementParty } from "../../agreement/agreementTypes";
+import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
   resolveSignerPartyLegalEntityDisplayValue,
@@ -26,7 +26,7 @@ export const PAID_PRO_ADD_ANOTHER_PARTY_LABEL = "Add another party";
 export type PaidProSignerSetupUiState = {
   creatorCoordinatorOnly: boolean;
   signerSetupUiPartyCount: number;
-  draftParties: readonly { id?: string; name?: string; role?: string }[];
+  draftParties: readonly { id?: string; name?: string; role?: string; email?: string }[];
   recipient1Name: string;
   recipient2Name: string;
   extraPartyLegalNames: readonly string[];
@@ -133,9 +133,9 @@ export function paidProSignerSetupUiStateFromRecipientSetup(
 }
 
 export function mergeNPartySignerSetupIntoDraft(
-  draft: { parties?: AgreementParty[]; creator_coordinator_only?: boolean } | null,
+  draft: AgreementDraft | null,
   setup: RecipientSetupEmailInput | null | undefined,
-): typeof draft {
+): AgreementDraft | null {
   if (!draft) return draft;
   const ui = paidProSignerSetupUiStateFromRecipientSetup(
     draft.parties ?? [],
@@ -191,10 +191,9 @@ export function resolveBridgeCreatorIsParty(
   bridge: Pick<AgreementVs01BridgeSession, "creatorIsParty" | "legalParties"> | null | undefined,
   draftCoordinatorOnly?: boolean | null,
 ): boolean {
-  if (bridge?.creatorIsParty === false) return false;
-  if (bridge?.legalParties?.length && bridge.creatorIsParty === false) return false;
   if (draftCoordinatorOnly) return false;
-  return bridge?.creatorIsParty !== false;
+  if (bridge?.creatorIsParty === false) return false;
+  return true;
 }
 
 export function buildVs01PrepareSigningRolesForBridge(args: {
