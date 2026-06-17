@@ -1,4 +1,6 @@
 import { prepareRoleSignerName, signerMetadataInputRaw } from "../agreement/signerMetadataNormalize";
+import { partyRequiresSignature } from "../agreement/partyRequiresSignature";
+import type { AgreementParty } from "../agreement/agreementTypes";
 import { isPlausibleEmail } from "./detailsStepValidation";
 import {
   normalizePlacedFieldGeometryIfBelowMinimum,
@@ -54,18 +56,97 @@ export type Vs01PrepareSigningRole = {
 };
 
 /**
- * Roles used for paid Pro prepare-mode placement + packet gate (owner + named counterparties only).
+ * Build one VS01 signing role per legal party that requires signature.
+ */
+export function buildVs01PrepareSigningRolesFromLegalParties(args: {
+  agreementId: string;
+  parties: readonly AgreementParty[];
+  signingPartiesOnly?: boolean;
+}): Vs01PrepareSigningRole[] {
+  const aid = args.agreementId.trim();
+  if (!aid) return [];
+  const sourceParties =
+    args.signingPartiesOnly === false
+      ? [...args.parties]
+      : args.parties.filter((p) => partyRequiresSignature(p));
+  const out: Vs01PrepareSigningRole[] = [];
+  let partyIndex = 0;
+  for (const party of sourceParties) {
+    const partyName = (party.name || "").trim();
+    if (!partyName) continue;
+    const partyId = String(party.id ?? `party_${partyIndex}`).trim() || `party_${partyIndex}`;
+    const roleId = buildStableSignerRoleId(aid, partyIndex, partyId);
+    const rowEmail = [party.signerEmail, party.reviewEmail, party.email]
+      .map((x) => (x ?? "").trim())
+      .find((x) => isPlausibleEmail(x));
+    const preparedSignerName = prepareRoleSignerName(party.signerName, partyName);
+    const isEntityParty = looksLikeLegalEntityPartyNameLocal(partyName);
+    const wf = (party.role || "").trim().toLowerCase();
+    const kind: Vs01PrepareSigningRole["kind"] = wf === "owner" ? "owner" : "counterparty";
+    out.push({
+      roleId,
+      partyIndex,
+      partyId,
+      entityName: partyName,
+      partyName,
+      roleLabel: partyName,
+      signerName: preparedSignerName ?? (!isEntityParty ? partyName : undefined),
+      signerTitle: signerMetadataInputRaw(party.signerTitle) || undefined,
+      signerEmail: rowEmail || undefined,
+      reviewEmail: party.reviewEmail?.trim() || undefined,
+      isEntityParty,
+      requiresSignature: party.requiresSignature !== false,
+      vs01CounterpartyId: kind === "counterparty" ? partyId : null,
+      kind,
+    });
+    partyIndex += 1;
+  }
+  return out;
+}
+
+/**
+ * Roles used for paid Pro prepare-mode placement + packet gate.
  */
 export function buildVs01PrepareSigningRoles(args: {
   agreementId: string;
-  /** Owner legal entity / party name only. */
   creatorName: string;
   creatorEmail: string;
-  /** Optional human representative for owner (never initials or signature typed text). */
   ownerSignerName?: string;
   ownerSignerTitle?: string;
   counterparties: Vs01Counterparty[];
+  creatorIsParty?: boolean;
+  legalParties?: readonly AgreementParty[];
 }): Vs01PrepareSigningRole[] {
+  if (args.legalParties?.length) {
+    const signingOnly =
+      args.creatorIsParty === false
+        ? args.legalParties.filter((p) => partyRequiresSignature(p))
+        : args.legalParties;
+    if (args.creatorIsParty === false || signingOnly.length >= 2) {
+      const fromParties = buildVs01PrepareSigningRolesFromLegalParties({
+        agreementId: args.agreementId,
+        parties: signingOnly,
+        signingPartiesOnly: false,
+      });
+      if (fromParties.length > 0) return fromParties;
+    }
+  }
+  if (args.creatorIsParty === false) {
+    return buildVs01PrepareSigningRolesFromLegalParties({
+      agreementId: args.agreementId,
+      parties: args.counterparties.map((c) => ({
+        id: c.id,
+        name: c.name,
+        role: "party",
+        email: c.email,
+        signerName: c.signerName,
+        signerTitle: c.signerTitle,
+        signerEmail: c.signerEmail,
+        reviewEmail: c.reviewEmail,
+      })),
+      signingPartiesOnly: true,
+    });
+  }
   const aid = args.agreementId.trim();
   const ownerName = (args.creatorName || "").trim() || "Owner";
   const ownerPartyId = "owner";

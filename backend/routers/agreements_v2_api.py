@@ -5582,9 +5582,9 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
             continue
         try:
             parties = d.get("parties") or []
-            signers = sum(
-                1 for p in parties if str((p or {}).get("role") or "").lower() == "signer"
-            )
+            from backend.services.vs01_signer_completion import resolve_required_signer_count
+
+            signers = resolve_required_signer_count(d)
             audit = d.get("audit_log") or []
             signed = any(
                 isinstance(e, dict) and str(e.get("event_type") or "") == "signed"
@@ -6676,8 +6676,10 @@ def _public_agreement_verify_pending_payload(aid: str, draft: AgreementDraft) ->
         lifecycle = "in_negotiation"
     signer_party_count = 0
     try:
-        signer_party_count = len(
-            [p for p in draft.parties or [] if _normalize_workflow_role(p.role) == "signer"]
+        from backend.services.vs01_signer_completion import resolve_required_signer_count
+
+        signer_party_count = resolve_required_signer_count(
+            draft.model_dump() if hasattr(draft, "model_dump") else dict(draft)
         )
     except Exception:
         signer_party_count = 0
@@ -8895,6 +8897,8 @@ def _public_lifecycle_label(draft: AgreementDraft, agreement_id: str) -> str:
 
 
 def _public_signature_status(agreement_id: str, draft: AgreementDraft) -> Dict[str, Any]:
+    from backend.services.vs01_signer_completion import resolve_required_signer_count
+
     audit = list(draft.audit_log or [])
     fully = any(_audit_event_dict(e).get("event_type") == "signed" for e in audit) or _all_signers_signed_from_audit(
         draft, audit
@@ -8903,11 +8907,11 @@ def _public_signature_status(agreement_id: str, draft: AgreementDraft) -> Dict[s
     lock = read_signing_lock(agreement_id)
     lv = str((lock or {}).get("locked_version_id") or "").strip() or None
     commitment = _agreement_version_hash(agreement_id, lv, draft) if lv else None
-    signers = [p for p in draft.parties or [] if _normalize_workflow_role(p.role) == "signer"]
+    draft_dict = draft.model_dump() if hasattr(draft, "model_dump") else dict(draft)
     return {
         "fully_executed": fully,
         "signatures_recorded": n_completed,
-        "signer_party_count": len(signers),
+        "signer_party_count": resolve_required_signer_count(draft_dict),
         "locked_version_id": lv,
         "signing_commitment_hash": commitment,
     }

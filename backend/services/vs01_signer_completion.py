@@ -175,19 +175,77 @@ def count_signature_completed_events(audit: Any) -> int:
     )
 
 
+_COMPLETION_ELIGIBLE_PARTY_ROLES = frozenset(
+    {"", "signer", "owner", "party", "counterparty", "provider", "client", "service_provider"}
+)
+
+_NON_SIGNING_PARTY_ROLES = frozenset({"viewer", "reviewer", "coordinator", "fyi", "copy", "read_only", "readonly"})
+
+
+def _normalize_party_workflow_role(role: str) -> str:
+    r = (role or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if r in ("serviceprovider", "service_provider"):
+        return "service_provider"
+    if r in ("readonly", "read_only"):
+        return "viewer"
+    return r
+
+
+def party_requires_signature(party: Any) -> bool:
+    """True when a draft party row should count toward required signer completion."""
+    if not isinstance(party, dict):
+        return False
+    if party.get("requires_signature") is False:
+        return False
+    if not str(party.get("name") or "").strip():
+        return False
+    wr = _normalize_party_workflow_role(str(party.get("role") or ""))
+    return wr not in _NON_SIGNING_PARTY_ROLES
+
+
+def resolve_required_signer_count(draft: Dict[str, Any]) -> int:
+    """
+    Authoritative required signer count for dashboard / public verify / completion gates.
+
+    Prefers VS01 portable role ids; falls back to draft parties that require signatures.
+    """
+    required_roles = required_vs01_signer_role_ids(draft)
+    if required_roles:
+        return len(required_roles)
+    parties = draft.get("parties") or []
+    party_signers = sum(1 for p in parties if party_requires_signature(p))
+    if party_signers > 0:
+        return party_signers
+    legacy = [
+        p
+        for p in parties
+        if _normalize_party_workflow_role(str((p or {}).get("role") or "")) == "signer"
+    ]
+    if legacy:
+        return len(legacy)
+    return max(len(parties), 1) if parties else 0
+
+
 def all_signers_signed_from_audit(draft: Dict[str, Any], audit: List[Any]) -> bool:
     parties = draft.get("parties") or []
-    signers = [p for p in parties if str((p or {}).get("role") or "").strip().lower() == "signer"]
-    done = signature_completed_participant_ids(audit)
-    ids = [str((p or {}).get("id") or "").strip() for p in signers]
-    if ids and all(ids):
-        if ids and all(i in done for i in ids):
-            return True
 
     required_roles = required_vs01_signer_role_ids(draft)
     if required_roles:
         completed_roles = completed_vs01_signer_role_ids(audit)
         return required_roles <= completed_roles
+
+    signing_parties = [p for p in parties if party_requires_signature(p)]
+    if signing_parties:
+        done = signature_completed_participant_ids(audit)
+        ids = [str((p or {}).get("id") or "").strip() for p in signing_parties]
+        if ids and all(ids) and all(i in done for i in ids):
+            return True
+
+    signers = [p for p in parties if str((p or {}).get("role") or "").strip().lower() == "signer"]
+    done = signature_completed_participant_ids(audit)
+    ids = [str((p or {}).get("id") or "").strip() for p in signers]
+    if ids and all(ids) and all(i in done for i in ids):
+        return True
 
     if len(signers) == 1 and done:
         return True

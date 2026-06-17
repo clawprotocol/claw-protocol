@@ -6,6 +6,7 @@ import {
   type PublicVerifyPayload,
 } from "../../agreement/agreementPublicVerify";
 import { downloadCompletedSignedAgreementPdf } from "../../agreement/completedSignedAgreementPdfDownload";
+import { resolveRequiredSignerCount } from "../../agreement/resolveRequiredSignerCount";
 import { PremiumAgreementReadonlyView } from "../../components/agreements/PremiumAgreementReadonlyView";
 import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
 import { CREATOR_COMPLETED_PILL, CREATOR_DOWNLOAD_PDF_LABEL } from "../creatorDashboardCopy";
@@ -20,7 +21,7 @@ type Props = {
 function formatSignatureSummary(verify: PublicVerifyPayload | null): string | null {
   const sig = verify?.signature_status;
   if (!sig) return null;
-  const required = Math.max(sig.signer_party_count ?? 0, 2);
+  const required = resolveRequiredSignerCount({ signerPartyCount: sig.signer_party_count });
   const recorded = sig.signatures_recorded ?? 0;
   if (sig.fully_executed) return `Fully signed (${required} of ${required})`;
   if (recorded > 0) return `${recorded} of ${required} signed`;

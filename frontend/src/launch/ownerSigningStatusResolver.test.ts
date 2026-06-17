@@ -102,6 +102,21 @@ describe("ownerSigningStatusResolver (Test359 follow-up)", () => {
     vi.restoreAllMocks();
   });
 
+  it("reports 0 of 3 from persisted public verify for three-party agreements", async () => {
+    vi.spyOn(agreementPublicVerify, "fetchPublicAgreementVerify").mockResolvedValue(
+      publicVerifyPayload({ signatures_recorded: 0, signer_party_count: 3 }) as never,
+    );
+    const snap = await fetchPersistedSigningProgressSnapshot(AG);
+    expect(snap?.requiredCount).toBe(3);
+    expect(snap?.signedCount).toBe(0);
+    const row = indexRow({ party_count: 3, signer_count: 3 });
+    const progress = resolveOwnerSigningProgress(row, snap);
+    expect(progress?.requiredCount).toBe(3);
+    expect(deriveWhatsNextProgressLine(row, resolveCreatorDashboardReviewGate(row, []), snap)).toBe(
+      "0 of 3 signed",
+    );
+  });
+
   it("reports 0 of 2 from persisted public verify when localStorage is empty", async () => {
     vi.spyOn(agreementPublicVerify, "fetchPublicAgreementVerify").mockResolvedValue(
       publicVerifyPayload({ signatures_recorded: 0 }) as never,

@@ -322,7 +322,7 @@ function standardizeWitnessSignatureLines(corpus: string): string {
 
 function ensureWitnessBlockFromRoles(corpus: string, roles: readonly Vs01PrepareSigningRole[]): string {
   const cleaned = standardizeWitnessSignatureLines(stripStaleExecutionPlacementCorpusCopy(corpus).text.trim());
-  const signerCount = Math.max(2, roles.length);
+  const signerCount = Math.max(1, roles.filter((r) => r.requiresSignature !== false).length);
   if (
     corpusHasVisibleSignatureExecutionLines(cleaned) &&
     corpusSignatureBlocksHaveRequiredByLines(cleaned, signerCount)

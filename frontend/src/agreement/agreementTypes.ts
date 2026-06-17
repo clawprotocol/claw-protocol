@@ -14,6 +14,8 @@ export type AgreementParty = {
   signerEmail?: string;
   /** Review / comment thread email when distinct from signing. */
   reviewEmail?: string;
+  /** When false, party is listed on the agreement but does not sign (e.g. notice-only). */
+  requiresSignature?: boolean;
 };
 
 export type AgreementDraft = {
@@ -51,4 +53,6 @@ export type AgreementDraft = {
   rendered_document_text?: string | null;
   /** Pro review redline v1 (server JSON); optional. */
   pro_redline_v1?: Record<string, unknown> | null;
+  /** Creator/admin is coordinating only — not a legal party or signer. */
+  creator_coordinator_only?: boolean;
 };

@@ -22,6 +22,10 @@ import {
 } from "../vs01/vs01SigningPacketStatusStore";
 import { isAgreementCompletedForDashboard } from "./creatorDashboardAgreementCompletion";
 import type { CreatorSigningProgressSnapshot } from "./creatorDashboardSigningProgress";
+import {
+  countRequiredSignersFromHandoff,
+  resolveRequiredSignerCount,
+} from "../agreement/resolveRequiredSignerCount";
 
 /**
  * Owner signing status source-of-truth order (Test361):
@@ -46,7 +50,9 @@ export type OwnerSigningProgress = SigningProgressSnapshot & {
 export function progressFromPublicVerify(verify: PublicVerifyPayload): OwnerSigningProgress | null {
   const sig = verify.signature_status;
   if (!sig) return null;
-  const requiredCount = Math.max(sig.signer_party_count ?? 0, 2);
+  const requiredCount = resolveRequiredSignerCount({
+    signerPartyCount: sig.signer_party_count,
+  });
   const signedCount = Math.max(sig.signatures_recorded ?? 0, 0);
   const fullySigned =
     Boolean(sig.fully_executed) ||
@@ -78,7 +84,10 @@ export async function fetchPersistedSigningProgressSnapshot(
 }
 
 function inferRequiredSignerCount(row: WorkspaceIndexAgreement): number {
-  return Math.max(row.signer_count ?? 0, row.party_count ?? 0, 2);
+  return resolveRequiredSignerCount({
+    signerCount: row.signer_count,
+    partyCount: row.party_count,
+  });
 }
 
 function progressFromWorkspaceLock(row: WorkspaceIndexAgreement): OwnerSigningProgress | null {
@@ -157,8 +166,9 @@ export function reconstructHandoffFromPortable(
   portable: Vs01CanonicalPacketPortableV1,
   agreementTitle?: string,
 ): PaidProVs01PostSignHandoffV1 {
-  const ownerRole = portable.roles[0];
-  const counterpartyRoles = portable.roles.slice(1);
+  const signingRoles = portable.roles.filter((r) => r.requiresSignature !== false);
+  const ownerRole = signingRoles.find((r) => r.kind === "owner") ?? signingRoles[0];
+  const otherRoles = signingRoles.filter((r) => r.roleId !== ownerRole?.roleId);
   return {
     v: 1,
     agreementId: portable.seed.agreementId,
@@ -170,7 +180,7 @@ export function reconstructHandoffFromPortable(
     packetPrepareOnly: true,
     ownerSignerRoleId: ownerRole?.roleId,
     ownerSigningUrl: "",
-    signers: counterpartyRoles.map((role) => ({
+    signers: otherRoles.map((role) => ({
       counterpartyId: role.vs01CounterpartyId ?? role.partyId ?? role.roleId,
       displayName: role.partyName || role.entityName || role.signerName || "Signer",
       email: role.signerEmail ?? "",
@@ -250,7 +260,11 @@ export function packetStatusFromPublicVerify(
   }
 
   const sig = verify.signature_status;
-  const requiredCount = Math.max(sig?.signer_party_count ?? 0, Object.keys(bySignerKey).length, 2);
+  const requiredCount = resolveRequiredSignerCount({
+    signerPartyCount: sig?.signer_party_count,
+    packetStatusSignerKeyCount: Object.keys(bySignerKey).length,
+    handoffSignerCount: countRequiredSignersFromHandoff(handoff),
+  });
   let signedCount = Object.values(bySignerKey).filter((status) => status === "signed").length;
   const serverSigned = Math.max(sig?.signatures_recorded ?? 0, 0);
   const fullyExecuted =
