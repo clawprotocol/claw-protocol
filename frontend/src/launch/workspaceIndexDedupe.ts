@@ -1,5 +1,6 @@
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { readPaidProVs01PostSignHandoff } from "../vs01/vs01PaidProPostSignHandoff";
+import { filterSupersededStaleDraftWorkspaceRows } from "./supersededStaleDraftWorkspaceRows";
 
 function normId(id: string): string {
   return id.trim();
@@ -43,8 +44,9 @@ function pickPreferredRow(
 export function dedupeWorkspaceIndexAgreements(
   rows: WorkspaceIndexAgreement[],
 ): WorkspaceIndexAgreement[] {
+  const withoutSupersededDrafts = filterSupersededStaleDraftWorkspaceRows(rows);
   const byAgreement = new Map<string, WorkspaceIndexAgreement>();
-  for (const row of rows) {
+  for (const row of withoutSupersededDrafts) {
     const id = normId(row.id);
     if (!id) continue;
     const prev = byAgreement.get(id);

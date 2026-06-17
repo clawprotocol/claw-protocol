@@ -2,6 +2,9 @@ import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi
 import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
 import { getLawdogEntryContextStored } from "./lawdogEntryContext";
 import {
+  filterSupersededStaleDraftWorkspaceRows,
+} from "./supersededStaleDraftWorkspaceRows";
+import {
   deriveCreatorDashboardStatus,
   sortCreatorDashboardRows,
   type CreatorDashboardStatus,
@@ -48,7 +51,8 @@ export function shouldFocusCreatorDashboardOnSingleAgreement(): boolean {
 export function filterCreatorDashboardAgreements(
   rows: readonly WorkspaceIndexAgreement[],
 ): CreatorDashboardAgreementFilterResult {
-  const sorted = sortCreatorDashboardRows(rows);
+  const dedupedRows = filterSupersededStaleDraftWorkspaceRows(rows);
+  const sorted = sortCreatorDashboardRows(dedupedRows);
   const featuredAgreementId = resolveCreatorDashboardFeaturedAgreementId(sorted);
   const resumeId = (readCreateReviewAgreementResumeId() || "").trim();
   const focusSingle = shouldFocusCreatorDashboardOnSingleAgreement();
