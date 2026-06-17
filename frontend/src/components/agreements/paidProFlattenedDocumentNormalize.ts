@@ -7,6 +7,7 @@
 import { stripPreWitnessExecutionPollutionFromPrefix } from "./paidProExecutionBlockNormalization";
 import { repairGluedSectionHeadingsInText } from "./documentSectionHeadingSplit";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
+import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
   return prefix
@@ -123,6 +124,11 @@ export function preparePaidProReviewDisplayPlain(text: string): {
   if (orphans.orphanSectionsRepaired > 0) {
     out = orphans.text;
     repairs.push(...orphans.repairs);
+  }
+  const orphanSectionNumbers = repairPaidProOrphanSectionNumbers(out);
+  if (orphanSectionNumbers.repairs.length > 0) {
+    out = orphanSectionNumbers.text;
+    repairs.push(...orphanSectionNumbers.repairs);
   }
   return { text: out, repairs: [...new Set(repairs)] };
 }

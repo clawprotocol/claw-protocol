@@ -7,6 +7,7 @@ import {
   renumberTopLevelHeadingsAfterOrphanRemoval,
 } from "./paidProOrphanSectionNumberRepair";
 import { validateAndRepairPremiumAgreementStructure } from "./premiumAgreementStructure";
+import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 
 function test364BrokenMiscellaneousTail(): string {
   return [
@@ -64,6 +65,68 @@ function cleanAgreement(): string {
     "By: _________________________",
   ].join("\n");
 }
+
+function test365TerminalOrphanBeforeWitness(): string {
+  return [
+    "11. General Provisions",
+    "11.7 Survival.",
+    "The following provisions survive expiration or termination of this Agreement to the extent applicable: payment obligations accrued before termination, confidentiality, and this Section 11.7.",
+    "",
+    "11.8 Counterparts and Electronic Signatures",
+    "",
+    "This Agreement may be signed in counterparts, each of which is deemed an original, and electronic signatures are permitted.",
+    "",
+    "12.",
+    "",
+    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    "",
+    "CLIENT:",
+    "Red Mesa Logistics LLC",
+    "By: _________________________",
+    "Name: Rand Mann",
+    "Title: CEO",
+    "",
+    "SERVICE PROVIDER:",
+    "Harbor Peak Automation LLC",
+    "By: _________________________",
+    "Name: Rasta Benning",
+    "Title: Member",
+  ].join("\n");
+}
+
+describe("Test365 terminal orphan before witness", () => {
+  it("removes standalone 12. before IN WITNESS WHEREOF", () => {
+    const { text, repairs } = repairPaidProOrphanSectionNumbers(test365TerminalOrphanBeforeWitness());
+    expect(text).not.toMatch(/^\s*12\.\s*$/m);
+    expect(repairs.some((r) => r.includes("terminal_orphan_before_witness:12."))).toBe(true);
+    expect(text).toMatch(
+      /counterparts[\s\S]*IN WITNESS WHEREOF/i,
+    );
+    expect(countPaidProExecutionBlocks(text)).toBe(1);
+  });
+
+  it("preparePaidProReviewDisplayPlain removes terminal orphan after flattening", () => {
+    const { text } = preparePaidProReviewDisplayPlain(test365TerminalOrphanBeforeWitness());
+    expect(text).not.toMatch(/^\s*12\.\s*$/m);
+    expect(text).toMatch(/IN WITNESS WHEREOF/i);
+  });
+
+  it("preserves real headings like 11. General Provisions and 12. Governing Law", () => {
+    const input = [
+      "11. General Provisions",
+      "Operative text.",
+      "",
+      "12. Governing Law",
+      "Texas law governs.",
+      "",
+      "IN WITNESS WHEREOF",
+    ].join("\n");
+    const { text, repairs } = repairPaidProOrphanSectionNumbers(input);
+    expect(text).toContain("11. General Provisions");
+    expect(text).toContain("12. Governing Law");
+    expect(repairs).toHaveLength(0);
+  });
+});
 
 describe("Test364 paid Pro orphan section number repair", () => {
   it("repairs survival clause stranded before orphan 16.", () => {

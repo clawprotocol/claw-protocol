@@ -9,6 +9,8 @@ import {
 } from "../../vs01/vs01CorpusOrphanSectionSanitizer";
 
 const WITNESS_RE = /\bIN WITNESS WHEREOF\b/i;
+const EXECUTION_BLOCK_START_RE =
+  /^(?:IN WITNESS WHEREOF|CLIENT\s*:|SERVICE\s+PROVIDER\s*:|\bSIGNATURES\b)/i;
 const TOP_LEVEL_HEADING_RE = /^(\d+)\.\s+(.+)$/;
 const THIS_SECTION_TAIL_RE = /this\s+section\.?\s*$/i;
 
@@ -74,6 +76,72 @@ export function repairStrandedThisSectionReference(text: string): {
     text: out.join("\n").replace(/\n{3,}/g, "\n\n"),
     repairs,
   };
+}
+
+function isSubstantiveBodyLine(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.length < 12) return false;
+  if (isOrphanStandaloneTopLevelSectionNumberLine(t)) return false;
+  if (isTopLevelHeadingLine(t)) return false;
+  if (/^\d+\.\d+\s+/.test(t)) return false;
+  if (/^[A-Z][A-Z0-9\s/&-]{4,}$/.test(t) && t.length < 80) return false;
+  return /[a-z]/i.test(t);
+}
+
+/**
+ * Final guard: drop standalone `N.` lines that cannot start a real section, especially
+ * terminal orphans immediately before witness / signature block starts.
+ */
+export function removeOrphanStandaloneSectionNumbersBeforeExecution(text: string): {
+  text: string;
+  repairs: string[];
+} {
+  const repairs: string[] = [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    if (!isOrphanStandaloneTopLevelSectionNumberLine(trimmed)) {
+      out.push(line);
+      continue;
+    }
+
+    const nextIdx = nextNonEmptyLineIndex(lines, i + 1);
+    const nextTrimmed = nextIdx != null ? lines[nextIdx]!.trim() : "";
+    const terminalBeforeExecution =
+      !nextTrimmed ||
+      WITNESS_RE.test(nextTrimmed) ||
+      EXECUTION_BLOCK_START_RE.test(nextTrimmed);
+    const followedByRealHeading = Boolean(nextTrimmed && isTopLevelHeadingLine(nextTrimmed));
+    const followedBySubsectionHeading = /^\d+\.\d+\s+\S/.test(nextTrimmed);
+    const followedBySubstantiveBody =
+      nextIdx != null && isSubstantiveBodyLine(lines[nextIdx]!);
+
+    if (terminalBeforeExecution) {
+      repairs.push(`terminal_orphan_before_witness:${trimmed}`);
+      continue;
+    }
+    if (followedByRealHeading || followedBySubsectionHeading || !followedBySubstantiveBody) {
+      repairs.push(`orphan_section_line_removed:${trimmed}`);
+      continue;
+    }
+    out.push(line);
+  }
+
+  return {
+    text: out.join("\n").replace(/\n{3,}/g, "\n\n"),
+    repairs,
+  };
+}
+
+function compactBlankLinesBeforeWitness(text: string): string {
+  const witnessIdx = text.search(WITNESS_RE);
+  if (witnessIdx < 0) return text;
+  const head = text.slice(0, witnessIdx).replace(/\n{3,}/g, "\n\n").trimEnd();
+  const tail = text.slice(witnessIdx).trimStart();
+  return `${head}\n\n${tail}`;
 }
 
 function isTopLevelHeadingLine(line: string): { number: number; title: string } | null {
@@ -149,21 +217,32 @@ export function repairPaidProOrphanSectionNumbers(text: string): PaidProOrphanSe
   repairs.push(...stranded.repairs);
 
   const orphanScanBefore = (working.match(/^\d+\.\s*$/gm) ?? []).length;
+  const terminalGuard = removeOrphanStandaloneSectionNumbersBeforeExecution(working);
+  working = terminalGuard.text;
+  repairs.push(...terminalGuard.repairs);
+
   const stripped = sanitizeVs01RenderCorpus(working, { boundary: "paid_pro_structure_repair" });
   working = stripped.text;
   if (stripped.removedLines.length > 0) {
     for (const line of stripped.removedLines) {
-      repairs.push(`orphan_section_line_removed:${line}`);
+      if (!repairs.includes(`orphan_section_line_removed:${line}`)) {
+        repairs.push(`orphan_section_line_removed:${line}`);
+      }
     }
   }
 
   const orphanRemoved =
-    stranded.repairs.length > 0 || stripped.removedLines.length > 0 || orphanScanBefore > 0;
+    stranded.repairs.length > 0 ||
+    terminalGuard.repairs.length > 0 ||
+    stripped.removedLines.length > 0 ||
+    orphanScanBefore > 0;
   if (orphanRemoved) {
     const renumbered = renumberTopLevelHeadingsAfterOrphanRemoval(working);
     working = renumbered.text;
     repairs.push(...renumbered.repairs);
   }
+
+  working = compactBlankLinesBeforeWitness(working);
 
   return { text: working.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
 }

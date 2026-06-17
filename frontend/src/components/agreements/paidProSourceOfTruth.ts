@@ -102,6 +102,7 @@ import {
   detectPaidProOrphanSubsections,
   normalizePaidProOrphanSubsections,
 } from "./normalizePaidProOrphanSubsections";
+import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import {
   evaluatePaidProSourceOfTruthEstablishment,
   logPaidProSourceOfTruthEstablishmentAttempt,
@@ -421,6 +422,18 @@ export function establishPaidProSourceOfTruth(args: {
       text: safeForCommit,
       allowedToOverride: false,
       reason: `orphan_sections=${orphanRepair.sectionNumbers.join(",")}`,
+    });
+  }
+  const orphanSectionRepair = repairPaidProOrphanSectionNumbers(safeForCommit);
+  if (orphanSectionRepair.repairs.length > 0) {
+    safeForCommit = orphanSectionRepair.text;
+    logProCorpusSourceMap({
+      stage: "pre_freeze_orphan_section_number_repair",
+      source: args.source ?? "server_full_draft",
+      len: safeForCommit.length,
+      text: safeForCommit,
+      allowedToOverride: false,
+      reason: orphanSectionRepair.repairs.join(","),
     });
   }
   const parties: CanonicalAgreementSnapshotParty[] = (args.draft?.parties ?? [])

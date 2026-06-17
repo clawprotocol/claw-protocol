@@ -43,6 +43,7 @@ import { isFusedOrConcatenatedPartyLegalName } from "./signerSetupPartyIdentity"
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
+import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { applyPaidProUserVisibleDisplayPrep } from "./paidProDisplayPlainAuthority";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
@@ -482,6 +483,12 @@ export function guardPaidProReviewRenderCorpus(
   });
   if (orphanSubs.orphanSectionsRepaired > 0) {
     text = orphanSubs.text;
+    repaired = true;
+  }
+
+  const orphanSectionNumbers = repairPaidProOrphanSectionNumbers(text);
+  if (orphanSectionNumbers.repairs.length > 0) {
+    text = orphanSectionNumbers.text;
     repaired = true;
   }
 
