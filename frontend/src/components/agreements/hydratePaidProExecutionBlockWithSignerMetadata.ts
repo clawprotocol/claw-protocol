@@ -97,6 +97,7 @@ function hydrateFieldLine(
   line: string,
   party: PaidProSignerMetadataParty,
   identity: CanonicalPartyIdentity,
+  opts?: { overwriteExistingMetadata?: boolean },
 ): { line: string; hydrated: number; missing: string[] } {
   const trimmed = line.trim();
   const m = trimmed.match(SIG_FIELD_RE);
@@ -106,21 +107,26 @@ function hydrateFieldLine(
   const value = m[2] ?? "";
   const signName = signatureNameForIdentity(identity);
   const missing: string[] = [];
+  const overwrite = opts?.overwriteExistingMetadata === true;
 
   if (/^by$/i.test(field) || /^date$/i.test(field)) {
     return { line, hydrated: 0, missing };
   }
   if (/^name$/i.test(field)) {
-    if (signName && isBlankSigValue(value)) {
-      return { line: fillSigFieldLine(line, "Name", signName), hydrated: 1, missing };
+    if (signName && (overwrite || isBlankSigValue(value))) {
+      const next = fillSigFieldLine(line, "Name", signName);
+      if (next.trim() === trimmed) return { line, hydrated: 0, missing };
+      return { line: next, hydrated: 1, missing };
     }
     if (!signName && isBlankSigValue(value)) missing.push(`name:${party.partyIndex}`);
     return { line, hydrated: 0, missing };
   }
   if (/^title$/i.test(field)) {
     const title = identity.title?.trim() ?? "";
-    if (title && isBlankSigValue(value)) {
-      return { line: fillSigFieldLine(line, "Title", title), hydrated: 1, missing };
+    if (title && (overwrite || isBlankSigValue(value))) {
+      const next = fillSigFieldLine(line, "Title", title);
+      if (next.trim() === trimmed) return { line, hydrated: 0, missing };
+      return { line: next, hydrated: 1, missing };
     }
     if (!title && isBlankSigValue(value)) missing.push(`title:${party.partyIndex}`);
     return { line, hydrated: 0, missing };
@@ -128,8 +134,10 @@ function hydrateFieldLine(
   if (/^email\s+for\s+notice/i.test(field)) {
     const email = identity.email?.trim() ?? "";
     const label = /^email\s+for\s+notices\s*:/i.test(trimmed) ? "Email for Notices" : "Email for Notice";
-    if (email && isBlankSigValue(value)) {
-      return { line: fillSigFieldLine(line, label, email), hydrated: 1, missing };
+    if (email && (overwrite || isBlankSigValue(value))) {
+      const next = fillSigFieldLine(line, label, email);
+      if (next.trim() === trimmed) return { line, hydrated: 0, missing };
+      return { line: next, hydrated: 1, missing };
     }
     if (!email && isBlankSigValue(value)) missing.push(`email:${party.partyIndex}`);
     return { line, hydrated: 0, missing };
@@ -139,8 +147,10 @@ function hydrateFieldLine(
     const label = /^address\s+for\s+notices\s*:/i.test(trimmed)
       ? "Address for Notices"
       : "Address for Notice";
-    if (address && isBlankSigValue(value)) {
-      return { line: fillSigFieldLine(line, label, address), hydrated: 1, missing };
+    if (address && (overwrite || isBlankSigValue(value))) {
+      const next = fillSigFieldLine(line, label, address);
+      if (next.trim() === trimmed) return { line, hydrated: 0, missing };
+      return { line: next, hydrated: 1, missing };
     }
     if (!address && isBlankSigValue(value)) missing.push(`address:${party.partyIndex}`);
     return { line, hydrated: 0, missing };
@@ -148,10 +158,16 @@ function hydrateFieldLine(
   return { line, hydrated: 0, missing };
 }
 
+export type HydratePaidProExecutionBlockOpts = {
+  /** When true (finalize), replace populated Name/Title/Email/Address with latest authority. */
+  overwriteExistingMetadata?: boolean;
+};
+
 export function hydratePaidProExecutionBlockWithSignerMetadata(
   corpus: string,
   recipientMetadata: AuthoritativeSigningSnapshotRecipientMetadata,
   roleContext?: PaidProPartyRoleContext | null,
+  opts?: HydratePaidProExecutionBlockOpts,
 ): HydratePaidProExecutionBlockResult {
   const raw = (corpus || "").replace(/\r\n/g, "\n");
   if (!raw.trim()) {
@@ -224,7 +240,7 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
     }
 
     if (currentParty && SIG_FIELD_RE.test(trimmed)) {
-      const hydrated = hydrateFieldLine(lines[i], currentParty.party, currentParty.identity);
+      const hydrated = hydrateFieldLine(lines[i], currentParty.party, currentParty.identity, opts);
       if (hydrated.hydrated > 0) {
         lines[i] = hydrated.line;
         fieldsHydrated += hydrated.hydrated;

@@ -831,6 +831,7 @@ import {
   logPaidProPostFinalizeEditSaveBlocked,
 } from "./paidProPostFinalizeEditSave";
 import {
+  beginPaidProPostFinalizeSignerDetailsReopen,
   logPaidProPostFinalizeEditSignerDetailsOpened,
   shouldShowPaidProPostFinalizeEditSignerDetails,
 } from "./paidProPostFinalizeEditSignerDetails";
@@ -14301,6 +14302,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     if (clearedSignerStagingAddressesRef.current) return;
+    const seed = resolvePaidProPostFinalizeSignerDetailsEditSeed();
+    if (seed?.some((p) => p.partyAddress.trim().length > 0)) return;
     clearedSignerStagingAddressesRef.current = true;
     setPartyAddresses((prev) => prev.map(() => ""));
   }, [paidProSignerMetadataSessionActive, premiumSurfaceGateTick]);
@@ -22639,7 +22642,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPremiumReviewDocEditorOpen(false);
     setPaidProCardEditDraft(null);
     setPaidProCardAiInstruction("");
-    clearAuthoritativeSigningSnapshot();
+    beginPaidProPostFinalizeSignerDetailsReopen();
+    pinnedFinalizedSignerCorpusRef.current = "";
+    pinnedFinalizedSignerCorpusHashRef.current = "";
     frozenSignerMetadataIdentitiesRef.current = null;
     frozenSignerMetadataPartyManifestRef.current = null;
     setGuidedSigningConfirmationActive(false);
@@ -24857,6 +24862,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const rawCorpusResolution = resolvePaidProSignerFinalizeRawCorpus({
       authoritativePaidProReviewPlain,
       simpleProFinalReviewPlain: simpleProFinalReviewCorpus.plainText,
+      immutableSourceOfTruthOnly: true,
     });
     const rawCorpus = rawCorpusResolution.corpus;
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
@@ -24880,6 +24886,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signerMetadata,
       partyManifest,
       signatureBlockModel,
+      replaceExisting: true,
     });
     pinFinalizedSignerAppliedCorpus(hydrated.corpus, "paid_pro_signer_metadata_finalize");
     if (import.meta.env.DEV) {

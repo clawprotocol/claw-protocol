@@ -20,9 +20,16 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
 import {
+  beginPaidProPostFinalizeSignerDetailsReopen,
   logPaidProPostFinalizeEditSignerDetailsOpened,
   shouldShowPaidProPostFinalizeEditSignerDetails,
 } from "./paidProPostFinalizeEditSignerDetails";
+import {
+  clearPaidProPinnedSignerAppliedCorpus,
+  readPaidProPinnedSignerAppliedCorpus,
+  setPaidProPinnedSignerAppliedCorpus,
+} from "./paidProFinalHydratedCorpus";
+import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 
 const BLUE = "Harbor Peak Automation LLC";
 const RED = "Red Mesa Logistics LLC";
@@ -45,6 +52,7 @@ describe("paidProPostFinalizeEditSignerDetails", () => {
   afterEach(() => {
     clearAuthoritativeSigningSnapshot();
     clearConsumedPaidProSignerMetadataAuthority();
+    clearPaidProPinnedSignerAppliedCorpus();
     cleanup();
   });
 
@@ -180,6 +188,26 @@ describe("paidProPostFinalizeEditSignerDetails", () => {
     const seed = resolvePaidProPostFinalizeSignerDetailsEditSeed();
     expect(seed?.[0]?.partyLegalName).toBe(RED);
     expect(seed?.[0]?.signerEmail).toBe("rand@example.test");
+  });
+
+  it("beginPaidProPostFinalizeSignerDetailsReopen clears snapshot and pinned hydrated corpus", () => {
+    const authority = qaAuthority();
+    const corpus = "x".repeat(600);
+    createAuthoritativeSigningSnapshot({
+      corpus,
+      signerMetadata: authorityPartiesToRecipientMetadata(authority.parties),
+      partyManifest: buildCanonicalFinalPartyManifestFromAuthority(authority),
+      signatureBlockModel: buildCanonicalSignerManifest({
+        identities: [],
+        signFirst: true,
+      }),
+    });
+    setPaidProPinnedSignerAppliedCorpus(corpus);
+    expect(isPaidProPostFinalizeHydratedCorpusLocked()).toBe(true);
+
+    beginPaidProPostFinalizeSignerDetailsReopen();
+    expect(isPaidProPostFinalizeHydratedCorpusLocked()).toBe(false);
+    expect(readPaidProPinnedSignerAppliedCorpus()).toBe("");
   });
 
   it("logPaidProPostFinalizeEditSignerDetailsOpened is dev-only", () => {

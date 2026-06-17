@@ -42,18 +42,18 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
 
   const snap = getAuthoritativeSigningSnapshot();
   const meta = snap?.signerMetadata ?? null;
-  if (
-    meta &&
-    signerMetadataAuthorityHasHydratableFields(meta) &&
-    countBlankSignerMetadataLinesInExecutionBlock(body) > 0
-  ) {
+  if (meta && signerMetadataAuthorityHasHydratableFields(meta)) {
     const parties = recipientMetadataToAuthorityParties(meta);
     const roleContext = { acceptedCorpus: body };
-    const hydration = hydratePaidProExecutionBlockWithSignerMetadata(body, meta, roleContext);
+    const hydration = hydratePaidProExecutionBlockWithSignerMetadata(body, meta, roleContext, {
+      overwriteExistingMetadata: true,
+    });
     if (hydration.applied) body = hydration.corpus.trim();
     const notice = applySignatureNoticeContactFieldsToCorpus(body, parties, roleContext);
     if (notice.applied) body = notice.text.trim();
-    const retry = hydratePaidProExecutionBlockWithSignerMetadata(body, meta, roleContext);
+    const retry = hydratePaidProExecutionBlockWithSignerMetadata(body, meta, roleContext, {
+      overwriteExistingMetadata: true,
+    });
     if (retry.applied) body = retry.corpus.trim();
   }
 

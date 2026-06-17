@@ -145,6 +145,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     rawCorpus,
     recipientMeta,
     roleContext,
+    { overwriteExistingMetadata: isFinalizeSurface },
   );
   if (executionHydration.applied) {
     rawCorpus = executionHydration.corpus;
@@ -207,6 +208,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       result.corpus,
       recipientMeta,
       roleContext,
+      { overwriteExistingMetadata: isFinalizeSurface },
     );
     if (retryHydration.applied && retryHydration.corpus !== result.corpus) {
       result = {

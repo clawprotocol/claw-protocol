@@ -126,6 +126,8 @@ export type CreateAuthoritativeSigningSnapshotArgs = {
   signerMetadata: AuthoritativeSigningSnapshotRecipientMetadata;
   partyManifest: CanonicalFinalPartyManifest;
   signatureBlockModel: CanonicalSignerManifest;
+  /** Replace an existing snapshot (re-finalize after edit_signer_details). */
+  replaceExisting?: boolean;
 };
 
 /**
@@ -136,15 +138,17 @@ export function createAuthoritativeSigningSnapshot(
   args: CreateAuthoritativeSigningSnapshotArgs,
 ): AuthoritativeSigningSnapshot {
   if (authoritativeSigningSnapshot) {
-    logSnapshotConsumed({ reason: "create_called_after_freeze", hash: authoritativeSigningSnapshot.hash });
-    return authoritativeSigningSnapshot;
+    if (args.replaceExisting) {
+      clearAuthoritativeSigningSnapshot();
+    } else {
+      logSnapshotConsumed({ reason: "create_called_after_freeze", hash: authoritativeSigningSnapshot.hash });
+      return authoritativeSigningSnapshot;
+    }
   }
-  const parties =
-    readConsumedPaidProSignerMetadataAuthority()?.parties ??
-    recipientMetadataToAuthorityParties({
-      ...args.signerMetadata,
-      partyAddresses: args.signerMetadata.partyAddresses ?? [],
-    });
+  const parties = recipientMetadataToAuthorityParties({
+    ...args.signerMetadata,
+    partyAddresses: args.signerMetadata.partyAddresses ?? [],
+  });
   const signerMetadata: AuthoritativeSigningSnapshotRecipientMetadata = {
     ...args.signerMetadata,
     partyAddresses: args.signerMetadata.partyAddresses ?? [],
@@ -158,8 +162,9 @@ export function createAuthoritativeSigningSnapshot(
   ).text.trim();
   if (signerMetadataAuthorityHasHydratableFields(signerMetadata)) {
     const roleContext = { acceptedCorpus: (args.corpus || "").trim() };
+    const hydrateOpts = { overwriteExistingMetadata: true as const };
     const hydrateFrom = (input: string) =>
-      hydratePaidProExecutionBlockWithSignerMetadata(input, signerMetadata, roleContext);
+      hydratePaidProExecutionBlockWithSignerMetadata(input, signerMetadata, roleContext, hydrateOpts);
     const hydration = hydrateFrom(corpus);
     if (hydration.applied) {
       corpus = hydration.corpus.trim();

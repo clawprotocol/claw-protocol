@@ -2,9 +2,17 @@
  * Reopen inline signer setup from post-finalize review (before packet / links are sent).
  */
 
+import { clearAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
 import { PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL } from "./authoritativePaidProReview";
+import { clearPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
 
 export { PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL as PAID_PRO_POST_FINALIZE_EDIT_SIGNER_DETAILS_LABEL };
+
+/** Drop stale post-finalize pins so the next finalize layers metadata on immutable SoT. */
+export function beginPaidProPostFinalizeSignerDetailsReopen(): void {
+  clearAuthoritativeSigningSnapshot();
+  clearPaidProPinnedSignerAppliedCorpus();
+}
 
 export function shouldShowPaidProPostFinalizeEditSignerDetails(args: {
   /** Same gate as the forced-route review decision chrome. */

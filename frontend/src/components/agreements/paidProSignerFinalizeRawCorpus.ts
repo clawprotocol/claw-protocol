@@ -43,11 +43,16 @@ function scoreFinalizeCandidate(text: string, tier: "starter" | "pro" | null): n
 export function resolvePaidProSignerFinalizeRawCorpus(args?: {
   authoritativePaidProReviewPlain?: string | null;
   simpleProFinalReviewPlain?: string | null;
+  /** Finalize always layers signer metadata on frozen SoT — never a prior hydrated review plain. */
+  immutableSourceOfTruthOnly?: boolean;
 }): PaidProSignerFinalizeRawCorpusResolution {
   const frozen = getFrozenCanonicalAgreementCorpus();
   const frozenText = frozen?.canonicalText?.trim() ?? "";
   const frozenTier = frozen?.tier ?? null;
   const sotText = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
+  if (args?.immutableSourceOfTruthOnly && sotText.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return { corpus: sotText, source: "paid_pro_source_of_truth" };
+  }
   const reviewPlain = (args?.authoritativePaidProReviewPlain || "").trim();
   const simplePlain = (args?.simpleProFinalReviewPlain || "").trim();
 
