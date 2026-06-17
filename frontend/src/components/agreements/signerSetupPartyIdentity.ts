@@ -368,7 +368,11 @@ function paidProLegalEntityForIndex(args: ResolvePaidProSignerDetailsGateArgs, i
       intakeText: args.intakeText,
     });
   const fromRecipient =
-    index === 0 ? args.recipient1Name : index === 1 ? args.recipient2Name : "";
+    index === 0
+      ? args.recipient1Name
+      : index === 1
+        ? args.recipient2Name
+        : args.extraPartyLegalNames?.[index - 2] ?? "";
   return resolveSignerPartyLegalEntityDisplayValue({
     slotIndex: index,
     currentInputValue: fromRecipient,
@@ -431,6 +435,8 @@ export type ResolvePaidProSignerDetailsGateArgs = {
   recipient1Email: string;
   recipient2Email: string;
   extraPartyReviewEmails: readonly string[];
+  extraPartyLegalNames?: readonly string[];
+  userExpandedPartyCount?: number;
 };
 
 /**
@@ -444,6 +450,7 @@ export function resolvePaidProSignerDetailsGate(
     intakeText: args.intakeText,
     draftPartyNames: args.draftPartyNames,
     rawPartyCount: args.partyCount,
+    userExpandedPartyCount: args.userExpandedPartyCount,
   });
   const legalEntityNames: string[] = [];
   const blockers: PaidProSignerDetailsBlocker[] = [];

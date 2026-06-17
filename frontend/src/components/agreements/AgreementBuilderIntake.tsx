@@ -1245,6 +1245,12 @@ import {
   resolveGuidedQuestionGateDecision,
 } from "./guidedDealCompletion/guidedQuestionGate";
 import { shouldBypassGuidedSendCtaBlockForPaidProSignerSetup } from "./paidProReviewSigningRoute";
+import { PaidProCoordinatorToggle } from "./PaidProCoordinatorToggle";
+import {
+  PAID_PRO_ADD_ANOTHER_PARTY_LABEL,
+  PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
+  canAddAnotherSignerParty,
+} from "./paidProNPartySignerSetup";
 import {
   evaluateGuidedSigningPacketGate,
   logGuidedFinalReviewSendSignatureStart,
@@ -2019,6 +2025,13 @@ type CreateFlowSendRecipientsPanelProps = {
     inputEventKind: "change" | "blur";
   }) => void;
   agreementId?: string | null;
+  /** N-party signer setup: explicit UI party row count (2–4). */
+  signerSetupUiPartyCount?: number;
+  onAddAnotherSignerParty?: () => void;
+  creatorCoordinatorOnly?: boolean;
+  onCreatorCoordinatorOnlyChange?: (checked: boolean) => void;
+  extraPartyLegalNames?: string[];
+  setExtraPartyLegalNames?: React.Dispatch<React.SetStateAction<string[]>>;
 };
 
 function CreateFlowSendRecipientsPanel({
@@ -2074,6 +2087,12 @@ function CreateFlowSendRecipientsPanel({
   onSignerMetadataForensicInput,
   onPaidProSignerMetadataFieldDiagnostics,
   agreementId = null,
+  signerSetupUiPartyCount = 2,
+  onAddAnotherSignerParty,
+  creatorCoordinatorOnly = false,
+  onCreatorCoordinatorOnlyChange,
+  extraPartyLegalNames = [],
+  setExtraPartyLegalNames,
 }: CreateFlowSendRecipientsPanelProps) {
   const [recipientEmailTouched, setRecipientEmailTouched] = useState<Record<number, boolean>>({});
   const resolvedSendMode: PremiumSendIntent =
@@ -2095,7 +2114,12 @@ function CreateFlowSendRecipientsPanel({
   const r1e = stripRecipientEmailNoise(recipient1Email);
   const r2e = stripRecipientEmailNoise(recipient2Email);
   const cappedParties = (draft?.parties ?? []).slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
-  const partyCount = cappedParties.length;
+  const uiPartyCount = Math.min(
+    Math.max(signerSetupUiPartyCount, 2, cappedParties.length),
+    PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
+  );
+  const partiesForSetup = cappedParties.slice(0, uiPartyCount);
+  const partyCount = partiesForSetup.length;
   const primaryName =
     partyDisplaySlots[0]?.displayName?.trim() ||
     (recipient1Name || "").trim() ||
@@ -2172,7 +2196,15 @@ function CreateFlowSendRecipientsPanel({
           Party name can be finalized before sending.
         </p>
       ) : null}
-      {cappedParties.map((party, idx) => {
+      {paidProInlineRecipientShell && onCreatorCoordinatorOnlyChange ? (
+        <div className="mb-4">
+          <PaidProCoordinatorToggle
+            checked={creatorCoordinatorOnly}
+            onChange={onCreatorCoordinatorOnlyChange}
+          />
+        </div>
+      ) : null}
+      {partiesForSetup.map((party, idx) => {
         const identity = signerSetupPartyIdentities[idx];
         const resolvedLine = partyDisplaySlots[idx]?.displayName?.trim();
         const legalEntityValue =
@@ -2180,7 +2212,7 @@ function CreateFlowSendRecipientsPanel({
             ? recipient1Name
             : idx === 1
               ? recipient2Name
-              : "";
+              : extraPartyLegalNames[idx - 2] ?? String((party as { name?: string }).name ?? "").trim();
         const emailVal =
           idx === 0 ? recipient1Email : idx === 1 ? recipient2Email : extraPartyReviewEmails[idx - 2] ?? "";
         const signerRenderSlot =
@@ -2418,7 +2450,33 @@ function CreateFlowSendRecipientsPanel({
                   Editable — corrections here apply to signer setup and signing metadata only, not the agreement body.
                 </span>
               </label>
-            ) : null}
+            ) : (
+              <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+                {`Party ${idx + 1} legal entity`}
+                <input
+                  type="text"
+                  data-claw-recipient-field={`party-${idx}-legal-name`}
+                  data-testid={`agreement-party-legal-name-${idx}`}
+                  value={legalEntityValue}
+                  onChange={(e) => {
+                    notifySignerMetadataFieldEdit({
+                      partyIndex: idx,
+                      field: "partyLegalName",
+                      raw: e.target.value,
+                      inputEventKind: "change",
+                    });
+                    setExtraPartyLegalNames?.((prev) => {
+                      const next = [...prev];
+                      while (next.length <= idx - 2) next.push("");
+                      next[idx - 2] = e.target.value;
+                      return next;
+                    });
+                  }}
+                  className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                  placeholder={`e.g. Party ${idx + 1} LLC`}
+                />
+              </label>
+            )}
             <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
               <span className="block">
                 {signaturePrepMode
@@ -2503,6 +2561,16 @@ function CreateFlowSendRecipientsPanel({
           </div>
         );
       })}
+      {paidProInlineRecipientShell && signaturePrepMode && onAddAnotherSignerParty && canAddAnotherSignerParty(uiPartyCount) ? (
+        <button
+          type="button"
+          data-testid="add-another-signer-party"
+          className="w-full rounded-lg border border-dashed border-slate-600/70 bg-slate-950/20 px-4 py-2.5 text-sm font-medium text-slate-200 hover:border-emerald-500/40 hover:bg-slate-950/40"
+          onClick={onAddAnotherSignerParty}
+        >
+          {PAID_PRO_ADD_ANOTHER_PARTY_LABEL}
+        </button>
+      ) : null}
       {!minimalProSendRecipientChrome ? (
         <label className="block text-xs font-medium text-slate-400 sm:text-sm">
           Optional signer roles / labels
@@ -3150,6 +3218,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [recipient2Email, setRecipient2Email] = useState("");
   const [recipientSignerLabels, setRecipientSignerLabels] = useState("");
   const [extraPartyReviewEmails, setExtraPartyReviewEmails] = useState<string[]>([]);
+  const [extraPartyLegalNames, setExtraPartyLegalNames] = useState<string[]>([]);
+  const [creatorCoordinatorOnly, setCreatorCoordinatorOnly] = useState(false);
+  const [signerSetupUiPartyCount, setSignerSetupUiPartyCount] = useState(2);
   const [partySignerNames, setPartySignerNames] = useState<string[]>([]);
   const [partySignerTitles, setPartySignerTitles] = useState<string[]>([]);
   const [partyAddresses, setPartyAddresses] = useState<string[]>([]);
@@ -3158,6 +3229,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const recipient1EmailRef = useRef("");
   const recipient2EmailRef = useRef("");
   const extraPartyReviewEmailsRef = useRef<string[]>([]);
+  const extraPartyLegalNamesRef = useRef<string[]>([]);
+  const creatorCoordinatorOnlyRef = useRef(false);
+  const signerSetupUiPartyCountRef = useRef(2);
   const partySignerNamesRef = useRef<string[]>([]);
   const partySignerTitlesRef = useRef<string[]>([]);
   const partyAddressesRef = useRef<string[]>([]);
@@ -3711,6 +3785,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     extraPartyReviewEmailsRef.current = extraPartyReviewEmails;
   }, [extraPartyReviewEmails]);
+  useLayoutEffect(() => {
+    extraPartyLegalNamesRef.current = extraPartyLegalNames;
+  }, [extraPartyLegalNames]);
+  useLayoutEffect(() => {
+    creatorCoordinatorOnlyRef.current = creatorCoordinatorOnly;
+  }, [creatorCoordinatorOnly]);
+  useLayoutEffect(() => {
+    signerSetupUiPartyCountRef.current = signerSetupUiPartyCount;
+  }, [signerSetupUiPartyCount]);
+  useEffect(() => {
+    const partyLen = draft?.parties?.length ?? 2;
+    if (partyLen > signerSetupUiPartyCount) {
+      setSignerSetupUiPartyCount(Math.min(partyLen, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES));
+    }
+    if (draft?.creator_coordinator_only) {
+      setCreatorCoordinatorOnly(true);
+    }
+  }, [draft?.parties?.length, draft?.creator_coordinator_only, signerSetupUiPartyCount]);
+  useEffect(() => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      if (Boolean(prev.creator_coordinator_only) === creatorCoordinatorOnly) return prev;
+      return { ...prev, creator_coordinator_only: creatorCoordinatorOnly };
+    });
+  }, [creatorCoordinatorOnly]);
   useLayoutEffect(() => {
     partySignerNamesRef.current = partySignerNames;
   }, [partySignerNames]);
@@ -5353,6 +5452,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipientPartyEmails: buildRecipientPartyEmailsArrayForHandoff(d),
       recipientPartySignerNames: buildRecipientPartySignerNamesArrayForHandoff(d),
       recipientPartySignerTitles: buildRecipientPartySignerTitlesArrayForHandoff(d),
+      recipient1Name: recipient1NameRef.current,
+      recipient2Name: recipient2NameRef.current,
+      recipientPartyLegalNames: extraPartyLegalNamesRef.current,
+      creatorCoordinatorOnly: creatorCoordinatorOnlyRef.current,
+      signerSetupUiPartyCount: signerSetupUiPartyCountRef.current,
     };
   }
 
@@ -5431,8 +5535,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         const ui = stripRecipientEmailNoise(extraRef[i - 2] ?? "");
         const em = looksLikeEmail(ui) ? ui : draftEm || "";
+        const legalName =
+          (extraPartyLegalNamesRef.current[i - 2] ?? "").trim() || String(p?.name || "").trim();
         slots.push({
-          name: String(p?.name || "").trim(),
+          name: legalName,
           email: em,
           role: String(p?.role || "party").trim() || "party",
           signerName,
@@ -14658,10 +14764,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProInlineSignersReady = Boolean(
     guidedPreReviewSignerSlots.complete && !createFlowRecipientPrimaryHelper,
   );
+  const handleAddAnotherSignerParty = React.useCallback(() => {
+    setSignerSetupUiPartyCount((prev) => {
+      if (!canAddAnotherSignerParty(prev)) return prev;
+      const next = prev + 1;
+      setDraft((draftPrev) => {
+        if (!draftPrev) return draftPrev;
+        const parties = [...(draftPrev.parties ?? [])];
+        while (parties.length < next) {
+          const idx = parties.length;
+          parties.push({
+            id: `party_${idx}`,
+            name: `Party ${idx + 1}`,
+            role: creatorCoordinatorOnlyRef.current ? "party" : idx === 0 ? "owner" : "party",
+            email: "",
+          });
+        }
+        return { ...draftPrev, parties };
+      });
+      return next;
+    });
+  }, []);
+  const nPartySignerSetupPanelProps = {
+    signerSetupUiPartyCount,
+    onAddAnotherSignerParty: handleAddAnotherSignerParty,
+    creatorCoordinatorOnly,
+    onCreatorCoordinatorOnlyChange: setCreatorCoordinatorOnly,
+    extraPartyLegalNames,
+    setExtraPartyLegalNames,
+  };
   const paidProSignerDetailsGate = useMemo(
     () =>
       resolvePaidProSignerDetailsGate({
-        partyCount: draft?.parties?.length ?? 2,
+        partyCount: Math.max(draft?.parties?.length ?? 2, signerSetupUiPartyCount),
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
         partySignerNames,
@@ -14670,9 +14805,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         recipient1Email,
         recipient2Email,
         extraPartyReviewEmails,
+        extraPartyLegalNames,
+        userExpandedPartyCount: signerSetupUiPartyCount,
       }),
     [
       draft?.parties,
+      signerSetupUiPartyCount,
       currentPremiumMergedIntakeKey,
       intakeCombined,
       partySignerNames,
@@ -14681,6 +14819,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipient1Email,
       recipient2Email,
       extraPartyReviewEmails,
+      extraPartyLegalNames,
     ],
   );
   const paidProSignatureDetailsReady = Boolean(
@@ -26467,6 +26606,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         <CreateFlowSendRecipientsPanel
           variant="staged"
           agreementId={reviewAgreementId}
+          {...nPartySignerSetupPanelProps}
           isPremiumRecipientSurface={isPremiumRecipientSurface}
           showProTierAdvanced={showProTierAdvanced}
           productionReadyForPersist={productionReadyForPersist}
@@ -28499,6 +28639,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             <CreateFlowSendRecipientsPanel
                                               variant="workspace"
                                               agreementId={reviewAgreementId}
+                                              {...nPartySignerSetupPanelProps}
                                               paidProInlineRecipientShell
                                               hidePrimarySendCta={Boolean(
                                                 paidProCanonicalStickyCta?.showStickyBar,
@@ -28603,6 +28744,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           <CreateFlowSendRecipientsPanel
                                             variant="workspace"
                                             agreementId={reviewAgreementId}
+                                            {...nPartySignerSetupPanelProps}
                                             paidProInlineRecipientShell
                                             isPremiumRecipientSurface={premiumSignersSurfaceReady}
                                             showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
@@ -28986,6 +29128,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             <CreateFlowSendRecipientsPanel
                                               variant="workspace"
                                               agreementId={reviewAgreementId}
+                                              {...nPartySignerSetupPanelProps}
                                               paidProInlineRecipientShell
                                               hidePrimarySendCta={Boolean(
                                                 paidProCanonicalStickyCta?.showStickyBar,
@@ -29794,6 +29937,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     <CreateFlowSendRecipientsPanel
                                       variant="workspace"
                                       agreementId={reviewAgreementId}
+                                      {...nPartySignerSetupPanelProps}
                                       paidProInlineRecipientShell
                                       isPremiumRecipientSurface={premiumSignersSurfaceReady}
                                       showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
@@ -30100,6 +30244,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       <CreateFlowSendRecipientsPanel
                         variant="workspace"
                         agreementId={reviewAgreementId}
+                        {...nPartySignerSetupPanelProps}
                         paidProInlineRecipientShell={paidProRecipientSetupOnDraft}
                         isPremiumRecipientSurface={premiumSignersSurfaceReady}
                         showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}

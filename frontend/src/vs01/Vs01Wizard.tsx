@@ -47,7 +47,9 @@ import {
 } from "./vs01PaidProPostSignHandoff";
 import { sha256Bytes } from "../utils/agreements/hash";
 import {
-  buildVs01PrepareSigningRoles,
+  buildVs01PrepareSigningRolesForBridge,
+} from "../components/agreements/paidProNPartySignerSetup";
+import {
   migrateLegacyRecipientPlacedFields,
   migrateLegacySenderPlacedFields,
 } from "./vs01SignerFieldAssignment";
@@ -417,13 +419,15 @@ export function Vs01Wizard({
   const prepareSignerRoles = useMemo(() => {
     const aid = (vs01LinkedAgreementId ?? "").trim();
     if (!paidProAgreementBridgeSkip || !aid) return null;
-    return buildVs01PrepareSigningRoles({
+    const bridge = readAgreementVs01BridgeSession();
+    return buildVs01PrepareSigningRolesForBridge({
       agreementId: aid,
       creatorName,
       creatorEmail,
       ownerSignerName: creatorSignerName,
       ownerSignerTitle: creatorSignerTitle,
       counterparties,
+      bridge,
     });
   }, [
     paidProAgreementBridgeSkip,
@@ -452,13 +456,14 @@ export function Vs01Wizard({
         if (args.signerName !== undefined) setCreatorSignerName(args.signerName);
         if (args.signerTitle !== undefined) setCreatorSignerTitle(args.signerTitle);
         if (aid) {
-          const rebuilt = buildVs01PrepareSigningRoles({
+          const rebuilt = buildVs01PrepareSigningRolesForBridge({
             agreementId: aid,
             creatorName,
             creatorEmail,
             ownerSignerName: nextOwnerSigner,
             ownerSignerTitle: nextOwnerTitle,
             counterparties,
+            bridge: bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession(),
           });
           const rebuiltRole = rebuilt.find((r) => r.roleId === args.roleId);
           if (rebuiltRole) {
@@ -483,13 +488,14 @@ export function Vs01Wizard({
             signerTitle: args.signerTitle,
           });
           if (aid) {
-            const rebuilt = buildVs01PrepareSigningRoles({
+            const rebuilt = buildVs01PrepareSigningRolesForBridge({
               agreementId: aid,
               creatorName,
               creatorEmail,
               ownerSignerName: creatorSignerName,
               ownerSignerTitle: creatorSignerTitle,
               counterparties: nextCps,
+              bridge: bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession(),
             });
             const rebuiltRole = rebuilt.find((r) => r.roleId === args.roleId);
             if (rebuiltRole) {
@@ -568,6 +574,7 @@ export function Vs01Wizard({
       setError("Agreement or document is not ready yet.");
       return;
     }
+    const bridge = bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession();
     const result = handlePreparePacketContinue({
       agreementId: linkedAgreementId,
       agreementTitle,
@@ -583,6 +590,7 @@ export function Vs01Wizard({
       initialsEnabled: prepareInitialsEnabledRef.current,
       receiptId,
       receiptHashSha256,
+      bridge,
     });
     if (!result.ok) {
       setError(result.finish.message);
@@ -607,14 +615,7 @@ export function Vs01Wizard({
       senderMustSignFirst: result.handoff.senderMustSignFirst ?? false,
       fieldsPlacedCount: placedCount,
     });
-    const roles = buildVs01PrepareSigningRoles({
-      agreementId: linkedAgreementId,
-      creatorName,
-      creatorEmail,
-      ownerSignerName: creatorSignerName,
-      ownerSignerTitle: creatorSignerTitle,
-      counterparties,
-    });
+    const roles = result.roles;
     void dispatchSigningInvitesFromHandoff(result.handoff, roles, {
       portablePacket: result.portablePacket,
       documentId: did,
@@ -725,13 +726,14 @@ export function Vs01Wizard({
         const ce = saved?.creatorEmail || bridge.creatorEmail || "";
         const csn = saved?.creatorSignerName || bridge.creatorSignerName || "";
         const cst = saved?.creatorSignerTitle || bridge.creatorSignerTitle || "";
-        const rolesForM = buildVs01PrepareSigningRoles({
+        const rolesForM = buildVs01PrepareSigningRolesForBridge({
           agreementId: bridge.agreementId,
           creatorName: cn,
           creatorEmail: ce,
           ownerSignerName: csn,
           ownerSignerTitle: cst,
           counterparties: cps,
+          bridge,
         });
         const ownerR = rolesForM[0]!;
         flushSync(() => {
@@ -850,13 +852,14 @@ export function Vs01Wizard({
           const ce = saved?.creatorEmail || bridge.creatorEmail || "";
           const csn = saved?.creatorSignerName || bridge.creatorSignerName || "";
           const cst = saved?.creatorSignerTitle || bridge.creatorSignerTitle || "";
-          const rolesForM = buildVs01PrepareSigningRoles({
+          const rolesForM = buildVs01PrepareSigningRolesForBridge({
             agreementId: bridge.agreementId,
             creatorName: cn,
             creatorEmail: ce,
             ownerSignerName: csn,
             ownerSignerTitle: cst,
             counterparties: cps,
+            bridge,
           });
           if (import.meta.env.MODE !== "test") {
             // eslint-disable-next-line no-console
@@ -1514,13 +1517,14 @@ export function Vs01Wizard({
                 return;
               }
 
-              const roles = buildVs01PrepareSigningRoles({
+              const roles = buildVs01PrepareSigningRolesForBridge({
                 agreementId: linkedAgreementId,
                 creatorName,
                 creatorEmail,
                 ownerSignerName: creatorSignerName,
                 ownerSignerTitle: creatorSignerTitle,
                 counterparties,
+                bridge: bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession(),
               });
               const ownerRole = roles[0]!;
 

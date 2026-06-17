@@ -39,6 +39,11 @@ import {
 import { readRecipientSetupArraysFromConsumedAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
 import { extractExecutionBlockSignerLines } from "../../components/agreements/paidProSignerMetadataHandoffExtract";
 import { stripRecipientEmailNoise } from "../../components/agreements/recipientEmailValidation";
+import {
+  buildLegalPartiesFromSignerSetupState,
+  mergeNPartySignerSetupIntoDraft,
+  paidProSignerSetupUiStateFromRecipientSetup,
+} from "../../components/agreements/paidProNPartySignerSetup";
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
 import type { Vs01Counterparty } from "../../vs01/types";
 import { resolveApiBase } from "../../lib/clawApi";
@@ -82,6 +87,10 @@ export type AgreementVs01BridgeSession = {
    * Drives VS01 shell copy (“reviewer already approved”) vs generic agreement bridge.
    */
   reviewerApprovedCleanHandoff?: boolean;
+  /** When false, creator/admin is not a required signer (coordinator-only). */
+  creatorIsParty?: boolean;
+  /** Full legal party list for N-party VS01 role generation. */
+  legalParties?: AgreementParty[];
 };
 
 export function setPaidProAgreementBridgeSkipMarker(documentId: string): void {
@@ -180,6 +189,15 @@ export type RecipientSetupEmailInput = {
   recipientPartySignerNames?: readonly (string | null | undefined)[] | undefined;
   /** Optional per-party representative titles (by party index). */
   recipientPartySignerTitles?: readonly (string | null | undefined)[] | undefined;
+  /** Live legal-entity inputs for party slots 0 and 1. */
+  recipient1Name?: string | null | undefined;
+  recipient2Name?: string | null | undefined;
+  /** Legal entity names for party slots 2+ (by index offset). */
+  recipientPartyLegalNames?: readonly (string | null | undefined)[] | undefined;
+  /** Creator coordinates but does not sign as a party. */
+  creatorCoordinatorOnly?: boolean;
+  /** Explicit signer-setup party row count from UI (2–4). */
+  signerSetupUiPartyCount?: number;
 };
 
 function normalizeRecipientSetupSlot(raw: string | null | undefined): string | undefined {
@@ -489,7 +507,7 @@ export function mergeLiveDraftWithRecipientSetupForVs01Bridge(
   if (!resolved) return liveDraft;
   const withEmails = mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, resolved) ?? liveDraft;
   const withSigner = mergePaidProRecipientSetupSignerMetadataIntoDraft(withEmails, resolved) ?? withEmails;
-  return withSigner;
+  return mergeNPartySignerSetupIntoDraft(withSigner, resolved) ?? withSigner;
 }
 
 /**
@@ -610,6 +628,8 @@ export function buildAgreementVs01BridgeSession(params: {
   senderFirstLawdogHandoff?: boolean;
   /** Reviewer approved without edits — finalize-for-signing handoff (not send-page intake). */
   reviewerApprovedCleanHandoff?: boolean;
+  /** Live recipient setup overlay (N-party + coordinator). */
+  recipientSetup?: RecipientSetupEmailInput | null;
 }): AgreementVs01BridgeSession {
   const parties = (params.draft?.parties ?? []) as AgreementParty[];
   const participants = bridgeParticipantsFromDraft(params.draft);
@@ -637,6 +657,16 @@ export function buildAgreementVs01BridgeSession(params: {
   const reviewerApproved = Boolean(params.reviewerApprovedCleanHandoff);
   const draftCorpus = resolveBridgeAgreementCorpusFromDraft(params.draft);
   const agreementCorpusText = (params.agreementCorpusText ?? "").trim() || draftCorpus;
+  const coordinatorOnly = Boolean(params.draft?.creator_coordinator_only ?? params.recipientSetup?.creatorCoordinatorOnly);
+  const signerNames = params.recipientSetup?.recipientPartySignerNames?.map((x) => String(x ?? "")) ?? [];
+  const signerTitles = params.recipientSetup?.recipientPartySignerTitles?.map((x) => String(x ?? "")) ?? [];
+  const uiState = paidProSignerSetupUiStateFromRecipientSetup(parties, params.recipientSetup, signerNames, signerTitles);
+  const legalParties = buildLegalPartiesFromSignerSetupState({
+    ...uiState,
+    creatorCoordinatorOnly: coordinatorOnly,
+    draftParties: parties,
+  });
+  const creatorIsParty = !coordinatorOnly;
   return {
     vs01DocumentId: params.vs01DocumentId.trim(),
     agreementId: params.agreementId.trim(),
@@ -661,6 +691,8 @@ export function buildAgreementVs01BridgeSession(params: {
       : {}),
     ...(reviewerApproved ? { reviewerApprovedCleanHandoff: true as const } : {}),
     ...(agreementCorpusText.length >= VS01_SIGNING_CORPUS_MIN_LEN ? { agreementCorpusText } : {}),
+    creatorIsParty,
+    ...(legalParties.length > 0 ? { legalParties } : {}),
   };
 }
 
@@ -902,6 +934,7 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     senderFirstLawdogHandoff: true,
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
     agreementCorpusText: handoffText,
+    recipientSetup: resolvedSetup,
   });
   const corpusResolution = resolveFinalVs01CorpusOrBlock({
     agreementCorpusText: handoffText,
@@ -933,6 +966,7 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     senderFirstLawdogHandoff: true,
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
     agreementCorpusText: corpusResolution.corpus,
+    recipientSetup: resolvedSetup,
   });
   logAgreementVs01BridgePreflight(bridge);
   logVs01BridgeSignerMetadata(bridge);
@@ -1026,6 +1060,7 @@ export function tryNavigateGuidedSignatureTrackLocalVs01Esign(options: {
     draft: mergedWithCorpus,
     senderFirstLawdogHandoff: true,
     agreementCorpusText: corpusResolution.corpus,
+    recipientSetup: resolvedSetup,
   });
   logAgreementVs01BridgePreflight(bridge);
   logVs01BridgeSignerMetadata(bridge);

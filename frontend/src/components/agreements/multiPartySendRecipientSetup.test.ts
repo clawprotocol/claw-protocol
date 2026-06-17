@@ -8,7 +8,7 @@ describe("multi-party send / review recipient setup (UI + handoff wiring)", () =
   it("recipient panel renders one capped draft.party row each with extra-party test ids from index 2", () => {
     const src = readFileSync(intakePath, "utf8");
     expect(src).toContain("MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS");
-    expect(src).toMatch(/cappedParties\.map\(\(party, idx\)/);
+    expect(src).toMatch(/partiesForSetup\.map\(\(party, idx\)/);
     expect(src).toMatch(/data-testid=\{idx >= 2 \? `agreement-party-review-email-\$\{idx\}`/);
   });
 

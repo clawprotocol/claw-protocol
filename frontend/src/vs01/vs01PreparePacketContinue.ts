@@ -24,7 +24,6 @@ import {
   logVs01PrepareContinueBlocked,
 } from "./vs01PreparePacketChecklist";
 import {
-  buildVs01PrepareSigningRoles,
   evaluatePreparePacketGateFromRoles,
   type SigningPacketPrepareGate,
   type Vs01PrepareSigningRole,
@@ -32,6 +31,13 @@ import {
 import type { PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
 import { ensureSigningPacketStatusFromHandoff } from "./vs01SigningPacketStatusStore";
 import { resolveVs01SenderMustSignFirst } from "./vs01SigningOrderPolicy";
+import { buildVs01PrepareSigningRolesForBridge } from "../components/agreements/paidProNPartySignerSetup";
+import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
+
+export type PreparePacketBridgeContext = Pick<
+  AgreementVs01BridgeSession,
+  "creatorIsParty" | "legalParties"
+>;
 
 export type PreparePacketContinueInput = {
   agreementId: string;
@@ -50,6 +56,8 @@ export type PreparePacketContinueInput = {
   initialsEnabled?: boolean;
   receiptId?: string | null;
   receiptHashSha256?: string | null;
+  /** Paid Pro bridge: N-party legal parties + coordinator-only flag (same as placement UI). */
+  bridge?: PreparePacketBridgeContext | null;
 };
 
 export type PreparePacketContinueResult =
@@ -58,21 +66,34 @@ export type PreparePacketContinueResult =
       handoff: PaidProVs01PostSignHandoffV1;
       gate: SigningPacketPrepareGate;
       portablePacket: Vs01CanonicalPacketPortableV1 | null;
+      roles: Vs01PrepareSigningRole[];
     }
   | { ok: false; finish: Extract<PrepareFinishClickResult, { allowed: false }> };
 
-export function recomputePreparePacketGate(input: PreparePacketContinueInput): {
-  gate: SigningPacketPrepareGate;
-  roles: Vs01PrepareSigningRole[];
-} {
-  const roles = buildVs01PrepareSigningRoles({
+/** Single bridge-aware role list for placement, gate, packet, and invite dispatch. */
+export function resolvePreparePacketSigningRoles(
+  input: PreparePacketContinueInput,
+): Vs01PrepareSigningRole[] {
+  return buildVs01PrepareSigningRolesForBridge({
     agreementId: input.agreementId,
     creatorName: input.creatorName,
     creatorEmail: input.creatorEmail,
     ownerSignerName: input.ownerSignerName,
     ownerSignerTitle: input.ownerSignerTitle,
     counterparties: input.counterparties,
+    bridge: input.bridge,
   });
+}
+
+function resolvePrimaryPrepareRole(roles: readonly Vs01PrepareSigningRole[]): Vs01PrepareSigningRole {
+  return roles.find((r) => r.kind === "owner") ?? roles[0]!;
+}
+
+export function recomputePreparePacketGate(input: PreparePacketContinueInput): {
+  gate: SigningPacketPrepareGate;
+  roles: Vs01PrepareSigningRole[];
+} {
+  const roles = resolvePreparePacketSigningRoles(input);
   const gate = evaluatePreparePacketGateFromRoles(
     roles,
     input.senderPlacedFields,
@@ -94,7 +115,8 @@ export function handlePreparePacketContinue(
     return { ok: false, finish };
   }
 
-  const ownerRole = roles[0]!;
+  const primaryRole = resolvePrimaryPrepareRole(roles);
+  const otherRoles = roles.filter((r) => r.roleId !== primaryRole.roleId);
   const initialsEnabled = input.initialsEnabled !== false;
   const corpusPlain = (input.prepareCorpusPlain ?? "").trim();
   let canonicalManifestFields: Vs01RecipientPlacedField[] | null = null;
@@ -147,38 +169,8 @@ export function handlePreparePacketContinue(
   }
 
   const rid = (input.receiptId ?? "").trim();
-  const named = input.counterparties.filter((c) => c.name.trim().length > 0);
-
-  const signers = named.flatMap((c) => {
-    const role = roles.find((r) => r.vs01CounterpartyId === c.id);
-    if (!role) return [];
-    const signerRoleId = role.roleId;
-    return [{
-      counterpartyId: c.id,
-      displayName: c.name.trim(),
-      email: (role.signerEmail ?? c.email).trim(),
-      signingUrl: buildSigningUrlForPrepareRole({
-        role,
-        ownerRole,
-        roles,
-        senderPlacedFields: input.senderPlacedFields,
-        recipientPlacedFields: input.recipientPlacedFields,
-        packetManifestFields: canonicalManifestFields,
-        canonicalPacketPayload,
-        canonicalPacketStored,
-        packetRevision,
-        documentId: input.documentId,
-        agreementId: input.agreementId,
-        receiptId: rid || null,
-        recipientIndex: role.partyIndex,
-      }),
-      signerRoleId,
-    }];
-  });
-
-  const ownerSigningUrl = buildSigningUrlForPrepareRole({
-    role: ownerRole,
-    ownerRole,
+  const urlArgs = {
+    ownerRole: primaryRole,
     roles,
     senderPlacedFields: input.senderPlacedFields,
     recipientPlacedFields: input.recipientPlacedFields,
@@ -189,7 +181,24 @@ export function handlePreparePacketContinue(
     documentId: input.documentId,
     agreementId: input.agreementId,
     receiptId: rid || null,
-    recipientIndex: ownerRole.partyIndex,
+  };
+
+  const signers = otherRoles.map((role) => ({
+    counterpartyId: role.vs01CounterpartyId ?? role.partyId,
+    displayName: role.entityName.trim() || role.partyName.trim(),
+    email: (role.signerEmail ?? "").trim(),
+    signingUrl: buildSigningUrlForPrepareRole({
+      role,
+      ...urlArgs,
+      recipientIndex: role.partyIndex,
+    }),
+    signerRoleId: role.roleId,
+  }));
+
+  const ownerSigningUrl = buildSigningUrlForPrepareRole({
+    role: primaryRole,
+    ...urlArgs,
+    recipientIndex: primaryRole.partyIndex,
   });
 
   const handoff: PaidProVs01PostSignHandoffV1 = {
@@ -202,18 +211,18 @@ export function handlePreparePacketContinue(
     packetPrepareOnly: !rid,
     savedAt: new Date().toISOString(),
     signers,
-    ownerSignerRoleId: ownerRole.roleId,
+    ownerSignerRoleId: primaryRole.roleId,
     senderMustSignFirst: resolveVs01SenderMustSignFirst(false),
     ownerSigningUrl,
     packetRevision: packetRevision ?? undefined,
     initialsEnabled,
   };
 
-  ensureSigningPacketStatusFromHandoff(handoff, ownerRole.roleId);
+  ensureSigningPacketStatusFromHandoff(handoff, primaryRole.roleId);
 
   logVs01PrepareContinueAllowed({
     agreementIdShort: input.agreementId.slice(0, 16),
-    signerCount: signers.length + 1,
+    signerCount: roles.length,
   });
   logVs01LifecycleEvent({
     event: "vs01_prepare_completed",
@@ -231,7 +240,11 @@ export function handlePreparePacketContinue(
       agreement_id: input.agreementId.slice(0, 16),
       document_id: input.documentId.slice(0, 16),
       signer_targets: [
-        { signer_role_id: ownerRole.roleId, party_index: ownerRole.partyIndex, recipient_index: ownerRole.partyIndex },
+        {
+          signer_role_id: primaryRole.roleId,
+          party_index: primaryRole.partyIndex,
+          recipient_index: primaryRole.partyIndex,
+        },
         ...signers.map((s) => ({
           signer_role_id: s.signerRoleId,
           party_index: roles.find((r) => r.roleId === s.signerRoleId)?.partyIndex ?? null,
@@ -242,7 +255,7 @@ export function handlePreparePacketContinue(
     });
   }
 
-  return { ok: true, handoff, gate, portablePacket };
+  return { ok: true, handoff, gate, portablePacket, roles };
 }
 
 /** Rebuild signing URLs from the latest stored canonical portable packet (avoids stale handoff links). */
@@ -254,8 +267,8 @@ export function rebuildPrepareSigningUrlsFromStored(input: {
 }): Pick<PaidProVs01PostSignHandoffV1, "ownerSigningUrl" | "signers" | "packetRevision"> | null {
   const portable = loadVs01CanonicalPacketPortable(input.handoff.vs01DocumentId);
   if (!portable) return null;
-  const ownerRole = input.roles[0];
-  if (!ownerRole || ownerRole.kind !== "owner") return null;
+  const ownerRole = resolvePrimaryPrepareRole(input.roles);
+  if (!ownerRole) return null;
   const initialsEnabled = portable.initialsPolicy.enabled;
   const urlRefs = resolveCanonicalPacketUrlRefs({
     documentId: input.handoff.vs01DocumentId,

@@ -622,9 +622,9 @@ export function evaluatePreparePacketGateFromRoles(
   senderPlacedFields: PlacedSigningField[],
   recipientPlacedFields: Vs01RecipientPlacedField[],
 ): SigningPacketPrepareGate {
-  const owner = roles[0];
-  if (!owner || owner.kind !== "owner") {
-    return emptySigningPacketPrepareGate({ __owner__: ["no_owner_role"] });
+  const owner = roles.find((r) => r.kind === "owner") ?? roles[0];
+  if (!owner) {
+    return emptySigningPacketPrepareGate({ __owner__: ["no_signer_roles"] });
   }
   return buildSigningPacketPrepareGate(roles, owner, roles, senderPlacedFields, recipientPlacedFields);
 }

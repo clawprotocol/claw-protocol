@@ -112,7 +112,14 @@ export function resolveAuthoritativePartySlotCount(args: {
   intakeText?: string | null;
   draftPartyNames?: readonly string[];
   rawPartyCount?: number;
+  /** When user explicitly adds 3+ parties in signer setup, do not collapse back to two. */
+  userExpandedPartyCount?: number;
 }): number {
+  const userExpanded = Math.max(0, args.userExpandedPartyCount ?? 0);
+  if (userExpanded > 2) {
+    return Math.min(userExpanded, 4);
+  }
+
   const intakeNames = collapsePartySlotCandidates(
     extractBetweenPartyNameList(String(args.intakeText ?? "")),
   );
