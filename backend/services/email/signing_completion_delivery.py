@@ -11,7 +11,10 @@ from backend.config.email_config import app_public_origin, email_configured
 from backend.services.email.delivery import send_email_non_fatal
 from backend.services.email.review_delivery import _redact_to
 from backend.services.email.templates.signing_complete import build_signing_complete_email
-from backend.services.vs01_fully_executed_snapshot import parse_signature_completed_events
+from backend.services.vs01_fully_executed_snapshot import (
+    parse_signature_completed_events,
+    signature_text_for_signer_role,
+)
 from backend.services.vs01_signer_completion import fully_executed_snapshot_ready
 
 _log = logging.getLogger(__name__)
@@ -209,6 +212,61 @@ def resolve_signing_completion_email_targets(draft: Dict[str, Any]) -> List[Dict
     return out
 
 
+def _resolve_completion_party_draft_party(
+    draft: Dict[str, Any],
+    *,
+    signer_role_id: str,
+) -> tuple[str, str]:
+    """Return (legal party name, human signer name) from draft parties for a role."""
+    rid = (signer_role_id or "").strip()
+    for audit_event in draft.get("audit_log") or []:
+        if not isinstance(audit_event, dict):
+            continue
+        if str(audit_event.get("event_type") or "") != "signature_completed":
+            continue
+        val = audit_event.get("value")
+        if not isinstance(val, dict):
+            continue
+        if str(val.get("signer_role_id") or "").strip() != rid:
+            continue
+        pid = str(val.get("participant_id") or "").strip()
+        if not pid:
+            break
+        for party in draft.get("parties") or []:
+            if isinstance(party, dict) and str(party.get("id") or "").strip() == pid:
+                return (
+                    str(party.get("name") or "").strip(),
+                    str(party.get("signerName") or "").strip(),
+                )
+        break
+    return "", ""
+
+
+def _resolve_completion_human_signer_name(
+    *,
+    party_name: str,
+    role: Dict[str, Any] | None,
+    draft_party_signer_name: str,
+    signature_field_value: str,
+    audit_display_name: str,
+) -> str:
+    """Human name for the 'signed by' label; safe fallbacks when unavailable."""
+    for candidate in (
+        str(role.get("signerName") or "").strip() if isinstance(role, dict) else "",
+        draft_party_signer_name,
+        signature_field_value,
+    ):
+        if candidate:
+            return candidate
+
+    audit_name = (audit_display_name or "").strip()
+    if audit_name and (
+        not party_name or audit_name.casefold() != party_name.casefold()
+    ):
+        return audit_name
+    return ""
+
+
 def _signing_completion_party_summary_lines(draft: Dict[str, Any]) -> List[str]:
     events = parse_signature_completed_events(draft.get("audit_log"))
     if not events:
@@ -217,48 +275,47 @@ def _signing_completion_party_summary_lines(draft: Dict[str, Any]) -> List[str]:
     stored = draft.get("vs01_signing_packet_v1")
     portable = stored.get("portable") if isinstance(stored, dict) else None
     roles: List[Dict[str, Any]] = []
-    if isinstance(portable, dict) and isinstance(portable.get("roles"), list):
-        roles = [r for r in portable["roles"] if isinstance(r, dict)]
+    fields: List[Any] = []
+    if isinstance(portable, dict):
+        if isinstance(portable.get("roles"), list):
+            roles = [r for r in portable["roles"] if isinstance(r, dict)]
+        if isinstance(portable.get("fields"), list):
+            fields = portable["fields"]
 
     lines: List[str] = []
     for event in events:
         rid = event.get("signer_role_id") or ""
         role = next((r for r in roles if str(r.get("roleId") or "").strip() == rid), None)
+        audit_display = (event.get("display_name") or "").strip()
+
         party_name = ""
-        signer_name = (event.get("display_name") or "").strip()
         if isinstance(role, dict):
             party_name = (
                 str(role.get("entityName") or "").strip()
                 or str(role.get("partyName") or "").strip()
                 or str(role.get("roleLabel") or "").strip()
             )
-            if not signer_name:
-                signer_name = str(role.get("signerName") or "").strip()
+
+        draft_party_name, draft_party_signer_name = _resolve_completion_party_draft_party(
+            draft,
+            signer_role_id=rid,
+        )
         if not party_name:
-            for audit_event in draft.get("audit_log") or []:
-                if not isinstance(audit_event, dict):
-                    continue
-                if str(audit_event.get("event_type") or "") != "signature_completed":
-                    continue
-                val = audit_event.get("value")
-                if not isinstance(val, dict):
-                    continue
-                if str(val.get("signer_role_id") or "").strip() != rid:
-                    continue
-                pid = str(val.get("participant_id") or "").strip()
-                if pid:
-                    for party in draft.get("parties") or []:
-                        if isinstance(party, dict) and str(party.get("id") or "").strip() == pid:
-                            party_name = str(party.get("name") or "").strip()
-                            if not signer_name:
-                                signer_name = str(party.get("signerName") or "").strip()
-                            break
-                break
+            party_name = draft_party_name
+
+        human_signer = _resolve_completion_human_signer_name(
+            party_name=party_name,
+            role=role,
+            draft_party_signer_name=draft_party_signer_name,
+            signature_field_value=signature_text_for_signer_role(fields, rid),
+            audit_display_name=audit_display,
+        )
+
         ts = (event.get("signed_date_display") or "").strip() or _format_audit_timestamp(
             event.get("signed_at") or ""
         )
-        party_label = party_name or signer_name or "Signer"
-        signer_label = signer_name or party_name or "Signer"
+        party_label = party_name or human_signer or audit_display or "Signer"
+        signer_label = human_signer or audit_display or party_name or "Signer"
         lines.append(f"{party_label} — signed by {signer_label} at {ts or 'completion'}")
     return lines
 

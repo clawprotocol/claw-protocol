@@ -8,6 +8,7 @@ import pytest
 
 from backend.services.email.signing_completion_delivery import (
     SIGNING_COMPLETION_EMAILS_SENT_EVENT,
+    _signing_completion_party_summary_lines,
     maybe_send_signing_completion_emails,
     resolve_signing_completion_email_targets,
 )
@@ -274,6 +275,244 @@ def test_completion_email_targets_owner_and_party_roles() -> None:
     targets = resolve_signing_completion_email_targets(draft)
     emails = sorted(t["email"] for t in targets)
     assert emails == ["cp@example.test", "owner@example.test"]
+
+
+def test_completion_email_party_summary_uses_human_signer_not_entity_echo() -> None:
+    """Audit participant_display_name is often the legal entity; email should show human signer."""
+    draft = {
+        "parties": [
+            {
+                "id": "p1",
+                "name": "Harbor Peak Automation LLC",
+                "role": "owner",
+                "email": "rasta@example.test",
+                "signerName": "Rasta Benning",
+            },
+            {
+                "id": "p2",
+                "name": "Red Mesa Logistics LLC",
+                "role": "party",
+                "email": "rand@example.test",
+                "signerName": "Rand Mann",
+            },
+        ],
+        "audit_log": [
+            build_signature_completed_event(
+                signer_role_id="role_owner",
+                participant_id="p1",
+                display_name="Harbor Peak Automation LLC",
+                document_id="doc1",
+                signed_at="2026-06-17T14:48:00Z",
+                signed_date_iso="2026-06-17",
+                signed_date_display="June 17, 2026",
+                locked_version_id=None,
+                agreement_version_hash=None,
+            ),
+            build_signature_completed_event(
+                signer_role_id="role_cp",
+                participant_id="p2",
+                display_name="Red Mesa Logistics LLC",
+                document_id="doc1",
+                signed_at="2026-06-17T14:48:01Z",
+                signed_date_iso="2026-06-17",
+                signed_date_display="June 17, 2026",
+                locked_version_id=None,
+                agreement_version_hash=None,
+            ),
+        ],
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "portable": {
+                "roles": [
+                    {
+                        "roleId": "role_owner",
+                        "partyIndex": 0,
+                        "requiresSignature": True,
+                        "entityName": "Harbor Peak Automation LLC",
+                        "signerName": "Rasta Benning",
+                    },
+                    {
+                        "roleId": "role_cp",
+                        "partyIndex": 1,
+                        "requiresSignature": True,
+                        "entityName": "Red Mesa Logistics LLC",
+                        "signerName": "Rand Mann",
+                    },
+                ]
+            },
+        },
+    }
+
+    lines = _signing_completion_party_summary_lines(draft)
+    assert len(lines) == 2
+    assert "Harbor Peak Automation LLC — signed by Rasta Benning" in lines[0]
+    assert "Red Mesa Logistics LLC — signed by Rand Mann" in lines[1]
+    assert "signed by Harbor Peak Automation LLC" not in "\n".join(lines)
+    assert "signed by Red Mesa Logistics LLC" not in "\n".join(lines)
+
+
+def test_completion_email_party_summary_n_party_one_row_per_signer() -> None:
+    draft = {
+        "audit_log": [
+            build_signature_completed_event(
+                signer_role_id=f"role_{i}",
+                participant_id=f"p{i}",
+                display_name=f"Entity {i} LLC",
+                document_id="doc1",
+                signed_at=f"2026-06-0{i}T12:00:00Z",
+                signed_date_iso=f"2026-06-0{i}",
+                signed_date_display=f"June {i}, 2026",
+                locked_version_id=None,
+                agreement_version_hash=None,
+            )
+            for i in range(1, 4)
+        ],
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "portable": {
+                "roles": [
+                    {
+                        "roleId": f"role_{i}",
+                        "partyIndex": i - 1,
+                        "requiresSignature": True,
+                        "entityName": f"Entity {i} LLC",
+                        "signerName": f"Signer {i}",
+                    }
+                    for i in range(1, 4)
+                ]
+            },
+        },
+    }
+
+    lines = _signing_completion_party_summary_lines(draft)
+    assert len(lines) == 3
+    for i in range(1, 4):
+        assert any(
+            line.startswith(f"Entity {i} LLC — signed by Signer {i} at")
+            for line in lines
+        )
+
+
+def test_completion_email_party_summary_falls_back_when_human_signer_missing() -> None:
+    draft = {
+        "audit_log": [
+            build_signature_completed_event(
+                signer_role_id="role_only",
+                participant_id="",
+                display_name="Solo Entity LLC",
+                document_id="doc1",
+                signed_at="2026-06-17T14:48:00Z",
+                signed_date_iso="2026-06-17",
+                signed_date_display="June 17, 2026",
+                locked_version_id=None,
+                agreement_version_hash=None,
+            ),
+        ],
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "portable": {
+                "roles": [
+                    {
+                        "roleId": "role_only",
+                        "requiresSignature": True,
+                        "entityName": "Solo Entity LLC",
+                    },
+                ]
+            },
+        },
+    }
+
+    lines = _signing_completion_party_summary_lines(draft)
+    assert lines == ["Solo Entity LLC — signed by Solo Entity LLC at June 17, 2026"]
+
+
+def test_completion_email_body_includes_entity_and_human_signer_in_parties() -> None:
+    draft = _draft_fully_executed_with_snapshot()
+    draft["title"] = "Services Agreement"
+    draft["parties"] = [
+        {
+            "id": "p1",
+            "name": "Harbor Peak Automation LLC",
+            "role": "owner",
+            "email": "owner@example.test",
+            "signerName": "Rasta Benning",
+        },
+        {
+            "id": "p2",
+            "name": "Red Mesa Logistics LLC",
+            "role": "party",
+            "email": "cp@example.test",
+            "signerName": "Rand Mann",
+        },
+    ]
+    draft["vs01_signing_packet_v1"]["portable"]["roles"] = [
+        {
+            "roleId": "role_owner",
+            "partyIndex": 0,
+            "requiresSignature": True,
+            "signerEmail": "owner@example.test",
+            "entityName": "Harbor Peak Automation LLC",
+            "signerName": "Rasta Benning",
+        },
+        {
+            "roleId": "role_cp",
+            "partyIndex": 1,
+            "requiresSignature": True,
+            "signerEmail": "cp@example.test",
+            "entityName": "Red Mesa Logistics LLC",
+            "signerName": "Rand Mann",
+        },
+    ]
+    draft["audit_log"] = [
+        build_signature_completed_event(
+            signer_role_id="role_owner",
+            participant_id="p1",
+            display_name="Harbor Peak Automation LLC",
+            document_id="doc1",
+            signed_at="2026-06-07T15:30:00Z",
+            signed_date_iso="2026-06-07",
+            signed_date_display="June 7, 2026",
+            locked_version_id=None,
+            agreement_version_hash=None,
+        ),
+        build_signature_completed_event(
+            signer_role_id="role_cp",
+            participant_id="p2",
+            display_name="Red Mesa Logistics LLC",
+            document_id="doc1",
+            signed_at="2026-06-08T16:45:00Z",
+            signed_date_iso="2026-06-08",
+            signed_date_display="June 8, 2026",
+            locked_version_id=None,
+            agreement_version_hash=None,
+        ),
+        build_fully_executed_signed_event(signed_at="2026-06-08T16:45:01Z", agreement_version_hash="h"),
+    ]
+
+    captured: list[dict] = []
+
+    class _Ok:
+        ok = True
+
+    def _capture(**kwargs: object) -> _Ok:
+        captured.append(dict(kwargs))
+        return _Ok()
+
+    with patch("backend.services.email.signing_completion_delivery.email_configured", return_value=True), patch(
+        "backend.services.email.signing_completion_delivery.send_email_non_fatal",
+        side_effect=_capture,
+    ), patch(
+        "backend.services.email.signing_completion_delivery.app_public_origin",
+        return_value="https://app.example.test",
+    ):
+        event = maybe_send_signing_completion_emails(agreement_id="ag1", draft=draft)
+    assert event is not None
+    assert captured
+    text = str(captured[0].get("text") or "")
+    assert "Harbor Peak Automation LLC — signed by Rasta Benning" in text
+    assert "Red Mesa Logistics LLC — signed by Rand Mann" in text
+    assert "signed by Harbor Peak Automation LLC" not in text
+    assert "signed by Red Mesa Logistics LLC" not in text
 
 
 def test_completion_email_body_includes_completed_timestamp_and_view_link() -> None:
