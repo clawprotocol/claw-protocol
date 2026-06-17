@@ -8,6 +8,7 @@ import { stripPreWitnessExecutionPollutionFromPrefix } from "./paidProExecutionB
 import { repairGluedSectionHeadingsInText } from "./documentSectionHeadingSplit";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
+import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
   return prefix
@@ -33,6 +34,12 @@ export function normalizeFlattenedPaidProDocumentBlocks(text: string): {
   const before = out;
 
   out = repairGluedSectionHeadingsInText(out);
+
+  const splitHeadingFragments = repairSplitPaidProHeadingFragments(out);
+  if (splitHeadingFragments.repairs.length > 0) {
+    out = splitHeadingFragments.text;
+    repairs.push(...splitHeadingFragments.repairs);
+  }
 
   out = out.replace(
     /^((?:CONSULTING AND IMPLEMENTATION|MUTUAL CONSULTING AND IMPLEMENTATION|SERVICES) AGREEMENT)\s+(This\b)/i,

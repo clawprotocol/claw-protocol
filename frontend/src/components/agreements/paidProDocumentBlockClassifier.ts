@@ -5,6 +5,10 @@
 
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { splitGluedSectionHeadingFromLine } from "./documentSectionHeadingSplit";
+import {
+  isDanglingPaidProMainHeadingPrefix,
+  isPaidProHeadingContinuationFragment,
+} from "./repairSplitPaidProHeadingFragments";
 
 export type PaidProDocumentBlockKind =
   | "document_title"
@@ -67,7 +71,12 @@ export function isMainSectionHeadingLine(line: string): boolean {
   // "10. HEADING. Sentence body on same line" is not a pure heading line.
   if (/\.\s+[A-Za-z]/.test(body)) return false;
   if (MAIN_HEADING_BODY_VERB_RE.test(body)) return false;
-  if (GLUED_MAIN_HEADING_BODY_START_RE.test(body)) return false;
+  if (GLUED_MAIN_HEADING_BODY_START_RE.test(body)) {
+    // "... and Client Materials" — title words after a conjunction, not glued body.
+    const titleSuffixAfterConnector =
+      /\b(?:and|or|&)\s+(?:[A-Z][a-zA-Z'&-]+(?:\s+[A-Z][a-zA-Z'&-]+){0,5})\s*$/.test(body);
+    if (!titleSuffixAfterConnector) return false;
+  }
   // Title punctuation allowed in major headings (semicolons common in compound titles).
   if (/^[A-Z0-9 ·\/—–'\-,&();:]+$/.test(body)) return true;
   if (/^[A-Z][a-zA-Z0-9\s/&,\-'—–().;:]+$/.test(body)) {
@@ -75,6 +84,33 @@ export function isMainSectionHeadingLine(line: string): boolean {
     return body.split(/\s+/).length <= 16;
   }
   return false;
+}
+
+function parseMainSectionTitleFromLine(line: string): string | null {
+  const m = line.trim().match(/^\d+\.\s+(?!\d+\.\d)(.+)$/);
+  return m?.[1]?.trim() ?? null;
+}
+
+function isFalseSplitMainHeadingFragment(headingLine: string, remainder: string): boolean {
+  const title = parseMainSectionTitleFromLine(headingLine);
+  if (!title || !remainder) return false;
+  return (
+    isDanglingPaidProMainHeadingPrefix(title) &&
+    isPaidProHeadingContinuationFragment(remainder)
+  );
+}
+
+function rejectFalseMainHeadingGluedSplit(glued: string, originalLine: string): string {
+  if (!glued.includes("\n")) return glued;
+  const [headingLine, ...rest] = glued
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const remainder = rest.join("\n").trim();
+  if (headingLine && remainder && isFalseSplitMainHeadingFragment(headingLine, remainder)) {
+    return originalLine.trim();
+  }
+  return glued;
 }
 
 /** Lines like `10. TITLE. Body on same line` — heading prefix only. */
@@ -93,7 +129,7 @@ export function extractMainSectionHeadingPrefix(
         return { heading, remainder };
       }
     }
-    const glued = splitGluedSectionHeadingFromLine(t);
+    const glued = rejectFalseMainHeadingGluedSplit(splitGluedSectionHeadingFromLine(t), t);
     if (glued.includes("\n")) {
       const [headingLine, ...rest] = glued
         .split("\n")
@@ -137,7 +173,7 @@ export function splitSinglePaidProDocumentBlock(block: string): string[] {
 
   for (const line of lines) {
     const t = line.trim();
-    const repairedLine = splitGluedSectionHeadingFromLine(t);
+    const repairedLine = rejectFalseMainHeadingGluedSplit(splitGluedSectionHeadingFromLine(t), t);
     if (repairedLine !== t) {
       flushCurrent();
       for (const part of repairedLine

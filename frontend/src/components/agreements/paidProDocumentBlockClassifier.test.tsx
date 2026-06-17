@@ -11,6 +11,7 @@ import {
   splitSinglePaidProDocumentBlock,
   summarizePaidProDocumentBlockClassifications,
 } from "./paidProDocumentBlockClassifier";
+import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 
 describe("paidProDocumentBlockClassifier", () => {
   afterEach(() => {
@@ -255,5 +256,49 @@ describe("paidProDocumentBlockClassifier", () => {
       /^8\. Independent Contractor; Assignment; Force Majeure/m,
     );
     unmount();
+  });
+
+  it("merges split main heading fragments and keeps subsections unchanged", () => {
+    const raw = [
+      "5. Ownership, Work Product and",
+      "Client Materials",
+      "",
+      "5.1 Client Ownership of Paid Deliverables",
+      "Client owns paid deliverables upon payment.",
+      "5.2 Service Provider Retained Materials",
+      "Service Provider retains pre-existing tools and methods.",
+    ].join("\n");
+
+    const result = preparePaidProReviewDisplayPlain(raw);
+    expect(result.text).toContain("5. Ownership, Work Product and Client Materials");
+    const prepared = result.text;
+    const blocks = classifyPaidProDocumentBlocks(prepared);
+    const mainHeadings = blocks
+      .filter((b) => b.kind === "main_section_heading")
+      .map((b) => b.firstLine);
+    expect(mainHeadings).toContain("5. Ownership, Work Product and Client Materials");
+    expect(blocks.some((b) => b.kind === "body_paragraph" && b.firstLine === "Client Materials")).toBe(
+      false,
+    );
+    expect(prepared).toMatch(/5\.1 Client Ownership of Paid Deliverables/);
+    expect(isMainSectionHeadingLine("5. Ownership, Work Product and Client Materials")).toBe(true);
+    expect(detectPaidProPlainParagraphHeadingLeaks(prepared).plainParagraphHeadingLeakCount).toBe(0);
+  });
+
+  it("does not merge split heading prefix with a body sentence on the next line", () => {
+    const raw = [
+      "5. Ownership, Work Product and",
+      "The Service Provider will deliver work product as described herein.",
+    ].join("\n\n");
+
+    const prepared = preparePaidProReviewDisplayPlain(raw).text;
+    const blocks = classifyPaidProDocumentBlocks(prepared);
+    expect(blocks.some((b) => b.firstLine === "5. Ownership, Work Product and")).toBe(true);
+    expect(
+      blocks.some((b) =>
+        b.firstLine.startsWith("The Service Provider will deliver work product"),
+      ),
+    ).toBe(true);
+    expect(blocks.some((b) => b.firstLine.includes("Client Materials"))).toBe(false);
   });
 });
