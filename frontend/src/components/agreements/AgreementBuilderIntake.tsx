@@ -1248,8 +1248,16 @@ import { shouldBypassGuidedSendCtaBlockForPaidProSignerSetup } from "./paidProRe
 import { PaidProCoordinatorToggle } from "./PaidProCoordinatorToggle";
 import {
   PAID_PRO_ADD_ANOTHER_PARTY_LABEL,
+  PAID_PRO_REMOVE_PARTY_LABEL,
   PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
+  applySignerSetupGeneratedPartyGuardToGate,
   canAddAnotherSignerParty,
+  canRemoveSignerSetupParty,
+  evaluateSignerSetupGeneratedPartyGuard,
+  formatSignerSetupBeyondGeneratedWarningBody,
+  formatSignerSetupBeyondGeneratedWarningTitle,
+  removeAddedSignerPartyState,
+  resolveGeneratedAgreementPartyCount,
 } from "./paidProNPartySignerSetup";
 import {
   evaluateGuidedSigningPacketGate,
@@ -2028,6 +2036,9 @@ type CreateFlowSendRecipientsPanelProps = {
   /** N-party signer setup: explicit UI party row count (2–4). */
   signerSetupUiPartyCount?: number;
   onAddAnotherSignerParty?: () => void;
+  onRemoveSignerParty?: (partyIndex: number) => void;
+  signerSetupBeyondGeneratedWarning?: string | null;
+  signerSetupGeneratedPartyCount?: number;
   creatorCoordinatorOnly?: boolean;
   onCreatorCoordinatorOnlyChange?: (checked: boolean) => void;
   extraPartyLegalNames?: string[];
@@ -2089,6 +2100,9 @@ function CreateFlowSendRecipientsPanel({
   agreementId = null,
   signerSetupUiPartyCount = 2,
   onAddAnotherSignerParty,
+  onRemoveSignerParty,
+  signerSetupBeyondGeneratedWarning = null,
+  signerSetupGeneratedPartyCount = 2,
   creatorCoordinatorOnly = false,
   onCreatorCoordinatorOnlyChange,
   extraPartyLegalNames = [],
@@ -2115,10 +2129,13 @@ function CreateFlowSendRecipientsPanel({
   const r2e = stripRecipientEmailNoise(recipient2Email);
   const cappedParties = (draft?.parties ?? []).slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
   const uiPartyCount = Math.min(
-    Math.max(signerSetupUiPartyCount, 2, cappedParties.length),
+    Math.max(signerSetupUiPartyCount, 2),
     PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
   );
-  const partiesForSetup = cappedParties.slice(0, uiPartyCount);
+  const partiesForSetup = Array.from({ length: uiPartyCount }, (_, idx) => {
+    const row = cappedParties[idx] as { name?: string; role?: string } | undefined;
+    return row ?? { name: "", role: "party" };
+  });
   const partyCount = partiesForSetup.length;
   const primaryName =
     partyDisplaySlots[0]?.displayName?.trim() ||
@@ -2202,6 +2219,18 @@ function CreateFlowSendRecipientsPanel({
             checked={creatorCoordinatorOnly}
             onChange={onCreatorCoordinatorOnlyChange}
           />
+        </div>
+      ) : null}
+      {paidProInlineRecipientShell && signerSetupBeyondGeneratedWarning ? (
+        <div
+          className="mb-4 rounded-lg border border-amber-500/35 bg-amber-950/25 px-3 py-2.5 text-xs leading-relaxed text-amber-100/95"
+          role="alert"
+          data-testid="signer-setup-beyond-generated-warning"
+        >
+          <p className="font-semibold text-amber-50/95">
+            {formatSignerSetupBeyondGeneratedWarningTitle(signerSetupGeneratedPartyCount)}
+          </p>
+          <p className="mt-1.5">{formatSignerSetupBeyondGeneratedWarningBody()}</p>
         </div>
       ) : null}
       {partiesForSetup.map((party, idx) => {
@@ -2399,9 +2428,24 @@ function CreateFlowSendRecipientsPanel({
             className="rounded-lg border border-slate-700/45 bg-slate-950/30 p-3 sm:p-4"
             data-testid={idx >= 2 ? `agreement-party-review-email-${idx}` : undefined}
           >
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Party {idx + 1} legal entity
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Party {idx + 1} legal entity
+              </p>
+              {paidProInlineRecipientShell &&
+              signaturePrepMode &&
+              onRemoveSignerParty &&
+              canRemoveSignerSetupParty(idx, uiPartyCount) ? (
+                <button
+                  type="button"
+                  data-testid={`remove-signer-party-${idx}`}
+                  className="shrink-0 text-[11px] font-medium text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline"
+                  onClick={() => onRemoveSignerParty(idx)}
+                >
+                  {PAID_PRO_REMOVE_PARTY_LABEL}
+                </button>
+              ) : null}
+            </div>
             <p className="mt-1 text-sm font-semibold text-slate-100">{partyLine}</p>
             {idx === 0 ? (
               <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
@@ -3795,14 +3839,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     signerSetupUiPartyCountRef.current = signerSetupUiPartyCount;
   }, [signerSetupUiPartyCount]);
   useEffect(() => {
-    const partyLen = draft?.parties?.length ?? 2;
-    if (partyLen > signerSetupUiPartyCount) {
-      setSignerSetupUiPartyCount(Math.min(partyLen, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES));
+    const generatedCount = resolveGeneratedAgreementPartyCount({
+      draftParties: draft?.parties,
+    });
+    if (generatedCount > signerSetupUiPartyCount) {
+      setSignerSetupUiPartyCount(Math.min(generatedCount, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES));
     }
     if (draft?.creator_coordinator_only) {
       setCreatorCoordinatorOnly(true);
     }
-  }, [draft?.parties?.length, draft?.creator_coordinator_only, signerSetupUiPartyCount]);
+  }, [draft?.parties, draft?.creator_coordinator_only, signerSetupUiPartyCount]);
   useEffect(() => {
     setDraft((prev) => {
       if (!prev) return prev;
@@ -14576,32 +14622,60 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     effectivePremiumSendMode,
   ]);
 
-  const guidedPreReviewSignerSlots = useMemo(
+  const generatedAgreementPartyCount = useMemo(
     () =>
-      resolveGuidedPreReviewSignerSlots({
-        partyCount: draft?.parties?.length ?? 2,
-        partySignerNames,
-        recipient1Name,
-        recipient2Name,
-        recipient1Email,
-        recipient2Email,
-        extraPartyReviewEmails,
-        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
-        sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
-        recipientsDeferred,
+      resolveGeneratedAgreementPartyCount({
+        draftParties: draft?.parties,
+        corpusPlain: readAuthoritativeSigningCorpus(),
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       }),
-    [
-      draft?.parties,
+    [draft?.parties, currentPremiumMergedIntakeKey, intakeCombined, premiumSurfaceGateTick],
+  );
+
+  const signerSetupGeneratedPartyGuard = useMemo(
+    () =>
+      evaluateSignerSetupGeneratedPartyGuard({
+        signerSetupUiPartyCount,
+        generatedPartyCount: generatedAgreementPartyCount,
+      }),
+    [signerSetupUiPartyCount, generatedAgreementPartyCount],
+  );
+
+  const guidedPreReviewSignerSlots = useMemo(() => {
+    const base = resolveGuidedPreReviewSignerSlots({
+      partyCount: Math.max(generatedAgreementPartyCount, signerSetupUiPartyCount),
       partySignerNames,
       recipient1Name,
       recipient2Name,
       recipient1Email,
       recipient2Email,
       extraPartyReviewEmails,
-      effectivePremiumSendMode,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+      sendMode: effectivePremiumSendMode === "review" ? "review" : "signature",
       recipientsDeferred,
-    ],
-  );
+    });
+    if (!signerSetupGeneratedPartyGuard.beyondGenerated) return base;
+    return {
+      ...base,
+      complete: false,
+      blockerMessage:
+        signerSetupGeneratedPartyGuard.warningMessage ?? base.blockerMessage,
+    };
+  }, [
+    generatedAgreementPartyCount,
+    signerSetupUiPartyCount,
+    signerSetupGeneratedPartyGuard.beyondGenerated,
+    signerSetupGeneratedPartyGuard.warningMessage,
+    draft?.parties,
+    partySignerNames,
+    recipient1Name,
+    recipient2Name,
+    recipient1Email,
+    recipient2Email,
+    extraPartyReviewEmails,
+    effectivePremiumSendMode,
+    recipientsDeferred,
+  ]);
 
   const guidedSignerCanonicalIdentities = useMemo(() => {
     const fromSnapshot = readAuthoritativeSignerIdentitiesForSurfaces();
@@ -14767,52 +14841,49 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const handleAddAnotherSignerParty = React.useCallback(() => {
     setSignerSetupUiPartyCount((prev) => {
       if (!canAddAnotherSignerParty(prev)) return prev;
-      const next = prev + 1;
-      setDraft((draftPrev) => {
-        if (!draftPrev) return draftPrev;
-        const parties = [...(draftPrev.parties ?? [])];
-        while (parties.length < next) {
-          const idx = parties.length;
-          parties.push({
-            id: `party_${idx}`,
-            name: `Party ${idx + 1}`,
-            role: creatorCoordinatorOnlyRef.current ? "party" : idx === 0 ? "owner" : "party",
-            email: "",
-          });
-        }
-        return { ...draftPrev, parties };
-      });
-      return next;
+      return prev + 1;
     });
   }, []);
+  const handleRemoveSignerParty = React.useCallback((partyIndex: number) => {
+    const next = removeAddedSignerPartyState(partyIndex, {
+      signerSetupUiPartyCount,
+      extraPartyLegalNames,
+      extraPartyReviewEmails,
+      partySignerNames,
+      partySignerTitles,
+      partyAddresses,
+    });
+    if (!next) return;
+    setSignerSetupUiPartyCount(next.signerSetupUiPartyCount);
+    setExtraPartyLegalNames(next.extraPartyLegalNames);
+    setExtraPartyReviewEmails(next.extraPartyReviewEmails);
+    setPartySignerNames(next.partySignerNames);
+    setPartySignerTitles(next.partySignerTitles);
+    setPartyAddresses(next.partyAddresses);
+  }, [
+    signerSetupUiPartyCount,
+    extraPartyLegalNames,
+    extraPartyReviewEmails,
+    partySignerNames,
+    partySignerTitles,
+    partyAddresses,
+  ]);
   const nPartySignerSetupPanelProps = {
     signerSetupUiPartyCount,
     onAddAnotherSignerParty: handleAddAnotherSignerParty,
+    onRemoveSignerParty: handleRemoveSignerParty,
+    signerSetupBeyondGeneratedWarning: signerSetupGeneratedPartyGuard.warningMessage,
+    signerSetupGeneratedPartyCount: generatedAgreementPartyCount,
     creatorCoordinatorOnly,
     onCreatorCoordinatorOnlyChange: setCreatorCoordinatorOnly,
     extraPartyLegalNames,
     setExtraPartyLegalNames,
   };
-  const paidProSignerDetailsGate = useMemo(
-    () =>
-      resolvePaidProSignerDetailsGate({
-        partyCount: Math.max(draft?.parties?.length ?? 2, signerSetupUiPartyCount),
-        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
-        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
-        partySignerNames,
-        recipient1Name,
-        recipient2Name,
-        recipient1Email,
-        recipient2Email,
-        extraPartyReviewEmails,
-        extraPartyLegalNames,
-        userExpandedPartyCount: signerSetupUiPartyCount,
-      }),
-    [
-      draft?.parties,
-      signerSetupUiPartyCount,
-      currentPremiumMergedIntakeKey,
-      intakeCombined,
+  const paidProSignerDetailsGate = useMemo(() => {
+    const gate = resolvePaidProSignerDetailsGate({
+      partyCount: Math.max(generatedAgreementPartyCount, signerSetupUiPartyCount),
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
       partySignerNames,
       recipient1Name,
       recipient2Name,
@@ -14820,8 +14891,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipient2Email,
       extraPartyReviewEmails,
       extraPartyLegalNames,
-    ],
-  );
+      userExpandedPartyCount: signerSetupUiPartyCount,
+    });
+    return applySignerSetupGeneratedPartyGuardToGate(
+      gate,
+      signerSetupGeneratedPartyGuard,
+      PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
+    );
+  }, [
+    generatedAgreementPartyCount,
+    signerSetupUiPartyCount,
+    signerSetupGeneratedPartyGuard,
+    draft?.parties,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    partySignerNames,
+    recipient1Name,
+    recipient2Name,
+    recipient1Email,
+    recipient2Email,
+    extraPartyReviewEmails,
+    extraPartyLegalNames,
+  ]);
   const paidProSignatureDetailsReady = Boolean(
     paidProSignerDetailsGate.complete && !createFlowRecipientPrimaryHelper,
   );

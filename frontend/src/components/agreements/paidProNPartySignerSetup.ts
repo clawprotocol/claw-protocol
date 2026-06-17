@@ -1,4 +1,8 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
+import { findSignatureLineAnchorsFromCorpusText } from "../../vs01/vs01SignatureBlockAnchors";
+import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { countRealParties } from "./starterPartyLimits";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
   resolveSignerPartyLegalEntityDisplayValue,
@@ -22,6 +26,136 @@ export const PAID_PRO_COORDINATOR_TOGGLE_HELPER =
   "You can prepare and send this agreement without being listed as a legal party or required signer.";
 
 export const PAID_PRO_ADD_ANOTHER_PARTY_LABEL = "Add another party";
+
+export const PAID_PRO_REMOVE_PARTY_LABEL = "Remove party";
+
+export function formatSignerSetupBeyondGeneratedWarningTitle(generatedPartyCount: number): string {
+  const n = Math.max(2, Math.min(generatedPartyCount, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES));
+  return `This agreement was drafted for ${n} legal parties.`;
+}
+
+export function formatSignerSetupBeyondGeneratedWarningBody(): string {
+  return "To add another legal party, regenerate the agreement so the agreement text, review flow, signature blocks, signer roles, and signing invitations stay synchronized.";
+}
+
+export function formatSignerSetupBeyondGeneratedWarning(generatedPartyCount: number): string {
+  return `${formatSignerSetupBeyondGeneratedWarningTitle(generatedPartyCount)} ${formatSignerSetupBeyondGeneratedWarningBody()}`;
+}
+
+export type ResolveGeneratedAgreementPartyCountArgs = {
+  draftParties?: readonly { name?: string | null }[];
+  corpusPlain?: string | null;
+  intakeText?: string | null;
+};
+
+/**
+ * Stable generated agreement party count — excludes user-added placeholder rows
+ * (e.g. "Party 3") and prefers corpus signature blocks when present.
+ */
+export function resolveGeneratedAgreementPartyCount(args: ResolveGeneratedAgreementPartyCountArgs): number {
+  const fromDraft = countRealParties(args.draftParties);
+  const corpus = String(args.corpusPlain ?? "").trim();
+  const fromCorpus =
+    corpus.length >= 80 ? findSignatureLineAnchorsFromCorpusText(corpus).length : 0;
+  const fromIntake = extractBetweenPartyNameList(String(args.intakeText ?? ""))
+    .map((n) => n.trim())
+    .filter((n) => n.length > 1 && isAuthoritativeLegalEntityName(n)).length;
+
+  let generated = Math.max(fromDraft, 2);
+  if (fromCorpus >= 2) generated = Math.max(generated, fromCorpus);
+  if (fromIntake >= 2) generated = Math.max(generated, fromIntake);
+  return Math.min(generated, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+}
+
+export function isSignerSetupBeyondGeneratedPartyCount(args: {
+  signerSetupUiPartyCount: number;
+  generatedPartyCount: number;
+}): boolean {
+  const generated = Math.max(
+    2,
+    Math.min(args.generatedPartyCount, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES),
+  );
+  return args.signerSetupUiPartyCount > generated;
+}
+
+export function evaluateSignerSetupGeneratedPartyGuard(args: {
+  signerSetupUiPartyCount: number;
+  generatedPartyCount: number;
+}): { beyondGenerated: boolean; warningMessage: string | null } {
+  const beyondGenerated = isSignerSetupBeyondGeneratedPartyCount(args);
+  return {
+    beyondGenerated,
+    warningMessage: beyondGenerated
+      ? formatSignerSetupBeyondGeneratedWarning(args.generatedPartyCount)
+      : null,
+  };
+}
+
+/** User-added parties only — removable from the end (Party 3/4), never Party 1 or 2. */
+export function canRemoveSignerSetupParty(partyIndex: number, uiPartyCount: number): boolean {
+  return partyIndex >= 2 && partyIndex === uiPartyCount - 1;
+}
+
+export type RemoveAddedSignerPartyStateInput = {
+  signerSetupUiPartyCount: number;
+  extraPartyLegalNames: readonly string[];
+  extraPartyReviewEmails: readonly string[];
+  partySignerNames: readonly string[];
+  partySignerTitles: readonly string[];
+  partyAddresses: readonly string[];
+};
+
+export type RemoveAddedSignerPartyStateResult = {
+  signerSetupUiPartyCount: number;
+  extraPartyLegalNames: string[];
+  extraPartyReviewEmails: string[];
+  partySignerNames: string[];
+  partySignerTitles: string[];
+  partyAddresses: string[];
+};
+
+/** Clears the removed party's signer fields and decrements UI party count. */
+export function removeAddedSignerPartyState(
+  partyIndex: number,
+  state: RemoveAddedSignerPartyStateInput,
+): RemoveAddedSignerPartyStateResult | null {
+  if (!canRemoveSignerSetupParty(partyIndex, state.signerSetupUiPartyCount)) return null;
+  const extraLegalNames = [...state.extraPartyLegalNames];
+  const extraReviewEmails = [...state.extraPartyReviewEmails];
+  const partySignerNames = [...state.partySignerNames];
+  const partySignerTitles = [...state.partySignerTitles];
+  const partyAddresses = [...state.partyAddresses];
+  if (partyIndex >= 2) {
+    const extraIdx = partyIndex - 2;
+    if (extraIdx < extraLegalNames.length) extraLegalNames.splice(extraIdx, 1);
+    if (extraIdx < extraReviewEmails.length) extraReviewEmails.splice(extraIdx, 1);
+  }
+  if (partyIndex < partySignerNames.length) partySignerNames.splice(partyIndex, 1);
+  if (partyIndex < partySignerTitles.length) partySignerTitles.splice(partyIndex, 1);
+  if (partyIndex < partyAddresses.length) partyAddresses.splice(partyIndex, 1);
+  return {
+    signerSetupUiPartyCount: state.signerSetupUiPartyCount - 1,
+    extraPartyLegalNames: extraLegalNames,
+    extraPartyReviewEmails: extraReviewEmails,
+    partySignerNames,
+    partySignerTitles,
+    partyAddresses,
+  };
+}
+
+export function applySignerSetupGeneratedPartyGuardToGate<T extends { complete: boolean; blockerMessage: string | null; ctaLabel: string }>(
+  gate: T,
+  guard: { beyondGenerated: boolean; warningMessage: string | null },
+  incompleteCtaLabel: string,
+): T {
+  if (!guard.beyondGenerated) return gate;
+  return {
+    ...gate,
+    complete: false,
+    blockerMessage: guard.warningMessage ?? gate.blockerMessage,
+    ctaLabel: incompleteCtaLabel,
+  };
+}
 
 export type PaidProSignerSetupUiState = {
   creatorCoordinatorOnly: boolean;

@@ -4,12 +4,25 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { PaidProCoordinatorToggle } from "./PaidProCoordinatorToggle";
 import {
   PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
+  applySignerSetupGeneratedPartyGuardToGate,
   buildLegalPartiesFromSignerSetupState,
   buildVs01PrepareSigningRolesForBridge,
   canAddAnotherSignerParty,
+  canRemoveSignerSetupParty,
+  evaluateSignerSetupGeneratedPartyGuard,
+  formatSignerSetupBeyondGeneratedWarning,
+  formatSignerSetupBeyondGeneratedWarningBody,
+  formatSignerSetupBeyondGeneratedWarningTitle,
+  isSignerSetupBeyondGeneratedPartyCount,
+  removeAddedSignerPartyState,
+  resolveGeneratedAgreementPartyCount,
   resolveSignerSetupUiPartyCount,
 } from "./paidProNPartySignerSetup";
-import { resolvePaidProSignerDetailsGate } from "./signerSetupPartyIdentity";
+import {
+  PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
+  PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
+  resolvePaidProSignerDetailsGate,
+} from "./signerSetupPartyIdentity";
 import { resolveAuthoritativePartySlotCount } from "./partySlotIdentityNormalize";
 
 const baseTwoPartyState = {
@@ -29,6 +42,24 @@ const baseTwoPartyState = {
   partySignerTitles: ["CEO", "President"],
   partyAddresses: [] as string[],
 };
+
+const twoPartyCorpus = `${"Operational clause with duties and payment mechanics. ".repeat(90)}
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+PARTY 1:
+Alpha LLC
+By: ______________________
+
+PARTY 2:
+Beta Inc
+By: ______________________`;
+
+const threePartyCorpus = `${twoPartyCorpus}
+
+PARTY 3:
+Gamma Corp
+By: ______________________`;
 
 describe("paidProNPartySignerSetup", () => {
   it("defaults to two-party slot count without user expansion", () => {
@@ -141,6 +172,138 @@ describe("paidProNPartySignerSetup", () => {
     });
     expect(gate.requiredCount).toBe(2);
     expect(gate.complete).toBe(true);
+  });
+});
+
+describe("post-generation signer setup party guard", () => {
+  it("resolveGeneratedAgreementPartyCount ignores user-added placeholder draft rows", () => {
+    expect(
+      resolveGeneratedAgreementPartyCount({
+        draftParties: [
+          { name: "Alpha LLC" },
+          { name: "Beta Inc" },
+          { name: "Party 3" },
+        ],
+        corpusPlain: twoPartyCorpus,
+      }),
+    ).toBe(2);
+  });
+
+  it("generated 2-party draft + UI Party 3 shows warning and blocks continue", () => {
+    const generated = resolveGeneratedAgreementPartyCount({
+      draftParties: baseTwoPartyState.draftParties,
+      corpusPlain: twoPartyCorpus,
+    });
+    expect(generated).toBe(2);
+    const guard = evaluateSignerSetupGeneratedPartyGuard({
+      signerSetupUiPartyCount: 3,
+      generatedPartyCount: generated,
+    });
+    expect(guard.beyondGenerated).toBe(true);
+    expect(guard.warningMessage).toContain("drafted for 2 legal parties");
+    const baseGate = resolvePaidProSignerDetailsGate({
+      partyCount: 3,
+      draftPartyNames: ["Alpha LLC", "Beta Inc"],
+      partySignerNames: ["Alice Admin", "Bob Beta", "Carol Gamma"],
+      recipient1Name: "Alpha LLC",
+      recipient2Name: "Beta Inc",
+      recipient1Email: "a@example.test",
+      recipient2Email: "b@example.test",
+      extraPartyReviewEmails: ["c@example.test"],
+      extraPartyLegalNames: ["Gamma Corp"],
+      userExpandedPartyCount: 3,
+    });
+    const gated = applySignerSetupGeneratedPartyGuardToGate(
+      baseGate,
+      guard,
+      PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
+    );
+    expect(gated.complete).toBe(false);
+    expect(gated.blockerMessage).toContain("signature blocks, signer roles, and signing invitations");
+    expect(gated.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA);
+  });
+
+  it("remove Party 3 clears fields, drops count, and clears warning", () => {
+    const expanded = {
+      ...baseTwoPartyState,
+      signerSetupUiPartyCount: 3,
+      extraPartyLegalNames: ["Gamma Corp"],
+      extraPartyReviewEmails: ["c@example.test"],
+      partySignerNames: ["Alice Admin", "Bob Beta", "Carol Gamma"],
+      partySignerTitles: ["CEO", "President", "COO"],
+    };
+    const removed = removeAddedSignerPartyState(2, expanded);
+    expect(removed).not.toBeNull();
+    expect(removed!.signerSetupUiPartyCount).toBe(2);
+    expect(removed!.extraPartyLegalNames).toEqual([]);
+    expect(removed!.partySignerNames).toEqual(["Alice Admin", "Bob Beta"]);
+    const guard = evaluateSignerSetupGeneratedPartyGuard({
+      signerSetupUiPartyCount: removed!.signerSetupUiPartyCount,
+      generatedPartyCount: 2,
+    });
+    expect(guard.beyondGenerated).toBe(false);
+    expect(guard.warningMessage).toBeNull();
+    const gate = applySignerSetupGeneratedPartyGuardToGate(
+      resolvePaidProSignerDetailsGate({
+        partyCount: 2,
+        draftPartyNames: ["Alpha LLC", "Beta Inc"],
+        partySignerNames: removed!.partySignerNames,
+        recipient1Name: "Alpha LLC",
+        recipient2Name: "Beta Inc",
+        recipient1Email: "a@example.test",
+        recipient2Email: "b@example.test",
+        extraPartyReviewEmails: removed!.extraPartyReviewEmails,
+        extraPartyLegalNames: removed!.extraPartyLegalNames,
+        userExpandedPartyCount: 2,
+      }),
+      guard,
+      PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
+    );
+    expect(gate.complete).toBe(true);
+    expect(gate.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA);
+  });
+
+  it("generated 3-party draft allows Party 3 without warning", () => {
+    const generated = resolveGeneratedAgreementPartyCount({
+      draftParties: [
+        { name: "Alpha LLC" },
+        { name: "Beta Inc" },
+        { name: "Gamma Corp" },
+      ],
+      corpusPlain: threePartyCorpus,
+    });
+    expect(generated).toBe(3);
+    const guard = evaluateSignerSetupGeneratedPartyGuard({
+      signerSetupUiPartyCount: 3,
+      generatedPartyCount: generated,
+    });
+    expect(guard.beyondGenerated).toBe(false);
+    expect(isSignerSetupBeyondGeneratedPartyCount({ signerSetupUiPartyCount: 3, generatedPartyCount: 3 })).toBe(
+      false,
+    );
+  });
+
+  it("Party 1 and Party 2 cannot be removed", () => {
+    expect(canRemoveSignerSetupParty(0, 3)).toBe(false);
+    expect(canRemoveSignerSetupParty(1, 3)).toBe(false);
+    expect(canRemoveSignerSetupParty(2, 3)).toBe(true);
+    expect(removeAddedSignerPartyState(0, { ...baseTwoPartyState, signerSetupUiPartyCount: 3 })).toBeNull();
+    expect(removeAddedSignerPartyState(1, { ...baseTwoPartyState, signerSetupUiPartyCount: 3 })).toBeNull();
+  });
+
+  it("warning copy uses generated party count", () => {
+    expect(formatSignerSetupBeyondGeneratedWarningTitle(2)).toBe(
+      "This agreement was drafted for 2 legal parties.",
+    );
+    expect(formatSignerSetupBeyondGeneratedWarningTitle(4)).toBe(
+      "This agreement was drafted for 4 legal parties.",
+    );
+    expect(formatSignerSetupBeyondGeneratedWarningBody()).toContain(
+      "regenerate the agreement so the agreement text",
+    );
+    expect(formatSignerSetupBeyondGeneratedWarning(2)).toContain(
+      "review flow, signature blocks, signer roles, and signing invitations",
+    );
   });
 });
 
