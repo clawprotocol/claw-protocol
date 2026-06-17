@@ -10,6 +10,7 @@ import { logPaidProPostFinalizeActionClick } from "./paidProPostFinalizeReviewSu
 import { PaidProReviewNextStepCallout } from "./PaidProReviewNextStepCallout";
 import { PaidProReviewStatusPanel } from "./PaidProReviewStatusPanel";
 import { logPaidProSignaturePrepCtaVisible } from "./paidProSignaturePrepUi";
+import { PAID_PRO_POST_FINALIZE_EDIT_SIGNER_DETAILS_LABEL } from "./paidProPostFinalizeEditSignerDetails";
 import { PAID_PRO_PREPARE_ESIGN_DECISION_CTA } from "./signerSetupPartyIdentity";
 
 export type PaidProSignerSavedMapping = {
@@ -33,6 +34,7 @@ type Props = {
   postFinalizeActionsReady?: boolean;
   getCopyPlainText: () => string;
   onEditAgreement: () => void;
+  onEditSignerDetails?: () => void;
   onExportAgreement: () => void;
   onShareForReview: () => void;
   onPrepareSignatures: () => void;
@@ -54,6 +56,7 @@ export function PaidProForcedFirstReviewChrome({
   postFinalizeActionsReady = false,
   getCopyPlainText,
   onEditAgreement,
+  onEditSignerDetails,
   onExportAgreement,
   onShareForReview,
   onPrepareSignatures,
@@ -166,6 +169,19 @@ export function PaidProForcedFirstReviewChrome({
           >
             {exportBusy ? "Preparing export…" : "Download / export"}
           </button>
+          {onEditSignerDetails ? (
+            <button
+              type="button"
+              className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+              onClick={() => {
+                logPostFinalizeAction("edit_signer_details");
+                onEditSignerDetails();
+              }}
+              data-testid="paid-pro-forced-edit-signer-details"
+            >
+              {PAID_PRO_POST_FINALIZE_EDIT_SIGNER_DETAILS_LABEL}
+            </button>
+          ) : null}
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"

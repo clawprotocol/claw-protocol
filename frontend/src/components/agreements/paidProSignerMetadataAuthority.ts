@@ -226,6 +226,46 @@ export function hashPaidProSignerMetadataAuthority(
   return hashPaidProCorpus(payload) || fingerprintAgreementBody(payload);
 }
 
+/** Reverse map consumed/snapshot authority parties into inline signer-setup React state. */
+export function authorityPartiesToLiveSignerMetadataUi(
+  parties: readonly PaidProSignerMetadataParty[],
+): LiveSignerMetadataUiState {
+  const count = Math.max(parties.length, 2);
+  const padded = [...parties];
+  while (padded.length < count) {
+    padded.push({
+      partyIndex: padded.length,
+      partyLegalName: "",
+      signerEmail: "",
+      signerName: "",
+      signerTitle: "",
+      partyAddress: "",
+    });
+  }
+  const p0 = padded[0];
+  const p1 = padded[1];
+  return {
+    partyCount: count,
+    recipient1Name: norm(p0?.partyLegalName),
+    recipient2Name: norm(p1?.partyLegalName),
+    recipient1Email: norm(p0?.signerEmail),
+    recipient2Email: norm(p1?.signerEmail),
+    extraPartyReviewEmails: padded.slice(2).map((p) => norm(p.signerEmail)),
+    partySignerNames: padded.map((p) => norm(p.signerName)),
+    partySignerTitles: padded.map((p) => norm(p.signerTitle)),
+    partyAddresses: padded.map((p) => norm(p.partyAddress)),
+  };
+}
+
+/** Seed signer-setup fields when reopening post-finalize review for corrections. */
+export function resolvePaidProPostFinalizeSignerDetailsEditSeed(): PaidProSignerMetadataParty[] | null {
+  const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
+  if (consumed.length >= 2) return consumed;
+  const snap = buildSnapshotPaidProSignerMetadataAuthority()?.parties ?? [];
+  if (snap.length >= 2) return snap;
+  return null;
+}
+
 export function buildLivePaidProSignerMetadataAuthority(
   ui: LiveSignerMetadataUiState,
   source: PaidProSignerMetadataAuthoritySource = "live_ui",

@@ -797,6 +797,7 @@ import {
   assertCanonicalPaidProSignerCtaReason,
   authorityPartiesToRecipientMetadata,
   authorityPartiesToCanonicalPartyIdentities,
+  authorityPartiesToLiveSignerMetadataUi,
   buildCanonicalFinalPartyManifestFromAuthority,
   buildLivePaidProSignerMetadataAuthority,
   clearConsumedPaidProSignerMetadataAuthority,
@@ -805,6 +806,7 @@ import {
   emitPaidProSignerMetadataFieldDiagnostics,
   paidProSignerMetadataForensicLineageEnabled,
   readConsumedPaidProSignerMetadataAuthority,
+  resolvePaidProPostFinalizeSignerDetailsEditSeed,
   setConsumedPaidProSignerMetadataAuthority,
   type LiveSignerMetadataUiState,
   type PaidProSignerMetadataField,
@@ -828,6 +830,10 @@ import {
   commitPaidProPostFinalizeClauseEditRevision,
   logPaidProPostFinalizeEditSaveBlocked,
 } from "./paidProPostFinalizeEditSave";
+import {
+  logPaidProPostFinalizeEditSignerDetailsOpened,
+  shouldShowPaidProPostFinalizeEditSignerDetails,
+} from "./paidProPostFinalizeEditSignerDetails";
 import {
   auditPaidProPostFinalizeHydrationInvariant,
   canProceedPaidProReviewFirstHandoffAfterFinalize,
@@ -22617,6 +22623,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(() => {
+    const seedParties = resolvePaidProPostFinalizeSignerDetailsEditSeed();
+    if (seedParties) {
+      const seededUi = authorityPartiesToLiveSignerMetadataUi(seedParties);
+      setRecipient1Name(seededUi.recipient1Name);
+      setRecipient2Name(seededUi.recipient2Name);
+      setRecipient1Email(seededUi.recipient1Email);
+      setRecipient2Email(seededUi.recipient2Email);
+      setExtraPartyReviewEmails([...seededUi.extraPartyReviewEmails]);
+      setPartySignerNames([...seededUi.partySignerNames]);
+      setPartySignerTitles([...seededUi.partySignerTitles]);
+      setPartyAddresses([...seededUi.partyAddresses]);
+      setSignerSetupUiPartyCount(Math.max(seededUi.partyCount, 2));
+    }
+    setPremiumReviewDocEditorOpen(false);
+    setPaidProCardEditDraft(null);
+    setPaidProCardAiInstruction("");
     clearAuthoritativeSigningSnapshot();
     frozenSignerMetadataIdentitiesRef.current = null;
     frozenSignerMetadataPartyManifestRef.current = null;
@@ -22639,6 +22661,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setDisplayPhase("review");
     setPremiumRecipientUxActive(false);
     setCreateFlowSendRecipientEditorOpen(true);
+    logPaidProPostFinalizeEditSignerDetailsOpened({
+      corpusHash: resolvePaidProPostFinalizeReviewHash() || "",
+      partyCount: seedParties?.length ?? 0,
+    });
     // "Edit signer details" must never no-op: scroll the inline signer setup into view and focus the
     // first incomplete required signer field. Falls back to scrolling the section anchors if no
     // focusable field is visible yet (e.g. before the panel finishes mounting).
@@ -28710,6 +28736,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               displayPolishedPaidProPlain
                                             }
                                             onEditAgreement={() => void openPaidProDraftCardEditor()}
+                                            onEditSignerDetails={
+                                              shouldShowPaidProPostFinalizeEditSignerDetails({
+                                                trackChooserVisible: showPaidProForcedFirstReviewTrackChooser,
+                                                packetPrepared: Boolean(
+                                                  agreementIdForReview &&
+                                                    isAgreementPacketPrepared(agreementIdForReview),
+                                                ),
+                                                signaturePreparationRequested,
+                                              })
+                                                ? handleGuidedBackToSignerDetailsFromFinalReview
+                                                : undefined
+                                            }
                                             onExportAgreement={() => void handleSimpleProFinalReviewExport()}
                                             exportBusy={proFinalReviewExportBusy}
                                             exportError={proFinalReviewExportError}

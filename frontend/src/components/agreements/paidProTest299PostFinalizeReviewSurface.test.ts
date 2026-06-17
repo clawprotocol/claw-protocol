@@ -248,6 +248,8 @@ describe("Test299 post-finalize review surface hydration + actions", () => {
     expect(chromeSrc).toContain('data-testid="paid-pro-forced-export-agreement"');
     expect(chromeSrc).toContain('data-testid="paid-pro-forced-edit-agreement"');
     expect(chromeSrc).toContain("Edit agreement text");
+    expect(chromeSrc).toContain('data-testid="paid-pro-forced-edit-signer-details"');
+    expect(chromeSrc).toContain("PAID_PRO_POST_FINALIZE_EDIT_SIGNER_DETAILS_LABEL");
     expect(chromeSrc).toContain("Download / export");
     expect(PaidProForcedFirstReviewChrome.name).toBe("PaidProForcedFirstReviewChrome");
   });
