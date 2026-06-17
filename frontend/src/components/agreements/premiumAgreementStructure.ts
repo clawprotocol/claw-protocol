@@ -5,6 +5,7 @@
 
 import { parseAgreementSections } from "./proOperationalSynthesis/sectionPurityValidator";
 import { shouldLogPremiumStructureRepair } from "./paidProDiagnosticLogPolicy";
+import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 
 export type PremiumStructureIssue = {
@@ -270,6 +271,12 @@ export function validatePremiumAgreementStructure(text: string): PremiumStructur
   const filler = scrubRepeatedGoodFaithFiller(working);
   working = filler.text;
   if (filler.removed > 0) repairs.push(`repeated_good_faith_removed:${filler.removed}`);
+
+  const orphanSections = repairPaidProOrphanSectionNumbers(working);
+  working = orphanSections.text;
+  if (orphanSections.repairs.length > 0) {
+    repairs.push(...orphanSections.repairs);
+  }
 
   const emptySubs = repairEmptyNumberedSubsections(working);
   working = emptySubs.text;
