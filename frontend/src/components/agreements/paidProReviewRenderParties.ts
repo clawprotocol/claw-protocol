@@ -16,6 +16,7 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 import { hasPaidProSourceOfTruth, getPaidProSourceOfTruthText } from "./paidProSourceOfTruth";
+import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
 export type ResolvePaidProReviewRenderPartiesArgs = {
   draft?: ParsedDraftShape | null;
@@ -23,9 +24,21 @@ export type ResolvePaidProReviewRenderPartiesArgs = {
   liveSignerMetadataUi?: LiveSignerMetadataUiState | null;
 };
 
+function pickSignerField(
+  consumed: string,
+  live: string,
+  preferLive: boolean,
+): string {
+  const c = consumed.trim();
+  const l = live.trim();
+  if (preferLive) return l || c;
+  return c || l;
+}
+
 function mergeLiveSignerFieldsOntoParties(
   base: readonly PaidProSignerMetadataParty[],
   live: readonly PaidProSignerMetadataParty[] | null,
+  preferLiveOverConsumed = false,
 ): PaidProSignerMetadataParty[] {
   if (!live?.length) return [...base];
   return base.map((party, index) => {
@@ -33,11 +46,11 @@ function mergeLiveSignerFieldsOntoParties(
     if (!slot) return party;
     return {
       ...party,
-      partyLegalName: party.partyLegalName.trim() || slot.partyLegalName,
-      signerEmail: party.signerEmail.trim() || slot.signerEmail,
-      signerName: party.signerName.trim() || slot.signerName,
-      signerTitle: party.signerTitle.trim() || slot.signerTitle,
-      partyAddress: party.partyAddress.trim() || slot.partyAddress,
+      partyLegalName: pickSignerField(party.partyLegalName, slot.partyLegalName, preferLiveOverConsumed),
+      signerEmail: pickSignerField(party.signerEmail, slot.signerEmail, preferLiveOverConsumed),
+      signerName: pickSignerField(party.signerName, slot.signerName, preferLiveOverConsumed),
+      signerTitle: pickSignerField(party.signerTitle, slot.signerTitle, preferLiveOverConsumed),
+      partyAddress: pickSignerField(party.partyAddress, slot.partyAddress, preferLiveOverConsumed),
     };
   });
 }
@@ -52,12 +65,13 @@ export function resolvePartiesForReviewRender(
   const liveParties = args?.liveSignerMetadataUi
     ? buildPaidProSignerMetadataParties(args.liveSignerMetadataUi)
     : null;
+  const preferLiveSignerFields = isPaidProReviewSignerMetadataSessionActive();
 
   if (labeledAuthority.length >= 3) {
     const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
     if (consumed && consumed.length >= 2) {
       return mergeLabeledPartyAuthorityIntoParties(
-        mergeLiveSignerFieldsOntoParties(consumed, liveParties),
+        mergeLiveSignerFieldsOntoParties(consumed, liveParties, preferLiveSignerFields),
         intakeRaw,
       );
     }
@@ -70,7 +84,7 @@ export function resolvePartiesForReviewRender(
   const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
   if (consumed && consumed.length >= 2) {
     return mergeLabeledPartyAuthorityIntoParties(
-      mergeLiveSignerFieldsOntoParties(consumed, liveParties),
+      mergeLiveSignerFieldsOntoParties(consumed, liveParties, preferLiveSignerFields),
       intakeRaw,
     );
   }

@@ -775,6 +775,11 @@ import {
   scrollPaidProReviewDecisionIntoView,
 } from "./paidProSignerFinalizeRouting";
 import {
+  logPaidProSignerTransition,
+  resolvePaidProSignerSetupPrimaryCtaOverride,
+  shouldRoutePaidProSignerSetupToReviewDecision,
+} from "./paidProSignerTransition";
+import {
   PAID_PRO_REVIEW_STICKY_BAR_SHELL_CLASS,
   PAID_PRO_REVIEW_STICKY_FOCUS_REVEAL_CLASS,
   PAID_PRO_REVIEW_STICKY_HELPER_CLASS,
@@ -3667,6 +3672,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedFinalReviewNavigationInFlightRef = useRef(false);
   const guidedFinalReviewRetryPendingRef = useRef(false);
   const guidedFinalReviewTransitionPromiseRef = useRef<Promise<void> | null>(null);
+  const finalizePaidProSignerMetadataAndOpenReviewDecisionRef = useRef<() => void>(() => {});
   const guidedSignatureTrackInFlightRef = useRef(false);
   const guidedSignaturePersistFailureRef = useRef<{ httpStatus?: number | null; rawMessage?: string } | null>(
     null,
@@ -18534,6 +18540,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             guidedProUxShowsUpdatedReadyCard(guidedProUxState))
         ) {
           if (guidedEarlySticky.reason === "signer_setup_ready_final_review") {
+            const paidProSignerFinalizeOverride = resolvePaidProSignerSetupPrimaryCtaOverride({
+              guidedStickyReason: guidedEarlySticky.reason,
+              acceptedPaidProAuthorityActive,
+              paidProFirstReviewSurfaceActive,
+              paidProInlineSignerSetupLatched,
+              signaturePreparationRequested,
+              signersComplete: guidedPreReviewSignerSlots.complete,
+              ctaLabel: paidProSignerDetailsGate.ctaLabel,
+            });
+            if (paidProSignerFinalizeOverride) {
+              return {
+                label: paidProSignerFinalizeOverride.label,
+                action: "guided_continue",
+                disabled: false,
+                reason: paidProSignerFinalizeOverride.reason,
+              };
+            }
             const stickyForSigner = Boolean(
               simpleCreateStickyBottomBarVisibleBaseGated &&
                 !(premiumPaidDocumentSurface && guidedProUxShowsQuestionPanel(guidedProUxState)),
@@ -22538,6 +22561,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         try {
           flushGuidedSignerMetadataBeforeFinalReview();
 
+          if (
+            shouldRoutePaidProSignerSetupToReviewDecision({
+              acceptedPaidProAuthorityActive,
+              signersComplete: guidedPreReviewSignerSlots.complete,
+              signaturePreparationRequested,
+            }) &&
+            paidProInlineSignerSetupLatched
+          ) {
+            logPaidProSignerTransition({
+              previousState: createFlowPhase,
+              nextState: "draft_ready_for_review",
+              navigationTarget: "review_decision",
+              reason: "paid_pro_signer_setup_skip_guided_final_review",
+            });
+            finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current();
+            return;
+          }
+
           const authoritativePlain = pickBestAuthoritativeCorpusPlain(
             [
               lastKnownGoodAuthoritativeDraftRef.current,
@@ -22802,6 +22843,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidBodyForGuidedCompletion,
       flushGuidedSignerMetadataBeforeFinalReview,
       scrollGuidedSignerSetupIntoView,
+      acceptedPaidProAuthorityActive,
+      signaturePreparationRequested,
+      paidProInlineSignerSetupLatched,
+      guidedPreReviewSignerSlots.complete,
       handleGuidedOpenFinalReview,
       handleGuidedBulkApply,
       commitGuidedApplyFromExistingCorpus,
@@ -25037,6 +25082,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       scrollGuidedSignerSetupIntoView();
       return;
     }
+    logPaidProSignerTransition({
+      previousState: createFlowPhase,
+      nextState: "draft_ready_for_review",
+      navigationTarget: "review_decision",
+      reason: "paid_pro_signer_details_finalize",
+    });
     const committedSignerUi = flushGuidedSignerMetadataBeforeFinalReview();
     const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const authority = buildLivePaidProSignerMetadataAuthority(committedSignerUi);
@@ -25129,7 +25180,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     effectivePremiumSendMode,
     recipientsDeferred,
     pinFinalizedSignerAppliedCorpus,
+    createFlowPhase,
   ]);
+
+  finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current =
+    finalizePaidProSignerMetadataAndOpenReviewDecision;
 
   const continueGuidedFinalReviewToSigning = React.useCallback(
     (opts: { intent: FinalReviewSendIntent }) => {
@@ -26314,6 +26369,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 createFlowPhase === "updated_agreement_ready" ||
                 guidedProUxShowsSignerSetup(guidedProUxState))
             ) {
+              if (
+                shouldRoutePaidProSignerSetupToReviewDecision({
+                  acceptedPaidProAuthorityActive,
+                  signersComplete: signerDetailsAreComplete,
+                  signaturePreparationRequested,
+                }) &&
+                paidProInlineSignerSetupLatched
+              ) {
+                logPaidProSignerTransition({
+                  previousState: createFlowPhase,
+                  nextState: "draft_ready_for_review",
+                  navigationTarget: "review_decision",
+                  reason: "paid_pro_signer_setup_skip_guided_final_review",
+                });
+                finalizePaidProSignerMetadataAndOpenReviewDecision();
+                return;
+              }
               await continueGuidedSignerSetupToFinalReview("execute_primary_cta");
               return;
             }
@@ -26471,6 +26543,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         isGuidedSignerSetupContinueToFinalReviewReason(unifiedPrimaryCta.reason) &&
         !guidedFinalReviewExplicitlyOpened
       ) {
+        if (
+          shouldRoutePaidProSignerSetupToReviewDecision({
+            acceptedPaidProAuthorityActive,
+            signersComplete: signerDetailsAreComplete,
+            signaturePreparationRequested,
+          }) &&
+          paidProInlineSignerSetupLatched
+        ) {
+          logPaidProSignerTransition({
+            previousState: createFlowPhase,
+            nextState: "draft_ready_for_review",
+            navigationTarget: "review_decision",
+            reason: "paid_pro_signer_setup_skip_guided_final_review",
+          });
+          finalizePaidProSignerMetadataAndOpenReviewDecision();
+          return;
+        }
         void continueGuidedSignerSetupToFinalReview(
           unifiedPrimaryCta.reason === "guided_final_review_inline_cta" ? "inline_cta" : "sticky_cta",
         );

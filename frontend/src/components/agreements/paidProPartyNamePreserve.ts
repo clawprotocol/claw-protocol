@@ -7,7 +7,119 @@ import { extractAgreementEntityCandidates } from "../../agreement/partyPlacehold
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
+
+const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:\s*$/i;
+
+export type PaidProNoticeBlockLogPayload = {
+  partyId: string;
+  legalEntity: string;
+  noticeRecipient: string;
+  noticeAddress: string;
+  renderedLines: string[];
+};
+
+export function logPaidProNoticeBlock(payload: PaidProNoticeBlockLogPayload): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-notice-block]", payload);
+}
+
+function isNoticeAddresseeEntityLine(line: string, fullNames: readonly string[], headerEntity: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || /^Attn:/i.test(trimmed)) return false;
+  if (headerEntity && partyLegalNamesMatch(trimmed, headerEntity)) return true;
+  return fullNames.some((full) => partyLegalNamesMatch(trimmed, full));
+}
+
+/**
+ * Notice stanzas often repeat the legal entity in the "If to …:" header and body lines.
+ * Short-label expansion can introduce a second canonical entity line — drop consecutive dupes at source.
+ */
+export function collapseDuplicateNoticeEntityLines(text: string, fullNames: readonly string[]): string {
+  if (!text || fullNames.length < 2) return text;
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let inNoticeBlock = false;
+  let sawEntityLineInBlock = false;
+  let headerEntity = "";
+  let blockRenderedLines: string[] = [];
+  let removedDuplicateInBlock = false;
+
+  const flushNoticeLog = () => {
+    if (!headerEntity || blockRenderedLines.length === 0) return;
+    if (!removedDuplicateInBlock && typeof import.meta !== "undefined" && !import.meta.env?.DEV) return;
+    logPaidProNoticeBlock({
+      partyId: headerEntity,
+      legalEntity: headerEntity,
+      noticeRecipient: blockRenderedLines.find((l) => /^Attn:/i.test(l)) ?? "",
+      noticeAddress: blockRenderedLines.find((l) => /^Address/i.test(l)) ?? "",
+      renderedLines: blockRenderedLines,
+    });
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    const ifToMatch = trimmed.match(IF_TO_NOTICE_HEADER_RE);
+
+    if (ifToMatch) {
+      if (inNoticeBlock) flushNoticeLog();
+      inNoticeBlock = true;
+      sawEntityLineInBlock = false;
+      headerEntity = (ifToMatch[1] ?? "").trim();
+      blockRenderedLines = [trimmed];
+      removedDuplicateInBlock = false;
+      out.push(line);
+      continue;
+    }
+
+    if (inNoticeBlock) {
+      if (!trimmed) {
+        flushNoticeLog();
+        inNoticeBlock = false;
+        sawEntityLineInBlock = false;
+        headerEntity = "";
+        blockRenderedLines = [];
+        out.push(line);
+        continue;
+      }
+      if (/^Attn:/i.test(trimmed) || /^Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed)) {
+        blockRenderedLines.push(trimmed);
+        flushNoticeLog();
+        inNoticeBlock = false;
+        sawEntityLineInBlock = false;
+        headerEntity = "";
+        blockRenderedLines = [];
+        out.push(line);
+        continue;
+      }
+      if (isNoticeAddresseeEntityLine(trimmed, fullNames, headerEntity)) {
+        if (sawEntityLineInBlock) {
+          removedDuplicateInBlock = true;
+          continue;
+        }
+        sawEntityLineInBlock = true;
+        blockRenderedLines.push(trimmed);
+        out.push(line);
+        continue;
+      }
+      if (/^Section\s+\d+/i.test(trimmed) || /^[A-Z][A-Z\s]{6,}$/.test(trimmed)) {
+        flushNoticeLog();
+        inNoticeBlock = false;
+        sawEntityLineInBlock = false;
+        headerEntity = "";
+        blockRenderedLines = [];
+      }
+    }
+
+    out.push(line);
+  }
+
+  if (inNoticeBlock) flushNoticeLog();
+  return out.join("\n");
+}
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)\.?$/i;
@@ -205,7 +317,8 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
 function preserveInSlice(slice: string, fullNames: readonly string[]): string {
   const { text: masked, emails } = maskEmailAddresses(slice);
   const expanded = expandShortPartyLabelsToFullLegal(masked, fullNames);
-  return unmaskEmailAddresses(expanded, emails);
+  const deduped = collapseDuplicateNoticeEntityLines(expanded, fullNames);
+  return unmaskEmailAddresses(deduped, emails);
 }
 
 /**

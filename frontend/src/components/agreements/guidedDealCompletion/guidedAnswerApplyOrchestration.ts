@@ -99,6 +99,9 @@ export const GUIDED_RETRY_APPLY_ANSWERS_CTA = "Try applying answers again";
 export function resolveGuidedSignerSetupStickyCta(args: {
   signerStatus: GuidedSignerSetupStatus;
   applyStatus: GuidedAnswerApplyStatus;
+  /** Paid Pro review-first: finalize opens review_decision, not guided_final_review. */
+  paidProSignerFinalizeToReviewDecision?: boolean;
+  paidProSignerFinalizeCtaLabel?: string;
 }): GuidedProStickyCta {
   if (args.signerStatus === "missing") {
     return {
@@ -122,6 +125,14 @@ export function resolveGuidedSignerSetupStickyCta(args: {
       action: "guided_continue",
       disabled: false,
       reason: "guided_apply_failed_retry",
+    };
+  }
+  if (args.paidProSignerFinalizeToReviewDecision) {
+    return {
+      label: args.paidProSignerFinalizeCtaLabel?.trim() || "Continue to review decision",
+      action: "guided_continue",
+      disabled: false,
+      reason: "paid_pro_signer_details_complete",
     };
   }
   return {

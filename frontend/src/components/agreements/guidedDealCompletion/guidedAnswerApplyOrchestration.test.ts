@@ -149,6 +149,17 @@ describe("guidedAnswerApplyOrchestration", () => {
     expect(cta.disabled).toBe(false);
   });
 
+  it("paid Pro signer finalize uses review-decision reason instead of guided final review", () => {
+    const cta = resolveGuidedSignerSetupStickyCta({
+      signerStatus: resolveGuidedSignerSetupStatus(true),
+      applyStatus: "applied",
+      paidProSignerFinalizeToReviewDecision: true,
+      paidProSignerFinalizeCtaLabel: "Continue to review decision",
+    });
+    expect(cta.reason).toBe("paid_pro_signer_details_complete");
+    expect(cta.label).toBe("Continue to review decision");
+  });
+
   it("stuck apply resolves when authoritative body grew", () => {
     expect(
       shouldResolveGuidedApplyFromExistingBody({
