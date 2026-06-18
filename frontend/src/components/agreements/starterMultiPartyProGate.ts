@@ -144,13 +144,14 @@ function detectJointVentureOrMultiVendorStructure(raw: string): boolean {
 
 function detectMultiProviderPayment(raw: string): boolean {
   const low = raw.toLowerCase();
+  const stripped = raw.replace(/\bupon\s+full\s+execution\s+by\s+all\s+parties\b/gi, " ");
   const providerHits =
     (low.match(/\b(?:provider|vendor|consultant|contractor|implement(?:er|ation))\w*\b/g) ?? []).length;
   const paymentContext = /\b(?:payment|fee|payable|invoice|milestone|monthly)\b/i.test(raw);
   if (!paymentContext) return false;
   if (providerHits >= 2) return true;
   return (
-    /\b(?:each\s+party|all\s+parties)\b/i.test(raw) &&
+    /\b(?:each\s+party|all\s+parties)\b/i.test(stripped) &&
     /\b(?:fee|payment|payable)\b/i.test(raw) &&
     (labeledPartyLegalEntities(raw).length >= 2 || maxIndexedPartyOrSigner(raw) >= 2)
   );

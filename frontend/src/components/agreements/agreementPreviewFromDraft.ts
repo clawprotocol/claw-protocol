@@ -58,7 +58,7 @@ import {
   formatStarterPreviewForDisplay,
 } from "./starterPreviewFormatting";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
-import { formatMilestonePaymentTermsFromIntake } from "./intakeCurrencyParse";
+import { formatMilestonePaymentTermsFromIntake, formatInstallmentPaymentTermsFromIntake, draftPaymentTermsLoseIntakeInstallmentCadence } from "./intakeCurrencyParse";
 import { renderClausePrimitive, selectClausePrimitivesForIntake } from "./agreementOutputQuality/canonicalClausePrimitives";
 import {
   logPlaceholderScanSkippedTransient,
@@ -275,13 +275,25 @@ function timingLabelsForFamily(
   };
 }
 
-function buildTermAndScheduleSection(draft: ParsedDraftShape): string {
+function buildTermAndScheduleSection(
+  draft: ParsedDraftShape,
+  opts?: { starterPreview?: boolean },
+): string {
   const labels = timingLabelsForFamily(draft.agreement_family, draft.title);
+  const starter = Boolean(opts?.starterPreview);
+  const partyCount = (draft.parties || []).length;
+  let durationLabel = labels.durationLabel;
+  if (starter && durationLabel === "Services Term") {
+    durationLabel = "Term";
+  }
   const parts: string[] = [];
   const dur = (draft.duration || "").trim();
-  const eff = (draft.effective_date || "").trim();
+  let eff = (draft.effective_date || "").trim();
+  if (starter && partyCount === 2 && /upon full execution by all parties/i.test(eff)) {
+    eff = "upon full execution by both parties";
+  }
   const due = (draft.due_date || "").trim();
-  if (dur) parts.push(`${labels.durationLabel}: ${dur}`);
+  if (dur) parts.push(`${durationLabel}: ${dur}`);
   if (eff) parts.push(`${labels.effectiveLabel}: ${formatScheduleFragment(eff)}`);
   if (due) parts.push(`${labels.keyDateLabel}: ${formatScheduleFragment(due)}`);
   if (!parts.length) return MISSING;
@@ -672,10 +684,18 @@ export function buildAgreementPreviewTextCore(
     starterPreview && options?.intakeText
       ? formatMilestonePaymentTermsFromIntake(options.intakeText)
       : null;
+  const installmentPay =
+    starterPreview && options?.intakeText
+      ? formatInstallmentPaymentTermsFromIntake(options.intakeText)
+      : null;
+  const draftPaySkewedByApi =
+    Boolean(installmentPay) &&
+    draftPaymentTermsLoseIntakeInstallmentCadence(draft.payment_terms, options?.intakeText);
   const pay = starterPreview
     ? milestonePay ||
-      normalizeStarterPaymentTermsForDisplay(draft.payment_terms) ||
-      (draft.payment_terms || "").trim() ||
+      installmentPay ||
+      (!draftPaySkewedByApi ? normalizeStarterPaymentTermsForDisplay(draft.payment_terms) : null) ||
+      (!draftPaySkewedByApi ? (draft.payment_terms || "").trim() : null) ||
       MISSING
     : premiumDeliverable
       ? payPrepared.trim() ||
@@ -683,7 +703,7 @@ export function buildAgreementPreviewTextCore(
         normalizePaymentTermsForDisplay(draft.payment_terms).trim() ||
         MISSING
       : nz(draft.payment_terms);
-  const termSection = buildTermAndScheduleSection(draft);
+  const termSection = buildTermAndScheduleSection(draft, { starterPreview });
   const lawRaw = (draft.jurisdiction || "").trim();
   const termNoticeRaw = (draft.termination_summary || "").trim();
   const termNoticePrepared = premiumDeliverable
@@ -712,7 +732,7 @@ export function buildAgreementPreviewTextCore(
 
   if (route === "premium_dynamic") {
     const sectionLines = buildPremiumDynamicCommercialSectionLines(draft, {
-      buildTermSection: () => buildTermAndScheduleSection(draft),
+      buildTermSection: () => buildTermAndScheduleSection(draft, { starterPreview }),
       buildLawBlock: () => lawBlockPremium,
       premiumSectionHeading: (n, h) => premiumSectionHeading(n, h, true),
     });

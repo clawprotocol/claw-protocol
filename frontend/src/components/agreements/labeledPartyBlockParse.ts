@@ -1,7 +1,16 @@
 /**
  * Parse explicit labeled party blocks from intake (Party N + Legal Entity / Signer fields).
  * Authoritative when 2+ blocks are present — not inferred from prose, revenue, or confidentiality.
+ *
+ * Also supports stacked unlabeled lines under `Party N:` (entity, signer name, title, email).
  */
+
+import {
+  looksLikeStackedPartyEmailLine,
+  looksLikeStackedPartyLegalEntityLine,
+  looksLikeStackedPartyPersonNameLine,
+  looksLikeStackedPartyTitleLine,
+} from "./starterPartyIdentityIsolation";
 
 export type LabeledPartyBlock = {
   /** 1-based index from the prompt ("Party 1" → 1). */
@@ -52,6 +61,31 @@ function emptyBlock(index: number): LabeledPartyBlock {
   };
 }
 
+/** Stacked `Party N:` blocks without `Legal Entity:` labels (Test372 free starter). */
+function applyStackedPartyLine(block: LabeledPartyBlock, line: string): void {
+  const t = line.trim();
+  if (!t) return;
+  if (looksLikeStackedPartyEmailLine(t)) {
+    if (!block.signerEmail) block.signerEmail = cleanFieldValue(t);
+    return;
+  }
+  if (!block.legalEntity && looksLikeStackedPartyLegalEntityLine(t)) {
+    block.legalEntity = cleanFieldValue(t);
+    return;
+  }
+  if (!block.signerName && looksLikeStackedPartyPersonNameLine(t)) {
+    block.signerName = cleanFieldValue(t);
+    return;
+  }
+  if (!block.signerTitle && looksLikeStackedPartyTitleLine(t)) {
+    block.signerTitle = cleanFieldValue(t);
+    return;
+  }
+  if (!block.address) {
+    block.address = cleanFieldValue(t);
+  }
+}
+
 /**
  * Parse `Party N` blocks with labeled sub-fields from raw intake (newlines preserved).
  * Returns blocks in ascending Party N order; omits blocks with no legal entity.
@@ -67,11 +101,16 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
   const flushField = (line: string) => {
     if (currentIndex == null) return;
     const block = blocksByIndex.get(currentIndex) ?? emptyBlock(currentIndex);
+    let labeled = false;
     for (const { key, re } of LABELED_FIELD_RES) {
       const m = line.match(re);
       if (!m?.[1]) continue;
       block[key] = cleanFieldValue(m[1]);
+      labeled = true;
       break;
+    }
+    if (!labeled) {
+      applyStackedPartyLine(block, line);
     }
     blocksByIndex.set(currentIndex, block);
   };

@@ -4,6 +4,7 @@
  */
 
 import type { EntitySignerMetadataCandidate } from "./universalSignerMetadataAuthority";
+import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 
 /** Canonical QA home prompt (Blue Canyon / Iron Vale + Sarah Mitchell / Michael Torres). */
 export const BLUE_CANYON_QA_HOME_PROMPT =
@@ -57,6 +58,8 @@ export function sanitizePartyLegalNameFromIntakeFragment(raw: string): string {
   if (purposeTail?.[1]) {
     return purposeTail[1].replace(/\s+/g, " ").trim();
   }
+  const isolated = isolateLegalEntityFromContaminatedName(s);
+  if (isolated !== s) return isolated;
   return s.replace(/\s+is\s+[A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+)+.*$/i, "").trim();
 }
 

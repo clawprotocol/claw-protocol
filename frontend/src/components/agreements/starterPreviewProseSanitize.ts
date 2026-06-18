@@ -9,6 +9,8 @@
  * Universal rendering layer — never family-specific.
  */
 
+import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
+
 type Replacement = { pattern: RegExp; replacement: string };
 
 const REPLACEMENTS: Replacement[] = [
@@ -70,7 +72,7 @@ export function sanitizeStarterPreviewProse(text: string): string {
  */
 export function sanitizeStarterPartyNameForDisplay(name: string): string {
   if (!name) return name;
-  let s = name;
+  let s = isolateLegalEntityFromContaminatedName(name);
   s = s.replace(/\s*\(edit in review\)/gi, "");
   s = s.replace(/\s*\(disclosing\s*\/?\s*receiving[^)]*\)/gi, "");
   s = s.replace(/\s*\(name(?:s)?\s+in\s+review\)/gi, "");

@@ -8,6 +8,7 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
+import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 
 const GENERIC_STARTER_PARTY_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
 
@@ -107,16 +108,15 @@ export function enrichStarterPreviewPartiesFromIntake(
       : parties;
 
   const enriched = baseParties.map((party, idx) => {
-    const current = String(party?.name ?? "").replace(/\s+/g, " ").trim();
+    const rawCurrent = String(party?.name ?? "").replace(/\s+/g, " ").trim();
+    const current = isolateLegalEntityFromContaminatedName(rawCurrent);
     const matchedFull =
       fullNames[idx] ||
       fullNames.find((full) => partyNameIsShortFormOf(full, current)) ||
       null;
-    if (!matchedFull || matchedFull === current) return party;
-    if (partyNameIsShortFormOf(matchedFull, current) || current.length < matchedFull.length) {
-      return { ...party, name: matchedFull };
-    }
-    return party;
+    const resolvedName = matchedFull || current;
+    if (!resolvedName || resolvedName === rawCurrent) return party;
+    return { ...party, name: resolvedName };
   });
 
   return { ...withRoles, parties: enriched };

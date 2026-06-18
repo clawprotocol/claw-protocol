@@ -6,6 +6,7 @@
 import { extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
 
 const ENTITY_SUFFIX =
@@ -120,7 +121,7 @@ export function resolveFullLegalPartiesFromIntake(
   const fromIntakeEntities = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
   if (fromIntakeEntities.length >= 2) return fromIntakeEntities;
   const fromArgs = (partyNames || [])
-    .map((n) => String(n || "").replace(/\s+/g, " ").trim())
+    .map((n) => isolateLegalEntityFromContaminatedName(String(n || "").replace(/\s+/g, " ").trim()))
     .filter((n) => n.length >= 3);
   const authoritativeArgs = fromArgs.filter(isAuthoritativeLegalEntityName);
   if (authoritativeArgs.length >= 2) return authoritativeArgs;

@@ -189,6 +189,35 @@ export function formatMilestonePaymentTermsFromIntake(intake: string): string | 
   return `$${formatted} paid over ${word} milestone payments tied to deployment stages and launch targets.`;
 }
 
+/** Preserve installment cadence from intake when draft payment_terms were rewritten (Test372). */
+export function formatInstallmentPaymentTermsFromIntake(intake: string): string | null {
+  const t = (intake || "").trim();
+  if (!t) return null;
+  const direct = t.match(/\$\s*([\d,]+(?:\.\d{2})?)\s+in\s+monthly\s+installments?/i);
+  if (direct) {
+    const amount = normalizeCurrency(direct[1]);
+    if (amount != null) {
+      return `$${amount.toLocaleString("en-US")} in monthly installments`;
+    }
+  }
+  const amount = extractAmountFromText(t);
+  if (amount != null && inferCadence(t) === "monthly" && /\binstallments?\b/i.test(t)) {
+    return `$${amount.toLocaleString("en-US")} in monthly installments`;
+  }
+  return null;
+}
+
+export function draftPaymentTermsLoseIntakeInstallmentCadence(
+  draftTerms: string | null | undefined,
+  intake: string | null | undefined,
+): boolean {
+  const d = String(draftTerms || "").trim().toLowerCase();
+  const i = String(intake || "").trim().toLowerCase();
+  if (!d || !i) return false;
+  if (!/\bmonthly\s+installments?\b/i.test(i)) return false;
+  return /\bupon\s+completion\b/i.test(d) || /\bon\s+completion\b/i.test(d);
+}
+
 /** Human-readable payment_terms line from structured hints (for smart defaults / POST body). */
 export function formatPaymentTermsLine(p: IntakePaymentField, intakeRaw?: string): string {
   const milestone = formatMilestonePaymentTermsFromIntake(intakeRaw ?? "");

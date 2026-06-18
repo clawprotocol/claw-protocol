@@ -21,6 +21,18 @@ Legal Entity: Blue Canyon Analytics LLC
 Signer Name: Unknown
 Signer Title: Unknown`;
 
+const STACKED_UNLABELED = `Party 1:
+Blue Canyon Analytics LLC
+Sarah Mitchell
+CEO
+sarah@bluecanyonanalytics.com
+
+Party 2:
+Harbor Peak Automation LLC
+Michael Torres
+President
+michael@harborpeakautomation.com`;
+
 describe("labeledPartyBlockParse", () => {
   it("parses labeled party blocks and treats Unknown as blank", () => {
     const blocks = parseLabeledPartyBlocks(SAMPLE);
@@ -41,5 +53,15 @@ describe("labeledPartyBlockParse", () => {
       "Harbor Peak Automation LLC",
       "Blue Canyon Analytics LLC",
     ]);
+  });
+
+  it("parses stacked unlabeled Party N blocks (entity, signer, title, email lines)", () => {
+    const blocks = parseLabeledPartyBlocks(STACKED_UNLABELED);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]?.legalEntity).toBe("Blue Canyon Analytics LLC");
+    expect(blocks[0]?.signerName).toBe("Sarah Mitchell");
+    expect(blocks[0]?.signerTitle).toBe("CEO");
+    expect(blocks[1]?.legalEntity).toBe("Harbor Peak Automation LLC");
+    expect(blocks[1]?.signerEmail).toBe("michael@harborpeakautomation.com");
   });
 });
