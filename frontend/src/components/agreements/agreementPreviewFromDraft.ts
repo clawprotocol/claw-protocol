@@ -44,7 +44,6 @@ import {
   sanitizeStarterPreviewProse,
 } from "./starterPreviewProseSanitize";
 import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
-import { readAgreementCreatorIntakeStorage } from "./agreementIntakeStorage";
 import {
   substitutePartyPlaceholdersInUserFacingText,
   textContainsUnresolvedIdentityPlaceholders,
@@ -58,7 +57,7 @@ import {
   formatStarterPreviewForDisplay,
 } from "./starterPreviewFormatting";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
-import { formatMilestonePaymentTermsFromIntake, formatInstallmentPaymentTermsFromIntake, draftPaymentTermsLoseIntakeInstallmentCadence } from "./intakeCurrencyParse";
+import { formatMilestonePaymentTermsFromIntake, formatInstallmentPaymentTermsFromIntake, draftPaymentTermsLoseIntakeInstallmentCadence, resolveStarterPreviewIntakeText, repairStarterPaymentCadenceInPreviewPlain } from "./intakeCurrencyParse";
 import { renderClausePrimitive, selectClausePrimitivesForIntake } from "./agreementOutputQuality/canonicalClausePrimitives";
 import {
   logPlaceholderScanSkippedTransient,
@@ -655,16 +654,30 @@ export function buildAgreementPreviewTextCore(
   if (frozenCore !== null) return frozenCore;
   recordPaidProPreviewRecompute("buildAgreementPreviewTextCore");
   const starterPreview = Boolean(options?.starterPreview);
+  const resolvedIntakeText = starterPreview
+    ? resolveStarterPreviewIntakeText(options?.intakeText)
+    : String(options?.intakeText || "").trim();
+  const buildOptions: AgreementPreviewBuildOptions = {
+    ...options,
+    intakeText: resolvedIntakeText || options?.intakeText,
+  };
   const premiumDeliverable = Boolean(options?.premiumDeliverablePreview) && !starterPreview;
   const route = selectAgreementPreviewRoute(draft, options);
   if (route === "operating") {
     return collapseDuplicateEsignNoticesInFullPreview(buildOperatingAgreementPreviewText(draft, options));
   }
 
-  const title = resolveStarterDisplayTitle(draft, options);
-  const partiesBlock = partiesPreambleBlock(draft, starterPreview, options?.intakeText);
-  const purposeRaw = (draft.purpose || "").trim();
-  const starterServicesScope = starterPreview ? buildStarterServicesScopeFromIntake(draft, options?.intakeText) : "";
+  const draftForBuild =
+    starterPreview && resolvedIntakeText.length > 0
+      ? enrichStarterPreviewPartiesFromIntake(draft, resolvedIntakeText)
+      : draft;
+
+  const title = resolveStarterDisplayTitle(draftForBuild, buildOptions);
+  const partiesBlock = partiesPreambleBlock(draftForBuild, starterPreview, buildOptions?.intakeText);
+  const purposeRaw = (draftForBuild.purpose || "").trim();
+  const starterServicesScope = starterPreview
+    ? buildStarterServicesScopeFromIntake(draftForBuild, buildOptions?.intakeText)
+    : "";
   const purposePrepared = premiumDeliverable
     ? applyPremiumDeliverableWeakPhraseReplacements(stripPreviewEsignNoticeLines(purposeRaw))
     : purposeRaw;
@@ -672,8 +685,8 @@ export function buildAgreementPreviewTextCore(
     ? starterServicesScope || (looksLikePaymentOnlyScope(purposeRaw) ? "" : compressProseForStarterScope(purposeRaw)) || MISSING
     : premiumDeliverable
       ? purposePrepared || MISSING
-      : nz(draft.purpose);
-  const payRaw = (draft.payment_terms || "").trim();
+      : nz(draftForBuild.purpose);
+  const payRaw = (draftForBuild.payment_terms || "").trim();
   const payPrepared = premiumDeliverable
     ? applyPremiumDeliverableWeakPhraseReplacements(stripPreviewEsignNoticeLines(payRaw))
     : payRaw;
@@ -681,21 +694,21 @@ export function buildAgreementPreviewTextCore(
     ? formatPaymentTermsLine(draft.payment ?? { amount: null, cadence: null, valid: true }).trim()
     : "";
   const milestonePay =
-    starterPreview && options?.intakeText
-      ? formatMilestonePaymentTermsFromIntake(options.intakeText)
+    starterPreview && buildOptions?.intakeText
+      ? formatMilestonePaymentTermsFromIntake(buildOptions.intakeText)
       : null;
   const installmentPay =
-    starterPreview && options?.intakeText
-      ? formatInstallmentPaymentTermsFromIntake(options.intakeText)
+    starterPreview && buildOptions?.intakeText
+      ? formatInstallmentPaymentTermsFromIntake(buildOptions.intakeText)
       : null;
   const draftPaySkewedByApi =
     Boolean(installmentPay) &&
-    draftPaymentTermsLoseIntakeInstallmentCadence(draft.payment_terms, options?.intakeText);
+    draftPaymentTermsLoseIntakeInstallmentCadence(draftForBuild.payment_terms, buildOptions?.intakeText);
   const pay = starterPreview
     ? milestonePay ||
       installmentPay ||
-      (!draftPaySkewedByApi ? normalizeStarterPaymentTermsForDisplay(draft.payment_terms) : null) ||
-      (!draftPaySkewedByApi ? (draft.payment_terms || "").trim() : null) ||
+      (!draftPaySkewedByApi ? normalizeStarterPaymentTermsForDisplay(draftForBuild.payment_terms) : null) ||
+      (!draftPaySkewedByApi ? (draftForBuild.payment_terms || "").trim() : null) ||
       MISSING
     : premiumDeliverable
       ? payPrepared.trim() ||
@@ -703,8 +716,8 @@ export function buildAgreementPreviewTextCore(
         normalizePaymentTermsForDisplay(draft.payment_terms).trim() ||
         MISSING
       : nz(draft.payment_terms);
-  const termSection = buildTermAndScheduleSection(draft, { starterPreview });
-  const lawRaw = (draft.jurisdiction || "").trim();
+  const termSection = buildTermAndScheduleSection(draftForBuild, { starterPreview });
+  const lawRaw = (draftForBuild.jurisdiction || "").trim();
   const termNoticeRaw = (draft.termination_summary || "").trim();
   const termNoticePrepared = premiumDeliverable
     ? applyPremiumDeliverableWeakPhraseReplacements(stripPreviewEsignNoticeLines(termNoticeRaw))
@@ -714,7 +727,7 @@ export function buildAgreementPreviewTextCore(
       ? compressTerminationSummaryForStarter(termNoticePrepared) || NEUTRAL_TERMINATION_NOTE
       : nz(termNoticePrepared)
     : NEUTRAL_TERMINATION_NOTE;
-  const more = sanitizeUserAdditionalTerms(draft.additional_terms, premiumDeliverable);
+  const more = sanitizeUserAdditionalTerms(draftForBuild.additional_terms, premiumDeliverable);
 
   const introGeneral = starterPreview
     ? ""
@@ -728,7 +741,7 @@ export function buildAgreementPreviewTextCore(
   const lawBlockPremium =
     lawRaw === PREMIUM_JURISDICTION_PLACEHOLDER
       ? `${PREMIUM_JURISDICTION_PLACEHOLDER} (Governing law was not taken from category labels or vague text — pick the correct state or country before send.)`
-      : `This Agreement shall be governed by the laws of ${nz(draft.jurisdiction)}, without regard to conflict-of-law principles.`;
+      : `This Agreement shall be governed by the laws of ${nz(draftForBuild.jurisdiction)}, without regard to conflict-of-law principles.`;
 
   if (route === "premium_dynamic") {
     const sectionLines = buildPremiumDynamicCommercialSectionLines(draft, {
@@ -976,14 +989,14 @@ export function buildStarterAgreementPreviewForReview(
   // intake through (e.g. restore=starterReview after refresh, where draft.parties may carry the
   // short parse form "Red Mesa"), fall back to the persisted creator intake so short party names
   // are expanded back to "Red Mesa Logistics LLC" instead of rendering a truncated preamble.
-  const intakeText = (options?.intakeText || "").trim() || readAgreementCreatorIntakeStorage().trim();
+  const intakeText = resolveStarterPreviewIntakeText(options?.intakeText);
   const draftForBuild =
     intakeText.length > 0 ? enrichStarterPreviewPartiesFromIntake(draft, intakeText) : draft;
   return buildAgreementPreviewText(
     { ...draftForBuild },
     {
       ...options,
-      intakeText: intakeText || options?.intakeText,
+      intakeText,
       starterPreview: true,
       premiumDeliverablePreview: false,
       freeStarterReviewPreview: true,
@@ -997,6 +1010,8 @@ function repairStarterCommercialReadinessDisplay(
   options?: AgreementPreviewBuildOptions,
 ): string {
   let out = (text || "").trim();
+  const intake = resolveStarterPreviewIntakeText(options?.intakeText);
+  out = repairStarterPaymentCadenceInPreviewPlain(out, intake);
   out = out.replace(
     /This Agreement\s*\((["“])Agreement(["”])\)\s+is\s+This Agreement is between/gi,
     "This Agreement ($1Agreement$2) is between",

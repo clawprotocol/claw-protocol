@@ -3,6 +3,10 @@
  * Assistive only — not authoritative for legal copy.
  */
 
+import { readAgreementCreatorIntakeStorage } from "./agreementIntakeStorage";
+import { readOriginalUserIntakeRaw } from "./originalUserIntakeRawStorage";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+
 export type IntakePaymentField = {
   amount: number | null;
   cadence: string | null;
@@ -189,22 +193,70 @@ export function formatMilestonePaymentTermsFromIntake(intake: string): string | 
   return `$${formatted} paid over ${word} milestone payments tied to deployment stages and launch targets.`;
 }
 
+const MONTHLY_INSTALLMENT_AMOUNT_RE = /\$\s*([\d,]+(?:\.\d{2})?)\s+in\s+monthly\s+installments?/i;
+
+function formatMonthlyInstallmentAmountLine(amount: number): string {
+  return `$${amount.toLocaleString("en-US")} in monthly installments`;
+}
+
+function monthlyInstallmentAmountLineFromText(t: string): string | null {
+  const direct = t.match(MONTHLY_INSTALLMENT_AMOUNT_RE);
+  if (direct) {
+    const amount = normalizeCurrency(direct[1]);
+    if (amount != null) return formatMonthlyInstallmentAmountLine(amount);
+  }
+  const amount = extractAmountFromText(t);
+  if (amount != null && inferCadence(t) === "monthly" && /\binstallments?\b/i.test(t)) {
+    return formatMonthlyInstallmentAmountLine(amount);
+  }
+  return null;
+}
+
+/**
+ * Starter preview intake: caller hint → session original (draft commit) → localStorage create intake.
+ */
+export function resolveStarterPreviewIntakeText(passed?: string | null): string {
+  const hint = String(passed ?? "").trim();
+  if (hint.length >= 20) return hint;
+  const session = readOriginalUserIntakeRaw().trim();
+  if (session.length >= 20) return session;
+  try {
+    const storage = readAgreementCreatorIntakeStorage().trim();
+    if (storage.length >= 20) return storage;
+  } catch {
+    /* ignore */
+  }
+  return hint || session;
+}
+
 /** Preserve installment cadence from intake when draft payment_terms were rewritten (Test372). */
 export function formatInstallmentPaymentTermsFromIntake(intake: string): string | null {
   const t = (intake || "").trim();
   if (!t) return null;
-  const direct = t.match(/\$\s*([\d,]+(?:\.\d{2})?)\s+in\s+monthly\s+installments?/i);
-  if (direct) {
-    const amount = normalizeCurrency(direct[1]);
-    if (amount != null) {
-      return `$${amount.toLocaleString("en-US")} in monthly installments`;
+
+  const willPayLine = t
+    .split(/\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .find((line) => /\bwill\s+pay\b/i.test(line) && /\bmonthly\s+installments?\b/i.test(line));
+  if (willPayLine) {
+    const short = monthlyInstallmentAmountLineFromText(willPayLine);
+    const sentence = willPayLine.replace(/[.;]+$/, "");
+    if (short && sentence.length > short.length + 12) {
+      return `${sentence}.`;
     }
+    return short;
   }
-  const amount = extractAmountFromText(t);
-  if (amount != null && inferCadence(t) === "monthly" && /\binstallments?\b/i.test(t)) {
-    return `$${amount.toLocaleString("en-US")} in monthly installments`;
+
+  const labeled = t.match(/(?:^|\n)\s*(?:payment|compensation|fee)s?\s*[:\-]\s*([^\n]+)/i);
+  if (labeled?.[1] && /\bmonthly\s+installments?\b/i.test(labeled[1])) {
+    return monthlyInstallmentAmountLineFromText(labeled[1].trim()) || labeled[1].trim();
   }
-  return null;
+
+  return monthlyInstallmentAmountLineFromText(t);
+}
+
+export function intakeDeclaresMonthlyInstallments(intake: string | null | undefined): boolean {
+  return /\bmonthly\s+installments?\b/i.test(String(intake || ""));
 }
 
 export function draftPaymentTermsLoseIntakeInstallmentCadence(
@@ -216,6 +268,39 @@ export function draftPaymentTermsLoseIntakeInstallmentCadence(
   if (!d || !i) return false;
   if (!/\bmonthly\s+installments?\b/i.test(i)) return false;
   return /\bupon\s+completion\b/i.test(d) || /\bon\s+completion\b/i.test(d);
+}
+
+/** Correct draft.payment_terms when API/parse rewrote monthly installments to completion language. */
+export function preserveInstallmentPaymentTermsOnDraft(
+  draft: ParsedDraftShape,
+  intakeRaw: string | null | undefined,
+): ParsedDraftShape {
+  const intake = resolveStarterPreviewIntakeText(intakeRaw);
+  const installment = formatInstallmentPaymentTermsFromIntake(intake);
+  if (!installment) return draft;
+  if (!draftPaymentTermsLoseIntakeInstallmentCadence(draft.payment_terms, intake)) return draft;
+  return { ...draft, payment_terms: installment };
+}
+
+const UPON_COMPLETION_PAYMENT_RE =
+  /((?:\d+\.\s*)?Payment Terms\s*)(\$[\d,]+(?:\.\d{2})?)\s+upon completion of services\.?/gi;
+
+/** Display-layer repair when authoritative/server body dropped monthly installment cadence. */
+export function repairStarterPaymentCadenceInPreviewPlain(
+  text: string,
+  intakeRaw: string | null | undefined,
+): string {
+  const intake = resolveStarterPreviewIntakeText(intakeRaw);
+  const installment = formatInstallmentPaymentTermsFromIntake(intake);
+  if (!installment || !text.trim()) return text;
+  if (!intakeDeclaresMonthlyInstallments(intake)) return text;
+  if (!/\bupon completion of services\b/i.test(text)) return text;
+  let out = text.replace(UPON_COMPLETION_PAYMENT_RE, `$1${installment}`);
+  out = out.replace(
+    /\$\s*([\d,]+(?:\.\d{2})?)\s+upon completion of services\.?/gi,
+    installment,
+  );
+  return out;
 }
 
 /** Human-readable payment_terms line from structured hints (for smart defaults / POST body). */

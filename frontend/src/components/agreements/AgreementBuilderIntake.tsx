@@ -69,7 +69,11 @@ import {
   PAYWALL_PAID_READY_SUB_SIGNATURE,
 } from "../../launch/paywallMessaging";
 import { LiveAgreementPreview, type IntakeFormationPhase } from "./LiveAgreementPreview";
-import { extractIntakePayment } from "./intakeCurrencyParse";
+import {
+  extractIntakePayment,
+  preserveInstallmentPaymentTermsOnDraft,
+  resolveStarterPreviewIntakeText,
+} from "./intakeCurrencyParse";
 import { detectAgreementFamily } from "./agreementFamilyRouter";
 import {
   CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
@@ -3460,7 +3464,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       };
       if (starterPreview) {
         const starterText = buildStarterAgreementPreviewForReview(d, {
-          intakeText: debouncedStepBuffer,
+          intakeText: resolveStarterPreviewIntakeText(debouncedStepBuffer),
           placeholderGate,
         });
         const draftParties = ((d as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? [])
@@ -4737,7 +4741,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       payment,
       agreement_family: family,
     };
-    if (!draft || typeof draft !== "object") return base;
+    if (!draft || typeof draft !== "object") {
+      return preserveInstallmentPaymentTermsOnDraft(base, intakeFallback);
+    }
     const o = draft as Record<string, unknown>;
     const partiesIn = Array.isArray(o.parties) ? o.parties : [];
     const parties: { name: string; role: string }[] = [];
@@ -4781,7 +4787,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (purposeTrim.includes(FULL_DRAFT_EXPANSION_MARKER) && !addTrim.includes(FULL_DRAFT_EXPANSION_MARKER)) {
       out.additional_terms = FULL_DRAFT_EXPANSION_MARKER;
     }
-    return { ...out, agreement_family: family };
+    return preserveInstallmentPaymentTermsOnDraft({ ...out, agreement_family: family }, intakeFallback);
   }
 
   async function parseDraft(
@@ -9581,6 +9587,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         parsed = alignParsedWithCanonicalType(parsed, rawIntake);
         parsed = normalizeParsedDraftLegalConcepts(parsed, rawIntake);
       }
+      parsed = preserveInstallmentPaymentTermsOnDraft(parsed, rawIntake);
       let nextMissing = computeMissing(parsed);
       if (nextMissing.length > 0 && simpleInstantProductionSurface) {
         parsed = applySimpleFlowSmartDefaults(parsed, rawIntake);
@@ -11968,12 +11975,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumSendPathUnlocked ||
         premiumPersistedFlowActive
       );
-      const nextPreview = buildAgreementPreviewText(draft, {
-        starterPreview,
-        premiumDeliverablePreview: !starterPreview,
-        intakeText: debouncedStepBuffer,
-        placeholderGate,
-      });
+      const starterIntake = resolveStarterPreviewIntakeText(
+        currentPremiumMergedIntakeKey || debouncedStepBuffer || intakeCombined,
+      );
+      const nextPreview = starterPreview
+        ? buildStarterAgreementPreviewForReview(draft, {
+            intakeText: starterIntake,
+            placeholderGate,
+          })
+        : buildAgreementPreviewText(draft, {
+            starterPreview,
+            premiumDeliverablePreview: !starterPreview,
+            intakeText: debouncedStepBuffer,
+            placeholderGate,
+          });
       if (
         isPlaceholderSafetyBlockedPreviewText(nextPreview) &&
         shouldSkipPlaceholderScanForTransientPreview({
@@ -11997,6 +12012,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
     debouncedStepBuffer,
+    intakeCombined,
+    currentPremiumMergedIntakeKey,
     starterReviewServerDraftReadyTick,
     previewPlaceholderGateSyncTick,
   ]);

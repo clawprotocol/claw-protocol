@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
+import { describe, expect, it, vi } from "vitest";
+import { buildAgreementPreviewText, buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { labeledPartyLegalEntities, parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
@@ -7,7 +7,11 @@ import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPres
 import {
   formatInstallmentPaymentTermsFromIntake,
   draftPaymentTermsLoseIntakeInstallmentCadence,
+  preserveInstallmentPaymentTermsOnDraft,
+  repairStarterPaymentCadenceInPreviewPlain,
+  resolveStarterPreviewIntakeText,
 } from "./intakeCurrencyParse";
+import { writeOriginalUserIntakeRawAtDraftCommit } from "./originalUserIntakeRawStorage";
 import { resolveSignerCardPartyNames } from "./signerFullLegalName";
 import { assessStarterComplexityGate } from "./starterMultiPartyProGate";
 import {
@@ -35,7 +39,7 @@ President
 michael@harborpeakautomation.com
 
 Scope: Strategic business consulting and operational planning services.
-Payment: $48,000 in monthly installments.
+${BLUE} will pay ${HARBOR} $48,000 in monthly installments.
 Term: twelve (12) months.
 Governing law: Oklahoma.
 Effective date: Upon full execution by all parties.`;
@@ -111,8 +115,13 @@ describe("Test372 Free 2-party identity isolation", () => {
   });
 
   it("preserves monthly installment payment cadence over API completion rewrite", () => {
-    expect(formatInstallmentPaymentTermsFromIntake(TEST372_FREE_STACKED_PARTY_INTAKE)).toBe(
-      "$48,000 in monthly installments",
+    const directional =
+      "Blue Canyon Analytics LLC will pay Harbor Peak Automation LLC $48,000 in monthly installments.";
+    expect(formatInstallmentPaymentTermsFromIntake(directional)).toMatch(
+      /Blue Canyon Analytics LLC will pay Harbor Peak Automation LLC \$48,000 in monthly installments/i,
+    );
+    expect(formatInstallmentPaymentTermsFromIntake(TEST372_FREE_STACKED_PARTY_INTAKE)).toMatch(
+      /\$48,000 in monthly installments/i,
     );
     expect(
       draftPaymentTermsLoseIntakeInstallmentCadence(
@@ -120,6 +129,41 @@ describe("Test372 Free 2-party identity isolation", () => {
         TEST372_FREE_STACKED_PARTY_INTAKE,
       ),
     ).toBe(true);
+    const preserved = preserveInstallmentPaymentTermsOnDraft(test372ContaminatedDraft(), TEST372_FREE_STACKED_PARTY_INTAKE);
+    expect(preserved.payment_terms).toMatch(/monthly installments/i);
+    expect(preserved.payment_terms).not.toMatch(/upon completion/i);
+  });
+
+  it("repairs authoritative preview text that dropped monthly installment cadence", () => {
+    const corrupted =
+      "SERVICES AGREEMENT\n\n2. Payment Terms\n$48,000 upon completion of services.\n\n3. Term: twelve (12) months.";
+    const repaired = repairStarterPaymentCadenceInPreviewPlain(corrupted, TEST372_FREE_STACKED_PARTY_INTAKE);
+    expect(repaired).toMatch(/monthly installments/i);
+    expect(repaired).not.toMatch(/upon completion of services/i);
+  });
+
+  it("buildStarterAgreementPreviewForReview uses session intake when step buffer is empty", () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+      clear: () => {
+        storage.clear();
+      },
+    });
+    writeOriginalUserIntakeRawAtDraftCommit(TEST372_FREE_STACKED_PARTY_INTAKE);
+    const preview = buildStarterAgreementPreviewForReview(test372ContaminatedDraft(), {
+      intakeText: "",
+    });
+    expect(resolveStarterPreviewIntakeText("")).toContain("monthly installments");
+    expect(preview).toMatch(/monthly installments/i);
+    expect(preview).not.toMatch(/upon completion of services/i);
+    vi.unstubAllGlobals();
   });
 
   it("starter preview opening recital, payment, and term sections are clean", () => {
