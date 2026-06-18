@@ -108,6 +108,10 @@ import {
   tryUnwrapPremiumJsonEnvelopeDocument,
 } from "./premiumFullDraftResponseNormalization";
 import { logDevPostPremiumFullDraftPipelineReturn } from "./premiumFullDraftPostResponseTrace";
+import {
+  assessLabeledPartyManifestIntegrity,
+  shouldBlockPaidProAdvisoryAcceptForPartyIdentity,
+} from "./labeledPartyManifestIntegrity";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import {
   isCommercialServicesIntake,
@@ -2743,8 +2747,22 @@ async function runPremiumCompletionInner(
         !hardAccRejection &&
         isNonfatalGenerationFailureCode((effectiveFull.server_generation_failure_code || "").trim()) &&
         meetsPaidProDegradedRecoveryDisplayRequirements(doc, rawForSoT || rawIntake);
+      const partyManifestIntegrity = assessLabeledPartyManifestIntegrity({
+        intakeText: rawForSoT || rawIntake,
+        draftPartyNames: (merged.parties ?? []).map((p) => String(p.name ?? "")),
+        documentText: doc,
+      });
+      const blockAdvisoryForPartyIdentity = shouldBlockPaidProAdvisoryAcceptForPartyIdentity(
+        partyManifestIntegrity,
+      );
+      if (blockAdvisoryForPartyIdentity && !proIntentGateMessage) {
+        proIntentGateMessage = partyManifestIntegrity.userMessage;
+      }
       // A validated long server_full_document_text wins over soft vPaid failures too.
-      const serverFullDocumentWins = serverFullDocumentAuthoritative && placeholderClientOk;
+      let serverFullDocumentWins = serverFullDocumentAuthoritative && placeholderClientOk;
+      if (blockAdvisoryForPartyIdentity) {
+        serverFullDocumentWins = false;
+      }
       // A deterministically party-placeholder-repaired body (only gap was a known party name) is
       // authoritative once it is structurally clean, placeholder-free, and section-complete. This
       // accepts the repaired body even when vPaid soft-fails — without it the paid user is stranded.
@@ -2764,11 +2782,12 @@ async function runPremiumCompletionInner(
           }),
         });
       const advisoryAccept =
-        longAdvisoryAccept ||
-        jsonParseNonfatalAccept ||
-        jsonParseDisplayRecoverableAccept ||
-        serverFullDocumentWins ||
-        partyPlaceholderRepairAccept;
+        !blockAdvisoryForPartyIdentity &&
+        (longAdvisoryAccept ||
+          jsonParseNonfatalAccept ||
+          jsonParseDisplayRecoverableAccept ||
+          serverFullDocumentWins ||
+          partyPlaceholderRepairAccept);
       if (advisoryAccept && (!vPaid.ok || !placeholderClientOk)) {
         if (
           jsonParseNonfatalAccept ||

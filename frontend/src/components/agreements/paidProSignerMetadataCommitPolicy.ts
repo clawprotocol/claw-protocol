@@ -14,7 +14,7 @@ import {
   mergeLabeledPartyAuthorityIntoParties,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
-import { isTripartiteLabeledPartiesIntake } from "./labeledPartyBlockParse";
+import { isLabeledMultiPartyIntake } from "./labeledPartyBlockParse";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
 function paidProSignerExecutionCorpusIsFrozenForHydration(): boolean {
@@ -57,10 +57,11 @@ export function shouldApplyLabeledPartyPartialExecutionHydration(args: {
   intakeText?: string | null;
 }): boolean {
   const intake = (args.intakeText ?? "").trim();
-  if (!intake || !isTripartiteLabeledPartiesIntake(intake)) return false;
+  if (!intake || !isLabeledMultiPartyIntake(intake, 3)) return false;
   if (!labeledPartyIntakeHasHydratableExecutionFields(intake)) return false;
   const merged = mergeLabeledPartyAuthorityIntoParties(args.parties, intake);
-  if (merged.length < 3) return false;
+  const expectedCount = isLabeledMultiPartyIntake(intake, 4) ? 4 : 3;
+  if (merged.length < expectedCount) return false;
   return merged.every((p) => p.partyLegalName.trim().length >= 2);
 }
 

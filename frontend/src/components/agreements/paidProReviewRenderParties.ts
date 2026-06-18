@@ -46,9 +46,26 @@ export function resolvePartiesForReviewRender(
   args?: ResolvePaidProReviewRenderPartiesArgs,
 ): PaidProSignerMetadataParty[] {
   const intakeRaw = (args?.intakeText ?? "").trim();
+  const labeledAuthority = intakeRaw
+    ? mergeLabeledPartyAuthorityIntoParties([], intakeRaw)
+    : [];
   const liveParties = args?.liveSignerMetadataUi
     ? buildPaidProSignerMetadataParties(args.liveSignerMetadataUi)
     : null;
+
+  if (labeledAuthority.length >= 3) {
+    const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
+    if (consumed && consumed.length >= 2) {
+      return mergeLabeledPartyAuthorityIntoParties(
+        mergeLiveSignerFieldsOntoParties(consumed, liveParties),
+        intakeRaw,
+      );
+    }
+    if (liveParties && liveParties.length >= 2) {
+      return mergeLabeledPartyAuthorityIntoParties(liveParties, intakeRaw);
+    }
+    return labeledAuthority;
+  }
 
   const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
   if (consumed && consumed.length >= 2) {

@@ -17,6 +17,7 @@ const UNKNOWN_VALUE_RE =
   /^(?:unknown|n\/?a|tbd|tba|none|—|–|-|\[not\s+yet\s+specified\]|\[?\s*not\s+yet\s+specified\s*\]?)$/i;
 
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
+const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 
 const LABELED_FIELD_RES: ReadonlyArray<{ key: keyof Omit<LabeledPartyBlock, "index">; re: RegExp }> = [
   { key: "legalEntity", re: /^\s*legal\s+entity\s*[:\-]\s*(.+)$/i },
@@ -92,6 +93,11 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
       continue;
     }
 
+    if (COORDINATOR_BLOCK_HEADER_RE.test(line)) {
+      currentIndex = null;
+      continue;
+    }
+
     if (currentIndex != null) {
       flushField(line);
     }
@@ -124,8 +130,29 @@ export function isTripartiteLabeledPartiesIntake(raw: string): boolean {
   return parseLabeledPartyBlocks(raw).length >= 3;
 }
 
+/** Quadripartite (4+) labeled-party intakes — four labeled Party blocks are authoritative. */
+export function isQuadripartiteLabeledPartiesIntake(raw: string): boolean {
+  return parseLabeledPartyBlocks(raw).length >= 4;
+}
+
+/** N-party labeled intake with at least `minimum` labeled Party blocks. */
+export function isLabeledMultiPartyIntake(raw: string, minimum = 3): boolean {
+  return parseLabeledPartyBlocks(raw).length >= minimum;
+}
+
 export function tripartiteRoleLabelForPartyIndex(index: number): string {
   return TRIPARTITE_LABELED_PARTY_ROLE_LABELS[index] ?? `Party ${index + 1}`;
+}
+
+/** Role label for labeled N-party intakes — quadripartite uses Party N only (no client/provider collapse). */
+export function labeledPartyRoleLabelForPartyIndex(index: number, intakeText?: string | null): string {
+  if (intakeText && isQuadripartiteLabeledPartiesIntake(intakeText)) {
+    return `Party ${index + 1}`;
+  }
+  if (intakeText && isTripartiteLabeledPartiesIntake(intakeText)) {
+    return tripartiteRoleLabelForPartyIndex(index);
+  }
+  return index === 0 ? "Client" : index === 1 ? "Service Provider" : `Party ${index + 1}`;
 }
 
 export function tripartiteExecutionBlockHeading(index: number): string {
@@ -133,6 +160,19 @@ export function tripartiteExecutionBlockHeading(index: number): string {
   if (label === "client") return "CLIENT";
   if (label.includes("service") && label.includes("provider")) return "SERVICE PROVIDER";
   if (label.includes("analytics") && label.includes("provider")) return "ANALYTICS PROVIDER";
+  return `PARTY ${index + 1}`;
+}
+
+/** Execution-block heading for labeled N-party intakes. */
+export function multiPartyExecutionBlockHeading(index: number, intakeText?: string | null): string {
+  if (intakeText && isQuadripartiteLabeledPartiesIntake(intakeText)) {
+    return `PARTY ${index + 1}`;
+  }
+  if (intakeText && isTripartiteLabeledPartiesIntake(intakeText)) {
+    return tripartiteExecutionBlockHeading(index);
+  }
+  if (index === 0) return "CLIENT";
+  if (index === 1) return "SERVICE PROVIDER";
   return `PARTY ${index + 1}`;
 }
 

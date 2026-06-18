@@ -131,7 +131,7 @@ export function resolveAuthoritativePartySlotCount(args: {
 
   const intake = String(args.intakeText ?? "").trim();
   const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
-  if (labeled.length >= 3) return labeled.length;
+  if (labeled.length >= 2) return labeled.length;
 
   const intakeNames = resolveAuthoritativeIntakePartyNames(intake);
   const intakeAuthoritative = intakeNames.filter(isAuthoritativeLegalEntityName);
@@ -228,12 +228,13 @@ export function partySlotListHasDriftFragments(
 ): boolean {
   const intake = String(intakeContext || "").trim();
   const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
-  if (labeled.length >= 3) {
+  if (labeled.length >= 2) {
     const current = collapsePartySlotCandidates(names);
     if (current.length === labeled.length) {
       const matches = labeled.filter((auth, i) => partyLegalNamesMatch(auth, current[i] ?? ""));
       if (matches.length >= labeled.length) return false;
     }
+    if (current.length < labeled.length) return true;
   }
 
   if (names.some((raw) => isInvalidPartySlotLegalEntity(normalizeAgreementPartyName(raw)))) {

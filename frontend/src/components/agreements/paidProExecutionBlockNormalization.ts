@@ -25,8 +25,10 @@ import {
 import { stripInlineStaleServerSignatureTailBeforeWitness } from "./paidProFlattenedDocumentNormalize";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 import {
+  isQuadripartiteLabeledPartiesIntake,
   isTripartiteLabeledPartiesIntake,
-  tripartiteExecutionBlockHeading,
+  labeledPartyLegalEntities,
+  multiPartyExecutionBlockHeading,
   tripartiteRoleLabelForPartyIndex,
 } from "./labeledPartyBlockParse";
 
@@ -141,13 +143,13 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
 }
 
 function executionBlockHeadingFromRoleLabel(roleLabel: string, index: number, intakeText?: string | null): string {
+  if (intakeText) {
+    return multiPartyExecutionBlockHeading(index, intakeText);
+  }
   const r = roleLabel.replace(/\s+/g, " ").trim().toLowerCase();
   if (r === "client") return "CLIENT";
   if (r.includes("service") && r.includes("provider")) return "SERVICE PROVIDER";
   if (r.includes("analytics") && r.includes("provider")) return "ANALYTICS PROVIDER";
-  if (intakeText && isTripartiteLabeledPartiesIntake(intakeText)) {
-    return tripartiteExecutionBlockHeading(index);
-  }
   if (index === 0) return "CLIENT";
   if (index === 1) return "SERVICE PROVIDER";
   return `PARTY ${index + 1}`;
@@ -163,16 +165,23 @@ function manifestRolesFromLegalNames(
   names: readonly string[],
   intakeText?: string | null,
 ): ManifestExecutionRole[] {
-  const tripartite = names.length >= 3 && isTripartiteLabeledPartiesIntake(intakeText ?? "");
+  const quad = Boolean(intakeText && isQuadripartiteLabeledPartiesIntake(intakeText));
+  const tripartite = !quad && names.length >= 3 && isTripartiteLabeledPartiesIntake(intakeText ?? "");
   return names.map((legalName, index) => {
-    const roleLabel = tripartite
-      ? tripartiteRoleLabelForPartyIndex(index)
+    const roleLabel = quad
+      ? `Party ${index + 1}`
+      : tripartite
+        ? tripartiteRoleLabelForPartyIndex(index)
+        : index === 0
+          ? "Client"
+          : index === 1
+            ? "Service Provider"
+            : `Party ${index + 1}`;
+    const role: AcceptedCorpusPartyRole = quad
+      ? "service_provider"
       : index === 0
-        ? "Client"
-        : index === 1
-          ? "Service Provider"
-          : `Party ${index + 1}`;
-    const role: AcceptedCorpusPartyRole = index === 0 ? "client" : "service_provider";
+        ? "client"
+        : "service_provider";
     return { role, legalName, roleLabel };
   });
 }
@@ -368,17 +377,25 @@ export function enforcePaidProSingleExecutionBlock(
   const authorityParties = (opts?.authorityParties ?? [])
     .map((p) => String(p.partyLegalName ?? p.legalName ?? "").replace(/\s+/g, " ").trim())
     .filter((n) => n.length >= 3);
+  const labeledNames = labeledPartyLegalEntities(String(opts?.intakeText ?? ""));
   const intakeManifest =
-    authorityParties.length < 2 && (opts?.intakeText || "").trim()
+    authorityParties.length < labeledNames.length && (opts?.intakeText || "").trim()
       ? resolveCanonicalPartyIdentitiesFromIntake(
           opts?.intakeText ?? "",
-          opts?.draftPartyNames ?? null,
+          opts?.draftPartyNames ?? labeledNames,
         )
-      : [];
+      : authorityParties.length < 2 && (opts?.intakeText || "").trim()
+        ? resolveCanonicalPartyIdentitiesFromIntake(
+            opts?.intakeText ?? "",
+            opts?.draftPartyNames ?? null,
+          )
+        : [];
   const manifestLegalNames =
-    intakeManifest.length >= 2
-      ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
-      : authorityParties;
+    labeledNames.length >= authorityParties.length && labeledNames.length >= 2
+      ? labeledNames
+      : intakeManifest.length >= 2
+        ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
+        : authorityParties;
   const manifestRoles =
     manifestLegalNames.length >= 2
       ? manifestRolesFromLegalNames(manifestLegalNames, opts?.intakeText ?? null)
@@ -386,7 +403,8 @@ export function enforcePaidProSingleExecutionBlock(
   const roles = manifestRoles ?? sanitizeRoleAssignments(text);
   const client = roles.find((r) => r.role === "client");
   const provider = roles.find((r) => r.role === "service_provider");
-  if (!client || !provider) {
+  const quadLabeled = Boolean(opts?.intakeText && isQuadripartiteLabeledPartiesIntake(opts.intakeText));
+  if ((!client || !provider) && !quadLabeled) {
     text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
     const truncated = truncatePostCanonicalExecutionPollution(text, {
       expectedPartyCount: manifestLegalNames.length >= 2 ? manifestLegalNames.length : 2,
@@ -404,9 +422,22 @@ export function enforcePaidProSingleExecutionBlock(
   const identities: CanonicalPartyIdentity[] =
     manifestRoles && manifestLegalNames.length >= 2
       ? buildManifestExecutionIdentities(manifestLegalNames, manifestRoles, opts?.intakeText ?? null)
-      : buildCorpusRoleIdentitiesForExecutionReconcile(
-          `${body}\n\nThis Agreement is between ${client.legalName} ("Client") and ${provider.legalName} ("Service Provider").`,
-        );
+      : client && provider
+        ? buildCorpusRoleIdentitiesForExecutionReconcile(
+            `${body}\n\nThis Agreement is between ${client.legalName} ("Client") and ${provider.legalName} ("Service Provider").`,
+          )
+        : [];
+  if (!identities.length) {
+    text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
+    const truncated = truncatePostCanonicalExecutionPollution(text, {
+      expectedPartyCount: manifestLegalNames.length >= 2 ? manifestLegalNames.length : 2,
+    });
+    if (truncated.text !== text) {
+      repairs.push(...truncated.repairs);
+      text = truncated.text;
+    }
+    return { text, repairs: [...new Set(repairs)] };
+  }
   const stubLines = [
     body,
     "",

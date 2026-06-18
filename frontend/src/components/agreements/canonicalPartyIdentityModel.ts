@@ -118,13 +118,13 @@ function partyFromLabeledBlock(
   return {
     partyId: partyIdForLabeledPartyNumber(block.index),
     sourceSlot,
-    legalName: cleanField(authority?.partyLegalName) || cleanField(block.legalEntity),
+    legalName: cleanField(block.legalEntity) || cleanField(authority?.partyLegalName),
     roleLabel: roleLabel?.trim() || tripartiteRoleLabelForPartyIndex(sourceSlot),
-    signerName: cleanField(authority?.signerName) || cleanField(block.signerName),
-    signerTitle: cleanField(authority?.signerTitle) || cleanField(block.signerTitle),
-    signerEmail: cleanField(authority?.signerEmail) || cleanField(block.signerEmail),
-    noticeEmail: cleanField(authority?.signerEmail) || cleanField(block.signerEmail),
-    noticeAddress: cleanField(authority?.partyAddress) || cleanField(block.address),
+    signerName: cleanField(block.signerName) || cleanField(authority?.signerName),
+    signerTitle: cleanField(block.signerTitle) || cleanField(authority?.signerTitle),
+    signerEmail: cleanField(block.signerEmail) || cleanField(authority?.signerEmail),
+    noticeEmail: cleanField(block.signerEmail) || cleanField(authority?.signerEmail),
+    noticeAddress: cleanField(block.address) || cleanField(authority?.partyAddress),
     isSigningParty: true,
     isUserParty: false,
     source: "labeled_party_block",
@@ -156,16 +156,19 @@ function partyFromAuthoritySlot(
 }
 
 function mergePartyIdentity(base: PartyIdentity, overlay: PartyIdentity): PartyIdentity {
+  const labeledBase = base.source === "labeled_party_block";
   return {
     ...base,
-    legalName: overlay.legalName.trim() || base.legalName,
+    legalName: labeledBase
+      ? base.legalName.trim() || overlay.legalName.trim()
+      : overlay.legalName.trim() || base.legalName,
     roleLabel: overlay.roleLabel?.trim() || base.roleLabel,
     signerName: overlay.signerName?.trim() || base.signerName,
     signerTitle: overlay.signerTitle?.trim() || base.signerTitle,
     signerEmail: overlay.signerEmail?.trim() || base.signerEmail,
     noticeEmail: overlay.noticeEmail?.trim() || base.noticeEmail,
     noticeAddress: overlay.noticeAddress?.trim() || base.noticeAddress,
-    source: base.source === "labeled_party_block" ? base.source : overlay.source,
+    source: labeledBase ? base.source : overlay.source === "labeled_party_block" ? overlay.source : base.source,
   };
 }
 

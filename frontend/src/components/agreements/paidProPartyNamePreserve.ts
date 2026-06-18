@@ -72,6 +72,12 @@ const DISALLOWED_PARTY_PHRASE_RE: readonly RegExp[] = [
   /\bthe\s+applicable\s+party\b/i,
   /^for\s+analytics\s+services$/i,
   /^will\s+keep\s+confidential\b/i,
+  /^software\s+platform\s+agreement$/i,
+  /\bsoftware\s+platform\s+agreement\b/i,
+  /licensing\s+revenue\s+will\s+be\s+shared/i,
+  /^signer\s+unknown$/i,
+  /^\[org_\d+\]$/i,
+  /^\[email_\d+\]$/i,
 ];
 
 function normPartyLabel(s: string): string {
@@ -85,11 +91,18 @@ export function isDisallowedPartyPhrase(name: string): boolean {
   return DISALLOWED_PARTY_PHRASE_RE.some((re) => re.test(t));
 }
 
-/** True when the label looks like a full legal entity (intake-authoritative), not body prose. */
+/** True when the label looks like a full legal entity (intake-authoritative), not body prose or titles. */
 export function isAuthoritativeLegalEntityName(name: string): boolean {
   const t = (name || "").replace(/\s+/g, " ").trim();
   if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
   if (ENTITY_SUFFIX.test(t)) return true;
+  if (/\bagreement\b/i.test(t) && !ENTITY_SUFFIX.test(t)) return false;
+  if (
+    /\b(?:revenue|licensing|confidential|governed|platform|implementation)\b/i.test(t) &&
+    !ENTITY_SUFFIX.test(t)
+  ) {
+    return false;
+  }
   const words = t.split(/\s+/);
   return words.length >= 3 && words.every((w) => /^[A-Z0-9]/.test(w) || /^[&.,'-]+$/.test(w));
 }

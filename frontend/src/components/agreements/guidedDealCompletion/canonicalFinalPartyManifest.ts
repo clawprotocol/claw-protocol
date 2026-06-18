@@ -9,8 +9,10 @@ import {
   isDisallowedPartyPhrase,
 } from "../paidProPartyNamePreserve";
 import {
+  isQuadripartiteLabeledPartiesIntake,
   isTripartiteLabeledPartiesIntake,
   labeledPartyLegalEntities,
+  labeledPartyRoleLabelForPartyIndex,
   tripartiteRoleLabelForPartyIndex,
 } from "../labeledPartyBlockParse";
 import {
@@ -105,7 +107,14 @@ function usablePartyName(raw: string | null | undefined): string {
   return t;
 }
 
-function roleForIndex(index: number, roleLabel?: string): CanonicalFinalPartyRole {
+function roleForIndex(
+  index: number,
+  roleLabel?: string,
+  intakeText?: string | null,
+): CanonicalFinalPartyRole {
+  if (intakeText && isQuadripartiteLabeledPartiesIntake(intakeText)) {
+    return `party_${index + 1}`;
+  }
   if (index === 0) return "client";
   if (index === 1) return "service_provider";
   const role = (roleLabel || "").trim().toLowerCase();
@@ -133,7 +142,7 @@ function resolvePartyNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, i
           ? collapsedDraft
           : args.draftPartyNames ?? [];
   const slotCount = Math.max(
-    labeledNames.length >= 3 ? labeledNames.length : draftPartyNames.length,
+    labeledNames.length >= 2 ? labeledNames.length : draftPartyNames.length,
     2,
   );
   const slot = handoff ? linearPremiumRecipientSlots(handoff, slotCount)[index] : undefined;
@@ -165,6 +174,9 @@ function roleLabelForEntry(
   index: number,
   intakeText?: string | null,
 ): string {
+  if (intakeText && isQuadripartiteLabeledPartiesIntake(intakeText)) {
+    return labeledPartyRoleLabelForPartyIndex(index, intakeText);
+  }
   if (intakeText && isTripartiteLabeledPartiesIntake(intakeText)) {
     return tripartiteRoleLabelForPartyIndex(index);
   }
@@ -229,7 +241,7 @@ function resolveCanonicalFinalPartyManifestUncached(
       ? labeledNames.filter(isAuthoritativeLegalEntityName)
       : intakeNames.filter(isAuthoritativeLegalEntityName);
   let slotCount = Math.max(args.partyCount, 2);
-  if (labeledNames.length >= 3) slotCount = labeledNames.length;
+  if (labeledNames.length >= 2) slotCount = Math.max(slotCount, labeledNames.length);
   else if (intakeAuthoritative.length === 2) slotCount = 2;
   else if (hasDrift && intakeNames.length === 2) slotCount = 2;
   else if (hasDrift && collapsedDraft.length === 2 && slotCount > 2) slotCount = 2;
@@ -257,7 +269,7 @@ function resolveCanonicalFinalPartyManifestUncached(
       ? stripRecipientEmailNoise(emailRaw)
       : "";
     const role = args.draftPartyRoles?.[i] ?? slot?.role ?? "";
-    const canonicalRole = roleForIndex(i, role);
+    const canonicalRole = roleForIndex(i, role, args.intakeText);
     const isIndividual = partyName ? isIndividualPartyName(partyName) : false;
     parties.push({
       index: i,
@@ -328,8 +340,12 @@ export function buildCanonicalFinalPartyManifestFromIdentities(
 }
 
 function blockHeadingForManifestParty(p: CanonicalFinalPartyEntry): string {
-  if (p.role === "client") return "CLIENT";
-  if (p.role === "service_provider") return "SERVICE PROVIDER";
+  const label = (p.roleLabel || "").toLowerCase();
+  if (label.includes("analytics") && label.includes("provider")) return "ANALYTICS PROVIDER";
+  if (p.role === "client" || label === "client") return "CLIENT";
+  if (p.role === "service_provider" || (label.includes("service") && label.includes("provider"))) {
+    return "SERVICE PROVIDER";
+  }
   return `PARTY ${p.index + 1}`;
 }
 

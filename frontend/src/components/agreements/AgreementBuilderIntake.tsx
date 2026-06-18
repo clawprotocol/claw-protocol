@@ -3848,6 +3848,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     const generatedCount = resolveGeneratedAgreementPartyCount({
       draftParties: draft?.parties,
+      intakeText: intakeCombinedRef.current || "",
     });
     if (generatedCount > signerSetupUiPartyCount) {
       setSignerSetupUiPartyCount(Math.min(generatedCount, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES));
@@ -3855,7 +3856,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (draft?.creator_coordinator_only) {
       setCreatorCoordinatorOnly(true);
     }
-  }, [draft?.parties, draft?.creator_coordinator_only, signerSetupUiPartyCount]);
+  }, [draft?.parties, draft?.creator_coordinator_only, signerSetupUiPartyCount, debouncedStepBuffer]);
   useEffect(() => {
     setDraft((prev) => {
       if (!prev) return prev;

@@ -1,6 +1,7 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import { findSignatureLineAnchorsFromCorpusText } from "../../vs01/vs01SignatureBlockAnchors";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { countRealParties } from "./starterPartyLimits";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
@@ -57,11 +58,14 @@ export function resolveGeneratedAgreementPartyCount(args: ResolveGeneratedAgreem
   const corpus = String(args.corpusPlain ?? "").trim();
   const fromCorpus =
     corpus.length >= 80 ? findSignatureLineAnchorsFromCorpusText(corpus).length : 0;
+  const fromLabeled = labeledPartyLegalEntities(String(args.intakeText ?? ""))
+    .filter((n) => isAuthoritativeLegalEntityName(n)).length;
   const fromIntake = extractBetweenPartyNameList(String(args.intakeText ?? ""))
     .map((n) => n.trim())
     .filter((n) => n.length > 1 && isAuthoritativeLegalEntityName(n)).length;
 
   let generated = Math.max(fromDraft, 2);
+  if (fromLabeled >= 2) generated = Math.max(generated, fromLabeled);
   if (fromCorpus >= 2) generated = Math.max(generated, fromCorpus);
   if (fromIntake >= 2) generated = Math.max(generated, fromIntake);
   return Math.min(generated, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
