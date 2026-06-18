@@ -9,7 +9,12 @@ import {
   readPaidProPinnedSignerAppliedCorpus,
 } from "./paidProFinalHydratedCorpus";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
-import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import {
+  labeledPartyIntakeHasHydratableExecutionFields,
+  mergeLabeledPartyAuthorityIntoParties,
+  type PaidProSignerMetadataParty,
+} from "./paidProSignerMetadataAuthority";
+import { isTripartiteLabeledPartiesIntake } from "./labeledPartyBlockParse";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
 function paidProSignerExecutionCorpusIsFrozenForHydration(): boolean {
@@ -43,16 +48,44 @@ export function hasSignerMetadataForExecutionOverlay(
   });
 }
 
-/** Review render must apply signer execution overlay (live session or consumed authority). */
-export function paidProReviewRenderNeedsSignerExecutionOverlay(args: {
-  deferSignerMetadataRepair?: boolean;
+/**
+ * Labeled 3-party intakes may have blank signer names on one slot while email/address are known.
+ * Apply execution-block overlay when slot-index authority has any hydratable field.
+ */
+export function shouldApplyLabeledPartyPartialExecutionHydration(args: {
   parties: readonly PaidProSignerMetadataParty[];
+  intakeText?: string | null;
 }): boolean {
-  if (args.deferSignerMetadataRepair) return true;
+  const intake = (args.intakeText ?? "").trim();
+  if (!intake || !isTripartiteLabeledPartiesIntake(intake)) return false;
+  if (!labeledPartyIntakeHasHydratableExecutionFields(intake)) return false;
+  const merged = mergeLabeledPartyAuthorityIntoParties(args.parties, intake);
+  if (merged.length < 3) return false;
+  return merged.every((p) => p.partyLegalName.trim().length >= 2);
+}
+
+export function shouldApplyExecutionBlockSignerOverlay(args: {
+  parties: readonly PaidProSignerMetadataParty[];
+  intakeText?: string | null;
+}): boolean {
+  if (shouldApplyLabeledPartyPartialExecutionHydration(args)) return true;
   return (
     hasSignerMetadataForExecutionOverlay(args.parties) ||
     shouldHydratePaidProReviewSurfacesFromConsumedAuthority(args.parties)
   );
+}
+
+/** Review render must apply signer execution overlay (live session or consumed authority). */
+export function paidProReviewRenderNeedsSignerExecutionOverlay(args: {
+  deferSignerMetadataRepair?: boolean;
+  parties: readonly PaidProSignerMetadataParty[];
+  intakeText?: string | null;
+}): boolean {
+  if (args.deferSignerMetadataRepair) return true;
+  return shouldApplyExecutionBlockSignerOverlay({
+    parties: args.parties,
+    intakeText: args.intakeText,
+  });
 }
 
 /** Hydrate notice/signature metadata on review surfaces (not while live signer session is active). */

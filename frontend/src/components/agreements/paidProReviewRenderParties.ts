@@ -9,6 +9,7 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import {
   buildPaidProSignerMetadataParties,
+  mergeLabeledPartyAuthorityIntoParties,
   readConsumedPaidProSignerMetadataAuthority,
   type LiveSignerMetadataUiState,
   type PaidProSignerMetadataParty,
@@ -44,19 +45,21 @@ function mergeLiveSignerFieldsOntoParties(
 export function resolvePartiesForReviewRender(
   args?: ResolvePaidProReviewRenderPartiesArgs,
 ): PaidProSignerMetadataParty[] {
+  const intakeRaw = (args?.intakeText ?? "").trim();
   const liveParties = args?.liveSignerMetadataUi
     ? buildPaidProSignerMetadataParties(args.liveSignerMetadataUi)
     : null;
 
   const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
   if (consumed && consumed.length >= 2) {
-    return mergeLiveSignerFieldsOntoParties(consumed, liveParties);
+    return mergeLabeledPartyAuthorityIntoParties(
+      mergeLiveSignerFieldsOntoParties(consumed, liveParties),
+      intakeRaw,
+    );
   }
   if (liveParties && liveParties.length >= 2) {
-    return liveParties;
+    return mergeLabeledPartyAuthorityIntoParties(liveParties, intakeRaw);
   }
-
-  const intakeRaw = (args?.intakeText ?? "").trim();
   const acceptedCorpus = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : null;
   const draftPartyNames =
     args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null;
@@ -83,15 +86,18 @@ export function resolvePartiesForReviewRender(
     uiSignerTitles: args?.liveSignerMetadataUi?.partySignerTitles,
   });
 
-  return records.slice(0, 12).map((record, partyIndex) => {
-    const slot = universal[partyIndex];
-    return {
-      partyIndex,
-      partyLegalName: record.fullLegalName,
-      signerEmail: "",
-      signerName: (record.signerName?.trim() || slot?.signerName?.trim() || "").trim(),
-      signerTitle: (record.signerTitle?.trim() || slot?.signerTitle?.trim() || "").trim(),
-      partyAddress: "",
-    };
-  });
+  return mergeLabeledPartyAuthorityIntoParties(
+    records.slice(0, 12).map((record, partyIndex) => {
+      const slot = universal[partyIndex];
+      return {
+        partyIndex,
+        partyLegalName: record.fullLegalName,
+        signerEmail: "",
+        signerName: (record.signerName?.trim() || slot?.signerName?.trim() || "").trim(),
+        signerTitle: (record.signerTitle?.trim() || slot?.signerTitle?.trim() || "").trim(),
+        partyAddress: "",
+      };
+    }),
+    intakeRaw,
+  );
 }

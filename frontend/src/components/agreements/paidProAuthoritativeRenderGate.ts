@@ -20,10 +20,7 @@ import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRende
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
-import {
-  hasSignerMetadataForExecutionOverlay,
-  shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
-} from "./paidProSignerMetadataCommitPolicy";
+import { shouldApplyExecutionBlockSignerOverlay } from "./paidProSignerMetadataCommitPolicy";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
 export type ResolvePaidProAuthoritativeDisplayPlainArgs = ResolvePaidProReviewRenderPartiesArgs;
@@ -47,8 +44,10 @@ export function resolvePaidProAuthoritativeDisplayPlain(
   const parties = resolvePartiesForReviewRender(args);
   const needsOverlay =
     isPaidProReviewSignerMetadataSessionActive() ||
-    hasSignerMetadataForExecutionOverlay(parties) ||
-    shouldHydratePaidProReviewSurfacesFromConsumedAuthority(parties);
+    shouldApplyExecutionBlockSignerOverlay({
+      parties,
+      intakeText: args?.intakeText ?? null,
+    });
   if (!needsOverlay || parties.length < 2) return base;
   const roleContext = {
     intakeText: args?.intakeText ?? null,

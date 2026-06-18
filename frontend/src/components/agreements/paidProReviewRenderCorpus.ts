@@ -17,6 +17,7 @@ import { preserveFullLegalPartyNames } from "./paidProPartyNamePreserve";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   authorityPartiesToCanonicalPartyIdentities,
+  mergeLabeledPartyAuthorityIntoParties,
   type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
@@ -82,9 +83,9 @@ import {
 } from "./paidProExecutionBlockInstrumentation";
 import {
   consumedAuthoritySignerMetadataComplete,
-  hasSignerMetadataForExecutionOverlay,
   isPaidProPostFinalizeHydratedCorpusLocked,
   paidProReviewRenderNeedsSignerExecutionOverlay,
+  shouldApplyExecutionBlockSignerOverlay,
   shouldHydratePaidProReviewSurfacesFromConsumedAuthority,
 } from "./paidProSignerMetadataCommitPolicy";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
@@ -653,22 +654,32 @@ function alignExecutionBlockRolesFromAcceptedCorpus(
     const locked = resolvePaidProPostFinalizeReviewPlain();
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
   }
+  const intake = roleContext?.intakeText ?? "";
+  const hydrationParties = mergeLabeledPartyAuthorityIntoParties(parties ?? [], intake);
+  const canOverlay = shouldApplyExecutionBlockSignerOverlay({
+    parties: hydrationParties,
+    intakeText: intake,
+  });
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    if (!parties?.length || !hasSignerMetadataForExecutionOverlay(parties)) {
+    if (!hydrationParties.length || !canOverlay) {
       return corpus;
     }
-    return applyPaidProSoTSignerExecutionOverlay(corpus, parties, roleContext);
+    return applyPaidProSoTSignerExecutionOverlay(corpus, hydrationParties, roleContext);
   }
-  if (!parties?.length || !shouldHydratePaidProReviewSurfacesFromConsumedAuthority(parties)) {
-    if (parties?.length && hasSignerMetadataForExecutionOverlay(parties)) {
-      return applyPaidProSoTSignerExecutionOverlay(corpus, parties, roleContext);
+  if (!hydrationParties.length || !shouldHydratePaidProReviewSurfacesFromConsumedAuthority(hydrationParties)) {
+    if (canOverlay) {
+      return applyPaidProSoTSignerExecutionOverlay(corpus, hydrationParties, roleContext);
     }
     return corpus;
   }
-  let text = enforcePaidProSingleExecutionBlock(corpus).text;
-  if (parties && parties.length >= 2) {
-    text = fillPaidProSignatureNoticeFieldsAfterExecutionRepair(text, parties, roleContext).text;
-    const identities = authorityPartiesToCanonicalPartyIdentities(parties, roleContext);
+  let text = enforcePaidProSingleExecutionBlock(corpus, {
+    authorityParties: hydrationParties,
+    intakeText: intake || null,
+    draftPartyNames: roleContext?.draftPartyNames ?? hydrationParties.map((p) => p.partyLegalName),
+  }).text;
+  if (hydrationParties.length >= 2) {
+    text = fillPaidProSignatureNoticeFieldsAfterExecutionRepair(text, hydrationParties, roleContext).text;
+    const identities = authorityPartiesToCanonicalPartyIdentities(hydrationParties, roleContext);
     const identityApply = applySignerPartyIdentityToAuthoritativeAgreement(
       text,
       identities,
@@ -705,6 +716,7 @@ export function resolvePaidProReviewRenderPlain(
   const needsSignerOverlay = paidProReviewRenderNeedsSignerExecutionOverlay({
     deferSignerMetadataRepair: args?.deferSignerMetadataRepair,
     parties: partiesForRender,
+    intakeText: args?.intakeText ?? null,
   });
   const signerOverlayKey = buildPaidProSignerStagingOverlayCacheKey(partiesForRender);
   const seedForMemo = shouldUsePaidProSourceOfTruthDisplayOnly() && !needsSignerOverlay

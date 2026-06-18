@@ -22,6 +22,60 @@ import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 import { resolveAcceptedCorpusRoleLabelForLegalName } from "./paidProAcceptedCorpusPartyRoles";
+import { labeledPartyBlocksForSignerMetadata } from "./labeledPartyBlockParse";
+
+function normSignerField(value: string | null | undefined): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** Slot-indexed signer metadata from labeled Party N intake blocks. */
+export function authorityPartiesFromLabeledPartyIntake(
+  intakeText: string | null | undefined,
+): PaidProSignerMetadataParty[] {
+  return labeledPartyBlocksForSignerMetadata(intakeText ?? "").map((block, partyIndex) => ({
+    partyIndex,
+    partyLegalName: block.legalEntity,
+    signerEmail: block.signerEmail,
+    signerTitle: block.signerTitle,
+    signerName: block.signerName,
+    partyAddress: block.address,
+  }));
+}
+
+/** Merge labeled intake authority into review parties — slot index is authoritative; UI fills gaps only. */
+export function mergeLabeledPartyAuthorityIntoParties(
+  parties: readonly PaidProSignerMetadataParty[],
+  intakeText?: string | null,
+): PaidProSignerMetadataParty[] {
+  const labeled = authorityPartiesFromLabeledPartyIntake(intakeText);
+  if (labeled.length < 2) return [...parties];
+  const count = Math.max(parties.length, labeled.length);
+  const out: PaidProSignerMetadataParty[] = [];
+  for (let i = 0; i < count; i++) {
+    const base = parties[i];
+    const auth = labeled[i];
+    if (!auth && !base) continue;
+    out.push({
+      partyIndex: i,
+      partyLegalName: normSignerField(base?.partyLegalName) || normSignerField(auth?.partyLegalName),
+      signerEmail: normSignerField(base?.signerEmail) || normSignerField(auth?.signerEmail),
+      signerName: normSignerField(base?.signerName) || normSignerField(auth?.signerName),
+      signerTitle: normSignerField(base?.signerTitle) || normSignerField(auth?.signerTitle),
+      partyAddress: normSignerField(base?.partyAddress) || normSignerField(auth?.partyAddress),
+    });
+  }
+  return out;
+}
+
+export function labeledPartyIntakeHasHydratableExecutionFields(intakeText?: string | null): boolean {
+  return authorityPartiesFromLabeledPartyIntake(intakeText).some(
+    (p) =>
+      p.signerName.trim() ||
+      p.signerTitle.trim() ||
+      p.signerEmail.trim() ||
+      p.partyAddress.trim(),
+  );
+}
 
 export type PaidProPartyRoleContext = {
   intakeText?: string | null;

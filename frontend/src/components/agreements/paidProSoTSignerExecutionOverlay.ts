@@ -2,37 +2,40 @@
  * Render-time signature-region overlay on frozen Paid Pro SoT — does not mutate stored SoT bytes.
  */
 
-import { applySignerPartyIdentityToAuthoritativeAgreement } from "./guidedDealCompletion/signerPartyIdentity";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import {
-  authorityPartiesToCanonicalPartyIdentities,
+  mergeLabeledPartyAuthorityIntoParties,
   type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
-import { fillPaidProSignatureNoticeFieldsAfterExecutionRepair } from "./paidProSignerSigningCorpusHygiene";
-import { hasSignerMetadataForExecutionOverlay } from "./paidProSignerMetadataCommitPolicy";
+import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
+import { shouldApplyExecutionBlockSignerOverlay } from "./paidProSignerMetadataCommitPolicy";
 
 export function applyPaidProSoTSignerExecutionOverlay(
   frozenCorpus: string,
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): string {
-  if (!parties.length || !hasSignerMetadataForExecutionOverlay(parties)) {
+  const intake = roleContext?.intakeText ?? "";
+  const hydrationParties = mergeLabeledPartyAuthorityIntoParties(parties, intake);
+  if (
+    !hydrationParties.length ||
+    !shouldApplyExecutionBlockSignerOverlay({ parties: hydrationParties, intakeText: intake })
+  ) {
     return frozenCorpus;
   }
-  let text = enforcePaidProSingleExecutionBlock(frozenCorpus).text;
-  if (parties.length >= 2) {
-    text = fillPaidProSignatureNoticeFieldsAfterExecutionRepair(text, parties, roleContext).text;
-    const identities = authorityPartiesToCanonicalPartyIdentities(parties, roleContext);
-    const identityApply = applySignerPartyIdentityToAuthoritativeAgreement(
-      text,
-      identities,
-      roleContext?.intakeText ?? "",
-      { signatureRegionOnly: true },
-    );
-    if (!identityApply.rejected) {
-      text = identityApply.text;
-    }
-  }
-  return text;
+  const ctx: PaidProPartyRoleContext = {
+    ...roleContext,
+    intakeText: (intake || roleContext?.intakeText) ?? null,
+    acceptedCorpus: roleContext?.acceptedCorpus ?? frozenCorpus,
+    draftPartyNames:
+      roleContext?.draftPartyNames ?? hydrationParties.map((p) => p.partyLegalName),
+  };
+  let text = enforcePaidProSingleExecutionBlock(frozenCorpus, {
+    authorityParties: hydrationParties,
+    intakeText: ctx.intakeText ?? null,
+    draftPartyNames: ctx.draftPartyNames ?? null,
+  }).text;
+  const finalized = finalizePaidProSigningCorpusText(text, hydrationParties, ctx);
+  return finalized.text;
 }

@@ -1011,9 +1011,14 @@ function extractGoverningLawWithConfidence(lower: string, text: string): { value
   const state = text.match(/\b(?:State\s+of|Commonwealth\s+of)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/);
   if (state) return { value: normalizeIntakeFieldText(`State of ${state[1]}`, 120), confidence: 0.9 };
 
-  // Bare "<US state> law/jurisdiction/courts" — covers "Oklahoma law" etc.
+  // Bare "<US state> law/jurisdiction/courts" — covers "Oklahoma law" / "Texas law governs" etc.
   const stateLaw = text.match(STATE_LAW_RE);
   if (stateLaw) return { value: normalizeIntakeFieldText(stateLaw[1], 120), confidence: 0.9 };
+
+  const lawGoverns = text.match(new RegExp(`\\b(${US_JURIS_ALT})\\s+law\\s+governs?\\b`, "i"));
+  if (lawGoverns) {
+    return { value: normalizeIntakeFieldText(lawGoverns[1], 120), confidence: 0.92 };
+  }
 
   // Last-resort: a single bare US state mention paired with legal context anywhere in intake.
   const bare = text.match(BARE_STATE_RE);
