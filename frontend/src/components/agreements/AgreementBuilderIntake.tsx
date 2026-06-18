@@ -97,6 +97,12 @@ import {
 } from "./agreementAdvancedIntentSummary";
 import { simplifyParsedDraftForInstantPath } from "./agreementComplexityGate";
 import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies";
+import {
+  assessStarterMultiPartyProRequirement,
+  buildStarterProCheckoutPendingDraft,
+  type StarterMultiPartyProGateAssessment,
+} from "./starterMultiPartyProGate";
+import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
 import { looksLikeRefinementIntent } from "./reviewRefineIntent";
 import { mergeProPreservingRefineParsed } from "./reviewRefineMerge";
 import { PremiumProGenerationWaitPanel } from "./PremiumProGenerationWaitPanel";
@@ -3205,6 +3211,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [proRefineWhatChangedSummary, setProRefineWhatChangedSummary] = useState<string | null>(null);
   /** Parsed draft held until user picks simplified vs. Pro for advanced instrument intakes. */
   const [complexityPendingParsed, setComplexityPendingParsed] = useState<ParsedDraftShape | null>(null);
+  const [starterMultiPartyProGate, setStarterMultiPartyProGate] =
+    useState<StarterMultiPartyProGateAssessment | null>(null);
   const complexityPendingParsedRef = useRef<ParsedDraftShape | null>(null);
   const complexityResumeHydratedRef = useRef(false);
   const [advancedFullDraftPaywallOpen, setAdvancedFullDraftPaywallOpen] = useState(false);
@@ -4059,7 +4067,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         (createUiStage !== CreateUiStage.INPUT ||
           createFlowPhase === "generating_draft" ||
           createFlowPhase === "complexity_choice_required" ||
+          createFlowPhase === "multi_party_pro_required" ||
           Boolean(complexityPendingParsed) ||
+          Boolean(starterMultiPartyProGate) ||
           Boolean(draft) ||
           Boolean(reviewAgreementId?.trim()) ||
           reviewWorkspaceBootstrapping)),
@@ -4070,6 +4080,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createUiStage === CreateUiStage.DRAFT &&
       (draft !== null ||
         createFlowPhase === "generating_draft" ||
+        createFlowPhase === "multi_party_pro_required" ||
         reviewWorkspaceBootstrapping ||
         Boolean(reviewAgreementId?.trim())),
   );
@@ -9405,6 +9416,59 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPreviewPaneRevealed(true);
   }, [draft, currentPremiumMergedIntakeKey, intakeCombined]);
 
+  const commitStarterMultiPartyProGate = React.useCallback(
+    (rawIntake: string): boolean => {
+      const assessment = assessStarterMultiPartyProRequirement(rawIntake);
+      if (!assessment.required) return false;
+      writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
+      writeOriginalUserIntakeRawIfRicher(rawIntake);
+      const pending = buildStarterProCheckoutPendingDraft(rawIntake);
+      stashCreateComplexityResume({
+        rawIntake,
+        pending,
+        awaitingProCheckout: false,
+        resume_kind: "multi_party_pro_gate",
+      });
+      setComplexityPendingParsed(pending);
+      setStarterMultiPartyProGate(assessment);
+      setReviewShowsSimplifiedAdvancedDraft(false);
+      setDraft(null);
+      setMissing([]);
+      setMissingAnswer("");
+      setFollowUpDetailTotal(0);
+      agreementDocumentDirtyRef.current = false;
+      setCreateFlowPhase("multi_party_pro_required");
+      setDisplayPhase("review");
+      setCreateUiStage(CreateUiStage.DRAFT);
+      setPreviewPaneRevealed(true);
+      setMobileWorkspacePane("preview");
+      setLoading(false);
+      logFreeReviewSurfaceResolved({
+        source: "multi_party_pro_gate",
+        displayPhase: "review",
+        createFlowPhase: "multi_party_pro_required",
+        hasDraft: false,
+        fromHomeAutoGenerate: Boolean(homeHeroAutoGenerateRef.current),
+      });
+      return true;
+    },
+    [],
+  );
+
+  const handleStarterMultiPartyProGateEditPrompt = React.useCallback(() => {
+    setStarterMultiPartyProGate(null);
+    setComplexityPendingParsed(null);
+    complexityPendingParsedRef.current = null;
+    clearCreateComplexityResume();
+    setCreateFlowPhase("capturing_input");
+    setCreateUiStage(CreateUiStage.INPUT);
+    setDisplayPhase("intake");
+    setDraft(null);
+    setDraftNowCommitted(false);
+    setPreviewPaneRevealed(false);
+    setLoading(false);
+  }, []);
+
   const commitFreeDraftForReview = React.useCallback(
     (opts: { source: FreeReviewSurfaceSource; fromHomeAutoGenerate?: boolean }) => {
       resetStalePaidReviewShellForFreeStarter(opts.source);
@@ -9497,6 +9561,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     beginStarterDraftGeneration();
     await finalizeIntakeCapture();
     try {
+      if (commitStarterMultiPartyProGate(rawIntake)) {
+        return false;
+      }
       let parsed = await parseDraft(rawIntake);
       writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
       writeOriginalUserIntakeRawIfRicher(rawIntake);
@@ -9613,6 +9680,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     freshSimpleCreateUx,
     homeHeroAutoGenerate,
     commitFreeDraftForReview,
+    commitStarterMultiPartyProGate,
     beginStarterDraftGeneration,
     currentPremiumMergedIntakeKey,
     intakeCombined,
@@ -10154,12 +10222,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     const resumeKind: CreateComplexityResumeKind =
-      complexityPendingParsedRef.current != null ? "complexity_gate" : "optional_full_upgrade";
+      resumeSnap?.resume_kind === "multi_party_pro_gate" || opts?.checkoutSource === "multi_party_pro_gate"
+        ? "multi_party_pro_gate"
+        : complexityPendingParsedRef.current != null
+          ? "complexity_gate"
+          : "optional_full_upgrade";
     const skipProCardScroll =
       opts?.skipProCardScroll === true ||
       Boolean(
         opts?.checkoutSource &&
-          /starter_review|restored_starter|starter_continue/.test(opts.checkoutSource),
+          /starter_review|restored_starter|starter_continue|multi_party_pro_gate/.test(opts.checkoutSource),
       );
     if (!skipProCardScroll) {
       scrollToPremiumPosAnchor();
@@ -10222,6 +10294,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     launchCreateFlowProCheckoutRef.current = beginAdvancedFullDraftCheckout;
   }, [beginAdvancedFullDraftCheckout]);
 
+  const handleStarterMultiPartyProGateBuildPro = React.useCallback(() => {
+    const pending = complexityPendingParsedRef.current ?? complexityPendingParsed;
+    beginAdvancedFullDraftCheckout(pending, {
+      checkoutSource: "multi_party_pro_gate",
+      skipProCardScroll: true,
+    });
+  }, [complexityPendingParsed, beginAdvancedFullDraftCheckout]);
+
   const beginAdvancedFullDraftBilling = React.useCallback(() => {
     const resumeSnap = readCreateComplexityResume();
     const pending =
@@ -10242,7 +10322,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     const resumeKind: CreateComplexityResumeKind =
-      complexityPendingParsedRef.current != null ? "complexity_gate" : "optional_full_upgrade";
+      resumeSnap?.resume_kind === "multi_party_pro_gate"
+        ? "multi_party_pro_gate"
+        : complexityPendingParsedRef.current != null
+          ? "complexity_gate"
+          : "optional_full_upgrade";
     stashCreateComplexityResume({
       rawIntake: raw,
       pending,
@@ -11024,6 +11108,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     try {
       finalTranscriptRef.current = intakeCombined.trim();
       const rawIntake = intakeCombined.trim();
+      if (createProductionTwoPane && commitStarterMultiPartyProGate(rawIntake)) {
+        return;
+      }
       let parsed = await parseDraft(rawIntake);
       parsed = { ...parsed, payment: extractIntakePayment(rawIntake) };
       parsed = runIntakeDefaultsAndRoles(parsed, rawIntake, simpleProductFlow, intakePartyRoleLabels);
@@ -11505,7 +11592,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   /** Advanced gate: staged left intentionally returns null (see `renderProductionStagedLeft`) while preview holds the UI — do not keep a fixed-width empty column. */
   const complexityGateActive = Boolean(
-    createProductionTwoPane && createFlowPhase === "complexity_choice_required",
+    createProductionTwoPane &&
+      (createFlowPhase === "complexity_choice_required" || createFlowPhase === "multi_party_pro_required"),
+  );
+  const multiPartyProGateActive = Boolean(
+    createProductionTwoPane && createFlowPhase === "multi_party_pro_required" && starterMultiPartyProGate,
   );
   /** Sole production gate for the large legacy “Describe / Say or type” intake chrome (never during handoff or review). */
   const shouldShowProductionInputShell = Boolean(
@@ -27722,9 +27813,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     (simpleProductFlow && liveWorkspaceTwoPane ? " opacity-90" : "")
                   }
                 >
+                  {multiPartyProGateActive && starterMultiPartyProGate ? (
+                    <StarterMultiPartyProGatePanel
+                      assessment={starterMultiPartyProGate}
+                      onBuildPro={() => void handleStarterMultiPartyProGateBuildPro()}
+                      onEditPrompt={handleStarterMultiPartyProGateEditPrompt}
+                    />
+                  ) : null}
                   {createProductionTwoPane &&
                   createFlowPhase === "complexity_choice_required" &&
-                  complexityPendingParsed ? (
+                  complexityPendingParsed &&
+                  !multiPartyProGateActive ? (
                     <div
                       className="mb-4 space-y-1 rounded-lg bg-slate-900/35 p-4 sm:p-5"
                       role="region"
@@ -27772,7 +27871,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       className="mb-2 text-[11px] font-medium text-slate-600 sm:text-xs lg:text-[0.8125rem] lg:text-slate-500"
                       role="note"
                     >
-                      {createProductionTwoPane && createFlowPhase === "complexity_choice_required"
+                      {createProductionTwoPane && createFlowPhase === "multi_party_pro_required"
+                        ? "This multi-party prompt needs LawDog Pro — edit your prompt or build a Pro agreement."
+                        : createProductionTwoPane && createFlowPhase === "complexity_choice_required"
                         ? "Choose a starting point — then review and continue to recipients."
                         : createProductionTwoPane &&
                             createUiStage === CreateUiStage.INPUT &&

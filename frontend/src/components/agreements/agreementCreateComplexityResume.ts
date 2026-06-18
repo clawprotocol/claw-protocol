@@ -3,8 +3,8 @@ import { pickLongestPremiumIntakeCorpus, readOriginalUserIntakeRaw } from "./ori
 
 const KEY = "claw_create_complexity_resume_v1";
 
-/** complexity_gate: OA / SAFE-class intercept. optional_full_upgrade: user chose optional full draft from instant path. */
-export type CreateComplexityResumeKind = "complexity_gate" | "optional_full_upgrade";
+/** complexity_gate: OA / SAFE-class intercept. optional_full_upgrade: user chose optional full draft from instant path. multi_party_pro_gate: 3+ party / coordinator / revenue-share free intercept. */
+export type CreateComplexityResumeKind = "complexity_gate" | "optional_full_upgrade" | "multi_party_pro_gate";
 
 export type CreateComplexityResumeV1 = {
   version: 1;

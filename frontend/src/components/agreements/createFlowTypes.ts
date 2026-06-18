@@ -5,6 +5,7 @@ export type CreateFlowProductionPhase =
   | "capturing_input"
   | "generating_draft"
   | "complexity_choice_required"
+  | "multi_party_pro_required"
   | "draft_ready_for_review"
   | "signer_setup_required"
   | "finalizing_final_review"
@@ -29,7 +30,8 @@ export function isCreateFlowPastCapture(phase: CreateFlowProductionPhase): boole
   return (
     phase !== "capturing_input" &&
     phase !== "generating_draft" &&
-    phase !== "complexity_choice_required"
+    phase !== "complexity_choice_required" &&
+    phase !== "multi_party_pro_required"
   );
 }
 
@@ -40,6 +42,8 @@ export function createFlowPrimaryCtaLabel(phase: CreateFlowProductionPhase): str
     case "generating_draft":
       return "";
     case "complexity_choice_required":
+      return "";
+    case "multi_party_pro_required":
       return "";
     case "draft_ready_for_review":
       return "Continue";

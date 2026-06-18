@@ -12,7 +12,8 @@ export type FreeReviewSurfaceSource =
   | "api_late_merge"
   | "session_restore"
   | "display_phase_guard"
-  | "complexity_gate_starter";
+  | "complexity_gate_starter"
+  | "multi_party_pro_gate";
 
 export type ResolveIsFreeStreamlineDraftReviewInput = {
   simpleProductFlow: boolean;
