@@ -188,11 +188,15 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
     const safeStructuredPayment = isPaymentSemanticallySafe(structuredPayment) ? structuredPayment : "";
     const liveComp = (live.compensationLine || "").trim();
     const safeLiveComp = isPaymentSemanticallySafe(liveComp) ? liveComp : "";
-    next.payment_terms =
+    const fromCurrencyParse =
       (fromStructured && payment.valid) || (fromStructured && payment.amount != null)
         ? fromStructured
-        : safeStructuredPayment || safeLiveComp ||
-          "No fees unless the parties document compensation in a separate writing or amendment.";
+        : "";
+    next.payment_terms =
+      safeStructuredPayment ||
+      fromCurrencyParse ||
+      safeLiveComp ||
+      "No fees unless the parties document compensation in a separate writing or amendment.";
   }
 
   if (!(next.duration || "").trim() && !(next.due_date || "").trim()) {

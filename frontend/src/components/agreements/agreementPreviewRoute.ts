@@ -1,5 +1,6 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { shouldUsePremiumDynamicCommercialSections } from "./premiumDeliverableDynamicSections";
+import { hasExplicitCommercialContractIntent } from "./starterEntityFormationIntent";
 
 export type PreviewRoute = "operating" | "premium_dynamic" | "premium_default";
 
@@ -7,6 +8,7 @@ export type PreviewRoute = "operating" | "premium_dynamic" | "premium_default";
 export type AgreementPreviewRouteOptions = {
   starterPreview?: boolean;
   premiumDeliverablePreview?: boolean;
+  intakeText?: string;
 };
 
 /**
@@ -16,6 +18,13 @@ export function selectAgreementPreviewRoute(
   draft: ParsedDraftShape,
   options: AgreementPreviewRouteOptions | undefined,
 ): PreviewRoute {
+  const intakeHint = `${options?.intakeText ?? ""}\n${draft.title ?? ""}`.trim();
+  if (
+    draft.agreement_family === "operating_agreement" &&
+    hasExplicitCommercialContractIntent(intakeHint)
+  ) {
+    return "premium_default";
+  }
   if (draft.agreement_family === "operating_agreement") {
     return "operating";
   }

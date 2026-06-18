@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 
+const TRIPARTITE_SOFTWARE_DEV_INTAKE = `Create a TRIPARTITE SOFTWARE DEVELOPMENT AND REVENUE SHARING AGREEMENT among Red Mesa Logistics LLC, Harbor Peak Automation LLC, and Blue Canyon Analytics LLC.
+
+Purpose: development and maintenance of a custom freight optimization platform, including analytics dashboard work.
+
+Term: twenty-four (24) months.
+
+Payment: $120,000 startup payment plus $3,000 per month maintenance.
+
+Revenue sharing: Red Mesa Logistics LLC 50%, Harbor Peak Automation LLC 30%, Blue Canyon Analytics LLC 20%.
+
+Confidentiality applies. Oklahoma law governs. Electronic execution via LawDog.`;
+
 describe("parseIntakeToStructuredAgreement", () => {
   it("does not put a long Parties: paragraph into parties[]", () => {
     const wall = `Parties: This agreement is entered into by Acme Corp and Beta LLC for the purpose of defining mutual obligations regarding software development, payment milestones, and confidentiality. The parties intend to be bound hereby.
@@ -21,6 +33,30 @@ Scope: API integration work.`;
     expect(s.payment).toMatch(/\$5,000/i);
     expect(s.term).toMatch(/18\s+months/i);
     expect(s.scope.length).toBeGreaterThan(3);
+  });
+
+  it("preserves labeled payment with startup payment wording and revenue sharing splits", () => {
+    const s = parseIntakeToStructuredAgreement(
+      `Payment: $120,000 startup payment plus $3,000 per month maintenance.
+
+Revenue sharing: Red Mesa Logistics LLC 50%, Harbor Peak Automation LLC 30%, Blue Canyon Analytics LLC 20%.`,
+    );
+    expect(s.payment).toMatch(/\$120,000/);
+    expect(s.payment).toMatch(/\$3,000/);
+    expect(s.payment).toMatch(/50\s*%/);
+    expect(s.payment).toMatch(/Revenue sharing:/i);
+  });
+
+  it("preserves tripartite software dev payment and revenue lines from full intake", () => {
+    const s = parseIntakeToStructuredAgreement(TRIPARTITE_SOFTWARE_DEV_INTAKE);
+    expect(s.payment).toMatch(/\$120,000/);
+    expect(s.payment).toMatch(/\$3,000/);
+    expect(s.payment).toMatch(/50\s*%/);
+  });
+
+  it("extracts twenty-four (24) months from labeled Term line", () => {
+    const s = parseIntakeToStructuredAgreement("Term: twenty-four (24) months.");
+    expect(s.term).toMatch(/twenty-four\s*\(24\)\s+months|24\s+months/i);
   });
 
   it("extracts governing law phrase into governing_law", () => {

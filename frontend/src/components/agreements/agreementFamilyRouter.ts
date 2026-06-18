@@ -4,6 +4,10 @@
  * `validatePaidProOutput` / source-fact checks, and intent contract substance — not this enum alone.
  * No network / LLM — keyword and phrase rules only.
  */
+import {
+  hasExplicitCommercialContractIntent,
+  hasExplicitEntityFormationIntent,
+} from "./starterEntityFormationIntent";
 export type AgreementFamily =
   | "consulting_agreement"
   | "services_agreement"
@@ -75,7 +79,7 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
   }
 
   if (
-    /\b(?:referral\s+agreement|revenue\s+share|referral\s+fee|channel\s+partner)\b/i.test(low) ||
+    /\b(?:referral\s+agreement|revenue\s+share(?:ing)?|referral\s+fee|channel\s+partner)\b/i.test(low) ||
     (commercialSignals.referralLike && commercialSignals.commission)
   ) {
     if (!/\b(?:founder\s+vesting|cap\s+table)\b/i.test(low)) {
@@ -98,17 +102,30 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     return "generic_business_agreement";
   }
 
+  if (hasExplicitCommercialContractIntent(t)) {
+    if (
+      /\b(?:software|development|integration|implementation|saas|technology|maintenance|revenue)\b/i.test(low)
+    ) {
+      return "services_agreement";
+    }
+    if (/\bservices?\s+(?:agreement|contract)\b/i.test(low)) {
+      return "services_agreement";
+    }
+    if (/\bconsulting\s+(?:agreement|contract)\b/i.test(low)) {
+      return "consulting_agreement";
+    }
+    return "generic_business_agreement";
+  }
+
+  if (hasExplicitEntityFormationIntent(t)) {
+    return "operating_agreement";
+  }
+
   if (
     /\boperating\s+agreement\b/i.test(t) ||
     /\bllc\s+agreement\b/i.test(low) ||
-    /\bmember[-\s]?managed\b/i.test(t) ||
-    /\bmanager[-\s]?managed\b/i.test(t) ||
-    (/\bllc\b/i.test(t) &&
-      /\b(?:membership(?:\s+interests?)?|managing\s+member|member[-\s]?managed|members?\s+of\s+(?:the\s+)?(?:llc|limited\s+liability\s+company)|members?\s*:|(?:equity|capital|membership)\s+units?\b|capital\s+contributions?|distributions?)\b/i.test(
-        low,
-      )) ||
-    /\bcompany\s+formation\b/i.test(low) ||
-    (/\bllc\b/i.test(t) && /\b(?:governance|company\s+operating)\b/i.test(low))
+    /\barticles?\s+of\s+organization\b/i.test(low) ||
+    /\bcompany\s+formation\b/i.test(low)
   ) {
     return "operating_agreement";
   }
@@ -244,6 +261,8 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
    * back to "Consulting Agreement" when a party name happens to contain the word "Consulting".
    */
   const explicitTechServicesIntent =
+    /\bsoftware\s+development(?:\s+and\s+[\w\s,/&'-]{0,96}?)?\s+(?:agreement|contract)\b/i.test(low) ||
+    /\b(?:tripartite|tri[-\s]?party|three[-\s]?party)\b[\s\S]{0,120}?\bsoftware\b/i.test(low) ||
     /\bsoftware\s+(?:integration|deployment|implementation)(?:\s+(?:and|&)\s+(?:integration|deployment|implementation|migration|support))*\s+(?:agreement|contract)\b/i.test(low) ||
     /\bsoftware\s+services?\s+(?:agreement|contract)\b/i.test(low) ||
     /\bsaas\s+(?:implementation|services?)\s+(?:agreement|contract)\b/i.test(low) ||
@@ -345,8 +364,15 @@ export function mapAgreementFamilyHint(hint: string | null | undefined): Agreeme
 export function mergeAgreementFamily(
   detected: AgreementFamily,
   hint: string | null | undefined,
-  _intake: string,
+  intake: string,
 ): AgreementFamily {
+  if (hasExplicitCommercialContractIntent(intake) && detected === "operating_agreement") {
+    return /\b(?:software|development|integration|implementation|saas|technology|maintenance|revenue)\b/i.test(
+      intake,
+    )
+      ? "services_agreement"
+      : "generic_business_agreement";
+  }
   if (detected === "operating_agreement" || detected === "nda") {
     return detected;
   }

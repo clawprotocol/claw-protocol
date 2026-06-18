@@ -178,6 +178,19 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   if (/\bemployment\s+(?:agreement|contract)\b/.test(low)) return "Employment Agreement";
   if (/\bindependent\s+contractor\s+(?:agreement|contract)\b/.test(low)) return "Independent Contractor Agreement";
 
+  // Tripartite / multi-party software + revenue share (regression: LLC party names must not force OA shell).
+  if (
+    /\b(?:tripartite|tri[-\s]?party|three[-\s]?party|3[-\s]?party)\b/.test(low) &&
+    /\bsoftware\s+development\b/.test(low) &&
+    /\brevenue\s+sharing\b/.test(low)
+  ) {
+    return "Tripartite Software Development and Revenue Sharing Agreement";
+  }
+  if (/\bsoftware\s+development\b/.test(low) && /\brevenue\s+sharing\b/.test(low) && /\bagreement\b/.test(low)) {
+    return "Software Development and Revenue Sharing Agreement";
+  }
+  if (/\brevenue\s+sharing\s+agreement\b/.test(low)) return "Revenue Sharing Agreement";
+
   // Software / tech / integration / implementation explicit intents (post-hardening polish #1).
   // Layered most-specific first so "software integration and deployment agreement" yields
   // "Software Integration Agreement", "saas implementation agreement" yields "SaaS
@@ -195,6 +208,9 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   if (/\bsoftware\s+services?\s+(?:agreement|contract)\b/.test(low)) return "Software Services Agreement";
   if (/\bweb\s+development\s+(?:agreement|contract)\b/.test(low)) return "Web Development Agreement";
   if (/\b(?:mobile|app)\s+development\s+(?:agreement|contract)\b/.test(low)) return "Mobile Development Agreement";
+  if (/\bsoftware\s+development(?:\s+and\s+[\w\s,/&'-]{0,96}?)?\s+(?:agreement|contract)\b/.test(low)) {
+    return "Software Development Agreement";
+  }
   if (/\bsoftware\s+development\s+(?:agreement|contract)\b/.test(low)) return "Software Development Agreement";
   if (/\bsaas\s+implementation\s+(?:agreement|contract)\b/.test(low)) return "SaaS Implementation Agreement";
   if (/\bsaas\s+services?\s+(?:agreement|contract)\b/.test(low)) return "SaaS Services Agreement";

@@ -13,7 +13,7 @@ import {
   normalizeAgreementPartyName,
   splitCommaSeparatedPartyNames,
 } from "./partySlotIdentityNormalize";
-import { truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
+import { stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 
 const TAIL_STOP =
   /\s+(?:\n|(?:(?:for|whereas|hereafter|effective|the\s+term|term:|scope:|consideration|warranties|Signer\s+for)\b))/i;
@@ -57,12 +57,13 @@ function truncateBetweenTailAtSentenceBoundary(tail: string): string {
 function trimBetweenPartyFragment(s: string): string {
   // Strip list punctuation only — preserve "Inc." / "Corp." terminal periods.
   const cleaned = sanitizePartyLegalNameFromIntakeFragment(s.replace(/[,;:]+$/g, "").trim());
-  return normalizePartyNameFragment(cleaned);
+  const { name } = stripPartyRoleAnnotations(cleaned);
+  return normalizePartyNameFragment(name);
 }
 
 function sliceBetweenPartyClauseTail(raw: string): string | null {
   const text = stripSignerInstructionClausesFromIntake(raw.trim());
-  const m = text.match(/\bbetween\s+/i);
+  const m = text.match(/\b(?:between|among)\s+/i);
   if (!m || m.index === undefined) return null;
 
   let tail = text.slice(m.index + m[0].length);
@@ -139,7 +140,7 @@ export function extractBetweenPartyPair(raw: string): { left: string; right: str
 
 export function verbatimBetweenClause(raw: string): string | null {
   const text = raw.trim();
-  const m = text.match(/\bbetween\s+[\s\S]+/i);
+  const m = text.match(/\b(?:between|among)\s+[\s\S]+/i);
   if (!m) return null;
   let clause = m[0];
   clause = truncatePartyClauseTailAtLabeledFields(clause);

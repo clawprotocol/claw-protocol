@@ -644,7 +644,7 @@ function looksLikePaymentText(s: string): boolean {
  */
 function extractEquityCompensationLine(text: string): string {
   const labeled = text.match(
-    /\b(?:compensation|payment|fee|equity|grant)\s*[:\-]\s*([^\n]{3,200}?)(?:\.\s|\n|$)/i,
+    /\b(?:compensation|fee|equity|grant)\s*[:\-]\s*([^\n]{3,200}?)(?:\.\s|\n|$)/i,
   );
   if (!labeled) return "";
   const body = labeled[1].trim();
@@ -654,7 +654,68 @@ function extractEquityCompensationLine(text: string): string {
   return normalizeIntakeFieldText(body, 200);
 }
 
+function trimLabeledFieldBody(body: string): string {
+  const boundary =
+    /\.\s+(?=(?:revenue\s+sharing|term|duration|payment|governing\s+law|jurisdiction|confidentialit|termination|effective\s+date|ip|intellectual\s+property|deliverables?)\s*[:\-])/i;
+  const m = boundary.exec(body);
+  if (m && m.index >= 4) {
+    return body.slice(0, m.index).replace(/[;,:\s]+$/g, "").trim();
+  }
+  const conf = body.match(/\.\s+Confidentiality\b/i);
+  if (conf && conf.index != null && conf.index > 8) {
+    return body.slice(0, conf.index).trim();
+  }
+  return body.replace(/\.\s*$/, "").trim();
+}
+
+function captureLabeledFieldBody(text: string, labelPattern: string): string {
+  const re = new RegExp(
+    `\\b(?:${labelPattern})\\s*[:\\-]\\s*([\\s\\S]+?)(?:\\.\\s+(?=(?:revenue\\s+sharing|term|duration|payment|governing\\s+law|jurisdiction|confidentialit|termination|effective\\s+date|ip|intellectual\\s+property|deliverables?)\\s*[:\\-])|$)`,
+    "i",
+  );
+  const m = text.match(re);
+  if (!m) return "";
+  return trimLabeledFieldBody(m[1]);
+}
+
+/** Labeled "Payment:" clause — preserves multi-amount intakes (startup + monthly maintenance, etc.). */
+function extractLabeledPaymentClause(text: string): string {
+  const body = captureLabeledFieldBody(text, "payment");
+  if (!body) return "";
+  if (!looksLikePaymentText(body)) return "";
+  if (!/\$\s*\d|\d+\s*%|\d+\s*k\b/i.test(body)) return "";
+  return normalizeIntakeFieldText(body, 220);
+}
+
+/** Labeled "Revenue sharing:" clause — percent splits among named parties. */
+function extractRevenueSharingClause(text: string): string {
+  const body = captureLabeledFieldBody(text, "revenue\\s+sharing");
+  if (!body || !/\d+\s*%/.test(body)) return "";
+  return normalizeIntakeFieldText(`Revenue sharing: ${body}`, 220);
+}
+
+function normalizeIntakePaymentField(raw: string): string {
+  const s = raw.replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  if (s.length > 320) return `${s.slice(0, 319).trim()}…`;
+  return s;
+}
+
+function combineStructuredPaymentLines(...parts: string[]): string {
+  const cleaned = parts.map((p) => p.replace(/\.\s*$/, "").trim()).filter(Boolean);
+  if (!cleaned.length) return "";
+  const joined = cleaned.join("; ");
+  if (joined.length <= 320) return joined;
+  return `${joined.slice(0, 319).trim()}…`;
+}
+
 function extractPaymentLine(text: string, payment: IntakePaymentField): string {
+  const labeledPayment = combineStructuredPaymentLines(
+    extractLabeledPaymentClause(text),
+    extractRevenueSharingClause(text),
+  );
+  if (labeledPayment) return labeledPayment;
+
   if (payment.amount != null) {
     if (payment.installmentAmountUnspecified) {
       return formatPaymentTermsLine(payment);
@@ -786,6 +847,21 @@ function extractTermAndMeta(lower: string, text: string): FieldMeta {
   const startEndLabel = extractStartEndDateLabel(text, lower);
   if (startEndLabel && startEndLabel.includes("·")) {
     return { text: startEndLabel, confidence: 0.92, signal: true, inferred: false };
+  }
+
+  const termLabeled = text.match(/\b(?:term|duration)\s*[:\-]\s*([^\n]+)/i);
+  if (termLabeled) {
+    const trimmed = trimScopeAtFieldBoundary(termLabeled[1]).replace(/\.\s*$/, "").trim();
+    const t = normalizeIntakeFieldText(trimmed, 120);
+    if (t) return { text: t, confidence: 0.92, signal: true, inferred: false };
+  }
+
+  const parenDuration = text.match(
+    /\((\d+)\)\s*(year|years|yr|yrs|month|months|mo|week|weeks|day|days)\b/i,
+  );
+  if (parenDuration) {
+    const t = formatTermLengthToken(parenDuration[1], parenDuration[2]);
+    return { text: t, confidence: 0.9, signal: true, inferred: false };
   }
 
   // Then prefer explicit "<N> <units>" duration ("8 months", "2 years") since this
@@ -1057,7 +1133,7 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
     parties: partyEx.parties,
     partyRoleHints: partyEx.roleHints,
     scope: scopeNorm,
-    payment: normalizeIntakeFieldText(payment),
+    payment: normalizeIntakePaymentField(payment),
     term: termNorm,
     governing_law: normalizeIntakeFieldText(governing_law, 120),
     governingLawConfidence: govLaw.confidence,
