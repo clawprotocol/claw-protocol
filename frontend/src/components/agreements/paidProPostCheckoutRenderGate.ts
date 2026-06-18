@@ -121,6 +121,12 @@ function recoveryBodyContainsParty(bodyLower: string, partyName: string): boolea
 }
 
 function intakeJurisdictionAnchor(intake: string): string | null {
+  const stateOfConstrued = intake.match(
+    /\blaws?\s+of\s+(?:the\s+)?State\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/i,
+  );
+  if (stateOfConstrued?.[1]) {
+    return stateOfConstrued[1].replace(/\s+/g, " ").trim().toLowerCase();
+  }
   const governedMatches = [
     ...intake.matchAll(/\b([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,2})\s+law\s+governs\b/g),
   ];
@@ -131,6 +137,10 @@ function intakeJurisdictionAnchor(intake: string): string | null {
   const labeled = intake.match(/\bgoverning\s+law\s*[:\-]\s*([A-Za-z][A-Za-z\s'.-]{2,40})/i);
   if (labeled?.[1]) {
     return labeled[1].replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  const stateOf = intake.match(/\bState\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/i);
+  if (stateOf?.[1] && /\b(?:govern|law|jurisdiction|construed)\b/i.test(intake)) {
+    return stateOf[1].replace(/\s+/g, " ").trim().toLowerCase();
   }
   return null;
 }
@@ -159,27 +169,46 @@ export function meetsPaidProDegradedRecoveryDisplayRequirements(
   body: string,
   intakeText?: string | null,
 ): boolean {
+  return explainPaidProDegradedRecoveryDisplayRequirements(body, intakeText).ok;
+}
+
+export function explainPaidProDegradedRecoveryDisplayRequirements(
+  body: string,
+  intakeText?: string | null,
+): { ok: boolean; failedStep: string } {
   const t = (body || "").trim();
-  if (t.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) return false;
+  if (t.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
+    return { ok: false, failedStep: `len:${t.length}` };
+  }
   const intake = (intakeText || "").trim();
   const bodyLower = t.toLowerCase();
   const intakeLower = intake.toLowerCase();
 
   const parties = authoritativeIntakePartiesForRecovery(intake);
   if (parties.length >= 2) {
-    if (!parties.every((p) => recoveryBodyContainsParty(bodyLower, p))) return false;
+    if (!parties.every((p) => recoveryBodyContainsParty(bodyLower, p))) {
+      return { ok: false, failedStep: "parties" };
+    }
   } else if (!/\b(agreement|consulting|services)\b/i.test(t)) {
-    return false;
+    return { ok: false, failedStep: "agreement_keyword" };
   }
 
   const jurisdiction = intakeJurisdictionAnchor(intake);
-  if (jurisdiction && !bodyLower.includes(jurisdiction)) return false;
+  if (jurisdiction && !bodyLower.includes(jurisdiction)) {
+    return { ok: false, failedStep: `jurisdiction:${jurisdiction}` };
+  }
 
-  if (!recoveryBodySatisfiesIntakePayment(bodyLower, intakeLower)) return false;
+  if (!recoveryBodySatisfiesIntakePayment(bodyLower, intakeLower)) {
+    return { ok: false, failedStep: "payment" };
+  }
 
-  if (countPaidProExecutionBlocks(t) !== 1) return false;
-  if (!/\b(agreement|consulting|services)\b/i.test(t)) return false;
-  return true;
+  if (countPaidProExecutionBlocks(t) !== 1) {
+    return { ok: false, failedStep: `execution_blocks:${countPaidProExecutionBlocks(t)}` };
+  }
+  if (!/\b(agreement|consulting|services)\b/i.test(t)) {
+    return { ok: false, failedStep: "agreement_keyword_tail" };
+  }
+  return { ok: true, failedStep: "" };
 }
 
 export function isDisplayablePaidProDegradedLocalRecovery(args: {

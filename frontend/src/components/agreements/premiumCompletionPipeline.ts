@@ -128,6 +128,7 @@ import {
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
 import { previewPostCheckoutRecoverySotCommit } from "./paidProPostCheckoutRecoveryAuthority";
+import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
@@ -3350,6 +3351,7 @@ async function runPremiumCompletionInner(
   if (premiumRenderSource === "rejected_paid_corpus") {
     const docTrimForSuppress = (winningPremiumBodyText || "").trim();
     const intakeForRecovery = rawForSoT || rawIntake;
+    const labeledTripartiteIntake = parseLabeledPartyBlocks(intakeForRecovery).length >= 3;
     const serverRecoveryCandidate = (
       pipelineNormalizedAuthoritativeText || docTrimForSuppress
     ).trim();
@@ -3395,7 +3397,76 @@ async function runPremiumCompletionInner(
         tierADiagnostic: tierADiag,
       };
     }
+    // Labeled tripartite intakes: never polish rejected server fragments — build from intake authority first.
+    if (labeledTripartiteIntake && rejectedPaidCorpusDueToClientGates) {
+      const intakeLocalRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
+        draft: outMerged,
+        rawIntake: intakeForRecovery,
+        intakeLower: intakeLowerGlobal,
+        recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+      });
+      const intakeRecoveryPreview = intakeLocalRecovery.ok
+        ? previewPostCheckoutRecoverySotCommit({
+            body: intakeLocalRecovery.body,
+            draft: outMerged,
+            intakeText: intakeForRecovery,
+            premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+          })
+        : null;
+      if (intakeLocalRecovery.ok && intakeRecoveryPreview?.eligible) {
+        const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+        if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+        logPremiumCompletionDebug({
+          stage: "premium_degraded_server_local_recovery",
+          recoveryCandidateEligible: true,
+          rejectedReason: undefined,
+          premiumRenderSource: recoverySource,
+          bodyLen: intakeLocalRecovery.body.length,
+          displayPlainLen: intakeRecoveryPreview.displayPlainLen,
+          lastClientGate: lastClientGateTrace,
+          note: "labeled_tripartite_intake_authority",
+        });
+        outMerged = stripClientPremiumArtifactBlocksFromDraft({
+          ...outMerged,
+          premium_full_document_text: intakeLocalRecovery.body,
+        });
+        return {
+          premiumDraft: outMerged,
+          premiumParties,
+          recipientCandidates,
+          winningPremiumBodyText: intakeLocalRecovery.body,
+          premiumRenderSource: recoverySource,
+          premiumReview,
+          premiumFinalizeAudit,
+          premiumReviewRoute,
+          staleIntakeOrGeneration: false,
+          agreementGenerationId: input.agreementGenerationId,
+          premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+          founderDetailsGateMessage: null,
+          proIntentGateMessage: null,
+          serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+          premiumDegradedServerRecoverable: true,
+          premiumDegradedServerLocalRecovery: true,
+          tierADiagnostic: tierADiag,
+        };
+      }
+      if (intakeLocalRecovery.ok && intakeRecoveryPreview && !intakeRecoveryPreview.eligible) {
+        logPremiumCompletionDebug({
+          stage: "premium_degraded_server_local_recovery",
+          recoveryCandidateEligible: false,
+          rejectedReason: intakeRecoveryPreview.blockReason,
+          premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+          bodyLen: intakeLocalRecovery.body.length,
+          displayPlainLen: intakeRecoveryPreview.displayPlainLen,
+          lastClientGate: lastClientGateTrace,
+          note: "labeled_tripartite_intake_authority_preview_blocked",
+        });
+      }
+    }
+    const skipServerDegradedRecovery =
+      labeledTripartiteIntake && rejectedPaidCorpusDueToClientGates;
     if (
+      !skipServerDegradedRecovery &&
       serverRecoveryCandidate.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
       meetsPaidProDegradedRecoveryDisplayRequirements(serverRecoveryCandidate, intakeForRecovery)
     ) {

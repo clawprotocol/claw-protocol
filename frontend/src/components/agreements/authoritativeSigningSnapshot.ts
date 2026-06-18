@@ -6,6 +6,7 @@
  * consume only that snapshot until the user explicitly chooses signing preparation.
  */
 
+import type { PartyIdentityMetadataSlot } from "./canonicalPartyIdentityModel";
 import type { CanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
 import type { CanonicalSignerManifest } from "./guidedDealCompletion/guidedReviewSigningContinuity";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
@@ -48,6 +49,10 @@ export type AuthoritativeSigningSnapshotRecipientMetadata = {
   partyAddresses: readonly string[];
   /** Full legal entity names for party slots 3+ (and optional override for slots 1–2). */
   partyLegalNames?: readonly string[];
+  /** Stable party ids keyed by sourceSlot — authoritative for N-party flows. */
+  partyIds?: readonly string[];
+  partyMetadata?: readonly PartyIdentityMetadataSlot[];
+  /** Legacy derived slots 0–1 — not authoritative for N-party flows. */
   recipient1Name: string;
   recipient2Name: string;
   recipient1Email: string;

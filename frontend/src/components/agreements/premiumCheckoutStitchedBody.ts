@@ -2,6 +2,7 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { PREMIUM_JURISDICTION_PLACEHOLDER, resolveFinalGoverningLaw } from "./premiumDraftTransform";
 import { buildCommercialFactGraph } from "./proOperationalSynthesis";
 import type { LabeledPartyBlock } from "./labeledPartyBlockParse";
+import { tripartiteExecutionBlockHeading } from "./labeledPartyBlockParse";
 
 const BANNED_PROSE_SUBSTR = [
   "quality gate",
@@ -210,9 +211,47 @@ function buildAiWorkflowServicesPremiumBody(
   return body.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function tripartiteIntakeField(rawIntake: string, label: string): string {
+  const m = rawIntake.match(new RegExp(`\\b${label}\\s*[:\\-]\\s*([^\\n]+)`, "i"));
+  return m?.[1]?.replace(/\s+/g, " ").trim() ?? "";
+}
+
+function tripartiteTitleFromIntake(draft: ParsedDraftShape, rawIntake: string): string {
+  const createLine = rawIntake.match(/^\s*Create\s+(?:a\s+)?(.+?)\.?\s*$/im);
+  const fromCreate = createLine?.[1]?.replace(/\s+/g, " ").trim();
+  if (fromCreate && fromCreate.length >= 12) return fromCreate;
+  return (
+    (draft.title || "").trim() ||
+    suggestSoftwareDevTitle(draft, rawIntake) ||
+    "TRIPARTITE SOFTWARE DEVELOPMENT AND REVENUE SHARING AGREEMENT"
+  );
+}
+
+function buildTripartiteWitnessExecutionBlocks(labeledBlocks: readonly LabeledPartyBlock[]): string[] {
+  return labeledBlocks.map((block, index) => {
+    const heading = tripartiteExecutionBlockHeading(index);
+    const lines = [
+      `${heading}:`,
+      block.legalEntity,
+      "By: ______________________________",
+      `Name: ${block.signerName || "______________________________"}`,
+      `Title: ${block.signerTitle || "______________________________"}`,
+      `Email for Notice: ${block.signerEmail || "______________________________"}`,
+    ];
+    if (block.address) {
+      lines.push(`Address for Notice: ${block.address}`);
+    }
+    lines.push("Date: ______________________________");
+    return lines.join("\n");
+  });
+}
+
 function suggestSoftwareDevTitle(d: ParsedDraftShape, raw: string): string {
   const low = `${raw} ${d.title || ""}`.toLowerCase();
   if (/\b(?:tripartite|tri[-\s]?party|three[-\s]?party)\b/.test(low)) {
+    if (/\b(?:ai|analytics|platform)\b/.test(low)) {
+      return "Tripartite AI Platform Development, Analytics, and Revenue Sharing Agreement";
+    }
     return "Tripartite Software Development and Revenue Sharing Agreement";
   }
   if (/\b(software|developer|development|saas|app|api|code|repository)\b/.test(low)) {
@@ -232,50 +271,54 @@ export function buildTripartitePremiumPostCheckoutStitchedBody(
   labeledBlocks: readonly LabeledPartyBlock[],
 ): string {
   const parties = labeledBlocks.map((b) => b.legalEntity).filter(Boolean);
-  const title =
-    (draft.title || "").trim() ||
-    suggestSoftwareDevTitle(draft, rawIntake) ||
-    "TRIPARTITE SOFTWARE DEVELOPMENT AND REVENUE SHARING AGREEMENT";
+  const title = tripartiteTitleFromIntake(draft, rawIntake);
   const purpose =
+    tripartiteIntakeField(rawIntake, "Purpose") ||
     (draft.purpose || "").trim() ||
     "development and maintenance of a custom freight optimization platform, including analytics dashboard work.";
   const pay =
+    tripartiteIntakeField(rawIntake, "Payment") ||
     (draft.payment_terms || "").trim() ||
     "$120,000 in four milestone payments plus $3,000 per month maintenance and analytics services.";
-  const term = (draft.duration || "").trim() || "twenty-four (24) months (24 months)";
-  const jResolved = resolveFinalGoverningLaw(rawIntake, draft, (draft.jurisdiction || "").trim() || "Oklahoma");
-  const lawGoverning = /\boklahoma\b/i.test(jResolved)
-    ? "the laws of the State of Oklahoma, without regard to its conflict of law rules"
-    : `the laws of ${jResolved}, without regard to its conflict of law rules`;
+  const term =
+    tripartiteIntakeField(rawIntake, "Term") ||
+    (draft.duration || "").trim() ||
+    "twenty-four (24) months (24 months)";
+  const jResolved = resolveFinalGoverningLaw(rawIntake, draft, (draft.jurisdiction || "").trim() || "Texas");
+  const lawGoverning = /\btexas\b/i.test(jResolved)
+    ? "the laws of the State of Texas, without regard to its conflict of law rules"
+    : /\boklahoma\b/i.test(jResolved)
+      ? "the laws of the State of Oklahoma, without regard to its conflict of law rules"
+      : `the laws of ${jResolved}, without regard to its conflict of law rules`;
   const revenueMatch = rawIntake.match(/\brevenue\s+sharing\s*[:\-]\s*([^\n.]+)/i);
-  const revenueLine =
-    revenueMatch?.[1]?.trim() ||
-    "Red Mesa Logistics LLC 50%, Harbor Peak Automation LLC 30%, Blue Canyon Analytics LLC 20%";
+  const revenueLine = revenueMatch?.[1]?.trim() || parties.join(" revenue share as stated in the intake.");
+  const exclusivityLine =
+    rawIntake.match(/(twenty-four\s*\(\s*24\s*\)\s*months?\s+exclusivity[^.\n]*)/i)?.[1]?.trim() ||
+    (/\bexclusiv/i.test(rawIntake) ? "The exclusivity period stated in the intake applies to platform features." : "");
+  const assignmentLine =
+    rawIntake.match(/([Nn]either\s+party\s+may\s+assign[^.\n]+)/)?.[1]?.trim() ||
+    (/\bassign/i.test(rawIntake)
+      ? "No Party may assign this Agreement without the prior written consent of the other Parties."
+      : "");
 
-  const signatureBlocks = labeledBlocks.map((block, index) => {
-    const lines = [
-      `PARTY ${index + 1}: ${block.legalEntity}`,
-      "",
-      "By: ______________________________  Date: __________",
-      `Name: ${block.signerName || "______________________________"}    Title: ${block.signerTitle || "__________"}    Email: ${block.signerEmail || "__________"}`,
-    ];
-    if (block.address) {
-      lines.push(`Address for Notice: ${block.address}`);
-    }
-    return lines.join("\n");
-  });
+  const signatureBlocks = buildTripartiteWitnessExecutionBlocks(labeledBlocks);
 
   const partyList = parties.join(", ");
   const blocks = [
     title.toUpperCase(),
     "",
-    `This Tripartite Software Development and Revenue Sharing Agreement (this "Agreement") is entered into among ${partyList} (each a "Party" and collectively the "Parties").`,
+    `This ${title} (this "Agreement") is entered into among ${partyList} (each a "Party" and collectively the "Parties").`,
     "",
     "1. PURPOSE; SCOPE OF SERVICES",
     purpose,
     "",
     "2. TERM",
     `The initial term of this Agreement is ${term}, unless extended or terminated as provided herein.`,
+  ];
+  if (exclusivityLine) {
+    blocks.push("", "2.1 EXCLUSIVITY", exclusivityLine);
+  }
+  blocks.push(
     "",
     "3. PAYMENT; MILESTONES; MAINTENANCE",
     pay,
@@ -285,35 +328,41 @@ export function buildTripartitePremiumPostCheckoutStitchedBody(
     "",
     "5. CONFIDENTIALITY",
     "Each Party will keep confidential information received from the other Parties confidential and will use it only to perform this Agreement, disclosing it only as required by law or with prior written consent.",
+  );
+  if (assignmentLine) {
+    blocks.push("", "6. ASSIGNMENT", assignmentLine);
+  }
+  const nextSection = assignmentLine ? 7 : 6;
+  blocks.push(
     "",
-    "6. INTELLECTUAL PROPERTY; DELIVERABLES",
+    `${nextSection}. INTELLECTUAL PROPERTY; DELIVERABLES`,
     "Software deliverables, documentation, and work product created under this Agreement will be owned and licensed as the Parties describe in writing. Pre-existing tools and background technology remain with the contributing Party, subject to licenses needed to operate the platform.",
     "",
-    "7. WARRANTIES; COMPLIANCE",
+    `${nextSection + 1}. WARRANTIES; COMPLIANCE`,
     "Each Party represents that it has authority to enter into this Agreement. The Parties will comply with applicable law in performing their respective obligations.",
     "",
-    "8. LIMITATION OF LIABILITY",
+    `${nextSection + 2}. LIMITATION OF LIABILITY`,
     "Except for breaches of confidentiality, fraud, or willful misconduct, neither Party is liable for indirect or consequential damages. Direct damages are limited to amounts paid under this Agreement in the twelve (12) months preceding the claim, except where a higher cap is required by law.",
     "",
-    "9. NOTICES",
+    `${nextSection + 3}. NOTICES`,
     "Notices may be delivered by email to the addresses the Parties designate in the signature blocks or in a written notice of address change.",
     "",
-    "10. MISCELLANEOUS",
+    `${nextSection + 4}. MISCELLANEOUS`,
     "This Agreement constitutes the entire understanding among the Parties regarding the subject matter. Amendments must be in writing and signed by all Parties. If any provision is unenforceable, the remainder stays in effect.",
     "",
-    "11. GOVERNING LAW",
-    `This Agreement is governed by ${lawGoverning}.`,
+    `${nextSection + 5}. GOVERNING LAW`,
+    `This Agreement shall be governed by and construed under ${lawGoverning}.`,
     "",
-    "12. ELECTRONIC SIGNATURES",
+    `${nextSection + 6}. ELECTRONIC SIGNATURES`,
     "The Parties may execute this Agreement using electronic signatures that satisfy applicable law.",
     "",
-    "IN WITNESS WHEREOF, the Parties have executed this Agreement.",
+    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
     "",
     ...signatureBlocks,
-  ];
+  );
   let out = blocks.join("\n\n").trim();
   while (out.length < 4_200) {
-    out += `\n\nOperational Detail. The Parties will cooperate in good faith on platform development milestones, analytics dashboard delivery, maintenance releases, and revenue reporting cadence consistent with the intake.`;
+    out += `\n\nOperational Detail. The Parties will cooperate in good faith on platform development milestones, analytics dashboard delivery, maintenance releases, exclusivity commitments, and revenue reporting cadence consistent with the intake.`;
   }
   return out;
 }

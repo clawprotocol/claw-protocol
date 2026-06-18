@@ -4,6 +4,7 @@
  */
 
 import { manifestToCanonicalPartyIdentities } from "./guidedDealCompletion/canonicalFinalPartyManifest";
+import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion/signatureRegion";
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import {
@@ -349,7 +350,22 @@ export function fingerprintSignerMetadataState(
   meta: AuthoritativeSigningSnapshotRecipientMetadata,
 ): string {
   const parties = recipientMetadataToAuthorityParties(meta);
-  return hashPaidProSignerMetadataAuthority(parties);
+  const authorityHash = hashPaidProSignerMetadataAuthority(parties);
+  const legacyEnvelope = fingerprintAgreementBody(
+    JSON.stringify({
+      recipient1Name: meta.recipient1Name.trim(),
+      recipient2Name: meta.recipient2Name.trim(),
+      recipient1Email: meta.recipient1Email.trim(),
+      recipient2Email: meta.recipient2Email.trim(),
+      partySignerNames: [...meta.partySignerNames],
+      partySignerTitles: [...meta.partySignerTitles],
+      partyAddresses: [...(meta.partyAddresses ?? [])],
+      partyLegalNames: [...(meta.partyLegalNames ?? [])],
+      partyIds: [...(meta.partyIds ?? [])],
+      extraPartyReviewEmails: [...meta.extraPartyReviewEmails],
+    }),
+  );
+  return `${authorityHash}:${legacyEnvelope}`;
 }
 
 /** Drift fingerprint from live UI state (all five signer authority fields). */

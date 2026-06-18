@@ -1001,6 +1001,18 @@ function trimGoverningLawSuffix(s: string): string {
  * that downstream defaults / family shells must never overwrite.
  */
 function extractGoverningLawWithConfidence(lower: string, text: string): { value: string; confidence: number } {
+  // "State of Texas" / "governed by and construed under the laws of the State of X"
+  const stateOfGoverning = text.match(
+    /\bgoverned\s+by\s+and\s+construed\s+under\s+the\s+laws?\s+of\s+(?:the\s+)?State\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/i,
+  );
+  if (stateOfGoverning) {
+    return { value: normalizeIntakeFieldText(`State of ${stateOfGoverning[1]}`, 120), confidence: 0.95 };
+  }
+  const stateOfBare = text.match(/\bState\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/);
+  if (stateOfBare && /\b(?:govern|law|jurisdiction|construed)\b/i.test(lower)) {
+    return { value: normalizeIntakeFieldText(`State of ${stateOfBare[1]}`, 120), confidence: 0.92 };
+  }
+
   // Labeled forms: "Governing law: X", "governed by X", "laws of X", "jurisdiction: X", "venue in X".
   const gl = text.match(
     /\b(?:govern(?:ed|ing)\s+(?:by|law)|laws?\s+of|jurisdiction|venue\s+in)\s*[:\s]+([^\n.]{2,120})/i,

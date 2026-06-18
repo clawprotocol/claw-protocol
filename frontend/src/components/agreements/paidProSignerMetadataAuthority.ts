@@ -23,10 +23,13 @@ import { stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 import { resolveAcceptedCorpusRoleLabelForLegalName } from "./paidProAcceptedCorpusPartyRoles";
 import { labeledPartyBlocksForSignerMetadata } from "./labeledPartyBlockParse";
+import {
+  fromRecipientMetadata,
+  normalizePartyIdentities,
+  toPaidProSignerMetadataParties,
+  toRecipientMetadata,
+} from "./canonicalPartyIdentityModel";
 
-function normSignerField(value: string | null | undefined): string {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
-}
 
 /** Slot-indexed signer metadata from labeled Party N intake blocks. */
 export function authorityPartiesFromLabeledPartyIntake(
@@ -47,24 +50,12 @@ export function mergeLabeledPartyAuthorityIntoParties(
   parties: readonly PaidProSignerMetadataParty[],
   intakeText?: string | null,
 ): PaidProSignerMetadataParty[] {
-  const labeled = authorityPartiesFromLabeledPartyIntake(intakeText);
-  if (labeled.length < 2) return [...parties];
-  const count = Math.max(parties.length, labeled.length);
-  const out: PaidProSignerMetadataParty[] = [];
-  for (let i = 0; i < count; i++) {
-    const base = parties[i];
-    const auth = labeled[i];
-    if (!auth && !base) continue;
-    out.push({
-      partyIndex: i,
-      partyLegalName: normSignerField(base?.partyLegalName) || normSignerField(auth?.partyLegalName),
-      signerEmail: normSignerField(base?.signerEmail) || normSignerField(auth?.signerEmail),
-      signerName: normSignerField(base?.signerName) || normSignerField(auth?.signerName),
-      signerTitle: normSignerField(base?.signerTitle) || normSignerField(auth?.signerTitle),
-      partyAddress: normSignerField(base?.partyAddress) || normSignerField(auth?.partyAddress),
-    });
-  }
-  return out;
+  const normalized = normalizePartyIdentities({
+    intakeText,
+    authorityParties: parties,
+  });
+  if (normalized.length < 2 && parties.length >= 2) return [...parties];
+  return toPaidProSignerMetadataParties(normalized) as PaidProSignerMetadataParty[];
 }
 
 export function labeledPartyIntakeHasHydratableExecutionFields(intakeText?: string | null): boolean {
@@ -337,57 +328,17 @@ export function buildLivePaidProSignerMetadataAuthority(
 export function recipientMetadataToAuthorityParties(
   meta: AuthoritativeSigningSnapshotRecipientMetadata,
 ): PaidProSignerMetadataParty[] {
-  const addresses = meta.partyAddresses ?? [];
-  const count = Math.max(
-    meta.partySignerNames.length,
-    meta.partySignerTitles.length,
-    addresses.length,
-    meta.partyLegalNames?.length ?? 0,
-    2,
-  );
-  const parties: PaidProSignerMetadataParty[] = [];
-  for (let i = 0; i < count; i++) {
-    const legalFromManifest = norm(meta.partyLegalNames?.[i] ?? "");
-    parties.push({
-      partyIndex: i,
-      partyLegalName:
-        legalFromManifest ||
-        norm(i === 0 ? meta.recipient1Name : i === 1 ? meta.recipient2Name : ""),
-      signerEmail: norm(
-        i === 0
-          ? meta.recipient1Email
-          : i === 1
-            ? meta.recipient2Email
-            : meta.extraPartyReviewEmails[i - 2],
-      ),
-      signerName: norm(meta.partySignerNames[i]),
-      signerTitle: norm(meta.partySignerTitles[i]),
-      partyAddress: norm(addresses[i]),
-    });
-  }
-  return parties;
+  return toPaidProSignerMetadataParties(fromRecipientMetadata(meta)) as PaidProSignerMetadataParty[];
 }
 
 export function authorityPartiesToRecipientMetadata(
   parties: readonly PaidProSignerMetadataParty[],
   extraEmails: readonly string[] = [],
 ): AuthoritativeSigningSnapshotRecipientMetadata {
-  const p0 = parties[0];
-  const p1 = parties[1];
-  const partySignerNames = parties.map((p) => p.signerName);
-  const partySignerTitles = parties.map((p) => p.signerTitle);
-  const partyAddresses = parties.map((p) => p.partyAddress);
-  return {
-    partySignerNames,
-    partySignerTitles,
-    partyAddresses,
-    partyLegalNames: parties.map((p) => p.partyLegalName),
-    recipient1Name: p0?.partyLegalName ?? "",
-    recipient2Name: p1?.partyLegalName ?? "",
-    recipient1Email: p0?.signerEmail ?? "",
-    recipient2Email: p1?.signerEmail ?? "",
-    extraPartyReviewEmails: [...extraEmails],
-  };
+  return toRecipientMetadata(
+    normalizePartyIdentities({ authorityParties: parties }),
+    extraEmails,
+  );
 }
 
 export function buildSnapshotPaidProSignerMetadataAuthority(): PaidProSignerMetadataAuthority | null {
