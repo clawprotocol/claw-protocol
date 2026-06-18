@@ -3,9 +3,10 @@ import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import {
+  assessStarterComplexityGate,
   assessStarterMultiPartyProRequirement,
   buildStarterProCheckoutPendingDraft,
-  hasRevenueShareAcrossThreePlusNamedEntities,
+  detectRevenueShareLanguage,
 } from "./starterMultiPartyProGate";
 import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteRegression.test";
 
@@ -17,19 +18,30 @@ California law governs.`;
 
 const EMPTY_PAYMENT = { amount: null, cadence: null, valid: false };
 
-describe("starterMultiPartyProGate", () => {
+describe("starterComplexityGate", () => {
   it("gates Test371 quadrpartite labeled intake", () => {
-    const gate = assessStarterMultiPartyProRequirement(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE);
+    const gate = assessStarterComplexityGate(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE);
     expect(gate.required).toBe(true);
     expect(gate.parties).toHaveLength(4);
     expect(gate.coordinatorName).toMatch(/Alex Morgan/i);
     expect(gate.keyTerms.length).toBeGreaterThan(0);
+    expect(gate.hasRevenueShare).toBe(true);
+    expect(gate.hasCoordinator).toBe(true);
+    expect(gate.reasons).toContain("three_plus_legal_parties");
+  });
+
+  it("alias assessStarterMultiPartyProRequirement matches assessStarterComplexityGate", () => {
+    expect(assessStarterMultiPartyProRequirement(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE).required).toBe(true);
   });
 
   it("does not gate ordinary two-party commercial intake", () => {
-    const gate = assessStarterMultiPartyProRequirement(TWO_PARTY_INTAKE);
+    const gate = assessStarterComplexityGate(TWO_PARTY_INTAKE);
     expect(gate.required).toBe(false);
     expect(gate.parties).toHaveLength(0);
+  });
+
+  it("detects revenue share language in Test371 intake", () => {
+    expect(detectRevenueShareLanguage(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE)).toBe(true);
   });
 
   it("Pro checkout pending draft preserves four labeled parties without corrupted parse names", () => {
@@ -40,20 +52,14 @@ describe("starterMultiPartyProGate", () => {
     expect(pending.parties.map((p) => p.name)).not.toContain("licensing revenue will be shared");
   });
 
-  it("free preview from gated intake path must not surface corrupted party strings", () => {
+  it("free preview from Pro pending path must not surface corrupted party strings", () => {
     const pending = buildStarterProCheckoutPendingDraft(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE);
     const preview = buildAgreementPreviewText(pending, { starterPreview: true });
     expect(preview).not.toMatch(/SOFTWARE PLATFORM AGREEMENT/);
     expect(preview).not.toMatch(/licensing revenue will be shared/i);
   });
 
-  it("detects revenue share across three plus named entities", () => {
-    const parties = ["Alpha LLC", "Beta LLC", "Gamma LLC"];
-    const intake = `Revenue sharing: Alpha LLC 40%, Beta LLC 35%, Gamma LLC 25%.`;
-    expect(hasRevenueShareAcrossThreePlusNamedEntities(intake, parties)).toBe(true);
-  });
-
-  it("two-party labeled blocks do not gate when no coordinator or revenue-share rule fires", () => {
+  it("two-party labeled blocks do not gate when no complexity signals", () => {
     const intake = `Party 1
 Legal Entity: Acme LLC
 Signer Name: Jane Doe
@@ -63,7 +69,7 @@ Legal Entity: Beta Corp
 Signer Name: John Smith
 
 Scope: software support. Texas law governs.`;
-    const gate = assessStarterMultiPartyProRequirement(intake);
+    const gate = assessStarterComplexityGate(intake);
     expect(gate.required).toBe(false);
   });
 
@@ -80,13 +86,40 @@ Coordinator
 Name: Pat Lee
 
 Scope: joint venture coordination.`;
-    const gate = assessStarterMultiPartyProRequirement(intake);
+    const gate = assessStarterComplexityGate(intake);
     expect(gate.required).toBe(true);
-    expect(gate.reasons).toContain("coordinator_with_multiple_parties");
+    expect(gate.reasons).toContain("coordinator_or_non_party_actor");
+  });
+
+  it("gates review workflow language", () => {
+    const intake = `Agreement between Acme LLC and Beta Corp.
+Both parties will use a review link and approval workflow before signing.`;
+    const gate = assessStarterComplexityGate(intake);
+    expect(gate.required).toBe(true);
+    expect(gate.reasons).toContain("review_approval_workflow");
+  });
+
+  it("gates joint venture structure with multiple parties", () => {
+    const intake = `Party 1
+Legal Entity: Alpha LLC
+Signer Name: Alex
+
+Party 2
+Legal Entity: Beta LLC
+Signer Name: Blake
+
+Party 3
+Legal Entity: Gamma LLC
+Signer Name: Casey
+
+Joint venture implementation partnership with multi-vendor fees.`;
+    const gate = assessStarterComplexityGate(intake);
+    expect(gate.required).toBe(true);
+    expect(gate.reasons).toContain("three_plus_legal_parties");
   });
 });
 
-describe("starterMultiPartyProGate two-party regression", () => {
+describe("starterComplexityGate two-party regression", () => {
   it("runIntakeDefaultsAndRoles on two-party intake still produces two parties", () => {
     const draft = runIntakeDefaultsAndRoles(
       {
@@ -104,7 +137,7 @@ describe("starterMultiPartyProGate two-party regression", () => {
       true,
       defaultIntakePartyRoleLabels(),
     );
-    expect(assessStarterMultiPartyProRequirement(TWO_PARTY_INTAKE).required).toBe(false);
+    expect(assessStarterComplexityGate(TWO_PARTY_INTAKE).required).toBe(false);
     expect(draft.parties.length).toBeGreaterThanOrEqual(2);
     expect(draft.parties.length).toBeLessThanOrEqual(2);
   });

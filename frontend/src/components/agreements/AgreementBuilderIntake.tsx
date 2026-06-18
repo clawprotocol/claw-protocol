@@ -98,9 +98,11 @@ import {
 import { simplifyParsedDraftForInstantPath } from "./agreementComplexityGate";
 import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies";
 import {
-  assessStarterMultiPartyProRequirement,
+  assessStarterComplexityGate,
   buildStarterProCheckoutPendingDraft,
-  type StarterMultiPartyProGateAssessment,
+  emptyStarterCheckoutPendingShell,
+  logStarterComplexityGateApplied,
+  type StarterComplexityGateAssessment,
 } from "./starterMultiPartyProGate";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
 import { looksLikeRefinementIntent } from "./reviewRefineIntent";
@@ -3212,7 +3214,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Parsed draft held until user picks simplified vs. Pro for advanced instrument intakes. */
   const [complexityPendingParsed, setComplexityPendingParsed] = useState<ParsedDraftShape | null>(null);
   const [starterMultiPartyProGate, setStarterMultiPartyProGate] =
-    useState<StarterMultiPartyProGateAssessment | null>(null);
+    useState<StarterComplexityGateAssessment | null>(null);
   const complexityPendingParsedRef = useRef<ParsedDraftShape | null>(null);
   const complexityResumeHydratedRef = useRef(false);
   const [advancedFullDraftPaywallOpen, setAdvancedFullDraftPaywallOpen] = useState(false);
@@ -9418,18 +9420,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const commitStarterMultiPartyProGate = React.useCallback(
     (rawIntake: string): boolean => {
-      const assessment = assessStarterMultiPartyProRequirement(rawIntake);
+      const assessment = assessStarterComplexityGate(rawIntake);
       if (!assessment.required) return false;
       writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
       writeOriginalUserIntakeRawIfRicher(rawIntake);
-      const pending = buildStarterProCheckoutPendingDraft(rawIntake);
       stashCreateComplexityResume({
         rawIntake,
-        pending,
+        pending: emptyStarterCheckoutPendingShell(),
         awaitingProCheckout: false,
         resume_kind: "multi_party_pro_gate",
+        originalUserIntakeRaw: rawIntake,
       });
-      setComplexityPendingParsed(pending);
+      setComplexityPendingParsed(null);
+      complexityPendingParsedRef.current = null;
       setStarterMultiPartyProGate(assessment);
       setReviewShowsSimplifiedAdvancedDraft(false);
       setDraft(null);
@@ -9443,6 +9446,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setPreviewPaneRevealed(true);
       setMobileWorkspacePane("preview");
       setLoading(false);
+      logStarterComplexityGateApplied();
       logFreeReviewSurfaceResolved({
         source: "multi_party_pro_gate",
         displayPhase: "review",
@@ -9551,6 +9555,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ) {
       return false;
     }
+    if (commitStarterMultiPartyProGate(rawIntake)) {
+      await finalizeIntakeCapture();
+      return false;
+    }
     console.debug("[handoff-start]", {
       source: opts?.handoffSource ?? "runProductionLocalDraftParse",
       createUiStage,
@@ -9561,9 +9569,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     beginStarterDraftGeneration();
     await finalizeIntakeCapture();
     try {
-      if (commitStarterMultiPartyProGate(rawIntake)) {
-        return false;
-      }
       let parsed = await parseDraft(rawIntake);
       writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
       writeOriginalUserIntakeRawIfRicher(rawIntake);
@@ -10295,12 +10300,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [beginAdvancedFullDraftCheckout]);
 
   const handleStarterMultiPartyProGateBuildPro = React.useCallback(() => {
-    const pending = complexityPendingParsedRef.current ?? complexityPendingParsed;
+    const resume = readCreateComplexityResume();
+    const raw =
+      resume?.originalUserIntakeRaw?.trim() ||
+      resume?.rawIntake?.trim() ||
+      intakeCombined.trim() ||
+      resolveRawIntakeForPremiumCheckout(null);
+    if (!raw) return;
+    const pending = buildStarterProCheckoutPendingDraft(raw);
+    setComplexityPendingParsed(pending);
+    complexityPendingParsedRef.current = pending;
+    stashCreateComplexityResume({
+      rawIntake: raw,
+      pending,
+      awaitingProCheckout: false,
+      resume_kind: "multi_party_pro_gate",
+      originalUserIntakeRaw: raw,
+    });
     beginAdvancedFullDraftCheckout(pending, {
       checkoutSource: "multi_party_pro_gate",
       skipProCardScroll: true,
     });
-  }, [complexityPendingParsed, beginAdvancedFullDraftCheckout]);
+  }, [intakeCombined, beginAdvancedFullDraftCheckout, resolveRawIntakeForPremiumCheckout]);
 
   const beginAdvancedFullDraftBilling = React.useCallback(() => {
     const resumeSnap = readCreateComplexityResume();
@@ -11108,7 +11129,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     try {
       finalTranscriptRef.current = intakeCombined.trim();
       const rawIntake = intakeCombined.trim();
-      if (createProductionTwoPane && commitStarterMultiPartyProGate(rawIntake)) {
+      if (
+        (createProductionTwoPane || (simpleProductFlow && liveWorkspaceTwoPane)) &&
+        commitStarterMultiPartyProGate(rawIntake)
+      ) {
+        await finalizeIntakeCapture();
         return;
       }
       let parsed = await parseDraft(rawIntake);
@@ -14884,6 +14909,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const guidedFinalPartyManifest = useMemo(() => {
+    if (createFlowPhase === "multi_party_pro_required" || starterMultiPartyProGate) {
+      return { parties: [] };
+    }
     const signingSnapshot = getAuthoritativeSigningSnapshot();
     if (signingSnapshot) {
       return signingSnapshot.partyManifest;
@@ -14923,6 +14951,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft?.parties,
     effectivePremiumSendMode,
     recipientsDeferred,
+    createFlowPhase,
+    starterMultiPartyProGate,
   ]);
 
   useEffect(() => {
@@ -29893,7 +29923,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                       <div className="h-24 w-full rounded-lg border border-slate-800/60 bg-[#0d1424]/80" />
                                     </div>
                                   </div>
-                                ) : useStarterDocumentPaperSurface ? (
+                                ) : useStarterDocumentPaperSurface && !multiPartyProGateActive ? (
                                   <StarterDraftDocumentSurface
                                     editorRef={agreementPreviewEditorRef}
                                     id="claw-agreement-preview-editor"

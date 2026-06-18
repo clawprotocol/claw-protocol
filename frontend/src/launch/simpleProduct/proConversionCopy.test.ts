@@ -49,10 +49,10 @@ describe("proConversionCopy", () => {
     expect(PRO_CTA_KEEP_FREE_DRAFT).toBe("Keep free draft");
     expect(PRO_CTA_EDIT_FREE_DRAFT).toBe("Edit free draft");
     expect(PRO_UPGRADE_CARD_HEADING).toMatch(/draft to deal/i);
-    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Copy your draft text");
+    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Simple 1–2 party draft");
     expect(PRO_UPGRADE_FREE_BULLETS.join(" ").toLowerCase()).not.toMatch(/download/);
-    expect(PRO_UPGRADE_FREE_COLUMN_HELPER).toMatch(/proof records/i);
-    expect(PRO_UPGRADE_PRO_BULLETS.length).toBeGreaterThan(0);
+    expect(PRO_UPGRADE_FREE_COLUMN_HELPER).toMatch(/simple 1–2 party drafts/i);
+    expect(PRO_UPGRADE_PRO_BULLETS).toContain("Multi-party and advanced agreements");
     expect(CHECKOUT_TITLE).toBe("Continue with Pro");
     expect(CHECKOUT_SUBTITLE).toMatch(/review and edit it before anything is sent or signed/i);
     expect(CHECKOUT_CTA).toBe("Continue with Pro");

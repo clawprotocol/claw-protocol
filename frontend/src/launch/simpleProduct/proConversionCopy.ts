@@ -28,14 +28,17 @@ export const PRO_UPGRADE_CARD_BODY =
 
 export const PRO_UPGRADE_FREE_COLUMN_LABEL = "Free";
 export const PRO_UPGRADE_FREE_BULLETS: readonly string[] = [
-  "Review the draft",
-  "Edit wording",
-  "Copy your draft text",
-  "Nothing is shared automatically",
+  "Simple 1–2 party draft",
+  "Copy/edit wording",
+  "No review workflow",
+  "No signature/proof record workflow",
 ] as const;
 
-export const PRO_UPGRADE_FREE_COLUMN_HELPER =
-  "Free keeps drafting lightweight. Pro unlocks collaboration, signatures, and proof records.";
+export const PRO_UPGRADE_FREE_COLUMN_HELPER = "Free is for simple 1–2 party drafts.";
+
+export const FREE_PRO_TIER_FREE_SUMMARY = PRO_UPGRADE_FREE_COLUMN_HELPER;
+export const FREE_PRO_TIER_PRO_SUMMARY =
+  "Pro is for agreements with multiple parties, revenue sharing, review workflows, signer routing, or proof records.";
 
 export const FREE_DRAFT_COPY_TEXT_LABEL = "Copy text";
 export const FREE_DRAFT_COPY_TEXT_COPIED = "Copied";
@@ -43,11 +46,10 @@ export const FREE_DRAFT_COPY_TEXT_FAILED = "Couldn't copy — try selecting text
 
 export const PRO_UPGRADE_PRO_COLUMN_LABEL = "Pro";
 export const PRO_UPGRADE_PRO_BULLETS: readonly string[] = [
-  "Send a private review link",
-  "See requested changes",
-  "Prepare signature fields",
-  "Collect signatures",
-  "Save the proof record",
+  "Multi-party and advanced agreements",
+  "Review links and requested changes",
+  "Signer setup and signature links",
+  "Completed agreement and proof record",
 ] as const;
 
 export const PRO_UPGRADE_BRIDGE_LINE =
@@ -60,8 +62,25 @@ export const PRO_UPGRADE_CAN_HELP_HEADING = "LawDog Pro can also help with";
 export const PRO_UPGRADE_REASSURANCE = "You review everything before anything is shared.";
 
 export const CHECKOUT_TITLE = "Continue with Pro";
+export const CHECKOUT_COMPLEX_AGREEMENT_TITLE = "Build the full Pro agreement";
 export const CHECKOUT_SUBTITLE =
   "Upgrade this draft into a Pro agreement. You'll review and edit it before anything is sent or signed.";
+export const CHECKOUT_COMPLEX_AGREEMENT_SUBTITLE =
+  "Your prompt includes advanced deal structure. Pro preserves the full agreement logic — all parties, signer roles, revenue-share terms, review workflow, signature blocks, and proof records.";
+
+export const CHECKOUT_COMPLEX_AGREEMENT_BULLETS: readonly string[] = [
+  "Preserve all legal parties and signer roles",
+  "Support revenue-share and multi-provider payment terms",
+  "Prepare review and signature workflows",
+  "Generate clean signature blocks and proof records",
+  "Approve every step before anything is sent or signed",
+] as const;
+
+export const CHECKOUT_FREE_PRO_EXPLAINER_LINES: readonly string[] = [
+  FREE_PRO_TIER_FREE_SUMMARY,
+  FREE_PRO_TIER_PRO_SUMMARY,
+  "Nothing is sent or signed until you approve it.",
+] as const;
 
 export const CHECKOUT_PRO_HELPS_INTRO = "LawDog Pro helps:";
 export const CHECKOUT_PRO_HELPS_BULLETS: readonly string[] = [

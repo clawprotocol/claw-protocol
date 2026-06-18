@@ -5,7 +5,13 @@ import { trackAgreementFunnelEvent } from "../../tracking/agreementFunnelAnalyti
 import { CHECKOUT_STARTER_UPGRADE_SUBTITLE, resolveCheckoutFlowProgress } from "./checkoutFlowProgress";
 import { CHECKOUT_LEGAL_DISCLAIMER } from "./checkoutTrustCopy";
 import { CheckoutTrustPanel } from "./CheckoutTrustPanel";
-import { CHECKOUT_CTA, CHECKOUT_FOOTER, CHECKOUT_TITLE } from "./proConversionCopy";
+import {
+  CHECKOUT_CTA,
+  CHECKOUT_COMPLEX_AGREEMENT_SUBTITLE,
+  CHECKOUT_COMPLEX_AGREEMENT_TITLE,
+  CHECKOUT_FOOTER,
+  CHECKOUT_TITLE,
+} from "./proConversionCopy";
 import {
   CHECKOUT_CARD_ACTIVATION_LINE,
   CHECKOUT_CARD_PROCESSING_LINE,
@@ -38,6 +44,7 @@ import {
   CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
   markAdvancedFullDraftCheckoutGranted,
 } from "../../components/agreements/agreementAdvancedDraftAccess";
+import { readCreateComplexityResume } from "../../components/agreements/agreementCreateComplexityResume";
 import { AgreementCompletionCheckoutContextPanel } from "../../components/agreements/AgreementCompletionCheckoutContext";
 import {
   clearUpgradeCheckoutContext,
@@ -450,6 +457,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     setUpgradeCheckoutSnap(readUpgradeCheckoutContext());
   }, [isCreateAgreementCheckout, agreementId]);
 
+  const complexAgreementCheckout = useMemo(
+    () => isCreateAgreementCheckout && readCreateComplexityResume()?.resume_kind === "multi_party_pro_gate",
+    [isCreateAgreementCheckout, agreementId],
+  );
+
   const createCheckoutLossLine = useMemo(
     () =>
       isCreateAgreementCheckout
@@ -503,14 +515,18 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           isSingleAgreementCheckout
             ? "Unlock this agreement"
             : isCreateAgreementCheckout
-              ? CHECKOUT_TITLE
+              ? complexAgreementCheckout
+                ? CHECKOUT_COMPLEX_AGREEMENT_TITLE
+                : CHECKOUT_TITLE
               : "Activate your plan"
         }
         subtitle={
           isSingleAgreementCheckout
             ? "One-time purchase — then return to send or export this agreement."
             : isCreateAgreementCheckout
-              ? CHECKOUT_STARTER_UPGRADE_SUBTITLE
+              ? complexAgreementCheckout
+                ? CHECKOUT_COMPLEX_AGREEMENT_SUBTITLE
+                : CHECKOUT_STARTER_UPGRADE_SUBTITLE
               : checkoutFlowProgress.variant === "direct_send"
                 ? "Continue with Pro for this agreement — review recipients before anything goes out."
                 : ck.pageSubtitle
@@ -550,6 +566,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
             <AgreementCompletionCheckoutContextPanel
               reasons={upgradeCheckoutSnap?.reasons}
               completionLabel={upgradeCheckoutSnap?.completionLabel}
+              complexAgreement={complexAgreementCheckout}
               className="min-w-0 order-2 lg:order-1"
               compact
             />

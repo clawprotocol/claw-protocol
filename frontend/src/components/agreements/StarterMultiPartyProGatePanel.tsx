@@ -1,8 +1,12 @@
-import type { StarterMultiPartyProGateAssessment } from "./starterMultiPartyProGate";
+import type { StarterComplexityGateAssessment } from "./starterMultiPartyProGate";
 import { formatStarterMultiPartyGatePartyLines } from "./starterMultiPartyProGate";
 
+export const STARTER_COMPLEXITY_GATE_TITLE = "Complex agreement detected";
+export const STARTER_COMPLEXITY_GATE_BODY =
+  "This looks like a multi-party or advanced agreement. LawDog Pro is required to preserve all parties, signer roles, revenue-share terms, review steps, and signature blocks.";
+
 export function StarterMultiPartyProGatePanel(props: {
-  assessment: StarterMultiPartyProGateAssessment;
+  assessment: StarterComplexityGateAssessment;
   onBuildPro: () => void;
   onEditPrompt: () => void;
 }) {
@@ -20,11 +24,10 @@ export function StarterMultiPartyProGatePanel(props: {
           id="starter-multi-party-pro-gate-title"
           className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl"
         >
-          Complex agreement detected
+          {STARTER_COMPLEXITY_GATE_TITLE}
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400 sm:text-[0.9375rem]">
-          This looks like a multi-party agreement. LawDog Pro is required to preserve all parties, signer roles,
-          revenue-share terms, and signature blocks.
+          {STARTER_COMPLEXITY_GATE_BODY}
         </p>
       </div>
 
@@ -46,7 +49,7 @@ export function StarterMultiPartyProGatePanel(props: {
         ) : null}
         {assessment.keyTerms.length > 0 ? (
           <p className="mt-3 text-slate-300">
-            <span className="font-medium text-slate-200">Key terms:</span> {assessment.keyTerms.join(", ")}.
+            <span className="font-medium text-slate-200">Key terms detected:</span> {assessment.keyTerms.join(", ")}.
           </p>
         ) : null}
       </div>
