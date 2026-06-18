@@ -26,6 +26,7 @@ import {
 } from "./premiumNetworkRecoveryLocalDraft";
 import { isNonfatalGenerationFailureCode } from "./premiumAcceptancePolicy";
 import { shouldBlockPaidProReviewReadinessFromFallbackCorpus } from "./paidProApiFailureAuthorityGuard";
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
@@ -120,18 +121,38 @@ function recoveryBodyContainsParty(bodyLower: string, partyName: string): boolea
 }
 
 function intakeJurisdictionAnchor(intake: string): string | null {
-  const m = intake.match(/\b([A-Za-z][A-Za-z\s]{2,30}?)\s+law\b/i);
-  return m ? m[1].replace(/\s+/g, " ").trim().toLowerCase() : null;
+  const governedMatches = [
+    ...intake.matchAll(/\b([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,2})\s+law\s+governs\b/g),
+  ];
+  const governed = governedMatches[governedMatches.length - 1];
+  if (governed?.[1]) {
+    return governed[1].replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  const labeled = intake.match(/\bgoverning\s+law\s*[:\-]\s*([A-Za-z][A-Za-z\s'.-]{2,40})/i);
+  if (labeled?.[1]) {
+    return labeled[1].replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  return null;
+}
+
+function authoritativeIntakePartiesForRecovery(intake: string): string[] {
+  const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  if (labeled.length >= 2) return labeled;
+  return extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
 }
 
 function recoveryBodySatisfiesIntakePayment(bodyLower: string, intakeLower: string): boolean {
-  const m = intakeLower.match(/\$\s*([\d,]+(?:\.\d{2})?)/);
-  if (!m) return /\$\s*[\d,]+|(?:fee|payment|compensation|consideration)\b/i.test(bodyLower);
-  const plain = m[1].replace(/,/g, "");
-  const withComma = m[1];
-  if (bodyLower.includes(plain) || bodyLower.includes(withComma)) return true;
-  const formatted = plain.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return bodyLower.includes(formatted);
+  const amounts = [...intakeLower.matchAll(/\$\s*([\d,]+(?:\.\d{2})?)/g)];
+  if (!amounts.length) {
+    return /\$\s*[\d,]+|(?:fee|payment|compensation|consideration)\b/i.test(bodyLower);
+  }
+  return amounts.some((m) => {
+    const plain = m[1].replace(/,/g, "");
+    const withComma = m[1];
+    if (bodyLower.includes(plain) || bodyLower.includes(withComma)) return true;
+    const formatted = plain.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return bodyLower.includes(formatted);
+  });
 }
 
 export function meetsPaidProDegradedRecoveryDisplayRequirements(
@@ -144,9 +165,9 @@ export function meetsPaidProDegradedRecoveryDisplayRequirements(
   const bodyLower = t.toLowerCase();
   const intakeLower = intake.toLowerCase();
 
-  const parties = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
+  const parties = authoritativeIntakePartiesForRecovery(intake);
   if (parties.length >= 2) {
-    if (!parties.slice(0, 2).every((p) => recoveryBodyContainsParty(bodyLower, p))) return false;
+    if (!parties.every((p) => recoveryBodyContainsParty(bodyLower, p))) return false;
   } else if (!/\b(agreement|consulting|services)\b/i.test(t)) {
     return false;
   }

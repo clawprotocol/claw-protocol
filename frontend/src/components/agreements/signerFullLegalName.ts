@@ -58,12 +58,8 @@ export function resolveSignerCardPartyNames(input: ExtractAgreementPartiesInput)
   /** Intake "between …" list is authoritative for full legal names — not draft short aliases. */
   const authoritative = resolveFullLegalPartiesFromIntake(null, intake);
   if (authoritative.length >= 2) {
-    if (orderedSlots.length > 0 && authoritative.length >= orderedSlots.length) {
-      return authoritative.slice(0, orderedSlots.length).map((n) =>
-        finalizePartyDisplayNameForUserFacing(n, intake),
-      );
-    }
-    return authoritative.map((n) => finalizePartyDisplayNameForUserFacing(n, intake));
+    const slotCount = Math.max(orderedSlots.length, authoritative.length);
+    return authoritative.slice(0, slotCount).map((n) => finalizePartyDisplayNameForUserFacing(n, intake));
   }
   return orderedSlots.map((n) => resolveFullLegalForSlot(n, authoritative, intake));
 }

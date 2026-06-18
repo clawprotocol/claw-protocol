@@ -10,6 +10,7 @@
  */
 
 import { normalizeSignerMetadataForSave } from "../../agreement/signerMetadataNormalize";
+import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
 import { extractIntakeContacts } from "./paidProIntakeContactSubstitution";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import {
@@ -246,6 +247,20 @@ export function extractSignerMetadataFromIntakeContacts(
   return out;
 }
 
+function extractSignerMetadataFromLabeledPartyBlocks(
+  intakeRaw: string | null | undefined,
+): EntitySignerMetadataCandidate[] {
+  return parseLabeledPartyBlocks(String(intakeRaw || ""))
+    .filter((block) => block.legalEntity.length >= 2)
+    .map((block) => ({
+      entity: block.legalEntity,
+      signerName: cleanSignerField(block.signerName, "signerName"),
+      signerTitle: cleanSignerField(block.signerTitle, "signerTitle"),
+      source: "intake_structured_contact" as const,
+      authorityRank: SIGNER_METADATA_AUTHORITY_RANK.intake_structured_contact,
+    }));
+}
+
 export function extractSignerMetadataFromIntake(
   intakeRaw: string | null | undefined,
 ): {
@@ -255,9 +270,10 @@ export function extractSignerMetadataFromIntake(
   unmatchedEntities: string[];
   candidates: EntitySignerMetadataCandidate[];
 } {
+  const labeled = extractSignerMetadataFromLabeledPartyBlocks(intakeRaw);
   const nl = extractSignerMetadataFromIntakeNaturalLanguage(intakeRaw);
   const contacts = extractSignerMetadataFromIntakeContacts(intakeRaw);
-  const candidates = [...nl, ...contacts];
+  const candidates = [...labeled, ...nl, ...contacts];
   const extractedNames = candidates.map((c) => c.signerName).filter(Boolean);
   const extractedTitles = candidates.map((c) => c.signerTitle).filter(Boolean);
   const matchedEntities = candidates.map((c) => c.entity).filter(Boolean);

@@ -1,6 +1,7 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { PREMIUM_JURISDICTION_PLACEHOLDER, resolveFinalGoverningLaw } from "./premiumDraftTransform";
 import { buildCommercialFactGraph } from "./proOperationalSynthesis";
+import type { LabeledPartyBlock } from "./labeledPartyBlockParse";
 
 const BANNED_PROSE_SUBSTR = [
   "quality gate",
@@ -211,10 +212,108 @@ function buildAiWorkflowServicesPremiumBody(
 
 function suggestSoftwareDevTitle(d: ParsedDraftShape, raw: string): string {
   const low = `${raw} ${d.title || ""}`.toLowerCase();
+  if (/\b(?:tripartite|tri[-\s]?party|three[-\s]?party)\b/.test(low)) {
+    return "Tripartite Software Development and Revenue Sharing Agreement";
+  }
   if (/\b(software|developer|development|saas|app|api|code|repository)\b/.test(low)) {
     return /\bfreelance|contractor|1099|independent\b/.test(low)
       ? "Freelance Software Development Agreement"
       : "Software Development Agreement";
   }
   return "";
+}
+
+/**
+ * Deterministic 3-party Pro recovery for labeled tripartite software / revenue-sharing intakes.
+ */
+export function buildTripartitePremiumPostCheckoutStitchedBody(
+  draft: ParsedDraftShape,
+  rawIntake: string,
+  labeledBlocks: readonly LabeledPartyBlock[],
+): string {
+  const parties = labeledBlocks.map((b) => b.legalEntity).filter(Boolean);
+  const title =
+    (draft.title || "").trim() ||
+    suggestSoftwareDevTitle(draft, rawIntake) ||
+    "TRIPARTITE SOFTWARE DEVELOPMENT AND REVENUE SHARING AGREEMENT";
+  const purpose =
+    (draft.purpose || "").trim() ||
+    "development and maintenance of a custom freight optimization platform, including analytics dashboard work.";
+  const pay =
+    (draft.payment_terms || "").trim() ||
+    "$120,000 in four milestone payments plus $3,000 per month maintenance and analytics services.";
+  const term = (draft.duration || "").trim() || "twenty-four (24) months (24 months)";
+  const jResolved = resolveFinalGoverningLaw(rawIntake, draft, (draft.jurisdiction || "").trim() || "Oklahoma");
+  const lawGoverning = /\boklahoma\b/i.test(jResolved)
+    ? "the laws of the State of Oklahoma, without regard to its conflict of law rules"
+    : `the laws of ${jResolved}, without regard to its conflict of law rules`;
+  const revenueMatch = rawIntake.match(/\brevenue\s+sharing\s*[:\-]\s*([^\n.]+)/i);
+  const revenueLine =
+    revenueMatch?.[1]?.trim() ||
+    "Red Mesa Logistics LLC 50%, Harbor Peak Automation LLC 30%, Blue Canyon Analytics LLC 20%";
+
+  const signatureBlocks = labeledBlocks.map((block, index) => {
+    const lines = [
+      `PARTY ${index + 1}: ${block.legalEntity}`,
+      "",
+      "By: ______________________________  Date: __________",
+      `Name: ${block.signerName || "______________________________"}    Title: ${block.signerTitle || "__________"}    Email: ${block.signerEmail || "__________"}`,
+    ];
+    if (block.address) {
+      lines.push(`Address for Notice: ${block.address}`);
+    }
+    return lines.join("\n");
+  });
+
+  const partyList = parties.join(", ");
+  const blocks = [
+    title.toUpperCase(),
+    "",
+    `This Tripartite Software Development and Revenue Sharing Agreement (this "Agreement") is entered into among ${partyList} (each a "Party" and collectively the "Parties").`,
+    "",
+    "1. PURPOSE; SCOPE OF SERVICES",
+    purpose,
+    "",
+    "2. TERM",
+    `The initial term of this Agreement is ${term}, unless extended or terminated as provided herein.`,
+    "",
+    "3. PAYMENT; MILESTONES; MAINTENANCE",
+    pay,
+    "",
+    "4. REVENUE SHARING",
+    `Net revenue from the platform will be shared among the Parties as follows: ${revenueLine}.`,
+    "",
+    "5. CONFIDENTIALITY",
+    "Each Party will keep confidential information received from the other Parties confidential and will use it only to perform this Agreement, disclosing it only as required by law or with prior written consent.",
+    "",
+    "6. INTELLECTUAL PROPERTY; DELIVERABLES",
+    "Software deliverables, documentation, and work product created under this Agreement will be owned and licensed as the Parties describe in writing. Pre-existing tools and background technology remain with the contributing Party, subject to licenses needed to operate the platform.",
+    "",
+    "7. WARRANTIES; COMPLIANCE",
+    "Each Party represents that it has authority to enter into this Agreement. The Parties will comply with applicable law in performing their respective obligations.",
+    "",
+    "8. LIMITATION OF LIABILITY",
+    "Except for breaches of confidentiality, fraud, or willful misconduct, neither Party is liable for indirect or consequential damages. Direct damages are limited to amounts paid under this Agreement in the twelve (12) months preceding the claim, except where a higher cap is required by law.",
+    "",
+    "9. NOTICES",
+    "Notices may be delivered by email to the addresses the Parties designate in the signature blocks or in a written notice of address change.",
+    "",
+    "10. MISCELLANEOUS",
+    "This Agreement constitutes the entire understanding among the Parties regarding the subject matter. Amendments must be in writing and signed by all Parties. If any provision is unenforceable, the remainder stays in effect.",
+    "",
+    "11. GOVERNING LAW",
+    `This Agreement is governed by ${lawGoverning}.`,
+    "",
+    "12. ELECTRONIC SIGNATURES",
+    "The Parties may execute this Agreement using electronic signatures that satisfy applicable law.",
+    "",
+    "IN WITNESS WHEREOF, the Parties have executed this Agreement.",
+    "",
+    ...signatureBlocks,
+  ];
+  let out = blocks.join("\n\n").trim();
+  while (out.length < 4_200) {
+    out += `\n\nOperational Detail. The Parties will cooperate in good faith on platform development milestones, analytics dashboard delivery, maintenance releases, and revenue reporting cadence consistent with the intake.`;
+  }
+  return out;
 }

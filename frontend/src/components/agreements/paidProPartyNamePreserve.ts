@@ -4,6 +4,7 @@
  */
 
 import { extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
 
@@ -62,6 +63,15 @@ const DISALLOWED_PARTY_PHRASE_RE: readonly RegExp[] = [
   /^or\s+other\b/i,
   /^project\s+deliverables?$/i,
   /^deliverables?$/i,
+  /^licensing\s+revenue$/i,
+  /^information\s+known\s+at\s+intake$/i,
+  /^party\s+information\s+known\s+at\s+intake$/i,
+  /^confidentiality\s+applies$/i,
+  /^revenue\s+sharing$/i,
+  /^applicable\s+party$/i,
+  /\bthe\s+applicable\s+party\b/i,
+  /^for\s+analytics\s+services$/i,
+  /^will\s+keep\s+confidential\b/i,
 ];
 
 function normPartyLabel(s: string): string {
@@ -90,6 +100,8 @@ export function resolveFullLegalPartiesFromIntake(
   intakeRaw: string | null | undefined,
 ): string[] {
   const intake = String(intakeRaw || "").trim();
+  const fromLabeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  if (fromLabeled.length >= 2) return fromLabeled;
   const fromBetween = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
   if (fromBetween.length >= 2) return fromBetween;
   const fromIntakeEntities = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
@@ -112,11 +124,14 @@ export function resolveAuthoritativePartiesForRecitalPolish(
   intakeRaw: string | null | undefined,
 ): string[] {
   const intake = String(intakeRaw || "").trim();
+  const fromLabeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
   const fromBetween = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
   const fromIntakeEntities = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
 
   let authoritative: string[] = [];
-  if (fromBetween.length >= 2) {
+  if (fromLabeled.length >= 2) {
+    authoritative = fromLabeled;
+  } else if (fromBetween.length >= 2) {
     authoritative = fromBetween;
   } else if (fromIntakeEntities.length >= 2) {
     authoritative = fromIntakeEntities;

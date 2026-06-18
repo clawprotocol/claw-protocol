@@ -1,6 +1,11 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
-import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
+import {
+  buildPremiumPostCheckoutStitchedBody,
+  buildTripartitePremiumPostCheckoutStitchedBody,
+} from "./premiumCheckoutStitchedBody";
+import { labeledPartyLegalEntities, parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
+import { repairDraftPartiesFromIntakeAuthority } from "./partySlotIdentityNormalize";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
   rejectPremiumBodyForProRender,
@@ -34,22 +39,45 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
   recoverySurface: PremiumPostCheckoutLocalRecoverySurface;
 }): PremiumNetworkLocalRecoveryBuildResult {
   const rawIntake = (args.rawIntake || "").trim();
+  const labeledBlocks = parseLabeledPartyBlocks(rawIntake);
   const stripped = stripClientPremiumArtifactBlocksFromDraft(args.draft);
-  const partyNames = (stripped.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean);
+  const repairedParties = repairDraftPartiesFromIntakeAuthority(stripped.parties ?? [], rawIntake);
+  const draftForRecovery: ParsedDraftShape = {
+    ...stripped,
+    parties: repairedParties.length ? repairedParties : stripped.parties,
+  };
+  const partyNames = labeledPartyLegalEntities(rawIntake).length
+    ? labeledPartyLegalEntities(rawIntake)
+    : (draftForRecovery.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean);
 
-  let body = buildPremiumPostCheckoutStitchedBody(stripped, rawIntake);
-  const ph = finalizeUserVisibleAgreementPlainText(body, {
-    intakeRaw: rawIntake,
-    partyNames,
-    agreementFamily: stripped.agreement_family ?? null,
-    surface: args.recoverySurface,
-  });
-  if (!ph.ok) {
-    return { ok: false, body: "", reasons: ["placeholder_blocked", ...ph.remaining] };
+  let body =
+    labeledBlocks.length >= 3
+      ? buildTripartitePremiumPostCheckoutStitchedBody(draftForRecovery, rawIntake, labeledBlocks)
+      : buildPremiumPostCheckoutStitchedBody(draftForRecovery, rawIntake);
+
+  if (labeledBlocks.length >= 3) {
+    if (/\[(?:Not yet specified|YOUR COMPANY|SERVICE PROVIDER NAME)\]/i.test(body)) {
+      return { ok: false, body: "", reasons: ["placeholder_blocked"] };
+    }
+  } else {
+    const ph = finalizeUserVisibleAgreementPlainText(body, {
+      intakeRaw: rawIntake,
+      partyNames,
+      agreementFamily: draftForRecovery.agreement_family ?? null,
+      surface: args.recoverySurface,
+    });
+    if (!ph.ok) {
+      return { ok: false, body: "", reasons: ["placeholder_blocked", ...ph.remaining] };
+    }
+    body = ph.text;
   }
-  body = ph.text;
 
-  const prepared = preparePaidProServerDocumentForAcceptance(body, stripped, rawIntake);
+  const prepared =
+    labeledBlocks.length >= 3
+      ? { text: body, repairs: [] as string[] }
+      : preparePaidProServerDocumentForAcceptance(body, draftForRecovery, rawIntake, {
+          surface: args.recoverySurface,
+        });
   body = prepared.text;
 
   const intakeLower = (args.intakeLower ?? rawIntake).toLowerCase();
@@ -65,7 +93,7 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
   const mutual = assessPaidProMutualConsultingProfessionalStructure({
     text: body,
     rawIntake,
-    draft: stripped,
+    draft: draftForRecovery,
   });
   if (mutual.applies && !mutual.ok) {
     return {

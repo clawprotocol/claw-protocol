@@ -3,6 +3,7 @@
  * (party_a, party_b) from becoming standalone signer slots or user-facing entity names.
  */
 
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
@@ -72,6 +73,16 @@ export function isInvalidPartySlotLegalEntity(name: string): boolean {
   return false;
 }
 
+export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | null): string[] {
+  const intake = String(intakeContext || "").trim();
+  if (!intake) return [];
+  const labeled = labeledPartyLegalEntities(intake)
+    .map(normalizeAgreementPartyName)
+    .filter((n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n));
+  if (labeled.length >= 2) return labeled;
+  return collapsePartySlotCandidates(extractBetweenPartyNameList(intake));
+}
+
 /** When intake/free-starter manifest has exactly two legal entities, cap signer setup at two. */
 /** When draft/API parties are service phrases but intake has two legal entities, restore intake authority. */
 export function repairDraftPartiesFromIntakeAuthority<T extends DraftPartyRowLike>(
@@ -82,10 +93,8 @@ export function repairDraftPartiesFromIntakeAuthority<T extends DraftPartyRowLik
   const intake = String(intakeContext || "").trim();
   if (!intake) return [...parties];
 
-  const intakeNames = collapsePartySlotCandidates(extractBetweenPartyNameList(intake)).filter(
-    isAuthoritativeLegalEntityName,
-  );
-  if (intakeNames.length !== 2) return [...parties];
+  const intakeNames = resolveAuthoritativeIntakePartyNames(intake).filter(isAuthoritativeLegalEntityName);
+  if (intakeNames.length < 2) return [...parties];
 
   const currentInvalid = parties.some((row) => {
     const name = normalizeAgreementPartyName(row.name);
@@ -96,7 +105,7 @@ export function repairDraftPartiesFromIntakeAuthority<T extends DraftPartyRowLik
       !isAuthoritativeLegalEntityName(name)
     );
   });
-  if (!currentInvalid) return [...parties];
+  if (!currentInvalid && parties.length === intakeNames.length) return [...parties];
 
   return intakeNames.map((name, index) => {
     const prev = parties[index] ?? parties.find((p) => partyLegalNamesMatch(p.name, name)) ?? parties[0];
@@ -120,14 +129,17 @@ export function resolveAuthoritativePartySlotCount(args: {
     return Math.min(userExpanded, 4);
   }
 
-  const intakeNames = collapsePartySlotCandidates(
-    extractBetweenPartyNameList(String(args.intakeText ?? "")),
-  );
+  const intake = String(args.intakeText ?? "").trim();
+  const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  if (labeled.length >= 3) return labeled.length;
+
+  const intakeNames = resolveAuthoritativeIntakePartyNames(intake);
   const intakeAuthoritative = intakeNames.filter(isAuthoritativeLegalEntityName);
+  if (labeled.length === 2) return 2;
   if (intakeAuthoritative.length === 2) return 2;
 
   const rowNames = args.draftPartyNames ?? [];
-  const hasDrift = partySlotListHasDriftFragments(rowNames);
+  const hasDrift = partySlotListHasDriftFragments(rowNames, args.intakeText);
   const collapsed = selectAuthoritativeTwoPartySlots(rowNames);
   if (hasDrift && collapsed.length === 2) return 2;
   if (hasDrift && intakeNames.length === 2) return 2;
@@ -210,7 +222,20 @@ export function selectAuthoritativeTwoPartySlots(names: readonly string[]): stri
 
 export type DraftPartyRowLike = { name: string; role?: string; email?: string; id?: string };
 
-export function partySlotListHasDriftFragments(names: readonly string[]): boolean {
+export function partySlotListHasDriftFragments(
+  names: readonly string[],
+  intakeContext?: string | null,
+): boolean {
+  const intake = String(intakeContext || "").trim();
+  const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  if (labeled.length >= 3) {
+    const current = collapsePartySlotCandidates(names);
+    if (current.length === labeled.length) {
+      const matches = labeled.filter((auth, i) => partyLegalNamesMatch(auth, current[i] ?? ""));
+      if (matches.length >= labeled.length) return false;
+    }
+  }
+
   if (names.some((raw) => isInvalidPartySlotLegalEntity(normalizeAgreementPartyName(raw)))) {
     return true;
   }
@@ -232,11 +257,28 @@ export function collapseDraftPartyRows(
 
   const rowNames = parties.map((p) => normalizeAgreementPartyName(p.name));
   const intake = String(intakeContext || "").trim();
+  const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  if (labeled.length >= 3 && parties.length !== labeled.length) {
+    return labeled.map((name, index) => {
+      const prev =
+        parties.find((p) => partyLegalNamesMatch(p.name, name)) ??
+        parties[index] ??
+        parties[parties.length - 1];
+      const role = isInternalPartyAliasRole(prev?.role) ? undefined : prev?.role;
+      return {
+        name,
+        role: role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
+        email: prev?.email,
+        id: prev?.id,
+      };
+    });
+  }
+
   const fromIntake = intake ? extractBetweenPartyNameList(intake) : [];
   const intakeCollapsed =
     fromIntake.length >= 2 ? collapsePartySlotCandidates(fromIntake) : [];
   const intakeAuthoritative = intakeCollapsed.filter(isAuthoritativeLegalEntityName);
-  const hasDrift = partySlotListHasDriftFragments(rowNames);
+  const hasDrift = partySlotListHasDriftFragments(rowNames, intake);
   const collapseToKnownTwoPartyAuthority =
     intakeAuthoritative.length === 2 && parties.length > 2;
 

@@ -3,7 +3,8 @@
  * Heuristic only — server parse on submit remains authoritative when available.
  */
 
-import { extractBetweenPartyPair } from "./partyBetweenParse";
+import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
+import { extractBetweenPartyNameList, extractBetweenPartyPair } from "./partyBetweenParse";
 import {
   extractIntakePayment,
   formatPaymentCadencePhrase,
@@ -372,8 +373,34 @@ function sliceFirstPartyListSentenceFromBetweenTail(tail: string): string {
   return line.slice(0, m.index).trim();
 }
 
-function extractStructuredParties(text: string, lower: string): PartiesExtract {
+function extractPartiesFromLabeledBlocks(rawIntake: string): PartiesExtract | null {
+  const blocks = parseLabeledPartyBlocks(rawIntake);
+  if (blocks.length < 2) return null;
+  const parties = blocks.map((b) => b.legalEntity).filter((n) => n.length >= 2);
+  if (parties.length < 2) return null;
+  return {
+    parties,
+    roleHints: {},
+    uncertain: false,
+    structured: { party_1: parties[0], party_2: parties[1] ?? parties[0] },
+  };
+}
+
+function extractStructuredParties(text: string, lower: string, rawIntake?: string): PartiesExtract {
+  const labeled = extractPartiesFromLabeledBlocks(rawIntake || text);
+  if (labeled) return labeled;
+
   const partyParseText = stripSignerInstructionClausesFromIntake(text);
+  const amongList = extractBetweenPartyNameList(partyParseText);
+  if (amongList.length >= 3) {
+    return {
+      parties: amongList,
+      roleHints: {},
+      uncertain: false,
+      structured: { party_1: amongList[0], party_2: amongList[1] ?? amongList[0] },
+    };
+  }
+
   const betweenPair = extractBetweenPartyPair(partyParseText);
   if (betweenPair) {
     const betweenIdx = partyParseText.toLowerCase().indexOf("between ");
@@ -1082,7 +1109,8 @@ export function extractScheduleLine(lower: string, text: string): string | null 
  * (never stuff a paragraph into `parties`).
  */
 export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredAgreement {
-  const text = stripSignerInstructionClausesFromIntake(raw.trim());
+  const rawTrim = raw.trim();
+  const text = stripSignerInstructionClausesFromIntake(rawTrim);
   if (!text) {
     return {
       parties: [],
@@ -1105,7 +1133,7 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
   }
   const lower = text.toLowerCase();
   const paymentField = extractIntakePayment(text);
-  const partyEx = extractStructuredParties(text, lower);
+  const partyEx = extractStructuredParties(text, lower, rawTrim);
   const scopeMeta = extractScopeAndMeta(lower, text);
   const termMeta = extractTermAndMeta(lower, text);
   let scope = scopeMeta.text;

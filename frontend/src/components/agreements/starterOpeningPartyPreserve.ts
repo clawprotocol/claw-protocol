@@ -5,6 +5,7 @@
 
 import { extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
 
@@ -59,6 +60,8 @@ function resolveFullLegalPartiesForStarterPreview(
   intakeRaw: string | null | undefined,
 ): string[] {
   const intake = String(intakeRaw || "").trim();
+  const fromLabeled = labeledPartyLegalEntities(intake);
+  if (fromLabeled.length >= 2) return fromLabeled;
   const fromBetween = extractBetweenPartyNameList(intake);
   if (fromBetween.length >= 2) return fromBetween;
   const fromEntities = extractAgreementEntityCandidates(intake);
@@ -98,7 +101,12 @@ export function enrichStarterPreviewPartiesFromIntake(
   );
   if (fullNames.length < 2) return withRoles;
 
-  const enriched = parties.map((party, idx) => {
+  const baseParties =
+    fullNames.length > parties.length
+      ? fullNames.map((name, index) => parties[index] ?? { name, role: index === 0 ? "Client" : index === 1 ? "Service Provider" : "party" })
+      : parties;
+
+  const enriched = baseParties.map((party, idx) => {
     const current = String(party?.name ?? "").replace(/\s+/g, " ").trim();
     const matchedFull =
       fullNames[idx] ||
