@@ -20,6 +20,7 @@ import { readOriginalUserIntakeRaw } from "./originalUserIntakeRawStorage";
 import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { sanitizeStarterPartyNameForDisplay } from "./starterPreviewProseSanitize";
+import { normalizeFreeStarterSectionRender } from "./freeStarterSectionRenderNormalize";
 
 export type FreeStarterRenderSource =
   | "repaired_starter_preview"
@@ -307,6 +308,13 @@ export function resolveFreeStarterReviewBody(
     finalPaymentTerms: extractFreeStarterPaymentTermsLine(body),
     protectedFactRepairCount,
   };
+
+  const normalized = normalizeFreeStarterSectionRender(result.body, {
+    intake: rawIntakeResolved,
+    draft,
+  });
+  result.body = normalized.text;
+  result.finalPaymentTerms = extractFreeStarterPaymentTermsLine(result.body);
 
   logFreeStarterRenderSource({
     source: result.source,

@@ -57,7 +57,14 @@ import {
   formatStarterPreviewForDisplay,
 } from "./starterPreviewFormatting";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
-import { formatMilestonePaymentTermsFromIntake, formatInstallmentPaymentTermsFromIntake, draftPaymentTermsLoseIntakeInstallmentCadence, resolveStarterPreviewIntakeText, repairStarterPaymentCadenceInPreviewPlain } from "./intakeCurrencyParse";
+import { extractTermDurationFromIntake, isInvalidVisibleScheduleValue, isSignerTitleLikeRole } from "./starterRoleLabelGuard";
+import {
+  formatMilestonePaymentTermsFromIntake,
+  formatInstallmentPaymentTermsFromIntake,
+  draftPaymentTermsLoseIntakeInstallmentCadence,
+  resolveStarterPreviewIntakeText,
+  repairStarterPaymentCadenceInPreviewPlain,
+} from "./intakeCurrencyParse";
 import { renderClausePrimitive, selectClausePrimitivesForIntake } from "./agreementOutputQuality/canonicalClausePrimitives";
 import {
   logPlaceholderScanSkippedTransient,
@@ -276,7 +283,7 @@ function timingLabelsForFamily(
 
 function buildTermAndScheduleSection(
   draft: ParsedDraftShape,
-  opts?: { starterPreview?: boolean },
+  opts?: { starterPreview?: boolean; intakeText?: string | null },
 ): string {
   const labels = timingLabelsForFamily(draft.agreement_family, draft.title);
   const starter = Boolean(opts?.starterPreview);
@@ -286,12 +293,20 @@ function buildTermAndScheduleSection(
     durationLabel = "Term";
   }
   const parts: string[] = [];
-  const dur = (draft.duration || "").trim();
+  const durRaw = (draft.duration || "").trim();
+  const dur =
+    durRaw && !isInvalidVisibleScheduleValue(durRaw)
+      ? durRaw
+      : starter
+        ? extractTermDurationFromIntake(opts?.intakeText)
+        : "";
   let eff = (draft.effective_date || "").trim();
+  if (starter && isInvalidVisibleScheduleValue(eff)) eff = "";
   if (starter && partyCount === 2 && /upon full execution by all parties/i.test(eff)) {
     eff = "upon full execution by both parties";
   }
-  const due = (draft.due_date || "").trim();
+  const dueRaw = (draft.due_date || "").trim();
+  const due = dueRaw && !isInvalidVisibleScheduleValue(dueRaw) ? dueRaw : "";
   if (dur) parts.push(`${durationLabel}: ${dur}`);
   if (eff) parts.push(`${labels.effectiveLabel}: ${formatScheduleFragment(eff)}`);
   if (due) parts.push(`${labels.keyDateLabel}: ${formatScheduleFragment(due)}`);
@@ -454,10 +469,11 @@ const STARTER_DISPLAY_ROLE_TOKENS = new Set([
 function partyEntryWithRoleConfidence(p: { name: string; role?: string }, starterPreview: boolean): PartyEntry {
   const role = (p.role || "").trim().toLowerCase();
   if (starterPreview) {
-    // Substantive intake-captured roles render parenthetically; everything else collapses
-    // to neutral "party" so the prose stays the collective "Parties".
     if (role && STARTER_DISPLAY_ROLE_TOKENS.has(role)) {
       return { name: p.name, role: p.role };
+    }
+    if (isSignerTitleLikeRole(role)) {
+      return { name: p.name, role: "party" };
     }
     return { name: p.name, role: "party" };
   }
@@ -716,7 +732,10 @@ export function buildAgreementPreviewTextCore(
         normalizePaymentTermsForDisplay(draft.payment_terms).trim() ||
         MISSING
       : nz(draft.payment_terms);
-  const termSection = buildTermAndScheduleSection(draftForBuild, { starterPreview });
+  const termSection = buildTermAndScheduleSection(draftForBuild, {
+    starterPreview,
+    intakeText: buildOptions?.intakeText,
+  });
   const lawRaw = (draftForBuild.jurisdiction || "").trim();
   const termNoticeRaw = (draft.termination_summary || "").trim();
   const termNoticePrepared = premiumDeliverable

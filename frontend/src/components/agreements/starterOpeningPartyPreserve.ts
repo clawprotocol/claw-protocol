@@ -9,6 +9,7 @@ import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
+import { isSignerTitleLikeRole, starterCommercialRoleForIndex } from "./starterRoleLabelGuard";
 
 const GENERIC_STARTER_PARTY_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
 
@@ -47,10 +48,10 @@ export function inferStarterCommercialPartyRoles(
     ...draft,
     parties: parties.map((party, index) => {
       const role = String(party?.role ?? "").trim().toLowerCase();
-      if (!GENERIC_STARTER_PARTY_ROLE.has(role)) return party;
+      if (!GENERIC_STARTER_PARTY_ROLE.has(role) && !isSignerTitleLikeRole(role)) return party;
       return {
         ...party,
-        role: index === 0 ? "Client" : "Service Provider",
+        role: starterCommercialRoleForIndex(index, parties.length),
       };
     }),
   };

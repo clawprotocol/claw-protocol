@@ -244,6 +244,54 @@ describe("Test372 Free 2-party identity isolation", () => {
     expect(repairedPreview).toMatch(/monthly installments/i);
   });
 
+  it("infers Client and Service Provider when draft party roles are signer titles", () => {
+    const draft: ParsedDraftShape = {
+      ...test372ContaminatedDraft(),
+      parties: [
+        { name: BLUE, role: "CEO" },
+        { name: HARBOR, role: "President" },
+      ],
+    };
+    const enriched = enrichStarterPreviewPartiesFromIntake(draft, TEST372_FREE_STACKED_PARTY_INTAKE);
+    expect(enriched.parties?.[0]?.role).toBe("Client");
+    expect(enriched.parties?.[1]?.role).toBe("Service Provider");
+    const preview = resolveFreeStarterReviewBody({
+      draft: enriched,
+      rawIntake: TEST372_FREE_STACKED_PARTY_INTAKE,
+    }).body;
+    expect(preview).toMatch(/\("Client"\)/);
+    expect(preview).toMatch(/\("Service Provider"\)/);
+    expect(preview).not.toMatch(/\("CEO"\)/);
+    expect(preview).not.toMatch(/\("President"\)/);
+  });
+
+  it("normalizes glued scope and payment headings with separated body blocks", () => {
+    const glued = [
+      "SERVICES AGREEMENT",
+      "",
+      `This Agreement is between ${BLUE} ("CEO") and ${HARBOR} ("President").`,
+      "",
+      "1. Scope of Services / Purpose strategic business consulting and operational planning services.",
+      "2. Payment Terms Blue Canyon Analytics LLC will pay Harbor Peak Automation LLC $48,000 in monthly installments.",
+      "3. Services Term and Effective Date Term: until null",
+    ].join("\n");
+    const normalized = resolveFreeStarterReviewBody({
+      draft: test372ContaminatedDraft(),
+      rawIntake: TEST372_FREE_STACKED_PARTY_INTAKE,
+      currentPreview: glued,
+    }).body;
+    expect(normalized).toMatch(/\("Client"\)/);
+    expect(normalized).not.toMatch(/\("CEO"\)|\("President"\)/);
+    expect(normalized).toMatch(/\n\n1\.\s+Scope of Services \/ Purpose\n\n/i);
+    expect(normalized).toMatch(/\n\n2\.\s+Payment Terms\n\n/i);
+    expect(normalized).not.toMatch(/Scope of Services \/ Purpose strategic/i);
+    expect(normalized).not.toMatch(/Payment Terms Blue Canyon/i);
+    expect(normalized).toMatch(/monthly installments/i);
+    expect(normalized).not.toMatch(/\buntil null\b/i);
+    expect(normalized).not.toMatch(/\bnull\b/i);
+    expect(normalized).toMatch(/twelve \(12\) months/i);
+  });
+
   it("simpleProFinalReviewCorpus does not override free starter rendered preview with longer authoritative body", () => {
     const rendered =
       "SERVICES AGREEMENT\n\n2. Payment Terms\n$48,000 in monthly installments.\n\n3. Term: twelve (12) months.";
