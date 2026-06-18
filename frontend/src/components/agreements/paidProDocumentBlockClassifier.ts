@@ -9,6 +9,18 @@ import {
   isDanglingPaidProMainHeadingPrefix,
   isPaidProHeadingContinuationFragment,
 } from "./repairSplitPaidProHeadingFragments";
+import {
+  isPaidProNumberedSectionHeadingLine,
+  PAID_PRO_SUBSECTION_NUMBER_RE,
+  parsePaidProNumberedSectionLine,
+} from "./paidProNumberedSectionHeading";
+
+export {
+  isPaidProNumberedSectionHeadingLine,
+  isPaidProNumberedSectionHeadingLine as isMainSectionHeadingLine,
+  parsePaidProNumberedSectionLine,
+  PAID_PRO_SUBSECTION_NUMBER_RE,
+} from "./paidProNumberedSectionHeading";
 
 export type PaidProDocumentBlockKind =
   | "document_title"
@@ -31,14 +43,7 @@ export type ClassifiedPaidProDocumentBlock = {
 };
 
 /** Subsection lines like "1.1", "8.1" — remain body paragraphs. */
-const SUBSECTION_HEADING_RE = /^\d+\.\d+(?:\.\d+)*\.?\s+/;
-
-/** Body sentence starters glued after a main heading title (no period separator). */
-const GLUED_MAIN_HEADING_BODY_START_RE =
-  /\s+(?:The|This|Each|Either|Any|Neither|Both|When|If|Unless|Upon|Where|As|An|A|In|For|Client|Service\s+Provider|Neither\s+party|Either\s+party|During|Within|After|Before|One|Party|All|Some|Such|Notwithstanding)\s+/i;
-
-/** Operative verbs that indicate body text, not heading title words. */
-const MAIN_HEADING_BODY_VERB_RE = /\b(?:will|shall|must|may|should|are|is|was|were|have|has|had|agrees?|represents?)\b/i;
+const SUBSECTION_HEADING_RE = PAID_PRO_SUBSECTION_NUMBER_RE;
 
 const SIGNATURE_PARTY_HEADER_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:?\s*$/i;
 const SIGNATURE_NOTICE_EMAIL_RE = /^email(?:\s+for\s+notices?)?\s*:/i;
@@ -61,34 +66,12 @@ function isFirstBlockDocumentTitle(firstLine: string): boolean {
 }
 
 /** Main numbered section heading — excludes subsections like "8.1". */
-export function isMainSectionHeadingLine(line: string): boolean {
-  const t = line.trim();
-  if (!t || SUBSECTION_HEADING_RE.test(t)) return false;
-  const match = t.match(/^(\d+)\.\s+(.+)$/);
-  if (!match) return false;
-  const body = match[2].trim();
-  if (body.length < 3 || body.length > 160) return false;
-  // "10. HEADING. Sentence body on same line" is not a pure heading line.
-  if (/\.\s+[A-Za-z]/.test(body)) return false;
-  if (MAIN_HEADING_BODY_VERB_RE.test(body)) return false;
-  if (GLUED_MAIN_HEADING_BODY_START_RE.test(body)) {
-    // "... and Client Materials" — title words after a conjunction, not glued body.
-    const titleSuffixAfterConnector =
-      /\b(?:and|or|&)\s+(?:[A-Z][a-zA-Z'&-]+(?:\s+[A-Z][a-zA-Z'&-]+){0,5})\s*$/.test(body);
-    if (!titleSuffixAfterConnector) return false;
-  }
-  // Title punctuation allowed in major headings (semicolons common in compound titles).
-  if (/^[A-Z0-9 ·\/—–'\-,&();:]+$/.test(body)) return true;
-  if (/^[A-Z][a-zA-Z0-9\s/&,\-'—–().;:]+$/.test(body)) {
-    if (/\.\s+[a-z]/.test(body)) return false;
-    return body.split(/\s+/).length <= 16;
-  }
-  return false;
+function isMainSectionHeadingLineInternal(line: string): boolean {
+  return isPaidProNumberedSectionHeadingLine(line);
 }
 
 function parseMainSectionTitleFromLine(line: string): string | null {
-  const m = line.trim().match(/^\d+\.\s+(?!\d+\.\d)(.+)$/);
-  return m?.[1]?.trim() ?? null;
+  return parsePaidProNumberedSectionLine(line)?.title ?? null;
 }
 
 function isFalseSplitMainHeadingFragment(headingLine: string, remainder: string): boolean {
@@ -125,7 +108,7 @@ export function extractMainSectionHeadingPrefix(
     if (dotSplit) {
       const heading = `${numbered[1]}. ${dotSplit[1].trim()}`;
       const remainder = dotSplit[2].trim();
-      if (remainder && isMainSectionHeadingLine(heading)) {
+      if (remainder && isMainSectionHeadingLineInternal(heading)) {
         return { heading, remainder };
       }
     }
@@ -135,13 +118,13 @@ export function extractMainSectionHeadingPrefix(
         .split("\n")
         .map((s) => s.trim())
         .filter(Boolean);
-      if (headingLine && isMainSectionHeadingLine(headingLine)) {
+      if (headingLine && isMainSectionHeadingLineInternal(headingLine)) {
         const remainder = rest.join("\n").trim();
         if (remainder) return { heading: headingLine, remainder };
       }
     }
   }
-  if (isMainSectionHeadingLine(t)) {
+  if (isMainSectionHeadingLineInternal(t)) {
     return { heading: t, remainder: "" };
   }
   return null;
@@ -191,7 +174,7 @@ export function splitSinglePaidProDocumentBlock(block: string): string[] {
       current.push(glued[1]!);
       continue;
     }
-    if (isMainSectionHeadingLine(t)) {
+    if (isMainSectionHeadingLineInternal(t)) {
       flushCurrent();
       segments.push(t);
       continue;
@@ -252,7 +235,7 @@ export function detectPaidProPlainParagraphHeadingLeaks(plain: string): {
       const t = line.trim();
       if (!t || SUBSECTION_HEADING_RE.test(t)) continue;
       if (/^section\s+\d+(?:\.\d+)*/i.test(t)) continue;
-      if (isMainSectionHeadingLine(t)) {
+      if (isMainSectionHeadingLineInternal(t)) {
         leakedLines.push(t);
         continue;
       }
@@ -301,7 +284,7 @@ export function classifyPaidProDocumentBlock(args: {
     return { kind: "signature_party_start", firstLine, singleLine };
   }
 
-  if (singleLine && isMainSectionHeadingLine(firstLine)) {
+  if (singleLine && isMainSectionHeadingLineInternal(firstLine)) {
     return { kind: "main_section_heading", firstLine, singleLine };
   }
 
