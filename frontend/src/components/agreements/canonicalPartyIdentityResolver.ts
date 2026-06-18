@@ -3,6 +3,10 @@
  * Short aliases are for defined-term parentheticals only; body text prefers role labels.
  */
 
+import {
+  isTripartiteLabeledPartiesIntake,
+  tripartiteRoleLabelForPartyIndex,
+} from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
   collapsePartySlotCandidates,
@@ -149,9 +153,12 @@ function isGenericPartyRoleLabel(role: string | null | undefined): boolean {
   return GENERIC_PARTY_ROLE_LABELS.has(norm(role || ""));
 }
 
-function roleLabelForIndex(index: number, explicit?: string): string {
+function roleLabelForIndex(index: number, explicit?: string, intakeRaw?: string | null): string {
   const t = (explicit || "").trim();
   if (t.length >= 2 && !isInternalPartyAliasRole(t) && !isGenericPartyRoleLabel(t)) return t;
+  if (intakeRaw && isTripartiteLabeledPartiesIntake(intakeRaw)) {
+    return tripartiteRoleLabelForPartyIndex(index);
+  }
   return DEFAULT_ROLE_LABELS[index] ?? `Party ${index + 1}`;
 }
 
@@ -365,7 +372,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
         const signer = signerBySlot[index];
         return {
           fullLegalName: full,
-          roleLabel: roleLabelForIndex(index, roleLabelsIn[index]),
+          roleLabel: roleLabelForIndex(index, roleLabelsIn[index], args.rawIntake),
           displayAlias: displayAlias === full ? full.split(/\s+/).slice(0, 2).join(" ") : displayAlias,
           signerName: signer?.signerName?.trim() || null,
           signerTitle: signer?.signerTitle?.trim() || null,
@@ -435,7 +442,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     const signer = signerBySlot[index];
     return {
       fullLegalName: full,
-      roleLabel: roleLabelForIndex(index, args.roleLabels?.[index]),
+      roleLabel: roleLabelForIndex(index, args.roleLabels?.[index], args.rawIntake),
       displayAlias: displayAlias === full ? full.split(/\s+/).slice(0, 2).join(" ") : displayAlias,
       signerName: signer?.signerName?.trim() || null,
       signerTitle: signer?.signerTitle?.trim() || null,

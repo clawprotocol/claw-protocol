@@ -46,6 +46,8 @@ export type AuthoritativeSigningSnapshotRecipientMetadata = {
   partySignerNames: readonly string[];
   partySignerTitles: readonly string[];
   partyAddresses: readonly string[];
+  /** Full legal entity names for party slots 3+ (and optional override for slots 1–2). */
+  partyLegalNames?: readonly string[];
   recipient1Name: string;
   recipient2Name: string;
   recipient1Email: string;

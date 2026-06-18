@@ -25,7 +25,7 @@ import {
 } from "./paidProExecutionBlockEntityHeading";
 
 const PARTY_SECTION_HEADING_RE =
-  /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*(.*)$/i;
+  /^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*(.*)$/i;
 
 const SIG_FIELD_RE =
   /^(By|Name|Title|Date|Email\s+for\s+Notices?|Address\s+for\s+Notices?)\s*:\s*(.*)$/i;
@@ -69,8 +69,12 @@ function resolvePartyFromLine(
       const idx = identities.findIndex((id) => id.blockHeading === "CLIENT");
       if (idx >= 0) return { party: parties[idx]!, identity: identities[idx]! };
     }
-    if (role.includes("SERVICE") && role.includes("PROVIDER")) {
+    if (role === "SERVICE PROVIDER") {
       const idx = identities.findIndex((id) => id.blockHeading === "SERVICE PROVIDER");
+      if (idx >= 0) return { party: parties[idx]!, identity: identities[idx]! };
+    }
+    if (role === "ANALYTICS PROVIDER") {
+      const idx = identities.findIndex((id) => id.blockHeading === "ANALYTICS PROVIDER");
       if (idx >= 0) return { party: parties[idx]!, identity: identities[idx]! };
     }
     return null;
@@ -224,7 +228,9 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
     }
 
     const partyFromLine = resolvePartyFromLine(trimmed, parties, identities);
-    if (partyFromLine) {
+    if (PARTY_SECTION_HEADING_RE.test(trimmed)) {
+      currentParty = partyFromLine;
+    } else if (partyFromLine) {
       currentParty = partyFromLine;
     } else if (isPartySectionStart(trimmed, parties)) {
       const resolved = resolvePartyFromLine(trimmed, parties, identities);

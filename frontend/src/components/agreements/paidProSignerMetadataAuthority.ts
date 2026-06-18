@@ -77,6 +77,7 @@ function blockHeadingFromRoleLabel(roleLabel: string, partyIndex: number): strin
   const r = roleLabel.trim().toLowerCase();
   if (r === "client") return "CLIENT";
   if (r.includes("service") && r.includes("provider")) return "SERVICE PROVIDER";
+  if (r.includes("analytics") && r.includes("provider")) return "ANALYTICS PROVIDER";
   if (partyIndex === 0) return "CLIENT";
   if (partyIndex === 1) return "SERVICE PROVIDER";
   return `PARTY ${partyIndex + 1}`;
@@ -287,13 +288,17 @@ export function recipientMetadataToAuthorityParties(
     meta.partySignerNames.length,
     meta.partySignerTitles.length,
     addresses.length,
+    meta.partyLegalNames?.length ?? 0,
     2,
   );
   const parties: PaidProSignerMetadataParty[] = [];
   for (let i = 0; i < count; i++) {
+    const legalFromManifest = norm(meta.partyLegalNames?.[i] ?? "");
     parties.push({
       partyIndex: i,
-      partyLegalName: norm(i === 0 ? meta.recipient1Name : i === 1 ? meta.recipient2Name : ""),
+      partyLegalName:
+        legalFromManifest ||
+        norm(i === 0 ? meta.recipient1Name : i === 1 ? meta.recipient2Name : ""),
       signerEmail: norm(
         i === 0
           ? meta.recipient1Email
@@ -322,6 +327,7 @@ export function authorityPartiesToRecipientMetadata(
     partySignerNames,
     partySignerTitles,
     partyAddresses,
+    partyLegalNames: parties.map((p) => p.partyLegalName),
     recipient1Name: p0?.partyLegalName ?? "",
     recipient2Name: p1?.partyLegalName ?? "",
     recipient1Email: p0?.signerEmail ?? "",

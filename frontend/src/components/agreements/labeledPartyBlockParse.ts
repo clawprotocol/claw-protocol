@@ -113,6 +113,29 @@ export function labeledPartyLegalEntities(raw: string): string[] {
   return parseLabeledPartyBlocks(raw).map((b) => b.legalEntity);
 }
 
+export const TRIPARTITE_LABELED_PARTY_ROLE_LABELS = [
+  "Client",
+  "Service Provider",
+  "Analytics Provider",
+] as const;
+
+/** Tripartite labeled-party intakes (Party 1/2/3 blocks + tripartite keyword). */
+export function isTripartiteLabeledPartiesIntake(raw: string): boolean {
+  return parseLabeledPartyBlocks(raw).length >= 3 && /\btripartite\b/i.test(raw);
+}
+
+export function tripartiteRoleLabelForPartyIndex(index: number): string {
+  return TRIPARTITE_LABELED_PARTY_ROLE_LABELS[index] ?? `Party ${index + 1}`;
+}
+
+export function tripartiteExecutionBlockHeading(index: number): string {
+  const label = tripartiteRoleLabelForPartyIndex(index).toLowerCase();
+  if (label === "client") return "CLIENT";
+  if (label.includes("service") && label.includes("provider")) return "SERVICE PROVIDER";
+  if (label.includes("analytics") && label.includes("provider")) return "ANALYTICS PROVIDER";
+  return `PARTY ${index + 1}`;
+}
+
 export function labeledPartyBlocksForSignerMetadata(raw: string): LabeledPartyBlock[] {
   return parseLabeledPartyBlocks(raw);
 }

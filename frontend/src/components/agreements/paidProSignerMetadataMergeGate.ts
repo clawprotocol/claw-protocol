@@ -143,7 +143,7 @@ export function reconcileExecutionBlockToRoleIdentities(
         lines.push(`Address for Notice: ${id.partyAddress.trim()}`);
       } else if (/^address\s+for\s+notice/i.test(t)) lines.push(cl);
       else if (/^date\s*:/i.test(t)) lines.push(cl);
-      else if (/^(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:/i.test(t)) break;
+      else if (/^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+)\s*:/i.test(t)) break;
     }
     if (!lines.some((l) => /^by\s*:/i.test(l.trim()))) {
       lines.push("By: __________________________");

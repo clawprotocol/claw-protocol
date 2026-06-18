@@ -6,6 +6,7 @@
 import {
   buildCorpusRoleIdentitiesForExecutionReconcile,
   resolvePaidProPartyRolesFromAcceptedCorpus,
+  type AcceptedCorpusPartyRole,
   type AcceptedCorpusRoleAssignment,
 } from "./paidProAcceptedCorpusPartyRoles";
 import {
@@ -23,6 +24,11 @@ import {
 } from "./paidProExecutionBlockInstrumentation";
 import { stripInlineStaleServerSignatureTailBeforeWitness } from "./paidProFlattenedDocumentNormalize";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
+import {
+  isTripartiteLabeledPartiesIntake,
+  tripartiteExecutionBlockHeading,
+  tripartiteRoleLabelForPartyIndex,
+} from "./labeledPartyBlockParse";
 
 export {
   isRecitalFragmentExecutionPartyLine,
@@ -31,7 +37,7 @@ export {
 } from "./paidProLegalEntityNameHygiene";
 
 const EXECUTION_ROLE_HEADING_LINE_RE =
-  /^\s*(?:CLIENT|SERVICE\s+PROVIDER|CONSULTANT|PROVIDER|PARTY\s+\d+)\s*:?\s*$/i;
+  /^\s*(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|CONSULTANT|PROVIDER|PARTY\s+\d+)\s*:?\s*$/i;
 
 const NUMBERED_SECTION_HEADING_RE = /^\s*(\d+(?:\.\d+)*)\.\s+\S+/;
 const EXECUTION_FIELD_LINE_RE = /^\s*(?:By|Name|Title|Date|Email|Signature)\s*:/i;
@@ -134,6 +140,60 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
   return { text, repairs };
 }
 
+function executionBlockHeadingFromRoleLabel(roleLabel: string, index: number, intakeText?: string | null): string {
+  const r = roleLabel.replace(/\s+/g, " ").trim().toLowerCase();
+  if (r === "client") return "CLIENT";
+  if (r.includes("service") && r.includes("provider")) return "SERVICE PROVIDER";
+  if (r.includes("analytics") && r.includes("provider")) return "ANALYTICS PROVIDER";
+  if (intakeText && isTripartiteLabeledPartiesIntake(intakeText)) {
+    return tripartiteExecutionBlockHeading(index);
+  }
+  if (index === 0) return "CLIENT";
+  if (index === 1) return "SERVICE PROVIDER";
+  return `PARTY ${index + 1}`;
+}
+
+type ManifestExecutionRole = {
+  legalName: string;
+  roleLabel: string;
+  role: AcceptedCorpusPartyRole;
+};
+
+function manifestRolesFromLegalNames(
+  names: readonly string[],
+  intakeText?: string | null,
+): ManifestExecutionRole[] {
+  const tripartite = names.length >= 3 && isTripartiteLabeledPartiesIntake(intakeText ?? "");
+  return names.map((legalName, index) => {
+    const roleLabel = tripartite
+      ? tripartiteRoleLabelForPartyIndex(index)
+      : index === 0
+        ? "Client"
+        : index === 1
+          ? "Service Provider"
+          : `Party ${index + 1}`;
+    const role: AcceptedCorpusPartyRole = index === 0 ? "client" : "service_provider";
+    return { role, legalName, roleLabel };
+  });
+}
+
+function buildManifestExecutionIdentities(
+  names: readonly string[],
+  roles: readonly ManifestExecutionRole[],
+  intakeText?: string | null,
+): CanonicalPartyIdentity[] {
+  return names.map((name, index) => ({
+    index,
+    partyDisplayName: name,
+    blockHeading: executionBlockHeadingFromRoleLabel(roles[index]?.roleLabel ?? "", index, intakeText),
+    email: "",
+    partyAddress: null,
+    representativeName: null,
+    title: null,
+    isIndividual: false,
+  }));
+}
+
 function sanitizeRoleAssignments(corpus: string): AcceptedCorpusRoleAssignment[] {
   return resolvePaidProPartyRolesFromAcceptedCorpus(corpus)
     .map((role) => ({
@@ -150,14 +210,20 @@ function operativeBodyWithoutExecutionTails(text: string): string {
   const pollutionStripped = stripPreWitnessExecutionPollutionFromPrefix(prefix);
   prefix = pollutionStripped.text;
   if (firstWitness >= 0) return prefix.trimEnd();
-  const sigStart = prefix.search(/(?:^|\n)\s*(?:CLIENT|SERVICE\s+PROVIDER)\s*:\s*(?:\n|$)/im);
+  const sigStart = prefix.search(
+    /(?:^|\n)\s*(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+)\s*:\s*(?:\n|$)/im,
+  );
   if (sigStart >= 0) return prefix.slice(0, sigStart).trimEnd();
   return prefix.trimEnd();
 }
 
-/** Hard invariant: no duplicate role headings after the first CLIENT / SERVICE PROVIDER pair. */
-export function truncatePostCanonicalExecutionPollution(text: string): { text: string; repairs: string[] } {
+/** Hard invariant: no duplicate role headings after the canonical party signature sections. */
+export function truncatePostCanonicalExecutionPollution(
+  text: string,
+  opts?: { expectedPartyCount?: number },
+): { text: string; repairs: string[] } {
   const repairs: string[] = [];
+  const expectedPartyCount = opts?.expectedPartyCount ?? 2;
   const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
   if (witnessIdx < 0) return { text, repairs };
 
@@ -189,6 +255,7 @@ export function truncatePostCanonicalExecutionPollution(text: string): { text: s
       continue;
     }
     if (
+      expectedPartyCount <= 2 &&
       (clientHeadings > 0 || serviceProviderHeadings > 0) &&
       /^\s*(?:CONSULTANT|PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed)
     ) {
@@ -312,22 +379,18 @@ export function enforcePaidProSingleExecutionBlock(
     intakeManifest.length >= 2
       ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
       : authorityParties;
-  const roles =
+  const manifestRoles =
     manifestLegalNames.length >= 2
-      ? ([
-          { role: "client" as const, legalName: manifestLegalNames[0]!, roleLabel: "Client" as const },
-          {
-            role: "service_provider" as const,
-            legalName: manifestLegalNames[1]!,
-            roleLabel: "Service Provider" as const,
-          },
-        ] satisfies AcceptedCorpusRoleAssignment[])
-      : sanitizeRoleAssignments(text);
+      ? manifestRolesFromLegalNames(manifestLegalNames, opts?.intakeText ?? null)
+      : null;
+  const roles = manifestRoles ?? sanitizeRoleAssignments(text);
   const client = roles.find((r) => r.role === "client");
   const provider = roles.find((r) => r.role === "service_provider");
   if (!client || !provider) {
     text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
-    const truncated = truncatePostCanonicalExecutionPollution(text);
+    const truncated = truncatePostCanonicalExecutionPollution(text, {
+      expectedPartyCount: manifestLegalNames.length >= 2 ? manifestLegalNames.length : 2,
+    });
     if (truncated.text !== text) {
       repairs.push(...truncated.repairs);
       text = truncated.text;
@@ -336,45 +399,24 @@ export function enforcePaidProSingleExecutionBlock(
   }
 
   const body = operativeBodyWithoutExecutionTails(text);
+  const expectedPartyCount = Math.max(manifestLegalNames.length, roles.length);
 
   const identities: CanonicalPartyIdentity[] =
-    manifestLegalNames.length >= 2
-      ? [
-          {
-            index: 0,
-            partyDisplayName: client.legalName,
-            blockHeading: "CLIENT",
-            email: "",
-            partyAddress: null,
-            representativeName: null,
-            title: null,
-            isIndividual: false,
-          },
-          {
-            index: 1,
-            partyDisplayName: provider.legalName,
-            blockHeading: "SERVICE PROVIDER",
-            email: "",
-            partyAddress: null,
-            representativeName: null,
-            title: null,
-            isIndividual: false,
-          },
-        ]
+    manifestRoles && manifestLegalNames.length >= 2
+      ? buildManifestExecutionIdentities(manifestLegalNames, manifestRoles, opts?.intakeText ?? null)
       : buildCorpusRoleIdentitiesForExecutionReconcile(
           `${body}\n\nThis Agreement is between ${client.legalName} ("Client") and ${provider.legalName} ("Service Provider").`,
         );
-  const stub = [
+  const stubLines = [
     body,
     "",
     "IN WITNESS WHEREOF, the Parties execute this Agreement.",
     "",
-    "CLIENT:",
-    client.legalName,
-    "",
-    "SERVICE PROVIDER:",
-    provider.legalName,
-  ].join("\n");
+  ];
+  for (const id of identities) {
+    stubLines.push(`${id.blockHeading}:`, id.partyDisplayName.trim(), "");
+  }
+  const stub = stubLines.join("\n");
   const reconciled = reconcileExecutionBlockToRoleIdentities(stub, identities);
   if (reconciled.text !== text) {
     repairs.push("execution_block:single_canonical_rebuilt");
@@ -382,7 +424,7 @@ export function enforcePaidProSingleExecutionBlock(
   text = reconciled.text;
 
   text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
-  const truncated = truncatePostCanonicalExecutionPollution(text);
+  const truncated = truncatePostCanonicalExecutionPollution(text, { expectedPartyCount });
   if (truncated.text !== text) {
     repairs.push(...truncated.repairs);
     text = truncated.text;

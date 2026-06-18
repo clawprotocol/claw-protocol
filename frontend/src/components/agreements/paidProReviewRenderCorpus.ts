@@ -414,7 +414,7 @@ export function applyPaidProReviewRenderSanitizer(
     const mergeGated = applyPaidProSignerMetadataMergeGate({
       corpus: out,
       parties,
-      canonicalPartyCount: 2,
+      canonicalPartyCount: parties.length,
       roleContext: ctx,
     });
     if (mergeGated.repairs.length > 0) {

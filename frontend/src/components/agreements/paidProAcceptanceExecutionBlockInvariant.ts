@@ -24,6 +24,7 @@ function roleToExecutionHeading(roleLabel: string): string {
   const r = roleLabel.replace(/\s+/g, " ").trim().toLowerCase();
   if (r === "client") return "CLIENT";
   if (r.includes("service") && r.includes("provider")) return "SERVICE PROVIDER";
+  if (r.includes("analytics") && r.includes("provider")) return "ANALYTICS PROVIDER";
   if (r === "buyer") return "BUYER";
   if (r === "seller") return "SELLER";
   if (r === "lender") return "LENDER";
@@ -40,14 +41,29 @@ function roleToExecutionHeading(roleLabel: string): string {
 function sortManifestRecordsForExecution(
   records: readonly CanonicalPartyIdentityRecord[],
 ): CanonicalPartyIdentityRecord[] {
+  if (records.length <= 2) {
+    const clientIdx = records.findIndex((r) => /^client$/i.test(r.roleLabel.trim()));
+    const providerIdx = records.findIndex((r) =>
+      /service\s+provider|^provider$/i.test(r.roleLabel.trim()),
+    );
+    if (clientIdx >= 0 && providerIdx >= 0 && clientIdx !== providerIdx) {
+      return [records[clientIdx]!, records[providerIdx]!];
+    }
+    return [...records];
+  }
   const clientIdx = records.findIndex((r) => /^client$/i.test(r.roleLabel.trim()));
   const providerIdx = records.findIndex((r) =>
     /service\s+provider|^provider$/i.test(r.roleLabel.trim()),
   );
-  if (clientIdx >= 0 && providerIdx >= 0 && clientIdx !== providerIdx) {
-    return [records[clientIdx]!, records[providerIdx]!];
+  const analyticsIdx = records.findIndex((r) => /analytics\s+provider/i.test(r.roleLabel.trim()));
+  const ordered: CanonicalPartyIdentityRecord[] = [];
+  if (clientIdx >= 0) ordered.push(records[clientIdx]!);
+  if (providerIdx >= 0) ordered.push(records[providerIdx]!);
+  if (analyticsIdx >= 0) ordered.push(records[analyticsIdx]!);
+  for (let i = 0; i < records.length; i += 1) {
+    if (!ordered.includes(records[i]!)) ordered.push(records[i]!);
   }
-  return records.slice(0, 2);
+  return ordered;
 }
 
 function buildPartyExecutionSection(rec: CanonicalPartyIdentityRecord): string {
@@ -72,8 +88,7 @@ export function manifestRecordsForPaidProAcceptance(args: {
 }): CanonicalPartyIdentityRecord[] {
   const partyNames = (args.draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
-    .filter((n) => n.length >= 2)
-    .slice(0, 2);
+    .filter((n) => n.length >= 2);
   const roleLabels = (args.draft?.parties ?? [])
     .map((p) => String(p?.role ?? "").trim())
     .filter((r) => r.length >= 2);

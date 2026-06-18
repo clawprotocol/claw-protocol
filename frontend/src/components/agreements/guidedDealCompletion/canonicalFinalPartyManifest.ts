@@ -8,7 +8,11 @@ import {
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
 } from "../paidProPartyNamePreserve";
-import { labeledPartyLegalEntities } from "../labeledPartyBlockParse";
+import {
+  isTripartiteLabeledPartiesIntake,
+  labeledPartyLegalEntities,
+  tripartiteRoleLabelForPartyIndex,
+} from "../labeledPartyBlockParse";
 import {
   isInvalidPartySlotLegalEntity,
   normalizeAgreementPartyName,
@@ -156,7 +160,14 @@ function resolvePartyNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, i
   return "";
 }
 
-function roleLabelForEntry(role: CanonicalFinalPartyRole, index: number): string {
+function roleLabelForEntry(
+  role: CanonicalFinalPartyRole,
+  index: number,
+  intakeText?: string | null,
+): string {
+  if (intakeText && isTripartiteLabeledPartiesIntake(intakeText)) {
+    return tripartiteRoleLabelForPartyIndex(index);
+  }
   if (role === "client") return "Client";
   if (role === "service_provider") return "Service Provider";
   return `Party ${index + 1}`;
@@ -255,7 +266,7 @@ function resolveCanonicalFinalPartyManifestUncached(
       email,
       signerName,
       signerTitle: title,
-      roleLabel: roleLabelForEntry(canonicalRole, i),
+      roleLabel: roleLabelForEntry(canonicalRole, i, args.intakeText),
       signerKind: isIndividual ? "individual" : "entity_representative",
       isSenderSide: i === 0,
       isIndividual,

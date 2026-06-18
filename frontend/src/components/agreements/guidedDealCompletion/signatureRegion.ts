@@ -82,7 +82,7 @@ export function findSignatureRegionEnd(text: string, start: number): number {
       continue;
     }
     const isWitness = /^\s*IN WITNESS WHEREOF\b/i.test(trimmed);
-    const isHeading = /^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed);
+    const isHeading = /^\s*(?:CLIENT|SERVICE PROVIDER|ANALYTICS PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed);
     const isSigField =
       /^\s*(?:By|Name|Title|Date|Email|Signature)\s*:/i.test(trimmed) || /^_{4,}$/.test(trimmed);
     if (isWitness || isHeading || isSigField) {
@@ -103,7 +103,7 @@ export function findSignatureRegionEnd(text: string, start: number): number {
 export function countSignatureBlockHeadingsInTail(text: string): number {
   const start = signaturePatchStartIndex(text);
   const tail = start >= 0 ? text.slice(start) : text.slice(Math.floor(text.length * 0.72));
-  return (tail.match(/^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:/gim) || []).length;
+  return (tail.match(/^\s*(?:CLIENT|SERVICE PROVIDER|ANALYTICS PROVIDER|PARTY\s+\d+)\s*:/gim) || []).length;
 }
 
 /** Count execution-line anchors (`By:` or `Signature:`) in the signature tail. */

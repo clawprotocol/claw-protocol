@@ -269,7 +269,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     const gated = applyPaidProSignerMetadataMergeGate({
       corpus: result.corpus,
       parties: args.authority.parties,
-      canonicalPartyCount: 2,
+      canonicalPartyCount: args.authority.parties.length,
       roleContext,
     });
     if (gated.repairs.length > 0) {

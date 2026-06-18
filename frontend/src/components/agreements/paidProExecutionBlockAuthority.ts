@@ -26,7 +26,7 @@ function countCompletePartySignatureSections(text: string): {
   const body = (text || "").replace(/\r\n/g, "\n");
   const tailStart = signaturePatchStartIndex(body);
   const tail = tailStart >= 0 ? body.slice(tailStart) : body.slice(Math.floor(body.length * 0.72));
-  const chunks = tail.split(/\n(?=\s*(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:)/i).filter((c) => c.trim());
+  const chunks = tail.split(/\n(?=\s*(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+)\s*:)/i).filter((c) => c.trim());
   let clientWithBy = 0;
   let serviceProviderWithBy = 0;
   for (const chunk of chunks) {
