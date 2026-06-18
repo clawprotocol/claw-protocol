@@ -1435,6 +1435,7 @@ import {
   resolveIsFreeStreamlineDraftReview,
   type FreeReviewSurfaceSource,
 } from "./freeStreamlineDraftReview";
+import { resolveFreeStarterReviewBody } from "./freeStarterReviewBodyResolver";
 import {
   FREE_STARTER_REVIEW_BADGE,
   FREE_STARTER_REVIEW_SUBTITLE,
@@ -3463,10 +3464,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         displayPhase,
       };
       if (starterPreview) {
-        const starterText = buildStarterAgreementPreviewForReview(d, {
-          intakeText: resolveStarterPreviewIntakeText(debouncedStepBuffer),
+        const resolvedIntake = resolveStarterPreviewIntakeText(debouncedStepBuffer);
+        const starterText = resolveFreeStarterReviewBody({
+          draft: d,
+          rawIntake: resolvedIntake,
+          apiPayload: {
+            payment_terms: d.payment_terms,
+            server_full_document_text: (d as { server_full_document_text?: string | null }).server_full_document_text,
+          },
           placeholderGate,
-        });
+        }).body;
         const draftParties = ((d as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? [])
           .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
           .filter((p) => p.name.trim());
@@ -3474,7 +3481,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           surface: "free_starter_review_display",
           tier: "starter",
           candidates: [{ source: "free_starter", text: starterText }],
-          intakeText: debouncedStepBuffer,
+          intakeText: resolvedIntake,
           parties: draftParties,
           minLen: 120,
         });
@@ -11144,7 +11151,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       let parsed = await parseDraft(rawIntake);
+      writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
+      writeOriginalUserIntakeRawIfRicher(rawIntake);
       parsed = { ...parsed, payment: extractIntakePayment(rawIntake) };
+      parsed = preserveInstallmentPaymentTermsOnDraft(parsed, rawIntake);
       parsed = runIntakeDefaultsAndRoles(parsed, rawIntake, simpleProductFlow, intakePartyRoleLabels);
       if (createProductionTwoPane) {
         parsed = alignParsedWithCanonicalType(parsed, rawIntake);
@@ -11979,10 +11989,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         currentPremiumMergedIntakeKey || debouncedStepBuffer || intakeCombined,
       );
       const nextPreview = starterPreview
-        ? buildStarterAgreementPreviewForReview(draft, {
-            intakeText: starterIntake,
+        ? resolveFreeStarterReviewBody({
+            draft,
+            rawIntake: starterIntake,
+            apiPayload: {
+              payment_terms: draft.payment_terms,
+              server_full_document_text: (draft as { server_full_document_text?: string | null })
+                .server_full_document_text,
+            },
             placeholderGate,
-          })
+          }).body
         : buildAgreementPreviewText(draft, {
             starterPreview,
             premiumDeliverablePreview: !starterPreview,
@@ -12814,8 +12830,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ) {
       return "";
     }
-    return stripPlaceholderBlockerFromPersistPlain(agreementDocumentText);
-  }, [agreementDocumentText, starterPreviewTransientGate]);
+    let visible = stripPlaceholderBlockerFromPersistPlain(agreementDocumentText);
+    if (isFreeStreamlineDraftReview && draft && !agreementDocumentDirtyRef.current) {
+      const resolved = resolveFreeStarterReviewBody({
+        draft,
+        rawIntake: resolveStarterPreviewIntakeText(
+          currentPremiumMergedIntakeKey || debouncedStepBuffer || intakeCombined,
+        ),
+        currentPreview: visible,
+        apiPayload: {
+          payment_terms: draft.payment_terms,
+          server_full_document_text: (draft as { server_full_document_text?: string | null })
+            .server_full_document_text,
+        },
+        placeholderGate: starterPreviewTransientGate,
+      });
+      visible = resolved.body || visible;
+    }
+    return visible;
+  }, [
+    agreementDocumentText,
+    starterPreviewTransientGate,
+    isFreeStreamlineDraftReview,
+    draft,
+    currentPremiumMergedIntakeKey,
+    debouncedStepBuffer,
+    intakeCombined,
+    reviewDocRefreshTick,
+  ]);
 
   const starterPreviewBodyForShell = visibleStarterAgreementDocumentText || renderedAgreementPreview;
 
@@ -19984,9 +20026,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return "";
     }
     try {
-      const text = buildAgreementPreviewText(draft as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
-        starterPreview: true,
-      }).trim();
+      const text = resolveFreeStarterReviewBody({
+        draft: draft as unknown as ParsedDraftShape,
+        rawIntake: resolveStarterPreviewIntakeText(
+          currentPremiumMergedIntakeKey || debouncedStepBuffer || intakeCombined,
+        ),
+      }).body.trim();
       const draftParties = (((draft as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? []))
         .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
         .filter((p) => p.name.trim());
@@ -20182,6 +20227,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalReviewAuthorityOnly: simpleProFinalReviewActive || isAuthoritativePaidProReviewActive,
       recoveryAuthoritativePlain: guidedPreIdentityAuthoritativeRef.current,
       pinnedFinalizedSignerPlain: pinnedFinalizedSignerCorpusRef.current,
+      isFreeStarterReview: isFreeStarterReviewSurface,
     });
   }, [
     guidedFinalReviewAuthoritativeResolution.body,
@@ -20198,6 +20244,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     isAuthoritativePaidProReviewActive,
     authoritativePaidProReviewPlain,
     visibleAgreementDocumentForReview,
+    isFreeStarterReviewSurface,
   ]);
 
   const proVisiblePaperCandidates = useMemo(() => {

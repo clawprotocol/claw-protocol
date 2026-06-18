@@ -60,7 +60,24 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   recoveryAuthoritativePlain?: string | null;
   /** Immutable pinned signer-applied body — never compete with picker/server length. */
   pinnedFinalizedSignerPlain?: string | null;
+  /** Free Starter review: never prefer authoritative_hydrated over intake-repaired preview. */
+  isFreeStarterReview?: boolean;
 }): SimpleProFinalReviewCorpusResolution {
+  if (args.isFreeStarterReview && !hasPaidProSourceOfTruth()) {
+    const rendered = norm(args.renderedPreviewPlain);
+    const adt = norm(args.agreementDocumentPlain);
+    const plainText = rendered || adt;
+    const authoritativeLen = norm(args.authoritativePlain).length;
+    return {
+      plainText,
+      source: rendered ? "rendered_preview" : "agreement_document",
+      authoritativeLen,
+      renderedLen: rendered.length,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
+
   const snapshotCorpus = readAuthoritativeSigningCorpus();
   if (snapshotCorpus.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
     return {
@@ -147,6 +164,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   let corpusRecovered = false;
 
   if (
+    !args.isFreeStarterReview &&
     plainText.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
     renderedLen >= 400 &&
     renderedLen < plainText.length * MATERIAL_SHORTER_RATIO
@@ -159,7 +177,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     });
   }
 
-  if (!authorityOnly && !hasPaidProSourceOfTruth()) {
+  if (!authorityOnly && !hasPaidProSourceOfTruth() && !args.isFreeStarterReview) {
     if (
       plainText.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
       rendered.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&

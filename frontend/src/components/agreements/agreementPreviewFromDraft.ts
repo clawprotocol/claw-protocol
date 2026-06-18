@@ -1049,7 +1049,13 @@ export function buildAgreementPreviewText(
   if (authoritative?.fullCorpusText && !starterPreview) {
     return authoritative.fullCorpusText;
   }
-  if (authoritative?.fullCorpusText && starterPreview && !freeStarterReviewPreview) {
+  // Free starter review must never short-circuit to paid authoritative corpus — only paid Pro display paths may.
+  if (
+    authoritative?.fullCorpusText &&
+    starterPreview &&
+    !freeStarterReviewPreview &&
+    shouldUsePaidProSourceOfTruthDisplayOnly()
+  ) {
     return authoritative.fullCorpusText;
   }
   const premiumDeliverable = Boolean(options?.premiumDeliverablePreview) && !starterPreview;

@@ -11,9 +11,11 @@ import {
   repairStarterPaymentCadenceInPreviewPlain,
   resolveStarterPreviewIntakeText,
 } from "./intakeCurrencyParse";
+import { resolveFreeStarterReviewBody } from "./freeStarterReviewBodyResolver";
 import { writeOriginalUserIntakeRawAtDraftCommit } from "./originalUserIntakeRawStorage";
 import { resolveSignerCardPartyNames } from "./signerFullLegalName";
 import { assessStarterComplexityGate } from "./starterMultiPartyProGate";
+import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
 import {
   isolateLegalEntityFromContaminatedName,
   isStackedPartyIdentityContamination,
@@ -193,6 +195,70 @@ describe("Test372 Free 2-party identity isolation", () => {
     });
     expect(names).toEqual([BLUE, HARBOR]);
     expect(names.join(" ")).not.toMatch(/Sarah Mitchell|Michael Torres|\bsarah\b|\bmichael\b/i);
+  });
+
+  it("resolveFreeStarterReviewBody prefers monthly installments when step buffer is empty and intake is in session storage", () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+      clear: () => {
+        storage.clear();
+      },
+    });
+    writeOriginalUserIntakeRawAtDraftCommit(TEST372_FREE_STACKED_PARTY_INTAKE);
+    const resolved = resolveFreeStarterReviewBody({
+      draft: test372ContaminatedDraft(),
+      rawIntake: "",
+      apiPayload: { payment_terms: "$48,000 upon completion of services" },
+      authoritativeBody:
+        "SERVICES AGREEMENT\n\n2. Payment Terms\n$48,000 upon completion of services.\n\n3. Services Term and Effective Date\nTerm: twelve (12) months",
+    });
+    expect(resolved.source).toBe("repaired_starter_preview");
+    expect(resolved.usedOriginalRaw).toBe(true);
+    expect(resolved.body).toMatch(/monthly installments/i);
+    expect(resolved.body).not.toMatch(/upon completion of services/i);
+    vi.unstubAllGlobals();
+  });
+
+  it("resolveFreeStarterReviewBody repairs authoritative_hydrated body before display when intake declares installments", () => {
+    const repairedPreview = buildStarterAgreementPreviewForReview(test372ContaminatedDraft(), {
+      intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,
+    });
+    const authoritativeHydrated =
+      "SERVICES AGREEMENT\n\nThis Agreement is between Blue Canyon Analytics LLC (\"Client\") and Harbor Peak Automation LLC (\"Service Provider\").\n\n2. Payment Terms\n$48,000 upon completion of services.\n\n3. Services Term and Effective Date\nTerm: twelve (12) months\nEffective Date: upon full execution by both parties";
+    const resolved = resolveFreeStarterReviewBody({
+      draft: test372ContaminatedDraft(),
+      rawIntake: TEST372_FREE_STACKED_PARTY_INTAKE,
+      currentPreview: authoritativeHydrated,
+      authoritativeBody: authoritativeHydrated,
+      apiPayload: { payment_terms: "$48,000 upon completion of services" },
+    });
+    expect(resolved.body).toMatch(/monthly installments/i);
+    expect(resolved.body).not.toMatch(/upon completion of services/i);
+    expect(repairedPreview).toMatch(/monthly installments/i);
+  });
+
+  it("simpleProFinalReviewCorpus does not override free starter rendered preview with longer authoritative body", () => {
+    const rendered =
+      "SERVICES AGREEMENT\n\n2. Payment Terms\n$48,000 in monthly installments.\n\n3. Term: twelve (12) months.";
+    const authoritative =
+      "SERVICES AGREEMENT\n\n2. Payment Terms\n$48,000 upon completion of services.\n\n3. Term: twelve (12) months.\n\n4. Governing Law\nOklahoma.\n\n5. Termination\nTerms to be agreed.\n\nSignatures follow.";
+    const corpus = resolveSimpleProFinalReviewCorpus({
+      authoritativePlain: authoritative,
+      renderedPreviewPlain: rendered,
+      agreementDocumentPlain: rendered,
+      isFreeStarterReview: true,
+    });
+    expect(corpus.plainText).toBe(rendered);
+    expect(corpus.source).toBe("rendered_preview");
+    expect(corpus.plainText).toMatch(/monthly installments/i);
+    expect(corpus.plainText).not.toMatch(/upon completion of services/i);
   });
 });
 
