@@ -39,7 +39,7 @@ import {
 import { requireAuthoritativeCorpusForSurface } from "./authoritativeAgreementDocument";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
-import { shouldApplyAiWorkflowServicesQualityFloor } from "./paidProAiWorkflowScopeGuard";
+import { applyPaidProDomainScopeGuard, shouldApplyAiWorkflowServicesQualityFloor } from "./paidProDomainScopeGuard";
 
 /** @deprecated Use PremiumRenderResolveSource — kept as alias for gradual migration. */
 export type PremiumPaidReadonlySourceUsed = PremiumRenderResolveSource;
@@ -154,8 +154,12 @@ export function applyAiWorkflowServicesQualityFloorToFallback(
       `${n++}. ELECTRONIC SIGNATURES\nThis Agreement may be executed electronically through LawDog or comparable e-sign platforms, with the same effect as original signatures.`,
     );
   }
-  if (!sections.length) return base;
-  return insertBeforeExecutionTail(base, sections.join("\n\n"));
+  if (!sections.length) {
+    return applyPaidProDomainScopeGuard(base, intakeText, { logSurface: "ai_workflow_quality_floor" });
+  }
+  return applyPaidProDomainScopeGuard(insertBeforeExecutionTail(base, sections.join("\n\n")), intakeText, {
+    logSurface: "ai_workflow_quality_floor",
+  });
 }
 
 /** Counts discrete commercial concepts present in the paper body (used to prefer richer corpus). */
@@ -616,7 +620,11 @@ export function pickPremiumPaidReadonlyPlainText(args: {
           surface: "premium_readonly_paid_fallback",
         }).text;
   }
-  finalizedPlain = applyAiWorkflowServicesQualityFloorToFallback(finalizedPlain, args.draft, args.intakeText);
+  finalizedPlain = applyPaidProDomainScopeGuard(
+    applyAiWorkflowServicesQualityFloorToFallback(finalizedPlain, args.draft, args.intakeText),
+    args.intakeText,
+    { logSurface: "premium_readonly_paid_picker" },
+  );
   const nonThin =
     finalizedPlain.length >= 1200 || premiumReadonlyCorpusSignalHits(finalizedPlain) >= 3;
 
@@ -787,5 +795,9 @@ export function buildPremiumDeliverablePlainTextFromDraft(
     intakeText: opts?.intakeText,
     legacyPremiumSnapshotText: opts?.legacySnapshotText,
   });
-  return applyAiWorkflowServicesQualityFloorToFallback(built, draft, opts?.intakeText);
+  return applyPaidProDomainScopeGuard(
+    applyAiWorkflowServicesQualityFloorToFallback(built, draft, opts?.intakeText),
+    opts?.intakeText,
+    { logSurface: "premium_deliverable_plain_from_draft" },
+  );
 }

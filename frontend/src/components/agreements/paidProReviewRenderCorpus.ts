@@ -96,6 +96,7 @@ import {
   repairExecutionBlockEntityHeadingLines,
 } from "./paidProExecutionBlockEntityHeading";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
+import { sanitizePaidProDomainScopeContamination } from "./paidProDomainScopeGuard";
 
 const LABELED_SIGNATURE_BLOCK_START =
   /^(?:CLIENT|SERVICE PROVIDER|PROVIDER|CONTRACTOR|COMPANY|PARTY\s+\d+)\s*:/i;
@@ -465,6 +466,19 @@ export function applyPaidProReviewRenderSanitizer(
     out = finalized.text;
     repaired = true;
   }
+
+  const providerLabel = parties[1]?.partyLegalName || parties[0]?.partyLegalName || "Service Provider";
+  const clientLabel = parties[0]?.partyLegalName || "Client";
+  const domainGuard = sanitizePaidProDomainScopeContamination(out, ctx?.intakeText ?? null, {
+    providerLabel,
+    clientLabel,
+    logSurface: "review_render_sanitizer",
+  });
+  if (domainGuard.repairs.length > 0) {
+    out = domainGuard.text;
+    repaired = true;
+  }
+
   return {
     text: out,
     repaired: repaired || guarded.repaired,

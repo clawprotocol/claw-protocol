@@ -17,6 +17,7 @@ import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualConsultingQualityFloor";
+import { applyPaidProDomainScopeGuard } from "./paidProDomainScopeGuard";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { stripMalformedProReviewDisplayArtifacts } from "./polishProAgreementDisplayLayer";
@@ -432,6 +433,12 @@ function preparePaidProServerDocumentForAcceptanceCore(
   if (floored !== out) {
     repairs.push("quality:ai_workflow_services_floor");
     out = floored;
+  }
+
+  const domainGuarded = applyPaidProDomainScopeGuard(out, intakeText, { logSurface: "acceptance_prep" });
+  if (domainGuarded !== out) {
+    repairs.push("domain_scope:contamination_sanitized");
+    out = domainGuarded;
   }
 
   const tailArtifacts = stripMalformedProReviewDisplayArtifacts(out);

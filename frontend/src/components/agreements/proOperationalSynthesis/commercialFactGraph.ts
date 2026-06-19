@@ -1,4 +1,5 @@
 import type { ParsedDraftShape } from "../intakeSmartDefaults";
+import { shouldApplyAiWorkflowServicesQualityFloor } from "../paidProDomainScopeGuard";
 
 export type CommercialFactGraph = {
   agreementKind: "ai_workflow_services" | "joint_venture_economics" | "services" | "generic";
@@ -122,7 +123,7 @@ export function buildCommercialFactGraph(rawIntake: string, draft?: ParsedDraftS
     raw.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+law\b/) ??
     raw.match(/\bgovern(?:ing|ed by)\s+(?:the\s+laws?\s+of\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
   const governingLaw = lawMatch?.[1] ? titleCaseState(norm(lawMatch[1])) : norm(draft?.jurisdiction) || null;
-  const aiWorkflow = /\b(?:ai|automation|workflow|configuration|implementation|setup|crm|integration)\b/i.test(raw);
+  const aiWorkflow = shouldApplyAiWorkflowServicesQualityFloor(raw);
   const jvEconomics = isJointVentureEconomicsIntake(raw);
   const serviceActivity = aiWorkflow
     ? "AI workflow setup"

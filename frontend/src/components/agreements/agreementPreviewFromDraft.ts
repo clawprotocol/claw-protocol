@@ -65,7 +65,7 @@ import {
   resolveStarterPreviewIntakeText,
   repairStarterPaymentCadenceInPreviewPlain,
 } from "./intakeCurrencyParse";
-import { shouldApplyAiWorkflowServicesQualityFloor } from "./paidProAiWorkflowScopeGuard";
+import { shouldApplyAiWorkflowServicesQualityFloor, applyPaidProDomainScopeGuard } from "./paidProDomainScopeGuard";
 import { renderClausePrimitive, selectClausePrimitivesForIntake } from "./agreementOutputQuality/canonicalClausePrimitives";
 import {
   logPlaceholderScanSkippedTransient,
@@ -1102,6 +1102,9 @@ export function buildAgreementPreviewText(
     if (!display.includes(AGREEMENT_PREVIEW_ESIGN_NOTICE)) {
       display = collapseDuplicateEsignNoticesInFullPreview(`${display}\n\n${AGREEMENT_PREVIEW_ESIGN_NOTICE}\n`);
     }
+    display = applyPaidProDomainScopeGuard(display, options?.intakeText, {
+      logSurface: "preview_premium_deliverable",
+    });
     return returnAuthoritativeTextForIllegalPostAcceptanceGeneration({
       surface: "preview_premium_deliverable",
       builder: "buildAgreementPreviewText",
