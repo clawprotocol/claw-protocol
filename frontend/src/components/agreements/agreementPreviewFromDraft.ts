@@ -65,6 +65,7 @@ import {
   resolveStarterPreviewIntakeText,
   repairStarterPaymentCadenceInPreviewPlain,
 } from "./intakeCurrencyParse";
+import { shouldApplyAiWorkflowServicesQualityFloor } from "./paidProAiWorkflowScopeGuard";
 import { renderClausePrimitive, selectClausePrimitivesForIntake } from "./agreementOutputQuality/canonicalClausePrimitives";
 import {
   logPlaceholderScanSkippedTransient,
@@ -360,7 +361,7 @@ function isAiWorkflowServicesAgreement(
 ): boolean {
   if (!isServicesAgreementLikeDraft(draft, intakeText)) return false;
   const blob = [draft.title, draft.purpose, draft.additional_terms, intakeText].filter(Boolean).join(" ");
-  return /\b(?:ai|artificial intelligence|workflow|automation|setup|implementation|integration)\b/i.test(blob);
+  return shouldApplyAiWorkflowServicesQualityFloor(blob);
 }
 
 function buildProServicesQualityFloorSections(args: {

@@ -48,7 +48,7 @@ describe("Test297 paid Pro signer-details-first on forced render path", () => {
     ).toBe(false);
   });
 
-  it("forced route hides track chooser until signer details complete", () => {
+  it("forced route hides track chooser until signer metadata is finalized", () => {
     expect(
       shouldShowPaidProForcedFirstReviewTrackChooser({
         forcedFirstReviewActive: true,
@@ -65,6 +65,32 @@ describe("Test297 paid Pro signer-details-first on forced render path", () => {
         signerDetailsReady: true,
         signerMetadataFinalized: false,
         signaturePreparationRequested: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowPaidProForcedFirstReviewTrackChooser({
+        forcedFirstReviewActive: true,
+        inlineSignerSetupMounted: false,
+        signerDetailsReady: true,
+        signerMetadataFinalized: true,
+        signaturePreparationRequested: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("first-review latch arms when intake prefilled signer details (confirmation required)", () => {
+    expect(
+      shouldArmPaidProFirstReviewSignerSetupLatch({
+        hasAcceptedPaidProAuthority: true,
+        premiumPaidDocumentSurface: true,
+        premiumRecipientUxActive: false,
+        createUiStageIsDraft: true,
+        firstReviewSurfaceActive: true,
+        hasCanonicalReviewCorpus: true,
+        paidProSignatureDetailsReady: true,
+        signerMetadataFinalized: false,
+        signaturePreparationRequested: false,
+        alreadyLatched: false,
       }),
     ).toBe(true);
   });
@@ -120,7 +146,7 @@ describe("Test297 paid Pro signer-details-first on forced render path", () => {
     expect(intakeSrc).toContain("paidProInlineRecipientShell ? true : resolvedSendMode === \"signature\"");
     const forcedBlock = intakeSrc.slice(
       intakeSrc.indexOf("paidProForcedFirstReviewActive ? ("),
-      intakeSrc.indexOf("paidProForcedFirstReviewActive ? (") + 6500,
+      intakeSrc.indexOf("paidProForcedFirstReviewActive ? (") + 12000,
     );
     expect(forcedBlock).toContain("showPaidProForcedFirstReviewTrackChooser");
     expect(forcedBlock).toContain("paidProCanonicalReviewSignerSetupActive");

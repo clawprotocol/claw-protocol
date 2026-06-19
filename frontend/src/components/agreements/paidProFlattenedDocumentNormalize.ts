@@ -8,6 +8,7 @@ import { stripPreWitnessExecutionPollutionFromPrefix } from "./paidProExecutionB
 import { repairGluedSectionHeadingsInText } from "./documentSectionHeadingSplit";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
+import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
@@ -136,6 +137,11 @@ export function preparePaidProReviewDisplayPlain(text: string): {
   if (orphanSectionNumbers.repairs.length > 0) {
     out = orphanSectionNumbers.text;
     repairs.push(...orphanSectionNumbers.repairs);
+  }
+  const sectionRender = normalizePaidProSectionRender(out);
+  if (sectionRender.fixedHeadingBodyCollapse > 0) {
+    out = sectionRender.text;
+    repairs.push("normalize:pro_section_heading_body");
   }
   return { text: out, repairs: [...new Set(repairs)] };
 }

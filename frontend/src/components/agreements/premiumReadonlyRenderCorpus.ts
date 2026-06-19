@@ -39,6 +39,7 @@ import {
 import { requireAuthoritativeCorpusForSurface } from "./authoritativeAgreementDocument";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
+import { shouldApplyAiWorkflowServicesQualityFloor } from "./paidProAiWorkflowScopeGuard";
 
 /** @deprecated Use PremiumRenderResolveSource — kept as alias for gradual migration. */
 export type PremiumPaidReadonlySourceUsed = PremiumRenderResolveSource;
@@ -87,7 +88,7 @@ function isAiWorkflowServicesFallback(draft: ParsedDraftShape | null | undefined
     .filter(Boolean)
     .join(" ");
   return /\b(?:services?|provider|consulting|contractor)\b/i.test(blob) &&
-    /\b(?:ai|artificial intelligence|workflow|automation|setup|implementation|integration)\b/i.test(blob);
+    shouldApplyAiWorkflowServicesQualityFloor(blob);
 }
 
 function nextSectionNumber(text: string): number {

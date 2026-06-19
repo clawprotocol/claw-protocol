@@ -319,19 +319,46 @@ export function logPaidProSignerMetadataHydrationMissing(payload: {
 const BLANK_SIG_NAME_RE = /^name\s*:\s*(?:_{2,}\s*)?$/im;
 const BLANK_SIG_TITLE_RE = /^title\s*:\s*(?:_{2,}\s*)?$/im;
 const BLANK_SIG_EMAIL_RE = /^email\s+for\s+notices?\s*:\s*(?:_{2,}\s*)?$/im;
-const BLANK_SIG_ADDRESS_RE = /^address\s+for\s+notices?\s*:\s*(?:_{2,}\s*)?$/im;
 
-/** Count blank Name/Title/Email/Address lines remaining in the execution tail. */
-export function countBlankSignerMetadataLinesInExecutionBlock(corpus: string): number {
+/** Count blank required signer metadata lines (Name/Title/Email when authority supplies values). */
+export function countBlankSignerMetadataLinesInExecutionBlock(
+  corpus: string,
+  parties?: readonly PaidProSignerMetadataParty[],
+): number {
   const witnessIdx = (corpus || "").search(/\bIN WITNESS WHEREOF\b/i);
   if (witnessIdx < 0) return 0;
   const tail = corpus.slice(witnessIdx);
+  const lines = tail.split("\n");
   let count = 0;
-  if (BLANK_SIG_NAME_RE.test(tail)) count += (tail.match(BLANK_SIG_NAME_RE) || []).length;
-  if (BLANK_SIG_TITLE_RE.test(tail)) count += (tail.match(BLANK_SIG_TITLE_RE) || []).length;
-  if (BLANK_SIG_EMAIL_RE.test(tail)) count += (tail.match(BLANK_SIG_EMAIL_RE) || []).length;
-  if (BLANK_SIG_ADDRESS_RE.test(tail)) count += (tail.match(BLANK_SIG_ADDRESS_RE) || []).length;
-  return count;
+  let partyIndex = -1;
+
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+    if (/^(?:CLIENT|SERVICE\s+PROVIDER|PARTY)/i.test(trimmed) && /:/.test(trimmed)) {
+      partyIndex += 1;
+      continue;
+    }
+    const party = parties?.[partyIndex];
+    if (/^name\s*:/i.test(trimmed) && party?.signerName.trim()) {
+      if (/^name\s*:\s*(?:_{2,}\s*)?$/i.test(trimmed)) count += 1;
+      continue;
+    }
+    if (/^title\s*:/i.test(trimmed) && party?.signerTitle.trim()) {
+      if (/^title\s*:\s*(?:_{2,}\s*)?$/i.test(trimmed)) count += 1;
+      continue;
+    }
+    if (/^email\s+for\s+notices?\s*:/i.test(trimmed) && party?.signerEmail.trim()) {
+      if (/^email\s+for\s+notices?\s*:\s*(?:_{2,}\s*)?$/i.test(trimmed)) count += 1;
+    }
+  }
+
+  if (parties?.length) return count;
+
+  let legacy = 0;
+  if (BLANK_SIG_NAME_RE.test(tail)) legacy += (tail.match(BLANK_SIG_NAME_RE) || []).length;
+  if (BLANK_SIG_TITLE_RE.test(tail)) legacy += (tail.match(BLANK_SIG_TITLE_RE) || []).length;
+  if (BLANK_SIG_EMAIL_RE.test(tail)) legacy += (tail.match(BLANK_SIG_EMAIL_RE) || []).length;
+  return legacy;
 }
 
 export function signerMetadataAuthorityHasHydratableFields(

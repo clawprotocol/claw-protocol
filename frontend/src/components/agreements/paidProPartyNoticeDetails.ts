@@ -304,3 +304,99 @@ export function applySignatureNoticeContactFieldsToCorpus(
     replacements,
   };
 }
+
+const DANGLING_IF_TO_RE = /\nIf to\s*:?\s*$/i;
+
+export function logPaidProNoticeSectionIntegrity(payload: {
+  repairs: string[];
+  partyCount: number;
+  stanzaCount: number;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (!payload.repairs.length) return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-notice-section-integrity]", payload);
+}
+
+function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
+  const legal = party.partyLegalName.trim();
+  const lines = [`If to ${legal}:`, legal];
+  const name = party.signerName.trim();
+  const title = party.signerTitle.trim();
+  if (name) {
+    lines.push(title ? `Attn: ${name}, ${title}` : `Attn: ${name}`);
+  }
+  const email = party.signerEmail.trim();
+  if (email) lines.push(`Email: ${email}`);
+  const address = party.partyAddress.trim();
+  if (address) lines.push(`Address: ${address}`);
+  return lines.join("\n");
+}
+
+function noticeStanzaComplete(stanza: string): boolean {
+  const trimmed = stanza.trim();
+  if (!trimmed) return false;
+  if (DANGLING_IF_TO_RE.test(`\n${trimmed}`)) return false;
+  if (/^If to\s*:\s*$/i.test(trimmed)) return false;
+  return /Attn:/i.test(trimmed) || /Email:/i.test(trimmed);
+}
+
+/**
+ * Repair incomplete operative Notices stanzas (dangling "If to", missing Attn/Email lines).
+ */
+export function repairIncompleteIfToNoticeStanzas(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+): { text: string; repairs: string[] } {
+  if (!corpus?.trim() || parties.length < 2) return { text: corpus, repairs: [] };
+  const repairs: string[] = [];
+  let text = corpus.replace(/\r\n/g, "\n");
+
+  if (DANGLING_IF_TO_RE.test(text) || /Notices[\s\S]*\nIf to\s*$/i.test(text)) {
+    text = text.replace(/\nIf to\s*:?\s*$/i, "");
+    repairs.push("notice:remove_dangling_if_to");
+  }
+
+  const noticesIdx = text.search(/(?:^|\n)\s*\d+\.\s*Notices\b/i);
+  if (noticesIdx < 0) {
+    if (/\nIf to\s*$/i.test(text)) {
+      const partiesBlock = parties.map((p) => buildIfToNoticeStanza(p)).join("\n\n");
+      text = `${text.trimEnd()}\n\n${partiesBlock}`;
+      repairs.push("notice:append_stanzas_after_dangling_if_to");
+      logPaidProNoticeSectionIntegrity({ repairs, partyCount: parties.length, stanzaCount: parties.length });
+    }
+    return { text: text.trimEnd(), repairs };
+  }
+
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const noticesEnd = witnessIdx >= 0 ? witnessIdx : text.length;
+  const before = text.slice(0, noticesIdx);
+  const noticesRegion = text.slice(noticesIdx, noticesEnd);
+  const after = text.slice(noticesEnd);
+
+  const blocks = noticesRegion.split(/\n(?=If to\s+)/i);
+  const intro = blocks[0] ?? "";
+  const stanzas = blocks.slice(1);
+  const rebuiltStanzas: string[] = [];
+  let stanzaCount = 0;
+
+  for (let i = 0; i < parties.length; i++) {
+    const party = parties[i]!;
+    const existing = stanzas[i]?.trim() ?? "";
+    if (noticeStanzaComplete(existing)) {
+      rebuiltStanzas.push(existing);
+      stanzaCount += 1;
+      continue;
+    }
+    rebuiltStanzas.push(buildIfToNoticeStanza(party));
+    repairs.push(`notice:rebuild_stanza_party_${i + 1}`);
+    stanzaCount += 1;
+  }
+
+  if (!repairs.length) return { text, repairs };
+
+  const mergedNotices = `${intro.trimEnd()}\n\n${rebuiltStanzas.join("\n\n")}`.replace(/\n{3,}/g, "\n\n");
+  text = `${before}${mergedNotices}${after}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  logPaidProNoticeSectionIntegrity({ repairs, partyCount: parties.length, stanzaCount });
+  return { text, repairs };
+}

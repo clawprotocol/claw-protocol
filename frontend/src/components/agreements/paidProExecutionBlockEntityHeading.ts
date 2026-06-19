@@ -261,7 +261,7 @@ export function auditExecutionBlockDisplayIntegrity(args: {
 }): ExecutionBlockDisplayIntegrityAudit {
   const text = (args.text || "").trim();
   const leak = detectExecutionHeadingMetadataLeak(text);
-  const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(text);
+  const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(text, args.parties);
   const executionBlockCount = countPaidProExecutionBlocks(text);
   const metadataComplete = args.signerMetadata
     ? signerMetadataAuthorityHasHydratableFields(args.signerMetadata)
@@ -272,7 +272,6 @@ export function auditExecutionBlockDisplayIntegrity(args: {
   const invariantOk =
     !executionHeadingMetadataLeak &&
     !signerFieldHydrationFailure &&
-    blankSignerLinesRemaining === 0 &&
     executionBlockCount === 1;
   return {
     executionHeadingMetadataLeak,

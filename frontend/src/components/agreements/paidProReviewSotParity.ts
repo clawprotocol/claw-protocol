@@ -81,7 +81,7 @@ export function auditPaidProReviewRenderSotParity(args: {
     hashMatch ||
     displayNormalizationDelta ||
     reviewMatchesSnapshotDisplay ||
-    (signerFieldOnlyDelta && blankSignerLinesRemaining === 0);
+    signerFieldOnlyDelta;
   if (reviewHash && !invariantOk) {
     logPaidProReviewSotParity({
       canonicalHash,

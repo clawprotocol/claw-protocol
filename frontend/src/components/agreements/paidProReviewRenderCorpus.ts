@@ -14,6 +14,8 @@ import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGu
 import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { preserveFullLegalPartyNames } from "./paidProPartyNamePreserve";
+import { repairProtectedLegalEntitySuffixes } from "./paidProProtectedEntityRepair";
+import { repairIncompleteIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   authorityPartiesToCanonicalPartyIdentities,
@@ -402,9 +404,22 @@ export function applyPaidProReviewRenderSanitizer(
   }
 
   if (legalNames.length >= 2) {
+    const entityRepair = repairProtectedLegalEntitySuffixes(text, legalNames, ctx?.intakeText ?? null);
+    if (entityRepair.repairs > 0) {
+      text = entityRepair.text;
+      repaired = true;
+    }
     const preserved = preserveFullLegalPartyNames(text, legalNames, ctx?.intakeText ?? null);
     if (preserved !== text) {
       text = preserved;
+      repaired = true;
+    }
+  }
+
+  if (parties.length >= 2) {
+    const noticeRepair = repairIncompleteIfToNoticeStanzas(text, parties);
+    if (noticeRepair.repairs.length > 0) {
+      text = noticeRepair.text;
       repaired = true;
     }
   }
@@ -659,6 +674,7 @@ function alignExecutionBlockRolesFromAcceptedCorpus(
   const canOverlay = shouldApplyExecutionBlockSignerOverlay({
     parties: hydrationParties,
     intakeText: intake,
+    corpusText: corpus,
   });
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
     if (!hydrationParties.length || !canOverlay) {

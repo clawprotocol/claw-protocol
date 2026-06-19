@@ -8,7 +8,7 @@ const MAIN_PLUS_NAMED_SUBSECTION_GLUE_RE =
 
 /** Body sentence starters that follow a glued heading title (not part of the title). */
 const GLUED_BODY_SENTENCE_START =
-  "(?:To\\s+the|During\\s+the\\s+Term|AI|The|This|Each|Either|Upon|Unless|If\\s|When|Where|As\\s|An\\s|A\\s|In\\s|For\\s|Client|Provider|Service\\s+Provider|Fixed|Termination|Both|All|Any|Neither|Notwithstanding|During|Within|After|Before|Red\\s|Mile|Harbor|Process|Not\\s|No\\s|One\\s|Party\\s|Neither\\s+party)";
+  "(?:To\\s+the|During\\s+the\\s+Term|AI|The|This|Each|Either|Upon|Unless|If\\s|When|Where|As\\s|An\\s|A\\s|In\\s|For\\s|Client|Provider|Service\\s+Provider|Consultant|Except|Taxes|Fixed|Termination|Both|All|Any|Neither|Notwithstanding|During|Within|After|Before|Red\\s|Mile|Harbor|Process|Not\\s|No\\s|One\\s|Party\\s|Neither\\s+party)";
 
 const MAIN_SECTION_GLUE_RE = new RegExp(
   `^(\\d+\\.\\s+(?!\\d+\\.\\d).+?)\\s+(${GLUED_BODY_SENTENCE_START}\\b.+)`,
@@ -26,7 +26,7 @@ const MIN_MAIN_HEADING_LEN = 6;
 
 const SUBSECTION_PERIOD_GLUE_RE = /^(\d+\.\d+(?:\.\d+)*\s+[^.\n]{3,120}?)\.\s+(.+)$/s;
 const SUBSECTION_SPACE_GLUE_RE =
-  /^(\d+\.\d+(?:\.\d+)*\s+[A-Z][^.\n]{2,90}?)\s+((?:Either|The|Upon|If|When|Each|Any|Neither|One|Both|Client|Service\s+Provider|Unless|Notwithstanding|During|Within|After|Before|Party|Neither\s+party|In\s+the|No\s+party|This|All|Some|Such|Where|As\s+a|A\s+party).+)$/s;
+  /^(\d+\.\d+(?:\.\d+)*\s+[A-Z][^.\n]{2,90}?)\s+((?:Either|The|Upon|If|When|Each|Any|Neither|One|Both|Client|Service\s+Provider|Consultant|Unless|Notwithstanding|During|Within|After|Before|Party|Neither\s+party|In\s+the|No\s+party|This|All|Some|Such|Where|As\s+a|A\s+party|Except).+)$/s;
 const MAIN_PERIOD_GLUE_RE = /^(\d+\.\s+(?!\d+\.\d)[^.\n]{3,120}?)\.\s+([A-Z].+)$/s;
 
 const INLINE_LETTERED_ENUM_TAIL_RE = /\([a-z]\)/i;

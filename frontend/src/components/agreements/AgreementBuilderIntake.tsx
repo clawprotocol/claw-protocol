@@ -305,6 +305,7 @@ import {
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
   shouldArmPaidProFirstReviewSignerSetupLatch,
+  logPaidProSignerSetupAutofinalizeDecision,
   shouldShowPaidProForcedFirstReviewTrackChooser,
   type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
@@ -15970,7 +15971,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [paidProPostFinalizeHydrationBlocked, premiumSurfaceGateTick, reviewDocRefreshTick]);
 
   useEffect(() => {
-    if (!paidProFirstReviewSignerSetupRequired) return;
+    if (!paidProFirstReviewSignerSetupRequired) {
+      if (
+        acceptedPaidProAuthorityActive &&
+        paidProFirstReviewSurfaceActive &&
+        paidProSignatureDetailsReady &&
+        !paidProSignerMetadataFinalized
+      ) {
+        logPaidProSignerSetupAutofinalizeDecision({
+          action: "hide_track_chooser",
+          reason: "awaiting_explicit_signer_finalize",
+          intakePrefillComplete: true,
+          signerMetadataFinalized: false,
+        });
+      }
+      return;
+    }
+    logPaidProSignerSetupAutofinalizeDecision({
+      action: "arm_latch",
+      reason: paidProSignatureDetailsReady
+        ? "intake_prefill_requires_confirmation"
+        : "signer_details_incomplete",
+      intakePrefillComplete: paidProSignatureDetailsReady,
+      signerMetadataFinalized: paidProSignerMetadataFinalized,
+    });
     if (!paidProInlineSignerSetupLatched) {
       setPaidProInlineSignerSetupLatched(true);
     }
@@ -15981,6 +16005,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProFirstReviewSignerSetupRequired,
     paidProInlineSignerSetupLatched,
     createFlowSendRecipientEditorOpen,
+    acceptedPaidProAuthorityActive,
+    paidProFirstReviewSurfaceActive,
+    paidProSignatureDetailsReady,
+    paidProSignerMetadataFinalized,
   ]);
 
   const paidProCanonicalStickyCta = useMemo(() => {

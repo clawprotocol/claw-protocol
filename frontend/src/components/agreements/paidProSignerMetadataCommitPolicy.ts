@@ -68,12 +68,35 @@ export function shouldApplyLabeledPartyPartialExecutionHydration(args: {
 export function shouldApplyExecutionBlockSignerOverlay(args: {
   parties: readonly PaidProSignerMetadataParty[];
   intakeText?: string | null;
+  corpusText?: string | null;
 }): boolean {
+  if (
+    args.corpusText?.trim() &&
+    executionBlockSignerMetadataAppearsHydrated(args.corpusText, args.parties)
+  ) {
+    return false;
+  }
   if (shouldApplyLabeledPartyPartialExecutionHydration(args)) return true;
   return (
     hasSignerMetadataForExecutionOverlay(args.parties) ||
     shouldHydratePaidProReviewSurfacesFromConsumedAuthority(args.parties)
   );
+}
+
+/** Skip re-hydration when execution block already contains signer names from a prior pass. */
+export function executionBlockSignerMetadataAppearsHydrated(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  const witnessIdx = (corpus || "").search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0 || parties.length < 2) return false;
+  const tail = corpus.slice(witnessIdx);
+  const withNames = parties.filter((p) => p.signerName.trim().length >= 2);
+  if (withNames.length < 2) return false;
+  return withNames.every((p) => {
+    const name = p.signerName.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^name\\s*:\\s*${name}\\b`, "im").test(tail);
+  });
 }
 
 /** Review render must apply signer execution overlay (live session or consumed authority). */

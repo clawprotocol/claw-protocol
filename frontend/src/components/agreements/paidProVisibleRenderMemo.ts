@@ -42,6 +42,10 @@ export function readMemoizedPaidProReviewPlain(key: string): string | null {
 
 export function writeMemoizedPaidProReviewPlain(key: string, plain: string): void {
   plainByKey.set(key, plain);
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+    // eslint-disable-next-line no-console
+    console.info("[paid-pro-render-converged]", { key, plainLen: plain.length });
+  }
 }
 
 export function readMemoizedPaidProReadonlyHtml(key: string): string | null {

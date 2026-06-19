@@ -540,7 +540,7 @@ export function shouldArmPaidProInlineSignerSetupLatch(args: {
   );
 }
 
-/** First paid Pro review entry — arm latch when corpus exists and signer metadata is incomplete. */
+/** First paid Pro review entry — arm latch until user explicitly finalizes signer metadata. */
 export function shouldArmPaidProFirstReviewSignerSetupLatch(args: {
   hasAcceptedPaidProAuthority: boolean;
   premiumPaidDocumentSurface: boolean;
@@ -555,19 +555,29 @@ export function shouldArmPaidProFirstReviewSignerSetupLatch(args: {
 }): boolean {
   if (args.alreadyLatched) return true;
   if (args.signaturePreparationRequested) return false;
+  if (args.signerMetadataFinalized) return false;
   return Boolean(
     args.hasAcceptedPaidProAuthority &&
       args.premiumPaidDocumentSurface &&
       !args.premiumRecipientUxActive &&
       args.createUiStageIsDraft &&
       args.firstReviewSurfaceActive &&
-      args.hasCanonicalReviewCorpus &&
-      !args.paidProSignatureDetailsReady &&
-      !args.signerMetadataFinalized,
+      args.hasCanonicalReviewCorpus,
   );
 }
 
-/** Delivery-track chooser on forced document route — only after signer metadata is complete. */
+export function logPaidProSignerSetupAutofinalizeDecision(payload: {
+  action: "arm_latch" | "skip_latch" | "show_track_chooser" | "hide_track_chooser";
+  reason: string;
+  intakePrefillComplete: boolean;
+  signerMetadataFinalized: boolean;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-signer-setup-autofinalize-decision]", payload);
+}
+
+/** Delivery-track chooser on forced document route — only after explicit signer metadata finalize. */
 export function shouldShowPaidProForcedFirstReviewTrackChooser(args: {
   forcedFirstReviewActive: boolean;
   inlineSignerSetupMounted: boolean;
@@ -578,7 +588,7 @@ export function shouldShowPaidProForcedFirstReviewTrackChooser(args: {
   return Boolean(
     args.forcedFirstReviewActive &&
       !args.inlineSignerSetupMounted &&
-      (args.signerDetailsReady || args.signerMetadataFinalized) &&
+      args.signerMetadataFinalized &&
       !args.signaturePreparationRequested,
   );
 }
