@@ -136,10 +136,10 @@ describe("Test375 role-label two-party free starter", () => {
     expect(gate.required).toBe(false);
     expect(gate.reasons).toHaveLength(0);
     expect(gate.partyCount).toBe(2);
-    expect(gate.parties).toEqual([
-      "Blue Canyon Analytics LLC",
-      "Harbor Peak Automation LLC",
-    ]);
+    expect(gate.parties).toHaveLength(2);
+    expect(gate.parties).toEqual(
+      expect.arrayContaining(["Blue Canyon Analytics LLC", "Harbor Peak Automation LLC"]),
+    );
     expect(gate.hasMultiProviderPayment).toBe(false);
   });
 

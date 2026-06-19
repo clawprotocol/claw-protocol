@@ -103,7 +103,7 @@ function maxIndexedPartyOrSigner(raw: string): number {
 }
 
 function countSignerDetailSlots(raw: string): number {
-  const labeled = parseLabeledPartyBlocks(raw);
+  const labeled = parseLabeledPartyBlocks(raw).filter((b) => b.legalEntity.trim().length >= 2);
   const withSigner = labeled.filter((b) => b.signerName || b.signerEmail || b.signerTitle).length;
   const signerNameLines = (raw.match(/^\s*signer\s+name\s*[:\-]/gim) ?? []).length;
   return Math.max(withSigner, signerNameLines, labeled.length, maxIndexedPartyOrSigner(raw));
@@ -144,14 +144,20 @@ export function detectMultiPartyCollaborationProse(raw: string): boolean {
   );
 }
 
+const DURATION_COUNT_RE =
+  /\b(?:one|two|three|3|four|4|five|5|six|6)\s+(?:months?|weeks?|days?|years?)\b/i;
+
 export function detectSignerCandidateOverflow(raw: string): boolean {
   const text = String(raw || "");
-  return (
+  const hasExplicitSignerCount =
     /\b(?:three|3|four|4|five|5)\s+authorized\s+representatives?\b/i.test(text) ||
-    /\b(?:three|3|four|4|five|5)\s+(?:signers?|signatories)\b/i.test(text) ||
-    maxIndexedPartyOrSigner(text) >= 3 ||
-    countSignerDetailSlots(text) >= 3
-  );
+    /\b(?:three|3|four|4|five|5)\s+(?:signers?|signatories)\b/i.test(text);
+  const indexed = maxIndexedPartyOrSigner(text);
+  const slots = countSignerDetailSlots(text);
+  if (!hasExplicitSignerCount && indexed < 3 && slots < 3 && DURATION_COUNT_RE.test(text)) {
+    return false;
+  }
+  return hasExplicitSignerCount || indexed >= 3 || slots >= 3;
 }
 
 function detectCoordinatorOrNonPartyActor(raw: string): boolean {
@@ -277,7 +283,7 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   const extractedEntityCount = parties.length;
   const indexedPartyMax = maxIndexedPartyOrSigner(intake);
   const signerSlots = countSignerDetailSlots(intake);
-  const partyCount = Math.max(extractedEntityCount, indexedPartyMax, signerSlots);
+  const partyCount = Math.max(extractedEntityCount, indexedPartyMax);
   const revenuePctCount = countRevenueSharePercentages(intake);
   const hasRevenueShare = detectRevenueShareLanguage(intake);
   const hasCoordinator = detectCoordinatorOrNonPartyActor(intake);
@@ -305,7 +311,7 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   if (hasReviewWorkflow) {
     reasons.push("review_approval_workflow");
   }
-  if (hasMultiPartyProse && (extractedEntityCount >= 2 || revenuePctCount >= 3 || indexedPartyMax >= 3)) {
+  if (hasMultiPartyProse && (extractedEntityCount > 2 || revenuePctCount >= 3 || indexedPartyMax >= 3)) {
     reasons.push("joint_venture_or_multi_vendor_structure");
   }
   if (detectJointVentureOrMultiVendorStructure(intake) && partyCount >= 2) {
@@ -338,6 +344,7 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
       reasonCodes: assessment.reasons,
       partyCount: assessment.partyCount,
       extractedEntityCount,
+      signerSlots,
       revenuePctCount,
       hasMultiPartyProse,
       hasSignerOverflow,
@@ -386,6 +393,22 @@ export function starterPreviewHasCorruptedPartyPlaceholderText(text: string): bo
   if (/\[ORG_[34]\]/i.test(body)) return true;
   if (/\bthe applicable Party\b/i.test(body) && /\d+(?:\.\d+)?\s*%/.test(body)) return true;
   return false;
+}
+
+export const STARTER_PREPARING_OVERLAY_DISPLAY_PHASES = [
+  "preparing_review",
+  "generating_draft",
+  "hydrating_generated",
+] as const;
+
+/** Safety: dismiss "Preparing your agreement" overlay once Pro gate is applied without a draft. */
+export function shouldDismissStarterPreparingOverlayForProGate(input: {
+  createFlowPhase: string;
+  hasDraft: boolean;
+  displayPhase: string;
+}): boolean {
+  if (input.createFlowPhase !== "multi_party_pro_required" || input.hasDraft) return false;
+  return (STARTER_PREPARING_OVERLAY_DISPLAY_PHASES as readonly string[]).includes(input.displayPhase);
 }
 
 export function logStarterComplexityGateApplied(): void {

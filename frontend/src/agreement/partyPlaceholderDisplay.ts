@@ -58,6 +58,51 @@ function stripParenClauses(s: string): string {
     .trim();
 }
 
+const NON_ENTITY_PROSE_PHRASE_RE =
+  /\b(?:texas|california|delaware|new\s+york|florida|illinois)\s+law\b|\belectronic\s+signatures?\b|\b(?:either|each|any)\s+party\b/i;
+
+function isLegalEntityCandidateName(name: string): boolean {
+  const t = name.replace(/\s+/g, " ").trim();
+  if (t.length < 2 || NON_ENTITY_PROSE_PHRASE_RE.test(t)) return false;
+  if (ENTITY_SUFFIX.test(t)) return true;
+  return t.split(/\s+/).length >= 2;
+}
+
+function isAliasOfLongerLegalEntity(short: string, long: string): boolean {
+  const s = short.replace(/\s+/g, " ").trim().toLowerCase();
+  const l = long.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!s || !l || s === l) return s === l;
+  if (l.startsWith(s)) return true;
+  const sw = s.split(/\s+/);
+  const lw = l.split(/\s+/);
+  return sw.length < lw.length && sw.every((w, i) => lw[i] === w);
+}
+
+/**
+ * Collapse short role references ("Red Mesa") into full legal names ("Red Mesa Logistics LLC")
+ * and drop non-entity prose fragments mistaken for parties.
+ */
+export function dedupeEntityCandidatesToLegalParties(candidates: readonly string[]): string[] {
+  const unique = [
+    ...new Set(
+      candidates
+        .map((c) => c.replace(/\s+/g, " ").trim())
+        .filter((c) => c.length >= 2 && isLegalEntityCandidateName(c)),
+    ),
+  ];
+  const withEntitySuffix = unique.filter((n) => ENTITY_SUFFIX.test(n));
+  const pool = withEntitySuffix.length >= 2 ? withEntitySuffix : unique;
+  const sorted = [...pool].sort((a, b) => b.length - a.length);
+  const kept: string[] = [];
+  for (const name of sorted) {
+    if (kept.some((k) => isAliasOfLongerLegalEntity(name, k))) continue;
+    const withoutShorter = kept.filter((k) => !isAliasOfLongerLegalEntity(k, name));
+    kept.length = 0;
+    kept.push(...withoutShorter, name);
+  }
+  return kept;
+}
+
 /**
  * Ordered entity-like phrases from free text (between X and Y, Org suffixes, etc.).
  */

@@ -107,6 +107,7 @@ import {
   emptyStarterCheckoutPendingShell,
   logStarterComplexityGateApplied,
   rejectIneligibleStarterDraftAfterParse,
+  shouldDismissStarterPreparingOverlayForProGate,
   type StarterComplexityGateAssessment,
 } from "./starterMultiPartyProGate";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
@@ -9475,6 +9476,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setPreviewPaneRevealed(true);
       setMobileWorkspacePane("preview");
       setLoading(false);
+      starterReviewServerDraftReadyRef.current = false;
+      setStarterReviewServerDraftReadyTick((n) => n + 1);
       logStarterComplexityGateApplied();
       logFreeReviewSurfaceResolved({
         source: "multi_party_pro_gate",
@@ -9795,6 +9798,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (text.length < 6) return;
     homeAutoGenerateStartedRef.current = true;
     logHomeCreateSubmit(text);
+    if (commitStarterMultiPartyProGate(text)) {
+      homeAutoGenerateConsumedRef.current = true;
+      return;
+    }
     beginStarterDraftGeneration();
     void (async () => {
       await runProductionLocalDraftParse({
@@ -9811,6 +9818,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft,
     createFlowPhase,
     beginStarterDraftGeneration,
+    commitStarterMultiPartyProGate,
   ]);
 
   const runPersistedRefineFromStepBuffer = React.useCallback(
@@ -11149,6 +11157,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     console.log("[AgreementIntake] generate: submit clicked");
     setLoading(true);
     setHardError(null);
+    const rawIntake = intakeCombined.trim();
+    if (
+      (createProductionTwoPane || (simpleProductFlow && liveWorkspaceTwoPane)) &&
+      commitStarterMultiPartyProGate(rawIntake)
+    ) {
+      await finalizeIntakeCapture();
+      return;
+    }
     if (createProductionTwoPane) {
       console.debug("[handoff-start]", {
         source: "onGenerate_parse_path",
@@ -11161,15 +11177,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     setDisplayPhase("generating_draft");
     try {
-      finalTranscriptRef.current = intakeCombined.trim();
-      const rawIntake = intakeCombined.trim();
-      if (
-        (createProductionTwoPane || (simpleProductFlow && liveWorkspaceTwoPane)) &&
-        commitStarterMultiPartyProGate(rawIntake)
-      ) {
-        await finalizeIntakeCapture();
-        return;
-      }
+      finalTranscriptRef.current = rawIntake;
       let parsed = await parseDraft(rawIntake);
       writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
       writeOriginalUserIntakeRawIfRicher(rawIntake);
@@ -11604,6 +11612,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     previewPlaceholderGateIsGeneratingRef.current = isGenerating;
     setPreviewPlaceholderGateSyncTick((n) => n + 1);
   }, [isGenerating]);
+
+  useEffect(() => {
+    if (!shouldDismissStarterPreparingOverlayForProGate({
+      createFlowPhase,
+      hasDraft: Boolean(draft),
+      displayPhase,
+    })) {
+      return;
+    }
+    setDisplayPhase("review");
+    if (loading) setLoading(false);
+  }, [createFlowPhase, draft, displayPhase, loading]);
 
   useEffect(() => {
     if (!homeHeroAutoGenerate || !onHomeGuidedTransitionPhase) return;
@@ -26523,6 +26543,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   createFlowPhase_before: createFlowPhase,
                   displayPhase_before: displayPhase,
                 });
+                if (commitStarterMultiPartyProGate(rawSubmitted)) {
+                  await finalizeIntakeCapture();
+                  return;
+                }
                 beginStarterDraftGeneration();
                 trackFunnelEvent("generate_clicked", {
                   ready_state: guidedStructureComplete && !isGenerating,
@@ -26712,6 +26736,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             createFlowPhase_before: createFlowPhase,
             displayPhase_before: displayPhase,
           });
+          if (commitStarterMultiPartyProGate(rawSubmitted)) {
+            return;
+          }
           beginStarterDraftGeneration();
           trackFunnelEvent("generate_clicked", {
             ready_state: guidedStructureComplete && !isGenerating,
