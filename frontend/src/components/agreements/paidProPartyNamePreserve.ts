@@ -3,7 +3,7 @@
  * Email-safe: masks addresses before any party-label replacement.
  */
 
-import { extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
+import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
@@ -227,9 +227,17 @@ export function resolveFullLegalPartiesFromIntake(
 ): string[] {
   const intake = String(intakeRaw || "").trim();
   const fromLabeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
-  if (fromLabeled.length >= 2) return fromLabeled;
+  if (fromLabeled.length >= 3) return fromLabeled;
+  if (fromLabeled.length === 2) return fromLabeled;
   const fromBetween = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
-  if (fromBetween.length >= 2) return fromBetween;
+  const betweenDeduped = dedupeEntityCandidatesToLegalParties(fromBetween);
+  const entityPool = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
+  );
+  const explicitMultiParty =
+    fromLabeled.length >= 3 || fromBetween.length >= 3 || entityPool.length >= 3;
+  if (betweenDeduped.length === 2 && !explicitMultiParty) return betweenDeduped;
+  if (betweenDeduped.length > 2) return betweenDeduped;
   const fromIntakeEntities = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
   if (fromIntakeEntities.length >= 2) return fromIntakeEntities;
   const fromArgs = (partyNames || [])

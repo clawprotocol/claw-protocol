@@ -5,6 +5,7 @@
 
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import {
@@ -131,6 +132,19 @@ export function resolveAuthoritativePartySlotCount(args: {
 
   const intake = String(args.intakeText ?? "").trim();
   const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  if (labeled.length >= 3) return labeled.length;
+
+  const betweenAuthoritative = dedupeEntityCandidatesToLegalParties(
+    extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName),
+  );
+  const amongList = extractBetweenPartyNameList(intake);
+  const entityPool = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
+  );
+  const explicitMultiParty =
+    labeled.length >= 3 || amongList.length >= 3 || entityPool.length >= 3;
+  if (betweenAuthoritative.length === 2 && !explicitMultiParty) return 2;
+
   if (labeled.length >= 2) return labeled.length;
 
   const intakeNames = resolveAuthoritativeIntakePartyNames(intake);

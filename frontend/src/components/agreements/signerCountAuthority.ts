@@ -11,7 +11,11 @@ import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import {
   collapsePartySlotCandidates,
   resolveAuthoritativePartySlotCount,
+  selectAuthoritativeTwoPartySlots,
 } from "./partySlotIdentityNormalize";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
+import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { countRealParties } from "./starterPartyLimits";
 
 const LOG_PREFIX = "[signer-count-authority]";
@@ -138,6 +142,25 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     });
   }
 
+  const betweenDeduped = dedupeEntityCandidatesToLegalParties(
+    extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName),
+  );
+  const amongList = extractBetweenPartyNameList(intake);
+  const entityPool = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
+  );
+  const explicitMultiParty =
+    labeledCount >= 3 || amongList.length >= 3 || entityPool.length >= 3;
+  if (
+    betweenDeduped.length === 2 &&
+    !explicitMultiParty &&
+    (args.userExpandedPartyCount ?? 0) <= 2 &&
+    count > 2
+  ) {
+    count = 2;
+    source = "party_slot_count";
+  }
+
   return {
     count: Math.max(2, Math.min(count, 4)),
     source,
@@ -221,4 +244,63 @@ export function assertSignerCountNotFromCorpus(surface: string, proposedCount: n
     return authoritative;
   }
   return consumeAuthoritativeSignerCount(surface, args, proposedCount);
+}
+
+/**
+ * Paid Pro readonly HTML / signature preview — manifest + intake authority only.
+ * Never inflate signer count from rendered partyNames.length or corpus regex scans.
+ */
+export function resolveReadonlyHtmlSignerCount(
+  surface: string,
+  args: SignerCountAuthorityArgs & {
+    partyNames?: readonly string[];
+    manifestPartyCount?: number | null;
+  },
+): number {
+  const slotNames = selectAuthoritativeTwoPartySlots(args.draftPartyNames ?? args.partyNames ?? []);
+  const authority = readConsumedPaidProSignerMetadataAuthority();
+  const manifestCount =
+    args.manifestPartyCount ??
+    authority?.parties?.filter((p) => String(p.partyLegalName ?? "").trim().length >= 2).length ??
+    0;
+
+  const resolution = resolveAuthoritativeSignerCountCore({
+    ...args,
+    draftPartyNames: slotNames,
+  });
+  let count = resolution.count;
+  if (manifestCount >= 2) {
+    count = Math.min(count, manifestCount);
+  }
+
+  const derivedFromPartyNames = (args.partyNames ?? []).filter((n) => String(n || "").trim().length >= 2)
+    .length;
+  const derivedFromCorpus = inferCorpusDerivedSignerCount(args.corpusPlain);
+  if (derivedFromPartyNames > count) {
+    logSignerCountConsumerMismatch({
+      surface: `${surface}:derived_party_names`,
+      authoritativeCount: count,
+      consumerCount: derivedFromPartyNames,
+      corpusBlockCount: resolution.corpusBlockCount,
+      source: resolution.source,
+    });
+  }
+  if (derivedFromCorpus > count && derivedFromCorpus !== resolution.corpusBlockCount) {
+    logSignerCountConsumerMismatch({
+      surface: `${surface}:derived_corpus_anchors`,
+      authoritativeCount: count,
+      consumerCount: derivedFromCorpus,
+      corpusBlockCount: resolution.corpusBlockCount,
+      source: resolution.source,
+    });
+  }
+
+  logSignerCountConsumer({
+    surface,
+    authoritativeCount: count,
+    consumerCount: count,
+    matched: true,
+    source: resolution.source,
+  });
+  return count;
 }

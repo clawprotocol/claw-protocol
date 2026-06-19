@@ -6,7 +6,9 @@ import type { PremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { corpusHasHydratedSignatureBlock } from "./guidedDealCompletion/signatureRegion";
 import { forbidPaidProExecutionBlockSynthesis } from "./paidProExecutionBlockAuthority";
-import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
+import { resolveReadonlyHtmlSignerCount } from "./signerCountAuthority";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import { selectAuthoritativeTwoPartySlots } from "./partySlotIdentityNormalize";
 import { sanitizeProReviewDisplayText } from "./polishProAgreementDisplayLayer";
 import { premiumRenderHintsWithoutDocumentCallouts } from "./premiumDocumentIntelligenceStrip";
 import {
@@ -187,14 +189,26 @@ export function stripCorpusSignatureRegionForExternalSignerUi(plain: string): st
 
 export type PremiumSignaturePreviewMode =
   | "embedded_corpus_signature_block"
-  | "decorative_fallback_signature_card";
+  | "decorative_fallback_signature_card"
+  | "external_signer_ui_corpus_stripped";
 
 export function resolvePremiumSignaturePreviewMode(
   plain: string,
   signerCount: number,
-  opts?: { forceEmbeddedCorpusSignature?: boolean },
-): { mode: PremiumSignaturePreviewMode; hasCorpusSignatureBlock: boolean; signerCount: number } {
+  opts?: { forceEmbeddedCorpusSignature?: boolean; suppressEmbeddedForDisplay?: boolean },
+): {
+  mode: PremiumSignaturePreviewMode;
+  hasCorpusSignatureBlock: boolean;
+  signerCount: number;
+} {
   const count = Math.max(1, signerCount);
+  if (opts?.suppressEmbeddedForDisplay) {
+    return {
+      mode: "external_signer_ui_corpus_stripped",
+      hasCorpusSignatureBlock: false,
+      signerCount: count,
+    };
+  }
   const hasCorpusSignatureBlock = corpusHasHydratedSignatureBlock(plain, count);
   const forceEmbedded = Boolean(opts?.forceEmbeddedCorpusSignature);
   return {
@@ -363,43 +377,47 @@ function buildPremiumAgreementReadonlyHtmlCore(
     );
   }
   if (opts.suppressCorpusEmbeddedSignatureForDisplay) {
-    const signerCount = consumeAuthoritativeSignerCount(
-      `${surface}:suppress_embedded`,
-      {
-        intakeText: opts.intakeText,
-        draftPartyNames: opts.draftPartyNames ?? opts.partyNames,
-        corpusPlain: raw,
-      },
-      opts.partyNames.filter((n) => n.trim().length >= 2).length,
-    );
+    const signerCount = resolveReadonlyHtmlSignerCount(`${surface}:suppress_embedded`, {
+      intakeText: opts.intakeText,
+      draftPartyNames: opts.draftPartyNames ?? opts.partyNames,
+      partyNames: opts.partyNames,
+      corpusPlain: raw,
+    });
     logSignaturePreviewMode({
-      mode: "decorative_fallback_signature_card",
+      mode: "external_signer_ui_corpus_stripped",
       hasCorpusSignatureBlock: false,
       signerCount,
     });
     return html;
   }
+  const signerCount = resolveReadonlyHtmlSignerCount(surface, {
+    intakeText: opts.intakeText,
+    draftPartyNames: opts.draftPartyNames ?? opts.partyNames,
+    partyNames: opts.partyNames,
+    corpusPlain: raw,
+  });
+  const authority = readConsumedPaidProSignerMetadataAuthority();
   const partyNamesForDisplay = (() => {
-    const count = consumeAuthoritativeSignerCount(
-      surface,
-      {
-        intakeText: opts.intakeText,
-        draftPartyNames: opts.draftPartyNames ?? opts.partyNames,
-        corpusPlain: raw,
-      },
-      opts.partyNames.filter((n) => n.trim().length >= 2).length,
-    );
-    return opts.partyNames.slice(0, count);
+    const manifestNames =
+      authority?.parties
+        ?.map((p) => String(p.partyLegalName ?? "").trim())
+        .filter((n) => n.length >= 2) ?? [];
+    if (manifestNames.length >= 2) {
+      return manifestNames.slice(0, signerCount);
+    }
+    const slots = selectAuthoritativeTwoPartySlots(opts.partyNames);
+    return slots.slice(0, signerCount);
   })();
   const forceEmbeddedFromAuthority =
     hasPaidProSourceOfTruth() && forbidPaidProExecutionBlockSynthesis(raw, partyNamesForDisplay.length);
-  const previewMode = resolvePremiumSignaturePreviewMode(raw, partyNamesForDisplay.length, {
+  const previewMode = resolvePremiumSignaturePreviewMode(raw, signerCount, {
     forceEmbeddedCorpusSignature: opts.forceEmbeddedCorpusSignature || forceEmbeddedFromAuthority,
   });
   logSignaturePreviewMode(previewMode);
   if (
     previewMode.mode === "decorative_fallback_signature_card" &&
-    !forceEmbeddedFromAuthority
+    !forceEmbeddedFromAuthority &&
+    !previewMode.hasCorpusSignatureBlock
   ) {
     html += buildPremiumSignatureSectionHtml(partyNamesForDisplay, opts.signatureSectionMode);
   }
