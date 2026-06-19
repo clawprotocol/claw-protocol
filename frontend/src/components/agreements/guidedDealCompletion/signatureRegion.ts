@@ -99,7 +99,7 @@ export function findSignatureRegionEnd(text: string, start: number): number {
   return start + offset;
 }
 
-/** Count party signature block headings in the signature tail. */
+/** Count party signature block headings in the signature tail (diagnostics / invariant checks only — not signer count). */
 export function countSignatureBlockHeadingsInTail(text: string): number {
   const start = signaturePatchStartIndex(text);
   const tail = start >= 0 ? text.slice(start) : text.slice(Math.floor(text.length * 0.72));
@@ -131,6 +131,7 @@ export function corpusSignatureBlocksHaveRequiredByLines(
   text: string,
   partyCount: number,
 ): boolean {
+  // partyCount must come from signerCountAuthority — never from countSignatureBlockHeadingsInTail.
   const headings = countSignatureBlockHeadingsInTail(text);
   const executionLines = countSignatureExecutionLinesInTail(text);
   if (headings > 0) return executionLines >= headings;

@@ -23,6 +23,7 @@ import { stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 import { resolveAcceptedCorpusRoleLabelForLegalName } from "./paidProAcceptedCorpusPartyRoles";
 import { labeledPartyBlocksForSignerMetadata } from "./labeledPartyBlockParse";
+import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   fromRecipientMetadata,
   normalizePartyIdentities,
@@ -229,8 +230,18 @@ function signerEmailForIndex(ui: LiveSignerMetadataUiState, index: number): stri
 
 export function buildPaidProSignerMetadataParties(
   ui: LiveSignerMetadataUiState,
+  opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] },
 ): PaidProSignerMetadataParty[] {
-  const count = Math.max(ui.partyCount, 2);
+  const count = consumeAuthoritativeSignerCount(
+    "metadata_authority_parties",
+    {
+      intakeText: opts?.intakeText,
+      draftPartyNames: opts?.draftPartyNames,
+      rawPartyCount: ui.partyCount,
+      userExpandedPartyCount: ui.partyCount,
+    },
+    ui.partyCount,
+  );
   const slots: SignerSetupPartyIdentity[] = [];
   for (let i = 0; i < count; i++) {
     slots.push({
@@ -315,8 +326,9 @@ export function resolvePaidProPostFinalizeSignerDetailsEditSeed(): PaidProSigner
 export function buildLivePaidProSignerMetadataAuthority(
   ui: LiveSignerMetadataUiState,
   source: PaidProSignerMetadataAuthoritySource = "live_ui",
+  opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] },
 ): PaidProSignerMetadataAuthority {
-  const parties = buildPaidProSignerMetadataParties(ui);
+  const parties = buildPaidProSignerMetadataParties(ui, opts);
   return {
     parties,
     source,

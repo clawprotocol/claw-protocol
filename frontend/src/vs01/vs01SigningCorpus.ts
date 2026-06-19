@@ -30,6 +30,7 @@ import {
   pickAuthoritativeSigningHandoffCorpus,
 } from "../components/agreements/authoritativeHandoffCorpusResolver";
 import { resolvePremiumSignaturePreviewMode } from "../components/agreements/premiumAgreementDocumentHtml";
+import { consumeAuthoritativeSignerCount } from "../components/agreements/signerCountAuthority";
 import {
   getAcceptedPremiumCanonicalCorpus,
   getAcceptedPremiumCorpusForVs01Signing,
@@ -253,6 +254,26 @@ export type Vs01WitnessRequirement = {
   witnessReason: string | null;
 };
 
+function resolveVs01AuthoritativeSignerCount(
+  args: ResolveFinalVs01CorpusOrBlockArgs,
+  corpusPlain?: string | null,
+): number {
+  const consumerCount = Math.max(
+    args.draft?.parties?.length ?? 0,
+    args.bridge?.counterparties?.length ?? 0,
+  );
+  return consumeAuthoritativeSignerCount(
+    "vs01_corpus_gate",
+    {
+      intakeText: args.intakeText,
+      draftParties: args.draft?.parties,
+      corpusPlain,
+      manifestPartyCount: args.bridge?.counterparties?.length,
+    },
+    consumerCount,
+  );
+}
+
 function mapHandoffSourceToFinalSource(
   source: GuidedVs01SigningHandoff["source"],
 ): FinalVs01CorpusSource {
@@ -434,9 +455,9 @@ export function resolveFinalVs01CorpusOrBlock(
   const guidedPro = args.guidedPro !== false;
   const premiumInProgress = Boolean(args.premiumInProgress);
   const premiumComplete = Boolean(args.premiumComplete);
-  const signerCount = Math.max(
-    2,
-    1 + (args.bridge?.counterparties?.length ?? args.draft?.parties?.length ?? 1),
+  const signerCount = resolveVs01AuthoritativeSignerCount(
+    args,
+    args.finalizedSigningPlain ?? args.acceptedReviewPlain ?? args.agreementCorpusText,
   );
   const signingSnapshot = getAuthoritativeSigningSnapshot();
   const handoffCorpusLen = (args.guidedSigningHandoff?.corpusText ?? "").trim().length;

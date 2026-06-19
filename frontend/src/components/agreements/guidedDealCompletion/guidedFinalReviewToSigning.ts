@@ -18,6 +18,7 @@ import {
   corpusHasVisibleSignatureExecutionLines,
   corpusSignatureBlocksHaveRequiredByLines,
 } from "./signatureRegion";
+import { resolveSignerCountFromManifest } from "../signerCountAuthority";
 import {
   renumberGuidedTopLevelSectionsSequentially,
   stripGuidedInstructionLeakLines,
@@ -353,11 +354,17 @@ export function prepareGuidedSigningCorpusCleanup(args: {
   body: string;
   partyManifest: CanonicalFinalPartyManifest;
   signerIdentities?: readonly CanonicalPartyIdentity[];
+  intakeText?: string | null;
   /** When true, skip guided re-merge/final-grade rebuild so user-saved final review text stays authoritative. */
   preserveUserEdits?: boolean;
 }): { body: string; repairs: string[]; hash: string } {
   const identities =
     args.signerIdentities ?? manifestToCanonicalPartyIdentities(args.partyManifest);
+  const signerCount = resolveSignerCountFromManifest(
+    args.partyManifest,
+    { intakeText: args.intakeText },
+    "guided_signing_cleanup",
+  );
   const repairs: string[] = [];
   let out = normalizePartyNameSpacingInCorpus((args.body || "").trim());
   repairs.push("spacing:party_names");
@@ -419,16 +426,16 @@ export function prepareGuidedSigningCorpusCleanup(args: {
     /name\s*:\s*_{4,}/i.test(out.slice(-1800)) ||
     /\[?\s*(?:your company name|service provider name)\s*\]?/i.test(out.slice(-1800));
   const lacksByAnchors =
-    identities.length >= 2 && !corpusSignatureBlocksHaveRequiredByLines(out, identities.length);
-  if ((needsSignatureTail || lacksByAnchors) && identities.length >= 2) {
-    const rebuilt = rebuildSignatureBlocksWithPartyIdentities(out, identities);
+    signerCount >= 2 && !corpusSignatureBlocksHaveRequiredByLines(out, signerCount);
+  if ((needsSignatureTail || lacksByAnchors) && signerCount >= 2) {
+    const rebuilt = rebuildSignatureBlocksWithPartyIdentities(out, identities.slice(0, signerCount));
     if (!shouldRejectSignerIdentityCorpusShrink(out.length, rebuilt.text.length)) {
       out = rebuilt.text;
       if (rebuilt.count > 0) repairs.push(lacksByAnchors ? "signature:by_lines_added" : "signature:block_rebuilt");
     }
   }
 
-  if (identities.length >= 2 && !corpusSignatureBlocksHaveRequiredByLines(out, identities.length)) {
+  if (signerCount >= 2 && !corpusSignatureBlocksHaveRequiredByLines(out, signerCount)) {
     repairs.push("signature:by_lines_still_missing");
   }
 
@@ -716,9 +723,19 @@ export function assertGuidedVs01SigningHandoffReady(args: {
   manifest: CanonicalFinalPartyManifest;
   corpusSource: GuidedSignatureTrackCorpusSource | "none";
   corpusBody?: string;
+  intakeText?: string | null;
 }): GuidedVs01HandoffAssertion {
   const parties = args.manifest.parties.filter((p) => p.partyName.trim().length >= 2);
-  if (parties.length < 2) {
+  const partyCount = resolveSignerCountFromManifest(
+    args.manifest,
+    {
+      intakeText: args.intakeText,
+      draftPartyNames: parties.map((p) => p.partyName),
+      corpusPlain: args.corpusBody,
+    },
+    "guided_vs01_handoff",
+  );
+  if (partyCount < 2) {
     return { ok: false, reason: "manifest_party_count" };
   }
   if (args.corpusSource === "none" || !GUIDED_VS01_ALLOWED_CORPUS_SOURCES.has(args.corpusSource)) {
@@ -731,7 +748,6 @@ export function assertGuidedVs01SigningHandoffReady(args: {
   if (!corpusHasVisibleSignatureExecutionLines(body)) {
     return { ok: false, reason: "missing_signature_block" };
   }
-  const partyCount = Math.max(2, parties.length);
   if (!corpusSignatureBlocksHaveRequiredByLines(body, partyCount)) {
     return { ok: false, reason: "missing_by_signature_lines" };
   }

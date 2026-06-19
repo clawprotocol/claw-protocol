@@ -27,6 +27,7 @@ import {
 import { isNonfatalGenerationFailureCode } from "./premiumAcceptancePolicy";
 import { shouldBlockPaidProReviewReadinessFromFallbackCorpus } from "./paidProApiFailureAuthorityGuard";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
@@ -412,6 +413,11 @@ export function freezePaidProPostCheckoutRecoveryCanonicalSnapshot(args: {
   const parties = ((args.draft?.parties ?? []) as Array<{ name?: string; role?: string; email?: string }>)
     .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
     .filter((p) => p.name.trim());
+  const authoritativeSignerCount = resolveAuthoritativeSignerCount({
+    intakeText: args.intakeText ?? "",
+    draftParties: parties,
+    corpusPlain: canonicalText,
+  }).count;
   try {
     const snapshot = buildCanonicalAgreementSnapshot({
       surface: "paid_pro_post_checkout_recovery_display",
@@ -424,7 +430,7 @@ export function freezePaidProPostCheckoutRecoveryCanonicalSnapshot(args: {
       ],
       intakeText: args.intakeText ?? "",
       parties,
-      signerState: { complete: false, signerCount: Math.max(2, parties.length) },
+      signerState: { complete: false, signerCount: authoritativeSignerCount },
       minLen: PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
       reviewSessionId: args.reviewSessionId ?? null,
     });

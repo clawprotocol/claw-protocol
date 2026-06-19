@@ -1284,6 +1284,7 @@ import {
   removeAddedSignerPartyState,
   resolveGeneratedAgreementPartyCount,
 } from "./paidProNPartySignerSetup";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   evaluateGuidedSigningPacketGate,
   logGuidedFinalReviewSendSignatureStart,
@@ -5374,7 +5375,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ],
           intakeText: intakeCombined,
           parties: draftParties,
-          signerState: { complete: false, signerCount: Math.max(2, draftParties.length) },
+          signerState: {
+            complete: false,
+            signerCount: resolveAuthoritativeSignerCount({
+              intakeText: intakeCombined,
+              draftParties,
+              corpusPlain: canonicalReviewPlain,
+            }).count,
+          },
           minLen: effectiveProCanonicalTier ? 500 : 120,
           reviewSessionId: reviewAgreementIdRef.current || getOrInitSessionAgreementGenerationId(),
         });
@@ -14531,7 +14539,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   const liveSignerMetadataUiState = React.useMemo(
     () => ({
-      partyCount: Math.max(draft?.parties?.length ?? 0, 2),
+      partyCount: resolveAuthoritativeSignerCount({
+        intakeText: intakeCombined,
+        draftParties: draft?.parties,
+        rawPartyCount: draft?.parties?.length ?? 0,
+        userExpandedPartyCount: signerSetupUiPartyCount,
+      }).count,
       recipient1Name,
       recipient2Name,
       recipient1Email,
@@ -14542,7 +14555,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       partyAddresses,
     }),
     [
-      draft?.parties?.length,
+      draft?.parties,
+      intakeCombined,
+      signerSetupUiPartyCount,
       recipient1Name,
       recipient2Name,
       recipient1Email,
@@ -14577,7 +14592,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     setConsumedPaidProSignerMetadataAuthority(
-      buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState),
+      buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState, "live_ui", {
+        intakeText: intakeCombined,
+        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+      }),
     );
   }, [
     liveSignerMetadataUiState,
@@ -14836,6 +14854,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedPreReviewSignerSlots = useMemo(() => {
     const base = resolveGuidedPreReviewSignerSlots({
       partyCount: Math.max(generatedAgreementPartyCount, signerSetupUiPartyCount),
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       partySignerNames,
       recipient1Name,
       recipient2Name,
@@ -14858,6 +14877,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     signerSetupUiPartyCount,
     signerSetupGeneratedPartyGuard.beyondGenerated,
     signerSetupGeneratedPartyGuard.warningMessage,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    draft?.parties,
     draft?.parties,
     partySignerNames,
     recipient1Name,
@@ -14887,7 +14909,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return authorityPartiesToCanonicalPartyIdentities(stableParties, paidProPartyRoleContext);
       }
     }
-    const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
+    const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState, "live_ui", {
+      intakeText: intakeCombined,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+    });
     if (hasPaidProSourceOfTruth()) {
       return authorityPartiesToCanonicalPartyIdentities(authority.parties, paidProPartyRoleContext);
     }
@@ -14930,7 +14955,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const snap = getAuthoritativeSigningSnapshot();
     if (!snap || signaturePreparationRequested) return;
     const currentMeta = authorityPartiesToRecipientMetadata(
-      buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState).parties,
+      buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState, "live_ui", {
+        intakeText: intakeCombined,
+        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+      }).parties,
       [...extraPartyReviewEmails],
     );
     const drifted = signerMetadataDriftedFromSnapshot(snap, currentMeta);
@@ -14982,12 +15010,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (signingSnapshot) {
       return signingSnapshot.partyManifest;
     }
-    const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState);
+    const authority = buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState, "live_ui", {
+      intakeText: intakeCombined,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
+    });
     if (hasPaidProSourceOfTruth()) {
       return buildCanonicalFinalPartyManifestFromAuthority(authority, paidProPartyRoleContext);
     }
     return resolveCanonicalFinalPartyManifest({
       partyCount: guidedPreReviewSignerSlots.requiredCount,
+      intakeText: intakeCombined,
       partySignerNames,
       partySignerTitles,
       recipient1Name,
@@ -15228,7 +15260,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     console.info("[paid-pro-recipient-fields]", {
       expanded: Boolean(createFlowSendRecipientEditorOpen || paidProRecipientBlockForceExpanded),
       signersReady: paidProInlineSignersReady,
-      signerCount: draft?.parties?.length ?? 0,
+      signerCount: generatedAgreementPartyCount,
       missingEmails: missing,
       createUiStage,
       createFlowPhase,
@@ -15238,7 +15270,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowSendRecipientEditorOpen,
     paidProRecipientBlockForceExpanded,
     paidProInlineSignersReady,
-    draft?.parties?.length,
+    generatedAgreementPartyCount,
     hasAnyValidRecipientEmail,
     recipientEmailsHaveValidationErrors,
     createFlowRecipientPrimaryHelper,
@@ -16942,6 +16974,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return buildPremiumAgreementReadonlyHtml(corpus, {
         signatureSectionMode: effectivePremiumSendMode === "signature" ? "execution" : "collaboration",
         partyNames: signaturePartyNames,
+        intakeText: intakeCombined,
+        draftPartyNames: signaturePartyNames,
         renderHints,
         suppressCorpusEmbeddedSignatureForDisplay: suppressProDocumentEmbeddedSignatures,
         forceEmbeddedCorpusSignature:
@@ -17083,6 +17117,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return buildPremiumAgreementReadonlyHtml(corpus, {
       signatureSectionMode: effectivePremiumSendMode === "signature" ? "execution" : "collaboration",
       partyNames: signaturePartyNames,
+      intakeText: intakeCombined,
+      draftPartyNames: signaturePartyNames,
       renderHints,
       suppressCorpusEmbeddedSignatureForDisplay: suppressProDocumentEmbeddedSignatures,
       forceEmbeddedCorpusSignature:
@@ -21598,6 +21634,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return buildPremiumAgreementReadonlyHtml(corpus, {
       signatureSectionMode: "collaboration",
       partyNames: signaturePartyNames,
+      intakeText: intakeCombined,
+      draftPartyNames: signaturePartyNames,
       renderHints,
       suppressDocumentIntelligenceCallouts:
         acceptedPaidProAuthorityActive || Boolean(paidProSignerHydratedPreviewPlain.trim()),
@@ -21742,13 +21780,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedAuthoritativeBodyHash,
   ]);
 
-  const premiumSigningRecipientCount = useMemo(() => {
-    let n = 0;
-    if (looksLikeEmail(stripRecipientEmailNoise(recipient1Email))) n += 1;
-    const r2 = stripRecipientEmailNoise(recipient2Email);
-    if (looksLikeEmail(r2) && (recipient2Name.trim() || n === 0)) n += 1;
-    return n;
-  }, [recipient1Email, recipient2Email, recipient2Name]);
+  const premiumSigningRecipientCount = useMemo(
+    () =>
+      resolveAuthoritativeSignerCount({
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        draftParties: draft?.parties,
+        rawPartyCount: generatedAgreementPartyCount,
+        userExpandedPartyCount: signerSetupUiPartyCount,
+        corpusPlain: readAuthoritativeSigningCorpus(),
+      }).count,
+    [
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      draft?.parties,
+      generatedAgreementPartyCount,
+      signerSetupUiPartyCount,
+      premiumSurfaceGateTick,
+    ],
+  );
 
   const assertSigningSendReadyOrBlock = React.useCallback((): boolean => {
     if (!paidProAuthoritative || effectivePremiumSendMode !== "signature") return true;
@@ -24645,11 +24694,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       logGuidedFinalReviewSigningPacketReady({
         bodyLen: gate.bodyLen,
-        signerCount: guidedSignerCanonicalIdentities.length,
+        signerCount: premiumSigningRecipientCount,
       });
       logGuidedSigningConfirmationMounted({
         bodyLen: gate.bodyLen,
-        signerCount: guidedSignerCanonicalIdentities.length,
+        signerCount: premiumSigningRecipientCount,
       });
     },
     [
@@ -24659,6 +24708,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProInlineSignersReady,
       handlePremiumSendModePick,
       guidedSignerCanonicalIdentities.length,
+      premiumSigningRecipientCount,
       acceptGuidedReviewCorpus,
       assertGuidedTransitionReady,
       syncReviewContinuityState,
@@ -24729,6 +24779,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         manifest: guidedFinalPartyManifest,
         corpusSource: selected.source,
         corpusBody: selected.body,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       });
       if (!handoffAssert.ok) {
         logGuidedSignatureTrackFailed({ reason: handoffAssert.reason ?? "handoff_assert_failed" });
@@ -24781,12 +24832,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalizedSigningCorpusRef.current = corpusText;
       logSigningCorpusInitialized({
         bodyLen: corpusText.length,
-        signerCount: canonicalSignerManifestRef.current?.entries.length ?? guidedSignerCanonicalIdentities.length,
+        signerCount: premiumSigningRecipientCount,
       });
 
       logGuidedSignaturePacketBuilt({
         bodyLen: corpusText.length,
-        signerCount: canonicalSignerManifestRef.current?.entries.length ?? 0,
+        signerCount: premiumSigningRecipientCount,
         hash: fingerprintAgreementBody(corpusText),
       });
       showModalIfSlow("adding_signature_fields");
@@ -25032,6 +25083,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipientSignerLabels,
     bumpPremiumSurfaceGateTick,
     navigate,
+    premiumSigningRecipientCount,
+    currentPremiumMergedIntakeKey,
   ]);
 
   const completeGuidedSigningHandoff = React.useCallback(
@@ -25049,7 +25102,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         logSigningCorpusInitialized({
           bodyLen: corpus.length,
-          signerCount: canonicalSignerManifestRef.current?.entries.length ?? 0,
+          signerCount: premiumSigningRecipientCount,
         });
       }
       finalReviewSendPathChosenRef.current = true;
@@ -25102,6 +25155,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedSignerCanonicalIdentities,
       mergeDraftPartiesFromCanonicalIdentities,
       completeGuidedPaidProReviewFirstHandoff,
+      premiumSigningRecipientCount,
     ],
   );
 

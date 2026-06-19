@@ -37,6 +37,7 @@ import {
   type CanonicalAgreementSurface,
 } from "./canonicalAgreementSnapshot";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   buildPaidProNormalizedSurfaceDiffPayload,
   logPaidProNormalizedSurfaceDiff,
@@ -446,13 +447,17 @@ export function establishPaidProSourceOfTruth(args: {
         : null,
     }))
     .filter((p) => p.name);
+  const authoritativeSignerCount = resolveAuthoritativeSignerCount({
+    intakeText: args.intakeText ?? null,
+    draftParties: parties,
+  }).count;
   const snapshot = buildCanonicalAgreementSnapshot({
     surface: "paid_pro_source_of_truth_establish",
     tier: "pro",
     candidates: [{ source: "server_full_document_text", text: safeForCommit }],
     intakeText: args.intakeText ?? null,
     parties,
-    signerState: { complete: false, signerCount: Math.max(2, parties.length) },
+    signerState: { complete: false, signerCount: authoritativeSignerCount },
     minLen: 500,
     reviewSessionId: args.reviewSessionId,
   });
@@ -484,7 +489,7 @@ export function establishPaidProSourceOfTruth(args: {
       candidates: [{ source: "server_full_document_text", text: acceptedCorpusText }],
       intakeText: args.intakeText ?? null,
       parties,
-      signerState: { complete: false, signerCount: Math.max(2, parties.length) },
+      signerState: { complete: false, signerCount: authoritativeSignerCount },
       minLen: 500,
       reviewSessionId: args.reviewSessionId,
     });

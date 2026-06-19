@@ -1,4 +1,5 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
+import { resolveAuthoritativeSignerCount } from "../../components/agreements/signerCountAuthority";
 import {
   agreementParticipantToVs01Counterparty,
   assertSignerMetadataPreserved,
@@ -800,13 +801,20 @@ function logVs01SigningSeedPreflight(
   );
   const docLen = signingLen > 0 ? signingLen : draftLen;
   const id = agreementId.trim();
+  const consumerSignerCount = parties.filter((p) =>
+    Boolean(explicitSignerNameForEntity(p.signerName, (p.name || "").trim())),
+  ).length;
+  const authoritativeSignerCount = resolveAuthoritativeSignerCount({
+    draftParties: parties,
+    corpusPlain: signingCorpusPlain,
+  }).count;
   // eslint-disable-next-line no-console
   console.info("[vs01-signing-seed-preflight]", {
     agreementIdShort: id.length <= 12 ? id : `${id.slice(0, 8)}…`,
     recipientCount: parties.filter((p) => (p.email || "").trim()).length,
-    signerCount: parties.filter((p) =>
-      Boolean(explicitSignerNameForEntity(p.signerName, (p.name || "").trim())),
-    ).length,
+    signerCount: authoritativeSignerCount,
+    consumerSignerCount,
+    signerCountMatched: consumerSignerCount === authoritativeSignerCount,
     hasDocumentText: docLen > 0,
     documentTextLen: docLen > 0 ? docLen : null,
     documentTextSource:

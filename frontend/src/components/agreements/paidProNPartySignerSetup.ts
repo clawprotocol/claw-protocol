@@ -1,6 +1,9 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import { countRealParties } from "./starterPartyLimits";
-import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import {
+  consumeAuthoritativeSignerCount,
+  resolveAuthoritativeSignerCount,
+} from "./signerCountAuthority";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
   resolveSignerPartyLegalEntityDisplayValue,
@@ -166,9 +169,23 @@ export type PaidProSignerSetupUiState = {
   intakeText?: string | null;
 };
 
-export function resolveSignerSetupUiPartyCount(state: Pick<PaidProSignerSetupUiState, "signerSetupUiPartyCount" | "draftParties">): number {
-  const raw = Math.max(state.signerSetupUiPartyCount, state.draftParties.length, 2);
-  return Math.min(raw, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+export function resolveSignerSetupUiPartyCount(
+  state: Pick<PaidProSignerSetupUiState, "signerSetupUiPartyCount" | "draftParties" | "intakeText">,
+): number {
+  const rawUi = Math.min(
+    Math.max(state.signerSetupUiPartyCount, state.draftParties.length, 2),
+    PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
+  );
+  return consumeAuthoritativeSignerCount(
+    "signer_setup_ui_party_count",
+    {
+      intakeText: state.intakeText,
+      draftParties: state.draftParties,
+      userExpandedPartyCount: state.signerSetupUiPartyCount,
+      rawPartyCount: rawUi,
+    },
+    rawUi,
+  );
 }
 
 export function canAddAnotherSignerParty(signerSetupUiPartyCount: number): boolean {

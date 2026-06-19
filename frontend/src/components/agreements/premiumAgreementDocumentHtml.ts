@@ -6,6 +6,7 @@ import type { PremiumDocumentRenderHints } from "./premiumDocumentRenderHints";
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import { corpusHasHydratedSignatureBlock } from "./guidedDealCompletion/signatureRegion";
 import { forbidPaidProExecutionBlockSynthesis } from "./paidProExecutionBlockAuthority";
+import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import { sanitizeProReviewDisplayText } from "./polishProAgreementDisplayLayer";
 import { premiumRenderHintsWithoutDocumentCallouts } from "./premiumDocumentIntelligenceStrip";
 import {
@@ -166,6 +167,9 @@ export type BuildPremiumAgreementReadonlyHtmlOpts = {
   suppressDocumentIntelligenceCallouts?: boolean;
   /** QA perf trace label only — does not affect output. */
   surface?: string;
+  /** Legal party authority inputs — never infer signer count from partyNames.length alone. */
+  intakeText?: string | null;
+  draftPartyNames?: readonly string[];
 };
 
 /** Remove signature tails when external signer UI owns execution blocks. */
@@ -268,6 +272,7 @@ function buildPremiumAgreementReadonlyHtmlCore(
   plain: string,
   opts: BuildPremiumAgreementReadonlyHtmlOpts,
 ): string {
+  const surface = opts.surface ?? "premium_agreement_readonly_html";
   if (!(plain || "").trim()) return "";
   const hints = opts.suppressDocumentIntelligenceCallouts
     ? premiumRenderHintsWithoutDocumentCallouts(opts.renderHints)
@@ -358,16 +363,39 @@ function buildPremiumAgreementReadonlyHtmlCore(
     );
   }
   if (opts.suppressCorpusEmbeddedSignatureForDisplay) {
+    const signerCount = consumeAuthoritativeSignerCount(
+      `${surface}:suppress_embedded`,
+      {
+        intakeText: opts.intakeText,
+        draftPartyNames: opts.draftPartyNames ?? opts.partyNames,
+        corpusPlain: raw,
+        manifestPartyCount: opts.partyNames.filter((n) => n.trim().length >= 2).length,
+      },
+      opts.partyNames.filter((n) => n.trim().length >= 2).length,
+    );
     logSignaturePreviewMode({
       mode: "decorative_fallback_signature_card",
       hasCorpusSignatureBlock: false,
-      signerCount: opts.partyNames.length,
+      signerCount,
     });
     return html;
   }
+  const partyNamesForDisplay = (() => {
+    const count = consumeAuthoritativeSignerCount(
+      surface,
+      {
+        intakeText: opts.intakeText,
+        draftPartyNames: opts.draftPartyNames ?? opts.partyNames,
+        corpusPlain: raw,
+        manifestPartyCount: opts.partyNames.filter((n) => n.trim().length >= 2).length,
+      },
+      opts.partyNames.filter((n) => n.trim().length >= 2).length,
+    );
+    return opts.partyNames.slice(0, count);
+  })();
   const forceEmbeddedFromAuthority =
-    hasPaidProSourceOfTruth() && forbidPaidProExecutionBlockSynthesis(raw, opts.partyNames.length);
-  const previewMode = resolvePremiumSignaturePreviewMode(raw, opts.partyNames.length, {
+    hasPaidProSourceOfTruth() && forbidPaidProExecutionBlockSynthesis(raw, partyNamesForDisplay.length);
+  const previewMode = resolvePremiumSignaturePreviewMode(raw, partyNamesForDisplay.length, {
     forceEmbeddedCorpusSignature: opts.forceEmbeddedCorpusSignature || forceEmbeddedFromAuthority,
   });
   logSignaturePreviewMode(previewMode);
@@ -375,7 +403,7 @@ function buildPremiumAgreementReadonlyHtmlCore(
     previewMode.mode === "decorative_fallback_signature_card" &&
     !forceEmbeddedFromAuthority
   ) {
-    html += buildPremiumSignatureSectionHtml(opts.partyNames, opts.signatureSectionMode);
+    html += buildPremiumSignatureSectionHtml(partyNamesForDisplay, opts.signatureSectionMode);
   }
   return html;
 }

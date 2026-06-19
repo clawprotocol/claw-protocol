@@ -4,11 +4,13 @@
 
 import { isPlaceholderPartyName } from "../starterPartyLimits";
 import { looksLikeEmail, shouldShowRecipientEmailFormatError, stripRecipientEmailNoise } from "../recipientEmailValidation";
+import { consumeAuthoritativeSignerCount } from "../signerCountAuthority";
 
 export type PremiumSendModeForSignerGate = "signature" | "review";
 
 export type ResolveGuidedPreReviewSignerSlotsArgs = {
   partyCount: number;
+  intakeText?: string | null;
   partySignerNames: readonly string[];
   recipient1Name: string;
   recipient2Name: string;
@@ -74,7 +76,16 @@ export function isNameTypedInEmailField(emailRaw: string): boolean {
 export function describeGuidedSignerSetupBlockers(
   args: ResolveGuidedPreReviewSignerSlotsArgs,
 ): SignerSetupFieldBlocker[] {
-  const requiredCount = Math.max(args.partyCount, 2);
+  const requiredCount = consumeAuthoritativeSignerCount(
+    "guided_signer_setup_blockers",
+    {
+      intakeText: args.intakeText,
+      draftPartyNames: args.draftPartyNames,
+      rawPartyCount: args.partyCount,
+      userExpandedPartyCount: args.partyCount,
+    },
+    Math.max(args.partyCount, 2),
+  );
   const blockers: SignerSetupFieldBlocker[] = [];
 
   for (let i = 0; i < requiredCount; i++) {
@@ -134,7 +145,16 @@ export type GuidedPreReviewSignerSlotsResolution = {
 export function resolveGuidedPreReviewSignerSlots(
   args: ResolveGuidedPreReviewSignerSlotsArgs,
 ): GuidedPreReviewSignerSlotsResolution {
-  const requiredCount = Math.max(args.partyCount, 2);
+  const requiredCount = consumeAuthoritativeSignerCount(
+    "guided_pre_review_signer_slots",
+    {
+      intakeText: args.intakeText,
+      draftPartyNames: args.draftPartyNames,
+      rawPartyCount: args.partyCount,
+      userExpandedPartyCount: args.partyCount,
+    },
+    Math.max(args.partyCount, 2),
+  );
   const blockers = describeGuidedSignerSetupBlockers(args);
   const visibleBlockers = blockers.filter((blocker) => {
     if (blocker.field !== "email" || blocker.reason !== "invalid_email") return true;
