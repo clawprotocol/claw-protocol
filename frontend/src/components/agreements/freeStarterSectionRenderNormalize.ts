@@ -17,6 +17,55 @@ import {
   repairInlineCollapsedStarterLayout,
 } from "./starterPreviewFormatting";
 
+const LOG_LABEL_PREFIX = "[free-starter-label-line-normalized]";
+
+const COLLAPSED_SCHEDULE_LABEL_RES: RegExp[] = [
+  /^Term:\s*(.+?)\s+Effective Date:\s*(.+)$/im,
+  /^Payment Terms:\s*(.+?)\s+Effective Date:\s*(.+)$/im,
+  /^Term:\s*(.+?)\s+Renewal:\s*(.+)$/im,
+  /^Start Date:\s*(.+?)\s+End Date:\s*(.+)$/im,
+  /^Notice:\s*(.+?)\s+Address:\s*(.+)$/im,
+  /^Services Term:\s*(.+?)\s+Effective Date:\s*(.+)$/im,
+];
+
+const COLLAPSED_SCHEDULE_LABEL_PAIRS: Array<[string, string]> = [
+  ["Term:", "Effective Date:"],
+  ["Payment Terms:", "Effective Date:"],
+  ["Term:", "Renewal:"],
+  ["Start Date:", "End Date:"],
+  ["Notice:", "Address:"],
+  ["Services Term:", "Effective Date:"],
+];
+
+function isTestMode(): boolean {
+  return typeof import.meta !== "undefined" && import.meta.env?.MODE === "test";
+}
+
+export function normalizeFreeStarterCollapsedLabelLines(text: string): {
+  text: string;
+  normalized: number;
+} {
+  let out = text || "";
+  let normalized = 0;
+
+  COLLAPSED_SCHEDULE_LABEL_RES.forEach((re, index) => {
+    const pair = COLLAPSED_SCHEDULE_LABEL_PAIRS[index];
+    if (!pair) return;
+    const next = out.replace(re, (_match, first: string, second: string) => {
+      normalized += 1;
+      return `${pair[0]} ${first.trim()}\n${pair[1]} ${second.trim()}`;
+    });
+    out = next;
+  });
+
+  if (normalized > 0 && !isTestMode()) {
+    // eslint-disable-next-line no-console
+    console.info(LOG_LABEL_PREFIX, { normalized });
+  }
+
+  return { text: out, normalized };
+}
+
 export type FreeStarterSectionNormalizeResult = {
   text: string;
   fixedHeadingBodyCollapse: number;
@@ -34,7 +83,7 @@ const STARTER_SECTION_GLUE_PATTERNS: RegExp[] = [
   /^(\d+\.\s+Additional Terms)\s+(.+)$/i,
 ];
 
-function isTestMode(): boolean {
+function isTestModeForSectionLog(): boolean {
   return typeof import.meta !== "undefined" && import.meta.env?.MODE === "test";
 }
 
@@ -44,7 +93,7 @@ export function logFreeStarterSectionRenderNormalized(payload: {
   fixedRoleLabels: number;
   finalLen: number;
 }): void {
-  if (isTestMode()) return;
+  if (isTestModeForSectionLog()) return;
   // eslint-disable-next-line no-console
   console.info("[free-starter-section-render-normalized]", payload);
 }
@@ -190,6 +239,10 @@ export function normalizeFreeStarterSectionRender(
   const nullFix = repairFreeStarterNullLeakage(out, intake, draft);
   out = nullFix.text;
   const fixedNullLeakage = nullFix.fixed;
+
+  const labelFix = normalizeFreeStarterCollapsedLabelLines(out);
+  out = labelFix.text;
+  fixedHeadingBodyCollapse += labelFix.normalized;
 
   out = formatStarterPreviewForDisplay(out);
   out = ensureHeadingBodySpacing(out);

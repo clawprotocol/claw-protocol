@@ -8,24 +8,48 @@ import {
   type CanonicalPartyIdentityRecord,
 } from "./canonicalPartyIdentityResolver";
 
+import {
+  resolveAgreementTitleFromIntakeScope,
+  type AgreementTitleScopeDecision,
+} from "./paidProAgreementTitleScope";
+
 export const PAID_PRO_MUTUAL_CONSULTING_TITLE = "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT";
 export const PAID_PRO_CONSULTING_TITLE = "CONSULTING AND IMPLEMENTATION AGREEMENT";
+export const PAID_PRO_CONSULTING_SERVICES_TITLE = "CONSULTING SERVICES AGREEMENT";
 export const PAID_PRO_SERVICES_TITLE = "SERVICES AGREEMENT";
 
 const PAID_PRO_CANONICAL_TITLE_RE =
-  /(?:MUTUAL\s+CONSULTING\s+AND\s+IMPLEMENTATION|CONSULTING\s+AND\s+IMPLEMENTATION|SERVICES)\s+AGREEMENT/i;
+  /(?:MUTUAL\s+)?(?:CONSULTING\s+SERVICES|BUSINESS\s+CONSULTING|CONSULTING\s+AND\s+IMPLEMENTATION|SERVICES)\s+AGREEMENT/i;
 
 export function resolvePaidProServicesAgreementTitle(intakeText?: string | null): string {
-  const low = String(intakeText || "").toLowerCase();
-  if (/\bmutual\b/.test(low)) return PAID_PRO_MUTUAL_CONSULTING_TITLE;
-  if (/\bconsulting\b/.test(low)) return PAID_PRO_CONSULTING_TITLE;
-  return PAID_PRO_SERVICES_TITLE;
+  return resolveAgreementTitleFromIntakeScope(intakeText).titleUpper;
 }
 
 function recitalAgreementPhrase(title: string): string {
-  if (/MUTUAL/i.test(title)) return "Mutual Consulting and Implementation Agreement";
-  if (/CONSULTING/i.test(title)) return "Consulting and Implementation Agreement";
+  const upper = title.toUpperCase();
+  if (/MUTUAL\s+CONSULTING\s+AND\s+IMPLEMENTATION/i.test(upper)) {
+    return "Mutual Consulting and Implementation Agreement";
+  }
+  if (/CONSULTING\s+AND\s+IMPLEMENTATION/i.test(upper)) {
+    return "Consulting and Implementation Agreement";
+  }
+  if (/MUTUAL\s+CONSULTING\s+SERVICES/i.test(upper)) {
+    return "Mutual Consulting Services Agreement";
+  }
+  if (/BUSINESS\s+CONSULTING/i.test(upper)) {
+    return "Business Consulting Agreement";
+  }
+  if (/CONSULTING\s+SERVICES/i.test(upper)) {
+    return "Consulting Services Agreement";
+  }
+  if (/MUTUAL\s+SERVICES/i.test(upper)) {
+    return "Mutual Services Agreement";
+  }
   return "Services Agreement";
+}
+
+export function paidProTitleScopeDecision(intakeText?: string | null): AgreementTitleScopeDecision {
+  return resolveAgreementTitleFromIntakeScope(intakeText);
 }
 
 export function buildCanonicalPaidProServicesOpeningRecital(

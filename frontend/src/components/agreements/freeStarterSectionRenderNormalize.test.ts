@@ -66,4 +66,14 @@ describe("normalizeFreeStarterSectionRender", () => {
     expect(out.text).not.toMatch(/\buntil null\b/i);
     expect(out.text).toMatch(/twelve \(12\) months/i);
   });
+
+  it("splits collapsed Term and Effective Date onto separate lines", () => {
+    const collapsed =
+      "3. Services Term and Effective Date\nTerm: 12 months Effective Date: upon full execution by both parties";
+    const out = normalizeFreeStarterSectionRender(collapsed, {
+      intake: "Term: twelve (12) months.",
+    });
+    expect(out.text).toMatch(/Term:\s*12 months\nEffective Date:\s*upon full execution by both parties/i);
+    expect(out.text).not.toMatch(/Term:\s*12 months Effective Date:/i);
+  });
 });

@@ -3,6 +3,7 @@ import { isGuidedFinalReviewPhase } from "../createFlowTypes";
 import type { FinalReviewSendIntent } from "../simpleProFinalReviewPhase";
 import type { GuidedCompletionPhase } from "./guidedCompletionPhase";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
+import { isPlaceholderPartyName } from "../starterPartyLimits";
 
 export const GUIDED_TRANSITION_MIN_BODY_LEN = 1000;
 export const GUIDED_TRANSITION_AUTHORITATIVE_RECOVERY_LEN = 3000;
@@ -61,7 +62,10 @@ export function buildCanonicalSignerManifest(args: {
   return {
     signFirst: args.signFirst,
     entries: args.identities
-      .filter((id) => id.partyDisplayName.trim().length > 0)
+      .filter(
+        (id) =>
+          id.partyDisplayName.trim().length > 0 && !isPlaceholderPartyName(id.partyDisplayName.trim()),
+      )
       .map((id, index) => ({
         partyName: id.partyDisplayName.trim(),
         signerName: id.representativeName?.trim() || id.partyDisplayName.trim(),

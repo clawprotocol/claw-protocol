@@ -1,9 +1,6 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
-import { findSignatureLineAnchorsFromCorpusText } from "../../vs01/vs01SignatureBlockAnchors";
-import { extractBetweenPartyNameList } from "./partyBetweenParse";
-import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { countRealParties } from "./starterPartyLimits";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
   resolveSignerPartyLegalEntityDisplayValue,
@@ -54,21 +51,12 @@ export type ResolveGeneratedAgreementPartyCountArgs = {
  * (e.g. "Party 3") and prefers corpus signature blocks when present.
  */
 export function resolveGeneratedAgreementPartyCount(args: ResolveGeneratedAgreementPartyCountArgs): number {
-  const fromDraft = countRealParties(args.draftParties);
-  const corpus = String(args.corpusPlain ?? "").trim();
-  const fromCorpus =
-    corpus.length >= 80 ? findSignatureLineAnchorsFromCorpusText(corpus).length : 0;
-  const fromLabeled = labeledPartyLegalEntities(String(args.intakeText ?? ""))
-    .filter((n) => isAuthoritativeLegalEntityName(n)).length;
-  const fromIntake = extractBetweenPartyNameList(String(args.intakeText ?? ""))
-    .map((n) => n.trim())
-    .filter((n) => n.length > 1 && isAuthoritativeLegalEntityName(n)).length;
-
-  let generated = Math.max(fromDraft, 2);
-  if (fromLabeled >= 2) generated = Math.max(generated, fromLabeled);
-  if (fromCorpus >= 2) generated = Math.max(generated, fromCorpus);
-  if (fromIntake >= 2) generated = Math.max(generated, fromIntake);
-  return Math.min(generated, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+  return resolveAuthoritativeSignerCount({
+    intakeText: args.intakeText,
+    draftParties: args.draftParties,
+    corpusPlain: args.corpusPlain,
+    rawPartyCount: countRealParties(args.draftParties),
+  }).count;
 }
 
 export function isSignerSetupBeyondGeneratedPartyCount(args: {

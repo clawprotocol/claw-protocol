@@ -20,6 +20,7 @@ import {
   normalizeAgreementPartyName,
   partySlotListHasDriftFragments,
   resolveAuthoritativeIntakePartyNames,
+  resolveAuthoritativePartySlotCount,
   selectAuthoritativeTwoPartySlots,
 } from "../partySlotIdentityNormalize";
 import { looksLikeEmail, stripRecipientEmailNoise } from "../recipientEmailValidation";
@@ -232,19 +233,11 @@ function resolveCanonicalFinalPartyManifestUncached(
   args: ResolveCanonicalFinalPartyManifestArgs,
 ): CanonicalFinalPartyManifest {
   const handoff = args.handoff ?? readPremiumRecipientHandoff();
-  const labeledNames = labeledPartyLegalEntities(String(args.intakeText ?? ""));
-  const intakeNames = resolveAuthoritativeIntakePartyNames(args.intakeText);
-  const collapsedDraft = selectAuthoritativeTwoPartySlots(args.draftPartyNames ?? []);
-  const hasDrift = partySlotListHasDriftFragments(args.draftPartyNames ?? [], args.intakeText);
-  const intakeAuthoritative =
-    labeledNames.length >= 2
-      ? labeledNames.filter(isAuthoritativeLegalEntityName)
-      : intakeNames.filter(isAuthoritativeLegalEntityName);
-  let slotCount = Math.max(args.partyCount, 2);
-  if (labeledNames.length >= 2) slotCount = Math.max(slotCount, labeledNames.length);
-  else if (intakeAuthoritative.length === 2) slotCount = 2;
-  else if (hasDrift && intakeNames.length === 2) slotCount = 2;
-  else if (hasDrift && collapsedDraft.length === 2 && slotCount > 2) slotCount = 2;
+  const slotCount = resolveAuthoritativePartySlotCount({
+    intakeText: args.intakeText,
+    draftPartyNames: args.draftPartyNames,
+    rawPartyCount: args.partyCount,
+  });
   const handoffSlots = handoff ? linearPremiumRecipientSlots(handoff, slotCount) : [];
   const parties: CanonicalFinalPartyEntry[] = [];
 
