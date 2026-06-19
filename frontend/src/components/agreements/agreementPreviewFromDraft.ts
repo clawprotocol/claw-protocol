@@ -44,6 +44,7 @@ import {
   sanitizeStarterPreviewProse,
 } from "./starterPreviewProseSanitize";
 import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
+import { starterPreviewHasCorruptedPartyPlaceholderText } from "./starterMultiPartyProGate";
 import {
   substitutePartyPlaceholdersInUserFacingText,
   textContainsUnresolvedIdentityPlaceholders,
@@ -1114,7 +1115,18 @@ export function buildAgreementPreviewText(
   const core = buildAgreementPreviewTextCore(draftForBuild, options);
   if (starterPreview) {
     const gated = applyAgreementPreviewPlaceholderGate(core, draftForBuild, options, "preview_starter");
-    const display = repairStarterCommercialReadinessDisplay(gated, draftForBuild, options);
+    let display = repairStarterCommercialReadinessDisplay(gated, draftForBuild, options);
+    if (starterPreviewHasCorruptedPartyPlaceholderText(display)) {
+      if (import.meta.env.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.warn("[starter-preview-corruption-blocked]", {
+          surface: "preview_starter",
+          sample: display.slice(0, 240),
+        });
+      }
+      display =
+        "This agreement needs LawDog Pro for multi-party structure. Use Build Pro to continue with the full agreement workflow.";
+    }
     logLawdogOutputPathMap({
       stage: "free_preview",
       source: "starter_preview",

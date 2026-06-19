@@ -6,6 +6,8 @@ import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { parseLabeledPartyBlocks, resolveStarterGatePartyLegalEntities } from "./labeledPartyBlockParse";
+import { countRealParties } from "./starterPartyLimits";
+import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
@@ -111,8 +113,44 @@ export function detectRevenueShareLanguage(raw: string): boolean {
   return (
     /\b(?:revenue|profit|royalt(?:y|ies))\s*(?:share|sharing|split|allocation)\b/i.test(raw) ||
     /\b(?:revenue|profit)\s+share\b/i.test(raw) ||
+    /\brevenue\b[\s\S]{0,160}\bshared\b/i.test(raw) ||
     /\b\d+(?:\.\d+)?\s*%\s*(?:of\s+)?(?:revenue|profit|royalt)/i.test(raw) ||
-    /\bpercentage\s+allocation\b/i.test(raw)
+    /\bpercentage\s+allocation\b/i.test(raw) ||
+    /\b(?:split|allocated|distributed)\s+(?:as\s+)?\d+(?:\.\d+)?\s*%/i.test(raw)
+  );
+}
+
+/** Count distinct percentage allocations in revenue-share context (multi-party split signal). */
+export function countRevenueSharePercentages(raw: string): number {
+  const text = String(raw || "");
+  const revenueSlice =
+    text.match(/\b(?:revenue|profit|royalt(?:y|ies))[\s\S]{0,1600}/i)?.[0] ?? text;
+  const hits = revenueSlice.match(/\d+(?:\.\d+)?\s*%/g) ?? [];
+  return hits.length;
+}
+
+export function detectMultiPartyCollaborationProse(raw: string): boolean {
+  const text = String(raw || "");
+  return (
+    /\b(?:four|4|three|3|five|5)\s+(?:companies|parties|entities|organizations|firms)\b/i.test(text) ||
+    /\b(?:all|each)\s+parties\b/i.test(text) ||
+    /\bjointly\s+(?:market|develop|own|operate|license)\b/i.test(text) ||
+    /\bpartnership\s+among\b/i.test(text) ||
+    /\bcollaboration\s+agreement\b/i.test(text) ||
+    /\bjointly\s+developed\s+(?:ip|intellectual\s+property|platform|software)\b/i.test(text) ||
+    /\b(?:platform|logistics)\s+(?:partnership|collaboration)\b/i.test(text) ||
+    /\b(?:multi[\s-]party|multiple\s+parties)\s+(?:partnership|agreement|collaboration|revenue)\b/i.test(text) ||
+    /\b(?:quadripartite|tripartite)\b/i.test(text)
+  );
+}
+
+export function detectSignerCandidateOverflow(raw: string): boolean {
+  const text = String(raw || "");
+  return (
+    /\b(?:three|3|four|4|five|5)\s+authorized\s+representatives?\b/i.test(text) ||
+    /\b(?:three|3|four|4|five|5)\s+(?:signers?|signatories)\b/i.test(text) ||
+    maxIndexedPartyOrSigner(text) >= 3 ||
+    countSignerDetailSlots(text) >= 3
   );
 }
 
@@ -236,27 +274,39 @@ function extractKeyTermsSummary(raw: string, flags: {
 export function assessStarterComplexityGate(raw: string): StarterComplexityGateAssessment {
   const intake = String(raw || "").trim();
   const parties = resolveStarterGatePartyLegalEntities(intake);
-  const partyCount = Math.max(parties.length, maxIndexedPartyOrSigner(intake), countSignerDetailSlots(intake));
+  const extractedEntityCount = parties.length;
+  const indexedPartyMax = maxIndexedPartyOrSigner(intake);
+  const signerSlots = countSignerDetailSlots(intake);
+  const partyCount = Math.max(extractedEntityCount, indexedPartyMax, signerSlots);
+  const revenuePctCount = countRevenueSharePercentages(intake);
   const hasRevenueShare = detectRevenueShareLanguage(intake);
   const hasCoordinator = detectCoordinatorOrNonPartyActor(intake);
   const hasReviewWorkflow = detectReviewApprovalWorkflow(intake);
   const hasMultiProviderPayment = detectMultiProviderPayment(intake, partyCount);
+  const hasMultiPartyProse = detectMultiPartyCollaborationProse(intake);
+  const hasSignerOverflow = detectSignerCandidateOverflow(intake);
   const reasons: StarterComplexityGateReason[] = [];
 
-  if (parties.length > 2 || maxIndexedPartyOrSigner(intake) >= 3) {
+  if (extractedEntityCount > 2 || indexedPartyMax >= 3) {
     reasons.push("three_plus_legal_parties");
   }
-  if (hasRevenueShare && partyCount >= 2) {
+  if (hasRevenueShare && (partyCount >= 2 || revenuePctCount >= 3)) {
+    reasons.push("revenue_share_or_allocation");
+  }
+  if (revenuePctCount >= 3) {
     reasons.push("revenue_share_or_allocation");
   }
   if (hasCoordinator && partyCount >= 2) {
     reasons.push("coordinator_or_non_party_actor");
   }
-  if (countSignerDetailSlots(intake) >= 3 || maxIndexedPartyOrSigner(intake) >= 3) {
+  if (hasSignerOverflow) {
     reasons.push("multi_signer_workflow");
   }
   if (hasReviewWorkflow) {
     reasons.push("review_approval_workflow");
+  }
+  if (hasMultiPartyProse && (extractedEntityCount >= 2 || revenuePctCount >= 3 || indexedPartyMax >= 3)) {
+    reasons.push("joint_venture_or_multi_vendor_structure");
   }
   if (detectJointVentureOrMultiVendorStructure(intake) && partyCount >= 2) {
     reasons.push("joint_venture_or_multi_vendor_structure");
@@ -265,9 +315,11 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
     reasons.push("multi_provider_payment");
   }
 
+  const uniqueReasons = [...new Set(reasons)];
+
   const assessment: StarterComplexityGateAssessment = {
-    required: reasons.length > 0,
-    reasons,
+    required: uniqueReasons.length > 0,
+    reasons: uniqueReasons,
     parties,
     coordinatorName: parseCoordinatorNameFromIntake(intake),
     keyTerms: extractKeyTermsSummary(intake, { hasRevenueShare, hasReviewWorkflow, hasMultiProviderPayment }),
@@ -285,6 +337,10 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
       reasons: assessment.reasons,
       reasonCodes: assessment.reasons,
       partyCount: assessment.partyCount,
+      extractedEntityCount,
+      revenuePctCount,
+      hasMultiPartyProse,
+      hasSignerOverflow,
       resolvedParties: assessment.parties,
       hasRevenueShare: assessment.hasRevenueShare,
       hasCoordinator: assessment.hasCoordinator,
@@ -299,6 +355,38 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
 
 /** @deprecated Use assessStarterComplexityGate */
 export const assessStarterMultiPartyProRequirement = assessStarterComplexityGate;
+
+/** Post-parse safety: reject starter drafts that slipped past pre-generation gate. */
+export function rejectIneligibleStarterDraftAfterParse(
+  rawIntake: string,
+  parsed: ParsedDraftShape,
+): boolean {
+  const gate = assessStarterComplexityGate(rawIntake);
+  if (gate.required) return true;
+  if (countRealParties(parsed.parties) > 2) return true;
+  try {
+    const preview = buildAgreementPreviewText(parsed, {
+      starterPreview: true,
+      intakeText: rawIntake,
+    });
+    if (starterPreviewHasCorruptedPartyPlaceholderText(preview)) return true;
+  } catch {
+    return true;
+  }
+  return false;
+}
+
+/** Hard invariant: starter output must never show ORG overflow / percentage party garbage. */
+export function starterPreviewHasCorruptedPartyPlaceholderText(text: string): boolean {
+  const body = String(text || "");
+  if (!body.trim()) return false;
+  if (/\bParty\s+[c^TO]%/i.test(body)) return true;
+  if (/\bapplicable Party\s*[%^TO]/i.test(body)) return true;
+  if (/\bParty\s+[a-z]\s*%/i.test(body)) return true;
+  if (/\[ORG_[34]\]/i.test(body)) return true;
+  if (/\bthe applicable Party\b/i.test(body) && /\d+(?:\.\d+)?\s*%/.test(body)) return true;
+  return false;
+}
 
 export function logStarterComplexityGateApplied(): void {
   if (import.meta.env.MODE === "test") return;

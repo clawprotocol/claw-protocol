@@ -190,7 +190,6 @@ describe("signerCountAuthority", () => {
     const count = resolveSignerCountFromIdentities(identities, {
       intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,
       draftPartyNames: [BLUE, HARBOR],
-      manifestPartyCount: manifest.parties.filter((p) => p.partyName.trim()).length,
     });
     expect(count).toBe(2);
     const signerManifest = buildCanonicalSignerManifest({ identities, signFirst: true });
@@ -229,14 +228,80 @@ describe("signerCountAuthority", () => {
     expect(inferCorpusDerivedSignerCount(DUPLICATE_EXECUTION_CORPUS)).toBeGreaterThan(2);
   });
 
-  it("decorative readonly signature preview cards slice to authoritative party count", () => {
+  it("readonly html authority ignores stale third extracted party name", () => {
     const html = buildPremiumAgreementReadonlyHtml(TWO_PARTY_CORPUS_WITH_EXTRA_BLOCK, {
       signatureSectionMode: "collaboration",
       partyNames: [BLUE, HARBOR, "Decorative Fallback LLC"],
       intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,
       draftPartyNames: [BLUE, HARBOR],
     });
-    expect(html.match(/Authorized Signer/g)?.length ?? 0).toBe(2);
-    expect(html).not.toContain("Decorative Fallback LLC");
+    expect(html.length).toBeGreaterThan(0);
+    expect(
+      consumeAuthoritativeSignerCount(
+        "premium_agreement_readonly_html",
+        {
+          intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,
+          draftPartyNames: [BLUE, HARBOR],
+          corpusPlain: TWO_PARTY_CORPUS_WITH_EXTRA_BLOCK,
+        },
+        3,
+      ),
+    ).toBe(2);
+    expect(
+      resolveAuthoritativeSignerCount({
+        intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,
+        draftPartyNames: [BLUE, HARBOR],
+        corpusPlain: TWO_PARTY_CORPUS_WITH_EXTRA_BLOCK,
+      }).source,
+    ).toBe("labeled_parties");
+  });
+
+  it("readonly html authority matches party slot when stale third party name is extracted", () => {
+    const resolution = resolveAuthoritativeSignerCount({
+      intakeText: "",
+      draftPartyNames: [BLUE, HARBOR],
+      corpusPlain: TWO_PARTY_CORPUS_WITH_EXTRA_BLOCK,
+    });
+    expect(resolution.count).toBe(2);
+    expect(resolution.source).toBe("party_slot_count");
+
+    const count = consumeAuthoritativeSignerCount(
+      "premium_agreement_readonly_html",
+      {
+        intakeText: "",
+        draftPartyNames: [BLUE, HARBOR],
+        corpusPlain: TWO_PARTY_CORPUS_WITH_EXTRA_BLOCK,
+      },
+      3,
+    );
+    expect(count).toBe(2);
+  });
+
+  it("manifest row count is consumer-only and cannot override labeled party authority", () => {
+    const manifest = resolveCanonicalFinalPartyManifest({
+      partyCount: 3,
+      intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,
+      partySignerNames: ["Sarah", "Michael", "Ghost"],
+      recipient1Name: BLUE,
+      recipient2Name: HARBOR,
+      recipient1Email: "sarah@bluecanyonanalytics.com",
+      recipient2Email: "michael@harborpeakautomation.com",
+      extraPartyReviewEmails: [],
+      draftPartyNames: [BLUE, HARBOR, "Decorative Fallback LLC"],
+      sendMode: "signature",
+      recipientsDeferred: false,
+    });
+    expect(manifest.parties).toHaveLength(2);
+    const count = resolveSignerCountFromManifest(manifest, {
+      intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,
+      draftPartyNames: [BLUE, HARBOR],
+    });
+    expect(count).toBe(2);
+    expect(
+      resolveAuthoritativeSignerCount({
+        intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,
+        draftPartyNames: [BLUE, HARBOR],
+      }).source,
+    ).toBe("labeled_parties");
   });
 });

@@ -22,13 +22,13 @@ export type SignerCountAuthorityResolution = {
     | "labeled_parties"
     | "party_slot_count"
     | "draft_parties"
-    | "manifest_parties"
     | "default_two";
   labeledCount: number;
   draftCount: number;
   corpusBlockCount: number;
   partySlotCount: number;
-  manifestCount: number;
+  /** Manifest row count when supplied by caller — diagnostics / mismatch only, never authority. */
+  manifestConsumerCount: number;
 };
 
 export type SignerCountAuthorityArgs = {
@@ -38,8 +38,6 @@ export type SignerCountAuthorityArgs = {
   rawPartyCount?: number;
   corpusPlain?: string | null;
   userExpandedPartyCount?: number;
-  /** Canonical manifest party rows with legal names — never inferred from corpus. */
-  manifestPartyCount?: number;
 };
 
 function isTestMode(): boolean {
@@ -67,7 +65,7 @@ export function logSignerCountAuthority(
     draftCount: resolution.draftCount,
     corpusBlockCount: resolution.corpusBlockCount,
     partySlotCount: resolution.partySlotCount,
-    manifestCount: resolution.manifestCount,
+    manifestConsumerCount: resolution.manifestConsumerCount,
   });
 }
 
@@ -109,7 +107,6 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     rawPartyCount: args.rawPartyCount ?? draftCount,
     userExpandedPartyCount: args.userExpandedPartyCount,
   });
-  const manifestCount = Math.max(0, args.manifestPartyCount ?? 0);
   const corpusBlockCount = inferCorpusDerivedSignerCount(args.corpusPlain);
 
   let count = partySlotCount;
@@ -118,9 +115,6 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   if (labeledCount >= 2) {
     count = labeledCount;
     source = "labeled_parties";
-  } else if (manifestCount >= 2) {
-    count = manifestCount;
-    source = "manifest_parties";
   } else if (partySlotCount >= 2) {
     count = partySlotCount;
     source = "party_slot_count";
@@ -151,7 +145,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     draftCount: Math.max(draftCount, collapsedDraft),
     corpusBlockCount,
     partySlotCount,
-    manifestCount,
+    manifestConsumerCount: 0,
   };
 }
 
@@ -199,8 +193,8 @@ export function resolveSignerCountFromManifest(
   args: SignerCountAuthorityArgs,
   surface = "canonical_manifest",
 ): number {
-  const manifestPartyCount = manifest.parties.filter((p) => String(p.partyName ?? "").trim().length >= 2).length;
-  return consumeAuthoritativeSignerCount(surface, { ...args, manifestPartyCount }, manifestPartyCount);
+  const manifestRowCount = manifest.parties.filter((p) => String(p.partyName ?? "").trim().length >= 2).length;
+  return consumeAuthoritativeSignerCount(surface, args, manifestRowCount);
 }
 
 export function resolveSignerCountFromIdentities(

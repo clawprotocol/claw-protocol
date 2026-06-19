@@ -268,7 +268,6 @@ function resolveVs01AuthoritativeSignerCount(
       intakeText: args.intakeText,
       draftParties: args.draft?.parties,
       corpusPlain,
-      manifestPartyCount: args.bridge?.counterparties?.length,
     },
     consumerCount,
   );

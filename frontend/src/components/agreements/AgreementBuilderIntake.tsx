@@ -106,6 +106,7 @@ import {
   buildStarterProCheckoutPendingDraft,
   emptyStarterCheckoutPendingShell,
   logStarterComplexityGateApplied,
+  rejectIneligibleStarterDraftAfterParse,
   type StarterComplexityGateAssessment,
 } from "./starterMultiPartyProGate";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
@@ -9600,6 +9601,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       let parsed = await parseDraft(rawIntake);
       writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
       writeOriginalUserIntakeRawIfRicher(rawIntake);
+      if (rejectIneligibleStarterDraftAfterParse(rawIntake, parsed)) {
+        commitStarterMultiPartyProGate(rawIntake);
+        return false;
+      }
       parsed = { ...parsed, payment: extractIntakePayment(rawIntake) };
       parsed = runIntakeDefaultsAndRoles(parsed, rawIntake, simpleProductFlow, intakePartyRoleLabels);
       parsed = alignParsedWithCanonicalType(parsed, rawIntake);
@@ -11168,6 +11173,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       let parsed = await parseDraft(rawIntake);
       writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
       writeOriginalUserIntakeRawIfRicher(rawIntake);
+      if (rejectIneligibleStarterDraftAfterParse(rawIntake, parsed)) {
+        commitStarterMultiPartyProGate(rawIntake);
+        await finalizeIntakeCapture();
+        return;
+      }
       parsed = { ...parsed, payment: extractIntakePayment(rawIntake) };
       parsed = preserveInstallmentPaymentTermsOnDraft(parsed, rawIntake);
       parsed = runIntakeDefaultsAndRoles(parsed, rawIntake, simpleProductFlow, intakePartyRoleLabels);

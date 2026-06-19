@@ -369,7 +369,6 @@ function buildPremiumAgreementReadonlyHtmlCore(
         intakeText: opts.intakeText,
         draftPartyNames: opts.draftPartyNames ?? opts.partyNames,
         corpusPlain: raw,
-        manifestPartyCount: opts.partyNames.filter((n) => n.trim().length >= 2).length,
       },
       opts.partyNames.filter((n) => n.trim().length >= 2).length,
     );
@@ -387,7 +386,6 @@ function buildPremiumAgreementReadonlyHtmlCore(
         intakeText: opts.intakeText,
         draftPartyNames: opts.draftPartyNames ?? opts.partyNames,
         corpusPlain: raw,
-        manifestPartyCount: opts.partyNames.filter((n) => n.trim().length >= 2).length,
       },
       opts.partyNames.filter((n) => n.trim().length >= 2).length,
     );

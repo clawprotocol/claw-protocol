@@ -11,6 +11,7 @@ import {
   looksLikeStackedPartyPersonNameLine,
   looksLikeStackedPartyTitleLine,
 } from "./starterPartyIdentityIsolation";
+import { extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 
 export type LabeledPartyBlock = {
   /** 1-based index from the prompt ("Party 1" → 1). */
@@ -206,13 +207,17 @@ export function roleLabelPartyLegalEntities(raw: string): string[] {
   return entities;
 }
 
-/** Labeled Party N blocks, else role-label Client/Provider blocks. */
+/** Labeled Party N blocks, else role-label Client/Provider blocks, else entity names from prose. */
 export function resolveStarterGatePartyLegalEntities(raw: string): string[] {
   const labeled = labeledPartyLegalEntities(raw);
-  if (labeled.length >= 2) return labeled;
+  if (labeled.length >= 3) return labeled;
   const roleLabeled = roleLabelPartyLegalEntities(raw);
-  if (roleLabeled.length >= 2) return roleLabeled;
-  return [...new Set([...labeled, ...roleLabeled])];
+  const merged = [...new Set([...labeled, ...roleLabeled])];
+  if (merged.length >= 3) return merged;
+  if (merged.length >= 2) return merged;
+  const fromProse = extractAgreementEntityCandidates(raw);
+  const combined = [...new Set([...merged, ...fromProse])];
+  return combined.length >= 2 ? combined : merged;
 }
 
 export const TRIPARTITE_LABELED_PARTY_ROLE_LABELS = [
