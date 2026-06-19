@@ -5,7 +5,7 @@
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { labeledPartyLegalEntities, parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
+import { parseLabeledPartyBlocks, resolveStarterGatePartyLegalEntities } from "./labeledPartyBlockParse";
 
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
@@ -142,18 +142,36 @@ function detectJointVentureOrMultiVendorStructure(raw: string): boolean {
   );
 }
 
-function detectMultiProviderPayment(raw: string): boolean {
-  const low = raw.toLowerCase();
-  const stripped = raw.replace(/\bupon\s+full\s+execution\s+by\s+all\s+parties\b/gi, " ");
-  const providerHits =
-    (low.match(/\b(?:provider|vendor|consultant|contractor|implement(?:er|ation))\w*\b/g) ?? []).length;
-  const paymentContext = /\b(?:payment|fee|payable|invoice|milestone|monthly)\b/i.test(raw);
-  if (!paymentContext) return false;
-  if (providerHits >= 2) return true;
+function isGenericInstallmentPaymentLanguage(raw: string): boolean {
+  return /\b(?:monthly\s+payment|monthly\s+payments|paid\s+monthly|payment\s+monthly|per\s+month)\b/i.test(
+    raw,
+  );
+}
+
+function detectMultiProviderPayment(raw: string, resolvedPartyCount: number): boolean {
+  if (resolvedPartyCount < 2) return false;
+
+  if (isGenericInstallmentPaymentLanguage(raw)) {
+    const explicitMultiProvider =
+      /\b(?:each\s+(?:party|provider|vendor|contractor)|multiple\s+(?:providers|vendors|contractors)|multi[\s-]provider|multi[\s-]vendor)\b/i.test(
+        raw,
+      );
+    if (!explicitMultiProvider) return false;
+  }
+
+  if (
+    /\b(?:each\s+(?:party|provider|vendor|contractor)|multiple\s+(?:providers|vendors|contractors)|multi[\s-]provider|multi[\s-]vendor)\b/i.test(
+      raw,
+    ) &&
+    /\b(?:payment|fee|fees|payable|invoice|compensation)\b/i.test(raw)
+  ) {
+    return true;
+  }
+
   return (
-    /\b(?:each\s+party|all\s+parties)\b/i.test(stripped) &&
+    /\b(?:each\s+party|all\s+parties)\b/i.test(raw) &&
     /\b(?:fee|payment|payable)\b/i.test(raw) &&
-    (labeledPartyLegalEntities(raw).length >= 2 || maxIndexedPartyOrSigner(raw) >= 2)
+    resolvedPartyCount >= 3
   );
 }
 
@@ -217,21 +235,21 @@ function extractKeyTermsSummary(raw: string, flags: {
 
 export function assessStarterComplexityGate(raw: string): StarterComplexityGateAssessment {
   const intake = String(raw || "").trim();
-  const parties = labeledPartyLegalEntities(intake);
+  const parties = resolveStarterGatePartyLegalEntities(intake);
   const partyCount = Math.max(parties.length, maxIndexedPartyOrSigner(intake), countSignerDetailSlots(intake));
   const hasRevenueShare = detectRevenueShareLanguage(intake);
   const hasCoordinator = detectCoordinatorOrNonPartyActor(intake);
   const hasReviewWorkflow = detectReviewApprovalWorkflow(intake);
-  const hasMultiProviderPayment = detectMultiProviderPayment(intake);
+  const hasMultiProviderPayment = detectMultiProviderPayment(intake, partyCount);
   const reasons: StarterComplexityGateReason[] = [];
 
   if (parties.length > 2 || maxIndexedPartyOrSigner(intake) >= 3) {
     reasons.push("three_plus_legal_parties");
   }
-  if (hasRevenueShare && (partyCount >= 2 || parties.length >= 2)) {
+  if (hasRevenueShare && partyCount >= 2) {
     reasons.push("revenue_share_or_allocation");
   }
-  if (hasCoordinator && (parties.length >= 2 || partyCount >= 2)) {
+  if (hasCoordinator && partyCount >= 2) {
     reasons.push("coordinator_or_non_party_actor");
   }
   if (countSignerDetailSlots(intake) >= 3 || maxIndexedPartyOrSigner(intake) >= 3) {
@@ -265,7 +283,9 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
     console.info("[starter-complexity-gate]", {
       blocked: assessment.required,
       reasons: assessment.reasons,
+      reasonCodes: assessment.reasons,
       partyCount: assessment.partyCount,
+      resolvedParties: assessment.parties,
       hasRevenueShare: assessment.hasRevenueShare,
       hasCoordinator: assessment.hasCoordinator,
       hasReviewWorkflow: assessment.hasReviewWorkflow,

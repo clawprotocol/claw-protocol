@@ -10,6 +10,17 @@ import {
 } from "./starterMultiPartyProGate";
 import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteRegression.test";
 
+export const TEST375_ROLE_LABEL_TWO_PARTY_INTAKE = `Client:
+Blue Canyon Analytics LLC
+
+Service Provider:
+Harbor Peak Automation LLC
+
+Simple consulting and implementation services.
+12 month term.
+Monthly payment.
+Texas law.`;
+
 const TWO_PARTY_INTAKE = `Consulting agreement between Acme LLC and Beta Corp.
 Scope: monthly marketing support.
 Payment: $5,000 per month.
@@ -116,6 +127,69 @@ Joint venture implementation partnership with multi-vendor fees.`;
     const gate = assessStarterComplexityGate(intake);
     expect(gate.required).toBe(true);
     expect(gate.reasons).toContain("three_plus_legal_parties");
+  });
+});
+
+describe("Test375 role-label two-party free starter", () => {
+  it("allows Client/Service Provider labeled intake with monthly payment", () => {
+    const gate = assessStarterComplexityGate(TEST375_ROLE_LABEL_TWO_PARTY_INTAKE);
+    expect(gate.required).toBe(false);
+    expect(gate.reasons).toHaveLength(0);
+    expect(gate.partyCount).toBe(2);
+    expect(gate.parties).toEqual([
+      "Blue Canyon Analytics LLC",
+      "Harbor Peak Automation LLC",
+    ]);
+    expect(gate.hasMultiProviderPayment).toBe(false);
+  });
+
+  it("renders a simple two-party free starter draft from Test375 intake", () => {
+    const draft = runIntakeDefaultsAndRoles(
+      {
+        title: "",
+        jurisdiction: "",
+        parties: [],
+        purpose: "",
+        payment_terms: "",
+        duration: null,
+        due_date: null,
+        effective_date: null,
+        payment: EMPTY_PAYMENT,
+      },
+      TEST375_ROLE_LABEL_TWO_PARTY_INTAKE,
+      true,
+      defaultIntakePartyRoleLabels(),
+    );
+    expect(assessStarterComplexityGate(TEST375_ROLE_LABEL_TWO_PARTY_INTAKE).required).toBe(false);
+    expect(draft.parties.length).toBeGreaterThanOrEqual(2);
+    const preview = buildAgreementPreviewText(draft, { starterPreview: true });
+    expect(preview.length).toBeGreaterThan(200);
+    expect(preview).toMatch(/Blue Canyon Analytics LLC/i);
+    expect(preview).toMatch(/Harbor Peak Automation LLC/i);
+  });
+
+  it("does not gate generic monthly payment when party count is unresolved", () => {
+    const intake = `Scope: consulting services.
+Monthly payment.
+12 month term.`;
+    const gate = assessStarterComplexityGate(intake);
+    expect(gate.required).toBe(false);
+    expect(gate.partyCount).toBe(0);
+    expect(gate.reasons).not.toContain("multi_provider_payment");
+  });
+
+  it("still gates revenue share with two parties", () => {
+    const intake = `Client:
+Acme LLC
+
+Service Provider:
+Beta Corp
+
+Revenue share: 20% of licensing revenue to Beta Corp.`;
+    const gate = assessStarterComplexityGate(intake);
+    expect(gate.required).toBe(true);
+    expect(gate.reasons).toContain("revenue_share_or_allocation");
+    expect(gate.partyCount).toBe(2);
   });
 });
 

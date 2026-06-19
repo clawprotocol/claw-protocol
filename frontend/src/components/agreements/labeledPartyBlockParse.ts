@@ -28,6 +28,11 @@ const UNKNOWN_VALUE_RE =
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 
+const ROLE_LABEL_PARTY_HEADER_RE =
+  /^\s*(?:client|service\s+provider|provider|contractor|consultant)\s*:\s*$/i;
+const ROLE_LABEL_INLINE_RE =
+  /^\s*(?:client|service\s+provider|provider|contractor|consultant)\s*:\s*(.+)$/i;
+
 const LABELED_FIELD_RES: ReadonlyArray<{ key: keyof Omit<LabeledPartyBlock, "index">; re: RegExp }> = [
   { key: "legalEntity", re: /^\s*legal\s+entity\s*[:\-]\s*(.+)$/i },
   { key: "signerName", re: /^\s*signer\s+name\s*[:\-]\s*(.+)$/i },
@@ -156,6 +161,58 @@ export function intakeHasAuthoritativeLabeledPartyBlocks(raw: string): boolean {
 /** Ordered full legal entity names from labeled party blocks. */
 export function labeledPartyLegalEntities(raw: string): string[] {
   return parseLabeledPartyBlocks(raw).map((b) => b.legalEntity);
+}
+
+/**
+ * Parse role-label party blocks (`Client:`, `Service Provider:`, etc.) followed by entity lines
+ * or inline `Client: Acme LLC` forms (Test375 free starter).
+ */
+export function roleLabelPartyLegalEntities(raw: string): string[] {
+  const text = String(raw || "").replace(/\r\n/g, "\n");
+  const lines = text.split("\n");
+  const entities: string[] = [];
+  let expectingEntity = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (PARTY_BLOCK_HEADER_RE.test(line) || COORDINATOR_BLOCK_HEADER_RE.test(line)) {
+      expectingEntity = false;
+      continue;
+    }
+
+    if (ROLE_LABEL_PARTY_HEADER_RE.test(line)) {
+      expectingEntity = true;
+      continue;
+    }
+
+    const inline = line.match(ROLE_LABEL_INLINE_RE);
+    if (inline?.[1]) {
+      const entity = cleanFieldValue(inline[1]);
+      if (entity.length >= 2 && looksLikeStackedPartyLegalEntityLine(entity)) {
+        entities.push(entity);
+      }
+      expectingEntity = false;
+      continue;
+    }
+
+    if (expectingEntity && looksLikeStackedPartyLegalEntityLine(line)) {
+      entities.push(cleanFieldValue(line));
+      expectingEntity = false;
+    }
+  }
+
+  return entities;
+}
+
+/** Labeled Party N blocks, else role-label Client/Provider blocks. */
+export function resolveStarterGatePartyLegalEntities(raw: string): string[] {
+  const labeled = labeledPartyLegalEntities(raw);
+  if (labeled.length >= 2) return labeled;
+  const roleLabeled = roleLabelPartyLegalEntities(raw);
+  if (roleLabeled.length >= 2) return roleLabeled;
+  return [...new Set([...labeled, ...roleLabeled])];
 }
 
 export const TRIPARTITE_LABELED_PARTY_ROLE_LABELS = [

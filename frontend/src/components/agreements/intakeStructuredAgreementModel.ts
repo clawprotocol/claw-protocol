@@ -3,7 +3,7 @@
  * Heuristic only — server parse on submit remains authoritative when available.
  */
 
-import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
+import { parseLabeledPartyBlocks, roleLabelPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList, extractBetweenPartyPair } from "./partyBetweenParse";
 import {
   extractIntakePayment,
@@ -375,8 +375,8 @@ function sliceFirstPartyListSentenceFromBetweenTail(tail: string): string {
 
 function extractPartiesFromLabeledBlocks(rawIntake: string): PartiesExtract | null {
   const blocks = parseLabeledPartyBlocks(rawIntake);
-  if (blocks.length < 2) return null;
-  const parties = blocks.map((b) => b.legalEntity).filter((n) => n.length >= 2);
+  const fromPartyN = blocks.map((b) => b.legalEntity).filter((n) => n.length >= 2);
+  const parties = fromPartyN.length >= 2 ? fromPartyN : roleLabelPartyLegalEntities(rawIntake);
   if (parties.length < 2) return null;
   return {
     parties,
