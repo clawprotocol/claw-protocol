@@ -121,12 +121,17 @@ function resolveRoleLabelForAuthorityParty(
 
 function blockHeadingFromRoleLabel(roleLabel: string, partyIndex: number): string {
   const r = roleLabel.trim().toLowerCase();
-  if (r === "client") return "CLIENT";
+  if (r === "client" || r === "buyer" || r === "customer" || r === "purchaser") {
+    return r.toUpperCase();
+  }
+  if (r === "vendor" || r === "supplier" || r === "contractor" || r === "consultant" || r === "agency") {
+    return r.toUpperCase();
+  }
   if (r.includes("service") && r.includes("provider")) return "SERVICE PROVIDER";
   if (r.includes("analytics") && r.includes("provider")) return "ANALYTICS PROVIDER";
   if (partyIndex === 0) return "CLIENT";
   if (partyIndex === 1) return "SERVICE PROVIDER";
-  return `PARTY ${partyIndex + 1}`;
+  return roleLabel.trim().toUpperCase() || `PARTY ${partyIndex + 1}`;
 }
 
 function manifestRoleFromRoleLabel(

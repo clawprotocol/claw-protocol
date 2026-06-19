@@ -7,10 +7,10 @@ import {
   isTripartiteLabeledPartiesIntake,
   tripartiteRoleLabelForPartyIndex,
 } from "./labeledPartyBlockParse";
+import { resolveCanonicalPartyRoleLabel, isGenericCanonicalRole } from "./canonicalPartyRoleAuthority";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
   collapsePartySlotCandidates,
-  isInternalPartyAliasRole,
   isInvalidPartySlotLegalEntity,
   normalizeAgreementPartyName,
 } from "./partySlotIdentityNormalize";
@@ -28,6 +28,10 @@ import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import type { CanonicalPartyIdentity as SignerCanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
+import {
+  replaceExtractionRoleAliasesInProse,
+} from "./canonicalPartyRoleAuthority";
+import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import {
   isContaminatedPartyLegalNameFromSignerInstruction,
   stripSignerInstructionContaminationFromCorpus,
@@ -66,8 +70,6 @@ export type CanonicalPartyIdentity = {
 };
 
 const WITNESS_RE = /\b(?:IN WITNESS WHEREOF|SIGNATURES?|EXECUTION)\b/i;
-
-const DEFAULT_ROLE_LABELS = ["Client", "Service Provider"] as const;
 
 export function logCanonicalPartyIdentityPreserved(args: {
   canonicalLegalName: string;
@@ -141,25 +143,17 @@ function norm(s: string): string {
   return s.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-const GENERIC_PARTY_ROLE_LABELS = new Set([
-  "",
-  "party",
-  "parties",
-  "signer",
-  "signatory",
-]);
-
-function isGenericPartyRoleLabel(role: string | null | undefined): boolean {
-  return GENERIC_PARTY_ROLE_LABELS.has(norm(role || ""));
-}
-
 function roleLabelForIndex(index: number, explicit?: string, intakeRaw?: string | null): string {
   const t = (explicit || "").trim();
-  if (t.length >= 2 && !isInternalPartyAliasRole(t) && !isGenericPartyRoleLabel(t)) return t;
   if (intakeRaw && isTripartiteLabeledPartiesIntake(intakeRaw)) {
     return tripartiteRoleLabelForPartyIndex(index);
   }
-  return DEFAULT_ROLE_LABELS[index] ?? `Party ${index + 1}`;
+  return resolveCanonicalPartyRoleLabel({
+    partyIndex: index,
+    partyCount: 2,
+    explicitRole: t,
+    preserveIntakeRole: Boolean(t && !isGenericCanonicalRole(t)),
+  });
 }
 
 function normalizedName(s: string): string {
@@ -333,7 +327,16 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     knownPartyTokens: starterNames,
   });
   const paidProSotActive = hasPaidProSourceOfTruth();
-  const roleLabelsIn = args.roleLabels ?? [];
+  let roleLabelsIn = [...(args.roleLabels ?? [])];
+  if (roleLabelsIn.length < 2 && args.rawIntake && collapsedStarterNames.length >= 2) {
+    const structured = parseIntakeToStructuredAgreement(args.rawIntake);
+    const fromHints = collapsedStarterNames.map(
+      (name) => structured.partyRoleHints[name.toLowerCase()] || "",
+    );
+    if (fromHints.filter((r) => r && r !== "party").length >= 2) {
+      roleLabelsIn = fromHints;
+    }
+  }
   const fullCandidatesEarly = [...rawIntakeNames, ...starterAuthoritative];
   const trustedPartyTokensEarly = [...fullCandidatesEarly, ...starterNames];
   if (collapsedStarterNames.length >= 2 && roleLabelsIn.length >= 2) {
@@ -817,6 +820,13 @@ export function repairCanonicalPartyIdentityInCorpus(
   const roleSwap = replaceTruncatedPartyRefsWithRoleLabels(out, records);
   out = roleSwap.text;
   repairs.push(...roleSwap.repairs);
+
+  const aliasSwap = replaceExtractionRoleAliasesInProse(
+    out,
+    records.map((r) => r.roleLabel),
+  );
+  out = aliasSwap.text;
+  repairs.push(...aliasSwap.repairs);
 
   const expanded = preserveFullLegalPartyNames(out, partyNames, intakeRaw);
   if (expanded !== out) {

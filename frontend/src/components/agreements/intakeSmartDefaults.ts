@@ -14,6 +14,16 @@ import {
   resolveUniversalSignerMetadataBySlot,
 } from "./universalSignerMetadataAuthority";
 
+function roleHintForPartyName(name: string, hints: Record<string, string>): string {
+  const key = name.toLowerCase().trim();
+  if (hints[key]) return hints[key];
+  for (const [hintKey, role] of Object.entries(hints)) {
+    const hk = hintKey.toLowerCase().trim();
+    if (key.includes(hk) || hk.includes(key)) return role;
+  }
+  return "party";
+}
+
 export type { AgreementFamily } from "./agreementFamilyRouter";
 
 /** Parsed draft shape from /api/agreements/parse (subset used for create). */
@@ -132,10 +142,13 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   const partySeed =
     authoritativeBetween.length >= 2 ? authoritativeBetween : betweenLegalEntities;
   if (partySeed.length >= 2) {
-    next.parties = partySeed.slice(0, 12).map((name, index) => ({
-      name: name.slice(0, MAX_PARTY_NAME_LEN),
-      role: next.parties?.[index]?.role || "party",
-    }));
+    next.parties = partySeed.slice(0, 12).map((name) => {
+      const roleHint = roleHintForPartyName(name, structured.partyRoleHints);
+      return {
+        name: name.slice(0, MAX_PARTY_NAME_LEN),
+        role: roleHint,
+      };
+    });
   } else if ((next.parties || []).length < 2) {
     const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
     if (explicitSigners && explicitSigners.length >= 2) {
@@ -145,7 +158,7 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
       // Apply per-name role hints (P2): "Jamie Chen as guarantor" → role "guarantor",
       // canonical name stays "Jamie Chen".
       next.parties = structured.parties.map((name) => {
-        const roleHint = structured.partyRoleHints[name.toLowerCase()] || "party";
+        const roleHint = roleHintForPartyName(name, structured.partyRoleHints);
         return {
           name: name.slice(0, MAX_PARTY_NAME_LEN),
           role: roleHint,

@@ -31,6 +31,7 @@ import {
   type PremiumRecipientHandoffV2,
 } from "../premiumPartyNamesHandoff";
 import type { ResolveGuidedPreReviewSignerSlotsArgs } from "./resolveGuidedPreReviewSignerSlots";
+import { resolveCanonicalPartyRoleLabel } from "../canonicalPartyRoleAuthority";
 import { resolveSignerSetupPartyIdentity } from "../signerSetupPartyIdentity";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
 import { isIndividualPartyName } from "./signerPartyIdentity";
@@ -174,12 +175,22 @@ function roleLabelForEntry(
   role: CanonicalFinalPartyRole,
   index: number,
   intakeText?: string | null,
+  explicitRoleLabel?: string | null,
 ): string {
   if (intakeText && isQuadripartiteLabeledPartiesIntake(intakeText)) {
     return labeledPartyRoleLabelForPartyIndex(index, intakeText);
   }
   if (intakeText && isTripartiteLabeledPartiesIntake(intakeText)) {
     return tripartiteRoleLabelForPartyIndex(index);
+  }
+  const explicit = (explicitRoleLabel || "").trim();
+  if (explicit) {
+    return resolveCanonicalPartyRoleLabel({
+      partyIndex: index,
+      partyCount: 2,
+      explicitRole: explicit,
+      preserveIntakeRole: Boolean(explicit && explicit.toLowerCase() !== "party"),
+    });
   }
   if (role === "client") return "Client";
   if (role === "service_provider") return "Service Provider";
@@ -271,7 +282,7 @@ function resolveCanonicalFinalPartyManifestUncached(
       email,
       signerName,
       signerTitle: title,
-      roleLabel: roleLabelForEntry(canonicalRole, i, args.intakeText),
+      roleLabel: roleLabelForEntry(canonicalRole, i, args.intakeText, role),
       signerKind: isIndividual ? "individual" : "entity_representative",
       isSenderSide: i === 0,
       isIndividual,
@@ -303,8 +314,17 @@ function manifestRoleFromBlockHeading(
   partyIndex: number,
 ): CanonicalFinalPartyRole {
   const h = blockHeading.trim().toUpperCase();
-  if (h === "CLIENT") return "client";
-  if (h === "SERVICE PROVIDER") return "service_provider";
+  if (h === "CLIENT" || h === "BUYER" || h === "CUSTOMER" || h === "PURCHASER") return "client";
+  if (
+    h === "SERVICE PROVIDER" ||
+    h === "VENDOR" ||
+    h === "SUPPLIER" ||
+    h === "CONTRACTOR" ||
+    h === "CONSULTANT" ||
+    h === "AGENCY"
+  ) {
+    return "service_provider";
+  }
   return roleForIndex(partyIndex);
 }
 
@@ -323,7 +343,7 @@ export function buildCanonicalFinalPartyManifestFromIdentities(
         email: p.email,
         signerName: p.representativeName,
         signerTitle: p.title,
-        roleLabel: roleLabelForEntry(role, p.index),
+        roleLabel: roleLabelForEntry(role, p.index, null, p.blockHeading),
         signerKind: isIndividual ? ("individual" as const) : ("entity_representative" as const),
         isSenderSide: role === "client",
         isIndividual,

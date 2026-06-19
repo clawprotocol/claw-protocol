@@ -58,7 +58,9 @@ import {
   formatStarterPreviewForDisplay,
 } from "./starterPreviewFormatting";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
+import { applyDocumentQualityFloor } from "./documentQualityFloor";
 import { extractTermDurationFromIntake, isInvalidVisibleScheduleValue, isSignerTitleLikeRole } from "./starterRoleLabelGuard";
+import { resolveCanonicalPartyRoleLabel } from "./canonicalPartyRoleAuthority";
 import {
   formatMilestonePaymentTermsFromIntake,
   formatInstallmentPaymentTermsFromIntake,
@@ -325,6 +327,24 @@ function looksLikePaymentOnlyScope(text: string): boolean {
 function extractServiceDescriptionFromIntake(intakeText: string | null | undefined): string {
   const intake = stripSignerInstructionClausesFromIntake(intakeText || "");
   if (!intake) return "";
+  const hiringProvide = intake.match(
+    /\b(?:is\s+)?hiring\s+[^.!?;]{0,140}?\s+to\s+provide\s+([^.!?;]{8,200})/i,
+  );
+  if (hiringProvide?.[1]) {
+    const candidate = hiringProvide[1]
+      .replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "")
+      .replace(/\s+services?\s*$/i, "")
+      .trim();
+    if (candidate.length >= 8) return candidate;
+  }
+  const toProvide = intake.match(/\bto\s+provide\s+([^.!?;]{8,200})/i);
+  if (toProvide?.[1]) {
+    const candidate = toProvide[1]
+      .replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "")
+      .replace(/\s+services?\s*$/i, "")
+      .trim();
+    if (candidate.length >= 8 && !looksLikePaymentOnlyScope(candidate)) return candidate;
+  }
   const betweenMatch = intake.match(/\bbetween\b[\s\S]{0,220}?\bfor\s+([^.!?;]+)(?:[.!?;]|$)/i);
   const candidate = (betweenMatch?.[1] || "").trim();
   if (!candidate || looksLikePaymentOnlyScope(candidate)) return "";
@@ -468,8 +488,26 @@ const STARTER_DISPLAY_ROLE_TOKENS = new Set([
   "vendor",
 ]);
 
-function partyEntryWithRoleConfidence(p: { name: string; role?: string }, starterPreview: boolean): PartyEntry {
+function partyEntryWithRoleConfidence(
+  p: { name: string; role?: string },
+  starterPreview: boolean,
+  draft?: ParsedDraftShape,
+): PartyEntry {
   const role = (p.role || "").trim().toLowerCase();
+  if (starterPreview && draft && (draft.parties || []).length === 2) {
+    const partyIndex = (draft.parties || []).findIndex(
+      (row) => String(row?.name || "").trim() === String(p.name || "").trim(),
+    );
+    const idx = partyIndex >= 0 ? partyIndex : 0;
+    const canonical = resolveCanonicalPartyRoleLabel({
+      partyIndex: idx,
+      partyCount: 2,
+      explicitRole: p.role,
+      agreementFamily: draft.agreement_family,
+      preserveIntakeRole: Boolean(role && !GENERIC_ROLE.has(role)),
+    });
+    return { name: p.name, role: canonical };
+  }
   if (starterPreview) {
     if (role && STARTER_DISPLAY_ROLE_TOKENS.has(role)) {
       return { name: p.name, role: p.role };
@@ -521,7 +559,7 @@ function partiesPreambleBlock(
       ...p,
       name: finalizePartyDisplayNameForUserFacing(p.name, intakeText),
     }))
-    .map((p) => partyEntryWithRoleConfidence(p, starterPreview));
+    .map((p) => partyEntryWithRoleConfidence(p, starterPreview, draft));
   if (validParties.length >= 2) {
     return formatLegalPartyPreamble(validParties);
   }
@@ -971,7 +1009,8 @@ function applyAgreementPreviewPlaceholderGate(
       authoritativeSource: placeholderCtx.authoritativeSource ?? null,
     });
     if (tier === "starter") {
-      return formatStarterPreviewForDisplay(display);
+      const formatted = formatStarterPreviewForDisplay(display);
+      return applyDocumentQualityFloor(formatted).text;
     }
     return display;
   }
@@ -989,7 +1028,8 @@ function applyAgreementPreviewPlaceholderGate(
       ? stripManualExecutionBlockPreservePreviewNotice(gate.text)
       : gate.text;
   if (tier === "starter") {
-    return formatStarterPreviewForDisplay(signatureStripped);
+    const formatted = formatStarterPreviewForDisplay(signatureStripped);
+    return applyDocumentQualityFloor(formatted).text;
   }
   return signatureStripped;
 }

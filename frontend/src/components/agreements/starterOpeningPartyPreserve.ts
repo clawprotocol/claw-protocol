@@ -9,7 +9,8 @@ import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
-import { isSignerTitleLikeRole, starterCommercialRoleForIndex } from "./starterRoleLabelGuard";
+import { isSignerTitleLikeRole } from "./starterRoleLabelGuard";
+import { resolveCanonicalPartyRoleLabel } from "./canonicalPartyRoleAuthority";
 
 const GENERIC_STARTER_PARTY_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
 
@@ -48,10 +49,26 @@ export function inferStarterCommercialPartyRoles(
     ...draft,
     parties: parties.map((party, index) => {
       const role = String(party?.role ?? "").trim().toLowerCase();
-      if (!GENERIC_STARTER_PARTY_ROLE.has(role) && !isSignerTitleLikeRole(role)) return party;
+      const preserveIntakeRole = Boolean(role && !GENERIC_STARTER_PARTY_ROLE.has(role) && !isSignerTitleLikeRole(role));
+      if (preserveIntakeRole) {
+        return {
+          ...party,
+          role: resolveCanonicalPartyRoleLabel({
+            partyIndex: index,
+            partyCount: parties.length,
+            explicitRole: party?.role,
+            agreementFamily: draft.agreement_family,
+            preserveIntakeRole: true,
+          }),
+        };
+      }
       return {
         ...party,
-        role: starterCommercialRoleForIndex(index, parties.length),
+        role: resolveCanonicalPartyRoleLabel({
+          partyIndex: index,
+          partyCount: parties.length,
+          agreementFamily: draft.agreement_family,
+        }),
       };
     }),
   };

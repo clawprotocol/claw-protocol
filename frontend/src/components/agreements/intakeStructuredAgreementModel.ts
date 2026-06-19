@@ -18,6 +18,7 @@ import {
   stripSignerInstructionClausesFromIntake,
 } from "./intakeSignerInstructionParse";
 import { preCleanBetweenTailForMultiPartySplit, stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
+import { mergeIntakeDeclaredRolesIntoPartyHints } from "./canonicalPartyRoleAuthority";
 
 export type IntakeStructuredAgreement = {
   parties: string[];
@@ -599,6 +600,30 @@ function extractScopeAndMeta(lower: string, text: string): FieldMeta {
       return { text: t, confidence: 0.92, signal: true, inferred: t.length < 28 && !/[.!?]/.test(t) };
   }
 
+  const hiringProvide = text.match(
+    /\b(?:is\s+)?hiring\s+[^.!\n]{0,140}?\s+to\s+provide\s+([^.!\n]{8,200})/i,
+  );
+  if (hiringProvide?.[1]) {
+    const t = normalizeIntakeFieldText(
+      hiringProvide[1].replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "").trim(),
+      220,
+    );
+    if (t.length >= 8) {
+      return { text: t, confidence: 0.9, signal: true, inferred: false };
+    }
+  }
+
+  const toProvide = text.match(/\bto\s+provide\s+([^.!\n]{8,200})/i);
+  if (toProvide?.[1]) {
+    const t = normalizeIntakeFieldText(
+      toProvide[1].replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "").trim(),
+      220,
+    );
+    if (t.length >= 8 && !/\b(?:pay|pays|paid|payment|fee|\$\s?\d)\b/i.test(t)) {
+      return { text: t, confidence: 0.88, signal: true, inferred: false };
+    }
+  }
+
   if (/\bmow\b/i.test(lower) || /\blawn\b/i.test(lower)) {
     return { text: "Weekly lawn care / property maintenance", confidence: 0.78, signal: true, inferred: false };
   }
@@ -1069,9 +1094,9 @@ function extractTermination(lower: string, text: string): string {
   if (noticePhrase || (noticeNumeric && /notice|terminat|either\s+party/i.test(lower))) {
     const parts: string[] = [];
     if (/either\s+party|by\s+either\s+party|both\s+parties\s+may/i.test(lower)) {
-      parts.push("Either party may terminate this agreement.");
+      parts.push("Either party may terminate this agreement");
     } else {
-      parts.push("The agreement may be terminated with notice as described in the intake.");
+      parts.push("The agreement may be terminated with notice as described in the intake");
     }
     const daysM =
       text.match(/\b(\d+)\s*days?\s*(?:'|’)?s?\s*(?:of\s+)?(?:prior\s+)?(?:written\s+)?notice\b/i) ||
@@ -1176,7 +1201,11 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
 
   return {
     parties: partyEx.parties,
-    partyRoleHints: partyEx.roleHints,
+    partyRoleHints: mergeIntakeDeclaredRolesIntoPartyHints(
+      partyEx.parties,
+      partyEx.roleHints,
+      rawTrim,
+    ),
     scope: scopeNorm,
     payment: normalizeIntakePaymentField(payment),
     term: termNorm,

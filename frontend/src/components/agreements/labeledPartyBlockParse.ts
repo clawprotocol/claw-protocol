@@ -12,6 +12,8 @@ import {
   looksLikeStackedPartyTitleLine,
 } from "./starterPartyIdentityIsolation";
 import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
+import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
 export type LabeledPartyBlock = {
   /** 1-based index from the prompt ("Party 1" → 1). */
@@ -215,6 +217,10 @@ export function resolveStarterGatePartyLegalEntities(raw: string): string[] {
   const merged = [...new Set([...labeled, ...roleLabeled])];
   if (merged.length >= 3) return merged;
   if (merged.length >= 2) return dedupeEntityCandidatesToLegalParties(merged);
+  const betweenAuthoritative = extractBetweenPartyNameList(raw).filter(isAuthoritativeLegalEntityName);
+  if (betweenAuthoritative.length === 2) {
+    return dedupeEntityCandidatesToLegalParties(betweenAuthoritative);
+  }
   const fromProse = dedupeEntityCandidatesToLegalParties(extractAgreementEntityCandidates(raw));
   const combined = dedupeEntityCandidatesToLegalParties([...merged, ...fromProse]);
   return combined.length >= 2 ? combined : dedupeEntityCandidatesToLegalParties(merged);

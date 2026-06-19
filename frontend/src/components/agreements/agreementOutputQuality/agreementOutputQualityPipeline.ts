@@ -12,6 +12,7 @@ import { buildMaterialMissingItems } from "../proAgreementCompleteness/revisionQ
 import { isCatastrophicStructuralFailure } from "../proAgreementCompleteness/proStructuralDetection";
 import { validateAgreementIntegrity } from "../guidedDealCompletion/agreementIntegrityValidator";
 import { applyVisibleBodyQualityGate } from "../visibleBodyQualityGate";
+import { applyDocumentQualityFloor } from "../documentQualityFloor";
 import { applySectionIsolatedPolishPipeline } from "./sectionIsolatedPolish";
 import type { AgreementOutputQualityContext, IntegrityResult, MaterialMissingItem } from "./types";
 
@@ -74,6 +75,9 @@ export function finalizeAgreementOutput(
     const visibleGate = applyVisibleBodyQualityGate(working, qualityCtx);
     working = visibleGate.text;
     structureRepairs.push(...visibleGate.repairs);
+    const qualityFloor = applyDocumentQualityFloor(working);
+    working = qualityFloor.text;
+    structureRepairs.push(...qualityFloor.repairs);
     const integrity = validateAndRepairFinalRenderIntegrity(working, ctx);
     return {
       ...integrity,
@@ -85,6 +89,9 @@ export function finalizeAgreementOutput(
   const integrityPass = validateAgreementIntegrity(working, { ...ctx, ...qualityCtx });
   working = integrityPass.text;
   structureRepairs.push(...integrityPass.repairs);
+  const qualityFloor = applyDocumentQualityFloor(working);
+  working = qualityFloor.text;
+  structureRepairs.push(...qualityFloor.repairs);
   const materialMissingItems = buildMaterialMissingItems({
     intakeRaw: ctx.intakeRaw,
     body: working,
