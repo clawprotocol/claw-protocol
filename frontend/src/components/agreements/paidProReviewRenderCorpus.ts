@@ -47,6 +47,7 @@ import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion
 import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSectionOrdering";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
+import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { applyPaidProUserVisibleDisplayPrep } from "./paidProDisplayPlainAuthority";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
@@ -519,6 +520,12 @@ export function guardPaidProReviewRenderCorpus(
   const orphanSectionNumbers = repairPaidProOrphanSectionNumbers(text);
   if (orphanSectionNumbers.repairs.length > 0) {
     text = orphanSectionNumbers.text;
+    repaired = true;
+  }
+
+  const structure = applySectionStructureIntegrity(text, { source: "paid_pro_review_render_guard" });
+  if (structure.repaired) {
+    text = structure.text;
     repaired = true;
   }
 

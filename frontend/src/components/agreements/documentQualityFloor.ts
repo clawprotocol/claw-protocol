@@ -5,6 +5,7 @@
 
 import { AGREEMENT_PREVIEW_ESIGN_NOTICE } from "./agreementPreviewConstants";
 import { repairGluedSectionHeadingsInText, splitGluedSectionHeadingFromLine } from "./documentSectionHeadingSplit";
+import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { repairInlineCollapsedStarterLayout } from "./starterPreviewFormatting";
 
 export type DocumentQualityFloorResult = {
@@ -154,6 +155,12 @@ export function applyDocumentQualityFloor(text: string): DocumentQualityFloorRes
   const dupRole = dedupeConsecutiveRoleWords(working);
   working = dupRole.text;
   repairs.push(...dupRole.repairs);
+
+  const structure = applySectionStructureIntegrity(working, { source: "document_quality_floor" });
+  working = structure.text;
+  if (structure.repaired) {
+    repairs.push(...structure.repairs.map((tag) => `section_structure:${tag}`));
+  }
 
   working = working.replace(/\n{3,}/g, "\n\n").trimEnd();
   return { text: working, repairs };

@@ -7,6 +7,7 @@
 import { stripPreWitnessExecutionPollutionFromPrefix } from "./paidProExecutionBlockNormalization";
 import { repairGluedSectionHeadingsInText } from "./documentSectionHeadingSplit";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
+import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
@@ -142,6 +143,11 @@ export function preparePaidProReviewDisplayPlain(text: string): {
   if (sectionRender.fixedHeadingBodyCollapse > 0) {
     out = sectionRender.text;
     repairs.push("normalize:pro_section_heading_body");
+  }
+  const structure = applySectionStructureIntegrity(out, { source: "preparePaidProReviewDisplayPlain" });
+  if (structure.repaired) {
+    out = structure.text;
+    repairs.push(...structure.repairs.map((tag) => `section_structure:${tag}`));
   }
   return { text: out, repairs: [...new Set(repairs)] };
 }
