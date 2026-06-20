@@ -12,6 +12,7 @@ import {
   detectSignerCandidateOverflow,
   rejectIneligibleStarterDraftAfterParse,
   shouldDismissStarterPreparingOverlayForProGate,
+  shouldResolveStarterHomeTransitionToReviewReady,
 } from "./starterMultiPartyProGate";
 import { TEST379_FOUR_PARTY_LOGISTICS_PLATFORM_INTAKE } from "./starterTest379FourPartyLogisticsRegression.test";
 
@@ -143,5 +144,14 @@ Red Mesa will provide updates. Harbor Peak will deliver milestones.`;
         displayPhase: "preparing_review",
       }),
     ).toBe(false);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "DRAFT",
+        createFlowPhase: "multi_party_pro_required",
+        isGenerating: false,
+        starterMultiPartyProGate: { required: true },
+      }),
+    ).toBe(true);
   });
 });

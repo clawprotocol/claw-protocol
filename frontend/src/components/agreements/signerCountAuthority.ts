@@ -6,7 +6,7 @@
  */
 
 import { findSignatureLineAnchorsFromCorpusText } from "../../vs01/vs01SignatureBlockAnchors";
-import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
+import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import {
   collapsePartySlotCandidates,
@@ -103,6 +103,8 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     args.draftPartyNames ??
     (args.draftParties ?? []).map((p) => String(p?.name ?? "").trim()).filter(Boolean);
   const labeledCount = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName).length;
+  const quotedCount = quotedRolePartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName).length;
+  const authoritativeIntakeCount = Math.max(labeledCount, quotedCount);
   const draftCount = countRealParties(args.draftParties ?? draftNames.map((name) => ({ name })));
   const collapsedDraft = collapsePartySlotCandidates(draftNames).filter(isAuthoritativeLegalEntityName).length;
   const partySlotCount = resolveAuthoritativePartySlotCount({
@@ -116,8 +118,8 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   let count = partySlotCount;
   let source: SignerCountAuthorityResolution["source"] = "party_slot_count";
 
-  if (labeledCount >= 2) {
-    count = labeledCount;
+  if (authoritativeIntakeCount >= 2) {
+    count = authoritativeIntakeCount;
     source = "labeled_parties";
   } else if (partySlotCount >= 2) {
     count = partySlotCount;
@@ -150,7 +152,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
   );
   const explicitMultiParty =
-    labeledCount >= 3 || amongList.length >= 3 || entityPool.length >= 3;
+    authoritativeIntakeCount >= 3 || amongList.length >= 3 || entityPool.length >= 3;
   if (
     betweenDeduped.length === 2 &&
     !explicitMultiParty &&
@@ -164,7 +166,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   return {
     count: Math.max(2, Math.min(count, 4)),
     source,
-    labeledCount,
+    labeledCount: authoritativeIntakeCount,
     draftCount: Math.max(draftCount, collapsedDraft),
     corpusBlockCount,
     partySlotCount,

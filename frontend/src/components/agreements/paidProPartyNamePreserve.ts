@@ -4,7 +4,7 @@
  */
 
 import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
-import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
+import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
@@ -227,7 +227,10 @@ export function resolveFullLegalPartiesFromIntake(
 ): string[] {
   const intake = String(intakeRaw || "").trim();
   const fromLabeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  const fromQuoted = quotedRolePartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  if (fromQuoted.length >= 3) return fromQuoted;
   if (fromLabeled.length >= 3) return fromLabeled;
+  if (fromQuoted.length === 2) return fromQuoted;
   if (fromLabeled.length === 2) return fromLabeled;
   const fromBetween = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
   const betweenDeduped = dedupeEntityCandidatesToLegalParties(fromBetween);
@@ -235,7 +238,7 @@ export function resolveFullLegalPartiesFromIntake(
     extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
   );
   const explicitMultiParty =
-    fromLabeled.length >= 3 || fromBetween.length >= 3 || entityPool.length >= 3;
+    fromLabeled.length >= 3 || fromQuoted.length >= 3 || fromBetween.length >= 3 || entityPool.length >= 3;
   if (betweenDeduped.length === 2 && !explicitMultiParty) return betweenDeduped;
   if (betweenDeduped.length > 2) return betweenDeduped;
   const fromIntakeEntities = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);

@@ -401,6 +401,30 @@ export const STARTER_PREPARING_OVERLAY_DISPLAY_PHASES = [
   "hydrating_generated",
 ] as const;
 
+/** Dismiss home/create transition once Pro gate is ready without a starter draft. */
+export function shouldResolveStarterHomeTransitionToReviewReady(input: {
+  draft: unknown;
+  createUiStage: string;
+  createFlowPhase: string;
+  isGenerating: boolean;
+  starterMultiPartyProGate?: unknown;
+}): boolean {
+  if (
+    input.createFlowPhase === "multi_party_pro_required" &&
+    Boolean(input.starterMultiPartyProGate)
+  ) {
+    return true;
+  }
+  if (input.createFlowPhase === "complexity_choice_required") {
+    return true;
+  }
+  return (
+    Boolean(input.draft) &&
+    input.createUiStage === "DRAFT" &&
+    (input.createFlowPhase === "draft_ready_for_review" || (!input.isGenerating && Boolean(input.draft)))
+  );
+}
+
 /** Safety: dismiss "Preparing your agreement" overlay once Pro gate is applied without a draft. */
 export function shouldDismissStarterPreparingOverlayForProGate(input: {
   createFlowPhase: string;

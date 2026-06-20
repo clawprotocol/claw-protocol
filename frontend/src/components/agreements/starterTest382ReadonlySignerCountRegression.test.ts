@@ -14,6 +14,8 @@ import {
   resolveReadonlyHtmlSignerCount,
 } from "./signerCountAuthority";
 
+import { resolveStarterGatePartyLegalEntities } from "./labeledPartyBlockParse";
+
 export const TEST382_ROLE_ALIAS_PRO_INTAKE = `
 Create a consulting agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC.
 
@@ -71,6 +73,13 @@ function inflatedPartyNames() {
 }
 
 describe("Test382 readonly HTML signer count", () => {
+  it("starter gate resolves only two legal entities from intake", () => {
+    const parties = resolveStarterGatePartyLegalEntities(TEST382_ROLE_ALIAS_PRO_INTAKE);
+    expect(parties).toHaveLength(2);
+    expect(parties).toContain(RED);
+    expect(parties).toContain(HARBOR);
+  });
+
   afterEach(() => {
     clearConsumedPaidProSignerMetadataAuthority();
     resetSignaturePreviewModeLogDedupeForTests();

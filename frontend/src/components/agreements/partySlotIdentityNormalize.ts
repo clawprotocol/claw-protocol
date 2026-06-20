@@ -3,7 +3,7 @@
  * (party_a, party_b) from becoming standalone signer slots or user-facing entity names.
  */
 
-import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
+import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
@@ -81,6 +81,10 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
     .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n));
   if (labeled.length >= 2) return labeled;
+  const quoted = quotedRolePartyLegalEntities(intake)
+    .map(normalizeAgreementPartyName)
+    .filter((n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n));
+  if (quoted.length >= 2) return quoted;
   return collapsePartySlotCandidates(extractBetweenPartyNameList(intake));
 }
 
@@ -132,6 +136,8 @@ export function resolveAuthoritativePartySlotCount(args: {
 
   const intake = String(args.intakeText ?? "").trim();
   const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  const quoted = quotedRolePartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  if (quoted.length >= 3) return quoted.length;
   if (labeled.length >= 3) return labeled.length;
 
   const betweenAuthoritative = dedupeEntityCandidatesToLegalParties(
@@ -142,9 +148,10 @@ export function resolveAuthoritativePartySlotCount(args: {
     extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
   );
   const explicitMultiParty =
-    labeled.length >= 3 || amongList.length >= 3 || entityPool.length >= 3;
+    labeled.length >= 3 || quoted.length >= 3 || amongList.length >= 3 || entityPool.length >= 3;
   if (betweenAuthoritative.length === 2 && !explicitMultiParty) return 2;
 
+  if (quoted.length >= 2) return quoted.length;
   if (labeled.length >= 2) return labeled.length;
 
   const intakeNames = resolveAuthoritativeIntakePartyNames(intake);
@@ -159,9 +166,12 @@ export function resolveAuthoritativePartySlotCount(args: {
   if (hasDrift && intakeNames.length === 2) return 2;
 
   const validCollapsed = collapsePartySlotCandidates(rowNames);
-  if (rowNames.length > 2 && validCollapsed.length === 2) return 2;
+  if (rowNames.length > 2 && validCollapsed.length === 2 && !explicitMultiParty) return 2;
 
-  return Math.max(args.rawPartyCount ?? rowNames.length, 2);
+  if (quoted.length >= 3) return quoted.length;
+  if (entityPool.length >= 3) return entityPool.length;
+
+  return Math.max(args.rawPartyCount ?? rowNames.length, quoted.length || labeled.length || 2);
 }
 
 function tokenContinuesEntitySuffix(token: string): boolean {
@@ -273,8 +283,11 @@ export function collapseDraftPartyRows(
   const rowNames = parties.map((p) => normalizeAgreementPartyName(p.name));
   const intake = String(intakeContext || "").trim();
   const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
-  if (labeled.length >= 3 && parties.length !== labeled.length) {
-    return labeled.map((name, index) => {
+  const quoted = quotedRolePartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  const authoritativeIntake =
+    quoted.length >= labeled.length ? quoted : labeled.length >= 3 ? labeled : quoted.length >= 3 ? quoted : labeled;
+  if (authoritativeIntake.length >= 3 && parties.length !== authoritativeIntake.length) {
+    return authoritativeIntake.map((name, index) => {
       const prev =
         parties.find((p) => partyLegalNamesMatch(p.name, name)) ??
         parties[index] ??

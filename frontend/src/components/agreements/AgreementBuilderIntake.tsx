@@ -108,6 +108,7 @@ import {
   logStarterComplexityGateApplied,
   rejectIneligibleStarterDraftAfterParse,
   shouldDismissStarterPreparingOverlayForProGate,
+  shouldResolveStarterHomeTransitionToReviewReady,
   type StarterComplexityGateAssessment,
 } from "./starterMultiPartyProGate";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
@@ -11627,11 +11628,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!homeHeroAutoGenerate || !onHomeGuidedTransitionPhase) return;
-    const reviewReady =
-      Boolean(draft) &&
-      createUiStage === CreateUiStage.DRAFT &&
-      (createFlowPhase === "draft_ready_for_review" || (!isGenerating && draft));
-    if (reviewReady) {
+    if (
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft,
+        createUiStage,
+        createFlowPhase,
+        isGenerating,
+        starterMultiPartyProGate,
+      })
+    ) {
       onHomeGuidedTransitionPhase("review_ready");
       return;
     }
@@ -11645,6 +11650,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createUiStage,
     createFlowPhase,
     isGenerating,
+    starterMultiPartyProGate,
   ]);
 
   /**

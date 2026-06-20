@@ -3,7 +3,7 @@
  * Heuristic only — server parse on submit remains authoritative when available.
  */
 
-import { parseLabeledPartyBlocks, roleLabelPartyLegalEntities } from "./labeledPartyBlockParse";
+import { parseLabeledPartyBlocks, parseQuotedRolePartyLines, roleLabelPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList, extractBetweenPartyPair } from "./partyBetweenParse";
 import {
   extractIntakePayment,
@@ -374,7 +374,25 @@ function sliceFirstPartyListSentenceFromBetweenTail(tail: string): string {
   return line.slice(0, m.index).trim();
 }
 
+function extractPartiesFromQuotedRoleBlocks(rawIntake: string): PartiesExtract | null {
+  const quoted = parseQuotedRolePartyLines(rawIntake);
+  if (quoted.length < 3) return null;
+  const roleHints: Record<string, string> = {};
+  for (const entry of quoted) {
+    roleHints[entry.legalEntity.toLowerCase()] = entry.roleLabel;
+  }
+  const parties = quoted.map((entry) => entry.legalEntity);
+  return {
+    parties,
+    roleHints,
+    uncertain: false,
+    structured: { party_1: parties[0]!, party_2: parties[1] ?? parties[0]! },
+  };
+}
+
 function extractPartiesFromLabeledBlocks(rawIntake: string): PartiesExtract | null {
+  const quoted = extractPartiesFromQuotedRoleBlocks(rawIntake);
+  if (quoted) return quoted;
   const blocks = parseLabeledPartyBlocks(rawIntake);
   const fromPartyN = blocks.map((b) => b.legalEntity).filter((n) => n.length >= 2);
   const parties = fromPartyN.length >= 2 ? fromPartyN : roleLabelPartyLegalEntities(rawIntake);

@@ -32,9 +32,14 @@ const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 
 const ROLE_LABEL_PARTY_HEADER_RE =
-  /^\s*(?:client|service\s+provider|provider|contractor|consultant)\s*:\s*$/i;
+  /^\s*(?:client|service\s+provider|provider|contractor|consultant|subcontractor|prime\s+contractor)\s*:\s*$/i;
 const ROLE_LABEL_INLINE_RE =
-  /^\s*(?:client|service\s+provider|provider|contractor|consultant)\s*:\s*(.+)$/i;
+  /^\s*(?:client|service\s+provider|provider|contractor|consultant|subcontractor|prime\s+contractor)\s*:\s*(.+)$/i;
+
+const QUOTED_ROLE_LINE_RE =
+  /^\s*([A-Z][^("\n]{2,120}?)\s*\(\s*["“”']([^"”'\n]{2,72})["”']\s*\)\s*\.?\s*$/;
+const INLINE_QUOTED_ROLE_RE =
+  /\b([A-Z][\w.&'’\-]+(?:\s+[A-Z][\w.&'’\-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\s*\(\s*["“”']([^"”'\n]{2,72})["”']\s*\)/g;
 
 const LABELED_FIELD_RES: ReadonlyArray<{ key: keyof Omit<LabeledPartyBlock, "index">; re: RegExp }> = [
   { key: "legalEntity", re: /^\s*legal\s+entity\s*[:\-]\s*(.+)$/i },
@@ -92,6 +97,50 @@ function applyStackedPartyLine(block: LabeledPartyBlock, line: string): void {
   if (!block.address) {
     block.address = cleanFieldValue(t);
   }
+}
+
+export type QuotedRolePartyLine = {
+  legalEntity: string;
+  roleLabel: string;
+};
+
+/** Parse stacked or inline `Entity LLC ("Role")` party declarations (Test384). */
+export function parseQuotedRolePartyLines(raw: string): QuotedRolePartyLine[] {
+  const text = String(raw || "").replace(/\r\n/g, "\n");
+  const out: QuotedRolePartyLine[] = [];
+  const seen = new Set<string>();
+
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(QUOTED_ROLE_LINE_RE);
+    if (!match?.[1] || !match[2]) continue;
+    const legalEntity = cleanFieldValue(match[1]);
+    const roleLabel = match[2].replace(/\s+/g, " ").trim();
+    if (legalEntity.length < 2 || !looksLikeStackedPartyLegalEntityLine(legalEntity)) continue;
+    const key = legalEntity.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ legalEntity, roleLabel });
+  }
+
+  INLINE_QUOTED_ROLE_RE.lastIndex = 0;
+  for (const match of text.matchAll(INLINE_QUOTED_ROLE_RE)) {
+    const legalEntity = cleanFieldValue(match[1] ?? "");
+    const roleLabel = (match[2] ?? "").replace(/\s+/g, " ").trim();
+    if (legalEntity.length < 2 || roleLabel.length < 2) continue;
+    const key = legalEntity.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ legalEntity, roleLabel });
+  }
+
+  return out;
+}
+
+/** Ordered full legal entity names from quoted role lines. */
+export function quotedRolePartyLegalEntities(raw: string): string[] {
+  return parseQuotedRolePartyLines(raw).map((entry) => entry.legalEntity);
 }
 
 /**
@@ -209,14 +258,16 @@ export function roleLabelPartyLegalEntities(raw: string): string[] {
   return entities;
 }
 
-/** Labeled Party N blocks, else role-label Client/Provider blocks, else entity names from prose. */
+/** Labeled Party N blocks, quoted-role lines, role-label Client/Provider blocks, else entity names from prose. */
 export function resolveStarterGatePartyLegalEntities(raw: string): string[] {
   const labeled = labeledPartyLegalEntities(raw);
   if (labeled.length >= 3) return labeled;
+  const quoted = quotedRolePartyLegalEntities(raw);
+  if (quoted.length >= 3) return dedupeEntityCandidatesToLegalParties(quoted);
   const roleLabeled = roleLabelPartyLegalEntities(raw);
-  const merged = [...new Set([...labeled, ...roleLabeled])];
+  const merged = dedupeEntityCandidatesToLegalParties([...labeled, ...quoted, ...roleLabeled]);
   if (merged.length >= 3) return merged;
-  if (merged.length >= 2) return dedupeEntityCandidatesToLegalParties(merged);
+  if (merged.length >= 2) return merged;
   const betweenAuthoritative = extractBetweenPartyNameList(raw).filter(isAuthoritativeLegalEntityName);
   if (betweenAuthoritative.length === 2) {
     return dedupeEntityCandidatesToLegalParties(betweenAuthoritative);
