@@ -69,6 +69,7 @@ describe("paidProSignatureRolePreservation", () => {
     expect(signatureTail).toMatch(/SERVICE\s+PROVIDER\s*:\s*\nIron Vale Systems Inc/i);
 
     expect(hydrated.corpus).not.toMatch(/Party Notice Details:/i);
-    expect(signatureTail).toMatch(/Email for Notice:/i);
+    expect(signatureTail).not.toMatch(/Email for Notice:/i);
+    expect(signatureTail).not.toMatch(/Address for Notice:/i);
   });
 });

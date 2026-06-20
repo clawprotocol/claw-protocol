@@ -45,7 +45,7 @@ const NEW_CITY = "Boise";
 const PARTY1_ADDRESS_OLD = `1027 S. Rainbow Blvd., #124, ${OLD_CITY}, ID 34213`;
 const PARTY1_ADDRESS_NEW = `1027 S. Rainbow Blvd., #124, ${NEW_CITY}, ID 34213`;
 
-function buildCorpus(party1Address: string) {
+function buildCorpus(_party1Address: string) {
   return [
     "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
     "",
@@ -59,15 +59,11 @@ function buildCorpus(party1Address: string) {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    "Email for Notice: bca342@me.com",
-    `Address for Notice: ${party1Address}`,
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    "Email for Notice: ivs345@gmail.com",
-    "Address for Notice: 8945 Hayride Rd., Metairie, LA 70003",
   ].join("\n");
 }
 

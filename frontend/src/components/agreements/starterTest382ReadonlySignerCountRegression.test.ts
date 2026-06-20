@@ -53,8 +53,6 @@ function test382ProCorpus() {
     "By: __________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    "Email for Notice: client@example.com",
-    "Address for Notice: 100 Main St",
     "Date: _____________________________",
     "",
     "SERVICE PROVIDER:",
@@ -62,8 +60,6 @@ function test382ProCorpus() {
     "By: __________________________",
     "Name: Michael Torres",
     "Title: President",
-    "Email for Notice: provider@example.com",
-    "Address for Notice: 200 Oak Ave",
     "Date: _____________________________",
   ].join("\n");
 }

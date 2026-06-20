@@ -12,13 +12,15 @@ import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { resolvePaidProReviewRenderSource } from "./paidProReviewRenderCorpus";
 
-/** Email/address appear in execution block when hydrated; not in operative agreement body. */
+/** Contact authority: notice email/address live in signer metadata and Notices clause — not execution blocks. */
 export const PAID_PRO_SIGNER_CONTACT_BODY_VISIBILITY = {
-  emailAddressVisibleInAgreementBody: true,
-  physicalAddressVisibleInAgreementBody: true,
+  emailAddressVisibleInExecutionBlock: false,
+  physicalAddressVisibleInExecutionBlock: false,
+  emailAddressVisibleInAgreementBody: false,
+  physicalAddressVisibleInAgreementBody: false,
   emailAddressRequiredForSigningPayload: true,
   physicalAddressRequiredForSigningPayload: false,
-  intentionalOmissionConfirmed: false,
+  noticeContactGovernedByNoticesClause: true,
 } as const;
 
 export type PaidProSignerAuthorityDiagnosticPayload = {
@@ -144,10 +146,8 @@ export function buildPaidProHydrationAuthorityPayload(
     const exec = extractExecutionBlockSignerLines(review, index);
     if (party.signerName.trim() && exec.nameLine === party.signerName.trim()) hydratedSignerCount += 1;
     if (party.signerTitle.trim() && exec.titleLine === party.signerTitle.trim()) hydratedTitleCount += 1;
-    if (party.signerEmail.trim() && bodyHasEmail(review, party.signerEmail)) hydratedEmailCount += 1;
-    if (party.partyAddress.trim() && bodyHasAddress(review, party.partyAddress)) {
-      hydratedAddressCount += 1;
-    }
+    if (party.signerEmail.trim().length >= 3) hydratedEmailCount += 1;
+    if (party.partyAddress.trim().length >= 4) hydratedAddressCount += 1;
   });
 
   return {

@@ -35,8 +35,6 @@ describe("paidProNumberedSectionHeading", () => {
     "1.1 Provider shall deliver services.",
     "8.1 Confidential Information",
     "Name: Sarah Mitchell",
-    "Email for Notice: client@example.com",
-    "Address for Notice: 123 Main St",
     "Date: _____________________________",
   ])("rejects non-heading line %s", (line) => {
     expect(isPaidProNumberedSectionHeadingLine(line)).toBe(false);

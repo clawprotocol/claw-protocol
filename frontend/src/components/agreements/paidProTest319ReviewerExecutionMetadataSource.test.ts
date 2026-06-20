@@ -29,7 +29,6 @@ import {
 import { resolveReviewFirstDisplayCorpus } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
 import {
   collectFinalizedCorpusHintsFromDraft,
-  countBlankAddressLinesInExecutionBlock,
   countBlankExecutionMetadataLines,
   executionBlockMissingAddressCarryover,
   resetPaidProTest315ReviewCopyHydrationLogsForTests,
@@ -59,16 +58,12 @@ function buildFullyHydratedBody() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    `Email for Notice: ${BLUE_EMAIL}`,
-    `Address for Notice: ${BLUE_ADDRESS}`,
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    `Email for Notice: ${IRON_EMAIL}`,
-    `Address for Notice: ${IRON_ADDRESS}`,
     "Date: _____________________________",
   ].join("\n");
 }
@@ -88,14 +83,12 @@ function buildReviewerRoutePartialBody() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    `Email for Notice: ${BLUE_EMAIL}`,
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    `Email for Notice: ${IRON_EMAIL}`,
     "Date: _____________________________",
   ].join("\n");
 }
@@ -115,16 +108,12 @@ function buildReviewerRouteBlankAddressBody() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    `Email for Notice: ${BLUE_EMAIL}`,
-    "Address for Notice: ________________",
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    `Email for Notice: ${IRON_EMAIL}`,
-    "Address for Notice: ________________",
     "Date: _____________________________",
   ].join("\n");
 }
@@ -143,16 +132,12 @@ function buildReviewerRouteBlankMetadataBody() {
     "By: _________________________________",
     "Name: _____________________________",
     "Title: ____________________________",
-    "Email for Notice: __________________",
-    "Address for Notice: ________________",
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: _____________________________",
     "Title: ____________________________",
-    "Email for Notice: __________________",
-    "Address for Notice: ________________",
     "Date: _____________________________",
   ].join("\n");
 }
@@ -230,11 +215,10 @@ function expectFullyHydratedExecutionBlock(text: string) {
   expect(text).toMatch(/\bCEO\b/);
   expect(text).toMatch(/Michael Torres/i);
   expect(text).toMatch(/President/i);
-  expect(text).toMatch(new RegExp(BLUE_EMAIL.replace(".", "\\.")));
-  expect(text).toMatch(new RegExp(IRON_EMAIL.replace(".", "\\.")));
-  expect(text).toContain(BLUE_ADDRESS);
-  expect(text).toContain(IRON_ADDRESS);
-  expect(countBlankAddressLinesInExecutionBlock(text)).toBe(0);
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : text;
+  expect(tail).not.toMatch(/Email for Notice:/i);
+  expect(tail).not.toMatch(/Address for Notice:/i);
   expect(countBlankExecutionMetadataLines(text)).toBe(0);
   expect(countBlankSignerMetadataLinesInExecutionBlock(text)).toBe(0);
   expect(countPaidProExecutionBlocks(text)).toBe(1);
@@ -258,20 +242,48 @@ describe("Test319 reviewer execution metadata source", () => {
   it("collects finalized corpus hints from draft server fields for reviewer routes", () => {
     const draft = reviewerDraftWithFinalizedOnServer(buildReviewerRoutePartialBody());
     const hints = collectFinalizedCorpusHintsFromDraft(draft);
-    expect(hints.some((h) => h.includes(BLUE_ADDRESS))).toBe(true);
-    expect(hints.some((h) => h.includes(IRON_ADDRESS))).toBe(true);
     expect(hints.some((h) => h.includes("Sarah Mitchell"))).toBe(true);
+    expect(hints.some((h) => h.includes("Michael Torres"))).toBe(true);
   });
 
-  it("detects address carryover failure when names present but address lines omitted", () => {
+  it("detects address carryover is not required when contact authority keeps notice data out of execution blocks", () => {
     const partial = buildReviewerRoutePartialBody();
     const meta = resolveReviewReadyRecipientMetadata(reviewerDraftWithFinalizedOnServer(partial), {
       corpusHints: [buildFullyHydratedBody()],
     });
-    expect(executionBlockMissingAddressCarryover(partial, meta)).toBe(true);
+    expect(executionBlockMissingAddressCarryover(partial, meta)).toBe(false);
+    expect(meta?.partySignerNames?.[0]).toBe("Sarah Mitchell");
+    expect(meta?.partyAddresses?.[0] ?? "").toBe("");
   });
 
-  it("Party 1 reviewer restores both addresses from draft finalized corpus without local pinned session", () => {
+  it("merges party addresses from snapshot metadata when handoff omits partyAddress", () => {
+    armHandoffWithoutAddresses();
+    const authority = qaAuthority();
+    const identities = authorityPartiesToCanonicalPartyIdentities(authority.parties);
+    createAuthoritativeSigningSnapshot({
+      corpus: buildFullyHydratedBody(),
+      signerMetadata: {
+        partySignerNames: ["Sarah Mitchell", "Michael Torres"],
+        partySignerTitles: ["CEO", "President"],
+        partyAddresses: [BLUE_ADDRESS, IRON_ADDRESS],
+        recipient1Name: BLUE,
+        recipient2Name: IRON,
+        recipient1Email: BLUE_EMAIL,
+        recipient2Email: IRON_EMAIL,
+        extraPartyReviewEmails: [],
+      },
+      partyManifest: buildCanonicalFinalPartyManifestFromAuthority(authority),
+      signatureBlockModel: buildCanonicalSignerManifest({ identities, signFirst: true }),
+    });
+    const draft = reviewerDraftWithFinalizedOnServer(buildReviewerRoutePartialBody());
+    const meta = resolveReviewReadyRecipientMetadata(draft, {
+      corpusHints: collectFinalizedCorpusHintsFromDraft(draft),
+    });
+    expect(meta?.partyAddresses?.[0]).toContain("Firestane");
+    expect(meta?.partyAddresses?.[1]).toContain("Tree Trunk");
+  });
+
+  it("Party 1 reviewer restores signing capacity from draft finalized corpus without local pinned session", () => {
     armHandoffWithoutAddresses();
     const draft = reviewerDraftWithFinalizedOnServer(buildReviewerRoutePartialBody());
     const display = resolveReviewFirstDisplayCorpus(draft, "reviewer");
@@ -288,14 +300,14 @@ describe("Test319 reviewer execution metadata source", () => {
     expectFullyHydratedExecutionBlock(party2?.text ?? "");
   });
 
-  it("Review Link Ready restores addresses when handoff lacks partyAddress", () => {
+  it("Review Link Ready restores signing capacity when handoff lacks partyAddress", () => {
     armHandoffWithoutAddresses();
     const draft = reviewerDraftWithFinalizedOnServer(buildReviewerRoutePartialBody());
     const display = resolveReviewFirstDisplayCorpus(draft, "owner_done");
     expectFullyHydratedExecutionBlock(display?.text ?? "");
   });
 
-  it("copy/export retains hydrated addresses after reviewer backfill", () => {
+  it("copy/export retains hydrated signing capacity after reviewer backfill", () => {
     armHandoffWithoutAddresses();
     const draft = reviewerDraftWithFinalizedOnServer(buildReviewerRoutePartialBody());
     const reviewer = resolveReviewFirstDisplayCorpus(draft, "reviewer")?.text ?? "";
@@ -316,17 +328,7 @@ describe("Test319 reviewer execution metadata source", () => {
     expectFullyHydratedExecutionBlock(display?.text ?? "");
   });
 
-  it("merges addresses from draft finalized corpus when handoff is partial only", () => {
-    armHandoffWithoutAddresses();
-    const draft = reviewerDraftWithFinalizedOnServer(buildReviewerRoutePartialBody());
-    const meta = resolveReviewReadyRecipientMetadata(draft, {
-      corpusHints: collectFinalizedCorpusHintsFromDraft(draft),
-    });
-    expect(meta?.partyAddresses?.[0]).toContain("Firestane");
-    expect(meta?.partyAddresses?.[1]).toContain("Tree Trunk");
-  });
-
-  it("still restores addresses when local pinned corpus exists alongside partial selected corpus", () => {
+  it("still restores signing capacity when local pinned corpus exists alongside partial selected corpus", () => {
     const authority = qaAuthority();
     const fullHydrated = buildFullyHydratedBody();
     const partial = buildReviewerRoutePartialBody();

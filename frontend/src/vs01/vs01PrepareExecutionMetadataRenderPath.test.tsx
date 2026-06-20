@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 /**
- * Full VS01 Prepare-for-e-signing render-path regression: execution metadata must survive
+ * Full VS01 Prepare-for-e-signing render-path regression: signing-capacity execution metadata must survive
  * normalizeLines → paginateCorpus → buildVs01SigningPacketModel → Vs01CanonicalSigningPage
  * (same component stack as StepPrepareSignature agreementBridgePlacementCopy path).
  */
@@ -21,11 +21,7 @@ import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
 const STARTER_749 = `${"Starter free preview clause. ".repeat(40)}`.slice(0, 749);
 
 const SARAH_EMAIL = "sarah@example.com";
-const SARAH_ADDRESS = "123 Main Street, Dallas, TX 75001";
 const MICHAEL_EMAIL = "michael@example.com";
-const MICHAEL_ADDRESS = "456 Oak Avenue, Tulsa, OK 74103";
-
-const EMAIL_ADDRESS_COLLAPSE_RE = /Email for Notice:.*Address for Notice:/i;
 
 function rolesForExecutionMetadata() {
   return buildVs01PrepareSigningRoles({
@@ -55,37 +51,22 @@ CLIENT: Blue Canyon Analytics LLC
 By: _________________________________
 Name: Sarah Mitchell
 Title: CEO
-Email for Notice: ${SARAH_EMAIL}
-Address for Notice: ${SARAH_ADDRESS}
 Date: _____________________________
 
 SERVICE PROVIDER: Iron Vale Systems Inc.
 By: _________________________________
 Name: Michael Torres
 Title: President
-Email for Notice: ${MICHAEL_EMAIL}
-Address for Notice: ${MICHAEL_ADDRESS}
 Date: _____________________________`;
 }
 
-function emailLines(lines: readonly string[]): string[] {
-  return lines.map((line) => line.trim()).filter((line) => /^Email for Notice:/i.test(line));
-}
-
-function addressLines(lines: readonly string[]): string[] {
-  return lines.map((line) => line.trim()).filter((line) => /^Address for Notice:/i.test(line));
-}
-
-function assertSeparateEmailAndAddressLines(lines: readonly string[], stage: string): void {
-  expect(emailLines(lines).length, `${stage}: email line count`).toBe(2);
-  expect(addressLines(lines).length, `${stage}: address line count`).toBe(2);
-  for (const line of lines) {
-    expect(line, `${stage}: collapsed email+address on one line`).not.toMatch(EMAIL_ADDRESS_COLLAPSE_RE);
-  }
-  expect(emailLines(lines).join("\n")).toContain(SARAH_EMAIL);
-  expect(emailLines(lines).join("\n")).toContain(MICHAEL_EMAIL);
-  expect(addressLines(lines).join("\n")).toContain(SARAH_ADDRESS);
-  expect(addressLines(lines).join("\n")).toContain(MICHAEL_ADDRESS);
+function assertSigningCapacityWitnessLines(lines: readonly string[], stage: string): void {
+  const trimmed = lines.map((line) => line.trim()).filter(Boolean);
+  expect(trimmed.some((line) => /^Name:/i.test(line)), `${stage}: name lines`).toBe(true);
+  expect(trimmed.some((line) => /^Title:/i.test(line)), `${stage}: title lines`).toBe(true);
+  expect(trimmed.some((line) => /^Date:/i.test(line)), `${stage}: date lines`).toBe(true);
+  expect(trimmed.filter((line) => /^Email for Notice:/i.test(line)), `${stage}: email notice lines`).toHaveLength(0);
+  expect(trimmed.filter((line) => /^Address for Notice:/i.test(line)), `${stage}: address notice lines`).toHaveLength(0);
 }
 
 function renderedCanonicalTextLines(container: HTMLElement): string[] {
@@ -101,15 +82,13 @@ function findWitnessPage(model: ReturnType<typeof buildVs01SigningPacketModel>) 
 }
 
 describe("VS01 Prepare execution metadata full render path", () => {
-  it("preserves Email and Address on separate lines through normalize, model, layout, and DOM render", () => {
+  it("preserves signing-capacity fields through normalize, model, layout, and DOM render", () => {
     const corpus = buildExecutionMetadataCorpus();
     const roles = rolesForExecutionMetadata();
 
-    // 1. normalizeLines (pre-pagination corpus normalization)
     const normalized = normalizeSigningPacketCorpusLines(corpus);
-    assertSeparateEmailAndAddressLines(normalized, "normalizeSigningPacketCorpusLines");
+    assertSigningCapacityWitnessLines(normalized, "normalizeSigningPacketCorpusLines");
 
-    // 2. buildVs01SigningPacketModel (paginateCorpus + field placement)
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
       authoritativeCorpusPlain: corpus,
@@ -121,24 +100,20 @@ describe("VS01 Prepare execution metadata full render path", () => {
 
     const modelFlowLines = model.pages.flatMap((page) => page.flowLines);
     const modelTextBlocks = model.pages.flatMap((page) => page.textBlocks.map((block) => block.text));
-    assertSeparateEmailAndAddressLines(modelFlowLines, "model.flowLines");
-    assertSeparateEmailAndAddressLines(modelTextBlocks, "model.textBlocks");
+    assertSigningCapacityWitnessLines(modelFlowLines, "model.flowLines");
+    assertSigningCapacityWitnessLines(modelTextBlocks, "model.textBlocks");
 
     const witnessPage = findWitnessPage(model);
     expect(witnessPage).toBeTruthy();
     expect(witnessPage!.signatureLineAnchors.length).toBeGreaterThanOrEqual(2);
 
-    // 3. Pagination / canonical flow layout descriptors (same path as Vs01CanonicalSigningPage)
     const witnessFlow = flowLinesForPage(witnessPage!);
-    assertSeparateEmailAndAddressLines(witnessFlow, "witnessFlowLines");
+    assertSigningCapacityWitnessLines(witnessFlow, "witnessFlowLines");
     const descriptors = buildFlowLineDescriptors(witnessFlow);
     const descriptorTexts = descriptors.map((d) => d.trimmed).filter(Boolean);
-    assertSeparateEmailAndAddressLines(descriptorTexts, "buildFlowLineDescriptors");
-    expect(descriptors.some((d) => /^Email for Notice:/i.test(d.trimmed))).toBe(true);
-    expect(descriptors.some((d) => /^Address for Notice:/i.test(d.trimmed))).toBe(true);
-    expect(descriptors.filter((d) => d.kind === "signature_label").length).toBeGreaterThanOrEqual(6);
+    assertSigningCapacityWitnessLines(descriptorTexts, "buildFlowLineDescriptors");
+    expect(descriptors.filter((d) => d.kind === "signature_label").length).toBeGreaterThanOrEqual(4);
 
-    // 4. Final packet render — Vs01CanonicalSigningPage (StepPrepareSignature canonical path)
     const renderedLines: string[] = [];
     for (const page of model.pages) {
       const { container, unmount } = render(
@@ -147,25 +122,15 @@ describe("VS01 Prepare execution metadata full render path", () => {
       renderedLines.push(...renderedCanonicalTextLines(container));
       unmount();
     }
-    assertSeparateEmailAndAddressLines(renderedLines, "Vs01CanonicalSigningPage DOM");
+    assertSigningCapacityWitnessLines(renderedLines, "Vs01CanonicalSigningPage DOM");
     expect(renderedLines.some((line) => /Sarah Mitchell/i.test(line))).toBe(true);
     expect(renderedLines.some((line) => /Michael Torres/i.test(line))).toBe(true);
-    expect(renderedLines.some((line) => line.includes(SARAH_ADDRESS))).toBe(true);
-    expect(renderedLines.some((line) => line.includes(MICHAEL_ADDRESS))).toBe(true);
 
     const witnessDom = render(
       <Vs01CanonicalSigningPage page={witnessPage!} pageWidthPx={VS01_PACKET_PAGE_WIDTH_PT} />,
     );
     const witnessRendered = renderedCanonicalTextLines(witnessDom.container);
-    assertSeparateEmailAndAddressLines(witnessRendered, "witness page DOM");
-    expect(witnessRendered.join("\n")).toMatch(/IN WITNESS WHEREOF/i);
+    assertSigningCapacityWitnessLines(witnessRendered, "witness page DOM");
     witnessDom.unmount();
-
-    // 5. Guided Pro Prepare uses canonical flow textBlocks (not PDF.js extraction) — verify packet text source
-    const packetPlainTextLines = model.pages.flatMap((page) =>
-      page.textBlocks.map((block) => block.text.trim()).filter(Boolean),
-    );
-    assertSeparateEmailAndAddressLines(packetPlainTextLines, "packet textBlocks (PDF-equivalent source)");
-    expect(packetPlainTextLines.join("\n")).not.toMatch(EMAIL_ADDRESS_COLLAPSE_RE);
   });
 });

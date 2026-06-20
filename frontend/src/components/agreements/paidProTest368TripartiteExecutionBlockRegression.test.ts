@@ -221,17 +221,15 @@ describe("paidPro test368 tripartite execution block regression", () => {
     expect(client).toMatch(/^Red Mesa Logistics LLC/m);
     expect(fieldInBlock(client, "Name")).toBe("Sarah Mitchell");
     expect(fieldInBlock(client, "Title")).toBe("Chief Executive Officer");
-    expect(fieldInBlock(client, "Email for Notice")).toBe("sarah@redmesalogistics.com");
+    expect(client).not.toMatch(/Email for Notice:/i);
     expect(client).not.toMatch(/845 Tyrone St/i);
 
     expect(serviceProvider).toMatch(/^Harbor Peak Automation LLC/m);
     expect(serviceProvider).not.toMatch(/Robert Henderson/i);
     expect(fieldInBlock(serviceProvider, "Name")).not.toMatch(/Robert Henderson/i);
     expect(fieldInBlock(serviceProvider, "Title")).not.toMatch(/Managing Member/i);
-    expect(fieldInBlock(serviceProvider, "Email for Notice")).toBe("contact@harborpeakautomation.com");
-    expect(fieldInBlock(serviceProvider, "Address for Notice")).toBe(
-      "845 Tyrone St., Bentonville, AR 75029",
-    );
+    expect(serviceProvider).not.toMatch(/Email for Notice:/i);
+    expect(serviceProvider).not.toMatch(/Address for Notice:/i);
 
     expect(analytics).toMatch(/^Blue Canyon Analytics LLC/m);
     expect(fieldInBlock(analytics, "Name")).toBe("Robert Henderson");
@@ -262,10 +260,8 @@ describe("paidPro test368 tripartite execution block regression", () => {
     expect(serviceProvider).not.toMatch(/Robert Henderson/i);
     expect(fieldInBlock(analytics, "Name")).toBe("Robert Henderson");
     expect(fieldInBlock(analytics, "Title")).toBe("Managing Member");
-    expect(fieldInBlock(serviceProvider, "Email for Notice")).toBe("contact@harborpeakautomation.com");
-    expect(fieldInBlock(serviceProvider, "Address for Notice")).toBe(
-      "845 Tyrone St., Bentonville, AR 75029",
-    );
+    expect(serviceProvider).not.toMatch(/Email for Notice:/i);
+    expect(serviceProvider).not.toMatch(/Address for Notice:/i);
   });
 
   it("does not collapse tripartite execution to only CLIENT and SERVICE PROVIDER", () => {

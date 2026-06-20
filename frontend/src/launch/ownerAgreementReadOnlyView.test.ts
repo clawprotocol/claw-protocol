@@ -31,12 +31,10 @@ function ownerReadOnlyFixturePlain(): string {
     `CLIENT: ${BLUE}`,
     "Name: Sarah Mitchell",
     "Title: CEO",
-    "Email for Notice: legal@bluecanyon.example",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "Name: Michael Torres",
     "Title: President",
-    "Email for Notice: legal@ironvale.example",
   ].join("\n");
 }
 

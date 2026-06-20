@@ -35,16 +35,12 @@ const FUSED_CORPUS = [
   "By: __________________________",
   "Name: Anthem H Blanchard",
   "Title: Member",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: _____________________________",
   "",
   "Iron Vale Systems Inc.",
   "By: __________________________",
   "Name: Blake Caen",
   "Title: Manager",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: _____________________________",
   "",
   "Party Notice Details:",
@@ -73,8 +69,8 @@ describe("canonicalPartyLegalNameSanitizer", () => {
     expect(text).toContain(BLUE);
     expect(text).toContain(IRON);
     const sigTail = text.split(/\bIN WITNESS WHEREOF\b/i)[1] ?? "";
-    expect(sigTail).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-    expect(sigTail).toMatch(/Email for Notice:\s*bca234@me\.com/i);
+    expect(sigTail).not.toMatch(/Email for Notice:/i);
+    expect(sigTail).not.toMatch(/Email for Notice:/i);
     assertCorpusHasNoFusedPartyLegalNames(text, authority().parties);
   });
 

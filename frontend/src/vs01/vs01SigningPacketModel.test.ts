@@ -33,16 +33,12 @@ Acme LLC
 By: ______________________
 Name: Anthem H Blanchard
 Title: Manager
-Email for Notice: anthem@example.test
-Address for Notice: 1027 S. Rainbow Blvd., #124, Las Vegas, NV 89111
 Date: ____________________
 
 SERVICE PROVIDER:
 Joe Smith
 Signature: _______________
 Name: Joe Smith
-Email for Notice: joe@example.test
-Address for Notice: 1 High Street, Benning, GA 31222
 Date: ____________________`;
 }
 
@@ -149,7 +145,7 @@ describe("VS01 canonical signing packet model (test61)", () => {
     expect(errors).toContain("text_intersects_initials_band");
   });
 
-  it("keeps Email for Notice and Address for Notice on separate witness flow lines", () => {
+  it("keeps signing-capacity witness flow lines without notice-contact contamination", () => {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
       authoritativeCorpusPlain: premiumCorpus(),
@@ -162,12 +158,10 @@ describe("VS01 canonical signing packet model (test61)", () => {
     );
     expect(witnessPage).toBeTruthy();
     const flow = witnessPage!.flowLines.map((line) => line.trim()).filter(Boolean);
-    const emailLines = flow.filter((line) => /^Email for Notice:/i.test(line));
-    const addressLines = flow.filter((line) => /^Address for Notice:/i.test(line));
-    expect(emailLines.length).toBe(2);
-    expect(addressLines.length).toBe(2);
-    for (const line of emailLines) {
-      expect(line).not.toMatch(/Address for Notice:/i);
-    }
+    expect(flow.some((line) => /^Name:/i.test(line))).toBe(true);
+    expect(flow.some((line) => /^Title:/i.test(line))).toBe(true);
+    expect(flow.some((line) => /^Date:/i.test(line))).toBe(true);
+    expect(flow.filter((line) => /^Email for Notice:/i.test(line))).toHaveLength(0);
+    expect(flow.filter((line) => /^Address for Notice:/i.test(line))).toHaveLength(0);
   });
 });

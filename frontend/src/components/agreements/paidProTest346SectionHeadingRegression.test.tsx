@@ -35,16 +35,12 @@ function buildSectionsSixThroughNineCorpus(): string {
     "By: __________________________",
     "Name: __________________________",
     "Title: __________________________",
-    "Email for Notice: __________________________",
-    "Address for Notice: ________________________",
     "Date: _____________________________",
     "SERVICE PROVIDER:",
     "Harbor Peak Automation LLC",
     "By: __________________________",
     "Name: __________________________",
     "Title: __________________________",
-    "Email for Notice: __________________________",
-    "Address for Notice: ________________________",
     "Date: _____________________________",
   ].join("\n\n");
 }

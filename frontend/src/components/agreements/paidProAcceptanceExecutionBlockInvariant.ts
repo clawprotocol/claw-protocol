@@ -16,6 +16,7 @@ import {
 } from "./paidProExecutionBlockAuthority";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { stripInlineStaleServerSignatureTailBeforeWitness } from "./paidProFlattenedDocumentNormalize";
+import { buildSigningCapacityExecutionBlockSection } from "./contactAuthorityExecutionBlockIntegrity";
 
 export const PAID_PRO_ACCEPTANCE_WITNESS_LINE =
   "IN WITNESS WHEREOF, the Parties execute this Agreement.";
@@ -67,17 +68,12 @@ function sortManifestRecordsForExecution(
 }
 
 function buildPartyExecutionSection(rec: CanonicalPartyIdentityRecord): string {
-  const heading = roleToExecutionHeading(rec.roleLabel);
-  return [
-    `${heading}:`,
-    rec.fullLegalName,
-    "By: __________________________",
-    "Name: __________________________",
-    "Title: __________________________",
-    "Email for Notice: __________________________",
-    "Address for Notice: ________________________",
-    "Date: _____________________________",
-  ].join("\n");
+  return buildSigningCapacityExecutionBlockSection({
+    heading: roleToExecutionHeading(rec.roleLabel),
+    legalEntityName: rec.fullLegalName,
+    signerName: rec.signerName,
+    signerTitle: rec.signerTitle,
+  });
 }
 
 /** Canonical LawDog execution tail from manifest party records (pre-freeze acceptance only). */

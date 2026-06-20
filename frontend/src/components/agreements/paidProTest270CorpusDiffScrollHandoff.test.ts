@@ -54,16 +54,12 @@ const FREEZE_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "",
   "SERVICE PROVIDER:",
   IRON,
   "By: _________________________________",
   "Name:",
   "Title:",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
 ].join("\n");
 
 function qaAuthority() {

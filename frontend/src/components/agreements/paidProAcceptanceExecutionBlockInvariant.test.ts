@@ -117,7 +117,8 @@ describe("paidProAcceptanceExecutionBlockInvariant", () => {
     expect(text).toContain(PAID_PRO_HARDENING_CLIENT);
     expect(text).toContain("SERVICE PROVIDER:");
     expect(text).toContain(PAID_PRO_HARDENING_PROVIDER);
-    expect(text).toContain("Email for Notice:");
+    expect(text).toContain("Date:");
+    expect(text).not.toContain("Email for Notice:");
     expect(countWitnessExecutionSections(text)).toBe(1);
     expect(countPaidProExecutionBlocks(text)).toBe(1);
     expect(analyzePaidProExecutionBlockInvariant(text).ok).toBe(true);

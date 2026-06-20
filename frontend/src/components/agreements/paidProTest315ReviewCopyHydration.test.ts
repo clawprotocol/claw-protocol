@@ -25,7 +25,7 @@ import {
   writePremiumRecipientHandoffLinear,
 } from "./premiumPartyNamesHandoff";
 import { resolveReviewFirstDisplayCorpus } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
-import { resetPaidProTest315ReviewCopyHydrationLogsForTests } from "../../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
+import { resetPaidProTest315ReviewCopyHydrationLogsForTests, resolveReviewReadyRecipientMetadata } from "../../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
 import {
   clearReviewFirstHandoffSource,
   peekReviewFirstPinnedCorpus,
@@ -53,16 +53,12 @@ function buildUnhydratedBody() {
     "By: _________________________________",
     "Name: ________________________________",
     "Title: ________________________________",
-    "Email for Notice: __________________________",
-    "Address for Notice: ________________________",
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: ________________________________",
     "Title: ________________________________",
-    "Email for Notice: __________________________",
-    "Address for Notice: ________________________",
     "Date: _____________________________",
   ].join("\n");
 }
@@ -150,10 +146,10 @@ function expectHydratedExecutionBlock(text: string) {
   expect(text).toMatch(/\bCEO\b/);
   expect(text).toMatch(/Michael Torres/i);
   expect(text).toMatch(/President/i);
-  expect(text).toMatch(/bca34@me\.com/i);
-  expect(text).toMatch(/ivs34@me\.com/i);
-  expect(text).toMatch(/234 Rete St\./i);
-  expect(text).toMatch(/309 Hue Avenue/i);
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : text;
+  expect(tail).not.toMatch(/Email for Notice:/i);
+  expect(tail).not.toMatch(/Address for Notice:/i);
   expect(countBlankSignerMetadataLinesInExecutionBlock(text)).toBe(0);
   expect(countPaidProExecutionBlocks(text)).toBe(1);
 }
@@ -180,6 +176,11 @@ describe("Test315 review-ready signer metadata hydration", () => {
     const display = resolveReviewFirstDisplayCorpus(draft, "owner_done");
     expect(display?.source).toBe("authoritative_signing_snapshot");
     expectHydratedExecutionBlock(display?.text ?? "");
+    const meta = resolveReviewReadyRecipientMetadata(draft);
+    expect(meta?.recipient1Email).toBe("bca34@me.com");
+    expect(meta?.recipient2Email).toBe("ivs34@me.com");
+    expect(meta?.partyAddresses?.[0]).toContain("234 Rete St.");
+    expect(meta?.partyAddresses?.[1]).toContain("309 Hue Avenue");
     expect(display?.text).not.toContain("CANONICAL_SOT_WITHOUT_HYDRATION");
   });
 

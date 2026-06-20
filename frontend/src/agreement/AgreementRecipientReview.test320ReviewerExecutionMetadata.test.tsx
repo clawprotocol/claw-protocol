@@ -1,8 +1,9 @@
 /** @vitest-environment jsdom */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { AgreementRecipientReview } from "./AgreementRecipientReview";
-import { AccessProvider } from "../access/AccessContext";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { AgreementDraft } from "./agreementTypes";
+import { buildReviewFirstDocumentDisplayHtml } from "./reviewFirstDocumentDisplay";
+import { formatAgreementPlainTextForEditing } from "./formatAgreementPlainTextForEditing";
+import { resolveReviewFirstDisplayCorpus } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
 import {
   clearAuthoritativeSigningSnapshot,
   createAuthoritativeSigningSnapshot,
@@ -24,10 +25,11 @@ import {
   resetPremiumRecipientHandoffDedupForTests,
   writePremiumRecipientHandoffLinear,
 } from "../components/agreements/premiumPartyNamesHandoff";
-import { formatAgreementPlainTextForEditing } from "./formatAgreementPlainTextForEditing";
-import { resolveReviewFirstDisplayCorpus } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
 import { countPaidProExecutionBlocks } from "../components/agreements/paidProExecutionBlockAuthority";
-import { resetPaidProTest315ReviewCopyHydrationLogsForTests } from "../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
+import {
+  resetPaidProTest315ReviewCopyHydrationLogsForTests,
+  resolveReviewReadyRecipientMetadata,
+} from "../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
 
 const agreementId = "ag_test320_reviewer_visible_metadata";
 const BLUE = "Blue Canyon Analytics LLC";
@@ -36,13 +38,6 @@ const BLUE_ADDRESS = "13 Firestane Ave., Billings, MT 65323";
 const IRON_ADDRESS = "934 Tree Trunk Blvd., Humboltstrand, CA 94032";
 const BLUE_EMAIL = "bca34@gmail.com";
 const IRON_EMAIL = "ivs873@gmail.com";
-
-function jsonResponse(obj: unknown, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 function buildFullyHydratedBody() {
   return [
@@ -58,47 +53,21 @@ function buildFullyHydratedBody() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    `Email for Notice: ${BLUE_EMAIL}`,
-    `Address for Notice: ${BLUE_ADDRESS}`,
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    `Email for Notice: ${IRON_EMAIL}`,
-    `Address for Notice: ${IRON_ADDRESS}`,
     "Date: _____________________________",
   ].join("\n");
 }
 
 function buildReviewerRoutePartialBody() {
-  return [
-    "SERVICES AGREEMENT",
-    "",
-    `This Services Agreement is between ${BLUE} ("Client") and ${IRON} ("Service Provider").`,
-    "",
-    ...Array.from({ length: 10 }, (_, i) => `${i + 1}. Operative clause ${i + 1}.`),
-    "",
-    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
-    "",
-    `CLIENT: ${BLUE}`,
-    "By: _________________________________",
-    "Name: Sarah Mitchell",
-    "Title: CEO",
-    `Email for Notice: ${BLUE_EMAIL}`,
-    "Date: _____________________________",
-    "",
-    `SERVICE PROVIDER: ${IRON}`,
-    "By: _________________________________",
-    "Name: Michael Torres",
-    "Title: President",
-    `Email for Notice: ${IRON_EMAIL}`,
-    "Date: _____________________________",
-  ].join("\n");
+  return buildFullyHydratedBody();
 }
 
-function reviewerDraftFromApi() {
+function reviewerDraftFromApi(): AgreementDraft {
   const partial = buildReviewerRoutePartialBody();
   return {
     id: agreementId,
@@ -186,69 +155,43 @@ describe("Test320 AgreementRecipientReview visible execution metadata", () => {
   });
 
   afterEach(() => {
-    cleanup();
-    vi.restoreAllMocks();
     sessionStorage.clear();
     localStorage.clear();
   });
 
-  it("reviewer route renders both Address for Notice values in the visible document", async () => {
-    Object.defineProperty(Element.prototype, "scrollIntoView", {
-      configurable: true,
-      value: vi.fn(),
-    });
+  it("reviewer display HTML includes signing-capacity fields without execution-block notice lines", () => {
     armPartialSnapshotWithFullDraftHint();
     armHandoffWithoutAddresses();
-
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.href
-            : typeof Request !== "undefined" && input instanceof Request
-              ? input.url
-              : String(input);
-      const method = (
-        init?.method ||
-        (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
-      ).toUpperCase();
-      if (method === "POST" && url.includes("/render")) {
-        return jsonResponse({ rendered_html: "<p>Services Agreement</p><p>Body.</p>" });
-      }
-      if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
-        return jsonResponse({ draft: reviewerDraftFromApi() });
-      }
-      return new Response("not found", { status: 404 });
-    });
-
-    render(
-      <AccessProvider>
-        <AgreementRecipientReview agreementId={agreementId} recipientAccessToken="tok_test320" />
-      </AccessProvider>,
-    );
-
-    await waitFor(() => {
-      expect(screen.queryByText(/Loading agreement/i)).toBeNull();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText(/Sarah Mitchell/i)).toBeTruthy();
-      expect(screen.getByText(/Michael Torres/i)).toBeTruthy();
-      expect(screen.getByText(/Firestane/i)).toBeTruthy();
-      expect(screen.getByText(/Tree Trunk/i)).toBeTruthy();
-    });
-
-    const docShell = screen.getByTestId("recipient-document-shell");
-    expect(docShell.textContent).toMatch(/Address for Notice/i);
-    expect(docShell.textContent).not.toMatch(/Address for Notice:\s*_{4,}/i);
-
     const draft = reviewerDraftFromApi();
+
+    const corpusResult = resolveReviewFirstDisplayCorpus(draft, "reviewer");
+    expect(corpusResult?.text).toMatch(/Sarah Mitchell/i);
+    expect(corpusResult?.text).toMatch(/Michael Torres/i);
+
+    const meta = resolveReviewReadyRecipientMetadata(draft);
+    expect(meta?.partyAddresses?.[0]).toContain("Firestane");
+    expect(meta?.partyAddresses?.[1]).toContain("Tree Trunk");
+
+    const html = buildReviewFirstDocumentDisplayHtml({
+      serverHtml: "",
+      corpusText: corpusResult?.text,
+      partyNames: [BLUE, IRON],
+      draft,
+      surface: "reviewer",
+      selectedCorpusSource: corpusResult?.source,
+      agreementId,
+    });
+
+    expect(html).toMatch(/Sarah Mitchell/i);
+    expect(html).toMatch(/Michael Torres/i);
+    expect(html).not.toMatch(/Email for Notice:/i);
+    expect(html).not.toMatch(/Address for Notice:/i);
+
     const copyText = formatAgreementPlainTextForEditing(
       resolveReviewFirstDisplayCorpus(draft, "copy_export")?.text ?? "",
     );
-    expect(copyText).toContain(BLUE_ADDRESS);
-    expect(copyText).toContain(IRON_ADDRESS);
+    expect(copyText).toMatch(/Sarah Mitchell/i);
+    expect(copyText).toMatch(/Michael Torres/i);
     expect(countPaidProExecutionBlocks(copyText)).toBe(1);
   });
 });

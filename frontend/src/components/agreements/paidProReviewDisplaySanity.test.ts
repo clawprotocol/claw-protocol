@@ -42,8 +42,6 @@ function validPostSotExecutionCorpus(): string {
     "By: __________________________",
     "Name: __________________________",
     "Title: _________________________",
-    "Email for Notice: __________________________",
-    "Address for Notice: ________________________",
     "Date: _____________________________",
     "",
     "SERVICE PROVIDER:",
@@ -51,8 +49,6 @@ function validPostSotExecutionCorpus(): string {
     "By: __________________________",
     "Name: __________________________",
     "Title: _________________________",
-    "Email for Notice: __________________________",
-    "Address for Notice: ________________________",
     "Date: _____________________________",
   ].join("\n");
 }

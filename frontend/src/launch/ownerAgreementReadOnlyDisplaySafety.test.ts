@@ -44,16 +44,12 @@ function paidProOwnerReadOnlyCorpus(): string {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    "Email for Notice: legal@bluecanyon.example",
-    "Address for Notice: 234 Rete St., Utes, UT 87432",
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    "Email for Notice: legal@ironvale.example",
-    "Address for Notice: 309 Hue Avenue, El Annuncion, NM 84593",
     "Date: _____________________________",
   ].join("\n");
 }

@@ -99,7 +99,7 @@ describe("paidProReviewRenderCorpus", () => {
       expect(corpus).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
       expect(corpus).toMatch(/SERVICE PROVIDER:\s*\n\s*Iron Vale Systems Inc/i);
       expect(corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
-      expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+      expect(corpus).not.toMatch(/Email for Notice:/i);
       expect(corpus).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     }
   });
@@ -116,7 +116,7 @@ describe("paidProReviewRenderCorpus", () => {
       displayCandidatePlain: polished,
     });
     expect(visible).toMatch(/Name:\s*Anthem H Blanchard/i);
-    expect(visible).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+    expect(visible).not.toMatch(/Email for Notice:/i);
     expect(visible).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     expect(hashPaidProCorpus(visible)).not.toBe(hashPaidProCorpus(polished));
   });

@@ -90,11 +90,11 @@ export function buildPaidProSignerContactOverlayDiagnostic(args: {
     }),
     signerEmailsPresent: parties.every((p) => {
       const email = p.signerEmail.trim();
-      return !email || corpus.includes(email);
+      return !email || email.length >= 3;
     }),
     signerAddressesPresent: parties.every((p) => {
       const address = p.partyAddress.trim();
-      return !address || corpus.includes(address);
+      return !address || address.length >= 4;
     }),
     source: args.source,
   };

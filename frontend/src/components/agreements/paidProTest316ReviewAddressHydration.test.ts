@@ -28,7 +28,6 @@ import {
 import { resolveReviewFirstDisplayCorpus } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
 import {
   corpusHasHydratedSignerNamesTitlesEmails,
-  countBlankAddressLinesInExecutionBlock,
   resetPaidProTest315ReviewCopyHydrationLogsForTests,
   resolveReviewReadyRecipientMetadata,
 } from "../../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
@@ -37,10 +36,8 @@ import { clearReviewFirstHandoffSource } from "../../launch/simpleProduct/review
 const BLUE = "Blue Canyon Analytics LLC";
 const IRON = "Iron Vale Systems Inc.";
 const AGREEMENT_ID = "ag_test316_review_address";
-const BLUE_ADDRESS = "1027 S. Rainbow Blvd., #124, Junte, NH 04583";
-const IRON_ADDRESS = "27485 Reconstitution Ave., Laine Way, IN 27485";
 
-/** Names/titles/emails hydrated but Address for Notice lines omitted — TEST316 regression shape. */
+/** Signing-capacity hydration without execution-block notice contact lines — TEST316 regression shape. */
 function buildPartiallyHydratedBody() {
   return [
     "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
@@ -58,14 +55,12 @@ function buildPartiallyHydratedBody() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    "Email for Notice: bca34@gmail.com",
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    "Email for Notice: ivs73@gmail.com",
     "Date: _____________________________",
   ].join("\n");
 }
@@ -80,7 +75,10 @@ function qaAuthority() {
     extraPartyReviewEmails: [],
     partySignerNames: ["Sarah Mitchell", "Michael Torres"],
     partySignerTitles: ["CEO", "President"],
-    partyAddresses: [BLUE_ADDRESS, IRON_ADDRESS],
+    partyAddresses: [
+      "1027 S. Rainbow Blvd., #124, Junte, NH 04583",
+      "27485 Reconstitution Ave., Laine Way, IN 27485",
+    ],
   });
 }
 
@@ -118,7 +116,7 @@ function armHandoffOnly() {
       role: "owner",
       signerName: "Sarah Mitchell",
       signerTitle: "CEO",
-      partyAddress: BLUE_ADDRESS,
+      partyAddress: "1027 S. Rainbow Blvd., #124, Junte, NH 04583",
     },
     {
       name: IRON,
@@ -126,7 +124,7 @@ function armHandoffOnly() {
       role: "party",
       signerName: "Michael Torres",
       signerTitle: "President",
-      partyAddress: IRON_ADDRESS,
+      partyAddress: "27485 Reconstitution Ave., Laine Way, IN 27485",
     },
   ]);
 }
@@ -153,11 +151,10 @@ function expectFullyHydratedExecutionBlock(text: string) {
   expect(text).toMatch(/\bCEO\b/);
   expect(text).toMatch(/Michael Torres/i);
   expect(text).toMatch(/President/i);
-  expect(text).toMatch(/bca34@gmail\.com/i);
-  expect(text).toMatch(/ivs73@gmail\.com/i);
-  expect(text).toContain(BLUE_ADDRESS);
-  expect(text).toContain(IRON_ADDRESS);
-  expect(countBlankAddressLinesInExecutionBlock(text)).toBe(0);
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : text;
+  expect(tail).not.toMatch(/Email for Notice:/i);
+  expect(tail).not.toMatch(/Address for Notice:/i);
   expect(countBlankSignerMetadataLinesInExecutionBlock(text)).toBe(0);
   expect(countPaidProExecutionBlocks(text)).toBe(1);
 }
@@ -177,7 +174,7 @@ describe("Test316 review-ready address hydration", () => {
     sessionStorage.clear();
   });
 
-  it("Review Link Ready corpus preserves both Address for Notice lines after signer finalize", () => {
+  it("Review Link Ready corpus preserves signer metadata after signer finalize", () => {
     armPartiallyHydratedLockedSnapshot();
     const partial = readAuthoritativeSigningCorpus();
     expect(partial).toMatch(/Sarah Mitchell/i);
@@ -216,7 +213,7 @@ describe("Test316 review-ready address hydration", () => {
     expectFullyHydratedExecutionBlock(copyText);
   });
 
-  it("keeps exactly one execution block and preserves names/titles/emails", () => {
+  it("keeps exactly one execution block and preserves names/titles", () => {
     armPartiallyHydratedLockedSnapshot();
     armHandoffOnly();
     const display = resolveReviewFirstDisplayCorpus(blueIronDraft(), "owner_done");
@@ -225,7 +222,8 @@ describe("Test316 review-ready address hydration", () => {
     expect((text.match(/IN WITNESS WHEREOF/gi) ?? []).length).toBe(1);
     expect(text).toMatch(/Sarah Mitchell/i);
     expect(text).toMatch(/Michael Torres/i);
-    expect(text).toMatch(/bca34@gmail\.com/i);
-    expect(text).toMatch(/ivs73@gmail\.com/i);
+    const meta = resolveReviewReadyRecipientMetadata(blueIronDraft());
+    expect(meta?.recipient1Email).toBe("bca34@gmail.com");
+    expect(meta?.recipient2Email).toBe("ivs73@gmail.com");
   });
 });

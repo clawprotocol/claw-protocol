@@ -76,7 +76,7 @@ describe("paidProHardening golden fixture (freeProQaTemplateATest204)", () => {
       assertSectionNumberingIntactAfterRecitalRepair(corpus);
     }
 
-    expect(surfaces.hydratedFinal).toMatch(/Email for Notice:\s*ivee23@me\.com/i);
+    expect(surfaces.hydratedFinal).not.toMatch(/Email for Notice:/i);
     expect(surfaces.hydratedFinal).toMatch(/Name:\s*Anthem H Blanchard/i);
     expect(surfaces.hydratedFinal).toMatch(/Name:\s*Ira Vale/i);
   });

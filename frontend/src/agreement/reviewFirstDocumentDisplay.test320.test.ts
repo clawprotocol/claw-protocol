@@ -23,7 +23,7 @@ import {
 import {
   stripUnsuppliedPartyAddressPlaceholders,
 } from "../components/agreements/polishProAgreementDisplayLayer";
-import { resetPaidProTest315ReviewCopyHydrationLogsForTests } from "../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
+import { resetPaidProTest315ReviewCopyHydrationLogsForTests, resolveReviewReadyRecipientMetadata } from "../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const IRON = "Iron Vale Systems Inc.";
@@ -44,16 +44,12 @@ function buildFullyHydratedBody() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    "Email for Notice: bca34@gmail.com",
-    `Address for Notice: ${BLUE_ADDRESS}`,
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    "Email for Notice: ivs873@gmail.com",
-    `Address for Notice: ${IRON_ADDRESS}`,
     "Date: _____________________________",
   ].join("\n");
 }
@@ -131,16 +127,19 @@ describe("Test320 reviewFirstDocumentDisplayHtml", () => {
     sessionStorage.clear();
   });
 
-  it("stripUnsuppliedPartyAddressPlaceholders keeps hydrated Address for Notice lines", () => {
-    const line = `Address for Notice: ${BLUE_ADDRESS}`;
+  it("stripUnsuppliedPartyAddressPlaceholders keeps supplied address text", () => {
+    const line = `Mailing address: ${BLUE_ADDRESS}`;
     const kept = stripUnsuppliedPartyAddressPlaceholders(line, null).text;
     expect(kept).toContain(BLUE_ADDRESS);
   });
 
-  it("visible HTML includes both Address for Notice values from partial snapshot", () => {
+  it("visible HTML includes signer names and metadata addresses without execution-block notice lines", () => {
     const draft = armSnapshot();
     const corpusResult = resolveReviewFirstDisplayCorpus(draft, "reviewer");
-    expect(corpusResult?.text).toContain(BLUE_ADDRESS);
+    expect(corpusResult?.text).toMatch(/Sarah Mitchell/i);
+    const meta = resolveReviewReadyRecipientMetadata(draft);
+    expect(meta?.partyAddresses?.[0]).toContain("Firestane");
+    expect(meta?.partyAddresses?.[1]).toContain("Tree Trunk");
 
     const html = buildReviewFirstDocumentDisplayHtml({
       serverHtml: "",
@@ -151,8 +150,8 @@ describe("Test320 reviewFirstDocumentDisplayHtml", () => {
       selectedCorpusSource: corpusResult?.source,
     });
 
-    expect(html).toContain(BLUE_ADDRESS);
-    expect(html).toContain(IRON_ADDRESS);
-    expect(html).toMatch(/Address for Notice/i);
+    expect(html).toMatch(/Sarah Mitchell/i);
+    expect(html).not.toMatch(/Email for Notice:/i);
+    expect(html).not.toMatch(/Address for Notice:/i);
   });
 });

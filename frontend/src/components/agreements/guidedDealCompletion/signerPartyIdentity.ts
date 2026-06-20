@@ -304,27 +304,17 @@ function fillSignatureNameUnderscoreLines(
     }
 
     if (/^email\s+for\s+notices?\s*:/i.test(trimmed)) {
-      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
-      const email = identities[partyIndex]?.email?.trim() ?? "";
-      if (!email) continue;
-      if (/_{4,}/.test(trimmed) || /^email\s+for\s+notices?\s*:\s*$/i.test(trimmed)) {
-        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
-        const label = /^email\s+for\s+notices\s*:/i.test(trimmed) ? "Email for Notices" : "Email for Notice";
-        lines[i] = `${indent}${label}: ${email}`;
-        replacements += 1;
-      }
+      lines.splice(i, 1);
+      i -= 1;
+      replacements += 1;
+      continue;
     }
 
     if (/^address\s+for\s+notices?\s*:/i.test(trimmed)) {
-      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
-      const address = identities[partyIndex]?.partyAddress?.trim() ?? "";
-      if (!address) continue;
-      if (/_{4,}/.test(trimmed) || /^address\s+for\s+notices?\s*:\s*$/i.test(trimmed)) {
-        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
-        const label = /^address\s+for\s+notices\s*:/i.test(trimmed) ? "Address for Notices" : "Address for Notice";
-        lines[i] = `${indent}${label}: ${address}`;
-        replacements += 1;
-      }
+      lines.splice(i, 1);
+      i -= 1;
+      replacements += 1;
+      continue;
     }
 
     if (/^date\s*:/i.test(trimmed)) {
@@ -358,18 +348,6 @@ function buildSignatureBlocks(identities: readonly CanonicalPartyIdentity[]): {
     lines.push(signName ? `Name: ${signName}` : "Name: __________________________");
     if (!id.isIndividual || id.title?.trim()) {
       lines.push(`Title: ${id.title?.trim() || "_________________________"}`);
-    }
-    const email = id.email?.trim();
-    if (email) {
-      lines.push(`Email for Notice: ${email}`);
-    } else {
-      lines.push("Email for Notice: __________________________");
-    }
-    const address = id.partyAddress?.trim();
-    if (address) {
-      lines.push(`Address for Notice: ${address}`);
-    } else {
-      lines.push("Address for Notice: ________________________");
     }
     lines.push(SIGNATURE_DATE_BLANK_LINE);
     blocks.push(lines.join("\n"));

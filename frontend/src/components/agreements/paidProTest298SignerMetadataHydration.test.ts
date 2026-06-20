@@ -53,16 +53,12 @@ const FREEZE_BODY = [
   "By: _________________________________",
   "Name: ________________________________",
   "Title: ________________________________",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: _____________________________",
   "",
   `PARTY: ${IRON}`,
   "By: _________________________________",
   "Name: ________________________________",
   "Title: ________________________________",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: _____________________________",
 ].join("\n");
 
@@ -128,10 +124,10 @@ describe("Test298 paid Pro signer metadata finalize + review actions", () => {
     expect(hydrated.corpus).toMatch(/Name:\s*Ivan Vee/i);
     expect(hydrated.corpus).toMatch(/Title:\s*Member/i);
     expect(hydrated.corpus).toMatch(/Title:\s*Manager/i);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*ivee23@me\.com/i);
-    expect(hydrated.corpus).toMatch(/Address for Notice:\s*1027 S\. Rainbow Blvd\./i);
-    expect(hydrated.corpus).toMatch(/Address for Notice:\s*138 Main St\./i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:/i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:/i);
+    expect(hydrated.corpus).not.toMatch(/Address for Notice:/i);
+    expect(hydrated.corpus).not.toMatch(/Address for Notice:/i);
     expect(hydrated.corpus).toMatch(new RegExp(`PARTY:\\s*${BLUE.replace(/\./g, "\\.")}`, "i"));
     expect(hydrated.corpus).not.toMatch(/Name:\s*_{4,}/);
   });
@@ -151,7 +147,7 @@ describe("Test298 paid Pro signer metadata finalize + review actions", () => {
     const copyDoc = getPaidProDocumentForSurface("copy");
     expect(copyDoc?.signerMetadataApplied).toBe(true);
     expect(copyDoc?.text).toMatch(/Name:\s*Anthem H Blanchard/i);
-    expect(copyDoc?.text).toMatch(/Email for Notice:\s*ivee23@me\.com/i);
+    expect(copyDoc?.text).not.toMatch(/Email for Notice:/i);
   });
 
   it("review track receives hydrated signer metadata", () => {
@@ -168,7 +164,7 @@ describe("Test298 paid Pro signer metadata finalize + review actions", () => {
     writeSigningSnapshot(hydrated.corpus, authority);
     const reviewPlain = resolvePaidProReviewRenderPlain();
     expect(reviewPlain).toMatch(/Name:\s*Ivan Vee/i);
-    expect(reviewPlain).toMatch(/Address for Notice:\s*138 Main St\./i);
+    expect(reviewPlain).not.toMatch(/Address for Notice:/i);
   });
 
   it("signature prep receives hydrated signer metadata", () => {

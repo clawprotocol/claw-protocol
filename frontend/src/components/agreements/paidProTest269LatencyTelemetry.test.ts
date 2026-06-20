@@ -167,16 +167,12 @@ describe("paidPro Test269 latency telemetry and dedupe", () => {
       "By: __________________________",
       "Name: _________________________",
       "Title: __________________________",
-      "Email for Notice: __________________________",
-      "Address for Notice: ________________________",
       "",
       "SERVICE PROVIDER:",
       "Beta Inc.",
       "By: __________________________",
       "Name: _________________________",
       "Title: __________________________",
-      "Email for Notice: __________________________",
-      "Address for Notice: ________________________",
     ].join("\n");
     const authority = buildLivePaidProSignerMetadataAuthority({
       partyCount: 2,
@@ -197,10 +193,10 @@ describe("paidPro Test269 latency telemetry and dedupe", () => {
     });
     expect(hydrated.corpus).toMatch(/Name:\s*Jane Client/i);
     expect(hydrated.corpus).toMatch(/Title:\s*CEO/i);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*jane@acme\.test/i);
-    expect(hydrated.corpus).toMatch(/Address for Notice:\s*1 Main St/i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:/i);
+    expect(hydrated.corpus).not.toMatch(/Address for Notice:/i);
     expect(hydrated.corpus).toMatch(/Name:\s*Bob Provider/i);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*bob@beta\.test/i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:/i);
   });
 
   it("clearPaidProSourceOfTruth clears safe-display cache and review/html memo", () => {

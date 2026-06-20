@@ -68,16 +68,12 @@ export function buildTest344FlattenedReviewerSnapshotCorpus(): string {
     "By: __________________________",
     "Name: Sidney Thomas",
     "Title: Manager",
-    "Email for Notice: anthemhayek@me.com",
-    "Address for Notice: 135 Hunt Ave., Donesville, KS 78653",
     "Date: _____________________________",
     "SERVICE PROVIDER:",
     HARBOR_PEAK,
     "By: __________________________",
     "Name: Hunt Punter",
     "Title: CEO",
-    "Email for Notice: cryptocurated21@gmail.com",
-    "Address for Notice: 127 Minte St., Minony, IN 85432",
     "Date: _____________________________",
   ].join("\n");
 

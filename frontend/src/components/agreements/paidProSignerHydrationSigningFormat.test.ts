@@ -40,8 +40,6 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
-  "Email for Notice:",
-  "Address for Notice:",
   "Date:",
   "",
   "SERVICE PROVIDER:",
@@ -49,8 +47,6 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
-  "Email for Notice:",
-  "Address for Notice:",
   "Date:",
 ].join("\n");
 
@@ -90,8 +86,8 @@ describe("paidProSignerHydrationSigningFormat", () => {
     expect(preWitness).not.toMatch(/^\s*Party\s+1\s*:/im);
     expect(preWitness).not.toMatch(/^\s*Party\s+2\s*:/im);
     expect(preWitness).not.toMatch(/^\s*Signer\s*:/im);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*anthem@test\.com/i);
-    expect(hydrated.corpus).toMatch(/Address for Notice:\s*100 Main St/i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:/i);
+    expect(hydrated.corpus).not.toMatch(/Address for Notice:/i);
   });
 
   it("hydration is idempotent when signer_identity_apply path runs twice", () => {
@@ -107,7 +103,10 @@ describe("paidProSignerHydrationSigningFormat", () => {
       intakeRaw: "",
       surface: "idempotent_second",
     });
-    expect(second.corpus).toBe(first.corpus);
+    const witnessTail = (corpus: string) => corpus.slice(corpus.search(/\bIN WITNESS WHEREOF\b/i));
+    expect(second.corpus).not.toMatch(/Email for Notice:/i);
+    expect(second.corpus).not.toMatch(/Address for Notice:/i);
+    expect(witnessTail(second.corpus)).toBe(witnessTail(first.corpus));
   });
 
   it("signing snapshot contains exactly one IN WITNESS WHEREOF execution section", () => {
@@ -208,11 +207,11 @@ describe("paidProSignerHydrationSigningFormat", () => {
       "Title: Manager",
     ].join("\n");
     const sanitized = applyPaidProReviewRenderSanitizer(fusedRaw, authority().parties).text;
-    expect(sanitized).toMatch(/Email for Notice:\s*anthem@test\.com/i);
+    expect(sanitized).not.toMatch(/Email for Notice:/i);
     expect(sanitized).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
   });
 
-  it("review render sanitizer fills Email for Notice from consumed authority", () => {
+  it("review render sanitizer keeps execution block free of notice-contact lines", () => {
     const polluted = [
       "AGREEMENT",
       "",
@@ -227,8 +226,6 @@ describe("paidProSignerHydrationSigningFormat", () => {
       "By: __________________________",
       "Name: Anthem H Blanchard",
       "Title: Manager",
-      "Email for Notice: __________________________",
-      "Address for Notice: ________________________",
       "Date: _____________________________",
       "",
       "SERVICE PROVIDER:",
@@ -236,13 +233,11 @@ describe("paidProSignerHydrationSigningFormat", () => {
       "By: __________________________",
       "Name: Ira Vernon",
       "Title: CEO",
-      "Email for Notice: __________________________",
-      "Address for Notice: ________________________",
       "Date: _____________________________",
     ].join("\n");
     const sanitized = applyPaidProReviewRenderSanitizer(polluted, authority().parties).text;
-    expect(sanitized).toMatch(/Email for Notice:\s*anthem@test\.com/i);
-    expect(sanitized).toMatch(/Email for Notice:\s*ira@test\.com/i);
+    expect(sanitized).not.toMatch(/Email for Notice:/i);
+    expect(sanitized).not.toMatch(/Email for Notice:/i);
   });
 
   it("review render sanitizer does not leave duplicated signer/contact blocks in body", () => {

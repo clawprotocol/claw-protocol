@@ -36,24 +36,21 @@ Red Mesa Logistics LLC
 By: _________________________
 Name: _________________________
 Title: _________________________
-Email for Notices: _________________________
-Address for Notices: _________________________
+Date: _____________________________
 
 SERVICE PROVIDER:
 Harbor Peak Automation LLC
 By: _________________________
 Name: _________________________
 Title: _________________________
-Email for Notices: _________________________
-Address for Notices: _________________________
+Date: _____________________________
 
 ANALYTICS PROVIDER:
 Blue Canyon Analytics LLC
 By: _________________________
 Name: _________________________
 Title: _________________________
-Email for Notices: _________________________
-Address for Notices: _________________________`;
+Date: _____________________________`;
 
 function executionTail(corpus: string): string {
   const idx = corpus.search(/\bIN WITNESS WHEREOF\b/i);
@@ -121,7 +118,9 @@ describe("canonicalPartyIdentityModel architecture regression", () => {
       expect(countSignatureBlockHeadingsInTail(tail)).toBe(3);
       expect(tail).toMatch(/ANALYTICS PROVIDER\s*:/i);
       expect(tail).toMatch(/Sarah Mitchell/i);
-      expect(tail).toMatch(/contact@harborpeakautomation\.com/i);
+      expect(tail).not.toMatch(/Email for Notice:/i);
+      expect(tail).not.toMatch(/Address for Notice:/i);
+      expect(getPartyBySourceSlot(parties, 1)?.signerEmail).toBe("contact@harborpeakautomation.com");
     });
   });
 
@@ -167,9 +166,10 @@ describe("canonicalPartyIdentityModel architecture regression", () => {
         authorityPartiesToRecipientMetadata(merged),
       );
       expect(hydrated.applied).toBe(true);
-      expect(hydrated.corpus).toMatch(/contact@harborpeakautomation\.com/i);
       expect(hydrated.corpus).toMatch(/Sarah Mitchell/i);
       expect(hydrated.corpus).toMatch(/Robert Henderson/i);
+      expect(executionTail(hydrated.corpus)).not.toMatch(/Email for Notice:/i);
+      expect(getPartyBySourceSlot(identities, 1)?.signerEmail).toBe("contact@harborpeakautomation.com");
     });
   });
 
@@ -302,14 +302,12 @@ ${PAID_PRO_HARDENING_CLIENT}
 By: _________________________
 Name: _________________________
 Title: _________________________
-Email for Notices: _________________________
-Address for Notices: _________________________
+Date: _____________________________
 
 SERVICE PROVIDER:
 ${PAID_PRO_HARDENING_PROVIDER}
 By: _________________________
 Name: _________________________
 Title: _________________________
-Email for Notices: _________________________
-Address for Notices: _________________________`;
+Date: _____________________________`;
 }

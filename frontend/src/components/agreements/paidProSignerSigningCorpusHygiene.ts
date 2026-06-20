@@ -15,6 +15,7 @@ import {
   corpusHasPartyNoticeDetails,
   stripExistingPartyNoticeDetails,
 } from "./paidProPartyNoticeDetails";
+import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
 
 const PARTY_NOTICE_HEADING_RE = /^\s*Party Notice Details:\s*$/i;
 const PARTY_NUMBER_HEADING_RE = /^\s*Party\s+(\d+)\s*:\s*$/i;
@@ -140,7 +141,7 @@ export function finalizePaidProSigningCorpusText(
     const notice = fillPaidProSignatureNoticeFieldsAfterExecutionRepair(text, parties, roleContext);
     if (notice.applied) {
       text = notice.text;
-      repairs.push("signature_notice_fields_post_execution");
+      repairs.push("signature_notice_contact_strip_post_execution");
     }
     const identities = authorityPartiesToCanonicalPartyIdentities(parties, roleContext);
     const identityApply = applySignerPartyIdentityToAuthoritativeAgreement(
@@ -153,6 +154,15 @@ export function finalizePaidProSigningCorpusText(
       text = identityApply.text;
       repairs.push("signer_identity_post_execution");
     }
+  }
+
+  const contactAuthority = applyContactAuthorityExecutionBlockIntegrity(text, {
+    source: "finalize_paid_pro_signing_corpus",
+    ensureNoticesClause: true,
+  });
+  if (contactAuthority.repaired) {
+    text = contactAuthority.text;
+    repairs.push(...contactAuthority.repairs.map((tag) => `contact_authority:${tag}`));
   }
 
   return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), repairs };

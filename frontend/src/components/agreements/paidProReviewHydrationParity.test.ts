@@ -38,15 +38,11 @@ const RAW = [
   "CLIENT:",
   "Blue Canyon Analytics LLC",
   "Name: _________________________",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: May 30, 2026",
   "",
   "SERVICE PROVIDER:",
   "Iron Vale Systems Inc.",
   "Name: _________________________",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: May 30, 2026",
 ].join("\n");
 
@@ -91,8 +87,8 @@ describe("paidProReviewHydrationParity", () => {
 
     for (const corpus of [hydrated.corpus, reviewPlain, copy, reviewSurface.text]) {
       expect(corpus).not.toMatch(/Party Notice Details:/i);
-      expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-      expect(corpus).toMatch(/Address for Notice:\s*1027 S\. Rainbow/i);
+      expect(corpus).not.toMatch(/Email for Notice:/i);
+      expect(corpus).not.toMatch(/Address for Notice:/i);
       expect(corpus).not.toMatch(/Email for Notice:\s*_{4,}/i);
       expect(corpus).not.toMatch(/Professional services shape/i);
       expect(corpus).not.toMatch(/Date:\s*May\s+30,\s*2026/i);
@@ -169,6 +165,6 @@ describe("paidProReviewHydrationParity", () => {
     });
     expect(html).not.toMatch(/Professional services shape/i);
     expect(html).not.toContain("premium-doc-callout");
-    expect(plain).toMatch(/Email for Notice:\s*ivee23@me\.com/i);
+    expect(plain).not.toMatch(/Email for Notice:/i);
   });
 });

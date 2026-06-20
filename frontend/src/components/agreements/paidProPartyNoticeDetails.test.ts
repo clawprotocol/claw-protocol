@@ -42,8 +42,6 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date:",
   "",
   "SERVICE PROVIDER:",
@@ -51,8 +49,6 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date:",
 ].join("\n");
 
@@ -102,7 +98,7 @@ describe("paidProPartyNoticeDetails", () => {
     expect(spSection).not.toMatch(/\nAddress:/i);
   });
 
-  it("ensureExecutionBlockNoticeContactFieldLines inserts missing notice rows before Date", () => {
+  it("ensureExecutionBlockNoticeContactFieldLines strips legacy notice rows from execution blocks", () => {
     const sparseBody = [
       "IN WITNESS WHEREOF, the Parties execute this Agreement.",
       "",
@@ -121,20 +117,34 @@ describe("paidProPartyNoticeDetails", () => {
       "Date:",
     ].join("\n");
     const ensured = ensureExecutionBlockNoticeContactFieldLines(sparseBody);
-    expect(ensured.inserted).toBeGreaterThanOrEqual(4);
-    expect(ensured.text).toMatch(/Email for Notice:/i);
-    expect(ensured.text).toMatch(/Address for Notice:/i);
-    const filled = applySignatureNoticeContactFieldsToCorpus(ensured.text, authority().parties);
-    expect(filled.text).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+    expect(ensured.inserted).toBe(0);
+    expect(ensured.text).not.toMatch(/Email for Notice:/i);
+    expect(ensured.text).not.toMatch(/Address for Notice:/i);
+    const stripped = applySignatureNoticeContactFieldsToCorpus(ensured.text, authority().parties);
+    expect(stripped.text).not.toMatch(/anthemhayek@gmail\.com/i);
   });
 
-  it("applySignatureNoticeContactFieldsToCorpus fills signature notice lines", () => {
-    const parties = authority().parties;
-    const withLines = applySignatureNoticeContactFieldsToCorpus(RAW_BODY, parties);
+  it("applySignatureNoticeContactFieldsToCorpus strips signature notice lines", () => {
+    const contaminated = [
+      ...RAW_BODY.split("\n").slice(0, -8),
+      "Email for Notice: __________________________",
+      "Address for Notice: ________________________",
+      "Date:",
+      "",
+      "SERVICE PROVIDER:",
+      IRON,
+      "By: _________________________________",
+      "Name:",
+      "Title:",
+      "Email for Notice: anthemhayek@gmail.com",
+      "Address for Notice: 1027 S. Rainbow Blvd.",
+      "Date:",
+    ].join("\n");
+    const withLines = applySignatureNoticeContactFieldsToCorpus(contaminated, authority().parties);
     expect(withLines.applied).toBe(true);
-    expect(withLines.text).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-    expect(withLines.text).toMatch(/Address for Notice:\s*1027 S\. Rainbow/i);
-    expect(withLines.text).not.toMatch(/Email for Notice:\s*_{4,}/i);
+    expect(withLines.text).not.toMatch(/Email for Notice:/i);
+    expect(withLines.text).not.toMatch(/Address for Notice:/i);
+    expect(withLines.text).not.toMatch(/anthemhayek@gmail\.com/i);
   });
 
   it("applyPartyNoticeDetailsToCorpus is idempotent", () => {
@@ -161,9 +171,8 @@ describe("paidProPartyNoticeDetails", () => {
     expect(hydrated.partyNoticeApplied).toBe(false);
     expect(hydrated.corpus).not.toMatch(/Party Notice Details:/i);
     expect(hydrated.corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*jn789@me\.com/i);
-    expect(hydrated.corpus).not.toMatch(/Email for Notice:\s*_{4,}/i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:/i);
+    expect(hydrated.corpus).not.toMatch(/anthemhayek@gmail\.com/i);
 
     const manifest = resolveCanonicalFinalPartyManifest({
       partyCount: 2,
@@ -204,13 +213,13 @@ describe("paidProPartyNoticeDetails", () => {
     }).corpus;
 
     for (const corpus of [copy, exportText, reviewDoc, vs01]) {
-      expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-      expect(corpus).toMatch(/Email for Notice:\s*jn789@me\.com/i);
-      expect(corpus).toMatch(/Address for Notice:\s*1027 S\. Rainbow/i);
+      expect(corpus).not.toMatch(/Email for Notice:/i);
+      expect(corpus).not.toMatch(/Address for Notice:/i);
+      expect(corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
     }
   });
 
-  it("changing email before finalize changes hydrated corpus hash", () => {
+  it("changing email before finalize does not mutate execution block corpus", () => {
     establishPaidProSourceOfTruth({ text: RAW_BODY, source: "server_full_draft" });
     const auth1 = authority();
     const h1 = buildHydratedAuthoritativeSigningCorpusFromAuthority({
@@ -238,7 +247,8 @@ describe("paidProPartyNoticeDetails", () => {
       intakeRaw: "",
       surface: "hash_b",
     });
-    expect(fingerprintAgreementBody(h1.corpus)).not.toBe(fingerprintAgreementBody(h2.corpus));
-    expect(h2.corpus).toMatch(/Email for Notice:\s*changed@test\.com/i);
+    expect(fingerprintAgreementBody(h1.corpus)).toBe(fingerprintAgreementBody(h2.corpus));
+    expect(h2.corpus).not.toMatch(/changed@test\.com/i);
+    expect(h2.corpus).not.toMatch(/Email for Notice:/i);
   });
 });

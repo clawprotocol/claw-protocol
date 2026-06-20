@@ -64,16 +64,12 @@ function buildSoTBody() {
     "By: _________________________________",
     "Name: ________________________________",
     "Title: ________________________________",
-    "Email for Notice: __________________________",
-    "Address for Notice: ________________________",
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${BLUE}`,
     "By: _________________________________",
     "Name: ________________________________",
     "Title: ________________________________",
-    "Email for Notice: __________________________",
-    "Address for Notice: ________________________",
     "Date: _____________________________",
   ].join("\n");
 }
@@ -161,10 +157,7 @@ describe("Test366 post-finalize edit signer details metadata carryover", () => {
     expect(isPaidProPostFinalizeHydratedCorpusLocked()).toBe(false);
     expect(readPaidProPinnedSignerAppliedCorpus()).toBe("");
 
-    const hydratedReviewPlain = buildSoTBody().replace(
-      /Email for Notice: _+/,
-      `Email for Notice: ${PARTY1_EMAIL_FIRST}`,
-    );
+    const hydratedReviewPlain = buildSoTBody();
     const raw = resolvePaidProSignerFinalizeRawCorpus({
       authoritativePaidProReviewPlain: hydratedReviewPlain,
       immutableSourceOfTruthOnly: true,

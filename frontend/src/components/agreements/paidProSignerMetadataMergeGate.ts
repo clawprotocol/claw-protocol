@@ -136,13 +136,11 @@ export function reconcileExecutionBlockToRoleIdentities(
         lines.push(`Name: ${id.representativeName.trim()}`);
       } else if (/^name\s*:/i.test(t)) lines.push(cl);
       else if (/^title\s*:/i.test(t)) lines.push(id.title?.trim() ? `Title: ${id.title.trim()}` : cl);
-      else if (/^email\s+for\s+notice/i.test(t) && id.email?.trim()) {
-        lines.push(`Email for Notice: ${id.email.trim()}`);
-      } else if (/^email\s+for\s+notice/i.test(t)) lines.push(cl);
-      else if (/^address\s+for\s+notice/i.test(t) && id.partyAddress?.trim()) {
-        lines.push(`Address for Notice: ${id.partyAddress.trim()}`);
-      } else if (/^address\s+for\s+notice/i.test(t)) lines.push(cl);
-      else if (/^date\s*:/i.test(t)) lines.push(cl);
+      else if (/^email\s+for\s+notice/i.test(t)) {
+        /* contact authority: strip legacy notice lines */
+      } else if (/^address\s+for\s+notice/i.test(t)) {
+        /* contact authority: strip legacy notice lines */
+      } else if (/^date\s*:/i.test(t)) lines.push(cl);
       else if (/^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+)\s*:/i.test(t)) break;
     }
     if (!lines.some((l) => /^by\s*:/i.test(l.trim()))) {
@@ -153,16 +151,6 @@ export function reconcileExecutionBlockToRoleIdentities(
           : "Name: __________________________",
       );
       lines.push(`Title: ${id.title?.trim() || "_________________________"}`);
-      lines.push(
-        id.email?.trim()
-          ? `Email for Notice: ${id.email.trim()}`
-          : "Email for Notice: __________________________",
-      );
-      lines.push(
-        id.partyAddress?.trim()
-          ? `Address for Notice: ${id.partyAddress.trim()}`
-          : "Address for Notice: ________________________",
-      );
       lines.push("Date: _____________________________");
     }
     blocks.push(lines.join("\n"));

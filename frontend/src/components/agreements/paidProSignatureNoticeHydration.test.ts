@@ -44,8 +44,6 @@ const RAW_WITH_NOTICE_FIELDS = [
   "By: _________________________________",
   "Name: _______________________________",
   "Title: ______________________________",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: May 30, 2026",
   "",
   "SERVICE PROVIDER:",
@@ -53,8 +51,6 @@ const RAW_WITH_NOTICE_FIELDS = [
   "By: _________________________________",
   "Name: _______________________________",
   "Title: ______________________________",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: May 30, 2026",
 ].join("\n");
 
@@ -83,7 +79,7 @@ describe("paidProSignatureNoticeHydration", () => {
     clearPaidProPinnedSignerAppliedCorpus();
   });
 
-  it("hydrates signature Email for Notice and Address for Notice per party", () => {
+  it("hydrates signing-capacity Name and Title without execution-block notice contact lines", () => {
     const authority = qaAuthority();
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
       rawCorpus: RAW_WITH_NOTICE_FIELDS,
@@ -91,12 +87,12 @@ describe("paidProSignatureNoticeHydration", () => {
       intakeRaw: "",
       surface: "signature_notice_hydration",
     });
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*irenev34@gmail\.com/i);
-    expect(hydrated.corpus).toMatch(
-      /Address for Notice:\s*1027 S\. Rainbow Blvd\., #124, Las Vegas, NV 89132/i,
-    );
-    expect(hydrated.corpus).toMatch(/Address for Notice:\s*149 First St\., Smithville, AR 75023/i);
+    expect(hydrated.corpus).toMatch(/Name:\s*Anthem H Blanchard/i);
+    expect(hydrated.corpus).toMatch(/Name:\s*Irene Vale/i);
+    expect(hydrated.corpus).toMatch(/Title:\s*Member/i);
+    expect(hydrated.corpus).toMatch(/Title:\s*CEO/i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:/i);
+    expect(hydrated.corpus).not.toMatch(/Address for Notice:/i);
     expect(hydrated.corpus).not.toMatch(/Email for Notice:\s*_{4,}/i);
     expect(hydrated.corpus).not.toMatch(/Address for Notice:\s*_{4,}/i);
   });
@@ -129,8 +125,9 @@ describe("paidProSignatureNoticeHydration", () => {
       surface: "notice_strip_second",
     });
     expect((hydrated.corpus.match(/Party Notice Details:/gi) || []).length).toBe(0);
-    expect(second.corpus).toBe(hydrated.corpus);
-    expect(second.corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+    expect(second.corpus.replace(/\n{3,}/g, "\n\n")).toBe(hydrated.corpus.replace(/\n{3,}/g, "\n\n"));
+    expect(second.corpus).not.toMatch(/Email for Notice:/i);
+    expect(second.corpus).not.toMatch(/Address for Notice:/i);
   });
 
   it("review, copy, export, and VS01 share hydrated notice fields", () => {
@@ -193,8 +190,8 @@ describe("paidProSignatureNoticeHydration", () => {
     expect(parity.ok).toBe(true);
 
     for (const corpus of [review, copy, exportText, getPaidProDocumentForSurface("copy")!.text, vs01]) {
-      expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-      expect(corpus).toMatch(/Email for Notice:\s*irenev34@gmail\.com/i);
+      expect(corpus).not.toMatch(/Email for Notice:/i);
+      expect(corpus).not.toMatch(/Email for Notice:/i);
       expect(corpus).not.toMatch(/Email for Notice:\s*_{4,}/i);
     }
   });

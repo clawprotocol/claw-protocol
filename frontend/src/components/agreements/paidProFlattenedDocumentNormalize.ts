@@ -8,6 +8,7 @@ import { stripPreWitnessExecutionPollutionFromPrefix } from "./paidProExecutionB
 import { repairGluedSectionHeadingsInText } from "./documentSectionHeadingSplit";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
+import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
@@ -148,6 +149,14 @@ export function preparePaidProReviewDisplayPlain(text: string): {
   if (structure.repaired) {
     out = structure.text;
     repairs.push(...structure.repairs.map((tag) => `section_structure:${tag}`));
+  }
+  const contactAuthority = applyContactAuthorityExecutionBlockIntegrity(out, {
+    source: "preparePaidProReviewDisplayPlain",
+    ensureNoticesClause: false,
+  });
+  if (contactAuthority.repaired) {
+    out = contactAuthority.text;
+    repairs.push(...contactAuthority.repairs.map((tag) => `contact_authority:${tag}`));
   }
   return { text: out, repairs: [...new Set(repairs)] };
 }

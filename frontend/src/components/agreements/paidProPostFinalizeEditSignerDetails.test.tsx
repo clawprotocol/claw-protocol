@@ -235,7 +235,6 @@ describe("post-finalize signer correction re-hydration", () => {
       "",
       `CLIENT: ${RED}`,
       "Name: ________________________________",
-      "Email for Notice: __________________________",
     ].join("\n");
     const correctedUi = authorityPartiesToLiveSignerMetadataUi(authority.parties);
     correctedUi.recipient1Email = "fixed@example.test";

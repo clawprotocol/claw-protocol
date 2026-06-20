@@ -17,7 +17,7 @@ import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
-import { applyPaidProRenderPolish, verifyIntakeEmailsPreserved } from "./paidProRenderPolish";
+import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import {
   PAID_PRO_HARDENING_CLIENT,
@@ -62,7 +62,6 @@ Each party will keep confidential information received from the other parties co
 Texas law governs. Electronic execution via LawDog.`;
 
 const TEST369_INTAKE = TEST369_TRIPARTITE_LABELED_PARTIES_INTAKE;
-const TEST369_INTAKE_EMAILS = ["jlawson@pioneerfreight.com", "legal@summitridgetech.com"];
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
 
@@ -216,17 +215,15 @@ describe("paidPro test369 tripartite execution hydration regression", () => {
     expect(client).toMatch(/^Pioneer Freight Solutions LLC/m);
     expect(fieldInBlock(client, "Name")).toBe("Jennifer Lawson");
     expect(fieldInBlock(client, "Title")).toBe("President");
-    expect(fieldInBlock(client, "Email for Notice")).toBe("jlawson@pioneerfreight.com");
+    expect(client).not.toMatch(/Email for Notice:/i);
     expect(client).not.toMatch(/2110 Crescent Park Drive/i);
     expect(client).not.toMatch(/Michael Carter/i);
 
     expect(serviceProvider).toMatch(/^Summit Ridge Technologies LLC/m);
     expect(serviceProvider).not.toMatch(/Michael Carter/i);
     expect(fieldInBlock(serviceProvider, "Name")).not.toMatch(/Michael Carter/i);
-    expect(fieldInBlock(serviceProvider, "Email for Notice")).toBe("legal@summitridgetech.com");
-    expect(fieldInBlock(serviceProvider, "Address for Notice")).toBe(
-      "2110 Crescent Park Drive, Plano, TX 75024",
-    );
+    expect(serviceProvider).not.toMatch(/Email for Notice:/i);
+    expect(serviceProvider).not.toMatch(/Address for Notice:/i);
 
     expect(analytics).toMatch(/^North Star Data Analytics LLC/m);
     expect(fieldInBlock(analytics, "Name")).toBe("Michael Carter");
@@ -235,20 +232,23 @@ describe("paidPro test369 tripartite execution hydration regression", () => {
     expect(analytics).not.toMatch(/2110 Crescent Park Drive/i);
   });
 
-  it("known intake emails are preserved in accepted Pro corpus", () => {
+  it("intake signer emails remain in authority and execution block stays notice-contact-free", () => {
     const { draft, parties, corpus } = buildTest369AcceptedCorpus();
+    const tail = executionTail(corpus);
+    expect(tail).not.toMatch(/Email for Notice:/i);
+    expect(tail).not.toMatch(/Address for Notice:/i);
+    expect(parties[0]?.signerEmail).toBe("jlawson@pioneerfreight.com");
+    expect(parties[1]?.signerEmail).toBe("legal@summitridgetech.com");
     establishPaidProSourceOfTruth({ text: corpus });
     const reviewPlain = resolvePaidProReviewRenderPlain({
       draft,
       intakeText: TEST369_INTAKE,
       deferSignerMetadataRepair: true,
     });
-    const guard = verifyIntakeEmailsPreserved(TEST369_INTAKE, reviewPlain, TEST369_INTAKE_EMAILS);
-    expect(guard.finalExactEmailCount).toBe(TEST369_INTAKE_EMAILS.length);
-    expect(guard.mutatedEmailCount).toBe(0);
-    expect(reviewPlain).toMatch(/jlawson@pioneerfreight\.com/i);
-    expect(reviewPlain).toMatch(/legal@summitridgetech\.com/i);
-    expect(parties[1]?.signerEmail).toBe("legal@summitridgetech.com");
+    expect(reviewPlain).not.toMatch(/Email for Notice:/i);
+    expect(reviewPlain).not.toMatch(/Address for Notice:/i);
+    expect(executionTail(reviewPlain)).not.toMatch(/jlawson@pioneerfreight\.com/i);
+    expect(executionTail(reviewPlain)).not.toMatch(/legal@summitridgetech\.com/i);
   });
 
   it("free starter governing law contains Texas", () => {

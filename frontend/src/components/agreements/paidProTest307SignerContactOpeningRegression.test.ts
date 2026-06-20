@@ -133,14 +133,12 @@ describe("TEST307 signer contact and opening regression", () => {
     expect(review).toMatch(/Title:\s*CEO/i);
     expect(review).toMatch(/Name:\s*Michael Torres/i);
     expect(review).toMatch(/Title:\s*President/i);
-    expect(review).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-    expect(review).toMatch(/Email for Notice:\s*ivs23@gmail\.com/i);
-    expect(review).toMatch(
-      /Address for Notice:\s*1027 S\. Rainbow Blvd\., #124, Las Vegas, NV 89123/i,
-    );
-    expect(review).toMatch(
-      /Address for Notice:\s*11111 South Incarnation Blvd\., Announcingtown, CT 01349/i,
-    );
+    expect(review).not.toMatch(/Email for Notice:/i);
+    expect(review).not.toMatch(/Address for Notice:/i);
+    const witnessIdx = review.search(/\bIN WITNESS WHEREOF\b/i);
+    const tail = witnessIdx >= 0 ? review.slice(witnessIdx) : review;
+    expect(tail).not.toMatch(/1027 S\. Rainbow Blvd/i);
+    expect(tail).not.toMatch(/11111 South Incarnation Blvd/i);
     expect(review).not.toMatch(/\("party"\)/i);
     expect(title.hasGenericPartyLabels).toBe(false);
     expect(title.hasProfessionalTitle).toBe(true);
@@ -175,8 +173,8 @@ describe("TEST307 signer contact and opening regression", () => {
     expect(hashPaidProCorpus(finalized)).toBe(hashPaidProCorpus(review));
     expect(hashPaidProCorpus(signerSetup)).toBe(hashPaidProCorpus(review));
     for (const corpus of [review, copy, display, finalized, signerSetup]) {
-      expect(corpus).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-      expect(corpus).toMatch(/Address for Notice:\s*11111 South Incarnation Blvd\./i);
+      expect(corpus).not.toMatch(/Email for Notice:/i);
+      expect(corpus).not.toMatch(/Address for Notice:/i);
     }
   });
 
@@ -197,8 +195,17 @@ describe("TEST307 signer contact and opening regression", () => {
     expect(pick.plainText.length).toBeGreaterThan(500);
     expect(pick.audit.candidates[0]?.reason).toMatch(/authoritative_signing_snapshot|paid_pro_review_hydrated/);
     expect(pick.plainText).toMatch(/Sarah Mitchell/i);
-    expect(pick.plainText).toMatch(/anthemhayek@gmail\.com/i);
+    expect(pick.plainText).not.toMatch(/anthemhayek@gmail\.com/i);
+    const witnessIdx = pick.plainText.search(/\bIN WITNESS WHEREOF\b/i);
+    const tail = witnessIdx >= 0 ? pick.plainText.slice(witnessIdx) : pick.plainText;
+    expect(tail).not.toMatch(/anthemhayek@gmail\.com/i);
     expect(pick.plainText).not.toMatch(/\("party"\)/i);
+    const contact = buildPaidProSignerContactOverlayDiagnostic({
+      reviewPlain: pick.plainText,
+      parties: test307Authority().parties,
+      source: "authoritative_signing_snapshot",
+    });
+    expect(contact.signerEmailsPresent).toBe(true);
     expect(hashPaidProCorpus(pick.plainText)).toBe(
       hashPaidProCorpus(resolvePaidProPostFinalizeReviewPlain()),
     );

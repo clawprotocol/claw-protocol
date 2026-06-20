@@ -182,15 +182,11 @@ describe("authoritativePaidProReview", () => {
       "CLIENT:",
       "Blue Canyon Analytics LLC",
       "Name: _________________________",
-      "Email for Notice: __________________________",
-      "Address for Notice: ________________________",
       "Date: May 30, 2026",
       "",
       "SERVICE PROVIDER:",
       "Iron Vale Systems Inc.",
       "Name: _________________________",
-      "Email for Notice: __________________________",
-      "Address for Notice: ________________________",
       "Date: May 30, 2026",
     ].join("\n");
     establishPaidProSourceOfTruth({ text: body, source: "server_full_draft" });
@@ -219,14 +215,14 @@ describe("authoritativePaidProReview", () => {
     expect(hydrated.rejected).toBe(false);
     setPaidProPinnedSignerAppliedCorpus(hydrated.corpus);
     const plain = resolveAuthoritativePaidProReviewPlain();
-    expect(plain).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-    expect(plain).toMatch(/Email for Notice:\s*irenev34@gmail\.com/i);
+    expect(plain).not.toMatch(/Email for Notice:/i);
+    expect(plain).not.toMatch(/Email for Notice:/i);
     expect(plain).not.toMatch(/is This Agreement is between/i);
     expect(plain).not.toMatch(/Date:\s*May\s+30,\s*2026/i);
     expect(plain).not.toMatch(/Email for Notice:\s*_{4,}/i);
     const review = getPaidProDocumentForSurface("review");
     expect(review?.signerMetadataApplied).toBe(true);
-    expect(review?.text).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
+    expect(review?.text).not.toMatch(/Email for Notice:/i);
   });
 
   it("exports paid review chip labels distinct from starter", () => {

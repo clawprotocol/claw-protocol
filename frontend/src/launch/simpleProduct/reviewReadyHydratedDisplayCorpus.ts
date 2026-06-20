@@ -119,18 +119,6 @@ export function corpusHasHydratedSignerNamesTitlesEmails(
   return requiredNames.every((name) => lower.includes(name.toLowerCase()));
 }
 
-function corpusHasRequiredAddressesInExecutionBlock(
-  plain: string,
-  meta: AuthoritativeSigningSnapshotRecipientMetadata | null,
-): boolean {
-  const addresses = requiredPartyAddresses(meta);
-  if (addresses.length === 0) return true;
-  const witnessIdx = plain.search(/\bIN WITNESS WHEREOF\b/i);
-  if (witnessIdx < 0) return false;
-  const tail = plain.slice(witnessIdx).toLowerCase();
-  return addresses.every((addr) => tail.includes(addr.toLowerCase()));
-}
-
 function isBlankSigFieldValue(value: string): boolean {
   const v = value.trim();
   return !v || /^_{2,}$/.test(v);
@@ -144,16 +132,7 @@ export function executionBlockHasBlankMetadataLines(corpus: string): boolean {
   return countBlankExecutionMetadataLines(corpus) > 0;
 }
 
-function countFilledAddressLinesInExecutionBlock(corpus: string): number {
-  const witnessIdx = (corpus || "").search(/\bIN WITNESS WHEREOF\b/i);
-  if (witnessIdx < 0) return 0;
-  const tail = corpus.slice(witnessIdx);
-  return (tail.match(/^address\s+for\s+notices?\s*:\s*(.+)$/gim) ?? []).filter(
-    (line) => !/^address\s+for\s+notices?\s*:\s*(?:_{2,}\s*)?$/i.test(line.trim()),
-  ).length;
-}
-
-/** True when review-track plain text has all required signer fields for both parties. */
+/** True when review-track plain text has signing-capacity fields for both parties (no notice-contact lines). */
 export function reviewTrackExecutionMetadataComplete(plain: string): boolean {
   const body = (plain || "").trim();
   if (body.length < 80) return false;
@@ -163,7 +142,9 @@ export function reviewTrackExecutionMetadataComplete(plain: string): boolean {
   const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
   if (witnessIdx < 0) return false;
   const tail = body.slice(witnessIdx);
-  if (!/address\s+for\s+notices?\s*:/i.test(tail)) return false;
+  if (/email\s+for\s+notices?\s*:/i.test(tail) || /address\s+for\s+notices?\s*:/i.test(tail)) {
+    return false;
+  }
 
   const filledNames = (tail.match(/^name\s*:\s*(.+)$/gim) ?? []).filter(
     (line) => !/^name\s*:\s*(?:_{2,}\s*)?$/i.test(line.trim()),
@@ -171,45 +152,15 @@ export function reviewTrackExecutionMetadataComplete(plain: string): boolean {
   const filledTitles = (tail.match(/^title\s*:\s*(.+)$/gim) ?? []).filter(
     (line) => !/^title\s*:\s*(?:_{2,}\s*)?$/i.test(line.trim()),
   ).length;
-  const filledEmails = (tail.match(/^email\s+for\s+notices?\s*:\s*(.+)$/gim) ?? []).filter(
-    (line) => !/^email\s+for\s+notices?\s*:\s*(?:_{2,}\s*)?$/i.test(line.trim()),
-  ).length;
 
-  return (
-    filledNames >= 2 &&
-    filledTitles >= 2 &&
-    filledEmails >= 2 &&
-    countFilledAddressLinesInExecutionBlock(body) >= 2 &&
-    countBlankAddressLinesInExecutionBlock(body) === 0
-  );
+  return filledNames >= 2 && filledTitles >= 2;
 }
 
-/** True when signer names/titles/emails are present but address lines are blank or omitted. */
+/** Contact authority: notice addresses live in metadata/Notices clause, not execution blocks. */
 export function executionBlockMissingAddressCarryover(
-  plain: string,
-  meta: AuthoritativeSigningSnapshotRecipientMetadata | null,
+  _plain: string,
+  _meta: AuthoritativeSigningSnapshotRecipientMetadata | null,
 ): boolean {
-  const body = (plain || "").trim();
-  if (!body || countPaidProExecutionBlocks(body) !== 1) return false;
-
-  const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
-  if (witnessIdx < 0) return true;
-  const tail = body.slice(witnessIdx);
-  const filledNames = (tail.match(/^name\s*:\s*(.+)$/gim) ?? []).filter(
-    (line) => !/^name\s*:\s*(?:_{2,}\s*)?$/i.test(line.trim()),
-  ).length;
-  const hasNameHydration =
-    filledNames >= 2 || (meta != null && corpusHasHydratedSignerNamesTitlesEmails(body, meta));
-  if (!hasNameHydration) return false;
-
-  if (!/address\s+for\s+notices?\s*:/i.test(tail)) return true;
-  if (countBlankAddressLinesInExecutionBlock(body) > 0) return true;
-  if (countFilledAddressLinesInExecutionBlock(body) < 2) return true;
-
-  const addresses = requiredPartyAddresses(meta);
-  if (addresses.length >= 2 && !corpusHasRequiredAddressesInExecutionBlock(body, meta)) {
-    return true;
-  }
   return false;
 }
 
@@ -229,15 +180,7 @@ export function corpusHasFullyHydratedExecutionBlock(corpus: string): boolean {
   if (body.length < 80) return false;
   if (countPaidProExecutionBlocks(body) !== 1) return false;
   if (executionBlockHasBlankMetadataLines(body)) return false;
-  const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
-  if (witnessIdx < 0) return false;
-  const tail = body.slice(witnessIdx);
-  const filledNames = (tail.match(/^name\s*:\s*(.+)$/gim) ?? []).filter(
-    (line) => !/^name\s*:\s*(?:_{2,}\s*)?$/i.test(line.trim()),
-  ).length;
-  if (filledNames < 2) return false;
-  if (!/address\s+for\s+notices?\s*:/i.test(tail)) return false;
-  return countFilledAddressLinesInExecutionBlock(body) >= 2;
+  return reviewTrackExecutionMetadataComplete(body);
 }
 
 type PartyExecutionFields = {
@@ -805,11 +748,6 @@ export function corpusHasHydratedSignerMetadata(
   if (requiredNames.length < 2) return false;
   if (!requiredNames.every((name) => lower.includes(name.toLowerCase()))) return false;
 
-  const addresses = requiredPartyAddresses(meta);
-  if (addresses.length > 0 && !corpusHasRequiredAddressesInExecutionBlock(body, meta)) {
-    return false;
-  }
-
   if (options?.reviewTrackSurface && !reviewTrackExecutionMetadataComplete(body)) {
     return false;
   }
@@ -877,10 +815,7 @@ export function applyReviewReadySignerExecutionHydration(
   if (hydration.applied) {
     out = hydration.corpus;
   } else if (
-    countBlankSignerMetadataLinesInExecutionBlock(out) > 0 ||
-    countBlankAddressLinesInExecutionBlock(out) > 0 ||
-    (requiredPartyAddresses(recipientMeta).length > 0 &&
-      !corpusHasRequiredAddressesInExecutionBlock(out, recipientMeta))
+    countBlankSignerMetadataLinesInExecutionBlock(out) > 0
   ) {
     const retry = hydratePaidProExecutionBlockWithSignerMetadata(base, recipientMeta, {
       acceptedCorpus: base,

@@ -6,6 +6,7 @@
 import { AGREEMENT_PREVIEW_ESIGN_NOTICE } from "./agreementPreviewConstants";
 import { repairGluedSectionHeadingsInText, splitGluedSectionHeadingFromLine } from "./documentSectionHeadingSplit";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
+import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
 import { repairInlineCollapsedStarterLayout } from "./starterPreviewFormatting";
 
 export type DocumentQualityFloorResult = {
@@ -160,6 +161,15 @@ export function applyDocumentQualityFloor(text: string): DocumentQualityFloorRes
   working = structure.text;
   if (structure.repaired) {
     repairs.push(...structure.repairs.map((tag) => `section_structure:${tag}`));
+  }
+
+  const contactAuthority = applyContactAuthorityExecutionBlockIntegrity(working, {
+    source: "document_quality_floor",
+    ensureNoticesClause: false,
+  });
+  working = contactAuthority.text;
+  if (contactAuthority.repaired) {
+    repairs.push(...contactAuthority.repairs.map((tag) => `contact_authority:${tag}`));
   }
 
   working = working.replace(/\n{3,}/g, "\n\n").trimEnd();

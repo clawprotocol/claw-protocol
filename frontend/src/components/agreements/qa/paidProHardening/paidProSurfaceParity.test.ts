@@ -51,7 +51,7 @@ describe("paidProHardening surface parity", () => {
     const reviewPlain = resolvePaidProHardeningSurfaces(fixture).reviewPlain;
     const hydratedResolver = resolvePaidProFinalHydratedCorpusForSurface("review", opts).text;
     expect(reviewPlain).toMatch(/collectively as the ["']Parties/i);
-    expect(hydratedResolver).toMatch(/Email for Notice:\s*ivee23@me\.com/i);
+    expect(hydratedResolver).not.toMatch(/Email for Notice:/i);
     expect(fingerprintPaidProAgreementOperativeBody(hydratedResolver)).toBe(
       fingerprintPaidProAgreementOperativeBody(reviewPlain),
     );

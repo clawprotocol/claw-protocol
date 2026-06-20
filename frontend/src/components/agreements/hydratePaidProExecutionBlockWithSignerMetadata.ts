@@ -23,6 +23,7 @@ import {
   repairExecutionBlockEntityHeadingLines,
   auditExecutionBlockDisplayIntegrity,
 } from "./paidProExecutionBlockEntityHeading";
+import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
 
 const PARTY_SECTION_HEADING_RE =
   /^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*(.*)$/i;
@@ -135,29 +136,8 @@ function hydrateFieldLine(
     if (!title && isBlankSigValue(value)) missing.push(`title:${party.partyIndex}`);
     return { line, hydrated: 0, missing };
   }
-  if (/^email\s+for\s+notice/i.test(field)) {
-    const email = identity.email?.trim() ?? "";
-    const label = /^email\s+for\s+notices\s*:/i.test(trimmed) ? "Email for Notices" : "Email for Notice";
-    if (email && (overwrite || isBlankSigValue(value))) {
-      const next = fillSigFieldLine(line, label, email);
-      if (next.trim() === trimmed) return { line, hydrated: 0, missing };
-      return { line: next, hydrated: 1, missing };
-    }
-    if (!email && isBlankSigValue(value)) missing.push(`email:${party.partyIndex}`);
-    return { line, hydrated: 0, missing };
-  }
-  if (/^address\s+for\s+notice/i.test(field)) {
-    const address = identity.partyAddress?.trim() ?? "";
-    const label = /^address\s+for\s+notices\s*:/i.test(trimmed)
-      ? "Address for Notices"
-      : "Address for Notice";
-    if (address && (overwrite || isBlankSigValue(value))) {
-      const next = fillSigFieldLine(line, label, address);
-      if (next.trim() === trimmed) return { line, hydrated: 0, missing };
-      return { line: next, hydrated: 1, missing };
-    }
-    if (!address && isBlankSigValue(value)) missing.push(`address:${party.partyIndex}`);
-    return { line, hydrated: 0, missing };
+  if (/^email\s+for\s+notice/i.test(field) || /^address\s+for\s+notice/i.test(field)) {
+    return { line: "", hydrated: 0, missing: [] };
   }
   return { line, hydrated: 0, missing };
 }
@@ -247,6 +227,14 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
 
     if (currentParty && SIG_FIELD_RE.test(trimmed)) {
       const hydrated = hydrateFieldLine(lines[i], currentParty.party, currentParty.identity, opts);
+      if (!hydrated.line.trim()) {
+        lines.splice(i, 1);
+        i -= 1;
+        fieldsHydrated += hydrated.hydrated;
+        missingFields.push(...hydrated.missing);
+        offset += 0;
+        continue;
+      }
       if (hydrated.hydrated > 0) {
         lines[i] = hydrated.line;
         fieldsHydrated += hydrated.hydrated;
@@ -257,7 +245,10 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
     offset += lines[i].length + 1;
   }
 
-  const normalized = lines.join("\n");
+  const normalized = applyContactAuthorityExecutionBlockIntegrity(lines.join("\n"), {
+    source: "hydrate_paid_pro_execution_block",
+    ensureNoticesClause: false,
+  }).text;
   const integrity = auditExecutionBlockDisplayIntegrity({
     text: normalized,
     signerMetadata: recipientMetadata,
@@ -318,7 +309,6 @@ export function logPaidProSignerMetadataHydrationMissing(payload: {
 
 const BLANK_SIG_NAME_RE = /^name\s*:\s*(?:_{2,}\s*)?$/im;
 const BLANK_SIG_TITLE_RE = /^title\s*:\s*(?:_{2,}\s*)?$/im;
-const BLANK_SIG_EMAIL_RE = /^email\s+for\s+notices?\s*:\s*(?:_{2,}\s*)?$/im;
 
 /** Count blank required signer metadata lines (Name/Title/Email when authority supplies values). */
 export function countBlankSignerMetadataLinesInExecutionBlock(
@@ -345,10 +335,6 @@ export function countBlankSignerMetadataLinesInExecutionBlock(
     }
     if (/^title\s*:/i.test(trimmed) && party?.signerTitle.trim()) {
       if (/^title\s*:\s*(?:_{2,}\s*)?$/i.test(trimmed)) count += 1;
-      continue;
-    }
-    if (/^email\s+for\s+notices?\s*:/i.test(trimmed) && party?.signerEmail.trim()) {
-      if (/^email\s+for\s+notices?\s*:\s*(?:_{2,}\s*)?$/i.test(trimmed)) count += 1;
     }
   }
 
@@ -357,7 +343,6 @@ export function countBlankSignerMetadataLinesInExecutionBlock(
   let legacy = 0;
   if (BLANK_SIG_NAME_RE.test(tail)) legacy += (tail.match(BLANK_SIG_NAME_RE) || []).length;
   if (BLANK_SIG_TITLE_RE.test(tail)) legacy += (tail.match(BLANK_SIG_TITLE_RE) || []).length;
-  if (BLANK_SIG_EMAIL_RE.test(tail)) legacy += (tail.match(BLANK_SIG_EMAIL_RE) || []).length;
   return legacy;
 }
 

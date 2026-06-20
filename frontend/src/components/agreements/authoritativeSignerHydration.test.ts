@@ -37,8 +37,6 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
-  "Email for Notice:",
-  "Address for Notice:",
   "Date:",
   "",
   "SERVICE PROVIDER:",
@@ -46,8 +44,6 @@ const RAW_BODY = [
   "By: _________________________________",
   "Name:",
   "Title:",
-  "Email for Notice:",
-  "Address for Notice:",
   "Date:",
 ].join("\n");
 
@@ -115,7 +111,7 @@ describe("authoritativeSignerHydration", () => {
     expect(ironTail).not.toMatch(/Anthem H Blanchard/);
   });
 
-  it("hydrates Email for Notice in execution block without Party Notice Details body section", () => {
+  it("hydrates signing-capacity fields without Party Notice Details or execution-block notice lines", () => {
     const authority = buildLivePaidProSignerMetadataAuthority({
       partyCount: 2,
       recipient1Name: BLUE_CANYON,
@@ -143,9 +139,9 @@ describe("authoritativeSignerHydration", () => {
     });
     expect(hydrated.partyNoticeApplied).toBe(false);
     expect(hydrated.corpus).not.toMatch(/Party Notice Details:/i);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*anthem@test\.com/i);
-    expect(hydrated.corpus).toMatch(/Email for Notice:\s*ira@test\.com/i);
-    expect(hydrated.corpus).toMatch(/Address for Notice:\s*100 Main St/i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:/i);
+    expect(hydrated.corpus).not.toMatch(/Email for Notice:/i);
+    expect(hydrated.corpus).not.toMatch(/Address for Notice:/i);
     const sigTail = hydrated.corpus.split(/IN WITNESS WHEREOF/i)[1] ?? "";
     const spSig = sigTail.split(/SERVICE PROVIDER:/i)[1] ?? "";
     expect(spSig).not.toMatch(/Address for Notice:\s*100 Main St/i);

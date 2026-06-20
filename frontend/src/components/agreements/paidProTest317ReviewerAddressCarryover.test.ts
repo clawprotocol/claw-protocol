@@ -29,8 +29,6 @@ import {
 } from "./premiumPartyNamesHandoff";
 import { resolveReviewFirstDisplayCorpus } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
 import {
-  countBlankAddressLinesInExecutionBlock,
-  extractPartyAddressesFromExecutionBlockCorpus,
   resetPaidProTest315ReviewCopyHydrationLogsForTests,
   resolveReviewReadyRecipientMetadata,
 } from "../../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
@@ -56,16 +54,12 @@ function buildFullyHydratedBody() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    "Email for Notice: bca894@gmail.com",
-    `Address for Notice: ${BLUE_ADDRESS}`,
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    "Email for Notice: fdg34@gmail.com",
-    `Address for Notice: ${IRON_ADDRESS}`,
     "Date: _____________________________",
   ].join("\n");
 }
@@ -85,14 +79,12 @@ function buildReviewerRoutePartialBody() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    "Email for Notice: bca894@gmail.com",
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    "Email for Notice: fdg34@gmail.com",
     "Date: _____________________________",
   ].join("\n");
 }
@@ -165,10 +157,7 @@ function armReviewerRouteRegressionFixture() {
 
   createAuthoritativeSigningSnapshot({
     corpus: fullHydrated,
-    signerMetadata: {
-      ...authorityPartiesToRecipientMetadata(authority.parties),
-      partyAddresses: ["", ""],
-    },
+    signerMetadata: authorityPartiesToRecipientMetadata(authority.parties),
     partyManifest: buildCanonicalFinalPartyManifestFromAuthority(authority),
     signatureBlockModel: buildCanonicalSignerManifest({ identities, signFirst: true }),
   });
@@ -185,11 +174,10 @@ function expectFullyHydratedExecutionBlock(text: string) {
   expect(text).toMatch(/\bCEO\b/);
   expect(text).toMatch(/Michael Torres/i);
   expect(text).toMatch(/President/i);
-  expect(text).toMatch(/bca894@gmail\.com/i);
-  expect(text).toMatch(/fdg34@gmail\.com/i);
-  expect(text).toContain(BLUE_ADDRESS);
-  expect(text).toContain(IRON_ADDRESS);
-  expect(countBlankAddressLinesInExecutionBlock(text)).toBe(0);
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : text;
+  expect(tail).not.toMatch(/Email for Notice:/i);
+  expect(tail).not.toMatch(/Address for Notice:/i);
   expect(countBlankSignerMetadataLinesInExecutionBlock(text)).toBe(0);
   expect(countPaidProExecutionBlocks(text)).toBe(1);
 }
@@ -209,16 +197,7 @@ describe("Test317 reviewer address carryover", () => {
     sessionStorage.clear();
   });
 
-  it("extracts addresses from finalized /app/create corpus by legal entity name", () => {
-    const full = buildFullyHydratedBody();
-    const extracted = extractPartyAddressesFromExecutionBlockCorpus(full);
-    expect(extracted.size).toBeGreaterThanOrEqual(2);
-    const values = [...extracted.values()];
-    expect(values.some((v) => v.includes("1027 S. Rainbow"))).toBe(true);
-    expect(values.some((v) => v.includes("24 Rete Ave"))).toBe(true);
-  });
-
-  it("merges addresses from pinned full corpus when handoff lacks partyAddress", () => {
+  it("merges party addresses from signing snapshot metadata when handoff lacks partyAddress", () => {
     armReviewerRouteRegressionFixture();
     armHandoffWithoutAddresses();
     const draft = blueIronDraft();
@@ -229,15 +208,20 @@ describe("Test317 reviewer address carryover", () => {
     expect(meta?.partyAddresses?.[1]).toContain("24 Rete Ave");
   });
 
-  it("Review Link Ready includes both Address for Notice lines", () => {
+  it("Review Link Ready preserves signing-capacity hydration and metadata addresses", () => {
     armReviewerRouteRegressionFixture();
     armHandoffWithoutAddresses();
     const display = resolveReviewFirstDisplayCorpus(blueIronDraft(), "owner_done");
     expect(display?.source).toBe("authoritative_signing_snapshot");
     expectFullyHydratedExecutionBlock(display?.text ?? "");
+    const meta = resolveReviewReadyRecipientMetadata(blueIronDraft(), {
+      corpusHints: [buildFullyHydratedBody()],
+    });
+    expect(meta?.partyAddresses?.[0]).toContain("1027 S. Rainbow");
+    expect(meta?.partyAddresses?.[1]).toContain("24 Rete Ave");
   });
 
-  it("Party 1 reviewer page includes both addresses", () => {
+  it("Party 1 reviewer page preserves signing-capacity hydration", () => {
     armReviewerRouteRegressionFixture();
     armHandoffWithoutAddresses();
     const display = resolveReviewFirstDisplayCorpus(blueIronDraft(), "reviewer");

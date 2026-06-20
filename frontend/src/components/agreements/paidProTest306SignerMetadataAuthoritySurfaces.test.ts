@@ -124,8 +124,8 @@ describe("Test306 signer metadata authority across surfaces", () => {
     const copy = getPaidProDocumentForSurface("copy", opts)!.text;
     expect(review).toMatch(/Name:\s*Anthem H Blanchard/i);
     expect(copy).toBe(review);
-    expect(review).toMatch(/Email for Notice:\s*anthemhayek@gmail\.com/i);
-    expect(review).toMatch(/Address for Notice:\s*1027 S\. Rainbow Blvd\./i);
+    expect(review).not.toMatch(/Email for Notice:/i);
+    expect(review).not.toMatch(/Address for Notice:/i);
   });
 
   it("pinned corpus fallback preserves signer metadata on copy and export surfaces", () => {
@@ -143,7 +143,7 @@ describe("Test306 signer metadata authority across surfaces", () => {
     expect(display).toBe(review);
     expect(finalized).toBe(copy);
     expect(signerSetup).toMatch(/Name:\s*Anthem H Blanchard/i);
-    expect(signerSetup).toMatch(/Email for Notice:\s*ivee23@me\.com/i);
+    expect(signerSetup).not.toMatch(/Email for Notice:/i);
 
     const parity = buildPaidProFinalDisplayCopyParityPayload({
       ...opts,

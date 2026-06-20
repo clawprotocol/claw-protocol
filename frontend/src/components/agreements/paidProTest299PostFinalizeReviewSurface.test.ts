@@ -47,16 +47,12 @@ const FREEZE_BODY = [
   "By: _________________________________",
   "Name: ________________________________",
   "Title: ________________________________",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: _____________________________",
   "",
   `PARTY: ${IRON}`,
   "By: _________________________________",
   "Name: ________________________________",
   "Title: ________________________________",
-  "Email for Notice: __________________________",
-  "Address for Notice: ________________________",
   "Date: _____________________________",
 ].join("\n");
 
@@ -127,8 +123,8 @@ describe("Test299 post-finalize review surface hydration + actions", () => {
     expect(snapshot).toMatch(/Name:\s*Michael Torres/i);
     expect(snapshot).toMatch(/Title:\s*CEO/i);
     expect(snapshot).toMatch(/Title:\s*President/i);
-    expect(snapshot).toMatch(/Email for Notice:\s*sm9876@gmail\.com/i);
-    expect(snapshot).toMatch(/Email for Notice:\s*ivs34@me\.com/i);
+    expect(snapshot).not.toMatch(/Email for Notice:/i);
+    expect(snapshot).not.toMatch(/Email for Notice:/i);
     expect(countBlankSignerMetadataLinesInExecutionBlock(snapshot)).toBe(0);
   });
 

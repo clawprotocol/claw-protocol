@@ -236,12 +236,8 @@ function buildTripartiteWitnessExecutionBlocks(labeledBlocks: readonly LabeledPa
       "By: ______________________________",
       `Name: ${block.signerName || "______________________________"}`,
       `Title: ${block.signerTitle || "______________________________"}`,
-      `Email for Notice: ${block.signerEmail || "______________________________"}`,
+      "Date: ______________________________",
     ];
-    if (block.address) {
-      lines.push(`Address for Notice: ${block.address}`);
-    }
-    lines.push("Date: ______________________________");
     return lines.join("\n");
   });
 }
@@ -345,7 +341,11 @@ export function buildTripartitePremiumPostCheckoutStitchedBody(
     "Except for breaches of confidentiality, fraud, or willful misconduct, neither Party is liable for indirect or consequential damages. Direct damages are limited to amounts paid under this Agreement in the twelve (12) months preceding the claim, except where a higher cap is required by law.",
     "",
     `${nextSection + 3}. NOTICES`,
-    "Notices may be delivered by email to the addresses the Parties designate in the signature blocks or in a written notice of address change.",
+    "Notices.",
+    "",
+    "Notices under this Agreement must be in writing and may be delivered by email, nationally recognized overnight courier, certified mail, or any other method the parties later approve in writing. A notice sent by email is effective when sent, provided the sender does not receive an automated delivery failure notice. A notice sent by courier or certified mail is effective when delivered or when delivery is refused.",
+    "",
+    "Unless a party designates a different notice address in writing, email notices may be sent to the email address that party provides through the LawDog signing process. Mailing notices may be sent to the address that party provides through the LawDog signing process or later designates in writing.",
     "",
     `${nextSection + 4}. MISCELLANEOUS`,
     "This Agreement constitutes the entire understanding among the Parties regarding the subject matter. Amendments must be in writing and signed by all Parties. If any provision is unenforceable, the remainder stays in effect.",

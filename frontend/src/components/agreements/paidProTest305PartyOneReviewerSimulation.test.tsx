@@ -75,16 +75,12 @@ function buildCorpus() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    "Email for Notice: BCA45@me.com",
-    "Address for Notice: 23 Edge St.",
     "Date: _____________________________",
     "",
     `PARTY: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    "Email for Notice: Huntme45@me.com",
-    "Address for Notice: 345 Fist Ave.",
     "Date: _____________________________",
   ].join("\n");
   const authority = buildLivePaidProSignerMetadataAuthority({

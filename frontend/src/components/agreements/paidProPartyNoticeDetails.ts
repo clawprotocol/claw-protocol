@@ -3,16 +3,18 @@
  * Idempotent insert near Notices (Section 11) or before signature blocks.
  */
 
-import { findSignatureRegionStart, signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
+import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import {
-  authorityPartiesToCanonicalPartyIdentities,
   partyDisplayRoleLabelForAuthorityParty,
   type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
-import { resolvePartyIndexForSignatureLine } from "./guidedDealCompletion/signerPartyIdentity";
 import { resolveCanonicalPartyLegalNameForIndex } from "./canonicalPartyLegalNameSanitizer";
+import {
+  applyContactAuthorityExecutionBlockIntegrity,
+  stripExecutionBlockContactContamination,
+} from "./contactAuthorityExecutionBlockIntegrity";
 
 export const PARTY_NOTICE_DETAILS_HEADING = "Party Notice Details:";
 
@@ -178,71 +180,19 @@ export function applyPartyNoticeDetailsToCorpus(
   };
 }
 
-const PARTY_BLOCK_HEADING_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:/i;
-const SIG_FIELD_LINE_RE =
-  /^(?:By|Name|Title|Date|Email\s+for\s+Notices?|Address\s+for\s+Notices?)\s*:/i;
-const ENTITY_SUFFIX_LINE_RE =
-  /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
-
 const BLANK_SIGNATURE_NOTICE_EMAIL_RE = /email\s+for\s+notices?\s*:\s*_{4,}/i;
 const BLANK_SIGNATURE_NOTICE_ADDRESS_RE = /address\s+for\s+notices?\s*:\s*_{4,}/i;
 
 /**
- * Insert Email/Address for Notice placeholder lines after Title when a party block omits them.
- * Required before contact hydration when server SoT blocks only include Name/Title/Date.
+ * Contact authority: remove legacy Email/Address for Notice lines from execution blocks.
+ * Never inserts notice placeholders into signature regions.
  */
 export function ensureExecutionBlockNoticeContactFieldLines(corpus: string): {
   text: string;
   inserted: number;
 } {
-  const marker = signaturePatchStartIndex(corpus);
-  const lines = (corpus || "").replace(/\r\n/g, "\n").split("\n");
-  let inserted = 0;
-  let offset = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    if (offset < marker) {
-      offset += (lines[i] ?? "").length + 1;
-      continue;
-    }
-    const trimmed = (lines[i] ?? "").trim();
-    if (!/^title\s*:/i.test(trimmed)) continue;
-
-    let hasEmail = false;
-    let hasAddress = false;
-    let dateIdx = -1;
-    for (let k = i + 1; k < lines.length; k++) {
-      const t = (lines[k] ?? "").trim();
-      if (!t) continue;
-      if (PARTY_BLOCK_HEADING_RE.test(t)) break;
-      if (/^email\s+for\s+notice/i.test(t)) hasEmail = true;
-      if (/^address\s+for\s+notice/i.test(t)) hasAddress = true;
-      if (/^date\s*:/i.test(t)) {
-        dateIdx = k;
-        break;
-      }
-      if (SIG_FIELD_LINE_RE.test(t) && !/^title\s*:/i.test(t)) continue;
-      if (!SIG_FIELD_LINE_RE.test(t) && ENTITY_SUFFIX_LINE_RE.test(t)) break;
-    }
-
-    const indent = lines[i].match(/^\s*/)?.[0] ?? "";
-    const toInsert: string[] = [];
-    if (!hasEmail) {
-      toInsert.push(`${indent}Email for Notice: __________________________`);
-    }
-    if (!hasAddress) {
-      toInsert.push(`${indent}Address for Notice: ________________________`);
-    }
-    if (!toInsert.length) continue;
-
-    const insertAt = dateIdx >= 0 ? dateIdx : i + 1;
-    lines.splice(insertAt, 0, ...toInsert);
-    inserted += toInsert.length;
-    i += toInsert.length;
-  }
-
-  if (inserted === 0) return { text: corpus, inserted: 0 };
-  return { text: lines.join("\n"), inserted };
+  const stripped = stripExecutionBlockContactContamination(corpus);
+  return { text: stripped.text, inserted: 0 };
 }
 
 export function corpusHasBlankSignatureNoticePlaceholders(corpus: string): boolean {
@@ -253,55 +203,21 @@ export function corpusHasBlankSignatureNoticePlaceholders(corpus: string): boole
 }
 
 /**
- * Fill signature-block Email/Address for Notice lines from signer metadata authority.
+ * Contact authority: strip signature-block notice/contact lines (never hydrate contact into execution blocks).
  */
 export function applySignatureNoticeContactFieldsToCorpus(
   corpus: string,
-  parties: readonly PaidProSignerMetadataParty[],
-  roleContext?: PaidProPartyRoleContext | null,
+  _parties: readonly PaidProSignerMetadataParty[],
+  _roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; applied: boolean; replacements: number } {
-  const hasContact = parties.some((p) => p.signerEmail.trim() || p.partyAddress.trim());
-  if (!hasContact) {
-    return { text: corpus, applied: false, replacements: 0 };
-  }
-  let working = ensureExecutionBlockNoticeContactFieldLines(corpus).text;
-  const fieldInsertions = working !== corpus ? 1 : 0;
-  const identities = authorityPartiesToCanonicalPartyIdentities(parties, roleContext);
-  const marker = signaturePatchStartIndex(working);
-  const lines = working.replace(/\r\n/g, "\n").split("\n");
-  let replacements = 0;
-  let offset = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (offset < marker) {
-      offset += lines[i].length + 1;
-      continue;
-    }
-    const trimmed = lines[i].trim();
-    if (/^email\s+for\s+notices?\s*:/i.test(trimmed)) {
-      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
-      const email = identities[partyIndex]?.email?.trim() ?? "";
-      if (email && (/_{4,}/.test(trimmed) || /^email\s+for\s+notices?\s*:\s*$/i.test(trimmed))) {
-        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
-        const label = /^email\s+for\s+notices\s*:/i.test(trimmed) ? "Email for Notices" : "Email for Notice";
-        lines[i] = `${indent}${label}: ${email}`;
-        replacements += 1;
-      }
-    }
-    if (/^address\s+for\s+notices?\s*:/i.test(trimmed)) {
-      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
-      const address = identities[partyIndex]?.partyAddress?.trim() ?? "";
-      if (address && (/_{4,}/.test(trimmed) || /^address\s+for\s+notices?\s*:\s*$/i.test(trimmed))) {
-        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
-        const label = /^address\s+for\s+notices\s*:/i.test(trimmed) ? "Address for Notices" : "Address for Notice";
-        lines[i] = `${indent}${label}: ${address}`;
-        replacements += 1;
-      }
-    }
-  }
+  const integrity = applyContactAuthorityExecutionBlockIntegrity(corpus, {
+    source: "signature_notice_contact_strip",
+    ensureNoticesClause: false,
+  });
   return {
-    text: lines.join("\n"),
-    applied: replacements > 0 || fieldInsertions > 0,
-    replacements,
+    text: integrity.text,
+    applied: integrity.repaired,
+    replacements: integrity.repairs.length,
   };
 }
 

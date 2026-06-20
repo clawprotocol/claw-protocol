@@ -60,16 +60,12 @@ function buildFullyHydratedBody() {
     "By: _________________________________",
     "Name: Sarah Mitchell",
     "Title: CEO",
-    `Email for Notice: ${BLUE_EMAIL}`,
-    `Address for Notice: ${BLUE_ADDRESS}`,
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: Michael Torres",
     "Title: President",
-    `Email for Notice: ${IRON_EMAIL}`,
-    `Address for Notice: ${IRON_ADDRESS}`,
     "Date: _____________________________",
   ].join("\n");
 }
@@ -89,16 +85,12 @@ function buildReviewerRouteBlankMetadataBody() {
     "By: _________________________________",
     "Name: _____________________________",
     "Title: ____________________________",
-    "Email for Notice: __________________",
-    "Address for Notice: ________________",
     "Date: _____________________________",
     "",
     `SERVICE PROVIDER: ${IRON}`,
     "By: _________________________________",
     "Name: _____________________________",
     "Title: ____________________________",
-    "Email for Notice: __________________",
-    "Address for Notice: ________________",
     "Date: _____________________________",
   ].join("\n");
 }
@@ -165,8 +157,8 @@ function armBlankMetadataRegressionFixture() {
       partyAddresses: ["", ""],
       recipient1Name: BLUE,
       recipient2Name: IRON,
-      recipient1Email: "",
-      recipient2Email: "",
+      recipient1Email: BLUE_EMAIL,
+      recipient2Email: IRON_EMAIL,
       extraPartyReviewEmails: [],
     },
     partyManifest: buildCanonicalFinalPartyManifestFromAuthority(authority),
@@ -185,10 +177,10 @@ function expectFullyHydratedExecutionBlock(text: string) {
   expect(text).toMatch(/\bCEO\b/);
   expect(text).toMatch(/Michael Torres/i);
   expect(text).toMatch(/President/i);
-  expect(text).toMatch(new RegExp(BLUE_EMAIL.replace(".", "\\.")));
-  expect(text).toMatch(new RegExp(IRON_EMAIL.replace(".", "\\.")));
-  expect(text).toContain(BLUE_ADDRESS);
-  expect(text).toContain(IRON_ADDRESS);
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : text;
+  expect(tail).not.toMatch(/Email for Notice:/i);
+  expect(tail).not.toMatch(/Address for Notice:/i);
   expect(countBlankExecutionMetadataLines(text)).toBe(0);
   expect(countBlankSignerMetadataLinesInExecutionBlock(text)).toBe(0);
   expect(countPaidProExecutionBlocks(text)).toBe(1);
@@ -227,7 +219,7 @@ describe("Test318 reviewer metadata carryover", () => {
     expectFullyHydratedExecutionBlock(spliced);
   });
 
-  it("resolves full metadata from pinned corpus when handoff and snapshot metadata are blank", () => {
+  it("resolves signing-capacity metadata from pinned corpus when handoff and snapshot signer fields are blank", () => {
     armBlankMetadataRegressionFixture();
     armHandoffWithBlankSignerFields();
     const draft = blueIronDraft();
@@ -240,8 +232,8 @@ describe("Test318 reviewer metadata carryover", () => {
     expect(meta?.partySignerTitles?.[1]).toBe("President");
     expect(meta?.recipient1Email).toBe(BLUE_EMAIL);
     expect(meta?.recipient2Email).toBe(IRON_EMAIL);
-    expect(meta?.partyAddresses?.[0]).toContain("Firestane");
-    expect(meta?.partyAddresses?.[1]).toContain("Tree Trunk");
+    expect(meta?.partyAddresses?.[0] ?? "").toBe("");
+    expect(meta?.partyAddresses?.[1] ?? "").toBe("");
   });
 
   it("applyReviewReadyMetadataBackfill replaces blank execution block from finalized source", () => {
@@ -289,7 +281,7 @@ describe("Test318 reviewer metadata carryover", () => {
     expectFullyHydratedExecutionBlock(copyText);
   });
 
-  it("blank handoff metadata cannot overwrite nonblank finalized metadata", () => {
+  it("blank handoff metadata cannot overwrite nonblank snapshot contact metadata", () => {
     armBlankMetadataRegressionFixture();
     armHandoffWithBlankSignerFields();
     const meta = resolveReviewReadyRecipientMetadata(blueIronDraft(), {
