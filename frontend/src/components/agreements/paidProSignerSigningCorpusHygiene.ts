@@ -13,9 +13,11 @@ import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNorma
 import {
   applySignatureNoticeContactFieldsToCorpus,
   corpusHasPartyNoticeDetails,
+  ensureOperativeIfToNoticeDelivery,
   stripExistingPartyNoticeDetails,
 } from "./paidProPartyNoticeDetails";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
+import { isOperativeIfToNoticeStanzaHeading } from "./paidProPartyNoticeDetails";
 
 const PARTY_NOTICE_HEADING_RE = /^\s*Party Notice Details:\s*$/i;
 const PARTY_NUMBER_HEADING_RE = /^\s*Party\s+(\d+)\s*:\s*$/i;
@@ -74,6 +76,26 @@ export function stripPaidProSignerSummaryBlocksFromCorpus(corpus: string): {
       while (j < lines.length && (lines[j] ?? "").trim()) j += 1;
       removed += 1;
       i = j;
+      continue;
+    }
+    if (isOperativeIfToNoticeStanzaHeading(trimmed)) {
+      out.push(lines[i] ?? "");
+      i += 1;
+      while (i < lines.length) {
+        const stanzaLine = (lines[i] ?? "").trim();
+        if (!stanzaLine) {
+          out.push(lines[i] ?? "");
+          i += 1;
+          break;
+        }
+        if (isOperativeIfToNoticeStanzaHeading(stanzaLine)) break;
+        if (/^(?:CLIENT|SERVICE\s+PROVIDER)\s*:/i.test(stanzaLine)) break;
+        if (PARTY_NUMBER_HEADING_RE.test(stanzaLine)) break;
+        if (PARTY_NOTICE_HEADING_RE.test(stanzaLine)) break;
+        if (/^\d+(?:\.\d+)?\.\s+\w/.test(stanzaLine)) break;
+        out.push(lines[i] ?? "");
+        i += 1;
+      }
       continue;
     }
     if (PARTY_NUMBER_HEADING_RE.test(trimmed) || blockHasNoticeStyleSignerLines(lines, i)) {
@@ -163,6 +185,14 @@ export function finalizePaidProSigningCorpusText(
   if (contactAuthority.repaired) {
     text = contactAuthority.text;
     repairs.push(...contactAuthority.repairs.map((tag) => `contact_authority:${tag}`));
+  }
+
+  if (parties && parties.length >= 2) {
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(text, parties);
+    if (noticeDelivery.repairs.length > 0) {
+      text = noticeDelivery.text;
+      repairs.push(...noticeDelivery.repairs.map((tag) => `notice_delivery:${tag}`));
+    }
   }
 
   return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), repairs };

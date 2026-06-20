@@ -9,6 +9,7 @@
  */
 
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
+import { extractOperativeIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
 
 export const DEFAULT_LAWDOG_NOTICES_CLAUSE =
   "Notices under this Agreement must be in writing and may be delivered by email, nationally recognized overnight courier, certified mail, or any other method the parties later approve in writing. A notice sent by email is effective when sent, provided the sender does not receive an automated delivery failure notice. A notice sent by courier or certified mail is effective when delivered or when delivery is refused.\n\nUnless a party designates a different notice address in writing, email notices may be sent to the email address that party provides through the LawDog signing process. Mailing notices may be sent to the address that party provides through the LawDog signing process or later designates in writing.";
@@ -173,12 +174,15 @@ function replaceNoticesSectionBody(text: string): { text: string; applied: boole
 
   const witnessIdx = normalized.search(WITNESS_RE);
   const noticesEnd = witnessIdx >= 0 ? witnessIdx : normalized.length;
+  const noticesRegion = normalized.slice(noticesIdx, noticesEnd);
+  const preservedStanzas = extractOperativeIfToNoticeStanzas(noticesRegion);
   const before = normalized.slice(0, noticesIdx);
   const noticesMatch = normalized.slice(noticesIdx).match(NOTICES_SECTION_RE);
   const heading = noticesMatch?.[0]?.trim() ?? "Notices.";
   const after = normalized.slice(noticesEnd).trimStart();
   const headingLine = heading.endsWith(".") ? heading : `${heading}.`;
-  const merged = `${before.trimEnd()}\n\n${headingLine}\n\n${DEFAULT_LAWDOG_NOTICES_CLAUSE}\n\n${after}`.replace(
+  const stanzaTail = preservedStanzas ? `\n\n${preservedStanzas}` : "";
+  const merged = `${before.trimEnd()}\n\n${headingLine}\n\n${DEFAULT_LAWDOG_NOTICES_CLAUSE}${stanzaTail}\n\n${after}`.replace(
     /\n{3,}/g,
     "\n\n",
   );

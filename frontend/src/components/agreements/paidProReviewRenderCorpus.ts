@@ -15,7 +15,7 @@ import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolve
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { preserveFullLegalPartyNames } from "./paidProPartyNamePreserve";
 import { repairProtectedLegalEntitySuffixes } from "./paidProProtectedEntityRepair";
-import { repairIncompleteIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
+import { ensureOperativeIfToNoticeDelivery, repairIncompleteIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   authorityPartiesToCanonicalPartyIdentities,
@@ -479,6 +479,14 @@ export function applyPaidProReviewRenderSanitizer(
   if (domainGuard.repairs.length > 0) {
     out = domainGuard.text;
     repaired = true;
+  }
+
+  if (parties.length >= 2) {
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, parties);
+    if (noticeDelivery.repairs.length > 0) {
+      out = noticeDelivery.text;
+      repaired = true;
+    }
   }
 
   return {

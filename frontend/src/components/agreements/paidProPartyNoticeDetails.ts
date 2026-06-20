@@ -223,6 +223,21 @@ export function applySignatureNoticeContactFieldsToCorpus(
 
 const DANGLING_IF_TO_RE = /\nIf to\s*:?\s*$/i;
 
+/** True when a line opens an operative Notices-clause "If to …:" stanza (approved contact destination). */
+export function isOperativeIfToNoticeStanzaHeading(line: string): boolean {
+  const trimmed = (line || "").trim();
+  return /^If to\s+.+\s*:\s*$/i.test(trimmed);
+}
+
+/** Extract complete operative If to stanzas from a notices-region slice. */
+export function extractOperativeIfToNoticeStanzas(noticesRegion: string): string {
+  const region = (noticesRegion || "").replace(/\r\n/g, "\n");
+  const blocks = region.split(/\n(?=If to\s+)/i);
+  if (blocks.length <= 1) return "";
+  const stanzas = blocks.slice(1).map((b) => b.trim()).filter(Boolean);
+  return stanzas.join("\n\n");
+}
+
 export function logPaidProNoticeSectionIntegrity(payload: {
   repairs: string[];
   partyCount: number;
@@ -249,12 +264,24 @@ function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
   return lines.join("\n");
 }
 
-function noticeStanzaComplete(stanza: string): boolean {
+function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty): boolean {
   const trimmed = stanza.trim();
   if (!trimmed) return false;
   if (DANGLING_IF_TO_RE.test(`\n${trimmed}`)) return false;
   if (/^If to\s*:\s*$/i.test(trimmed)) return false;
-  return /Attn:/i.test(trimmed) || /Email:/i.test(trimmed);
+  const hasAttn = /Attn:/i.test(trimmed);
+  const hasEmailLine = /Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed);
+  const requiredEmail = party?.signerEmail?.trim() ?? "";
+  if (requiredEmail) {
+    if (!hasEmailLine) return false;
+    if (!trimmed.toLowerCase().includes(requiredEmail.toLowerCase())) return false;
+  }
+  const requiredAddress = party?.partyAddress?.trim() ?? "";
+  if (requiredAddress) {
+    if (!/Address(?:\s+for\s+Notice)?\s*:/i.test(trimmed)) return false;
+    if (!trimmed.toLowerCase().includes(requiredAddress.toLowerCase().slice(0, 12))) return false;
+  }
+  return hasAttn || hasEmailLine;
 }
 
 /**
@@ -273,7 +300,9 @@ export function repairIncompleteIfToNoticeStanzas(
     repairs.push("notice:remove_dangling_if_to");
   }
 
-  const noticesIdx = text.search(/(?:^|\n)\s*\d+\.\s*Notices\b/i);
+  const noticesIdx = text.search(
+    /(?:^|\n)\s*\d+(?:\.\d+)?\.\s*(?:Notices|Notice\s+Addresses?)\b/i,
+  );
   if (noticesIdx < 0) {
     if (/\nIf to\s*$/i.test(text)) {
       const partiesBlock = parties.map((p) => buildIfToNoticeStanza(p)).join("\n\n");
@@ -299,7 +328,7 @@ export function repairIncompleteIfToNoticeStanzas(
   for (let i = 0; i < parties.length; i++) {
     const party = parties[i]!;
     const existing = stanzas[i]?.trim() ?? "";
-    if (noticeStanzaComplete(existing)) {
+    if (noticeStanzaComplete(existing, party)) {
       rebuiltStanzas.push(existing);
       stanzaCount += 1;
       continue;
@@ -315,4 +344,23 @@ export function repairIncompleteIfToNoticeStanzas(
   text = `${before}${mergedNotices}${after}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   logPaidProNoticeSectionIntegrity({ repairs, partyCount: parties.length, stanzaCount });
   return { text, repairs };
+}
+
+/** Rebuild operative notice stanzas when authority contact fields are missing from the corpus. */
+export function ensureOperativeIfToNoticeDelivery(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+): { text: string; repairs: string[] } {
+  if (!corpus?.trim() || parties.length < 2) return { text: corpus, repairs: [] };
+  const missing = parties.some((p) => {
+    const email = p.signerEmail.trim();
+    if (email && !corpus.includes(email)) return true;
+    const addr = p.partyAddress.trim();
+    if (addr && addr.length > 8 && !corpus.toLowerCase().includes(addr.toLowerCase().slice(0, 12))) {
+      return true;
+    }
+    return false;
+  });
+  if (!missing) return { text: corpus, repairs: [] };
+  return repairIncompleteIfToNoticeStanzas(corpus, parties);
 }
