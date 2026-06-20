@@ -1,9 +1,8 @@
 import type { StarterComplexityGateAssessment } from "./starterMultiPartyProGate";
-import { formatStarterMultiPartyGatePartyLines } from "./starterMultiPartyProGate";
-
-export const STARTER_COMPLEXITY_GATE_TITLE = "Complex agreement detected";
-export const STARTER_COMPLEXITY_GATE_BODY =
-  "This looks like a multi-party or advanced agreement. LawDog Pro is required to preserve all parties, signer roles, revenue-share terms, review steps, and signature blocks.";
+import {
+  formatStarterMultiPartyGatePartyLines,
+  resolveStarterMultiPartyProGatePresentation,
+} from "./starterMultiPartyProGate";
 
 export function StarterMultiPartyProGatePanel(props: {
   assessment: StarterComplexityGateAssessment;
@@ -12,6 +11,7 @@ export function StarterMultiPartyProGatePanel(props: {
 }) {
   const { assessment, onBuildPro, onEditPrompt } = props;
   const partyLines = formatStarterMultiPartyGatePartyLines(assessment.parties);
+  const presentation = resolveStarterMultiPartyProGatePresentation(assessment);
 
   return (
     <div
@@ -24,10 +24,10 @@ export function StarterMultiPartyProGatePanel(props: {
           id="starter-multi-party-pro-gate-title"
           className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl"
         >
-          {STARTER_COMPLEXITY_GATE_TITLE}
+          {presentation.title}
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400 sm:text-[0.9375rem]">
-          {STARTER_COMPLEXITY_GATE_BODY}
+          {presentation.body}
         </p>
       </div>
 
@@ -60,7 +60,7 @@ export function StarterMultiPartyProGatePanel(props: {
           className="min-h-[2.75rem] w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-center text-sm font-semibold text-emerald-950 shadow-sm transition hover:bg-emerald-400 sm:min-w-[12rem] sm:flex-1"
           onClick={onBuildPro}
         >
-          Build Pro agreement
+          {presentation.primaryCtaLabel}
         </button>
         <button
           type="button"

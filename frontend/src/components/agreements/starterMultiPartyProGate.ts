@@ -401,6 +401,61 @@ export const STARTER_PREPARING_OVERLAY_DISPLAY_PHASES = [
   "hydrating_generated",
 ] as const;
 
+export function isThreePlusLegalPartyGate(assessment: StarterComplexityGateAssessment): boolean {
+  return (
+    assessment.partyCount >= 3 ||
+    assessment.parties.length >= 3 ||
+    assessment.reasons.includes("three_plus_legal_parties")
+  );
+}
+
+export function resolveMultiPartyProGatePartyCount(assessment: StarterComplexityGateAssessment): number {
+  return Math.max(assessment.partyCount, assessment.parties.length, 3);
+}
+
+export function buildMultiPartyProGateTitle(assessment: StarterComplexityGateAssessment): string {
+  const count = resolveMultiPartyProGatePartyCount(assessment);
+  return `This agreement includes ${count} parties and requires Pro.`;
+}
+
+export const MULTI_PARTY_PRO_GATE_BODY =
+  "Starter drafts support simple 1–2 party agreements. Pro supports multi-party agreements, custom roles, review, signing, and proof records.";
+
+export const MULTI_PARTY_PRO_GATE_PRIMARY_CTA = "Continue with Pro";
+
+export const LEGACY_COMPLEXITY_GATE_TITLE = "Complex agreement detected";
+export const LEGACY_COMPLEXITY_GATE_BODY =
+  "This looks like a multi-party or advanced agreement. LawDog Pro is required to preserve all parties, signer roles, revenue-share terms, review steps, and signature blocks.";
+
+export function resolveStarterMultiPartyProGatePresentation(assessment: StarterComplexityGateAssessment): {
+  title: string;
+  body: string;
+  primaryCtaLabel: string;
+  showSimplifiedStarterOption: boolean;
+  hideStarterReviewCta: boolean;
+} {
+  if (isThreePlusLegalPartyGate(assessment)) {
+    return {
+      title: buildMultiPartyProGateTitle(assessment),
+      body: MULTI_PARTY_PRO_GATE_BODY,
+      primaryCtaLabel: MULTI_PARTY_PRO_GATE_PRIMARY_CTA,
+      showSimplifiedStarterOption: false,
+      hideStarterReviewCta: true,
+    };
+  }
+  return {
+    title: LEGACY_COMPLEXITY_GATE_TITLE,
+    body: LEGACY_COMPLEXITY_GATE_BODY,
+    primaryCtaLabel: "Build Pro agreement",
+    showSimplifiedStarterOption: false,
+    hideStarterReviewCta: true,
+  };
+}
+
+export function shouldHideStarterReviewCtaForCreateFlowPhase(createFlowPhase: string): boolean {
+  return createFlowPhase === "multi_party_pro_required";
+}
+
 /** Dismiss home/create transition once Pro gate is ready without a starter draft. */
 export function shouldResolveStarterHomeTransitionToReviewReady(input: {
   draft: unknown;

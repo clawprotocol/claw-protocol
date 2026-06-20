@@ -85,6 +85,7 @@ import { AdvancedFullDraftPaywallModal } from "./AdvancedFullDraftPaywallModal";
 import {
   clearCreateComplexityResume,
   readCreateComplexityResume,
+  resolveCreateComplexityResumeHydration,
   stashCreateComplexityResume,
   type CreateComplexityResumeKind,
 } from "./agreementCreateComplexityResume";
@@ -11863,10 +11864,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       complexityResumeHydratedRef.current = true;
       return;
     }
-    complexityResumeHydratedRef.current = true;
     const stored = readAgreementCreatorIntakeStorage().trim();
-    if (stored !== resume.rawIntake.trim()) return;
-    setComplexityPendingParsed(resume.pending);
+    const hydration = resolveCreateComplexityResumeHydration(resume, stored);
+    complexityResumeHydratedRef.current = true;
+    if (hydration.kind === "none") return;
+
+    if (hydration.kind === "multi_party_pro_gate") {
+      const assessment = assessStarterComplexityGate(hydration.rawIntake);
+      if (!assessment.required) return;
+      setStarterMultiPartyProGate(assessment);
+      setComplexityPendingParsed(null);
+      complexityPendingParsedRef.current = null;
+      setReviewShowsSimplifiedAdvancedDraft(false);
+      setDraft(null);
+      setCreateFlowPhase("multi_party_pro_required");
+      setDisplayPhase("review");
+      setCreateUiStage(CreateUiStage.DRAFT);
+      setLoading(false);
+      setPreviewPaneRevealed(true);
+      return;
+    }
+
+    setComplexityPendingParsed(hydration.pending);
     setCreateFlowPhase("complexity_choice_required");
     setDisplayPhase("intake");
     setCreateUiStage(CreateUiStage.DRAFT);
@@ -16745,6 +16764,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleCreateStickyBottomBarVisibleBase &&
     !hideStickyForPaidProFinalizeDeliveryChoiceBase &&
     !hideStickyForStarterProContinuation &&
+    !multiPartyProGateActive &&
     (!guidedFinalReviewActive || paidProCanonicalStickyBarVisible);
 
 
@@ -18331,6 +18351,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (stageAInputFirst) return stageAContinueBlocked;
     if (createProductionTwoPane) {
       if (createFlowPhase === "complexity_choice_required") return true;
+      if (createFlowPhase === "multi_party_pro_required") return true;
       if (createUiStage === CreateUiStage.INPUT) {
         return !intakeCombined.trim() || !guidedStructureComplete;
       }
@@ -18598,6 +18619,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           action: "guided_continue",
           disabled: true,
           reason: "complexity_choice_required",
+        };
+      }
+      if (createFlowPhase === "multi_party_pro_required") {
+        return {
+          label: "Continue with Pro above",
+          action: "guided_continue",
+          disabled: true,
+          reason: "multi_party_pro_required",
         };
       }
       if (createUiStage === CreateUiStage.INPUT) {

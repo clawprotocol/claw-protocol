@@ -67,3 +67,25 @@ export function clearCreateComplexityResume(): void {
     /* ignore */
   }
 }
+
+export type CreateComplexityResumeHydration =
+  | { kind: "none" }
+  | { kind: "multi_party_pro_gate"; rawIntake: string }
+  | { kind: "complexity_choice_required"; pending: ParsedDraftShape; rawIntake: string };
+
+/** Map stashed complexity resume to the create-flow phase it should restore — never mix Pro-gate with OA/custom choice UI. */
+export function resolveCreateComplexityResumeHydration(
+  resume: CreateComplexityResumeV1 | null,
+  storedIntake: string,
+): CreateComplexityResumeHydration {
+  if (!resume?.pending) return { kind: "none" };
+  if (resume.resume_kind === "optional_full_upgrade") return { kind: "none" };
+  if (storedIntake.trim() !== resume.rawIntake.trim()) return { kind: "none" };
+  if (resume.resume_kind === "multi_party_pro_gate") {
+    return { kind: "multi_party_pro_gate", rawIntake: resume.rawIntake };
+  }
+  if (resume.resume_kind === "complexity_gate") {
+    return { kind: "complexity_choice_required", pending: resume.pending, rawIntake: resume.rawIntake };
+  }
+  return { kind: "none" };
+}
