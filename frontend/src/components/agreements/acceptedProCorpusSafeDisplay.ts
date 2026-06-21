@@ -35,6 +35,7 @@ import {
   writeAcceptedProCorpusSafeDisplayCache,
 } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -264,6 +265,17 @@ function applyAcceptedProCorpusSafeDisplayCore(
       out = execution.text;
       repairs.push(...execution.repairs);
     }
+  }
+
+  const contactAuthority = applyPaidProNoticeContactAuthority(out, {
+    draft: opts?.draft ?? null,
+    intakeText: intakeRaw,
+    surface: opts?.surface ? `${opts.surface}:notice_contact_authority` : "accepted_pro_corpus_safe_display:notice_contact_authority",
+    blockOnUnresolved: false,
+  });
+  if (contactAuthority.text !== out) {
+    out = contactAuthority.text;
+    repairs.push(...contactAuthority.repairs.map((r) => `contact_authority:${r}`));
   }
 
   return { text: out, repairs: [...new Set(repairs)] };

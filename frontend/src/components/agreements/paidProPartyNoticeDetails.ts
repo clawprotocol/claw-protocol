@@ -314,6 +314,25 @@ export function logPaidProNoticeSectionIntegrity(payload: {
   console.info("[paid-pro-notice-section-integrity]", payload);
 }
 
+/** Optional-contact display: omit missing email/address; never emit placeholder tokens. */
+export function formatNoticeAddressLines(address: string): string[] {
+  const trimmed = address.trim();
+  if (!trimmed) return [];
+  const explicitLines = trimmed
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (explicitLines.length > 1) return explicitLines;
+  const usAddress = trimmed.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/i);
+  if (usAddress) {
+    return [
+      usAddress[1].trim(),
+      `${usAddress[2].trim()}, ${usAddress[3].toUpperCase()} ${usAddress[4]}`,
+    ];
+  }
+  return [trimmed];
+}
+
 function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
   const legal = party.partyLegalName.trim();
   const lines = [`If to ${legal}:`, legal];
@@ -324,8 +343,10 @@ function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
   }
   const email = party.signerEmail.trim();
   if (email) lines.push(`Email: ${email}`);
-  const address = party.partyAddress.trim();
-  if (address) lines.push(`Address: ${address}`);
+  const addressLines = formatNoticeAddressLines(party.partyAddress);
+  if (addressLines.length > 0) {
+    lines.push("Address:", ...addressLines);
+  }
   return lines.join("\n");
 }
 

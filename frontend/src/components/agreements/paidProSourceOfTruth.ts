@@ -99,6 +99,8 @@ import {
   clearPaidProSignerStagingDisplayCorpus,
 } from "./paidProSignerStagingDisplayCorpus";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
+import { assertPaidProNoticeContactAuthorityForFreeze } from "./paidProNoticeContactAuthority";
+import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import {
   detectPaidProOrphanSubsections,
   normalizePaidProOrphanSubsections,
@@ -437,6 +439,14 @@ export function establishPaidProSourceOfTruth(args: {
       reason: orphanSectionRepair.repairs.join(","),
     });
   }
+  safeForCommit = assertPaidProNoticeContactAuthorityForFreeze(safeForCommit, {
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+    surface: "establish_paid_pro_source_of_truth_pre_freeze",
+  });
+  if (containsUnresolvedRenderTokens(safeForCommit)) {
+    throw new Error("[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority");
+  }
   const parties: CanonicalAgreementSnapshotParty[] = (args.draft?.parties ?? [])
     .map((p) => ({
       name: String(p?.name ?? "").trim(),
@@ -461,6 +471,11 @@ export function establishPaidProSourceOfTruth(args: {
     minLen: 500,
     reviewSessionId: args.reviewSessionId,
   });
+  if (!snapshot.integrityOk || snapshot.placeholderIssues.length > 0) {
+    throw new Error(
+      `[paid-pro-sot-freeze-blocked] integrityOk=${snapshot.integrityOk} placeholders=${snapshot.placeholderIssues.join(",") || "none"}`,
+    );
+  }
   const frozen = freezeCanonicalAgreementSnapshot(snapshot, "server_full_document_text");
   const frozenText = frozen?.canonicalText ?? safeForCommit;
   const preEstablishFreezeHash = frozen?.hash ?? null;

@@ -85,8 +85,10 @@ describe("TEST390 — notice / execution boundary integrity", () => {
     expect(repaired.repairs.length).toBeGreaterThan(0);
     expect(repaired.text).toContain(RED_EMAIL);
     expect(repaired.text).toContain(HARBOR_EMAIL);
-    expect(repaired.text).toContain(RED_ADDR);
-    expect(repaired.text).toContain(HARBOR_ADDR);
+    expect(repaired.text).toContain("100 Mesa Drive");
+    expect(repaired.text).toContain("Austin, TX 78701");
+    expect(repaired.text).toContain("200 Peak Lane");
+    expect(repaired.text).toContain("Dallas, TX 75201");
     expect(repaired.text).not.toMatch(/AutomationIN WITNESS/i);
     const witnessCount = (repaired.text.match(/\bIN WITNESS WHEREOF\b/gi) || []).length;
     expect(witnessCount).toBe(1);
