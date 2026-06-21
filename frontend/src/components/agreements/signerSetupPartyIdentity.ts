@@ -26,6 +26,7 @@ import {
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
 } from "./paidProPartyNamePreserve";
+import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
 import {
   collapsePartySlotCandidates,
   isInvalidPartySlotLegalEntity,
@@ -887,6 +888,27 @@ export function resolveSignerSetupPartyIdentities(args: {
   handoffSlots?: readonly { name?: string | null }[];
 }): SignerSetupPartyIdentity[] {
   const rowNames = args.parties.map((p) => String(p?.name ?? "").trim()).filter(Boolean);
+  const authorityIdentities = resolveAuthoritativeLegalPartyIdentities({
+    intakeText: args.intakeText,
+    draftParties: args.parties.map((p) => ({ name: String(p?.name ?? "") })),
+    consumerPartyCount: rowNames.length,
+    surface: "signer_setup_party_identities",
+  });
+  if (authorityIdentities.length >= 2) {
+    const draftPartyNames = authorityIdentities.map((a) => a.legalEntityName);
+    return authorityIdentities.map((identity, i) =>
+      resolveSignerSetupPartyIdentity({
+        partyIndex: i,
+        draftPartyName: identity.legalEntityName,
+        handoffName: args.handoffSlots?.[i]?.name,
+        intakeText: args.intakeText,
+        agreementBodyText: args.agreementBodyText,
+        draftPartyNames,
+        recipientDisplayName: "",
+        log: false,
+      }),
+    );
+  }
   const hasDrift = partySlotListHasDriftFragments(rowNames);
   const intakeNames = collapsePartySlotCandidates(
     extractBetweenPartyNameList(String(args.intakeText ?? "")),

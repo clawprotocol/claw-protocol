@@ -1287,6 +1287,7 @@ import {
   formatSignerSetupBeyondGeneratedWarningTitle,
   removeAddedSignerPartyState,
   resolveGeneratedAgreementPartyCount,
+  resolveSignerSetupUiPartyCount,
 } from "./paidProNPartySignerSetup";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
@@ -2066,6 +2067,8 @@ type CreateFlowSendRecipientsPanelProps = {
   agreementId?: string | null;
   /** N-party signer setup: explicit UI party row count (2–4). */
   signerSetupUiPartyCount?: number;
+  /** Legal-party-authority-capped row count for rendering signer cards. */
+  signerSetupAuthoritativePartyCount?: number;
   onAddAnotherSignerParty?: () => void;
   onRemoveSignerParty?: (partyIndex: number) => void;
   signerSetupBeyondGeneratedWarning?: string | null;
@@ -2130,6 +2133,7 @@ function CreateFlowSendRecipientsPanel({
   onPaidProSignerMetadataFieldDiagnostics,
   agreementId = null,
   signerSetupUiPartyCount = 2,
+  signerSetupAuthoritativePartyCount,
   onAddAnotherSignerParty,
   onRemoveSignerParty,
   signerSetupBeyondGeneratedWarning = null,
@@ -2160,7 +2164,14 @@ function CreateFlowSendRecipientsPanel({
   const r2e = stripRecipientEmailNoise(recipient2Email);
   const cappedParties = (draft?.parties ?? []).slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
   const uiPartyCount = Math.min(
-    Math.max(signerSetupUiPartyCount, 2),
+    Math.max(
+      signerSetupAuthoritativePartyCount ??
+        resolveSignerSetupUiPartyCount({
+          signerSetupUiPartyCount,
+          draftParties: cappedParties,
+        }),
+      2,
+    ),
     PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
   );
   const partiesForSetup = Array.from({ length: uiPartyCount }, (_, idx) => {
@@ -3879,11 +3890,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     signerSetupUiPartyCountRef.current = signerSetupUiPartyCount;
   }, [signerSetupUiPartyCount]);
   useEffect(() => {
+    const intakeText = intakeCombinedRef.current || "";
     const generatedCount = resolveGeneratedAgreementPartyCount({
       draftParties: draft?.parties,
-      intakeText: intakeCombinedRef.current || "",
+      intakeText,
     });
-    if (generatedCount > signerSetupUiPartyCount) {
+    const authoritative = resolveSignerSetupUiPartyCount({
+      signerSetupUiPartyCount: signerSetupUiPartyCountRef.current,
+      draftParties: draft?.parties ?? [],
+      intakeText,
+    });
+    if (authoritative < signerSetupUiPartyCountRef.current) {
+      setSignerSetupUiPartyCount(authoritative);
+    } else if (generatedCount > signerSetupUiPartyCountRef.current) {
       setSignerSetupUiPartyCount(Math.min(generatedCount, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES));
     }
     if (draft?.creator_coordinator_only) {
@@ -14897,6 +14916,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [draft?.parties, currentPremiumMergedIntakeKey, intakeCombined, premiumSurfaceGateTick],
   );
 
+  const authoritativeSignerSetupPartyCount = useMemo(
+    () =>
+      resolveSignerSetupUiPartyCount({
+        signerSetupUiPartyCount,
+        draftParties: draft?.parties ?? [],
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      }),
+    [signerSetupUiPartyCount, draft?.parties, currentPremiumMergedIntakeKey, intakeCombined],
+  );
+
   const signerSetupGeneratedPartyGuard = useMemo(
     () =>
       evaluateSignerSetupGeneratedPartyGuard({
@@ -14908,7 +14937,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const guidedPreReviewSignerSlots = useMemo(() => {
     const base = resolveGuidedPreReviewSignerSlots({
-      partyCount: Math.max(generatedAgreementPartyCount, signerSetupUiPartyCount),
+      partyCount: authoritativeSignerSetupPartyCount,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       partySignerNames,
       recipient1Name,
@@ -14928,13 +14957,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         signerSetupGeneratedPartyGuard.warningMessage ?? base.blockerMessage,
     };
   }, [
-    generatedAgreementPartyCount,
-    signerSetupUiPartyCount,
+    authoritativeSignerSetupPartyCount,
     signerSetupGeneratedPartyGuard.beyondGenerated,
     signerSetupGeneratedPartyGuard.warningMessage,
     currentPremiumMergedIntakeKey,
     intakeCombined,
-    draft?.parties,
     draft?.parties,
     partySignerNames,
     recipient1Name,
@@ -15154,6 +15181,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
   const nPartySignerSetupPanelProps = {
     signerSetupUiPartyCount,
+    signerSetupAuthoritativePartyCount: authoritativeSignerSetupPartyCount,
     onAddAnotherSignerParty: handleAddAnotherSignerParty,
     onRemoveSignerParty: handleRemoveSignerParty,
     signerSetupBeyondGeneratedWarning: signerSetupGeneratedPartyGuard.warningMessage,
@@ -15165,7 +15193,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   };
   const paidProSignerDetailsGate = useMemo(() => {
     const gate = resolvePaidProSignerDetailsGate({
-      partyCount: Math.max(generatedAgreementPartyCount, signerSetupUiPartyCount),
+      partyCount: authoritativeSignerSetupPartyCount,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
       partySignerNames,
@@ -15183,7 +15211,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
     );
   }, [
-    generatedAgreementPartyCount,
+    authoritativeSignerSetupPartyCount,
     signerSetupUiPartyCount,
     signerSetupGeneratedPartyGuard,
     draft?.parties,

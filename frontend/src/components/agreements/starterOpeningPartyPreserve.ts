@@ -11,6 +11,7 @@ import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { isSignerTitleLikeRole } from "./starterRoleLabelGuard";
 import { resolveCanonicalPartyRoleLabel } from "./canonicalPartyRoleAuthority";
+import { repairDraftPartiesFromIntakeAuthority } from "./partySlotIdentityNormalize";
 
 const GENERIC_STARTER_PARTY_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
 
@@ -120,10 +121,21 @@ export function enrichStarterPreviewPartiesFromIntake(
   );
   if (fullNames.length < 2) return withRoles;
 
+  const repairedParties = repairDraftPartiesFromIntakeAuthority(
+    parties.map((p) => ({
+      name: String(p?.name ?? ""),
+      role: p?.role,
+      email: p?.email,
+      id: p?.id,
+    })),
+    intakeText,
+  );
   const baseParties =
-    fullNames.length > parties.length
-      ? fullNames.map((name, index) => parties[index] ?? { name, role: index === 0 ? "Client" : index === 1 ? "Service Provider" : "party" })
-      : parties;
+    repairedParties.length >= 2
+      ? repairedParties
+      : fullNames.length > parties.length
+        ? fullNames.map((name, index) => parties[index] ?? { name, role: index === 0 ? "Client" : index === 1 ? "Service Provider" : "party" })
+        : parties;
 
   const enriched = baseParties.map((party, idx) => {
     const rawCurrent = String(party?.name ?? "").replace(/\s+/g, " ").trim();

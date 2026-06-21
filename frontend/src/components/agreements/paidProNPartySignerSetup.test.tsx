@@ -73,7 +73,7 @@ describe("paidProNPartySignerSetup", () => {
     expect(resolveSignerSetupUiPartyCount(baseTwoPartyState)).toBe(2);
   });
 
-  it("respects user-expanded party count for gate and UI (3 parties)", () => {
+  it("two-party intake authority blocks UI inflation without explicit multi-party", () => {
     expect(
       resolveAuthoritativePartySlotCount({
         intakeText: "between Alpha LLC and Beta Inc",
@@ -81,7 +81,7 @@ describe("paidProNPartySignerSetup", () => {
         rawPartyCount: 3,
         userExpandedPartyCount: 3,
       }),
-    ).toBe(3);
+    ).toBe(2);
     expect(canAddAnotherSignerParty(2)).toBe(true);
     expect(canAddAnotherSignerParty(PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES)).toBe(false);
   });

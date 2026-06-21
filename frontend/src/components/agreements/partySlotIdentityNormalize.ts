@@ -114,10 +114,18 @@ export function repairDraftPartiesFromIntakeAuthority<T extends DraftPartyRowLik
 
   return intakeNames.map((name, index) => {
     const prev = parties[index] ?? parties.find((p) => partyLegalNamesMatch(p.name, name)) ?? parties[0];
+    const prevRole = String(prev?.role ?? "").trim();
+    const role = isInternalPartyAliasRole(prevRole)
+      ? index === 0
+        ? "Client"
+        : index === 1
+          ? "Service Provider"
+          : "party"
+      : prevRole || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party");
     return {
       ...prev,
       name,
-      role: prev?.role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
+      role,
     } as T;
   });
 }
@@ -130,9 +138,6 @@ export function resolveAuthoritativePartySlotCount(args: {
   userExpandedPartyCount?: number;
 }): number {
   const userExpanded = Math.max(0, args.userExpandedPartyCount ?? 0);
-  if (userExpanded > 2) {
-    return Math.min(userExpanded, 4);
-  }
 
   const intake = String(args.intakeText ?? "").trim();
   const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
@@ -143,12 +148,17 @@ export function resolveAuthoritativePartySlotCount(args: {
   const betweenAuthoritative = dedupeEntityCandidatesToLegalParties(
     extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName),
   );
-  const amongList = extractBetweenPartyNameList(intake);
   const entityPool = dedupeEntityCandidatesToLegalParties(
     extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
   );
+  const collapsedDraftAuthoritative = collapsePartySlotCandidates(args.draftPartyNames ?? []).filter(
+    isAuthoritativeLegalEntityName,
+  );
   const explicitMultiParty =
-    labeled.length >= 3 || quoted.length >= 3 || amongList.length >= 3 || entityPool.length >= 3;
+    labeled.length >= 3 ||
+    quoted.length >= 3 ||
+    betweenAuthoritative.length >= 3 ||
+    collapsedDraftAuthoritative.length >= 3;
   if (betweenAuthoritative.length === 2 && !explicitMultiParty) return 2;
 
   if (quoted.length >= 2) return quoted.length;
@@ -171,7 +181,20 @@ export function resolveAuthoritativePartySlotCount(args: {
   if (quoted.length >= 3) return quoted.length;
   if (entityPool.length >= 3) return entityPool.length;
 
-  return Math.max(args.rawPartyCount ?? rowNames.length, quoted.length || labeled.length || 2);
+  let legalCount = Math.max(args.rawPartyCount ?? rowNames.length, quoted.length || labeled.length || 2);
+  legalCount = Math.max(2, Math.min(legalCount, 4));
+
+  if (userExpanded > 2) {
+    if (betweenAuthoritative.length === 2 && !explicitMultiParty) {
+      return 2;
+    }
+    if (!explicitMultiParty && legalCount >= 2 && userExpanded > legalCount) {
+      return legalCount;
+    }
+    return Math.min(Math.max(legalCount, userExpanded), 4);
+  }
+
+  return legalCount;
 }
 
 function tokenContinuesEntitySuffix(token: string): boolean {

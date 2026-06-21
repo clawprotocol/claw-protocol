@@ -14,7 +14,7 @@ import {
   selectAuthoritativeTwoPartySlots,
 } from "./partySlotIdentityNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
-import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
+import { dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { countRealParties } from "./starterPartyLimits";
 
@@ -147,18 +147,12 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   const betweenDeduped = dedupeEntityCandidatesToLegalParties(
     extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName),
   );
-  const amongList = extractBetweenPartyNameList(intake);
-  const entityPool = dedupeEntityCandidatesToLegalParties(
-    extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
-  );
   const explicitMultiParty =
-    authoritativeIntakeCount >= 3 || amongList.length >= 3 || entityPool.length >= 3;
-  if (
-    betweenDeduped.length === 2 &&
-    !explicitMultiParty &&
-    (args.userExpandedPartyCount ?? 0) <= 2 &&
-    count > 2
-  ) {
+    labeledCount >= 3 ||
+    quotedCount >= 3 ||
+    betweenDeduped.length >= 3 ||
+    collapsePartySlotCandidates(draftNames).filter(isAuthoritativeLegalEntityName).length >= 3;
+  if (betweenDeduped.length === 2 && !explicitMultiParty && count > 2) {
     count = 2;
     source = "party_slot_count";
   }

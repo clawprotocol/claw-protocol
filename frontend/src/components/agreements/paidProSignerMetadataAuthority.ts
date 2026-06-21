@@ -23,6 +23,7 @@ import { stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 import { resolveAcceptedCorpusRoleLabelForLegalName } from "./paidProAcceptedCorpusPartyRoles";
 import { labeledPartyBlocksForSignerMetadata } from "./labeledPartyBlockParse";
+import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   fromRecipientMetadata,
@@ -237,29 +238,33 @@ export function buildPaidProSignerMetadataParties(
   ui: LiveSignerMetadataUiState,
   opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] },
 ): PaidProSignerMetadataParty[] {
-  const count = consumeAuthoritativeSignerCount(
-    "metadata_authority_parties",
-    {
-      intakeText: opts?.intakeText,
-      draftPartyNames: opts?.draftPartyNames,
-      rawPartyCount: ui.partyCount,
-      userExpandedPartyCount: ui.partyCount,
-    },
-    ui.partyCount,
-  );
-  const slots: SignerSetupPartyIdentity[] = [];
-  for (let i = 0; i < count; i++) {
-    slots.push({
-      legalEntityName: partyLegalNameForIndex(ui, i),
-      displayName: partyLegalNameForIndex(ui, i),
-      source: "authoritative_manifest",
-    });
-  }
+  const authorityIdentities = resolveAuthoritativeLegalPartyIdentities({
+    intakeText: opts?.intakeText,
+    draftPartyNames: opts?.draftPartyNames,
+    consumerPartyCount: ui.partyCount,
+    surface: "metadata_authority_parties",
+  });
+  const count =
+    authorityIdentities.length >= 2
+      ? authorityIdentities.length
+      : consumeAuthoritativeSignerCount(
+          "metadata_authority_parties",
+          {
+            intakeText: opts?.intakeText,
+            draftPartyNames: opts?.draftPartyNames,
+            rawPartyCount: ui.partyCount,
+            userExpandedPartyCount: ui.partyCount,
+          },
+          ui.partyCount,
+        );
   const parties: PaidProSignerMetadataParty[] = [];
   for (let i = 0; i < count; i++) {
+    const authorityLegal = authorityIdentities[i]?.legalEntityName ?? "";
+    const uiLegal = partyLegalNameForIndex(ui, i);
+    const resolvedLegal = authorityLegal || uiLegal;
     parties.push({
       partyIndex: i,
-      partyLegalName: sanitizeSignerPartyLegalEntityDisplay(partyLegalNameForIndex(ui, i), {
+      partyLegalName: sanitizeSignerPartyLegalEntityDisplay(resolvedLegal, {
         partyIndex: i,
         source: "metadata_authority",
       }),
