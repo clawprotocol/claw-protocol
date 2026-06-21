@@ -40,6 +40,8 @@ import { requireAuthoritativeCorpusForSurface } from "./authoritativeAgreementDo
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import { applyPaidProDomainScopeGuard, shouldApplyAiWorkflowServicesQualityFloor } from "./paidProDomainScopeGuard";
+import { gateOperativeClauseFamilyAppend } from "./documentCompositionAuthority";
+import type { OperativeClauseFamily } from "./clauseFamilyRegistry";
 
 /** @deprecated Use PremiumRenderResolveSource — kept as alias for gradual migration. */
 export type PremiumPaidReadonlySourceUsed = PremiumRenderResolveSource;
@@ -118,42 +120,47 @@ export function applyAiWorkflowServicesQualityFloorToFallback(
   const provider = String(parties[1]?.name || "Service Provider").trim() || "Service Provider";
   let n = nextSectionNumber(base);
   const sections: string[] = [];
+  const pushSection = (family: OperativeClauseFamily | null, headingBody: string, keywordPresent?: RegExp) => {
+    if (family) {
+      if (!gateOperativeClauseFamilyAppend(base, family).allowed) return;
+    } else if (keywordPresent?.test(base)) {
+      return;
+    }
+    sections.push(`${n++}. ${headingBody}`);
+  };
   if (!/\bacceptance\b|\bdemonstration review\b/i.test(base)) {
-    sections.push(
-      `${n++}. ACCEPTANCE AND DEMONSTRATION REVIEW\n${provider} will provide a practical demonstration or review of the configured AI workflow setup services. ${client} will review the delivered setup in good faith and identify any material nonconformity with the agreed scope within a reasonable review period.`,
+    pushSection(
+      null,
+      `ACCEPTANCE AND DEMONSTRATION REVIEW\n${provider} will provide a practical demonstration or review of the configured AI workflow setup services. ${client} will review the delivered setup in good faith and identify any material nonconformity with the agreed scope within a reasonable review period.`,
     );
   }
-  if (!/\bownership\b|\bwork product\b/i.test(base)) {
-    sections.push(
-      `${n++}. OWNERSHIP AND WORK PRODUCT\n${client} owns final custom work product and deliverables created for ${client} after payment of amounts due. ${provider} retains pre-existing tools, templates, know-how, background materials, and reusable processes, and ${client} receives a license to use those retained materials as needed to use the delivered workflow setup.`,
-    );
-  }
-  if (!/\bconfidential/i.test(base)) {
-    sections.push(
-      `${n++}. CONFIDENTIALITY\nEach Party shall protect the other Party's Confidential Information using commercially reasonable measures and use it only for purposes of this Agreement.`,
-    );
-  }
-  if (!/\bterminat/i.test(base)) {
-    sections.push(
-      `${n++}. TERMINATION\nEither Party may terminate this Agreement for material breach if the breach is not cured within a commercially reasonable notice period. Termination does not affect payment obligations accrued before termination or provisions intended to survive.`,
-    );
-  }
+  pushSection(
+    "intellectual_property",
+    `OWNERSHIP AND WORK PRODUCT\n${client} owns final custom work product and deliverables created for ${client} after payment of amounts due. ${provider} retains pre-existing tools, templates, know-how, background materials, and reusable processes, and ${client} receives a license to use those retained materials as needed to use the delivered workflow setup.`,
+  );
+  pushSection(
+    "confidentiality",
+    `CONFIDENTIALITY\nEach Party shall protect the other Party's Confidential Information using commercially reasonable measures and use it only for purposes of this Agreement.`,
+  );
+  pushSection(
+    "termination",
+    `TERMINATION\nEither Party may terminate this Agreement for material breach if the breach is not cured within a commercially reasonable notice period. Termination does not affect payment obligations accrued before termination or provisions intended to survive.`,
+  );
   if (!/\bthird[-\s]?party|\bsupport\b|\bplatform\b|\bdependency\b/i.test(base)) {
-    sections.push(
-      `${n++}. THIRD-PARTY TOOLS AND OPTIONAL SUPPORT\nProvider is not responsible for outages, changes, or limitations of third-party AI platforms, software, or services outside Provider's control. Any post-delivery support is provided only if separately agreed in writing.`,
+    pushSection(
+      null,
+      `THIRD-PARTY TOOLS AND OPTIONAL SUPPORT\nProvider is not responsible for outages, changes, or limitations of third-party AI platforms, software, or services outside Provider's control. Any post-delivery support is provided only if separately agreed in writing.`,
     );
   }
-  if (!/\bgoverning law\b|\bgoverned by the laws\b/i.test(base)) {
-    const law = String(draft?.jurisdiction || "").trim() || "the jurisdiction selected by the Parties";
-    sections.push(
-      `${n++}. GOVERNING LAW\nThis Agreement shall be governed by the laws of ${law}, without regard to conflict-of-law principles.`,
-    );
-  }
-  if (!/\belectronic signatures\b|\be-sign\b/i.test(base)) {
-    sections.push(
-      `${n++}. ELECTRONIC SIGNATURES\nThis Agreement may be executed electronically through LawDog or comparable e-sign platforms, with the same effect as original signatures.`,
-    );
-  }
+  const law = String(draft?.jurisdiction || "").trim() || "the jurisdiction selected by the Parties";
+  pushSection(
+    "governing_law",
+    `GOVERNING LAW\nThis Agreement shall be governed by the laws of ${law}, without regard to conflict-of-law principles.`,
+  );
+  pushSection(
+    "electronic_signatures",
+    `ELECTRONIC SIGNATURES\nThis Agreement may be executed electronically through LawDog or comparable e-sign platforms, with the same effect as original signatures.`,
+  );
   if (!sections.length) {
     return applyPaidProDomainScopeGuard(base, intakeText, { logSurface: "ai_workflow_quality_floor" });
   }

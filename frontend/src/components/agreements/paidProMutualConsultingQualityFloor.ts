@@ -5,6 +5,10 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { isCommercialServicesIntake } from "./agreementIntentContract";
 import { insertBeforeExecutionTail } from "./paidProMutualConsultingQualityFloorInsert";
+import {
+  MUTUAL_CONSULTING_TOPIC_FAMILY,
+} from "./clauseFamilyRegistry";
+import { gateOperativeClauseFamilyAppend } from "./documentCompositionAuthority";
 
 export type MutualConsultingStructureTopic =
   | "services_scope"
@@ -127,6 +131,8 @@ export function applyMutualConsultingProfessionalQualityFloor(
   const sections: string[] = [];
 
   const pushIfMissing = (topic: MutualConsultingStructureTopic, body: string) => {
+    const family = MUTUAL_CONSULTING_TOPIC_FAMILY[topic];
+    if (!gateOperativeClauseFamilyAppend(out, family).allowed) return;
     if (!TOPIC_PATTERNS[topic].test(out)) {
       sections.push(`${n++}. ${body}`);
       repairs.push(`quality:mutual_consulting_${topic}`);

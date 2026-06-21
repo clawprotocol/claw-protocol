@@ -308,6 +308,19 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
   }
   pairs.sort((a, b) => b.short.length - a.short.length);
 
+  const noticesRegionStart = text.search(
+    /(?:^|\n)\s*\d+(?:\.\d+)?\.?\s*(?:Notices|Notice\s+Addresses?|Governing\s+Law,\s*Venue\s+and\s+Notices)\b/i,
+  );
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const noticesRegionEnd = witnessIdx >= 0 ? witnessIdx : text.length;
+
+  const isRoleLabelInNoticeRegion = (offset: number, match: string): boolean => {
+    if (noticesRegionStart < 0 || offset < noticesRegionStart || offset >= noticesRegionEnd) {
+      return false;
+    }
+    return /^(?:Client|Service\s+Provider|Party\s+\d+)$/i.test(match.trim());
+  };
+
   let out = text;
   for (const { short, full } of pairs) {
     const re = new RegExp(
@@ -316,6 +329,7 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
     );
     const next = out.replace(re, (match, offset) => {
       if (typeof offset !== "number") return full;
+      if (isRoleLabelInNoticeRegion(offset, match)) return match;
       const window = out.slice(Math.max(0, offset - 8), offset + match.length + 16);
       if (/\[\[LDG_(?:EMAIL|URL)_\d+\]\]/i.test(window)) return match;
       const tail = out.slice(offset + match.length);

@@ -223,6 +223,26 @@ export function applySignatureNoticeContactFieldsToCorpus(
 
 const DANGLING_IF_TO_RE = /\nIf to\s*:?\s*$/i;
 
+const ROLE_ONLY_IF_TO_HEADER_RE = /^If to (?:the )?(?:Client|Service\s+Provider|Party\s+\d+)\s*:\s*$/i;
+
+const CORRUPTED_NOTICE_ROLE_FUSION_RE =
+  /^(?:Client|Service\s+Provider)(?:\s+(?:Client|Service\s+Provider))+\s+(?:Attention|Attn)\s*:/i;
+
+const CORRUPTED_NOTICE_ROLE_ATTENTION_RE =
+  /^(?:Client|Service\s+Provider)\s+(?:Client|Service\s+Provider\s+)?(?:Attention|Attn)\s*:/i;
+
+/** Detect fused party/role labels in operative notice stanzas. */
+export function noticeStanzaHasRoleLabelCorruption(stanza: string): boolean {
+  const trimmed = (stanza || "").trim();
+  if (!trimmed) return false;
+  const header = trimmed.split("\n")[0]?.trim() ?? "";
+  if (ROLE_ONLY_IF_TO_HEADER_RE.test(header)) return true;
+  return trimmed.split("\n").some((line) => {
+    const t = line.trim();
+    return CORRUPTED_NOTICE_ROLE_FUSION_RE.test(t) || CORRUPTED_NOTICE_ROLE_ATTENTION_RE.test(t);
+  });
+}
+
 /** True when a line opens an operative Notices-clause "If to …:" stanza (approved contact destination). */
 export function isOperativeIfToNoticeStanzaHeading(line: string): boolean {
   const trimmed = (line || "").trim();
@@ -267,6 +287,7 @@ function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
 function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty): boolean {
   const trimmed = stanza.trim();
   if (!trimmed) return false;
+  if (noticeStanzaHasRoleLabelCorruption(trimmed)) return false;
   if (DANGLING_IF_TO_RE.test(`\n${trimmed}`)) return false;
   if (/^If to\s*:\s*$/i.test(trimmed)) return false;
   const hasAttn = /Attn:/i.test(trimmed);
@@ -282,6 +303,15 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
     if (!trimmed.toLowerCase().includes(requiredAddress.toLowerCase().slice(0, 12))) return false;
   }
   return hasAttn || hasEmailLine;
+}
+
+const NOTICES_SECTION_HEADING_RE =
+  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notices|Notice\s+Addresses?)\b|(?:^|\n)\s*\d+\.\s+[^\n]*\bNotices\b/i;
+
+function findNoticesSectionStart(text: string): number {
+  const match = text.match(NOTICES_SECTION_HEADING_RE);
+  if (!match || match.index == null) return -1;
+  return match.index;
 }
 
 /**
@@ -300,9 +330,7 @@ export function repairIncompleteIfToNoticeStanzas(
     repairs.push("notice:remove_dangling_if_to");
   }
 
-  const noticesIdx = text.search(
-    /(?:^|\n)\s*\d+(?:\.\d+)?\.\s*(?:Notices|Notice\s+Addresses?)\b/i,
-  );
+  const noticesIdx = findNoticesSectionStart(text);
   if (noticesIdx < 0) {
     if (/\nIf to\s*$/i.test(text)) {
       const partiesBlock = parties.map((p) => buildIfToNoticeStanza(p)).join("\n\n");

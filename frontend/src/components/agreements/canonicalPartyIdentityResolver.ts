@@ -20,7 +20,6 @@ import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 import {
   isAuthoritativeLegalEntityName,
-  preserveFullLegalPartyNames,
   preserveFullLegalPartyNamesInOpeningAndSignatures,
   shortFormsFromLegalName,
 } from "./paidProPartyNamePreserve";
@@ -828,16 +827,10 @@ export function repairCanonicalPartyIdentityInCorpus(
   out = aliasSwap.text;
   repairs.push(...aliasSwap.repairs);
 
-  const expanded = preserveFullLegalPartyNames(out, partyNames, intakeRaw);
+  const expanded = preserveFullLegalPartyNamesInOpeningAndSignatures(out, partyNames, intakeRaw);
   if (expanded !== out) {
-    repairs.push("party_identity:expand_short_to_full");
-    out = expanded;
-  }
-
-  const opening = preserveFullLegalPartyNamesInOpeningAndSignatures(out, partyNames, intakeRaw);
-  if (opening !== out) {
     repairs.push("party_identity:opening_signatures_full_legal");
-    out = opening;
+    out = expanded;
   }
 
   const client = records[0]!;

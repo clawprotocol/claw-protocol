@@ -37,8 +37,9 @@ import {
   manifestRecordsForPaidProAcceptance,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
-import { preserveFullLegalPartyNames } from "./paidProPartyNamePreserve";
+import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
 import { insertBeforeExecutionTail } from "./paidProMutualConsultingQualityFloorInsert";
+import { gateOperativeClauseFamilyAppend } from "./documentCompositionAuthority";
 
 function intakeJurisdictionFromSources(
   intakeText: string,
@@ -62,6 +63,8 @@ function ensureIntakeGoverningLawInAcceptanceCorpus(
   intakeText: string,
   draft: ParsedDraftShape | null | undefined,
 ): { text: string; repairs: string[] } {
+  const governingGate = gateOperativeClauseFamilyAppend(text, "governing_law");
+  if (!governingGate.allowed) return { text, repairs: [] };
   const jurisdiction = intakeJurisdictionFromSources(intakeText, draft);
   if (!jurisdiction) return { text, repairs: [] };
   const bodyLow = (text || "").toLowerCase();
@@ -484,10 +487,14 @@ function preparePaidProServerDocumentForAcceptanceCore(
     repairs.push(...governingLaw.repairs);
   }
 
-  const preservedLegal = preserveFullLegalPartyNames(out, partyLegalNames, intakeText);
+  const preservedLegal = preserveFullLegalPartyNamesInOpeningAndSignatures(
+    out,
+    partyLegalNames,
+    intakeText,
+  );
   if (preservedLegal !== out) {
     out = preservedLegal;
-    repairs.push("party_identity:preserve_full_legal_names");
+    repairs.push("party_identity:preserve_opening_signature_legal_names");
   }
 
   return { text: out.trim(), repairs: [...new Set(repairs)] };

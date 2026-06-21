@@ -81,6 +81,13 @@ export function logSignerCountConsumerMismatch(payload: {
   source: SignerCountAuthorityResolution["source"];
 }): void {
   if (isTestMode()) return;
+  if (
+    payload.surface === "vs01_corpus_gate" &&
+    payload.consumerCount === 0 &&
+    payload.authoritativeCount >= 2
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.warn(`${LOG_PREFIX}-mismatch`, payload);
 }
