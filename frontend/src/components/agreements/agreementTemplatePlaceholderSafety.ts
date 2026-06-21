@@ -11,6 +11,11 @@ import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { resolveIntakeEmailForContactSlot } from "./paidProIntakeContactSubstitution";
 import { buildPartyEntries, normalizeSignatureBlockHeadings } from "./paidProAgreementPolish";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
+import {
+  buildRenderTokenAuthorityParties,
+  enforceUserVisibleRenderTokenAuthority,
+  scanUnresolvedRenderTokens,
+} from "./userVisibleRenderTokenAuthority";
 import { isCanonicalCommittedText, stripCanonicalCommitMarker } from "./canonicalAgreementDocument";
 import { isStarterDocumentSurface } from "./agreementDocumentSurfacePolicy";
 import { shouldLogPlaceholderScanResult } from "./paidProDiagnosticLogPolicy";
@@ -1297,6 +1302,18 @@ function finalizeUserVisibleAgreementPlainTextCore(
     });
     prepared = stripCanonicalCommitMarker(polish.text);
   }
+  const authorityParties = buildRenderTokenAuthorityParties({
+    intakeRaw,
+    partyNames: partyResolution.names,
+  });
+  const tokenAuthority = enforceUserVisibleRenderTokenAuthority(prepared, {
+    intakeRaw,
+    partyNames: partyResolution.names,
+    parties: authorityParties,
+    surface: `${ctx.surface}:pre_scan`,
+    blockOnUnresolved: false,
+  });
+  prepared = tokenAuthority.text;
   const scanCtx = { intakeRaw, partyNames: partyResolution.names };
   const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(prepared, scanCtx);
   const signatureFinal = normalizeSignatureBlockHeadings(
@@ -1313,31 +1330,43 @@ function finalizeUserVisibleAgreementPlainTextCore(
   remainingDetail = demotion.decisions;
   const remainingFatal = remainingDetail.filter((d) => d.fatal).map((d) => d.token);
   const remaining = [...new Set(remainingDetail.map((d) => d.token))].slice(0, 40);
-  const ok = remainingFatal.length === 0;
+
+  const postTokenAuthority = enforceUserVisibleRenderTokenAuthority(postRepairText, {
+    intakeRaw,
+    partyNames: partyResolution.names,
+    parties: authorityParties,
+    surface: `${ctx.surface}:post_repair`,
+    blockOnUnresolved: false,
+  });
+  let finalText = postTokenAuthority.text;
+  const survivorTokens = scanUnresolvedRenderTokens(finalText).map((m) => m.token);
+  const fatalFromSurvivors = survivorTokens.filter((t) => !remainingFatal.includes(t));
+  const remainingFatalAll = [...remainingFatal, ...fatalFromSurvivors];
+  const ok = remainingFatalAll.length === 0;
 
   logPaidProPlaceholderGateDecision({
     surface: ctx.surface,
-    docLen: postRepairText.length,
+    docLen: finalText.length,
     scannedCount: remainingDetail.length,
-    fatalCount: remainingFatal.length,
-    nonfatalCount: remainingDetail.length - remainingFatal.length,
-    repairedCount: repaired.length,
+    fatalCount: remainingFatalAll.length,
+    nonfatalCount: Math.max(0, remainingDetail.length - remainingDetail.filter((d) => d.fatal).length),
+    repairedCount: repaired.length + tokenAuthority.repairs.length + postTokenAuthority.repairs.length,
     partyAnchorsFound: partyResolution.anchorsFound,
     partyCount: partyResolution.partyCount,
     accepted: ok,
     signatureOnlyDemotion: demotion.demoted,
     demotedSignatureContactCount: demotion.demotedCount,
-    fatalTokens: remainingFatal.slice(0, 16),
+    fatalTokens: remainingFatalAll.slice(0, 16),
     executionContextFound: remainingDetail.some((d) => d.isExecutionContext),
   });
 
   logPlaceholderScanResult({
     surface: ctx.surface,
-    scannedCount: remainingDetail.length,
-    fatalCount: remainingFatal.length,
-    nonfatalCount: remainingDetail.length - remainingFatal.length,
-    repairedCount: repaired.length,
-    bodyLen: postRepairText.length,
+    scannedCount: remainingDetail.length + survivorTokens.length,
+    fatalCount: remainingFatalAll.length,
+    nonfatalCount: remainingDetail.length - remainingDetail.filter((d) => d.fatal).length,
+    repairedCount: repaired.length + tokenAuthority.repairs.length + postTokenAuthority.repairs.length,
+    bodyLen: finalText.length,
     partyCount: partyResolution.partyCount,
     ok,
     anchorsFound: partyResolution.anchorsFound,
@@ -1347,9 +1376,9 @@ function finalizeUserVisibleAgreementPlainTextCore(
   phLog(LOG_PREFIX_SCAN, {
     surface: ctx.surface,
     family: ctx.agreementFamily ?? "",
-    token_count: remainingFatal.length,
-    token_types: remainingFatal.slice(0, 12),
-    repaired_count: repaired.length,
+    token_count: remainingFatalAll.length,
+    token_types: remainingFatalAll.slice(0, 12),
+    repaired_count: repaired.length + tokenAuthority.repairs.length + postTokenAuthority.repairs.length,
     ok,
   });
   if (repaired.length) {
@@ -1371,7 +1400,7 @@ function finalizeUserVisibleAgreementPlainTextCore(
     phLog(LOG_PREFIX_REJECT, {
       surface: ctx.surface,
       family: ctx.agreementFamily ?? "",
-      remaining: remainingFatal.slice(0, 12),
+      remaining: remainingFatalAll.slice(0, 12),
       remaining_detail: remainingDetail
         .filter((d) => d.fatal)
         .slice(0, 12)
@@ -1390,10 +1419,10 @@ function finalizeUserVisibleAgreementPlainTextCore(
   }
   return {
     ok,
-    text: postRepairText,
-    repaired,
-    remaining,
-    remainingFatal,
+    text: finalText,
+    repaired: [...repaired, ...tokenAuthority.repairs, ...postTokenAuthority.repairs],
+    remaining: [...new Set([...remaining, ...survivorTokens])].slice(0, 40),
+    remainingFatal: remainingFatalAll,
     remainingDetail,
     partyResolution,
   };

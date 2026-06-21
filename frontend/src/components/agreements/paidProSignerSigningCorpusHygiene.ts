@@ -18,7 +18,7 @@ import {
   stripExistingPartyNoticeDetails,
 } from "./paidProPartyNoticeDetails";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
-import { enforceProfessionalOutputIntegrity } from "./professionalOutputIntegrity";
+import { enforceUserVisibleRenderTokenAuthority } from "./userVisibleRenderTokenAuthority";
 
 const PARTY_NOTICE_HEADING_RE = /^\s*Party Notice Details:\s*$/i;
 const PARTY_NUMBER_HEADING_RE = /^\s*Party\s+(\d+)\s*:\s*$/i;
@@ -196,10 +196,12 @@ export function finalizePaidProSigningCorpusText(
     }
   }
 
-  const outputIntegrity = enforceProfessionalOutputIntegrity(text, {
+  const outputIntegrity = enforceUserVisibleRenderTokenAuthority(text, {
     intakeRaw: roleContext?.intakeText ?? null,
     parties,
+    partyNames: parties?.map((p) => p.partyLegalName) ?? null,
     surface: "finalize_paid_pro_signing_corpus",
+    blockOnUnresolved: false,
   });
   if (outputIntegrity.repairs.length > 0) {
     text = outputIntegrity.text;

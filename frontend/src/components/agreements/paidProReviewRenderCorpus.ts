@@ -50,7 +50,7 @@ import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberR
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
 import { applyPaidProUserVisibleDisplayPrep } from "./paidProDisplayPlainAuthority";
-import { enforceProfessionalOutputIntegrity } from "./professionalOutputIntegrity";
+import { enforceUserVisibleRenderTokenAuthority } from "./userVisibleRenderTokenAuthority";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { applySignerPartyIdentityToAuthoritativeAgreement } from "./guidedDealCompletion/signerPartyIdentity";
@@ -494,10 +494,12 @@ export function applyPaidProReviewRenderSanitizer(
     }
   }
 
-  const outputIntegrity = enforceProfessionalOutputIntegrity(out, {
+  const outputIntegrity = enforceUserVisibleRenderTokenAuthority(out, {
     intakeRaw: ctx?.intakeText ?? null,
     parties,
+    partyNames: legalNames,
     surface: "paid_pro_review_render_sanitizer",
+    blockOnUnresolved: false,
   });
   if (outputIntegrity.repairs.length > 0) {
     out = outputIntegrity.text;
