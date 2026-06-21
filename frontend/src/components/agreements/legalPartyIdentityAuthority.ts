@@ -26,6 +26,9 @@ import {
 } from "./partySlotIdentityNormalize";
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import { looksLikeEmail } from "./recipientEmailValidation";
+import {
+  resolveLegalIdentitiesFromExtraction,
+} from "./legalIdentityResolution";
 
 export type AuthoritativeLegalPartyIdentitySource =
   | "labeled_parties"
@@ -94,10 +97,26 @@ export function resolveAuthoritativeLegalPartyIdentities(
   const draftRows: DraftPartyRowLike[] = [
     ...(args.draftParties ?? (args.draftPartyNames ?? []).map((name) => ({ name: String(name ?? "") }))),
   ];
-  const repaired = repairDraftPartiesFromIntakeAuthority(draftRows, intake);
-  const intakeNames = resolveAuthoritativeIntakePartyNames(intake)
+  const resolvedExtraction = resolveLegalIdentitiesFromExtraction({
+    candidates: draftRows.map((p) => p.name),
+    intakeText: intake,
+  });
+  const repaired = repairDraftPartiesFromIntakeAuthority(
+    resolvedExtraction.length >= 2
+      ? resolvedExtraction.map((r, index) => ({
+          ...(draftRows[index] ?? { name: r.legalEntityName }),
+          name: r.legalEntityName,
+        }))
+      : draftRows,
+    intake,
+  );
+  let intakeNames = resolveAuthoritativeIntakePartyNames(intake)
     .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2 && isAuthoritativeLegalEntityName(n) && !isNonPartyMetadataToken(n));
+
+  if (intakeNames.length < 2 && resolvedExtraction.length >= 2) {
+    intakeNames = resolvedExtraction.map((r) => r.legalEntityName);
+  }
 
   const slotCount = resolveAuthoritativePartySlotCount({
     intakeText: intake,
