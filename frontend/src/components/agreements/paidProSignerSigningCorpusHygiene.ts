@@ -9,7 +9,7 @@ import {
   type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
-import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
+import { enforcePaidProSingleExecutionBlock, resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import {
   applySignatureNoticeContactFieldsToCorpus,
   corpusHasPartyNoticeDetails,
@@ -54,7 +54,7 @@ export function stripPaidProSignerSummaryBlocksFromCorpus(corpus: string): {
     if (text.length !== before) removed += 1;
   }
 
-  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   if (witnessIdx < 0) {
     return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), removed };
   }
@@ -189,7 +189,7 @@ export function finalizePaidProSigningCorpusText(
   }
 
   if (parties && parties.length >= 2) {
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(text, parties);
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(text, parties, roleContext);
     if (noticeDelivery.repairs.length > 0) {
       text = noticeDelivery.text;
       repairs.push(...noticeDelivery.repairs.map((tag) => `notice_delivery:${tag}`));

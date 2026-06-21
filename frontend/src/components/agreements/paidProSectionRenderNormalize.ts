@@ -3,6 +3,7 @@
  */
 
 import { repairGluedSectionHeadingsInText, splitGluedSectionHeadingFromLine } from "./documentSectionHeadingSplit";
+import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 
 export type PaidProSectionNormalizeResult = {
   text: string;
@@ -57,7 +58,7 @@ function ensureHeadingBodySpacing(text: string): string {
 }
 
 export function normalizePaidProSectionRender(text: string): PaidProSectionNormalizeResult {
-  const witnessIdx = (text || "").search(/\bIN WITNESS WHEREOF\b/i);
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text || "");
   const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
   const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
 

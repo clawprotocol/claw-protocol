@@ -425,7 +425,7 @@ export function applyPaidProReviewRenderSanitizer(
   }
 
   if (parties.length >= 2) {
-    const noticeRepair = repairIncompleteIfToNoticeStanzas(text, parties);
+    const noticeRepair = repairIncompleteIfToNoticeStanzas(text, parties, ctx);
     if (noticeRepair.repairs.length > 0) {
       text = noticeRepair.text;
       repaired = true;
@@ -487,7 +487,7 @@ export function applyPaidProReviewRenderSanitizer(
   }
 
   if (parties.length >= 2) {
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, parties);
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, parties, ctx);
     if (noticeDelivery.repairs.length > 0) {
       out = noticeDelivery.text;
       repaired = true;

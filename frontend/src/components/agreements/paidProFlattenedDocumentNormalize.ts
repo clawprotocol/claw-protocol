@@ -4,7 +4,7 @@
  * - strip stale server "SIGNATURES The parties have caused…" tails before LawDog witness blocks
  */
 
-import { stripPreWitnessExecutionPollutionFromPrefix } from "./paidProExecutionBlockNormalization";
+import { stripPreWitnessExecutionPollutionFromPrefix, resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import { repairGluedSectionHeadingsInText } from "./documentSectionHeadingSplit";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
@@ -81,7 +81,7 @@ export function stripInlineStaleServerSignatureTailBeforeWitness(text: string): 
 } {
   const repairs: string[] = [];
   let working = (text || "").replace(/\r\n/g, "\n");
-  const witnessIdx = working.search(/\bIN WITNESS WHEREOF\b/i);
+  const witnessIdx = resolveAuthoritativeWitnessIndex(working);
   if (witnessIdx < 0) return { text: working.trim(), repairs };
 
   const tail = working.slice(witnessIdx);

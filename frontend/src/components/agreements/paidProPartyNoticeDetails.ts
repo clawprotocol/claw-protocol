@@ -5,6 +5,7 @@
 
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
 import {
+  mergeLabeledPartyAuthorityIntoParties,
   partyDisplayRoleLabelForAuthorityParty,
   type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
@@ -15,6 +16,10 @@ import {
   applyContactAuthorityExecutionBlockIntegrity,
   stripExecutionBlockContactContamination,
 } from "./contactAuthorityExecutionBlockIntegrity";
+import {
+  resolveAuthoritativeWitnessIndex,
+  stripPreWitnessExecutionPollutionFromPrefix,
+} from "./paidProExecutionBlockNormalization";
 
 export const PARTY_NOTICE_DETAILS_HEADING = "Party Notice Details:";
 
@@ -238,6 +243,39 @@ function noticeStanzaContainsPlaceholderTokens(stanza: string): boolean {
   return NOTICE_PLACEHOLDER_TOKEN_RE.test(stanza || "");
 }
 
+/** Detect execution-block pollution fused into or appended to operative notice stanzas. */
+export function noticeStanzaHasExecutionPollution(stanza: string): boolean {
+  const trimmed = (stanza || "").trim();
+  if (!trimmed) return false;
+  if (/IN WITNESS WHEREOF/i.test(trimmed) && !/^\s*IN WITNESS WHEREOF\b/i.test(trimmed)) return true;
+  if (/^\s*IN WITNESS WHEREOF\b/i.test(trimmed)) return true;
+  if (/^(?:CLIENT|SERVICE\s+PROVIDER)\s*:/im.test(trimmed)) return true;
+  if (/^\s*(?:By|Name|Title|Date)\s*:/im.test(trimmed)) return true;
+  return false;
+}
+
+function noticesRegionHasExecutionPollution(region: string): boolean {
+  return noticeStanzaHasExecutionPollution(region) || /\bIN WITNESS WHEREOF\b/i.test(region || "");
+}
+
+function defuseEntityWitnessFusionLine(line: string): { line: string; repaired: boolean } {
+  const trimmed = line.trim();
+  if (!/IN WITNESS WHEREOF/i.test(trimmed) || /^\s*IN WITNESS WHEREOF\b/i.test(trimmed)) {
+    return { line, repaired: false };
+  }
+  const cleaned = trimmed.replace(/\s*IN WITNESS WHEREOF[\s\S]*$/i, "").trim();
+  if (!cleaned) return { line: "", repaired: true };
+  return { line: cleaned, repaired: cleaned !== trimmed };
+}
+
+function enrichNoticeAuthorityParties(
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): readonly PaidProSignerMetadataParty[] {
+  if (!roleContext?.intakeText?.trim()) return parties;
+  return mergeLabeledPartyAuthorityIntoParties(parties, roleContext.intakeText);
+}
+
 /** Detect fused party/role labels in operative notice stanzas. */
 export function noticeStanzaHasRoleLabelCorruption(stanza: string): boolean {
   const trimmed = (stanza || "").trim();
@@ -295,6 +333,7 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
   const trimmed = stanza.trim();
   if (!trimmed) return false;
   if (noticeStanzaContainsPlaceholderTokens(trimmed)) return false;
+  if (noticeStanzaHasExecutionPollution(trimmed)) return false;
   if (noticeStanzaHasRoleLabelCorruption(trimmed)) return false;
   if (DANGLING_IF_TO_RE.test(`\n${trimmed}`)) return false;
   if (/^If to\s*:\s*$/i.test(trimmed)) return false;
@@ -328,8 +367,10 @@ function findNoticesSectionStart(text: string): number {
 export function repairIncompleteIfToNoticeStanzas(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; repairs: string[] } {
-  if (!corpus?.trim() || parties.length < 2) return { text: corpus, repairs: [] };
+  const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
+  if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
   const repairs: string[] = [];
   let text = corpus.replace(/\r\n/g, "\n");
 
@@ -341,19 +382,37 @@ export function repairIncompleteIfToNoticeStanzas(
   const noticesIdx = findNoticesSectionStart(text);
   if (noticesIdx < 0) {
     if (/\nIf to\s*$/i.test(text)) {
-      const partiesBlock = parties.map((p) => buildIfToNoticeStanza(p)).join("\n\n");
+      const partiesBlock = authorityParties.map((p) => buildIfToNoticeStanza(p)).join("\n\n");
       text = `${text.trimEnd()}\n\n${partiesBlock}`;
       repairs.push("notice:append_stanzas_after_dangling_if_to");
-      logPaidProNoticeSectionIntegrity({ repairs, partyCount: parties.length, stanzaCount: parties.length });
+      logPaidProNoticeSectionIntegrity({
+        repairs,
+        partyCount: authorityParties.length,
+        stanzaCount: authorityParties.length,
+      });
     }
     return { text: text.trimEnd(), repairs };
   }
 
-  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   const noticesEnd = witnessIdx >= 0 ? witnessIdx : text.length;
   const before = text.slice(0, noticesIdx);
-  const noticesRegion = text.slice(noticesIdx, noticesEnd);
+  let noticesRegion = text.slice(noticesIdx, noticesEnd);
   const after = text.slice(noticesEnd);
+
+  const defusedLines: string[] = [];
+  for (const line of noticesRegion.split("\n")) {
+    const defused = defuseEntityWitnessFusionLine(line);
+    if (defused.repaired) repairs.push("notice:defuse_entity_witness_fusion");
+    if (defused.line) defusedLines.push(defused.line);
+  }
+  noticesRegion = defusedLines.join("\n");
+
+  const pollutionStrip = stripPreWitnessExecutionPollutionFromPrefix(noticesRegion);
+  if (pollutionStrip.repairs.length > 0) {
+    noticesRegion = pollutionStrip.text;
+    repairs.push(...pollutionStrip.repairs.map((r) => `notice:${r}`));
+  }
 
   const blocks = noticesRegion.split(/\n(?=If to\s+)/i);
   const intro = blocks[0] ?? "";
@@ -361,8 +420,8 @@ export function repairIncompleteIfToNoticeStanzas(
   const rebuiltStanzas: string[] = [];
   let stanzaCount = 0;
 
-  for (let i = 0; i < parties.length; i++) {
-    const party = parties[i]!;
+  for (let i = 0; i < authorityParties.length; i++) {
+    const party = authorityParties[i]!;
     const existing = stanzas[i]?.trim() ?? "";
     if (noticeStanzaComplete(existing, party)) {
       rebuiltStanzas.push(existing);
@@ -377,8 +436,11 @@ export function repairIncompleteIfToNoticeStanzas(
   if (!repairs.length) return { text, repairs };
 
   const mergedNotices = `${intro.trimEnd()}\n\n${rebuiltStanzas.join("\n\n")}`.replace(/\n{3,}/g, "\n\n");
-  text = `${before}${mergedNotices}${after}`.replace(/\n{3,}/g, "\n\n").trimEnd();
-  logPaidProNoticeSectionIntegrity({ repairs, partyCount: parties.length, stanzaCount });
+  const executionTail = after.trimStart();
+  text = executionTail
+    ? `${before}${mergedNotices}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+    : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  logPaidProNoticeSectionIntegrity({ repairs, partyCount: authorityParties.length, stanzaCount });
   return { text, repairs };
 }
 
@@ -386,9 +448,11 @@ export function repairIncompleteIfToNoticeStanzas(
 export function ensureOperativeIfToNoticeDelivery(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; repairs: string[] } {
-  if (!corpus?.trim() || parties.length < 2) return { text: corpus, repairs: [] };
-  const missing = parties.some((p) => {
+  const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
+  if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
+  const missing = authorityParties.some((p) => {
     const email = p.signerEmail.trim();
     if (email && !corpus.includes(email)) return true;
     const addr = p.partyAddress.trim();
@@ -398,6 +462,13 @@ export function ensureOperativeIfToNoticeDelivery(
     return false;
   });
   const hasPlaceholderTokens = NOTICE_PLACEHOLDER_TOKEN_RE.test(corpus);
-  if (!missing && !hasPlaceholderTokens) return { text: corpus, repairs: [] };
-  return repairIncompleteIfToNoticeStanzas(corpus, parties);
+  const noticesIdx = findNoticesSectionStart(corpus);
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const noticesRegion =
+    noticesIdx >= 0 ? corpus.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : corpus.length) : "";
+  const hasExecutionPollution = noticesRegionHasExecutionPollution(noticesRegion);
+  if (!missing && !hasPlaceholderTokens && !hasExecutionPollution) {
+    return { text: corpus, repairs: [] };
+  }
+  return repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);
 }

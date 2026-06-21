@@ -80,6 +80,14 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
       continue;
     }
 
+    if (/IN WITNESS WHEREOF/i.test(trimmed) && !/^\s*IN WITNESS WHEREOF\b/i.test(trimmed)) {
+      const cleaned = trimmed.replace(/\s*IN WITNESS WHEREOF[\s\S]*$/i, "").trim();
+      if (cleaned) out.push(cleaned);
+      repairs.push("execution_block:defuse_entity_witness_fusion");
+      i += 1;
+      continue;
+    }
+
     if (/^\s*IN WITNESS WHEREOF\b/i.test(trimmed)) {
       repairs.push("execution_block:strip_pre_witness_witness_clause");
       i += 1;
@@ -212,18 +220,25 @@ function sanitizeRoleAssignments(corpus: string): AcceptedCorpusRoleAssignment[]
     .filter((role) => role.legalName.length >= 3 && !isRecitalFragmentExecutionPartyLine(role.legalName));
 }
 
+/**
+ * Last canonical witness index — premature witness clauses inside Notices must not bound the operative body.
+ */
+export function resolveAuthoritativeWitnessIndex(text: string): number {
+  let last = -1;
+  const re = /\bIN WITNESS WHEREOF\b/gi;
+  for (const m of (text || "").matchAll(re)) {
+    if (m.index != null) last = m.index;
+  }
+  return last;
+}
+
 function operativeBodyWithoutExecutionTails(text: string): string {
   const inlineStripped = stripInlineStaleServerSignatureTailBeforeWitness(text);
-  const firstWitness = inlineStripped.text.search(/\bIN WITNESS WHEREOF\b/i);
-  let prefix = firstWitness >= 0 ? inlineStripped.text.slice(0, firstWitness) : inlineStripped.text;
-  const pollutionStripped = stripPreWitnessExecutionPollutionFromPrefix(prefix);
-  prefix = pollutionStripped.text;
-  if (firstWitness >= 0) return prefix.trimEnd();
-  const sigStart = prefix.search(
-    /(?:^|\n)\s*(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+)\s*:\s*(?:\n|$)/im,
-  );
-  if (sigStart >= 0) return prefix.slice(0, sigStart).trimEnd();
-  return prefix.trimEnd();
+  const lastWitness = resolveAuthoritativeWitnessIndex(inlineStripped.text);
+  const operativePrefix =
+    lastWitness >= 0 ? inlineStripped.text.slice(0, lastWitness) : inlineStripped.text;
+  const pollutionStripped = stripPreWitnessExecutionPollutionFromPrefix(operativePrefix);
+  return pollutionStripped.text.trimEnd();
 }
 
 /** Hard invariant: no duplicate role headings after the canonical party signature sections. */
@@ -233,7 +248,7 @@ export function truncatePostCanonicalExecutionPollution(
 ): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   const expectedPartyCount = opts?.expectedPartyCount ?? 2;
-  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   if (witnessIdx < 0) return { text, repairs };
 
   const prefix = text.slice(0, witnessIdx).trimEnd();
@@ -359,7 +374,7 @@ export function enforcePaidProSingleExecutionBlock(
     repairs.push(...inlineStaleStrip.repairs);
   }
 
-  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   if (witnessIdx >= 0) {
     const preWitnessStrip = stripPreWitnessExecutionPollutionFromPrefix(text.slice(0, witnessIdx));
     if (preWitnessStrip.repairs.length > 0) {
