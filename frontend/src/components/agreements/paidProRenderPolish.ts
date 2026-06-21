@@ -19,6 +19,7 @@ import {
   substitutePaidProIntakeContactPlaceholders,
   type PaidProContactSubstitutionResult,
 } from "./paidProIntakeContactSubstitution";
+import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { polishPaidProAgreementText } from "./paidProAgreementPolish";
 import { forbidPaidProExecutionBlockSynthesis } from "./paidProExecutionBlockAuthority";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -113,7 +114,13 @@ export function applyPaidProRenderPolish(
   text: string,
   intakeRaw: string | null | undefined,
   partyNames: readonly string[] | null | undefined,
-  opts?: { surface?: string; skipCache?: boolean; mode?: "commit" | "validate_only"; forceCommit?: boolean },
+  opts?: {
+    surface?: string;
+    skipCache?: boolean;
+    mode?: "commit" | "validate_only";
+    forceCommit?: boolean;
+    authorityParties?: readonly PaidProSignerMetadataParty[];
+  },
 ): PaidProRenderPolishResult {
   const surface = opts?.surface ?? "unknown";
   if (shouldSkipPaidProPolish({ surface })) {
@@ -186,7 +193,10 @@ export function applyPaidProRenderPolish(
     return rememberPolishResult(cacheKey, result);
   }
 
-  const contactSub = substitutePaidProIntakeContactPlaceholders(baseText, intakeRaw, { surface });
+  const contactSub = substitutePaidProIntakeContactPlaceholders(baseText, intakeRaw, {
+    surface,
+    authorityParties: opts?.authorityParties,
+  });
   let working = contactSub.text;
 
   const { text: masked, emails, urls } = maskProtectedSpans(working);

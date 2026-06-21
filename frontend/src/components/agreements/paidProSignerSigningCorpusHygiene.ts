@@ -14,10 +14,11 @@ import {
   applySignatureNoticeContactFieldsToCorpus,
   corpusHasPartyNoticeDetails,
   ensureOperativeIfToNoticeDelivery,
+  isOperativeIfToNoticeStanzaHeading,
   stripExistingPartyNoticeDetails,
 } from "./paidProPartyNoticeDetails";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
-import { isOperativeIfToNoticeStanzaHeading } from "./paidProPartyNoticeDetails";
+import { enforceProfessionalOutputIntegrity } from "./professionalOutputIntegrity";
 
 const PARTY_NOTICE_HEADING_RE = /^\s*Party Notice Details:\s*$/i;
 const PARTY_NUMBER_HEADING_RE = /^\s*Party\s+(\d+)\s*:\s*$/i;
@@ -193,6 +194,16 @@ export function finalizePaidProSigningCorpusText(
       text = noticeDelivery.text;
       repairs.push(...noticeDelivery.repairs.map((tag) => `notice_delivery:${tag}`));
     }
+  }
+
+  const outputIntegrity = enforceProfessionalOutputIntegrity(text, {
+    intakeRaw: roleContext?.intakeText ?? null,
+    parties,
+    surface: "finalize_paid_pro_signing_corpus",
+  });
+  if (outputIntegrity.repairs.length > 0) {
+    text = outputIntegrity.text;
+    repairs.push(...outputIntegrity.repairs.map((tag) => `output_integrity:${tag}`));
   }
 
   return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), repairs };

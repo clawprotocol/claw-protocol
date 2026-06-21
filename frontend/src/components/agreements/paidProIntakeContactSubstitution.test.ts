@@ -91,6 +91,38 @@ describe("paidProIntakeContactSubstitution", () => {
     expect(fin.remainingFatal.some((x) => /EMAIL/i.test(x))).toBe(true);
   });
 
+  it("substitutes operative Notice [EMAIL_1] when signer-metadata authority provides email", () => {
+    const parties = [
+      {
+        partyIndex: 0,
+        partyLegalName: IRONCLAD_PARTIES[0],
+        signerEmail: IRONCLAD_EMAILS[0],
+        signerName: "Ethan Cole",
+        signerTitle: "CEO",
+        partyAddress: "1 Main St",
+      },
+      {
+        partyIndex: 1,
+        partyLegalName: IRONCLAD_PARTIES[1],
+        signerEmail: IRONCLAD_EMAILS[1],
+        signerName: "Maya Bennett",
+        signerTitle: "CTO",
+        partyAddress: "2 Oak Ave",
+      },
+    ];
+    const body =
+      `AGREEMENT among ${IRONCLAD_PARTIES[0]} and ${IRONCLAD_PARTIES[1]}.\n\n10. Notices\n\n` +
+      `If to ${IRONCLAD_PARTIES[0]}:\nEmail: [EMAIL_1]\n\n` +
+      `If to ${IRONCLAD_PARTIES[1]}:\nEmail: [EMAIL_2]\n`;
+    const sub = substitutePaidProIntakeContactPlaceholders(body, "", {
+      surface: "test",
+      authorityParties: parties,
+    });
+    expect(sub.text).toContain(IRONCLAD_EMAILS[0]);
+    expect(sub.text).toContain(IRONCLAD_EMAILS[1]);
+    expect(sub.text).not.toMatch(/\[\s*EMAIL_\d+\s*\]/i);
+  });
+
   it("applyPaidProRenderPolish keeps exact emails when party names appear in email domains", () => {
     const contacts = IRONCLAD_PARTIES.map((p, i) => `${p}\nEmail: [EMAIL_${i + 1}]`).join("\n\n");
     const body = padOperative(

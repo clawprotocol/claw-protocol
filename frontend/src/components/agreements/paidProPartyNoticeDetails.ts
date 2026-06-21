@@ -223,6 +223,9 @@ export function applySignatureNoticeContactFieldsToCorpus(
 
 const DANGLING_IF_TO_RE = /\nIf to\s*:?\s*$/i;
 
+const NOTICE_PLACEHOLDER_TOKEN_RE =
+  /\[\s*(?:(?:SIGNER|PARTY|CONTACT)_)?(?:EMAIL|ADDRESS|NAME|TITLE)(?:_\d+)?\s*\]/i;
+
 const ROLE_ONLY_IF_TO_HEADER_RE = /^If to (?:the )?(?:Client|Service\s+Provider|Party\s+\d+)\s*:\s*$/i;
 
 const CORRUPTED_NOTICE_ROLE_FUSION_RE =
@@ -230,6 +233,10 @@ const CORRUPTED_NOTICE_ROLE_FUSION_RE =
 
 const CORRUPTED_NOTICE_ROLE_ATTENTION_RE =
   /^(?:Client|Service\s+Provider)\s+(?:Client|Service\s+Provider\s+)?(?:Attention|Attn)\s*:/i;
+
+function noticeStanzaContainsPlaceholderTokens(stanza: string): boolean {
+  return NOTICE_PLACEHOLDER_TOKEN_RE.test(stanza || "");
+}
 
 /** Detect fused party/role labels in operative notice stanzas. */
 export function noticeStanzaHasRoleLabelCorruption(stanza: string): boolean {
@@ -287,6 +294,7 @@ function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
 function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty): boolean {
   const trimmed = stanza.trim();
   if (!trimmed) return false;
+  if (noticeStanzaContainsPlaceholderTokens(trimmed)) return false;
   if (noticeStanzaHasRoleLabelCorruption(trimmed)) return false;
   if (DANGLING_IF_TO_RE.test(`\n${trimmed}`)) return false;
   if (/^If to\s*:\s*$/i.test(trimmed)) return false;
@@ -389,6 +397,7 @@ export function ensureOperativeIfToNoticeDelivery(
     }
     return false;
   });
-  if (!missing) return { text: corpus, repairs: [] };
+  const hasPlaceholderTokens = NOTICE_PLACEHOLDER_TOKEN_RE.test(corpus);
+  if (!missing && !hasPlaceholderTokens) return { text: corpus, repairs: [] };
   return repairIncompleteIfToNoticeStanzas(corpus, parties);
 }

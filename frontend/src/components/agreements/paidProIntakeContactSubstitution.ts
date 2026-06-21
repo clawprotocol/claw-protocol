@@ -9,6 +9,7 @@ import {
   normalizePlaceholderToken,
   parseSignatureContactSlot,
 } from "./agreementTemplatePlaceholderSafety";
+import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 
 export type IntakeContactRecord = {
   name: string;
@@ -90,6 +91,19 @@ export function resolveIntakeEmailForContactSlot(
   return emails[slot - 1] ?? null;
 }
 
+/** Intake email first; signer-metadata authority fills numbered slots when intake lacks them. */
+export function resolveAuthoritativeEmailForContactSlot(
+  slot: number | null,
+  intakeRaw: string | null | undefined,
+  parties?: readonly PaidProSignerMetadataParty[],
+): string | null {
+  const fromIntake = resolveIntakeEmailForContactSlot(intakeRaw, slot);
+  if (fromIntake) return fromIntake;
+  if (!slot || slot < 1 || !parties?.length) return null;
+  const email = parties[slot - 1]?.signerEmail?.trim() ?? "";
+  return email || null;
+}
+
 export function isSignatureOrContactContext(text: string, index: number): boolean {
   const window = text.slice(Math.max(0, index - 700), Math.min(text.length, index + 500));
   if (CONTACT_SECTION_CONTEXT_RE.test(window)) return true;
@@ -126,10 +140,11 @@ export type PaidProContactSubstitutionResult = {
 export function substitutePaidProIntakeContactPlaceholders(
   text: string,
   intakeRaw: string | null | undefined,
-  opts?: { surface?: string },
+  opts?: { surface?: string; authorityParties?: readonly PaidProSignerMetadataParty[] },
 ): PaidProContactSubstitutionResult {
   const contacts = extractIntakeContacts(intakeRaw);
   const intakeContactCount = contacts.length;
+  const authorityParties = opts?.authorityParties;
   let replacedEmailCount = 0;
   const unresolvedEmailTokens: string[] = [];
   const surface = opts?.surface ?? "unknown";
@@ -138,9 +153,8 @@ export function substitutePaidProIntakeContactPlaceholders(
     const idx = typeof offset === "number" ? offset : text.indexOf(match);
     if (idx < 0 || !isEmailNumberedToken(match)) return match;
     const slot = parseSignatureContactSlot(match);
-    const resolved = resolveIntakeEmailForContactSlot(intakeRaw, slot);
+    const resolved = resolveAuthoritativeEmailForContactSlot(slot, intakeRaw, authorityParties);
     if (resolved) {
-      if (isOperativeSignatureContactMisuse(match, text, idx)) return match;
       replacedEmailCount += 1;
       return resolved;
     }
