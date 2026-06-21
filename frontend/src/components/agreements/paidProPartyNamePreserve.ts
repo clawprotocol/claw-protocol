@@ -206,8 +206,12 @@ export function isDisallowedPartyPhrase(name: string): boolean {
 
 /** True when the label looks like a full legal entity (intake-authoritative), not body prose or titles. */
 export function isAuthoritativeLegalEntityName(name: string): boolean {
-  const t = (name || "").replace(/\s+/g, " ").trim();
+  const t = isolateLegalEntityFromContaminatedName((name || "").replace(/\s+/g, " ").trim());
   if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
+  if (/^(?:my|our|the|your|their|each|both|either)\s+company$/i.test(t)) return false;
+  if (/^(?:client|customer|vendor|contractor|service\s+provider|provider|party\s*[ab])$/i.test(t)) {
+    return false;
+  }
   if (ENTITY_SUFFIX.test(t)) return true;
   if (/\bagreement\b/i.test(t) && !ENTITY_SUFFIX.test(t)) return false;
   if (

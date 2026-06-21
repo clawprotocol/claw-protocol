@@ -19,6 +19,9 @@ const STANDALONE_SUFFIX_RE =
 const INTERNAL_PARTY_ALIAS_RE =
   /^(?:party[_\s-]?[ab]\d*|party[_\s-]?\d+|client|consultant|service\s+provider|provider|contractor|company|vendor|customer)$/i;
 
+const NATURAL_COMPANY_ALIAS_RE =
+  /^(?:my|our|the|your|their|each|both|either)\s+company$/i;
+
 const ENTITY_SUFFIX_CONTINUATION_RE =
   /^(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\b/i;
 
@@ -29,6 +32,7 @@ export function isStandaloneLegalEntitySuffix(name: string): boolean {
 export function isInternalPartyAliasToken(name: string): boolean {
   const t = (name || "").replace(/\s+/g, " ").trim();
   if (!t) return true;
+  if (NATURAL_COMPANY_ALIAS_RE.test(t)) return true;
   if (INTERNAL_PARTY_ALIAS_RE.test(t)) return true;
   if (/^\(?\s*["'“”]?party[_\s-]?[ab]\d*["'“”]?\s*\)?$/i.test(t)) return true;
   if (/\bparty[_\s-]?[ab]\b/i.test(t) && t.length < 28) return true;
@@ -85,7 +89,9 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
     .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n));
   if (quoted.length >= 2) return quoted;
-  return collapsePartySlotCandidates(extractBetweenPartyNameList(intake));
+  return collapsePartySlotCandidates(extractBetweenPartyNameList(intake)).filter(
+    (n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n) && isAuthoritativeLegalEntityName(n),
+  );
 }
 
 /** When intake/free-starter manifest has exactly two legal entities, cap signer setup at two. */

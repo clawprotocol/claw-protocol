@@ -14,6 +14,7 @@ import {
   isStandaloneLegalEntitySuffix,
   normalizeAgreementPartyName,
 } from "../components/agreements/partySlotIdentityNormalize";
+import { isolateLegalEntityFromContaminatedName } from "../components/agreements/starterPartyIdentityIsolation";
 import {
   countIdentityPlaceholders,
   inferOrgSlotOriginMetadata,
@@ -41,7 +42,7 @@ export function repairDuplicatedEntityPunctuationInDisplay(text: string): string
 }
 
 function pushUnique(out: string[], seen: Set<string>, raw: string) {
-  const t = raw.replace(/\s+/g, " ").trim();
+  const t = isolateLegalEntityFromContaminatedName(stripParenClauses(raw).replace(/\s+/g, " ").trim());
   if (t.length < 2 || t.length > 160) return;
   const low = t.toLowerCase();
   if (/^(you|i|we|they|counterparty|party|parties|the|a|an)\b/i.test(t)) return;
@@ -61,9 +62,16 @@ function stripParenClauses(s: string): string {
 const NON_ENTITY_PROSE_PHRASE_RE =
   /\b(?:texas|california|delaware|new\s+york|florida|illinois)\s+law\b|\belectronic\s+signatures?\b|\b(?:either|each|any)\s+party\b/i;
 
+const NATURAL_COMPANY_ALIAS_RE =
+  /^(?:my|our|the|your|their|each|both|either)\s+company$/i;
+
 function isLegalEntityCandidateName(name: string): boolean {
   const t = name.replace(/\s+/g, " ").trim();
   if (t.length < 2 || NON_ENTITY_PROSE_PHRASE_RE.test(t)) return false;
+  if (NATURAL_COMPANY_ALIAS_RE.test(t)) return false;
+  if (/^(?:client|customer|vendor|contractor|service\s+provider|provider|party\s*[ab])$/i.test(t)) {
+    return false;
+  }
   if (ENTITY_SUFFIX.test(t)) return true;
   return t.split(/\s+/).length >= 2;
 }
@@ -126,7 +134,7 @@ export function extractAgreementEntityCandidates(context: string): string[] {
   }
 
   for (const m of text.matchAll(
-    /\b([A-Z][\w.&'’\-]+(?:\s+[A-Z][\w.&'’\-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\b/g,
+    /\b([A-Z][\w&'’\-]+(?:\s+[A-Z][\w&'’\-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\b/g,
   )) {
     pushUnique(out, seen, m[1]);
   }

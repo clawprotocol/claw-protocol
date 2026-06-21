@@ -28,6 +28,7 @@ import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import { looksLikeEmail } from "./recipientEmailValidation";
 import {
   resolveLegalIdentitiesFromExtraction,
+  isContaminatedLegalIdentityLabel,
 } from "./legalIdentityResolution";
 
 export type AuthoritativeLegalPartyIdentitySource =
@@ -175,6 +176,10 @@ export function compareLegalIdentityContinuity(
       continue;
     }
     if (!partyLegalNamesMatch(exp, got)) {
+      mismatches.push({ slotIndex: i, expected: exp, actual: got });
+      continue;
+    }
+    if (isContaminatedLegalIdentityLabel(got, exp)) {
       mismatches.push({ slotIndex: i, expected: exp, actual: got });
     }
   }

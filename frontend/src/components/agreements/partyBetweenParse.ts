@@ -10,9 +10,11 @@ import {
 import { normalizePartyNameFragment } from "./partyIntakeNormalize";
 import {
   collapsePartySlotCandidates,
+  isInvalidPartySlotLegalEntity,
   normalizeAgreementPartyName,
   splitCommaSeparatedPartyNames,
 } from "./partySlotIdentityNormalize";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 
 const TAIL_STOP =
@@ -90,7 +92,11 @@ function extractBetweenPartyNameListFromOxfordTail(tail: string): string[] {
   const names = collapsePartySlotCandidates(
     right.length >= 2 ? [...leftNames, normalizeAgreementPartyName(right)] : leftNames,
   );
-  return names.length >= 2 ? names : [];
+  return names.filter((n) => isAuthoritativeLegalEntityName(n) && !isInvalidPartySlotLegalEntity(n));
+}
+
+function filterAuthoritativeBetweenPartyNames(names: string[]): string[] {
+  return names.filter((n) => isAuthoritativeLegalEntityName(n) && !isInvalidPartySlotLegalEntity(n));
 }
 
 /** Two-party between clause: split on the first " and ", not later service-list conjunctions. */
@@ -108,7 +114,8 @@ function extractBetweenPartyNameListFromFirstAndPair(tail: string): string[] {
   const names = collapsePartySlotCandidates(
     right.length >= 2 ? [...leftNames, normalizeAgreementPartyName(right)] : leftNames,
   );
-  return names.length >= 2 ? names.slice(0, 2) : [];
+  const filtered = filterAuthoritativeBetweenPartyNames(names);
+  return filtered.length >= 2 ? filtered.slice(0, 2) : [];
 }
 
 /**

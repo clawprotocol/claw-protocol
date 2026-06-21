@@ -4,9 +4,10 @@
  */
 
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
+import { normalizeCommaSeparatedEntitySuffix } from "./partySlotIdentityNormalize";
 
 const LEGAL_ENTITY_PREFIX_RE =
-  /^((?:[A-Za-z0-9][A-Za-z0-9\s&'.-]*?)(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)\.?)/i;
+  /^((?:[A-Za-z0-9][A-Za-z0-9\s&'.-]*?)\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.|Company))\.?/i;
 
 const EMAIL_LINE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
@@ -41,12 +42,48 @@ export function looksLikeStackedPartyLegalEntityLine(line: string): boolean {
   return PARTY_ENTITY_SUFFIX_RE.test(t);
 }
 
+/** Strip sentence-leading jurisdiction fragments — never part of a legal entity name. */
+const JURISDICTION_SENTENCE_PREFIX_RE =
+  /^(?:Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New\s+Hampshire|New\s+Jersey|New\s+Mexico|New\s+York|North\s+Carolina|North\s+Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode\s+Island|South\s+Carolina|South\s+Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West\s+Virginia|Wisconsin|Wyoming|Venue|Governing\s+Law)\.\s+(?=[A-Z])/i;
+
+export function stripJurisdictionPrefixFromEntityName(raw: string): string {
+  let s = norm(raw);
+  if (!s) return s;
+  for (let i = 0; i < 3; i++) {
+    const next = s.replace(JURISDICTION_SENTENCE_PREFIX_RE, "").trim();
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+/**
+ * Collapse repeated entity mentions in one candidate ("Entity LLC. Entity LLC" → "Entity LLC").
+ * Preserves "Entity Name, LLC" comma-suffix merges.
+ */
+export function collapseRepeatedEntityMentionCandidate(raw: string): string {
+  let s = stripJurisdictionPrefixFromEntityName(raw);
+  if (!s) return s;
+  const periodParts = s
+    .split(/\.\s+(?=[A-Z])/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (periodParts.length > 1) {
+    const withSuffix = periodParts.filter((p) => PARTY_ENTITY_SUFFIX_RE.test(p));
+    if (withSuffix.length >= 1) {
+      return withSuffix.sort((a, b) => b.length - a.length)[0]!;
+    }
+    return periodParts[0]!;
+  }
+  return normalizeCommaSeparatedEntitySuffix(s);
+}
+
 /**
  * Truncate a contaminated party label at the first legal-entity suffix.
  * "Blue Canyon Analytics LLC Sarah Mitchell CEO sarah" → "Blue Canyon Analytics LLC"
  */
 export function isolateLegalEntityFromContaminatedName(raw: string): string {
-  const s = norm(raw);
+  let s = collapseRepeatedEntityMentionCandidate(norm(raw));
   if (!s) return s;
   const m = s.match(LEGAL_ENTITY_PREFIX_RE);
   if (m?.[1]) return norm(m[1]);

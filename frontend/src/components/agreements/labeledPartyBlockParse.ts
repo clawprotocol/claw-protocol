@@ -14,6 +14,7 @@ import {
 import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { resolveLegalIdentitiesFromExtraction } from "./legalIdentityResolution";
 
 export type LabeledPartyBlock = {
   /** 1-based index from the prompt ("Party 1" → 1). */
@@ -258,23 +259,35 @@ export function roleLabelPartyLegalEntities(raw: string): string[] {
   return entities;
 }
 
-/** Labeled Party N blocks, quoted-role lines, role-label Client/Provider blocks, else entity names from prose. */
+/** Labeled Party N blocks, quoted-role lines, role-label Client/Provider blocks, else resolved legal entities from prose. */
 export function resolveStarterGatePartyLegalEntities(raw: string): string[] {
-  const labeled = labeledPartyLegalEntities(raw);
+  const intake = String(raw || "").trim();
+  const labeled = labeledPartyLegalEntities(intake);
   if (labeled.length >= 3) return labeled;
-  const quoted = quotedRolePartyLegalEntities(raw);
+  const quoted = quotedRolePartyLegalEntities(intake);
   if (quoted.length >= 3) return dedupeEntityCandidatesToLegalParties(quoted);
-  const roleLabeled = roleLabelPartyLegalEntities(raw);
+  const roleLabeled = roleLabelPartyLegalEntities(intake);
   const merged = dedupeEntityCandidatesToLegalParties([...labeled, ...quoted, ...roleLabeled]);
   if (merged.length >= 3) return merged;
-  if (merged.length >= 2) return merged;
-  const betweenAuthoritative = extractBetweenPartyNameList(raw).filter(isAuthoritativeLegalEntityName);
+
+  const resolved = resolveLegalIdentitiesFromExtraction({
+    candidates: merged,
+    intakeText: intake,
+  }).map((r) => r.legalEntityName);
+  if (resolved.length >= 3) return resolved;
+  if (resolved.length >= 2) return resolved;
+
+  const betweenAuthoritative = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
   if (betweenAuthoritative.length === 2) {
     return dedupeEntityCandidatesToLegalParties(betweenAuthoritative);
   }
-  const fromProse = dedupeEntityCandidatesToLegalParties(extractAgreementEntityCandidates(raw));
+  const fromProse = dedupeEntityCandidatesToLegalParties(extractAgreementEntityCandidates(intake));
   const combined = dedupeEntityCandidatesToLegalParties([...merged, ...fromProse]);
-  return combined.length >= 2 ? combined : dedupeEntityCandidatesToLegalParties(merged);
+  const fallbackResolved = resolveLegalIdentitiesFromExtraction({
+    candidates: combined,
+    intakeText: intake,
+  }).map((r) => r.legalEntityName);
+  return fallbackResolved.length >= 2 ? fallbackResolved : fallbackResolved;
 }
 
 export const TRIPARTITE_LABELED_PARTY_ROLE_LABELS = [
