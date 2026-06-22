@@ -13,7 +13,9 @@ import {
   resolveAuthoritativePartySlotCount,
   selectAuthoritativeTwoPartySlots,
 } from "./partySlotIdentityNormalize";
+import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import {
   dedupeEntityCandidatesToLegalParties,
   extractAgreementEntityCandidates,
@@ -126,12 +128,18 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     userExpandedPartyCount: args.userExpandedPartyCount,
   });
   const corpusBlockCount = inferCorpusDerivedSignerCount(args.corpusPlain);
-  const manifestPartyCount =
-    args.manifestPartyCount ??
+  const paidProSoTActive = hasPaidProSourceOfTruth();
+  const frozenManifestCount = paidProSoTActive ? readFrozenCanonicalManifestPartyCount() : 0;
+  const consumedManifestCount =
     readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
       (p) => String(p.partyLegalName ?? "").trim().length >= 2,
-    ).length ??
-    0;
+    ).length ?? 0;
+  const explicitManifestPartyCount = args.manifestPartyCount ?? 0;
+  const manifestPartyCount = Math.max(
+    explicitManifestPartyCount,
+    paidProSoTActive ? frozenManifestCount : 0,
+    paidProSoTActive ? consumedManifestCount : 0,
+  );
 
   let count = partySlotCount;
   let source: SignerCountAuthorityResolution["source"] = "party_slot_count";
@@ -182,7 +190,14 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
 
   if (manifestPartyCount >= 3 && count < manifestPartyCount) {
     count = manifestPartyCount;
-    source = manifestPartyCount >= 3 && labeledCount >= 3 ? "labeled_parties" : source;
+    if (explicitManifestPartyCount >= 3 && labeledCount >= 3) {
+      source = "labeled_parties";
+    }
+  }
+
+  if (paidProSoTActive && frozenManifestCount >= 3 && count < frozenManifestCount) {
+    count = frozenManifestCount;
+    source = labeledCount >= frozenManifestCount ? "labeled_parties" : "party_slot_count";
   }
 
   return {

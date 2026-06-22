@@ -9,6 +9,13 @@ import {
   intakeHasFullLegalEntityParties,
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
+import {
+  dedupeEntityCandidatesToLegalParties,
+  extractAgreementEntityCandidates,
+} from "../../agreement/partyPlaceholderDisplay";
 import {
   analyzePaidProExecutionBlockInvariant,
   assertPaidProSingleExecutionBlock,
@@ -82,6 +89,44 @@ export function manifestRecordsForPaidProAcceptance(args: {
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
 }): CanonicalPartyIdentityRecord[] {
+  const frozenNames = readFrozenCanonicalManifestPartyNames();
+  if (frozenNames.length >= 3) {
+    return frozenNames.map((fullLegalName, index) => ({
+      fullLegalName,
+      roleLabel: index === 0 ? "Client" : index === 1 ? "Service Provider" : `Party ${index + 1}`,
+      displayAlias: fullLegalName.split(/\s+/).slice(0, 2).join(" "),
+      signerName: null,
+      signerTitle: null,
+      partyAddress: null,
+    }));
+  }
+
+  const labeled = labeledPartyLegalEntities(args.intakeText ?? "").filter(isAuthoritativeLegalEntityName);
+  if (labeled.length >= 3) {
+    return labeled.slice(0, 4).map((fullLegalName, index) => ({
+      fullLegalName,
+      roleLabel: index === 0 ? "Client" : index === 1 ? "Service Provider" : `Party ${index + 1}`,
+      displayAlias: fullLegalName.split(/\s+/).slice(0, 2).join(" "),
+      signerName: null,
+      signerTitle: null,
+      partyAddress: null,
+    }));
+  }
+
+  const entityPool = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(args.intakeText ?? "").filter(isAuthoritativeLegalEntityName),
+  );
+  if (entityPool.length >= 3) {
+    return entityPool.slice(0, 4).map((fullLegalName, index) => ({
+      fullLegalName,
+      roleLabel: index === 0 ? "Client" : index === 1 ? "Service Provider" : `Party ${index + 1}`,
+      displayAlias: fullLegalName.split(/\s+/).slice(0, 2).join(" "),
+      signerName: null,
+      signerTitle: null,
+      partyAddress: null,
+    }));
+  }
+
   const partyNames = (args.draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
     .filter((n) => n.length >= 2);
@@ -170,6 +215,17 @@ function operativePrefixWithoutExecution(text: string): string {
   return prefix.trimEnd();
 }
 
+function executionBlockCoversManifestPartyNames(
+  text: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+): boolean {
+  if (records.length < 3) return true;
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : text.slice(-3000);
+  const present = records.filter((rec) => tail.includes(rec.fullLegalName.trim())).length;
+  return present >= records.length;
+}
+
 /**
  * Repair or normalize execution block before SoT freeze / acceptance.
  * Appends canonical tail when witness/execution count is not exactly one.
@@ -188,7 +244,12 @@ export function ensurePaidProAcceptanceExecutionBlockInvariant(
 
   const authorityParties = records.map((rec) => ({ partyLegalName: rec.fullLegalName }));
 
-  if (witnessCount === 1 && executionBlockCount === 1 && invariant.ok) {
+  if (
+    witnessCount === 1 &&
+    executionBlockCount === 1 &&
+    invariant.ok &&
+    executionBlockCoversManifestPartyNames(out, records)
+  ) {
     const normalized = enforcePaidProSingleExecutionBlock(out, { authorityParties });
     if (normalized.text !== out) {
       repairs.push(...normalized.repairs);

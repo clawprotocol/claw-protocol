@@ -2,10 +2,12 @@
  * Prevents empty signer-metadata handoff reads from clobbering a populated session handoff.
  */
 
-import type { PremiumRecipientHandoffV2 } from "./premiumPartyNamesHandoff";
+import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import {
   linearPremiumRecipientSlots,
   premiumRecipientHandoffPartyFingerprint,
+  type PremiumRecipientHandoffV2,
 } from "./premiumPartyNamesHandoff";
 import { signerMetadataInputRaw } from "../../agreement/signerMetadataNormalize";
 import {
@@ -78,7 +80,11 @@ export function applyPremiumRecipientHandoffReadGate(
   opts?: { partySlotCount?: number; corpusHash?: string | null },
 ): PremiumRecipientHandoffV2 | null {
   if (!handoff) return null;
-  const partySlotCount = Math.max(opts?.partySlotCount ?? 2, 2);
+  const partySlotCount = Math.max(
+    opts?.partySlotCount ?? 2,
+    hasPaidProSourceOfTruth() ? readFrozenCanonicalManifestPartyCount() : 0,
+    2,
+  );
   if ((opts?.corpusHash ?? "").trim()) {
     latchedCorpusHash = (opts?.corpusHash ?? "").trim();
   }

@@ -36,9 +36,11 @@ export function repairMalformedPaidProAgreementRecital(
     const roleLabels = repairOpeningRecitalRoleLabelsFromManifest(out, records);
     out = roleLabels.text;
     repairs.push(...roleLabels.repairs);
-    const opening = ensurePaidProServicesAgreementOpening(out, records);
-    out = opening.text;
-    repairs.push(...opening.repairs);
+    if (records.length < 3) {
+      const opening = ensurePaidProServicesAgreementOpening(out, records);
+      out = opening.text;
+      repairs.push(...opening.repairs);
+    }
   }
   const dup = repairDuplicateAgreementOpening(out, records);
   out = dup.text;

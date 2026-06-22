@@ -12,6 +12,7 @@ import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthority
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
+import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
   return prefix
@@ -48,6 +49,8 @@ export function normalizeFlattenedPaidProDocumentBlocks(text: string): {
     /^((?:CONSULTING AND IMPLEMENTATION|MUTUAL CONSULTING AND IMPLEMENTATION|SERVICES) AGREEMENT)\s+(This\b)/i,
     "$1\n\n$2",
   );
+
+  out = out.replace(/^(MUTUAL SERVICES AGREEMENT)\s+(This\b)/i, "$1\n\n$2");
 
   out = out.replace(
     /([.!?)"])\s+(\d+\.\s+(?!\d+\.\d)(?:[A-Z][^\n]{2,160}?))(?=\s+\d+(?:\.\d+)?\s+)/g,
@@ -157,6 +160,16 @@ export function preparePaidProReviewDisplayPlain(text: string): {
   if (contactAuthority.repaired) {
     out = contactAuthority.text;
     repairs.push(...contactAuthority.repairs.map((tag) => `contact_authority:${tag}`));
+  }
+  const sectionAny = repairMalformedSectionAnyReference(out);
+  if (sectionAny.repaired) {
+    out = sectionAny.text;
+    repairs.push("normalize:section_any_reference");
+  }
+  const splitTail = repairSplitPaidProHeadingFragments(out);
+  if (splitTail.repairs.length > 0) {
+    out = splitTail.text;
+    repairs.push(...splitTail.repairs);
   }
   return { text: out, repairs: [...new Set(repairs)] };
 }

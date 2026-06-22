@@ -234,6 +234,7 @@ function findRecitalOpener(head: string): RecitalOpenerMatch | null {
     pushAll(re, (m) => ((m[1] || m[2] || "").toLowerCase() === "between" ? "between" : "among"));
   }
   pushAll(/\bis\s+between\s+(?=[A-Z])/gi, () => "between");
+  pushAll(/\bby\s+and\s+between\s+(?=[A-Z])/gi, () => "between");
 
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => a.index - b.index);
@@ -307,11 +308,25 @@ function buildRecitalReplacement(
   return `This Agreement is entered into ${joiner} ${list}${collective}`;
 }
 
+function normalizedLegalNamePresent(head: string, legalName: string): boolean {
+  const base = legalName.replace(/[.,]+$/g, "").trim().toLowerCase();
+  return head.toLowerCase().includes(base);
+}
+
+/** True when frozen 3+ party manifest is not fully represented in the opening recital. */
+export function frozenManifestRecitalNeedsRewrite(text: string, names: readonly string[]): boolean {
+  if (names.length < 3) return false;
+  const head = text.slice(0, Math.min(text.length, RECITAL_SCAN_LEN));
+  if (names.some((n) => !normalizedLegalNamePresent(head, n))) return true;
+  if (/\(\s*["']Service Provider["']\s*\)/i.test(head)) return true;
+  return false;
+}
+
 export function normalizeOpeningRecital(
   text: string,
   parties: readonly PartyEntry[],
   confidence: PartyExtractionConfidence,
-  opts?: { skipInternalMask?: boolean },
+  opts?: { skipInternalMask?: boolean; forceRewrite?: boolean },
 ): { text: string; log: RecitalPolishLog } {
   const authoritativeCount = parties.length;
   const baseLog: RecitalPolishLog = {
@@ -342,8 +357,9 @@ export function normalizeOpeningRecital(
   }
 
   if (
-    recitalAlreadyPolished(recital.partyList, parties) ||
-    recitalAlreadyPolished(maskedHead, parties)
+    !opts?.forceRewrite &&
+    (recitalAlreadyPolished(recital.partyList, parties) ||
+      recitalAlreadyPolished(maskedHead, parties))
   ) {
     return {
       text,
@@ -356,7 +372,11 @@ export function normalizeOpeningRecital(
       new RegExp(`(?<![\\w/])${escapeRe(p.short)}(?![\\w@])`, "i").test(recital.partyList) &&
       !recital.partyList.includes(p.full),
   );
-  if (!needsShortRewrite && parties.every((p) => recital.partyList.includes(p.full))) {
+  if (
+    !opts?.forceRewrite &&
+    !needsShortRewrite &&
+    parties.every((p) => recital.partyList.includes(p.full))
+  ) {
     return {
       text,
       log: { ...baseLog, reason: "already_full_names" },

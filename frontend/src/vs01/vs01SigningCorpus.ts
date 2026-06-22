@@ -34,6 +34,7 @@ import { consumeAuthoritativeSignerCount } from "../components/agreements/signer
 import { labeledPartyLegalEntities } from "../components/agreements/labeledPartyBlockParse";
 import { resolveAuthoritativePartySlotCount } from "../components/agreements/partySlotIdentityNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
+import { readFrozenCanonicalManifestPartyCount } from "../components/agreements/frozenCanonicalManifestAuthority";
 import {
   getAcceptedPremiumCanonicalCorpus,
   getAcceptedPremiumCorpusForVs01Signing,
@@ -277,6 +278,7 @@ function resolveVs01AuthoritativeSignerCount(
     readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
       (p) => String(p.partyLegalName ?? "").trim().length >= 2,
     ).length ?? 0,
+    readFrozenCanonicalManifestPartyCount(),
     slotCount,
     labeledCount >= 3 ? labeledCount : 0,
   );

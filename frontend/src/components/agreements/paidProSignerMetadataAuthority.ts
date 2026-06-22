@@ -183,7 +183,8 @@ export type PaidProSignerMetadataParty = {
 export type PaidProSignerMetadataAuthoritySource =
   | "live_ui"
   | "authoritative_snapshot"
-  | "authoritative_write";
+  | "authoritative_write"
+  | "server_full_draft";
 
 export type PaidProSignerMetadataAuthority = {
   parties: PaidProSignerMetadataParty[];

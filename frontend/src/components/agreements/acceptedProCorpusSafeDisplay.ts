@@ -8,6 +8,7 @@ import {
   intakeHasFullLegalEntityParties,
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
+import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES } from "./paidProNPartySignerSetup";
@@ -114,6 +115,9 @@ function canonicalPartyNamesFromAcceptanceContext(
   draft: ParsedDraftShape | null | undefined,
   intakeText: string | null | undefined,
 ): string[] {
+  const frozen = readFrozenCanonicalManifestPartyNames();
+  if (frozen.length >= 2) return frozen;
+
   const fromIntake = labeledPartyLegalEntities(intakeText ?? "")
     .map((n) => n.trim())
     .filter((n) => isAuthoritativeLegalEntityName(n));

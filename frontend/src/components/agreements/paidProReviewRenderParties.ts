@@ -19,6 +19,10 @@ import {
   hasPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
 } from "./paidProSourceOfTruth";
+import {
+  paidProSignerMetadataPartiesFromFrozenManifest,
+  readFrozenCanonicalManifestPartyNames,
+} from "./frozenCanonicalManifestAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
@@ -59,10 +63,38 @@ function mergeLiveSignerFieldsOntoParties(
   });
 }
 
+function mergeFrozenManifestParties(
+  base: readonly PaidProSignerMetadataParty[],
+  intakeRaw: string,
+  liveParties: readonly PaidProSignerMetadataParty[] | null,
+  preferLiveSignerFields: boolean,
+): PaidProSignerMetadataParty[] {
+  const frozen = paidProSignerMetadataPartiesFromFrozenManifest();
+  if (frozen.length < 3) return [...base];
+  const mergedFrozen = mergeLiveSignerFieldsOntoParties(frozen, liveParties, preferLiveSignerFields);
+  if (base.length >= 3) {
+    return mergeLabeledPartyAuthorityIntoParties(
+      mergeLiveSignerFieldsOntoParties(base, mergedFrozen, false),
+      intakeRaw,
+    );
+  }
+  return mergeLabeledPartyAuthorityIntoParties(mergedFrozen, intakeRaw);
+}
+
 export function resolvePartiesForReviewRender(
   args?: ResolvePaidProReviewRenderPartiesArgs,
 ): PaidProSignerMetadataParty[] {
   const intakeRaw = (args?.intakeText ?? "").trim();
+  const frozenManifestNames = readFrozenCanonicalManifestPartyNames();
+  const livePartiesEarly = args?.liveSignerMetadataUi
+    ? buildPaidProSignerMetadataParties(args.liveSignerMetadataUi)
+    : null;
+  const preferLiveSignerFieldsEarly = isPaidProReviewSignerMetadataSessionActive();
+
+  if (frozenManifestNames.length >= 3 && !intakeRaw) {
+    return mergeFrozenManifestParties([], intakeRaw, livePartiesEarly, preferLiveSignerFieldsEarly);
+  }
+
   const labeledAuthority = intakeRaw
     ? mergeLabeledPartyAuthorityIntoParties([], intakeRaw)
     : [];
@@ -87,10 +119,17 @@ export function resolvePartiesForReviewRender(
 
   const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
   if (consumed && consumed.length >= 2) {
-    return mergeLabeledPartyAuthorityIntoParties(
+    const merged = mergeLabeledPartyAuthorityIntoParties(
       mergeLiveSignerFieldsOntoParties(consumed, liveParties, preferLiveSignerFields),
       intakeRaw,
     );
+    if (frozenManifestNames.length >= 3 && merged.length < frozenManifestNames.length) {
+      return mergeFrozenManifestParties(merged, intakeRaw, liveParties, preferLiveSignerFields);
+    }
+    return merged;
+  }
+  if (frozenManifestNames.length >= 3) {
+    return mergeFrozenManifestParties([], intakeRaw, liveParties, preferLiveSignerFields);
   }
   if (liveParties && liveParties.length >= 2) {
     return mergeLabeledPartyAuthorityIntoParties(liveParties, intakeRaw);

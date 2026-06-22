@@ -19,6 +19,7 @@ import { resolvePaidProFrozenDisplayPlain } from "./paidProPostFreezeCorpusInvar
 import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRenderParties";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
+import { applyFrozenManifestPaidProDisplayAuthority } from "./paidProFrozenManifestDisplayAuthority";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { shouldApplyExecutionBlockSignerOverlay } from "./paidProSignerMetadataCommitPolicy";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
@@ -40,7 +41,12 @@ export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
 export function resolvePaidProAuthoritativeDisplayPlain(
   args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
 ): string {
-  const base = preparePaidProReviewDisplayPlain(resolvePaidProFrozenDisplayPlain()).text;
+  const prepared = preparePaidProReviewDisplayPlain(resolvePaidProFrozenDisplayPlain()).text;
+  const manifestAligned = applyFrozenManifestPaidProDisplayAuthority(prepared, {
+    intakeText: args?.intakeText ?? null,
+    draft: args?.draft ?? null,
+  }).text;
+  const base = manifestAligned;
   const parties = resolvePartiesForReviewRender(args);
   const needsOverlay =
     isPaidProReviewSignerMetadataSessionActive() ||

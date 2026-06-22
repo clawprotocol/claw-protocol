@@ -4,6 +4,7 @@ import {
   consumeAuthoritativeSignerCount,
   resolveAuthoritativeSignerCount,
 } from "./signerCountAuthority";
+import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
   resolveSignerPartyLegalEntityDisplayValue,
@@ -172,8 +173,9 @@ export type PaidProSignerSetupUiState = {
 export function resolveSignerSetupUiPartyCount(
   state: Pick<PaidProSignerSetupUiState, "signerSetupUiPartyCount" | "draftParties" | "intakeText">,
 ): number {
+  const frozenCount = readFrozenCanonicalManifestPartyCount();
   const rawUi = Math.min(
-    Math.max(state.signerSetupUiPartyCount, state.draftParties.length, 2),
+    Math.max(state.signerSetupUiPartyCount, state.draftParties.length, frozenCount, 2),
     PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
   );
   return consumeAuthoritativeSignerCount(

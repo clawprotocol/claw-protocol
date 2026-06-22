@@ -84,7 +84,13 @@ import {
   intakeHasFullLegalEntityParties,
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
+import { buildPartyEntries, frozenManifestRecitalNeedsRewrite, normalizeOpeningRecital } from "./paidProAgreementPolish";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import {
+  hashPaidProSignerMetadataAuthority,
+  setConsumedPaidProSignerMetadataAuthority,
+} from "./paidProSignerMetadataAuthority";
+import { writePremiumRecipientHandoffLinear } from "./premiumPartyNamesHandoff";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
   isGenericPaidProAcceptanceManifestFallback,
@@ -399,7 +405,20 @@ export function establishPaidProSourceOfTruth(args: {
   const roleLabels = (args.draft?.parties ?? [])
     .map((p) => String(p?.role ?? "").trim())
     .filter((r) => r.length >= 2);
-  if (intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList)) {
+  const acceptanceManifestForOpening = manifestRecordsForPaidProAcceptance({
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+  });
+  if (acceptanceManifestForOpening.length >= 3) {
+    const manifestNames = acceptanceManifestForOpening.map((r) => r.fullLegalName);
+    const recital = normalizeOpeningRecital(
+      safeForCommit,
+      buildPartyEntries(manifestNames),
+      "high",
+      { forceRewrite: frozenManifestRecitalNeedsRewrite(safeForCommit, manifestNames) },
+    );
+    safeForCommit = recital.text;
+  } else if (intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList)) {
     const identityRecords = resolveCanonicalPartyIdentitiesFromIntake(
       args.intakeText ?? "",
       partyNameList,
@@ -611,6 +630,24 @@ export function establishPaidProSourceOfTruth(args: {
       rawAcceptedLen: trim(args.text).length,
     },
   });
+  if (reviewParties.length >= 2) {
+    setConsumedPaidProSignerMetadataAuthority({
+      parties: reviewParties,
+      source: "server_full_draft",
+      hash: hashPaidProSignerMetadataAuthority(reviewParties),
+      updatedAt: Date.now(),
+    });
+    writePremiumRecipientHandoffLinear(
+      reviewParties.map((party) => ({
+        name: party.partyLegalName,
+        email: party.signerEmail,
+        role: "party",
+        signerName: party.signerName,
+        signerTitle: party.signerTitle,
+        partyAddress: party.partyAddress,
+      })),
+    );
+  }
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
     console.info("[paid-pro-source-of-truth]", {
