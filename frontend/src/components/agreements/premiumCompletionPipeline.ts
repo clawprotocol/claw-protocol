@@ -132,7 +132,10 @@ import {
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
 import { previewPostCheckoutRecoverySotCommit } from "./paidProPostCheckoutRecoveryAuthority";
-import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
+import {
+  DETERMINISTIC_PRO_FALLBACK_REASON,
+  logDeterministicProFallbackDecision,
+} from "./deterministicQuadPartyProFallback";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
@@ -1736,6 +1739,7 @@ async function runPremiumCompletionInner(
   } | null = null;
   let pipelineNormalizedAuthoritativeText = "";
   let rejectedPaidCorpusDueToClientGates = false;
+  let premiumJsonParseDegradedAttemptCount = 0;
 
   try {
     const mergedForApi = stripClientPremiumArtifactBlocksFromDraft(merged);
@@ -1944,6 +1948,13 @@ async function runPremiumCompletionInner(
           code: fcRecover || "unknown",
           message: msgRecover || "Your agreement is ready. You can refine any wording below.",
         };
+        if (fcRecover === "json_parse") {
+          premiumJsonParseDegradedAttemptCount += 1;
+          logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.serverDegradedJsonParse, {
+            attempt: premiumJsonParseDegradedAttemptCount,
+            documentLen: (full.document_text || "").trim().length,
+          });
+        }
       }
       let doc = (effectiveFull.document_text || "").trim();
       const canonicalPartyNamesForAttribution = (merged.parties || [])
@@ -2379,6 +2390,19 @@ async function runPremiumCompletionInner(
               doc = frozen.body;
               usedClientRetry = true;
               effectiveFull = full2;
+              if (
+                (full2.generation_outcome || "").trim() === "degraded" &&
+                (full2.server_generation_failure_code || "").trim() === "json_parse"
+              ) {
+                premiumJsonParseDegradedAttemptCount += 1;
+                logDeterministicProFallbackDecision(
+                  DETERMINISTIC_PRO_FALLBACK_REASON.serverRetryDegradedJsonParse,
+                  {
+                    attempt: premiumJsonParseDegradedAttemptCount,
+                    documentLen: (full2.document_text || "").trim().length,
+                  },
+                );
+              }
             }
           } catch {
             doc = preStructuralRetryDoc;
@@ -3392,7 +3416,6 @@ async function runPremiumCompletionInner(
   if (premiumRenderSource === "rejected_paid_corpus") {
     const docTrimForSuppress = (winningPremiumBodyText || "").trim();
     const intakeForRecovery = rawForSoT || rawIntake;
-    const labeledTripartiteIntake = parseLabeledPartyBlocks(intakeForRecovery).length >= 3;
     const serverRecoveryCandidate = (
       pipelineNormalizedAuthoritativeText || docTrimForSuppress
     ).trim();
@@ -3438,8 +3461,12 @@ async function runPremiumCompletionInner(
         tierADiagnostic: tierADiag,
       };
     }
-    // Labeled tripartite intakes: never polish rejected server fragments — build from intake authority first.
-    if (labeledTripartiteIntake && rejectedPaidCorpusDueToClientGates) {
+    const jsonParseClientRejected =
+      rejectedPaidCorpusDueToClientGates &&
+      (serverDegradedHttpMetaForRecovery?.code === "json_parse" ||
+        serverGenerationDegraded?.code === "json_parse" ||
+        premiumJsonParseDegradedAttemptCount >= 1);
+    const tryDeterministicIntakeRecovery = () => {
       const intakeLocalRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
         draft: outMerged,
         rawIntake: intakeForRecovery,
@@ -3455,6 +3482,29 @@ async function runPremiumCompletionInner(
           })
         : null;
       if (intakeLocalRecovery.ok && intakeRecoveryPreview?.eligible) {
+        logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.accepted, {
+          bodyLen: intakeLocalRecovery.body.length,
+          displayPlainLen: intakeRecoveryPreview.displayPlainLen,
+          jsonParseAttempts: premiumJsonParseDegradedAttemptCount,
+        });
+        return { accepted: true as const, body: intakeLocalRecovery.body, preview: intakeRecoveryPreview };
+      }
+      logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.rejected, {
+        localRecoveryOk: intakeLocalRecovery.ok,
+        localRecoveryReasons: intakeLocalRecovery.reasons,
+        blockReason: intakeRecoveryPreview?.blockReason ?? null,
+        bodyLen: intakeLocalRecovery.ok ? intakeLocalRecovery.body.length : 0,
+        jsonParseAttempts: premiumJsonParseDegradedAttemptCount,
+      });
+      return {
+        accepted: false as const,
+        localRecovery: intakeLocalRecovery,
+        preview: intakeRecoveryPreview,
+      };
+    };
+    if (rejectedPaidCorpusDueToClientGates) {
+      const deterministic = tryDeterministicIntakeRecovery();
+      if (deterministic.accepted) {
         const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
         if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
         logPremiumCompletionDebug({
@@ -3462,20 +3512,20 @@ async function runPremiumCompletionInner(
           recoveryCandidateEligible: true,
           rejectedReason: undefined,
           premiumRenderSource: recoverySource,
-          bodyLen: intakeLocalRecovery.body.length,
-          displayPlainLen: intakeRecoveryPreview.displayPlainLen,
+          bodyLen: deterministic.body.length,
+          displayPlainLen: deterministic.preview.displayPlainLen,
           lastClientGate: lastClientGateTrace,
-          note: "labeled_tripartite_intake_authority",
+          note: "deterministic_intake_authority",
         });
         outMerged = stripClientPremiumArtifactBlocksFromDraft({
           ...outMerged,
-          premium_full_document_text: intakeLocalRecovery.body,
+          premium_full_document_text: deterministic.body,
         });
         return {
           premiumDraft: outMerged,
           premiumParties,
           recipientCandidates,
-          winningPremiumBodyText: intakeLocalRecovery.body,
+          winningPremiumBodyText: deterministic.body,
           premiumRenderSource: recoverySource,
           premiumReview,
           premiumFinalizeAudit,
@@ -3491,21 +3541,8 @@ async function runPremiumCompletionInner(
           tierADiagnostic: tierADiag,
         };
       }
-      if (intakeLocalRecovery.ok && intakeRecoveryPreview && !intakeRecoveryPreview.eligible) {
-        logPremiumCompletionDebug({
-          stage: "premium_degraded_server_local_recovery",
-          recoveryCandidateEligible: false,
-          rejectedReason: intakeRecoveryPreview.blockReason,
-          premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
-          bodyLen: intakeLocalRecovery.body.length,
-          displayPlainLen: intakeRecoveryPreview.displayPlainLen,
-          lastClientGate: lastClientGateTrace,
-          note: "labeled_tripartite_intake_authority_preview_blocked",
-        });
-      }
     }
-    const skipServerDegradedRecovery =
-      labeledTripartiteIntake && rejectedPaidCorpusDueToClientGates;
+    const skipServerDegradedRecovery = jsonParseClientRejected;
     if (
       !skipServerDegradedRecovery &&
       serverRecoveryCandidate.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
@@ -3572,6 +3609,12 @@ async function runPremiumCompletionInner(
     if (localRecovery.ok && degradedRecoveryPreview?.eligible) {
       const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
       if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+      logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.accepted, {
+        bodyLen: localRecovery.body.length,
+        displayPlainLen: degradedRecoveryPreview.displayPlainLen,
+        jsonParseAttempts: premiumJsonParseDegradedAttemptCount,
+        note: "late_local_recovery",
+      });
       logPremiumCompletionDebug({
         stage: "premium_degraded_server_local_recovery",
         recoveryCandidateEligible: true,
@@ -3617,6 +3660,12 @@ async function runPremiumCompletionInner(
       });
     }
     if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
+    logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.noCanonicalFreezeAfterRejection, {
+      localRecoveryOk: localRecovery.ok,
+      recoverySotEligible: degradedRecoveryPreview?.eligible ?? false,
+      recoverySotBlockReason: degradedRecoveryPreview?.blockReason ?? null,
+      jsonParseAttempts: premiumJsonParseDegradedAttemptCount,
+    });
     logPremiumCompletionDebug({
       stage: "pipeline_return_rejected_paid_corpus",
       accepted: false,

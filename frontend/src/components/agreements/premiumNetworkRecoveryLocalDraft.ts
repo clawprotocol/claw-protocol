@@ -13,6 +13,10 @@ import {
 } from "./premiumFullDraftClientAcceptance";
 import { assessPaidProMutualConsultingProfessionalStructure } from "./paidProMutualConsultingQualityFloor";
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
+import {
+  buildDeterministicQuadPartyMutualServicesProFallback,
+  resolveDeterministicQuadPartyNames,
+} from "./deterministicQuadPartyProFallback";
 
 export const PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE = "premium_network_local_recovery" as const;
 export const PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE =
@@ -46,16 +50,33 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
     ...stripped,
     parties: repairedParties.length ? repairedParties : stripped.parties,
   };
+  const quadPartyNames = resolveDeterministicQuadPartyNames(rawIntake, draftForRecovery);
   const partyNames = labeledPartyLegalEntities(rawIntake).length
     ? labeledPartyLegalEntities(rawIntake)
-    : (draftForRecovery.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean);
+    : quadPartyNames.length >= 4
+      ? quadPartyNames
+      : (draftForRecovery.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean);
 
-  let body =
-    labeledBlocks.length >= 3
-      ? buildTripartitePremiumPostCheckoutStitchedBody(draftForRecovery, rawIntake, labeledBlocks)
-      : buildPremiumPostCheckoutStitchedBody(draftForRecovery, rawIntake);
+  let body = "";
+  if (quadPartyNames.length >= 4) {
+    const quad = buildDeterministicQuadPartyMutualServicesProFallback({
+      draft: draftForRecovery,
+      rawIntake,
+      partyNames: quadPartyNames,
+    });
+    if (!quad.ok) {
+      return { ok: false, body: "", reasons: quad.reasons };
+    }
+    body = quad.body;
+  } else if (labeledBlocks.length >= 3) {
+    body = buildTripartitePremiumPostCheckoutStitchedBody(draftForRecovery, rawIntake, labeledBlocks);
+  } else {
+    body = buildPremiumPostCheckoutStitchedBody(draftForRecovery, rawIntake);
+  }
 
-  if (labeledBlocks.length >= 3) {
+  if (quadPartyNames.length >= 4) {
+    // Quad deterministic fallback already ran placeholder + acceptance prep.
+  } else if (labeledBlocks.length >= 3) {
     if (/\[(?:Not yet specified|YOUR COMPANY|SERVICE PROVIDER NAME)\]/i.test(body)) {
       return { ok: false, body: "", reasons: ["placeholder_blocked"] };
     }
@@ -73,7 +94,7 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
   }
 
   const prepared =
-    labeledBlocks.length >= 3
+    quadPartyNames.length >= 4 || labeledBlocks.length >= 3
       ? { text: body, repairs: [] as string[] }
       : preparePaidProServerDocumentForAcceptance(body, draftForRecovery, rawIntake, {
           surface: args.recoverySurface,
