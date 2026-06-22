@@ -17,6 +17,10 @@ import {
 } from "./paidProNoticeContactAuthority";
 import { assertClauseFamilyStructuralIntegrityForFreeze } from "./clauseFamilyStructuralIntegrity";
 import { hasInlineMalformedNoticeStanzas } from "./paidProPartyNoticeDetails";
+import {
+  analyzeMultiPartyExecutionBlockShape,
+  resolveAcceptanceManifestRecordsForExecution,
+} from "./paidProAcceptanceExecutionBlockInvariant";
 
 export type PaidProDocumentBoundaryAuthorityOpts = PaidProNoticeContactAuthorityOpts & {
   /** When true (freeze path), unresolved boundary violations throw. */
@@ -121,10 +125,19 @@ export function applyPaidProDocumentBoundaryAuthority(
   }
 
   if (/\bIN WITNESS WHEREOF\b/i.test(out)) {
-    const execution = enforcePaidProSingleExecutionBlock(out);
-    if (execution.text !== out) {
-      out = execution.text;
-      repairs.push(...execution.repairs.map((r) => `execution:${r}`));
+    const executionManifest = resolveAcceptanceManifestRecordsForExecution({
+      draft: opts?.draft ?? null,
+      intakeText: opts?.intakeText ?? null,
+    });
+    const skipMultiPartyExecutionNormalize =
+      executionManifest.length >= 3 &&
+      !analyzeMultiPartyExecutionBlockShape(out, executionManifest).malformed;
+    if (!skipMultiPartyExecutionNormalize) {
+      const execution = enforcePaidProSingleExecutionBlock(out);
+      if (execution.text !== out) {
+        out = execution.text;
+        repairs.push(...execution.repairs.map((r) => `execution:${r}`));
+      }
     }
   }
 

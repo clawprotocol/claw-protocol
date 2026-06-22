@@ -95,6 +95,7 @@ import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
   isGenericPaidProAcceptanceManifestFallback,
   manifestRecordsForPaidProAcceptance,
+  resolveAcceptanceManifestRecordsForExecution,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { assertPaidProSingleExecutionBlock } from "./paidProExecutionBlockAuthority";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
@@ -506,6 +507,25 @@ export function establishPaidProSourceOfTruth(args: {
     surface: "establish_paid_pro_source_of_truth_pre_freeze",
     parties: reviewParties,
   });
+  const preFreezeExecutionManifest = resolveAcceptanceManifestRecordsForExecution({
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+  });
+  if (
+    preFreezeExecutionManifest.length >= 3 &&
+    !isGenericPaidProAcceptanceManifestFallback(preFreezeExecutionManifest)
+  ) {
+    const preFreezeExecution = ensurePaidProAcceptanceExecutionBlockInvariant(
+      safeForCommit,
+      preFreezeExecutionManifest,
+    );
+    safeForCommit = preFreezeExecution.text;
+    assertPaidProSingleExecutionBlock(
+      safeForCommit,
+      "establish_paid_pro_source_of_truth_pre_freeze_execution",
+      { expectedParties: preFreezeExecutionManifest.length },
+    );
+  }
   if (containsUnresolvedRenderTokens(safeForCommit)) {
     throw new Error("[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority");
   }

@@ -32,7 +32,7 @@ import { buildPremiumPostCheckoutLocalRecoveryProDraft } from "./premiumNetworkR
 import { countNumberedAgreementSections } from "./paidProMutualConsultingQualityFloor";
 import {
   test398Draft,
-} from "./paidProTest398MultiPartyVisualDegrade.test";
+} from "./paidProTest398Fixtures";
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
 import { DETERMINISTIC_PRO_FALLBACK_REASON } from "./deterministicQuadPartyProFallback";
 

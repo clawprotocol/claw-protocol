@@ -35,7 +35,7 @@ import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
   isGenericPaidProAcceptanceManifestFallback,
-  manifestRecordsForPaidProAcceptance,
+  resolveAcceptanceManifestRecordsForExecution,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
@@ -411,10 +411,16 @@ function preparePaidProServerDocumentForAcceptanceCore(
           roleLabels.length >= 2 ? roleLabels : undefined,
         )
       : [];
+  const manifestRecords = resolveAcceptanceManifestRecordsForExecution({
+    draft: draft ?? null,
+    intakeText,
+  });
   const records =
-    resolved.length >= 2
-      ? resolved
-      : manifestRecordsForPaidProAcceptance({ draft: draft ?? null, intakeText });
+    manifestRecords.length >= 3
+      ? manifestRecords
+      : resolved.length >= 2
+        ? resolved
+        : manifestRecords;
 
   if (records.length >= 2) {
     const roleFix = repairOpeningRecitalRoleLabelsFromManifest(out, records);

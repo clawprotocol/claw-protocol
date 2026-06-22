@@ -54,7 +54,14 @@ export type PaidProExecutionBlockInvariantResult = {
   violations: string[];
 };
 
-/** Count contiguous execution regions (witness anchor or signature tail). Must be 1 for Paid Pro. */
+/** True when By/Name signer fields are collapsed on one line (malformed), not valid multi-line blocks. */
+export function tailHasCollapsedInlineSignerFields(tail: string): boolean {
+  return tail.split("\n").some((line) => {
+    const compact = line.replace(/\s+/g, " ").trim();
+    return /By\s*:(?:\s|_)+Name\s*:/i.test(compact);
+  });
+}
+
 export function countPaidProExecutionBlocks(text: string): number {
   const body = (text || "").replace(/\r\n/g, "\n").trim();
   if (!body) return 0;
@@ -98,6 +105,29 @@ export function analyzePaidProExecutionBlockInvariant(
   }
   if (expectedParties === 2 && sections.serviceProviderHeadings > 1) {
     violations.push(`service_provider_heading_duplicate:${sections.serviceProviderHeadings}`);
+  }
+  if (expectedParties >= 3) {
+    const tailStart = signaturePatchStartIndex(text);
+    const tail = tailStart >= 0 ? text.slice(tailStart) : text.slice(Math.floor(text.length * 0.72));
+    const witnessFirstLine = tail.split("\n")[0] ?? "";
+    if (/\b(?:CLIENT|SERVICE\s+PROVIDER)\s*:/i.test(tail)) {
+      violations.push("two_party_role_fallback");
+    }
+    if (sections.clientHeadings >= 1) {
+      violations.push(`client_heading_fallback:${sections.clientHeadings}`);
+    }
+    if (sections.serviceProviderHeadings >= 1) {
+      violations.push(`service_provider_heading_duplicate:${sections.serviceProviderHeadings}`);
+    }
+    if (
+      /\bIN WITNESS WHEREOF\b/i.test(witnessFirstLine) &&
+      (/\b(?:CLIENT|SERVICE\s+PROVIDER)\s*:/i.test(witnessFirstLine) || /\bBy\s*:/i.test(witnessFirstLine))
+    ) {
+      violations.push("inline_witness_collapsed");
+    }
+    if (tailHasCollapsedInlineSignerFields(tail)) {
+      violations.push("inline_signer_fields");
+    }
   }
   if (sections.legacyEntitySignatureLines > 0) {
     violations.push(`legacy_entity_signature_lines:${sections.legacyEntitySignatureLines}`);

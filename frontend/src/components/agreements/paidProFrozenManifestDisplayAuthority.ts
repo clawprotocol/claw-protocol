@@ -15,7 +15,11 @@ import {
   authorityPartiesToCanonicalPartyIdentities,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
-import { ensurePaidProAcceptanceExecutionBlockInvariant } from "./paidProAcceptanceExecutionBlockInvariant";
+import {
+  analyzeMultiPartyExecutionBlockShape,
+  ensurePaidProAcceptanceExecutionBlockInvariant,
+  resolveAcceptanceManifestRecordsForExecution,
+} from "./paidProAcceptanceExecutionBlockInvariant";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
 
@@ -47,7 +51,35 @@ function corpusHasTwoPartyRoleSignatureTail(text: string): boolean {
 function witnessTailMissingManifestNames(text: string, names: readonly string[]): boolean {
   const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
   const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+  if (!tail) return true;
+  const records = names.map((fullLegalName) => ({
+    fullLegalName,
+    roleLabel: fullLegalName,
+    displayAlias: fullLegalName,
+    signerName: null,
+    signerTitle: null,
+    partyAddress: null,
+  }));
+  const shape = analyzeMultiPartyExecutionBlockShape(text, records);
+  if (!shape.malformed) return false;
   return names.some((name) => !tail.includes(name));
+}
+
+function resolveFrozenManifestDisplayPartyNames(
+  opts?: { intakeText?: string | null; draft?: ParsedDraftShape | null },
+): string[] {
+  const intakeRecords = resolveAcceptanceManifestRecordsForExecution({
+    draft: opts?.draft ?? null,
+    intakeText: opts?.intakeText ?? null,
+  });
+  const intakeNames = intakeRecords.map((r) => r.fullLegalName);
+  const frozenNames = readFrozenCanonicalManifestPartyNames();
+  if (intakeNames.length >= 3 && frozenNames.length < intakeNames.length) {
+    return intakeNames;
+  }
+  if (frozenNames.length >= 3) return frozenNames;
+  if (intakeNames.length >= 3) return intakeNames;
+  return frozenNames;
 }
 
 /**
@@ -55,10 +87,15 @@ function witnessTailMissingManifestNames(text: string, names: readonly string[])
  */
 export function applyFrozenManifestPaidProDisplayAuthority(
   text: string,
-  _opts?: { intakeText?: string | null; draft?: ParsedDraftShape | null },
+  opts?: { intakeText?: string | null; draft?: ParsedDraftShape | null },
 ): { text: string; repairs: string[] } {
-  const names = readFrozenCanonicalManifestPartyNames();
+  const names = resolveFrozenManifestDisplayPartyNames(opts);
   if (names.length < 3) return { text, repairs: [] };
+
+  const intakeRecords = resolveAcceptanceManifestRecordsForExecution({
+    draft: opts?.draft ?? null,
+    intakeText: opts?.intakeText ?? null,
+  });
 
   const repairs: string[] = [];
   let out = (text || "").replace(/\r\n/g, "\n");
@@ -69,6 +106,19 @@ export function applyFrozenManifestPaidProDisplayAuthority(
   if (sectionAny.repaired) {
     out = sectionAny.text;
     repairs.push("frozen_manifest:section_any_reference");
+  }
+
+  const executionCanonical =
+    intakeRecords.length >= 3 &&
+    !analyzeMultiPartyExecutionBlockShape(out, intakeRecords).malformed &&
+    !corpusHasTwoPartyRoleSignatureTail(out);
+  if (
+    executionCanonical &&
+    !sectionAny.repaired &&
+    !frozenManifestRecitalNeedsRewrite(out, names) &&
+    repairMalformedPaidProAgreementRecital(out, parties).text === out
+  ) {
+    return { text: out, repairs: [] };
   }
 
   const malformedRecital = repairMalformedPaidProAgreementRecital(out, parties);
@@ -93,11 +143,16 @@ export function applyFrozenManifestPaidProDisplayAuthority(
 
   const needsExecutionRebuild =
     names.length >= 3 &&
-    (corpusHasTwoPartyRoleSignatureTail(out) || witnessTailMissingManifestNames(out, names));
+    (corpusHasTwoPartyRoleSignatureTail(out) ||
+      witnessTailMissingManifestNames(out, names) ||
+      (intakeRecords.length >= 3 && analyzeMultiPartyExecutionBlockShape(out, intakeRecords).malformed));
   if (needsExecutionRebuild) {
-    const records = canonicalPartyRecordsFromSignerIdentities(
-      authorityPartiesToCanonicalPartyIdentities(parties),
-    );
+    const records =
+      intakeRecords.length >= 3
+        ? intakeRecords
+        : canonicalPartyRecordsFromSignerIdentities(
+            authorityPartiesToCanonicalPartyIdentities(parties),
+          );
     const exec = ensurePaidProAcceptanceExecutionBlockInvariant(out, records);
     if (exec.text !== out) {
       out = exec.text;
