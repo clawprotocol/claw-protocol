@@ -20,7 +20,7 @@ import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRende
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
 import { applyFrozenManifestPaidProDisplayAuthority } from "./paidProFrozenManifestDisplayAuthority";
-import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { shouldApplyExecutionBlockSignerOverlay } from "./paidProSignerMetadataCommitPolicy";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
@@ -41,7 +41,9 @@ export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
 export function resolvePaidProAuthoritativeDisplayPlain(
   args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
 ): string {
-  const prepared = preparePaidProReviewDisplayPlain(resolvePaidProFrozenDisplayPlain()).text;
+  const prepared = shouldUsePaidProSourceOfTruthDisplayOnly()
+    ? preparePaidProFrozenDisplayPlain(resolvePaidProFrozenDisplayPlain()).text
+    : preparePaidProReviewDisplayPlain(resolvePaidProFrozenDisplayPlain()).text;
   const manifestAligned = applyFrozenManifestPaidProDisplayAuthority(prepared, {
     intakeText: args?.intakeText ?? null,
     draft: args?.draft ?? null,
@@ -78,4 +80,24 @@ export function shouldBlockPaidProStructuralMutationAfterAcceptance(_surface?: s
 export function paidProSourceOfTruthAcceptedAndValid(): boolean {
   const record = getPaidProSourceOfTruth();
   return Boolean(record && record.text.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN);
+}
+
+/** Strip embedded corpus signature from readonly HTML when external signer setup owns execution. */
+export function shouldSuppressCorpusEmbeddedSignatureForProReview(args: {
+  paidProAuthoritative: boolean;
+  paidProRecipientSetupOnDraft?: boolean;
+  guidedInlineSignerSetupActive?: boolean;
+  paidProInlineSignerSetupLatched?: boolean;
+  paidProSignerMetadataSessionActive?: boolean;
+  paidProPostSignerMetadataFreezeActive?: boolean;
+}): boolean {
+  if (hasAuthoritativeSigningSnapshot()) return false;
+  if (!args.paidProAuthoritative) return false;
+  if (args.paidProPostSignerMetadataFreezeActive) return false;
+  return Boolean(
+    args.paidProRecipientSetupOnDraft ||
+      args.guidedInlineSignerSetupActive ||
+      args.paidProInlineSignerSetupLatched ||
+      args.paidProSignerMetadataSessionActive,
+  );
 }

@@ -301,4 +301,40 @@ describe("paidProDocumentBlockClassifier", () => {
     ).toBe(true);
     expect(blocks.some((b) => b.firstLine.includes("Client Materials"))).toBe(false);
   });
+
+  it("classifies quad-party uppercase entity signature headings as signature labels, not document titles", () => {
+    const plain = [
+      "MUTUAL SERVICES AGREEMENT",
+      "This Agreement is among Red Mesa Logistics LLC, Blue Canyon Analytics LLC, Harbor Peak Automation LLC, and Iron Vale Systems Inc.",
+      "1. Services",
+      "Each party provides services.",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "RED MESA LOGISTICS LLC",
+      "By: _____________________________",
+      "Name: ___________________________",
+      "BLUE CANYON ANALYTICS LLC",
+      "By: _____________________________",
+      "HARBOR PEAK AUTOMATION LLC",
+      "By: _____________________________",
+      "IRON VALE SYSTEMS INC",
+      "By: _____________________________",
+    ].join("\n\n");
+
+    const blocks = classifyPaidProDocumentBlocks(plain);
+    const entityBlocks = blocks.filter((b) => b.kind === "signature_entity_name");
+    expect(entityBlocks).toHaveLength(4);
+    expect(blocks.filter((b) => b.kind === "document_title" && /LOGISTICS|CANYON|HARBOR|IRON/i.test(b.block))).toHaveLength(0);
+
+    const html = buildPremiumAgreementReadonlyHtml(plain, {
+      signatureSectionMode: "collaboration",
+      partyNames: [
+        "Red Mesa Logistics LLC",
+        "Blue Canyon Analytics LLC",
+        "Harbor Peak Automation LLC",
+        "Iron Vale Systems Inc",
+      ],
+    });
+    expect(html).toContain('class="premium-doc-signature-entity-name"');
+    expect(html).not.toMatch(/<h1>RED MESA LOGISTICS LLC<\/h1>/i);
+  });
 });

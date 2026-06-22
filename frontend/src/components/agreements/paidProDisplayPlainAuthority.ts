@@ -14,8 +14,9 @@ import {
   detectExecutionHeadingMetadataLeak,
   repairExecutionBlockEntityHeadingLines,
 } from "./paidProExecutionBlockEntityHeading";
-import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import { enrichPaidProPostFinalizeDisplayCorpus } from "./paidProPostFinalizeReviewSurface";
 import type { PaidProDocumentSurface } from "./paidProSourceOfTruth";
 
@@ -36,6 +37,9 @@ export function isPaidProUserVisibleDocumentSurface(surface: string): boolean {
 export function applyPaidProUserVisibleDisplayPrep(plain: string): string {
   const body = (plain || "").trim();
   if (body.length < 80) return body;
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    return preparePaidProFrozenDisplayPlain(body).text.trimEnd();
+  }
   return preparePaidProReviewDisplayPlain(body).text.trimEnd();
 }
 

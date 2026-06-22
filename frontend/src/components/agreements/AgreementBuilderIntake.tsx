@@ -653,7 +653,10 @@ import {
   hasPaidProPipelineSessionAcceptance,
   markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
-import { resolvePaidProAuthoritativeDisplayPlain } from "./paidProAuthoritativeRenderGate";
+import {
+  resolvePaidProAuthoritativeDisplayPlain,
+  shouldSuppressCorpusEmbeddedSignatureForProReview,
+} from "./paidProAuthoritativeRenderGate";
 import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRenderParties";
 import {
   logReviewPipelineTelemetryOnce,
@@ -14726,20 +14729,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     },
     [signaturePreparationRequested, paidProInlineSignerSetupLatched],
   );
-  const suppressProDocumentEmbeddedSignatures = useMemo(() => {
-    if (hasAuthoritativeSigningSnapshot()) return false;
-    if (paidProSignerMetadataSessionActive) return false;
-    if (guidedInlineSignerSetupActive) return false;
-    if (paidProPostSignerMetadataFreezeActive) return false;
-    return Boolean(paidProAuthoritative && !paidProRecipientSetupOnDraft);
-  }, [
-    paidProAuthoritative,
-    paidProRecipientSetupOnDraft,
-    paidProSignerMetadataSessionActive,
-    guidedInlineSignerSetupActive,
-    paidProPostSignerMetadataFreezeActive,
-    premiumSurfaceGateTick,
-  ]);
+  const suppressProDocumentEmbeddedSignatures = useMemo(
+    () =>
+      shouldSuppressCorpusEmbeddedSignatureForProReview({
+        paidProAuthoritative,
+        paidProRecipientSetupOnDraft,
+        guidedInlineSignerSetupActive,
+        paidProInlineSignerSetupLatched,
+        paidProSignerMetadataSessionActive,
+        paidProPostSignerMetadataFreezeActive,
+      }),
+    [
+      paidProAuthoritative,
+      paidProRecipientSetupOnDraft,
+      paidProSignerMetadataSessionActive,
+      guidedInlineSignerSetupActive,
+      paidProPostSignerMetadataFreezeActive,
+      paidProInlineSignerSetupLatched,
+      premiumSurfaceGateTick,
+    ],
+  );
   const productionReadyForPersist = Boolean(
     createProductionTwoPane &&
       draft &&

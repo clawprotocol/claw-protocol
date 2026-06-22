@@ -48,7 +48,7 @@ const SUBSECTION_HEADING_RE = PAID_PRO_SUBSECTION_NUMBER_RE;
 const SIGNATURE_PARTY_HEADER_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:?\s*$/i;
 const SIGNATURE_NOTICE_EMAIL_RE = /^email(?:\s+for\s+notices?)?\s*:/i;
 const SIGNATURE_ENTITY_LINE_RE =
-  /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
+  /\b(?:LLC|L\.L\.C\.|Inc\.?|INC|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
 
 function isStandaloneAllCapsTitleLine(line: string): boolean {
   const t = line.trim();
@@ -292,22 +292,23 @@ export function classifyPaidProDocumentBlock(args: {
     return { kind: "legacy_section_heading", firstLine, singleLine };
   }
 
+  if (args.inSignatureRegion) {
+    const sigKind = classifySignatureLine(firstLine);
+    if (sigKind) {
+      return { kind: sigKind, firstLine, singleLine };
+    }
+  }
+
   const isTitle =
     args.blockIndex === 0
       ? singleLine && isFirstBlockDocumentTitle(firstLine)
       : singleLine &&
         isStandaloneAllCapsTitleLine(firstLine) &&
-        !SIGNATURE_PARTY_HEADER_RE.test(firstLine);
+        !SIGNATURE_PARTY_HEADER_RE.test(firstLine) &&
+        !args.inSignatureRegion;
 
   if (isTitle) {
     return { kind: "document_title", firstLine, singleLine };
-  }
-
-  if (args.inSignatureRegion) {
-    const sigKind = classifySignatureLine(firstLine);
-    if (sigKind && sigKind !== "signature_party_start") {
-      return { kind: sigKind, firstLine, singleLine };
-    }
   }
 
   return { kind: "body_paragraph", firstLine, singleLine };

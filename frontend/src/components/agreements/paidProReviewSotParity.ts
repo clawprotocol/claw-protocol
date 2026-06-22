@@ -3,12 +3,13 @@
  */
 
 import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
-import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { getPaidProSourceOfTruthText, hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 
 const SIGNER_FIELD_ONLY_CLASSIFICATIONS = new Set([
   "signer_metadata_only",
@@ -51,7 +52,10 @@ export function auditPaidProReviewRenderSotParity(args: {
     return getPaidProSourceOfTruthText().trim();
   })();
   const canonicalDisplayPlain = canonicalPlain
-    ? preparePaidProReviewDisplayPlain(canonicalPlain).text.trim()
+    ? (shouldUsePaidProSourceOfTruthDisplayOnly()
+        ? preparePaidProFrozenDisplayPlain(canonicalPlain).text
+        : preparePaidProReviewDisplayPlain(canonicalPlain).text
+      ).trim()
     : "";
   const canonicalDisplayHash =
     canonicalDisplayPlain.length >= 80 ? hashPaidProCorpus(canonicalDisplayPlain) : "";

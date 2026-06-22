@@ -13,6 +13,10 @@ import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberR
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import { readPaidProPinnedSignerAppliedCorpus, PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN } from "./paidProFinalHydratedCorpus";
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
   return prefix
@@ -121,11 +125,56 @@ export function stripInlineStaleServerSignatureTailBeforeWitness(text: string): 
   return { text: merged, repairs: [...new Set(repairs)] };
 }
 
-/** Display + acceptance prep: section breaks then stale signature tail removal. */
-export function preparePaidProReviewDisplayPlain(text: string): {
+function shouldUseFrozenDisplayPrepOnly(opts?: { frozenDisplayOnly?: boolean }): boolean {
+  if (opts?.frozenDisplayOnly != null) return opts.frozenDisplayOnly;
+  if (!hasPaidProSourceOfTruth()) return false;
+  if (getPaidProSourceOfTruthText().trim().length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
+  if (hasAuthoritativeSigningSnapshot()) return false;
+  if (readPaidProPinnedSignerAppliedCorpus().trim().length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
+    return false;
+  }
+  return true;
+}
+
+/** Post-freeze display prep — whitespace, safe split-heading merge, stale signature strip; no section-render surgery. */
+export function preparePaidProFrozenDisplayPlain(text: string): {
   text: string;
   repairs: string[];
 } {
+  const repairs: string[] = [];
+  let out = (text || "").replace(/\r\n/g, "\n").trimEnd();
+  if (!out) return { text: out, repairs };
+
+  const splitTail = repairSplitPaidProHeadingFragments(out);
+  if (splitTail.repairs.length > 0) {
+    out = splitTail.text;
+    repairs.push(...splitTail.repairs);
+  }
+  const sectionAny = repairMalformedSectionAnyReference(out);
+  if (sectionAny.repaired) {
+    out = sectionAny.text;
+    repairs.push("normalize:section_any_reference");
+  }
+
+  const stripped = stripInlineStaleServerSignatureTailBeforeWitness(out);
+  if (stripped.text !== out) {
+    out = stripped.text;
+    repairs.push(...stripped.repairs);
+  }
+  return { text: out.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs: [...new Set(repairs)] };
+}
+
+/** Display + acceptance prep: section breaks then stale signature tail removal. */
+export function preparePaidProReviewDisplayPlain(
+  text: string,
+  opts?: { frozenDisplayOnly?: boolean },
+): {
+  text: string;
+  repairs: string[];
+} {
+  if (opts?.frozenDisplayOnly ?? shouldUseFrozenDisplayPrepOnly(opts)) {
+    return preparePaidProFrozenDisplayPlain(text);
+  }
   const repairs: string[] = [];
   const norm = normalizeFlattenedPaidProDocumentBlocks(text);
   let out = norm.text;

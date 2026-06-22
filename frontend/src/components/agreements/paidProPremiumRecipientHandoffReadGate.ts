@@ -4,6 +4,7 @@
 
 import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
   linearPremiumRecipientSlots,
   premiumRecipientHandoffPartyFingerprint,
@@ -83,6 +84,7 @@ export function applyPremiumRecipientHandoffReadGate(
   const partySlotCount = Math.max(
     opts?.partySlotCount ?? 2,
     hasPaidProSourceOfTruth() ? readFrozenCanonicalManifestPartyCount() : 0,
+    readConsumedPaidProSignerMetadataAuthority()?.parties.length ?? 0,
     2,
   );
   if ((opts?.corpusHash ?? "").trim()) {
