@@ -18,6 +18,7 @@ import {
   stripExistingPartyNoticeDetails,
 } from "./paidProPartyNoticeDetails";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
+import { repairDocumentBoundaryFusion } from "./paidProDocumentBoundaryAuthority";
 import { enforceUserVisibleRenderTokenAuthority } from "./userVisibleRenderTokenAuthority";
 
 const PARTY_NOTICE_HEADING_RE = /^\s*Party Notice Details:\s*$/i;
@@ -206,6 +207,12 @@ export function finalizePaidProSigningCorpusText(
   if (outputIntegrity.repairs.length > 0) {
     text = outputIntegrity.text;
     repairs.push(...outputIntegrity.repairs.map((tag) => `output_integrity:${tag}`));
+  }
+
+  const fusion = repairDocumentBoundaryFusion(text);
+  if (fusion.text !== text) {
+    text = fusion.text;
+    repairs.push(...fusion.repairs.map((r) => `signing:${r}`));
   }
 
   return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), repairs };

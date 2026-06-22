@@ -9,7 +9,10 @@
  */
 
 import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
-import { extractOperativeIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
+import {
+  extractOperativeIfToNoticeStanzas,
+  resolveOperativeNoticesFamilyEnd,
+} from "./paidProPartyNoticeDetails";
 
 export const DEFAULT_LAWDOG_NOTICES_CLAUSE =
   "Notices under this Agreement must be in writing and may be delivered by email, nationally recognized overnight courier, certified mail, or any other method the parties later approve in writing. A notice sent by email is effective when sent, provided the sender does not receive an automated delivery failure notice. A notice sent by courier or certified mail is effective when delivered or when delivery is refused.\n\nUnless a party designates a different notice address in writing, email notices may be sent to the email address that party provides through the LawDog signing process. Mailing notices may be sent to the address that party provides through the LawDog signing process or later designates in writing.";
@@ -167,6 +170,20 @@ export function corpusHasLawDogNoticesClause(text: string): boolean {
   return /LawDog signing process/i.test(text || "");
 }
 
+function countOperativeIfToNoticeStanzas(text: string): number {
+  const normalized = (text || "").replace(/\r\n/g, "\n");
+  const noticesIdx = normalized.search(NOTICES_SECTION_RE);
+  if (noticesIdx < 0) return 0;
+  const region = normalized.slice(noticesIdx, resolveOperativeNoticesFamilyEnd(normalized, noticesIdx));
+  const stanzas = extractOperativeIfToNoticeStanzas(region);
+  if (!stanzas.trim()) return 0;
+  return stanzas.split(/\n\n(?=If to\s+)/i).filter((s) => s.trim()).length;
+}
+
+function hasCompleteOperativeNoticeStanzas(text: string): boolean {
+  return countOperativeIfToNoticeStanzas(text) >= 2;
+}
+
 function replaceNoticesSectionBody(text: string): { text: string; applied: boolean } {
   const normalized = text.replace(/\r\n/g, "\n");
   const noticesIdx = normalized.search(NOTICES_SECTION_RE);
@@ -174,15 +191,19 @@ function replaceNoticesSectionBody(text: string): { text: string; applied: boole
 
   const witnessIdx = normalized.search(WITNESS_RE);
   const noticesEnd = witnessIdx >= 0 ? witnessIdx : normalized.length;
-  const noticesRegion = normalized.slice(noticesIdx, noticesEnd);
+  const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(normalized, noticesIdx);
+  const noticesRegion = normalized.slice(noticesIdx, noticesFamilyEnd);
   const preservedStanzas = extractOperativeIfToNoticeStanzas(noticesRegion);
   const before = normalized.slice(0, noticesIdx);
+  const middle = normalized.slice(noticesFamilyEnd, noticesEnd);
   const noticesMatch = normalized.slice(noticesIdx).match(NOTICES_SECTION_RE);
   const heading = noticesMatch?.[0]?.trim() ?? "Notices.";
   const after = normalized.slice(noticesEnd).trimStart();
   const headingLine = heading.endsWith(".") ? heading : `${heading}.`;
   const stanzaTail = preservedStanzas ? `\n\n${preservedStanzas}` : "";
-  const merged = `${before.trimEnd()}\n\n${headingLine}\n\n${DEFAULT_LAWDOG_NOTICES_CLAUSE}${stanzaTail}\n\n${after}`.replace(
+  const middlePart = middle.trimEnd();
+  const middleSuffix = middlePart ? `\n\n${middlePart}` : "";
+  const merged = `${before.trimEnd()}\n\n${headingLine}\n\n${DEFAULT_LAWDOG_NOTICES_CLAUSE}${stanzaTail}${middleSuffix}\n\n${after}`.replace(
     /\n{3,}/g,
     "\n\n",
   );
@@ -192,6 +213,12 @@ function replaceNoticesSectionBody(text: string): { text: string; applied: boole
 export function ensureLawDogNoticesClauseInCorpus(text: string): { text: string; applied: boolean } {
   const normalized = (text || "").replace(/\r\n/g, "\n").trimEnd();
   if (!normalized) return { text: normalized, applied: false };
+  if (
+    hasCompleteOperativeNoticeStanzas(normalized) &&
+    !corpusNoticesClauseReferencesSignatureBlocks(normalized)
+  ) {
+    return { text: normalized + (normalized.endsWith("\n") ? "" : "\n"), applied: false };
+  }
   if (corpusHasLawDogNoticesClause(normalized) && !corpusNoticesClauseReferencesSignatureBlocks(normalized)) {
     return { text: normalized + (normalized.endsWith("\n") ? "" : "\n"), applied: false };
   }

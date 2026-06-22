@@ -37,3 +37,11 @@ export {
   countStandaloneClauseFamilyHeadings,
   type OperativeClauseFamily,
 } from "./clauseFamilyRegistry";
+export { dedupeStandaloneOperativeClauseFamilies } from "./operativeClauseFamilyDedup";
+export {
+  assertClauseFamilyStructuralIntegrityForFreeze,
+  validateClauseFamilyStructuralIntegrity,
+  validateNoticesClauseFamilyStructuralIntegrity,
+  type ClauseFamilyStructuralIntegrityReport,
+  type ClauseFamilyStructuralViolation,
+} from "./clauseFamilyStructuralIntegrity";

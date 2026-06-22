@@ -239,7 +239,7 @@ const CORRUPTED_NOTICE_ROLE_FUSION_RE =
 const CORRUPTED_NOTICE_ROLE_ATTENTION_RE =
   /^(?:Client|Service\s+Provider)\s+(?:Client|Service\s+Provider\s+)?(?:Attention|Attn)\s*:/i;
 
-function noticeStanzaContainsPlaceholderTokens(stanza: string): boolean {
+export function noticeStanzaContainsPlaceholderTokens(stanza: string): boolean {
   return NOTICE_PLACEHOLDER_TOKEN_RE.test(stanza || "");
 }
 
@@ -274,6 +274,18 @@ function enrichNoticeAuthorityParties(
 ): readonly PaidProSignerMetadataParty[] {
   if (!roleContext?.intakeText?.trim()) return parties;
   return mergeLabeledPartyAuthorityIntoParties(parties, roleContext.intakeText);
+}
+
+/** True when multiple operative "If to" notice stanzas are fused on one line or empty. */
+export function hasInlineMalformedNoticeStanzas(text: string): boolean {
+  const corpus = (text || "").replace(/\r\n/g, "\n");
+  return corpus.split("\n").some((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (/^\s*If to\s*:\s*$/i.test(trimmed)) return true;
+    const ifToCount = (trimmed.match(/\bIf to\s+/gi) ?? []).length;
+    return ifToCount >= 2;
+  });
 }
 
 /** Detect fused party/role labels in operative notice stanzas. */
@@ -382,6 +394,45 @@ function findNoticesSectionStart(text: string): number {
   return match.index;
 }
 
+const TOP_LEVEL_OPERATIVE_HEADING_RE = /^\s*\d+\.(?!\d)\s+\S/;
+
+/** Exclusive end index of the Notices clause family (before the next top-level operative section). */
+export function resolveOperativeNoticesFamilyEnd(text: string, noticesStart: number): number {
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  const operativeEnd = witnessIdx >= 0 ? witnessIdx : text.length;
+  if (noticesStart < 0 || noticesStart >= operativeEnd) return operativeEnd;
+
+  const lines = text.slice(noticesStart, operativeEnd).split("\n");
+  let seenNoticesHeading = false;
+  let seenIfToStanza = false;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = (lines[i] ?? "").trim();
+    if (!trimmed) continue;
+
+    if (!seenNoticesHeading) {
+      if (/\bNotices\b/i.test(trimmed) && TOP_LEVEL_OPERATIVE_HEADING_RE.test(trimmed)) {
+        seenNoticesHeading = true;
+      }
+      continue;
+    }
+
+    if (/^If to\s+/i.test(trimmed)) {
+      seenIfToStanza = true;
+      continue;
+    }
+
+    if (TOP_LEVEL_OPERATIVE_HEADING_RE.test(trimmed) && !/\bNotices\b/i.test(trimmed)) {
+      if (seenIfToStanza || !/^If to\s+/i.test(trimmed)) {
+        const offset = lines.slice(0, i).join("\n").length + (i > 0 ? 1 : 0);
+        return noticesStart + offset;
+      }
+    }
+  }
+
+  return operativeEnd;
+}
+
 /**
  * Repair incomplete operative Notices stanzas (dangling "If to", missing Attn/Email lines).
  */
@@ -418,7 +469,9 @@ export function repairIncompleteIfToNoticeStanzas(
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   const noticesEnd = witnessIdx >= 0 ? witnessIdx : text.length;
   const before = text.slice(0, noticesIdx);
-  let noticesRegion = text.slice(noticesIdx, noticesEnd);
+  const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(text, noticesIdx);
+  let noticesRegion = text.slice(noticesIdx, noticesFamilyEnd);
+  const middle = text.slice(noticesFamilyEnd, noticesEnd);
   const after = text.slice(noticesEnd);
 
   const defusedLines: string[] = [];
@@ -457,10 +510,12 @@ export function repairIncompleteIfToNoticeStanzas(
   if (!repairs.length) return { text, repairs };
 
   const mergedNotices = `${intro.trimEnd()}\n\n${rebuiltStanzas.join("\n\n")}`.replace(/\n{3,}/g, "\n\n");
+  const middlePart = middle.trimEnd();
   const executionTail = after.trimStart();
+  const middleSuffix = middlePart ? `\n\n${middlePart}` : "";
   text = executionTail
-    ? `${before}${mergedNotices}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trimEnd()
-    : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+    ? `${before}${mergedNotices}${middleSuffix}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+    : `${before}${mergedNotices}${middleSuffix}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   logPaidProNoticeSectionIntegrity({ repairs, partyCount: authorityParties.length, stanzaCount });
   return { text, repairs };
 }
@@ -488,7 +543,8 @@ export function ensureOperativeIfToNoticeDelivery(
   const noticesRegion =
     noticesIdx >= 0 ? corpus.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : corpus.length) : "";
   const hasExecutionPollution = noticesRegionHasExecutionPollution(noticesRegion);
-  if (!missing && !hasPlaceholderTokens && !hasExecutionPollution) {
+  const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
+  if (!missing && !hasPlaceholderTokens && !hasExecutionPollution && !hasInlineMalformedNotices) {
     return { text: corpus, repairs: [] };
   }
   return repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);

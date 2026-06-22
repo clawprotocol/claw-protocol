@@ -22,6 +22,7 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { AUTHORITATIVE_BODY_PRESERVE_MIN_WINNING_LEN } from "./premiumAuthoritativeBodyPreservation";
+import { validateClauseFamilyStructuralIntegrity } from "./clauseFamilyStructuralIntegrity";
 import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
@@ -132,6 +133,8 @@ export type BuildCanonicalAgreementSnapshotArgs = {
   minLen?: number;
   generatedAt?: number;
   reviewSessionId?: string | null;
+  /** When true, skip integrity shrink/repair — authoritative boundary-repaired body is final. */
+  forceAuthoritativePreservation?: boolean;
 };
 
 let frozenCanonicalAgreementCorpus: CanonicalAgreementSnapshot | null = null;
@@ -312,6 +315,7 @@ export function buildCanonicalAgreementSnapshot(
       });
       canonicalText = repaired.text.trim();
     } else if (
+      args.forceAuthoritativePreservation ||
       PRESERVE_CORPUS_SOURCES.has(selected.source) ||
       (args.tier === "pro" &&
         selected.source === "server_full_document_text" &&
@@ -359,6 +363,14 @@ export function buildCanonicalAgreementSnapshot(
 
   const placeholderIssues = collectPlaceholderIssues(canonicalText);
   const blockerIssues = collectBlockerIssues(canonicalText);
+  if (args.tier === "pro" && canonicalText.length >= 500) {
+    const structural = validateClauseFamilyStructuralIntegrity(canonicalText);
+    for (const violation of structural.violations) {
+      if (!placeholderIssues.includes(violation.code)) {
+        placeholderIssues.push(violation.code);
+      }
+    }
+  }
   const commercialSpecificity =
     integrityReport?.commercialSpecificity ??
     scoreCommercialSpecificity(`${args.intakeText ?? ""}\n${Object.values(semanticFacts.facts ?? {}).join("\n")}`, canonicalText);

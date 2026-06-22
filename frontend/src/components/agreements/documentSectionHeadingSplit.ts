@@ -162,6 +162,8 @@ export function repairGluedSectionHeadingsInText(text: string): string {
   t = t.replace(/([.!?])\s+(\d+\.\s+[A-Z])/g, "$1\n\n$2");
   t = t.replace(/([.!?])\s+(\d+\.\d+\s+)/g, "$1\n\n$2");
   t = t.replace(/([^\n])\s+(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
+  t = t.replace(/([A-Za-z]+)\."(\d+\.\s+)/g, "$1.\"\n\n$2");
+  t = t.replace(/([a-z])\.\s*(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1.\n\n$2");
 
   const expandedLines: string[] = [];
   for (const line of t.split("\n")) {

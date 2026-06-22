@@ -99,7 +99,7 @@ import {
   clearPaidProSignerStagingDisplayCorpus,
 } from "./paidProSignerStagingDisplayCorpus";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
-import { assertPaidProNoticeContactAuthorityForFreeze } from "./paidProNoticeContactAuthority";
+import { assertPaidProDocumentBoundaryAuthorityForFreeze } from "./paidProDocumentBoundaryAuthority";
 import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import {
   detectPaidProOrphanSubsections,
@@ -439,10 +439,14 @@ export function establishPaidProSourceOfTruth(args: {
       reason: orphanSectionRepair.repairs.join(","),
     });
   }
-  safeForCommit = assertPaidProNoticeContactAuthorityForFreeze(safeForCommit, {
+  safeForCommit = assertPaidProDocumentBoundaryAuthorityForFreeze(safeForCommit, {
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
     surface: "establish_paid_pro_source_of_truth_pre_freeze",
+    parties: resolvePartiesForReviewRender({
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+    }),
   });
   if (containsUnresolvedRenderTokens(safeForCommit)) {
     throw new Error("[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority");
@@ -470,6 +474,7 @@ export function establishPaidProSourceOfTruth(args: {
     signerState: { complete: false, signerCount: authoritativeSignerCount },
     minLen: 500,
     reviewSessionId: args.reviewSessionId,
+    forceAuthoritativePreservation: true,
   });
   if (!snapshot.integrityOk || snapshot.placeholderIssues.length > 0) {
     throw new Error(
@@ -507,6 +512,7 @@ export function establishPaidProSourceOfTruth(args: {
       signerState: { complete: false, signerCount: authoritativeSignerCount },
       minLen: 500,
       reviewSessionId: args.reviewSessionId,
+      forceAuthoritativePreservation: true,
     });
     freezeCanonicalAgreementSnapshot(reconcileSnapshot, "server_full_document_text");
   }

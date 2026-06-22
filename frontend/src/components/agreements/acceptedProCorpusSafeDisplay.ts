@@ -35,7 +35,7 @@ import {
   writeAcceptedProCorpusSafeDisplayCache,
 } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
-import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
+import { applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -267,15 +267,17 @@ function applyAcceptedProCorpusSafeDisplayCore(
     }
   }
 
-  const contactAuthority = applyPaidProNoticeContactAuthority(out, {
+  const boundary = applyPaidProDocumentBoundaryAuthority(out, {
     draft: opts?.draft ?? null,
     intakeText: intakeRaw,
-    surface: opts?.surface ? `${opts.surface}:notice_contact_authority` : "accepted_pro_corpus_safe_display:notice_contact_authority",
+    surface: opts?.surface
+      ? `${opts.surface}:document_boundary_authority`
+      : "accepted_pro_corpus_safe_display:document_boundary_authority",
     blockOnUnresolved: false,
   });
-  if (contactAuthority.text !== out) {
-    out = contactAuthority.text;
-    repairs.push(...contactAuthority.repairs.map((r) => `contact_authority:${r}`));
+  if (boundary.text !== out) {
+    out = boundary.text;
+    repairs.push(...boundary.repairs.map((r) => `boundary:${r}`));
   }
 
   return { text: out, repairs: [...new Set(repairs)] };
