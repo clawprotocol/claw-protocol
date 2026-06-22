@@ -3,6 +3,10 @@
  */
 
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import {
+  repairAgreementTemplatePlaceholders,
+  repairPaidProFreezePlaceholderAuthority,
+} from "./agreementTemplatePlaceholderSafety";
 import { validateClauseFamilyStructuralIntegrity } from "./clauseFamilyStructuralIntegrity";
 import { countStandaloneClauseFamilyHeadings } from "./clauseFamilyRegistry";
 import { applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
@@ -155,7 +159,22 @@ export function runPaidProAuthoritativePipelineTrace(
   }).text;
   stages.push(snapshotFromText("accepted_corpus", accepted, partyOpts));
 
-  const boundary = applyPaidProDocumentBoundaryAuthority(accepted, {
+  const partyNames = (args.parties ?? [])
+    .map((p) => p.partyLegalName.trim())
+    .filter((name) => name.length >= 2);
+  let preBoundary = server;
+  const placeholderRepair = repairAgreementTemplatePlaceholders(preBoundary, {
+    intakeRaw: args.intakeText ?? "",
+    partyNames,
+  });
+  preBoundary = placeholderRepair.text;
+  const freezeExpansion = repairPaidProFreezePlaceholderAuthority(preBoundary, {
+    intakeRaw: args.intakeText ?? "",
+    partyNames,
+  });
+  preBoundary = freezeExpansion.text;
+
+  const boundary = applyPaidProDocumentBoundaryAuthority(preBoundary, {
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
     parties: args.parties,

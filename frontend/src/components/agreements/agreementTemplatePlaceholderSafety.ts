@@ -33,6 +33,7 @@ import {
   logOrgPlaceholderOriginsFromText,
   logPaidProPlaceholderContext,
   logPaidProPlaceholderRepair,
+  sanitizePlaceholderSurroundingText,
 } from "./paidProPlaceholderAttributionLog";
 import { formatStarterPreviewForDisplay } from "./starterPreviewFormatting";
 import { repairMoneyCommaBracketPlaceholderCorruption } from "./agreementMoneyPlaceholderRepair";
@@ -1102,6 +1103,86 @@ function repairAgreementTemplatePlaceholdersUncached(
   });
 
   return { text: out, repaired };
+}
+
+function repairSoftFieldBracketPlaceholdersExpanded(text: string): { text: string; repaired: string[] } {
+  const repaired: string[] = [];
+  const tailStart = Math.floor(text.length * 0.55);
+  const out = text.replace(GENERIC_UPPER_BRACKET_RE, (match, offset) => {
+    const idx = typeof offset === "number" ? offset : text.indexOf(match);
+    const inner = bracketInner(match);
+    if (!isSignatureFieldLabel(inner) && !SOFT_PREAMBLE_LABEL_RE.test(inner)) return match;
+    const inTail = idx >= tailStart;
+    const inSigCtx = isExecutionSignatureContext(text, idx);
+    const inNotice = /\bif\s+to\b/i.test(text.slice(Math.max(0, idx - 120), idx + 40));
+    if (!inTail && !inSigCtx && !inNotice) return match;
+    repaired.push(`soft_field_expanded:${match.trim()}`);
+    return "_________________________";
+  });
+  return { text: out, repaired };
+}
+
+function omitOptionalUnresolvedContactPlaceholderLines(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const optionalContactLineRe = /^\s*(?:email|e-mail|address|phone|fax)\s*:\s*\[[^\]]+\]\s*$/i;
+  const out = text
+    .split("\n")
+    .filter((line) => {
+      if (!optionalContactLineRe.test(line)) return true;
+      repairs.push("omit:optional_contact_line");
+      return false;
+    })
+    .join("\n");
+  return { text: out, repairs };
+}
+
+/** Final freeze-path expansion repair (run after repairAgreementTemplatePlaceholders). */
+export function repairPaidProFreezePlaceholderAuthority(
+  text: string,
+  _ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
+): { text: string; repaired: string[] } {
+  let out = text;
+  const repaired: string[] = [];
+
+  const expandedSoft = repairSoftFieldBracketPlaceholdersExpanded(out);
+  out = expandedSoft.text;
+  repaired.push(...expandedSoft.repaired);
+
+  const omit = omitOptionalUnresolvedContactPlaceholderLines(out);
+  out = omit.text;
+  repaired.push(...omit.repairs);
+
+  return { text: out, repaired };
+}
+
+export function logPreFreezePlaceholderRejectionDetails(
+  text: string,
+  issues: readonly string[],
+  ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
+): void {
+  if (typeof import.meta !== "undefined" && import.meta.env.MODE === "test") return;
+  const scanCtx = { intakeRaw: ctx.intakeRaw ?? "", partyNames: normPartyNames(ctx.partyNames) };
+  const fatal = analyzeTemplatePlaceholderFragments(text, scanCtx).filter((d) => d.fatal);
+  for (const decision of fatal.slice(0, 12)) {
+    logPaidProPlaceholderContext({
+      placeholder: decision.token,
+      surroundingText: decision.contextSnippet || decision.token,
+    });
+  }
+  for (const token of listUnresolvedIdentityPlaceholderTokens(text).slice(0, 12)) {
+    const idx = text.toLowerCase().indexOf(token.toLowerCase());
+    logPaidProPlaceholderContext({
+      placeholder: token,
+      surroundingText: idx >= 0 ? sanitizePlaceholderSurroundingText(text, idx) : token,
+    });
+  }
+  // eslint-disable-next-line no-console
+  console.warn("[paid-pro-sot-freeze-placeholder-reject]", {
+    issues: [...issues],
+    fatalTokens: fatal.map((d) => d.token).slice(0, 16),
+    identityTokens: listUnresolvedIdentityPlaceholderTokens(text).slice(0, 16),
+    docLen: text.length,
+  });
 }
 
 type ScanMatch = { token: string; index: number };

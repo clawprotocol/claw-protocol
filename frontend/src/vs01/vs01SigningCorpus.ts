@@ -31,6 +31,8 @@ import {
 } from "../components/agreements/authoritativeHandoffCorpusResolver";
 import { resolvePremiumSignaturePreviewMode } from "../components/agreements/premiumAgreementDocumentHtml";
 import { consumeAuthoritativeSignerCount } from "../components/agreements/signerCountAuthority";
+import { labeledPartyLegalEntities } from "../components/agreements/labeledPartyBlockParse";
+import { resolveAuthoritativePartySlotCount } from "../components/agreements/partySlotIdentityNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
 import {
   getAcceptedPremiumCanonicalCorpus,
@@ -263,10 +265,21 @@ function resolveVs01AuthoritativeSignerCount(
     args.draft?.parties?.length ?? 0,
     args.bridge?.counterparties?.length ?? 0,
   );
-  const manifestPartyCount =
+  const draftNames = (args.draft?.parties ?? [])
+    .map((p) => String(p.name ?? "").trim())
+    .filter((name) => name.length >= 2);
+  const slotCount = resolveAuthoritativePartySlotCount({
+    intakeText: args.intakeText ?? "",
+    draftPartyNames: draftNames,
+  });
+  const labeledCount = labeledPartyLegalEntities(args.intakeText ?? "").length;
+  const manifestPartyCount = Math.max(
     readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
       (p) => String(p.partyLegalName ?? "").trim().length >= 2,
-    ).length ?? 0;
+    ).length ?? 0,
+    slotCount,
+    labeledCount >= 3 ? labeledCount : 0,
+  );
   return consumeAuthoritativeSignerCount(
     "vs01_corpus_gate",
     {

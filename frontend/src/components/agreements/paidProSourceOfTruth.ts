@@ -20,7 +20,7 @@ import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelin
 import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycleDiff";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
-import { repairAgreementTemplatePlaceholders } from "./agreementTemplatePlaceholderSafety";
+import { repairAgreementTemplatePlaceholders, repairPaidProFreezePlaceholderAuthority, logPreFreezePlaceholderRejectionDetails } from "./agreementTemplatePlaceholderSafety";
 import {
   hasPaidProPipelineSessionAcceptance,
   markPaidProPipelineValidationPassed,
@@ -440,18 +440,6 @@ export function establishPaidProSourceOfTruth(args: {
       reason: orphanSectionRepair.repairs.join(","),
     });
   }
-  safeForCommit = assertPaidProDocumentBoundaryAuthorityForFreeze(safeForCommit, {
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-    surface: "establish_paid_pro_source_of_truth_pre_freeze",
-    parties: resolvePartiesForReviewRender({
-      draft: args.draft ?? null,
-      intakeText: args.intakeText ?? null,
-    }),
-  });
-  if (containsUnresolvedRenderTokens(safeForCommit)) {
-    throw new Error("[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority");
-  }
   const reviewParties = resolvePartiesForReviewRender({
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
@@ -465,20 +453,42 @@ export function establishPaidProSourceOfTruth(args: {
     }))
     .filter((p) => p.name.length >= 2);
   const partyNames = parties.map((p) => p.name);
-  const placeholderRepair = repairAgreementTemplatePlaceholders(safeForCommit, {
+  let placeholderRepairTotal: string[] = [];
+  for (let pass = 0; pass < 2; pass++) {
+    const placeholderRepair = repairAgreementTemplatePlaceholders(safeForCommit, {
+      intakeRaw: args.intakeText ?? "",
+      partyNames,
+    });
+    safeForCommit = placeholderRepair.text;
+    placeholderRepairTotal.push(...placeholderRepair.repaired);
+    if (placeholderRepair.repaired.length === 0) break;
+  }
+  const freezeAuthorityRepair = repairPaidProFreezePlaceholderAuthority(safeForCommit, {
     intakeRaw: args.intakeText ?? "",
     partyNames,
   });
-  if (placeholderRepair.repaired.length > 0) {
-    safeForCommit = placeholderRepair.text;
+  if (freezeAuthorityRepair.repaired.length > 0) {
+    safeForCommit = freezeAuthorityRepair.text;
+    placeholderRepairTotal.push(...freezeAuthorityRepair.repaired);
+  }
+  if (placeholderRepairTotal.length > 0) {
     logProCorpusSourceMap({
       stage: "pre_freeze_placeholder_repair",
       source: args.source ?? "server_full_draft",
       len: safeForCommit.length,
       text: safeForCommit,
       allowedToOverride: false,
-      reason: placeholderRepair.repaired.slice(0, 8).join(","),
+      reason: placeholderRepairTotal.slice(0, 8).join(","),
     });
+  }
+  safeForCommit = assertPaidProDocumentBoundaryAuthorityForFreeze(safeForCommit, {
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+    surface: "establish_paid_pro_source_of_truth_pre_freeze",
+    parties: reviewParties,
+  });
+  if (containsUnresolvedRenderTokens(safeForCommit)) {
+    throw new Error("[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority");
   }
   const authoritativeSignerCount = resolveAuthoritativeSignerCount({
     intakeText: args.intakeText ?? null,
@@ -497,6 +507,10 @@ export function establishPaidProSourceOfTruth(args: {
     forceAuthoritativePreservation: true,
   });
   if (!snapshot.integrityOk || snapshot.placeholderIssues.length > 0) {
+    logPreFreezePlaceholderRejectionDetails(safeForCommit, snapshot.placeholderIssues, {
+      intakeRaw: args.intakeText ?? "",
+      partyNames,
+    });
     throw new Error(
       `[paid-pro-sot-freeze-blocked] integrityOk=${snapshot.integrityOk} placeholders=${snapshot.placeholderIssues.join(",") || "none"}`,
     );

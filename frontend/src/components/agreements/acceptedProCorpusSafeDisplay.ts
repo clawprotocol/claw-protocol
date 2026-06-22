@@ -8,6 +8,9 @@ import {
   intakeHasFullLegalEntityParties,
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES } from "./paidProNPartySignerSetup";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
@@ -26,7 +29,6 @@ import {
 } from "./paidProAcceptedCorpusPartyRoles";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import {
   buildAcceptedProCorpusSafeDisplayCacheKey,
@@ -36,6 +38,7 @@ import {
 } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
+import { repairAgreementTemplatePlaceholders, repairPaidProFreezePlaceholderAuthority } from "./agreementTemplatePlaceholderSafety";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -107,11 +110,20 @@ function resolvePaidProSafeDisplayPartyRecords(
   });
 }
 
-function canonicalPartyNamesFromDraft(draft: ParsedDraftShape | null | undefined): string[] {
+function canonicalPartyNamesFromAcceptanceContext(
+  draft: ParsedDraftShape | null | undefined,
+  intakeText: string | null | undefined,
+): string[] {
+  const fromIntake = labeledPartyLegalEntities(intakeText ?? "")
+    .map((n) => n.trim())
+    .filter((n) => isAuthoritativeLegalEntityName(n));
+  if (fromIntake.length >= 2) {
+    return fromIntake.slice(0, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+  }
   return (draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
     .filter((name) => name.length >= 2)
-    .slice(0, 2);
+    .slice(0, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
 }
 
 /**
@@ -161,8 +173,8 @@ function applyAcceptedProCorpusSafeDisplayCore(
   out = entityNeutral.text;
   repairs.push(...entityNeutral.repairs);
 
-  const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
   const intakeRaw = opts?.intakeText ?? null;
+  const partyNames = canonicalPartyNamesFromAcceptanceContext(opts?.draft, intakeRaw);
   const hasAuthoritativeParties = paidProSafeDisplayHasAuthoritativeParties(intakeRaw, partyNames);
   const records = resolvePaidProSafeDisplayPartyRecords(intakeRaw, partyNames, opts?.draft);
 
@@ -278,6 +290,29 @@ function applyAcceptedProCorpusSafeDisplayCore(
   if (boundary.text !== out) {
     out = boundary.text;
     repairs.push(...boundary.repairs.map((r) => `boundary:${r}`));
+  }
+
+  const partyNamesForRepair =
+    records.length >= 2
+      ? records.map((r) => r.fullLegalName).filter((n) => n.length >= 2)
+      : partyNames;
+  if (partyNamesForRepair.length >= 2 && out.length >= 400) {
+    const placeholderRepair = repairAgreementTemplatePlaceholders(out, {
+      intakeRaw: intakeRaw ?? "",
+      partyNames: partyNamesForRepair,
+    });
+    if (placeholderRepair.repaired.length > 0) {
+      out = placeholderRepair.text;
+      repairs.push(...placeholderRepair.repaired.map((r) => `placeholder:${r}`));
+    }
+    const freezeExpansion = repairPaidProFreezePlaceholderAuthority(out, {
+      intakeRaw: intakeRaw ?? "",
+      partyNames: partyNamesForRepair,
+    });
+    if (freezeExpansion.repaired.length > 0) {
+      out = freezeExpansion.text;
+      repairs.push(...freezeExpansion.repaired.map((r) => `placeholder_freeze:${r}`));
+    }
   }
 
   return { text: out, repairs: [...new Set(repairs)] };

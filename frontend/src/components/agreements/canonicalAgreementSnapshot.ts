@@ -1,6 +1,8 @@
 import { applyProCorpusIntegrity, type ProCorpusIntegrityReport } from "./proCorpusIntegrity";
-import { repairAgreementTemplatePlaceholders } from "./agreementTemplatePlaceholderSafety";
-import { analyzeTemplatePlaceholderFragments } from "./agreementTemplatePlaceholderSafety";
+import {
+  analyzeTemplatePlaceholderFragments,
+  repairAgreementTemplatePlaceholders,
+} from "./agreementTemplatePlaceholderSafety";
 import {
   repairProFullAgreementCandidateSurgically,
   validateProFullAgreementCandidate,

@@ -183,6 +183,7 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { markPaidProLocalPostProcessingEndAt } from "./paidProQaPerfTrace";
 import { adaptPremiumFullDraftToProIntelligencePacket } from "./proAgreementIntelligence";
 import {
@@ -424,6 +425,15 @@ function alignTitleWithCanonical(parsed: ParsedDraftShape, rawIntake: string): P
   const headline = (canon.headline || "").trim();
   if (!headline) return parsed;
   return { ...parsed, title: headline };
+}
+
+function resolvePremiumCompletionCanonicalPartyNames(
+  draft: ParsedDraftShape,
+  intakeText: string,
+): string[] {
+  return resolvePartiesForReviewRender({ draft, intakeText })
+    .map((p) => p.partyLegalName.trim())
+    .filter((name) => name.length >= 2);
 }
 
 function familyTitleFallback(family: AgreementFamily): string {
@@ -1982,8 +1992,9 @@ async function runPremiumCompletionInner(
         // hard-fail downstream. Runs before structural/placeholder/acceptance gates so the repaired body
         // is what gets validated and (if clean) accepted as the paid SoT.
         if (textContainsUnresolvedIdentityPlaceholders(doc)) {
-          const canonicalPartyNamesForRepair = (merged.parties || []).map((p) =>
-            String(p?.name ?? "").trim(),
+          const canonicalPartyNamesForRepair = resolvePremiumCompletionCanonicalPartyNames(
+            merged,
+            preGateIntake,
           );
           const structuredPartyCount = (merged.parties || []).length;
           const canonicalIdentityCount = resolveCanonicalPartyIdentitiesFromSources({
@@ -2667,7 +2678,7 @@ async function runPremiumCompletionInner(
           typeof performance !== "undefined" ? performance.now() : Date.now();
         const ph = finalizeUserVisibleAgreementPlainText(doc, {
           intakeRaw: (rawForSoT || rawIntake || "").trim(),
-          partyNames: (merged.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean),
+          partyNames: resolvePremiumCompletionCanonicalPartyNames(merged, rawForSoT || rawIntake),
           agreementFamily: merged.agreement_family ?? null,
           surface: "premium_completion_pipeline",
         });
@@ -3006,17 +3017,28 @@ async function runPremiumCompletionInner(
           agreementGenerationId: input.agreementGenerationId,
           serverFullDocumentText: effectiveFull.server_full_document_text,
         });
-        if (
+        const preservedCandidate =
+          frozenReject?.body.trim() ||
+          preservedRecovery.text.trim() ||
+          (doc || "").trim();
+        const preservedPlaceholder = finalizeUserVisibleAgreementPlainText(preservedCandidate, {
+          intakeRaw: (rawForSoT || rawIntake || "").trim(),
+          partyNames: resolvePremiumCompletionCanonicalPartyNames(merged, rawForSoT || rawIntake),
+          agreementFamily: merged.agreement_family ?? null,
+          surface: "premium_completion_pipeline:preserved_recovery",
+        });
+        const shouldAttemptPreserve =
           longAdvisoryAccept ||
           (frozenReject &&
             frozenReject.body.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) ||
           (preservedRecovery.text.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
-            !(doc || "").trim())
+            !(doc || "").trim());
+        if (
+          shouldAttemptPreserve &&
+          preservedPlaceholder.ok &&
+          preservedPlaceholder.text.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
         ) {
-          const preserved =
-            frozenReject?.body.trim() ||
-            preservedRecovery.text.trim() ||
-            doc;
+          const preserved = preservedPlaceholder.text.trim();
           doc = preserved;
           winningPremiumBodyText = preserved;
           premiumRenderSource = (frozenReject?.source || "server_full_draft") as PremiumRenderSource;
@@ -3092,7 +3114,7 @@ async function runPremiumCompletionInner(
         : buildPremiumPostCheckoutStitchedBody(stripped, rawSoT);
     const phFb = finalizeUserVisibleAgreementPlainText(fb, {
       intakeRaw: (rawSoT || "").trim(),
-      partyNames: (merged.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean),
+      partyNames: resolvePremiumCompletionCanonicalPartyNames(stripped, rawSoT),
       agreementFamily: merged.agreement_family ?? null,
       surface: "premium_completion_fallback_stitched",
     });

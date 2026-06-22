@@ -62,7 +62,7 @@ export const TEST396_QUAD_PARTY_INTAKE = [
   "Oklahoma law governs. Provider fees and revenue sharing among the parties.",
 ].join("\n");
 
-function test396Draft(): ParsedDraftShape {
+export function test396Draft(): ParsedDraftShape {
   return {
     title: "Multi-Party Revenue Sharing Agreement",
     jurisdiction: "Oklahoma",
@@ -82,7 +82,7 @@ function test396Draft(): ParsedDraftShape {
   };
 }
 
-function test396Parties() {
+export function test396Parties() {
   return buildLivePaidProSignerMetadataAuthority({
     partyCount: 4,
     recipient1Name: RED,
