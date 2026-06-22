@@ -1372,10 +1372,10 @@ function finalizeUserVisibleAgreementPlainTextCore(
   if (isCanonicalCommittedText(prepared)) {
     prepared = stripCanonicalCommitMarker(prepared);
   } else if (
-    ctx.surface === "premium_completion_pipeline" &&
-    prepared.trim().length >= 1_500
+    (ctx.surface === "premium_completion_pipeline" && prepared.trim().length >= 1_500) ||
+    ctx.surface === "deterministic_quad_party_pro_fallback"
   ) {
-    // Accepted server_full_draft already ran applyAcceptedProCorpusSafeDisplay — avoid re-polish shrink.
+    // Gate-ready corpus — placeholder scan only; skip recital/enterprise/structure re-polish.
   } else {
     const polish = applyPaidProRenderPolish(prepared, intakeRaw, partyResolution.names, {
       surface: ctx.surface,

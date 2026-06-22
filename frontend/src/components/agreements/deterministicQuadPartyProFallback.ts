@@ -5,7 +5,9 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
-import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
+import {
+  analyzeTemplatePlaceholderFragments,
+} from "./agreementTemplatePlaceholderSafety";
 import { resolveFinalGoverningLaw } from "./premiumDraftTransform";
 import {
   labeledPartyLegalEntities,
@@ -16,9 +18,19 @@ import {
 } from "./labeledPartyBlockParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
-import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
+import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
-import { PAID_PRO_RECOVERY_MIN_DISPLAY_LEN } from "./paidProPostCheckoutRenderGate";
+import {
+  explainPaidProDegradedRecoveryDisplayRequirements,
+  PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
+} from "./paidProPostCheckoutRenderGate";
+import { rejectPremiumBodyForProRender } from "./premiumFullDraftClientAcceptance";
+import { countNumberedAgreementSections } from "./paidProMutualConsultingQualityFloor";
+import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
+import { countSignatureBlockHeadingsInTail } from "./guidedDealCompletion/signatureRegion";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+
+export const DETERMINISTIC_QUAD_PARTY_PRO_FALLBACK_SURFACE = "deterministic_quad_party_pro_fallback" as const;
 
 export const DETERMINISTIC_PRO_FALLBACK_REASON = {
   serverDegradedJsonParse: "server_degraded_json_parse",
@@ -36,8 +48,16 @@ export function logDeterministicProFallbackDecision(
   payload: Record<string, unknown>,
 ): void {
   if (import.meta.env.MODE === "test") return;
+  const expanded: Record<string, unknown> = { reason };
+  for (const [key, value] of Object.entries(payload)) {
+    if (Array.isArray(value)) {
+      expanded[key] = [...value];
+    } else {
+      expanded[key] = value;
+    }
+  }
   // eslint-disable-next-line no-console
-  console.info("[deterministic-pro-fallback]", { reason, ...payload });
+  console.info("[deterministic-pro-fallback]", expanded);
 }
 
 export function resolveDeterministicQuadPartyNames(
@@ -105,7 +125,7 @@ function buildQuadPartyNoticeStanzas(parties: readonly string[]): string[] {
       `If to ${party}:`,
       party,
       "Attention: Authorized Signer",
-      "Email: notices@example.com",
+      "Email: primary business email on file with the Party",
       "Address: primary business address on file with the Party",
     ].join("\n"),
   );
@@ -135,6 +155,90 @@ function oxfordPartyList(parties: readonly string[]): string {
   if (parties.length <= 1) return parties[0] ?? "";
   if (parties.length === 2) return `${parties[0]} and ${parties[1]}`;
   return `${parties.slice(0, -1).join(", ")}, and ${parties[parties.length - 1]}`;
+}
+
+function finalizeDeterministicQuadPartyPlaceholderGate(
+  body: string,
+  rawIntake: string,
+  parties: readonly string[],
+): { ok: boolean; text: string; remaining: string[] } {
+  const scanCtx = { intakeRaw: rawIntake, partyNames: [...parties] };
+  const remainingDetail = analyzeTemplatePlaceholderFragments(body, scanCtx);
+  const remainingFatal = remainingDetail.filter((d) => d.fatal).map((d) => d.token);
+  return {
+    ok: remainingFatal.length === 0,
+    text: body,
+    remaining: [...new Set(remainingFatal)],
+  };
+}
+function finalizeDeterministicQuadPartyProFallbackBody(
+  body: string,
+  rawIntake: string,
+  parties: readonly string[],
+): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = body;
+  const execution = enforcePaidProSingleExecutionBlock(out, {
+    intakeText: rawIntake,
+    draftPartyNames: [...parties],
+  });
+  out = execution.text;
+  repairs.push(...(execution.repairs ?? []));
+  return { text: out.trim(), repairs: [...new Set(repairs)] };
+}
+
+export function validateDeterministicQuadPartyProFallbackAcceptance(args: {
+  body: string;
+  rawIntake: string;
+  partyNames: readonly string[];
+}): { ok: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  const body = (args.body || "").trim();
+  const parties = args.partyNames.filter(isAuthoritativeLegalEntityName).slice(0, 4);
+  if (body.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
+    reasons.push(`too_short:${body.length}`);
+  }
+  if (parties.length < 4) {
+    reasons.push(`quad_party_names:${parties.length}`);
+  }
+  const numbered = countNumberedAgreementSections(body);
+  if (numbered < 12) {
+    reasons.push(`numbered_sections:${numbered}`);
+  }
+  const structure = applySectionStructureIntegrity(body, {
+    source: DETERMINISTIC_QUAD_PARTY_PRO_FALLBACK_SURFACE,
+  });
+  if (structure.anomalyCount > 0 && !structure.repaired) {
+    reasons.push(`section_structure:${structure.anomalyCount}`);
+    for (const d of structure.diagnostics.slice(0, 4)) {
+      reasons.push(`section_structure_detail:${String(d).slice(0, 80)}`);
+    }
+  }
+  const renderReject = rejectPremiumBodyForProRender(body, {
+    intakeText: args.rawIntake,
+    partyNames: parties,
+  });
+  if (!renderReject.ok) reasons.push(...renderReject.reasons);
+  const degraded = explainPaidProDegradedRecoveryDisplayRequirements(body, args.rawIntake);
+  if (!degraded.ok) reasons.push(`degraded_recovery:${degraded.failedStep}`);
+  if (countPaidProExecutionBlocks(body) !== 1) {
+    reasons.push(`execution_blocks:${countPaidProExecutionBlocks(body)}`);
+  }
+  const sigHeadings = countSignatureBlockHeadingsInTail(body);
+  if (sigHeadings < 4) reasons.push(`signature_headings:${sigHeadings}`);
+  const vs01 = resolveAuthoritativeSignerCount({
+    intakeText: args.rawIntake,
+    draftParties: parties.map((name) => ({ name })),
+    corpusPlain: body,
+  }).count;
+  if (vs01 !== 4) reasons.push(`vs01_party_count:${vs01}`);
+  for (const party of parties) {
+    if (!body.toLowerCase().includes(party.toLowerCase())) {
+      reasons.push(`missing_party:${party.slice(0, 40)}`);
+    }
+  }
+  const uniq = [...new Set(reasons)];
+  return { ok: uniq.length === 0, reasons: uniq };
 }
 
 /**
@@ -174,13 +278,13 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
   const blocks = [
     title.toUpperCase(),
     "",
-    `This ${title} (this "Agreement") is entered into as of the Effective Date among ${partyList} (each a "Party" and collectively the "Parties").`,
+    `This ${title} (this "Agreement") is entered into by and among ${partyList} (each a "Party" and collectively the "Parties").`,
     "",
     "1. SERVICES AND SCOPE",
     `Each Party may provide professional services, implementation support, analytics work, logistics coordination, and related deliverables to the other Parties as described in the intake and any written statements of work the Parties execute. Core scope includes: ${purpose}`,
     "",
-    "2. TERM",
-    `The initial term of this Agreement is ${term}, unless extended or terminated as provided herein.`,
+    "2. TERM AND TERMINATION",
+    `The initial term of this Agreement is ${term}, unless extended or terminated as provided herein. Either Party may terminate for material breach on thirty (30) days' written notice if the breach is not cured during that period.`,
     "",
     "3. PAYMENT AND CONSIDERATION",
     `Fees, revenue sharing, provider fees, and payment timing are as follows: ${payment}. Each Party will invoice and pay the other Parties according to the schedules they agree in writing.`,
@@ -188,7 +292,7 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
     "4. CONFIDENTIALITY",
     "Each Party will keep confidential information received from the other Parties confidential, use it only to perform under this Agreement, and disclose it only to personnel or advisors bound by confidentiality obligations or as required by law.",
     "",
-    "5. INTELLECTUAL PROPERTY",
+    "5. INTELLECTUAL PROPERTY AND WORK PRODUCT",
     "Each Party retains its pre-existing tools, templates, and background intellectual property. Work product created specifically for another Party under a written statement of work will be owned and licensed as the Parties describe in that statement of work or a signed exhibit.",
     "",
     "6. LIMITATION OF LIABILITY",
@@ -200,19 +304,19 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
     "8. MUTUAL INDEMNIFICATION",
     "Each Party will defend, indemnify, and hold harmless the other Parties from third-party claims arising from that indemnifying Party's negligence, willful misconduct, or material breach of this Agreement, subject to the limitation of liability section.",
     "",
-    "9. NOTICES",
+    "9. WARRANTIES AND COMPLIANCE",
+    "Each Party represents that it has authority to enter this Agreement and will comply with applicable law in performing its obligations. Except as expressly stated, services are provided without additional warranties.",
+    "",
+    "10. NOTICES",
     "Notices under this Agreement must be in writing and may be delivered by email to the primary business email of each Party or by mail to its primary business address. A notice sent by email is effective when sent unless the sender receives a delivery failure notice.",
     "",
     ...noticeStanzas.flatMap((stanza) => ["", stanza]),
     "",
-    "10. GOVERNING LAW",
+    "11. GOVERNING LAW",
     `This Agreement is governed by ${lawGoverning}.`,
     "",
-    "11. AMENDMENTS",
-    "This Agreement may be amended only by a written instrument signed by all Parties.",
-    "",
-    "12. ELECTRONIC SIGNATURES",
-    "The Parties may execute this Agreement using electronic signatures that satisfy applicable law, including execution through LawDog when the Parties elect that process.",
+    "12. MISCELLANEOUS AND ELECTRONIC SIGNATURES",
+    "This Agreement may be amended only by a written instrument signed by all Parties. The Parties may execute this Agreement using electronic signatures that satisfy applicable law, including execution through LawDog when the Parties elect that process.",
     "",
     "IN WITNESS WHEREOF, the Parties execute this Agreement.",
     "",
@@ -224,35 +328,31 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
     body += `\n\nOperational Detail. The Parties will cooperate in good faith on service delivery milestones, analytics reporting, logistics integration, revenue sharing reconciliations, and change orders consistent with the intake.`;
   }
 
-  const ph = finalizeUserVisibleAgreementPlainText(body, {
-    intakeRaw: rawIntake,
-    partyNames: parties,
-    agreementFamily: draft.agreement_family ?? null,
-    surface: "deterministic_quad_party_pro_fallback",
-  });
+  const ph = finalizeDeterministicQuadPartyPlaceholderGate(body, rawIntake, parties);
   if (!ph.ok) {
     return { ok: false, body: "", reasons: ["placeholder_blocked", ...ph.remaining] };
   }
   body = ph.text;
 
-  const prepared = preparePaidProServerDocumentForAcceptance(body, draft, rawIntake, {
-    surface: "deterministic_quad_party_pro_fallback",
-  });
-  body = prepared.text;
-
-  const execution = enforcePaidProSingleExecutionBlock(body, {
-    intakeText: rawIntake,
-    draftPartyNames: parties,
-  });
-  body = execution.text;
+  const finalized = finalizeDeterministicQuadPartyProFallbackBody(body, rawIntake, parties);
+  body = finalized.text;
 
   while (body.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
     body += `\n\nOperational Detail. The Parties will document service milestones, analytics deliverables, logistics handoffs, and revenue reconciliation procedures in good faith under this Agreement.`;
+  }
+
+  const acceptance = validateDeterministicQuadPartyProFallbackAcceptance({
+    body,
+    rawIntake,
+    partyNames: parties,
+  });
+  if (!acceptance.ok) {
+    return { ok: false, body: "", reasons: acceptance.reasons };
   }
 
   if (body.trim().length < PREMIUM_USABLE_BODY_MIN_LEN) {
     return { ok: false, body: "", reasons: [`too_short:${body.trim().length}`] };
   }
 
-  return { ok: true, body: body.trim(), reasons: prepared.repairs };
+  return { ok: true, body: body.trim(), reasons: finalized.repairs };
 }

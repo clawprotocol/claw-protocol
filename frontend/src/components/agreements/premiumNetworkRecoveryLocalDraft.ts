@@ -111,21 +111,23 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
     return { ok: false, body: "", reasons: renderReject.reasons };
   }
 
-  const mutual = assessPaidProMutualConsultingProfessionalStructure({
-    text: body,
-    rawIntake,
-    draft: draftForRecovery,
-  });
-  if (mutual.applies && !mutual.ok) {
-    return {
-      ok: false,
-      body: "",
-      reasons: [
-        "mutual_consulting_floor",
-        `sections:${mutual.numberedSectionCount}`,
-        ...mutual.topicsMissing,
-      ],
-    };
+  if (quadPartyNames.length < 4) {
+    const mutual = assessPaidProMutualConsultingProfessionalStructure({
+      text: body,
+      rawIntake,
+      draft: draftForRecovery,
+    });
+    if (mutual.applies && !mutual.ok) {
+      return {
+        ok: false,
+        body: "",
+        reasons: [
+          "mutual_consulting_floor",
+          `sections:${mutual.numberedSectionCount}`,
+          ...mutual.topicsMissing,
+        ],
+      };
+    }
   }
 
   if (body.trim().length < PREMIUM_USABLE_BODY_MIN_LEN) {

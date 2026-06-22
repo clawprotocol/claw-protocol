@@ -3491,7 +3491,7 @@ async function runPremiumCompletionInner(
       }
       logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.rejected, {
         localRecoveryOk: intakeLocalRecovery.ok,
-        localRecoveryReasons: intakeLocalRecovery.reasons,
+        localRecoveryReasons: [...intakeLocalRecovery.reasons],
         blockReason: intakeRecoveryPreview?.blockReason ?? null,
         bodyLen: intakeLocalRecovery.ok ? intakeLocalRecovery.body.length : 0,
         jsonParseAttempts: premiumJsonParseDegradedAttemptCount,

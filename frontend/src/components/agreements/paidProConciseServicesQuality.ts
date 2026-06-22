@@ -13,6 +13,7 @@ import {
   repairDuplicateAgreementOpening,
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
+import { isDeterministicQuadPartyProFallbackSurface } from "./agreementDocumentSurfacePolicy";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
@@ -390,6 +391,9 @@ function preparePaidProServerDocumentForAcceptanceCore(
   intakeText: string,
   surface: string,
 ): { text: string; repairs: string[] } {
+  if (isDeterministicQuadPartyProFallbackSurface(surface)) {
+    return { text: (raw || "").replace(/\r\n?/g, "\n").trim(), repairs: [] };
+  }
   const repairs: string[] = [];
   let out = (raw || "").replace(/\r\n?/g, "\n").trim();
   const partyNames = (draft?.parties ?? [])

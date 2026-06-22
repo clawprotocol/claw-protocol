@@ -32,8 +32,13 @@ export function isStarterDocumentSurface(ctx: StarterSurfaceContext): boolean {
 }
 
 /** True when paid-Pro recital/signature/enterprise/structure polish must not run. */
+export function isDeterministicQuadPartyProFallbackSurface(surface?: string | null): boolean {
+  const s = String(surface || "").trim();
+  return s === "deterministic_quad_party_pro_fallback" || s.includes("deterministic_quad_party_pro_fallback");
+}
+
 export function shouldSkipPaidProPolish(ctx: StarterSurfaceContext): boolean {
-  return isStarterDocumentSurface(ctx);
+  return isStarterDocumentSurface(ctx) || isDeterministicQuadPartyProFallbackSurface(ctx.surface);
 }
 
 export function assertPaidProPolishNotOnStarter(ctx: StarterSurfaceContext, caller: string): void {
