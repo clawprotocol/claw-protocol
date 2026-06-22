@@ -31,6 +31,7 @@ import {
 } from "../components/agreements/authoritativeHandoffCorpusResolver";
 import { resolvePremiumSignaturePreviewMode } from "../components/agreements/premiumAgreementDocumentHtml";
 import { consumeAuthoritativeSignerCount } from "../components/agreements/signerCountAuthority";
+import { readConsumedPaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
 import {
   getAcceptedPremiumCanonicalCorpus,
   getAcceptedPremiumCorpusForVs01Signing,
@@ -262,14 +263,19 @@ function resolveVs01AuthoritativeSignerCount(
     args.draft?.parties?.length ?? 0,
     args.bridge?.counterparties?.length ?? 0,
   );
+  const manifestPartyCount =
+    readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
+      (p) => String(p.partyLegalName ?? "").trim().length >= 2,
+    ).length ?? 0;
   return consumeAuthoritativeSignerCount(
     "vs01_corpus_gate",
     {
       intakeText: args.intakeText,
       draftParties: args.draft?.parties,
       corpusPlain,
+      manifestPartyCount,
     },
-    consumerCount,
+    Math.max(consumerCount, manifestPartyCount),
   );
 }
 

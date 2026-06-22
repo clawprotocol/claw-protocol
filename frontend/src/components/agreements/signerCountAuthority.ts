@@ -14,7 +14,10 @@ import {
   selectAuthoritativeTwoPartySlots,
 } from "./partySlotIdentityNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
-import { dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
+import {
+  dedupeEntityCandidatesToLegalParties,
+  extractAgreementEntityCandidates,
+} from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { countRealParties } from "./starterPartyLimits";
 
@@ -42,6 +45,8 @@ export type SignerCountAuthorityArgs = {
   rawPartyCount?: number;
   corpusPlain?: string | null;
   userExpandedPartyCount?: number;
+  /** Canonical manifest / consumed authority row count — never shrink below this when >= 3. */
+  manifestPartyCount?: number;
 };
 
 function isTestMode(): boolean {
@@ -121,6 +126,12 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     userExpandedPartyCount: args.userExpandedPartyCount,
   });
   const corpusBlockCount = inferCorpusDerivedSignerCount(args.corpusPlain);
+  const manifestPartyCount =
+    args.manifestPartyCount ??
+    readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
+      (p) => String(p.partyLegalName ?? "").trim().length >= 2,
+    ).length ??
+    0;
 
   let count = partySlotCount;
   let source: SignerCountAuthorityResolution["source"] = "party_slot_count";
@@ -154,14 +165,24 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   const betweenDeduped = dedupeEntityCandidatesToLegalParties(
     extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName),
   );
+  const entityPool = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
+  );
   const explicitMultiParty =
     labeledCount >= 3 ||
     quotedCount >= 3 ||
     betweenDeduped.length >= 3 ||
+    entityPool.length >= 3 ||
+    manifestPartyCount >= 3 ||
     collapsePartySlotCandidates(draftNames).filter(isAuthoritativeLegalEntityName).length >= 3;
-  if (betweenDeduped.length === 2 && !explicitMultiParty && count > 2) {
+  if (betweenDeduped.length === 2 && !explicitMultiParty && count > 2 && manifestPartyCount < 3) {
     count = 2;
     source = "party_slot_count";
+  }
+
+  if (manifestPartyCount >= 3 && count < manifestPartyCount) {
+    count = manifestPartyCount;
+    source = manifestPartyCount >= 3 && labeledCount >= 3 ? "labeled_parties" : source;
   }
 
   return {
@@ -273,7 +294,7 @@ export function resolveReadonlyHtmlSignerCount(
   });
   let count = resolution.count;
   if (manifestCount >= 2) {
-    count = Math.min(count, manifestCount);
+    count = Math.max(count, Math.min(manifestCount, 4));
   }
 
   const derivedFromPartyNames = (args.partyNames ?? []).filter((n) => String(n || "").trim().length >= 2)

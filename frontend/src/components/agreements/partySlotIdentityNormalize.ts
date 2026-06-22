@@ -164,6 +164,7 @@ export function resolveAuthoritativePartySlotCount(args: {
     labeled.length >= 3 ||
     quoted.length >= 3 ||
     betweenAuthoritative.length >= 3 ||
+    entityPool.length >= 3 ||
     collapsedDraftAuthoritative.length >= 3;
   if (betweenAuthoritative.length === 2 && !explicitMultiParty) return 2;
 

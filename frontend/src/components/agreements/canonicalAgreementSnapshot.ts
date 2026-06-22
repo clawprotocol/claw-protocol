@@ -1,5 +1,6 @@
 import { applyProCorpusIntegrity, type ProCorpusIntegrityReport } from "./proCorpusIntegrity";
 import { repairAgreementTemplatePlaceholders } from "./agreementTemplatePlaceholderSafety";
+import { analyzeTemplatePlaceholderFragments } from "./agreementTemplatePlaceholderSafety";
 import {
   repairProFullAgreementCandidateSurgically,
   validateProFullAgreementCandidate,
@@ -223,10 +224,23 @@ function preserveCanonicalLegalParties(args: {
   });
 }
 
-function collectPlaceholderIssues(text: string): string[] {
+function collectPlaceholderIssues(
+  text: string,
+  opts?: { intakeText?: string | null; partyNames?: readonly string[] },
+): string[] {
   const issues = new Set<string>();
   if (HARD_PLACEHOLDER_RE.test(text)) issues.add("unresolved_identity_or_address_placeholder");
-  if (/\[[A-Z][A-Z0-9_\s-]{2,}\]/.test(text)) issues.add("unresolved_bracket_token");
+  const fatal = analyzeTemplatePlaceholderFragments(text, {
+    intakeRaw: opts?.intakeText ?? null,
+    partyNames: opts?.partyNames ? [...opts.partyNames] : [],
+  }).filter((d) => d.fatal);
+  if (fatal.length > 0) {
+    issues.add("unresolved_bracket_token");
+    for (const decision of fatal) {
+      const tag = decision.category || decision.token;
+      if (tag && !issues.has(tag)) issues.add(tag);
+    }
+  }
   return [...issues];
 }
 
@@ -361,7 +375,10 @@ export function buildCanonicalAgreementSnapshot(
     }
   }
 
-  const placeholderIssues = collectPlaceholderIssues(canonicalText);
+  const placeholderIssues = collectPlaceholderIssues(canonicalText, {
+    intakeText: args.intakeText,
+    partyNames,
+  });
   const blockerIssues = collectBlockerIssues(canonicalText);
   if (args.tier === "pro" && canonicalText.length >= 500) {
     const structural = validateClauseFamilyStructuralIntegrity(canonicalText);

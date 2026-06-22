@@ -20,6 +20,7 @@ import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelin
 import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycleDiff";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
+import { repairAgreementTemplatePlaceholders } from "./agreementTemplatePlaceholderSafety";
 import {
   hasPaidProPipelineSessionAcceptance,
   markPaidProPipelineValidationPassed,
@@ -451,19 +452,38 @@ export function establishPaidProSourceOfTruth(args: {
   if (containsUnresolvedRenderTokens(safeForCommit)) {
     throw new Error("[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority");
   }
-  const parties: CanonicalAgreementSnapshotParty[] = (args.draft?.parties ?? [])
+  const reviewParties = resolvePartiesForReviewRender({
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+  });
+  const parties: CanonicalAgreementSnapshotParty[] = reviewParties
     .map((p) => ({
-      name: String(p?.name ?? "").trim(),
-      role: p?.role ? String(p.role).trim() : null,
-      email: p?.email ? String(p.email).trim() : null,
-      partyAddress: (p as { partyAddress?: string | null })?.partyAddress
-        ? String((p as { partyAddress?: string | null }).partyAddress).trim()
-        : null,
+      name: p.partyLegalName.trim(),
+      role: null,
+      email: p.signerEmail?.trim() || null,
+      partyAddress: p.partyAddress?.trim() || null,
     }))
-    .filter((p) => p.name);
+    .filter((p) => p.name.length >= 2);
+  const partyNames = parties.map((p) => p.name);
+  const placeholderRepair = repairAgreementTemplatePlaceholders(safeForCommit, {
+    intakeRaw: args.intakeText ?? "",
+    partyNames,
+  });
+  if (placeholderRepair.repaired.length > 0) {
+    safeForCommit = placeholderRepair.text;
+    logProCorpusSourceMap({
+      stage: "pre_freeze_placeholder_repair",
+      source: args.source ?? "server_full_draft",
+      len: safeForCommit.length,
+      text: safeForCommit,
+      allowedToOverride: false,
+      reason: placeholderRepair.repaired.slice(0, 8).join(","),
+    });
+  }
   const authoritativeSignerCount = resolveAuthoritativeSignerCount({
     intakeText: args.intakeText ?? null,
     draftParties: parties,
+    manifestPartyCount: parties.length,
   }).count;
   const snapshot = buildCanonicalAgreementSnapshot({
     surface: "paid_pro_source_of_truth_establish",

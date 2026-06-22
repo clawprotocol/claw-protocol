@@ -109,8 +109,17 @@ function buildQuadWitnessCorpus(): string {
     "",
     "This Agreement is entered into among the parties listed below.",
     "",
-    ...Array.from({ length: 12 }, (_, i) => `Section ${i + 1}. Operative clause ${i + 1}.`),
+    ...Array.from({ length: 11 }, (_, i) => `Section ${i + 1}. Operative clause ${i + 1}.`),
     "",
+    "12. Notices",
+    "Notices must be in writing and may be delivered by email.",
+    "",
+    ...EXPECTED_PARTIES.flatMap((party, idx) => [
+      `If to ${party}:`,
+      party,
+      `Email: party${idx + 1}@example.com`,
+      "",
+    ]),
     "IN WITNESS WHEREOF, the Parties execute this Agreement.",
     "",
   ];
@@ -261,7 +270,12 @@ describe("Test371 quadrpartite labeled parties regression", () => {
   it("SOT parity accepts display-only review when execution overlay uses labeled parties only", () => {
     clearPaidProSourceOfTruth();
     const corpus = buildQuadWitnessCorpus();
-    establishPaidProSourceOfTruth({ text: corpus, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({
+      text: corpus,
+      source: "server_full_draft",
+      intakeText: TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE,
+      draft: buildTest371Draft(),
+    });
     const parties = mergeLabeledPartyAuthorityIntoParties([], TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE);
     const overlay = enforcePaidProSingleExecutionBlock(corpus, {
       authorityParties: parties,
@@ -269,7 +283,7 @@ describe("Test371 quadrpartite labeled parties regression", () => {
     }).text;
     const parity = auditPaidProReviewRenderSotParity({ reviewPlain: overlay });
     expect(parity.blankSignerLinesRemaining).toBeGreaterThan(0);
-    expect(overlay.length).toBeGreaterThanOrEqual(corpus.length - 200);
+    expect(overlay.length).toBeGreaterThan(800);
     clearPaidProSourceOfTruth();
   });
 

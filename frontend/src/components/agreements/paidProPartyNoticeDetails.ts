@@ -4,6 +4,9 @@
  */
 
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
+import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
+import { PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES } from "./paidProNPartySignerSetup";
+import { resolveAuthoritativePartySlotCount } from "./partySlotIdentityNormalize";
 import {
   mergeLabeledPartyAuthorityIntoParties,
   partyDisplayRoleLabelForAuthorityParty,
@@ -268,12 +271,47 @@ function defuseEntityWitnessFusionLine(line: string): { line: string; repaired: 
   return { line: cleaned, repaired: cleaned !== trimmed };
 }
 
+function resolveCanonicalNoticeAuthorityParties(
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): readonly PaidProSignerMetadataParty[] {
+  const intake = roleContext?.intakeText?.trim() ?? "";
+  const draftPartyNames =
+    roleContext?.draftPartyNames ??
+    parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2);
+
+  const labeled = intake ? parseLabeledPartyBlocks(intake) : [];
+  const slotCount = intake
+    ? resolveAuthoritativePartySlotCount({
+        intakeText: intake,
+        draftPartyNames,
+        rawPartyCount: parties.length,
+      })
+    : parties.length;
+
+  const maxParties = Math.min(
+    labeled.length >= 2 ? labeled.length : Math.max(slotCount, parties.length),
+    PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
+  );
+
+  const base =
+    parties.length >= 2
+      ? parties.slice(0, maxParties)
+      : intake
+        ? mergeLabeledPartyAuthorityIntoParties([], intake)
+        : parties;
+
+  if (!intake) return base.slice(0, maxParties);
+
+  const merged = mergeLabeledPartyAuthorityIntoParties(base, intake);
+  return merged.slice(0, maxParties);
+}
+
 function enrichNoticeAuthorityParties(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): readonly PaidProSignerMetadataParty[] {
-  if (!roleContext?.intakeText?.trim()) return parties;
-  return mergeLabeledPartyAuthorityIntoParties(parties, roleContext.intakeText);
+  return resolveCanonicalNoticeAuthorityParties(parties, roleContext);
 }
 
 /** True when multiple operative "If to" notice stanzas are fused on one line or empty. */

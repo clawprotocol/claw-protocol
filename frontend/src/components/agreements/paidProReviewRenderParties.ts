@@ -15,7 +15,11 @@ import {
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
-import { hasPaidProSourceOfTruth, getPaidProSourceOfTruthText } from "./paidProSourceOfTruth";
+import {
+  hasPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+} from "./paidProSourceOfTruth";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
 export type ResolvePaidProReviewRenderPartiesArgs = {
@@ -94,16 +98,21 @@ export function resolvePartiesForReviewRender(
   const acceptedCorpus = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : null;
   const draftPartyNames =
     args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null;
+  const slotCount = resolveAuthoritativeSignerCount({
+    intakeText: intakeRaw || null,
+    draftPartyNames: draftPartyNames ?? undefined,
+    draftParties: args?.draft?.parties,
+  }).count;
   const records = acceptedCorpus
     ? resolveCanonicalPartyIdentitiesFromSources({
         rawIntake: intakeRaw || null,
         starterNames: draftPartyNames,
-        generatedBody: acceptedCorpus,
+        generatedBody: labeledAuthority.length >= 3 ? null : acceptedCorpus,
       })
     : resolveCanonicalPartyIdentitiesFromIntake(intakeRaw || null, draftPartyNames);
   if (records.length < 2) return consumed ?? [];
 
-  const legalEntities = records.map((r) => r.fullLegalName);
+  const legalEntities = records.slice(0, slotCount).map((r) => r.fullLegalName);
   const universal = resolveUniversalSignerMetadataBySlot({
     legalEntities,
     intakeText: intakeRaw || null,
@@ -118,7 +127,7 @@ export function resolvePartiesForReviewRender(
   });
 
   return mergeLabeledPartyAuthorityIntoParties(
-    records.slice(0, 12).map((record, partyIndex) => {
+    records.slice(0, slotCount).map((record, partyIndex) => {
       const slot = universal[partyIndex];
       return {
         partyIndex,
