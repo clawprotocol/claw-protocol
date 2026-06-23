@@ -383,6 +383,92 @@ export function formatNoticeAddressLines(address: string): string[] {
   return [trimmed];
 }
 
+const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE =
+  "Primary business address and email on file with the other Parties.";
+
+export function isBareEntityOnlyNoticeStanza(stanza: string): boolean {
+  const lines = stanza
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0 || lines.length > 2) return false;
+  if (!/^If to\s+/i.test(lines[0] ?? "")) return false;
+  if (/Email|Attn|Address|primary business address/i.test(stanza)) return false;
+  const entityFromHeading = (lines[0] ?? "")
+    .replace(/^If to\s+/i, "")
+    .replace(/:\s*$/, "")
+    .trim()
+    .toLowerCase();
+  if (lines.length === 1) return entityFromHeading.length >= 2;
+  const second = (lines[1] ?? "").trim().toLowerCase();
+  return second === entityFromHeading || ENTITY_SUFFIX_LINE_RE.test(lines[1] ?? "");
+}
+
+const ENTITY_SUFFIX_LINE_RE =
+  /\b(?:LLC|L\.L\.C\.|Inc\.?|INC|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
+
+export function hasBareEntityOnlyNoticeStanzas(text: string): boolean {
+  const noticesIdx = findNoticesSectionStart(text);
+  if (noticesIdx < 0) return false;
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  const region = text.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : text.length);
+  const blocks = region.split(/\n(?=If to\s+)/i).slice(1);
+  return blocks.some((block) => isBareEntityOnlyNoticeStanza(block.trim()));
+}
+
+/** Append safe notice destination wording to bare entity-name-only stanzas (display-only). */
+export function repairBareEntityOnlyNoticeStanzas(corpus: string): { text: string; repairs: string[] } {
+  const noticesIdx = findNoticesSectionStart(corpus);
+  if (noticesIdx < 0) return { text: corpus, repairs: [] };
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const noticesEnd = witnessIdx >= 0 ? witnessIdx : corpus.length;
+  const before = corpus.slice(0, noticesIdx);
+  const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(corpus, noticesIdx);
+  let noticesRegion = corpus.slice(noticesIdx, noticesFamilyEnd);
+  const middle = corpus.slice(noticesFamilyEnd, noticesEnd);
+  const after = corpus.slice(noticesEnd);
+
+  const blocks = noticesRegion.split(/\n(?=If to\s+)/i);
+  const intro = blocks[0] ?? "";
+  const stanzas = blocks.slice(1);
+  const repairs: string[] = [];
+  const rebuilt = stanzas.map((stanza) => {
+    const trimmed = stanza.trim();
+    const normalized = expandFusedIfToNoticeStanza(trimmed);
+    if (!isBareEntityOnlyNoticeStanza(normalized)) return trimmed;
+    repairs.push("notice:append_primary_contact_fallback");
+    return `${normalized}\n${NOTICE_PRIMARY_CONTACT_FALLBACK_LINE}`;
+  });
+  if (!repairs.length) return { text: corpus, repairs: [] };
+
+  const mergedNotices = `${intro.trimEnd()}\n\n${rebuilt.join("\n\n")}`.replace(/\n{3,}/g, "\n\n");
+  const middlePart = middle.trimEnd();
+  const executionTail = after.trimStart();
+  const middleSuffix = middlePart ? `\n\n${middlePart}` : "";
+  const text = executionTail
+    ? `${before}${mergedNotices}${middleSuffix}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+    : `${before}${mergedNotices}${middleSuffix}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return { text, repairs };
+}
+
+function noticeStanzaHasEntityLine(stanza: string): boolean {
+  const entityLine = stanza
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)[1];
+  return Boolean(entityLine && entityLine.length >= 3 && ENTITY_SUFFIX_LINE_RE.test(entityLine));
+}
+
+function expandFusedIfToNoticeStanza(stanza: string): string {
+  const trimmed = stanza.trim();
+  if (trimmed.includes("\n")) return trimmed;
+  const fused = trimmed.match(/^If to\s+(.+?):\s*(.+)$/i);
+  if (!fused?.[1] || !fused?.[2]) return trimmed;
+  return `If to ${fused[1].trim()}:\n${fused[2].trim()}`;
+}
+
 function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
   const legal = party.partyLegalName.trim();
   const lines = [`If to ${legal}:`, legal];
@@ -392,10 +478,13 @@ function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
     lines.push(title ? `Attn: ${name}, ${title}` : `Attn: ${name}`);
   }
   const email = party.signerEmail.trim();
-  if (email) lines.push(`Email: ${email}`);
   const addressLines = formatNoticeAddressLines(party.partyAddress);
+  if (email) lines.push(`Email: ${email}`);
   if (addressLines.length > 0) {
     lines.push("Address:", ...addressLines);
+  }
+  if (!email && addressLines.length === 0) {
+    lines.push(NOTICE_PRIMARY_CONTACT_FALLBACK_LINE);
   }
   return lines.join("\n");
 }
@@ -410,6 +499,7 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
   if (/^If to\s*:\s*$/i.test(trimmed)) return false;
   const hasAttn = /Attn:/i.test(trimmed);
   const hasEmailLine = /Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed);
+  const hasSafeFallback = /primary business address and email on file/i.test(trimmed);
   const requiredEmail = party?.signerEmail?.trim() ?? "";
   if (requiredEmail) {
     if (!hasEmailLine) return false;
@@ -420,7 +510,7 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
     if (!/Address(?:\s+for\s+Notice)?\s*:/i.test(trimmed)) return false;
     if (!trimmed.toLowerCase().includes(requiredAddress.toLowerCase().slice(0, 12))) return false;
   }
-  return hasAttn || hasEmailLine;
+  return (hasAttn || hasEmailLine || hasSafeFallback) && noticeStanzaHasEntityLine(trimmed);
 }
 
 const NOTICES_SECTION_HEADING_RE =
@@ -582,7 +672,8 @@ export function ensureOperativeIfToNoticeDelivery(
     noticesIdx >= 0 ? corpus.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : corpus.length) : "";
   const hasExecutionPollution = noticesRegionHasExecutionPollution(noticesRegion);
   const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
-  if (!missing && !hasPlaceholderTokens && !hasExecutionPollution && !hasInlineMalformedNotices) {
+  const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);
+  if (!missing && !hasPlaceholderTokens && !hasExecutionPollution && !hasInlineMalformedNotices && !hasBareNoticeStanzas) {
     return { text: corpus, repairs: [] };
   }
   return repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);

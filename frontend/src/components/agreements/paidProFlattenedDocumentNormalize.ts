@@ -13,6 +13,7 @@ import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberR
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
+import { repairBareEntityOnlyNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
@@ -154,6 +155,11 @@ export function preparePaidProFrozenDisplayPlain(text: string): {
   if (sectionAny.repaired) {
     out = sectionAny.text;
     repairs.push("normalize:section_any_reference");
+  }
+  const bareNotices = repairBareEntityOnlyNoticeStanzas(out);
+  if (bareNotices.repairs.length > 0) {
+    out = bareNotices.text;
+    repairs.push(...bareNotices.repairs);
   }
 
   const stripped = stripInlineStaleServerSignatureTailBeforeWitness(out);

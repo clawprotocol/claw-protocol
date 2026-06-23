@@ -69,7 +69,12 @@ export function auditPaidProReviewRenderSotParity(args: {
   const snapshotPlain = readAuthoritativeSigningCorpus()?.trim() ?? "";
   const snapshotDisplayHash =
     snapshotPlain.length >= 80
-      ? hashPaidProCorpus(preparePaidProReviewDisplayPlain(snapshotPlain).text.trim())
+      ? hashPaidProCorpus(
+          (shouldUsePaidProSourceOfTruthDisplayOnly()
+            ? preparePaidProFrozenDisplayPlain(snapshotPlain)
+            : preparePaidProReviewDisplayPlain(snapshotPlain)
+          ).text.trim(),
+        )
       : "";
   const reviewMatchesSnapshotDisplay = Boolean(
     snapshotDisplayHash && reviewHash && snapshotDisplayHash === reviewHash,

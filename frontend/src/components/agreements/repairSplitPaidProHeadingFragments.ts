@@ -89,12 +89,31 @@ export function isPaidProHeadingContinuationFragment(line: string): boolean {
   if (/^\d+\.\s/.test(t)) return false;
   if (EXECUTION_LINE_RE.test(t)) return false;
   if (/^(?:By|Name|Title|Date|Email|Address|Signature)\s*:/i.test(t)) return false;
-  if (BODY_SENTENCE_START_RE.test(t) && !/^(?:During|Within|After|Before|Upon)\s+[A-Z]/i.test(t)) return false;
+
+const HEADING_PARTICLE_WORD_RE = /^(?:for|of|and|or|the|to|in|on|at|by|with|upon|under|per|a|an)$/i;
+
+  const words = t
+    .split(/\s+/)
+    .map((w) => w.replace(/[.,;:]+$/, ""))
+    .filter(Boolean);
+  if (words.length < 1 || words.length > 8) return false;
+
+  const titleCaseHeading =
+    words.length >= 2 &&
+    !BODY_VERB_RE.test(t) &&
+    words.every(
+      (w) =>
+        HEADING_PARTICLE_WORD_RE.test(w) ||
+        /^[A-Z][a-zA-Z'&-]*$/.test(w) ||
+        /^[A-Z]{2,}$/.test(w),
+    );
+  if (titleCaseHeading) return true;
+
+  if (BODY_SENTENCE_START_RE.test(t) && !/^(?:During|Within|After|Before|Upon)\s+[A-Z]/i.test(t)) {
+    return false;
+  }
   if (BODY_VERB_RE.test(t)) return false;
   if (/[.!?]$/.test(t) && t.length > 24) return false;
-
-  const words = t.split(/\s+/).filter(Boolean);
-  if (words.length < 1 || words.length > 8) return false;
 
   const titleCaseOk = words.every(
     (w) => /^[A-Z][a-zA-Z'&-]*$/.test(w) || /^[A-Z]{2,}$/.test(w),

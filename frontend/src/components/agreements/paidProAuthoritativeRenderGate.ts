@@ -41,14 +41,16 @@ export function shouldUsePaidProSourceOfTruthDisplayOnly(): boolean {
 export function resolvePaidProAuthoritativeDisplayPlain(
   args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
 ): string {
-  const prepared = shouldUsePaidProSourceOfTruthDisplayOnly()
+  const displayOnly = shouldUsePaidProSourceOfTruthDisplayOnly();
+  const prepared = displayOnly
     ? preparePaidProFrozenDisplayPlain(resolvePaidProFrozenDisplayPlain()).text
     : preparePaidProReviewDisplayPlain(resolvePaidProFrozenDisplayPlain()).text;
-  const manifestAligned = applyFrozenManifestPaidProDisplayAuthority(prepared, {
-    intakeText: args?.intakeText ?? null,
-    draft: args?.draft ?? null,
-  }).text;
-  const base = manifestAligned;
+  const base = displayOnly
+    ? prepared
+    : applyFrozenManifestPaidProDisplayAuthority(prepared, {
+        intakeText: args?.intakeText ?? null,
+        draft: args?.draft ?? null,
+      }).text;
   const parties = resolvePartiesForReviewRender(args);
   const needsOverlay =
     isPaidProReviewSignerMetadataSessionActive() ||

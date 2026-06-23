@@ -803,7 +803,9 @@ export function resolvePaidProReviewRenderPlain(
   const memoHit = readMemoizedPaidProReviewPlain(memoKey);
   if (memoHit != null && !needsSignerOverlay) {
     return finishUserVisiblePlain(
-      normalizePaidProOrphanSubsections(memoHit, { source: `${surface}:memo` }).text,
+      shouldUsePaidProSourceOfTruthDisplayOnly()
+        ? memoHit
+        : normalizePaidProOrphanSubsections(memoHit, { source: `${surface}:memo` }).text,
     );
   }
 

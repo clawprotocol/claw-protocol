@@ -97,7 +97,24 @@ describe("repairSplitPaidProHeadingFragments", () => {
       false,
     );
     expect(isPaidProHeadingContinuationFragment("Client Materials")).toBe(true);
+    expect(isPaidProHeadingContinuationFragment("Client Responsibility for Payment.")).toBe(true);
     expect(isPaidProHeadingContinuationFragment("The Service Provider will deliver.")).toBe(false);
     expect(isPaidProHeadingContinuationFragment("5.1 Client Ownership")).toBe(false);
+  });
+
+  it("merges 3.7 Joint / Client Responsibility for Payment subsection split (TEST403)", () => {
+    const raw = [
+      "3. Compensation",
+      "Fees are payable as described.",
+      "3.7 Joint",
+      "Client Responsibility for Payment.",
+      "Red Mesa Logistics LLC and Blue Canyon Analytics LLC are jointly responsible for payment.",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    ].join("\n");
+    const { text, repairs } = repairSplitPaidProHeadingFragments(raw);
+    expect(text).toContain("3.7 Joint Client Responsibility for Payment.");
+    expect(text).not.toMatch(/3\.7 Joint\s*\n\s*Client Responsibility for Payment/i);
+    expect(repairs).toContain("split_subsection_heading_fragment:3.7");
   });
 });
