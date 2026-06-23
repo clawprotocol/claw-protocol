@@ -113,6 +113,7 @@ import {
   shouldBlockPaidProAdvisoryAcceptForPartyIdentity,
 } from "./labeledPartyManifestIntegrity";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
+import { evaluatePaidProSectionStructureFreezeGate } from "./paidProSectionStructureCompletenessAuthority";
 import {
   isCommercialServicesIntake,
 } from "./agreementIntentContract";
@@ -2543,6 +2544,20 @@ async function runPremiumCompletionInner(
       });
       if (intentModeFirst === "full" && !vPaid.ok && !serverSchemaNeedsDetails) {
         proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, vPaid.reasons);
+      }
+      const structureFreezeGate = evaluatePaidProSectionStructureFreezeGate(
+        doc,
+        "premium_completion_pipeline:pre_accept_structure_freeze_gate",
+      );
+      if (!structureFreezeGate.ok) {
+        vPaid = {
+          ok: false,
+          reasons: [structureFreezeGate.rejectReason ?? "section_structure_incomplete"],
+        };
+        if (!proIntentGateMessage) {
+          proIntentGateMessage =
+            "LawDog could not verify section structure for this Pro draft. Retrying generation may produce a usable agreement.";
+        }
       }
       if (import.meta.env.MODE !== "test" && acc.ok && vPaid.ok && doc && founderIntent) {
         let titleForGate = getResolvedTitleForFounderGating((effectiveFull.title || "").trim(), doc);

@@ -264,22 +264,35 @@ export function trimPremiumRecipientHandoffToPartyCount(
   };
 }
 
-function authoritativeHandoffPartyCap(): number | undefined {
-  const monotonic = readSignerMetadataEffectiveMax();
-  if (monotonic.partySlots >= 2) {
-    return Math.min(monotonic.partySlots, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+function authoritativeHandoffPartyCap(explicitAuthoritativeCount?: number): number | undefined {
+  const caps: number[] = [];
+  if (explicitAuthoritativeCount != null && explicitAuthoritativeCount >= 2) {
+    caps.push(Math.min(explicitAuthoritativeCount, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS));
   }
   if (hasPaidProSourceOfTruth()) {
     const frozen = readFrozenCanonicalManifestPartyCount();
-    if (frozen >= 2) return frozen;
+    if (frozen >= 2) caps.push(frozen);
   }
   const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
-  if (!consumed?.length) return undefined;
-  const authoritativeRows = consumed.filter((p) => {
-    const legal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
-    return legal.length >= 2 && isAuthoritativeLegalEntityName(legal);
-  }).length;
-  return authoritativeRows >= 2 ? Math.min(authoritativeRows, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS) : undefined;
+  if (!consumed?.length) {
+    /* continue */
+  } else {
+    const authoritativeRows = consumed.filter((p) => {
+      const legal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
+      return legal.length >= 2 && isAuthoritativeLegalEntityName(legal);
+    }).length;
+    if (authoritativeRows >= 2) {
+      caps.push(Math.min(authoritativeRows, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS));
+    }
+  }
+  if (explicitAuthoritativeCount == null) {
+    const monotonic = readSignerMetadataEffectiveMax().partySlots;
+    if (monotonic >= 2) {
+      caps.push(Math.min(monotonic, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS));
+    }
+  }
+  if (caps.length === 0) return undefined;
+  return Math.min(...caps);
 }
 
 /** Canonical party count for handoff read/write — never inflated by phantom draft or consumed rows. */
@@ -484,6 +497,7 @@ export function writePremiumRecipientHandoffExact(
   party1: PremiumRecipientHandoffSlot,
   party2: PremiumRecipientHandoffSlot,
   partyIndexSlots?: PremiumRecipientHandoffSlot[],
+  authoritativePartyCount?: number,
 ): void {
   try {
     const extra = (partyIndexSlots ?? []).filter(
@@ -526,20 +540,27 @@ export function writePremiumRecipientHandoffExact(
       !extra.length
     )
       return;
-    const cap = authoritativeHandoffPartyCap();
+    const cap = authoritativeHandoffPartyCap(authoritativePartyCount);
     const trimmedPayload =
       cap != null && cap >= 2
         ? trimPremiumRecipientHandoffToPartyCount(payload, cap)
-        : payload;
+        : authoritativePartyCount != null && authoritativePartyCount >= 2
+          ? trimPremiumRecipientHandoffToPartyCount(payload, authoritativePartyCount)
+          : payload;
     sessionStorage.setItem(KEY_V2, JSON.stringify(trimmedPayload));
     sessionStorage.removeItem(LEGACY_KEY);
     invalidatePremiumRecipientHandoffReadCache();
     logReviewLinkSignerMetadataHandoffWrite(trimmedPayload);
-    const slots = linearPremiumRecipientSlots(
+    const slotCount = resolveHandoffPartySlotCount(
       trimmedPayload,
-      resolveHandoffPartySlotCount(trimmedPayload, cap),
+      authoritativePartyCount ?? cap,
     );
-    latchSignerMetadataEffectiveMax(countSignerMetadataSlots(trimmedPayload, slots.length));
+    const slots = linearPremiumRecipientSlots(trimmedPayload, slotCount);
+    const counts = countSignerMetadataSlots(trimmedPayload, slots.length);
+    if (authoritativePartyCount != null && authoritativePartyCount >= 2) {
+      counts.partySlots = Math.min(counts.partySlots, authoritativePartyCount);
+    }
+    latchSignerMetadataEffectiveMax(counts);
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console

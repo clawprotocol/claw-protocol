@@ -150,11 +150,8 @@ function inferIntermediateHeadingTitle(
   if (/warrant|service condition/i.test(joined)) {
     return "Service Warranties and Conditions";
   }
-  if (/general|provision/i.test(joined) && minor > 1) {
-    return null;
-  }
   if (/general|provision/i.test(joined)) {
-    return "General Provisions";
+    return null;
   }
   return null;
 }
@@ -401,6 +398,37 @@ export function applyPaidProSectionStructureCompletenessAuthority(
     diagnostics: analysis,
     rejected,
     rejectReason,
+  };
+}
+
+/** Mirror the SoT pre-freeze section-structure gate for acceptance (repair + reject check, no throw). */
+export function evaluatePaidProSectionStructureFreezeGate(
+  text: string,
+  source = "section_structure_freeze_preview",
+): {
+  ok: boolean;
+  rejectReason: string | null;
+  text: string;
+  diagnostics: PaidProSectionStructureCompletenessDiagnostics;
+} {
+  const result = applyPaidProSectionStructureCompletenessAuthority(text, {
+    source,
+    phase: "pre_freeze",
+    blockOnFatal: false,
+  });
+  if (result.rejected) {
+    return {
+      ok: false,
+      rejectReason: result.rejectReason,
+      text: result.text,
+      diagnostics: result.diagnostics,
+    };
+  }
+  return {
+    ok: true,
+    rejectReason: null,
+    text: result.text,
+    diagnostics: result.diagnostics,
   };
 }
 

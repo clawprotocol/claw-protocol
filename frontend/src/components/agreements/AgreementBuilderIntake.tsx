@@ -652,6 +652,11 @@ import {
   hydratePaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
+  isPaidProSoTStructuralEstablishmentFailure,
+  shouldHydratePaidProSoTAfterEstablishmentFailure,
+  tryRecoverPaidProSourceOfTruthFromStructuralFailure,
+} from "./paidProSoTStructuralRecovery";
+import {
   hasPaidProPipelineSessionAcceptance,
   markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
@@ -7771,7 +7776,42 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 text: snapshotPlain,
                 source: paidProSotSource,
               }) && snapshotPlain.trim().length >= 500;
+            let structuralRecoveryApplied = false;
+            if (isPaidProSoTStructuralEstablishmentFailure(establishMsg)) {
+              const recovered = tryRecoverPaidProSourceOfTruthFromStructuralFailure({
+                draft: mergedDraftPersist,
+                intakeText: mergedIntake,
+                source: paidProSotSource,
+                agreementGenerationId: sessionGenId,
+                generationOutcome: generationOutcomeLabel,
+              });
+              if (recovered.ok) {
+                structuralRecoveryApplied = true;
+                snapshotPlain = recovered.body;
+                mergedDraftPersist = mergePremiumDraftWithServerCorpusFields(merged.draft, {
+                  authoritativePlain: snapshotPlain,
+                  serverFullFromApi:
+                    String(merged.draft.premium_server_full_document_text ?? "").trim() || snapshotPlain,
+                  premiumRenderSource:
+                    resolvedPersist.premium_render_source === "server_full_document_text"
+                      ? "server_full_document_text"
+                      : result.premiumRenderSource,
+                });
+                commitPaidProAcceptanceStorageHygiene();
+                bumpPremiumSurfaceGateTick();
+                setGuidedCompletionPhase("applied");
+                setGuidedFinalReviewExplicitlyOpened(true);
+                guidedFinalReviewExplicitlyUnlockedRef.current = true;
+                setDisplayPhase("review");
+                setCreateFlowPhaseGuarded("draft_ready_for_review");
+                setPreviewPaneRevealed(true);
+                setProFullDraftCustomGateMessage(
+                  "Your Pro agreement was recovered using a deterministic structure-safe draft. Review before finalize.",
+                );
+              }
+            }
             if (
+              !structuralRecoveryApplied &&
               pipelineValidatedForRecovery &&
               (establishMsg.includes("[pro-minimum-substance-blocked]") ||
                 establishMsg.includes("[paid-pro-clause-family-structural-blocked]") ||
@@ -7805,7 +7845,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 }
               }
             }
-            if (!hasPaidProSourceOfTruth() && pipelineValidatedForRecovery) {
+            if (
+              !structuralRecoveryApplied &&
+              shouldHydratePaidProSoTAfterEstablishmentFailure(establishMsg) &&
+              !hasPaidProSourceOfTruth() &&
+              pipelineValidatedForRecovery
+            ) {
               const hydrated = hydratePaidProSourceOfTruth({
                 text: snapshotPlain,
                 source: paidProSotSource,
@@ -7835,7 +7880,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               setPremiumSendPathUnlocked(false);
               setPremiumPostCheckoutPhase("processing");
               setProFullDraftCustomGateMessage(
-                "LawDog could not lock your Pro agreement for review. Tap **Retry Pro draft** to regenerate.",
+                isPaidProSoTStructuralEstablishmentFailure(establishMsg)
+                  ? "LawDog could not lock section structure for your Pro agreement. Tap **Retry Pro draft** to regenerate a structure-safe version."
+                  : "LawDog could not lock your Pro agreement for review. Tap **Retry Pro draft** to regenerate.",
               );
               logPremiumCompletionDebug({
                 stage: "ui_apply_blocked_sot_establish_failed",
@@ -8255,6 +8302,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             (merged.draft.parties?.[1]?.name || merged.displayName2 || "").trim(),
           ),
           buildPartyIndexSlotsFromPartiesAndCandidates(merged.draft.parties ?? [], result.recipientCandidates ?? []),
+          resolveAuthoritativeSignerCount({
+            intakeText: mergedIntake,
+            draftParties: merged.draft.parties ?? [],
+            manifestPartyCount: (merged.draft.parties ?? []).length,
+          }).count,
         );
         try {
           if (url) {
