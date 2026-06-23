@@ -21,7 +21,9 @@ export function shouldImmediateAuthoritativePremiumCommit(args: {
   premiumPipelineSource: string;
   validatePaidProOutputOk: boolean;
   premiumRenderResolveSource: PremiumRenderResolveSource | string | null | undefined;
+  frozenSourceOfTruthEstablished?: boolean;
 }): boolean {
+  if (args.frozenSourceOfTruthEstablished === false) return false;
   return (
     args.usePaidAuthoritativeBody &&
     args.snapshotPlainTrimLen >= 500 &&

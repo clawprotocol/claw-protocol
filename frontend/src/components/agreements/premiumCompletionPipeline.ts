@@ -113,7 +113,7 @@ import {
   shouldBlockPaidProAdvisoryAcceptForPartyIdentity,
 } from "./labeledPartyManifestIntegrity";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
-import { evaluatePaidProSectionStructureFreezeGate } from "./paidProSectionStructureCompletenessAuthority";
+import { evaluatePaidProCorpusSoTFreezeCompatibility } from "./paidProSoTStructuralRecovery";
 import {
   isCommercialServicesIntake,
 } from "./agreementIntentContract";
@@ -2545,10 +2545,12 @@ async function runPremiumCompletionInner(
       if (intentModeFirst === "full" && !vPaid.ok && !serverSchemaNeedsDetails) {
         proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, vPaid.reasons);
       }
-      const structureFreezeGate = evaluatePaidProSectionStructureFreezeGate(
-        doc,
-        "premium_completion_pipeline:pre_accept_structure_freeze_gate",
-      );
+      const structureFreezeGate = evaluatePaidProCorpusSoTFreezeCompatibility(doc, {
+        draft: mergedForApi,
+        intakeText: rawForSoT || rawIntake,
+        draftPartyCount: mergedForApi?.parties?.length ?? 0,
+        source: "premium_completion_pipeline:pre_accept_structure_freeze_gate",
+      });
       if (!structureFreezeGate.ok) {
         vPaid = {
           ok: false,

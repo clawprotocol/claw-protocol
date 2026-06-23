@@ -30,7 +30,7 @@ import {
   validateProMinimumSubstance,
 } from "./paidProConciseServicesQuality";
 import { corpusHasPaidProSyntheticMalformedSectionHeadings } from "./paidProSyntheticMalformedSectionHeadings";
-import { evaluatePaidProSectionStructureFreezeGate } from "./paidProSectionStructureCompletenessAuthority";
+import { evaluatePaidProCorpusSoTFreezeCompatibility } from "./paidProSoTStructuralRecovery";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -284,14 +284,13 @@ export function validatePaidProOutput(args: {
     logDecision(false, reasons);
     return { ok: false, reasons };
   }
-  const structureFreeze = evaluatePaidProSectionStructureFreezeGate(
-    t,
-    "validatePaidProOutput:section_structure_freeze_gate",
-  );
+  const structureFreeze = evaluatePaidProCorpusSoTFreezeCompatibility(t, {
+    draft: args.draft ?? null,
+    intakeText: rawI,
+    source: "validatePaidProOutput:sot_freeze_compatibility_gate",
+  });
   if (!structureFreeze.ok) {
-    const reasons = [
-      structureFreeze.rejectReason ?? "section_structure_incomplete",
-    ];
+    const reasons = [structureFreeze.rejectReason ?? "section_structure_incomplete"];
     logVpaidDevFail(reasons);
     logDecision(false, reasons);
     return { ok: false, reasons };

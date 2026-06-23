@@ -69,6 +69,19 @@ describe("shouldImmediateAuthoritativePremiumCommit", () => {
     ).toBe(false);
   });
 
+  it("does not commit when frozen SoT is not established", () => {
+    expect(
+      shouldImmediateAuthoritativePremiumCommit({
+        usePaidAuthoritativeBody: true,
+        snapshotPlainTrimLen: 16200,
+        premiumPipelineSource: "server_full_draft",
+        validatePaidProOutputOk: true,
+        premiumRenderResolveSource: "server_full_document_text",
+        frozenSourceOfTruthEstablished: false,
+      }),
+    ).toBe(false);
+  });
+
   it("does not commit when resolver still live_generated_preview and validation fails", () => {
     expect(
       shouldImmediateAuthoritativePremiumCommit({

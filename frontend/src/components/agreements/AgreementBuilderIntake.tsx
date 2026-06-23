@@ -644,6 +644,7 @@ import {
   snapshotFieldsFromAcceptedPremiumCanonical,
 } from "./acceptedPremiumCanonicalCorpus";
 import {
+  clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruth,
@@ -652,13 +653,14 @@ import {
   hydratePaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
-  isPaidProSoTStructuralEstablishmentFailure,
+  hasFrozenPaidProAuthoritativeSnapshot,
+  isPaidProSoTEstablishmentFailure,
   shouldHydratePaidProSoTAfterEstablishmentFailure,
   tryRecoverPaidProSourceOfTruthFromStructuralFailure,
 } from "./paidProSoTStructuralRecovery";
 import {
   hasPaidProPipelineSessionAcceptance,
-  markPaidProPipelineValidationPassed,
+  clearPaidProPostAcceptanceValidatorCache,
 } from "./paidProPostAcceptanceValidatorCache";
 import {
   resolvePaidProAuthoritativeDisplayPlain,
@@ -6714,7 +6716,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           source: pipelineSource,
           generationOutcome: opts.reason?.includes("needs") ? "needs_details" : "ok",
         });
-        logPremiumFallbackSuppressed("authoritative_doc_present");
+        if (hasFrozenPaidProAuthoritativeSnapshot()) {
+          logPremiumFallbackSuppressed("authoritative_doc_present");
+        }
         cleanPremiumUrlAfterAuthoritativeCommit();
         window.requestAnimationFrame(() => {
           bumpPremiumSurfaceGateTick();
@@ -7777,7 +7781,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 source: paidProSotSource,
               }) && snapshotPlain.trim().length >= 500;
             let structuralRecoveryApplied = false;
-            if (isPaidProSoTStructuralEstablishmentFailure(establishMsg)) {
+            if (isPaidProSoTEstablishmentFailure(establishMsg)) {
               const recovered = tryRecoverPaidProSourceOfTruthFromStructuralFailure({
                 draft: mergedDraftPersist,
                 intakeText: mergedIntake,
@@ -7812,41 +7816,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }
             if (
               !structuralRecoveryApplied &&
-              pipelineValidatedForRecovery &&
-              (establishMsg.includes("[pro-minimum-substance-blocked]") ||
-                establishMsg.includes("[paid-pro-clause-family-structural-blocked]") ||
-                establishMsg.includes("[paid-pro-document-boundary-blocked]"))
-            ) {
-              try {
-                markPaidProPipelineValidationPassed({
-                  text: snapshotPlain,
-                  source: paidProSotSource,
-                });
-                establishPaidProSourceOfTruth({
-                  text: snapshotPlain,
-                  source: paidProSotSource,
-                  draft: mergedDraftPersist,
-                  intakeText: mergedIntake,
-                  agreementGenerationId: sessionGenId,
-                  generationOutcome: generationOutcomeLabel,
-                });
-                commitPaidProAcceptanceStorageHygiene();
-                bumpPremiumSurfaceGateTick();
-                setGuidedCompletionPhase("applied");
-                setGuidedFinalReviewExplicitlyOpened(true);
-                guidedFinalReviewExplicitlyUnlockedRef.current = true;
-                setDisplayPhase("review");
-                setCreateFlowPhaseGuarded("draft_ready_for_review");
-                setPreviewPaneRevealed(true);
-              } catch (recoveryErr) {
-                if (import.meta.env.DEV) {
-                  // eslint-disable-next-line no-console
-                  console.warn("[premium-handoff] pipeline-validated SoT recovery failed", recoveryErr);
-                }
-              }
-            }
-            if (
-              !structuralRecoveryApplied &&
               shouldHydratePaidProSoTAfterEstablishmentFailure(establishMsg) &&
               !hasPaidProSourceOfTruth() &&
               pipelineValidatedForRecovery
@@ -7875,12 +7844,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 // eslint-disable-next-line no-console
                 console.warn("[premium-handoff] establishPaidProSourceOfTruth blocked", establishErr);
               }
+              clearPaidProPostAcceptanceValidatorCache();
+              clearPaidProSourceOfTruth();
               setProFullDraftQualityRetry(true);
               setPremiumPersistedFlowActive(false);
               setPremiumSendPathUnlocked(false);
               setPremiumPostCheckoutPhase("processing");
               setProFullDraftCustomGateMessage(
-                isPaidProSoTStructuralEstablishmentFailure(establishMsg)
+                isPaidProSoTEstablishmentFailure(establishMsg)
                   ? "LawDog could not lock section structure for your Pro agreement. Tap **Retry Pro draft** to regenerate a structure-safe version."
                   : "LawDog could not lock your Pro agreement for review. Tap **Retry Pro draft** to regenerate.",
               );
@@ -7917,6 +7888,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPipelineSource: result.premiumRenderSource,
           validatePaidProOutputOk: vCommitGate.ok,
           premiumRenderResolveSource: resolvedPersist.premium_render_source,
+          frozenSourceOfTruthEstablished: hasPaidProSourceOfTruth(),
         });
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
@@ -12891,7 +12863,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const authoritativePremiumUiCommitted = useMemo(() => {
     const snap = readPremiumCompletionSnapshot();
-    return resolveAuthoritativePremiumCommitted({
+    const resolved = resolveAuthoritativePremiumCommitted({
       winningPremiumBodyText:
         lastPremiumWinningCorpusRef.current ||
         premiumPipelineOutputBodyRef.current ||
@@ -12900,7 +12872,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumRenderResolveSource: snap?.premiumRenderResolveSource,
       agreementDocumentText,
       snapshot: snap,
-    }).committed;
+    });
+    if (!resolved.committed) return false;
+    return hasFrozenPaidProAuthoritativeSnapshot() || isAcceptedPremiumCanonicalEstablished();
   }, [
     agreementDocumentText,
     premiumTruthPipelineSource,
@@ -16813,7 +16787,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         source: snap?.premiumPipelineRenderSource ?? lastPremiumPipelineRenderSourceRef.current,
         generationOutcome: "ok",
       });
-      logPremiumFallbackSuppressed("authoritative_doc_present");
+      if (hasFrozenPaidProAuthoritativeSnapshot()) {
+        logPremiumFallbackSuppressed("authoritative_doc_present");
+      }
     }
   }, [
     authoritativePremiumUiCommitted,

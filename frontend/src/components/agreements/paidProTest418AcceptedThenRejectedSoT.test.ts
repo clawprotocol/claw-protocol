@@ -27,7 +27,7 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
-  isPaidProSoTStructuralEstablishmentFailure,
+  isPaidProSoTEstablishmentFailure,
   shouldHydratePaidProSoTAfterEstablishmentFailure,
   tryRecoverPaidProSourceOfTruthFromStructuralFailure,
 } from "./paidProSoTStructuralRecovery";
@@ -102,7 +102,7 @@ describe("TEST418 — accepted-then-rejected Pro SoT dead-end and structural ret
 
     const msg =
       "paid-pro-sot-freeze-blocked section_structure_incomplete reason=section_structure_synthetic_malformed_headings";
-    expect(isPaidProSoTStructuralEstablishmentFailure(msg)).toBe(true);
+    expect(isPaidProSoTEstablishmentFailure(msg)).toBe(true);
     expect(shouldHydratePaidProSoTAfterEstablishmentFailure(msg)).toBe(false);
     expect(hasPaidProSourceOfTruth()).toBe(false);
   });
