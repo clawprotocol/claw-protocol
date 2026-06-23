@@ -314,10 +314,11 @@ function enrichNoticeAuthorityParties(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): readonly PaidProSignerMetadataParty[] {
-  return ensureNoticeAuthorityPartyLegalEntities(
+  const resolved = ensureNoticeAuthorityPartyLegalEntities(
     resolveCanonicalNoticeAuthorityParties(parties, roleContext),
     roleContext,
   );
+  return preserveSlotIndexedSignerMetadataParties(resolved, parties);
 }
 
 /** True when multiple operative "If to" notice stanzas are fused on one line or empty. */
@@ -624,7 +625,12 @@ export function repairIncompleteIfToNoticeStanzas(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; repairs: string[] } {
-  const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
+  const authorityParties = parties.some((p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim())
+    ? preserveSlotIndexedSignerMetadataParties(
+        enrichNoticeAuthorityParties(parties, roleContext),
+        parties,
+      )
+    : enrichNoticeAuthorityParties(parties, roleContext);
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
   const repairs: string[] = [];
   let text = corpus.replace(/\r\n/g, "\n");
@@ -682,7 +688,11 @@ export function repairIncompleteIfToNoticeStanzas(
   for (let i = 0; i < authorityParties.length; i++) {
     const party = authorityParties[i]!;
     const existing = stanzas[i]?.trim() ?? "";
-    if (noticeStanzaComplete(existing, party)) {
+    const requiredEmail = party.signerEmail.trim();
+    const stanzaHasAuthorityEmail =
+      !requiredEmail ||
+      new RegExp(`Email:\\s*${escapeRegExp(requiredEmail)}`, "i").test(existing);
+    if (noticeStanzaComplete(existing, party) && stanzaHasAuthorityEmail) {
       rebuiltStanzas.push(existing);
       stanzaCount += 1;
       continue;
@@ -728,20 +738,48 @@ export function ensureOperativeIfToNoticeDelivery(
 ): { text: string; repairs: string[] } {
   const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
-  const missing = authorityParties.some((p) => {
-    const email = p.signerEmail.trim();
-    if (email && !corpus.includes(email)) return true;
-    const addr = p.partyAddress.trim();
-    if (addr && addr.length > 8 && !corpus.toLowerCase().includes(addr.toLowerCase().slice(0, 12))) {
-      return true;
-    }
-    return false;
-  });
-  const hasPlaceholderTokens = NOTICE_PLACEHOLDER_TOKEN_RE.test(corpus);
+
   const noticesIdx = findNoticesSectionStart(corpus);
   const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
   const noticesRegion =
     noticesIdx >= 0 ? corpus.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : corpus.length) : "";
+
+  const noticesRegionIncludesEmail = (email: string): boolean =>
+    Boolean(
+      email &&
+        noticesRegion.toLowerCase().includes(email.toLowerCase()) &&
+        /Email(?:\s+for\s+Notice)?\s*:/i.test(noticesRegion),
+    );
+
+  const noticesRegionIncludesAddress = (addr: string): boolean => {
+    if (!addr || addr.length <= 8) return true;
+    const needle = addr.toLowerCase().slice(0, 12);
+    return (
+      noticesRegion.toLowerCase().includes(needle) &&
+      /Address(?:\s+for\s+Notice)?\s*:/i.test(noticesRegion)
+    );
+  };
+
+  const stanzaBlocks = noticesRegion.split(/\n(?=If to\s+)/i).slice(1).map((s) => s.trim());
+  const stanzasMissingPerPartyContact = authorityParties.some((party, index) => {
+    const stanza = stanzaBlocks[index] ?? "";
+    const email = party.signerEmail.trim();
+    if (email && !noticeStanzaComplete(stanza, party)) return true;
+    const addr = party.partyAddress.trim();
+    if (addr && addr.length > 8 && !noticeStanzaComplete(stanza, party)) return true;
+    return false;
+  });
+
+  const missing =
+    stanzasMissingPerPartyContact ||
+    authorityParties.some((p) => {
+      const email = p.signerEmail.trim();
+      if (email && !noticesRegionIncludesEmail(email)) return true;
+      const addr = p.partyAddress.trim();
+      if (addr && !noticesRegionIncludesAddress(addr)) return true;
+      return false;
+    });
+  const hasPlaceholderTokens = NOTICE_PLACEHOLDER_TOKEN_RE.test(noticesRegion);
   const hasExecutionPollution = noticesRegionHasExecutionPollution(noticesRegion);
   const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
   const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);

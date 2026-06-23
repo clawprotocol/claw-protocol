@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
-import { countSignatureBlockHeadingsInTail } from "./guidedDealCompletion/signatureRegion";
 import { resolveCanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
 import {
   assessLabeledPartyManifestIntegrity,
@@ -209,7 +208,7 @@ describe("Test371 quadrpartite labeled parties regression", () => {
     ).toBeGreaterThanOrEqual(4);
   });
 
-  it("execution block rebuild uses four PARTY sections without CLIENT/SERVICE PROVIDER fallback", () => {
+  it("execution block rebuild uses four entity headings without CLIENT/SERVICE PROVIDER fallback", () => {
     const parties = mergeLabeledPartyAuthorityIntoParties([], TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE);
     expect(parties).toHaveLength(4);
     const rebuilt = enforcePaidProSingleExecutionBlock(buildQuadWitnessCorpus(), {
@@ -218,10 +217,12 @@ describe("Test371 quadrpartite labeled parties regression", () => {
     }).text;
     const tailIdx = rebuilt.search(/\bIN WITNESS WHEREOF\b/i);
     const tail = tailIdx >= 0 ? rebuilt.slice(tailIdx) : rebuilt;
-    expect(countSignatureBlockHeadingsInTail(tail)).toBe(4);
-    expect(tail).toMatch(/PARTY\s+1\s*:/i);
-    expect(tail).toMatch(/PARTY\s+4\s*:/i);
+    expect((tail.match(/^\s*By\s*:/gim) || []).length).toBe(4);
+    for (const entity of EXPECTED_PARTIES) {
+      expect(tail).toMatch(new RegExp(entity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    }
     expect(tail).not.toMatch(/^\s*CLIENT\s*:/im);
+    expect(tail).not.toMatch(/^\s*PARTY\s+\d+\s*:/im);
     expect(tail).not.toMatch(/SOFTWARE PLATFORM AGREEMENT/i);
     expect(tail).not.toMatch(/licensing revenue will be shared/i);
   });

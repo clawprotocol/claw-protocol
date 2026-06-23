@@ -3,6 +3,7 @@
  */
 
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   getAuthoritativeSigningSnapshot,
   readAuthoritativeSigningCorpus,
@@ -35,13 +36,24 @@ import {
 /** Render-time enrichment — does not mutate the frozen signing snapshot store. */
 export function enrichPaidProPostFinalizeDisplayCorpus(
   plain: string,
-  draft?: AgreementDraft | null,
+  draft?: AgreementDraft | ParsedDraftShape | null,
 ): string {
   let body = (plain || "").trim();
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
 
   const snap = getAuthoritativeSigningSnapshot();
   const meta = snap?.signerMetadata ?? null;
+  const authorityParties =
+    (meta ? recipientMetadataToAuthorityParties(meta) : null) ??
+    readConsumedPaidProSignerMetadataAuthority()?.parties ??
+    [];
+
+  const blankSignerLines = countBlankSignerMetadataLinesInExecutionBlock(body);
+  const headingLeak = detectExecutionHeadingMetadataLeak(body).leak;
+  if (blankSignerLines === 0 && !headingLeak && authorityParties.length >= 2) {
+    return body;
+  }
+
   if (meta && signerMetadataAuthorityHasHydratableFields(meta)) {
     const parties = recipientMetadataToAuthorityParties(meta);
     const roleContext = { acceptedCorpus: body };
@@ -57,30 +69,31 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
     if (retry.applied) body = retry.corpus.trim();
   }
 
-  const corpusHints = collectReviewReadyCorpusHints(body, draft ?? null);
-  body = applyReviewReadyMetadataBackfill(body, draft ?? null, {
+  const corpusHints = collectReviewReadyCorpusHints(body, (draft as AgreementDraft | null) ?? null);
+  body = applyReviewReadyMetadataBackfill(body, (draft as AgreementDraft | null) ?? null, {
     corpusHints,
     surface: "owner_done",
     selectedSource: "authoritative_signing_snapshot",
   });
 
-  const authorityParties =
-    (meta ? recipientMetadataToAuthorityParties(meta) : null) ??
-    readConsumedPaidProSignerMetadataAuthority()?.parties ??
-    [];
   if (body.length >= 80 && authorityParties.length >= 2 && detectExecutionHeadingMetadataLeak(body).leak) {
     body = repairExecutionBlockEntityHeadingLines(body, authorityParties).text.trim();
   }
   return body;
 }
 
-function finalizePostFinalizeReviewPlain(plain: string, draft?: AgreementDraft | null): string {
+function finalizePostFinalizeReviewPlain(
+  plain: string,
+  draft?: AgreementDraft | ParsedDraftShape | null,
+): string {
   const body = enrichPaidProPostFinalizeDisplayCorpus(plain, draft);
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
   return body;
 }
 
-export function resolvePaidProPostFinalizeReviewPlain(draft?: AgreementDraft | null): string {
+export function resolvePaidProPostFinalizeReviewPlain(
+  draft?: AgreementDraft | ParsedDraftShape | null,
+): string {
   const snapshot = readAuthoritativeSigningCorpus().trim();
   if (snapshot.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
     return finalizePostFinalizeReviewPlain(snapshot, draft);

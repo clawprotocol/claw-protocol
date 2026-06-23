@@ -5,6 +5,7 @@
 import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
 import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
+import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { resolvePaidProFrozenUserVisibleReviewDisplayPlain } from "./paidProDisplayPlainAuthority";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
@@ -50,6 +51,15 @@ export function auditPaidProReviewRenderSotParity(args: {
   const review = (args.reviewPlain || "").trim();
   const reviewHash = review.length >= 80 ? hashPaidProCorpus(review) : "";
   const displayOnly = shouldUsePaidProSourceOfTruthDisplayOnly();
+  const postFinalizeLocked = isPaidProPostFinalizeHydratedCorpusLocked();
+  const prepareDisplayPlain = (plain: string) =>
+    displayOnly || postFinalizeLocked
+      ? preparePaidProFrozenDisplayPlain(plain, {
+          intakeText: args.intakeText ?? null,
+          draftPartyNames:
+            args.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+        }).text
+      : preparePaidProReviewDisplayPlain(plain).text;
   const expectedReviewPlain =
     displayOnly && hasPaidProSourceOfTruth()
       ? resolvePaidProFrozenUserVisibleReviewDisplayPlain({
@@ -67,14 +77,7 @@ export function auditPaidProReviewRenderSotParity(args: {
     return getPaidProSourceOfTruthText().trim();
   })();
   const canonicalDisplayPlain = canonicalPlain
-    ? (displayOnly
-        ? preparePaidProFrozenDisplayPlain(canonicalPlain, {
-            intakeText: args.intakeText ?? null,
-            draftPartyNames:
-              args.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
-          }).text
-        : preparePaidProReviewDisplayPlain(canonicalPlain).text
-      ).trim()
+    ? prepareDisplayPlain(canonicalPlain).trim()
     : "";
   const canonicalDisplayPlainHash =
     canonicalDisplayPlain.length >= 80 ? hashPaidProCorpus(canonicalDisplayPlain) : "";
@@ -88,12 +91,7 @@ export function auditPaidProReviewRenderSotParity(args: {
   const snapshotPlain = readAuthoritativeSigningCorpus()?.trim() ?? "";
   const snapshotDisplayHash =
     snapshotPlain.length >= 80
-      ? hashPaidProCorpus(
-          (displayOnly
-            ? preparePaidProFrozenDisplayPlain(snapshotPlain)
-            : preparePaidProReviewDisplayPlain(snapshotPlain)
-          ).text.trim(),
-        )
+      ? hashPaidProCorpus(prepareDisplayPlain(snapshotPlain).trim())
       : "";
   const reviewMatchesSnapshotDisplay = Boolean(
     snapshotDisplayHash && reviewHash && snapshotDisplayHash === reviewHash,

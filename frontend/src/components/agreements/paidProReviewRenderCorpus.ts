@@ -338,7 +338,7 @@ export function applyPaidProReviewRenderSanitizer(
   roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; repaired: boolean } {
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const locked = resolvePaidProPostFinalizeReviewPlain();
+    const locked = resolvePaidProPostFinalizeReviewPlain(null);
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
       if (!detectExecutionHeadingMetadataLeak(locked).leak) {
         return { text: locked, repaired: false };
@@ -722,7 +722,7 @@ function alignExecutionBlockRolesFromAcceptedCorpus(
   roleContext?: PaidProPartyRoleContext | null,
 ): string {
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const locked = resolvePaidProPostFinalizeReviewPlain();
+    const locked = resolvePaidProPostFinalizeReviewPlain(null);
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
   }
   const intake = roleContext?.intakeText ?? "";
@@ -776,7 +776,7 @@ export function resolvePaidProReviewRenderPlain(
     return applyPaidProUserVisibleDisplayPrep(body);
   };
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const locked = resolvePaidProPostFinalizeReviewPlain();
+    const locked = resolvePaidProPostFinalizeReviewPlain(args?.draft ?? null);
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
       const visible = finishUserVisiblePlain(locked);
       auditPaidProReviewRenderCorpus(visible);
@@ -806,7 +806,7 @@ export function resolvePaidProReviewRenderPlain(
         : "";
   const memoKey = buildPaidProReviewPlainMemoKey(seedForMemo, surface);
   const memoHit = readMemoizedPaidProReviewPlain(memoKey);
-  if (memoHit != null && !needsSignerOverlay) {
+  if (memoHit != null && !needsSignerOverlay && !isPaidProPostFinalizeHydratedCorpusLocked()) {
     return finishUserVisiblePlain(
       shouldUsePaidProSourceOfTruthDisplayOnly()
         ? memoHit
@@ -875,7 +875,7 @@ function resolvePaidProReviewRenderPlainInner(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const locked = resolvePaidProPostFinalizeReviewPlain();
+    const locked = resolvePaidProPostFinalizeReviewPlain(args?.draft ?? null);
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) return locked;
   }
   if (args?.deferSignerMetadataRepair) {

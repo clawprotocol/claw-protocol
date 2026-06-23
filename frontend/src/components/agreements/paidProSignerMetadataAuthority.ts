@@ -170,6 +170,19 @@ function blockHeadingFromRoleLabel(roleLabel: string, partyIndex: number): strin
   return roleLabel.trim().toUpperCase() || `PARTY ${partyIndex + 1}`;
 }
 
+/** True when execution blocks must use legal-entity headings (3+ finalized authority parties). */
+export function shouldUseAuthorityEntityExecutionHeadings(
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  if (parties.length < 3) return false;
+  return parties.every((p) => sanitizeAuthorityPartyLegalName(p.partyLegalName).length >= 2);
+}
+
+/** Execution-block heading from frozen authority — legal entity uppercase for N-party flows. */
+export function authorityExecutionBlockHeading(party: PaidProSignerMetadataParty): string {
+  return sanitizeAuthorityPartyLegalName(party.partyLegalName).toUpperCase();
+}
+
 function manifestRoleFromRoleLabel(
   roleLabel: string,
   partyIndex: number,
@@ -492,7 +505,9 @@ export function authorityPartiesToCanonicalPartyIdentities(
     const legal = authorityLegal || slotIsolatedCanonicalEntity(p.partyIndex, slots);
     const isIndividual = legal ? isIndividualPartyName(legal) : false;
     const roleLabel = resolveRoleLabelForAuthorityParty(legal, p.partyIndex, roleContext);
-    const blockHeading = blockHeadingFromRoleLabel(roleLabel, p.partyIndex);
+    const blockHeading = shouldUseAuthorityEntityExecutionHeadings(parties)
+      ? authorityExecutionBlockHeading(p)
+      : blockHeadingFromRoleLabel(roleLabel, p.partyIndex);
     return {
       index: p.partyIndex,
       partyDisplayName: legal,

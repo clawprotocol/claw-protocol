@@ -17,7 +17,7 @@ import {
 } from "./canonicalPartyLegalNameSanitizer";
 import { setPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
 import { auditPaidProSignerFinalizeCorpus } from "./paidProCorpusLifecycleDiff";
-import { ensureExecutionBlockNoticeContactFieldLines } from "./paidProPartyNoticeDetails";
+import { ensureExecutionBlockNoticeContactFieldLines, ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
 import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import {
@@ -36,6 +36,7 @@ import {
   recipientMetadataToAuthorityParties,
   setConsumedPaidProSignerMetadataAuthority,
   buildSnapshotPaidProSignerMetadataAuthority,
+  type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
 
 export type PaidProSigningAuthorityPhase =
@@ -135,6 +136,10 @@ export type CreateAuthoritativeSigningSnapshotArgs = {
   signatureBlockModel: CanonicalSignerManifest;
   /** Replace an existing snapshot (re-finalize after edit_signer_details). */
   replaceExisting?: boolean;
+  /** Intake text for notice/execution authority context during finalize. */
+  intakeText?: string | null;
+  /** Slot-indexed authority parties for finalize — avoids recipient-metadata roundtrip loss. */
+  authorityParties?: readonly PaidProSignerMetadataParty[];
 };
 
 /**
@@ -152,10 +157,15 @@ export function createAuthoritativeSigningSnapshot(
       return authoritativeSigningSnapshot;
     }
   }
-  const parties = recipientMetadataToAuthorityParties({
-    ...args.signerMetadata,
-    partyAddresses: args.signerMetadata.partyAddresses ?? [],
-  });
+  const parties =
+    args.authorityParties?.length && args.authorityParties.length >= 2
+      ? [...args.authorityParties]
+      : (readConsumedPaidProSignerMetadataAuthority()?.parties?.length ?? 0) >= 2
+        ? readConsumedPaidProSignerMetadataAuthority()!.parties
+        : recipientMetadataToAuthorityParties({
+            ...args.signerMetadata,
+            partyAddresses: args.signerMetadata.partyAddresses ?? [],
+          });
   const signerMetadata: AuthoritativeSigningSnapshotRecipientMetadata = {
     ...args.signerMetadata,
     partyAddresses: args.signerMetadata.partyAddresses ?? [],
@@ -165,7 +175,11 @@ export function createAuthoritativeSigningSnapshot(
   let corpus = finalizePaidProSigningCorpusText(
     applyCanonicalPartyLegalNamesToSigningCorpus(rawInput, parties).text,
     parties,
-    { acceptedCorpus: rawInput },
+    {
+      acceptedCorpus: rawInput,
+      intakeText: args.intakeText ?? null,
+      draftPartyNames: parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2),
+    },
   ).text.trim();
   if (signerMetadataAuthorityHasHydratableFields(signerMetadata)) {
     const roleContext = { acceptedCorpus: (args.corpus || "").trim() };
@@ -197,6 +211,15 @@ export function createAuthoritativeSigningSnapshot(
       if (notice.applied) corpus = notice.text.trim();
       const finalHydration = hydrateFrom(corpus);
       if (finalHydration.applied) corpus = finalHydration.corpus.trim();
+    }
+  }
+  if (parties.length >= 2) {
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, parties, {
+      intakeText: args.intakeText ?? null,
+      draftPartyNames: parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2),
+    });
+    if (noticeDelivery.repairs.length > 0) {
+      corpus = noticeDelivery.text.trim();
     }
   }
   const hash = hashPaidProCorpus(corpus);

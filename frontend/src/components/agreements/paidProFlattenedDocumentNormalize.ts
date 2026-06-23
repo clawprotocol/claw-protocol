@@ -18,11 +18,13 @@ import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetad
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
   return prefix
     .replace(/\s+(\bSIGNATURES\b\s+The\s+parties)/gi, "\n\n$1")
     .replace(/\s+(\bSIGNATURES\b\s*:)/gi, "\n\n$1")
+    .replace(/([.!?])\s+\bSIGNATURES\b\s*$/gim, "$1")
     .replace(/\s+(\bCLIENT\s*:)/gi, "\n$1")
     .replace(/\s+(\bSERVICE\s+PROVIDER\s*:)/gi, "\n$1")
     .replace(/\s+(By\s*:)/gi, "\n$1")
@@ -157,14 +159,26 @@ export function preparePaidProFrozenDisplayPlain(
     repairs.push("normalize:section_any_reference");
   }
 
-  const stripped = stripInlineStaleServerSignatureTailBeforeWitness(out);
-  if (stripped.text !== out) {
-    out = stripped.text;
-    repairs.push(...stripped.repairs);
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const inlineSignatures = out.replace(/([.!?])\s+\bSIGNATURES\b\s*$/gim, "$1");
+    if (inlineSignatures !== out) {
+      out = inlineSignatures;
+      repairs.push("normalize:strip_inline_signatures_suffix");
+    }
+  } else {
+    const stripped = stripInlineStaleServerSignatureTailBeforeWitness(out);
+    if (stripped.text !== out) {
+      out = stripped.text;
+      repairs.push(...stripped.repairs);
+    }
   }
 
   const authority = readConsumedPaidProSignerMetadataAuthority();
-  if (authority?.parties && authority.parties.length >= 2) {
+  if (
+    !isPaidProPostFinalizeHydratedCorpusLocked() &&
+    authority?.parties &&
+    authority.parties.length >= 2
+  ) {
     const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, authority.parties, {
       intakeText: opts?.intakeText ?? null,
       draftPartyNames:
@@ -179,7 +193,7 @@ export function preparePaidProFrozenDisplayPlain(
   const hasSignerContactMetadata = authority?.parties?.some(
     (p) => p.signerEmail?.trim() || p.partyAddress?.trim(),
   );
-  if (!hasSignerContactMetadata) {
+  if (!isPaidProPostFinalizeHydratedCorpusLocked() && !hasSignerContactMetadata) {
     const bareNotices = repairBareEntityOnlyNoticeStanzas(out);
     if (bareNotices.repairs.length > 0) {
       out = bareNotices.text;

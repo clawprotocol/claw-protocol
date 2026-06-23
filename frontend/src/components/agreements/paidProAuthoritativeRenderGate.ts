@@ -21,7 +21,7 @@ import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
 import { applyFrozenManifestPaidProDisplayAuthority } from "./paidProFrozenManifestDisplayAuthority";
 import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
-import { shouldApplyExecutionBlockSignerOverlay } from "./paidProSignerMetadataCommitPolicy";
+import { shouldApplyExecutionBlockSignerOverlay, isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
 export type ResolvePaidProAuthoritativeDisplayPlainArgs = ResolvePaidProReviewRenderPartiesArgs;
@@ -56,6 +56,7 @@ export function resolvePaidProAuthoritativeDisplayPlain(
         draft: args?.draft ?? null,
       }).text;
   const parties = resolvePartiesForReviewRender(args);
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) return base;
   const needsOverlay =
     isPaidProReviewSignerMetadataSessionActive() ||
     shouldApplyExecutionBlockSignerOverlay({

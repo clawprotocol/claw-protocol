@@ -25332,6 +25332,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signerMetadata,
       partyManifest,
       signatureBlockModel,
+      intakeText: intakeForHydration,
+      authorityParties: authority.parties,
       replaceExisting: true,
     });
     pinFinalizedSignerAppliedCorpus(hydrated.corpus, "paid_pro_signer_metadata_finalize");

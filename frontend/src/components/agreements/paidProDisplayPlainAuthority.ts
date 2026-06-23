@@ -18,6 +18,7 @@ import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } fr
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { shouldUsePaidProSourceOfTruthDisplayOnly, resolvePaidProAuthoritativeDisplayPlain, type ResolvePaidProAuthoritativeDisplayPlainArgs } from "./paidProAuthoritativeRenderGate";
 import { enrichPaidProPostFinalizeDisplayCorpus } from "./paidProPostFinalizeReviewSurface";
+import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { hashPaidProCorpus, type PaidProDocumentSurface } from "./paidProSourceOfTruth";
 
 export type PaidProUserVisibleDisplaySurface =
@@ -37,6 +38,16 @@ export function isPaidProUserVisibleDocumentSurface(surface: string): boolean {
 export function applyPaidProUserVisibleDisplayPrep(plain: string): string {
   const body = (plain || "").trim();
   if (body.length < 80) return body;
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const authorityEmails =
+      readConsumedPaidProSignerMetadataAuthority()?.parties
+        ?.map((p) => p.signerEmail.trim())
+        .filter(Boolean) ?? [];
+    if (authorityEmails.length > 0 && authorityEmails.every((email) => body.includes(email))) {
+      return body;
+    }
+    return preparePaidProFrozenDisplayPlain(body).text.trimEnd();
+  }
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
     const authorityEmails =
       readConsumedPaidProSignerMetadataAuthority()?.parties

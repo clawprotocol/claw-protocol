@@ -290,6 +290,10 @@ export function toRecipientMetadata(
   const sorted = sortedBySourceSlot(parties);
   const slot0 = getPartyBySourceSlot(sorted, 0) ?? sorted[0];
   const slot1 = getPartyBySourceSlot(sorted, 1) ?? sorted[1];
+  const derivedExtraEmails = sorted.slice(2).map((p) => p.noticeEmail?.trim() || p.signerEmail?.trim() || "");
+  const mergedExtraEmails = derivedExtraEmails.map(
+    (email, idx) => cleanField(extraPartyReviewEmails[idx] ?? "") || email,
+  );
   return {
     partySignerNames: sorted.map((p) => p.signerName?.trim() ?? ""),
     partySignerTitles: sorted.map((p) => p.signerTitle?.trim() ?? ""),
@@ -306,7 +310,7 @@ export function toRecipientMetadata(
     recipient2Name: slot1?.legalName ?? "",
     recipient1Email: slot0?.noticeEmail?.trim() || slot0?.signerEmail?.trim() || "",
     recipient2Email: slot1?.noticeEmail?.trim() || slot1?.signerEmail?.trim() || "",
-    extraPartyReviewEmails: [...extraPartyReviewEmails],
+    extraPartyReviewEmails: mergedExtraEmails,
   };
 }
 

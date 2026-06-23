@@ -43,6 +43,20 @@ const EXECUTION_ROLE_HEADING_LINE_RE =
 
 const NUMBERED_SECTION_HEADING_RE = /^\s*(\d+(?:\.\d+)*)\.\s+\S+/;
 const EXECUTION_FIELD_LINE_RE = /^\s*(?:By|Name|Title|Date|Email|Signature)\s*:/i;
+const IF_TO_NOTICE_STANZA_HEADER_RE = /^If to\s+/i;
+
+/** True when lineIndex sits inside an operative If-to notice stanza (not execution block fields). */
+function isWithinIfToNoticeStanza(lines: readonly string[], lineIndex: number): boolean {
+  for (let j = lineIndex; j >= Math.max(0, lineIndex - 24); j -= 1) {
+    const t = (lines[j] ?? "").trim();
+    if (!t) continue;
+    if (/^\s*IN WITNESS WHEREOF\b/i.test(t)) return false;
+    if (EXECUTION_ROLE_HEADING_LINE_RE.test(t)) return false;
+    if (IF_TO_NOTICE_STANZA_HEADER_RE.test(t)) return true;
+    if (NUMBERED_SECTION_HEADING_RE.test(t) && !/\bnotices?\b/i.test(t)) return false;
+  }
+  return false;
+}
 
 function roleHeadingStartsExecutionCluster(lines: readonly string[], start: number): boolean {
   const trimmed = (lines[start] ?? "").trim();
@@ -105,9 +119,11 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
           continue;
         }
         if (NUMBERED_SECTION_HEADING_RE.test(t)) break;
+        if (IF_TO_NOTICE_STANZA_HEADER_RE.test(t)) break;
         if (roleHeadingStartsExecutionCluster(lines, i)) break;
         if (isStandaloneSignaturesHeadingLine(lines[i] ?? "")) break;
         if (EXECUTION_FIELD_LINE_RE.test(t)) {
+          if (isWithinIfToNoticeStanza(lines, i)) break;
           i += 1;
           continue;
         }
@@ -134,6 +150,11 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
     }
 
     if (EXECUTION_FIELD_LINE_RE.test(trimmed)) {
+      if (isWithinIfToNoticeStanza(lines, i)) {
+        out.push(line);
+        i += 1;
+        continue;
+      }
       repairs.push("execution_block:strip_pre_witness_orphan_execution_field");
       i += 1;
       continue;
@@ -200,11 +221,14 @@ function buildManifestExecutionIdentities(
   names: readonly string[],
   roles: readonly ManifestExecutionRole[],
   intakeText?: string | null,
+  useEntityHeadings = false,
 ): CanonicalPartyIdentity[] {
   return names.map((name, index) => ({
     index,
     partyDisplayName: name,
-    blockHeading: executionBlockHeadingFromRoleLabel(roles[index]?.roleLabel ?? "", index, intakeText),
+    blockHeading: useEntityHeadings
+      ? name.toUpperCase()
+      : executionBlockHeadingFromRoleLabel(roles[index]?.roleLabel ?? "", index, intakeText),
     email: "",
     partyAddress: null,
     representativeName: null,
@@ -439,10 +463,16 @@ export function enforcePaidProSingleExecutionBlock(
 
   const body = operativeBodyWithoutExecutionTails(text);
   const expectedPartyCount = Math.max(manifestLegalNames.length, roles.length);
+  const useEntityHeadings = authorityParties.length >= 3 && manifestLegalNames.length >= 3;
 
   const identities: CanonicalPartyIdentity[] =
     manifestRoles && manifestLegalNames.length >= 2
-      ? buildManifestExecutionIdentities(manifestLegalNames, manifestRoles, opts?.intakeText ?? null)
+      ? buildManifestExecutionIdentities(
+          manifestLegalNames,
+          manifestRoles,
+          opts?.intakeText ?? null,
+          useEntityHeadings,
+        )
       : client && provider
         ? buildCorpusRoleIdentitiesForExecutionReconcile(
             `${body}\n\nThis Agreement is between ${client.legalName} ("Client") and ${provider.legalName} ("Service Provider").`,

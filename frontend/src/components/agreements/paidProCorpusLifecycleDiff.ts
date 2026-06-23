@@ -12,6 +12,7 @@ import {
 } from "./paidProPostFreezeCorpusInvariant";
 import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
+import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { classifyPaidProNormalizedSurfaceDiff } from "./paidProNormalizedSurfaceDiff";
 import { normalizeCorpusForCopyCompare } from "./qa/paidProCorpusIntegrity/paidProCorpusIntegrityMetrics";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
@@ -101,16 +102,18 @@ export function classifyPaidProCorpusLifecycleDiff(
   const after = (afterText || "").replace(/\r\n/g, "\n");
   if (before === after) return "identical";
 
-  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+  if (shouldUsePaidProSourceOfTruthDisplayOnly() || isPaidProPostFinalizeHydratedCorpusLocked()) {
     const frozenBefore = preparePaidProFrozenDisplayPlain(before).text.trim();
     const frozenAfter = preparePaidProFrozenDisplayPlain(after).text.trim();
     if (frozenBefore === frozenAfter) return "display_normalization_only";
   }
 
-  const displayPreparedBefore = preparePaidProReviewDisplayPlain(before).text.trim();
-  const displayPreparedAfter = preparePaidProReviewDisplayPlain(after).text.trim();
-  if (displayPreparedBefore === displayPreparedAfter) {
-    return "display_normalization_only";
+  if (!isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const displayPreparedBefore = preparePaidProReviewDisplayPlain(before).text.trim();
+    const displayPreparedAfter = preparePaidProReviewDisplayPlain(after).text.trim();
+    if (displayPreparedBefore === displayPreparedAfter) {
+      return "display_normalization_only";
+    }
   }
 
   const normalizedSurface = classifyPaidProNormalizedSurfaceDiff(before, after);
