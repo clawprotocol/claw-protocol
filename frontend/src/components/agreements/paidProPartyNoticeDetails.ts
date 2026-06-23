@@ -16,6 +16,8 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
 import { resolveCanonicalPartyLegalNameForIndex } from "./canonicalPartyLegalNameSanitizer";
+import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
+import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
 import {
   applyContactAuthorityExecutionBlockIntegrity,
   stripExecutionBlockContactContamination,
@@ -312,7 +314,10 @@ function enrichNoticeAuthorityParties(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): readonly PaidProSignerMetadataParty[] {
-  return resolveCanonicalNoticeAuthorityParties(parties, roleContext);
+  return ensureNoticeAuthorityPartyLegalEntities(
+    resolveCanonicalNoticeAuthorityParties(parties, roleContext),
+    roleContext,
+  );
 }
 
 /** True when multiple operative "If to" notice stanzas are fused on one line or empty. */
@@ -462,6 +467,51 @@ function noticeStanzaHasEntityLine(stanza: string): boolean {
   return Boolean(entityLine && entityLine.length >= 3 && ENTITY_SUFFIX_LINE_RE.test(entityLine));
 }
 
+function logPaidProNoticeEntityMissingDiagnostic(payload: { partyIndex: number; resolvedLegal: string }): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.warn("[paid-pro-notice-entity-missing]", payload);
+}
+
+function resolveNoticeStanzaLegalEntity(
+  party: PaidProSignerMetadataParty,
+  authorityParties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): string {
+  const direct = party.partyLegalName.trim();
+  if (direct.length >= 2) return direct;
+  const fromCanonical = resolveCanonicalPartyLegalNameForIndex(party.partyIndex, authorityParties).trim();
+  if (fromCanonical.length >= 2) return fromCanonical;
+  const intake = roleContext?.intakeText?.trim() ?? "";
+  if (intake) {
+    const fromIntake = resolveCanonicalPartyIdentitiesFromIntake(
+      intake,
+      roleContext?.draftPartyNames ?? null,
+    );
+    const legal = fromIntake[party.partyIndex]?.fullLegalName?.trim() ?? "";
+    if (legal.length >= 2) return legal;
+  }
+  const frozen = readFrozenCanonicalManifestPartyNames();
+  const frozenLegal = frozen[party.partyIndex]?.trim() ?? "";
+  if (frozenLegal.length >= 2) return frozenLegal;
+  logPaidProNoticeEntityMissingDiagnostic({
+    partyIndex: party.partyIndex,
+    resolvedLegal: `Party ${party.partyIndex + 1}`,
+  });
+  return `Party ${party.partyIndex + 1}`;
+}
+
+function ensureNoticeAuthorityPartyLegalEntities(
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): PaidProSignerMetadataParty[] {
+  return parties.map((party) => {
+    const legal = resolveNoticeStanzaLegalEntity(party, parties, roleContext);
+    if (legal === party.partyLegalName.trim()) return party;
+    return { ...party, partyLegalName: legal };
+  });
+}
+
 function expandFusedIfToNoticeStanza(stanza: string): string {
   const trimmed = stanza.trim();
   if (trimmed.includes("\n")) return trimmed;
@@ -470,11 +520,12 @@ function expandFusedIfToNoticeStanza(stanza: string): string {
   return `If to ${fused[1].trim()}:\n${fused[2].trim()}`;
 }
 
-function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
-  const legal = party.partyLegalName.trim();
-  if (!legal || legal.length < 2) {
-    throw new Error(`[paid-pro-notice-entity-missing] partyIndex=${party.partyIndex}`);
-  }
+function buildIfToNoticeStanza(
+  party: PaidProSignerMetadataParty,
+  authorityParties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): string {
+  const legal = resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext);
   const lines = [`If to ${legal}:`, legal];
   const name = party.signerName.trim();
   const title = party.signerTitle.trim();
@@ -586,7 +637,9 @@ export function repairIncompleteIfToNoticeStanzas(
   const noticesIdx = findNoticesSectionStart(text);
   if (noticesIdx < 0) {
     if (/\nIf to\s*$/i.test(text)) {
-      const partiesBlock = authorityParties.map((p) => buildIfToNoticeStanza(p)).join("\n\n");
+      const partiesBlock = authorityParties
+        .map((p) => buildIfToNoticeStanza(p, authorityParties, roleContext))
+        .join("\n\n");
       text = `${text.trimEnd()}\n\n${partiesBlock}`;
       repairs.push("notice:append_stanzas_after_dangling_if_to");
       logPaidProNoticeSectionIntegrity({
@@ -634,7 +687,7 @@ export function repairIncompleteIfToNoticeStanzas(
       stanzaCount += 1;
       continue;
     }
-    rebuiltStanzas.push(buildIfToNoticeStanza(party));
+    rebuiltStanzas.push(buildIfToNoticeStanza(party, authorityParties, roleContext));
     repairs.push(`notice:rebuild_stanza_party_${i + 1}`);
     stanzaCount += 1;
   }

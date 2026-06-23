@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import type { LiveSignerMetadataUiState } from "./paidProSignerMetadataAuthority";
 import {
@@ -8,7 +8,8 @@ import {
   readVisiblePaidProSignerMetadataDomValue,
 } from "./paidProSignerMetadataDomCommit";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
-import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import * as paidProSourceOfTruth from "./paidProSourceOfTruth";
+import * as authoritativeSigningSnapshot from "./authoritativeSigningSnapshot";
 
 const CLIENT = "Blue Canyon Analytics LLC";
 const IRON_VAL = "Iron Val Systems Inc";
@@ -47,6 +48,7 @@ describe("paidProSignerMetadataDomCommit", () => {
   afterEach(() => {
     cleanup();
     document.body.innerHTML = "";
+    vi.restoreAllMocks();
   });
 
   it("reads visible signer metadata from DOM fields", () => {
@@ -88,16 +90,13 @@ describe("paidProSignerMetadataDomCommit", () => {
   });
 
   it("defers review render repair only while signer metadata session is active on accepted SoT", () => {
-    establishPaidProSourceOfTruth({ text: "MUTUAL CONSULTING AGREEMENT\n\n".repeat(40), source: "server_full_draft" });
-    try {
-      expect(
-        shouldDeferPaidProReviewRenderSignerRepair({ signerMetadataSessionActive: true }),
-      ).toBe(true);
-      expect(
-        shouldDeferPaidProReviewRenderSignerRepair({ signerMetadataSessionActive: false }),
-      ).toBe(false);
-    } finally {
-      clearPaidProSourceOfTruth();
-    }
+    vi.spyOn(paidProSourceOfTruth, "hasPaidProSourceOfTruth").mockReturnValue(true);
+    vi.spyOn(authoritativeSigningSnapshot, "hasAuthoritativeSigningSnapshot").mockReturnValue(false);
+    expect(
+      shouldDeferPaidProReviewRenderSignerRepair({ signerMetadataSessionActive: true }),
+    ).toBe(true);
+    expect(
+      shouldDeferPaidProReviewRenderSignerRepair({ signerMetadataSessionActive: false }),
+    ).toBe(false);
   });
 });

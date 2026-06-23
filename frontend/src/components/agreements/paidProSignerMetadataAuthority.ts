@@ -25,6 +25,7 @@ import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdent
 import { resolveAcceptedCorpusRoleLabelForLegalName } from "./paidProAcceptedCorpusPartyRoles";
 import { labeledPartyBlocksForSignerMetadata } from "./labeledPartyBlockParse";
 import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
+import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   fromRecipientMetadata,
@@ -234,6 +235,8 @@ export type LiveSignerMetadataUiState = {
   recipient1Email: string;
   recipient2Email: string;
   extraPartyReviewEmails: readonly string[];
+  /** Legal entity names for party indices 2+ (agreement order). */
+  extraPartyLegalNames?: readonly string[];
   partySignerNames: readonly string[];
   partySignerTitles: readonly string[];
   partyAddresses: readonly string[];
@@ -260,7 +263,32 @@ function norm(v: string | null | undefined): string {
 function partyLegalNameForIndex(ui: LiveSignerMetadataUiState, index: number): string {
   if (index === 0) return norm(ui.recipient1Name);
   if (index === 1) return norm(ui.recipient2Name);
-  return "";
+  return norm(ui.extraPartyLegalNames?.[index - 2]);
+}
+
+function fillPartyLegalNamesFromFrozenManifestAndIntake(
+  parties: PaidProSignerMetadataParty[],
+  opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] },
+): PaidProSignerMetadataParty[] {
+  const frozen = readFrozenCanonicalManifestPartyNames();
+  const intakeRecords = (opts?.intakeText ?? "").trim()
+    ? resolveCanonicalPartyIdentitiesFromIntake(opts!.intakeText!, opts?.draftPartyNames ?? null)
+    : [];
+  return parties.map((party, i) => {
+    const resolved =
+      party.partyLegalName.trim() ||
+      frozen[i]?.trim() ||
+      intakeRecords[i]?.fullLegalName?.trim() ||
+      "";
+    if (resolved.length < 2 || resolved === party.partyLegalName) return party;
+    return {
+      ...party,
+      partyLegalName: sanitizeSignerPartyLegalEntityDisplay(resolved, {
+        partyIndex: i,
+        source: "metadata_authority",
+      }),
+    };
+  });
 }
 
 function signerEmailForIndex(ui: LiveSignerMetadataUiState, index: number): string {
@@ -309,7 +337,7 @@ export function buildPaidProSignerMetadataParties(
       partyAddress: norm(ui.partyAddresses[i]),
     });
   }
-  return parties;
+  return fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);
 }
 
 export function hashPaidProSignerMetadataAuthority(
@@ -353,6 +381,7 @@ export function authorityPartiesToLiveSignerMetadataUi(
     recipient1Email: norm(p0?.signerEmail),
     recipient2Email: norm(p1?.signerEmail),
     extraPartyReviewEmails: padded.slice(2).map((p) => norm(p.signerEmail)),
+    extraPartyLegalNames: padded.slice(2).map((p) => norm(p.partyLegalName)),
     partySignerNames: padded.map((p) => norm(p.signerName)),
     partySignerTitles: padded.map((p) => norm(p.signerTitle)),
     partyAddresses: padded.map((p) => norm(p.partyAddress)),

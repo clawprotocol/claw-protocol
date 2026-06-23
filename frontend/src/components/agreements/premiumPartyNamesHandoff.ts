@@ -238,6 +238,28 @@ function logReviewLinkSignerMetadataHandoffWrite(payload: PremiumRecipientHandof
   });
 }
 
+/** Persist full ordered party-indexed handoff from consumed signer metadata authority. */
+export function writePremiumRecipientHandoffFromAuthorityParties(
+  parties: readonly {
+    partyLegalName: string;
+    signerEmail: string;
+    signerName: string;
+    signerTitle: string;
+    partyAddress: string;
+  }[],
+): void {
+  if (parties.length < 2) return;
+  const slots: PremiumRecipientHandoffSlot[] = parties.map((party) => ({
+    name: String(party.partyLegalName ?? "").trim(),
+    email: String(party.signerEmail ?? "").trim(),
+    role: "party",
+    signerName: signerMetadataInputRaw(party.signerName),
+    signerTitle: signerMetadataInputRaw(party.signerTitle),
+    partyAddress: String(party.partyAddress ?? "").trim(),
+  }));
+  writePremiumRecipientHandoffLinear(slots);
+}
+
 /**
  * Persist names, emails, and roles in one write. Undefined patch fields keep previous values.
  * Emails: blank patch never clears a previously stored non-blank email.
@@ -315,7 +337,7 @@ export function persistPremiumRecipientHandoff(patch: {
     sessionStorage.removeItem(LEGACY_KEY);
     invalidatePremiumRecipientHandoffReadCache();
     logReviewLinkSignerMetadataHandoffWrite(payload);
-    const slots = linearPremiumRecipientSlots(payload, 2 + (partyIndexSlots?.length ?? 0));
+    const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload));
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console
@@ -406,7 +428,7 @@ export function writePremiumRecipientHandoffExact(
     sessionStorage.removeItem(LEGACY_KEY);
     invalidatePremiumRecipientHandoffReadCache();
     logReviewLinkSignerMetadataHandoffWrite(payload);
-    const slots = linearPremiumRecipientSlots(payload, 2 + (extra.length ?? 0));
+    const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload));
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console
@@ -497,8 +519,22 @@ export function writePremiumRecipientHandoffSignerMetadata(args: {
     signerName: args.signerNames[1] ?? "",
     signerTitle: args.signerTitles[1] ?? "",
   });
-  if (!party1.name && !party2.name && !party1.signerName && !party2.signerName) return;
-  writePremiumRecipientHandoffExact(party1, party2, cur?.partyIndexSlots);
+  const extraSlots: PremiumRecipientHandoffSlot[] = [];
+  for (let i = 2; i < Math.max(args.signerNames.length, legal.length, emails.length); i++) {
+    const base = cur?.partyIndexSlots?.[i - 2] ?? emptySlot();
+    extraSlots.push(
+      mergeSlot(base, {
+        name: legal[i]?.trim() || base.name,
+        email: emails[i]?.trim() || base.email,
+        signerName: args.signerNames[i] ?? "",
+        signerTitle: args.signerTitles[i] ?? "",
+      }),
+    );
+  }
+  if (!party1.name && !party2.name && !party1.signerName && !party2.signerName && !extraSlots.length) {
+    return;
+  }
+  writePremiumRecipientHandoffExact(party1, party2, extraSlots.length ? extraSlots : cur?.partyIndexSlots);
 }
 
 /** Build `partyIndexSlots` for indices ≥2 from authoritative parties + optional checkout candidates. */

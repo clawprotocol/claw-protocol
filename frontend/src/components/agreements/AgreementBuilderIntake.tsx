@@ -291,6 +291,7 @@ import {
   premiumHandoffSlotFromParty,
   writePremiumRecipientHandoffExact,
   writePremiumRecipientHandoffLinear,
+  writePremiumRecipientHandoffFromAuthorityParties,
   writePremiumRecipientHandoffSignerMetadata,
   MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
   type PremiumRecipientHandoffSlot,
@@ -5590,13 +5591,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       },
     ) => {
       const parties = d.parties ?? [];
-      const n = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+      const intakeText = intakeCombinedRef.current || "";
+      const n = Math.min(
+        Math.max(
+          signerSetupUiPartyCountRef.current,
+          parties.length,
+          resolveAuthoritativeSignerCount({
+            intakeText,
+            draftParties: parties,
+            userExpandedPartyCount: signerSetupUiPartyCountRef.current,
+          }).count,
+        ),
+        MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
+      );
       const slots: PremiumRecipientHandoffSlot[] = [];
       const extraRef = extraPartyReviewEmailsRef.current;
       const signerNamesRef = partySignerNamesRef.current;
       const signerTitlesRef = partySignerTitlesRef.current;
       const addressesRef = partyAddressesRef.current;
-      const intakeText = intakeCombinedRef.current || "";
       const agreementBodyText =
         getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "";
       const slotIdentities = resolveSignerSetupPartyIdentities({
@@ -5605,7 +5617,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementBodyText,
       });
       for (let i = 0; i < n; i++) {
-        const p = parties[i]!;
+        const p = parties[i];
         const draftEm = partyEmailAtIndex(d.parties, i);
         const signerName = partySignerMetaAtIndex(d.parties, i, signerNamesRef, signerTitlesRef, "signerName");
         const signerTitle = partySignerMetaAtIndex(d.parties, i, signerNamesRef, signerTitlesRef, "signerTitle");
@@ -5615,7 +5627,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             attemptedValue:
               (opts?.displayName1 ?? "").trim() ||
               (recipient1NameRef.current || "").trim() ||
-              String(p?.name || "").trim(),
+              String(p?.name || "").trim() ||
+              slotIdentities[i]?.legalEntityName?.trim() ||
+              "",
             slotIdentities,
             source: "persist_handoff_slot_0",
           });
@@ -5632,13 +5646,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           continue;
         }
         if (i === 1) {
-          const p1 = parties[1]!;
           const n2 = assertSignerSlotLegalEntityForPersist({
             slotIndex: 1,
             attemptedValue:
               (opts?.displayName2 ?? "").trim() ||
               (recipient2NameRef.current || "").trim() ||
-              String(p1?.name || "").trim(),
+              String(p?.name || "").trim() ||
+              slotIdentities[i]?.legalEntityName?.trim() ||
+              "",
             slotIdentities,
             source: "persist_handoff_slot_1",
           });
@@ -5647,7 +5662,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           slots.push({
             name: n2,
             email: e2,
-            role: String(p1?.role || "party").trim() || "party",
+            role: String(p?.role || "party").trim() || "party",
             signerName,
             signerTitle,
             partyAddress: (addressesRef[1] ?? "").trim(),
@@ -5657,13 +5672,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const ui = stripRecipientEmailNoise(extraRef[i - 2] ?? "");
         const em = looksLikeEmail(ui) ? ui : draftEm || "";
         const legalName =
-          (extraPartyLegalNamesRef.current[i - 2] ?? "").trim() || String(p?.name || "").trim();
+          (extraPartyLegalNamesRef.current[i - 2] ?? "").trim() ||
+          slotIdentities[i]?.legalEntityName?.trim() ||
+          String(p?.name || "").trim();
         slots.push({
           name: legalName,
           email: em,
           role: String(p?.role || "party").trim() || "party",
           signerName,
           signerTitle,
+          partyAddress: (addressesRef[i] ?? "").trim(),
         });
       }
       if (slots.length === 0) return;
@@ -14627,6 +14645,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipient1Email,
       recipient2Email,
       extraPartyReviewEmails,
+      extraPartyLegalNames,
       partySignerNames,
       partySignerTitles,
       partyAddresses,
@@ -14640,6 +14659,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipient1Email,
       recipient2Email,
       extraPartyReviewEmails,
+      extraPartyLegalNames,
       partySignerNames,
       partySignerTitles,
       partyAddresses,
@@ -25274,7 +25294,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     const committedSignerUi = flushGuidedSignerMetadataBeforeFinalReview();
     const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    const authority = buildLivePaidProSignerMetadataAuthority(committedSignerUi);
+    const draftPartyNames = (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim());
+    const authority = buildLivePaidProSignerMetadataAuthority(committedSignerUi, "live_ui", {
+      intakeText: intakeForHydration,
+      draftPartyNames,
+    });
+    writePremiumRecipientHandoffFromAuthorityParties(authority.parties);
     setConsumedPaidProSignerMetadataAuthority(authority);
     const partyManifest = buildCanonicalFinalPartyManifestFromAuthority(authority, {
       intakeText: intakeForHydration,
