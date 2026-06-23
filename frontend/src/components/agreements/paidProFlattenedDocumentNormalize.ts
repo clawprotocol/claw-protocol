@@ -14,6 +14,7 @@ import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
 import { repairBareEntityOnlyNoticeStanzas, ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
+import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -41,6 +42,12 @@ export function normalizeFlattenedPaidProDocumentBlocks(text: string): {
   const repairs: string[] = [];
   let out = (text || "").replace(/\r\n/g, "\n").trim();
   if (!out) return { text: out, repairs };
+
+  const titleOpening = repairPaidProDocumentTitleOpening(out);
+  if (titleOpening.repairs.length > 0) {
+    out = titleOpening.text;
+    repairs.push(...titleOpening.repairs);
+  }
 
   const before = out;
 
@@ -147,6 +154,12 @@ export function preparePaidProFrozenDisplayPlain(
   const repairs: string[] = [];
   let out = (text || "").replace(/\r\n/g, "\n").trimEnd();
   if (!out) return { text: out, repairs };
+
+  const titleOpening = repairPaidProDocumentTitleOpening(out);
+  if (titleOpening.repairs.length > 0) {
+    out = titleOpening.text;
+    repairs.push(...titleOpening.repairs);
+  }
 
   const splitTail = repairSplitPaidProHeadingFragments(out);
   if (splitTail.repairs.length > 0) {
