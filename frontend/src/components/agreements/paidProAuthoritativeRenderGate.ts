@@ -43,7 +43,11 @@ export function resolvePaidProAuthoritativeDisplayPlain(
 ): string {
   const displayOnly = shouldUsePaidProSourceOfTruthDisplayOnly();
   const prepared = displayOnly
-    ? preparePaidProFrozenDisplayPlain(resolvePaidProFrozenDisplayPlain()).text
+    ? preparePaidProFrozenDisplayPlain(resolvePaidProFrozenDisplayPlain(), {
+        intakeText: args?.intakeText ?? null,
+        draftPartyNames:
+          args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+      }).text
     : preparePaidProReviewDisplayPlain(resolvePaidProFrozenDisplayPlain()).text;
   const base = displayOnly
     ? prepared

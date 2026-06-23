@@ -2,6 +2,8 @@
  * Canonical policy: starter/free preview surfaces must never run paid-Pro polish passes.
  */
 
+import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "./paidProAuthoritativeRenderGate";
+
 export const STARTER_DOCUMENT_SURFACES = [
   "preview_starter",
   "starter_document_surface",
@@ -38,7 +40,10 @@ export function isDeterministicQuadPartyProFallbackSurface(surface?: string | nu
 }
 
 export function shouldSkipPaidProPolish(ctx: StarterSurfaceContext): boolean {
-  return isStarterDocumentSurface(ctx) || isDeterministicQuadPartyProFallbackSurface(ctx.surface);
+  if (isStarterDocumentSurface(ctx)) return true;
+  if (isDeterministicQuadPartyProFallbackSurface(ctx.surface)) return true;
+  if (shouldBlockPaidProStructuralMutationAfterAcceptance(ctx.surface)) return true;
+  return false;
 }
 
 export function assertPaidProPolishNotOnStarter(ctx: StarterSurfaceContext, caller: string): void {

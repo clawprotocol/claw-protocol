@@ -58,6 +58,7 @@ import {
   formatStarterPreviewForDisplay,
 } from "./starterPreviewFormatting";
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
+import { logPaidProPostFreezeMutationAttempt } from "./paidProFreezeDiagnostics";
 import { applyDocumentQualityFloor } from "./documentQualityFloor";
 import { extractTermDurationFromIntake, isInvalidVisibleScheduleValue, isSignerTitleLikeRole } from "./starterRoleLabelGuard";
 import { resolveCanonicalPartyRoleLabel } from "./canonicalPartyRoleAuthority";
@@ -966,6 +967,14 @@ function applyAgreementPreviewPlaceholderGate(
   options: AgreementPreviewBuildOptions | undefined,
   surface: string,
 ): string {
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    logPaidProPostFreezeMutationAttempt({
+      caller: "applyAgreementPreviewPlaceholderGate",
+      blocked: true,
+      surface,
+    });
+    return text;
+  }
   const tier = surface.includes("starter") ? "starter" : "premium";
   let working = text;
   if (tier === "starter") {

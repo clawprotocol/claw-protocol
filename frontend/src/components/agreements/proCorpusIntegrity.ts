@@ -10,6 +10,7 @@ import { forbiddenSemanticFactForLine, reconstructProSectionsFromSemanticBlocks 
 import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
 import { assertNoPostAcceptanceStructuralMutation } from "./authoritativeAgreementDocument";
 import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "./paidProAuthoritativeRenderGate";
+import { logPaidProPostFreezeMutationAttempt } from "./paidProFreezeDiagnostics";
 
 export type ProCorpusArchetype =
   | "monthly_consulting"
@@ -715,6 +716,11 @@ export function applyProCorpusIntegrity(
   context: ProCorpusIntegrityContext = {},
 ): ProCorpusIntegrityResult {
   if (shouldBlockPaidProStructuralMutationAfterAcceptance(context.surface)) {
+    logPaidProPostFreezeMutationAttempt({
+      caller: "applyProCorpusIntegrity",
+      blocked: true,
+      surface: context.surface ?? null,
+    });
     const counters = blankCounters();
     const trimmed = (text || "").replace(/\r\n?/g, "\n").trim();
     const report = verifyProCorpusIntegrity(trimmed, context, counters);

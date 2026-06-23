@@ -15,7 +15,10 @@ import {
 } from "./partySlotIdentityNormalize";
 import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
-import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  logPaidProFreezeConsumer,
+} from "./paidProFreezeDiagnostics";
+import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth, hashPaidProCorpus } from "./paidProSourceOfTruth";
 import {
   dedupeEntityCandidatesToLegalParties,
   extractAgreementEntityCandidates,
@@ -139,6 +142,8 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     explicitManifestPartyCount,
     paidProSoTActive ? frozenManifestCount : 0,
     paidProSoTActive ? consumedManifestCount : 0,
+    authoritativeIntakeCount >= 3 ? authoritativeIntakeCount : 0,
+    partySlotCount >= 3 ? partySlotCount : 0,
   );
 
   let count = partySlotCount;
@@ -182,8 +187,15 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     betweenDeduped.length >= 3 ||
     entityPool.length >= 3 ||
     manifestPartyCount >= 3 ||
+    partySlotCount >= 3 ||
     collapsePartySlotCandidates(draftNames).filter(isAuthoritativeLegalEntityName).length >= 3;
-  if (betweenDeduped.length === 2 && !explicitMultiParty && count > 2 && manifestPartyCount < 3) {
+  if (
+    betweenDeduped.length === 2 &&
+    !explicitMultiParty &&
+    count > 2 &&
+    manifestPartyCount < 3 &&
+    partySlotCount < 3
+  ) {
     count = 2;
     source = "party_slot_count";
   }
@@ -245,6 +257,15 @@ export function consumeAuthoritativeSignerCount(
       consumerCount: consumer,
       matched: true,
       source: resolution.source,
+    });
+  }
+  if (hasPaidProSourceOfTruth() && authoritativeCount >= 2) {
+    const frozenHash = hashPaidProCorpus(getPaidProSourceOfTruthText());
+    logPaidProFreezeConsumer({
+      consumer: surface,
+      hash: frozenHash,
+      partyCount: authoritativeCount,
+      signerCount: authoritativeCount,
     });
   }
   return authoritativeCount;

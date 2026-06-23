@@ -10,7 +10,8 @@ import {
   isPostFreezeAuthorizedSignerOverlayDrift,
   isSignatureRegionOnlyCorpusShrink,
 } from "./paidProPostFreezeCorpusInvariant";
-import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import { classifyPaidProNormalizedSurfaceDiff } from "./paidProNormalizedSurfaceDiff";
 import { normalizeCorpusForCopyCompare } from "./qa/paidProCorpusIntegrity/paidProCorpusIntegrityMetrics";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
@@ -31,6 +32,7 @@ export type PaidProCorpusLifecycleDiffClassification =
   | "signer_metadata_only"
   | "display_normalization_only"
   | "execution_block_hydration_only"
+  | "notice_contact_hydration_only"
   | "whitespace_or_line_width_only"
   | "substantive_clause_change"
   | "unknown"
@@ -59,6 +61,7 @@ let lastAuditForTests: PaidProCorpusLifecycleDiffPayload | null = null;
 const PRESERVE_REVIEW_SCROLL_CLASSIFICATIONS = new Set<PaidProCorpusLifecycleDiffClassification>([
   "signer_metadata_only",
   "execution_block_hydration_only",
+  "notice_contact_hydration_only",
   "display_normalization_only",
   "whitespace_or_line_width_only",
   "identical",
@@ -77,6 +80,19 @@ function collapseSignatureLineWidthNoise(text: string): string {
   return text.replace(/_{2,}/g, "___");
 }
 
+function isNoticeContactHydrationOnlyDelta(before: string, after: string): boolean {
+  const witnessBefore = before.search(/\bIN WITNESS WHEREOF\b/i);
+  const witnessAfter = after.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessBefore < 0 || witnessAfter < 0) return false;
+  const tailBefore = before.slice(witnessBefore).trimEnd();
+  const tailAfter = after.slice(witnessAfter).trimEnd();
+  if (tailBefore !== tailAfter) return false;
+  const headBefore = before.slice(0, witnessBefore);
+  const headAfter = after.slice(0, witnessAfter);
+  if (headBefore === headAfter) return false;
+  return /\bNotices\b/i.test(headBefore) && /\bNotices\b/i.test(headAfter);
+}
+
 export function classifyPaidProCorpusLifecycleDiff(
   beforeText: string,
   afterText: string,
@@ -84,6 +100,12 @@ export function classifyPaidProCorpusLifecycleDiff(
   const before = (beforeText || "").replace(/\r\n/g, "\n");
   const after = (afterText || "").replace(/\r\n/g, "\n");
   if (before === after) return "identical";
+
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    const frozenBefore = preparePaidProFrozenDisplayPlain(before).text.trim();
+    const frozenAfter = preparePaidProFrozenDisplayPlain(after).text.trim();
+    if (frozenBefore === frozenAfter) return "display_normalization_only";
+  }
 
   const displayPreparedBefore = preparePaidProReviewDisplayPlain(before).text.trim();
   const displayPreparedAfter = preparePaidProReviewDisplayPlain(after).text.trim();
@@ -101,6 +123,9 @@ export function classifyPaidProCorpusLifecycleDiff(
   if (
     normalizeCorpusForCopyCompare(clauseBefore) !== normalizeCorpusForCopyCompare(clauseAfter)
   ) {
+    if (isNoticeContactHydrationOnlyDelta(before, after)) {
+      return "notice_contact_hydration_only";
+    }
     return "substantive_clause_change";
   }
 

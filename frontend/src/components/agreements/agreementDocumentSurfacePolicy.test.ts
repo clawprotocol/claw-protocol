@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import * as paidProAuthoritativeRenderGate from "./paidProAuthoritativeRenderGate";
 import { isStarterDocumentSurface, shouldSkipPaidProPolish } from "./agreementDocumentSurfacePolicy";
 
 describe("agreementDocumentSurfacePolicy", () => {
@@ -8,4 +9,15 @@ describe("agreementDocumentSurfacePolicy", () => {
     expect(isStarterDocumentSurface({ tier: "free", starterPreview: true })).toBe(true);
     expect(shouldSkipPaidProPolish({ surface: "preview_premium_deliverable" })).toBe(false);
   });
+
+  it("skips paid-Pro polish on premium deliverable after canonical freeze", () => {
+    vi.spyOn(paidProAuthoritativeRenderGate, "shouldBlockPaidProStructuralMutationAfterAcceptance").mockReturnValue(
+      true,
+    );
+    expect(shouldSkipPaidProPolish({ surface: "preview_premium_deliverable" })).toBe(true);
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });

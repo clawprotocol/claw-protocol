@@ -13,7 +13,8 @@ import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberR
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
-import { repairBareEntityOnlyNoticeStanzas } from "./paidProPartyNoticeDetails";
+import { repairBareEntityOnlyNoticeStanzas, ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
@@ -138,7 +139,10 @@ function shouldUseFrozenDisplayPrepOnly(opts?: { frozenDisplayOnly?: boolean }):
 }
 
 /** Post-freeze display prep — whitespace, safe split-heading merge, stale signature strip; no section-render surgery. */
-export function preparePaidProFrozenDisplayPlain(text: string): {
+export function preparePaidProFrozenDisplayPlain(
+  text: string,
+  opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] | null },
+): {
   text: string;
   repairs: string[];
 } {
@@ -156,17 +160,37 @@ export function preparePaidProFrozenDisplayPlain(text: string): {
     out = sectionAny.text;
     repairs.push("normalize:section_any_reference");
   }
-  const bareNotices = repairBareEntityOnlyNoticeStanzas(out);
-  if (bareNotices.repairs.length > 0) {
-    out = bareNotices.text;
-    repairs.push(...bareNotices.repairs);
-  }
 
   const stripped = stripInlineStaleServerSignatureTailBeforeWitness(out);
   if (stripped.text !== out) {
     out = stripped.text;
     repairs.push(...stripped.repairs);
   }
+
+  const authority = readConsumedPaidProSignerMetadataAuthority();
+  if (authority?.parties && authority.parties.length >= 2) {
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, authority.parties, {
+      intakeText: opts?.intakeText ?? null,
+      draftPartyNames:
+        opts?.draftPartyNames ??
+        authority.parties.map((p) => p.partyLegalName).filter((name) => name.trim().length >= 2),
+    });
+    if (noticeDelivery.repairs.length > 0) {
+      out = noticeDelivery.text;
+      repairs.push(...noticeDelivery.repairs.map((r) => `display:${r}`));
+    }
+  }
+  const hasSignerContactMetadata = authority?.parties?.some(
+    (p) => p.signerEmail?.trim() || p.partyAddress?.trim(),
+  );
+  if (!hasSignerContactMetadata) {
+    const bareNotices = repairBareEntityOnlyNoticeStanzas(out);
+    if (bareNotices.repairs.length > 0) {
+      out = bareNotices.text;
+      repairs.push(...bareNotices.repairs);
+    }
+  }
+
   return { text: out.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs: [...new Set(repairs)] };
 }
 

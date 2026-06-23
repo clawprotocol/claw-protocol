@@ -648,6 +648,21 @@ export function repairIncompleteIfToNoticeStanzas(
   return { text, repairs };
 }
 
+/** Hydrate operative notice stanzas from consumed signer metadata when contact fields exist. */
+export function hydrateOperativeNoticeStanzasFromSignerMetadata(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): { text: string; repairs: string[] } {
+  const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
+  if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
+  const hasContactMetadata = authorityParties.some(
+    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
+  );
+  if (!hasContactMetadata) return { text: corpus, repairs: [] };
+  return repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);
+}
+
 /** Rebuild operative notice stanzas when authority contact fields are missing from the corpus. */
 export function ensureOperativeIfToNoticeDelivery(
   corpus: string,

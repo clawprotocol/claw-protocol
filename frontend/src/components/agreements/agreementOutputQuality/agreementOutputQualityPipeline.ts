@@ -15,6 +15,8 @@ import { applyVisibleBodyQualityGate } from "../visibleBodyQualityGate";
 import { applyDocumentQualityFloor } from "../documentQualityFloor";
 import { applySectionIsolatedPolishPipeline } from "./sectionIsolatedPolish";
 import type { AgreementOutputQualityContext, IntegrityResult, MaterialMissingItem } from "./types";
+import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "../paidProAuthoritativeRenderGate";
+import { logPaidProPostFreezeMutationAttempt } from "../paidProFreezeDiagnostics";
 
 export type AgreementOutputQualityResult = IntegrityResult & {
   clarificationsStripped: boolean;
@@ -43,11 +45,19 @@ export function finalizeAgreementOutput(
 
   const structureRepairs: string[] = [];
   if (ctx.tier === "premium") {
-    const isolated = applySectionIsolatedPolishPipeline(working, ctx);
-    working = isolated.text;
-    structureRepairs.push(...isolated.repairs);
-    const boiler = suppressRepeatedBoilerplate(working);
-    working = boiler.text;
+    if (shouldBlockPaidProStructuralMutationAfterAcceptance(ctx.surface)) {
+      logPaidProPostFreezeMutationAttempt({
+        caller: "finalizeAgreementOutput",
+        blocked: true,
+        surface: ctx.surface ?? null,
+      });
+    } else {
+      const isolated = applySectionIsolatedPolishPipeline(working, ctx);
+      working = isolated.text;
+      structureRepairs.push(...isolated.repairs);
+      const boiler = suppressRepeatedBoilerplate(working);
+      working = boiler.text;
+    }
   } else {
     const boiler = suppressRepeatedBoilerplate(working, { sectionPass: false });
     working = boiler.text;

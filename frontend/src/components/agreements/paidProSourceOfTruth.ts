@@ -49,6 +49,7 @@ import {
   logExecutionBlockLocation,
   logPostFreezeCorpusDrift,
 } from "./paidProExecutionBlockInstrumentation";
+import { logPaidProFreezeEstablished } from "./paidProFreezeDiagnostics";
 import {
   enforceAuthoritativeProCorpusDisplay,
   logProCorpusSourceMap,
@@ -677,6 +678,11 @@ export function establishPaidProSourceOfTruth(args: {
       source: record.source,
     });
   }
+  logPaidProFreezeEstablished({
+    hash: record.hash,
+    partyCount: reviewParties.length,
+    signerCount: reviewParties.length,
+  });
   tracePaidProCorpusMutation({
     store: "paidProSourceOfTruth",
     caller: "establishPaidProSourceOfTruth",

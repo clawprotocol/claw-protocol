@@ -30,7 +30,7 @@ import {
   pickAuthoritativeSigningHandoffCorpus,
 } from "../components/agreements/authoritativeHandoffCorpusResolver";
 import { resolvePremiumSignaturePreviewMode } from "../components/agreements/premiumAgreementDocumentHtml";
-import { consumeAuthoritativeSignerCount } from "../components/agreements/signerCountAuthority";
+import { consumeAuthoritativeSignerCount, resolveAuthoritativeSignerCount } from "../components/agreements/signerCountAuthority";
 import { labeledPartyLegalEntities } from "../components/agreements/labeledPartyBlockParse";
 import { resolveAuthoritativePartySlotCount } from "../components/agreements/partySlotIdentityNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
@@ -262,10 +262,6 @@ function resolveVs01AuthoritativeSignerCount(
   args: ResolveFinalVs01CorpusOrBlockArgs,
   corpusPlain?: string | null,
 ): number {
-  const consumerCount = Math.max(
-    args.draft?.parties?.length ?? 0,
-    args.bridge?.counterparties?.length ?? 0,
-  );
   const draftNames = (args.draft?.parties ?? [])
     .map((p) => String(p.name ?? "").trim())
     .filter((name) => name.length >= 2);
@@ -282,6 +278,12 @@ function resolveVs01AuthoritativeSignerCount(
     slotCount,
     labeledCount >= 3 ? labeledCount : 0,
   );
+  const resolution = resolveAuthoritativeSignerCount({
+    intakeText: args.intakeText,
+    draftParties: args.draft?.parties,
+    corpusPlain,
+    manifestPartyCount,
+  });
   return consumeAuthoritativeSignerCount(
     "vs01_corpus_gate",
     {
@@ -290,7 +292,7 @@ function resolveVs01AuthoritativeSignerCount(
       corpusPlain,
       manifestPartyCount,
     },
-    Math.max(consumerCount, manifestPartyCount),
+    resolution.count,
   );
 }
 

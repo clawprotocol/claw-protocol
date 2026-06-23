@@ -16,6 +16,7 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { isLabeledMultiPartyIntake } from "./labeledPartyBlockParse";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 
 function paidProSignerExecutionCorpusIsFrozenForHydration(): boolean {
   if (hasAuthoritativeSigningSnapshot()) return true;
@@ -70,6 +71,7 @@ export function shouldApplyExecutionBlockSignerOverlay(args: {
   intakeText?: string | null;
   corpusText?: string | null;
 }): boolean {
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) return false;
   if (
     args.corpusText?.trim() &&
     executionBlockSignerMetadataAppearsHydrated(args.corpusText, args.parties)

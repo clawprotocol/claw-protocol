@@ -4,12 +4,12 @@
 
 import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
 import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { getPaidProSourceOfTruthText, hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
-import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 
 const SIGNER_FIELD_ONLY_CLASSIFICATIONS = new Set([
   "signer_metadata_only",
@@ -17,6 +17,7 @@ const SIGNER_FIELD_ONLY_CLASSIFICATIONS = new Set([
   "whitespace_or_line_width_only",
   "display_normalization_only",
   "identical",
+  "notice_contact_hydration_only",
 ]);
 
 export function logPaidProReviewSotParity(payload: {

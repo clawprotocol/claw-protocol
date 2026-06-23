@@ -38,6 +38,13 @@ export function applyPaidProUserVisibleDisplayPrep(plain: string): string {
   const body = (plain || "").trim();
   if (body.length < 80) return body;
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    const authorityEmails =
+      readConsumedPaidProSignerMetadataAuthority()?.parties
+        ?.map((p) => p.signerEmail.trim())
+        .filter(Boolean) ?? [];
+    if (authorityEmails.length > 0 && authorityEmails.every((email) => body.includes(email))) {
+      return body;
+    }
     return preparePaidProFrozenDisplayPlain(body).text.trimEnd();
   }
   return preparePaidProReviewDisplayPlain(body).text.trimEnd();

@@ -18,6 +18,7 @@ import {
   type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
@@ -381,6 +382,7 @@ export function setConsumedPaidProSignerMetadataAuthority(
   authority: PaidProSignerMetadataAuthority,
 ): void {
   consumedLiveAuthority = authority;
+  clearPaidProVisibleRenderMemo();
 }
 
 export function clearConsumedPaidProSignerMetadataAuthority(): void {

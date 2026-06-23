@@ -5,6 +5,8 @@ import {
   resolveAuthoritativeSignerCount,
 } from "./signerCountAuthority";
 import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import { resolveAuthoritativePartySlotCount } from "./partySlotIdentityNormalize";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
   resolveSignerPartyLegalEntityDisplayValue,
@@ -174,10 +176,32 @@ export function resolveSignerSetupUiPartyCount(
   state: Pick<PaidProSignerSetupUiState, "signerSetupUiPartyCount" | "draftParties" | "intakeText">,
 ): number {
   const frozenCount = readFrozenCanonicalManifestPartyCount();
+  const consumedCount =
+    readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
+      (p) => String(p.partyLegalName ?? "").trim().length >= 2,
+    ).length ?? 0;
+  const draftNames = state.draftParties.map((p) => String(p.name ?? "").trim()).filter(Boolean);
+  const slotCount = resolveAuthoritativePartySlotCount({
+    intakeText: state.intakeText ?? "",
+    draftPartyNames: draftNames,
+    userExpandedPartyCount: state.signerSetupUiPartyCount,
+  });
+  const manifestPartyCount = Math.max(
+    frozenCount,
+    consumedCount,
+    slotCount >= 3 ? slotCount : 0,
+  );
   const rawUi = Math.min(
     Math.max(state.signerSetupUiPartyCount, state.draftParties.length, frozenCount, 2),
     PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
   );
+  const resolution = resolveAuthoritativeSignerCount({
+    intakeText: state.intakeText,
+    draftParties: state.draftParties,
+    userExpandedPartyCount: state.signerSetupUiPartyCount,
+    rawPartyCount: rawUi,
+    manifestPartyCount,
+  });
   return consumeAuthoritativeSignerCount(
     "signer_setup_ui_party_count",
     {
@@ -185,8 +209,9 @@ export function resolveSignerSetupUiPartyCount(
       draftParties: state.draftParties,
       userExpandedPartyCount: state.signerSetupUiPartyCount,
       rawPartyCount: rawUi,
+      manifestPartyCount,
     },
-    rawUi,
+    resolution.count,
   );
 }
 

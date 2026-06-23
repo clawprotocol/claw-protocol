@@ -20,6 +20,8 @@ import {
 } from "./proOperationalSynthesis";
 import { softenProDocumentTone } from "./premiumSituationIntelligence";
 import { shouldSkipPaidProPolish } from "./agreementDocumentSurfacePolicy";
+import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "./paidProAuthoritativeRenderGate";
+import { logPaidProPostFreezeMutationAttempt } from "./paidProFreezeDiagnostics";
 import { shouldLogPaidProPolishDiagnostic } from "./paidProDiagnosticLogPolicy";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 
@@ -694,6 +696,13 @@ export function polishPaidProAgreementText(
   },
 ): PaidProAgreementPolishResult {
   if (shouldSkipPaidProPolish({ surface: opts?.surface })) {
+    if (shouldBlockPaidProStructuralMutationAfterAcceptance(opts?.surface)) {
+      logPaidProPostFreezeMutationAttempt({
+        caller: "polishPaidProAgreementText",
+        blocked: true,
+        surface: opts?.surface ?? null,
+      });
+    }
     return {
       text: text || "",
       log: {
