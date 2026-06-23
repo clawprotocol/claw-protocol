@@ -22,7 +22,7 @@ import {
   getPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildAcceptedQuadPartyServerCorpus, padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 import {
   TEST405_PARTY_ADDRESSES,
   TEST405_PARTY_EMAILS,
@@ -94,7 +94,7 @@ describe("TEST405_FOUR_PARTY_SIGNER_METADATA_HYDRATION", () => {
     const draft = test405Draft();
     const intake = TEST405_PRODUCTION_QUAD_PARTY_INTAKE;
     const parties = test405Parties();
-    const raw = padBeforeWitness(buildTest405ServerDraft());
+    const raw = buildAcceptedQuadPartyServerCorpus(intake, draft);
 
     setConsumedPaidProSignerMetadataAuthority({
       parties,

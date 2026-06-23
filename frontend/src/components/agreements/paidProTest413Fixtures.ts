@@ -1,4 +1,5 @@
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildDeterministicQuadPartyMutualServicesProFallback } from "./deterministicQuadPartyProFallback";
+import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const RED = "Red Mesa Logistics LLC";
@@ -65,24 +66,15 @@ export function test413Draft(): ParsedDraftShape {
   };
 }
 
-export function buildTest413ServerFullDraft(minLen = 20_000): string {
-  let body = buildTest401MalformedServerDraft();
-  for (const name of TEST413_LEGAL_ENTITIES) {
-    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    body = body.replace(new RegExp(`If to ${esc}: ${esc}`, "g"), `If to ${name}:\n${name}`);
-  }
-  body = body.replace(
+export function buildTest413ServerFullDraft(minLen = 5_000): string {
+  const fallback = buildDeterministicQuadPartyMutualServicesProFallback({
+    rawIntake: TEST413_PRODUCTION_QUAD_PARTY_INTAKE,
+    draft: test413Draft(),
+  });
+  if (!fallback.ok) return "";
+  let body = fallback.body.replace(
     "MUTUAL SERVICES AGREEMENT",
     "MUTUAL CONSULTING SERVICES AGREEMENT",
   );
-  if (body.length >= minLen) return body;
-  const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
-  const insertAt = witnessIdx >= 0 ? witnessIdx : body.length;
-  let pad = "";
-  let i = 0;
-  while (body.length + pad.length < minLen) {
-    pad += `13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith.\n\n`;
-    i += 1;
-  }
-  return `${body.slice(0, insertAt)}${pad}${body.slice(insertAt)}`;
+  return padOperativeCorpusBeforeWitness(body, minLen);
 }

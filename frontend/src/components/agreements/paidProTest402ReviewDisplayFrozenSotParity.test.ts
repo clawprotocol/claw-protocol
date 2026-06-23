@@ -34,7 +34,7 @@ import {
   getPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildAcceptedQuadPartyServerCorpus, padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 import {
   TEST398_QUAD_PARTY_MUTUAL_SERVICES_INTAKE,
   test398Draft,
@@ -74,7 +74,7 @@ describe("TEST402 — frozen SoT review display parity and signature presentatio
   it("review/display stays normalize-equivalent to frozen SoT with compact quad-party signatures", () => {
     const draft = test398Draft();
     const intake = TEST398_QUAD_PARTY_MUTUAL_SERVICES_INTAKE;
-    const raw = padQuadPartyServerDraftBeforeWitness(buildTest401MalformedServerDraft());
+    const raw = buildAcceptedQuadPartyServerCorpus(intake, draft);
 
     setConsumedPaidProSignerMetadataAuthority({
       parties: test398Parties(),
@@ -84,7 +84,7 @@ describe("TEST402 — frozen SoT review display parity and signature presentatio
     });
 
     const prep = preparePaidProServerDocumentForAcceptance(raw, draft, intake);
-    const acceptedText = padQuadPartyServerDraftBeforeWitness(prep.text);
+    const acceptedText = padOperativeCorpusBeforeWitness(prep.text);
     markPaidProPipelineValidationPassed({ text: acceptedText, source: "server_full_draft_retry" });
 
     establishPaidProSourceOfTruth({

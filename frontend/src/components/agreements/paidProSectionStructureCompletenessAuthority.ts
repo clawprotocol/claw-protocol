@@ -5,6 +5,9 @@
 
 import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import { isPaidProNumberedSectionHeadingLine } from "./paidProNumberedSectionHeading";
+import {
+  detectPaidProSyntheticMalformedSectionHeadings,
+} from "./paidProSyntheticMalformedSectionHeadings";
 
 export type PaidProSectionHierarchyMarker = {
   major: number;
@@ -23,6 +26,7 @@ export type PaidProSectionStructureCompletenessDiagnostics = {
   truncatedFamilies: number[];
   repairable: boolean;
   fatal: boolean;
+  syntheticMalformedHeadings: string[];
 };
 
 export type ApplyPaidProSectionStructureCompletenessResult = {
@@ -105,7 +109,7 @@ export function collectPaidProSectionHierarchyMarkers(text: string): PaidProSect
   return markers;
 }
 
-function inferParentHeadingTitle(major: number, childLines: readonly string[]): string {
+function inferParentHeadingTitle(_major: number, childLines: readonly string[]): string | null {
   const joined = childLines.join(" ").toLowerCase();
   if (/warrant|represent|compliance|authority|non-?conflict/i.test(joined)) {
     return "REPRESENTATIONS, WARRANTIES AND COMPLIANCE";
@@ -131,10 +135,14 @@ function inferParentHeadingTitle(major: number, childLines: readonly string[]): 
   if (/miscellaneous|counterpart|electronic signature/i.test(joined)) {
     return "MISCELLANEOUS";
   }
-  return `SECTION ${major}`;
+  return null;
 }
 
-function inferIntermediateHeadingTitle(major: number, minor: number, siblingLines: readonly string[]): string {
+function inferIntermediateHeadingTitle(
+  _major: number,
+  minor: number,
+  siblingLines: readonly string[],
+): string | null {
   const joined = siblingLines.join(" ").toLowerCase();
   if (/mutual authority|non-?conflict|represent/i.test(joined) && minor === 1) {
     return "Mutual Authority and Non-Conflict";
@@ -142,10 +150,13 @@ function inferIntermediateHeadingTitle(major: number, minor: number, siblingLine
   if (/warrant|service condition/i.test(joined)) {
     return "Service Warranties and Conditions";
   }
+  if (/general|provision/i.test(joined) && minor > 1) {
+    return null;
+  }
   if (/general|provision/i.test(joined)) {
     return "General Provisions";
   }
-  return `Section ${major}.${minor} Provisions`;
+  return null;
 }
 
 /** Analyze numbered hierarchy completeness without mutating text. */
@@ -233,6 +244,7 @@ export function analyzePaidProSectionStructureCompleteness(
     truncatedFamilies: uniqueTruncated,
     repairable: repairable && (uniqueMissingParents.length > 0 || uniqueMissingIntermediates.length > 0),
     fatal: fatal && !repairable,
+    syntheticMalformedHeadings: [],
   };
 }
 
@@ -268,6 +280,7 @@ export function repairPaidProSectionStructureCompleteness(text: string): {
       major,
       childMarkers.map((m) => m.line),
     );
+    if (!title) continue;
     insertLineBeforeIndex(lines, firstChild.lineIndex, `${major}. ${title}`);
     head = lines.join("\n");
     repairs.push(`insert_missing_parent:${major}`);
@@ -296,6 +309,7 @@ export function repairPaidProSectionStructureCompleteness(text: string): {
       minor,
       familyMarkers.map((m) => m.line),
     );
+    if (!title) continue;
     insertLineBeforeIndex(lines, insertBefore.lineIndex, `${major}.${minor} ${title}`);
     head = lines.join("\n");
     repairs.push(`insert_missing_intermediate:${major}.${minor}`);
@@ -304,6 +318,8 @@ export function repairPaidProSectionStructureCompleteness(text: string): {
   const mergedHead = head.replace(/\n{3,}/g, "\n\n").trimEnd();
   const merged = tail ? `${mergedHead}\n\n${tail.trimStart()}` : mergedHead;
   const post = analyzePaidProSectionStructureCompleteness(merged);
+  const synthetic = detectPaidProSyntheticMalformedSectionHeadings(merged);
+  post.syntheticMalformedHeadings = synthetic.map((s) => s.line);
 
   return {
     text: merged.replace(/\n{3,}/g, "\n\n").trimEnd(),
@@ -340,15 +356,26 @@ export function applyPaidProSectionStructureCompletenessAuthority(
     }
   }
 
+  const syntheticFindings = detectPaidProSyntheticMalformedSectionHeadings(out);
+  if (syntheticFindings.length > 0) {
+    analysis = {
+      ...analysis,
+      syntheticMalformedHeadings: syntheticFindings.map((s) => s.line),
+    };
+  }
+
   const rejected =
     analysis.fatal ||
     analysis.missingParentSections.length > 0 ||
-    analysis.missingIntermediateSections.length > 0;
+    analysis.missingIntermediateSections.length > 0 ||
+    analysis.syntheticMalformedHeadings.length > 0;
 
   const rejectReason = rejected
-    ? analysis.fatal
-      ? "section_structure_completeness_fatal"
-      : "section_structure_completeness_unresolved"
+    ? analysis.syntheticMalformedHeadings.length > 0
+      ? "section_structure_synthetic_malformed_headings"
+      : analysis.fatal
+        ? "section_structure_completeness_fatal"
+        : "section_structure_completeness_unresolved"
     : null;
 
   if (opts?.log !== false && (repairs.length > 0 || rejected)) {
@@ -390,7 +417,7 @@ export function assertPaidProSectionStructureCompletenessForFreeze(
   });
   if (result.rejected) {
     throw new Error(
-      `[paid-pro-sot-freeze-blocked] section_structure_incomplete reason=${result.rejectReason} parents=${result.diagnostics.missingParentSections.join(",") || "none"} intermediates=${result.diagnostics.missingIntermediateSections.slice(0, 8).join(",") || "none"}`,
+      `[paid-pro-sot-freeze-blocked] section_structure_incomplete reason=${result.rejectReason} parents=${result.diagnostics.missingParentSections.join(",") || "none"} intermediates=${result.diagnostics.missingIntermediateSections.slice(0, 8).join(",") || "none"} synthetic=${result.diagnostics.syntheticMalformedHeadings.slice(0, 4).join("|") || "none"}`,
     );
   }
   return result.text;

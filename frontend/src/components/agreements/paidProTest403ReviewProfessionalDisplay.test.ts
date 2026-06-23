@@ -27,7 +27,7 @@ import {
   getPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildAcceptedQuadPartyServerCorpus, padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 import {
   TEST403_PRODUCTION_QUAD_PARTY_INTAKE,
   test403Draft,
@@ -107,7 +107,17 @@ describe("TEST403 — professional review display after frozen SoT", () => {
   it("keeps frozen parity, repairs notices/headings, and stays 4-party without section-render surgery", () => {
     const draft = test403Draft();
     const intake = TEST403_PRODUCTION_QUAD_PARTY_INTAKE;
-    const raw = padBeforeWitness(buildTest403ServerDraft());
+    let raw = buildAcceptedQuadPartyServerCorpus(intake, draft);
+    raw = raw.replace(
+      "3. PAYMENT AND CONSIDERATION",
+      [
+        "3. PAYMENT AND CONSIDERATION",
+        "",
+        "3.7 Joint",
+        "Client Responsibility for Payment.",
+        `${RED} and ${BLUE} are jointly responsible for Provider fees.`,
+      ].join("\n"),
+    );
 
     setConsumedPaidProSignerMetadataAuthority({
       parties: test403Parties(),
@@ -117,7 +127,7 @@ describe("TEST403 — professional review display after frozen SoT", () => {
     });
 
     const prep = preparePaidProServerDocumentForAcceptance(raw, draft, intake);
-    const acceptedText = padBeforeWitness(prep.text);
+    const acceptedText = padOperativeCorpusBeforeWitness(prep.text);
     markPaidProPipelineValidationPassed({ text: acceptedText, source: "server_full_draft_retry" });
 
     establishPaidProSourceOfTruth({

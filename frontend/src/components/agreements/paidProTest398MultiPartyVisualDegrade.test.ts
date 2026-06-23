@@ -26,6 +26,7 @@ import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNorm
 import { resolveFinalVs01CorpusOrBlock } from "../../vs01/vs01SigningCorpus";
 import { linearPremiumRecipientSlots, readPremiumRecipientHandoff } from "./premiumPartyNamesHandoff";
 import { applyPremiumRecipientHandoffReadGate } from "./paidProPremiumRecipientHandoffReadGate";
+import { buildAcceptedQuadPartyServerCorpus } from "./paidProTestAcceptedQuadPartyCorpus";
 import {
   TEST398_QUAD_PARTY_MUTUAL_SERVICES_INTAKE,
   test398Draft,
@@ -37,54 +38,11 @@ const HARBOR = "Harbor Peak Automation LLC";
 const IRON = "Iron Vale Systems Inc.";
 
 function buildTest398ServerDraft(): string {
-  const notices = [
-    "11. Notices",
-    `If to ${RED}: ${RED}`,
-    `If to ${BLUE}: ${BLUE}`,
-    `If to ${HARBOR}: ${HARBOR}`,
-    `If to ${IRON}: ${IRON}`,
-  ].join("\n\n");
-
-  return [
-    "MUTUAL SERVICES AGREEMENT",
-    "",
-    `This Mutual Services Agreement is between ${RED} ("Client") and Blue Canyon Analytics ("Service Provider").`,
-    "",
-    "1. Services and Engagement",
-    "The Providers will deliver platform design, implementation, and support services.",
-    "",
-    "1.3 Out-of-Scope Work and Changes",
-    "Any material expansion of scope described in Section Any must be approved in writing.",
-    "",
-    "1.4 Support",
-    "During Term",
-    "Each party will provide support during the term as reasonably required.",
-    "",
-    "3.4 Invoicing and",
-    "Allocation",
-    "Fees will be invoiced monthly and allocated among the parties.",
-    "",
-    notices,
-    "",
-    "12. Governing Law",
-    "Oklahoma law governs.",
-    "",
-    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
-    "",
-    "CLIENT:",
-    RED,
-    "By: _________________________________",
-    "Name:",
-    "Title:",
-    "Date: _____________________________",
-    "",
-    "SERVICE PROVIDER:",
-    "Blue Canyon Analytics",
-    "By: _________________________________",
-    "Name:",
-    "Title:",
-    "Date: _____________________________",
-  ].join("\n");
+  return buildAcceptedQuadPartyServerCorpus(
+    TEST398_QUAD_PARTY_MUTUAL_SERVICES_INTAKE,
+    test398Draft(),
+    2000,
+  );
 }
 
 function expectQuadPartyLegalName(text: string, fullName: string): void {

@@ -32,7 +32,7 @@ import {
   getPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildAcceptedQuadPartyServerCorpus, padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 import {
   TEST407_PRODUCTION_QUAD_PARTY_INTAKE,
   test407Draft,
@@ -57,7 +57,7 @@ const IRON = "Iron Vale Systems Inc.";
 
 function buildTest409ProductionOpening(base: string): string {
   return base.replace(
-    /^MUTUAL SERVICES AGREEMENT\n\nThis Mutual Services Agreement is among/m,
+    /^MUTUAL SERVICES AGREEMENT\n\nThis Mutual Services Agreement is entered into by and among/m,
     [
       'MUTUAL SERVICES AGREEMENT This MUTUAL SERVICES AGREEMENT (the "Agreement") is entered into by and among',
       `${RED} ("Red Mesa"), ${BLUE} ("Blue Canyon"), ${HARBOR} ("Harbor Peak"), and ${IRON} ("Iron Vale") (each a "Party" and collectively, the "Parties");`,
@@ -91,10 +91,12 @@ describe("TEST409 — chronic Pro title classification on review and post-finali
   it("repairs production-style glued title on first-review and visible-shell paths", () => {
     const draft = test407Draft();
     const intake = TEST407_PRODUCTION_QUAD_PARTY_INTAKE;
-    const raw = padBeforeWitness(buildTest409ProductionOpening(buildTest401MalformedServerDraft()));
+    const raw = padOperativeCorpusBeforeWitness(
+      buildTest409ProductionOpening(buildAcceptedQuadPartyServerCorpus(intake, draft)),
+    );
 
     const prep = preparePaidProServerDocumentForAcceptance(raw, draft, intake);
-    const acceptedText = padBeforeWitness(prep.text);
+    const acceptedText = padOperativeCorpusBeforeWitness(prep.text);
     markPaidProPipelineValidationPassed({ text: acceptedText, source: "server_full_draft_retry" });
 
     establishPaidProSourceOfTruth({
@@ -140,10 +142,12 @@ describe("TEST409 — chronic Pro title classification on review and post-finali
   it("repairs production-style glued title on authoritative signing snapshot display path", () => {
     const draft = test407Draft();
     const intake = TEST407_PRODUCTION_QUAD_PARTY_INTAKE;
-    const raw = padBeforeWitness(buildTest409ProductionOpening(buildTest401MalformedServerDraft()));
+    const raw = padOperativeCorpusBeforeWitness(
+      buildTest409ProductionOpening(buildAcceptedQuadPartyServerCorpus(intake, draft)),
+    );
 
     const prep = preparePaidProServerDocumentForAcceptance(raw, draft, intake);
-    const acceptedText = padBeforeWitness(prep.text);
+    const acceptedText = padOperativeCorpusBeforeWitness(prep.text);
     markPaidProPipelineValidationPassed({ text: acceptedText, source: "server_full_draft_retry" });
 
     establishPaidProSourceOfTruth({

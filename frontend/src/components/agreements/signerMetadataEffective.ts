@@ -10,6 +10,7 @@ export type SignerMetadataEffectiveCounts = {
   partySlots: number;
   slotsWithSignerName: number;
   slotsWithSignerTitle: number;
+  slotsWithSignerEmail: number;
 };
 
 export function countSignerMetadataSlots(
@@ -22,22 +23,28 @@ export function countSignerMetadataSlots(
     partySlots: slots.length,
     slotsWithSignerName: slots.filter((s) => signerMetadataInputRaw(s.signerName).length > 0).length,
     slotsWithSignerTitle: slots.filter((s) => signerMetadataInputRaw(s.signerTitle).length > 0).length,
+    slotsWithSignerEmail: slots.filter((s) => String(s.email ?? "").trim().length > 0).length,
   };
 }
 
+let sessionMaxPartySlots = 0;
 let sessionMaxSlotsWithSignerName = 0;
 let sessionMaxSlotsWithSignerTitle = 0;
+let sessionMaxSlotsWithSignerEmail = 0;
 
 export function latchSignerMetadataEffectiveMax(counts: SignerMetadataEffectiveCounts): void {
+  sessionMaxPartySlots = Math.max(sessionMaxPartySlots, counts.partySlots);
   sessionMaxSlotsWithSignerName = Math.max(sessionMaxSlotsWithSignerName, counts.slotsWithSignerName);
   sessionMaxSlotsWithSignerTitle = Math.max(sessionMaxSlotsWithSignerTitle, counts.slotsWithSignerTitle);
+  sessionMaxSlotsWithSignerEmail = Math.max(sessionMaxSlotsWithSignerEmail, counts.slotsWithSignerEmail);
 }
 
 export function readSignerMetadataEffectiveMax(): SignerMetadataEffectiveCounts {
   return {
-    partySlots: 2,
+    partySlots: sessionMaxPartySlots,
     slotsWithSignerName: sessionMaxSlotsWithSignerName,
     slotsWithSignerTitle: sessionMaxSlotsWithSignerTitle,
+    slotsWithSignerEmail: sessionMaxSlotsWithSignerEmail,
   };
 }
 
@@ -46,8 +53,10 @@ export function readSignerMetadataEffectiveMaxForTests(): SignerMetadataEffectiv
 }
 
 export function resetSignerMetadataEffectiveMaxForTests(): void {
+  sessionMaxPartySlots = 0;
   sessionMaxSlotsWithSignerName = 0;
   sessionMaxSlotsWithSignerTitle = 0;
+  sessionMaxSlotsWithSignerEmail = 0;
   lastLoggedEffectiveFingerprint = "";
 }
 

@@ -28,7 +28,7 @@ import {
   getPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildAcceptedQuadPartyServerCorpus, padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 import {
   TEST407_PRODUCTION_QUAD_PARTY_INTAKE,
   test407Draft,
@@ -107,28 +107,21 @@ describe("TEST408 — Pro agreement title rendering and opening collapse repair"
   it("keeps frozen review display parity-safe without section-render normalization on locked path", () => {
     const draft = test407Draft();
     const intake = TEST407_PRODUCTION_QUAD_PARTY_INTAKE;
-    let raw = padBeforeWitness(buildTest401MalformedServerDraft());
+    let raw = buildAcceptedQuadPartyServerCorpus(intake, draft, 1800);
     raw = raw.replace(
-      /^MUTUAL SERVICES AGREEMENT\n\nThis Mutual Services Agreement is among/m,
+      /^MUTUAL SERVICES AGREEMENT\n\nThis Mutual Services Agreement is entered into by and among/m,
       [
         "MUTUAL SERVICES AGREEMENT This MUTUAL SERVICES AGREEMENT This MUTUAL SERVICES AGREEMENT This Mutual Services Agreement (this \"Agreement\") is entered into by and among",
         `${RED}, ${BLUE}, ${HARBOR}, and ${IRON}.`,
       ].join("\n"),
     );
     raw = raw.replace(
-      /1\.3 Out-of-Scope Work and Changes\nAny material expansion of scope must be approved in writing\./,
-      [
-        "1.3 Out-of-Scope Work and Changes",
-        "Any material expansion of scope must be approved in writing.",
-        "",
-        "3.6 Payment Responsibility of",
-        "Clients.",
-        `${RED} and ${BLUE} are jointly responsible for Provider fees.`,
-      ].join("\n"),
+      "3. PAYMENT AND CONSIDERATION",
+      "3. Payment and\nConsideration",
     );
 
     const prep = preparePaidProServerDocumentForAcceptance(raw, draft, intake);
-    const acceptedText = padBeforeWitness(prep.text);
+    const acceptedText = padOperativeCorpusBeforeWitness(prep.text);
     markPaidProPipelineValidationPassed({ text: acceptedText, source: "server_full_draft_retry" });
 
     establishPaidProSourceOfTruth({
@@ -152,8 +145,8 @@ describe("TEST408 — Pro agreement title rendering and opening collapse repair"
     expect(reviewPlain).not.toMatch(
       /MUTUAL SERVICES AGREEMENT This MUTUAL SERVICES AGREEMENT This MUTUAL SERVICES AGREEMENT/i,
     );
-    expect(reviewPlain).not.toMatch(/3\.6 Payment Responsibility of\s*\n\s*Clients\./i);
-    expect(reviewPlain).toMatch(/3\.6 Payment Responsibility of Clients\./i);
+    expect(reviewPlain).not.toMatch(/3\. Payment and\s*\n\s*Consideration/i);
+    expect(reviewPlain).toMatch(/3\. PAYMENT AND CONSIDERATION/i);
 
     expect(hashPaidProCorpus(frozenDisplay)).toBe(hashPaidProCorpus(reviewPlain));
 

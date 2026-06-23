@@ -4,9 +4,7 @@
  */
 
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
-import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
 import { PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES } from "./paidProNPartySignerSetup";
-import { resolveAuthoritativePartySlotCount } from "./partySlotIdentityNormalize";
 import {
   mergeLabeledPartyAuthorityIntoParties,
   partyDisplayRoleLabelForAuthorityParty,
@@ -17,7 +15,8 @@ import {
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
 import { resolveCanonicalPartyLegalNameForIndex } from "./canonicalPartyLegalNameSanitizer";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
-import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
+import { readFrozenCanonicalManifestPartyNames, readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   applyContactAuthorityExecutionBlockIntegrity,
   stripExecutionBlockContactContamination,
@@ -274,28 +273,40 @@ function defuseEntityWitnessFusionLine(line: string): { line: string; repaired: 
   return { line: cleaned, repaired: cleaned !== trimmed };
 }
 
-function resolveCanonicalNoticeAuthorityParties(
+function resolveCanonicalNoticePartyCount(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
-): readonly PaidProSignerMetadataParty[] {
+): number {
+  const frozen = readFrozenCanonicalManifestPartyCount();
+  if (frozen >= 2) {
+    return Math.min(frozen, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+  }
+
   const intake = roleContext?.intakeText?.trim() ?? "";
   const draftPartyNames =
     roleContext?.draftPartyNames ??
     parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2);
 
-  const labeled = intake ? parseLabeledPartyBlocks(intake) : [];
-  const slotCount = intake
-    ? resolveAuthoritativePartySlotCount({
-        intakeText: intake,
-        draftPartyNames,
-        rawPartyCount: parties.length,
-      })
-    : parties.length;
+  if (intake) {
+    const resolved = resolveAuthoritativeSignerCount({
+      intakeText: intake,
+      draftPartyNames,
+      manifestPartyCount: Math.min(parties.length, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES),
+    });
+    return Math.min(Math.max(resolved.count, 2), PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+  }
 
-  const maxParties = Math.min(
-    labeled.length >= 2 ? labeled.length : Math.max(slotCount, parties.length),
-    PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES,
-  );
+  const authoritativeRows = parties.filter((p) => p.partyLegalName.trim().length >= 2).length;
+  return Math.min(Math.max(authoritativeRows, 2), PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+}
+
+function resolveCanonicalNoticeAuthorityParties(
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): readonly PaidProSignerMetadataParty[] {
+  const intake = roleContext?.intakeText?.trim() ?? "";
+
+  const maxParties = resolveCanonicalNoticePartyCount(parties, roleContext);
 
   const base =
     parties.length >= 2
@@ -307,18 +318,20 @@ function resolveCanonicalNoticeAuthorityParties(
   if (!intake) return base.slice(0, maxParties);
 
   const merged = mergeLabeledPartyAuthorityIntoParties(base, intake);
-  return preserveSlotIndexedSignerMetadataParties(merged, base).slice(0, maxParties);
+  return preserveSlotIndexedSignerMetadataParties(merged, base, maxParties).slice(0, maxParties);
 }
 
 function enrichNoticeAuthorityParties(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): readonly PaidProSignerMetadataParty[] {
+  const cap = resolveCanonicalNoticePartyCount(parties, roleContext);
+  const cappedSource = parties.slice(0, cap);
   const resolved = ensureNoticeAuthorityPartyLegalEntities(
-    resolveCanonicalNoticeAuthorityParties(parties, roleContext),
+    resolveCanonicalNoticeAuthorityParties(cappedSource, roleContext),
     roleContext,
   );
-  return preserveSlotIndexedSignerMetadataParties(resolved, parties);
+  return preserveSlotIndexedSignerMetadataParties(resolved, cappedSource, cap).slice(0, cap);
 }
 
 /** True when multiple operative "If to" notice stanzas are fused on one line or empty. */
@@ -625,12 +638,15 @@ export function repairIncompleteIfToNoticeStanzas(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): { text: string; repairs: string[] } {
-  const authorityParties = parties.some((p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim())
+  const cap = resolveCanonicalNoticePartyCount(parties, roleContext);
+  const cappedParties = parties.slice(0, cap);
+  const authorityParties = cappedParties.some((p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim())
     ? preserveSlotIndexedSignerMetadataParties(
-        enrichNoticeAuthorityParties(parties, roleContext),
-        parties,
+        enrichNoticeAuthorityParties(cappedParties, roleContext),
+        cappedParties,
+        cap,
       )
-    : enrichNoticeAuthorityParties(parties, roleContext);
+    : enrichNoticeAuthorityParties(cappedParties, roleContext);
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
   const repairs: string[] = [];
   let text = corpus.replace(/\r\n/g, "\n");

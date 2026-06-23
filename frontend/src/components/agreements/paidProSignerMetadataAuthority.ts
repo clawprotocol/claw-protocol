@@ -58,10 +58,12 @@ export function authorityPartiesFromLabeledPartyIntake(
 export function preserveSlotIndexedSignerMetadataParties(
   merged: readonly PaidProSignerMetadataParty[],
   source: readonly PaidProSignerMetadataParty[],
+  maxSlots?: number,
 ): PaidProSignerMetadataParty[] {
   const max = Math.max(merged.length, source.length);
+  const cap = maxSlots != null && maxSlots >= 2 ? Math.min(max, maxSlots) : max;
   const out: PaidProSignerMetadataParty[] = [];
-  for (let i = 0; i < max; i++) {
+  for (let i = 0; i < cap; i++) {
     const slot = merged[i];
     const auth = source.find((p) => (p.partyIndex ?? 0) === i) ?? source[i];
     if (!auth && slot) {

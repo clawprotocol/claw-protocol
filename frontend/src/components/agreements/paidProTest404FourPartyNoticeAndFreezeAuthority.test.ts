@@ -22,7 +22,7 @@ import {
   getPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildDeterministicQuadPartyMutualServicesProFallback } from "./deterministicQuadPartyProFallback";
 import {
   TEST404_PARTY_EMAILS,
   TEST404_PRODUCTION_QUAD_PARTY_INTAKE,
@@ -45,19 +45,19 @@ function padBeforeWitness(base: string, minLen = 2000): string {
   let pad = "";
   let i = 0;
   while (base.length + pad.length < minLen) {
-    pad += `13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith.\n\n`;
+    pad += `13. Supplemental Provisions\n\n13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith.\n\n`;
     i += 1;
   }
   return `${base.slice(0, insertAt)}${pad}${base.slice(insertAt)}`;
 }
 
-function buildTest404ServerDraft(): string {
-  let body = buildTest401MalformedServerDraft();
-  for (const name of [RED, BLUE, HARBOR, IRON]) {
-    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    body = body.replace(new RegExp(`If to ${esc}: ${esc}`, "g"), `If to ${name}:\n${name}`);
-  }
-  return body;
+function buildTest404AcceptedCorpus(intake: string): string {
+  const fallback = buildDeterministicQuadPartyMutualServicesProFallback({
+    rawIntake: intake,
+    draft: test404Draft(),
+  });
+  expect(fallback.ok).toBe(true);
+  return padBeforeWitness(fallback.body);
 }
 
 function countIfToNoticeStanzas(text: string): number {
@@ -79,7 +79,7 @@ describe("TEST404_FOUR_PARTY_NOTICE_AND_FREEZE_AUTHORITY", () => {
     const draft = test404Draft();
     const intake = TEST404_PRODUCTION_QUAD_PARTY_INTAKE;
     const parties = test404Parties();
-    const raw = padBeforeWitness(buildTest404ServerDraft());
+    const raw = buildTest404AcceptedCorpus(intake);
 
     setConsumedPaidProSignerMetadataAuthority({
       parties,

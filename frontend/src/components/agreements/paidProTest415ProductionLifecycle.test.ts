@@ -33,12 +33,13 @@ import {
   getPaidProSourceOfTruthText,
 } from "./paidProSourceOfTruth";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildDeterministicQuadPartyMutualServicesProFallback } from "./deterministicQuadPartyProFallback";
 import {
   TEST415_FORBIDDEN_ENTITY_MARKERS,
   TEST415_LEGAL_ENTITIES,
   TEST415_PRODUCTION_INTAKE,
   TEST415_SIGNER_NAMES,
+  test415Draft,
   test415DraftWithPhantomFifthParty,
   test415LiveUiBlankExtraLegalNames,
 } from "./paidProTest415Fixtures";
@@ -88,7 +89,7 @@ function padServerDraft(body: string, minLen = 2000): string {
   let pad = "";
   let i = 0;
   while (body.length + pad.length < minLen) {
-    pad += `13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith.\n\n`;
+    pad += `13. Supplemental Provisions\n\n13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith.\n\n`;
     i += 1;
   }
   return `${body.slice(0, insertAt)}${pad}${body.slice(insertAt)}`;
@@ -148,12 +149,13 @@ describe("TEST415_PRODUCTION_LIFECYCLE_PROOF", () => {
     assertPartyAlignment("intake_authority", intakeParties);
     assertNoForbiddenEntityAuthority("intake_authority", intakeParties);
 
-    // Stage 2: server_full_draft acceptance
-    let body = padServerDraft(buildTest401MalformedServerDraft());
-    for (const name of TEST415_LEGAL_ENTITIES) {
-      const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      body = body.replace(new RegExp(`If to ${esc}: ${esc}`, "g"), `If to ${name}:\n${name}`);
-    }
+    // Stage 2: server_full_draft acceptance (clean deterministic body — corrupted server drafts must not freeze)
+    const fallback = buildDeterministicQuadPartyMutualServicesProFallback({
+      rawIntake: intake,
+      draft: test415Draft(),
+    });
+    expect(fallback.ok).toBe(true);
+    const body = padServerDraft(fallback.body);
     const prep = preparePaidProServerDocumentForAcceptance(body, draft, intake);
     markPaidProPipelineValidationPassed({ text: prep.text, source: "server_full_draft" });
 

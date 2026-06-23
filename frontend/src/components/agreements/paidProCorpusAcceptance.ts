@@ -29,6 +29,7 @@ import {
   logPaidProValidationDecision,
   validateProMinimumSubstance,
 } from "./paidProConciseServicesQuality";
+import { corpusHasPaidProSyntheticMalformedSectionHeadings } from "./paidProSyntheticMalformedSectionHeadings";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -275,6 +276,12 @@ export function validatePaidProOutput(args: {
     logVpaidDevFail(dcl.reasons);
     logDecision(false, dcl.reasons);
     return dcl;
+  }
+  if (corpusHasPaidProSyntheticMalformedSectionHeadings(t)) {
+    const reasons = ["section_structure_synthetic_malformed_headings"];
+    logVpaidDevFail(reasons);
+    logDecision(false, reasons);
+    return { ok: false, reasons };
   }
   const intakeLower = rawI.toLowerCase();
   const minimumSubstance = validateProMinimumSubstance({

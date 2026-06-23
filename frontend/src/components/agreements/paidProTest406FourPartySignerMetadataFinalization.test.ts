@@ -27,7 +27,7 @@ import {
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
 } from "./paidProSourceOfTruth";
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildDeterministicQuadPartyMutualServicesProFallback } from "./deterministicQuadPartyProFallback";
 import {
   TEST406_PARTY_ADDRESSES,
   TEST406_PARTY_EMAILS,
@@ -52,19 +52,19 @@ function padBeforeWitness(base: string, minLen = 2000): string {
   let pad = "";
   let i = 0;
   while (base.length + pad.length < minLen) {
-    pad += `13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith.\n\n`;
+    pad += `13. Supplemental Provisions\n\n13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith.\n\n`;
     i += 1;
   }
   return `${base.slice(0, insertAt)}${pad}${base.slice(insertAt)}`;
 }
 
-function buildTest406ServerDraft(): string {
-  let body = buildTest401MalformedServerDraft();
-  for (const name of [RED, BLUE, HARBOR, IRON]) {
-    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    body = body.replace(new RegExp(`If to ${esc}: ${esc}`, "g"), `If to ${name}:\n${name}`);
-  }
-  return body;
+function buildTest406AcceptedCorpus(intake: string): string {
+  const fallback = buildDeterministicQuadPartyMutualServicesProFallback({
+    rawIntake: intake,
+    draft: test406Draft(),
+  });
+  expect(fallback.ok).toBe(true);
+  return padBeforeWitness(fallback.body);
 }
 
 afterEach(() => {
@@ -80,7 +80,7 @@ describe("TEST406_FOUR_PARTY_SIGNER_METADATA_FINALIZATION", () => {
   it("finalize path preserves 4-party authority, handoff, hydration, and review without notice entity crash", () => {
     const draft = test406Draft();
     const intake = TEST406_PRODUCTION_QUAD_PARTY_INTAKE;
-    const raw = padBeforeWitness(buildTest406ServerDraft());
+    const raw = buildTest406AcceptedCorpus(intake);
 
     const prep = preparePaidProServerDocumentForAcceptance(raw, draft, intake);
     const acceptedText = padBeforeWitness(prep.text);

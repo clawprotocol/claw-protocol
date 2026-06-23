@@ -88,6 +88,7 @@ export function applyPremiumRecipientHandoffReadGate(
   if (!handoff) return null;
   const rawSlotCount = Math.max(
     opts?.partySlotCount ?? 0,
+    readSignerMetadataEffectiveMax().partySlots,
     2 + (handoff.partyIndexSlots?.length ?? 0),
     2,
   );
@@ -127,11 +128,14 @@ export function applyPremiumRecipientHandoffReadGate(
   const monotonicSignerLatchSatisfied =
     monotonicMax.slotsWithSignerName >= 2 &&
     (priorPopulated?.slotsWithSignerName ?? 0) >= 2;
+  const monotonicPartyLatchSatisfied =
+    monotonicMax.partySlots >= 3 &&
+    (priorPopulated?.partySlots ?? 0) >= 3;
 
   if (
     sessionEverHadPopulatedHandoff &&
     lastPopulatedHandoff &&
-    (partyFingerprintMatch || monotonicSignerLatchSatisfied)
+    (partyFingerprintMatch || monotonicSignerLatchSatisfied || monotonicPartyLatchSatisfied)
   ) {
     logSignerMetadataStaleEmptyReadIgnored({
       partySlots: counts.partySlots,

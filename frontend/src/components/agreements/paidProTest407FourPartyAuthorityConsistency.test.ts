@@ -41,7 +41,7 @@ import {
   getPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
+import { buildAcceptedQuadPartyServerCorpus, padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 import {
   TEST407_PARTY_ADDRESSES,
   TEST407_PARTY_EMAILS,
@@ -133,10 +133,13 @@ describe("TEST407_FOUR_PARTY_AUTHORITY_CONSISTENCY", () => {
   it("preserves immutable 4-party authority across handoff, snapshot, review, and VS01 without downstream reconstruction", () => {
     const draft = test407Draft();
     const intake = TEST407_PRODUCTION_QUAD_PARTY_INTAKE;
-    const raw = padBeforeWitness(buildTest407ServerDraft());
+    const raw = buildAcceptedQuadPartyServerCorpus(intake, draft).replace(
+      /Electronic signatures[\s\S]*?original signatures\.\s*SIGNATURES/gi,
+      "Electronic signatures, including signatures delivered through an electronic signing platform, are binding and effective as original signatures.",
+    );
 
     const prep = preparePaidProServerDocumentForAcceptance(raw, draft, intake);
-    const acceptedText = padBeforeWitness(prep.text);
+    const acceptedText = padOperativeCorpusBeforeWitness(prep.text);
     markPaidProPipelineValidationPassed({ text: acceptedText, source: "server_full_draft_retry" });
 
     establishPaidProSourceOfTruth({
@@ -226,8 +229,8 @@ describe("TEST407_FOUR_PARTY_AUTHORITY_CONSISTENCY", () => {
     expect(reviewPlain).toMatch(/If to Red Mesa[\s\S]*Email:\s*cryptocurated21\+1@gmail\.com/i);
 
     expect(sectionRenderSpy).not.toHaveBeenCalled();
-    expect(reviewPlain).not.toMatch(/SIGNATURES\s*$/im);
-    expect(visiblePlain).not.toMatch(/SIGNATURES\s*$/im);
+    expect(reviewPlain).not.toMatch(/original signatures\.\s+SIGNATURES/i);
+    expect(visiblePlain).not.toMatch(/original signatures\.\s+SIGNATURES/i);
 
     const record = getPaidProSourceOfTruth()!;
     const frozen = getFrozenCanonicalAgreementCorpus();

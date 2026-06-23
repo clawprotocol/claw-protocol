@@ -14,6 +14,11 @@ import {
   resetPaidProPremiumRecipientHandoffReadGateForTests,
 } from "./paidProPremiumRecipientHandoffReadGate";
 import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
+import {
+  readSignerMetadataEffectiveMax,
+  latchSignerMetadataEffectiveMax,
+  countSignerMetadataSlots,
+} from "./signerMetadataEffective";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
@@ -260,6 +265,10 @@ export function trimPremiumRecipientHandoffToPartyCount(
 }
 
 function authoritativeHandoffPartyCap(): number | undefined {
+  const monotonic = readSignerMetadataEffectiveMax();
+  if (monotonic.partySlots >= 2) {
+    return Math.min(monotonic.partySlots, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+  }
   if (hasPaidProSourceOfTruth()) {
     const frozen = readFrozenCanonicalManifestPartyCount();
     if (frozen >= 2) return frozen;
@@ -430,6 +439,7 @@ export function persistPremiumRecipientHandoff(patch: {
       trimmedPayload,
       resolveHandoffPartySlotCount(trimmedPayload, cap),
     );
+    latchSignerMetadataEffectiveMax(countSignerMetadataSlots(trimmedPayload, slots.length));
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console
@@ -529,6 +539,7 @@ export function writePremiumRecipientHandoffExact(
       trimmedPayload,
       resolveHandoffPartySlotCount(trimmedPayload, cap),
     );
+    latchSignerMetadataEffectiveMax(countSignerMetadataSlots(trimmedPayload, slots.length));
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console
