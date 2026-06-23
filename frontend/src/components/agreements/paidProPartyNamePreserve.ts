@@ -187,6 +187,8 @@ const DISALLOWED_PARTY_PHRASE_RE: readonly RegExp[] = [
   /^will\s+keep\s+confidential\b/i,
   /^software\s+platform\s+agreement$/i,
   /\bsoftware\s+platform\s+agreement\b/i,
+  /^shared\s+warehouse\s+automation$/i,
+  /\bshared\s+warehouse\s+automation\b/i,
   /licensing\s+revenue\s+will\s+be\s+shared/i,
   /^signer\s+unknown$/i,
   /^\[org_\d+\]$/i,

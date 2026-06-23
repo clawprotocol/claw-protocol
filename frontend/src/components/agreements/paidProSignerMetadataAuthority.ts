@@ -27,6 +27,7 @@ import { labeledPartyBlocksForSignerMetadata } from "./labeledPartyBlockParse";
 import {
   authorityPartiesFromIntakeSignerMetadata,
   mergeIntakeSignerMetadataIntoAuthorityParties,
+  resolveAuthorityPartyLegalNameField,
 } from "./intakeSignerMetadataAuthority";
 import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
@@ -74,7 +75,10 @@ export function preserveSlotIndexedSignerMetadataParties(
     if (!slot || !auth) continue;
     out.push({
       partyIndex: i,
-      partyLegalName: slot.partyLegalName.trim() || auth.partyLegalName.trim(),
+      partyLegalName: resolveAuthorityPartyLegalNameField(
+        slot.partyLegalName.trim() || auth.partyLegalName.trim(),
+        "",
+      ) || resolveAuthorityPartyLegalNameField(auth.partyLegalName.trim(), ""),
       signerEmail: slot.signerEmail.trim() || auth.signerEmail.trim(),
       signerName: slot.signerName.trim() || auth.signerName.trim(),
       signerTitle: slot.signerTitle.trim() || auth.signerTitle.trim(),
@@ -403,8 +407,12 @@ export function hashPaidProSignerMetadataAuthority(
 export function authorityPartiesToLiveSignerMetadataUi(
   parties: readonly PaidProSignerMetadataParty[],
 ): LiveSignerMetadataUiState {
-  const count = Math.max(parties.length, 2);
-  const padded = [...parties];
+  const authoritativeCount = parties.filter((p) =>
+    resolveAuthorityPartyLegalNameField(p.partyLegalName, "").length >= 2,
+  ).length;
+  const count = Math.max(Math.min(parties.length, authoritativeCount >= 2 ? authoritativeCount : parties.length), 2);
+  const capped = parties.slice(0, count);
+  const padded = [...capped];
   while (padded.length < count) {
     padded.push({
       partyIndex: padded.length,

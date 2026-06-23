@@ -93,6 +93,40 @@ function isStrictLegalEntityName(value: string): boolean {
   return isLegalEntityName(t);
 }
 
+/** Human signer names must never populate legal-entity authority fields. */
+export function isLikelyHumanSignerName(value: string): boolean {
+  const t = value.replace(/\s+/g, " ").trim();
+  if (t.length < 2 || t.length > 48) return false;
+  if (isLegalEntityName(t) || isAuthoritativeLegalEntityName(t)) return false;
+  if (new RegExp(`${ENTITY_SUFFIX_PATTERN}$`, "i").test(t)) return false;
+  if (looksLikeConcatenatedSignerNames(t)) return false;
+  const words = t.split(/\s+/);
+  if (words.length > 4) return false;
+  return words.length >= 1 && words.every((w) => /^[A-Za-z][A-Za-z'.-]*$/.test(w));
+}
+
+/** Concatenated multi-signer blobs (e.g. Mary Jay Hen Park Ira) are never legal entities. */
+export function looksLikeConcatenatedSignerNames(value: string): boolean {
+  const t = value.replace(/\s+/g, " ").trim();
+  if (!t || new RegExp(`${ENTITY_SUFFIX_PATTERN}$`, "i").test(t)) return false;
+  const words = t.split(/\s+/);
+  if (words.length < 4) return false;
+  const nameLike = words.filter((w) => /^[A-Za-z][A-Za-z'.-]*$/.test(w)).length;
+  return nameLike >= 4;
+}
+
+/** Legal entity field value — rejects signer names, scope phrases, and concatenated names. */
+export function resolveAuthorityPartyLegalNameField(
+  value: string,
+  fallback = "",
+): string {
+  const t = value.replace(/\s+/g, " ").trim();
+  if (!t) return fallback;
+  if (isLikelyHumanSignerName(t) || looksLikeConcatenatedSignerNames(t)) return fallback;
+  if (!isLegalEntityName(t) && !isAuthoritativeLegalEntityName(t)) return fallback;
+  return t;
+}
+
 function normalizeExtractedLegalEntity(raw: string): string {
   const compact = raw.replace(/\s+/g, " ").trim();
   const tail = compact.match(
@@ -424,11 +458,9 @@ export function mergeIntakeSignerMetadataIntoAuthorityParties(
     const cur = parties[i];
     const intake = aligned[i];
     const legal =
-      (cur?.partyLegalName.trim() && isLegalEntityName(cur.partyLegalName)
-        ? cur.partyLegalName
-        : "") ||
-      intake?.partyLegalName ||
-      legalEntities[i]?.trim() ||
+      resolveAuthorityPartyLegalNameField(cur?.partyLegalName ?? "", "") ||
+      resolveAuthorityPartyLegalNameField(intake?.partyLegalName ?? "", "") ||
+      resolveAuthorityPartyLegalNameField(legalEntities[i] ?? "", "") ||
       "";
     out.push({
       partyIndex: i,

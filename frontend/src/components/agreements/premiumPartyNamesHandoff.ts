@@ -13,7 +13,16 @@ import {
   applyPremiumRecipientHandoffReadGate,
   resetPaidProPremiumRecipientHandoffReadGateForTests,
 } from "./paidProPremiumRecipientHandoffReadGate";
+import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import {
+  isLikelyHumanSignerName,
+  looksLikeConcatenatedSignerNames,
+  resolveAuthorityPartyLegalNameField,
+} from "./intakeSignerMetadataAuthority";
+import { sanitizeAuthorityPartyLegalName } from "./signerSetupPartyIdentity";
 import {
   hasCurrentSessionFreeStarterIntent,
   hasCurrentSessionProEntitlement,
@@ -65,6 +74,30 @@ export type PremiumRecipientHandoffV2 = {
 
 function emptySlot(): PremiumRecipientHandoffSlot {
   return { name: "", email: "", role: "", signerName: "", signerTitle: "", partyAddress: "" };
+}
+
+/** Never persist signer names or scope phrases into handoff legal-entity `name` fields. */
+function sanitizeHandoffSlotEntityName(
+  slot: PremiumRecipientHandoffSlot,
+): PremiumRecipientHandoffSlot {
+  const signerName = signerMetadataInputRaw(slot.signerName);
+  const rawName = String(slot.name ?? "").trim();
+  let name = resolveAuthorityPartyLegalNameField(rawName, "");
+  if (!name && rawName && signerName && rawName.toLowerCase() === signerName.toLowerCase()) {
+    name = "";
+  }
+  if (
+    rawName &&
+    !name &&
+  (isLikelyHumanSignerName(rawName) || looksLikeConcatenatedSignerNames(rawName))
+  ) {
+    name = "";
+  }
+  return { ...slot, name };
+}
+
+function sanitizeHandoffSlots(slots: PremiumRecipientHandoffSlot[]): PremiumRecipientHandoffSlot[] {
+  return slots.map(sanitizeHandoffSlotEntityName);
 }
 
 function stripStalePremiumHandoffExtraSlots(
@@ -133,7 +166,9 @@ export function readPremiumRecipientHandoff(): PremiumRecipientHandoffV2 | null 
         };
         const stripped = stripStalePremiumHandoffExtraSlots(handoff);
         const gated = applyPremiumRecipientHandoffReadGate(stripped, {
-          partySlotCount: 2 + (stripped.partyIndexSlots?.length ?? 0),
+          partySlotCount: resolveHandoffAuthorityPartyCount({
+            partySlotCount: resolveHandoffPartySlotCount(stripped),
+          }),
         });
         if (gated) logReviewLinkSignerMetadataHandoffRead(gated);
         return gated;
@@ -225,10 +260,27 @@ export function trimPremiumRecipientHandoffToPartyCount(
 }
 
 function authoritativeHandoffPartyCap(): number | undefined {
+  if (hasPaidProSourceOfTruth()) {
+    const frozen = readFrozenCanonicalManifestPartyCount();
+    if (frozen >= 2) return frozen;
+  }
   const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
   if (!consumed?.length) return undefined;
-  const n = consumed.filter((p) => String(p.partyLegalName ?? "").trim().length >= 2).length;
-  return n >= 2 ? n : undefined;
+  const authoritativeRows = consumed.filter((p) => {
+    const legal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
+    return legal.length >= 2 && isAuthoritativeLegalEntityName(legal);
+  }).length;
+  return authoritativeRows >= 2 ? Math.min(authoritativeRows, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS) : undefined;
+}
+
+/** Canonical party count for handoff read/write — never inflated by phantom draft or consumed rows. */
+export function resolveHandoffAuthorityPartyCount(opts?: {
+  partySlotCount?: number;
+}): number {
+  const cap = authoritativeHandoffPartyCap();
+  const requested = Math.max(opts?.partySlotCount ?? 0, 2);
+  if (cap != null && cap >= 2) return Math.min(requested, cap);
+  return requested;
 }
 
 function logReviewLinkSignerMetadataHandoffRead(handoff: PremiumRecipientHandoffV2): void {
@@ -360,17 +412,24 @@ export function persistPremiumRecipientHandoff(patch: {
       savedAt: Date.now(),
       ...(partyIndexSlots?.length ? { partyIndexSlots } : {}),
     };
-    const fingerprint = premiumRecipientHandoffFingerprint(payload);
+    const cap = authoritativeHandoffPartyCap();
+    const trimmedPayload =
+      cap != null && cap >= 2
+        ? trimPremiumRecipientHandoffToPartyCount(payload, cap)
+        : payload;
+    const fingerprint = premiumRecipientHandoffFingerprint(trimmedPayload);
     if (fingerprint === lastPersistedHandoffFingerprint) {
       return;
     }
     lastPersistedHandoffFingerprint = fingerprint;
-    sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
+    sessionStorage.setItem(KEY_V2, JSON.stringify(trimmedPayload));
     sessionStorage.removeItem(LEGACY_KEY);
     invalidatePremiumRecipientHandoffReadCache();
-    logReviewLinkSignerMetadataHandoffWrite(payload);
-    const cap = authoritativeHandoffPartyCap();
-    const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload, cap));
+    logReviewLinkSignerMetadataHandoffWrite(trimmedPayload);
+    const slots = linearPremiumRecipientSlots(
+      trimmedPayload,
+      resolveHandoffPartySlotCount(trimmedPayload, cap),
+    );
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console
@@ -457,20 +516,27 @@ export function writePremiumRecipientHandoffExact(
       !extra.length
     )
       return;
-    sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
+    const cap = authoritativeHandoffPartyCap();
+    const trimmedPayload =
+      cap != null && cap >= 2
+        ? trimPremiumRecipientHandoffToPartyCount(payload, cap)
+        : payload;
+    sessionStorage.setItem(KEY_V2, JSON.stringify(trimmedPayload));
     sessionStorage.removeItem(LEGACY_KEY);
     invalidatePremiumRecipientHandoffReadCache();
-    logReviewLinkSignerMetadataHandoffWrite(payload);
-    const cap = authoritativeHandoffPartyCap();
-    const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload, cap));
+    logReviewLinkSignerMetadataHandoffWrite(trimmedPayload);
+    const slots = linearPremiumRecipientSlots(
+      trimmedPayload,
+      resolveHandoffPartySlotCount(trimmedPayload, cap),
+    );
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console
       console.info("[review-link-recipient-email-handoff-write]", {
         partySlots: slots.length,
         partySlotsWithEmail: withEmail,
-        party1HasEmail: Boolean(String(payload.party1.email || "").trim()),
-        party2HasEmail: Boolean(String(payload.party2.email || "").trim()),
+        party1HasEmail: Boolean(String(trimmedPayload.party1.email || "").trim()),
+        party2HasEmail: Boolean(String(trimmedPayload.party2.email || "").trim()),
       });
     }
   } catch {
@@ -530,8 +596,9 @@ export function writePremiumRecipientHandoffLinear(
     authoritativePartyCount != null && authoritativePartyCount >= 2
       ? authoritativePartyCount
       : authoritativeHandoffPartyCap();
+  const sanitized = sanitizeHandoffSlots(slots);
   const trimmed =
-    cap != null && cap >= 2 ? slots.slice(0, Math.min(slots.length, cap)) : slots;
+    cap != null && cap >= 2 ? sanitized.slice(0, Math.min(sanitized.length, cap)) : sanitized;
   const party1 = trimmed[0] ?? emptySlot();
   const party2 = trimmed[1] ?? emptySlot();
   const partyIndexSlots =

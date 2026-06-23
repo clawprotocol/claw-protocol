@@ -2286,12 +2286,21 @@ function CreateFlowSendRecipientsPanel({
       {partiesForSetup.map((party, idx) => {
         const identity = signerSetupPartyIdentities[idx];
         const resolvedLine = partyDisplaySlots[idx]?.displayName?.trim();
-        const legalEntityValue =
+        const legalEntityValueRaw =
           idx === 0
             ? recipient1Name
             : idx === 1
               ? recipient2Name
               : extraPartyLegalNames[idx - 2] ?? String((party as { name?: string }).name ?? "").trim();
+        const legalEntityValue =
+          idx === 0 || idx === 1
+            ? legalEntityValueRaw
+            : resolveSignerPartyLegalEntityDisplayValue({
+                slotIndex: idx,
+                currentInputValue: legalEntityValueRaw,
+                slotIdentities: signerSetupPartyIdentities,
+                source: "signer_setup_extra_party_input",
+              }) || legalEntityValueRaw;
         const emailVal =
           idx === 0 ? recipient1Email : idx === 1 ? recipient2Email : extraPartyReviewEmails[idx - 2] ?? "";
         const signerRenderSlot =
@@ -2306,7 +2315,16 @@ function CreateFlowSendRecipientsPanel({
                 partyAddress: partyAddresses[idx],
                 source: "signer_setup_input_render",
               })
-            : null;
+            : resolveSignerSetupRenderSlot({
+                slotIndex: idx,
+                currentLegalEntityValue: legalEntityValue,
+                slotIdentities: signerSetupPartyIdentities,
+                email: emailVal,
+                signerName: partySignerNames[idx],
+                signerTitle: partySignerTitles[idx],
+                partyAddress: partyAddresses[idx],
+                source: "signer_setup_extra_party_render",
+              });
         // Summary line uses sanitized canonical; inputs bind to live user state so edits are not snapped back.
         const partyLine =
           (signerRenderSlot?.canonicalLegalEntity ?? "") ||
@@ -2317,7 +2335,7 @@ function CreateFlowSendRecipientsPanel({
                 slotIdentities: signerSetupPartyIdentities,
                 source: "signer_setup_party_line",
               })
-            : "") ||
+            : legalEntityValue) ||
           resolvedLine ||
           String((party as { name?: string }).name ?? "").trim() ||
           identity?.displayName?.trim() ||

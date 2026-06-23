@@ -16,7 +16,8 @@ export function countSignerMetadataSlots(
   handoff: PremiumRecipientHandoffV2 | null,
   partySlotCount = 2,
 ): SignerMetadataEffectiveCounts {
-  const slots = linearPremiumRecipientSlots(handoff, Math.max(partySlotCount, 2));
+  const cappedCount = Math.max(partySlotCount, 2);
+  const slots = linearPremiumRecipientSlots(handoff, cappedCount);
   return {
     partySlots: slots.length,
     slotsWithSignerName: slots.filter((s) => signerMetadataInputRaw(s.signerName).length > 0).length,

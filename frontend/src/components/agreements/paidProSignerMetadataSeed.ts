@@ -71,12 +71,18 @@ function hydrateStringArrayNonDestructive(
 export function runPaidProSignerMetadataAuthoritySeed(
   args: PaidProSignerMetadataSeedArgs,
 ): PaidProSignerMetadataSeedResult {
-  const partyCount = Math.max(
-    args.authoritativePartyCount ?? 0,
-    args.legalEntities.length,
-    args.uiSignerNames?.length ?? 0,
-    2,
-  );
+  const partyCount = (() => {
+    const raw = Math.max(
+      args.authoritativePartyCount ?? 0,
+      args.legalEntities.length,
+      args.uiSignerNames?.length ?? 0,
+      2,
+    );
+    if (args.authoritativePartyCount != null && args.authoritativePartyCount >= 2) {
+      return Math.min(raw, args.authoritativePartyCount);
+    }
+    return raw;
+  })();
   const intakeAligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, args.legalEntities);
   const canonicalLegalEntities = intakeAligned.map((s) => s.partyLegalName || args.legalEntities[s.partyIndex] || "");
 
