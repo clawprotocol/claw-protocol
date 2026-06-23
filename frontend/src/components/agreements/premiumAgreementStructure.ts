@@ -6,6 +6,7 @@
 import { parseAgreementSections } from "./proOperationalSynthesis/sectionPurityValidator";
 import { shouldLogPremiumStructureRepair } from "./paidProDiagnosticLogPolicy";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
+import { analyzePaidProSectionStructureCompleteness } from "./paidProSectionStructureCompletenessAuthority";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 
 export type PremiumStructureIssue = {
@@ -312,7 +313,30 @@ export function validatePremiumAgreementStructure(text: string): PremiumStructur
     }
   }
 
-  const ok = issues.filter((i) => !i.repaired).length === 0;
+  const completeness = analyzePaidProSectionStructureCompleteness(working);
+  if (completeness.missingParentSections.length > 0) {
+    issues.push({
+      code: "missing_parent_sections",
+      message: `Missing parent sections: ${completeness.missingParentSections.join(", ")}`,
+    });
+  }
+  if (completeness.missingIntermediateSections.length > 0) {
+    issues.push({
+      code: "missing_intermediate_sections",
+      message: `Missing intermediate sections: ${completeness.missingIntermediateSections.slice(0, 6).join(", ")}`,
+    });
+  }
+  if (completeness.truncatedFamilies.length > 0) {
+    issues.push({
+      code: "truncated_section_families",
+      message: `Truncated section families: ${completeness.truncatedFamilies.join(", ")}`,
+    });
+  }
+
+  const ok =
+    issues.filter((i) => !i.repaired).length === 0 &&
+    completeness.missingParentSections.length === 0 &&
+    completeness.missingIntermediateSections.length === 0;
   return { text: working, ok, issues, repairs };
 }
 

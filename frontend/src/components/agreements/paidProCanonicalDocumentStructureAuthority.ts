@@ -20,6 +20,9 @@ import {
 } from "./sectionStructureAuthority";
 import { isPaidProNumberedSectionHeadingLine } from "./paidProNumberedSectionHeading";
 import { splitGluedNumberedSectionLine } from "./paidProNumberedSectionHeadingBodySplit";
+import {
+  applyPaidProSectionStructureCompletenessAuthority,
+} from "./paidProSectionStructureCompletenessAuthority";
 
 export type PaidProCanonicalStructureDiagnostics = {
   headingBodyCollapseCount: number;
@@ -225,6 +228,22 @@ export function applyPaidProCanonicalDocumentStructureAuthority(
     repairs.push(...structure.repairs.map((r) => `section_structure:${r}`));
   }
   diagnostics.structuralAnomalyCount = structure.anomalyCount;
+
+  if (phase === "pre_freeze") {
+    const completeness = applyPaidProSectionStructureCompletenessAuthority(out, {
+      source: `${source}:section_completeness`,
+      phase: "pre_freeze",
+      blockOnFatal: false,
+      log: opts?.log !== false,
+    });
+    if (completeness.repairs.length > 0) {
+      out = completeness.text;
+      repairs.push(...completeness.repairs.map((r) => `section_completeness:${r}`));
+    }
+    if (completeness.rejected) {
+      repairs.push(`section_completeness:unresolved:${completeness.rejectReason ?? "unknown"}`);
+    }
+  }
 
   const leaks = detectPaidProPlainParagraphHeadingLeaks(out);
   diagnostics.headingDemotionCount = leaks.plainParagraphHeadingLeakCount;

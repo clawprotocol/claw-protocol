@@ -16,6 +16,7 @@ import {
   establishPaidProSourceOfTruth,
   type PaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import { analyzePaidProSectionStructureCompleteness } from "./paidProSectionStructureCompletenessAuthority";
 import {
   PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
@@ -78,6 +79,22 @@ export function previewPostCheckoutRecoverySotCommit(args: {
       eligible: false,
       displayPlain: resolvedDisplayPlain,
       blockReason: "recovery_display_plain_below_review_min",
+      rawBodyLen,
+      displayPlainLen: resolvedDisplayPlain.length,
+    };
+  }
+  const completeness = analyzePaidProSectionStructureCompleteness(resolvedDisplayPlain);
+  if (
+    completeness.missingParentSections.length > 0 ||
+    completeness.missingIntermediateSections.length > 0 ||
+    completeness.fatal
+  ) {
+    return {
+      eligible: false,
+      displayPlain: resolvedDisplayPlain,
+      blockReason: completeness.fatal
+        ? "recovery_section_structure_completeness_fatal"
+        : "recovery_section_structure_incomplete",
       rawBodyLen,
       displayPlainLen: resolvedDisplayPlain.length,
     };

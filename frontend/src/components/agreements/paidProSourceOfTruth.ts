@@ -113,6 +113,7 @@ import {
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { assertPaidProDocumentBoundaryAuthorityForFreeze } from "./paidProDocumentBoundaryAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
+import { assertPaidProSectionStructureCompletenessForFreeze } from "./paidProSectionStructureCompletenessAuthority";
 import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import {
   detectPaidProOrphanSubsections,
@@ -549,6 +550,10 @@ export function establishPaidProSourceOfTruth(args: {
   if (containsUnresolvedRenderTokens(safeForCommit)) {
     throw new Error("[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority");
   }
+  safeForCommit = assertPaidProSectionStructureCompletenessForFreeze(
+    safeForCommit,
+    "establish_paid_pro_source_of_truth_pre_freeze",
+  );
   const authoritativeSignerCount = resolveAuthoritativeSignerCount({
     intakeText: args.intakeText ?? null,
     draftParties: parties,
