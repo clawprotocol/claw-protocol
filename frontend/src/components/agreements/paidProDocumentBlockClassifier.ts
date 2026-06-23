@@ -10,6 +10,9 @@ import {
   isPaidProHeadingContinuationFragment,
 } from "./repairSplitPaidProHeadingFragments";
 import {
+  PAID_PRO_GLUED_DOCUMENT_TITLE_OPENING_RE,
+} from "./paidProDocumentTitleOpeningRepair";
+import {
   isPaidProNumberedSectionHeadingLine,
   PAID_PRO_SUBSECTION_NUMBER_RE,
   parsePaidProNumberedSectionLine,
@@ -136,6 +139,10 @@ export function splitSinglePaidProDocumentBlock(block: string): string[] {
   if (!trimmed) return [];
 
   if (!trimmed.includes("\n")) {
+    const gluedTitle = trimmed.match(PAID_PRO_GLUED_DOCUMENT_TITLE_OPENING_RE);
+    if (gluedTitle?.[1] && gluedTitle[2]) {
+      return [gluedTitle[1].trim(), gluedTitle[2].trim()];
+    }
     const glued = splitGluedMainAndSubsectionHeadingLine(trimmed);
     if (glued) return glued;
     const embedded = extractMainSectionHeadingPrefix(trimmed);

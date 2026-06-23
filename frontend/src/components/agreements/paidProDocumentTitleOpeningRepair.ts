@@ -8,13 +8,19 @@ import {
   summarizePaidProDocumentBlockClassifications,
 } from "./paidProDocumentBlockClassifier";
 
+export const PAID_PRO_GLUED_DOCUMENT_TITLE_OPENING_RE =
+  /^((?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT)\s+(This\b[\s\S]+)$/;
+
 const PAID_PRO_CANONICAL_TITLE_EXTRACT_RE =
   /\b((?:MUTUAL\s+)?(?:CONSULTING\s+(?:AND\s+IMPLEMENTATION\s+|SERVICES\s+)?|SERVICES\s+)?(?:CONSULTING\s+AND\s+IMPLEMENTATION\s+|CONSULTING\s+SERVICES\s+|BUSINESS\s+CONSULTING\s+|SOFTWARE\s+DEVELOPMENT\s+SERVICES\s+)?AGREEMENT)\b/i;
+
+const PAID_PRO_STANDALONE_TITLE_LINE_RE =
+  /^(?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT\s*$/i;
 
 const PAID_PRO_CAPS_TITLE_SCAN_RE = /\b(?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT\b/g;
 
 const PAID_PRO_RECITAL_START_RE =
-  /\bThis\s+(?:Mutual\s+)?(?:Consulting\s+(?:and\s+Implementation\s+|Services\s+)?|Services\s+)?(?:Consulting\s+and\s+Implementation\s+|Consulting\s+Services\s+|Software\s+Development\s+Services\s+)?Agreement\b/i;
+  /\bThis\s+(?:(?:Mutual|MUTUAL)\s+)?(?:Consulting\s+(?:and\s+Implementation\s+|Services\s+)?|Services\s+|SERVICES\s+)?(?:Consulting\s+and\s+Implementation\s+|Consulting\s+Services\s+|Software\s+Development\s+Services\s+)?Agreement\b/i;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -35,18 +41,47 @@ function countCapsTitleOccurrences(opening: string): number {
   return (opening.match(PAID_PRO_CAPS_TITLE_SCAN_RE) ?? []).length;
 }
 
+/** Title-case recital phrase from an all-caps document title. */
+export function recitalPhraseFromTitleUpper(titleUpper: string): string {
+  return titleUpper
+    .trim()
+    .toLowerCase()
+    .replace(/(^|\s)\S/g, (m) => m.toUpperCase());
+}
+
+export function hasStandaloneTitleParagraph(opening: string): boolean {
+  const firstBlock = opening.trim().split(/\n\n+/)[0]?.trim() ?? "";
+  const lines = firstBlock.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length !== 1) return false;
+  return PAID_PRO_STANDALONE_TITLE_LINE_RE.test(lines[0] ?? "");
+}
+
+function recitalRepeatsTitlePhrase(openingFlat: string, titleUpper: string): boolean {
+  if (!titleUpper.trim()) return false;
+  const titleEsc = escapeRegex(titleUpper);
+  return new RegExp(`\\bThis\\s+${titleEsc}\\b`).test(openingFlat);
+}
+
 function collapseRecitalTitleDuplication(recital: string, titleUpper: string): string {
   let r = recital.trim();
   const titleEsc = escapeRegex(titleUpper);
+  const recitalPhrase = recitalPhraseFromTitleUpper(titleUpper);
+
   r = r.replace(new RegExp(`^(?:${titleEsc}\\s+)+`, "i"), "");
+  r = r.replace(new RegExp(`^This\\s+${titleEsc}\\b`, "i"), `This ${recitalPhrase}`);
+
   while (/^This\s+(?:MUTUAL\s+)?(?:SERVICES\s+)?AGREEMENT\s+This\s+/i.test(r)) {
     r = r.replace(/^This\s+(?:MUTUAL\s+)?(?:SERVICES\s+)?AGREEMENT\s+/i, "");
   }
   r = r.replace(
-    /^((?:This\s+(?:Mutual\s+)?(?:[A-Za-z]+\s+){0,10}Agreement\s*)+)/i,
+    /^((?:This\s+(?:(?:Mutual|MUTUAL)\s+)?(?:[A-Za-z]+\s+){0,10}Agreement\s*)+)/i,
     (match) => {
-      const parts = match.match(/This\s+(?:Mutual\s+)?(?:[A-Za-z]+\s+){0,10}Agreement\s*/gi) ?? [];
-      return parts[parts.length - 1] ?? match;
+      const parts = match.match(/This\s+(?:(?:Mutual|MUTUAL)\s+)?(?:[A-Za-z]+\s+){0,10}Agreement\s*/gi) ?? [];
+      const last = parts[parts.length - 1] ?? match;
+      if (new RegExp(titleEsc, "i").test(last)) {
+        return `This ${recitalPhrase} `;
+      }
+      return last;
     },
   );
   if (!/^This\s+/i.test(r)) {
@@ -61,29 +96,22 @@ export function needsPaidProDocumentTitleOpeningRepair(text: string): boolean {
   if (body.length < 40) return false;
 
   const opening = openingSliceBeforeSectionOne(body);
+  const openingFlat = opening.replace(/\s+/g, " ").trim();
   const firstLine = opening.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
-  if (/^[A-Z][A-Z\s&]{8,}AGREEMENT\s+This\b/.test(firstLine)) return true;
-  if (
-    /\b(?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT\s+This\s+(?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT\b/.test(
-      opening.slice(0, 800),
-    )
-  ) {
-    return true;
-  }
+
+  const titleUpper = extractCanonicalTitleUpper(opening) ?? "";
+
+  if (PAID_PRO_GLUED_DOCUMENT_TITLE_OPENING_RE.test(firstLine)) return true;
+  if (titleUpper && recitalRepeatsTitlePhrase(openingFlat, titleUpper)) return true;
   if (countCapsTitleOccurrences(opening) > 1) return true;
 
   const summary = summarizePaidProDocumentBlockClassifications(body);
-  if (summary.titleCount >= 1) return false;
+  if (summary.titleCount >= 1 && hasStandaloneTitleParagraph(opening) && (!titleUpper || !recitalRepeatsTitlePhrase(openingFlat, titleUpper))) {
+    return false;
+  }
 
-  const firstBlockLine = opening
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean) ?? "";
-  if (/^(?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT\s*$/i.test(firstBlockLine)) {
-    const afterTitle = opening.slice(opening.indexOf(firstBlockLine) + firstBlockLine.length).trim();
-    if (/^This\s+/i.test(afterTitle) && countCapsTitleOccurrences(opening) <= 1) {
-      return false;
-    }
+  if (hasStandaloneTitleParagraph(opening) && (!titleUpper || !recitalRepeatsTitlePhrase(openingFlat, titleUpper))) {
+    return false;
   }
 
   return Boolean(extractCanonicalTitleUpper(opening) && PAID_PRO_RECITAL_START_RE.test(opening));
@@ -124,9 +152,11 @@ export function repairPaidProDocumentTitleOpening(text: string): {
   recital = collapseRecitalTitleDuplication(recital, titleUpper);
 
   const rebuiltOpening = `${titleUpper}\n\n${recital}`.trim();
-  const normalizedBefore = openingPart.replace(/\s+/g, " ").trim();
-  const normalizedAfter = rebuiltOpening.replace(/\s+/g, " ").trim();
-  if (normalizedBefore === normalizedAfter) {
+  if (
+    hasStandaloneTitleParagraph(rebuiltOpening) &&
+    !recitalRepeatsTitlePhrase(recital, titleUpper) &&
+    rebuiltOpening.replace(/\s+/g, " ").trim() === openingFlat
+  ) {
     return { text: working, repairs };
   }
 
@@ -135,4 +165,14 @@ export function repairPaidProDocumentTitleOpening(text: string): {
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd();
   return { text: out, repairs };
+}
+
+/** Final visible-shell title projection — idempotent display-only separator + recital cleanup. */
+export function projectPaidProVisibleTitleDisplayPlain(plain: string): string {
+  const body = (plain || "").trim();
+  if (body.length < 40) return body;
+  const repaired = repairPaidProDocumentTitleOpening(body);
+  if (repaired.repairs.length > 0) return repaired.text;
+  if (summarizePaidProDocumentBlockClassifications(body).titleCount >= 1) return body;
+  return repairPaidProDocumentTitleOpening(body).text || body;
 }

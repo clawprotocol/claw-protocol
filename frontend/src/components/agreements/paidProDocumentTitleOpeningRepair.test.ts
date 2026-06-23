@@ -24,13 +24,14 @@ describe("repairPaidProDocumentTitleOpening", () => {
     expect(summarizePaidProDocumentBlockClassifications(clean).titleCount).toBe(1);
   });
 
-  it("dedupes repeated title phrases glued into the recital", () => {
+  it("dedupes production-style single-repeat glued title openings", () => {
     const collapsed =
-      "MUTUAL SERVICES AGREEMENT This MUTUAL SERVICES AGREEMENT This Mutual Services Agreement (this \"Agreement\") is entered into by and among Example LLC and Sample Inc.\n\n1. Services\nBody.";
+      'MUTUAL SERVICES AGREEMENT This MUTUAL SERVICES AGREEMENT (the "Agreement") is entered into by and among Example LLC and Sample Inc.\n\n1. Services\nBody.';
     const repaired = repairPaidProDocumentTitleOpening(collapsed);
     expect(repaired.repairs).toContain("display:repair_collapsed_title_opening");
     expect(repaired.text).toMatch(/^MUTUAL SERVICES AGREEMENT\n\nThis Mutual Services Agreement/m);
     expect(repaired.text).not.toMatch(/MUTUAL SERVICES AGREEMENT This MUTUAL SERVICES AGREEMENT/i);
     expect(summarizePaidProDocumentBlockClassifications(repaired.text).titleCount).toBe(1);
+    expect(summarizePaidProDocumentBlockClassifications(collapsed).titleCount).toBe(1);
   });
 });

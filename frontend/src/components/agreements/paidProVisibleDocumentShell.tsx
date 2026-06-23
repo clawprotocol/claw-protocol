@@ -16,6 +16,7 @@ import {
   resolvePaidProFirstReviewVisibleDisplayPlain,
   type PaidProFirstReviewVisibleDisplayArgs,
 } from "./paidProFirstReviewDisplayAuthority";
+import { projectPaidProVisibleTitleDisplayPlain } from "./paidProDocumentTitleOpeningRepair";
 import {
   auditPaidProPostFinalizeVisibleSurface,
   logPaidProPostFinalizeVisibleSurfaceMismatch,
@@ -46,22 +47,26 @@ export function resolveCanonicalPlainForVisibleShell(
 ): { plain: string; source: string } {
   const resolution = resolvePaidProFirstReviewVisibleDisplayPlain(args);
   logTest310DisplaySource(resolution);
-  if (resolution.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
-    if (resolution.plain.length >= 80) {
-      logTest310BlockClassification(resolution.plain);
+  const projectedPlain =
+    resolution.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+      ? projectPaidProVisibleTitleDisplayPlain(resolution.plain)
+      : resolution.plain;
+  if (projectedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+    if (projectedPlain.length >= 80) {
+      logTest310BlockClassification(projectedPlain);
     }
     logTest313HeadingRenderSource({
       source: resolution.source,
-      plain: resolution.plain,
+      plain: projectedPlain,
       paidProActive: resolution.paidProActive,
       forbiddenSourceBlocked: resolution.forbiddenSourceBlocked,
     });
     logTest314HeadingInvariant({
       source: resolution.source,
       renderer: "resolver",
-      plain: resolution.plain,
+      plain: projectedPlain,
     });
-    return { plain: resolution.plain, source: resolution.source };
+    return { plain: projectedPlain, source: resolution.source };
   }
   return { plain: "", source: resolution.source || "none" };
 }
