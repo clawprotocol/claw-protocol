@@ -92,7 +92,11 @@ import {
   hashPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
-import { writePremiumRecipientHandoffLinear } from "./premiumPartyNamesHandoff";
+import {
+  readPremiumRecipientHandoff,
+  resolveHandoffPartySlotCount,
+  writePremiumRecipientHandoffLinear,
+} from "./premiumPartyNamesHandoff";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
   isGenericPaidProAcceptanceManifestFallback,
@@ -113,7 +117,7 @@ import {
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { assertPaidProDocumentBoundaryAuthorityForFreeze } from "./paidProDocumentBoundaryAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
-import { assertPaidProSectionStructureCompletenessForFreeze } from "./paidProSectionStructureCompletenessAuthority";
+import { assertPaidProSectionStructureCompletenessForFreeze, applyPaidProSectionStructureCompletenessAuthority } from "./paidProSectionStructureCompletenessAuthority";
 import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import {
   detectPaidProOrphanSubsections,
@@ -527,7 +531,29 @@ export function establishPaidProSourceOfTruth(args: {
     intakeText: args.intakeText ?? null,
     surface: "establish_paid_pro_source_of_truth_pre_freeze",
     parties: reviewParties,
+    draftPartyCount: args.draft?.parties?.length ?? 0,
+    handoffPartySlots: (() => {
+      const handoff = readPremiumRecipientHandoff();
+      if (!handoff) return reviewParties.length;
+      return resolveHandoffPartySlotCount(handoff, reviewParties.length);
+    })(),
   });
+  const postBoundaryStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
+    source: "establish_paid_pro_source_of_truth_post_boundary",
+    phase: "pre_freeze",
+    blockOnFatal: false,
+  });
+  if (postBoundaryStructure.repairs.length > 0) {
+    safeForCommit = postBoundaryStructure.text;
+    logProCorpusSourceMap({
+      stage: "pre_freeze_canonical_structure_authority",
+      source: args.source ?? "server_full_draft",
+      len: safeForCommit.length,
+      text: safeForCommit,
+      allowedToOverride: false,
+      reason: postBoundaryStructure.repairs.slice(0, 8).join(","),
+    });
+  }
   const preFreezeExecutionManifest = resolveAcceptanceManifestRecordsForExecution({
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
@@ -696,6 +722,7 @@ export function establishPaidProSourceOfTruth(args: {
         signerTitle: party.signerTitle,
         partyAddress: party.partyAddress,
       })),
+      reviewParties.length,
     );
   }
   if (import.meta.env.DEV) {

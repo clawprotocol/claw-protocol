@@ -660,10 +660,17 @@ export function repairIncompleteIfToNoticeStanzas(
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   const noticesEnd = witnessIdx >= 0 ? witnessIdx : text.length;
   const before = text.slice(0, noticesIdx);
+  const after = text.slice(noticesEnd);
+  const fullNoticesRegion = text.slice(noticesIdx, noticesEnd);
   const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(text, noticesIdx);
   let noticesRegion = text.slice(noticesIdx, noticesFamilyEnd);
   const middle = text.slice(noticesFamilyEnd, noticesEnd);
-  const after = text.slice(noticesEnd);
+  const middleBeforeIfTo = middle.split(/\n(?=If to\s+)/i)[0]?.trim() ?? "";
+
+  if (hasInlineMalformedNoticeStanzas(fullNoticesRegion)) {
+    noticesRegion = noticesRegion.replace(/\s+(If to\s+)/gi, "\n\n$1");
+    repairs.push("notice:split_inline_stanzas");
+  }
 
   const defusedLines: string[] = [];
   for (const line of noticesRegion.split("\n")) {
@@ -679,15 +686,27 @@ export function repairIncompleteIfToNoticeStanzas(
     repairs.push(...pollutionStrip.repairs.map((r) => `notice:${r}`));
   }
 
-  const blocks = noticesRegion.split(/\n(?=If to\s+)/i);
-  const intro = blocks[0] ?? "";
-  const stanzas = blocks.slice(1);
+  const blocks = fullNoticesRegion.split(/\n(?=If to\s+)/i);
+  const introParts = [blocks[0]?.trim() ?? ""];
+  if (middleBeforeIfTo && !introParts[0]?.includes(middleBeforeIfTo)) {
+    introParts.push(middleBeforeIfTo);
+  }
+  const intro = introParts.filter(Boolean).join("\n\n");
+  const existingStanzas = blocks.slice(1).map((s) => s.trim()).filter(Boolean);
+  let tailAfterStanzas = "";
+  if (blocks.length > 1) {
+    const lastBlock = blocks[blocks.length - 1] ?? "";
+    const relIdx = fullNoticesRegion.lastIndexOf(lastBlock);
+    if (relIdx >= 0) {
+      tailAfterStanzas = fullNoticesRegion.slice(relIdx + lastBlock.length).trim();
+    }
+  }
   const rebuiltStanzas: string[] = [];
   let stanzaCount = 0;
 
   for (let i = 0; i < authorityParties.length; i++) {
     const party = authorityParties[i]!;
-    const existing = stanzas[i]?.trim() ?? "";
+    const existing = existingStanzas[i]?.trim() ?? "";
     const requiredEmail = party.signerEmail.trim();
     const stanzaHasAuthorityEmail =
       !requiredEmail ||
@@ -702,17 +721,66 @@ export function repairIncompleteIfToNoticeStanzas(
     stanzaCount += 1;
   }
 
-  if (!repairs.length) return { text, repairs };
+  if (!repairs.length) {
+    const trimmedOnly = trimOperativeNoticeStanzasToPartyCount(text, authorityParties.length);
+    if (trimmedOnly.repairs.length > 0) {
+      logPaidProNoticeSectionIntegrity({
+        repairs: trimmedOnly.repairs,
+        partyCount: authorityParties.length,
+        stanzaCount: authorityParties.length,
+      });
+      return { text: trimmedOnly.text, repairs: trimmedOnly.repairs };
+    }
+    return { text, repairs };
+  }
 
-  const mergedNotices = `${intro.trimEnd()}\n\n${rebuiltStanzas.join("\n\n")}`.replace(/\n{3,}/g, "\n\n");
-  const middlePart = middle.trimEnd();
-  const executionTail = after.trimStart();
-  const middleSuffix = middlePart ? `\n\n${middlePart}` : "";
-  text = executionTail
-    ? `${before}${mergedNotices}${middleSuffix}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trimEnd()
-    : `${before}${mergedNotices}${middleSuffix}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  const mergedParts = [`${intro.trimEnd()}\n\n${rebuiltStanzas.join("\n\n")}`.replace(/\n{3,}/g, "\n\n").trimEnd()];
+  if (tailAfterStanzas) mergedParts.push(tailAfterStanzas);
+  const mergedNotices = mergedParts.join("\n\n");
+  text = after.trimStart()
+    ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+    : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   logPaidProNoticeSectionIntegrity({ repairs, partyCount: authorityParties.length, stanzaCount });
+  const trimmed = trimOperativeNoticeStanzasToPartyCount(text, authorityParties.length);
+  if (trimmed.repairs.length > 0) {
+    repairs.push(...trimmed.repairs);
+    text = trimmed.text;
+  }
   return { text, repairs };
+}
+
+export function trimOperativeNoticeStanzasToPartyCount(
+  corpus: string,
+  partyCount: number,
+): { text: string; repairs: string[] } {
+  if (partyCount < 2) return { text: corpus, repairs: [] };
+  const noticesIdx = findNoticesSectionStart(corpus);
+  if (noticesIdx < 0) return { text: corpus, repairs: [] };
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const end = witnessIdx >= 0 ? witnessIdx : corpus.length;
+  const before = corpus.slice(0, noticesIdx);
+  const region = corpus.slice(noticesIdx, end);
+  const after = corpus.slice(end);
+  const blocks = region.split(/\n(?=If to\s+)/i);
+  const stanzaBlocks = blocks.slice(1).filter((s) => s.trim());
+  if (stanzaBlocks.length <= partyCount) return { text: corpus, repairs: [] };
+  const intro = blocks[0] ?? "";
+  const kept = stanzaBlocks.slice(0, partyCount);
+  const mergedNotices = `${intro.trimEnd()}\n\n${kept.join("\n\n")}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  const text = after.trimStart()
+    ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+    : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return { text, repairs: ["notice:trim_excess_stanzas"] };
+}
+
+/** Count operative If-to stanzas between the numbered Notices heading and execution witness. */
+export function countOperativeIfToNoticeStanzas(corpus: string): number {
+  const noticesIdx = findNoticesSectionStart(corpus);
+  if (noticesIdx < 0) return 0;
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const end = witnessIdx >= 0 ? witnessIdx : corpus.length;
+  const region = corpus.slice(noticesIdx, end);
+  return (region.match(/^If to\s+/gim) || []).length;
 }
 
 /** Hydrate operative notice stanzas from consumed signer metadata when contact fields exist. */
@@ -784,7 +852,18 @@ export function ensureOperativeIfToNoticeDelivery(
   const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
   const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);
   if (!missing && !hasPlaceholderTokens && !hasExecutionPollution && !hasInlineMalformedNotices && !hasBareNoticeStanzas) {
-    return { text: corpus, repairs: [] };
+    const trimmed = trimOperativeNoticeStanzasToPartyCount(corpus, authorityParties.length);
+    return trimmed.repairs.length > 0
+      ? { text: trimmed.text, repairs: trimmed.repairs }
+      : { text: corpus, repairs: [] };
   }
-  return repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);
+  const repaired = repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);
+  const trimmed = trimOperativeNoticeStanzasToPartyCount(repaired.text, authorityParties.length);
+  if (trimmed.repairs.length > 0) {
+    return {
+      text: trimmed.text,
+      repairs: [...repaired.repairs, ...trimmed.repairs],
+    };
+  }
+  return repaired;
 }

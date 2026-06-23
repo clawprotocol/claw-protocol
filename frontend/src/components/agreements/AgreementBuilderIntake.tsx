@@ -649,6 +649,7 @@ import {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
+  hydratePaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
   hasPaidProPipelineSessionAcceptance,
@@ -7754,7 +7755,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               }) && snapshotPlain.trim().length >= 500;
             if (
               pipelineValidatedForRecovery &&
-              establishMsg.includes("[pro-minimum-substance-blocked]")
+              (establishMsg.includes("[pro-minimum-substance-blocked]") ||
+                establishMsg.includes("[paid-pro-clause-family-structural-blocked]") ||
+                establishMsg.includes("[paid-pro-document-boundary-blocked]"))
             ) {
               try {
                 markPaidProPipelineValidationPassed({
@@ -7782,6 +7785,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   // eslint-disable-next-line no-console
                   console.warn("[premium-handoff] pipeline-validated SoT recovery failed", recoveryErr);
                 }
+              }
+            }
+            if (!hasPaidProSourceOfTruth() && pipelineValidatedForRecovery) {
+              const hydrated = hydratePaidProSourceOfTruth({
+                text: snapshotPlain,
+                source: paidProSotSource,
+                agreementGenerationId: sessionGenId,
+              });
+              if (hydrated) {
+                commitPaidProAcceptanceStorageHygiene();
+                bumpPremiumSurfaceGateTick();
+                setGuidedCompletionPhase("applied");
+                setGuidedFinalReviewExplicitlyOpened(true);
+                guidedFinalReviewExplicitlyUnlockedRef.current = true;
+                setDisplayPhase("review");
+                setCreateFlowPhaseGuarded("draft_ready_for_review");
+                setPreviewPaneRevealed(true);
+                setProFullDraftCustomGateMessage(
+                  "Your Pro agreement is ready to review. Some signing checks may need attention before finalize.",
+                );
               }
             }
             if (!hasPaidProSourceOfTruth()) {

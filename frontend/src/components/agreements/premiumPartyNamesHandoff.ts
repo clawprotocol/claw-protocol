@@ -13,6 +13,7 @@ import {
   applyPremiumRecipientHandoffReadGate,
   resetPaidProPremiumRecipientHandoffReadGateForTests,
 } from "./paidProPremiumRecipientHandoffReadGate";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
   hasCurrentSessionFreeStarterIntent,
   hasCurrentSessionProEntitlement,
@@ -223,8 +224,16 @@ export function trimPremiumRecipientHandoffToPartyCount(
   };
 }
 
+function authoritativeHandoffPartyCap(): number | undefined {
+  const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
+  if (!consumed?.length) return undefined;
+  const n = consumed.filter((p) => String(p.partyLegalName ?? "").trim().length >= 2).length;
+  return n >= 2 ? n : undefined;
+}
+
 function logReviewLinkSignerMetadataHandoffRead(handoff: PremiumRecipientHandoffV2): void {
-  const slots = linearPremiumRecipientSlots(handoff, resolveHandoffPartySlotCount(handoff));
+  const cap = authoritativeHandoffPartyCap();
+  const slots = linearPremiumRecipientSlots(handoff, resolveHandoffPartySlotCount(handoff, cap));
   const fingerprint = JSON.stringify(
     slots.map((s) => ({
       email: (s.email || "").trim(),
@@ -245,7 +254,8 @@ function logReviewLinkSignerMetadataHandoffRead(handoff: PremiumRecipientHandoff
 }
 
 function logReviewLinkSignerMetadataHandoffWrite(payload: PremiumRecipientHandoffV2): void {
-  const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload));
+  const cap = authoritativeHandoffPartyCap();
+  const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload, cap));
   const withSignerName = slots.filter((s) => signerMetadataInputRaw(s.signerName).length > 0).length;
   const withSignerTitle = slots.filter((s) => signerMetadataInputRaw(s.signerTitle).length > 0).length;
   if (!withSignerName && !withSignerTitle) return;
@@ -359,7 +369,8 @@ export function persistPremiumRecipientHandoff(patch: {
     sessionStorage.removeItem(LEGACY_KEY);
     invalidatePremiumRecipientHandoffReadCache();
     logReviewLinkSignerMetadataHandoffWrite(payload);
-    const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload));
+    const cap = authoritativeHandoffPartyCap();
+    const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload, cap));
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console
@@ -450,7 +461,8 @@ export function writePremiumRecipientHandoffExact(
     sessionStorage.removeItem(LEGACY_KEY);
     invalidatePremiumRecipientHandoffReadCache();
     logReviewLinkSignerMetadataHandoffWrite(payload);
-    const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload));
+    const cap = authoritativeHandoffPartyCap();
+    const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload, cap));
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console
@@ -510,10 +522,20 @@ export function premiumRecipientHandoffPartyFingerprint(payload: PremiumRecipien
 }
 
 /** Persist full ordered party-indexed reviewer rows (`party1`/`party2` + optional `partyIndexSlots`). */
-export function writePremiumRecipientHandoffLinear(slots: PremiumRecipientHandoffSlot[]): void {
-  const party1 = slots[0] ?? emptySlot();
-  const party2 = slots[1] ?? emptySlot();
-  const partyIndexSlots = slots.length > 2 ? slots.slice(2, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS) : undefined;
+export function writePremiumRecipientHandoffLinear(
+  slots: PremiumRecipientHandoffSlot[],
+  authoritativePartyCount?: number,
+): void {
+  const cap =
+    authoritativePartyCount != null && authoritativePartyCount >= 2
+      ? authoritativePartyCount
+      : authoritativeHandoffPartyCap();
+  const trimmed =
+    cap != null && cap >= 2 ? slots.slice(0, Math.min(slots.length, cap)) : slots;
+  const party1 = trimmed[0] ?? emptySlot();
+  const party2 = trimmed[1] ?? emptySlot();
+  const partyIndexSlots =
+    trimmed.length > 2 ? trimmed.slice(2, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS) : undefined;
   writePremiumRecipientHandoffExact(party1, party2, partyIndexSlots);
 }
 

@@ -6,13 +6,13 @@
 
 import { countStandaloneClauseFamilyHeadings, type OperativeClauseFamily } from "./clauseFamilyRegistry";
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
+import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import {
   extractOperativeIfToNoticeStanzas,
   hasInlineMalformedNoticeStanzas,
   noticeStanzaContainsPlaceholderTokens,
   noticeStanzaHasExecutionPollution,
   noticeStanzaHasRoleLabelCorruption,
-  resolveOperativeNoticesFamilyEnd,
 } from "./paidProPartyNoticeDetails";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 
@@ -39,6 +39,19 @@ const ORPHAN_ADDRESS_LINE_RE = /^\s*Address(?:\s+for\s+Notice)?\s*:\s*$/i;
 const MALFORMED_NOTICE_LABEL_RE = /^\s*Email\s+for\s+Notices?\s*:/i;
 const FUSED_NOTICES_HEADING_RE = /[a-z]\.\d+\.\s+Notices\b/i;
 
+function stanzaHasLegalEntityLine(stanza: string): boolean {
+  const trimmed = (stanza || "").trim();
+  if (!trimmed) return false;
+  const lines = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const entityLine = lines[1] ?? "";
+  if (entityLine.length >= 3) return true;
+  const fused = lines[0]?.match(/^If to\s+(.+?)\s*:\s*(.+)$/i);
+  return Boolean(fused && fused[2].trim().length >= 3);
+}
+
 function isOrphanLabelLine(lines: readonly string[], idx: number): boolean {
   const trimmed = lines[idx]?.trim() ?? "";
   if (!trimmed) return false;
@@ -53,29 +66,90 @@ function isOrphanLabelLine(lines: readonly string[], idx: number): boolean {
   return true;
 }
 
-function noticesRegionSlice(corpus: string): string {
+/** Notices heading through execution witness — canonical stanza count authority. */
+function noticesRegionToWitness(corpus: string): string {
   const text = (corpus || "").replace(/\r\n/g, "\n");
   const heading = text.match(NOTICES_HEADING_RE);
   if (!heading || heading.index == null) return "";
   const start = heading.index;
-  const end = resolveOperativeNoticesFamilyEnd(text, start);
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  const end = witnessIdx >= 0 ? witnessIdx : text.length;
   return text.slice(start, end);
 }
 
 function countIfToStanzas(noticesRegion: string): number {
-  const stanzas = extractOperativeIfToNoticeStanzas(noticesRegion);
-  if (!stanzas.trim()) return 0;
-  return stanzas.split(/\n\n(?=If to\s+)/i).filter((s) => s.trim()).length || 1;
+  if (!noticesRegion.trim()) return 0;
+  return (noticesRegion.match(/^If to\s+/gim) || []).length;
+}
+
+function resolveCanonicalAuthorityPartyCount(
+  parties?: readonly PaidProSignerMetadataParty[],
+): number {
+  if (!parties?.length) return 0;
+  return parties.filter((p) => String(p.partyLegalName ?? "").trim().length >= 2).length;
+}
+
+function requiredNoticeStanzaCount(
+  parties?: readonly PaidProSignerMetadataParty[],
+  requireTwo = true,
+): number {
+  const canonical = resolveCanonicalAuthorityPartyCount(parties);
+  if (canonical >= 2) return canonical;
+  return requireTwo ? 2 : 0;
+}
+
+function isTestMode(): boolean {
+  return typeof import.meta !== "undefined" && import.meta.env?.MODE === "test";
+}
+
+export function logNoticeStanzaValidationDiagnostic(payload: {
+  surface?: string;
+  phase: "pre_acceptance" | "post_acceptance";
+  canonicalAuthorityPartyCount: number;
+  draftPartyCount?: number;
+  handoffPartySlots?: number;
+  noticeStanzaCount: number;
+  noticeValidationPartySource: string;
+  violations: string[];
+}): void {
+  if (isTestMode()) return;
+  const excessSlots =
+    payload.handoffPartySlots != null &&
+    payload.canonicalAuthorityPartyCount >= 2 &&
+    payload.handoffPartySlots > payload.canonicalAuthorityPartyCount;
+  if (
+    payload.violations.length === 0 &&
+    !excessSlots &&
+    payload.noticeStanzaCount >= payload.canonicalAuthorityPartyCount
+  ) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-notice-stanza-validation]", {
+    ...payload,
+    excessPartySlotsVsAuthority: excessSlots,
+  });
 }
 
 export function validateNoticesClauseFamilyStructuralIntegrity(
   corpus: string,
-  opts?: { parties?: readonly PaidProSignerMetadataParty[]; requireTwoPartyStanzas?: boolean },
+  opts?: {
+    parties?: readonly PaidProSignerMetadataParty[];
+    requireTwoPartyStanzas?: boolean;
+    surface?: string;
+    phase?: "pre_acceptance" | "post_acceptance";
+    handoffPartySlots?: number;
+    draftPartyCount?: number;
+  },
 ): ClauseFamilyStructuralViolation[] {
   const violations: ClauseFamilyStructuralViolation[] = [];
   const text = (corpus || "").replace(/\r\n/g, "\n");
   const hasProperHeading = NOTICES_HEADING_RE.test(text);
-  const region = noticesRegionSlice(text);
+  const region = noticesRegionToWitness(text);
+  const canonicalAuthorityPartyCount = resolveCanonicalAuthorityPartyCount(opts?.parties);
+  const requiredStanzas = requiredNoticeStanzaCount(opts?.parties, opts?.requireTwoPartyStanzas !== false);
+  const noticeValidationPartySource =
+    canonicalAuthorityPartyCount >= 2 ? "canonical_authority_parties" : "minimum_two_party";
 
   if (hasInlineMalformedNoticeStanzas(text)) {
     violations.push({
@@ -111,7 +185,11 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
     return violations;
   }
 
-  if (!NOTICES_OPERATIVE_TEXT_RE.test(region) && countIfToStanzas(region) < 2) {
+  const stanzaCount = countIfToStanzas(region);
+  const stanzasSatisfyAuthority =
+    requiredStanzas > 0 && stanzaCount >= requiredStanzas;
+
+  if (!NOTICES_OPERATIVE_TEXT_RE.test(region) && !stanzasSatisfyAuthority) {
     violations.push({
       family: "notices",
       code: "missing_operative_notice_text",
@@ -120,14 +198,12 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   }
 
   const stanzaBlob = extractOperativeIfToNoticeStanzas(region);
-  const stanzaCount = countIfToStanzas(region);
-  const requireTwo = opts?.requireTwoPartyStanzas !== false;
 
-  if (requireTwo && stanzaCount < 2) {
+  if (requiredStanzas > 0 && stanzaCount < requiredStanzas) {
     violations.push({
       family: "notices",
       code: "missing_party_notice_stanzas",
-      message: `Expected at least 2 If to notice stanzas; found ${stanzaCount}.`,
+      message: `Expected ${requiredStanzas} If to notice stanzas; found ${stanzaCount}.`,
     });
   }
 
@@ -155,8 +231,7 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
           message: `Party ${idx + 1} notice stanza has corrupted role labels.`,
         });
       }
-      const entityLine = stanza.split("\n")[1]?.trim() ?? "";
-      if (!entityLine || entityLine.length < 3) {
+      if (!stanzaHasLegalEntityLine(stanza)) {
         violations.push({
           family: "notices",
           code: "empty_notice_entity_name",
@@ -191,6 +266,17 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
       });
     }
   }
+
+  logNoticeStanzaValidationDiagnostic({
+    surface: opts?.surface,
+    phase: opts?.phase ?? "pre_acceptance",
+    canonicalAuthorityPartyCount,
+    draftPartyCount: opts?.draftPartyCount,
+    handoffPartySlots: opts?.handoffPartySlots,
+    noticeStanzaCount: stanzaCount,
+    noticeValidationPartySource,
+    violations: violations.map((v) => v.code),
+  });
 
   return violations;
 }
@@ -245,6 +331,10 @@ export function validateClauseFamilyStructuralIntegrity(
     parties?: readonly PaidProSignerMetadataParty[];
     families?: OperativeClauseFamily[];
     requireNotices?: boolean;
+    surface?: string;
+    phase?: "pre_acceptance" | "post_acceptance";
+    handoffPartySlots?: number;
+    draftPartyCount?: number;
   },
 ): ClauseFamilyStructuralIntegrityReport {
   const families = opts?.families ?? [
@@ -255,7 +345,15 @@ export function validateClauseFamilyStructuralIntegrity(
   const violations: ClauseFamilyStructuralViolation[] = [];
 
   if (families.includes("notices") || opts?.requireNotices !== false) {
-    violations.push(...validateNoticesClauseFamilyStructuralIntegrity(corpus, opts));
+    violations.push(
+      ...validateNoticesClauseFamilyStructuralIntegrity(corpus, {
+        parties: opts?.parties,
+        surface: opts?.surface,
+        phase: opts?.phase,
+        handoffPartySlots: opts?.handoffPartySlots,
+        draftPartyCount: opts?.draftPartyCount,
+      }),
+    );
   }
   if (families.includes("governing_law")) {
     violations.push(...validateGoverningLawClauseFamilyStructuralIntegrity(corpus));
@@ -278,9 +376,18 @@ export function validateClauseFamilyStructuralIntegrity(
 /** Hard gate — throws when any clause family fails structural validation. */
 export function assertClauseFamilyStructuralIntegrityForFreeze(
   corpus: string,
-  opts?: Parameters<typeof validateClauseFamilyStructuralIntegrity>[1] & { surface?: string },
+  opts?: Parameters<typeof validateClauseFamilyStructuralIntegrity>[1] & {
+    surface?: string;
+    phase?: "pre_acceptance" | "post_acceptance";
+    handoffPartySlots?: number;
+    draftPartyCount?: number;
+  },
 ): void {
-  const report = validateClauseFamilyStructuralIntegrity(corpus, opts);
+  const report = validateClauseFamilyStructuralIntegrity(corpus, {
+    ...opts,
+    surface: opts?.surface ?? "freeze",
+    phase: opts?.phase ?? "post_acceptance",
+  });
   if (!report.ok) {
     const codes = report.violations.map((v) => v.code).join(",");
     throw new Error(

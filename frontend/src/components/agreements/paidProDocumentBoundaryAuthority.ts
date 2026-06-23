@@ -27,6 +27,10 @@ export type PaidProDocumentBoundaryAuthorityOpts = PaidProNoticeContactAuthority
   blockOnViolation?: boolean;
   /** Party authority for clause-family structural validation at freeze. */
   parties?: readonly import("./paidProSignerMetadataAuthority").PaidProSignerMetadataParty[];
+  /** Diagnostics — draft-derived party row count (may exceed canonical authority). */
+  draftPartyCount?: number;
+  /** Diagnostics — session handoff slot count before trim. */
+  handoffPartySlots?: number;
 };
 
 export type PaidProDocumentBoundaryAuthorityResult = {
@@ -221,6 +225,9 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
       assertClauseFamilyStructuralIntegrityForFreeze(out, {
         parties: opts?.parties,
         surface: opts?.surface ?? "paid_pro_document_boundary_freeze",
+        phase: "post_acceptance",
+        draftPartyCount: opts?.draftPartyCount,
+        handoffPartySlots: opts?.handoffPartySlots,
       });
       return out;
     }
