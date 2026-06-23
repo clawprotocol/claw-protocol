@@ -77,6 +77,7 @@ import {
 import {
   isPaidProUserVisibleDocumentSurface,
   resolvePaidProDisplayPlainForSurface,
+  resolvePaidProFrozenUserVisibleReviewDisplayHash,
 } from "./paidProDisplayPlainAuthority";
 import { paidProSignerExecutionCorpusIsFrozen } from "./paidProFinalHydratedCorpus";
 import { logPaidProDriftCorpusCaptureOnce } from "./paidProDriftCorpusCapture";
@@ -100,6 +101,8 @@ import {
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { assertPaidProSingleExecutionBlock } from "./paidProExecutionBlockAuthority";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
+import { resolvePaidProFrozenDisplayAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 import {
   clearPaidProReviewRenderFusedRepairCache,
@@ -926,7 +929,20 @@ export function getPaidProDocumentForSurface(
     len: text.length,
     hash,
     source: corpusSource,
-    canonicalHash: sotForTelemetry?.hash ?? hash,
+    canonicalHash:
+      resolvePaidProFrozenUserVisibleReviewDisplayHash({
+        intakeText: opts?.intakeText ?? null,
+        draft: opts?.draft ?? null,
+      }) ??
+      (shouldUsePaidProSourceOfTruthDisplayOnly()
+        ? resolvePaidProFrozenDisplayAuthoritativeHash({
+            intakeText: opts?.intakeText ?? null,
+            draftPartyNames:
+              opts?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+          })
+        : null) ??
+      sotForTelemetry?.hash ??
+      hash,
     canonicalLen: sotForTelemetry?.text.length ?? text.length,
   });
   return {

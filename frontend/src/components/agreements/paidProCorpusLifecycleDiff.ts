@@ -285,11 +285,22 @@ export function auditPaidProReviewRenderCorpus(renderedText: string): PaidProCor
   const fromStage: PaidProCorpusLifecycleStage = checkpoints.has("signer_finalize")
     ? "signer_finalize"
     : "canonical_freeze";
-  return auditPaidProCorpusLifecycleFromCheckpoint({
+  const from = checkpoints.get(fromStage);
+  if (!from) return null;
+  const beforeDisplay = shouldUsePaidProSourceOfTruthDisplayOnly()
+    ? preparePaidProFrozenDisplayPlain(from.text).text
+    : from.text;
+  const payload = auditPaidProCorpusLifecycleTransition({
     fromStage,
     toStage: "review_render",
+    beforeText: beforeDisplay,
     afterText: renderedText,
   });
+  checkpoints.set("review_render", {
+    text: trimCorpus(renderedText),
+    hash: payload.toHash,
+  });
+  return payload;
 }
 
 export function auditPaidProReviewLinkGenerationCorpus(

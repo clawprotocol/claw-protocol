@@ -780,7 +780,12 @@ export function resolvePaidProReviewRenderPlain(
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
       const visible = finishUserVisiblePlain(locked);
       auditPaidProReviewRenderCorpus(visible);
-      auditPaidProReviewRenderSotParity({ reviewPlain: visible, surface: "paid_pro_post_finalize_locked" });
+      auditPaidProReviewRenderSotParity({
+        reviewPlain: visible,
+        surface: "paid_pro_post_finalize_locked",
+        intakeText: args?.intakeText ?? null,
+        draft: args?.draft ?? null,
+      });
       return visible;
     }
   }
@@ -810,7 +815,7 @@ export function resolvePaidProReviewRenderPlain(
   }
 
   let rendered: string;
-  if (shouldUsePaidProSourceOfTruthDisplayOnly() && !needsSignerOverlay) {
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
     rendered = tracePaidProQaPassText(
       "resolvePaidProReviewRenderPlain",
       `${surface}:display_only_sot`,
@@ -856,7 +861,12 @@ export function resolvePaidProReviewRenderPlain(
   const visible = finishUserVisiblePlain(rendered);
   if (visible.length >= 200 && hasPaidProSourceOfTruth()) {
     auditPaidProReviewRenderCorpus(visible);
-    auditPaidProReviewRenderSotParity({ reviewPlain: visible, surface: "paid_pro_review_render_plain" });
+    auditPaidProReviewRenderSotParity({
+      reviewPlain: visible,
+      surface: "paid_pro_review_render_plain",
+      intakeText: args?.intakeText ?? null,
+      draft: args?.draft ?? null,
+    });
   }
   return visible;
 }

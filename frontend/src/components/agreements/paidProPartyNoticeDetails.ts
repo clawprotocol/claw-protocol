@@ -10,6 +10,7 @@ import { resolveAuthoritativePartySlotCount } from "./partySlotIdentityNormalize
 import {
   mergeLabeledPartyAuthorityIntoParties,
   partyDisplayRoleLabelForAuthorityParty,
+  preserveSlotIndexedSignerMetadataParties,
   type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
@@ -304,7 +305,7 @@ function resolveCanonicalNoticeAuthorityParties(
   if (!intake) return base.slice(0, maxParties);
 
   const merged = mergeLabeledPartyAuthorityIntoParties(base, intake);
-  return merged.slice(0, maxParties);
+  return preserveSlotIndexedSignerMetadataParties(merged, base).slice(0, maxParties);
 }
 
 function enrichNoticeAuthorityParties(
@@ -471,6 +472,9 @@ function expandFusedIfToNoticeStanza(stanza: string): string {
 
 function buildIfToNoticeStanza(party: PaidProSignerMetadataParty): string {
   const legal = party.partyLegalName.trim();
+  if (!legal || legal.length < 2) {
+    throw new Error(`[paid-pro-notice-entity-missing] partyIndex=${party.partyIndex}`);
+  }
   const lines = [`If to ${legal}:`, legal];
   const name = party.signerName.trim();
   const title = party.signerTitle.trim();

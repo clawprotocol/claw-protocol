@@ -18,7 +18,6 @@ import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetad
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
-import { readPaidProPinnedSignerAppliedCorpus, PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN } from "./paidProFinalHydratedCorpus";
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
   return prefix
@@ -132,9 +131,6 @@ function shouldUseFrozenDisplayPrepOnly(opts?: { frozenDisplayOnly?: boolean }):
   if (!hasPaidProSourceOfTruth()) return false;
   if (getPaidProSourceOfTruthText().trim().length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
   if (hasAuthoritativeSigningSnapshot()) return false;
-  if (readPaidProPinnedSignerAppliedCorpus().trim().length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
-    return false;
-  }
   return true;
 }
 

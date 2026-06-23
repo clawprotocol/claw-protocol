@@ -193,8 +193,16 @@ function mergeSlot(
   return { name, email, role, signerName, signerTitle, partyAddress };
 }
 
+function resolveHandoffPartySlotCount(handoff: PremiumRecipientHandoffV2): number {
+  const indexed = 2 + (handoff.partyIndexSlots?.length ?? 0);
+  const namedExtra = [handoff.party1?.name, handoff.party2?.name]
+    .concat((handoff.partyIndexSlots ?? []).map((s) => s.name))
+    .filter((n) => String(n ?? "").trim().length >= 2).length;
+  return Math.max(2, indexed, namedExtra);
+}
+
 function logReviewLinkSignerMetadataHandoffRead(handoff: PremiumRecipientHandoffV2): void {
-  const slots = linearPremiumRecipientSlots(handoff, 2 + (handoff.partyIndexSlots?.length ?? 0));
+  const slots = linearPremiumRecipientSlots(handoff, resolveHandoffPartySlotCount(handoff));
   const fingerprint = JSON.stringify(
     slots.map((s) => ({
       email: (s.email || "").trim(),
@@ -215,7 +223,7 @@ function logReviewLinkSignerMetadataHandoffRead(handoff: PremiumRecipientHandoff
 }
 
 function logReviewLinkSignerMetadataHandoffWrite(payload: PremiumRecipientHandoffV2): void {
-  const slots = linearPremiumRecipientSlots(payload, 2 + (payload.partyIndexSlots?.length ?? 0));
+  const slots = linearPremiumRecipientSlots(payload, resolveHandoffPartySlotCount(payload));
   const withSignerName = slots.filter((s) => signerMetadataInputRaw(s.signerName).length > 0).length;
   const withSignerTitle = slots.filter((s) => signerMetadataInputRaw(s.signerTitle).length > 0).length;
   if (!withSignerName && !withSignerTitle) return;

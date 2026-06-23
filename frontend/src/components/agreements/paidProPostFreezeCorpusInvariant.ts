@@ -7,6 +7,7 @@ import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPa
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import { countWitnessExecutionSections } from "./paidProSignerSigningCorpusHygiene";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
+import { preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
@@ -114,6 +115,16 @@ export function resolvePaidProFrozenAuthoritativeHash(): string | null {
   if (frozen) return frozen;
   if (hasPaidProSourceOfTruth()) return getPaidProSourceOfTruth()?.hash ?? null;
   return null;
+}
+
+/** Display-prepared frozen baseline hash — review/display surfaces compare against this after acceptance. */
+export function resolvePaidProFrozenDisplayAuthoritativeHash(
+  opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] | null },
+): string | null {
+  const plain = resolvePaidProFrozenAuthoritativePlain();
+  if (!plain) return null;
+  const display = preparePaidProFrozenDisplayPlain(plain, opts).text.trim();
+  return display.length >= 80 ? hashPaidProCorpus(display) : null;
 }
 
 /**

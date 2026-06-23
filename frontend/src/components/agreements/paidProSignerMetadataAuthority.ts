@@ -48,6 +48,37 @@ export function authorityPartiesFromLabeledPartyIntake(
   }));
 }
 
+/** Preserve slot-index consumed signer metadata when intake merge would blank legal names or contact fields. */
+export function preserveSlotIndexedSignerMetadataParties(
+  merged: readonly PaidProSignerMetadataParty[],
+  source: readonly PaidProSignerMetadataParty[],
+): PaidProSignerMetadataParty[] {
+  const max = Math.max(merged.length, source.length);
+  const out: PaidProSignerMetadataParty[] = [];
+  for (let i = 0; i < max; i++) {
+    const slot = merged[i];
+    const auth = source.find((p) => (p.partyIndex ?? 0) === i) ?? source[i];
+    if (!auth && slot) {
+      out.push({ ...slot, partyIndex: i });
+      continue;
+    }
+    if (!slot && auth) {
+      out.push({ ...auth, partyIndex: i });
+      continue;
+    }
+    if (!slot || !auth) continue;
+    out.push({
+      partyIndex: i,
+      partyLegalName: slot.partyLegalName.trim() || auth.partyLegalName.trim(),
+      signerEmail: slot.signerEmail.trim() || auth.signerEmail.trim(),
+      signerName: slot.signerName.trim() || auth.signerName.trim(),
+      signerTitle: slot.signerTitle.trim() || auth.signerTitle.trim(),
+      partyAddress: slot.partyAddress.trim() || auth.partyAddress.trim(),
+    });
+  }
+  return out;
+}
+
 /** Merge labeled intake authority into review parties — slot index is authoritative; UI fills gaps only. */
 export function mergeLabeledPartyAuthorityIntoParties(
   parties: readonly PaidProSignerMetadataParty[],
@@ -58,7 +89,9 @@ export function mergeLabeledPartyAuthorityIntoParties(
     authorityParties: parties,
   });
   if (normalized.length < 2 && parties.length >= 2) return [...parties];
-  return toPaidProSignerMetadataParties(normalized) as PaidProSignerMetadataParty[];
+  const merged = toPaidProSignerMetadataParties(normalized) as PaidProSignerMetadataParty[];
+  if (!parties.length) return merged;
+  return preserveSlotIndexedSignerMetadataParties(merged, parties);
 }
 
 export function labeledPartyIntakeHasHydratableExecutionFields(intakeText?: string | null): boolean {

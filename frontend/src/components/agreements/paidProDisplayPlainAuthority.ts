@@ -16,9 +16,9 @@ import {
 } from "./paidProExecutionBlockEntityHeading";
 import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
-import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
+import { shouldUsePaidProSourceOfTruthDisplayOnly, resolvePaidProAuthoritativeDisplayPlain, type ResolvePaidProAuthoritativeDisplayPlainArgs } from "./paidProAuthoritativeRenderGate";
 import { enrichPaidProPostFinalizeDisplayCorpus } from "./paidProPostFinalizeReviewSurface";
-import type { PaidProDocumentSurface } from "./paidProSourceOfTruth";
+import { hashPaidProCorpus, type PaidProDocumentSurface } from "./paidProSourceOfTruth";
 
 export type PaidProUserVisibleDisplaySurface =
   | PaidProDocumentSurface
@@ -48,6 +48,21 @@ export function applyPaidProUserVisibleDisplayPrep(plain: string): string {
     return preparePaidProFrozenDisplayPlain(body).text.trimEnd();
   }
   return preparePaidProReviewDisplayPlain(body).text.trimEnd();
+}
+
+/** Frozen SoT review plain after authorized display prep and user-visible finishing. */
+export function resolvePaidProFrozenUserVisibleReviewDisplayPlain(
+  args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
+): string {
+  if (!shouldUsePaidProSourceOfTruthDisplayOnly()) return "";
+  return applyPaidProUserVisibleDisplayPrep(resolvePaidProAuthoritativeDisplayPlain(args)).trim();
+}
+
+export function resolvePaidProFrozenUserVisibleReviewDisplayHash(
+  args?: ResolvePaidProAuthoritativeDisplayPlainArgs,
+): string | null {
+  const plain = resolvePaidProFrozenUserVisibleReviewDisplayPlain(args);
+  return plain.length >= 80 ? hashPaidProCorpus(plain) : null;
 }
 
 export type ResolvePaidProDisplayPlainForSurfaceArgs = {

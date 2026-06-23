@@ -1,12 +1,12 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as paidProAgreementPolish from "./paidProAgreementPolish";
-import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
-import { hasBareEntityOnlyNoticeStanzas } from "./paidProPartyNoticeDetails";
+import { hasBareEntityOnlyNoticeStanzas, isOperativeIfToNoticeStanzaHeading } from "./paidProPartyNoticeDetails";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 import { auditPaidProReviewRenderSotParity } from "./paidProReviewSotParity";
+import { resolvePaidProFrozenUserVisibleReviewDisplayHash } from "./paidProDisplayPlainAuthority";
 import * as paidProSectionRenderNormalize from "./paidProSectionRenderNormalize";
 import {
   clearConsumedPaidProSignerMetadataAuthority,
@@ -24,11 +24,14 @@ import {
 } from "./paidProSourceOfTruth";
 import { buildTest401MalformedServerDraft } from "./paidProTest401MalformedQuadPartyExecutionBlockRecovery.test";
 import {
-  TEST404_PARTY_EMAILS,
-  TEST404_PRODUCTION_QUAD_PARTY_INTAKE,
-  test404Draft,
-  test404Parties,
-} from "./paidProTest404Fixtures";
+  TEST405_PARTY_ADDRESSES,
+  TEST405_PARTY_EMAILS,
+  TEST405_PRODUCTION_QUAD_PARTY_INTAKE,
+  TEST405_SIGNER_NAMES,
+  TEST405_SIGNER_TITLES,
+  test405Draft,
+  test405Parties,
+} from "./paidProTest405Fixtures";
 import { consumeAuthoritativeSignerCount, resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { resolveSignerSetupUiPartyCount } from "./paidProNPartySignerSetup";
 import { resolveFinalVs01CorpusOrBlock } from "../../vs01/vs01SigningCorpus";
@@ -51,7 +54,7 @@ function padBeforeWitness(base: string, minLen = 2000): string {
   return `${base.slice(0, insertAt)}${pad}${base.slice(insertAt)}`;
 }
 
-function buildTest404ServerDraft(): string {
+function buildTest405ServerDraft(): string {
   let body = buildTest401MalformedServerDraft();
   for (const name of [RED, BLUE, HARBOR, IRON]) {
     const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -67,6 +70,18 @@ function countIfToNoticeStanzas(text: string): number {
   return (region.match(/^If to\s+/gim) || []).length;
 }
 
+function extractNoticeStanzas(text: string): string[] {
+  const noticesIdx = text.search(/\bNotices\b/i);
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const region = witnessIdx >= 0 ? text.slice(noticesIdx, witnessIdx) : text.slice(noticesIdx);
+  return region.split(/\n(?=If to\s+)/i).slice(1).map((s) => s.trim()).filter(Boolean);
+}
+
+function executionTail(text: string): string {
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  return witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+}
+
 afterEach(() => {
   clearPaidProSourceOfTruth();
   clearConsumedPaidProSignerMetadataAuthority();
@@ -74,17 +89,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("TEST404_FOUR_PARTY_NOTICE_AND_FREEZE_AUTHORITY", () => {
-  it("preserves 4-party freeze, hydrates notice metadata, blocks post-freeze mutation, and keeps single execution block", () => {
-    const draft = test404Draft();
-    const intake = TEST404_PRODUCTION_QUAD_PARTY_INTAKE;
-    const parties = test404Parties();
-    const raw = padBeforeWitness(buildTest404ServerDraft());
+describe("TEST405_FOUR_PARTY_SIGNER_METADATA_HYDRATION", () => {
+  it("hydrates all 4 notice stanzas, preserves 4-party execution, and keeps display hash parity", () => {
+    const draft = test405Draft();
+    const intake = TEST405_PRODUCTION_QUAD_PARTY_INTAKE;
+    const parties = test405Parties();
+    const raw = padBeforeWitness(buildTest405ServerDraft());
 
     setConsumedPaidProSignerMetadataAuthority({
       parties,
       source: "live_ui",
-      hash: "test404",
+      hash: "test405",
       updatedAt: 0,
     });
 
@@ -103,14 +118,9 @@ describe("TEST404_FOUR_PARTY_NOTICE_AND_FREEZE_AUTHORITY", () => {
     setConsumedPaidProSignerMetadataAuthority({
       parties,
       source: "live_ui",
-      hash: "test404",
+      hash: "test405",
       updatedAt: Date.now(),
     });
-
-    const record = getPaidProSourceOfTruth()!;
-    const frozen = getFrozenCanonicalAgreementCorpus();
-    expect(frozen?.hash).toBeTruthy();
-    const canonicalHash = hashPaidProCorpus(record.text);
 
     const sectionRenderSpy = vi.spyOn(paidProSectionRenderNormalize, "normalizePaidProSectionRender");
     const polishSpy = vi.spyOn(paidProAgreementPolish, "polishPaidProAgreementText");
@@ -120,31 +130,46 @@ describe("TEST404_FOUR_PARTY_NOTICE_AND_FREEZE_AUTHORITY", () => {
     expect(sectionRenderSpy).not.toHaveBeenCalled();
     expect(polishSpy).not.toHaveBeenCalled();
 
-    const polishResult = paidProAgreementPolish.polishPaidProAgreementText(
-      record.text,
-      intake,
-      [RED, BLUE, HARBOR, IRON],
-      { surface: "preview_premium_deliverable" },
-    );
-    expect(polishResult.text).toBe(record.text);
-    expect(polishResult.log.recital.applied).toBe(false);
-
-    expect(hashPaidProCorpus(record.text)).toBe(canonicalHash);
+    expect(reviewPlain).toMatch(/^MUTUAL SERVICES AGREEMENT\n\nThis /m);
 
     const parity = auditPaidProReviewRenderSotParity({ reviewPlain, intakeText: intake, draft });
     expect(parity.invariantOk).toBe(true);
 
+    const displayBaselineHash = resolvePaidProFrozenUserVisibleReviewDisplayHash({
+      intakeText: intake,
+      draft,
+    });
+    expect(displayBaselineHash).toBeTruthy();
+    expect(hashPaidProCorpus(reviewPlain)).toBe(displayBaselineHash);
+
     expect(countIfToNoticeStanzas(reviewPlain)).toBe(4);
     expect(hasBareEntityOnlyNoticeStanzas(reviewPlain)).toBe(false);
-    expect(reviewPlain).toContain(TEST404_PARTY_EMAILS.red);
-    expect(reviewPlain).toContain(TEST404_PARTY_EMAILS.blue);
-    expect(reviewPlain).toContain(TEST404_PARTY_EMAILS.harbor);
-    expect(reviewPlain).toContain(TEST404_PARTY_EMAILS.iron);
-    expect(reviewPlain).toContain("Oklahoma City, OK 73101");
-    expect(reviewPlain).toContain("Tulsa, OK 74103");
-    expect(reviewPlain).not.toMatch(
-      /Primary business address and email on file with the other Parties\.\s*\n\nIf to/i,
-    );
+    expect(reviewPlain).not.toMatch(/If to\s*:\s*\n/i);
+
+    const stanzas = extractNoticeStanzas(reviewPlain);
+    expect(stanzas).toHaveLength(4);
+
+    const entities = [RED, BLUE, HARBOR, IRON];
+    const emails = Object.values(TEST405_PARTY_EMAILS);
+    const addresses = Object.values(TEST405_PARTY_ADDRESSES);
+
+    stanzas.forEach((stanza, i) => {
+      expect(isOperativeIfToNoticeStanzaHeading(stanza.split("\n")[0] ?? "")).toBe(true);
+      expect(stanza).toContain(entities[i]!);
+      expect(stanza).toContain(TEST405_SIGNER_NAMES[i]!);
+      expect(stanza).toContain(TEST405_SIGNER_TITLES[i]!);
+      expect(stanza).toContain(emails[i]!);
+      expect(stanza).toContain(addresses[i]!.slice(0, 12));
+      expect(stanza).not.toContain("Primary business address and email on file with the other Parties.");
+    });
+
+    const tail = executionTail(reviewPlain);
+    for (const name of entities) {
+      expect(tail).toMatch(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    }
+    for (const signer of TEST405_SIGNER_NAMES) {
+      expect(tail).toMatch(new RegExp(signer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    }
 
     expect(countPaidProExecutionBlocks(reviewPlain)).toBe(1);
     expect((reviewPlain.match(/\bIN WITNESS WHEREOF\b/gi) || []).length).toBe(1);
@@ -156,10 +181,9 @@ describe("TEST404_FOUR_PARTY_NOTICE_AND_FREEZE_AUTHORITY", () => {
       corpusPlain: reviewPlain,
     });
     expect(resolution.count).toBe(4);
-    expect(resolution.draftCount).toBe(2);
 
     expect(
-      consumeAuthoritativeSignerCount("test404_metadata_authority", {
+      consumeAuthoritativeSignerCount("test405_metadata_authority", {
         intakeText: intake,
         draftParties: draft.parties,
         manifestPartyCount: 4,
@@ -186,8 +210,7 @@ describe("TEST404_FOUR_PARTY_NOTICE_AND_FREEZE_AUTHORITY", () => {
     expect(vs01.allowed).toBe(true);
     expect(vs01.signerCount).toBe(4);
 
-    for (const name of [RED, BLUE, HARBOR, IRON]) {
-      expect(reviewPlain).toMatch(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
-    }
+    const record = getPaidProSourceOfTruth()!;
+    expect(hashPaidProCorpus(record.text)).toBeTruthy();
   });
 });

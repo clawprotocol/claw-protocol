@@ -71,7 +71,14 @@ export function shouldApplyExecutionBlockSignerOverlay(args: {
   intakeText?: string | null;
   corpusText?: string | null;
 }): boolean {
-  if (shouldUsePaidProSourceOfTruthDisplayOnly()) return false;
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    const parties = args.parties ?? [];
+    const withLegal = parties.filter((p) => p.partyLegalName.trim().length >= 2);
+    if (withLegal.length >= 3 && hasSignerMetadataForExecutionOverlay(parties)) {
+      return true;
+    }
+    return false;
+  }
   if (
     args.corpusText?.trim() &&
     executionBlockSignerMetadataAppearsHydrated(args.corpusText, args.parties)

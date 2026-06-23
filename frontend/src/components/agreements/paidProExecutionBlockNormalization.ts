@@ -173,7 +173,9 @@ function manifestRolesFromLegalNames(
   names: readonly string[],
   intakeText?: string | null,
 ): ManifestExecutionRole[] {
-  const quad = Boolean(intakeText && isQuadripartiteLabeledPartiesIntake(intakeText));
+  const quad = Boolean(
+    (intakeText && isQuadripartiteLabeledPartiesIntake(intakeText)) || names.length >= 4,
+  );
   const tripartite = !quad && names.length >= 3 && isTripartiteLabeledPartiesIntake(intakeText ?? "");
   return names.map((legalName, index) => {
     const roleLabel = quad
@@ -406,11 +408,13 @@ export function enforcePaidProSingleExecutionBlock(
           )
         : [];
   const manifestLegalNames =
-    labeledNames.length >= authorityParties.length && labeledNames.length >= 2
-      ? labeledNames
-      : intakeManifest.length >= 2
-        ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
-        : authorityParties;
+    authorityParties.length >= 3
+      ? authorityParties
+      : labeledNames.length >= authorityParties.length && labeledNames.length >= 2
+        ? labeledNames
+        : intakeManifest.length >= authorityParties.length && intakeManifest.length >= 2
+          ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
+          : authorityParties;
   const manifestRoles =
     manifestLegalNames.length >= 2
       ? manifestRolesFromLegalNames(manifestLegalNames, opts?.intakeText ?? null)
@@ -419,7 +423,9 @@ export function enforcePaidProSingleExecutionBlock(
   const client = roles.find((r) => r.role === "client");
   const provider = roles.find((r) => r.role === "service_provider");
   const quadLabeled = Boolean(opts?.intakeText && isQuadripartiteLabeledPartiesIntake(opts.intakeText));
-  if ((!client || !provider) && !quadLabeled) {
+  const quadParty =
+    quadLabeled || authorityParties.length >= 4 || manifestLegalNames.length >= 4;
+  if ((!client || !provider) && !quadParty && manifestLegalNames.length < 3) {
     text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
     const truncated = truncatePostCanonicalExecutionPollution(text, {
       expectedPartyCount: manifestLegalNames.length >= 2 ? manifestLegalNames.length : 2,

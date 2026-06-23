@@ -5,9 +5,11 @@
 import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
 import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
+import { resolvePaidProFrozenUserVisibleReviewDisplayPlain } from "./paidProDisplayPlainAuthority";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { getPaidProSourceOfTruthText, hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
 
@@ -36,6 +38,8 @@ export function logPaidProReviewSotParity(payload: {
 export function auditPaidProReviewRenderSotParity(args: {
   reviewPlain: string;
   surface?: string;
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
 }): {
   canonicalHash: string | null;
   reviewHash: string;
@@ -45,7 +49,17 @@ export function auditPaidProReviewRenderSotParity(args: {
 } {
   const review = (args.reviewPlain || "").trim();
   const reviewHash = review.length >= 80 ? hashPaidProCorpus(review) : "";
-  const canonicalHash = hasPaidProSourceOfTruth() ? resolvePaidProFrozenAuthoritativeHash() : null;
+  const displayOnly = shouldUsePaidProSourceOfTruthDisplayOnly();
+  const expectedReviewPlain =
+    displayOnly && hasPaidProSourceOfTruth()
+      ? resolvePaidProFrozenUserVisibleReviewDisplayPlain({
+          intakeText: args.intakeText ?? null,
+          draft: args.draft ?? null,
+        })
+      : "";
+  const expectedReviewHash =
+    expectedReviewPlain.length >= 80 ? hashPaidProCorpus(expectedReviewPlain) : "";
+  const canonicalHash = expectedReviewHash || (hasPaidProSourceOfTruth() ? resolvePaidProFrozenAuthoritativeHash() : null);
   const canonicalPlain = (() => {
     if (!hasPaidProSourceOfTruth()) return "";
     const frozen = getFrozenCanonicalAgreementCorpus()?.canonicalText?.trim();
@@ -53,25 +67,29 @@ export function auditPaidProReviewRenderSotParity(args: {
     return getPaidProSourceOfTruthText().trim();
   })();
   const canonicalDisplayPlain = canonicalPlain
-    ? (shouldUsePaidProSourceOfTruthDisplayOnly()
-        ? preparePaidProFrozenDisplayPlain(canonicalPlain).text
+    ? (displayOnly
+        ? preparePaidProFrozenDisplayPlain(canonicalPlain, {
+            intakeText: args.intakeText ?? null,
+            draftPartyNames:
+              args.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
+          }).text
         : preparePaidProReviewDisplayPlain(canonicalPlain).text
       ).trim()
     : "";
-  const canonicalDisplayHash =
+  const canonicalDisplayPlainHash =
     canonicalDisplayPlain.length >= 80 ? hashPaidProCorpus(canonicalDisplayPlain) : "";
   const classification =
     canonicalPlain && review
       ? classifyPaidProCorpusLifecycleDiff(canonicalPlain, review)
       : null;
   const displayNormalizationDelta = Boolean(
-    canonicalDisplayHash && reviewHash && canonicalDisplayHash === reviewHash,
+    canonicalDisplayPlainHash && reviewHash && canonicalDisplayPlainHash === reviewHash,
   );
   const snapshotPlain = readAuthoritativeSigningCorpus()?.trim() ?? "";
   const snapshotDisplayHash =
     snapshotPlain.length >= 80
       ? hashPaidProCorpus(
-          (shouldUsePaidProSourceOfTruthDisplayOnly()
+          (displayOnly
             ? preparePaidProFrozenDisplayPlain(snapshotPlain)
             : preparePaidProReviewDisplayPlain(snapshotPlain)
           ).text.trim(),
@@ -86,12 +104,13 @@ export function auditPaidProReviewRenderSotParity(args: {
       reviewMatchesSnapshotDisplay,
   );
   const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(review);
-  const hashMatch = Boolean(canonicalHash && reviewHash && canonicalHash === reviewHash);
-  const invariantOk =
-    hashMatch ||
-    displayNormalizationDelta ||
-    reviewMatchesSnapshotDisplay ||
-    signerFieldOnlyDelta;
+  const hashMatch = Boolean(
+    (expectedReviewHash && reviewHash && expectedReviewHash === reviewHash) ||
+      (canonicalHash && reviewHash && canonicalHash === reviewHash),
+  );
+  const invariantOk = displayOnly && expectedReviewHash
+    ? expectedReviewHash === reviewHash
+    : hashMatch || displayNormalizationDelta || reviewMatchesSnapshotDisplay || signerFieldOnlyDelta;
   if (reviewHash && !invariantOk) {
     logPaidProReviewSotParity({
       canonicalHash,
