@@ -41,28 +41,6 @@ const BLUE = "Blue Canyon Analytics LLC";
 const HARBOR = "Harbor Peak Automation LLC";
 const IRON = "Iron Vale Systems Inc";
 
-function padBeforeWitness(base: string, minLen = 2000): string {
-  if (base.length >= minLen) return base;
-  const witnessIdx = base.search(/\bIN WITNESS WHEREOF\b/i);
-  const insertAt = witnessIdx >= 0 ? witnessIdx : base.length;
-  let pad = "";
-  let i = 0;
-  while (base.length + pad.length < minLen) {
-    pad += `13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith.\n\n`;
-    i += 1;
-  }
-  return `${base.slice(0, insertAt)}${pad}${base.slice(insertAt)}`;
-}
-
-function buildTest405ServerDraft(): string {
-  let body = buildTest401MalformedServerDraft();
-  for (const name of [RED, BLUE, HARBOR, IRON]) {
-    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    body = body.replace(new RegExp(`If to ${esc}: ${esc}`, "g"), `If to ${name}:\n${name}`);
-  }
-  return body;
-}
-
 function countIfToNoticeStanzas(text: string): number {
   const noticesIdx = text.search(/\bNotices\b/i);
   const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
@@ -104,7 +82,7 @@ describe("TEST405_FOUR_PARTY_SIGNER_METADATA_HYDRATION", () => {
     });
 
     const prep = preparePaidProServerDocumentForAcceptance(raw, draft, intake);
-    const acceptedText = padBeforeWitness(prep.text);
+    const acceptedText = padOperativeCorpusBeforeWitness(prep.text);
     markPaidProPipelineValidationPassed({ text: acceptedText, source: "server_full_draft_retry" });
 
     establishPaidProSourceOfTruth({

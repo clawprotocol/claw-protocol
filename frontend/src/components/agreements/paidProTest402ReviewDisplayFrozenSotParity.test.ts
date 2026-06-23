@@ -49,19 +49,6 @@ const BLUE = "Blue Canyon Analytics LLC";
 const HARBOR = "Harbor Peak Automation LLC";
 const IRON = "Iron Vale Systems Inc";
 
-function padQuadPartyServerDraftBeforeWitness(base: string, minLen = 2000): string {
-  if (base.length >= minLen) return base;
-  const witnessIdx = base.search(/\bIN WITNESS WHEREOF\b/i);
-  const insertAt = witnessIdx >= 0 ? witnessIdx : base.length;
-  let pad = "";
-  let i = 0;
-  while (base.length + pad.length < minLen) {
-    pad += `13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith on deliverables, reporting, and acceptance milestones.\n\n`;
-    i += 1;
-  }
-  return `${base.slice(0, insertAt)}${pad}${base.slice(insertAt)}`;
-}
-
 afterEach(() => {
   clearPaidProSourceOfTruth();
   clearConsumedPaidProSignerMetadataAuthority();

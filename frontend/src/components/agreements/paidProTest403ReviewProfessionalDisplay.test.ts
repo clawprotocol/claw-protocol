@@ -42,39 +42,6 @@ const BLUE = "Blue Canyon Analytics LLC";
 const HARBOR = "Harbor Peak Automation LLC";
 const IRON = "Iron Vale Systems Inc";
 
-function padBeforeWitness(base: string, minLen = 2000): string {
-  if (base.length >= minLen) return base;
-  const witnessIdx = base.search(/\bIN WITNESS WHEREOF\b/i);
-  const insertAt = witnessIdx >= 0 ? witnessIdx : base.length;
-  let pad = "";
-  let i = 0;
-  while (base.length + pad.length < minLen) {
-    pad += `13.${i + 1} Supplemental clause ${i + 1}. Each party will continue cooperating in good faith.\n\n`;
-    i += 1;
-  }
-  return `${base.slice(0, insertAt)}${pad}${base.slice(insertAt)}`;
-}
-
-function buildTest403ServerDraft(): string {
-  let body = buildTest401MalformedServerDraft();
-  for (const name of [RED, BLUE, HARBOR, IRON]) {
-    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    body = body.replace(new RegExp(`If to ${esc}: ${esc}`, "g"), `If to ${name}:\n${name}`);
-  }
-  body = body.replace(
-    /1\.3 Out-of-Scope Work and Changes\nAny material expansion of scope must be approved in writing\./,
-    [
-      "1.3 Out-of-Scope Work and Changes",
-      "Any material expansion of scope must be approved in writing.",
-      "",
-      "3.7 Joint",
-      "Client Responsibility for Payment.",
-      `${RED} and ${BLUE} are jointly responsible for Provider fees.`,
-    ].join("\n"),
-  );
-  return body;
-}
-
 function countIfToNoticeStanzas(text: string): number {
   const noticesIdx = text.search(/\bNotices\b/i);
   const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
