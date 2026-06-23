@@ -193,12 +193,34 @@ function mergeSlot(
   return { name, email, role, signerName, signerTitle, partyAddress };
 }
 
-function resolveHandoffPartySlotCount(handoff: PremiumRecipientHandoffV2): number {
+export function resolveHandoffPartySlotCount(
+  handoff: PremiumRecipientHandoffV2,
+  authoritativeCount?: number,
+): number {
   const indexed = 2 + (handoff.partyIndexSlots?.length ?? 0);
-  const namedExtra = [handoff.party1?.name, handoff.party2?.name]
-    .concat((handoff.partyIndexSlots ?? []).map((s) => s.name))
-    .filter((n) => String(n ?? "").trim().length >= 2).length;
-  return Math.max(2, indexed, namedExtra);
+  if (authoritativeCount != null && authoritativeCount >= 2) {
+    return Math.min(indexed, authoritativeCount);
+  }
+  return Math.max(2, indexed);
+}
+
+/** Trim stored handoff to authoritative party count — prevents phantom extra slots. */
+export function trimPremiumRecipientHandoffToPartyCount(
+  handoff: PremiumRecipientHandoffV2,
+  partyCount: number,
+): PremiumRecipientHandoffV2 {
+  const n = Math.min(Math.max(partyCount, 2), MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+  const slots = linearPremiumRecipientSlots(handoff, n);
+  const party1 = slots[0] ?? emptySlot();
+  const party2 = slots[1] ?? emptySlot();
+  const partyIndexSlots = n > 2 ? slots.slice(2, n) : undefined;
+  return {
+    v: 2,
+    party1,
+    party2,
+    savedAt: handoff.savedAt,
+    ...(partyIndexSlots?.length ? { partyIndexSlots } : {}),
+  };
 }
 
 function logReviewLinkSignerMetadataHandoffRead(handoff: PremiumRecipientHandoffV2): void {
@@ -501,26 +523,39 @@ export function writePremiumRecipientHandoffSignerMetadata(args: {
   signerTitles: readonly string[];
   partyLegalNames?: readonly string[];
   partyEmails?: readonly string[];
+  partyAddresses?: readonly string[];
+  authoritativePartyCount?: number;
 }): void {
   const cur = readPremiumRecipientHandoff();
   const base1 = cur?.party1 ?? emptySlot();
   const base2 = cur?.party2 ?? emptySlot();
   const legal = args.partyLegalNames ?? [];
   const emails = args.partyEmails ?? [];
+  const addresses = args.partyAddresses ?? [];
+  const count = Math.max(
+    args.authoritativePartyCount ?? 0,
+    args.signerNames.length,
+    legal.length,
+    emails.length,
+    addresses.length,
+    2,
+  );
   const party1 = mergeSlot(base1, {
     name: legal[0]?.trim() || base1.name,
     email: emails[0]?.trim() || base1.email,
     signerName: args.signerNames[0] ?? "",
     signerTitle: args.signerTitles[0] ?? "",
+    partyAddress: addresses[0]?.trim() || base1.partyAddress,
   });
   const party2 = mergeSlot(base2, {
     name: legal[1]?.trim() || base2.name,
     email: emails[1]?.trim() || base2.email,
     signerName: args.signerNames[1] ?? "",
     signerTitle: args.signerTitles[1] ?? "",
+    partyAddress: addresses[1]?.trim() || base2.partyAddress,
   });
   const extraSlots: PremiumRecipientHandoffSlot[] = [];
-  for (let i = 2; i < Math.max(args.signerNames.length, legal.length, emails.length); i++) {
+  for (let i = 2; i < count; i++) {
     const base = cur?.partyIndexSlots?.[i - 2] ?? emptySlot();
     extraSlots.push(
       mergeSlot(base, {
@@ -528,13 +563,20 @@ export function writePremiumRecipientHandoffSignerMetadata(args: {
         email: emails[i]?.trim() || base.email,
         signerName: args.signerNames[i] ?? "",
         signerTitle: args.signerTitles[i] ?? "",
+        partyAddress: addresses[i]?.trim() || base.partyAddress,
       }),
     );
   }
-  if (!party1.name && !party2.name && !party1.signerName && !party2.signerName && !extraSlots.length) {
+  if (
+    !party1.name &&
+    !party2.name &&
+    !party1.signerName &&
+    !party2.signerName &&
+    !extraSlots.length
+  ) {
     return;
   }
-  writePremiumRecipientHandoffExact(party1, party2, extraSlots.length ? extraSlots : cur?.partyIndexSlots);
+  writePremiumRecipientHandoffExact(party1, party2, extraSlots.length ? extraSlots : undefined);
 }
 
 /** Build `partyIndexSlots` for indices ≥2 from authoritative parties + optional checkout candidates. */

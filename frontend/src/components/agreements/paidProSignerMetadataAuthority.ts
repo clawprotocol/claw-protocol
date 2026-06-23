@@ -24,6 +24,10 @@ import { stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 import { resolveAcceptedCorpusRoleLabelForLegalName } from "./paidProAcceptedCorpusPartyRoles";
 import { labeledPartyBlocksForSignerMetadata } from "./labeledPartyBlockParse";
+import {
+  authorityPartiesFromIntakeSignerMetadata,
+  mergeIntakeSignerMetadataIntoAuthorityParties,
+} from "./intakeSignerMetadataAuthority";
 import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
@@ -84,15 +88,36 @@ export function preserveSlotIndexedSignerMetadataParties(
 export function mergeLabeledPartyAuthorityIntoParties(
   parties: readonly PaidProSignerMetadataParty[],
   intakeText?: string | null,
+  legalEntities?: readonly string[],
 ): PaidProSignerMetadataParty[] {
+  const intakeParties = authorityPartiesFromIntakeSignerMetadata(
+    intakeText,
+    legalEntities?.length
+      ? legalEntities
+      : parties.map((p) => p.partyLegalName).filter(Boolean),
+  );
+  if (intakeParties.length >= 2 && !parties.length) {
+    return intakeParties;
+  }
   const normalized = normalizePartyIdentities({
     intakeText,
-    authorityParties: parties,
+    authorityParties: parties.length ? parties : intakeParties,
   });
-  if (normalized.length < 2 && parties.length >= 2) return [...parties];
+  if (normalized.length < 2 && parties.length >= 2) {
+    return mergeIntakeSignerMetadataIntoAuthorityParties(
+      parties,
+      intakeText,
+      legalEntities ?? parties.map((p) => p.partyLegalName),
+    );
+  }
   const merged = toPaidProSignerMetadataParties(normalized) as PaidProSignerMetadataParty[];
   if (!parties.length) return merged;
-  return preserveSlotIndexedSignerMetadataParties(merged, parties);
+  const slotMerged = preserveSlotIndexedSignerMetadataParties(merged, parties);
+  return mergeIntakeSignerMetadataIntoAuthorityParties(
+    slotMerged,
+    intakeText,
+    legalEntities ?? slotMerged.map((p) => p.partyLegalName),
+  );
 }
 
 export function labeledPartyIntakeHasHydratableExecutionFields(intakeText?: string | null): boolean {
@@ -350,7 +375,12 @@ export function buildPaidProSignerMetadataParties(
       partyAddress: norm(ui.partyAddresses[i]),
     });
   }
-  return fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);
+  const filled = fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);
+  return mergeIntakeSignerMetadataIntoAuthorityParties(
+    filled,
+    opts?.intakeText,
+    filled.map((p) => p.partyLegalName),
+  );
 }
 
 export function hashPaidProSignerMetadataAuthority(

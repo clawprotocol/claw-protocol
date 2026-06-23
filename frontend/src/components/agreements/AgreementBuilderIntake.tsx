@@ -837,7 +837,10 @@ import {
   type LiveSignerMetadataUiState,
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
-import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
+import {
+  readHandoffContactFieldsForSeed,
+  runPaidProSignerMetadataAuthoritySeed,
+} from "./paidProSignerMetadataSeed";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 import {
   isPaidProPostFinalizeHydratedCorpusLocked,
@@ -3754,6 +3757,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const frozenSignerMetadataIdentitiesRef = useRef<
     ReturnType<typeof resolveCanonicalPartyIdentitiesFromSignerSetup> | null
   >(null);
+  const paidProIntakeSignerPrefillAttemptedRef = useRef("");
   useLayoutEffect(() => {
     paidProSignerMetadataSessionActiveRef.current = paidProSignerMetadataSessionActive_({
       hasPaidProSourceOfTruth: hasPaidProSourceOfTruth(),
@@ -16113,6 +16117,119 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       surface: "paid_pro_forced_first_review",
     });
   }, [paidProPostFinalizeHydrationBlocked, premiumSurfaceGateTick, reviewDocRefreshTick]);
+
+  useEffect(() => {
+    if (!acceptedPaidProAuthorityActive || !paidProFirstReviewSurfaceActive) return;
+    if (paidProSignerMetadataFinalized || premiumRecipientUxActive) return;
+    const intakeText = currentPremiumMergedIntakeKey || intakeCombined;
+    if (!intakeText.trim()) return;
+    const parties = draft?.parties ?? [];
+    const agreementBodyText =
+      getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "";
+    const slotIdentities = resolveSignerSetupPartyIdentities({
+      parties,
+      intakeText,
+      agreementBodyText,
+      handoffSlots: linearPremiumRecipientSlots(readPremiumRecipientHandoff(), authoritativeSignerSetupPartyCount),
+    });
+    const legalEntities = slotIdentities.map((s) => s.legalEntityName).filter(Boolean);
+    if (legalEntities.length < 2) return;
+    const prefillKey = `${intakeText}|${legalEntities.join("|")}|${authoritativeSignerSetupPartyCount}`;
+    if (paidProIntakeSignerPrefillAttemptedRef.current === prefillKey) return;
+    const ho = readPremiumRecipientHandoff();
+    const handoffContacts = readHandoffContactFieldsForSeed(ho, authoritativeSignerSetupPartyCount);
+    const seed = runPaidProSignerMetadataAuthoritySeed({
+      stage: "paid_pro_first_review_intake_prefill",
+      legalEntities,
+      intakeText,
+      corpusText: agreementBodyText,
+      draft: draft ?? null,
+      handoff: ho,
+      uiSignerNames: partySignerNamesRef.current,
+      uiSignerTitles: partySignerTitlesRef.current,
+      uiSignerEmails: [
+        recipient1EmailRef.current,
+        recipient2EmailRef.current,
+        ...extraPartyReviewEmailsRef.current,
+      ],
+      uiPartyAddresses: partyAddressesRef.current.length
+        ? partyAddressesRef.current
+        : handoffContacts.addresses,
+      authoritativePartyCount: authoritativeSignerSetupPartyCount,
+    });
+    if (!seed.uiChanged && !seed.contactFieldsChanged) return;
+    paidProIntakeSignerPrefillAttemptedRef.current = prefillKey;
+    if (seed.uiChanged) {
+      setPartySignerNames(seed.names);
+      setPartySignerTitles(seed.titles);
+    }
+    if (seed.contactFieldsChanged || seed.emails.some(Boolean)) {
+      if (seed.emails[0]) setRecipient1Email((prev) => (prev.trim() ? prev : seed.emails[0]!));
+      if (seed.emails[1]) setRecipient2Email((prev) => (prev.trim() ? prev : seed.emails[1]!));
+      if (authoritativeSignerSetupPartyCount > 2) {
+        setExtraPartyReviewEmails((prev) => {
+          const next = prev.slice();
+          while (next.length < authoritativeSignerSetupPartyCount - 2) next.push("");
+          for (let i = 2; i < authoritativeSignerSetupPartyCount; i++) {
+            const em = seed.emails[i]?.trim() ?? "";
+            if (em && !(next[i - 2] ?? "").trim()) next[i - 2] = em;
+          }
+          return next;
+        });
+      }
+      if (seed.addresses.some(Boolean)) {
+        setPartyAddresses((prev) => {
+          const next = prev.slice();
+          while (next.length < authoritativeSignerSetupPartyCount) next.push("");
+          for (let i = 0; i < authoritativeSignerSetupPartyCount; i++) {
+            const addr = seed.addresses[i]?.trim() ?? "";
+            if (addr && !(next[i] ?? "").trim()) next[i] = addr;
+          }
+          return next;
+        });
+      }
+    }
+    setRecipient1Name((prev) =>
+      hydrateLegalEntityNameFromHandoff(
+        prev,
+        ho?.party1.name ?? "",
+        slotIdentities[0]?.legalEntityName,
+        slotIdentities,
+        0,
+      ),
+    );
+    setRecipient2Name((prev) =>
+      hydrateLegalEntityNameFromHandoff(
+        prev,
+        ho?.party2.name ?? "",
+        slotIdentities[1]?.legalEntityName,
+        slotIdentities,
+        1,
+      ),
+    );
+    if (authoritativeSignerSetupPartyCount > 2) {
+      setExtraPartyLegalNames((prev) => {
+        const next = prev.slice();
+        while (next.length < authoritativeSignerSetupPartyCount - 2) next.push("");
+        for (let i = 2; i < authoritativeSignerSetupPartyCount; i++) {
+          const legal = legalEntities[i]?.trim() ?? "";
+          if (legal && !(next[i - 2] ?? "").trim()) next[i - 2] = legal;
+        }
+        return next;
+      });
+    }
+  }, [
+    acceptedPaidProAuthorityActive,
+    paidProFirstReviewSurfaceActive,
+    paidProSignerMetadataFinalized,
+    premiumRecipientUxActive,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    draft,
+    authoritativeSignerSetupPartyCount,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
 
   useEffect(() => {
     if (!paidProFirstReviewSignerSetupRequired) {
