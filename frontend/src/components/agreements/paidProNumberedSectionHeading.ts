@@ -38,6 +38,22 @@ function hasOperativeVerbInTitle(title: string): boolean {
 
 /** Body sentence glued to a heading title on the same line (not part of the title). */
 function hasGluedBodySentenceOnSameLine(title: string): boolean {
+  const words = title.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    let sawCaps = false;
+    const lemmas = new Set<string>();
+    for (let i = 0; i < words.length; i += 1) {
+      const w = words[i]!.replace(/[.,;:]+$/, "");
+      const lower = w.toLowerCase();
+      if (/^[A-Z0-9][A-Z0-9&'/-]*$/.test(w) && !/[a-z]/.test(w) && w.length > 1) {
+        sawCaps = true;
+        lemmas.add(lower);
+        continue;
+      }
+      if (i >= 1 && sawCaps && /^[A-Z][a-z]/.test(w)) return true;
+      if (i >= 1 && lemmas.has(lower)) return true;
+    }
+  }
   if (
     /\.\s+(?:[a-z]|The|This|Each|Either|Any|Neither|Both|Upon|Unless|If|When|During|Within|After|Before|Client|Service\s+Provider|Notwithstanding)\b/.test(
       title,

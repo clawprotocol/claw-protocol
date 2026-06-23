@@ -27,6 +27,7 @@ import {
 import { rejectPremiumBodyForProRender } from "./premiumFullDraftClientAcceptance";
 import { countNumberedAgreementSections } from "./paidProMutualConsultingQualityFloor";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
+import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 import { countSignatureBlockHeadingsInTail } from "./guidedDealCompletion/signatureRegion";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 
@@ -336,6 +337,12 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
 
   const finalized = finalizeDeterministicQuadPartyProFallbackBody(body, rawIntake, parties);
   body = finalized.text;
+
+  const canonicalStructure = applyPaidProCanonicalDocumentStructureAuthority(body, {
+    source: DETERMINISTIC_QUAD_PARTY_PRO_FALLBACK_SURFACE,
+    phase: "pre_freeze",
+  });
+  body = canonicalStructure.text;
 
   while (body.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
     body += `\n\nOperational Detail. The Parties will document service milestones, analytics deliverables, logistics handoffs, and revenue reconciliation procedures in good faith under this Agreement.`;

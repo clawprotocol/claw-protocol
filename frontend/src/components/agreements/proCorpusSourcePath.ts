@@ -19,6 +19,7 @@ export type ProCorpusSourceMapStage =
   | "pre_freeze_orphan_subsection_repair"
   | "pre_freeze_orphan_section_number_repair"
   | "pre_freeze_placeholder_repair"
+  | "pre_freeze_canonical_structure_authority"
   | "authoritative_pro_freeze"
   | "pro_review_display"
   | "review_link_payload"

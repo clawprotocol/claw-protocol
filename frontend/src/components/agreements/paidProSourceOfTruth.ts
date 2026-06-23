@@ -112,6 +112,7 @@ import {
 } from "./paidProSignerStagingDisplayCorpus";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { assertPaidProDocumentBoundaryAuthorityForFreeze } from "./paidProDocumentBoundaryAuthority";
+import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import {
   detectPaidProOrphanSubsections,
@@ -505,6 +506,21 @@ export function establishPaidProSourceOfTruth(args: {
       reason: placeholderRepairTotal.slice(0, 8).join(","),
     });
   }
+  const canonicalStructure = applyPaidProCanonicalDocumentStructureAuthority(safeForCommit, {
+    source: "establish_paid_pro_source_of_truth_pre_freeze",
+    phase: "pre_freeze",
+  });
+  if (canonicalStructure.repairs.length > 0) {
+    safeForCommit = canonicalStructure.text;
+    logProCorpusSourceMap({
+      stage: "pre_freeze_canonical_structure_authority",
+      source: args.source ?? "server_full_draft",
+      len: safeForCommit.length,
+      text: safeForCommit,
+      allowedToOverride: false,
+      reason: canonicalStructure.repairs.slice(0, 8).join(","),
+    });
+  }
   safeForCommit = assertPaidProDocumentBoundaryAuthorityForFreeze(safeForCommit, {
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
@@ -630,6 +646,11 @@ export function establishPaidProSourceOfTruth(args: {
       preEstablishFreezeHash && preEstablishFreezeHash !== acceptedCorpusHash
         ? "canonical_establish_reconcile"
         : undefined,
+  });
+  applyPaidProCanonicalDocumentStructureAuthority(record.text, {
+    source: "establish_paid_pro_source_of_truth_post_freeze_check",
+    phase: "post_freeze_check",
+    log: true,
   });
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();

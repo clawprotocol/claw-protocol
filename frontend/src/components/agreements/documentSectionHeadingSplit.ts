@@ -3,6 +3,8 @@
  * Shared by free starter preview and paid Pro display normalization.
  */
 
+import { splitGluedNumberedSectionLine } from "./paidProNumberedSectionHeadingBodySplit";
+
 const MAIN_PLUS_NAMED_SUBSECTION_GLUE_RE =
   /^(\d+\.\s+(?!\d+\.\d)(?:[^\n.]{3,90}?))\s+((?:[A-Z][a-zA-Z]+(?:\s+(?:and|of|for|the|to|on|in|or|by|at|from|upon|with)\s+)*[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\.)\s+((?:Either|The|Upon|If|When|Each|Any|Neither|One|Both|Client|Service\s+Provider|Unless|Notwithstanding|During|Within|After|Before).+)/;
 
@@ -95,6 +97,11 @@ export function splitInlineNumberedSectionMarkerFromLine(line: string): string {
 export function splitGluedSectionHeadingFromLine(line: string): string {
   const trimmed = line.trim();
   if (!trimmed || trimmed.length < 24 || !/^\d+\./.test(trimmed)) return line;
+
+  const structural = splitGluedNumberedSectionLine(trimmed);
+  if (structural) {
+    return `${structural.heading}\n${structural.body}`;
+  }
 
   const subPeriod = trimmed.match(SUBSECTION_PERIOD_GLUE_RE);
   if (subPeriod?.[1] && subPeriod[2]?.trim()) {

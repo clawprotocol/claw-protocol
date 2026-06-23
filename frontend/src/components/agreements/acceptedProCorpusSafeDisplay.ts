@@ -40,6 +40,7 @@ import {
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
 import { repairAgreementTemplatePlaceholders, repairPaidProFreezePlaceholderAuthority } from "./agreementTemplatePlaceholderSafety";
+import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -317,6 +318,17 @@ function applyAcceptedProCorpusSafeDisplayCore(
       out = freezeExpansion.text;
       repairs.push(...freezeExpansion.repaired.map((r) => `placeholder_freeze:${r}`));
     }
+  }
+
+  const canonicalStructure = applyPaidProCanonicalDocumentStructureAuthority(out, {
+    source: opts?.surface
+      ? `${opts.surface}:canonical_structure_authority`
+      : "accepted_pro_corpus_safe_display:canonical_structure_authority",
+    phase: "pre_freeze",
+  });
+  if (canonicalStructure.repairs.length > 0) {
+    out = canonicalStructure.text;
+    repairs.push(...canonicalStructure.repairs.map((r) => `structure:${r}`));
   }
 
   return { text: out, repairs: [...new Set(repairs)] };
