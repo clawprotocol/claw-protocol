@@ -85,14 +85,53 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
   const labeled = labeledPartyLegalEntities(intake)
     .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n));
+  if (labeled.length >= 3) return labeled;
+  const lineSeparated = extractLineSeparatedLegalEntityParties(intake);
+  if (lineSeparated.length === 2 && labeled.length <= 2) return lineSeparated;
   if (labeled.length >= 2) return labeled;
   const quoted = quotedRolePartyLegalEntities(intake)
     .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n));
   if (quoted.length >= 2) return quoted;
+  const entityPool = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
+  ).filter((n) => !isInvalidPartySlotLegalEntity(n));
+  if (entityPool.length >= 2) return entityPool;
   return collapsePartySlotCandidates(extractBetweenPartyNameList(intake)).filter(
     (n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n) && isAuthoritativeLegalEntityName(n),
   );
+}
+
+/**
+ * Unlabeled short intake: first authoritative legal-entity lines in document order.
+ * Party 1 line → Client slot; Party 2 line → Service Provider slot.
+ */
+export function extractLineSeparatedLegalEntityParties(intakeRaw: string): string[] {
+  const lines = String(intakeRaw || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  for (const line of lines) {
+    if (/^\$/.test(line) || /^\d/.test(line) && /\bmonth/i.test(line)) continue;
+    if (/^(?:term|fee|payment|governing|duration|oklahoma|texas|law)\b/i.test(line)) continue;
+    if (/workflow|consulting|automation|services?\b/i.test(line) && !PARTY_ENTITY_SUFFIX_RE.test(line)) {
+      continue;
+    }
+    const normalized = normalizeAgreementPartyName(line);
+    if (
+      normalized.length >= 3 &&
+      !isInvalidPartySlotLegalEntity(normalized) &&
+      isAuthoritativeLegalEntityName(normalized)
+    ) {
+      if (!out.some((existing) => partyLegalNamesMatch(existing, normalized))) {
+        out.push(normalized);
+      }
+      if (out.length >= 2) break;
+    }
+  }
+  return out;
 }
 
 /** When intake/free-starter manifest has exactly two legal entities, cap signer setup at two. */
@@ -174,8 +213,7 @@ export function resolveAuthoritativePartySlotCount(args: {
 
   const intakeNames = resolveAuthoritativeIntakePartyNames(intake);
   const intakeAuthoritative = intakeNames.filter(isAuthoritativeLegalEntityName);
-  if (labeled.length === 2) return 2;
-  if (intakeAuthoritative.length === 2) return 2;
+  if (intakeAuthoritative.length === 2 && !explicitMultiParty) return 2;
 
   const rowNames = args.draftPartyNames ?? [];
   const hasDrift = partySlotListHasDriftFragments(rowNames, args.intakeText);

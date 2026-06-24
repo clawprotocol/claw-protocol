@@ -5,6 +5,7 @@
 
 import {
   isTripartiteLabeledPartiesIntake,
+  labeledPartyLegalEntities,
   tripartiteRoleLabelForPartyIndex,
 } from "./labeledPartyBlockParse";
 import { resolveCanonicalPartyRoleLabel, isGenericCanonicalRole } from "./canonicalPartyRoleAuthority";
@@ -14,7 +15,7 @@ import {
   isInvalidPartySlotLegalEntity,
   normalizeAgreementPartyName,
 } from "./partySlotIdentityNormalize";
-import { extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
+import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { logPaidProEntityMap } from "./paidProPlaceholderAttributionLog";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
@@ -31,6 +32,7 @@ import {
   replaceExtractionRoleAliasesInProse,
 } from "./canonicalPartyRoleAuthority";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
+import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNormalize";
 import {
   isContaminatedPartyLegalNameFromSignerInstruction,
   stripSignerInstructionContaminationFromCorpus,
@@ -319,6 +321,37 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
   const collapsedStarterNames = collapsePartySlotCandidates(
     (args.starterNames ?? []).map((n) => normalizeAgreementPartyName(String(n || ""))),
   );
+  const lineSeparatedParties = extractLineSeparatedLegalEntityParties(args.rawIntake ?? "");
+  const labeledPartyCount = labeledPartyLegalEntities(args.rawIntake ?? "").length;
+  const entityPoolCount = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(args.rawIntake ?? "").filter(isAuthoritativeLegalEntityName),
+  ).length;
+  const likelyMultiParty =
+    labeledPartyCount >= 3 ||
+    entityPoolCount >= 3 ||
+    collapsedStarterNames.length >= 3 ||
+    (args.roleLabels?.length ?? 0) >= 3;
+  if (lineSeparatedParties.length === 2 && !likelyMultiParty) {
+    const manifestNames = lineSeparatedParties.slice(0, 12);
+    const signerBySlot = resolveUniversalSignerMetadataBySlot({
+      legalEntities: manifestNames,
+      intakeText: args.rawIntake,
+      corpusText: args.generatedBody,
+      draftParties: manifestNames.map((name) => ({ name })),
+    });
+    return manifestNames.map((fullLegalName, index) => {
+      const full = cleanManifestLegalName(fullLegalName);
+      const signer = signerBySlot[index];
+      return {
+        fullLegalName: full,
+        roleLabel: roleLabelForIndex(index, args.roleLabels?.[index], args.rawIntake),
+        displayAlias: definedShortNameFromLegalEntity(full),
+        signerName: signer?.signerName?.trim() || null,
+        signerTitle: signer?.signerTitle?.trim() || null,
+        partyAddress: null,
+      };
+    });
+  }
   const starterAuthoritative = authoritativeNamesFromPartyNames(collapsedStarterNames);
   const starterNames = rawStarterNames(collapsedStarterNames);
   const rawIntakeNames = canonicalEntityNamesFromText(args.rawIntake, {

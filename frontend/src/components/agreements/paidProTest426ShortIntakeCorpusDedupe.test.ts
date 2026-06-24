@@ -1,7 +1,9 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
+import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
+import { rejectPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
   markCurrentSessionProEntitlementComplete,
@@ -11,15 +13,16 @@ import {
   persistPremiumRecipientHandoff,
 } from "./premiumPartyNamesHandoff";
 import {
-  applyPaidProSectionStructureCompletenessAuthority,
-} from "./paidProSectionStructureCompletenessAuthority";
-import {
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
-import { resolvePaidProFreezeCommitText } from "./paidProFreezeCandidate";
+import {
+  buildPaidProFreezeCandidate,
+  resolvePaidProFreezeCommitText,
+} from "./paidProFreezeCandidate";
+import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import {
@@ -33,6 +36,10 @@ import {
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { resolveNoticeStructuralValidationParties } from "./paidProPartyNoticeDetails";
 import {
+  extractLineSeparatedLegalEntityParties,
+} from "./partySlotIdentityNormalize";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import {
   buildTest444ServerFullDraft,
   TEST444_HARBOR_PEAK,
   TEST444_INTAKE,
@@ -41,10 +48,11 @@ import {
   test444Draft,
 } from "./paidProTest444Fixtures";
 import { buildTest442ShortDocumentText } from "./paidProTest442Fixtures";
-import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 
-const STARTER_FALLBACK = "Starter draft preview — short fallback corpus for TEST444.";
+const STARTER_FALLBACK =
+  "Starter draft preview — short fallback corpus for TEST426 Frankenstein guard.";
 
 function emptyConsumedAuthorityParties(): PaidProSignerMetadataParty[] {
   return [
@@ -67,7 +75,34 @@ function emptyConsumedAuthorityParties(): PaidProSignerMetadataParty[] {
   ];
 }
 
-describe("TEST444 — short intake Red Mesa / Harbor Peak freeze after 17k server draft", () => {
+function countTopLevelPaymentHeadings(text: string): number {
+  return (text.match(/^\s*\d+\.\s+PAYMENT\s+AND\s+CONSIDERATION\s*$/gim) ?? []).length;
+}
+
+function countPreamblePhrase(text: string): number {
+  return (
+    text.match(/\bentered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between\b/gi) ??
+    []
+  ).length;
+}
+
+function canonicalAuthorityPartyCount(
+  parties: PaidProSignerMetadataParty[],
+  roleContext: {
+    intakeText: string;
+    draftPartyNames: string[];
+    acceptedCorpus: string;
+  },
+): number {
+  const enriched = resolveNoticeStructuralValidationParties(parties, roleContext);
+  return enriched.filter(
+    (p) =>
+      String(p.partyLegalName ?? "").trim().length >= 2 &&
+      isAuthoritativeLegalEntityName(p.partyLegalName.trim()),
+  ).length;
+}
+
+describe("TEST426 — short intake corpus dedupe and single-source Pro authority", () => {
   const storage = new Map<string, string>();
 
   beforeEach(() => {
@@ -89,43 +124,41 @@ describe("TEST444 — short intake Red Mesa / Harbor Peak freeze after 17k serve
     vi.unstubAllGlobals();
   });
 
-  it("fixture uses exact Railway QA short prompt", () => {
-    expect(TEST444_INTAKE).toContain(TEST444_RED_MESA);
-    expect(TEST444_INTAKE).toContain(TEST444_HARBOR_PEAK);
-    expect(TEST444_INTAKE).toContain("Oklahoma law");
-    expect(TEST444_INTAKE).not.toContain("Client:");
+  it("line-separated intake establishes Red Mesa Client / Harbor Peak Service Provider order", () => {
+    const lineParties = extractLineSeparatedLegalEntityParties(TEST444_INTAKE);
+    expect(lineParties).toEqual([TEST444_RED_MESA, TEST444_HARBOR_PEAK]);
+    const draft = test444Draft();
+    expect(draft.parties?.[0]?.name).toBe(TEST444_RED_MESA);
+    expect(draft.parties?.[0]?.role).toBe("Client");
+    expect(draft.parties?.[1]?.name).toBe(TEST444_HARBOR_PEAK);
+    expect(draft.parties?.[1]?.role).toBe("Service Provider");
   });
 
-  it("notice authority hydrates legal names from short intake when consumed slots are empty", () => {
-    setConsumedPaidProSignerMetadataAuthority({
-      parties: emptyConsumedAuthorityParties(),
-      source: "live_ui",
-      hash: "test444-empty",
-      updatedAt: Date.now(),
-    });
-    persistPremiumRecipientHandoff({
-      party1: { name: "", email: "", role: "Client" },
-      party2: { name: "", email: "", role: "Service Provider" },
-    });
-
-    const reviewParties = resolvePartiesForReviewRender({
-      draft: test444Draft(),
+  it("free starter preview names Red Mesa Client and Harbor Peak Service Provider — not Red Mesa twice", () => {
+    const free = buildAgreementPreviewText(test444Draft(), {
+      starterPreview: true,
       intakeText: TEST444_INTAKE,
     });
-    expect(reviewParties[0]?.partyLegalName).toBe(TEST444_RED_MESA);
-    expect(reviewParties[1]?.partyLegalName).toBe(TEST444_HARBOR_PEAK);
-
-    const server = buildTest444ServerFullDraft();
-    const noticeParties = resolveNoticeStructuralValidationParties(reviewParties, {
-      intakeText: TEST444_INTAKE,
-      draftPartyNames: test444Draft().parties?.map((p) => p.name) ?? [],
-      acceptedCorpus: server,
-    });
-    expect(noticeParties[0]?.partyLegalName).toBe(TEST444_RED_MESA);
-    expect(noticeParties[1]?.partyLegalName).toBe(TEST444_HARBOR_PEAK);
+    expect(free).toContain(TEST444_RED_MESA);
+    expect(free).toContain(TEST444_HARBOR_PEAK);
+    expect(free).not.toContain("Harbor Harbor");
+    expect(free).not.toMatch(/\bParty 1\b/);
+    expect(free).not.toMatch(/\bParty 2\b/);
+    expect(free).toMatch(
+      new RegExp(
+        `${TEST444_RED_MESA.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\(\\s*["']?Client["']?\\s*\\)`,
+        "i",
+      ),
+    );
+    expect(free).toMatch(
+      new RegExp(
+        `${TEST444_HARBOR_PEAK.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\(\\s*["']?Service Provider["']?\\s*\\)`,
+        "i",
+      ),
+    );
   });
 
-  it("pre-validation adopts substantive server full before freeze prep", () => {
+  it("pre-validation adopts substantive server full — never validates thin starter shell", () => {
     const shortDoc = buildTest442ShortDocumentText();
     const serverFull = buildTest444ServerFullDraft();
     const effectiveFull = {
@@ -144,14 +177,16 @@ describe("TEST444 — short intake Red Mesa / Harbor Peak freeze after 17k serve
     });
     expect(adopted.adoptedServerFull).toBe(true);
     expect(adopted.text.length).toBeGreaterThan(shortDoc.length * 2);
+    expect(adopted.text.length).toBeGreaterThan(TEST444_MIN_SERVER_LEN - 500);
     expect(adopted.text).toContain(TEST444_RED_MESA);
+    expect(adopted.text).toContain(TEST444_HARBOR_PEAK);
   });
 
-  it("freeze accepts ~17k server draft — no Party 1/2 notice stanzas or heading anomaly rejection", () => {
+  it("freeze prep + validation share one canonical corpus hash — no Frankenstein stitch", () => {
     setConsumedPaidProSignerMetadataAuthority({
       parties: emptyConsumedAuthorityParties(),
       source: "live_ui",
-      hash: "test444-freeze",
+      hash: "test426-freeze",
       updatedAt: Date.now(),
     });
     persistPremiumRecipientHandoff({
@@ -160,8 +195,6 @@ describe("TEST444 — short intake Red Mesa / Harbor Peak freeze after 17k serve
     });
 
     const server = buildTest444ServerFullDraft();
-    expect(server.length).toBeGreaterThan(TEST444_MIN_SERVER_LEN - 500);
-
     const adopted = resolvePremiumPreValidationBody({
       clientDocumentText: buildTest442ShortDocumentText(),
       effectiveFull: {
@@ -178,38 +211,83 @@ describe("TEST444 — short intake Red Mesa / Harbor Peak freeze after 17k serve
       adopted,
       test444Draft(),
       TEST444_INTAKE,
-      { surface: "test444_prepare" },
+      { surface: "test426_prepare" },
     );
 
-    const structure = applyPaidProSectionStructureCompletenessAuthority(prepared.text, {
-      source: "test444_structure",
-      phase: "pre_freeze",
-    });
-    expect(structure.rejectReason).not.toBe("section_heading_title_anomaly");
-    expect(structure.rejected).toBe(false);
-
-    const freezeCommit = resolvePaidProFreezeCommitText({
+    const freezeCandidate = buildPaidProFreezeCandidate({
       text: prepared.text,
-      source: "server_full_draft",
       draft: test444Draft(),
       intakeText: TEST444_INTAKE,
-      agreementGenerationId: "gen-test444",
-      surface: "test444_freeze_commit",
+      source: "server_full_draft",
+      surface: "test426_freeze_candidate",
     });
-    expect(freezeCommit.ok, freezeCommit.rejectReason ?? "freeze_failed").toBe(true);
-    expect(freezeCommit.text).not.toMatch(/\bParty 1\b/);
-    expect(freezeCommit.text).not.toMatch(/\bParty 2\b/);
-    expect(freezeCommit.text).toContain(TEST444_RED_MESA);
-    expect(freezeCommit.text).toContain(TEST444_HARBOR_PEAK);
+    expect(freezeCandidate.ok, freezeCandidate.rejectReason ?? "freeze_failed").toBe(true);
+    const preparedHash = paidProPipelineAcceptedCorpusHash(freezeCandidate.text);
+    expect(freezeCandidate.hash).toBe(preparedHash);
+
+    const validation = validatePaidProOutput({
+      text: freezeCandidate.text,
+      rawIntake: TEST444_INTAKE,
+      draft: test444Draft(),
+      premiumPipelineSource: "server_full_draft",
+    });
+
+    expect(validation.ok, validation.reasons.join("|") || "validation_failed").toBe(true);
+    const postValidationFreeze = buildPaidProFreezeCandidate({
+      text: freezeCandidate.text,
+      draft: test444Draft(),
+      intakeText: TEST444_INTAKE,
+      source: "server_full_draft",
+      surface: "test426_post_validation_hash",
+    });
+    expect(postValidationFreeze.ok).toBe(true);
+    expect(postValidationFreeze.hash).toBe(preparedHash);
+
+    const dup = rejectPaidProCorpusDuplication(freezeCandidate.text);
+    expect(dup.ok, dup.reasons.join("|")).toBe(true);
+    expect(countTopLevelPaymentHeadings(freezeCandidate.text)).toBeLessThanOrEqual(1);
+    expect(countPreamblePhrase(freezeCandidate.text)).toBeLessThanOrEqual(1);
+    expect(freezeCandidate.text).not.toContain("Harbor Harbor");
+    expect(freezeCandidate.text).not.toMatch(/\bParty 1\b/);
+    expect(freezeCandidate.text).not.toMatch(/\bParty 2\b/);
   });
 
-  it("establishes SoT from server_full_draft and renders long authoritative review", () => {
+  it("notice authority hydrates two canonical parties from short intake", () => {
+    setConsumedPaidProSignerMetadataAuthority({
+      parties: emptyConsumedAuthorityParties(),
+      source: "live_ui",
+      hash: "test426-notice",
+      updatedAt: Date.now(),
+    });
+
+    const server = buildTest444ServerFullDraft();
+    const reviewParties = resolvePartiesForReviewRender({
+      draft: test444Draft(),
+      intakeText: TEST444_INTAKE,
+    });
+    const noticeParties = resolveNoticeStructuralValidationParties(reviewParties, {
+      intakeText: TEST444_INTAKE,
+      draftPartyNames: test444Draft().parties?.map((p) => p.name) ?? [],
+      acceptedCorpus: server,
+    });
+    expect(noticeParties[0]?.partyLegalName).toBe(TEST444_RED_MESA);
+    expect(noticeParties[1]?.partyLegalName).toBe(TEST444_HARBOR_PEAK);
+
+    const authorityCount = canonicalAuthorityPartyCount(emptyConsumedAuthorityParties(), {
+      intakeText: TEST444_INTAKE,
+      draftPartyNames: test444Draft().parties?.map((p) => p.name) ?? [],
+      acceptedCorpus: server,
+    });
+    expect(authorityCount).toBe(2);
+  });
+
+  it("establishes long server_full_draft SoT — not starter Frankenstein fallback", () => {
     const server = buildTest444ServerFullDraft();
     const prepared = preparePaidProServerDocumentForAcceptance(
       server,
       test444Draft(),
       TEST444_INTAKE,
-      { surface: "test444_sot_prepare" },
+      { surface: "test426_sot_prepare" },
     );
 
     const freezeCommit = resolvePaidProFreezeCommitText({
@@ -217,16 +295,17 @@ describe("TEST444 — short intake Red Mesa / Harbor Peak freeze after 17k serve
       source: "server_full_draft",
       draft: test444Draft(),
       intakeText: TEST444_INTAKE,
-      surface: "test444_sot_freeze",
+      surface: "test426_sot_freeze",
     });
     expect(freezeCommit.ok, freezeCommit.rejectReason ?? "freeze_failed").toBe(true);
+    expect(freezeCommit.text.length).toBeGreaterThan(10000);
 
     establishPaidProSourceOfTruth({
       text: freezeCommit.text,
       source: "server_full_draft",
       draft: test444Draft(),
       intakeText: TEST444_INTAKE,
-      reviewSessionId: "gen-test444-sot",
+      reviewSessionId: "gen-test426-sot",
     });
 
     expect(hasPaidProSourceOfTruth()).toBe(true);
@@ -252,15 +331,6 @@ describe("TEST444 — short intake Red Mesa / Harbor Peak freeze after 17k serve
     expect(finalReview.plainText.length).toBeGreaterThan(10000);
     expect(finalReview.authoritativeLen).toBeGreaterThan(10000);
     expect(finalReview.plainText).toContain(TEST444_HARBOR_PEAK);
-
-    const validation = validatePaidProOutput({
-      text: sot,
-      rawIntake: TEST444_INTAKE,
-      draft: test444Draft(),
-      premiumPipelineSource: "server_full_draft",
-    });
-    expect(validation.ok, validation.reasons.join("|") || "validation_failed").toBe(true);
-    expect(validation.reasons).not.toContain("section_heading_title_anomaly");
-    expect(validation.reasons).not.toContain("rejected_paid_corpus");
+    expect(finalReview.plainText).not.toContain(STARTER_FALLBACK);
   });
 });

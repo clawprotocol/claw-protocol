@@ -222,7 +222,12 @@ function assertFrozenCorpusIntegrity(stage: string, scenario: Test424JourneyScen
   assertNoPlaceholderLeakage(stage, corpus);
 }
 
-function establishScenarioSoT(stage: string, scenario: Test424JourneyScenario, corpus: string): string {
+function establishScenarioSoT(
+  stage: string,
+  scenario: Test424JourneyScenario,
+  corpus: string,
+  opts?: { allowShorterOverwrite?: boolean },
+): string {
   const prep = preparePaidProServerDocumentForAcceptance(corpus, scenario.draft, scenario.intakeText);
   const accepted = padOperativeCorpusBeforeWitness(prep.text, 2000);
   markPaidProPipelineValidationPassed({ text: accepted, source: "server_full_draft" });
@@ -232,6 +237,7 @@ function establishScenarioSoT(stage: string, scenario: Test424JourneyScenario, c
     source: "server_full_draft",
     draft: scenario.draft,
     intakeText: scenario.intakeText,
+    allowShorterOverwrite: opts?.allowShorterOverwrite ?? false,
   });
   if (!hasPaidProSourceOfTruth()) {
     journeyFail(stage, "structural SoT not established");
@@ -451,7 +457,12 @@ export function runJourneyBReviewRevisionFlow(scenario: Test424JourneyScenario):
     journeyFail("owner_edit", "stale uploadedRevisionCorpus after accept");
   }
 
-  const reEstablished = establishScenarioSoT("owner_edit_resot", scenario, continuity.latestAcceptedCorpus);
+  const reEstablished = establishScenarioSoT(
+    "owner_edit_resot",
+    scenario,
+    continuity.latestAcceptedCorpus,
+    { allowShorterOverwrite: true },
+  );
   if (!reEstablished.includes(revisedToken)) {
     journeyFail("owner_edit_resot", `re-established SoT missing approved revision: ${revisedToken}`);
   }

@@ -2772,6 +2772,18 @@ async function runPremiumCompletionInner(
           doc = adoptedServerFull;
         }
         acc = { ok: true, reasons: [] };
+        vPaid = validatePaidProOutput({
+          text: doc,
+          rawIntake: rawForSoT || rawIntake,
+          draft: mergedForApi,
+          skipFounderTitleCheck: founderIntent,
+          intentContract,
+          intentContractMode: intentModeFirst,
+          premiumPipelineSource: premiumPipelineSourceForValidation(doc, "server_full_draft"),
+        });
+        if (intentModeFirst === "full" && !vPaid.ok && !serverSchemaNeedsDetails) {
+          proIntentGateMessage = proIntentPlainEnglishForGate(intentContract, vPaid.reasons);
+        }
       }
       let placeholderClientOk = true;
       let fatalPlaceholderCount = 0;

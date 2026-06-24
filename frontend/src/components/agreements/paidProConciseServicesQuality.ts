@@ -33,12 +33,17 @@ import { removeOrphanPartyLinesBeforeExecutionTail } from "./paidProOrphanPartyL
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 import {
+  analyzePaidProExecutionBlockInvariant,
+} from "./paidProExecutionBlockAuthority";
+import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
   isGenericPaidProAcceptanceManifestFallback,
   resolveAcceptanceManifestRecordsForExecution,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
+import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicationAuthority";
+import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNormalize";
 import { insertBeforeExecutionTail } from "./paidProMutualConsultingQualityFloorInsert";
 import { gateOperativeClauseFamilyAppend } from "./documentCompositionAuthority";
 
@@ -396,10 +401,18 @@ function preparePaidProServerDocumentForAcceptanceCore(
   }
   const repairs: string[] = [];
   let out = (raw || "").replace(/\r\n?/g, "\n").trim();
-  const partyNames = (draft?.parties ?? [])
+  const lineSeparated = extractLineSeparatedLegalEntityParties(intakeText);
+  const draftPartyNames = (draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
-    .filter((n) => n.length >= 2)
-    .slice(0, 2);
+    .filter((n) => n.length >= 2);
+  const partyNames =
+    lineSeparated.length === 2 && draftPartyNames.length <= 2
+      ? lineSeparated
+      : draftPartyNames.length >= 2
+        ? draftPartyNames.slice(0, 12)
+        : lineSeparated.length >= 2
+          ? lineSeparated
+          : draftPartyNames.slice(0, 2);
   const roleLabels = (draft?.parties ?? [])
     .map((p) => String(p?.role ?? "").trim())
     .filter((r) => r.length >= 2);
@@ -421,6 +434,13 @@ function preparePaidProServerDocumentForAcceptanceCore(
       : resolved.length >= 2
         ? resolved
         : manifestRecords;
+  const expectedParties = Math.max(
+    records.length,
+    draftPartyNames.length,
+    2,
+  );
+  const invariantAtPrepareEntry = analyzePaidProExecutionBlockInvariant(out, { expectedParties });
+  const corpusSnapshotBeforePrepareMutations = out;
 
   if (records.length >= 2) {
     const roleFix = repairOpeningRecitalRoleLabelsFromManifest(out, records);
@@ -460,11 +480,25 @@ function preparePaidProServerDocumentForAcceptanceCore(
 
   const displayPrep = preparePaidProReviewDisplayPlain(out);
   if (displayPrep.text !== out) {
-    out = displayPrep.text;
-    repairs.push(...displayPrep.repairs);
+    const beforeDisplayInvariant = analyzePaidProExecutionBlockInvariant(out, { expectedParties });
+    const afterDisplayInvariant = analyzePaidProExecutionBlockInvariant(displayPrep.text, {
+      expectedParties,
+    });
+    if (!beforeDisplayInvariant.ok || afterDisplayInvariant.ok) {
+      out = displayPrep.text;
+      repairs.push(...displayPrep.repairs);
+    } else {
+      repairs.push("prepare:display_prep_execution_regression_skipped");
+    }
   }
 
-  if (records.length >= 2 && !isGenericPaidProAcceptanceManifestFallback(records)) {
+  const invariantBeforeEnsure = analyzePaidProExecutionBlockInvariant(out, { expectedParties });
+  if (
+    records.length >= 2 &&
+    !isGenericPaidProAcceptanceManifestFallback(records) &&
+    !invariantAtPrepareEntry.ok &&
+    !invariantBeforeEnsure.ok
+  ) {
     const execution = ensurePaidProAcceptanceExecutionBlockInvariant(out, records);
     if (execution.text !== out) {
       out = execution.text;
@@ -505,6 +539,20 @@ function preparePaidProServerDocumentForAcceptanceCore(
   if (preservedLegal !== out) {
     out = preservedLegal;
     repairs.push("party_identity:preserve_opening_signature_legal_names");
+  }
+
+  const duplication = applyPaidProCorpusDuplicationAuthority(out);
+  if (duplication.repairs.length > 0) {
+    out = duplication.text;
+    repairs.push(...duplication.repairs.map((r) => `corpus_duplication:${r}`));
+  }
+
+  if (
+    invariantAtPrepareEntry.ok &&
+    !analyzePaidProExecutionBlockInvariant(out, { expectedParties }).ok
+  ) {
+    out = corpusSnapshotBeforePrepareMutations;
+    repairs.push("prepare:execution_invariant_final_restored");
   }
 
   return { text: out.trim(), repairs: [...new Set(repairs)] };

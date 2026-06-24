@@ -193,7 +193,19 @@ export function repairSplitPaidProHeadingFragments(text: string): RepairSplitPai
   for (let i = 0; i < lines.length; i += 1) {
     if (skip.has(i)) continue;
     const line = lines[i]!;
-    const prefix = parseMainSectionPrefixLine(line);
+    const trimmed = line.trim();
+    const prefix = parseMainSectionPrefixLine(trimmed);
+    if (prefix && /^(?:If|The|Each|Either|Any|Unless|When)\b/i.test(prefix.title)) {
+      const prevLine = out.length > 0 ? out[out.length - 1]?.trim() ?? "" : "";
+      if (prevLine && !/^\d+\.\s+[A-Z]/.test(prevLine)) {
+        out[out.length - 1] = `${prevLine} ${prefix.title}`.trim();
+        repairs.push(`false_top_heading_demoted:${prefix.sectionNum}`);
+        continue;
+      }
+      out.push(prefix.title);
+      repairs.push(`false_top_heading_stripped:${prefix.sectionNum}`);
+      continue;
+    }
     if (prefix && (isDanglingPaidProMainHeadingPrefix(prefix.title) || /,\s*$/.test(prefix.title))) {
       const nextIdx = nextNonEmptyLineIndex(lines, i + 1);
       if (nextIdx != null) {

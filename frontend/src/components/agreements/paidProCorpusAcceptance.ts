@@ -36,6 +36,7 @@ import {
   previewRecoverPaidProFreezeCandidate,
 } from "./paidProFreezeCandidate";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { rejectPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -289,7 +290,6 @@ export function validatePaidProOutput(args: {
     logDecision(false, reasons);
     return { ok: false, reasons };
   }
-  const validationInputHash = paidProPipelineAcceptedCorpusHash(t);
   const freezeCandidate = buildPaidProFreezeCandidate({
     text: t,
     draft: args.draft ?? null,
@@ -297,17 +297,39 @@ export function validatePaidProOutput(args: {
     source: pipelineSource ?? "server_full_draft",
     surface: "validatePaidProOutput",
   });
+  const validationCorpus = freezeCandidate.ok ? freezeCandidate.text : t;
+  const preparedHash = freezeCandidate.ok ? freezeCandidate.hash : null;
+  const validationCorpusHash = paidProPipelineAcceptedCorpusHash(validationCorpus);
   logPaidProFreezeCandidateDecision({
     accepted: freezeCandidate.ok,
     source: pipelineSource ?? "server_full_draft",
     preparedFreezeCandidateHash: freezeCandidate.hash,
-    validationInputHash,
-    validationInputMatchesPreparedFreeze: freezeCandidate.hash === validationInputHash,
+    validationInputHash: validationCorpusHash,
+    validationInputMatchesPreparedFreeze:
+      freezeCandidate.ok && preparedHash === validationCorpusHash,
     rejectReason: freezeCandidate.rejectReason,
     candidateLen: freezeCandidate.text.length,
   });
+  if (freezeCandidate.ok) {
+    const dup = rejectPaidProCorpusDuplication(validationCorpus);
+    if (!dup.ok) {
+      const reasons = dup.reasons;
+      logVpaidDevFail(reasons);
+      logDecision(false, reasons);
+      return { ok: false, reasons };
+    }
+    if (
+      serverFullDocExists &&
+      validationCorpus.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+    ) {
+      const reasons = ["freeze_candidate_thin_vs_server_full"];
+      logVpaidDevFail(reasons);
+      logDecision(false, reasons);
+      return { ok: false, reasons };
+    }
+  }
   if (!freezeCandidate.ok) {
-    if (serverFullDocExists) {
+    if (!serverFullDocExists) {
       const recovery = previewRecoverPaidProFreezeCandidate({
         draft: args.draft ?? null,
         intakeText: rawI,
@@ -317,7 +339,7 @@ export function validatePaidProOutput(args: {
         accepted: recovery.ok,
         source: "deterministic_recovery_freeze_candidate",
         preparedFreezeCandidateHash: recovery.hash,
-        validationInputHash,
+        validationInputHash: validationCorpusHash,
         validationInputMatchesPreparedFreeze: false,
         rejectReason: recovery.rejectReason,
         candidateLen: recovery.text.length,
@@ -338,9 +360,10 @@ export function validatePaidProOutput(args: {
     logDecision(false, reasons);
     return { ok: false, reasons };
   }
+  const bodyForGates = validationCorpus;
   const intakeLower = rawI.toLowerCase();
   const minimumSubstance = validateProMinimumSubstance({
-    text: t,
+    text: bodyForGates,
     rawIntake: rawI,
     draft: args.draft ?? null,
     source: pipelineSource,
@@ -353,7 +376,7 @@ export function validatePaidProOutput(args: {
     logDecision(false, reasons);
     return { ok: false, reasons };
   }
-  const acc = rejectPremiumBodyForProRender(t, {
+  const acc = rejectPremiumBodyForProRender(bodyForGates, {
     intakeLower,
     intakeText: args.rawIntake,
     partyNames: args.draft?.parties?.map((p) => p.name) ?? null,
@@ -363,7 +386,7 @@ export function validatePaidProOutput(args: {
     logDecision(false, acc.reasons);
     return acc;
   }
-  const s = rejectPaidProStitchedOrThinShell(t, intakeLower);
+  const s = rejectPaidProStitchedOrThinShell(bodyForGates, intakeLower);
   if (!s.ok) {
     if (conciseQuality.applies && conciseQuality.ok && serverFullDocExists) {
       /* concise commercial services server body — not a stitched starter shell */
@@ -373,7 +396,7 @@ export function validatePaidProOutput(args: {
       return s;
     }
   }
-  const drift = rejectProUpgradeSourceFactDrift(t, { intakeLower });
+  const drift = rejectProUpgradeSourceFactDrift(bodyForGates, { intakeLower });
   if (!drift.ok) {
     logVpaidDevFail(drift.reasons);
     logDecision(false, drift.reasons);
@@ -392,7 +415,7 @@ export function validatePaidProOutput(args: {
   if (intentContractForValidation) {
     const vi = validateIntentContractForPaidProOutput({
       contract: intentContractForValidation,
-      text: t,
+      text: bodyForGates,
       rawIntake: args.rawIntake,
       draftTitle: args.draft?.title,
       authoritativeProPipelineAccepted: isAuthoritativePremiumPipelineProvenance(args.premiumPipelineSource),

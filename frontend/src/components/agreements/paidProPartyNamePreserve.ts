@@ -377,11 +377,13 @@ export function preserveFullLegalPartyNamesInOpeningAndSignatures(
   const fullNames = resolveFullLegalPartiesFromIntake(partyNames, intakeRaw);
   if (fullNames.length < 2) return text;
 
-  const headLen = Math.min(text.length, PREAMBLE_MAX_LEN);
-  let result = preserveInSlice(text.slice(0, headLen), fullNames);
-
   const sigMarker = text.search(/\b(?:IN WITNESS WHEREOF|SIGNATURES?|EXECUTION)\b/i);
-  const midStart = headLen;
+  const preambleCap = Math.min(text.length, PREAMBLE_MAX_LEN);
+  const headEnd = sigMarker >= 0 && sigMarker < preambleCap ? sigMarker : preambleCap;
+
+  let result = preserveInSlice(text.slice(0, headEnd), fullNames);
+
+  const midStart = headEnd;
   const midEnd = sigMarker >= 0 ? sigMarker : text.length;
 
   if (midStart < midEnd) {

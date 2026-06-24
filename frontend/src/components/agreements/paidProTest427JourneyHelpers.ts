@@ -186,7 +186,11 @@ function assertFrozenCorpusIntegrity(stage: string, scenario: Test427Scenario, c
   assertNoFixtureContamination(stage, corpus);
 }
 
-function establishScenarioSoT(scenario: Test427Scenario, corpus: string): string {
+function establishScenarioSoT(
+  scenario: Test427Scenario,
+  corpus: string,
+  opts?: { allowShorterOverwrite?: boolean },
+): string {
   const prep = preparePaidProServerDocumentForAcceptance(corpus, scenario.draft, scenario.intakeText);
   const accepted = padOperativeCorpusBeforeWitness(prep.text, 2000);
   markPaidProPipelineValidationPassed({ text: accepted, source: "server_full_draft" });
@@ -196,6 +200,7 @@ function establishScenarioSoT(scenario: Test427Scenario, corpus: string): string
     source: "server_full_draft",
     draft: scenario.draft,
     intakeText: scenario.intakeText,
+    allowShorterOverwrite: opts?.allowShorterOverwrite ?? false,
   });
   if (!hasPaidProSourceOfTruth()) {
     test427Fail("freeze_establish", "SoT not established");
@@ -623,9 +628,11 @@ export function runTest427ProductionWorkflow(scenario: Test427Scenario): void {
     test427Fail("revision_flow", `accepted revision missing token: ${revisedToken}`);
   }
 
-  const reEstablished = establishScenarioSoT(scenario, continuity.latestAcceptedCorpus);
-  if (!continuity.latestAcceptedCorpus.includes(revisedToken)) {
-    test427Fail("revision_flow", `accepted revision missing token: ${revisedToken}`);
+  const reEstablished = establishScenarioSoT(scenario, continuity.latestAcceptedCorpus, {
+    allowShorterOverwrite: true,
+  });
+  if (!reEstablished.includes(revisedToken)) {
+    test427Fail("revision_flow", `re-established SoT missing approved revision: ${revisedToken}`);
   }
   if (readFrozenCanonicalManifestPartyCount() !== scenario.expectedN) {
     test427Fail("revision_flow", "party count changed after re-freeze");

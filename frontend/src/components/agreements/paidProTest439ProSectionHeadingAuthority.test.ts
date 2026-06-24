@@ -2,18 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
 import {
-  clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
-import {
-  clearPremiumPartyNamesHandoff,
-  resetPremiumRecipientHandoffDedupForTests,
-} from "./premiumPartyNamesHandoff";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import { resolvePaidProFreezeCommitText } from "./paidProFreezeCandidate";
 import {
-  clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -27,6 +21,7 @@ import {
   TEST439_RED_MESA,
   test439Draft,
 } from "./paidProTest439Fixtures";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 const HARBOR_STANDALONE_RE = /Harbor Peak Automation(?!\s+LLC)/;
 
@@ -59,17 +54,16 @@ describe("TEST439 — Pro section heading title authority (Red Mesa / Harbor Pea
       getItem: (k: string) => storage.get(k) ?? null,
       setItem: (k: string, v: string) => storage.set(k, v),
       removeItem: (k: string) => storage.delete(k),
+      clear: () => storage.clear(),
     });
+    resetPaidProPipelineTestIsolation();
     markCurrentSessionProIntent();
     markCurrentSessionProEntitlementComplete();
     getOrInitSessionAgreementGenerationId();
   });
 
   afterEach(() => {
-    clearPaidProSourceOfTruth();
-    clearPremiumPartyNamesHandoff();
-    clearCurrentSessionProEntitlementMarkers();
-    resetPremiumRecipientHandoffDedupForTests();
+    resetPaidProPipelineTestIsolation();
     storage.clear();
     vi.unstubAllGlobals();
   });

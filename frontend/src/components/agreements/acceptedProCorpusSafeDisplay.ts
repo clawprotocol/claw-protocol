@@ -29,6 +29,7 @@ import {
   detectExecutionBlockRoleInversion,
 } from "./paidProAcceptedCorpusPartyRoles";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
+import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import {
@@ -81,9 +82,12 @@ export function stripAcceptedProMarkdownArtifacts(text: string): { text: string;
 
 function reconcileAcceptedCorpusExecutionRolesIfInverted(text: string): { text: string; repaired: boolean } {
   if (!detectExecutionBlockRoleInversion(text)) return { text, repaired: false };
+  const beforeInvariant = analyzePaidProExecutionBlockInvariant(text, { expectedParties: 2 });
   const identities = buildCorpusRoleIdentitiesForExecutionReconcile(text);
   const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
   if (reconciled.repairs <= 0 || reconciled.text === text) return { text, repaired: false };
+  const afterInvariant = analyzePaidProExecutionBlockInvariant(reconciled.text, { expectedParties: 2 });
+  if (beforeInvariant.ok && !afterInvariant.ok) return { text, repaired: false };
   return { text: reconciled.text, repaired: true };
 }
 
@@ -281,10 +285,23 @@ function applyAcceptedProCorpusSafeDisplayCore(
     (executionRecords.length >= 2 &&
       !isGenericPaidProAcceptanceManifestFallback(executionRecords));
   if (mayNormalizeExecutionBlock) {
-    const execution = enforcePaidProSingleExecutionBlock(out);
+    const expectedParties = Math.max(executionRecords.length, 2);
+    const beforeInvariant = analyzePaidProExecutionBlockInvariant(out, { expectedParties });
+    const execution = enforcePaidProSingleExecutionBlock(out, {
+      authorityParties: executionRecords.map((r) => ({ partyLegalName: r.fullLegalName })),
+      intakeText: intakeRaw,
+      draftPartyNames: partyNames,
+    });
     if (execution.text !== out) {
-      out = execution.text;
-      repairs.push(...execution.repairs);
+      const afterInvariant = analyzePaidProExecutionBlockInvariant(execution.text, {
+        expectedParties,
+      });
+      if (!beforeInvariant.ok || afterInvariant.ok) {
+        out = execution.text;
+        repairs.push(...execution.repairs);
+      } else {
+        repairs.push("safe:enforce_execution_skipped_regression");
+      }
     }
   }
 

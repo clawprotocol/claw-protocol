@@ -5,16 +5,10 @@ import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import * as paidProCorpusAcceptance from "./paidProCorpusAcceptance";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
-  clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
 import {
-  clearPremiumPartyNamesHandoff,
-  resetPremiumRecipientHandoffDedupForTests,
-} from "./premiumPartyNamesHandoff";
-import {
-  clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -24,11 +18,9 @@ import { resolvePaidProFreezeCommitText } from "./paidProFreezeCandidate";
 import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import {
-  clearFrozenPremiumSessionBodiesForTests,
   SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN,
 } from "./premiumAcceptancePolicy";
-import { clearPaidProPostAcceptanceValidatorCache } from "./paidProPostAcceptanceValidatorCache";
-import { clearPremiumParseSessionGuard } from "./premiumParseSessionGuard";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { runPremiumCompletion } from "./premiumCompletionPipeline";
@@ -94,9 +86,7 @@ describe("TEST442 — server_full_document_text adopted before validatePaidProOu
       removeItem: (k: string) => storage.delete(k),
       clear: () => storage.clear(),
     });
-    clearFrozenPremiumSessionBodiesForTests();
-    clearPremiumParseSessionGuard();
-    clearPaidProPostAcceptanceValidatorCache();
+    resetPaidProPipelineTestIsolation();
     premiumApiMock.mockResponses = [];
     premiumApiMock.callIndex = 0;
     markCurrentSessionProIntent();
@@ -105,11 +95,7 @@ describe("TEST442 — server_full_document_text adopted before validatePaidProOu
   });
 
   afterEach(() => {
-    clearPaidProSourceOfTruth();
-    clearPremiumPartyNamesHandoff();
-    clearCurrentSessionProEntitlementMarkers();
-    resetPremiumRecipientHandoffDedupForTests();
-    clearFrozenPremiumSessionBodiesForTests();
+    resetPaidProPipelineTestIsolation();
     storage.clear();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();

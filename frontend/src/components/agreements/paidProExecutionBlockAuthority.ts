@@ -24,7 +24,23 @@ function countCompletePartySignatureSections(text: string): {
   serviceProviderHeadings: number;
 } {
   const body = (text || "").replace(/\r\n/g, "\n");
-  const tailStart = signaturePatchStartIndex(body);
+  const witnessMatches = [...body.matchAll(/\bIN WITNESS WHEREOF\b/gi)];
+  let tailStart = -1;
+  const minWitnessPos = Math.floor(body.length * 0.45);
+  for (let i = witnessMatches.length - 1; i >= 0; i--) {
+    const idx = witnessMatches[i].index ?? -1;
+    if (idx >= minWitnessPos) {
+      tailStart = idx;
+      break;
+    }
+  }
+  if (tailStart < 0 && witnessMatches.length > 0) {
+    const lastIdx = witnessMatches[witnessMatches.length - 1]?.index ?? -1;
+    if (lastIdx >= Math.floor(body.length * 0.72)) tailStart = lastIdx;
+  }
+  if (tailStart < 0) {
+    tailStart = signaturePatchStartIndex(body);
+  }
   const tail = tailStart >= 0 ? body.slice(tailStart) : body.slice(Math.floor(body.length * 0.72));
   const chunks = tail.split(/\n(?=\s*(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+)\s*:)/i).filter((c) => c.trim());
   let clientWithBy = 0;

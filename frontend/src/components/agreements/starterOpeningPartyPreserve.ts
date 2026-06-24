@@ -7,6 +7,7 @@ import { extractAgreementEntityCandidates } from "../../agreement/partyPlacehold
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNormalize";
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { isSignerTitleLikeRole } from "./starterRoleLabelGuard";
@@ -80,6 +81,8 @@ function resolveFullLegalPartiesForStarterPreview(
   intakeRaw: string | null | undefined,
 ): string[] {
   const intake = String(intakeRaw || "").trim();
+  const fromLineSeparated = extractLineSeparatedLegalEntityParties(intake);
+  if (fromLineSeparated.length >= 2) return fromLineSeparated;
   const fromLabeled = labeledPartyLegalEntities(intake);
   if (fromLabeled.length >= 2) return fromLabeled;
   const fromBetween = extractBetweenPartyNameList(intake);

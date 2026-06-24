@@ -34,7 +34,7 @@ function cacheKeyString(key: PaidProCorpusScanCacheKey): string {
 export function corpusHashForScanCache(corpus: string): string {
   const t = (corpus || "").trim();
   if (!t) return "";
-  return t.length >= 80 ? hashPaidProCorpus(t) : `len:${t.length}`;
+  return hashPaidProCorpus(t);
 }
 
 export function readCachedCorpusScanResult<T>(key: PaidProCorpusScanCacheKey): T | null {

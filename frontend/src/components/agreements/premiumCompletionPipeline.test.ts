@@ -14,7 +14,6 @@ import {
   stripPremiumUserNotesFromMergedIntake,
 } from "./premiumCompletionPipeline";
 import {
-  clearFrozenPremiumSessionBodiesForTests,
   isNonfatalGenerationFailureCode,
   isNonfatalParseDegradedPaidAccept,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
@@ -23,12 +22,7 @@ import {
 } from "./premiumAcceptancePolicy";
 import { repairKnownPartyPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
-import { clearPremiumParseSessionGuard } from "./premiumParseSessionGuard";
-import { clearPaidProPostAcceptanceValidatorCache } from "./paidProPostAcceptanceValidatorCache";
-import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
-import { clearPremiumGenerationCallAudit } from "./paidProPremiumGenerationCallAudit";
-import { clearPaidProCheckoutPreviewPreflightCache } from "./paidProCheckoutPreviewPreflightCache";
-import { clearPaidProPerformanceTrace, clearLastFinishedPaidProPerformanceTrace } from "./paidProPerformanceTrace";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
 
@@ -86,14 +80,7 @@ vi.mock("./paidProCorpusAcceptance", async (importOriginal) => {
 });
 
 beforeEach(() => {
-  clearFrozenPremiumSessionBodiesForTests();
-  clearPremiumParseSessionGuard();
-  clearPaidProPostAcceptanceValidatorCache();
-  clearAcceptedProCorpusSafeDisplayCacheForTests();
-  clearPremiumGenerationCallAudit();
-  clearPaidProCheckoutPreviewPreflightCache();
-  clearPaidProPerformanceTrace();
-  clearLastFinishedPaidProPerformanceTrace();
+  resetPaidProPipelineTestIsolation();
   premiumApiMock.mockResponses = [];
   premiumApiMock.callIndex = 0;
   premiumApiMock.forceValidateFail = false;

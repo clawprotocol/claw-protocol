@@ -3,7 +3,7 @@
  * Heuristic only — server parse on submit remains authoritative when available.
  */
 
-import { parseLabeledPartyBlocks, parseQuotedRolePartyLines, roleLabelPartyLegalEntities } from "./labeledPartyBlockParse";
+import { parseLabeledPartyBlocks, parseQuotedRolePartyLines, roleLabelPartyLegalEntities, labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList, extractBetweenPartyPair } from "./partyBetweenParse";
 import {
   extractIntakePayment,
@@ -19,6 +19,7 @@ import {
 } from "./intakeSignerInstructionParse";
 import { preCleanBetweenTailForMultiPartySplit, stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 import { mergeIntakeDeclaredRolesIntoPartyHints } from "./canonicalPartyRoleAuthority";
+import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNormalize";
 
 export type IntakeStructuredAgreement = {
   parties: string[];
@@ -558,6 +559,16 @@ function extractStructuredParties(text: string, lower: string, rawIntake?: strin
 
   if (/\bI\s+will\b/i.test(text) && /\byou\b/i.test(lower)) {
     return { parties: [], roleHints: {}, uncertain: true, structured: null };
+  }
+
+  const lineSeparated = extractLineSeparatedLegalEntityParties(rawIntake || text);
+  if (lineSeparated.length === 2 && labeledPartyLegalEntities(rawIntake || text).length <= 2) {
+    return {
+      parties: lineSeparated,
+      roleHints: {},
+      uncertain: false,
+      structured: { party_1: lineSeparated[0]!, party_2: lineSeparated[1]! },
+    };
   }
 
   return { parties: [], roleHints: {}, uncertain: false, structured: null };

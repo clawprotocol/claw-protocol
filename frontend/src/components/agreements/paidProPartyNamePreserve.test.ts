@@ -25,6 +25,43 @@ describe("paidProPartyNamePreserve", () => {
     expect(out).toContain("Northwind Automation Partners LLC");
   });
 
+  it("does not duplicate execution blocks when witness falls within preamble cap", () => {
+    const redMesa = "Red Mesa Logistics LLC";
+    const harborPeak = "Harbor Peak Automation LLC";
+    const witnessLine = "IN WITNESS WHEREOF, the parties execute this Agreement.";
+    const body = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      `This Agreement is between ${redMesa} (Client) and Harbor Peak Automation (Service Provider).`,
+      "",
+      "1. SCOPE OF SERVICES",
+      "Professional workflow automation consulting services.",
+      "",
+      witnessLine,
+      "",
+      "CLIENT:",
+      redMesa,
+      "By: ______________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Harbor Peak Automation",
+      "By: ______________________________",
+    ].join("\n");
+    let padded = body;
+    while (padded.length < 12_000) {
+      padded += "\n\nSupplemental operative clause under Oklahoma law.";
+    }
+    const out = preserveFullLegalPartyNamesInOpeningAndSignatures(
+      padded,
+      [redMesa, harborPeak],
+      null,
+    );
+    const tail = out.slice(out.search(/\bIN WITNESS WHEREOF\b/i));
+    expect((tail.match(/^\s*CLIENT\s*:/gim) || []).length).toBe(1);
+    expect((tail.match(/^\s*SERVICE\s+PROVIDER\s*:/gim) || []).length).toBe(1);
+    expect(out).toContain(harborPeak);
+  });
+
   it("collapses duplicate notice entity lines introduced by short-label expansion", () => {
     const parties = ["Iron Vale Systems Inc.", "Harbor Peak Automation LLC"];
     const body = [

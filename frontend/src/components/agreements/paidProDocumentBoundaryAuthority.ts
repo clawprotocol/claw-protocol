@@ -10,7 +10,7 @@ import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNorm
 import { dedupeStandaloneOperativeClauseFamilies } from "./operativeClauseFamilyDedup";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
-import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
+import { countPaidProExecutionBlocks, analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import {
   applyPaidProNoticeContactAuthority,
   type PaidProNoticeContactAuthorityOpts,
@@ -136,11 +136,29 @@ export function applyPaidProDocumentBoundaryAuthority(
     const skipMultiPartyExecutionNormalize =
       executionManifest.length >= 3 &&
       !analyzeMultiPartyExecutionBlockShape(out, executionManifest).malformed;
-    if (!skipMultiPartyExecutionNormalize) {
-      const execution = enforcePaidProSingleExecutionBlock(out);
+    const expectedExecutionParties = Math.max(executionManifest.length, 2);
+    const executionInvariantBefore = analyzePaidProExecutionBlockInvariant(out, {
+      expectedParties: expectedExecutionParties,
+    });
+    if (
+      !skipMultiPartyExecutionNormalize &&
+      !executionInvariantBefore.ok
+    ) {
+      const execution = enforcePaidProSingleExecutionBlock(out, {
+        intakeText: opts?.intakeText ?? null,
+        authorityParties: executionManifest.map((r) => ({ partyLegalName: r.fullLegalName })),
+        draftPartyNames: executionManifest.map((r) => r.fullLegalName),
+      });
       if (execution.text !== out) {
-        out = execution.text;
-        repairs.push(...execution.repairs.map((r) => `execution:${r}`));
+        const executionInvariantAfter = analyzePaidProExecutionBlockInvariant(execution.text, {
+          expectedParties: expectedExecutionParties,
+        });
+        if (executionInvariantAfter.ok) {
+          out = execution.text;
+          repairs.push(...execution.repairs.map((r) => `execution:${r}`));
+        } else {
+          repairs.push("execution:enforce_skipped_regression");
+        }
       }
     }
   }

@@ -351,6 +351,25 @@ function operativePrefixWithoutExecution(text: string): string {
   return prefix.trimEnd();
 }
 
+function stripStaleSignatureRoleBlocksFromPrefix(prefix: string): string {
+  let out = prefix;
+  const staleClient = out.search(/(?:^|\n)\s*CLIENT\s*:/im);
+  if (staleClient >= 0) out = out.slice(0, staleClient).trimEnd();
+  const staleProvider = out.search(/(?:^|\n)\s*SERVICE\s+PROVIDER\s*:/im);
+  if (staleProvider >= 0) out = out.slice(0, staleProvider).trimEnd();
+  return out;
+}
+
+function rebuildCanonicalExecutionTailFromPrefix(
+  text: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+): string {
+  const prefix = stripStaleSignatureRoleBlocksFromPrefix(operativePrefixWithoutExecution(text));
+  return `${prefix}\n\n${buildCanonicalExecutionTailFromManifest(records)}\n`
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function executionBlockCoversManifestPartyNames(
   text: string,
   records: readonly CanonicalPartyIdentityRecord[],
@@ -393,20 +412,11 @@ export function ensurePaidProAcceptanceExecutionBlockInvariant(
     !shapeAudit.malformed &&
     executionBlockCoversManifestPartyNames(out, records)
   ) {
-    if (partyCount < 3) {
-      const normalized = enforcePaidProSingleExecutionBlock(out, { authorityParties });
-      if (normalized.text !== out) {
-        repairs.push(...normalized.repairs);
-        out = normalized.text;
-      }
-    }
     return { text: out, repairs: [...new Set(repairs)] };
   }
 
   if (witnessCount === 0 || executionBlockCount === 0 || shapeAudit.malformed) {
-    const prefix = operativePrefixWithoutExecution(out);
-    const tail = buildCanonicalExecutionTailFromManifest(records);
-    out = `${prefix}\n\n${tail}\n`.replace(/\n{3,}/g, "\n\n").trim();
+    out = rebuildCanonicalExecutionTailFromPrefix(out, records);
     repairs.push(
       shapeAudit.malformed
         ? `acceptance_execution_block:multi_party_shape_repair:${shapeAudit.reasons.join(";")}`
@@ -428,11 +438,21 @@ export function ensurePaidProAcceptanceExecutionBlockInvariant(
     expectedParties: partyCount >= 3 ? partyCount : 2,
   });
   if (afterWitness !== 1 || afterBlocks !== 1 || !afterInvariant.ok || afterShape.malformed) {
-    const prefix = operativePrefixWithoutExecution(out);
-    out = `${prefix}\n\n${buildCanonicalExecutionTailFromManifest(records)}\n`
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
+    out = rebuildCanonicalExecutionTailFromPrefix(out, records);
     repairs.push("acceptance_execution_block:appended_canonical_tail_fallback");
+  }
+
+  const preAssert = analyzePaidProExecutionBlockInvariant(out, {
+    expectedParties: partyCount >= 3 ? partyCount : 2,
+  });
+  if (
+    !preAssert.ok &&
+    preAssert.violations.some((v) =>
+      /^(?:client|service_provider)_(?:heading|signature_section)_duplicate:/.test(v),
+    )
+  ) {
+    out = rebuildCanonicalExecutionTailFromPrefix(out, records);
+    repairs.push("acceptance_execution_block:duplicate_tail_rebuild");
   }
 
   assertPaidProSingleExecutionBlock(out, "ensurePaidProAcceptanceExecutionBlockInvariant", {

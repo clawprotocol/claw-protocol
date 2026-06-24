@@ -38,7 +38,7 @@ export function buildAcceptedProCorpusSafeDisplayCacheKey(
 function corpusHashForCache(corpus: string): string {
   const t = (corpus || "").trim();
   if (!t) return "empty";
-  return t.length >= 80 ? hashPaidProCorpus(t) : `len:${t.length}`;
+  return hashPaidProCorpus(t);
 }
 
 export function readAcceptedProCorpusSafeDisplayCache(
