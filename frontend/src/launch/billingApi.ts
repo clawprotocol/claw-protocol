@@ -25,6 +25,8 @@ export type KeyBalanceFetch = {
 export type SubscriptionFetch = {
   data: SubscriptionRow | null;
   error: string | null;
+  /** True when the server explicitly reported no subscription (HTTP 404 or null body). */
+  noSubscription: boolean;
 };
 
 export async function fetchKeyBalance(orgId: string): Promise<KeyBalanceFetch> {
@@ -49,23 +51,24 @@ export async function fetchKeyBalance(orgId: string): Promise<KeyBalanceFetch> {
 }
 
 export async function fetchSubscription(orgId: string): Promise<SubscriptionFetch> {
-  if (!featureFlags.serverBilling) return { data: null, error: null };
+  if (!featureFlags.serverBilling) return { data: null, error: null, noSubscription: false };
   const oid = (orgId || "").trim();
-  if (!oid) return { data: null, error: null };
+  if (!oid) return { data: null, error: null, noSubscription: false };
   try {
     const res = await fetch(apiUrl(`/v1/subscriptions/${encodeURIComponent(oid)}`), {
       headers: { Accept: "application/json" },
     });
-    if (res.status === 404) return { data: null, error: null };
+    if (res.status === 404) return { data: null, error: null, noSubscription: true };
     if (!res.ok) {
       const msg = await errorMessageFromResponse(res, `Could not load subscription (HTTP ${res.status}).`);
       logClawClientWarning("billing.subscription", { status: res.status, orgId: oid });
-      return { data: null, error: msg };
+      return { data: null, error: msg, noSubscription: false };
     }
-    const j = await readJson<{ subscription?: SubscriptionRow }>(res);
-    return { data: j.subscription ?? null, error: null };
+    const j = await readJson<{ subscription?: SubscriptionRow | null }>(res);
+    const row = j.subscription ?? null;
+    return { data: row, error: null, noSubscription: !row };
   } catch (e) {
     logClawClientWarning("billing.subscription", { error: String(e) });
-    return { data: null, error: "Could not reach the server — check that the API is running." };
+    return { data: null, error: "Could not reach the server — check that the API is running.", noSubscription: false };
   }
 }

@@ -583,10 +583,6 @@ async def get_usage_bundle(usage_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-def _relaxed_subscription_probe_environment() -> bool:
-    """Match ``CLAW_ENVIRONMENT`` defaults used elsewhere (unset → treat as local)."""
-    return os.getenv("CLAW_ENVIRONMENT", "local").strip().lower() in ("local", "dev", "test")
-
 
 @router.get("/subscriptions/{org_id}")
 async def get_subscription(org_id: str) -> Dict[str, Any]:
@@ -594,10 +590,9 @@ async def get_subscription(org_id: str) -> Dict[str, Any]:
     eco.init_schema()
     row = subs.get_subscription_for_org(eco, org_id)
     if not row:
-        # Local/dev: callers (e.g. workspace bootstrap) probe org id — empty subscription is normal, not 404.
-        if _relaxed_subscription_probe_environment():
-            return {"subscription": None}
-        raise HTTPException(status_code=404, detail="not_found")
+        # Missing subscription is a normal probe result (local-org, pre-checkout, stale org id).
+        # Never 404 — callers treat null as free/no plan without poisoning checkout-return flows.
+        return {"subscription": None}
     return {"subscription": row}
 
 

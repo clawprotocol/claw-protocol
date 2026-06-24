@@ -2,9 +2,10 @@
  * Verify Stripe checkout return and refresh server entitlement.
  */
 
-import { refreshSubscriptionEntitlement } from "../access/subscriptionEntitlementCache";
+import { refreshSubscriptionEntitlement, writeCachedSubscriptionEntitlement } from "../access/subscriptionEntitlementCache";
 import { verifyBillingCheckoutSession } from "../launch/billingCheckoutApi";
 import { markPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
+import { getOrgId } from "../launch/orgContext";
 
 export function readCheckoutSessionIdFromUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -20,8 +21,20 @@ export async function handleCheckoutReturnEntitlement(): Promise<boolean> {
   const sessionId = readCheckoutSessionIdFromUrl();
   if (!sessionId) return false;
   try {
-    await verifyBillingCheckoutSession(sessionId);
-    await refreshSubscriptionEntitlement();
+    const verified = await verifyBillingCheckoutSession(sessionId);
+    const oid = getOrgId().trim();
+    if (verified.subscription?.plan_code && oid) {
+      writeCachedSubscriptionEntitlement(
+        {
+          org_id: oid,
+          plan_code: verified.subscription.plan_code,
+          status: verified.subscription.status ?? "active",
+        },
+        oid,
+      );
+    } else {
+      await refreshSubscriptionEntitlement(oid);
+    }
     markPaidPremiumCompletionSession({ source: "settled_checkout" });
     return true;
   } catch {
