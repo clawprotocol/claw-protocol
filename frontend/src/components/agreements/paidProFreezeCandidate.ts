@@ -16,7 +16,9 @@ import {
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { assertPaidProSingleExecutionBlock } from "./paidProExecutionBlockAuthority";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
-import { assertPaidProDocumentBoundaryAuthorityForFreeze } from "./paidProDocumentBoundaryAuthority";
+import { assertClauseFamilyStructuralIntegrityForFreeze } from "./clauseFamilyStructuralIntegrity";
+import { assertPaidProDocumentBoundaryAuthorityForFreeze, applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
+import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 import {
   assertPaidProSectionStructureCompletenessForFreeze,
@@ -45,6 +47,7 @@ import {
 import {
   paidProPipelineAcceptedCorpusHash,
   readPaidProPipelineAcceptedCorpusHash,
+  markPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import { logProCorpusSourceMap } from "./proCorpusSourcePath";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderCorpus";
@@ -53,6 +56,10 @@ import type { CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapsh
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { buildDeterministicQuadPartyMutualServicesProFallback } from "./deterministicQuadPartyProFallback";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
+import {
+  assertProfessionalCorpusCleanForFreeze,
+  repairProfessionalCorpusContamination,
+} from "./paidProProfessionalCorpusContamination";
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
@@ -117,9 +124,41 @@ export function preparePaidProFreezeCandidateText(
     reason: "prepare_paid_pro_freeze_candidate",
   });
   const authorityText = authorityGuard.text;
+  const authorityTrimmed = trim(authorityText);
+  const authorityStableHash = paidProPipelineAcceptedCorpusHash(authorityTrimmed);
+  const pipelineAcceptedHash = readPaidProPipelineAcceptedCorpusHash();
+  if (
+    authorityStableHash &&
+    pipelineAcceptedHash &&
+    pipelineAcceptedHash === authorityStableHash &&
+    authorityTrimmed.length >= 4000 &&
+    hasPaidProPipelineSessionAcceptance({
+      text: authorityTrimmed,
+      source: requestedSource,
+    })
+  ) {
+    const reviewParties = resolvePartiesForReviewRender({
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+    });
+    const parties: CanonicalAgreementSnapshotParty[] = reviewParties
+      .map((p) => ({
+        name: p.partyLegalName.trim(),
+        role: null,
+        email: p.signerEmail?.trim() || null,
+        partyAddress: p.partyAddress?.trim() || null,
+      }))
+      .filter((p) => p.name.length >= 2);
+    return {
+      text: authorityTrimmed,
+      hash: hashPaidProCorpus(authorityTrimmed),
+      reviewParties,
+      parties,
+      repairs: ["freeze_prep_skipped_pipeline_stable_corpus"],
+    };
+  }
 
   const incomingPreparedHash = paidProPipelineAcceptedCorpusHash(authorityText);
-  const pipelineAcceptedHash = readPaidProPipelineAcceptedCorpusHash();
   const skipRedundantSafeDisplay =
     Boolean(pipelineAcceptedHash) &&
     Boolean(incomingPreparedHash) &&
@@ -261,6 +300,16 @@ export function preparePaidProFreezeCandidateText(
     repairs.push(...canonicalStructure.repairs.slice(0, 8));
   }
 
+  const contaminationRepair = repairProfessionalCorpusContamination(safeForCommit, {
+    partyNames: partyNames,
+    partyCount: parties.length,
+    signerNames: reviewParties.map((p) => p.signerName),
+  });
+  if (contaminationRepair.repairs.length > 0) {
+    safeForCommit = contaminationRepair.text;
+    repairs.push(...contaminationRepair.repairs);
+  }
+
   return {
     text: safeForCommit,
     hash: hashPaidProCorpus(safeForCommit),
@@ -276,6 +325,33 @@ export function assertPaidProFreezeCandidateGates(
   args: PreparePaidProFreezeCandidateArgs,
 ): string {
   const surface = args.surface ?? "paid_pro_freeze_candidate";
+  const inputTrimmed = trim(args.text);
+  const inputPipelineHash = paidProPipelineAcceptedCorpusHash(inputTrimmed);
+  const pipelineHash = readPaidProPipelineAcceptedCorpusHash();
+  if (
+    inputPipelineHash &&
+    pipelineHash &&
+    pipelineHash === inputPipelineHash &&
+    hasPaidProPipelineSessionAcceptance({
+      text: inputTrimmed,
+      source: args.source ?? "server_full_draft",
+    })
+  ) {
+    return inputTrimmed;
+  }
+  const prepPipelineHash = paidProPipelineAcceptedCorpusHash(prep.text);
+  if (
+    prep.repairs.includes("freeze_prep_skipped_pipeline_stable_corpus") &&
+    prepPipelineHash &&
+    pipelineHash &&
+    pipelineHash === prepPipelineHash &&
+    hasPaidProPipelineSessionAcceptance({
+      text: prep.text,
+      source: args.source ?? "server_full_draft",
+    })
+  ) {
+    return prep.text;
+  }
   let safeForCommit = prep.text;
 
   safeForCommit = assertPaidProDocumentBoundaryAuthorityForFreeze(safeForCommit, {
@@ -331,6 +407,51 @@ export function assertPaidProFreezeCandidateGates(
     `${surface}_pre_freeze`,
   );
 
+  safeForCommit = assertProfessionalCorpusCleanForFreeze(safeForCommit, {
+    partyNames: prep.parties.map((p) => p.name),
+    partyCount: prep.parties.length,
+    intakeText: args.intakeText ?? null,
+    draft: args.draft ?? null,
+    signerNames: prep.reviewParties.map((p) => p.signerName),
+    surface: `${surface}_pre_notice_finalize`,
+  });
+
+  const noticeFinalize = applyPaidProNoticeContactAuthority(safeForCommit, {
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+    surface: `${surface}_freeze_finalize_notices`,
+    blockOnUnresolved: true,
+  });
+  safeForCommit = noticeFinalize.text;
+
+  const finalizeBoundary = applyPaidProDocumentBoundaryAuthority(safeForCommit, {
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+    surface: `${surface}_freeze_finalize_boundary`,
+    parties: prep.reviewParties,
+    draftPartyCount: args.draft?.parties?.length ?? 0,
+    handoffPartySlots: (() => {
+      const handoff = readPremiumRecipientHandoff();
+      if (!handoff) return prep.reviewParties.length;
+      return resolveHandoffPartySlotCount(handoff, prep.reviewParties.length);
+    })(),
+    blockOnViolation: false,
+    blockOnUnresolved: true,
+  });
+  safeForCommit = finalizeBoundary.text;
+
+  assertClauseFamilyStructuralIntegrityForFreeze(safeForCommit, {
+    parties: prep.reviewParties,
+    surface: `${surface}_freeze_finalize`,
+    phase: "post_acceptance",
+    draftPartyCount: args.draft?.parties?.length ?? 0,
+    handoffPartySlots: (() => {
+      const handoff = readPremiumRecipientHandoff();
+      if (!handoff) return prep.reviewParties.length;
+      return resolveHandoffPartySlotCount(handoff, prep.reviewParties.length);
+    })(),
+  });
+
   return safeForCommit;
 }
 
@@ -341,6 +462,11 @@ export function evaluatePaidProFreezeCandidateGates(
 ): PaidProFreezeCandidateGateResult {
   try {
     const text = assertPaidProFreezeCandidateGates(prep, args);
+    markPaidProPipelineValidationPassed({
+      text,
+      source: args.source ?? "server_full_draft",
+    });
+    markPaidProPipelineAcceptedCorpusHash(text);
     return {
       ok: true,
       text,
@@ -379,6 +505,10 @@ function extractPaidProFreezeRejectReason(message: string): string {
     return "document_boundary_blocked";
   }
   if (message.includes("unresolved_render_tokens")) return "unresolved_render_tokens";
+  if (message.includes("[paid-pro-professional-corpus-contamination-blocked]")) {
+    const codes = message.match(/blocked\]\s*(.+)/)?.[1];
+    return codes?.split(",")[0] ?? "professional_corpus_contamination";
+  }
   if (message.includes("[paid-pro-sot-freeze-blocked]")) {
     return message.replace(/^\[paid-pro-sot-freeze-blocked\]\s*/i, "").slice(0, 120);
   }

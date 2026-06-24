@@ -8,6 +8,9 @@ import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot"
 import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import type { PremiumRecipientHandoffSlot } from "./premiumPartyNamesHandoff";
+import { signerMetadataInputRaw } from "../../agreement/signerMetadataNormalize";
 
 function cleanManifestPartyName(name: string): string {
   return (name || "")
@@ -55,5 +58,32 @@ export function paidProSignerMetadataPartiesFromFrozenManifest(): PaidProSignerM
     signerName: "",
     signerTitle: "",
     partyAddress: "",
+  }));
+}
+
+/** Frozen/consumed signer metadata for signer-setup UI — never downgraded below establish-time manifest. */
+export function readFrozenSignerMetadataHandoffSlots(): PremiumRecipientHandoffSlot[] {
+  const consumed = readConsumedPaidProSignerMetadataAuthority();
+  if (consumed && consumed.parties.length >= 2) {
+    return consumed.parties.map((p) => ({
+      name: String(p.partyLegalName ?? "").trim(),
+      email: String(p.signerEmail ?? "").trim(),
+      role: "party",
+      signerName: signerMetadataInputRaw(p.signerName),
+      signerTitle: signerMetadataInputRaw(p.signerTitle),
+      partyAddress: String(p.partyAddress ?? "").trim(),
+    }));
+  }
+  const frozen = getFrozenCanonicalAgreementCorpus();
+  const rows: CanonicalAgreementSnapshotParty[] =
+    frozen?.signerManifest?.length ? frozen.signerManifest : frozen?.parties ?? [];
+  if (rows.length < 2) return [];
+  return rows.map((row) => ({
+    name: cleanManifestPartyName(String(row.name ?? "")),
+    email: String(row.email ?? "").trim(),
+    role: String(row.role ?? "").trim() || "party",
+    signerName: "",
+    signerTitle: "",
+    partyAddress: String(row.partyAddress ?? "").trim(),
   }));
 }

@@ -22,7 +22,11 @@ import {
   getAuthoritativeSigningSnapshot,
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
-import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
+import { readFrozenSignerMetadataHandoffSlots } from "./frozenCanonicalManifestAuthority";
+import {
+  paidProSignerMetadataForensicLineageEnabled,
+  readConsumedPaidProSignerMetadataAuthority,
+} from "./paidProSignerMetadataAuthority";
 import {
   matchSignerForEntityIsClauses,
   sanitizePartyLegalNameFromIntakeFragment,
@@ -337,6 +341,48 @@ export function extractSignerMetadataFromCorpus(
   return out;
 }
 
+function candidatesFromConsumedSignerAuthority(
+  legalEntities: readonly string[],
+): EntitySignerMetadataCandidate[] {
+  const consumed = readConsumedPaidProSignerMetadataAuthority();
+  const fromConsumed: EntitySignerMetadataCandidate[] = [];
+  if (consumed && consumed.parties.length >= 2) {
+    for (let i = 0; i < consumed.parties.length; i += 1) {
+      const p = consumed.parties[i]!;
+      const entity = legalEntities[i]?.trim() || String(p.partyLegalName ?? "").trim();
+      const signerName = cleanSignerField(p.signerName, "signerName");
+      const signerTitle = cleanSignerField(p.signerTitle, "signerTitle");
+      if (!signerName && !signerTitle) continue;
+      fromConsumed.push({
+        entity,
+        signerName,
+        signerTitle,
+        source: "authoritative_snapshot",
+        authorityRank: SIGNER_METADATA_AUTHORITY_RANK.authoritative_snapshot,
+      });
+    }
+    if (fromConsumed.length > 0) return fromConsumed;
+  }
+  const frozenSlots = readFrozenSignerMetadataHandoffSlots();
+  if (frozenSlots.length < 2) return [];
+  const fromFrozen: EntitySignerMetadataCandidate[] = [];
+  for (let i = 0; i < frozenSlots.length; i += 1) {
+    const slot = frozenSlots[i]!;
+    const entity = legalEntities[i]?.trim() || String(slot.name ?? "").trim();
+    const signerName = cleanSignerField(slot.signerName, "signerName");
+    const signerTitle = cleanSignerField(slot.signerTitle, "signerTitle");
+    if (!signerName && !signerTitle) continue;
+    fromFrozen.push({
+      entity,
+      signerName,
+      signerTitle,
+      source: "authoritative_snapshot",
+      authorityRank: SIGNER_METADATA_AUTHORITY_RANK.authoritative_snapshot,
+    });
+  }
+  return fromFrozen;
+}
+
 function candidatesFromHandoff(
   handoff: PremiumRecipientHandoffV2 | null | undefined,
   partyCount: number,
@@ -465,6 +511,7 @@ export function resolveUniversalSignerMetadataBySlot(
 
   const intakeExtract = extractSignerMetadataFromIntake(sources.intakeText);
   const allCandidates: EntitySignerMetadataCandidate[] = [
+    ...candidatesFromConsumedSignerAuthority(legalEntities),
     ...candidatesFromSnapshot(snapshotMeta, legalEntities),
     ...candidatesFromHandoff(handoff, partyCount, legalEntities),
     ...candidatesFromDraftParties(sources.draftParties, legalEntities),

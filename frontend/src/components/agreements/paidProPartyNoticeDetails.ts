@@ -585,7 +585,7 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
 const NOTICES_SECTION_HEADING_RE =
   /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notices|Notice\s+Addresses?)\b|(?:^|\n)\s*\d+\.\s+[^\n]*\bNotices\b/i;
 
-function findNoticesSectionStart(text: string): number {
+export function findNoticesSectionStart(text: string): number {
   const match = text.match(NOTICES_SECTION_HEADING_RE);
   if (!match || match.index == null) return -1;
   return match.index;

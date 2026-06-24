@@ -14,6 +14,8 @@ import {
   writePremiumRecipientHandoffFromAuthorityParties,
   writePremiumRecipientHandoffSignerMetadata,
 } from "./premiumPartyNamesHandoff";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import { readSignerMetadataEffectiveMax } from "./signerMetadataEffective";
 import {
   detectAndLogSignerMetadataLoss,
   hydrateSignerMetadataArraysNonDestructive,
@@ -72,9 +74,16 @@ export function runPaidProSignerMetadataAuthoritySeed(
   args: PaidProSignerMetadataSeedArgs,
 ): PaidProSignerMetadataSeedResult {
   const partyCount = (() => {
+    const consumedCount =
+      readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
+        (p) => String(p.partyLegalName ?? "").trim().length >= 2,
+      ).length ?? 0;
+    const effectiveMax = readSignerMetadataEffectiveMax().partySlots;
     const raw = Math.max(
       args.authoritativePartyCount ?? 0,
       args.legalEntities.length,
+      consumedCount,
+      effectiveMax,
       args.uiSignerNames?.length ?? 0,
       2,
     );

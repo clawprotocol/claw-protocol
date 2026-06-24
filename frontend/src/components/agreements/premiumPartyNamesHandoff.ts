@@ -209,6 +209,7 @@ function mergeSlot(
     signerTitle: string;
     partyAddress: string;
   }>,
+  opts?: { preserveSignerFieldsOnEmptyPatch?: boolean },
 ): PremiumRecipientHandoffSlot {
   const name = patch.name !== undefined ? String(patch.name || "").trim() || prev.name : prev.name;
   const email =
@@ -219,13 +220,22 @@ function mergeSlot(
     patch.role !== undefined
       ? String(patch.role || "").trim() || prev.role || "party"
       : prev.role || "party";
+  const preserveSigner = opts?.preserveSignerFieldsOnEmptyPatch ?? hasPaidProSourceOfTruth();
+  const patchSignerName =
+    patch.signerName !== undefined ? normalizeSignerMetadataForSave(patch.signerName) ?? "" : null;
   const signerName =
-    patch.signerName !== undefined
-      ? normalizeSignerMetadataForSave(patch.signerName) ?? ""
+    patchSignerName !== null
+      ? preserveSigner && !patchSignerName
+        ? signerMetadataInputRaw(prev.signerName)
+        : patchSignerName
       : signerMetadataInputRaw(prev.signerName);
+  const patchSignerTitle =
+    patch.signerTitle !== undefined ? normalizeSignerMetadataForSave(patch.signerTitle) ?? "" : null;
   const signerTitle =
-    patch.signerTitle !== undefined
-      ? normalizeSignerMetadataForSave(patch.signerTitle) ?? ""
+    patchSignerTitle !== null
+      ? preserveSigner && !patchSignerTitle
+        ? signerMetadataInputRaw(prev.signerTitle)
+        : patchSignerTitle
       : signerMetadataInputRaw(prev.signerTitle);
   const partyAddress =
     patch.partyAddress !== undefined
@@ -439,20 +449,22 @@ export function persistPremiumRecipientHandoff(patch: {
       cap != null && cap >= 2
         ? trimPremiumRecipientHandoffToPartyCount(payload, cap)
         : payload;
-    const fingerprint = premiumRecipientHandoffFingerprint(trimmedPayload);
+    const slotCount = resolveHandoffPartySlotCount(trimmedPayload, cap);
+    const mergedPayload = mergeHandoffPayloadFromConsumedSignerAuthority(trimmedPayload, slotCount);
+    if (wouldHandoffWriteDowngradeSignerMetadata(mergedPayload, slotCount)) {
+      return;
+    }
+    const fingerprint = premiumRecipientHandoffFingerprint(mergedPayload);
     if (fingerprint === lastPersistedHandoffFingerprint) {
       return;
     }
     lastPersistedHandoffFingerprint = fingerprint;
-    sessionStorage.setItem(KEY_V2, JSON.stringify(trimmedPayload));
+    sessionStorage.setItem(KEY_V2, JSON.stringify(mergedPayload));
     sessionStorage.removeItem(LEGACY_KEY);
     invalidatePremiumRecipientHandoffReadCache();
-    logReviewLinkSignerMetadataHandoffWrite(trimmedPayload);
-    const slots = linearPremiumRecipientSlots(
-      trimmedPayload,
-      resolveHandoffPartySlotCount(trimmedPayload, cap),
-    );
-    latchSignerMetadataEffectiveMax(countSignerMetadataSlots(trimmedPayload, slots.length));
+    logReviewLinkSignerMetadataHandoffWrite(mergedPayload);
+    const slots = linearPremiumRecipientSlots(mergedPayload, slotCount);
+    latchSignerMetadataEffectiveMax(countSignerMetadataSlots(mergedPayload, slots.length));
     const withEmail = slots.filter((s) => Boolean(String(s.email || "").trim())).length;
     if (withEmail > 0) {
       // eslint-disable-next-line no-console
@@ -466,6 +478,55 @@ export function persistPremiumRecipientHandoff(patch: {
   } catch {
     /* ignore */
   }
+}
+
+function mergeHandoffPayloadFromConsumedSignerAuthority(
+  payload: PremiumRecipientHandoffV2,
+  partySlotCount: number,
+): PremiumRecipientHandoffV2 {
+  if (!hasPaidProSourceOfTruth()) return payload;
+  const consumed = readConsumedPaidProSignerMetadataAuthority();
+  if (!consumed?.parties?.length) return payload;
+  const slots = linearPremiumRecipientSlots(payload, partySlotCount);
+  const mergedSlots = slots.map((slot, i) => {
+    const auth = consumed.parties[i];
+    if (!auth) return slot;
+    return mergeSlot(slot, {
+      name: slot.name || auth.partyLegalName,
+      email: slot.email || auth.signerEmail,
+      signerName: slot.signerName || auth.signerName,
+      signerTitle: slot.signerTitle || auth.signerTitle,
+      partyAddress: slot.partyAddress || auth.partyAddress,
+    });
+  });
+  const party1 = mergedSlots[0] ?? payload.party1;
+  const party2 = mergedSlots[1] ?? payload.party2;
+  const partyIndexSlots = partySlotCount > 2 ? mergedSlots.slice(2, partySlotCount) : undefined;
+  return {
+    v: 2,
+    party1,
+    party2,
+    savedAt: payload.savedAt,
+    ...(partyIndexSlots?.length ? { partyIndexSlots } : {}),
+  };
+}
+
+function wouldHandoffWriteDowngradeSignerMetadata(
+  payload: PremiumRecipientHandoffV2,
+  partySlotCount: number,
+): boolean {
+  if (!hasPaidProSourceOfTruth()) return false;
+  const max = readSignerMetadataEffectiveMax();
+  if (max.slotsWithSignerName < 3) return false;
+  const newCounts = countSignerMetadataSlots(payload, partySlotCount);
+  if (newCounts.slotsWithSignerName < max.slotsWithSignerName) return true;
+  if (max.slotsWithSignerTitle >= 3 && newCounts.slotsWithSignerTitle < max.slotsWithSignerTitle) {
+    return true;
+  }
+  if (max.slotsWithSignerEmail >= 3 && newCounts.slotsWithSignerEmail < max.slotsWithSignerEmail) {
+    return true;
+  }
+  return false;
 }
 
 /** @deprecated Use persistPremiumRecipientHandoff — kept for call sites; merges without clearing emails. */
@@ -547,16 +608,29 @@ export function writePremiumRecipientHandoffExact(
         : authoritativePartyCount != null && authoritativePartyCount >= 2
           ? trimPremiumRecipientHandoffToPartyCount(payload, authoritativePartyCount)
           : payload;
-    sessionStorage.setItem(KEY_V2, JSON.stringify(trimmedPayload));
-    sessionStorage.removeItem(LEGACY_KEY);
-    invalidatePremiumRecipientHandoffReadCache();
-    logReviewLinkSignerMetadataHandoffWrite(trimmedPayload);
     const slotCount = resolveHandoffPartySlotCount(
       trimmedPayload,
       authoritativePartyCount ?? cap,
     );
-    const slots = linearPremiumRecipientSlots(trimmedPayload, slotCount);
-    const counts = countSignerMetadataSlots(trimmedPayload, slots.length);
+    const mergedPayload = mergeHandoffPayloadFromConsumedSignerAuthority(trimmedPayload, slotCount);
+    if (wouldHandoffWriteDowngradeSignerMetadata(mergedPayload, slotCount)) {
+      if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn("[review-link-signer-metadata-handoff-write-blocked]", {
+          reason: "monotonic_signer_metadata_downgrade",
+          partySlots: slotCount,
+          priorSlotsWithSignerName: readSignerMetadataEffectiveMax().slotsWithSignerName,
+          attemptedSlotsWithSignerName: countSignerMetadataSlots(mergedPayload, slotCount).slotsWithSignerName,
+        });
+      }
+      return;
+    }
+    sessionStorage.setItem(KEY_V2, JSON.stringify(mergedPayload));
+    sessionStorage.removeItem(LEGACY_KEY);
+    invalidatePremiumRecipientHandoffReadCache();
+    logReviewLinkSignerMetadataHandoffWrite(mergedPayload);
+    const slots = linearPremiumRecipientSlots(mergedPayload, slotCount);
+    const counts = countSignerMetadataSlots(mergedPayload, slots.length);
     if (authoritativePartyCount != null && authoritativePartyCount >= 2) {
       counts.partySlots = Math.min(counts.partySlots, authoritativePartyCount);
     }
@@ -567,8 +641,8 @@ export function writePremiumRecipientHandoffExact(
       console.info("[review-link-recipient-email-handoff-write]", {
         partySlots: slots.length,
         partySlotsWithEmail: withEmail,
-        party1HasEmail: Boolean(String(trimmedPayload.party1.email || "").trim()),
-        party2HasEmail: Boolean(String(trimmedPayload.party2.email || "").trim()),
+        party1HasEmail: Boolean(String(mergedPayload.party1.email || "").trim()),
+        party2HasEmail: Boolean(String(mergedPayload.party2.email || "").trim()),
       });
     }
   } catch {

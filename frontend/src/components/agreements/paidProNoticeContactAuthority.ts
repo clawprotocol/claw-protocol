@@ -5,6 +5,7 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
+import { repairProfessionalCorpusContamination } from "./paidProProfessionalCorpusContamination";
 import type { PaidProPartyRoleContext } from "./paidProSignerMetadataAuthority";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import {
@@ -44,6 +45,15 @@ export function applyPaidProNoticeContactAuthority(
   let out = (raw || "").replace(/\r\n/g, "\n");
 
   if (parties.length >= 2) {
+    const contaminationRepair = repairProfessionalCorpusContamination(out, {
+      partyNames: parties.map((p) => p.partyLegalName),
+      partyCount: parties.length,
+      signerNames: parties.map((p) => p.signerName),
+    });
+    if (contaminationRepair.repairs.length > 0) {
+      out = contaminationRepair.text;
+      repairs.push(...contaminationRepair.repairs);
+    }
     const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, parties, roleContext);
     if (noticeDelivery.repairs.length > 0) {
       out = noticeDelivery.text;

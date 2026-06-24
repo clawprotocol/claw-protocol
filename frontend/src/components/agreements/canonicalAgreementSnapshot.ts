@@ -383,7 +383,20 @@ export function buildCanonicalAgreementSnapshot(
   });
   const blockerIssues = collectBlockerIssues(canonicalText);
   if (args.tier === "pro" && canonicalText.length >= 500) {
-    const structural = validateClauseFamilyStructuralIntegrity(canonicalText);
+    const structuralParties = parties.map((p, partyIndex) => ({
+      partyIndex,
+      partyLegalName: p.name,
+      signerEmail: String(p.email ?? "").trim(),
+      signerName: "",
+      signerTitle: "",
+      partyAddress: String(p.partyAddress ?? "").trim(),
+    }));
+    const structural = validateClauseFamilyStructuralIntegrity(canonicalText, {
+      parties: structuralParties,
+      draftPartyCount: parties.length,
+      phase: "post_acceptance",
+      surface: args.surface,
+    });
     for (const violation of structural.violations) {
       if (!placeholderIssues.includes(violation.code)) {
         placeholderIssues.push(violation.code);
