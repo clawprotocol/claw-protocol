@@ -1266,13 +1266,11 @@ async function runPremiumCompletionInner(
     input.structuredDraft,
     (baseWithoutNotes || rawIntake).trim() || baseWithoutNotes,
   );
-  const rawForSoT = pickLongestPremiumIntakeCorpus(
-    48,
-    input.originalUserIntakeRawForMerge,
-    baseWithoutNotes,
-    rawIntake,
-    structuredCorpus,
-  );
+  const origMerge = nz(input.originalUserIntakeRawForMerge).trim();
+  const rawForSoT =
+    origMerge.length >= 48
+      ? origMerge
+      : pickLongestPremiumIntakeCorpus(48, baseWithoutNotes, rawIntake, structuredCorpus);
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
     console.info("[premium-upgrade-source] runPremiumCompletion", {

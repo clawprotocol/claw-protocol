@@ -281,6 +281,12 @@ import {
   writeOriginalUserIntakeRawIfRicher,
 } from "./originalUserIntakeRawStorage";
 import { buildUpgradeSourceTextForPremium } from "./premiumUpgradeSourceText";
+import {
+  ensurePremiumCheckoutIntakePreserved,
+  resolvePremiumCheckoutIntakeCorpus,
+  resolvePremiumRequestIntakeText,
+} from "./premiumCheckoutIntakeCorpus";
+import { logPremiumFlowTrace } from "./premiumFlowTrace";
 import { isLikelyCategoryOrTradeLabel } from "./premiumDraftTransform";
 import {
   buildPartyIndexSlotsFromPartiesAndCandidates,
@@ -5787,10 +5793,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     (draftForFallback?: ParsedDraftShape | null): string => {
       const d = draftForFallback ?? draftSnapshotRef.current;
       return buildUpgradeSourceTextForPremium({
-        resume: readCreateComplexityResume(),
         intakeCombined: intakeCombinedRef.current,
         structuredDraft: d,
         agreementDocumentText: agreementDocumentTextRef.current,
+        finalTranscript: finalTranscriptRef.current,
       });
     },
     [],
@@ -6486,15 +6492,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           /* ignore */
         }
       }
-      const rawIntakeBase = pickLongestPremiumIntakeCorpus(
-        48,
-        readOriginalUserIntakeRaw(),
-        (resumeSnap?.originalUserIntakeRaw ?? "").trim(),
-        (resumeSnap?.rawIntake ?? "").trim(),
-        intakeCombinedRef.current,
-        prior ? resolveRawIntakeForPremiumCheckout(prior) : "",
-        docSnapEarly,
-      );
+      const intakeCorpusResolved = resolvePremiumCheckoutIntakeCorpus({
+        structuredDraft: prior,
+        intakeCombined: intakeCombinedRef.current,
+        agreementDocumentText: agreementDocumentTextRef.current,
+        finalTranscript: finalTranscriptRef.current,
+        allowDocumentFallback: false,
+      });
+      const rawIntakeBase = intakeCorpusResolved.corpus;
+      if (rawIntakeBase.trim()) {
+        ensurePremiumCheckoutIntakePreserved(rawIntakeBase);
+      }
       if (!rawIntakeBase.trim() || !prior) {
         if (import.meta.env.MODE !== "test") {
           // eslint-disable-next-line no-console
@@ -8812,10 +8820,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (!runIsCurrent()) return;
           premiumProRunInFlightRef.current = true;
           try {
+          const requestResolved = resolvePremiumRequestIntakeText({
+            mergedOrRetryIntake: args.intakeText,
+            structuredDraft: prior,
+            intakeCombined: intakeCombinedRef.current,
+            agreementDocumentText: agreementDocumentTextRef.current,
+            finalTranscript: finalTranscriptRef.current,
+          });
+          const intakeForPipeline =
+            requestResolved.intakeText.trim().length >= args.intakeText.trim().length
+              ? requestResolved.intakeText
+              : args.intakeText;
           if (!premiumGapBaseIntakeRef.current.trim()) {
-            premiumGapBaseIntakeRef.current = stripPremiumUserNotesFromMergedIntake(args.intakeText) || args.intakeText;
+            premiumGapBaseIntakeRef.current =
+              stripPremiumUserNotesFromMergedIntake(intakeForPipeline) || intakeForPipeline;
           }
-          const intakeFpGuard = shortIntakeFingerprint(args.intakeText);
+          const intakeFpGuard = shortIntakeFingerprint(intakeForPipeline);
           if (
             shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative({
               intakeFingerprint: intakeFpGuard,
@@ -8962,7 +8982,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 48,
                 readOriginalUserIntakeRaw(),
                 readCreateComplexityResume()?.originalUserIntakeRaw,
-                stripPremiumUserNotesFromMergedIntake(args.intakeText),
+                stripPremiumUserNotesFromMergedIntake(intakeForPipeline),
+                requestResolved.resolved.corpus,
                 rawIntakeBase,
               );
               try {
@@ -8970,7 +8991,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 try {
                   result = await withTimeout(
                     ensurePremiumCompletion({
-                      intakeText: args.intakeText,
+                      intakeText: intakeForPipeline,
                       originalUserIntakeRawForMerge: originalMergeHint,
                       structuredDraft: prior!,
                       agreementFamily: prior!.agreement_family ?? detectAgreementFamily(args.intakeText),
@@ -9235,6 +9256,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 validatePaidProOutputOk: vPre.ok,
               });
             }
+            logPremiumFlowTrace({
+              originalPromptLen: requestResolved.resolved.sessionOriginalLen,
+              starterDraftLen: docSnapEarly.length,
+              checkoutBackLen: requestResolved.resolved.checkoutBackLen,
+              premiumRequestInputLen: intakeForPipeline.trim().length,
+              serverResponseLen: (result?.winningPremiumBodyText || "").trim().length,
+              preparedServerLen: (
+                premiumPipelineOutputBodyRef.current ||
+                result?.winningPremiumBodyText ||
+                ""
+              ).trim().length,
+              freezeCandidateLen: (result?.winningPremiumBodyText || "").trim().length,
+              freezeAccepted: Boolean(result && isPremiumPipelineRewriteSucceeded(result)),
+              freezeRejectReasons: (result?.agreementValidation?.failures ?? [])
+                .map((f) => f.code)
+                .slice(0, 8),
+              sourceOfTruthEstablished: hasPaidProSourceOfTruth(),
+              renderedReviewLen: agreementDocumentTextRef.current.trim().length,
+              finalUiPhase: String(premiumPostCheckoutPhaseRef.current ?? displayPhaseRef.current ?? "review"),
+              intakeChosenSource: requestResolved.resolved.chosenSource,
+            });
             applySuccess(result);
           } else {
             if (import.meta.env.DEV) {
@@ -9815,6 +9857,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           pending: parsed,
           awaitingProCheckout: false,
           resume_kind: "complexity_gate",
+          originalUserIntakeRaw: rawIntake,
         });
         setComplexityPendingParsed(parsed);
         let starterDraft = simplifyParsedDraftForInstantPath(parsed, rawIntake);
@@ -9927,6 +9970,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setIntakeBaselineCommitted(snap.intakeText);
       setIntakeStepBuffer(snap.intakeText);
       setDebouncedStepBuffer(snap.intakeText);
+      writeOriginalUserIntakeRawIfRicher(snap.intakeText);
+      finalTranscriptRef.current = snap.intakeText;
+      stashCreateComplexityResume({
+        rawIntake: snap.intakeText,
+        pending: snap.draft,
+        awaitingProCheckout: false,
+        resume_kind: "optional_full_upgrade",
+        originalUserIntakeRaw: readOriginalUserIntakeRaw() || snap.intakeText,
+      });
     }
     logCheckoutBackRestoreApplied({
       hasDraft: true,
@@ -10415,7 +10467,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const resumeSnap = readCreateComplexityResume();
     const pending =
       complexityPendingParsedRef.current ?? gateDraft ?? (resumeSnap?.pending ?? null);
-    const raw = resolveRawIntakeForPremiumCheckout(pending);
+    const intakeResolved = resolvePremiumCheckoutIntakeCorpus({
+      structuredDraft: pending,
+      intakeCombined: intakeCombinedRef.current,
+      agreementDocumentText: agreementDocumentTextRef.current,
+      finalTranscript: finalTranscriptRef.current,
+      allowDocumentFallback: false,
+    });
+    const raw = intakeResolved.corpus || resolveRawIntakeForPremiumCheckout(pending);
     if (!raw) {
       console.warn("[premium-flow] checkout_launch_aborted", { reason: "empty_raw_intake", hasPending: Boolean(pending) });
       return;
@@ -10424,6 +10483,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       console.warn("[premium-flow] checkout_launch_aborted", { reason: "no_pending_draft" });
       return;
     }
+    ensurePremiumCheckoutIntakePreserved(raw);
     if (
       isProEntitledForAgreement({
         tier,
@@ -10456,12 +10516,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       surface: "advanced_full_draft_stripe",
       source: opts?.checkoutSource ?? "starter_pro_refine_card",
       rawLen: raw.length,
+      intakeChosenSource: intakeResolved.chosenSource,
+      sessionOriginalLen: intakeResolved.sessionOriginalLen,
+      checkoutBackLen: intakeResolved.checkoutBackLen,
     });
     stashCreateComplexityResume({
       rawIntake: raw,
       pending,
       awaitingProCheckout: true,
       resume_kind: resumeKind,
+      originalUserIntakeRaw: readOriginalUserIntakeRaw() || raw,
     });
     stashUpgradeCheckoutContext(upgradeContextReasons, {
       completionLabel: buildUpgradeCheckoutCompletionLabel(pending),
@@ -10721,6 +10785,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleSendOpenPhase?: "review" | "send",
     reviewFirstHandoffPersist = false,
   ): Promise<boolean> {
+    const partyCtxTrimmed = (partyNameContext || "").trim();
+    if (partyCtxTrimmed.length >= 20) {
+      writeOriginalUserIntakeRawIfRicher(partyCtxTrimmed);
+    }
     let postedId = "";
     try {
       /** Clear stale save/hydrate errors before a new persist attempt (e.g. prior basic_parse_timeout then retry). */
@@ -15561,12 +15629,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setHardError("We need a draft to retry. Restore your agreement or re-enter your intake, then use Retry Pro draft again.");
       return;
     }
-    const raw = resolveRawIntakeForPremiumCheckout(draft) || "";
+    const notes = (readCreateComplexityResume()?.premiumUpgradeNotes || "").trim() || pendingUpgradePromptRef.current.trim();
+    const retryResolved = resolvePremiumRequestIntakeText({
+      mergedOrRetryIntake: buildPremiumMergedIntakeWithUserNotes(
+        resolveRawIntakeForPremiumCheckout(draft) || "",
+        notes,
+      ),
+      structuredDraft: draft,
+      intakeCombined: intakeCombinedRef.current,
+      agreementDocumentText: agreementDocumentTextRef.current,
+      finalTranscript: finalTranscriptRef.current,
+    });
+    const raw = stripPremiumUserNotesFromMergedIntake(retryResolved.intakeText) || retryResolved.intakeText;
     if (!raw.trim()) {
       setHardError("We need your current intake to retry. Confirm your text above, then try again.");
       return;
     }
-    const notes = (readCreateComplexityResume()?.premiumUpgradeNotes || "").trim() || pendingUpgradePromptRef.current.trim();
+    ensurePremiumCheckoutIntakePreserved(raw);
     const it = buildPremiumMergedIntakeWithUserNotes(raw, notes);
     const ga = (premiumLastGapAnswersRef.current || "").trim();
     logPremiumCompletionDebug({

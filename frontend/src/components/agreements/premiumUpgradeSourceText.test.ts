@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { buildUpgradeSourceTextForPremium } from "./premiumUpgradeSourceText";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import * as orig from "./originalUserIntakeRawStorage";
+import { stashCreateComplexityResume } from "./agreementCreateComplexityResume";
 import * as storage from "./agreementIntakeStorage";
 
 const longPrompt =
@@ -14,6 +15,8 @@ const mockDraftPayment: ParsedDraftShape["payment"] = {
 };
 
 describe("buildUpgradeSourceTextForPremium", () => {
+  const storageMap = new Map<string, string>();
+
   const minimalDraft: ParsedDraftShape = {
     title: "Services Agreement",
     jurisdiction: "Oklahoma",
@@ -31,17 +34,23 @@ describe("buildUpgradeSourceTextForPremium", () => {
   };
 
   beforeEach(() => {
+    storageMap.clear();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (k: string) => storageMap.get(k) ?? null,
+      setItem: (k: string, v: string) => storageMap.set(k, v),
+      removeItem: (k: string) => storageMap.delete(k),
+    });
     vi.spyOn(orig, "readOriginalUserIntakeRaw").mockReturnValue("");
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   it("prefers session-stored original intake over short starter document text", () => {
     vi.spyOn(orig, "readOriginalUserIntakeRaw").mockReturnValue(longPrompt);
     const out = buildUpgradeSourceTextForPremium({
-      resume: null,
       intakeCombined: "",
       structuredDraft: minimalDraft,
       agreementDocumentText: "A".repeat(250), // long but wrong
@@ -51,18 +60,15 @@ describe("buildUpgradeSourceTextForPremium", () => {
   });
 
   it("uses resume originalUserIntakeRaw when session is empty", () => {
+    stashCreateComplexityResume({
+      rawIntake: "short",
+      pending: minimalDraft,
+      awaitingProCheckout: true,
+      originalUserIntakeRaw: longPrompt,
+      resume_kind: "optional_full_upgrade",
+    });
     const out = buildUpgradeSourceTextForPremium({
-      resume: {
-        version: 1,
-        rawIntake: "short",
-        pending: minimalDraft,
-        awaitingProCheckout: true,
-        savedAt: 1,
-        originalUserIntakeRaw: longPrompt,
-      } as any,
       intakeCombined: "",
-      // No structured draft here: a full parsed shape can serialize longer than a one-line
-      // `originalUserIntakeRaw` and would otherwise win in pickLongest.
       structuredDraft: null,
       agreementDocumentText: "",
     });
@@ -72,7 +78,6 @@ describe("buildUpgradeSourceTextForPremium", () => {
   it("falls back to readAgreementCreatorIntakeStorage when higher-priority sources are short", () => {
     vi.spyOn(storage, "readAgreementCreatorIntakeStorage").mockReturnValue(longPrompt);
     const out = buildUpgradeSourceTextForPremium({
-      resume: null,
       intakeCombined: "x",
       structuredDraft: null,
       agreementDocumentText: "",
