@@ -142,6 +142,18 @@ export function detectHeadingBodyBoundaryInSectionTitle(
     }
 
     if (i >= 1) {
+      const prevWord = words[i - 1]!;
+      if (cleanToken(prevWord).endsWith(",") || /,\s*$/.test(words.slice(0, i).join(" "))) {
+        if (
+          isTitleCaseHeadingToken(word) ||
+          isHeadingParticleToken(word) ||
+          isAllCapsHeadingToken(word)
+        ) {
+          headingLemma.add(lemma);
+          continue;
+        }
+      }
+
       const prior = words.slice(0, i);
       const hasHeadingShape =
         prior.some((w) => isAllCapsHeadingToken(w)) ||
@@ -155,6 +167,10 @@ export function detectHeadingBodyBoundaryInSectionTitle(
       }
 
       if (headingLemma.has(lemma)) {
+        const rest = words.slice(i + 1);
+        if (rest.length === 0 || rest.every((w) => tokenLooksLikeHeadingContinuation(w))) {
+          continue;
+        }
         splitAt = i;
         break;
       }
@@ -165,6 +181,14 @@ export function detectHeadingBodyBoundaryInSectionTitle(
       }
 
       if (isBodySentenceStarterToken(word)) {
+        const prev = i > 0 ? cleanToken(words[i - 1]!).toLowerCase() : "";
+        if (
+          (prev === "and" || prev === "or" || prev === "of") &&
+          (isTitleCaseHeadingToken(word) || isHeadingParticleToken(word))
+        ) {
+          headingLemma.add(lemma);
+          continue;
+        }
         splitAt = i;
         break;
       }

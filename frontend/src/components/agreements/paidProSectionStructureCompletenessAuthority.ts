@@ -8,6 +8,10 @@ import { isPaidProNumberedSectionHeadingLine } from "./paidProNumberedSectionHea
 import {
   detectPaidProSyntheticMalformedSectionHeadings,
 } from "./paidProSyntheticMalformedSectionHeadings";
+import {
+  applyPaidProSectionHeadingTitleAuthority,
+  detectPaidProSectionHeadingTitleAnomalies,
+} from "./paidProSectionHeadingTitleAuthority";
 
 export type PaidProSectionHierarchyMarker = {
   major: number;
@@ -27,6 +31,7 @@ export type PaidProSectionStructureCompletenessDiagnostics = {
   repairable: boolean;
   fatal: boolean;
   syntheticMalformedHeadings: string[];
+  sectionHeadingTitleAnomalies: string[];
 };
 
 export type ApplyPaidProSectionStructureCompletenessResult = {
@@ -276,6 +281,7 @@ export function analyzePaidProSectionStructureCompleteness(
     repairable: repairable && (uniqueMissingParents.length > 0 || uniqueMissingIntermediates.length > 0),
     fatal: fatal && !repairable,
     syntheticMalformedHeadings: [],
+    sectionHeadingTitleAnomalies: [],
   };
 }
 
@@ -393,18 +399,37 @@ export function applyPaidProSectionStructureCompletenessAuthority(
     };
   }
 
+  let titleAnomalies = detectPaidProSectionHeadingTitleAnomalies(out);
+  if (titleAnomalies.length > 0) {
+    const titleRepair = applyPaidProSectionHeadingTitleAuthority(out);
+    if (titleRepair.repairs.length > 0) {
+      out = titleRepair.text;
+      repairs.push(...titleRepair.repairs.map((r) => `section_heading_title:${r}`));
+      titleAnomalies = detectPaidProSectionHeadingTitleAnomalies(out);
+    }
+    if (titleAnomalies.length > 0) {
+      analysis = {
+        ...analysis,
+        sectionHeadingTitleAnomalies: titleAnomalies.map((a) => `${a.code}:${a.line}`),
+      };
+    }
+  }
+
   const rejected =
     analysis.fatal ||
     analysis.missingParentSections.length > 0 ||
     analysis.missingIntermediateSections.length > 0 ||
-    analysis.syntheticMalformedHeadings.length > 0;
+    analysis.syntheticMalformedHeadings.length > 0 ||
+    analysis.sectionHeadingTitleAnomalies.length > 0;
 
   const rejectReason = rejected
-    ? analysis.syntheticMalformedHeadings.length > 0
-      ? "section_structure_synthetic_malformed_headings"
-      : analysis.fatal
-        ? "section_structure_completeness_fatal"
-        : "section_structure_completeness_unresolved"
+    ? analysis.sectionHeadingTitleAnomalies.length > 0
+      ? "section_heading_title_anomaly"
+      : analysis.syntheticMalformedHeadings.length > 0
+        ? "section_structure_synthetic_malformed_headings"
+        : analysis.fatal
+          ? "section_structure_completeness_fatal"
+          : "section_structure_completeness_unresolved"
     : null;
 
   if (opts?.log !== false && (repairs.length > 0 || rejected)) {
@@ -421,6 +446,7 @@ export function applyPaidProSectionStructureCompletenessAuthority(
         truncatedFamilies: analysis.truncatedFamilies,
         brokenFamilies: analysis.brokenFamilies,
         syntheticMalformedHeadings: analysis.syntheticMalformedHeadings.slice(0, 6),
+        sectionHeadingTitleAnomalies: analysis.sectionHeadingTitleAnomalies.slice(0, 6),
       },
       ...analysis,
     });

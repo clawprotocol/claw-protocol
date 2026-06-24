@@ -20,6 +20,7 @@ import { assertClauseFamilyStructuralIntegrityForFreeze } from "./clauseFamilySt
 import { assertPaidProDocumentBoundaryAuthorityForFreeze, applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
 import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
+import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadingTitleAuthority";
 import {
   assertPaidProSectionStructureCompletenessForFreeze,
   applyPaidProSectionStructureCompletenessAuthority,
@@ -36,6 +37,7 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import { buildPartyEntries, frozenManifestRecitalNeedsRewrite, normalizeOpeningRecital } from "./paidProAgreementPolish";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
 import {
   readPremiumRecipientHandoff,
   resolveHandoffPartySlotCount,
@@ -323,6 +325,18 @@ export function preparePaidProFreezeCandidateText(
     }
   }
 
+  if (partyNames.length >= 2) {
+    const preservedLegal = preserveFullLegalPartyNamesInOpeningAndSignatures(
+      safeForCommit,
+      partyNames,
+      args.intakeText ?? null,
+    );
+    if (preservedLegal !== safeForCommit) {
+      safeForCommit = preservedLegal;
+      repairs.push("party_identity:preserve_opening_notice_signature_legal_names");
+    }
+  }
+
   return {
     text: safeForCommit,
     hash: hashPaidProCorpus(safeForCommit),
@@ -432,6 +446,11 @@ export function assertPaidProFreezeCandidateGates(
     safeForCommit = postNoticeStructure.text;
   }
 
+  const postNoticeTitleAuthority = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
+  if (postNoticeTitleAuthority.repairs.length > 0) {
+    safeForCommit = postNoticeTitleAuthority.text;
+  }
+
   safeForCommit = assertPaidProSectionStructureCompletenessForFreeze(
     safeForCommit,
     `${surface}_pre_freeze`,
@@ -473,6 +492,20 @@ export function assertPaidProFreezeCandidateGates(
       return resolveHandoffPartySlotCount(handoff, prep.reviewParties.length);
     })(),
   });
+
+  const finalTitleAuthority = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
+  if (finalTitleAuthority.repairs.length > 0) {
+    safeForCommit = finalTitleAuthority.text;
+  }
+
+  const partyLegalNames = prep.parties.map((p) => p.name).filter((n) => n.length >= 2);
+  if (partyLegalNames.length >= 2) {
+    safeForCommit = preserveFullLegalPartyNamesInOpeningAndSignatures(
+      safeForCommit,
+      partyLegalNames,
+      args.intakeText ?? null,
+    );
+  }
 
   return safeForCommit;
 }

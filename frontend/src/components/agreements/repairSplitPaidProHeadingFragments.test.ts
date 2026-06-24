@@ -32,6 +32,24 @@ describe("repairSplitPaidProHeadingFragments", () => {
     expect(isMainSectionHeadingLine("5. Ownership, Work Product and Client Materials")).toBe(true);
   });
 
+  it("merges comma-ending main headings with continuation fragments (TEST439)", () => {
+    const raw = [
+      "3. Fees,",
+      "Invoicing and Expenses",
+      "Client will pay monthly fees.",
+      "8. Term,",
+      "Termination and Effect of Termination",
+      "Either party may terminate on notice.",
+    ].join("\n");
+    const { text, repairs } = repairSplitPaidProHeadingFragments(raw);
+    expect(text).toContain("3. Fees, Invoicing and Expenses");
+    expect(text).toContain("8. Term, Termination and Effect of Termination");
+    expect(text.split("\n").some((l) => l.trim() === "3. Fees,")).toBe(false);
+    expect(text.split("\n").some((l) => l.trim() === "8. Term,")).toBe(false);
+    expect(repairs).toContain("split_heading_fragment:3");
+    expect(repairs).toContain("split_heading_fragment:8");
+  });
+
   it("is idempotent for already-clean headings", () => {
     const clean = "5. Ownership, Work Product and Client Materials\n\n5.1 Client Ownership of Paid Deliverables";
     const once = repairSplitPaidProHeadingFragments(clean);
@@ -93,6 +111,8 @@ describe("repairSplitPaidProHeadingFragments", () => {
 
   it("classifies dangling prefix and continuation fragment helpers", () => {
     expect(isDanglingPaidProMainHeadingPrefix("Ownership, Work Product and")).toBe(true);
+    expect(isDanglingPaidProMainHeadingPrefix("Fees,")).toBe(true);
+    expect(isDanglingPaidProMainHeadingPrefix("Term,")).toBe(true);
     expect(isDanglingPaidProMainHeadingPrefix("Ownership, Work Product and Client Materials")).toBe(
       false,
     );

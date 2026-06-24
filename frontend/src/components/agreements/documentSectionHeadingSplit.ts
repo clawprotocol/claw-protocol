@@ -164,6 +164,9 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
   if (glued?.[1] && glued[2]?.trim()) {
     const heading = glued[1].trim();
     const body = glued[2].trim();
+    if (/\b(?:and|or|of|for|the|to|with|upon|under)\s*$/i.test(heading)) {
+      return line;
+    }
     if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && body.length >= 8) {
       return `${heading}\n${body}`;
     }

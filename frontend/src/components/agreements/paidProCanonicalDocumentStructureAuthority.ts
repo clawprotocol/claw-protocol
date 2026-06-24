@@ -13,7 +13,9 @@ import {
 import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
-import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
+import {
+  applyPaidProSectionHeadingTitleAuthority,
+} from "./paidProSectionHeadingTitleAuthority";
 import {
   applySectionStructureIntegrity,
   type SectionStructureRepairResult,
@@ -199,14 +201,7 @@ export function applyPaidProCanonicalDocumentStructureAuthority(
     repairs.push(`structure:heading_body_block_spacing:${spacing.promotions}`);
   }
 
-  const splitFragments = repairSplitPaidProHeadingFragments(spacing.text);
-  diagnostics.headingContinuationRepairs = splitFragments.repairs.length;
-  if (splitFragments.repairs.length > 0) {
-    out = `${splitFragments.text}${tail ? `\n\n${tail.trimStart()}` : ""}`.replace(/\n{3,}/g, "\n\n").trimEnd();
-    repairs.push(...splitFragments.repairs.map((r) => `heading_continuation:${r}`));
-  } else {
-    out = `${spacing.text}${tail ? `\n\n${tail.trimStart()}` : ""}`.replace(/\n{3,}/g, "\n\n").trimEnd();
-  }
+  out = `${spacing.text}${tail ? `\n\n${tail.trimStart()}` : ""}`.replace(/\n{3,}/g, "\n\n").trimEnd();
 
   const orphans = normalizePaidProOrphanSubsections(out, { source });
   diagnostics.orphanNumberRepairs = orphans.orphanSectionsRepaired;
@@ -243,6 +238,13 @@ export function applyPaidProCanonicalDocumentStructureAuthority(
     if (completeness.rejected) {
       repairs.push(`section_completeness:unresolved:${completeness.rejectReason ?? "unknown"}`);
     }
+  }
+
+  const finalTitleAuthority = applyPaidProSectionHeadingTitleAuthority(out);
+  diagnostics.headingContinuationRepairs = finalTitleAuthority.repairs.length;
+  if (finalTitleAuthority.repairs.length > 0) {
+    out = finalTitleAuthority.text;
+    repairs.push(...finalTitleAuthority.repairs.map((r) => `section_title:${r}`));
   }
 
   const leaks = detectPaidProPlainParagraphHeadingLeaks(out);

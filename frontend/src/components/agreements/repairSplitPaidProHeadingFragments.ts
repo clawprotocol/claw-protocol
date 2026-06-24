@@ -42,6 +42,19 @@ export type RepairSplitPaidProHeadingFragmentsResult = {
   repairs: string[];
 };
 
+function peelMainHeadingContinuationFromGluedLine(
+  line: string,
+): { fragment: string; remainder: string } | null {
+  const t = line.trim();
+  const m = t.match(
+    /^((?:[A-Z][a-zA-Z]+(?:\s+(?:and|or|of|the|for|to|with|upon|under|on|in|per|a|an)\s+)*[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)+)\s+((?:Either|The|Each|Any|Neither|Both|All|Some|Such|Client|Service|Either party|Neither party|Upon|Unless|When|If|Notwithstanding|During|Within|After|Before|One|Party|No|Not|An|A|In|For|Where|As).+)$/,
+  );
+  if (m?.[1] && m[2] && isPaidProHeadingContinuationFragment(m[1])) {
+    return { fragment: m[1].trim(), remainder: m[2].trim() };
+  }
+  return null;
+}
+
 function peelHeadingContinuationFromGluedLine(
   line: string,
 ): { fragment: string; remainder: string } | null {
@@ -57,6 +70,36 @@ function peelHeadingContinuationFromGluedLine(
     return { fragment: singleWord[1].trim(), remainder: singleWord[2].trim() };
   }
   return null;
+}
+
+function collectHeadingContinuationFragmentLines(
+  lines: string[],
+  startIdx: number,
+): { parts: string[]; nextIdx: number } {
+  const parts: string[] = [];
+  let idx: number | null = startIdx;
+  while (idx != null) {
+    const trimmed = lines[idx]!.trim();
+    if (!trimmed) {
+      idx = nextNonEmptyLineIndex(lines, idx + 1);
+      continue;
+    }
+    if (parts.length === 0 && isPaidProHeadingContinuationFragment(trimmed)) {
+      parts.push(trimmed);
+      idx = nextNonEmptyLineIndex(lines, idx + 1);
+      continue;
+    }
+    if (
+      parts.length > 0 &&
+      (isPaidProHeadingContinuationFragment(trimmed) || isDanglingPaidProMainHeadingPrefix(trimmed))
+    ) {
+      parts.push(trimmed);
+      idx = nextNonEmptyLineIndex(lines, idx + 1);
+      continue;
+    }
+    break;
+  }
+  return { parts, nextIdx: idx ?? startIdx };
 }
 
 function nextNonEmptyLineIndex(lines: string[], from: number): number | null {
@@ -79,7 +122,9 @@ export function isDanglingPaidProMainHeadingPrefix(title: string): boolean {
   if (!title || title.length < 3) return false;
   if (/\.\s+[A-Za-z]/.test(title)) return false;
   if (BODY_VERB_RE.test(title)) return false;
-  return DANGLING_HEADING_TAIL_RE.test(title);
+  if (DANGLING_HEADING_TAIL_RE.test(title)) return true;
+  if (/,\s*$/.test(title)) return true;
+  return false;
 }
 
 export function isPaidProHeadingContinuationFragment(line: string): boolean {
@@ -129,6 +174,7 @@ function isCompleteMergedMainHeadingLine(merged: string): boolean {
   if (BODY_VERB_RE.test(prefix.title)) return false;
   if (/\.\s+[A-Za-z]/.test(prefix.title)) return false;
   if (BODY_SENTENCE_START_RE.test(prefix.title)) return false;
+  if (/,\s*$/.test(prefix.title)) return false;
   return prefix.title.split(/\s+/).filter(Boolean).length >= 2;
 }
 
@@ -148,9 +194,22 @@ export function repairSplitPaidProHeadingFragments(text: string): RepairSplitPai
     if (skip.has(i)) continue;
     const line = lines[i]!;
     const prefix = parseMainSectionPrefixLine(line);
-    if (prefix && isDanglingPaidProMainHeadingPrefix(prefix.title)) {
+    if (prefix && (isDanglingPaidProMainHeadingPrefix(prefix.title) || /,\s*$/.test(prefix.title))) {
       const nextIdx = nextNonEmptyLineIndex(lines, i + 1);
       if (nextIdx != null) {
+        const collected = collectHeadingContinuationFragmentLines(lines, nextIdx);
+        if (collected.parts.length > 0) {
+          const continuation = collected.parts.join(" ");
+          const merged = `${prefix.full} ${continuation}`;
+          if (isCompleteMergedMainHeadingLine(merged)) {
+            out.push(merged);
+            for (let k = nextIdx; k < collected.nextIdx; k += 1) {
+              if (lines[k]!.trim()) skip.add(k);
+            }
+            repairs.push(`split_heading_fragment:${prefix.sectionNum}`);
+            continue;
+          }
+        }
         const nextTrimmed = lines[nextIdx]!.trim();
         if (isPaidProHeadingContinuationFragment(nextTrimmed)) {
           const merged = `${prefix.full} ${nextTrimmed}`;
@@ -158,6 +217,17 @@ export function repairSplitPaidProHeadingFragments(text: string): RepairSplitPai
             out.push(merged);
             skip.add(nextIdx);
             repairs.push(`split_heading_fragment:${prefix.sectionNum}`);
+            continue;
+          }
+        }
+        const peeled = peelMainHeadingContinuationFromGluedLine(nextTrimmed);
+        if (peeled && isPaidProHeadingContinuationFragment(peeled.fragment)) {
+          const merged = `${prefix.full} ${peeled.fragment}`;
+          if (isCompleteMergedMainHeadingLine(merged)) {
+            out.push(merged);
+            out.push(peeled.remainder);
+            skip.add(nextIdx);
+            repairs.push(`split_heading_fragment:${prefix.sectionNum}:peeled_body`);
             continue;
           }
         }
