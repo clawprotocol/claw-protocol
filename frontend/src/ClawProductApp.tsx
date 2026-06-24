@@ -23,7 +23,6 @@ import { AdvancedWorkProductPage } from "./launch/AdvancedWorkProductPage";
 import { AffiliateLandingPage } from "./launch/affiliate/AffiliateLandingPage";
 import { parseAffiliateLandingPath } from "./launch/affiliate/affiliateLandingRoutes";
 import { ClawOpportunityPage } from "./launch/affiliate/ClawOpportunityPage";
-import { LawdogAffiliatePage } from "./launch/LawdogAffiliatePage";
 import { LawdogSettingsPage } from "./launch/LawdogSettingsPage";
 import { LawdogSignaturesPage } from "./launch/LawdogSignaturesPage";
 import { LawdogReferralRedirect, parseLawdogReferralPath } from "./launch/LawdogReferralRedirect";
@@ -79,6 +78,7 @@ import { TermsPage } from "./launch/legal/TermsPage";
 import { PrivacyPage } from "./launch/legal/PrivacyPage";
 import { AffiliateTermsPage } from "./launch/legal/AffiliateTermsPage";
 import { PaidProReviewUxVisualPage } from "./qa/PaidProReviewUxVisualPage";
+import { handleCheckoutReturnEntitlement } from "./launch/checkoutReturnEntitlement";
 
 const RECIPIENT_SIGNING_HERO: Vs01LayoutHero = {
   title: "Review and sign",
@@ -425,6 +425,10 @@ function AppEsignDocumentShell(props: { seed: string; search: string }) {
  */
 export function ClawProductApp() {
   const { pathname, search, navigate } = useLaunchNav();
+
+  useEffect(() => {
+    void handleCheckoutReturnEntitlement();
+  }, []);
   const recipientSignBootstrap = typeof window !== "undefined" ? getVs01UrlBootstrap() : null;
   const agreementSignInfo = !recipientSignBootstrap ? parseAgreementSignPath(pathname, search) : null;
   const reviewInfo =
@@ -650,7 +654,7 @@ export function ClawProductApp() {
       case "billing":
         return <BillingPage />;
       case "affiliate":
-        return <LawdogAffiliatePage />;
+        return <ClawOpportunityPage />;
       case "settings":
         return <LawdogSettingsPage />;
       case "signatures":

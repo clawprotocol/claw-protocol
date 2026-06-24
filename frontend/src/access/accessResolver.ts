@@ -1,5 +1,7 @@
 import type { AccessTier, EntitlementSource } from "./types";
 import { TIER_CONFIG } from "./tierConfig";
+import { featureFlags } from "../config/featureFlags";
+import { subscriptionTierForAccess } from "./subscriptionEntitlementCache";
 
 const VALID_TIERS = new Set(Object.keys(TIER_CONFIG) as AccessTier[]);
 
@@ -62,9 +64,16 @@ export type ResolvedAccess = {
 export function resolveAccess(): ResolvedAccess {
   const sourcesTried: EntitlementSource[] = [
     { id: "future_backend", tier: null },
-    { id: "future_subscription", tier: null },
     { id: "future_wallet", tier: null },
   ];
+
+  if (featureFlags.serverBilling) {
+    const subTier = subscriptionTierForAccess();
+    sourcesTried.unshift({ id: "server_subscription", tier: subTier });
+    if (subTier) {
+      return { tier: subTier, sourcesTried };
+    }
+  }
 
   const q = readQueryTier();
   if (q) {

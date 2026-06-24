@@ -424,6 +424,9 @@ export function enforcePaidProSingleExecutionBlock(
     .map((n) => n.replace(/\s+/g, " ").trim())
     .filter((n) => n.length >= 3);
   const labeledNames = labeledPartyLegalEntities(String(opts?.intakeText ?? ""));
+  const explicitDraftNames = (opts?.draftPartyNames ?? [])
+    .map((n) => String(n ?? "").trim())
+    .filter((n) => n.length >= 3);
   const authoritativePartyCount = consumeAuthoritativeSignerCount(
     "enforcePaidProSingleExecutionBlock",
     {
@@ -452,13 +455,15 @@ export function enforcePaidProSingleExecutionBlock(
       ? frozenNames.slice(0, authoritativePartyCount)
       : authorityParties.length >= authoritativePartyCount && authorityParties.length >= 2
         ? authorityParties.slice(0, authoritativePartyCount)
-        : authorityParties.length >= 3
-          ? authorityParties
-          : labeledNames.length >= authorityParties.length && labeledNames.length >= 2
-            ? labeledNames
-            : intakeManifest.length >= authorityParties.length && intakeManifest.length >= 2
-              ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
-              : authorityParties;
+        : explicitDraftNames.length >= authoritativePartyCount && explicitDraftNames.length >= 2
+          ? explicitDraftNames.slice(0, authoritativePartyCount)
+          : authorityParties.length >= 3
+            ? authorityParties
+            : labeledNames.length >= authorityParties.length && labeledNames.length >= 2
+              ? labeledNames
+              : intakeManifest.length >= authorityParties.length && intakeManifest.length >= 2
+                ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
+                : authorityParties;
   const manifestRoles =
     manifestLegalNames.length >= 2
       ? manifestRolesFromLegalNames(manifestLegalNames, opts?.intakeText ?? null)

@@ -54,16 +54,7 @@ import { resolvePartiesForReviewRender } from "./paidProReviewRenderCorpus";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import type { CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapshot";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
-import { buildDeterministicQuadPartyMutualServicesProFallback } from "./deterministicQuadPartyProFallback";
-import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
-import {
-  PAID_PRO_QUAD_PARTY_FALLBACK_COUNT,
-} from "./paidProAuthorityLimits";
-import { buildNPartyPaidProServerCorpus } from "./paidProNPartyCorpusBuilder";
-import { PAID_PRO_RECOVERY_MIN_DISPLAY_LEN } from "./paidProPostCheckoutRenderGate";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
-import { collapsePartySlotCandidates } from "./partySlotIdentityNormalize";
-import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import { buildPaidProStructuralRecoveryBody } from "./paidProStructuralRecovery";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
   assertProfessionalCorpusCleanForFreeze,
@@ -553,70 +544,24 @@ export function previewRecoverPaidProFreezeCandidate(
       effective_date: null,
       payment: { amount: null, cadence: null, valid: false },
     } as ParsedDraftShape);
-  const signerResolution = resolveAuthoritativeSignerCount({
+
+  const built = buildPaidProStructuralRecoveryBody({
     intakeText: args.intakeText,
-    draftParties: draft.parties ?? [],
+    draft,
   });
-  const draftPartyNames = collapsePartySlotCandidates(
-    (draft.parties ?? []).map((p) => String(p?.name ?? "").trim()).filter(Boolean),
-  ).filter(isAuthoritativeLegalEntityName);
-  const partyCount = signerResolution.count;
-
-  let recoveryBody = "";
-
-  if (
-    partyCount > PAID_PRO_QUAD_PARTY_FALLBACK_COUNT &&
-    draftPartyNames.length >= partyCount
-  ) {
-    recoveryBody = buildNPartyPaidProServerCorpus({
-      parties: draftPartyNames.slice(0, partyCount),
-      intakeText: args.intakeText,
-      draft,
-      title: draft.title,
-      minLen: PAID_PRO_RECOVERY_MIN_DISPLAY_LEN + 1200,
-    });
+  if (!built.ok) {
+    return {
+      ok: false,
+      text: "",
+      hash: "",
+      rejectReason: `deterministic_fallback_failed:${built.reason ?? "recovery_build_failed"}`,
+      reviewParties: [],
+      parties: [],
+    };
   }
 
-  if (recoveryBody.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
-    let quadReasons: string[] = [];
-    if (partyCount <= PAID_PRO_QUAD_PARTY_FALLBACK_COUNT) {
-      const fallback = buildDeterministicQuadPartyMutualServicesProFallback({
-        rawIntake: args.intakeText,
-        draft,
-      });
-      quadReasons = fallback.reasons;
-      if (fallback.ok) {
-        recoveryBody = fallback.body;
-      }
-    }
-    if (recoveryBody.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN && draftPartyNames.length >= 3) {
-      recoveryBody = buildNPartyPaidProServerCorpus({
-        parties: draftPartyNames.slice(0, Math.min(draftPartyNames.length, partyCount)),
-        intakeText: args.intakeText,
-        draft,
-        title: draft.title,
-        minLen: PAID_PRO_RECOVERY_MIN_DISPLAY_LEN + 1200,
-      });
-    }
-    if (recoveryBody.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
-      recoveryBody = padOperativeCorpusBeforeWitness(
-        recoveryBody,
-        PAID_PRO_RECOVERY_MIN_DISPLAY_LEN + 200,
-      );
-    }
-    if (recoveryBody.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
-      return {
-        ok: false,
-        text: "",
-        hash: "",
-        rejectReason: `deterministic_fallback_failed:${quadReasons.join(",") || `too_short:${recoveryBody.length}`}`,
-        reviewParties: [],
-        parties: [],
-      };
-    }
-  }
   const prep = preparePaidProServerDocumentForAcceptance(
-    recoveryBody,
+    built.body,
     draft,
     args.intakeText,
     { surface: args.surface ?? "paid_pro_freeze_candidate_recovery_preview" },

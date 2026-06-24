@@ -3,12 +3,11 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { buildDeterministicQuadPartyMutualServicesProFallback } from "./deterministicQuadPartyProFallback";
-import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import {
   buildPaidProFreezeCandidate,
   clearPartialPaidProAuthoritativeState,
+  previewRecoverPaidProFreezeCandidate,
 } from "./paidProFreezeCandidate";
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import {
@@ -80,7 +79,7 @@ export type PaidProSoTStructuralRecoveryResult =
   | { ok: false; reason: string };
 
 /**
- * Deterministic quad-party mutual-services fallback when server corpus cannot pass SoT freeze.
+ * Deterministic N-party intake recovery when server corpus cannot pass SoT freeze.
  */
 export function tryRecoverPaidProSourceOfTruthFromStructuralFailure(args: {
   draft: ParsedDraftShape | null;
@@ -89,9 +88,9 @@ export function tryRecoverPaidProSourceOfTruthFromStructuralFailure(args: {
   agreementGenerationId?: string | null;
   generationOutcome?: string | null;
 }): PaidProSoTStructuralRecoveryResult {
-  const fallback = buildDeterministicQuadPartyMutualServicesProFallback({
-    rawIntake: args.intakeText,
-    draft: args.draft ?? {
+  const draft =
+    args.draft ??
+    ({
       title: "Agreement",
       jurisdiction: "",
       parties: [],
@@ -101,29 +100,29 @@ export function tryRecoverPaidProSourceOfTruthFromStructuralFailure(args: {
       due_date: null,
       effective_date: null,
       payment: { amount: null, cadence: null, valid: false },
-    },
+    } as ParsedDraftShape);
+
+  const preview = previewRecoverPaidProFreezeCandidate({
+    draft,
+    intakeText: args.intakeText,
+    surface: "paid_pro_sot_structural_recovery",
   });
-  if (!fallback.ok) {
+  if (!preview.ok) {
     return {
       ok: false,
-      reason: `deterministic_fallback_failed:${fallback.reasons.join(",") || "unknown"}`,
+      reason: `deterministic_fallback_failed:${preview.rejectReason ?? "freeze_preview_rejected"}`,
     };
   }
-  const prep = preparePaidProServerDocumentForAcceptance(
-    fallback.body,
-    args.draft,
-    args.intakeText,
-    { surface: "paid_pro_sot_structural_recovery" },
-  );
+
   markPaidProPipelineValidationPassed({
-    text: prep.text,
+    text: preview.text,
     source: args.source ?? "server_full_draft_retry",
   });
   try {
     const record = establishPaidProSourceOfTruth({
-      text: prep.text,
+      text: preview.text,
       source: args.source ?? "server_full_draft_retry",
-      draft: args.draft,
+      draft,
       intakeText: args.intakeText,
       agreementGenerationId: args.agreementGenerationId,
       generationOutcome: args.generationOutcome ?? "ok",
@@ -131,7 +130,7 @@ export function tryRecoverPaidProSourceOfTruthFromStructuralFailure(args: {
     return {
       ok: true,
       record,
-      recoverySource: "deterministic_quad_party_mutual_services_fallback",
+      recoverySource: "deterministic_n_party_intake_recovery",
       body: record.text,
     };
   } catch (err) {

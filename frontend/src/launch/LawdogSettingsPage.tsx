@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AppShell } from "./AppShell";
 import { LawdogDashboardLayout } from "./LawdogProductNav";
+import { AccountLoginPanel } from "./AccountLoginPanel";
 import { readStoredDisplayName, writeCurrentUserDisplayName } from "../account/currentUser";
 import { resolveAffiliateUserSlug, writeAffiliateUserSlug } from "../account/affiliatePresentation";
 
@@ -20,6 +21,7 @@ export function LawdogSettingsPage() {
     <AppShell title="Settings" subtitle="Workspace preferences for your LawDog account.">
       <LawdogDashboardLayout activeId="settings">
         <div className="max-w-md space-y-5">
+          <AccountLoginPanel className="rounded-xl border border-slate-800/80 bg-slate-950/40 p-4" />
           <label className="block">
             <span className="text-sm font-medium text-slate-300">Display name</span>
             <input

@@ -268,10 +268,12 @@ export const JOURNEY_D_SCENARIOS: Test424JourneyScenario[] = [
   TEST424_PARTIAL_FIVE,
 ];
 
-/** Journey E — structural / freeze recovery. */
+/** Journey E — structural / freeze recovery (representative 2/4/5-party matrix). */
 export const JOURNEY_E_SCENARIOS: Test424JourneyScenario[] = [
   TEST424_TWO_PARTY,
+  TEST424_FOUR_PARTY_VENDOR,
   TEST424_FOUR_PARTY_CONSULTING,
+  TEST424_FIVE_PARTY_REV,
   TEST424_FIVE_PARTY_JV,
 ];
 

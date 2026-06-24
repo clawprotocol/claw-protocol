@@ -75,6 +75,18 @@ export type PaidProAuthorityMeta = {
 /**
  * Same decision as {@link isPaidProAgreementAuthoritative} plus a stable `reason` for logging / QA.
  */
+function isActiveCheckoutReturnWindow(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const u = new URL(window.location.href);
+    if (u.searchParams.get("premiumCompletion") === "1") return true;
+    if (u.searchParams.get("checkout_session_id")) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
 export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuthorityInput): PaidProAuthorityMeta {
   const d = input.draft ?? null;
   const corpusLen = d
@@ -90,7 +102,8 @@ export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuth
   const hasStoredPaidSession = hasStoredPaidPremiumCompletionSession();
   if (
     hasStoredPaidSession &&
-    !(hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement())
+    !(hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) &&
+    (!isProdBuild() || isActiveCheckoutReturnWindow())
   ) {
     return { authoritative: true, reason: "paid_premium_completion_session", corpusLen, premium_render_source };
   }

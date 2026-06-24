@@ -52,6 +52,14 @@ export function isSupabaseBrowserConfigured(): boolean {
   return Boolean(readSupabaseUrlEnv() && readSupabaseAnonKeyEnv());
 }
 
+function supabaseAuthPersistSession(): boolean {
+  try {
+    return String(import.meta.env.VITE_CLAW_FEATURE_SUPABASE_AUTH || "").trim() === "1";
+  } catch {
+    return false;
+  }
+}
+
 let cachedClient: SupabaseClient<LawdogSupabaseTables> | null = null;
 
 /** Returns null when Supabase public env vars are missing (local/dev fallback). */
@@ -63,8 +71,9 @@ export function getSupabaseBrowserClient(): SupabaseClient<LawdogSupabaseTables>
     readSupabaseAnonKeyEnv(),
     {
       auth: {
-        persistSession: false,
-        autoRefreshToken: false,
+        persistSession: supabaseAuthPersistSession(),
+        autoRefreshToken: supabaseAuthPersistSession(),
+        detectSessionInUrl: supabaseAuthPersistSession(),
       },
     },
   );

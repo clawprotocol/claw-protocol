@@ -4,6 +4,8 @@ import "./index.css";
 import { ClawProductApp } from "./ClawProductApp";
 import { ApiReachabilityBanner } from "./launch/ApiReachabilityBanner";
 import { LaunchNavProvider } from "./launch/LaunchNavContext";
+import { AccessProvider } from "./access/AccessContext";
+import { AuthProvider } from "./auth/AuthProvider";
 import { warnIfProductionMissingPrivacyInbox } from "./launch/legal/privacyInboxDeployGuard";
 import { initLawdogLocalhostDevGating } from "./launch/lawdogLocalDevGating";
 import { isProductionApiMisconfigured } from "./lib/clawApi";
@@ -22,8 +24,12 @@ startApiReachabilityPolling();
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <LaunchNavProvider>
-      <ApiReachabilityBanner />
-      <ClawProductApp />
+      <AuthProvider>
+        <AccessProvider>
+          <ApiReachabilityBanner />
+          <ClawProductApp />
+        </AccessProvider>
+      </AuthProvider>
     </LaunchNavProvider>
   </React.StrictMode>
 );

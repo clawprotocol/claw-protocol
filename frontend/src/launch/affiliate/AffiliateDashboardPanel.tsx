@@ -24,6 +24,7 @@ import { lawdogExplorerTxUrl, lawdogUsdcContractDisplay } from "./lawdogPayoutEn
 import { LawdogProofActivityHeatmap } from "../../proof/LawdogProofActivityHeatmap";
 import { AffiliateProgramLegalLinks } from "./AffiliateProgramLegalLinks";
 import { acceptAffiliateTerms, readAffiliateTermsAccepted } from "../legal/affiliateTermsAcceptance";
+import { useLaunchNav } from "../LaunchNavContext";
 
 function dashAvatarFrameClass(tier: string): string {
   const t = tier.toLowerCase();
@@ -94,6 +95,8 @@ export function AffiliateDashboardPanel(props: {
   onLinkStateChange?: (state: "join" | "create" | "ready") => void;
 }) {
   const { orgId, onLinkStateChange } = props;
+  const { navigate } = useLaunchNav();
+  const goSubscribe = () => navigate("/app/billing");
   const [data, setData] = useState<AffiliateDashboardResponse | null>(null);
   const [celebrations, setCelebrations] = useState<AffiliateCelebrations | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -181,7 +184,12 @@ export function AffiliateDashboardPanel(props: {
                 early access during private beta.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" className="vs01-btn vs01-btn--primary vs01-btn--compact" disabled={!hasInstantSubscriberAccess}>
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--primary vs01-btn--compact"
+                  disabled={hasInstantSubscriberAccess}
+                  onClick={() => !hasInstantSubscriberAccess && goSubscribe()}
+                >
                   Subscribe to unlock
                 </button>
               </div>
@@ -299,7 +307,12 @@ export function AffiliateDashboardPanel(props: {
                 {accessReq?.x_handle ? <li>X: @{accessReq.x_handle}</li> : null}
                 {accessReq?.created_at ? <li>Submitted: {new Date(accessReq.created_at).toLocaleString()}</li> : null}
               </ul>
-              <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3" disabled={!hasInstantSubscriberAccess}>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
+                disabled={hasInstantSubscriberAccess}
+                onClick={() => !hasInstantSubscriberAccess && goSubscribe()}
+              >
                 Subscribe to unlock now
               </button>
             </>
@@ -456,7 +469,12 @@ export function AffiliateDashboardPanel(props: {
               access during private beta.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" className="vs01-btn vs01-btn--primary vs01-btn--compact" disabled={!hasInstantSubscriberAccess}>
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--primary vs01-btn--compact"
+                disabled={hasInstantSubscriberAccess}
+                onClick={() => !hasInstantSubscriberAccess && goSubscribe()}
+              >
                 Subscribe to unlock
               </button>
             </div>
@@ -550,7 +568,12 @@ export function AffiliateDashboardPanel(props: {
               {accessReq?.x_handle ? <li>X handle: @{accessReq.x_handle}</li> : null}
               {accessReq?.created_at ? <li>Submitted: {new Date(accessReq.created_at).toLocaleString()}</li> : null}
             </ul>
-            <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3" disabled={!hasInstantSubscriberAccess}>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
+              disabled={hasInstantSubscriberAccess}
+              onClick={() => !hasInstantSubscriberAccess && goSubscribe()}
+            >
               Subscribe to unlock now
             </button>
           </>

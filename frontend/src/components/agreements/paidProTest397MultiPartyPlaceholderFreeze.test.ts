@@ -35,7 +35,7 @@ import {
   TEST396_QUAD_PARTY_INTAKE,
   test396Draft,
   test396Parties,
-} from "./paidProTest396MultiPartyFreeze.test";
+} from "./paidProTest396Fixtures";
 import { buildCanonicalAgreementSnapshot } from "./canonicalAgreementSnapshot";
 
 const RED = "Red Mesa Logistics LLC";

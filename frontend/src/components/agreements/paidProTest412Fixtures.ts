@@ -1,5 +1,5 @@
 import { TEST403_PRODUCTION_QUAD_PARTY_INTAKE } from "./paidProTest403Fixtures";
-import { TEST396_QUAD_PARTY_INTAKE } from "./paidProTest396MultiPartyFreeze.test";
+import { TEST396_QUAD_PARTY_INTAKE } from "./paidProTest396Fixtures";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const RED = "Red Mesa Logistics LLC";

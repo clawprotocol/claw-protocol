@@ -66,6 +66,14 @@ import { logPaymentFlowStage } from "../../components/agreements/paymentFlowProg
 import { ensureAffiliateAttributionForOrg, getAffiliateCodeForAttribution } from "../affiliate/affiliateAttributionContext";
 import { ensureGenesisReferralHandoffForCheckout } from "../genesisReferral/ensureGenesisReferralHandoff";
 import { getOrgId } from "../orgContext";
+import {
+  createBillingCheckoutSession,
+  demoActivateSubscription,
+  isStripeCheckoutApiConfigured,
+} from "../billingCheckoutApi";
+import { refreshSubscriptionEntitlement } from "../../access/subscriptionEntitlementCache";
+import { featureFlags } from "../../config/featureFlags";
+import { useAuth } from "../../auth/AuthProvider";
 import { resetCheckoutEntryScroll } from "./checkoutEntryScroll";
 import { SimpleFlowShell } from "./SimpleFlowShell";
 import { SpaLink } from "../SpaLink";
@@ -179,6 +187,7 @@ function stripCardDigits(raw: string): string {
 export function SimpleCheckoutPage(props: { agreementId: string }) {
   const { agreementId } = props;
   const { navigate, search } = useLaunchNav();
+  const { user } = useAuth();
   const dc = useDynamicConfig();
   const ck = dc.checkout;
   const checkoutLogged = useRef(false);
@@ -321,15 +330,68 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           ? appendReturnToQueryParam(returnTo, "premiumCompletion", "1")
           : returnTo;
       navigate(destination);
+      if (featureFlags.serverBilling && !isStripeCheckoutApiConfigured()) {
+        try {
+          await demoActivateSubscription({
+            userId: user?.id ?? "demo-checkout",
+            orgId: getOrgId(),
+          });
+          await refreshSubscriptionEntitlement();
+        } catch {
+          /* demo entitlement sync optional */
+        }
+      }
       inFlightRef.current = false;
       setProcessing(false);
     },
-    [navigate, returnTo, agreementId, isSingleAgreementCheckout, amountUsd, tier],
+    [navigate, returnTo, agreementId, isSingleAgreementCheckout, amountUsd, tier, user?.id],
   );
+
+  async function startStripeCheckout(): Promise<void> {
+    if (finishedRef.current || processing || amountUsd == null) return;
+    inFlightRef.current = true;
+    setProcessing(true);
+    setPaymentError(null);
+    try {
+      const affiliateCode = getAffiliateCodeForAttribution();
+      if (affiliateCode) {
+        const attributed = await ensureAffiliateAttributionForOrg(getOrgId());
+        if (!attributed.ok) {
+          fail("We could not link this referral before payment. Reopen from the affiliate link and try again.");
+          return;
+        }
+      }
+      const genesisHandoff = await ensureGenesisReferralHandoffForCheckout();
+      if (!genesisHandoff.ok) {
+        fail("This referral link cannot be used for your own account.");
+        return;
+      }
+      const returnTarget =
+        agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID
+          ? appendReturnToQueryParam(returnTo, "premiumCompletion", "1")
+          : returnTo;
+      const session = await createBillingCheckoutSession({
+        agreementId,
+        cadence,
+        returnTo: returnTarget,
+        userId: user?.id ?? null,
+        customerEmail: user?.email ?? null,
+        referralCode: genesisHandoff.metadata.referral_code ?? affiliateCode ?? null,
+        visitorId: genesisHandoff.metadata.visitor_id ?? null,
+      });
+      window.location.assign(session.checkout_url);
+    } catch (err) {
+      fail(err instanceof Error ? err.message : "Could not start Stripe checkout.");
+    }
+  }
 
   async function onCardPay(e: FormEvent): Promise<void> {
     e.preventDefault();
     if (finishedRef.current || processing || amountUsd == null) return;
+    if (isStripeCheckoutApiConfigured() && !devPaymentBypassActive && !qaPaymentBypassActive) {
+      await startStripeCheckout();
+      return;
+    }
     if (devPaymentBypassActive) {
       console.info("[DEV PAYMENT BYPASS] active");
       console.info(

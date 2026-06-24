@@ -22,7 +22,7 @@ export const LAWDOG_NAV_ITEMS: NavItem[] = [
   { id: "create", label: "Create", path: "/app/create", testId: "lawdog-nav-create" },
   { id: "agreements", label: "Agreements", path: "/app/agreements", testId: "lawdog-nav-agreements" },
   { id: "signatures", label: "Signatures", path: "/app/signatures", testId: "lawdog-nav-signatures" },
-  { id: "affiliate", label: "Affiliate", path: "/app/affiliate", testId: "lawdog-nav-affiliate" },
+  { id: "affiliate", label: "Affiliate", path: "/app/opportunity", testId: "lawdog-nav-affiliate" },
 ];
 
 export function resolveLawdogNavActiveId(pathname: string): LawdogNavItemId {

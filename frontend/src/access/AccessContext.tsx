@@ -1,9 +1,12 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { allowedAiModelClassForTier, planDisplayName, tierEntitlements } from "./tierConfig";
 import { canUseFeature, getUsageAllowanceSnapshot } from "./accessHelpers";
 import { resolveAccess, type ResolvedAccess } from "./accessResolver";
 import type { AccessFeature, AccessTier, AiModelClass, GateContext, GateResult, UsageKind } from "./types";
 import { loadUsageTotals, peekUsageTotals, recordUsage as persistUsage } from "./usageMeter";
+import { featureFlags } from "../config/featureFlags";
+import { refreshSubscriptionEntitlement } from "./subscriptionEntitlementCache";
+import { getOrgId } from "../launch/orgContext";
 
 export type AccessContextValue = {
   tier: AccessTier;
@@ -37,6 +40,11 @@ export function AccessProvider({ children }: { children: React.ReactNode }) {
   const [tick, setTick] = useState(0);
 
   const refreshUsage = useCallback(() => setTick((n) => n + 1), []);
+
+  useEffect(() => {
+    if (!featureFlags.serverBilling) return;
+    void refreshSubscriptionEntitlement(getOrgId()).then(() => setTick((n) => n + 1));
+  }, []);
 
   const resolved = useMemo((): ResolvedAccess => {
     void tick;

@@ -29,7 +29,7 @@ import { buildPremiumPostCheckoutLocalRecoveryProDraft } from "./premiumNetworkR
 import {
   TEST396_QUAD_PARTY_INTAKE,
   test396Draft,
-} from "./paidProTest396MultiPartyFreeze.test";
+} from "./paidProTest396Fixtures";
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
 
 const RED = "Red Mesa Logistics LLC";
