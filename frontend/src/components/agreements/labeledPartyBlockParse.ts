@@ -19,6 +19,8 @@ import { resolveLegalIdentitiesFromExtraction } from "./legalIdentityResolution"
 export type LabeledPartyBlock = {
   /** 1-based index from the prompt ("Party 1" → 1). */
   index: number;
+  /** Intake role label when present (`Party 1 (Client):`, quoted roles, etc.). */
+  roleLabel: string;
   legalEntity: string;
   signerName: string;
   signerTitle: string;
@@ -30,6 +32,9 @@ const UNKNOWN_VALUE_RE =
   /^(?:unknown|n\/?a|tbd|tba|none|—|–|-|\[not\s+yet\s+specified\]|\[?\s*not\s+yet\s+specified\s*\]?)$/i;
 
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
+const PARTY_BLOCK_WITH_ROLE_INLINE_RE =
+  /^\s*party\s*(\d+)\s*\(\s*([^)]+?)\s*\)\s*:\s*(.+)$/i;
+const PARTY_BLOCK_WITH_ROLE_HEADER_RE = /^\s*party\s*(\d+)\s*\(\s*([^)]+?)\s*\)\s*:?\s*$/i;
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 
 const ROLE_LABEL_PARTY_HEADER_RE =
@@ -67,6 +72,7 @@ function cleanFieldValue(value: string): string {
 function emptyBlock(index: number): LabeledPartyBlock {
   return {
     index,
+    roleLabel: "",
     legalEntity: "",
     signerName: "",
     signerTitle: "",
@@ -177,6 +183,33 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
     const line = rawLine.trim();
     if (!line) continue;
 
+    const roleInline = line.match(PARTY_BLOCK_WITH_ROLE_INLINE_RE);
+    if (roleInline?.[1] && roleInline[2] && roleInline[3]) {
+      currentIndex = Number.parseInt(roleInline[1], 10);
+      if (!Number.isFinite(currentIndex) || currentIndex < 1) {
+        currentIndex = null;
+        continue;
+      }
+      const block = blocksByIndex.get(currentIndex) ?? emptyBlock(currentIndex);
+      block.roleLabel = cleanFieldValue(roleInline[2]);
+      block.legalEntity = cleanFieldValue(roleInline[3]);
+      blocksByIndex.set(currentIndex, block);
+      continue;
+    }
+
+    const roleHeader = line.match(PARTY_BLOCK_WITH_ROLE_HEADER_RE);
+    if (roleHeader?.[1] && roleHeader[2]) {
+      currentIndex = Number.parseInt(roleHeader[1], 10);
+      if (!Number.isFinite(currentIndex) || currentIndex < 1) {
+        currentIndex = null;
+        continue;
+      }
+      const block = blocksByIndex.get(currentIndex) ?? emptyBlock(currentIndex);
+      block.roleLabel = cleanFieldValue(roleHeader[2]);
+      blocksByIndex.set(currentIndex, block);
+      continue;
+    }
+
     const header = line.match(PARTY_BLOCK_HEADER_RE);
     if (header?.[1]) {
       currentIndex = Number.parseInt(header[1], 10);
@@ -214,6 +247,18 @@ export function intakeHasAuthoritativeLabeledPartyBlocks(raw: string): boolean {
 /** Ordered full legal entity names from labeled party blocks. */
 export function labeledPartyLegalEntities(raw: string): string[] {
   return parseLabeledPartyBlocks(raw).map((b) => b.legalEntity);
+}
+
+/** Role labels from labeled party blocks when intake declares them explicitly. */
+export function labeledPartyRoleLabels(raw: string): string[] {
+  return parseLabeledPartyBlocks(raw).map((b) => b.roleLabel.trim());
+}
+
+/** Resolve role label for a labeled block — explicit intake role beats generic Party N. */
+export function labeledPartyBlockRoleLabel(block: LabeledPartyBlock, intakeText?: string | null): string {
+  const explicit = block.roleLabel.trim();
+  if (explicit.length >= 2) return explicit;
+  return labeledPartyRoleLabelForPartyIndex(block.index - 1, intakeText);
 }
 
 /**

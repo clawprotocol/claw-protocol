@@ -179,12 +179,19 @@ export function detectExecutionBlockRoleInversion(corpus: string): boolean {
 
   const clientBlock = tail.match(/^\s*CLIENT\s*:\s*\n([^\n]+)/im);
   const providerBlock = tail.match(/^\s*SERVICE\s+PROVIDER\s*:\s*\n([^\n]+)/im);
-  if (clientBlock?.[1] && providerBlock?.[1]) {
-    const underClient = clientBlock[1].trim();
-    const underProvider = providerBlock[1].trim();
+  const clientInline = tail.match(/^\s*CLIENT\s*:\s*([^\n]+)/im);
+  const providerInline = tail.match(/^\s*SERVICE\s+PROVIDER\s*:\s*([^\n]+)/im);
+
+  const underClient = (clientBlock?.[1] ?? clientInline?.[1] ?? "").trim();
+  const underProvider = (providerBlock?.[1] ?? providerInline?.[1] ?? "").trim();
+  if (underClient && underProvider) {
     const clientOk = partyLegalNamesMatch(underClient, client.legalName);
     const providerOk = partyLegalNamesMatch(underProvider, provider.legalName);
     if (!clientOk || !providerOk) return true;
+  } else if (underClient && !partyLegalNamesMatch(underClient, client.legalName)) {
+    return true;
+  } else if (underProvider && !partyLegalNamesMatch(underProvider, provider.legalName)) {
+    return true;
   }
 
   return executionTailRoleParentheticalInversion(tail, corpus);

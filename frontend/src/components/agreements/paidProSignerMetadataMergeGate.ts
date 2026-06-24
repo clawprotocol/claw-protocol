@@ -15,6 +15,7 @@ import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAu
 import {
   buildCorpusRoleIdentitiesForExecutionReconcile,
   detectExecutionBlockRoleInversion,
+  partyLegalNamesMatch,
 } from "./paidProAcceptedCorpusPartyRoles";
 
 const SUBSTANTIVE_ROLE_BLOCK_START_RE =
@@ -158,7 +159,23 @@ export function reconcileExecutionBlockToRoleIdentities(
 
   if (blocks.length < 2) return { text: corpus, repairs: 0 };
   const rebuiltTail = `${witnessLine}\n\n${blocks.join("\n\n")}\n`;
-  return { text: `${prefix}\n\n${rebuiltTail}`, repairs: 1 };
+  const rebuilt = `${prefix}\n\n${rebuiltTail}`;
+  if (rebuilt === corpus) return { text: corpus, repairs: 0 };
+  return { text: rebuilt, repairs: 1 };
+}
+
+function executionTailContainsAllPartyLegalNames(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  const witnessIdx = corpus.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return false;
+  const tail = corpus.slice(witnessIdx);
+  return parties.every((p) => {
+    const legal = p.partyLegalName.trim();
+    if (!legal) return false;
+    return tail.split("\n").some((line) => partyLegalNamesMatch(line.trim(), legal));
+  });
 }
 
 export function applyPaidProSignerMetadataMergeGate(args: {
@@ -203,10 +220,15 @@ export function applyPaidProSignerMetadataMergeGate(args: {
   if (identities.length >= 2) {
     const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
     if (witnessIdx >= 0) {
-      const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
-      if (reconciled.repairs > 0) {
-        text = reconciled.text;
-        repairs.push("reconcile_execution_block_from_signer_authority");
+      const needsReconcile =
+        detectExecutionBlockRoleInversion(text) ||
+        !executionTailContainsAllPartyLegalNames(text, parties);
+      if (needsReconcile) {
+        const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
+        if (reconciled.repairs > 0) {
+          text = reconciled.text;
+          repairs.push("reconcile_execution_block_from_signer_authority");
+        }
       }
     } else if (signaturePatchStartIndex(text) >= 0) {
       const execInvariant = analyzePaidProExecutionBlockInvariant(text, {

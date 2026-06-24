@@ -133,6 +133,18 @@ function dedupeBlocks(blocks: ParsedBlock[], repairs: string[]): ParsedBlock[] {
 
   for (const block of blocks) {
     if (block.headingKey === "__execution__") {
+      const existingIdx = out.findIndex((b) => b.headingKey === "__execution__");
+      if (existingIdx >= 0) {
+        const prev = out[existingIdx]!;
+        const mergedLines = [...prev.lines];
+        if (block.lines.length > 0) {
+          if (mergedLines.length > 0) mergedLines.push("");
+          mergedLines.push(...block.lines);
+        }
+        out[existingIdx] = { ...prev, lines: mergedLines };
+        repairs.push("section_dedupe_execution_merged");
+        continue;
+      }
       out.push(block);
       continue;
     }

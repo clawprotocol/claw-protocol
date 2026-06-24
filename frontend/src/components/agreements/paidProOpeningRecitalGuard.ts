@@ -6,6 +6,8 @@
 import {
   PARTY_ENTITY_SUFFIX_RE,
   type CanonicalPartyIdentityRecord,
+  definedMultiPartyAgreementOpeningLine,
+  repairAdjacentDuplicatePartyNamesInOpening,
 } from "./canonicalPartyIdentityResolver";
 
 import {
@@ -315,6 +317,98 @@ export function repairPaidProServicesAgreementOpening(
   const opening = buildCanonicalPaidProServicesOpeningRecital(client, provider, intakeText);
   repairs.push("opening:prepend_canonical_services_recital");
   return { text: `${opening}${remainder}`, repairs };
+}
+
+export function buildCanonicalPaidProMultiPartyOpeningRecital(
+  records: readonly CanonicalPartyIdentityRecord[],
+  intakeText?: string | null,
+): string {
+  const title = resolvePaidProServicesAgreementTitle(intakeText);
+  const mutual = /MUTUAL/i.test(title);
+  const openingLine = definedMultiPartyAgreementOpeningLine(records, {
+    consulting: /CONSULTING/i.test(title),
+    mutual,
+  });
+  return [title, "", openingLine, ""].join("\n");
+}
+
+/** True when multi-party opening has duplicate recitals or wrong defined terms before Section 1. */
+export function detectPaidProMalformedMultiPartyOpening(
+  text: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+): boolean {
+  if (records.length < 3) return false;
+  const body = (text || "").replace(/\r\n/g, "\n").trim();
+  if (!body) return true;
+  const preSec1 = openingSliceBeforeSection1(body);
+  const enteredCount = (preSec1.match(/\bentered\s+into\b/gi) ?? []).length;
+  const amongCount = (preSec1.match(/\bby\s+and\s+among\b/gi) ?? []).length;
+  const betweenCount = (preSec1.match(/\bby\s+and\s+between\b/gi) ?? []).length;
+  if (enteredCount > 1 || (amongCount > 0 && betweenCount > 0)) return true;
+  if (records.some((r) => !preSec1.includes(r.fullLegalName.trim()))) return true;
+  const roleMarks = records.filter((r) => {
+    const role = r.roleLabel.trim();
+    if (!role || role.toLowerCase() === r.fullLegalName.trim().toLowerCase()) return false;
+    return new RegExp(`\\(\\s*["']?${role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*\\)`, "i").test(preSec1);
+  });
+  if (roleMarks.length < Math.min(2, records.length)) return true;
+  for (const record of records) {
+    const name = record.fullLegalName.trim();
+    if (new RegExp(`${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(preSec1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Atomically replace malformed multi-party opening before Section 1.
+ */
+export function repairPaidProMultiPartyAgreementOpening(
+  text: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+  intakeText?: string | null,
+): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  if (records.length < 3) return { text, repairs };
+
+  let body = (text || "").replace(/\r\n/g, "\n").trim();
+  const adjacent = repairAdjacentDuplicatePartyNamesInOpening(body, records);
+  body = adjacent.text;
+  repairs.push(...adjacent.repairs);
+
+  if (!detectPaidProMalformedMultiPartyOpening(body, records)) {
+    return { text: body, repairs };
+  }
+
+  const legalNames = new Set(records.map((r) => r.fullLegalName.trim().toLowerCase()).filter(Boolean));
+  const stripped = stripLeadingStandalonePartyLines(body, legalNames);
+  if (stripped.stripped > 0) {
+    body = stripped.text;
+    repairs.push("opening:strip_naked_party_header");
+  }
+
+  const { operative, executionTail } = splitOperativeAndExecutionTail(body);
+  const sec1Idx = findOpeningSectionOneIndex(operative);
+  const operativeRemainder = sec1Idx >= 0 ? operative.slice(sec1Idx).trim() : operative;
+  const remainder = executionTail
+    ? `${operativeRemainder}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
+    : operativeRemainder;
+  const opening = buildCanonicalPaidProMultiPartyOpeningRecital(records, intakeText);
+  repairs.push("opening:prepend_canonical_multiparty_recital");
+  return { text: `${opening}${remainder}`, repairs };
+}
+
+export function ensurePaidProMultiPartyAgreementOpening(
+  text: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+  intakeText?: string | null,
+): { text: string; repairs: string[] } {
+  if (records.length < 3) return { text, repairs: [] };
+  if (!detectPaidProMalformedMultiPartyOpening(text, records)) {
+    return { text, repairs: [] };
+  }
+  return repairPaidProMultiPartyAgreementOpening(text, records, intakeText);
 }
 
 export function ensurePaidProServicesAgreementOpening(

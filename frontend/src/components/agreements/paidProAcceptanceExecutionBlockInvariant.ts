@@ -10,7 +10,14 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
 import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
-import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
+import { isGenericCanonicalRole } from "./canonicalPartyRoleAuthority";
+import {
+  labeledPartyBlockRoleLabel,
+  labeledPartyLegalEntities,
+  parseLabeledPartyBlocks,
+  parseQuotedRolePartyLines,
+  quotedRolePartyLegalEntities,
+} from "./labeledPartyBlockParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
@@ -47,11 +54,48 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function acceptanceManifestRoleLabel(fullLegalName: string, index: number, partyCount: number): string {
-  if (partyCount >= 3) return fullLegalName.trim();
+function acceptanceManifestRoleLabel(
+  _fullLegalName: string,
+  index: number,
+  partyCount: number,
+  explicitRole?: string,
+): string {
+  const explicit = (explicitRole || "").trim();
+  if (explicit.length >= 2 && !isGenericCanonicalRole(explicit)) return explicit;
+  if (partyCount >= 3) return `Party ${index + 1}`;
   if (index === 0) return "Client";
   if (index === 1) return "Service Provider";
   return `Party ${index + 1}`;
+}
+
+function manifestRecordsFromLabeledPartyBlocks(intakeText: string): CanonicalPartyIdentityRecord[] {
+  const blocks = parseLabeledPartyBlocks(intakeText);
+  if (blocks.length < 2) return [];
+  return blocks.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES).map((block) => {
+    const fullLegalName = block.legalEntity.trim();
+    return {
+      fullLegalName,
+      roleLabel: labeledPartyBlockRoleLabel(block, intakeText),
+      displayAlias: fullLegalName.split(/\s+/).slice(0, 2).join(" "),
+      signerName: block.signerName.trim() || null,
+      signerTitle: block.signerTitle.trim() || null,
+      partyAddress: block.address.trim() || null,
+    };
+  });
+}
+
+function manifestRecordsFromQuotedRoleLines(intakeText: string): CanonicalPartyIdentityRecord[] {
+  const quoted = parseQuotedRolePartyLines(intakeText);
+  if (quoted.length < 2) return [];
+  const partyCount = Math.min(quoted.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  return quoted.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES).map((entry, index) => ({
+    fullLegalName: entry.legalEntity.trim(),
+    roleLabel: acceptanceManifestRoleLabel(entry.legalEntity, index, partyCount, entry.roleLabel),
+    displayAlias: entry.legalEntity.split(/\s+/).slice(0, 2).join(" "),
+    signerName: null,
+    signerTitle: null,
+    partyAddress: null,
+  }));
 }
 
 function roleToExecutionHeading(roleLabel: string): string {
@@ -189,13 +233,50 @@ export function analyzeMultiPartyExecutionBlockShape(
   return { malformed: reasons.length > 0, reasons: [...new Set(reasons)] };
 }
 
-function manifestRecordsFromPartyNames(names: readonly string[]): CanonicalPartyIdentityRecord[] {
+function manifestRecordsFromPartyNames(
+  names: readonly string[],
+  intakeText?: string | null,
+  draft?: ParsedDraftShape | null,
+): CanonicalPartyIdentityRecord[] {
+  const intake = String(intakeText ?? "").trim();
+  if (intake) {
+    const fromLabeled = manifestRecordsFromLabeledPartyBlocks(intake);
+    if (fromLabeled.length >= 2) return fromLabeled;
+    const fromQuoted = manifestRecordsFromQuotedRoleLines(intake);
+    if (fromQuoted.length >= 2) return fromQuoted;
+  }
+
   const unique: string[] = [];
   for (const raw of names) {
     const name = String(raw ?? "").trim();
     if (name.length < 2 || !isAuthoritativeLegalEntityName(name) || unique.includes(name)) continue;
     unique.push(name);
   }
+  if (unique.length < 2) return [];
+
+  const partyNames = (draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((n) => n.length >= 2);
+  const roleLabels = (draft?.parties ?? [])
+    .map((p) => String(p?.role ?? "").trim())
+    .filter((r) => r.length >= 2);
+  if (intake && partyNames.length >= 2) {
+    const fromIntake = resolveCanonicalPartyIdentitiesFromIntake(
+      intake,
+      partyNames,
+      roleLabels.length >= 2 ? roleLabels : undefined,
+    );
+    if (fromIntake.length >= unique.length && fromIntake.length >= 2) {
+      return fromIntake.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
+    }
+  }
+  if (intake && unique.length >= 2) {
+    const fromIntakeNames = resolveCanonicalPartyIdentitiesFromIntake(intake, unique);
+    if (fromIntakeNames.length >= 2) {
+      return fromIntakeNames.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
+    }
+  }
+
   const partyCount = Math.min(unique.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
   return unique.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES).map((fullLegalName, index) => ({
     fullLegalName,
@@ -211,6 +292,9 @@ function manifestRecordsFromPartyNames(names: readonly string[]): CanonicalParty
 function resolveIntakeAuthorityPartyNames(intakeText: string | null | undefined): string[] {
   const labeled = labeledPartyLegalEntities(intakeText ?? "").filter(isAuthoritativeLegalEntityName);
   if (labeled.length >= 3) return labeled.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
+
+  const quoted = quotedRolePartyLegalEntities(intakeText ?? "").filter(isAuthoritativeLegalEntityName);
+  if (quoted.length >= 3) return quoted.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
 
   const entityPool = dedupeEntityCandidatesToLegalParties(
     extractAgreementEntityCandidates(intakeText ?? "").filter(isAuthoritativeLegalEntityName),
@@ -233,30 +317,33 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
   const intakeAuthority = resolveIntakeAuthorityPartyNames(args.intakeText);
   const frozenNames = readFrozenCanonicalManifestPartyNames().filter(isAuthoritativeLegalEntityName);
 
+  const intakeText = args.intakeText ?? null;
+  const draft = args.draft ?? null;
+
   if (intakeAuthority.length >= 3) {
     if (frozenNames.length < intakeAuthority.length) {
-      return manifestRecordsFromPartyNames(intakeAuthority);
+      return manifestRecordsFromPartyNames(intakeAuthority, intakeText, draft);
     }
     if (frozenNames.length >= 3) {
-      return manifestRecordsFromPartyNames(frozenNames);
+      return manifestRecordsFromPartyNames(frozenNames, intakeText, draft);
     }
-    return manifestRecordsFromPartyNames(intakeAuthority);
+    return manifestRecordsFromPartyNames(intakeAuthority, intakeText, draft);
   }
 
   if (frozenNames.length >= 3) {
-    return manifestRecordsFromPartyNames(frozenNames);
+    return manifestRecordsFromPartyNames(frozenNames, intakeText, draft);
   }
 
-  const labeled = labeledPartyLegalEntities(args.intakeText ?? "").filter(isAuthoritativeLegalEntityName);
+  const labeled = labeledPartyLegalEntities(intakeText ?? "").filter(isAuthoritativeLegalEntityName);
   if (labeled.length >= 2) {
-    return manifestRecordsFromPartyNames(labeled.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES));
+    return manifestRecordsFromPartyNames(labeled.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES), intakeText, draft);
   }
 
   const entityPool = dedupeEntityCandidatesToLegalParties(
-    extractAgreementEntityCandidates(args.intakeText ?? "").filter(isAuthoritativeLegalEntityName),
+    extractAgreementEntityCandidates(intakeText ?? "").filter(isAuthoritativeLegalEntityName),
   );
   if (entityPool.length >= 2) {
-    return manifestRecordsFromPartyNames(entityPool.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES));
+    return manifestRecordsFromPartyNames(entityPool.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES), intakeText, draft);
   }
 
   const partyNames = (args.draft?.parties ?? [])
@@ -274,7 +361,7 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
     if (fromIntake.length >= 2) return fromIntake;
   }
   if (partyNames.length >= 2) {
-    return manifestRecordsFromPartyNames(partyNames);
+    return manifestRecordsFromPartyNames(partyNames, intakeText, draft);
   }
   return genericPaidProAcceptanceManifestFallback();
 }

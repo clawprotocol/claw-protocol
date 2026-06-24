@@ -11,7 +11,7 @@ import {
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
-import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import { ensurePaidProMultiPartyAgreementOpening, ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 
 export function repairMalformedPaidProAgreementRecital(
@@ -40,6 +40,10 @@ export function repairMalformedPaidProAgreementRecital(
       const opening = ensurePaidProServicesAgreementOpening(out, records);
       out = opening.text;
       repairs.push(...opening.repairs);
+    } else {
+      const multiOpening = ensurePaidProMultiPartyAgreementOpening(out, records);
+      out = multiOpening.text;
+      repairs.push(...multiOpening.repairs);
     }
   }
   const dup = repairDuplicateAgreementOpening(out, records);

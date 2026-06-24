@@ -7,6 +7,9 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { ensureOperativeIfToNoticeDelivery, ensureCanonicalNoticesSectionHeadingForFreeze } from "./paidProPartyNoticeDetails";
 import { repairProfessionalCorpusContamination } from "./paidProProfessionalCorpusContamination";
 import type { PaidProPartyRoleContext } from "./paidProSignerMetadataAuthority";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { mergeLabeledPartyAuthorityIntoParties } from "./paidProSignerMetadataAuthority";
+import { manifestRecordsForPaidProAcceptance } from "./paidProAcceptanceExecutionBlockInvariant";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import {
   containsUnresolvedRenderTokens,
@@ -34,7 +37,29 @@ export function applyPaidProNoticeContactAuthority(
 ): PaidProNoticeContactAuthorityResult {
   const surface = opts?.surface ?? "paid_pro_notice_contact_authority";
   const intakeRaw = opts?.intakeText ?? null;
-  const parties = resolvePartiesForReviewRender({ draft: opts?.draft, intakeText: intakeRaw });
+  let parties = resolvePartiesForReviewRender({ draft: opts?.draft, intakeText: intakeRaw });
+  const manifestRecords = manifestRecordsForPaidProAcceptance({
+    draft: opts?.draft ?? null,
+    intakeText: intakeRaw,
+  });
+  const manifestAuthoritative = manifestRecords.filter((r) =>
+    isAuthoritativeLegalEntityName(r.fullLegalName),
+  );
+  if (
+    manifestAuthoritative.length >= 3 &&
+    parties.filter((p) => isAuthoritativeLegalEntityName(p.partyLegalName.trim())).length <
+      manifestAuthoritative.length
+  ) {
+    const fromManifest = manifestAuthoritative.map((record, partyIndex) => ({
+      partyIndex,
+      partyLegalName: record.fullLegalName,
+      signerEmail: "",
+      signerName: (record.signerName?.trim() || "").trim(),
+      signerTitle: (record.signerTitle?.trim() || "").trim(),
+      partyAddress: (record.partyAddress?.trim() || "").trim(),
+    }));
+    parties = mergeLabeledPartyAuthorityIntoParties(fromManifest, intakeRaw);
+  }
   const repairs: string[] = [];
   let out = (raw || "").replace(/\r\n/g, "\n");
   const roleContext: PaidProPartyRoleContext = {

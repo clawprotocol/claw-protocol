@@ -234,7 +234,7 @@ export function repairExecutionBlockEntityHeadingLines(
     if (expectEntityLine && trimmed && !SIG_FIELD_RE.test(trimmed)) {
       const authorityName = (parties ?? [])[activePartyIndex]?.partyLegalName?.trim() ?? "";
       const cleaned =
-        authorityName && executionPartyLabelNeedsAuthorityRepair(trimmed, authorityName)
+        authorityName && !partyLegalNamesMatch(trimmed, authorityName)
           ? authorityName
           : extractCleanLegalEntityFromExecutionLine(trimmed, legalNames);
       if (cleaned && cleaned !== trimmed) {

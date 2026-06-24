@@ -577,6 +577,63 @@ export function definedConsultingAgreementOpeningLine(
   return `This Consulting and Implementation Agreement (the "Agreement") is entered into as of the Effective Date by and between ${client.fullLegalName} ("Client") and ${provider.fullLegalName} ("Service Provider"). The "Effective Date" is the date on which the Agreement has been fully executed by both parties.`;
 }
 
+function oxfordJoinPartyLabels(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+function multiPartyCollectivePhrase(partyCount: number): string {
+  if (partyCount < 2) return "";
+  if (partyCount === 2) return ' (each a "Party" and together, the "Parties")';
+  return ' (each a "Party" and collectively, the "Parties")';
+}
+
+/** N-party opening with role labels in defined-term parentheticals. */
+export function definedMultiPartyAgreementOpeningLine(
+  records: readonly CanonicalPartyIdentityRecord[],
+  opts?: { consulting?: boolean; mutual?: boolean },
+): string {
+  if (records.length < 2) return "";
+  const partyLabels = records.map((record, index) => {
+    const addr = optionalPartyAddressPhrase(record.partyAddress);
+    const role = record.roleLabel.trim() || `Party ${index + 1}`;
+    return `${record.fullLegalName.trim()} ("${role}")${addr}`;
+  });
+  const connector = records.length === 2 ? "between" : "among";
+  const list = records.length === 2
+    ? `${partyLabels[0]} and ${partyLabels[1]}`
+    : oxfordJoinPartyLabels(partyLabels);
+  const mutual = opts?.mutual ? "Mutual " : "";
+  const consulting = opts?.consulting ?? true;
+  const titlePart = consulting ? "Consulting and Implementation Agreement" : "Services Agreement";
+  return `This ${mutual}${titlePart} (the "Agreement") is entered into as of the Effective Date by and ${connector} ${list}${multiPartyCollectivePhrase(records.length)}. The "Effective Date" is the date on which the Agreement has been fully executed by all Parties.`;
+}
+
+/** Remove adjacent duplicate legal entity names in the opening slice (malformed server recitals). */
+export function repairAdjacentDuplicatePartyNamesInOpening(
+  text: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const headEnd = witnessIdx >= 0 ? witnessIdx : Math.min(text.length, 4_000);
+  let head = text.slice(0, headEnd);
+  const tail = text.slice(headEnd);
+  for (const record of records) {
+    const name = record.fullLegalName.trim();
+    if (name.length < 4) continue;
+    const escaped = escapeRe(name);
+    const re = new RegExp(`(${escaped})\\s+\\1`, "gi");
+    if (re.test(head)) {
+      re.lastIndex = 0;
+      head = head.replace(re, "$1");
+      repairs.push(`opening:adjacent_duplicate_legal_name:${name.slice(0, 24)}`);
+    }
+  }
+  return repairs.length > 0 ? { text: head + tail, repairs } : { text, repairs: [] };
+}
+
 const EFFECTIVE_DATE_DUPLICATE_OPENING_RE =
   /(?:entered\s+into\s+as\s+of\s+the\s+)?Effective\s+Date\s+This\s+Agreement\s+is\s+(?:entered\s+into\s+)?(?:by\s+and\s+)?between/gi;
 
@@ -711,11 +768,17 @@ export function repairDuplicateAgreementOpening(
       const head = input.slice(0, 2_000);
       const useMutualConsulting = /Mutual\s+Consulting/i.test(head);
       const useConsulting = /Consulting\s+and\s+Implementation/i.test(head);
-      const replacement = useMutualConsulting
-        ? definedMutualConsultingAgreementOpeningLine(records[0]!, records[1]!)
-        : useConsulting
-          ? definedConsultingAgreementOpeningLine(records[0]!, records[1]!)
-          : definedServicesAgreementOpeningLine(records[0]!, records[1]!);
+      const replacement =
+        records.length >= 3
+          ? definedMultiPartyAgreementOpeningLine(records, {
+              consulting: useConsulting || !/Services\s+Agreement/i.test(head),
+              mutual: useMutualConsulting,
+            })
+          : useMutualConsulting
+            ? definedMutualConsultingAgreementOpeningLine(records[0]!, records[1]!)
+            : useConsulting
+              ? definedConsultingAgreementOpeningLine(records[0]!, records[1]!)
+              : definedServicesAgreementOpeningLine(records[0]!, records[1]!);
       let next = input.replace(DUPLICATE_OPENING_REPLACE, () => {
         repairs.push("opening:duplicate_services_agreement_phrase");
         return replacement;

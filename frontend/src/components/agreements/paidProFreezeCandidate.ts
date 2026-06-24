@@ -21,6 +21,7 @@ import { assertPaidProDocumentBoundaryAuthorityForFreeze, applyPaidProDocumentBo
 import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadingTitleAuthority";
+import { diagnosePaidProCorpusDuplication, repairPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
 import { ensureCanonicalNoticesSectionHeadingForFreeze, resolveNoticeStructuralValidationParties } from "./paidProPartyNoticeDetails";
 import {
   assertPaidProSectionStructureCompletenessForFreeze,
@@ -36,8 +37,13 @@ import {
   intakeHasFullLegalEntityParties,
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
-import { buildPartyEntries, frozenManifestRecitalNeedsRewrite, normalizeOpeningRecital } from "./paidProAgreementPolish";
-import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import { buildPartyEntriesFromManifestRecords, frozenManifestRecitalNeedsRewrite, normalizeOpeningRecital } from "./paidProAgreementPolish";
+import {
+  detectPaidProMalformedMultiPartyOpening,
+  ensurePaidProMultiPartyAgreementOpening,
+  ensurePaidProServicesAgreementOpening,
+} from "./paidProOpeningRecitalGuard";
+import { repairAdjacentDuplicatePartyNamesInOpening, repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
 import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
 import {
   readPremiumRecipientHandoff,
@@ -223,14 +229,35 @@ export function preparePaidProFreezeCandidateText(
     intakeText: args.intakeText ?? null,
   });
   if (acceptanceManifestForOpening.length >= 3) {
-    const manifestNames = acceptanceManifestForOpening.map((r) => r.fullLegalName);
-    const recital = normalizeOpeningRecital(
+    const adjacentDup = repairAdjacentDuplicatePartyNamesInOpening(
       safeForCommit,
-      buildPartyEntries(manifestNames),
-      "high",
-      { forceRewrite: frozenManifestRecitalNeedsRewrite(safeForCommit, manifestNames) },
+      acceptanceManifestForOpening,
     );
+    safeForCommit = adjacentDup.text;
+    repairs.push(...adjacentDup.repairs);
+
+    const dupOpen = repairDuplicateAgreementOpening(safeForCommit, acceptanceManifestForOpening);
+    safeForCommit = dupOpen.text;
+    repairs.push(...dupOpen.repairs);
+
+    const multiOpening = ensurePaidProMultiPartyAgreementOpening(
+      safeForCommit,
+      acceptanceManifestForOpening,
+      args.intakeText ?? null,
+    );
+    safeForCommit = multiOpening.text;
+    repairs.push(...multiOpening.repairs);
+
+    const partyEntries = buildPartyEntriesFromManifestRecords(acceptanceManifestForOpening);
+    const manifestNames = acceptanceManifestForOpening.map((r) => r.fullLegalName);
+    const needsRecitalRewrite =
+      detectPaidProMalformedMultiPartyOpening(safeForCommit, acceptanceManifestForOpening) ||
+      frozenManifestRecitalNeedsRewrite(safeForCommit, manifestNames);
+    const recital = normalizeOpeningRecital(safeForCommit, partyEntries, "high", {
+      forceRewrite: needsRecitalRewrite,
+    });
     safeForCommit = recital.text;
+    if (recital.log.applied) repairs.push("opening:normalize_multiparty_recital");
   } else if (intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList)) {
     const identityRecords = resolveCanonicalPartyIdentitiesFromIntake(
       args.intakeText ?? "",
@@ -338,6 +365,19 @@ export function preparePaidProFreezeCandidateText(
     }
   }
 
+  const dupDiagPrep = diagnosePaidProCorpusDuplication(safeForCommit);
+  if (
+    dupDiagPrep.duplicateMiscellaneousSections >= 2 ||
+    dupDiagPrep.duplicateSignaturesFollowMarkers >= 2 ||
+    dupDiagPrep.duplicateOpeningRecitals >= 2
+  ) {
+    const corpusDuplication = repairPaidProCorpusDuplication(safeForCommit);
+    if (corpusDuplication.repairs.length > 0) {
+      safeForCommit = corpusDuplication.text;
+      repairs.push(...corpusDuplication.repairs.map((r) => `corpus_duplication:${r}`));
+    }
+  }
+
   return {
     text: safeForCommit,
     hash: hashPaidProCorpus(safeForCommit),
@@ -400,7 +440,7 @@ export function assertPaidProFreezeCandidateGates(
     phase: "pre_freeze",
     blockOnFatal: false,
   });
-  if (!postBoundaryStructure.rejected) {
+  if (!postBoundaryStructure.rejected || postBoundaryStructure.repairs.length > 0) {
     safeForCommit = postBoundaryStructure.text;
   }
 
@@ -443,13 +483,30 @@ export function assertPaidProFreezeCandidateGates(
     phase: "pre_freeze",
     blockOnFatal: false,
   });
-  if (!postNoticeStructure.rejected) {
+  if (!postNoticeStructure.rejected || postNoticeStructure.repairs.length > 0) {
     safeForCommit = postNoticeStructure.text;
   }
 
   const postNoticeTitleAuthority = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
   if (postNoticeTitleAuthority.repairs.length > 0) {
     safeForCommit = postNoticeTitleAuthority.text;
+  }
+
+  const postNoticeDupDiag = diagnosePaidProCorpusDuplication(safeForCommit);
+  if (
+    postNoticeDupDiag.duplicateMiscellaneousSections >= 2 ||
+    postNoticeDupDiag.duplicateSignaturesFollowMarkers >= 2 ||
+    postNoticeDupDiag.duplicateOpeningRecitals >= 2
+  ) {
+    const postNoticeCorpusDuplication = repairPaidProCorpusDuplication(safeForCommit);
+    if (postNoticeCorpusDuplication.repairs.length > 0) {
+      safeForCommit = postNoticeCorpusDuplication.text;
+    }
+  }
+
+  const postDuplicationHeading = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
+  if (postDuplicationHeading.repairs.length > 0) {
+    safeForCommit = postDuplicationHeading.text;
   }
 
   safeForCommit = assertPaidProSectionStructureCompletenessForFreeze(

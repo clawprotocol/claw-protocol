@@ -10,6 +10,8 @@ import {
   resolveAuthoritativePartiesForRecitalPolish,
 } from "./paidProPartyNamePreserve";
 import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolver";
+import type { CanonicalPartyIdentityRecord } from "./canonicalPartyIdentityResolver";
+import { isGenericCanonicalRole } from "./canonicalPartyRoleAuthority";
 import { resolvePaidProPolishPartyNamesFromIdentities } from "./guidedDealCompletion/signerPartyIdentity";
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import {
@@ -108,6 +110,23 @@ export function buildPartyEntries(fullNames: readonly string[]): PartyEntry[] {
     full: full.replace(/\s+/g, " ").trim(),
     short: definedShortNameFromLegalEntity(full),
   }));
+}
+
+/** Manifest role labels for recital defined terms — not legal-name shorts. */
+export function buildPartyEntriesFromManifestRecords(
+  records: readonly CanonicalPartyIdentityRecord[],
+): PartyEntry[] {
+  return records.map((record) => {
+    const full = record.fullLegalName.replace(/\s+/g, " ").trim();
+    const role = record.roleLabel.trim();
+    const short =
+      role.length >= 2 &&
+      !isGenericCanonicalRole(role) &&
+      role.toLowerCase() !== full.toLowerCase()
+        ? role
+        : definedShortNameFromLegalEntity(full);
+    return { full, short };
+  });
 }
 
 export function assessPartyExtractionConfidence(

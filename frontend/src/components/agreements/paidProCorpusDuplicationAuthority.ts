@@ -17,6 +17,8 @@ export type PaidProCorpusDuplicationDiagnostics = {
   duplicatePaymentHeadings: number;
   falseIfHeadings: number;
   repeatedPreamblePhrase: boolean;
+  duplicateMiscellaneousSections: number;
+  duplicateSignaturesFollowMarkers: number;
 };
 
 export function diagnosePaidProCorpusDuplication(text: string): PaidProCorpusDuplicationDiagnostics {
@@ -25,11 +27,16 @@ export function diagnosePaidProCorpusDuplication(text: string): PaidProCorpusDup
   const openingMatches = head.match(OPENING_RECITAL_RE) ?? [];
   const paymentMatches = head.match(DUPLICATE_PAYMENT_HEADING_RE) ?? [];
   let falseIfHeadings = 0;
+  let duplicateMiscellaneous = 0;
+  let duplicateSignaturesFollow = 0;
   for (const line of head.split("\n")) {
-    const m = line.trim().match(FALSE_TOP_LEVEL_IF_HEADING_RE);
-    if (m && /^(?:If|The|Each|Either|Any|Unless|When)\b/i.test(m[2])) {
+    const trimmed = line.trim();
+    const falseHeading = trimmed.match(FALSE_TOP_LEVEL_IF_HEADING_RE);
+    if (falseHeading && /^(?:If|The|Each|Either|Any|Unless|When)\b/i.test(falseHeading[2])) {
       falseIfHeadings += 1;
     }
+    if (/^\d+\.\s+Miscellaneous\b/i.test(trimmed)) duplicateMiscellaneous += 1;
+    if (/^\[?\s*SIGNATURES\s+FOLLOW\s*\]?$/i.test(trimmed)) duplicateSignaturesFollow += 1;
   }
   const preamblePhrase =
     /\bentered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between\b/gi;
@@ -39,6 +46,8 @@ export function diagnosePaidProCorpusDuplication(text: string): PaidProCorpusDup
     duplicatePaymentHeadings: paymentMatches.length,
     falseIfHeadings,
     repeatedPreamblePhrase: preambleCount >= 2,
+    duplicateMiscellaneousSections: duplicateMiscellaneous,
+    duplicateSignaturesFollowMarkers: duplicateSignaturesFollow,
   };
 }
 
@@ -53,6 +62,12 @@ export function rejectPaidProCorpusDuplication(text: string): { ok: boolean; rea
   }
   if (diag.falseIfHeadings >= 2) {
     reasons.push("false_top_level_if_heading");
+  }
+  if (diag.duplicateMiscellaneousSections >= 2) {
+    reasons.push("duplicate_miscellaneous_section");
+  }
+  if (diag.duplicateSignaturesFollowMarkers >= 2) {
+    reasons.push("duplicate_signatures_follow_marker");
   }
   return { ok: reasons.length === 0, reasons };
 }
@@ -97,8 +112,9 @@ export function repairPaidProCorpusDuplication(text: string): { text: string; re
   const needsSectionContinuity =
     repairs.length > 0 ||
     diagAfterMerge.duplicatePaymentHeadings >= 2 ||
-    diagAfterMerge.repeatedPreamblePhrase ||
-    diagAfterMerge.duplicateOpeningRecitals >= 2;
+    diagAfterMerge.duplicateOpeningRecitals >= 2 ||
+    diagAfterMerge.duplicateMiscellaneousSections >= 2 ||
+    diagAfterMerge.duplicateSignaturesFollowMarkers >= 2;
   if (needsSectionContinuity) {
     const sections = normalizeProAgreementSectionContinuity(out);
     if (sections.repairs.length > 0) {

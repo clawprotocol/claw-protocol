@@ -17,6 +17,7 @@ import {
 } from "./paidProOrphanSectionNumberRepair";
 
 const MAIN_SECTION_PREFIX_RE = /^(\d+)\.\s+(?!\d+\.\d)(.+)$/;
+const SUBSECTION_PREFIX_RE = /^(\d+\.\d+)\s+(.+)$/;
 const ALL_CAPS_SECTION_HEADING_RE = /^\d+\.\s+[A-Z][A-Z\s,&'\-]+$/;
 const EXECUTION_LINE_RE =
   /^(?:IN WITNESS WHEREOF|CLIENT\s*:|SERVICE\s+PROVIDER\s*:|\bSIGNATURES\b)/i;
@@ -202,6 +203,33 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
         const nextTrimmed = lines[nextIdx]!.trim();
         if (
           isIncompletePaidProHeadingTitle(prefix.title) &&
+          isPaidProHeadingContinuationFragment(nextTrimmed)
+        ) {
+          findings.push({
+            lineIndex: i,
+            line: trimmed,
+            code: "numbered_heading_title_continuation_split",
+          });
+        }
+      }
+      continue;
+    }
+
+    const subsection = trimmed.match(SUBSECTION_PREFIX_RE);
+    if (subsection?.[1] && subsection[2]) {
+      const subTitle = subsection[2].trim();
+      if (isFalseFragmentSectionTitle(subTitle)) {
+        findings.push({
+          lineIndex: i,
+          line: trimmed,
+          code: "false_fragment_section_heading",
+        });
+      }
+      const nextIdx = nextNonEmptyLineIndex(lines, i + 1);
+      if (nextIdx != null) {
+        const nextTrimmed = lines[nextIdx]!.trim();
+        if (
+          isIncompletePaidProHeadingTitle(subTitle) &&
           isPaidProHeadingContinuationFragment(nextTrimmed)
         ) {
           findings.push({

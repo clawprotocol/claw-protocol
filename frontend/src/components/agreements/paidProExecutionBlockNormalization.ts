@@ -6,6 +6,8 @@
 import {
   buildCorpusRoleIdentitiesForExecutionReconcile,
   resolvePaidProPartyRolesFromAcceptedCorpus,
+  detectExecutionBlockRoleInversion,
+  partyLegalNamesMatch,
   type AcceptedCorpusPartyRole,
   type AcceptedCorpusRoleAssignment,
 } from "./paidProAcceptedCorpusPartyRoles";
@@ -19,6 +21,7 @@ import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifest
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
+import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import { isStandaloneSignaturesHeadingLine } from "./paidProSignatureSectionOrdering";
 import {
   logExecutionBlockCount,
@@ -366,6 +369,28 @@ function stripRecitalFragmentExecutionLinesFromTail(text: string, repairs: strin
   return `${prefix}\n\n${out.join("\n").trimEnd()}\n`;
 }
 
+/** True when witness tail already carries every manifest legal name with no role inversion. */
+function existingExecutionTailMatchesManifest(
+  text: string,
+  manifestLegalNames: readonly string[],
+): boolean {
+  if (manifestLegalNames.length < 2) return false;
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  if (witnessIdx < 0) return false;
+  if (detectExecutionBlockRoleInversion(text)) return false;
+  const tail = text.slice(witnessIdx);
+  const namesPresent = manifestLegalNames.every((name) => {
+    const legal = name.trim();
+    if (!legal) return false;
+    return tail.split("\n").some((line) => partyLegalNamesMatch(line.trim(), legal));
+  });
+  if (!namesPresent) return false;
+  const invariant = analyzePaidProExecutionBlockInvariant(text, {
+    expectedParties: manifestLegalNames.length,
+  });
+  return invariant.ok && invariant.witnessClauseCount === 1;
+}
+
 /**
  * Collapse duplicate witness / fragment-derived execution blocks to one canonical tail from SoT roles.
  * Operative body before the first IN WITNESS WHEREOF is preserved unchanged.
@@ -514,6 +539,19 @@ export function enforcePaidProSingleExecutionBlock(
     }
     return { text, repairs: [...new Set(repairs)] };
   }
+
+  if (existingExecutionTailMatchesManifest(text, manifestLegalNames)) {
+    text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
+    const truncated = truncatePostCanonicalExecutionPollution(text, { expectedPartyCount });
+    if (truncated.text !== text) {
+      repairs.push(...truncated.repairs);
+      text = truncated.text;
+    }
+    logExecutionBlockLocation(text, "enforcePaidProSingleExecutionBlock:preserved");
+    logExecutionBlockCount(text, "enforcePaidProSingleExecutionBlock:preserved");
+    return { text, repairs: [...new Set(repairs)] };
+  }
+
   const stubLines = [
     body,
     "",
@@ -527,8 +565,8 @@ export function enforcePaidProSingleExecutionBlock(
   const reconciled = reconcileExecutionBlockToRoleIdentities(stub, identities);
   if (reconciled.text !== text) {
     repairs.push("execution_block:single_canonical_rebuilt");
+    text = reconciled.text;
   }
-  text = reconciled.text;
 
   text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
   const truncated = truncatePostCanonicalExecutionPollution(text, { expectedPartyCount });
