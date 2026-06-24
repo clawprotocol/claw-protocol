@@ -278,10 +278,23 @@ export const JOURNEY_E_SCENARIOS: Test424JourneyScenario[] = [
 ];
 
 export function buildMalformedAcceptedCorpus(corpus: string): string {
+  const ifToLines = corpus.match(/^If to\b[^\n]*$/gim) ?? [];
   let body = corpus;
-  body = body.replace(/^\d+\.\s+NOTICES\s*$/gim, "10. COMMUNICATIONS");
-  body = body.replace(/^\d+\.\s+Notices\s*$/gim, "10. Communications");
-  return body;
+  if (ifToLines.length >= 2) {
+    const fusedInline = ifToLines.map((line) => line.trim()).join(" ");
+    body = body.replace(/^If to\b[^\n]*$/gim, "");
+    body = body.replace(/^\d+\.\s+NOTICES\s*$/gim, "");
+    body = body.replace(/^\d+\.\s+Notices\s*$/gim, "");
+    const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
+    const insertAt = witnessIdx >= 0 ? witnessIdx : body.length;
+    const block = `\n\n10. NOTICES\n\nNotices under this Agreement must be in writing.\n\n${fusedInline}\n\n`;
+    body = `${body.slice(0, insertAt).trimEnd()}${block}${body.slice(insertAt)}`;
+  }
+  const witnessTail = body.match(/\nIN WITNESS WHEREOF[\s\S]*$/i)?.[0]?.trim();
+  if (witnessTail) {
+    body = `${body}\n\n${witnessTail}`;
+  }
+  return body.replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
 export function scenarioAuthorityParties(scenario: Test423Scenario) {

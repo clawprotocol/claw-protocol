@@ -21,6 +21,7 @@ import { assertPaidProDocumentBoundaryAuthorityForFreeze, applyPaidProDocumentBo
 import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadingTitleAuthority";
+import { ensureCanonicalNoticesSectionHeadingForFreeze } from "./paidProPartyNoticeDetails";
 import {
   assertPaidProSectionStructureCompletenessForFreeze,
   applyPaidProSectionStructureCompletenessAuthority,
@@ -480,6 +481,11 @@ export function assertPaidProFreezeCandidateGates(
     blockOnUnresolved: true,
   });
   safeForCommit = finalizeBoundary.text;
+
+  const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
+  if (preClauseNoticesHeading.repairs.length > 0) {
+    safeForCommit = preClauseNoticesHeading.text;
+  }
 
   assertClauseFamilyStructuralIntegrityForFreeze(safeForCommit, {
     parties: prep.reviewParties,

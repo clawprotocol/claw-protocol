@@ -4,7 +4,7 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
+import { ensureOperativeIfToNoticeDelivery, ensureCanonicalNoticesSectionHeadingForFreeze } from "./paidProPartyNoticeDetails";
 import { repairProfessionalCorpusContamination } from "./paidProProfessionalCorpusContamination";
 import type { PaidProPartyRoleContext } from "./paidProSignerMetadataAuthority";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
@@ -43,6 +43,12 @@ export function applyPaidProNoticeContactAuthority(
   };
   const repairs: string[] = [];
   let out = (raw || "").replace(/\r\n/g, "\n");
+
+  const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
+  if (headingRepair.repairs.length > 0) {
+    out = headingRepair.text;
+    repairs.push(...headingRepair.repairs);
+  }
 
   if (parties.length >= 2) {
     const contaminationRepair = repairProfessionalCorpusContamination(out, {

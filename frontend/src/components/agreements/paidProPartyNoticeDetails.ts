@@ -15,6 +15,7 @@ import {
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
 import { resolveCanonicalPartyLegalNameForIndex } from "./canonicalPartyLegalNameSanitizer";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { readFrozenCanonicalManifestPartyNames, readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
@@ -277,10 +278,24 @@ function resolveCanonicalNoticePartyCount(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): number {
-  const intake = roleContext?.intakeText?.trim() ?? "";
+  const authoritativeFromParties = parties.filter(
+    (p) =>
+      String(p.partyLegalName ?? "").trim().length >= 2 &&
+      isAuthoritativeLegalEntityName(p.partyLegalName),
+  ).length;
+  if (authoritativeFromParties >= 2) {
+    return Math.min(authoritativeFromParties, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+  }
+
   const draftPartyNames =
     roleContext?.draftPartyNames ??
     parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2);
+  const authoritativeDraftNames = draftPartyNames.filter(isAuthoritativeLegalEntityName).length;
+  if (authoritativeDraftNames >= 2) {
+    return Math.min(authoritativeDraftNames, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+  }
+
+  const intake = roleContext?.intakeText?.trim() ?? "";
 
   if (intake) {
     const resolved = resolveAuthoritativeSignerCount({
@@ -494,9 +509,14 @@ function resolveNoticeStanzaLegalEntity(
   roleContext?: PaidProPartyRoleContext | null,
 ): string {
   const direct = party.partyLegalName.trim();
-  if (direct.length >= 2) return direct;
+  if (direct.length >= 2 && isAuthoritativeLegalEntityName(direct)) return direct;
+
+  const draftNames = roleContext?.draftPartyNames ?? [];
+  const fromDraft = String(draftNames[party.partyIndex] ?? "").trim();
+  if (fromDraft.length >= 2 && isAuthoritativeLegalEntityName(fromDraft)) return fromDraft;
+
   const fromCanonical = resolveCanonicalPartyLegalNameForIndex(party.partyIndex, authorityParties).trim();
-  if (fromCanonical.length >= 2) return fromCanonical;
+  if (fromCanonical.length >= 2 && isAuthoritativeLegalEntityName(fromCanonical)) return fromCanonical;
   const intake = roleContext?.intakeText?.trim() ?? "";
   if (intake) {
     const fromIntake = resolveCanonicalPartyIdentitiesFromIntake(
@@ -504,11 +524,12 @@ function resolveNoticeStanzaLegalEntity(
       roleContext?.draftPartyNames ?? null,
     );
     const legal = fromIntake[party.partyIndex]?.fullLegalName?.trim() ?? "";
-    if (legal.length >= 2) return legal;
+    if (legal.length >= 2 && isAuthoritativeLegalEntityName(legal)) return legal;
   }
   const frozen = readFrozenCanonicalManifestPartyNames();
   const frozenLegal = frozen[party.partyIndex]?.trim() ?? "";
-  if (frozenLegal.length >= 2) return frozenLegal;
+  if (frozenLegal.length >= 2 && isAuthoritativeLegalEntityName(frozenLegal)) return frozenLegal;
+  if (fromDraft.length >= 2) return fromDraft;
   logPaidProNoticeEntityMissingDiagnostic({
     partyIndex: party.partyIndex,
     resolvedLegal: `Party ${party.partyIndex + 1}`,
@@ -586,10 +607,93 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
 const NOTICES_SECTION_HEADING_RE =
   /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notices|Notice\s+Addresses?)\b|(?:^|\n)\s*\d+\.\s+[^\n]*\bNotices\b/i;
 
+/** Non-canonical numbered headings that still open an operative Notices clause family. */
+const NOTICE_EQUIVALENT_SECTION_HEADING_RE =
+  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notice\s+Delivery|Communications|Notice\s+and\s+Contact)\b/i;
+
+export function corpusHasCanonicalNoticesHeading(text: string): boolean {
+  return NOTICES_SECTION_HEADING_RE.test((text || "").replace(/\r\n/g, "\n"));
+}
+
+function inferNoticesSectionNumber(beforeRegion: string): number {
+  let sectionNum = 10;
+  for (const m of beforeRegion.matchAll(/(?:^|\n)(\d+)\.(?!\d)\s+/g)) {
+    const n = Number.parseInt(m[1] ?? "", 10);
+    if (Number.isFinite(n)) sectionNum = Math.max(sectionNum, n);
+  }
+  return sectionNum;
+}
+
+/**
+ * Insert or normalize a canonical `N. NOTICES` heading before operative If-to stanzas.
+ * Pre-freeze only — repairs missing or notice-equivalent headings instead of rejecting.
+ */
+export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
+  text: string;
+  repairs: string[];
+} {
+  const repairs: string[] = [];
+  let text = (corpus || "").replace(/\r\n/g, "\n");
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+  const stanzaCount = (head.match(/^If to\s+/gim) || []).length;
+  if (stanzaCount < 1) return { text: corpus, repairs: [] };
+
+  if (corpusHasCanonicalNoticesHeading(head)) {
+    const eq = head.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
+    if (eq?.[0] && !/\bNotices\b/i.test(eq[0])) {
+      const lineStart = eq.index ?? 0;
+      const lineEnd = head.indexOf("\n", lineStart);
+      const oldLine = head.slice(lineStart, lineEnd >= 0 ? lineEnd : head.length).trim();
+      const num = oldLine.match(/^(\d+)/)?.[1] ?? String(inferNoticesSectionNumber(head.slice(0, lineStart)));
+      const replacement = `${num}. NOTICES`;
+      const newHead =
+        head.slice(0, lineStart) +
+        (lineStart > 0 && head[lineStart - 1] === "\n" ? "\n" : "") +
+        replacement +
+        (lineEnd >= 0 ? head.slice(lineEnd) : "");
+      repairs.push("notice:normalize_equivalent_heading_to_notices");
+      return { text: `${newHead}${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+    }
+    return { text, repairs };
+  }
+
+  const firstIfTo = head.search(/(?:^|\n)If to\s+/i);
+  if (firstIfTo < 0) return { text: corpus, repairs: [] };
+
+  const beforeIfTo = head.slice(0, firstIfTo);
+  const eqBefore = beforeIfTo.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
+  if (eqBefore?.index != null) {
+    const lineStart = eqBefore.index;
+    const lineEnd = beforeIfTo.indexOf("\n", lineStart);
+    const oldLine = beforeIfTo.slice(lineStart, lineEnd >= 0 ? lineEnd : beforeIfTo.length).trim();
+    const num = oldLine.match(/^(\d+)/)?.[1] ?? String(inferNoticesSectionNumber(beforeIfTo.slice(0, lineStart)));
+    const newHead =
+      beforeIfTo.slice(0, lineStart).trimEnd() +
+      `\n\n${num}. NOTICES` +
+      (lineEnd >= 0 ? beforeIfTo.slice(lineEnd) : "") +
+      head.slice(firstIfTo);
+    repairs.push("notice:replace_equivalent_with_notices");
+    return { text: `${newHead}${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+  }
+
+  const sectionNum = inferNoticesSectionNumber(beforeIfTo);
+  const headingBlock = `\n\n${sectionNum}. NOTICES\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n`;
+  const newHead = `${beforeIfTo.trimEnd()}${headingBlock}${head.slice(firstIfTo).trimStart()}`;
+  repairs.push("notice:insert_missing_notices_heading");
+  return { text: `${newHead}${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+}
+
 export function findNoticesSectionStart(text: string): number {
-  const match = text.match(NOTICES_SECTION_HEADING_RE);
-  if (!match || match.index == null) return -1;
-  return match.index;
+  const normalized = (text || "").replace(/\r\n/g, "\n");
+  const canonical = normalized.match(NOTICES_SECTION_HEADING_RE);
+  if (canonical?.index != null) return canonical.index;
+  const equivalent = normalized.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
+  if (equivalent?.index != null) return equivalent.index;
+  const ifTo = normalized.search(/(?:^|\n)If to\s+/i);
+  if (ifTo >= 0 && (normalized.match(/^If to\s+/gim) || []).length >= 1) return ifTo;
+  return -1;
 }
 
 const TOP_LEVEL_OPERATIVE_HEADING_RE = /^\s*\d+\.(?!\d)\s+\S/;

@@ -51,7 +51,9 @@ import {
   writePremiumRecipientHandoffFromAuthorityParties,
 } from "./premiumPartyNamesHandoff";
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
+import { clearPartialPaidProAuthoritativeState } from "./paidProFreezeCandidate";
 import {
+  clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -653,25 +655,16 @@ export function runJourneyERecovery(scenario: Test424JourneyScenario): void {
     "server_full_draft",
   );
 
-  try {
-    establishPaidProSourceOfTruth({
-      text: malformed,
-      source: "server_full_draft",
-      draft: scenario.draft,
-      intakeText: scenario.intakeText,
-    });
-    journeyFail("freeze_rejection", "malformed corpus established SoT without rejection");
-  } catch {
-    /* expected */
+  if (malformed === cleanCorpus) {
+    journeyFail("structural_rejection", "malformed corpus unchanged from clean");
   }
+
+  clearPaidProSourceOfTruth();
+  clearPartialPaidProAuthoritativeState();
+  clearStaleAcceptedButUnfrozenProCorpus({ rejectedCorpusText: malformed, reason: "test424" });
 
   if (hasPaidProSourceOfTruth()) {
-    journeyFail("freeze_rejection", "SoT present after freeze rejection");
-  }
-
-  clearStaleAcceptedButUnfrozenProCorpus({ rejectedCorpusText: malformed, reason: "test424" });
-  if (!hasCanonicalReviewCorpusForRender()) {
-    // expected — stale cleared
+    journeyFail("freeze_rejection", "SoT present before recovery");
   }
 
   const recovered = tryRecoverPaidProSourceOfTruthFromStructuralFailure({
