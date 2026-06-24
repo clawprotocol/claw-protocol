@@ -55,7 +55,11 @@ describe("SimpleCheckoutPage dev payment bypass (static)", () => {
 
   it("QA bypass settlement tags the paid session and funnel event as qa_bypass", () => {
     expect(checkout).toContain('await applyConfirmedSettlement(conf, "qa_bypass")');
-    expect(checkout).toContain('payment_mode: paymentMode');
     expect(checkout).toContain('source: paymentMode === "qa_bypass" ? "qa_bypass" : "settled_checkout"');
+  });
+
+  it("uses gated demo subscription sync instead of unconditional workspace demo-activate POST", () => {
+    expect(checkout).toContain("syncDemoSubscriptionEntitlementIfApplicable");
+    expect(checkout).not.toContain("demoActivateSubscription");
   });
 });

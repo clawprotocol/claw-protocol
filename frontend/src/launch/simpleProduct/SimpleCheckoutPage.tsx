@@ -68,11 +68,9 @@ import { ensureGenesisReferralHandoffForCheckout } from "../genesisReferral/ensu
 import { getOrgId } from "../orgContext";
 import {
   createBillingCheckoutSession,
-  demoActivateSubscription,
   isStripeCheckoutApiConfigured,
 } from "../billingCheckoutApi";
-import { refreshSubscriptionEntitlement } from "../../access/subscriptionEntitlementCache";
-import { featureFlags } from "../../config/featureFlags";
+import { syncDemoSubscriptionEntitlementIfApplicable } from "../billingCheckoutDemoSync";
 import { useAuth } from "../../auth/AuthProvider";
 import { resetCheckoutEntryScroll } from "./checkoutEntryScroll";
 import { SimpleFlowShell } from "./SimpleFlowShell";
@@ -330,17 +328,13 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           ? appendReturnToQueryParam(returnTo, "premiumCompletion", "1")
           : returnTo;
       navigate(destination);
-      if (featureFlags.serverBilling && !isStripeCheckoutApiConfigured()) {
-        try {
-          await demoActivateSubscription({
-            userId: user?.id ?? "demo-checkout",
-            orgId: getOrgId(),
-          });
-          await refreshSubscriptionEntitlement();
-        } catch {
-          /* demo entitlement sync optional */
-        }
-      }
+      await syncDemoSubscriptionEntitlementIfApplicable({
+        userId: user?.id ?? "demo-checkout",
+        orgId: getOrgId(),
+        devBypass: paymentMode === "dev_bypass",
+        qaBypass: paymentMode === "qa_bypass",
+        localDemoCard: paymentMode === "demo_card",
+      });
       inFlightRef.current = false;
       setProcessing(false);
     },

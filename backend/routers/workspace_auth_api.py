@@ -82,11 +82,14 @@ async def bind_user_org(body: BindUserOrgIn) -> Dict[str, Any]:
 
 @router.post("/demo-activate-subscription")
 async def demo_activate_subscription(body: BindUserOrgIn) -> Dict[str, Any]:
-    """Dev/QA only: activate Pro subscription without Stripe."""
+    """Dev/QA/staging only: activate Pro subscription without Stripe."""
     import os
 
     env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
-    if env not in ("local", "dev", "test"):
+    prod_denied = env in ("production", "prod")
+    non_prod_allowed = env in ("local", "dev", "test", "staging", "qa", "preview", "review")
+    preview_like = env.startswith("preview") or env.startswith("review") or env.startswith("pr-")
+    if prod_denied or not (non_prod_allowed or preview_like):
         raise HTTPException(status_code=404, detail="not_found")
 
     org_id = (body.previous_org_id or "").strip() or _stable_org_id_for_user(body.user_id)
