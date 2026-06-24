@@ -373,7 +373,7 @@ export function writePremiumRecipientHandoffFromAuthorityParties(
     signerTitle: signerMetadataInputRaw(party.signerTitle),
     partyAddress: String(party.partyAddress ?? "").trim(),
   }));
-  writePremiumRecipientHandoffLinear(slots);
+  writePremiumRecipientHandoffLinear(slots, parties.length);
 }
 
 /**

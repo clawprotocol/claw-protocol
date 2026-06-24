@@ -31,6 +31,7 @@ import {
 } from "./intakeSignerMetadataAuthority";
 import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   fromRecipientMetadata,
@@ -319,9 +320,19 @@ function fillPartyLegalNamesFromFrozenManifestAndIntake(
     ? resolveCanonicalPartyIdentitiesFromIntake(opts!.intakeText!, opts?.draftPartyNames ?? null)
     : [];
   return parties.map((party, i) => {
+    const frozenName = frozen[i]?.trim() ?? "";
+    if (frozenName.length >= 2 && isAuthoritativeLegalEntityName(frozenName)) {
+      const sanitized = sanitizeSignerPartyLegalEntityDisplay(frozenName, {
+        partyIndex: i,
+        source: "metadata_authority",
+      });
+      if (sanitized !== party.partyLegalName) {
+        return { ...party, partyLegalName: sanitized };
+      }
+      return party;
+    }
     const resolved =
       party.partyLegalName.trim() ||
-      frozen[i]?.trim() ||
       intakeRecords[i]?.fullLegalName?.trim() ||
       "";
     if (resolved.length < 2 || resolved === party.partyLegalName) return party;
@@ -345,14 +356,29 @@ export function buildPaidProSignerMetadataParties(
   ui: LiveSignerMetadataUiState,
   opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] },
 ): PaidProSignerMetadataParty[] {
-  const authorityIdentities = resolveAuthoritativeLegalPartyIdentities({
-    intakeText: opts?.intakeText,
-    draftPartyNames: opts?.draftPartyNames,
-    consumerPartyCount: ui.partyCount,
-    surface: "metadata_authority_parties",
-  });
-  const count =
-    authorityIdentities.length >= 2
+  const frozenNames = readFrozenCanonicalManifestPartyNames();
+  const hasFrozenManifest = frozenNames.filter((n) => n.trim().length >= 2).length >= 2;
+  const authorityIdentities = hasFrozenManifest
+    ? []
+    : resolveAuthoritativeLegalPartyIdentities({
+        intakeText: opts?.intakeText,
+        draftPartyNames: opts?.draftPartyNames,
+        consumerPartyCount: ui.partyCount,
+        surface: "metadata_authority_parties",
+      });
+  const count = hasFrozenManifest
+    ? consumeAuthoritativeSignerCount(
+        "metadata_authority_parties:frozen_manifest",
+        {
+          intakeText: opts?.intakeText,
+          draftPartyNames: opts?.draftPartyNames,
+          manifestPartyCount: frozenNames.length,
+          rawPartyCount: ui.partyCount,
+          userExpandedPartyCount: ui.partyCount,
+        },
+        frozenNames.length,
+      )
+    : authorityIdentities.length >= 2
       ? authorityIdentities.length
       : consumeAuthoritativeSignerCount(
           "metadata_authority_parties",
@@ -366,9 +392,15 @@ export function buildPaidProSignerMetadataParties(
         );
   const parties: PaidProSignerMetadataParty[] = [];
   for (let i = 0; i < count; i++) {
+    const frozenLegal = (frozenNames[i] ?? "").trim();
     const authorityLegal = authorityIdentities[i]?.legalEntityName ?? "";
     const uiLegal = partyLegalNameForIndex(ui, i);
-    const resolvedLegal = authorityLegal || uiLegal;
+    const resolvedLegal =
+      hasFrozenManifest && frozenLegal
+        ? frozenLegal
+        : uiLegal && isAuthoritativeLegalEntityName(uiLegal)
+          ? uiLegal
+          : authorityLegal || uiLegal;
     parties.push({
       partyIndex: i,
       partyLegalName: sanitizeSignerPartyLegalEntityDisplay(resolvedLegal, {
@@ -382,10 +414,13 @@ export function buildPaidProSignerMetadataParties(
     });
   }
   const filled = fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);
+  const legalEntitiesForMerge = hasFrozenManifest
+    ? frozenNames.slice(0, count)
+    : filled.map((p) => p.partyLegalName);
   return mergeIntakeSignerMetadataIntoAuthorityParties(
     filled,
     opts?.intakeText,
-    filled.map((p) => p.partyLegalName),
+    legalEntitiesForMerge,
   );
 }
 

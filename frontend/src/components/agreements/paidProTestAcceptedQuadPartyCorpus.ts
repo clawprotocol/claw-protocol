@@ -10,11 +10,10 @@ export function padOperativeCorpusBeforeWitness(base: string, minLen = 2000): st
   if (base.length >= minLen) return base;
   const witnessIdx = base.search(/\bIN WITNESS WHEREOF\b/i);
   const insertAt = witnessIdx >= 0 ? witnessIdx : base.length;
-  let pad = "\n\n13. Supplemental Provisions\n\n";
-  let i = 1;
+  let pad = "\n\nSupplemental Provisions\n\n";
   while (base.length + pad.length < minLen) {
-    pad += `13.${i} Supplemental clause ${i}. Each party will continue cooperating in good faith.\n\n`;
-    i += 1;
+    pad +=
+      "Each Party agrees to cooperate in good faith on milestones, deliverables, reporting, and change orders under this Agreement.\n\n";
   }
   return `${base.slice(0, insertAt)}${pad}${base.slice(insertAt)}`;
 }

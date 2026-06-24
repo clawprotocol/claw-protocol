@@ -8,6 +8,7 @@ import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import {
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
@@ -189,7 +190,7 @@ export function resolveAuthoritativePartySlotCount(args: {
   if (entityPool.length >= 3) return entityPool.length;
 
   let legalCount = Math.max(args.rawPartyCount ?? rowNames.length, quoted.length || labeled.length || 2);
-  legalCount = Math.max(2, Math.min(legalCount, 4));
+  legalCount = Math.max(2, Math.min(legalCount, PAID_PRO_AUTHORITY_MAX_PARTIES));
 
   if (userExpanded > 2) {
     if (betweenAuthoritative.length === 2 && !explicitMultiParty) {
@@ -198,7 +199,7 @@ export function resolveAuthoritativePartySlotCount(args: {
     if (!explicitMultiParty && legalCount >= 2 && userExpanded > legalCount) {
       return legalCount;
     }
-    return Math.min(Math.max(legalCount, userExpanded), 4);
+    return Math.min(Math.max(legalCount, userExpanded), PAID_PRO_AUTHORITY_MAX_PARTIES);
   }
 
   return legalCount;

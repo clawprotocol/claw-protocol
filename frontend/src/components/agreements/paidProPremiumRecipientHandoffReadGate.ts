@@ -86,10 +86,43 @@ export function applyPremiumRecipientHandoffReadGate(
   opts?: { partySlotCount?: number; corpusHash?: string | null },
 ): PremiumRecipientHandoffV2 | null {
   if (!handoff) return null;
+  const explicitPartySlotCount = opts?.partySlotCount;
+  const indexedHandoffSlots = 2 + (handoff.partyIndexSlots?.length ?? 0);
+  if (
+    explicitPartySlotCount != null &&
+    explicitPartySlotCount >= 2 &&
+    explicitPartySlotCount < indexedHandoffSlots
+  ) {
+    lastPopulatedHandoff = null;
+    sessionEverHadPopulatedHandoff = false;
+    latchSignerMetadataEffectiveMax({
+      partySlots: explicitPartySlotCount,
+      slotsWithSignerName: 0,
+      slotsWithSignerTitle: 0,
+      slotsWithSignerEmail: 0,
+    });
+    const cleared: PremiumRecipientHandoffV2 = trimPremiumRecipientHandoffToPartyCount(
+      {
+        v: 2,
+        party1: { name: "", email: "", role: "party", signerName: "", signerTitle: "", partyAddress: "" },
+        party2: { name: "", email: "", role: "party", signerName: "", signerTitle: "", partyAddress: "" },
+        savedAt: handoff.savedAt,
+      },
+      explicitPartySlotCount,
+    );
+    logSignerMetadataEffective({
+      source: "handoff_read_party_count_shrink_cleared",
+      partySlots: explicitPartySlotCount,
+      slotsWithSignerName: 0,
+      slotsWithSignerTitle: 0,
+      ignoredEmptyRead: false,
+    });
+    return cleared;
+  }
   const rawSlotCount = Math.max(
-    opts?.partySlotCount ?? 0,
+    explicitPartySlotCount ?? 0,
     readSignerMetadataEffectiveMax().partySlots,
-    2 + (handoff.partyIndexSlots?.length ?? 0),
+    indexedHandoffSlots,
     2,
   );
   const partySlotCount = resolveHandoffAuthorityPartyCount({ partySlotCount: rawSlotCount });

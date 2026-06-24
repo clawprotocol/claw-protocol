@@ -291,7 +291,6 @@ function resolveCanonicalNoticePartyCount(
     const resolved = resolveAuthoritativeSignerCount({
       intakeText: intake,
       draftPartyNames,
-      manifestPartyCount: Math.min(parties.length, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES),
     });
     return Math.min(Math.max(resolved.count, 2), PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
   }

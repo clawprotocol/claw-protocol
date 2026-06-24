@@ -6,8 +6,10 @@
 import { manifestToCanonicalPartyIdentities } from "./guidedDealCompletion/canonicalFinalPartyManifest";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import {
+  consumeAuthoritativeSignerCount,
   resolveSignerCountFromIdentities,
 } from "./signerCountAuthority";
+import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion/signatureRegion";
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import {
@@ -63,6 +65,29 @@ export type HydratedAuthoritativeSigningCorpusResult = {
   rejectReason?: "corpus_shrink";
 };
 
+function resolveHydrationAuthoritativeSignerCount(
+  identities: readonly CanonicalPartyIdentity[],
+  intakeRaw: string,
+  surface: string,
+  authorityPartyCount: number,
+): number {
+  const frozenCount = readFrozenCanonicalManifestPartyCount();
+  if (frozenCount >= 2) {
+    return consumeAuthoritativeSignerCount(
+      `${surface}:frozen_manifest`,
+      { intakeText: intakeRaw, manifestPartyCount: frozenCount },
+      frozenCount,
+    );
+  }
+  const fromIdentities = resolveSignerCountFromIdentities(
+    identities,
+    { intakeText: intakeRaw },
+    surface,
+  );
+  if (fromIdentities >= 2) return fromIdentities;
+  return Math.max(authorityPartyCount, 2);
+}
+
 export function resolveAuthoritativeSignerIdentitiesFromSnapshot(
   snapshot: AuthoritativeSigningSnapshot,
 ): CanonicalPartyIdentity[] {
@@ -84,10 +109,11 @@ export function buildHydratedAuthoritativeSigningCorpus(args: {
     { signatureRegionOnly: args.signatureRegionOnly !== false },
   );
   const corpus = identityApply.rejected ? raw : identityApply.text;
-  const signerCount = resolveSignerCountFromIdentities(
+  const signerCount = resolveHydrationAuthoritativeSignerCount(
     args.identities,
-    { intakeText: args.intakeRaw },
-    `${args.surface}:hydrate`,
+    args.intakeRaw,
+    args.surface,
+    args.identities.length,
   );
   const hasFilledBlocks = corpusSignatureBlocksHaveRequiredByLines(corpus, Math.max(2, signerCount));
   logAuthoritativeSignerHydration({
@@ -178,10 +204,11 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     surface: args.surface,
     signatureRegionOnly: args.signatureRegionOnly !== false,
   });
-  const signerCount = resolveSignerCountFromIdentities(
+  const signerCount = resolveHydrationAuthoritativeSignerCount(
     identities,
-    { intakeText: args.intakeRaw },
-    `${args.surface}:hydrate_authority`,
+    args.intakeRaw,
+    args.surface,
+    args.authority.parties.length,
   );
   const hasBlocks = corpusSignatureBlocksHaveRequiredByLines(result.corpus, signerCount);
   const hasPopulatedNames = (() => {

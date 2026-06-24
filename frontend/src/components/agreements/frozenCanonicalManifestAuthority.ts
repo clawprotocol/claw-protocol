@@ -3,8 +3,8 @@
  * when intake/draft consumers would otherwise drift to two-party fallbacks.
  */
 
-import type { CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapshot";
-import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
+import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
+import { getFrozenCanonicalAgreementCorpus, type CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapshot";
 import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
@@ -37,11 +37,11 @@ function manifestRowsFromSnapshot(
 export function readFrozenCanonicalManifestPartyNames(): string[] {
   const frozen = getFrozenCanonicalAgreementCorpus();
   const fromFrozen = manifestRowsFromSnapshot(frozen?.signerManifest ?? frozen?.parties);
-  if (fromFrozen.length >= 2) return fromFrozen.slice(0, 4);
+  if (fromFrozen.length >= 2) return fromFrozen.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
 
   const doc = getAuthoritativeAgreementDocument();
   const fromDoc = manifestRowsFromSnapshot(doc?.canonicalPartyManifest);
-  if (fromDoc.length >= 2) return fromDoc.slice(0, 4);
+  if (fromDoc.length >= 2) return fromDoc.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
 
   return [];
 }

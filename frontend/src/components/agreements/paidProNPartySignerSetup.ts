@@ -1,4 +1,4 @@
-import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
+import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import { countRealParties } from "./starterPartyLimits";
 import {
   consumeAuthoritativeSignerCount,
@@ -18,10 +18,11 @@ import {
   buildVs01PrepareSigningRoles,
   type Vs01PrepareSigningRole,
 } from "../../vs01/vs01SignerFieldAssignment";
+import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import type { Vs01Counterparty } from "../../vs01/types";
 
 /** UI cap for explicit multi-party signer setup (handoff supports more). */
-export const PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES = 4;
+export const PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES = PAID_PRO_AUTHORITY_MAX_PARTIES;
 
 export const PAID_PRO_COORDINATOR_TOGGLE_LABEL =
   "I'm coordinating this agreement, not signing as a party";

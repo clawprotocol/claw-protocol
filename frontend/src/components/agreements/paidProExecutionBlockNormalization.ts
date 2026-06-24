@@ -15,6 +15,8 @@ import {
   repairDuplicatedLegalEntitySuffixPhrase,
   repairOrphanedLegalEntitySuffixSpacingInCorpus,
 } from "./paidProLegalEntityNameHygiene";
+import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
+import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import { isStandaloneSignaturesHeadingLine } from "./paidProSignatureSectionOrdering";
@@ -418,7 +420,19 @@ export function enforcePaidProSingleExecutionBlock(
   const authorityParties = (opts?.authorityParties ?? [])
     .map((p) => String(p.partyLegalName ?? p.legalName ?? "").replace(/\s+/g, " ").trim())
     .filter((n) => n.length >= 3);
+  const frozenNames = readFrozenCanonicalManifestPartyNames()
+    .map((n) => n.replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 3);
   const labeledNames = labeledPartyLegalEntities(String(opts?.intakeText ?? ""));
+  const authoritativePartyCount = consumeAuthoritativeSignerCount(
+    "enforcePaidProSingleExecutionBlock",
+    {
+      intakeText: opts?.intakeText ?? null,
+      draftPartyNames: opts?.draftPartyNames ?? authorityParties,
+      manifestPartyCount: frozenNames.length >= 2 ? frozenNames.length : undefined,
+    },
+    Math.max(authorityParties.length, frozenNames.length, labeledNames.length, 2),
+  );
   const intakeManifest =
     authorityParties.length < labeledNames.length && (opts?.intakeText || "").trim()
       ? resolveCanonicalPartyIdentitiesFromIntake(
@@ -432,13 +446,19 @@ export function enforcePaidProSingleExecutionBlock(
           )
         : [];
   const manifestLegalNames =
-    authorityParties.length >= 3
-      ? authorityParties
-      : labeledNames.length >= authorityParties.length && labeledNames.length >= 2
-        ? labeledNames
-        : intakeManifest.length >= authorityParties.length && intakeManifest.length >= 2
-          ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
-          : authorityParties;
+    frozenNames.length >= authoritativePartyCount &&
+    frozenNames.length >= 2 &&
+    authorityParties.length >= 2
+      ? frozenNames.slice(0, authoritativePartyCount)
+      : authorityParties.length >= authoritativePartyCount && authorityParties.length >= 2
+        ? authorityParties.slice(0, authoritativePartyCount)
+        : authorityParties.length >= 3
+          ? authorityParties
+          : labeledNames.length >= authorityParties.length && labeledNames.length >= 2
+            ? labeledNames
+            : intakeManifest.length >= authorityParties.length && intakeManifest.length >= 2
+              ? intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3)
+              : authorityParties;
   const manifestRoles =
     manifestLegalNames.length >= 2
       ? manifestRolesFromLegalNames(manifestLegalNames, opts?.intakeText ?? null)
@@ -462,8 +482,8 @@ export function enforcePaidProSingleExecutionBlock(
   }
 
   const body = operativeBodyWithoutExecutionTails(text);
-  const expectedPartyCount = Math.max(manifestLegalNames.length, roles.length);
-  const useEntityHeadings = authorityParties.length >= 3 && manifestLegalNames.length >= 3;
+  const expectedPartyCount = Math.max(manifestLegalNames.length, authoritativePartyCount, roles.length);
+  const useEntityHeadings = manifestLegalNames.length >= 3;
 
   const identities: CanonicalPartyIdentity[] =
     manifestRoles && manifestLegalNames.length >= 2

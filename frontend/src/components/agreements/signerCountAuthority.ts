@@ -14,6 +14,7 @@ import {
   selectAuthoritativeTwoPartySlots,
 } from "./partySlotIdentityNormalize";
 import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
+import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
   logPaidProFreezeConsumer,
@@ -213,7 +214,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   }
 
   return {
-    count: Math.max(2, Math.min(count, 4)),
+    count: Math.max(2, Math.min(count, PAID_PRO_AUTHORITY_MAX_PARTIES)),
     source,
     labeledCount: authoritativeIntakeCount,
     draftCount: Math.max(draftCount, collapsedDraft),
@@ -330,7 +331,7 @@ export function resolveReadonlyHtmlSignerCount(
   });
   let count = resolution.count;
   if (manifestCount >= 2) {
-    count = Math.max(count, Math.min(manifestCount, 4));
+    count = Math.max(count, Math.min(manifestCount, PAID_PRO_AUTHORITY_MAX_PARTIES));
   }
 
   const derivedFromPartyNames = (args.partyNames ?? []).filter((n) => String(n || "").trim().length >= 2)

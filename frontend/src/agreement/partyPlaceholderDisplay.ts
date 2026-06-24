@@ -76,11 +76,21 @@ function isLegalEntityCandidateName(name: string): boolean {
   return t.split(/\s+/).length >= 2;
 }
 
+const INTAKE_ROLE_LABEL_PREFIX_RE =
+  /^(?:(?:compliance\s+)?auditor|vendor|subcontractor|customer|client|service\s+provider|consultant|provider|contractor)\s+/i;
+
+function stripIntakeRoleLabelPrefix(name: string): string {
+  const stripped = name.replace(INTAKE_ROLE_LABEL_PREFIX_RE, "").trim();
+  return stripped.length >= 3 ? stripped : name;
+}
+
 function isAliasOfLongerLegalEntity(short: string, long: string): boolean {
   const s = short.replace(/\s+/g, " ").trim().toLowerCase();
   const l = long.replace(/\s+/g, " ").trim().toLowerCase();
   if (!s || !l || s === l) return s === l;
   if (l.startsWith(s)) return true;
+  if (l.endsWith(s) && s.length >= 8) return true;
+  if (s.endsWith(l) && l.length >= 8) return true;
   const sw = s.split(/\s+/);
   const lw = l.split(/\s+/);
   return sw.length < lw.length && sw.every((w, i) => lw[i] === w);
@@ -103,10 +113,11 @@ export function dedupeEntityCandidatesToLegalParties(candidates: readonly string
   const sorted = [...pool].sort((a, b) => b.length - a.length);
   const kept: string[] = [];
   for (const name of sorted) {
-    if (kept.some((k) => isAliasOfLongerLegalEntity(name, k))) continue;
-    const withoutShorter = kept.filter((k) => !isAliasOfLongerLegalEntity(k, name));
+    const canonicalName = stripIntakeRoleLabelPrefix(name);
+    if (kept.some((k) => isAliasOfLongerLegalEntity(canonicalName, k))) continue;
+    const withoutShorter = kept.filter((k) => !isAliasOfLongerLegalEntity(k, canonicalName));
     kept.length = 0;
-    kept.push(...withoutShorter, name);
+    kept.push(...withoutShorter, canonicalName);
   }
   return kept;
 }

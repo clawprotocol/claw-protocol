@@ -9,6 +9,7 @@ import {
   intakeHasFullLegalEntityParties,
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
+import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
@@ -195,8 +196,8 @@ function manifestRecordsFromPartyNames(names: readonly string[]): CanonicalParty
     if (name.length < 2 || !isAuthoritativeLegalEntityName(name) || unique.includes(name)) continue;
     unique.push(name);
   }
-  const partyCount = Math.min(unique.length, 4);
-  return unique.slice(0, 4).map((fullLegalName, index) => ({
+  const partyCount = Math.min(unique.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  return unique.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES).map((fullLegalName, index) => ({
     fullLegalName,
     roleLabel: acceptanceManifestRoleLabel(fullLegalName, index, partyCount),
     displayAlias: fullLegalName.split(/\s+/).slice(0, 2).join(" "),
@@ -209,17 +210,17 @@ function manifestRecordsFromPartyNames(names: readonly string[]): CanonicalParty
 /** Intake, labeled blocks, entity pool, and consumed signer metadata — not stale frozen manifest. */
 function resolveIntakeAuthorityPartyNames(intakeText: string | null | undefined): string[] {
   const labeled = labeledPartyLegalEntities(intakeText ?? "").filter(isAuthoritativeLegalEntityName);
-  if (labeled.length >= 3) return labeled.slice(0, 4);
+  if (labeled.length >= 3) return labeled.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
 
   const entityPool = dedupeEntityCandidatesToLegalParties(
     extractAgreementEntityCandidates(intakeText ?? "").filter(isAuthoritativeLegalEntityName),
   );
-  if (entityPool.length >= 3) return entityPool.slice(0, 4);
+  if (entityPool.length >= 3) return entityPool.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
 
   const signerNames = (readConsumedPaidProSignerMetadataAuthority()?.parties ?? [])
     .map((p) => String(p.partyLegalName ?? "").trim())
     .filter((n) => isAuthoritativeLegalEntityName(n));
-  if (signerNames.length >= 3) return signerNames.slice(0, 4);
+  if (signerNames.length >= 3) return signerNames.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
 
   return [];
 }
@@ -248,14 +249,14 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
 
   const labeled = labeledPartyLegalEntities(args.intakeText ?? "").filter(isAuthoritativeLegalEntityName);
   if (labeled.length >= 2) {
-    return manifestRecordsFromPartyNames(labeled.slice(0, 4));
+    return manifestRecordsFromPartyNames(labeled.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES));
   }
 
   const entityPool = dedupeEntityCandidatesToLegalParties(
     extractAgreementEntityCandidates(args.intakeText ?? "").filter(isAuthoritativeLegalEntityName),
   );
   if (entityPool.length >= 2) {
-    return manifestRecordsFromPartyNames(entityPool.slice(0, 4));
+    return manifestRecordsFromPartyNames(entityPool.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES));
   }
 
   const partyNames = (args.draft?.parties ?? [])
