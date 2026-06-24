@@ -250,8 +250,12 @@ function applyAcceptedProCorpusSafeDisplayCore(
     surface: opts?.surface ? `${opts.surface}:prepare` : "accepted_pro_corpus_safe_display:prepare",
   });
   if (prepared.text !== out) {
-    out = prepared.text;
-    repairs.push(...prepared.repairs);
+    if (wouldMateriallyShrinkAcceptedCorpus(input.length, prepared.text.length)) {
+      repairs.push("safe:prepare_shrink_blocked");
+    } else {
+      out = prepared.text;
+      repairs.push(...prepared.repairs);
+    }
   }
 
   const preSigRoleRepair = reconcileAcceptedCorpusExecutionRolesIfInverted(out);
@@ -329,6 +333,13 @@ function applyAcceptedProCorpusSafeDisplayCore(
   if (canonicalStructure.repairs.length > 0) {
     out = canonicalStructure.text;
     repairs.push(...canonicalStructure.repairs.map((r) => `structure:${r}`));
+  }
+
+  if (wouldMateriallyShrinkAcceptedCorpus(input.length, out.length)) {
+    return {
+      text: input,
+      repairs: [...repairs, "safe:final_shrink_blocked"],
+    };
   }
 
   return { text: out, repairs: [...new Set(repairs)] };

@@ -289,7 +289,7 @@ export function validatePaidProOutput(args: {
     logDecision(false, reasons);
     return { ok: false, reasons };
   }
-  const acceptanceHash = paidProPipelineAcceptedCorpusHash(t);
+  const validationInputHash = paidProPipelineAcceptedCorpusHash(t);
   const freezeCandidate = buildPaidProFreezeCandidate({
     text: t,
     draft: args.draft ?? null,
@@ -300,9 +300,9 @@ export function validatePaidProOutput(args: {
   logPaidProFreezeCandidateDecision({
     accepted: freezeCandidate.ok,
     source: pipelineSource ?? "server_full_draft",
-    candidateHash: freezeCandidate.hash,
-    acceptanceHash,
-    hashesMatch: freezeCandidate.hash === acceptanceHash,
+    preparedFreezeCandidateHash: freezeCandidate.hash,
+    validationInputHash,
+    validationInputMatchesPreparedFreeze: freezeCandidate.hash === validationInputHash,
     rejectReason: freezeCandidate.rejectReason,
     candidateLen: freezeCandidate.text.length,
   });
@@ -316,9 +316,9 @@ export function validatePaidProOutput(args: {
       logPaidProFreezeCandidateDecision({
         accepted: recovery.ok,
         source: "deterministic_recovery_freeze_candidate",
-        candidateHash: recovery.hash,
-        acceptanceHash,
-        hashesMatch: false,
+        preparedFreezeCandidateHash: recovery.hash,
+        validationInputHash,
+        validationInputMatchesPreparedFreeze: false,
         rejectReason: recovery.rejectReason,
         candidateLen: recovery.text.length,
       });

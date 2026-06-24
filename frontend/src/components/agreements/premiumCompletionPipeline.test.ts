@@ -25,6 +25,7 @@ import { repairKnownPartyPlaceholders } from "../../agreement/partyPlaceholderDi
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { clearPremiumParseSessionGuard } from "./premiumParseSessionGuard";
 import { clearPaidProPostAcceptanceValidatorCache } from "./paidProPostAcceptanceValidatorCache";
+import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPremiumGenerationCallAudit } from "./paidProPremiumGenerationCallAudit";
 import { clearPaidProCheckoutPreviewPreflightCache } from "./paidProCheckoutPreviewPreflightCache";
 import { clearPaidProPerformanceTrace, clearLastFinishedPaidProPerformanceTrace } from "./paidProPerformanceTrace";
@@ -88,6 +89,7 @@ beforeEach(() => {
   clearFrozenPremiumSessionBodiesForTests();
   clearPremiumParseSessionGuard();
   clearPaidProPostAcceptanceValidatorCache();
+  clearAcceptedProCorpusSafeDisplayCacheForTests();
   clearPremiumGenerationCallAudit();
   clearPaidProCheckoutPreviewPreflightCache();
   clearPaidProPerformanceTrace();
@@ -1112,9 +1114,10 @@ function buildMediumServicesBody(targetLen: number): string {
   let i = 10;
   while (body.length < targetLen) {
     body +=
-      `\n${i}. Additional Provision. The parties acknowledge that the obligations under section ${i} are ` +
-      "commercially reasonable and shall be performed diligently, with each party bearing responsibility for its own " +
-      "personnel, equipment, records, insurance, and compliance with applicable law in connection with the engagement.";
+      `\n${i}. Supplemental Services Term ${i}. Service Provider shall document milestone ${i} deliverables, ` +
+      `maintain insurance coverage tier ${i}, coordinate with Client personnel for workflow segment ${i}, ` +
+      `and comply with Texas commercial standards applicable to engagement phase ${i} including records retention ` +
+      `and confidentiality controls specific to operational workstream ${i}.`;
     i += 1;
   }
   return body;

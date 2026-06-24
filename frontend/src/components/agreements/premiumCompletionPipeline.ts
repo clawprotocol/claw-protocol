@@ -192,6 +192,7 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import { resolvePremiumPreValidationBody } from "./premiumPreValidationBodyAuthority";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { markPaidProLocalPostProcessingEndAt } from "./paidProQaPerfTrace";
 import { adaptPremiumFullDraftToProIntelligencePacket } from "./proAgreementIntelligence";
@@ -217,6 +218,7 @@ import {
 } from "./agreementOutputQuality";
 import {
   buildPremiumRecipientCandidatesFromIntake,
+  authoritativeWirePremiumBodyLen,
   classifyLongPremiumHttpOutcome,
   clearAcceptedServerFullDraftLatchAndSessionFrozenBodies,
   countStructuralFatals,
@@ -1700,6 +1702,8 @@ async function runPremiumCompletionInner(
 
   let outMerged: ParsedDraftShape = merged;
   let winningPremiumBodyText = "";
+  let lastWireAuthoritativeBodyLen = 0;
+  let premiumBodyHardRejectedForDevContextLeak = false;
   const intakeLowerGlobal = (rawForSoT || rawIntake).toLowerCase();
   const premiumRejectCtx = {
     intakeLower: intakeLowerGlobal,
@@ -1947,6 +1951,29 @@ async function runPremiumCompletionInner(
         tierADiag.schemaValidationReasons = (full.schema_validation_reasons || []).filter(Boolean).slice(0, 8);
       }
       let effectiveFull: PremiumFullDraftResult = full;
+      const wireDocumentText = (full.document_text || "").trim();
+      const wireServerFullDocumentText =
+        (full.server_full_document_text || "").trim() || extractPremiumApiServerCorpusText(full);
+      const wireAuthoritativeBodyLen = authoritativeWirePremiumBodyLen({
+        wireDocumentText,
+        wireServerFullDocumentText,
+      });
+      lastWireAuthoritativeBodyLen = wireAuthoritativeBodyLen;
+      let premiumWireBodyRejectedForDevContextLeak = false;
+      const wireLeakScan = scanPremiumOutputForDevContextLeak(
+        wireServerFullDocumentText || wireDocumentText,
+      );
+      if (!wireLeakScan.ok) {
+        logDevContextLeak("premium_completion_pipeline", wireLeakScan.labels, {
+          stage: "wire_response_dev_context_leak",
+        });
+        premiumBodyHardRejectedForDevContextLeak = true;
+        premiumWireBodyRejectedForDevContextLeak = true;
+        if (tierAEnabled) {
+          tierADiag.serverTextClearedBeforeMerge = true;
+          tierADiag.serverTextClearReason = "dev_context_leak_wire_response";
+        }
+      }
       if ((full.generation_outcome || "").trim() === "degraded") {
         const fcRecover = (full.server_generation_failure_code || "").trim();
         const msgRecover = (full.server_generation_failure_message || "").trim();
@@ -1963,6 +1990,9 @@ async function runPremiumCompletionInner(
         }
       }
       let doc = (effectiveFull.document_text || "").trim();
+      if (premiumWireBodyRejectedForDevContextLeak) {
+        doc = "";
+      }
       const canonicalPartyNamesForAttribution = (merged.parties || [])
         .map((p) => String(p?.name ?? "").trim())
         .filter(Boolean);
@@ -2460,6 +2490,7 @@ async function runPremiumCompletionInner(
           if (!leak1.ok) {
             logDevContextLeak("premium_completion_pipeline", leak1.labels, { stage: "post_sanitized_rerun" });
             doc = "";
+            premiumBodyHardRejectedForDevContextLeak = true;
             if (tierAEnabled) {
               tierADiag.serverTextClearedBeforeMerge = true;
               tierADiag.serverTextClearReason = "dev_context_leak_after_rerun";
@@ -2522,16 +2553,57 @@ async function runPremiumCompletionInner(
         serverFullDocumentText: effectiveFull.server_full_document_text,
       });
       if (!(doc || "").trim() && recoveryCandidate.text.trim()) {
-        doc = recoveryCandidate.text;
+        const leakRecovery = scanPremiumOutputForDevContextLeak(recoveryCandidate.text);
+        if (leakRecovery.ok) {
+          doc = recoveryCandidate.text;
+          logPremiumCompletionDebug({
+            stage: "pipeline_recovered_empty_doc_before_client_gates",
+            recoveryCandidateEligible: true,
+            recoveryCandidateLen: recoveryCandidate.recoveryCandidateLen,
+            serverLen: recoveryCandidate.serverLen,
+            acceptedSource: recoveryCandidate.source,
+            rejectedReason: "empty_doc_restored_from_recovery_candidate",
+            docLen: doc.length,
+          });
+        } else {
+          logPremiumCompletionDebug({
+            stage: "pipeline_skip_leaky_recovery_candidate",
+            recoveryCandidateEligible: false,
+            recoveryCandidateLen: recoveryCandidate.recoveryCandidateLen,
+            serverLen: recoveryCandidate.serverLen,
+            acceptedSource: recoveryCandidate.source,
+            rejectedReason: "dev_context_leak_in_recovery_candidate",
+            leakLabels: leakRecovery.labels,
+          });
+        }
+      }
+      const preValidationBody = resolvePremiumPreValidationBody({
+        clientDocumentText: doc,
+        effectiveFull,
+        draft: mergedForApi,
+        intakeText: rawForSoT || rawIntake,
+        wireServerFullDocumentText,
+      });
+      if (preValidationBody.adoptedServerFull) {
+        doc = preValidationBody.text;
         logPremiumCompletionDebug({
-          stage: "pipeline_recovered_empty_doc_before_client_gates",
-          recoveryCandidateEligible: true,
-          recoveryCandidateLen: recoveryCandidate.recoveryCandidateLen,
-          serverLen: recoveryCandidate.serverLen,
-          acceptedSource: recoveryCandidate.source,
-          rejectedReason: "empty_doc_restored_from_recovery_candidate",
-          docLen: doc.length,
+          stage: "pipeline_pre_validation_server_full_adopt",
+          clientLen: preValidationBody.clientLen,
+          serverFullLen: preValidationBody.serverFullLen,
+          adoptedLen: doc.length,
         });
+      }
+      const postAdoptLeak = scanPremiumOutputForDevContextLeak(doc);
+      if (!postAdoptLeak.ok) {
+        logDevContextLeak("premium_completion_pipeline", postAdoptLeak.labels, {
+          stage: "post_pre_validation_adopt",
+        });
+        doc = "";
+        premiumBodyHardRejectedForDevContextLeak = true;
+        if (tierAEnabled) {
+          tierADiag.serverTextClearedBeforeMerge = true;
+          tierADiag.serverTextClearReason = "dev_context_leak_before_client_gates";
+        }
       }
       let acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
       const intakeS = (rawForSoT || rawIntake).trim();
@@ -2778,6 +2850,7 @@ async function runPremiumCompletionInner(
         isNonfatalParseDegradedPaidAccept({
           failureCode: (effectiveFull.server_generation_failure_code || "").trim(),
           bodyLen: (doc || "").length,
+          wireAuthoritativeBodyLen: wireAuthoritativeBodyLen,
           fatalPlaceholderCount,
           structuralOk: acc.ok && placeholderClientOk,
           hasRequiredSections: premiumBodyHasRequiredPaidSections({
@@ -2897,12 +2970,29 @@ async function runPremiumCompletionInner(
         });
         winningPremiumBodyText = doc;
         const freezeSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
-        const preparedForFreeze = preparePaidProServerDocumentForAcceptance(
-          doc,
-          mergedForApi,
-          rawForSoT || rawIntake,
-          { surface: "premium_completion_pipeline_freeze_prep" },
-        );
+        const wireCorpusForFreeze = (
+          wireServerFullDocumentText ||
+          wireDocumentText ||
+          (doc || "").trim()
+        ).trim();
+        const docTrimForFreeze = (doc || "").trim();
+        const useWireCorpusForFreeze =
+          wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+          docTrimForFreeze.length < Math.floor(wireCorpusForFreeze.length * 0.85);
+        const freezePrepInput = useWireCorpusForFreeze ? wireCorpusForFreeze : doc;
+        const freezePrepTrim = (freezePrepInput || "").trim();
+        const skipThinPrepareForSubstantiveWire =
+          wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+          freezePrepTrim.length >= Math.floor(wireCorpusForFreeze.length * 0.9) &&
+          freezePrepTrim.length <= Math.ceil(wireCorpusForFreeze.length * 1.15);
+        const preparedForFreeze = skipThinPrepareForSubstantiveWire
+          ? { text: freezePrepTrim, repairs: [] as string[] }
+          : preparePaidProServerDocumentForAcceptance(
+              freezePrepInput,
+              mergedForApi,
+              rawForSoT || rawIntake,
+              { surface: "premium_completion_pipeline_freeze_prep" },
+            );
         doc = preparedForFreeze.text;
         let freezeCommit = resolvePaidProFreezeCommitText({
           text: doc,
@@ -2913,6 +3003,70 @@ async function runPremiumCompletionInner(
           generationOutcome: (effectiveFull.generation_outcome || "").trim(),
           surface: "premium_completion_pipeline_accept",
         });
+        if (!freezeCommit.ok) {
+          const wirePreValidation = resolvePremiumPreValidationBody({
+            clientDocumentText: wireDocumentText,
+            effectiveFull: {
+              ...effectiveFull,
+              document_text: wireDocumentText,
+              server_full_document_text: wireServerFullDocumentText || wireDocumentText,
+            },
+            draft: mergedForApi,
+            intakeText: rawForSoT || rawIntake,
+            wireServerFullDocumentText,
+            safeDisplaySurface: "premium_completion_pipeline:wire_freeze_retry",
+          });
+          if (
+            wireAuthoritativeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+            wirePreValidation.text.length >= Math.floor(wireAuthoritativeBodyLen * 0.85)
+          ) {
+            const wireDisplay = applyAcceptedProCorpusSafeDisplay(wirePreValidation.text, {
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              surface: "premium_completion_pipeline:wire_freeze_retry_display",
+            }).text.trim();
+            const wireFreezeDirect = resolvePaidProFreezeCommitText({
+              text: wireDisplay,
+              source: freezeSource,
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              agreementGenerationId: input.agreementGenerationId ?? null,
+              generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+              surface: "premium_completion_pipeline_wire_freeze_direct",
+            });
+            if (
+              wireFreezeDirect.ok &&
+              wireFreezeDirect.text.length >= Math.floor(wireAuthoritativeBodyLen * 0.85)
+            ) {
+              doc = wireDisplay;
+              freezeCommit = wireFreezeDirect;
+            }
+            if (!freezeCommit.ok) {
+              const wirePrepared = preparePaidProServerDocumentForAcceptance(
+                wirePreValidation.text,
+                mergedForApi,
+                rawForSoT || rawIntake,
+                { surface: "premium_completion_pipeline:wire_freeze_retry" },
+              );
+              const wireFreeze = resolvePaidProFreezeCommitText({
+                text: wirePrepared.text,
+                source: freezeSource,
+                draft: mergedForApi,
+                intakeText: rawForSoT || rawIntake,
+                agreementGenerationId: input.agreementGenerationId ?? null,
+                generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+                surface: "premium_completion_pipeline_wire_freeze_retry",
+              });
+              if (
+                wireFreeze.ok &&
+                wireFreeze.text.length >= Math.floor(wireAuthoritativeBodyLen * 0.85)
+              ) {
+                doc = wirePrepared.text;
+                freezeCommit = wireFreeze;
+              }
+            }
+          }
+        }
         if (!freezeCommit.ok) {
           const recovery = previewRecoverPaidProFreezeCandidate({
             draft: mergedForApi,
@@ -2952,12 +3106,18 @@ async function runPremiumCompletionInner(
               surface: "premium_completion_pipeline_structural_recovery",
             });
             if (structuralGate.ok) {
-              const minStructuralLen = serverFullDocumentAuthoritative
-                ? Math.max(
-                    PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
-                    Math.floor(doc.length * 0.85),
-                  )
-                : PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
+              const minStructuralLen =
+                serverFullDocumentAuthoritative
+                  ? Math.max(
+                      PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
+                      Math.floor(doc.length * 0.85),
+                    )
+                  : wireAuthoritativeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+                    ? Math.max(
+                        PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
+                        Math.floor(wireAuthoritativeBodyLen * 0.85),
+                      )
+                    : PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
               if (structuralGate.text.length >= minStructuralLen) {
                 doc = structuralGate.text;
                 freezeCommit = structuralGate;
@@ -2973,6 +3133,17 @@ async function runPremiumCompletionInner(
             candidateLen: freezeCommit.text.length,
             source: freezeSource,
           });
+        }
+        if (
+          freezeCommit.ok &&
+          isNonfatalGenerationFailureCode((effectiveFull.server_generation_failure_code || "").trim()) &&
+          wireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+        ) {
+          freezeCommit = {
+            ...freezeCommit,
+            ok: false,
+            rejectReason: "wire_corpus_below_parse_degraded_floor",
+          };
         }
         if (!freezeCommit.ok) {
           clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
@@ -3001,6 +3172,28 @@ async function runPremiumCompletionInner(
           }
         } else {
           doc = freezeCommit.text;
+          const jsonParseWireWinRestore =
+            jsonParseNonfatalAccept &&
+            wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+            doc.length < Math.floor(wireCorpusForFreeze.length * 0.85);
+          if (jsonParseWireWinRestore) {
+            const wireDisplayed = applyAcceptedProCorpusSafeDisplay(wireCorpusForFreeze, {
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              surface: "premium_completion_pipeline:json_parse_wire_winning",
+            }).text.trim();
+            if (wireDisplayed.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
+              doc = wireDisplayed;
+              outMerged = stripClientPremiumArtifactBlocksFromDraft({
+                ...outMerged,
+                premium_full_document_text: doc,
+                premium_server_full_document_text:
+                  wireCorpusForFreeze.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN
+                    ? wireCorpusForFreeze
+                    : doc,
+              });
+            }
+          }
           winningPremiumBodyText = doc;
           if (serverGenDegraded) {
             const fc = (effectiveFull.server_generation_failure_code || "").trim();
@@ -3311,8 +3504,17 @@ async function runPremiumCompletionInner(
         renderSource: frozenFallback.source,
       });
     } else if (import.meta.env.MODE === "test") {
-      winningPremiumBodyText = fb;
-      premiumRenderSource = "fallback_preview";
+      if (
+        premiumBodyHardRejectedForDevContextLeak ||
+        (lastWireAuthoritativeBodyLen > 0 &&
+          lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN)
+      ) {
+        winningPremiumBodyText = "";
+        premiumRenderSource = "rejected_paid_corpus";
+      } else {
+        winningPremiumBodyText = fb;
+        premiumRenderSource = "fallback_preview";
+      }
     } else {
       winningPremiumBodyText = "";
       premiumRenderSource = "rejected_paid_corpus";
@@ -3634,7 +3836,12 @@ async function runPremiumCompletionInner(
         preview: intakeRecoveryPreview,
       };
     };
-    if (rejectedPaidCorpusDueToClientGates) {
+    if (
+      rejectedPaidCorpusDueToClientGates &&
+      !premiumBodyHardRejectedForDevContextLeak &&
+      !jsonParseClientRejected &&
+      lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+    ) {
       const deterministic = tryDeterministicIntakeRecovery();
       if (deterministic.accepted) {
         const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
@@ -3724,6 +3931,10 @@ async function runPremiumCompletionInner(
         };
       }
     }
+    const blockLateThinWireRecovery =
+      premiumBodyHardRejectedForDevContextLeak ||
+      (lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+        premiumJsonParseDegradedAttemptCount > 0);
     const localRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
       draft: outMerged,
       rawIntake: rawForSoT || rawIntake,
@@ -3738,7 +3949,7 @@ async function runPremiumCompletionInner(
           premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
         })
       : null;
-    if (localRecovery.ok && degradedRecoveryPreview?.eligible) {
+    if (!blockLateThinWireRecovery && localRecovery.ok && degradedRecoveryPreview?.eligible) {
       const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
       if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
       logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.accepted, {

@@ -99,9 +99,9 @@ export type PaidProFreezeCandidateGateResult = {
 export function logPaidProFreezeCandidateDecision(payload: {
   accepted: boolean;
   source: string;
-  candidateHash: string;
-  acceptanceHash?: string | null;
-  hashesMatch?: boolean;
+  preparedFreezeCandidateHash: string;
+  validationInputHash?: string | null;
+  validationInputMatchesPreparedFreeze?: boolean;
   rejectReason?: string | null;
   candidateLen: number;
 }): void {

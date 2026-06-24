@@ -102,9 +102,21 @@ export function premiumBodyHasRequiredPaidSections(args: {
  * it is long enough, has zero fatal placeholders, passes the structural gate, and contains the
  * required paid sections. Intelligence metadata degrades; the body does NOT get rejected.
  */
+export function authoritativeWirePremiumBodyLen(args: {
+  wireDocumentText?: string | null;
+  wireServerFullDocumentText?: string | null;
+}): number {
+  return Math.max(
+    (args.wireDocumentText || "").trim().length,
+    (args.wireServerFullDocumentText || "").trim().length,
+  );
+}
+
 export function isNonfatalParseDegradedPaidAccept(args: {
   failureCode: string | null | undefined;
   bodyLen: number;
+  /** Original HTTP wire corpus length before local thin-body expansion — blocks expanded fallbacks. */
+  wireAuthoritativeBodyLen?: number | null;
   fatalPlaceholderCount: number;
   structuralOk: boolean;
   hasRequiredSections: boolean;
@@ -113,6 +125,8 @@ export function isNonfatalParseDegradedPaidAccept(args: {
   if (!args.structuralOk) return false;
   if (args.fatalPlaceholderCount > 0) return false;
   if (!args.hasRequiredSections) return false;
+  const wireLen = args.wireAuthoritativeBodyLen ?? args.bodyLen;
+  if (wireLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
   if (args.bodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
   return true;
 }
