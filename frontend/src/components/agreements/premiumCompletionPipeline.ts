@@ -118,9 +118,11 @@ import {
 } from "./agreementIntentContract";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
+  buildPaidProFreezeCandidate,
   previewRecoverPaidProFreezeCandidate,
   resolvePaidProFreezeCommitText,
 } from "./paidProFreezeCandidate";
+import { buildPaidProStructuralRecoveryBody } from "./paidProStructuralRecovery";
 import {
   countNumberedAgreementSections,
   MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING,
@@ -2756,6 +2758,18 @@ async function runPremiumCompletionInner(
       // required paid sections. Only the intelligence metadata degrades — the agreement body stays
       // authoritative. Without this a complete ~9k draft is wrongly dropped to "Retry Pro draft".
       const standardClientGatesPass = acc.ok && vPaid.ok && placeholderClientOk;
+      if (import.meta.env.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.info("[premium-flow] premium_rewrite_response_received", {
+          docLen: (doc || "").length,
+          serverFullLen: serverFullDoc.length,
+          generationOutcome: (effectiveFull.generation_outcome || "").trim() || null,
+          accOk: acc.ok,
+          vPaidOk: vPaid.ok,
+          placeholderOk: placeholderClientOk,
+          standardClientGatesPass,
+        });
+      }
       const jsonParseNonfatalAccept =
         !standardClientGatesPass &&
         !longAdvisoryAccept &&
@@ -2883,6 +2897,13 @@ async function runPremiumCompletionInner(
         });
         winningPremiumBodyText = doc;
         const freezeSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+        const preparedForFreeze = preparePaidProServerDocumentForAcceptance(
+          doc,
+          mergedForApi,
+          rawForSoT || rawIntake,
+          { surface: "premium_completion_pipeline_freeze_prep" },
+        );
+        doc = preparedForFreeze.text;
         let freezeCommit = resolvePaidProFreezeCommitText({
           text: doc,
           source: freezeSource,
@@ -2898,108 +2919,183 @@ async function runPremiumCompletionInner(
             intakeText: rawForSoT || rawIntake,
             surface: "premium_completion_pipeline_accept_recovery",
           });
-          if (recovery.ok) {
+          const serverLen = doc.length;
+          if (
+            recovery.ok &&
+            (serverLen < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
+              recovery.text.length >= Math.floor(serverLen * 0.85))
+          ) {
             doc = recovery.text;
-            freezeCommit = resolvePaidProFreezeCommitText({
+            freezeCommit = recovery;
+          }
+        }
+        if (!freezeCommit.ok) {
+          const structural = buildPaidProStructuralRecoveryBody({
+            intakeText: rawForSoT || rawIntake,
+            draft: mergedForApi,
+          });
+          if (structural.ok) {
+            const structuralPrep = preparePaidProServerDocumentForAcceptance(
+              structural.body,
+              mergedForApi,
+              rawForSoT || rawIntake,
+              { surface: "premium_completion_pipeline_structural_recovery" },
+            );
+            doc = structuralPrep.text;
+            const structuralGate = buildPaidProFreezeCandidate({
               text: doc,
               source: freezeSource,
               draft: mergedForApi,
               intakeText: rawForSoT || rawIntake,
               agreementGenerationId: input.agreementGenerationId ?? null,
               generationOutcome: (effectiveFull.generation_outcome || "").trim(),
-              surface: "premium_completion_pipeline_accept_recovery",
+              surface: "premium_completion_pipeline_structural_recovery",
             });
+            if (structuralGate.ok) {
+              const minStructuralLen = serverFullDocumentAuthoritative
+                ? Math.max(
+                    PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
+                    Math.floor(doc.length * 0.85),
+                  )
+                : PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
+              if (structuralGate.text.length >= minStructuralLen) {
+                doc = structuralGate.text;
+                freezeCommit = structuralGate;
+              }
+            }
+          }
+        }
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[premium-flow] freeze_commit_decision", {
+            accepted: freezeCommit.ok,
+            rejectReason: freezeCommit.rejectReason,
+            candidateLen: freezeCommit.text.length,
+            source: freezeSource,
+          });
+        }
+        if (!freezeCommit.ok) {
+          logPremiumCompletionDebug({
+            stage: "pipeline_freeze_commit_rejected",
+            accepted: false,
+            rejectedReason: freezeCommit.rejectReason ?? "freeze_commit_failed",
+            currentDocLen: doc.length,
+            premiumRenderSource: freezeSource,
+          });
+          logPremiumAcceptanceDecision({
+            accepted: false,
+            reason: "freeze_commit_rejected",
+            bodyLen: doc.length,
+            fatalPlaceholderCount,
+            structuralFatalCount,
+            generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+            renderSource: freezeSource,
+          });
+          winningPremiumBodyText = "";
+          premiumRenderSource = "rejected_paid_corpus";
+          rejectedPaidCorpusDueToClientGates = true;
+          if (!proIntentGateMessage) {
+            proIntentGateMessage =
+              "LawDog could not establish a structure-safe Pro agreement from the server response. Tap **Retry Pro draft** to try again.";
           }
         } else {
           doc = freezeCommit.text;
-        }
-        winningPremiumBodyText = doc;
-        if (serverGenDegraded) {
-          const fc = (effectiveFull.server_generation_failure_code || "").trim();
-          if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {
-            premiumRenderSource = "server_full_draft_degraded";
+          winningPremiumBodyText = doc;
+          if (serverGenDegraded) {
+            const fc = (effectiveFull.server_generation_failure_code || "").trim();
+            if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {
+              premiumRenderSource = "server_full_draft_degraded";
+            } else {
+              premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+            }
           } else {
             premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
           }
-        } else {
-          premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
-        }
-        outMerged = applyAuthoritativeFamilyToDraft(outMerged, familyDecision);
-        if (import.meta.env.DEV) {
-          console.info("[premium-render-source]", {
-            premiumRenderSource,
-            doc_len: doc.length,
-            client_retry: usedClientRetry,
-            server_gen_degraded: serverGenDegraded,
+          outMerged = applyAuthoritativeFamilyToDraft(outMerged, familyDecision);
+          if (import.meta.env.DEV) {
+            console.info("[premium-render-source]", {
+              premiumRenderSource,
+              doc_len: doc.length,
+              client_retry: usedClientRetry,
+              server_gen_degraded: serverGenDegraded,
+            });
+          }
+          if (import.meta.env.MODE !== "test" && !serverGenDegraded) {
+            // eslint-disable-next-line no-console
+            console.info("[CLAW] premium accepted", { source: premiumRenderSource, doc_len: doc.length });
+          }
+          if (import.meta.env.MODE !== "test") {
+            // eslint-disable-next-line no-console
+            console.info("[premium-flow] authoritative_corpus_committed", {
+              bodyLen: doc.length,
+              source: premiumRenderSource,
+              freezeHash: freezeCommit.hash,
+            });
+          }
+          paidProPerfSpanStart("post_accept_commit_render");
+          freezeAcceptedPremiumBodyForSession(
+            input.agreementGenerationId,
+            doc,
+            usedClientRetry ? "server_full_draft_retry" : "server_full_draft",
+          );
+          markPaidProPipelineValidationPassed({
+            text: doc,
+            source: premiumRenderSource,
           });
-        }
-        if (import.meta.env.MODE !== "test" && !serverGenDegraded) {
-          // eslint-disable-next-line no-console
-          console.info("[CLAW] premium accepted", { source: premiumRenderSource, doc_len: doc.length });
-        }
-        paidProPerfSpanStart("post_accept_commit_render");
-        freezeAcceptedPremiumBodyForSession(
-          input.agreementGenerationId,
-          doc,
-          usedClientRetry ? "server_full_draft_retry" : "server_full_draft",
-        );
-        markPaidProPipelineValidationPassed({
-          text: doc,
-          source: premiumRenderSource,
-        });
-        if (import.meta.env.MODE !== "test") {
-          // eslint-disable-next-line no-console
-          console.info("[paid-pro-acceptance]", {
+          if (import.meta.env.MODE !== "test") {
+            // eslint-disable-next-line no-console
+            console.info("[paid-pro-acceptance]", {
+              renderSource: premiumRenderSource,
+              docLen: doc.length,
+              generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+              failureCode: serverGenDegraded
+                ? (effectiveFull.server_generation_failure_code || "").trim()
+                : undefined,
+              clientRetry: usedClientRetry,
+            });
+          }
+          logPremiumAcceptanceDecision({
+            accepted: true,
+            reason: serverFullDocumentWins && (!vPaid.ok || !acc.ok)
+              ? "server_full_document_authoritative"
+              : partyPlaceholderRepairAccept && (!vPaid.ok || !standardClientGatesPass)
+                ? "party_placeholder_repaired_authoritative"
+                : jsonParseNonfatalAccept
+                  ? "json_parse_nonfatal_body_authoritative"
+                  : jsonParseDisplayRecoverableAccept
+                    ? "json_parse_display_recoverable_authoritative"
+                    : longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
+                    ? "long_body_advisory_accept"
+                    : "client_gates_passed",
+            bodyLen: doc.length,
+            fatalPlaceholderCount,
+            structuralFatalCount,
+            generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+            renderSource: premiumRenderSource,
+          });
+          paidProPerfRecordE2ePhase("authoritative_commit", {
             renderSource: premiumRenderSource,
             docLen: doc.length,
+          });
+          paidProPerfSpanEnd("post_accept_commit_render", {
+            docLen: doc.length,
+            docText: doc,
+            outcome: premiumRenderSource,
+          });
+          logPremiumCompletionDebug({
+            stage: "pipeline_client_gates_passed",
+            docLen: doc.length,
+            placeholder_fatal_count: fatalPlaceholderCount,
             generationOutcome: (effectiveFull.generation_outcome || "").trim(),
-            failureCode: serverGenDegraded
-              ? (effectiveFull.server_generation_failure_code || "").trim()
-              : undefined,
-            clientRetry: usedClientRetry,
+            degraded: serverGenDegraded,
+            failureCode:
+              serverGenDegraded || jsonParseNonfatalAccept || jsonParseDisplayRecoverableAccept
+                ? (effectiveFull.server_generation_failure_code || "").trim()
+                : undefined,
+            accepted: true,
+            advisoryOnly: advisoryAccept && (!vPaid.ok || !placeholderClientOk),
           });
         }
-        logPremiumAcceptanceDecision({
-          accepted: true,
-          reason: serverFullDocumentWins && (!vPaid.ok || !acc.ok)
-            ? "server_full_document_authoritative"
-            : partyPlaceholderRepairAccept && (!vPaid.ok || !standardClientGatesPass)
-              ? "party_placeholder_repaired_authoritative"
-              : jsonParseNonfatalAccept
-                ? "json_parse_nonfatal_body_authoritative"
-                : jsonParseDisplayRecoverableAccept
-                  ? "json_parse_display_recoverable_authoritative"
-                  : longAdvisoryAccept && (!vPaid.ok || !placeholderClientOk)
-                  ? "long_body_advisory_accept"
-                  : "client_gates_passed",
-          bodyLen: doc.length,
-          fatalPlaceholderCount,
-          structuralFatalCount,
-          generationOutcome: (effectiveFull.generation_outcome || "").trim(),
-          renderSource: premiumRenderSource,
-        });
-        paidProPerfRecordE2ePhase("authoritative_commit", {
-          renderSource: premiumRenderSource,
-          docLen: doc.length,
-        });
-        paidProPerfSpanEnd("post_accept_commit_render", {
-          docLen: doc.length,
-          docText: doc,
-          outcome: premiumRenderSource,
-        });
-        logPremiumCompletionDebug({
-          stage: "pipeline_client_gates_passed",
-          docLen: doc.length,
-          placeholder_fatal_count: fatalPlaceholderCount,
-          generationOutcome: (effectiveFull.generation_outcome || "").trim(),
-          degraded: serverGenDegraded,
-          failureCode:
-            serverGenDegraded || jsonParseNonfatalAccept || jsonParseDisplayRecoverableAccept
-              ? (effectiveFull.server_generation_failure_code || "").trim()
-              : undefined,
-          accepted: true,
-          advisoryOnly: advisoryAccept && (!vPaid.ok || !placeholderClientOk),
-        });
       } else {
         const intakeSForGate = (rawForSoT || rawIntake) || "";
         const vpaidDiag = acc.ok && !vPaid.ok ? buildPaidProValidationDiagnostics(doc || "", intakeSForGate) : null;

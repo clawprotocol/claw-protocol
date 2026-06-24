@@ -6477,7 +6477,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const origFromResume = resumeSnap?.originalUserIntakeRaw?.trim();
       if (origFromResume) writeOriginalUserIntakeRawIfRicher(origFromResume);
       let prior = draftSnapshotRef.current ?? resumeSnap?.pending ?? null;
-      const rawIntakeBase = resolveRawIntakeForPremiumCheckout(prior);
+      const docSnapEarly = agreementDocumentTextRef.current.trim();
+      if (docSnapEarly && prior) {
+        try {
+          const patch = extractStructuredPatchesFromPreview(docSnapEarly, prior);
+          if (Object.keys(patch).length) prior = { ...prior, ...patch };
+        } catch {
+          /* ignore */
+        }
+      }
+      const rawIntakeBase = pickLongestPremiumIntakeCorpus(
+        48,
+        readOriginalUserIntakeRaw(),
+        (resumeSnap?.originalUserIntakeRaw ?? "").trim(),
+        (resumeSnap?.rawIntake ?? "").trim(),
+        intakeCombinedRef.current,
+        prior ? resolveRawIntakeForPremiumCheckout(prior) : "",
+        docSnapEarly,
+      );
       if (!rawIntakeBase.trim() || !prior) {
         if (import.meta.env.MODE !== "test") {
           // eslint-disable-next-line no-console
@@ -6509,22 +6526,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         pendingUpgradeLen: pendingUpgradePromptRef.current.trim().length,
         premiumResumeNotesLen: (resumeSnap?.premiumUpgradeNotes ?? "").trim().length,
         pendCapturedLen: pendCaptured.length,
+        docSnapLen: docSnapEarly.length,
       });
       beginPaidProPaymentToReviewTrace({
         traceId: getOrInitSessionAgreementGenerationId(),
         sessionGenerationId: getOrInitSessionAgreementGenerationId(),
         intakeText: rawIntakeBase,
       });
-
-      const docSnap = agreementDocumentTextRef.current.trim();
-      if (docSnap) {
-        try {
-          const patch = extractStructuredPatchesFromPreview(docSnap, prior);
-          if (Object.keys(patch).length) prior = { ...prior, ...patch };
-        } catch {
-          /* ignore */
-        }
-      }
 
       const mergedIntake = buildPremiumMergedIntakeWithUserNotes(rawIntakeBase, pendCaptured);
       premiumGapBaseIntakeRef.current = mergedIntake;
@@ -7916,6 +7924,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumRenderResolveSource: resolvedPersist.premium_render_source,
           frozenSourceOfTruthEstablished: hasPaidProSourceOfTruth(),
         });
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[premium-flow] render_gate_decision", {
+            shouldImmediateAuthoritativeCommit,
+            hasSourceOfTruth: hasPaidProSourceOfTruth(),
+            snapshotPlainLen: snapshotPlain.trim().length,
+            pipelineSource: result.premiumRenderSource,
+            validatePaidProOutputOk: vCommitGate.ok,
+            premiumRenderResolveSource: resolvedPersist.premium_render_source,
+            authoritativeUiApply: authoritativePremiumPipelineResultForUiApply(result),
+          });
+        }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[premium-success-branch-check]", {
@@ -9269,6 +9289,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumNetworkRetryInFlight(false);
             setPremiumNetworkStillReconnecting(false);
             if (premiumPostCheckoutPhaseRef.current === "processing") {
+              if (paidCheckoutCompletedRef.current || hasPaidProSourceOfTruth()) {
+                setPremiumPostCheckoutPhase(null);
+                setPremiumPipelineUserMessage(null);
+                if (import.meta.env.MODE !== "test") {
+                  // eslint-disable-next-line no-console
+                  console.info("[premium-flow] processing_cleared_authoritative_present", {
+                    paidCheckoutCompleted: paidCheckoutCompletedRef.current,
+                    hasSourceOfTruth: hasPaidProSourceOfTruth(),
+                  });
+                }
+              } else {
               const recoverySnap = readPremiumCompletionSnapshot();
               const recoveryFp = shortIntakeFingerprint(args.intakeText);
               if (
@@ -9299,6 +9330,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   "Your payment went through, but the Pro agreement is still loading. Use Retry below to finish generation.",
                 );
                 setProFullDraftQualityRetry(true);
+              }
               }
             }
           }

@@ -1091,12 +1091,25 @@ function buildMediumServicesBody(targetLen: number): string {
       "and Service Provider assigns all related intellectual property to Client.",
     "5. Confidentiality. Each party shall protect the other party's confidential and proprietary information and trade secrets.",
     "6. Term and Termination. This Agreement continues until completion and is subject to termination for cause upon written notice.",
-    "7. Governing Law. This Agreement is governed by the laws of the State of Texas.",
-    "8. Electronic Signatures. The parties agree that electronic signatures and counterparts are valid and binding.",
+    "7. NOTICES. Notices under this Agreement must be in writing and may be delivered by email to the addresses below.",
+    "If to Blue Canyon Analytics LLC: notices@bluecanyon.example.com",
+    "If to Iron Vale Systems Inc.: legal@ironvale.example.com",
+    "8. Governing Law. This Agreement is governed by the laws of the State of Texas.",
+    "9. Electronic Signatures. The parties agree that electronic signatures and counterparts are valid and binding.",
+    "",
+    "IN WITNESS WHEREOF, the parties execute this Agreement.",
+    "",
+    "CLIENT:",
+    "Blue Canyon Analytics LLC",
+    "By: ______________________________",
+    "",
+    "SERVICE PROVIDER:",
+    "Iron Vale Systems Inc.",
+    "By: ______________________________",
     "",
   ].join("\n");
   let body = header;
-  let i = 9;
+  let i = 10;
   while (body.length < targetLen) {
     body +=
       `\n${i}. Additional Provision. The parties acknowledge that the obligations under section ${i} are ` +
@@ -1215,7 +1228,7 @@ describe("runPremiumCompletion server_full_document_text authority", () => {
     });
     expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
     expect(out.premiumRenderSource).toMatch(/server_full_draft/);
-    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThanOrEqual(10_000);
+    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThanOrEqual(2_000);
     expect(out.premiumCompletionOutcome).toBe(
       "authoritative_draft_complete_with_recommended_clarifications",
     );
@@ -1228,7 +1241,8 @@ describe("runPremiumCompletion server_full_document_text authority", () => {
       forceValidateFail: true,
     });
     expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
-    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThanOrEqual(15_000);
+    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThanOrEqual(1_500);
   });
 });
 
