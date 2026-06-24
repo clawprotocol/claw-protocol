@@ -98,6 +98,21 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
   const trimmed = line.trim();
   if (!trimmed || trimmed.length < 24 || !/^\d+\./.test(trimmed)) return line;
 
+  const starterKnownSlashHeadingRe =
+    /^\d+\.\s+(?:Scope of Services\s*\/\s*Purpose|Services Term and Effective Date|Term and Effective Date)\s*$/i;
+  if (starterKnownSlashHeadingRe.test(trimmed)) return line;
+
+  const starterScopeBodyGlue = trimmed.match(/^(\d+\.\s+Scope of Services\s*\/\s*Purpose)\s+(.+)$/i);
+  if (starterScopeBodyGlue?.[1] && starterScopeBodyGlue[2]?.trim()) {
+    return `${starterScopeBodyGlue[1].trim()}\n${starterScopeBodyGlue[2].trim()}`;
+  }
+  const starterTermBodyGlue = trimmed.match(
+    /^(\d+\.\s+(?:Services Term and Effective Date|Term and Effective Date))\s+(Term:.+)$/i,
+  );
+  if (starterTermBodyGlue?.[1] && starterTermBodyGlue[2]?.trim()) {
+    return `${starterTermBodyGlue[1].trim()}\n${starterTermBodyGlue[2].trim()}`;
+  }
+
   const structural = splitGluedNumberedSectionLine(trimmed);
   if (structural) {
     return `${structural.heading}\n${structural.body}`;

@@ -23,6 +23,7 @@ import {
 import { resolveApiBase } from "./lib/clawApi";
 import { JOY_COPY } from "./joy/clawJoyCopy";
 import { JoyMilestoneMark } from "./joy/JoyMilestone";
+import { isoTimestampDemoSuffix } from "./demo/isoTimestampDemoSuffix";
 
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -719,8 +720,8 @@ const App: React.FC = () => {
     const now = new Date().toISOString();
     return {
       created_at: now,
-      epoch_id: `epoch-demo-${now.replace(/[-:.TZ]/g, "").slice(-6)}`,
-      timeline_id: `tl_demo_${now.replace(/[-:.TZ]/g, "").slice(-6)}`,
+      epoch_id: `epoch-demo-${isoTimestampDemoSuffix(now)}`,
+      timeline_id: `tl_demo_${isoTimestampDemoSuffix(now)}`,
       anchor_network: anchorNetwork,
     };
   }

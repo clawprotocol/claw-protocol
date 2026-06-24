@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import type { AgreementParty } from "../../agreement/agreementTypes";
-import { extractAgreementParties } from "../../agreement/extractAgreementParties";
-import { AgreementSignaturePlaceholderGrid } from "./AgreementSignaturePlaceholderGrid";
 import {
   STARTER_DOCUMENT_DONE_EDITING_LABEL,
   STARTER_DOCUMENT_EDIT_WORDING_LABEL,
@@ -46,9 +44,6 @@ export function StarterDraftDocumentSurface(props: {
     editorRef,
     id = "claw-starter-agreement-document",
     editRequestNonce,
-    parties,
-    intakeText,
-    partiesLine,
   } = props;
   const [editing, setEditing] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "failed">("idle");
@@ -59,16 +54,6 @@ export function StarterDraftDocumentSurface(props: {
     window.requestAnimationFrame(() => editorRef?.current?.focus());
   }, [editRequestNonce, editorRef]);
   const { title, body } = useMemo(() => splitAgreementDisplay(value), [value]);
-  const signaturePartyNames = useMemo(
-    () =>
-      extractAgreementParties({
-        parties,
-        intakeText,
-        renderedText: value,
-        partiesLine,
-      }),
-    [parties, intakeText, value, partiesLine],
-  );
 
   useEffect(() => {
     logStarterReviewDocumentRendered();
@@ -171,11 +156,6 @@ export function StarterDraftDocumentSurface(props: {
           ) : (
             <p className="mt-6 text-stone-600">{value.trim() || "Your agreement text will appear here."}</p>
           )}
-          <AgreementSignaturePlaceholderGrid
-            partyNames={signaturePartyNames}
-            className="mt-10 border-t border-dashed border-stone-300/80 pt-6"
-            variant="paper"
-          />
         </article>
       )}
     </div>

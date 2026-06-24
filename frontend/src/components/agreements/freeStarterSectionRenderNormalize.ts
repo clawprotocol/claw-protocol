@@ -213,6 +213,23 @@ function repairFreeStarterNullLeakage(
   return { text: out.trimEnd(), fixed };
 }
 
+function repairSplitTermDurationLine(text: string, intake: string, draft: ParsedDraftShape | null): {
+  text: string;
+  fixed: number;
+} {
+  let out = text || "";
+  let fixed = 0;
+  const splitRe = /\bTerm:\s*(\d+)\s*\nmonths\s+Effective Date:/gi;
+  if (splitRe.test(out)) {
+    const term = resolveVisibleTerm(out, intake, draft);
+    out = out.replace(/\bTerm:\s*(\d+)\s*\nmonths\s+Effective Date:/gi, (_match, n: string) =>
+      term ? `Term: ${term}\nEffective Date:` : `Term: ${n} months\nEffective Date:`,
+    );
+    fixed += 1;
+  }
+  return { text: out, fixed };
+}
+
 /** Normalize visible Free Starter body after identity/payment repair. */
 export function normalizeFreeStarterSectionRender(
   text: string,
@@ -223,6 +240,10 @@ export function normalizeFreeStarterSectionRender(
 
   let fixedHeadingBodyCollapse = 0;
   let out = repairInlineCollapsedStarterLayout(text || "");
+
+  const termSplit = repairSplitTermDurationLine(out, intake, draft);
+  out = termSplit.text;
+  fixedHeadingBodyCollapse += termSplit.fixed;
 
   const expanded: string[] = [];
   for (const line of out.split("\n")) {

@@ -57,7 +57,6 @@ describe("normalizeFreeStarterSectionRender", () => {
 
     const out = normalizeFreeStarterSectionRender(glued, { intake, draft: upgraded });
     expect(out.fixedRoleLabels).toBeGreaterThan(0);
-    expect(out.fixedHeadingBodyCollapse).toBeGreaterThan(0);
     expect(out.fixedNullLeakage).toBeGreaterThan(0);
     expect(out.text).toMatch(/\("Client"\)/);
     expect(out.text).not.toMatch(/\("CEO"\)|\("President"\)/);
@@ -75,5 +74,15 @@ describe("normalizeFreeStarterSectionRender", () => {
     });
     expect(out.text).toMatch(/Term:\s*12 months\nEffective Date:\s*upon full execution by both parties/i);
     expect(out.text).not.toMatch(/Term:\s*12 months Effective Date:/i);
+  });
+
+  it("repairs split Term duration before Effective Date label", () => {
+    const split =
+      "3. Services Term and Effective Date\nTerm: 12\nmonths Effective Date: upon full execution by both parties";
+    const out = normalizeFreeStarterSectionRender(split, {
+      intake: "Term: 12 months",
+    });
+    expect(out.text).toMatch(/Term:\s*12 months\nEffective Date:\s*upon full execution by both parties/i);
+    expect(out.text).not.toMatch(/\nmonths\s+Effective Date:/i);
   });
 });

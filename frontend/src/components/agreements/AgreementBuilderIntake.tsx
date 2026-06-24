@@ -3539,6 +3539,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             server_full_document_text: (d as { server_full_document_text?: string | null }).server_full_document_text,
           },
           placeholderGate,
+          hasDraftPayload: starterReviewServerDraftReadyRef.current,
+          currentPreview: agreementDocumentTextRef.current,
         }).body;
         const draftParties = ((d as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? [])
           .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
@@ -12297,12 +12299,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ? resolveFreeStarterReviewBody({
             draft,
             rawIntake: starterIntake,
+            currentPreview: agreementDocumentTextRef.current,
             apiPayload: {
               payment_terms: draft.payment_terms,
               server_full_document_text: (draft as { server_full_document_text?: string | null })
                 .server_full_document_text,
             },
             placeholderGate,
+            hasDraftPayload: starterReviewServerDraftReadyRef.current,
           }).body
         : buildAgreementPreviewText(draft, {
             starterPreview,
@@ -13145,6 +13149,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             .server_full_document_text,
         },
         placeholderGate: starterPreviewTransientGate,
+        hasDraftPayload: starterPreviewTransientGate.hasDraftPayload,
       });
       visible = resolved.body || visible;
     }

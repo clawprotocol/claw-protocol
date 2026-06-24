@@ -276,7 +276,11 @@ function repairKnownPartyAliasDisplayFragments(
       out = out.replace(re, full);
     }
   }
-  return out.replace(/\s+/g, " ").trim();
+  return out
+    .split("\n")
+    .map((line) => (line.trim() === "" ? "" : line.replace(/[ \t]{2,}/g, " ").trim()))
+    .join("\n")
+    .trim();
 }
 
 /** A candidate is a usable real party name (not blank, not another placeholder, not a generic word). */

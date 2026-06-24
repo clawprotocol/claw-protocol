@@ -299,12 +299,18 @@ function buildTermAndScheduleSection(
   }
   const parts: string[] = [];
   const durRaw = (draft.duration || "").trim();
-  const dur =
+  let dur =
     durRaw && !isInvalidVisibleScheduleValue(durRaw)
       ? durRaw
       : starter
         ? extractTermDurationFromIntake(opts?.intakeText)
         : "";
+  if (starter && dur) {
+    const fromIntake = extractTermDurationFromIntake(opts?.intakeText);
+    if (fromIntake && fromIntake.length > dur.length && fromIntake.includes(dur.replace(/\s+/g, " ").trim())) {
+      dur = fromIntake;
+    }
+  }
   let eff = (draft.effective_date || "").trim();
   if (starter && isInvalidVisibleScheduleValue(eff)) eff = "";
   if (starter && partyCount === 2 && /upon full execution by all parties/i.test(eff)) {

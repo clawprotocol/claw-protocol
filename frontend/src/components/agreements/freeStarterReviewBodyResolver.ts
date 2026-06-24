@@ -21,6 +21,12 @@ import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPres
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { sanitizeStarterPartyNameForDisplay } from "./starterPreviewProseSanitize";
 import { normalizeFreeStarterSectionRender } from "./freeStarterSectionRenderNormalize";
+import { SHORT_STALE_PREMIUM_INTAKE_THRESHOLD } from "./premiumCheckoutIntakeCorpus";
+import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
+import {
+  starterPreviewHasGluedSectionHeadings,
+  starterPreviewHasParagraphSectionBreaks,
+} from "./starterPreviewFormatting";
 
 export type FreeStarterRenderSource =
   | "repaired_starter_preview"
@@ -41,6 +47,8 @@ export type ResolveFreeStarterReviewBodyArgs = {
   currentPreview?: string | null;
   authoritativeBody?: string | null;
   placeholderGate?: AgreementPreviewBuildOptions["placeholderGate"];
+  /** POST /draft returned a payload — prefer clean server/hydrated preview over local rebuild. */
+  hasDraftPayload?: boolean;
   /** When true, allow a longer alternate body (only when intake is unavailable). */
   preferAlternate?: boolean;
 };
@@ -87,14 +95,44 @@ export function logFreeStarterProtectedFactRepair(payload: {
   console.info("[free-starter-protected-fact-repair]", payload);
 }
 
-function resolveIntakeWithMeta(passed?: string | null): {
+function looksLikeStructuredDraftCoercion(hint: string, draft: ParsedDraftShape | null): boolean {
+  const t = hint.trim();
+  if (t.length < 80) return false;
+  if (/\b(?:Client|Service Provider):\s*/i.test(t)) return false;
+  if (draft) {
+    const coerced = buildReviewCoercionRawIntakeFromDraft(draft, "").trim();
+    if (coerced.length >= 80 && t.length >= coerced.length - 24 && t.length <= coerced.length + 24) {
+      return true;
+    }
+  }
+  return t.length >= SHORT_STALE_PREMIUM_INTAKE_THRESHOLD;
+}
+
+function resolveIntakeWithMeta(
+  passed?: string | null,
+  draft?: ParsedDraftShape | null,
+): {
   text: string;
   usedOriginalRaw: boolean;
   usedStorageRaw: boolean;
 } {
   const hint = String(passed ?? "").trim();
-  if (hint.length >= 20) return { text: hint, usedOriginalRaw: false, usedStorageRaw: false };
   const session = readOriginalUserIntakeRaw().trim();
+  if (session.length >= 20) {
+    if (!hint || hint.length < 20) {
+      return { text: session, usedOriginalRaw: true, usedStorageRaw: false };
+    }
+    if (
+      /\b(?:Client|Service Provider):\s*/i.test(session) &&
+      !/\b(?:Client|Service Provider):\s*/i.test(hint)
+    ) {
+      return { text: session, usedOriginalRaw: true, usedStorageRaw: false };
+    }
+    if (looksLikeStructuredDraftCoercion(hint, draft ?? null)) {
+      return { text: session, usedOriginalRaw: true, usedStorageRaw: false };
+    }
+  }
+  if (hint.length >= 20) return { text: hint, usedOriginalRaw: false, usedStorageRaw: false };
   if (session.length >= 20) return { text: session, usedOriginalRaw: true, usedStorageRaw: false };
   try {
     const storage = readAgreementCreatorIntakeStorage().trim();
@@ -221,6 +259,23 @@ export function guardFreeStarterProtectedFacts(
   return { text: out.trim(), repairCount };
 }
 
+function needsPaymentCadenceRepair(body: string, intake: string): boolean {
+  if (!intakeDeclaresMonthlyInstallments(intake)) return false;
+  return draftPaymentTermsLoseIntakeInstallmentCadence(extractFreeStarterPaymentTermsLine(body), intake);
+}
+
+/** True when hydrated/server starter preview is structured and free of known collapse artifacts. */
+export function isCleanFreeStarterServerPreview(text: string): boolean {
+  const t = String(text || "").trim();
+  if (t.length < 200) return false;
+  if (starterPreviewHasGluedSectionHeadings(t)) return false;
+  if (!starterPreviewHasParagraphSectionBreaks(t)) return false;
+  if (/\bTerm:\s*\d+\s*\nmonths\s+Effective Date:/i.test(t)) return false;
+  if (/Term:\s*\d+\s*$/m.test(t) && /\nmonths\s+Effective Date:/i.test(t)) return false;
+  if (/Term:\s*\d+\s+months\s+Effective Date:/i.test(t)) return false;
+  return true;
+}
+
 function buildRepairedStarterPreview(
   draft: ParsedDraftShape,
   intake: string,
@@ -240,9 +295,9 @@ function buildRepairedStarterPreview(
 export function resolveFreeStarterReviewBody(
   args: ResolveFreeStarterReviewBodyArgs,
 ): ResolveFreeStarterReviewBodyResult {
-  const intakeMeta = resolveIntakeWithMeta(args.rawIntake);
-  const rawIntakeResolved = intakeMeta.text;
   const draft = args.draft;
+  const intakeMeta = resolveIntakeWithMeta(args.rawIntake, draft);
+  const rawIntakeResolved = intakeMeta.text;
 
   const repairedPreview = draft ? buildRepairedStarterPreview(draft, rawIntakeResolved, args.placeholderGate) : "";
 
@@ -256,10 +311,10 @@ export function resolveFreeStarterReviewBody(
   const current = String(args.currentPreview ?? "").trim();
 
   const alternates: { text: string; source: FreeStarterRenderSource }[] = [];
-  if (authoritative) alternates.push({ text: authoritative, source: "authoritative_hydrated_repaired" });
-  if (apiDoc && apiDoc !== authoritative) alternates.push({ text: apiDoc, source: "api_payload_repaired" });
-  if (current && current !== authoritative && current !== apiDoc) {
-    alternates.push({ text: current, source: "current_preview_repaired" });
+  if (current) alternates.push({ text: current, source: "current_preview_repaired" });
+  if (apiDoc && apiDoc !== current) alternates.push({ text: apiDoc, source: "api_payload_repaired" });
+  if (authoritative && authoritative !== current && authoritative !== apiDoc) {
+    alternates.push({ text: authoritative, source: "authoritative_hydrated_repaired" });
   }
 
   let body = repairedPreview;
@@ -267,8 +322,18 @@ export function resolveFreeStarterReviewBody(
   let protectedFactRepairCount = 0;
 
   const intakeBacked = rawIntakeResolved.length >= 20;
+  const serverDraftReady = Boolean(args.hasDraftPayload);
+  const cleanServerCandidate = alternates.find((c) => isCleanFreeStarterServerPreview(c.text));
 
-  if (intakeBacked && repairedPreview.trim() && !args.preferAlternate) {
+  if (
+    serverDraftReady &&
+    cleanServerCandidate &&
+    !needsPaymentCadenceRepair(cleanServerCandidate.text, rawIntakeResolved) &&
+    !args.preferAlternate
+  ) {
+    body = cleanServerCandidate.text;
+    source = cleanServerCandidate.source;
+  } else if (intakeBacked && repairedPreview.trim() && !args.preferAlternate) {
     body = repairedPreview;
     source = "repaired_starter_preview";
   } else if (!body.trim() && alternates.length > 0) {

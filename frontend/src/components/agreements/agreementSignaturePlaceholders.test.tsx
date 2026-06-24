@@ -26,9 +26,8 @@ describe("AgreementSignaturePlaceholderGrid", () => {
 describe("StarterDraftDocumentSurface signature placeholders (static)", () => {
   const surface = readFileSync(join(__dirname, "StarterDraftDocumentSurface.tsx"), "utf8");
 
-  it("does not hardcode a two-party Party A / Party B map", () => {
+  it("does not render decorative signature cards in free starter review preview", () => {
+    expect(surface).not.toContain("AgreementSignaturePlaceholderGrid");
     expect(surface).not.toMatch(/\["Party A",\s*"Party B"\]\.map/);
-    expect(surface).toContain("extractAgreementParties");
-    expect(surface).toContain("AgreementSignaturePlaceholderGrid");
   });
 });
