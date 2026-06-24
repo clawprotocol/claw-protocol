@@ -3,6 +3,8 @@
  * Structural invariant only — no title allowlists or prompt-specific patterns.
  */
 
+import { isFalseFragmentSectionTitle } from "./paidProOrphanSectionNumberRepair";
+
 /** Subsection lines like "1.1", "8.1" — remain body paragraphs. */
 export const PAID_PRO_SUBSECTION_NUMBER_RE = /^\d+\.\d+(?:\.\d+)*\.?\s+/;
 
@@ -90,5 +92,6 @@ export function isPaidProNumberedSectionHeadingLine(line: string): boolean {
   }
   if (hasOperativeVerbInTitle(title)) return false;
   if (hasGluedBodySentenceOnSameLine(title)) return false;
+  if (isFalseFragmentSectionTitle(title)) return false;
   return true;
 }

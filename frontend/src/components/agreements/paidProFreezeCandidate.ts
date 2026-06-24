@@ -400,7 +400,7 @@ export function assertPaidProFreezeCandidateGates(
     phase: "pre_freeze",
     blockOnFatal: false,
   });
-  if (postBoundaryStructure.repairs.length > 0) {
+  if (!postBoundaryStructure.rejected) {
     safeForCommit = postBoundaryStructure.text;
   }
 
@@ -443,7 +443,7 @@ export function assertPaidProFreezeCandidateGates(
     phase: "pre_freeze",
     blockOnFatal: false,
   });
-  if (postNoticeStructure.repairs.length > 0) {
+  if (!postNoticeStructure.rejected) {
     safeForCommit = postNoticeStructure.text;
   }
 

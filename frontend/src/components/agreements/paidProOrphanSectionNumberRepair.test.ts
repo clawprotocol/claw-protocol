@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import {
+  hasFalseFragmentSectionHeading,
   hasOrphanStandaloneSectionNumberLines,
+  repairOrphanNumberFragmentContinuationLines,
   repairPaidProOrphanSectionNumbers,
   repairStrandedThisSectionReference,
   renumberTopLevelHeadingsAfterOrphanRemoval,
@@ -175,5 +177,47 @@ describe("Test364 paid Pro orphan section number repair", () => {
     expect(repairs).toContain("section_renumber:18->17");
     expect(text).toMatch(/17\.\s+ELECTRONIC SIGNATURES/i);
     expect(text).toContain("16. Miscellaneous");
+  });
+});
+
+describe("TEST427 orphan number + Service + Provider fragment merge", () => {
+  const fragmentBlock = [
+    "10. Suspension, Force Majeure and Transition",
+    "Service Provider may suspend performance when required by law.",
+    "5.",
+    "Service",
+    "Provider will resume performance promptly after the issue is resolved.",
+    "11. Governing Law",
+    "Oklahoma law governs.",
+  ].join("\n");
+
+  it("merges 5. / Service / Provider into operative paragraph", () => {
+    const { text, repairs } = repairPaidProOrphanSectionNumbers(fragmentBlock);
+    expect(text).not.toMatch(/^\s*5\.\s*$/m);
+    expect(text).not.toMatch(/^\s*5\.\s+Service\s*$/im);
+    expect(text).toContain(
+      "Service Provider will resume performance promptly after the issue is resolved.",
+    );
+    expect(repairs.some((r) => r.includes("orphan_number_fragment_merged") || r.includes("orphan_fragment"))).toBe(
+      true,
+    );
+    expect(hasFalseFragmentSectionHeading(text)).toBe(false);
+  });
+
+  it("merges Service / Provider after standalone orphan number was already removed", () => {
+    const afterOrphanRemoval = [
+      "10. Suspension, Force Majeure and Transition",
+      "Service Provider may suspend performance when required by law.",
+      "Service",
+      "Provider will resume performance promptly after the issue is resolved.",
+      "11. Governing Law",
+      "Oklahoma law governs.",
+    ].join("\n");
+    const { text, repairs } = repairOrphanNumberFragmentContinuationLines(afterOrphanRemoval);
+    expect(text).toContain(
+      "Service Provider will resume performance promptly after the issue is resolved.",
+    );
+    expect(repairs.some((r) => r.includes("orphan_title_fragment_merged"))).toBe(true);
+    expect(text).not.toMatch(/^\s*Service\s*$/m);
   });
 });

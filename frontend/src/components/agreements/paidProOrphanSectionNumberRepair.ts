@@ -14,6 +14,169 @@ const EXECUTION_BLOCK_START_RE =
 const TOP_LEVEL_HEADING_RE = /^(\d+)\.\s+(.+)$/;
 const THIS_SECTION_TAIL_RE = /this\s+section\.?\s*$/i;
 
+/** One-word titles that are continuation fragments, not real section headings. */
+export const FALSE_FRAGMENT_SECTION_TITLE_WORDS = new Set([
+  "service",
+  "provider",
+  "client",
+  "if",
+  "each",
+  "either",
+  "the",
+  "upon",
+  "unless",
+  "when",
+  "during",
+  "within",
+  "after",
+  "before",
+  "neither",
+  "both",
+  "notwithstanding",
+  "all",
+  "some",
+  "such",
+  "an",
+  "a",
+  "in",
+  "for",
+  "where",
+  "as",
+  "one",
+  "party",
+  "no",
+  "not",
+  "any",
+  "upon",
+  "fees",
+  "invoices",
+]);
+
+const BODY_CONTINUATION_START_RE =
+  /^(?:Provider|Client|will|shall|may|must|party|parties|agrees?|represents?)\b/i;
+
+export function isFalseFragmentSectionTitle(title: string): boolean {
+  const words = title.trim().split(/\s+/).filter(Boolean);
+  if (words.length !== 1) return false;
+  const normalized = words[0].replace(/[.,;:]+$/, "").toLowerCase();
+  return FALSE_FRAGMENT_SECTION_TITLE_WORDS.has(normalized);
+}
+
+export function hasFalseFragmentSectionHeading(text: string): boolean {
+  for (const line of (text || "").replace(/\r\n/g, "\n").split("\n")) {
+    const trimmed = line.trim();
+    const match = trimmed.match(TOP_LEVEL_HEADING_RE);
+    if (!match?.[2] || /^\d+\.\d+/.test(trimmed)) continue;
+    if (isFalseFragmentSectionTitle(match[2])) return true;
+  }
+  return false;
+}
+
+function mergeFragmentWithContinuationLine(fragment: string, continuation: string): string | null {
+  const frag = fragment.trim();
+  const cont = continuation.trim();
+  if (!frag || !cont) return null;
+  if (/^provider\b/i.test(cont) && /^service$/i.test(frag)) {
+    return `Service ${cont}`;
+  }
+  if (/^client\b/i.test(cont) && /^service$/i.test(frag)) {
+    return `Service ${cont}`;
+  }
+  if (isFalseFragmentSectionTitle(frag) && BODY_CONTINUATION_START_RE.test(cont)) {
+    return `${frag} ${cont}`;
+  }
+  if (isFalseFragmentSectionTitle(frag) && /[a-z]/.test(cont)) {
+    return `${frag} ${cont}`;
+  }
+  return null;
+}
+
+function isContinuationBodyLine(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.length < 8) return false;
+  if (isOrphanStandaloneTopLevelSectionNumberLine(t)) return false;
+  if (TOP_LEVEL_HEADING_RE.test(t) && !/^\d+\.\d+/.test(t)) return false;
+  if (EXECUTION_BLOCK_START_RE.test(t)) return false;
+  return /[a-z]/.test(t);
+}
+
+/**
+ * Merge orphan `N.` + fragment + continuation patterns into operative paragraphs.
+ * Example: `5.` / `Service` / `Provider will resume…` => `Service Provider will resume…`
+ */
+export function repairOrphanNumberFragmentContinuationLines(text: string): {
+  text: string;
+  repairs: string[];
+} {
+  const repairs: string[] = [];
+  const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
+  const skip = new Set<number>();
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    if (skip.has(i)) continue;
+    const trimmed = lines[i]!.trim();
+
+    const falseHeading = trimmed.match(/^(\d+)\.\s+([A-Za-z]+)\s*$/);
+    if (falseHeading?.[2] && isFalseFragmentSectionTitle(falseHeading[2])) {
+      const nextIdx = nextNonEmptyLineIndex(lines, i + 1);
+      if (nextIdx != null) {
+        const merged = mergeFragmentWithContinuationLine(falseHeading[2], lines[nextIdx]!.trim());
+        if (merged) {
+          out.push(merged);
+          skip.add(nextIdx);
+          repairs.push(`orphan_fragment_heading_merged:${falseHeading[1]}`);
+          continue;
+        }
+      }
+    }
+
+    if (isFalseFragmentSectionTitle(trimmed)) {
+      const nextIdx = nextNonEmptyLineIndex(lines, i + 1);
+      if (nextIdx != null && isContinuationBodyLine(lines[nextIdx]!)) {
+        const merged = mergeFragmentWithContinuationLine(trimmed, lines[nextIdx]!.trim());
+        if (merged) {
+          out.push(merged);
+          skip.add(nextIdx);
+          repairs.push(`orphan_title_fragment_merged:${trimmed}`);
+          continue;
+        }
+      }
+    }
+
+    if (isOrphanStandaloneTopLevelSectionNumberLine(trimmed)) {
+      const fragIdx = nextNonEmptyLineIndex(lines, i + 1);
+      if (fragIdx != null) {
+        const fragTrimmed = lines[fragIdx]!.trim();
+        const contIdx = nextNonEmptyLineIndex(lines, fragIdx + 1);
+        if (
+          isFalseFragmentSectionTitle(fragTrimmed) &&
+          contIdx != null &&
+          isContinuationBodyLine(lines[contIdx]!)
+        ) {
+          const merged = mergeFragmentWithContinuationLine(fragTrimmed, lines[contIdx]!.trim());
+          if (merged) {
+            out.push(merged);
+            skip.add(fragIdx);
+            skip.add(contIdx);
+            repairs.push(`orphan_number_fragment_merged:${trimmed}`);
+            continue;
+          }
+        }
+      }
+      out.push(lines[i]!);
+      continue;
+    }
+
+    out.push(lines[i]!);
+  }
+
+  return {
+    text: out.join("\n").replace(/\n{3,}/g, "\n\n"),
+    repairs,
+  };
+}
+
 export type PaidProOrphanSectionNumberRepairResult = {
   text: string;
   repairs: string[];
@@ -215,6 +378,12 @@ export function repairPaidProOrphanSectionNumbers(text: string): PaidProOrphanSe
   const stranded = repairStrandedThisSectionReference(working);
   working = stranded.text;
   repairs.push(...stranded.repairs);
+
+  const fragmentMerge = repairOrphanNumberFragmentContinuationLines(working);
+  if (fragmentMerge.repairs.length > 0) {
+    working = fragmentMerge.text;
+    repairs.push(...fragmentMerge.repairs);
+  }
 
   const orphanScanBefore = (working.match(/^\d+\.\s*$/gm) ?? []).length;
   const terminalGuard = removeOrphanStandaloneSectionNumbersBeforeExecution(working);

@@ -10,6 +10,11 @@ import {
   isPaidProHeadingContinuationFragment,
   repairSplitPaidProHeadingFragments,
 } from "./repairSplitPaidProHeadingFragments";
+import {
+  hasFalseFragmentSectionHeading,
+  isFalseFragmentSectionTitle,
+  repairOrphanNumberFragmentContinuationLines,
+} from "./paidProOrphanSectionNumberRepair";
 
 const MAIN_SECTION_PREFIX_RE = /^(\d+)\.\s+(?!\d+\.\d)(.+)$/;
 const ALL_CAPS_SECTION_HEADING_RE = /^\d+\.\s+[A-Z][A-Z\s,&'\-]+$/;
@@ -26,7 +31,8 @@ export type PaidProSectionHeadingTitleAnomaly = {
     | "numbered_heading_ends_with_comma"
     | "numbered_heading_title_continuation_split"
     | "orphan_title_fragment_before_section"
-    | "duplicate_semantic_and_canonical_heading";
+    | "duplicate_semantic_and_canonical_heading"
+    | "false_fragment_section_heading";
 };
 
 function nextNonEmptyLineIndex(lines: string[], from: number): number | null {
@@ -177,6 +183,13 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
 
     const prefix = parseMainSectionPrefixLine(trimmed);
     if (prefix) {
+      if (isFalseFragmentSectionTitle(prefix.title)) {
+        findings.push({
+          lineIndex: i,
+          line: trimmed,
+          code: "false_fragment_section_heading",
+        });
+      }
       if (/,\s*$/.test(prefix.title)) {
         findings.push({
           lineIndex: i,
@@ -284,6 +297,12 @@ export function applyPaidProSectionHeadingTitleAuthority(text: string): {
   const repairs: string[] = [];
   let out = (text || "").replace(/\r\n/g, "\n");
 
+  const fragmentMerge = repairOrphanNumberFragmentContinuationLines(out);
+  if (fragmentMerge.repairs.length > 0) {
+    out = fragmentMerge.text;
+    repairs.push(...fragmentMerge.repairs.map((r) => `orphan_fragment:${r}`));
+  }
+
   const commaTrim = repairCommaTerminatedNumberedHeadings(out);
   if (commaTrim.repairs.length > 0) {
     out = commaTrim.text;
@@ -306,6 +325,14 @@ export function applyPaidProSectionHeadingTitleAuthority(text: string): {
   if (splitAgain.repairs.length > 0) {
     out = splitAgain.text;
     repairs.push(...splitAgain.repairs.map((r) => `split_heading:${r}`));
+  }
+
+  if (hasFalseFragmentSectionHeading(out)) {
+    const retry = repairOrphanNumberFragmentContinuationLines(out);
+    if (retry.repairs.length > 0) {
+      out = retry.text;
+      repairs.push(...retry.repairs.map((r) => `orphan_fragment_retry:${r}`));
+    }
   }
 
   return { text: out, repairs };

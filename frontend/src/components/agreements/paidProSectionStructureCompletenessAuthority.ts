@@ -12,6 +12,10 @@ import {
   applyPaidProSectionHeadingTitleAuthority,
   detectPaidProSectionHeadingTitleAnomalies,
 } from "./paidProSectionHeadingTitleAuthority";
+import {
+  hasFalseFragmentSectionHeading,
+  repairOrphanNumberFragmentContinuationLines,
+} from "./paidProOrphanSectionNumberRepair";
 
 export type PaidProSectionHierarchyMarker = {
   major: number;
@@ -381,6 +385,12 @@ export function applyPaidProSectionStructureCompletenessAuthority(
   let out = (text || "").replace(/\r\n/g, "\n").trim();
   const repairs: string[] = [];
 
+  const orphanFragmentMerge = repairOrphanNumberFragmentContinuationLines(out);
+  if (orphanFragmentMerge.repairs.length > 0) {
+    out = orphanFragmentMerge.text;
+    repairs.push(...orphanFragmentMerge.repairs.map((r) => `orphan_fragment:${r}`));
+  }
+
   let analysis = analyzePaidProSectionStructureCompleteness(out);
   if (analysis.repairable && (analysis.missingParentSections.length > 0 || analysis.missingIntermediateSections.length > 0)) {
     const repaired = repairPaidProSectionStructureCompleteness(out);
@@ -413,6 +423,16 @@ export function applyPaidProSectionStructureCompletenessAuthority(
         sectionHeadingTitleAnomalies: titleAnomalies.map((a) => `${a.code}:${a.line}`),
       };
     }
+  }
+
+  if (hasFalseFragmentSectionHeading(out)) {
+    analysis = {
+      ...analysis,
+      sectionHeadingTitleAnomalies: [
+        ...analysis.sectionHeadingTitleAnomalies,
+        "false_fragment_section_heading:persisted",
+      ],
+    };
   }
 
   const rejected =
