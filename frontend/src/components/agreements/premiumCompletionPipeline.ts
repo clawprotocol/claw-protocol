@@ -218,8 +218,10 @@ import {
 import {
   buildPremiumRecipientCandidatesFromIntake,
   classifyLongPremiumHttpOutcome,
+  clearAcceptedServerFullDraftLatchAndSessionFrozenBodies,
   countStructuralFatals,
   freezeAcceptedPremiumBodyForSession,
+  freezeSessionPremiumBodyForGeneration,
   getFrozenPremiumBodyForSession,
   isLongCommerciallyUsablePremiumBody,
   isNonfatalGenerationFailureCode,
@@ -2307,7 +2309,7 @@ async function runPremiumCompletionInner(
         );
       }
       if (shouldFreezePremiumPipelineRecoveryCandidate(doc, effectiveFull.server_generation_failure_code)) {
-        freezeAcceptedPremiumBodyForSession(input.agreementGenerationId, doc, "server_full_draft");
+        freezeSessionPremiumBodyForGeneration(input.agreementGenerationId, doc, "server_full_draft");
       }
       {
         const draftingStubRepair = repairContextualDraftingStubPhrases(doc);
@@ -2975,6 +2977,7 @@ async function runPremiumCompletionInner(
           });
         }
         if (!freezeCommit.ok) {
+          clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
           logPremiumCompletionDebug({
             stage: "pipeline_freeze_commit_rejected",
             accepted: false,

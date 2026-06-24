@@ -419,6 +419,10 @@ export function validatePaidProOutput(args: {
     }
   }
   if (conciseQuality.malformedOpening) {
+    if (serverFullDocExists && freezeCandidate.ok) {
+      logDecision(true, ["concise_malformed_opening_overridden_after_freeze_pass"]);
+      return { ok: true, reasons: [] };
+    }
     const reasons = ["concise_services_malformed_opening"];
     logVpaidDevFail(reasons);
     logDecision(false, reasons);

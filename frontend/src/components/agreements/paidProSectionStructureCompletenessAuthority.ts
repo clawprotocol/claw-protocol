@@ -109,6 +109,35 @@ export function collectPaidProSectionHierarchyMarkers(text: string): PaidProSect
   return markers;
 }
 
+function deriveSubsectionTitleFromLine(line: string): string | null {
+  const trimmed = line.trim();
+  const subMatch = trimmed.match(SUBSECTION_HEADING_RE);
+  if (subMatch?.[4]) {
+    const title = subMatch[4].trim().replace(/\.\s*$/, "");
+    if (title.length >= 4 && /[a-z]/i.test(title)) return title;
+  }
+  return null;
+}
+
+function deriveParentTitleFromChildLines(childLines: readonly string[]): string {
+  for (const line of childLines) {
+    const fromSub = deriveSubsectionTitleFromLine(line);
+    if (fromSub && fromSub.length >= 4) {
+      return fromSub.length > 72 ? `${fromSub.slice(0, 72).trim()}…` : fromSub;
+    }
+  }
+  const joined = childLines
+    .map((l) => l.replace(SUBSECTION_HEADING_RE, "$4").trim())
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (joined.length >= 12) {
+    const snippet = joined.slice(0, 72).trim();
+    if (snippet.length >= 8) return snippet;
+  }
+  return "OPERATIVE PROVISIONS";
+}
+
 function inferParentHeadingTitle(_major: number, childLines: readonly string[]): string | null {
   const joined = childLines.join(" ").toLowerCase();
   if (/warrant|represent|compliance|authority|non-?conflict/i.test(joined)) {
@@ -135,14 +164,14 @@ function inferParentHeadingTitle(_major: number, childLines: readonly string[]):
   if (/miscellaneous|counterpart|electronic signature/i.test(joined)) {
     return "MISCELLANEOUS";
   }
-  return null;
+  return deriveParentTitleFromChildLines(childLines);
 }
 
 function inferIntermediateHeadingTitle(
-  _major: number,
+  major: number,
   minor: number,
   siblingLines: readonly string[],
-): string | null {
+): string {
   const joined = siblingLines.join(" ").toLowerCase();
   if (/mutual authority|non-?conflict|represent/i.test(joined) && minor === 1) {
     return "Mutual Authority and Non-Conflict";
@@ -151,9 +180,14 @@ function inferIntermediateHeadingTitle(
     return "Service Warranties and Conditions";
   }
   if (/general|provision/i.test(joined)) {
-    return null;
+    return `General Provisions ${major}.${minor}`;
   }
-  return null;
+  const fromSibling = siblingLines.find((line) => deriveSubsectionTitleFromLine(line));
+  if (fromSibling) {
+    const title = deriveSubsectionTitleFromLine(fromSibling);
+    if (title) return title;
+  }
+  return `Subsection ${major}.${minor}`;
 }
 
 /** Analyze numbered hierarchy completeness without mutating text. */
@@ -277,7 +311,6 @@ export function repairPaidProSectionStructureCompleteness(text: string): {
       major,
       childMarkers.map((m) => m.line),
     );
-    if (!title) continue;
     insertLineBeforeIndex(lines, firstChild.lineIndex, `${major}. ${title}`);
     head = lines.join("\n");
     repairs.push(`insert_missing_parent:${major}`);
@@ -306,7 +339,6 @@ export function repairPaidProSectionStructureCompleteness(text: string): {
       minor,
       familyMarkers.map((m) => m.line),
     );
-    if (!title) continue;
     insertLineBeforeIndex(lines, insertBefore.lineIndex, `${major}.${minor} ${title}`);
     head = lines.join("\n");
     repairs.push(`insert_missing_intermediate:${major}.${minor}`);
@@ -382,6 +414,14 @@ export function applyPaidProSectionStructureCompletenessAuthority(
       repairs: repairs.slice(0, 12),
       rejected,
       rejectReason,
+      unresolvedSections: {
+        missingParents: analysis.missingParentSections,
+        missingIntermediates: analysis.missingIntermediateSections.slice(0, 12),
+        orphanChildren: analysis.orphanChildren.slice(0, 12),
+        truncatedFamilies: analysis.truncatedFamilies,
+        brokenFamilies: analysis.brokenFamilies,
+        syntheticMalformedHeadings: analysis.syntheticMalformedHeadings.slice(0, 6),
+      },
       ...analysis,
     });
   }

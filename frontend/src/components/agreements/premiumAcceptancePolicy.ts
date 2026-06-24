@@ -166,6 +166,8 @@ type LatchedAcceptedServerFullDraft = {
   source: PremiumRenderSource;
   len: number;
   hash: string;
+  /** True only after a successful freeze commit — blocks recovery replacement of long server corpus. */
+  freezeEstablished: boolean;
 };
 
 let latchedAcceptedServerFullDraft: LatchedAcceptedServerFullDraft | null = null;
@@ -174,17 +176,22 @@ let latchedAcceptedServerFullDraft: LatchedAcceptedServerFullDraft | null = null
 export function latchAcceptedServerFullDraftAuthority(
   body: string,
   source: PremiumRenderSource,
+  opts?: { freezeEstablished?: boolean },
 ): void {
   const t = (body || "").trim();
   if (!isLongCommerciallyUsablePremiumBody(t.length)) return;
   if (!isAuthoritativePremiumPipelineRenderSource(source)) return;
+  const freezeEstablished = opts?.freezeEstablished ?? false;
   if (!latchedAcceptedServerFullDraft || t.length >= latchedAcceptedServerFullDraft.len) {
     latchedAcceptedServerFullDraft = {
       body: t,
       source,
       len: t.length,
       hash: fingerprintAgreementBody(t),
+      freezeEstablished,
     };
+  } else if (freezeEstablished) {
+    latchedAcceptedServerFullDraft.freezeEstablished = true;
   }
 }
 
@@ -268,7 +275,8 @@ export function shouldPreserveLongPremiumDespiteSoftGateFailure(args: {
   return true;
 }
 
-export function freezeAcceptedPremiumBodyForSession(
+/** Session-only freeze — preserves long body across pipeline retries without establishing authority latch. */
+export function freezeSessionPremiumBodyForGeneration(
   generationId: string | null | undefined,
   body: string,
   source: PremiumRenderSource,
@@ -279,7 +287,15 @@ export function freezeAcceptedPremiumBodyForSession(
   const prev = sessionFrozenPremiumByGenerationId.get(id);
   if (prev && prev.body.length >= t.length) return;
   sessionFrozenPremiumByGenerationId.set(id, { body: t, source, frozenAt: Date.now() });
-  latchAcceptedServerFullDraftAuthority(t, source);
+}
+
+export function freezeAcceptedPremiumBodyForSession(
+  generationId: string | null | undefined,
+  body: string,
+  source: PremiumRenderSource,
+): void {
+  freezeSessionPremiumBodyForGeneration(generationId, body, source);
+  latchAcceptedServerFullDraftAuthority(body, source, { freezeEstablished: true });
 }
 
 export function getFrozenPremiumBodyForSession(
@@ -302,7 +318,7 @@ export function resolvePremiumBodyAgainstSessionFreeze(
   const frozen = getFrozenPremiumBodyForSession(generationId);
   if (!frozen) {
     if (isLongCommerciallyUsablePremiumBody(candidate.length)) {
-      freezeAcceptedPremiumBodyForSession(generationId, candidate, candidateSource);
+      freezeSessionPremiumBodyForGeneration(generationId, candidate, candidateSource);
     }
     return { body: candidate, source: candidateSource, usedFreeze: false };
   }
@@ -310,7 +326,7 @@ export function resolvePremiumBodyAgainstSessionFreeze(
     return { body: frozen.body, source: frozen.source, usedFreeze: true };
   }
   if (candidate.length > frozen.body.length) {
-    freezeAcceptedPremiumBodyForSession(generationId, candidate, candidateSource);
+    freezeSessionPremiumBodyForGeneration(generationId, candidate, candidateSource);
     return { body: candidate, source: candidateSource, usedFreeze: false };
   }
   return { body: frozen.body, source: frozen.source, usedFreeze: true };

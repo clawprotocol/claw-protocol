@@ -423,6 +423,15 @@ export function assertPaidProFreezeCandidateGates(
     );
   }
 
+  const postNoticeStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
+    source: `${surface}_post_notice_finalize`,
+    phase: "pre_freeze",
+    blockOnFatal: false,
+  });
+  if (postNoticeStructure.repairs.length > 0) {
+    safeForCommit = postNoticeStructure.text;
+  }
+
   safeForCommit = assertPaidProSectionStructureCompletenessForFreeze(
     safeForCommit,
     `${surface}_pre_freeze`,

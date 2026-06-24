@@ -55,7 +55,8 @@ function trim(s: string | null | undefined): string {
 }
 
 export function hasLatchedLongAcceptedServerFullDraft(): boolean {
-  return getLatchedAcceptedServerFullDraftAuthority() !== null;
+  const latched = getLatchedAcceptedServerFullDraftAuthority();
+  return latched !== null && latched.freezeEstablished;
 }
 
 export function logPremiumAuthorityCandidateRejectedShorterThanAccepted(payload: {
@@ -87,7 +88,7 @@ export function guardPaidProAcceptedServerFullDraftCommit(
   const generationOutcome = trim(args.generationOutcome).toLowerCase();
 
   const latched = getLatchedAcceptedServerFullDraftAuthority();
-  if (!latched || latched.len < LONG_PREMIUM_AUTHORITATIVE_MIN_LEN) {
+  if (!latched || !latched.freezeEstablished || latched.len < LONG_PREMIUM_AUTHORITATIVE_MIN_LEN) {
     return {
       text: candidate,
       rejected: false,
