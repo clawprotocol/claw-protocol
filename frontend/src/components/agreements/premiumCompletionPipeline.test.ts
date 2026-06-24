@@ -34,6 +34,13 @@ import {
 } from "./paidProTest429FourPartyNorthStarFixtures";
 import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 import { detectPaidProSectionHeadingTitleAnomalies } from "./paidProSectionHeadingTitleAuthority";
+import {
+  buildTest432FourPartyShrunkDocumentText,
+  buildTest432FourPartyWireServerCorpus,
+  test432FourPartyStructuredDraft,
+} from "./paidProTest432FourPartyNorthStarPipelineFixtures";
+import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
+import { countOperativeIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
 
@@ -1540,6 +1547,52 @@ describe("TEST431 premiumCompletionPipeline skipThinPrepare guard", () => {
     expect(out.premiumRenderSource).not.toMatch(/deterministic_recovery/);
     expect(out.winningPremiumBodyText.trim().length).toBeGreaterThan(15_000);
     expect(detectPaidProSectionHeadingTitleAnomalies(out.winningPremiumBodyText).length).toBe(0);
+    expect(out.winningPremiumBodyText).toMatch(/Revenue Allocation Among Service Providers/i);
+    for (const party of [NORTH_STAR, SUMMIT_RIDGE, DELTA_INTEGRATION, BLUE_CANYON]) {
+      expect(out.winningPremiumBodyText).toContain(party);
+    }
+  });
+});
+
+describe("TEST432 premiumCompletionPipeline authoritative wire freeze", () => {
+  it("prefers substantive server_full wire over shrunk document_text for freeze prep", async () => {
+    const wire = buildTest432FourPartyWireServerCorpus();
+    const shrunkDoc = buildTest432FourPartyShrunkDocumentText();
+    expect(wire.length).toBeGreaterThan(shrunkDoc.length);
+    expect(shrunkDoc.length).toBeGreaterThan(Math.floor(wire.length * 0.85));
+
+    premiumApiMock.mockResponses = [
+      {
+        title: "Consulting and Implementation Agreement",
+        agreement_family: "consulting_agreement",
+        document_text: shrunkDoc,
+        server_full_document_text: wire,
+        key_terms_found: ["payment", "governing_law"],
+        missing_material_info: [],
+        generation_outcome: "ok",
+        agreement_validation: { valid: true } as never,
+      },
+    ];
+
+    const out = await runPremiumCompletion({
+      intakeText: TEST429_FOUR_PARTY_NORTH_STAR_INTAKE,
+      originalUserIntakeRawForMerge: TEST429_FOUR_PARTY_NORTH_STAR_INTAKE,
+      structuredDraft: test432FourPartyStructuredDraft(),
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      agreementGenerationId: "gen-test432-wire-freeze",
+      premiumRequestIntakeFingerprint: "fp-test432-wire-freeze",
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => test432FourPartyStructuredDraft(),
+    });
+
+    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    expect(out.premiumRenderSource).not.toMatch(/deterministic_recovery/);
+    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThan(18_000);
+    expect(detectPaidProSectionHeadingTitleAnomalies(out.winningPremiumBodyText).length).toBe(0);
+    expect(countOperativeIfToNoticeStanzas(out.winningPremiumBodyText)).toBe(4);
+    expect(countPaidProExecutionBlocks(out.winningPremiumBodyText)).toBe(1);
     expect(out.winningPremiumBodyText).toMatch(/Revenue Allocation Among Service Providers/i);
     for (const party of [NORTH_STAR, SUMMIT_RIDGE, DELTA_INTEGRATION, BLUE_CANYON]) {
       expect(out.winningPremiumBodyText).toContain(party);

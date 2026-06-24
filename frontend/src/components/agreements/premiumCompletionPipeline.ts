@@ -121,6 +121,7 @@ import {
   detectPaidProSectionHeadingTitleAnomalies,
   applyPaidProSectionHeadingTitleAuthority,
 } from "./paidProSectionHeadingTitleAuthority";
+import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipelineTrace";
 import {
   buildPaidProFreezeCandidate,
   previewRecoverPaidProFreezeCandidate,
@@ -1964,6 +1965,15 @@ async function runPremiumCompletionInner(
         wireServerFullDocumentText,
       });
       lastWireAuthoritativeBodyLen = wireAuthoritativeBodyLen;
+      if (wireServerFullDocumentText.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
+        tracePaidProAcceptancePipelineStage({
+          stage: "raw_server_full_draft_received",
+          source: "server_full_draft",
+          text: wireServerFullDocumentText,
+          rawIntake: rawForSoT || rawIntake,
+          draft: mergedForApi,
+        });
+      }
       let premiumWireBodyRejectedForDevContextLeak = false;
       const wireLeakScan = scanPremiumOutputForDevContextLeak(
         wireServerFullDocumentText || wireDocumentText,
@@ -2996,7 +3006,14 @@ async function runPremiumCompletionInner(
         const useWireCorpusForFreeze =
           wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
           docTrimForFreeze.length < Math.floor(wireCorpusForFreeze.length * 0.85);
-        const freezePrepInput = useWireCorpusForFreeze ? wireCorpusForFreeze : doc;
+        const preferAuthoritativeWireForFreeze =
+          serverFullDocumentAuthoritative &&
+          wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+          wireCorpusForFreeze.length > docTrimForFreeze.length;
+        const freezePrepInput =
+          preferAuthoritativeWireForFreeze || useWireCorpusForFreeze
+            ? wireCorpusForFreeze
+            : doc;
         const freezePrepTrim = (freezePrepInput || "").trim();
         const wireHeadingAnomalies =
           detectPaidProSectionHeadingTitleAnomalies(freezePrepTrim).length > 0;
@@ -3231,6 +3248,13 @@ async function runPremiumCompletionInner(
             }
           }
           winningPremiumBodyText = doc;
+          tracePaidProAcceptancePipelineStage({
+            stage: "premium_completion_pipeline_final",
+            source: premiumRenderSource,
+            text: doc,
+            rawIntake: rawForSoT || rawIntake,
+            draft: mergedForApi,
+          });
           if (serverGenDegraded) {
             const fc = (effectiveFull.server_generation_failure_code || "").trim();
             if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {

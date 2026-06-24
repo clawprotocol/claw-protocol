@@ -74,6 +74,7 @@ import {
 import { paidProSignerExecutionCorpusIsFrozen } from "./paidProFinalHydratedCorpus";
 import { logPaidProDriftCorpusCaptureOnce } from "./paidProDriftCorpusCapture";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
+import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipelineTrace";
 import {
   hashPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
@@ -572,6 +573,13 @@ export function establishPaidProSourceOfTruth(args: {
     newText: record.text,
     sourceBefore,
     sourceAfter: record.source,
+  });
+  tracePaidProAcceptancePipelineStage({
+    stage: "after_establishPaidProSourceOfTruth",
+    source: record.source,
+    text: record.text,
+    rawIntake: args.intakeText ?? null,
+    draft: args.draft ?? null,
   });
   return record;
 }

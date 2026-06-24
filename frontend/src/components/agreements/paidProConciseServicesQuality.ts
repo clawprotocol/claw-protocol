@@ -14,6 +14,7 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
 import { isDeterministicQuadPartyProFallbackSurface } from "./agreementDocumentSurfacePolicy";
+import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipelineTrace";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
@@ -22,6 +23,7 @@ import { applyPaidProDomainScopeGuard } from "./paidProDomainScopeGuard";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { stripMalformedProReviewDisplayArtifacts } from "./polishProAgreementDisplayLayer";
+import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import {
   assessProMinimumSubstanceCached,
   hasPaidProAuthoritativeValidationPassed,
@@ -233,7 +235,9 @@ export function assessConciseCommercialServicesProQuality(args: {
     : /\b(?:governing\s+law|governed\s+by|laws\s+of)\b/i.test(bodyLow);
   (lawOk ? requiredFactsFound : requiredFactsMissing).push("governing_law");
 
-  const esignOk = /\belectronic\s+signatures?\b|\be-?sign\b|\bcounterparts?\b/i.test(bodyLow);
+  const esignOk =
+    /\belectronic\s+signatures?\b|\be-?sign\b|\bcounterparts?\b/i.test(bodyLow) ||
+    (/\bin\s+witness\s+whereof\b/i.test(bodyLow) && countPaidProExecutionBlocks(text) >= 1);
   (esignOk ? requiredFactsFound : requiredFactsMissing).push("electronic_signatures");
 
   const termOk = /\bterminat(?:ion|e)?\b/i.test(bodyLow);
@@ -555,5 +559,13 @@ function preparePaidProServerDocumentForAcceptanceCore(
     repairs.push("prepare:execution_invariant_final_restored");
   }
 
-  return { text: out.trim(), repairs: [...new Set(repairs)] };
+  const result = { text: out.trim(), repairs: [...new Set(repairs)] };
+  tracePaidProAcceptancePipelineStage({
+    stage: "after_preparePaidProServerDocumentForAcceptance",
+    source: "server_full_draft",
+    text: result.text,
+    rawIntake: intakeText,
+    draft: draft ?? null,
+  });
+  return result;
 }

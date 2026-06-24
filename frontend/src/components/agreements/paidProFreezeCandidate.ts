@@ -59,6 +59,7 @@ import {
   markPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import { logProCorpusSourceMap } from "./proCorpusSourcePath";
+import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipelineTrace";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderCorpus";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import type { CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapshot";
@@ -440,11 +441,25 @@ export function assertPaidProFreezeCandidateGates(
       return resolveHandoffPartySlotCount(handoff, prep.reviewParties.length);
     })(),
   });
+  tracePaidProAcceptancePipelineStage({
+    stage: "after_applyPaidProDocumentBoundaryAuthority",
+    source: args.source ?? "server_full_draft",
+    text: safeForCommit,
+    rawIntake: args.intakeText ?? null,
+    draft: args.draft ?? null,
+  });
 
   const postBoundaryHeading = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
   if (postBoundaryHeading.repairs.length > 0) {
     safeForCommit = postBoundaryHeading.text;
   }
+  tracePaidProAcceptancePipelineStage({
+    stage: "after_heading_title_authority",
+    source: args.source ?? "server_full_draft",
+    text: safeForCommit,
+    rawIntake: args.intakeText ?? null,
+    draft: args.draft ?? null,
+  });
 
   const postBoundaryStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
     source: `${surface}_post_boundary`,
@@ -657,7 +672,23 @@ export function buildPaidProFreezeCandidate(
   args: PreparePaidProFreezeCandidateArgs,
 ): PaidProFreezeCandidateGateResult {
   const prep = preparePaidProFreezeCandidateText(args);
-  return evaluatePaidProFreezeCandidateGates(prep, args);
+  tracePaidProAcceptancePipelineStage({
+    stage: "validatePaidProOutput_validation_input",
+    source: args.source ?? "server_full_draft",
+    text: prep.text,
+    rawIntake: args.intakeText ?? null,
+    draft: args.draft ?? null,
+  });
+  const result = evaluatePaidProFreezeCandidateGates(prep, args);
+  tracePaidProAcceptancePipelineStage({
+    stage: "after_buildPaidProFreezeCandidate",
+    source: args.source ?? "server_full_draft",
+    text: result.text,
+    rejectReason: result.rejectReason,
+    rawIntake: args.intakeText ?? null,
+    draft: args.draft ?? null,
+  });
+  return result;
 }
 
 /**
