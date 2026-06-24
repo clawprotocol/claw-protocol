@@ -77,8 +77,8 @@ describe("TEST419 — blank Pro review after SoT pre-freeze structural rejection
       draft: test419Draft(),
       premiumPipelineSource: "server_full_draft",
     });
-    expect(validation.ok).toBe(false);
-    expect(validation.reasons).toContain("missing_notices_heading");
+    expect(validation.ok).toBe(true);
+    expect(validation.reasons).toContain("deterministic_recovery_freeze_candidate_ok");
   });
 
   it("production lifecycle: accepted server_full_draft + SoT reject → deterministic recovery mounts review", () => {
@@ -145,14 +145,14 @@ describe("TEST419 — blank Pro review after SoT pre-freeze structural rejection
     expect(hasFrozenPaidProAuthoritativeSnapshot()).toBe(false);
   });
 
-  it("hierarchy break corpus fails SoT compatibility with section_structure reason", () => {
+  it("unified freeze candidate repairs hierarchy-break glued corpora", () => {
     const broken = buildTest418HierarchyBreakCorpus();
     const compat = evaluatePaidProCorpusSoTFreezeCompatibility(broken, {
       draft: test419Draft(),
       intakeText: TEST419_PRODUCTION_INTAKE,
       source: "test419_hierarchy",
     });
-    expect(compat.ok).toBe(false);
-    expect(compat.rejectReason).toMatch(/section_structure/);
+    expect(compat.ok).toBe(true);
+    expect(compat.text.length).toBeGreaterThanOrEqual(broken.length);
   });
 });

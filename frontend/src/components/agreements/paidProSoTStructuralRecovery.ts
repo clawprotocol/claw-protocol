@@ -3,12 +3,14 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
-import { validateClauseFamilyStructuralIntegrity } from "./clauseFamilyStructuralIntegrity";
 import { buildDeterministicQuadPartyMutualServicesProFallback } from "./deterministicQuadPartyProFallback";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
-import { evaluatePaidProSectionStructureFreezeGate } from "./paidProSectionStructureCompletenessAuthority";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import {
+  buildPaidProFreezeCandidate,
+  clearPartialPaidProAuthoritativeState,
+} from "./paidProFreezeCandidate";
+import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import {
   establishPaidProSourceOfTruth,
   hasPaidProSourceOfTruth,
@@ -44,8 +46,7 @@ export function hasFrozenPaidProAuthoritativeSnapshot(): boolean {
 }
 
 /**
- * Mirror SoT pre-freeze boundary + clause-family + section-structure gates for acceptance.
- * Uses the same repair passes as freeze without throwing.
+ * Canonical freeze-candidate gate — same prepare + assert path as SoT establishment.
  */
 export function evaluatePaidProCorpusSoTFreezeCompatibility(
   text: string,
@@ -58,45 +59,21 @@ export function evaluatePaidProCorpusSoTFreezeCompatibility(
     source?: string;
   },
 ): { ok: boolean; rejectReason: string | null; text: string } {
-  const source = opts?.source ?? "sot_freeze_compatibility_preview";
-  const boundary = applyPaidProDocumentBoundaryAuthority(text, {
+  const result = buildPaidProFreezeCandidate({
+    text,
     draft: opts?.draft ?? null,
     intakeText: opts?.intakeText ?? null,
-    parties: opts?.parties,
-    draftPartyCount: opts?.draftPartyCount,
-    handoffPartySlots: opts?.handoffPartySlots,
-    surface: source,
-    blockOnViolation: false,
-    blockOnUnresolved: false,
+    source: "server_full_draft",
+    surface: opts?.source ?? "sot_freeze_compatibility_preview",
   });
-  if (!boundary.ok || boundary.violations.length > 0) {
-    return {
-      ok: false,
-      rejectReason: boundary.violations[0] ?? "document_boundary_violation",
-      text: boundary.text,
-    };
-  }
-  const clauseFamily = validateClauseFamilyStructuralIntegrity(boundary.text, {
-    parties: opts?.parties,
-    surface: source,
-    phase: "post_acceptance",
-    draftPartyCount: opts?.draftPartyCount,
-    handoffPartySlots: opts?.handoffPartySlots,
-  });
-  if (!clauseFamily.ok) {
-    const code = clauseFamily.violations[0]?.code ?? "clause_family_structural";
-    return { ok: false, rejectReason: code, text: boundary.text };
-  }
-  const structure = evaluatePaidProSectionStructureFreezeGate(boundary.text, source);
-  if (!structure.ok) {
-    return {
-      ok: false,
-      rejectReason: structure.rejectReason ?? "section_structure_incomplete",
-      text: structure.text,
-    };
-  }
-  return { ok: true, rejectReason: null, text: structure.text };
+  return {
+    ok: result.ok,
+    rejectReason: result.rejectReason,
+    text: result.ok ? result.text : result.text,
+  };
 }
+
+export { clearPartialPaidProAuthoritativeState };
 
 export type PaidProSoTStructuralRecoveryResult =
   | { ok: true; record: PaidProSourceOfTruth; recoverySource: string; body: string }
@@ -138,6 +115,10 @@ export function tryRecoverPaidProSourceOfTruthFromStructuralFailure(args: {
     args.intakeText,
     { surface: "paid_pro_sot_structural_recovery" },
   );
+  markPaidProPipelineValidationPassed({
+    text: prep.text,
+    source: args.source ?? "server_full_draft_retry",
+  });
   try {
     const record = establishPaidProSourceOfTruth({
       text: prep.text,

@@ -8,22 +8,14 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
-import {
-  applyAcceptedProCorpusSafeDisplay,
-} from "./acceptedProCorpusSafeDisplay";
-import {
-  paidProPipelineAcceptedCorpusHash,
-  readPaidProPipelineAcceptedCorpusHash,
-} from "./paidProPipelineAcceptedCorpus";
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
 import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycleDiff";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
-import { repairAgreementTemplatePlaceholders, repairPaidProFreezePlaceholderAuthority, logPreFreezePlaceholderRejectionDetails } from "./agreementTemplatePlaceholderSafety";
+import { logPreFreezePlaceholderRejectionDetails } from "./agreementTemplatePlaceholderSafety";
 import {
   hasPaidProPipelineSessionAcceptance,
-  markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { logFalseProAuthorityBlocked } from "./paidProRuntimeAuthorityEstablishment";
@@ -34,7 +26,6 @@ import {
   freezeCanonicalAgreementSnapshot,
   hasFrozenCanonicalAgreementCorpus,
   readCanonicalAgreementCorpusForSurface,
-  type CanonicalAgreementSnapshotParty,
   type CanonicalAgreementSurface,
 } from "./canonicalAgreementSnapshot";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
@@ -83,27 +74,10 @@ import { paidProSignerExecutionCorpusIsFrozen } from "./paidProFinalHydratedCorp
 import { logPaidProDriftCorpusCaptureOnce } from "./paidProDriftCorpusCapture";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import {
-  intakeHasFullLegalEntityParties,
-  resolveCanonicalPartyIdentitiesFromIntake,
-} from "./canonicalPartyIdentityResolver";
-import { buildPartyEntries, frozenManifestRecitalNeedsRewrite, normalizeOpeningRecital } from "./paidProAgreementPolish";
-import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
-import {
   hashPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
-import {
-  readPremiumRecipientHandoff,
-  resolveHandoffPartySlotCount,
-  writePremiumRecipientHandoffLinear,
-} from "./premiumPartyNamesHandoff";
-import {
-  ensurePaidProAcceptanceExecutionBlockInvariant,
-  isGenericPaidProAcceptanceManifestFallback,
-  manifestRecordsForPaidProAcceptance,
-  resolveAcceptanceManifestRecordsForExecution,
-} from "./paidProAcceptanceExecutionBlockInvariant";
-import { assertPaidProSingleExecutionBlock } from "./paidProExecutionBlockAuthority";
+import { writePremiumRecipientHandoffLinear } from "./premiumPartyNamesHandoff";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
 import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import { resolvePaidProFrozenDisplayAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
@@ -114,20 +88,15 @@ import {
 import {
   clearPaidProSignerStagingDisplayCorpus,
 } from "./paidProSignerStagingDisplayCorpus";
-import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
-import { assertPaidProDocumentBoundaryAuthorityForFreeze } from "./paidProDocumentBoundaryAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
-import { assertPaidProSectionStructureCompletenessForFreeze, applyPaidProSectionStructureCompletenessAuthority } from "./paidProSectionStructureCompletenessAuthority";
-import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
-import {
-  detectPaidProOrphanSubsections,
-  normalizePaidProOrphanSubsections,
-} from "./normalizePaidProOrphanSubsections";
-import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import {
   evaluatePaidProSourceOfTruthEstablishment,
   logPaidProSourceOfTruthEstablishmentAttempt,
 } from "./paidProSessionEligibility";
+import {
+  preparePaidProFreezeCandidateText,
+  assertPaidProFreezeCandidateGates,
+} from "./paidProFreezeCandidate";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -307,52 +276,26 @@ export function establishPaidProSourceOfTruth(args: {
       return existingSot;
     }
   }
-  const authorityGuard = guardPaidProAcceptedServerFullDraftCommit({
-    candidateText: args.text,
-    candidateSource: requestedSource,
-    renderSource: requestedSource,
-    generationOutcome: args.generationOutcome ?? "ok",
-    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
-    reason: "establish_paid_pro_source_of_truth",
+  const prep = preparePaidProFreezeCandidateText({
+    text: args.text,
+    source: requestedSource,
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+    agreementGenerationId: args.agreementGenerationId,
+    generationOutcome: args.generationOutcome,
+    reviewSessionId: args.reviewSessionId,
+    surface: "establish_paid_pro_source_of_truth",
   });
-  const authorityText = authorityGuard.text;
   logProCorpusSourceMap({
     stage: "server_full_draft_received",
     source: args.source ?? "server_full_draft",
-    len: authorityText.length,
-    text: authorityText,
+    len: prep.text.length,
+    text: prep.text,
     allowedToOverride: false,
-    reason: authorityGuard.rejected
-      ? "establish_paid_pro_source_of_truth_latch_restore"
-      : "establish_paid_pro_source_of_truth",
+    reason: "paid_pro_freeze_candidate_prepared",
   });
-  const incomingPreparedHash = paidProPipelineAcceptedCorpusHash(authorityText);
-  const pipelineAcceptedHash = readPaidProPipelineAcceptedCorpusHash();
-  const skipRedundantSafeDisplay =
-    Boolean(pipelineAcceptedHash) &&
-    Boolean(incomingPreparedHash) &&
-    pipelineAcceptedHash === incomingPreparedHash;
-  const safe = skipRedundantSafeDisplay
-    ? authorityText
-    : applyAcceptedProCorpusSafeDisplay(authorityText, {
-        draft: args.draft ?? null,
-        intakeText: args.intakeText ?? null,
-        surface: "establish_paid_pro_source_of_truth",
-      }).text;
-  const pipelineSessionAccepted =
-    hasPaidProPipelineSessionAcceptance({
-      text: authorityText,
-      source: requestedSource,
-    }) ||
-    hasPaidProPipelineSessionAcceptance({
-      text: trim(args.text),
-      source: requestedSource,
-    });
-  if (pipelineSessionAccepted && safe !== authorityText) {
-    markPaidProPipelineValidationPassed({ text: safe, source: requestedSource });
-  }
   const minimumSubstance = validateProMinimumSubstance({
-    text: safe,
+    text: prep.text,
     rawIntake: args.intakeText ?? "",
     draft: args.draft ?? null,
     source: requestedSource,
@@ -361,225 +304,51 @@ export function establishPaidProSourceOfTruth(args: {
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.intakeText ?? "") &&
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.draft?.purpose ?? "");
   const pipelineAcceptedAfterSubstance =
-    pipelineSessionAccepted ||
-    hasPaidProPipelineSessionAcceptance({ text: safe, source: requestedSource });
-  if (minimumSubstance.applies && !minimumSubstance.ok && intakeHasConcreteServicesFacts) {
-    const emptyUnknownSubstanceFailure = minimumSubstance.missingSections.length === 0;
-    const advisoryOnly =
-      pipelineAcceptedAfterSubstance && emptyUnknownSubstanceFailure;
-    if (!advisoryOnly) {
+    hasPaidProPipelineSessionAcceptance({
+      text: prep.text,
+      source: requestedSource,
+    }) ||
+    hasPaidProPipelineSessionAcceptance({
+      text: trim(args.text),
+      source: requestedSource,
+    });
+  if (minimumSubstance.applies && !minimumSubstance.ok) {
+    if (pipelineAcceptedAfterSubstance) {
+      logProCorpusSourceMap({
+        stage: "client_gates_passed",
+        source: requestedSource,
+        len: prep.text.length,
+        text: prep.text,
+        allowedToOverride: false,
+        reason: `minimum_substance_advisory_after_pipeline_accept;malformedOpening=${minimumSubstance.malformedOpening};missing=${minimumSubstance.missingSections.join(",") || "unknown"}`,
+      });
+    } else if (intakeHasConcreteServicesFacts) {
       throw new Error(
         `[pro-minimum-substance-blocked] missingSections=${minimumSubstance.missingSections.join(",") || "unknown"}`,
       );
     }
-    logProCorpusSourceMap({
-      stage: "client_gates_passed",
-      source: requestedSource,
-      len: safe.length,
-      text: safe,
-      allowedToOverride: false,
-      reason: `minimum_substance_advisory_after_pipeline_accept;malformedOpening=${minimumSubstance.malformedOpening};missing=${minimumSubstance.missingSections.join(",") || "unknown"}`,
-    });
   }
   logProCorpusSourceMap({
     stage: "client_gates_passed",
     source: args.source ?? "server_full_draft",
-    len: safe.length,
-    text: safe,
+    len: prep.text.length,
+    text: prep.text,
     allowedToOverride: false,
-    reason: "accepted_pro_corpus_safe_display",
+    reason: "paid_pro_freeze_candidate_prepared",
   });
-  const postSafeGuard = guardPaidProAcceptedServerFullDraftCommit({
-    candidateText: safe,
-    candidateSource: requestedSource,
-    renderSource: requestedSource,
-    generationOutcome: args.generationOutcome ?? "ok",
-    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
-    reason: "establish_paid_pro_source_of_truth_post_safe_display",
-  });
-  let safeForCommit = postSafeGuard.text;
-  const acceptanceManifest = manifestRecordsForPaidProAcceptance({
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-  });
-  const skipAcceptanceExecutionSynthesis = isGenericPaidProAcceptanceManifestFallback(
-    acceptanceManifest,
-  );
-  if (!skipAcceptanceExecutionSynthesis) {
-    const exec = ensurePaidProAcceptanceExecutionBlockInvariant(safeForCommit, acceptanceManifest);
-    safeForCommit = exec.text;
-    assertPaidProSingleExecutionBlock(safeForCommit, "establish_paid_pro_source_of_truth_pre_freeze");
-  }
-  const partyNameList = (args.draft?.parties ?? [])
-    .map((p) => String(p?.name ?? "").trim())
-    .filter((n) => n.length >= 2);
-  const roleLabels = (args.draft?.parties ?? [])
-    .map((p) => String(p?.role ?? "").trim())
-    .filter((r) => r.length >= 2);
-  const acceptanceManifestForOpening = manifestRecordsForPaidProAcceptance({
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-  });
-  if (acceptanceManifestForOpening.length >= 3) {
-    const manifestNames = acceptanceManifestForOpening.map((r) => r.fullLegalName);
-    const recital = normalizeOpeningRecital(
-      safeForCommit,
-      buildPartyEntries(manifestNames),
-      "high",
-      { forceRewrite: frozenManifestRecitalNeedsRewrite(safeForCommit, manifestNames) },
-    );
-    safeForCommit = recital.text;
-  } else if (intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList)) {
-    const identityRecords = resolveCanonicalPartyIdentitiesFromIntake(
-      args.intakeText ?? "",
-      partyNameList,
-      roleLabels.length >= 2 ? roleLabels : undefined,
-    );
-    if (identityRecords.length >= 2) {
-      safeForCommit = ensurePaidProServicesAgreementOpening(
-        safeForCommit,
-        identityRecords,
-        args.intakeText ?? null,
-      ).text;
-    }
-  }
-  const orphanDetect = detectPaidProOrphanSubsections(safeForCommit);
-  if (orphanDetect.orphanSectionsFound > 0) {
-    const orphanRepair = normalizePaidProOrphanSubsections(safeForCommit, {
-      source: "establish_paid_pro_source_of_truth_pre_freeze",
-    });
-    safeForCommit = orphanRepair.text;
-    logProCorpusSourceMap({
-      stage: "pre_freeze_orphan_subsection_repair",
-      source: args.source ?? "server_full_draft",
-      len: safeForCommit.length,
-      text: safeForCommit,
-      allowedToOverride: false,
-      reason: `orphan_sections=${orphanRepair.sectionNumbers.join(",")}`,
-    });
-  }
-  const orphanSectionRepair = repairPaidProOrphanSectionNumbers(safeForCommit);
-  if (orphanSectionRepair.repairs.length > 0) {
-    safeForCommit = orphanSectionRepair.text;
-    logProCorpusSourceMap({
-      stage: "pre_freeze_orphan_section_number_repair",
-      source: args.source ?? "server_full_draft",
-      len: safeForCommit.length,
-      text: safeForCommit,
-      allowedToOverride: false,
-      reason: orphanSectionRepair.repairs.join(","),
-    });
-  }
-  const reviewParties = resolvePartiesForReviewRender({
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-  });
-  const parties: CanonicalAgreementSnapshotParty[] = reviewParties
-    .map((p) => ({
-      name: p.partyLegalName.trim(),
-      role: null,
-      email: p.signerEmail?.trim() || null,
-      partyAddress: p.partyAddress?.trim() || null,
-    }))
-    .filter((p) => p.name.length >= 2);
+  const reviewParties = prep.reviewParties;
+  const parties = prep.parties;
   const partyNames = parties.map((p) => p.name);
-  let placeholderRepairTotal: string[] = [];
-  for (let pass = 0; pass < 2; pass++) {
-    const placeholderRepair = repairAgreementTemplatePlaceholders(safeForCommit, {
-      intakeRaw: args.intakeText ?? "",
-      partyNames,
-    });
-    safeForCommit = placeholderRepair.text;
-    placeholderRepairTotal.push(...placeholderRepair.repaired);
-    if (placeholderRepair.repaired.length === 0) break;
-  }
-  const freezeAuthorityRepair = repairPaidProFreezePlaceholderAuthority(safeForCommit, {
-    intakeRaw: args.intakeText ?? "",
-    partyNames,
-  });
-  if (freezeAuthorityRepair.repaired.length > 0) {
-    safeForCommit = freezeAuthorityRepair.text;
-    placeholderRepairTotal.push(...freezeAuthorityRepair.repaired);
-  }
-  if (placeholderRepairTotal.length > 0) {
-    logProCorpusSourceMap({
-      stage: "pre_freeze_placeholder_repair",
-      source: args.source ?? "server_full_draft",
-      len: safeForCommit.length,
-      text: safeForCommit,
-      allowedToOverride: false,
-      reason: placeholderRepairTotal.slice(0, 8).join(","),
-    });
-  }
-  const canonicalStructure = applyPaidProCanonicalDocumentStructureAuthority(safeForCommit, {
-    source: "establish_paid_pro_source_of_truth_pre_freeze",
-    phase: "pre_freeze",
-  });
-  if (canonicalStructure.repairs.length > 0) {
-    safeForCommit = canonicalStructure.text;
-    logProCorpusSourceMap({
-      stage: "pre_freeze_canonical_structure_authority",
-      source: args.source ?? "server_full_draft",
-      len: safeForCommit.length,
-      text: safeForCommit,
-      allowedToOverride: false,
-      reason: canonicalStructure.repairs.slice(0, 8).join(","),
-    });
-  }
-  safeForCommit = assertPaidProDocumentBoundaryAuthorityForFreeze(safeForCommit, {
+  const safeForCommit = assertPaidProFreezeCandidateGates(prep, {
+    text: args.text,
+    source: requestedSource,
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
-    surface: "establish_paid_pro_source_of_truth_pre_freeze",
-    parties: reviewParties,
-    draftPartyCount: args.draft?.parties?.length ?? 0,
-    handoffPartySlots: (() => {
-      const handoff = readPremiumRecipientHandoff();
-      if (!handoff) return reviewParties.length;
-      return resolveHandoffPartySlotCount(handoff, reviewParties.length);
-    })(),
+    agreementGenerationId: args.agreementGenerationId,
+    generationOutcome: args.generationOutcome,
+    reviewSessionId: args.reviewSessionId,
+    surface: "establish_paid_pro_source_of_truth",
   });
-  const postBoundaryStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
-    source: "establish_paid_pro_source_of_truth_post_boundary",
-    phase: "pre_freeze",
-    blockOnFatal: false,
-  });
-  if (postBoundaryStructure.repairs.length > 0) {
-    safeForCommit = postBoundaryStructure.text;
-    logProCorpusSourceMap({
-      stage: "pre_freeze_canonical_structure_authority",
-      source: args.source ?? "server_full_draft",
-      len: safeForCommit.length,
-      text: safeForCommit,
-      allowedToOverride: false,
-      reason: postBoundaryStructure.repairs.slice(0, 8).join(","),
-    });
-  }
-  const preFreezeExecutionManifest = resolveAcceptanceManifestRecordsForExecution({
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-  });
-  if (
-    preFreezeExecutionManifest.length >= 3 &&
-    !isGenericPaidProAcceptanceManifestFallback(preFreezeExecutionManifest)
-  ) {
-    const preFreezeExecution = ensurePaidProAcceptanceExecutionBlockInvariant(
-      safeForCommit,
-      preFreezeExecutionManifest,
-    );
-    safeForCommit = preFreezeExecution.text;
-    assertPaidProSingleExecutionBlock(
-      safeForCommit,
-      "establish_paid_pro_source_of_truth_pre_freeze_execution",
-      { expectedParties: preFreezeExecutionManifest.length },
-    );
-  }
-  if (containsUnresolvedRenderTokens(safeForCommit)) {
-    throw new Error("[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority");
-  }
-  safeForCommit = assertPaidProSectionStructureCompletenessForFreeze(
-    safeForCommit,
-    "establish_paid_pro_source_of_truth_pre_freeze",
-  );
   const authoritativeSignerCount = resolveAuthoritativeSignerCount({
     intakeText: args.intakeText ?? null,
     draftParties: parties,
@@ -708,7 +477,7 @@ export function establishPaidProSourceOfTruth(args: {
   });
   if (reviewParties.length >= 2) {
     setConsumedPaidProSignerMetadataAuthority({
-      parties: reviewParties,
+      parties: [...reviewParties],
       source: "server_full_draft",
       hash: hashPaidProSignerMetadataAuthority(reviewParties),
       updatedAt: Date.now(),

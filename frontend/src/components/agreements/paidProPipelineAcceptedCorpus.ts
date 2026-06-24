@@ -20,6 +20,10 @@ export function readPaidProPipelineAcceptedCorpusHash(): string | null {
   return pipelineAcceptedCorpusHash;
 }
 
-export function clearPaidProPipelineAcceptedCorpusHashForTests(): void {
+export function clearPaidProPipelineAcceptedCorpusHash(): void {
   pipelineAcceptedCorpusHash = null;
+}
+
+export function clearPaidProPipelineAcceptedCorpusHashForTests(): void {
+  clearPaidProPipelineAcceptedCorpusHash();
 }

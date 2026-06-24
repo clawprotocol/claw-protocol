@@ -192,9 +192,14 @@ export function getLatchedAcceptedServerFullDraftAuthority(): LatchedAcceptedSer
   return latchedAcceptedServerFullDraft;
 }
 
-export function clearFrozenPremiumSessionBodiesForTests(): void {
+/** Clears latch + per-generation frozen bodies after structural SoT rejection (TEST421). */
+export function clearAcceptedServerFullDraftLatchAndSessionFrozenBodies(): void {
   sessionFrozenPremiumByGenerationId.clear();
   latchedAcceptedServerFullDraft = null;
+}
+
+export function clearFrozenPremiumSessionBodiesForTests(): void {
+  clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
 }
 
 export function isLongCommerciallyUsablePremiumBody(bodyLen: number): boolean {

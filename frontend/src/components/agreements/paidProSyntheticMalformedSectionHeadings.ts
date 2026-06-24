@@ -25,6 +25,16 @@ const PROVISIONS_GLUED_INTERMEDIATE_RE = /^\d+\.\d+\s+Provisions\s+\d+\.\d+/i;
 const GENERIC_GENERAL_PROVISIONS_RE = /^\d+\.\d+\s+General Provisions\s*$/i;
 const SUBSECTION_HEADING_RE = /^(\d+)\.(\d+)(?:\.(\d+))?\s+(.+)$/;
 
+/** Real clause titles (e.g. "Initial Payment.") — not empty synthetic subsection shells. */
+function isSubstantiveSubsectionTitle(title: string): boolean {
+  const t = title.trim();
+  if (t.length < 5) return false;
+  if (/^Section\s*$/i.test(t)) return false;
+  if (/^General Provisions\s*$/i.test(t)) return false;
+  if (/^Provisions\s+\d+\.\d+/i.test(t)) return false;
+  return /[a-z]/i.test(t) && (/\s/.test(t) || t.endsWith("."));
+}
+
 function isProseBodyLine(trimmed: string): boolean {
   if (!trimmed) return false;
   if (GENERIC_SECTION_PARENT_RE.test(trimmed)) return false;
@@ -126,7 +136,7 @@ export function detectPaidProSyntheticMalformedSectionHeadings(text: string): Pa
         break;
       }
     }
-    if (!hasBody) {
+    if (!hasBody && !isSubstantiveSubsectionTitle(titleText)) {
       findings.push({ lineIndex: i, line: trimmed, code: "empty_numbered_subsection" });
     }
   }

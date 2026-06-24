@@ -216,6 +216,43 @@ export function clearPremiumCompletionSnapshot(): void {
   }
 }
 
+/**
+ * Strip accepted-but-unfrozen Pro corpus from the session snapshot while preserving intake draft,
+ * parties, and generation binding needed for retry (TEST421).
+ */
+export function quarantineAcceptedProCorpusInPremiumCompletionSnapshot(): boolean {
+  const snap = readPremiumCompletionSnapshot();
+  if (!snap) return false;
+  const premiumDraft = { ...snap.premiumDraft };
+  delete premiumDraft.premium_full_document_text;
+  delete premiumDraft.premium_server_full_document_text;
+  if (
+    premiumDraft.premium_render_source &&
+    premiumDraft.premium_render_source !== "live_generated_preview"
+  ) {
+    premiumDraft.premium_render_source = "live_generated_preview";
+  }
+  const next: Omit<PremiumCompletionSnapshot, "savedAt"> = {
+    ...snap,
+    premiumDraft,
+    premiumAccepted: false,
+    structuralCatastrophic: true,
+  };
+  delete next.premiumReadonlyPlainText;
+  delete next.premiumWinningBodyText;
+  delete next.acceptedPremiumCanonicalText;
+  delete next.acceptedPremiumCanonicalHash;
+  delete next.acceptedPremiumCanonicalPipelineSource;
+  delete next.paidProSourceOfTruthText;
+  delete next.paidProSourceOfTruthHash;
+  delete next.paidProSourceOfTruthAcceptedAt;
+  delete next.paidProSourceOfTruthSource;
+  delete next.premiumPipelineRenderSource;
+  delete next.premiumRenderResolveSource;
+  persistPremiumCompletionSnapshot(next);
+  return true;
+}
+
 export function markPremiumPostCheckoutRevealDismissed(): void {
   try {
     sessionStorage.setItem(REVEAL_DISMISSED_KEY, "1");

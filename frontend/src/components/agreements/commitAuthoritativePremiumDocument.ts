@@ -4,6 +4,7 @@
 
 import type { MutableRefObject } from "react";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
 import {
@@ -114,6 +115,66 @@ export function probeAuthoritativeVisibleSurfaces(args: {
       (args.draft?.premium_render_source as string | undefined) ??
       null,
   };
+}
+
+export function clearAcceptedUnfrozenPremiumDocumentRefs(
+  refs: AuthoritativePremiumDocumentRefs,
+): void {
+  refs.hydratedPremiumBodyRef.current = "";
+  refs.lastPremiumWinningCorpusRef.current = "";
+  refs.premiumPipelineOutputBodyRef.current = "";
+  refs.lastPremiumPipelineRenderSourceRef.current = null;
+  if (refs.lastKnownGoodAuthoritativeDraftRef) {
+    refs.lastKnownGoodAuthoritativeDraftRef.current = "";
+  }
+}
+
+export function stripAcceptedPremiumServerFieldsFromDraft(draft: ParsedDraftShape): ParsedDraftShape {
+  const next = { ...draft };
+  delete next.premium_full_document_text;
+  delete next.premium_server_full_document_text;
+  if (
+    next.premium_render_source &&
+    next.premium_render_source !== "live_generated_preview"
+  ) {
+    next.premium_render_source = "live_generated_preview";
+  }
+  return next;
+}
+
+export function rejectedCorpusMatchesStoredText(
+  rejectedCorpusText: string | null | undefined,
+  text: string | null | undefined,
+): boolean {
+  const rejected = (rejectedCorpusText || "").trim();
+  const candidate = (text || "").trim();
+  if (!rejected || !candidate) return false;
+  if (rejected === candidate) return true;
+  if (rejected.length >= 500 && candidate.length >= 500) {
+    return fingerprintAgreementBody(rejected) === fingerprintAgreementBody(candidate);
+  }
+  return false;
+}
+
+/** Revert agreement document away from rejected Pro corpus; clear winning/hydrated refs. */
+export function revertAgreementDocumentAwayFromRejectedCorpus(
+  refs: AuthoritativePremiumDocumentRefs,
+  rejectedCorpusText: string,
+  starterPlain: string,
+): { reverted: boolean; starterPlain: string } {
+  clearAcceptedUnfrozenPremiumDocumentRefs(refs);
+  const current = refs.agreementDocumentTextRef.current.trim();
+  const rejected = (rejectedCorpusText || "").trim();
+  const shouldRevert =
+    rejected.length > 0 &&
+    (rejectedCorpusMatchesStoredText(rejected, current) || current.length >= 1500);
+  if (!shouldRevert) {
+    return { reverted: false, starterPlain: current };
+  }
+  const revert = (starterPlain || "").trim();
+  refs.agreementDocumentTextRef.current = revert;
+  refs.agreementDocumentDirtyRef.current = false;
+  return { reverted: true, starterPlain: revert };
 }
 
 /** True when any canonical surface carries the authoritative corpus (not starter preview). */

@@ -30,7 +30,12 @@ import {
   validateProMinimumSubstance,
 } from "./paidProConciseServicesQuality";
 import { corpusHasPaidProSyntheticMalformedSectionHeadings } from "./paidProSyntheticMalformedSectionHeadings";
-import { evaluatePaidProCorpusSoTFreezeCompatibility } from "./paidProSoTStructuralRecovery";
+import {
+  buildPaidProFreezeCandidate,
+  logPaidProFreezeCandidateDecision,
+  previewRecoverPaidProFreezeCandidate,
+} from "./paidProFreezeCandidate";
+import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -284,13 +289,51 @@ export function validatePaidProOutput(args: {
     logDecision(false, reasons);
     return { ok: false, reasons };
   }
-  const structureFreeze = evaluatePaidProCorpusSoTFreezeCompatibility(t, {
+  const acceptanceHash = paidProPipelineAcceptedCorpusHash(t);
+  const freezeCandidate = buildPaidProFreezeCandidate({
+    text: t,
     draft: args.draft ?? null,
     intakeText: rawI,
-    source: "validatePaidProOutput:sot_freeze_compatibility_gate",
+    source: pipelineSource ?? "server_full_draft",
+    surface: "validatePaidProOutput",
   });
-  if (!structureFreeze.ok) {
-    const reasons = [structureFreeze.rejectReason ?? "section_structure_incomplete"];
+  logPaidProFreezeCandidateDecision({
+    accepted: freezeCandidate.ok,
+    source: pipelineSource ?? "server_full_draft",
+    candidateHash: freezeCandidate.hash,
+    acceptanceHash,
+    hashesMatch: freezeCandidate.hash === acceptanceHash,
+    rejectReason: freezeCandidate.rejectReason,
+    candidateLen: freezeCandidate.text.length,
+  });
+  if (!freezeCandidate.ok) {
+    if (serverFullDocExists) {
+      const recovery = previewRecoverPaidProFreezeCandidate({
+        draft: args.draft ?? null,
+        intakeText: rawI,
+        surface: "validatePaidProOutput_recovery",
+      });
+      logPaidProFreezeCandidateDecision({
+        accepted: recovery.ok,
+        source: "deterministic_recovery_freeze_candidate",
+        candidateHash: recovery.hash,
+        acceptanceHash,
+        hashesMatch: false,
+        rejectReason: recovery.rejectReason,
+        candidateLen: recovery.text.length,
+      });
+      if (recovery.ok) {
+        logDecision(true, [
+          "deterministic_recovery_freeze_candidate_ok",
+          freezeCandidate.rejectReason ?? "server_freeze_failed",
+        ]);
+        return {
+          ok: true,
+          reasons: ["deterministic_recovery_freeze_candidate_ok"],
+        };
+      }
+    }
+    const reasons = [freezeCandidate.rejectReason ?? "freeze_candidate_rejected"];
     logVpaidDevFail(reasons);
     logDecision(false, reasons);
     return { ok: false, reasons };

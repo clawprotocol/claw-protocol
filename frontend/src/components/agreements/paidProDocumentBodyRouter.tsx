@@ -11,10 +11,6 @@ import {
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
 import type { PaidProFirstReviewVisibleDisplayArgs } from "./paidProFirstReviewDisplayAuthority";
 import {
-  getAuthoritativeAgreementText,
-  hasAuthoritativeAgreementDocument,
-} from "./authoritativeAgreementDocument";
-import {
   hasFrozenCanonicalAgreementCorpus,
   readCanonicalAgreementCorpusForSurface,
 } from "./canonicalAgreementSnapshot";
@@ -22,7 +18,6 @@ import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
-import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 
 /** Minimum frozen SoT length to force visible document shell (inclusive). */
 export const PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN = 1000;
@@ -32,22 +27,13 @@ export function resolveCanonicalReviewCorpusLenForRender(): number {
   if (hasPaidProSourceOfTruth()) {
     return getPaidProSourceOfTruthText().trim().length;
   }
-  const authoritative = getAuthoritativeAgreementText().trim();
-  if (authoritative.length > 0) return authoritative.length;
   const frozen = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
   if (frozen?.canonicalText?.trim()) return frozen.canonicalText.trim().length;
-  const latched = getLatchedAcceptedServerFullDraftAuthority();
-  return latched?.body.trim().length ?? 0;
+  return 0;
 }
 
 export function hasCanonicalReviewCorpusForRender(): boolean {
-  const latchedLen = getLatchedAcceptedServerFullDraftAuthority()?.body.trim().length ?? 0;
-  return (
-    hasFrozenCanonicalAgreementCorpus() ||
-    hasAuthoritativeAgreementDocument() ||
-    hasPaidProSourceOfTruth() ||
-    latchedLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
-  );
+  return hasPaidProSourceOfTruth() || hasFrozenCanonicalAgreementCorpus();
 }
 
 export function shouldForcePaidProReviewDocumentRender(): boolean {

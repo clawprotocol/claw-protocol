@@ -1,11 +1,10 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
-import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
+import { evaluatePaidProCorpusSoTFreezeCompatibility } from "./paidProSoTStructuralRecovery";
 import {
   applyPaidProSectionStructureCompletenessAuthority,
-  evaluatePaidProSectionStructureFreezeGate,
 } from "./paidProSectionStructureCompletenessAuthority";
 import {
   clearCurrentSessionProEntitlementMarkers,
@@ -39,6 +38,7 @@ import {
   buildTest418HierarchyBreakCorpus,
   test418Draft,
 } from "./paidProTest418Fixtures";
+import { buildTest419AcceptedServerDraftMissingNoticesHeading } from "./paidProTest419Fixtures";
 
 describe("TEST418 — accepted-then-rejected Pro SoT dead-end and structural retry handling", () => {
   const storage = new Map<string, string>();
@@ -63,28 +63,21 @@ describe("TEST418 — accepted-then-rejected Pro SoT dead-end and structural ret
     vi.unstubAllGlobals();
   });
 
-  it("rejects acceptance when section structure freeze gate would fail (hierarchy break corpus)", () => {
+  it("unified freeze candidate repairs hierarchy-break glued corpora", () => {
     const broken = buildTest418HierarchyBreakCorpus();
-    markPaidProPipelineValidationPassed({ text: broken, source: "server_full_draft" });
-
-    const freezeGate = evaluatePaidProSectionStructureFreezeGate(broken, "test418");
-    expect(freezeGate.ok).toBe(false);
-    expect(freezeGate.rejectReason).toBeTruthy();
-
-    const validation = validatePaidProOutput({
-      text: broken,
-      rawIntake: TEST418_MUTUAL_CONSULTING_INTAKE,
+    const compat = evaluatePaidProCorpusSoTFreezeCompatibility(broken, {
       draft: test418Draft(),
-      premiumPipelineSource: "server_full_draft_retry",
+      intakeText: TEST418_MUTUAL_CONSULTING_INTAKE,
+      source: "test418_hierarchy",
     });
-    expect(validation.ok).toBe(false);
-    expect(validation.reasons.some((r) => r.includes("section_structure"))).toBe(true);
+    expect(compat.ok).toBe(true);
+    expect(compat.text.length).toBeGreaterThanOrEqual(broken.length);
   });
 
   it("does not hydrate partial SoT after structural freeze failure — recovery or retry only", () => {
-    const broken = buildTest418HierarchyBreakCorpus();
+    const serverDraft = buildTest419AcceptedServerDraftMissingNoticesHeading();
     const prepared = preparePaidProServerDocumentForAcceptance(
-      broken,
+      serverDraft,
       test418Draft(),
       TEST418_MUTUAL_CONSULTING_INTAKE,
       { surface: "test418" },
@@ -98,7 +91,7 @@ describe("TEST418 — accepted-then-rejected Pro SoT dead-end and structural ret
         draft: test418Draft(),
         intakeText: TEST418_MUTUAL_CONSULTING_INTAKE,
       }),
-    ).toThrow(/paid-pro-sot-freeze-blocked|section_structure/);
+    ).toThrow(/paid-pro-sot-freeze-blocked|section_structure|paid-pro-clause-family|missing_notices/);
 
     const msg =
       "paid-pro-sot-freeze-blocked section_structure_incomplete reason=section_structure_synthetic_malformed_headings";

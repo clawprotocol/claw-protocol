@@ -657,7 +657,10 @@ import {
   isPaidProSoTEstablishmentFailure,
   shouldHydratePaidProSoTAfterEstablishmentFailure,
   tryRecoverPaidProSourceOfTruthFromStructuralFailure,
+  clearPartialPaidProAuthoritativeState,
 } from "./paidProSoTStructuralRecovery";
+import { clearStaleAcceptedButUnfrozenProCorpus } from "./paidProStaleAcceptedUnfrozenCorpus";
+import { clearAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
 import {
   hasPaidProPipelineSessionAcceptance,
   clearPaidProPostAcceptanceValidatorCache,
@@ -1025,6 +1028,8 @@ import {
   probeAuthoritativeVisibleSurfaces,
   scheduleAuthoritativeVisibleSurfaceVerification,
   syncAuthoritativePremiumDocumentRefs,
+  revertAgreementDocumentAwayFromRejectedCorpus,
+  stripAcceptedPremiumServerFieldsFromDraft,
   type AuthoritativePremiumDocumentRefs,
 } from "./commitAuthoritativePremiumDocument";
 import {
@@ -7840,9 +7845,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               }
             }
             if (!hasPaidProSourceOfTruth()) {
+              if (isPaidProSoTEstablishmentFailure(establishMsg)) {
+                clearStaleAcceptedButUnfrozenProCorpus({
+                  rejectedCorpusText: snapshotPlain,
+                  reason: establishMsg,
+                });
+                const starterRevert = buildFreeStarterBaselinePlain(mergedDraftPersist);
+                const reverted = revertAgreementDocumentAwayFromRejectedCorpus(
+                  authoritativePremiumDocRefs,
+                  snapshotPlain,
+                  starterRevert,
+                );
+                if (reverted.reverted) {
+                  mergedDraftPersist = stripAcceptedPremiumServerFieldsFromDraft(mergedDraftPersist);
+                  setAgreementDocumentText(reverted.starterPlain);
+                  setDraft(mergedDraftPersist);
+                }
+              }
               if (import.meta.env.DEV) {
                 // eslint-disable-next-line no-console
                 console.warn("[premium-handoff] establishPaidProSourceOfTruth blocked", establishErr);
+              }
+              if (!isPaidProSoTEstablishmentFailure(establishMsg)) {
+                clearPartialPaidProAuthoritativeState();
+                clearAuthoritativeAgreementDocument();
               }
               clearPaidProPostAcceptanceValidatorCache();
               clearPaidProSourceOfTruth();
@@ -12810,17 +12836,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProAuthoritativeBodyLen = useMemo(() => {
     const fromActive = authoritativePaidProReviewPlain.trim().length;
     if (fromActive > 0) return fromActive;
-    if (premiumCheckoutCompleted) {
-      const sotLen = getPaidProSourceOfTruthText().trim().length;
-      if (sotLen > 0) return sotLen;
-      return Math.max(
-        premiumPipelineOutputBodyRef.current.trim().length,
-        hydratedPremiumBodyRef.current.trim().length,
-        lastPremiumWinningCorpusRef.current.trim().length,
-      );
+    if (hasPaidProSourceOfTruth()) {
+      return getPaidProSourceOfTruthText().trim().length;
     }
     return 0;
-  }, [authoritativePaidProReviewPlain, premiumCheckoutCompleted, reviewDocRefreshTick, premiumSurfaceGateTick]);
+  }, [authoritativePaidProReviewPlain, reviewDocRefreshTick, premiumSurfaceGateTick]);
 
   const visibleAgreementDocumentForReview = useMemo(() => {
     if (!isAuthoritativePaidProReviewActive || !authoritativePaidProReviewPlain) {

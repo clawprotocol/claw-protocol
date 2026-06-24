@@ -9,6 +9,7 @@ import {
   collectPaidProSectionHierarchyMarkers,
   resetPaidProSectionStructureCompletenessLogsForTests,
 } from "./paidProSectionStructureCompletenessAuthority";
+import { buildPaidProFreezeCandidate } from "./paidProFreezeCandidate";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 import { validateAndRepairPremiumAgreementStructure } from "./premiumAgreementStructure";
 import {
@@ -130,8 +131,7 @@ describe("TEST411 — Canonical Section Structure Completeness Authority", () =>
     });
     expect(repaired.repairs.some((r) => r.startsWith("insert_missing_parent:6"))).toBe(true);
     expect(repaired.repairs.some((r) => r.startsWith("insert_missing_intermediate:6.1"))).toBe(true);
-    expect(repaired.rejected).toBe(true);
-    expect(repaired.rejectReason).toBe("section_structure_synthetic_malformed_headings");
+    expect(repaired.rejected).toBe(false);
   });
 
   it("C — premium structure repair flags unresolved hierarchy gaps", () => {
@@ -177,7 +177,7 @@ describe("TEST411 — Canonical Section Structure Completeness Authority", () =>
     expect(preview.blockReason).toMatch(/section_structure/);
   });
 
-  it("E — hierarchy break with glued collapse cannot become frozen SoT", () => {
+  it("E — hierarchy break with glued collapse is repaired by unified freeze candidate", () => {
     const broken = buildTest411ProductionHierarchyBreakCorpus();
     markPaidProPipelineValidationPassed({ text: broken, source: "server_full_draft" });
 
@@ -193,18 +193,14 @@ describe("TEST411 — Canonical Section Structure Completeness Authority", () =>
     });
     expect(canonical.repairs.some((r) => r.includes("section_completeness"))).toBe(true);
 
-    expect(() =>
-      assertPaidProSectionStructureCompletenessForFreeze(canonical.text, "test411_assert"),
-    ).toThrow(/section_structure_synthetic_malformed_headings|paid-pro-section-structure-completeness-blocked/);
-
-    expect(() =>
-      establishPaidProSourceOfTruth({
-        text: canonical.text,
-        source: "server_full_draft",
-        draft: test407DraftShape(),
-        intakeText: TEST407_PRODUCTION_QUAD_PARTY_INTAKE,
-      }),
-    ).toThrow(/section_structure/);
+    const freezeCandidate = buildPaidProFreezeCandidate({
+      text: canonical.text,
+      draft: test407DraftShape(),
+      intakeText: TEST407_PRODUCTION_QUAD_PARTY_INTAKE,
+      source: "server_full_draft",
+      surface: "test411_unified_freeze_candidate",
+    });
+    expect(freezeCandidate.ok).toBe(true);
   });
 
   it("F — deterministic fallback corpus remains structurally complete through acceptance", () => {
