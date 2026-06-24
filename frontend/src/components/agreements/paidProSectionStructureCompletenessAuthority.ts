@@ -11,6 +11,7 @@ import {
 import {
   applyPaidProSectionHeadingTitleAuthority,
   detectPaidProSectionHeadingTitleAnomalies,
+  formatPaidProSectionHeadingTitleAnomalyDetails,
 } from "./paidProSectionHeadingTitleAuthority";
 import {
   hasFalseFragmentSectionHeading,
@@ -445,6 +446,26 @@ export function applyPaidProSectionStructureCompletenessAuthority(
     }
   }
 
+  if (titleAnomalies.length > 0) {
+    const finalTitle = applyPaidProSectionHeadingTitleAuthority(out);
+    if (finalTitle.repairs.length > 0) {
+      out = finalTitle.text;
+      repairs.push(...finalTitle.repairs.map((r) => `section_heading_title_final:${r}`));
+      titleAnomalies = detectPaidProSectionHeadingTitleAnomalies(out);
+      if (titleAnomalies.length === 0) {
+        analysis = {
+          ...analysis,
+          sectionHeadingTitleAnomalies: [],
+        };
+      } else {
+        analysis = {
+          ...analysis,
+          sectionHeadingTitleAnomalies: titleAnomalies.map((a) => `${a.code}:${a.line}`),
+        };
+      }
+    }
+  }
+
   if (hasFalseFragmentSectionHeading(out)) {
     analysis = {
       ...analysis,
@@ -473,12 +494,17 @@ export function applyPaidProSectionStructureCompletenessAuthority(
     : null;
 
   if (opts?.log !== false && (repairs.length > 0 || rejected)) {
+    const headingAnomalyDetails =
+      titleAnomalies.length > 0
+        ? formatPaidProSectionHeadingTitleAnomalyDetails(out, titleAnomalies)
+        : [];
     logSectionStructureCompleteness({
       source,
       phase,
       repairs: repairs.slice(0, 12),
       rejected,
       rejectReason,
+      headingAnomalyDetails,
       unresolvedSections: {
         missingParents: analysis.missingParentSections,
         missingIntermediates: analysis.missingIntermediateSections.slice(0, 12),

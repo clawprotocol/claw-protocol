@@ -23,6 +23,17 @@ import {
 import { repairKnownPartyPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import {
+  buildTest429MalformedFourPartyServerCorpus,
+  BLUE_CANYON,
+  DELTA_INTEGRATION,
+  NORTH_STAR,
+  SUMMIT_RIDGE,
+  TEST429_FOUR_PARTY_NORTH_STAR_INTAKE,
+  test429Draft,
+} from "./paidProTest429FourPartyNorthStarFixtures";
+import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
+import { detectPaidProSectionHeadingTitleAnomalies } from "./paidProSectionHeadingTitleAuthority";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
 
@@ -1462,5 +1473,76 @@ describe("runPremiumCompletion needs_details party-placeholder repair", () => {
     });
     expect(out.premiumRenderSource).not.toMatch(/server_full_draft/);
     expect(out.winningPremiumBodyText.trim().length).toBe(0);
+  });
+});
+
+function test431FourPartyStructured(): ParsedDraftShape {
+  return {
+    ...test429Draft(),
+    purpose: "Manufacturing workflow modernization and ERP analytics.",
+    parties: [
+      { name: NORTH_STAR, role: "Client" },
+      { name: SUMMIT_RIDGE, role: "Lead Consultant" },
+      { name: DELTA_INTEGRATION, role: "Technology Integrator" },
+      { name: BLUE_CANYON, role: "Data Analytics Provider" },
+    ],
+  };
+}
+
+function buildTest431WireServerCorpus(): string {
+  let corpus = buildTest429MalformedFourPartyServerCorpus();
+  if (!/^\s*9\.\s+Revenue Allocation Among\s*$/m.test(corpus)) {
+    corpus = corpus.replace(
+      "\n1. Scope of Services",
+      "\n9. Revenue Allocation Among\n\nService Providers\n\n1. Scope of Services",
+    );
+  }
+  return padOperativeCorpusBeforeWitness(corpus, 23_000);
+}
+
+describe("TEST431 premiumCompletionPipeline skipThinPrepare guard", () => {
+  it("runs full freeze prep when substantive wire has split Revenue Allocation Among / Service Providers headings", async () => {
+    const serverFull = buildTest431WireServerCorpus();
+    expect(serverFull.length).toBeGreaterThan(15_000);
+    expect(serverFull).toMatch(/Revenue Allocation Among/);
+    expect(serverFull).toMatch(/Service Providers/);
+    expect(detectPaidProSectionHeadingTitleAnomalies(serverFull).length).toBeGreaterThan(0);
+    // document_text matches wire length — would qualify for skipThinPrepare without anomaly guard
+    expect(serverFull.length).toBeGreaterThan(15_000);
+
+    premiumApiMock.mockResponses = [
+      {
+        title: "Consulting and Implementation Agreement",
+        agreement_family: "consulting_agreement",
+        document_text: serverFull,
+        server_full_document_text: serverFull,
+        key_terms_found: ["payment", "governing_law"],
+        missing_material_info: [],
+        generation_outcome: "ok",
+        agreement_validation: { valid: true } as never,
+      },
+    ];
+
+    const out = await runPremiumCompletion({
+      intakeText: TEST429_FOUR_PARTY_NORTH_STAR_INTAKE,
+      originalUserIntakeRawForMerge: TEST429_FOUR_PARTY_NORTH_STAR_INTAKE,
+      structuredDraft: test431FourPartyStructured(),
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      agreementGenerationId: "gen-test431-skip-thin-prepare",
+      premiumRequestIntakeFingerprint: "fp-test431-skip-thin-prepare",
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => test431FourPartyStructured(),
+    });
+
+    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    expect(out.premiumRenderSource).not.toMatch(/deterministic_recovery/);
+    expect(out.winningPremiumBodyText.trim().length).toBeGreaterThan(15_000);
+    expect(detectPaidProSectionHeadingTitleAnomalies(out.winningPremiumBodyText).length).toBe(0);
+    expect(out.winningPremiumBodyText).toMatch(/Revenue Allocation Among Service Providers/i);
+    for (const party of [NORTH_STAR, SUMMIT_RIDGE, DELTA_INTEGRATION, BLUE_CANYON]) {
+      expect(out.winningPremiumBodyText).toContain(party);
+    }
   });
 });

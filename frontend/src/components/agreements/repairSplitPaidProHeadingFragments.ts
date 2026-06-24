@@ -9,7 +9,7 @@ const MAIN_SECTION_PREFIX_RE = /^(\d+)\.\s+(?!\d+\.\d)(.+)$/;
 const SUBSECTION_PREFIX_RE = /^(\d+\.\d+)\s+(.+)$/;
 
 /** Heading title ends mid-phrase — next line is likely a continuation fragment. */
-const DANGLING_HEADING_TAIL_RE = /\b(and|or|&|of|for|the|to|with|upon|under|by)\s*$/i;
+const DANGLING_HEADING_TAIL_RE = /\b(and|or|&|of|for|the|to|with|upon|under|by|among)\s*$/i;
 
 const EXECUTION_LINE_RE =
   /^(?:IN WITNESS WHEREOF|CLIENT\s*:|SERVICE\s+PROVIDER\s*:|\bSIGNATURES\b)/i;
@@ -34,7 +34,7 @@ function isSubsectionDanglingPrefix(title: string): boolean {
   if (/\.\s+[A-Za-z]/.test(title)) return false;
   if (BODY_VERB_RE.test(title)) return false;
   if (DANGLING_HEADING_TAIL_RE.test(title)) return true;
-  if (/\b(?:Lead|Revenue|Internal)\s*$/i.test(title)) return true;
+  if (/\b(?:Lead|Revenue|Internal|Among)\s*$/i.test(title)) return true;
   return title.split(/\s+/).filter(Boolean).length <= 2;
 }
 

@@ -89,7 +89,16 @@ function normalizeHeadingTokens(s: string): string[] {
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter((w) => w.length > 2 && !/^(?:and|or|the|of|for|to|with|upon|under)$/i.test(w));
+    .filter((w) => w.length > 2 && !/^(?:and|or|the|of|for|to|with|upon|under|among)$/i.test(w));
+}
+
+function fragmentContainedInCanonicalTitle(fragmentText: string, canonicalTitle: string): boolean {
+  const fragment = fragmentText.trim().toLowerCase();
+  const canonical = canonicalTitle.trim().toLowerCase();
+  if (!fragment || !canonical) return false;
+  if (canonical.includes(fragment)) return true;
+  const fragmentWords = fragment.split(/\s+/).filter((w) => w.length > 2);
+  return fragmentWords.length > 0 && fragmentWords.every((w) => canonical.includes(w));
 }
 
 function semanticTokensOverlap(fragmentText: string, canonicalTitle: string): boolean {
@@ -153,7 +162,8 @@ export function repairOrphanSemanticHeadingFragmentsBeforeCanonicalHeadings(text
     const fragmentText = fragmentLines.join(" ");
     const removeOrphans =
       ALL_CAPS_SECTION_HEADING_RE.test(nextTrimmed) ||
-      semanticTokensOverlap(fragmentText, canonical.title);
+      semanticTokensOverlap(fragmentText, canonical.title) ||
+      fragmentContainedInCanonicalTitle(fragmentText, canonical.title);
     if (removeOrphans) {
       for (let k = i; k < nextIdx; k += 1) {
         if (lines[k]!.trim()) skip.add(k);
@@ -278,6 +288,29 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
   }
 
   return findings;
+}
+
+/** Actionable anomaly payload for freeze diagnostics and regression tests. */
+export function formatPaidProSectionHeadingTitleAnomalyDetails(
+  text: string,
+  anomalies: PaidProSectionHeadingTitleAnomaly[],
+): Array<{
+  code: string;
+  line: string;
+  lineIndex: number;
+  prevLine: string | null;
+  nextLine: string | null;
+}> {
+  const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
+  return anomalies.map((a) => ({
+    code: a.code,
+    line: a.line,
+    lineIndex: a.lineIndex,
+    prevLine:
+      a.lineIndex > 0 ? (lines[a.lineIndex - 1]?.trim() || null) : null,
+    nextLine:
+      a.lineIndex + 1 < lines.length ? (lines[a.lineIndex + 1]?.trim() || null) : null,
+  }));
 }
 
 function repairCommaTerminatedNumberedHeadings(text: string): { text: string; repairs: string[] } {

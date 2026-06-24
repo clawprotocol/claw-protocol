@@ -330,6 +330,12 @@ export function preparePaidProFreezeCandidateText(
     repairs.push(...canonicalStructure.repairs.slice(0, 8));
   }
 
+  const headingAfterCanonical = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
+  if (headingAfterCanonical.repairs.length > 0) {
+    safeForCommit = headingAfterCanonical.text;
+    repairs.push(...headingAfterCanonical.repairs.map((r) => `section_heading_title:${r}`));
+  }
+
   const contaminationRepair = repairProfessionalCorpusContamination(safeForCommit, {
     partyNames: partyNames,
     partyCount: parties.length,
@@ -435,14 +441,17 @@ export function assertPaidProFreezeCandidateGates(
     })(),
   });
 
+  const postBoundaryHeading = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
+  if (postBoundaryHeading.repairs.length > 0) {
+    safeForCommit = postBoundaryHeading.text;
+  }
+
   const postBoundaryStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
     source: `${surface}_post_boundary`,
     phase: "pre_freeze",
     blockOnFatal: false,
   });
-  if (!postBoundaryStructure.rejected || postBoundaryStructure.repairs.length > 0) {
-    safeForCommit = postBoundaryStructure.text;
-  }
+  safeForCommit = postBoundaryStructure.text;
 
   const preFreezeExecutionManifest = resolveAcceptanceManifestRecordsForExecution({
     draft: args.draft ?? null,
@@ -483,9 +492,7 @@ export function assertPaidProFreezeCandidateGates(
     phase: "pre_freeze",
     blockOnFatal: false,
   });
-  if (!postNoticeStructure.rejected || postNoticeStructure.repairs.length > 0) {
-    safeForCommit = postNoticeStructure.text;
-  }
+  safeForCommit = postNoticeStructure.text;
 
   const postNoticeTitleAuthority = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
   if (postNoticeTitleAuthority.repairs.length > 0) {

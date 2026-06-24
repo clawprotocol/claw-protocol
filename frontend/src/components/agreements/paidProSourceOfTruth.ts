@@ -18,6 +18,7 @@ import {
   hasPaidProPipelineSessionAcceptance,
 } from "./paidProPostAcceptanceValidatorCache";
 import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 import { logFalseProAuthorityBlocked } from "./paidProRuntimeAuthorityEstablishment";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 import {
@@ -313,6 +314,9 @@ export function establishPaidProSourceOfTruth(args: {
       text: trim(args.text),
       source: requestedSource,
     });
+  const wireLen = trim(args.text).length;
+  const substantiveServerDraft =
+    requestedSource === "server_full_draft" && wireLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
   if (minimumSubstance.applies && !minimumSubstance.ok) {
     if (pipelineAcceptedAfterSubstance) {
       logProCorpusSourceMap({
@@ -321,12 +325,27 @@ export function establishPaidProSourceOfTruth(args: {
         len: prep.text.length,
         text: prep.text,
         allowedToOverride: false,
-        reason: `minimum_substance_advisory_after_pipeline_accept;malformedOpening=${minimumSubstance.malformedOpening};missing=${minimumSubstance.missingSections.join(",") || "unknown"}`,
+        reason: `minimum_substance_advisory_after_pipeline_accept;malformedOpening=${minimumSubstance.malformedOpening};missing=${minimumSubstance.missingSections.join(",") || "none"}`,
       });
-    } else if (intakeHasConcreteServicesFacts) {
+    } else if (substantiveServerDraft && minimumSubstance.missingSections.length === 0) {
+      logProCorpusSourceMap({
+        stage: "client_gates_passed",
+        source: requestedSource,
+        len: prep.text.length,
+        text: prep.text,
+        allowedToOverride: false,
+        reason: `minimum_substance_advisory_substantive_server;malformedOpening=${minimumSubstance.malformedOpening};docLen=${wireLen}`,
+      });
+    } else if (intakeHasConcreteServicesFacts && minimumSubstance.missingSections.length > 0) {
       throw new Error(
-        `[pro-minimum-substance-blocked] missingSections=${minimumSubstance.missingSections.join(",") || "unknown"}`,
+        `[pro-minimum-substance-blocked] missingSections=${minimumSubstance.missingSections.join(",")}`,
       );
+    } else if (
+      intakeHasConcreteServicesFacts &&
+      minimumSubstance.malformedOpening &&
+      !substantiveServerDraft
+    ) {
+      throw new Error("[pro-minimum-substance-blocked] malformedOpening=true");
     }
   }
   logProCorpusSourceMap({

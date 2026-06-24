@@ -118,6 +118,10 @@ import {
 } from "./agreementIntentContract";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
+  detectPaidProSectionHeadingTitleAnomalies,
+  applyPaidProSectionHeadingTitleAuthority,
+} from "./paidProSectionHeadingTitleAuthority";
+import {
   buildPaidProFreezeCandidate,
   previewRecoverPaidProFreezeCandidate,
   resolvePaidProFreezeCommitText,
@@ -2994,7 +2998,10 @@ async function runPremiumCompletionInner(
           docTrimForFreeze.length < Math.floor(wireCorpusForFreeze.length * 0.85);
         const freezePrepInput = useWireCorpusForFreeze ? wireCorpusForFreeze : doc;
         const freezePrepTrim = (freezePrepInput || "").trim();
+        const wireHeadingAnomalies =
+          detectPaidProSectionHeadingTitleAnomalies(freezePrepTrim).length > 0;
         const skipThinPrepareForSubstantiveWire =
+          !wireHeadingAnomalies &&
           wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
           freezePrepTrim.length >= Math.floor(wireCorpusForFreeze.length * 0.9) &&
           freezePrepTrim.length <= Math.ceil(wireCorpusForFreeze.length * 1.15);
@@ -3006,6 +3013,12 @@ async function runPremiumCompletionInner(
               rawForSoT || rawIntake,
               { surface: "premium_completion_pipeline_freeze_prep" },
             );
+        if (skipThinPrepareForSubstantiveWire) {
+          const headingPrep = applyPaidProSectionHeadingTitleAuthority(preparedForFreeze.text);
+          if (headingPrep.repairs.length > 0) {
+            preparedForFreeze.text = headingPrep.text;
+          }
+        }
         doc = preparedForFreeze.text;
         let freezeCommit = resolvePaidProFreezeCommitText({
           text: doc,
