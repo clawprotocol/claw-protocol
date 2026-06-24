@@ -35,14 +35,15 @@ export function applyPaidProNoticeContactAuthority(
   const surface = opts?.surface ?? "paid_pro_notice_contact_authority";
   const intakeRaw = opts?.intakeText ?? null;
   const parties = resolvePartiesForReviewRender({ draft: opts?.draft, intakeText: intakeRaw });
+  const repairs: string[] = [];
+  let out = (raw || "").replace(/\r\n/g, "\n");
   const roleContext: PaidProPartyRoleContext = {
     intakeText: intakeRaw,
     draftPartyNames: (opts?.draft?.parties ?? [])
       .map((p) => String(p?.name ?? "").trim())
       .filter(Boolean),
+    acceptedCorpus: out,
   };
-  const repairs: string[] = [];
-  let out = (raw || "").replace(/\r\n/g, "\n");
 
   const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
   if (headingRepair.repairs.length > 0) {
@@ -60,7 +61,10 @@ export function applyPaidProNoticeContactAuthority(
       out = contaminationRepair.text;
       repairs.push(...contaminationRepair.repairs);
     }
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, parties, roleContext);
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, parties, {
+      ...roleContext,
+      acceptedCorpus: out,
+    });
     if (noticeDelivery.repairs.length > 0) {
       out = noticeDelivery.text;
       repairs.push(...noticeDelivery.repairs.map((r) => `notice:${r}`));

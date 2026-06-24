@@ -21,7 +21,7 @@ import { assertPaidProDocumentBoundaryAuthorityForFreeze, applyPaidProDocumentBo
 import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadingTitleAuthority";
-import { ensureCanonicalNoticesSectionHeadingForFreeze } from "./paidProPartyNoticeDetails";
+import { ensureCanonicalNoticesSectionHeadingForFreeze, resolveNoticeStructuralValidationParties } from "./paidProPartyNoticeDetails";
 import {
   assertPaidProSectionStructureCompletenessForFreeze,
   applyPaidProSectionStructureCompletenessAuthority,
@@ -488,7 +488,13 @@ export function assertPaidProFreezeCandidateGates(
   }
 
   assertClauseFamilyStructuralIntegrityForFreeze(safeForCommit, {
-    parties: prep.reviewParties,
+    parties: resolveNoticeStructuralValidationParties(prep.reviewParties, {
+      intakeText: args.intakeText ?? null,
+      draftPartyNames: (args.draft?.parties ?? [])
+        .map((p) => String(p?.name ?? "").trim())
+        .filter(Boolean),
+      acceptedCorpus: safeForCommit,
+    }),
     surface: `${surface}_freeze_finalize`,
     phase: "post_acceptance",
     draftPartyCount: args.draft?.parties?.length ?? 0,
@@ -497,6 +503,11 @@ export function assertPaidProFreezeCandidateGates(
       if (!handoff) return prep.reviewParties.length;
       return resolveHandoffPartySlotCount(handoff, prep.reviewParties.length);
     })(),
+    intakeText: args.intakeText ?? null,
+    draftPartyNames: (args.draft?.parties ?? [])
+      .map((p) => String(p?.name ?? "").trim())
+      .filter(Boolean),
+    acceptedCorpus: safeForCommit,
   });
 
   const finalTitleAuthority = applyPaidProSectionHeadingTitleAuthority(safeForCommit);

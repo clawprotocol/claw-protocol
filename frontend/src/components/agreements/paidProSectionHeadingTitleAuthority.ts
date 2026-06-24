@@ -239,12 +239,56 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
   return findings;
 }
 
+function repairCommaTerminatedNumberedHeadings(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text || "");
+  const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+  const lines = head.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    const prefix = parseMainSectionPrefixLine(trimmed);
+    if (prefix && /,\s*$/.test(prefix.title) && !isIncompletePaidProHeadingTitle(prefix.title)) {
+      const nextIdx = nextNonEmptyLineIndex(lines, i + 1);
+      if (nextIdx == null) {
+        const cleaned = `${prefix.sectionNum}. ${prefix.title.replace(/,\s*$/, "").trim()}`;
+        out.push(cleaned);
+        repairs.push(`comma_heading_trim:${prefix.sectionNum}`);
+        continue;
+      }
+      const nextTrimmed = lines[nextIdx]!.trim();
+      if (!isPaidProHeadingContinuationFragment(nextTrimmed)) {
+        const cleaned = `${prefix.sectionNum}. ${prefix.title.replace(/,\s*$/, "").trim()}`;
+        out.push(cleaned);
+        repairs.push(`comma_heading_trim:${prefix.sectionNum}`);
+        continue;
+      }
+    }
+    out.push(line);
+  }
+
+  const mergedHead = out.join("\n").replace(/\n{3,}/g, "\n\n");
+  const textOut = tail
+    ? `${mergedHead}${mergedHead.endsWith("\n") ? "" : "\n\n"}${tail}`
+    : mergedHead;
+  return { text: textOut, repairs };
+}
+
 export function applyPaidProSectionHeadingTitleAuthority(text: string): {
   text: string;
   repairs: string[];
 } {
   const repairs: string[] = [];
   let out = (text || "").replace(/\r\n/g, "\n");
+
+  const commaTrim = repairCommaTerminatedNumberedHeadings(out);
+  if (commaTrim.repairs.length > 0) {
+    out = commaTrim.text;
+    repairs.push(...commaTrim.repairs.map((r) => `comma_heading:${r}`));
+  }
 
   const split = repairSplitPaidProHeadingFragments(out);
   if (split.repairs.length > 0) {

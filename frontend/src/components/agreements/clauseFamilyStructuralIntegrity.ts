@@ -13,8 +13,10 @@ import {
   noticeStanzaContainsPlaceholderTokens,
   noticeStanzaHasExecutionPollution,
   noticeStanzaHasRoleLabelCorruption,
+  resolveNoticeStructuralValidationParties,
 } from "./paidProPartyNoticeDetails";
-import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
 export type ClauseFamilyStructuralViolation = {
   family: OperativeClauseFamily | "structural";
@@ -84,9 +86,15 @@ function countIfToStanzas(noticesRegion: string): number {
 
 function resolveCanonicalAuthorityPartyCount(
   parties?: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
 ): number {
   if (!parties?.length) return 0;
-  return parties.filter((p) => String(p.partyLegalName ?? "").trim().length >= 2).length;
+  const enriched = resolveNoticeStructuralValidationParties(parties, roleContext);
+  return enriched.filter(
+    (p) =>
+      String(p.partyLegalName ?? "").trim().length >= 2 &&
+      isAuthoritativeLegalEntityName(p.partyLegalName.trim()),
+  ).length;
 }
 
 function requiredNoticeStanzaCount(
@@ -140,13 +148,27 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
     phase?: "pre_acceptance" | "post_acceptance";
     handoffPartySlots?: number;
     draftPartyCount?: number;
+    intakeText?: string | null;
+    draftPartyNames?: readonly string[] | null;
+    acceptedCorpus?: string | null;
   },
 ): ClauseFamilyStructuralViolation[] {
   const violations: ClauseFamilyStructuralViolation[] = [];
   const text = (corpus || "").replace(/\r\n/g, "\n");
   const hasProperHeading = NOTICES_HEADING_RE.test(text);
   const region = noticesRegionToWitness(text);
-  const canonicalAuthorityPartyCount = resolveCanonicalAuthorityPartyCount(opts?.parties);
+  const noticeRoleContext: PaidProPartyRoleContext | null =
+    opts?.intakeText || opts?.acceptedCorpus || opts?.draftPartyNames
+      ? {
+          intakeText: opts?.intakeText ?? null,
+          draftPartyNames: opts?.draftPartyNames ?? null,
+          acceptedCorpus: opts?.acceptedCorpus ?? corpus,
+        }
+      : null;
+  const canonicalAuthorityPartyCount = resolveCanonicalAuthorityPartyCount(
+    opts?.parties,
+    noticeRoleContext,
+  );
   const requiredStanzas = requiredNoticeStanzaCount(opts?.parties, opts?.requireTwoPartyStanzas !== false);
   const noticeValidationPartySource =
     canonicalAuthorityPartyCount >= 2 ? "canonical_authority_parties" : "minimum_two_party";
@@ -335,6 +357,9 @@ export function validateClauseFamilyStructuralIntegrity(
     phase?: "pre_acceptance" | "post_acceptance";
     handoffPartySlots?: number;
     draftPartyCount?: number;
+    intakeText?: string | null;
+    draftPartyNames?: readonly string[] | null;
+    acceptedCorpus?: string | null;
   },
 ): ClauseFamilyStructuralIntegrityReport {
   const families = opts?.families ?? [
@@ -352,6 +377,9 @@ export function validateClauseFamilyStructuralIntegrity(
         phase: opts?.phase,
         handoffPartySlots: opts?.handoffPartySlots,
         draftPartyCount: opts?.draftPartyCount,
+        intakeText: opts?.intakeText,
+        draftPartyNames: opts?.draftPartyNames,
+        acceptedCorpus: opts?.acceptedCorpus ?? corpus,
       }),
     );
   }

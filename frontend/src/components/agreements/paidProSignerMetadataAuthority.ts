@@ -91,20 +91,61 @@ export function preserveSlotIndexedSignerMetadataParties(
   return out;
 }
 
+/** Intake / draft canonical names when slot parties lack authoritative legal entities. */
+function resolveMergeLegalEntitiesForPartyAuthority(
+  parties: readonly PaidProSignerMetadataParty[],
+  intakeText?: string | null,
+  legalEntities?: readonly string[],
+): string[] {
+  const explicit = (legalEntities ?? [])
+    .map((n) => String(n ?? "").trim())
+    .filter((n) => n.length >= 2);
+  if (explicit.filter(isAuthoritativeLegalEntityName).length >= 2) return explicit;
+
+  const fromParties = parties
+    .map((p) => p.partyLegalName.trim())
+    .filter((n) => n.length >= 2);
+  if (fromParties.filter(isAuthoritativeLegalEntityName).length >= 2) return fromParties;
+
+  const intake = (intakeText ?? "").trim();
+  if (intake) {
+    const records = resolveCanonicalPartyIdentitiesFromIntake(
+      intake,
+      fromParties.length ? fromParties : parties.map((p) => p.partyLegalName),
+    );
+    if (records.length >= 2) return records.map((r) => r.fullLegalName);
+  }
+  return explicit.length ? explicit : fromParties;
+}
+
 /** Merge labeled intake authority into review parties — slot index is authoritative; UI fills gaps only. */
 export function mergeLabeledPartyAuthorityIntoParties(
   parties: readonly PaidProSignerMetadataParty[],
   intakeText?: string | null,
   legalEntities?: readonly string[],
 ): PaidProSignerMetadataParty[] {
+  const resolvedLegalEntities = resolveMergeLegalEntitiesForPartyAuthority(
+    parties,
+    intakeText,
+    legalEntities,
+  );
   const intakeParties = authorityPartiesFromIntakeSignerMetadata(
     intakeText,
-    legalEntities?.length
-      ? legalEntities
-      : parties.map((p) => p.partyLegalName).filter(Boolean),
+    resolvedLegalEntities.length ? resolvedLegalEntities : parties.map((p) => p.partyLegalName).filter(Boolean),
   );
   if (intakeParties.length >= 2 && !parties.length) {
     return intakeParties;
+  }
+  if (
+    parties.length >= 2 &&
+    parties.filter((p) => isAuthoritativeLegalEntityName(p.partyLegalName.trim())).length < 2 &&
+    resolvedLegalEntities.filter(isAuthoritativeLegalEntityName).length >= 2
+  ) {
+    return mergeIntakeSignerMetadataIntoAuthorityParties(
+      parties,
+      intakeText,
+      resolvedLegalEntities,
+    );
   }
   const normalized = normalizePartyIdentities({
     intakeText,
@@ -114,7 +155,7 @@ export function mergeLabeledPartyAuthorityIntoParties(
     return mergeIntakeSignerMetadataIntoAuthorityParties(
       parties,
       intakeText,
-      legalEntities ?? parties.map((p) => p.partyLegalName),
+      resolvedLegalEntities,
     );
   }
   const merged = toPaidProSignerMetadataParties(normalized) as PaidProSignerMetadataParty[];
@@ -123,7 +164,7 @@ export function mergeLabeledPartyAuthorityIntoParties(
   return mergeIntakeSignerMetadataIntoAuthorityParties(
     slotMerged,
     intakeText,
-    legalEntities ?? slotMerged.map((p) => p.partyLegalName),
+    resolveMergeLegalEntitiesForPartyAuthority(slotMerged, intakeText, resolvedLegalEntities),
   );
 }
 

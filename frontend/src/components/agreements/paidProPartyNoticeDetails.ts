@@ -14,7 +14,10 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { paidProSignerMetadataForensicLineageEnabled } from "./paidProSignerMetadataAuthority";
 import { resolveCanonicalPartyLegalNameForIndex } from "./canonicalPartyLegalNameSanitizer";
-import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
+import {
+  resolveCanonicalPartyIdentitiesFromIntake,
+  resolveCanonicalPartyIdentitiesFromSources,
+} from "./canonicalPartyIdentityResolver";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { readFrozenCanonicalManifestPartyNames, readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
@@ -321,15 +324,46 @@ function resolveCanonicalNoticeAuthorityParties(
   roleContext?: PaidProPartyRoleContext | null,
 ): readonly PaidProSignerMetadataParty[] {
   const intake = roleContext?.intakeText?.trim() ?? "";
+  const draftPartyNames = roleContext?.draftPartyNames ?? parties.map((p) => p.partyLegalName);
+  const acceptedCorpus = roleContext?.acceptedCorpus?.trim() ?? "";
 
   const maxParties = resolveCanonicalNoticePartyCount(parties, roleContext);
 
-  const base =
+  const canonicalFromSources = (): PaidProSignerMetadataParty[] => {
+    const records = resolveCanonicalPartyIdentitiesFromSources({
+      rawIntake: intake || null,
+      generatedBody: acceptedCorpus || null,
+      starterNames: draftPartyNames,
+    });
+    if (records.length < 2) return [];
+    return records.slice(0, maxParties).map((record, partyIndex) => ({
+      partyIndex,
+      partyLegalName: record.fullLegalName,
+      signerEmail: "",
+      signerName: (record.signerName?.trim() || "").trim(),
+      signerTitle: (record.signerTitle?.trim() || "").trim(),
+      partyAddress: (record.partyAddress?.trim() || "").trim(),
+    }));
+  };
+
+  let base =
     parties.length >= 2
       ? parties.slice(0, maxParties)
       : intake
         ? mergeLabeledPartyAuthorityIntoParties([], intake)
         : parties;
+
+  if (
+    base.filter((p) => isAuthoritativeLegalEntityName(p.partyLegalName.trim())).length < 2
+  ) {
+    const fromCanonical = canonicalFromSources();
+    if (fromCanonical.length >= 2) {
+      base = preserveSlotIndexedSignerMetadataParties(fromCanonical, base, maxParties).slice(
+        0,
+        maxParties,
+      );
+    }
+  }
 
   if (!intake) return base.slice(0, maxParties);
 
@@ -348,6 +382,14 @@ function enrichNoticeAuthorityParties(
     roleContext,
   );
   return preserveSlotIndexedSignerMetadataParties(resolved, cappedSource, cap).slice(0, cap);
+}
+
+/** Canonical manifest parties for notice stanza validation and freeze structural gates. */
+export function resolveNoticeStructuralValidationParties(
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): readonly PaidProSignerMetadataParty[] {
+  return enrichNoticeAuthorityParties(parties, roleContext);
 }
 
 /** True when multiple operative "If to" notice stanzas are fused on one line or empty. */
@@ -529,6 +571,16 @@ function resolveNoticeStanzaLegalEntity(
   const frozen = readFrozenCanonicalManifestPartyNames();
   const frozenLegal = frozen[party.partyIndex]?.trim() ?? "";
   if (frozenLegal.length >= 2 && isAuthoritativeLegalEntityName(frozenLegal)) return frozenLegal;
+  const acceptedCorpus = roleContext?.acceptedCorpus?.trim() ?? "";
+  if (acceptedCorpus) {
+    const fromCorpus = resolveCanonicalPartyIdentitiesFromSources({
+      rawIntake: intake || null,
+      generatedBody: acceptedCorpus,
+      starterNames: draftNames,
+    });
+    const corpusLegal = fromCorpus[party.partyIndex]?.fullLegalName?.trim() ?? "";
+    if (corpusLegal.length >= 2 && isAuthoritativeLegalEntityName(corpusLegal)) return corpusLegal;
+  }
   if (fromDraft.length >= 2) return fromDraft;
   logPaidProNoticeEntityMissingDiagnostic({
     partyIndex: party.partyIndex,
