@@ -23,6 +23,7 @@ import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
 import {
   isLongCommerciallyUsablePremiumBody,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
 } from "./premiumAcceptancePolicy";
 import {
   assessConciseCommercialServicesProQuality,
@@ -36,7 +37,7 @@ import {
   previewRecoverPaidProFreezeCandidate,
 } from "./paidProFreezeCandidate";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
-import { rejectPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
+import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicationAuthority";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -297,23 +298,30 @@ export function validatePaidProOutput(args: {
     source: pipelineSource ?? "server_full_draft",
     surface: "validatePaidProOutput",
   });
-  const validationCorpus = freezeCandidate.ok ? freezeCandidate.text : t;
-  const preparedHash = freezeCandidate.ok ? freezeCandidate.hash : null;
+  const preparedCandidateText = freezeCandidate.text;
+  const validationCorpus = freezeCandidate.ok ? freezeCandidate.text : preparedCandidateText;
+  const preparedStableHash = paidProPipelineAcceptedCorpusHash(preparedCandidateText);
   const validationCorpusHash = paidProPipelineAcceptedCorpusHash(validationCorpus);
+  const substantiveServerDraft =
+    serverFullDocExists && docLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
   logPaidProFreezeCandidateDecision({
     accepted: freezeCandidate.ok,
     source: pipelineSource ?? "server_full_draft",
     preparedFreezeCandidateHash: freezeCandidate.hash,
     validationInputHash: validationCorpusHash,
     validationInputMatchesPreparedFreeze:
-      freezeCandidate.ok && preparedHash === validationCorpusHash,
+      Boolean(preparedStableHash) && validationCorpusHash === preparedStableHash,
     rejectReason: freezeCandidate.rejectReason,
-    candidateLen: freezeCandidate.text.length,
+    candidateLen: preparedCandidateText.length,
   });
+  let validationCorpusForGates = validationCorpus;
   if (freezeCandidate.ok) {
-    const dup = rejectPaidProCorpusDuplication(validationCorpus);
-    if (!dup.ok) {
-      const reasons = dup.reasons;
+    const duplicationAuthority = applyPaidProCorpusDuplicationAuthority(validationCorpusForGates);
+    if (duplicationAuthority.repairs.length > 0) {
+      validationCorpusForGates = duplicationAuthority.text;
+    }
+    if (duplicationAuthority.rejected) {
+      const reasons = duplicationAuthority.reasons;
       logVpaidDevFail(reasons);
       logDecision(false, reasons);
       return { ok: false, reasons };
@@ -340,7 +348,8 @@ export function validatePaidProOutput(args: {
         source: "deterministic_recovery_freeze_candidate",
         preparedFreezeCandidateHash: recovery.hash,
         validationInputHash: validationCorpusHash,
-        validationInputMatchesPreparedFreeze: false,
+        validationInputMatchesPreparedFreeze:
+          Boolean(preparedStableHash) && validationCorpusHash === preparedStableHash,
         rejectReason: recovery.rejectReason,
         candidateLen: recovery.text.length,
       });
@@ -354,13 +363,21 @@ export function validatePaidProOutput(args: {
           reasons: ["deterministic_recovery_freeze_candidate_ok"],
         };
       }
+    } else if (substantiveServerDraft) {
+      const reasons = [
+        freezeCandidate.rejectReason ?? "freeze_candidate_rejected",
+        "substantive_server_draft_recovery_blocked",
+      ];
+      logVpaidDevFail(reasons);
+      logDecision(false, reasons);
+      return { ok: false, reasons };
     }
     const reasons = [freezeCandidate.rejectReason ?? "freeze_candidate_rejected"];
     logVpaidDevFail(reasons);
     logDecision(false, reasons);
     return { ok: false, reasons };
   }
-  const bodyForGates = validationCorpus;
+  const bodyForGates = validationCorpusForGates;
   const intakeLower = rawI.toLowerCase();
   const minimumSubstance = validateProMinimumSubstance({
     text: bodyForGates,

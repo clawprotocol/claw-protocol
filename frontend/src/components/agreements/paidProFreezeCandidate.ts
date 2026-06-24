@@ -619,6 +619,7 @@ export function evaluatePaidProFreezeCandidateGates(
 }
 
 function extractPaidProFreezeRejectReason(message: string): string {
+  if (message.includes("section_heading_title_anomaly")) return "section_heading_title_anomaly";
   if (message.includes("missing_notices_heading")) return "missing_notices_heading";
   if (message.includes("section_structure_synthetic_malformed_headings")) {
     return "section_structure_synthetic_malformed_headings";

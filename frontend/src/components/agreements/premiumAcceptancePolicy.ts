@@ -30,6 +30,9 @@ export type PremiumRenderSource =
 /** Minimum server body length treated as commercially authoritative. */
 export const LONG_PREMIUM_AUTHORITATIVE_MIN_LEN = 15_000;
 
+/** Short deterministic recovery must not replace a substantive server_full_draft above this length. */
+export const SUBSTANTIVE_SERVER_DRAFT_MIN_LEN = 10_000;
+
 /** Fallback/stitched previews shorter than this must not replace a long candidate. */
 export const SHORT_PREMIUM_FALLBACK_MAX_LEN = 8_000;
 

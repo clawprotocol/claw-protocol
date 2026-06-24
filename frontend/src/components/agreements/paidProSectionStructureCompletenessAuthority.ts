@@ -425,6 +425,26 @@ export function applyPaidProSectionStructureCompletenessAuthority(
     }
   }
 
+  if (titleAnomalies.length > 0) {
+    const retryTitle = applyPaidProSectionHeadingTitleAuthority(out);
+    if (retryTitle.repairs.length > 0) {
+      out = retryTitle.text;
+      repairs.push(...retryTitle.repairs.map((r) => `section_heading_title_retry:${r}`));
+      titleAnomalies = detectPaidProSectionHeadingTitleAnomalies(out);
+      if (titleAnomalies.length === 0) {
+        analysis = {
+          ...analysis,
+          sectionHeadingTitleAnomalies: [],
+        };
+      } else {
+        analysis = {
+          ...analysis,
+          sectionHeadingTitleAnomalies: titleAnomalies.map((a) => `${a.code}:${a.line}`),
+        };
+      }
+    }
+  }
+
   if (hasFalseFragmentSectionHeading(out)) {
     analysis = {
       ...analysis,
@@ -530,8 +550,9 @@ export function assertPaidProSectionStructureCompletenessForFreeze(
     log: true,
   });
   if (result.rejected) {
+    const headingAnomalies = result.diagnostics.sectionHeadingTitleAnomalies.slice(0, 6).join("|");
     throw new Error(
-      `[paid-pro-sot-freeze-blocked] section_structure_incomplete reason=${result.rejectReason} parents=${result.diagnostics.missingParentSections.join(",") || "none"} intermediates=${result.diagnostics.missingIntermediateSections.slice(0, 8).join(",") || "none"} synthetic=${result.diagnostics.syntheticMalformedHeadings.slice(0, 4).join("|") || "none"}`,
+      `[paid-pro-sot-freeze-blocked] section_structure_incomplete reason=${result.rejectReason} parents=${result.diagnostics.missingParentSections.join(",") || "none"} intermediates=${result.diagnostics.missingIntermediateSections.slice(0, 8).join(",") || "none"} synthetic=${result.diagnostics.syntheticMalformedHeadings.slice(0, 4).join("|") || "none"} heading_anomalies=${headingAnomalies || "none"}`,
     );
   }
   return result.text;

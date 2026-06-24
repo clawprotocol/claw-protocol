@@ -229,6 +229,7 @@ import {
   isNonfatalGenerationFailureCode,
   isNonfatalParseDegradedPaidAccept,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
   logPremiumAcceptanceDecision,
   partyPlaceholderRepairYieldsAuthoritativePaidBody,
   premiumBodyHasRequiredPaidSections,
@@ -3080,19 +3081,29 @@ async function runPremiumCompletionInner(
           }
         }
         if (!freezeCommit.ok) {
-          const recovery = previewRecoverPaidProFreezeCandidate({
-            draft: mergedForApi,
-            intakeText: rawForSoT || rawIntake,
-            surface: "premium_completion_pipeline_accept_recovery",
-          });
-          const serverLen = doc.length;
-          if (
-            recovery.ok &&
-            (serverLen < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
-              recovery.text.length >= Math.floor(serverLen * 0.85))
-          ) {
-            doc = recovery.text;
-            freezeCommit = recovery;
+          const authoritativeServerLen = Math.max(
+            wireAuthoritativeBodyLen,
+            serverFullDocumentAuthoritative ? wireCorpusForFreeze.length : 0,
+          );
+          const substantiveAuthoritativeServer =
+            serverFullDocumentAuthoritative &&
+            authoritativeServerLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+
+          if (!substantiveAuthoritativeServer) {
+            const recovery = previewRecoverPaidProFreezeCandidate({
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              surface: "premium_completion_pipeline_accept_recovery",
+            });
+            const serverLen = doc.length;
+            if (
+              recovery.ok &&
+              (serverLen < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
+                recovery.text.length >= Math.floor(serverLen * 0.85))
+            ) {
+              doc = recovery.text;
+              freezeCommit = recovery;
+            }
           }
         }
         if (!freezeCommit.ok) {
