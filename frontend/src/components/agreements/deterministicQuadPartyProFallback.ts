@@ -28,7 +28,11 @@ import { rejectPremiumBodyForProRender } from "./premiumFullDraftClientAcceptanc
 import { countNumberedAgreementSections } from "./paidProMutualConsultingQualityFloor";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
-import { countSignatureBlockHeadingsInTail } from "./guidedDealCompletion/signatureRegion";
+import {
+  countSignatureBlockHeadingsInTail,
+  countSignatureExecutionLinesInTail,
+  corpusSignatureBlocksHaveRequiredByLines,
+} from "./guidedDealCompletion/signatureRegion";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 
 export const DETERMINISTIC_QUAD_PARTY_PRO_FALLBACK_SURFACE = "deterministic_quad_party_pro_fallback" as const;
@@ -222,11 +226,14 @@ export function validateDeterministicQuadPartyProFallbackAcceptance(args: {
   if (!renderReject.ok) reasons.push(...renderReject.reasons);
   const degraded = explainPaidProDegradedRecoveryDisplayRequirements(body, args.rawIntake);
   if (!degraded.ok) reasons.push(`degraded_recovery:${degraded.failedStep}`);
-  if (countPaidProExecutionBlocks(body) !== 1) {
-    reasons.push(`execution_blocks:${countPaidProExecutionBlocks(body)}`);
+  const executionBlocks = countPaidProExecutionBlocks(body);
+  if (executionBlocks !== 1) {
+    reasons.push(`execution_blocks:${executionBlocks}`);
+  } else if (!corpusSignatureBlocksHaveRequiredByLines(body, parties.length)) {
+    reasons.push(
+      `signature_tail_incomplete:headings=${countSignatureBlockHeadingsInTail(body)}:by=${countSignatureExecutionLinesInTail(body)}`,
+    );
   }
-  const sigHeadings = countSignatureBlockHeadingsInTail(body);
-  if (sigHeadings < 4) reasons.push(`signature_headings:${sigHeadings}`);
   const vs01 = resolveAuthoritativeSignerCount({
     intakeText: args.rawIntake,
     draftParties: parties.map((name) => ({ name })),

@@ -97,6 +97,7 @@ import {
   preparePaidProFreezeCandidateText,
   assertPaidProFreezeCandidateGates,
 } from "./paidProFreezeCandidate";
+import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -339,7 +340,7 @@ export function establishPaidProSourceOfTruth(args: {
   const reviewParties = prep.reviewParties;
   const parties = prep.parties;
   const partyNames = parties.map((p) => p.name);
-  const safeForCommit = assertPaidProFreezeCandidateGates(prep, {
+  let safeForCommit = assertPaidProFreezeCandidateGates(prep, {
     text: args.text,
     source: requestedSource,
     draft: args.draft ?? null,
@@ -365,16 +366,51 @@ export function establishPaidProSourceOfTruth(args: {
     reviewSessionId: args.reviewSessionId,
     forceAuthoritativePreservation: true,
   });
+  let snapshotForFreeze = snapshot;
   if (!snapshot.integrityOk || snapshot.placeholderIssues.length > 0) {
-    logPreFreezePlaceholderRejectionDetails(safeForCommit, snapshot.placeholderIssues, {
+    const noticeRetry = applyPaidProNoticeContactAuthority(safeForCommit, {
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+      surface: "establish_paid_pro_source_of_truth_snapshot_retry",
+      blockOnUnresolved: false,
+    });
+    if (noticeRetry.repairs.length > 0) {
+      safeForCommit = assertPaidProFreezeCandidateGates(
+        { ...prep, text: noticeRetry.text, hash: hashPaidProCorpus(noticeRetry.text) },
+        {
+          text: noticeRetry.text,
+          source: requestedSource,
+          draft: args.draft ?? null,
+          intakeText: args.intakeText ?? null,
+          agreementGenerationId: args.agreementGenerationId,
+          generationOutcome: args.generationOutcome,
+          reviewSessionId: args.reviewSessionId,
+          surface: "establish_paid_pro_source_of_truth_snapshot_retry",
+        },
+      );
+      snapshotForFreeze = buildCanonicalAgreementSnapshot({
+        surface: "paid_pro_source_of_truth_establish_retry",
+        tier: "pro",
+        candidates: [{ source: "server_full_document_text", text: safeForCommit }],
+        intakeText: args.intakeText ?? null,
+        parties,
+        signerState: { complete: false, signerCount: authoritativeSignerCount },
+        minLen: 500,
+        reviewSessionId: args.reviewSessionId,
+        forceAuthoritativePreservation: true,
+      });
+    }
+  }
+  if (!snapshotForFreeze.integrityOk || snapshotForFreeze.placeholderIssues.length > 0) {
+    logPreFreezePlaceholderRejectionDetails(safeForCommit, snapshotForFreeze.placeholderIssues, {
       intakeRaw: args.intakeText ?? "",
       partyNames,
     });
     throw new Error(
-      `[paid-pro-sot-freeze-blocked] integrityOk=${snapshot.integrityOk} placeholders=${snapshot.placeholderIssues.join(",") || "none"}`,
+      `[paid-pro-sot-freeze-blocked] integrityOk=${snapshotForFreeze.integrityOk} placeholders=${snapshotForFreeze.placeholderIssues.join(",") || "none"}`,
     );
   }
-  const frozen = freezeCanonicalAgreementSnapshot(snapshot, "server_full_document_text");
+  const frozen = freezeCanonicalAgreementSnapshot(snapshotForFreeze, "server_full_document_text");
   const frozenText = frozen?.canonicalText ?? safeForCommit;
   const preEstablishFreezeHash = frozen?.hash ?? null;
   const driftGuard = enforceAuthoritativeProCorpusDisplay({

@@ -277,11 +277,6 @@ function resolveCanonicalNoticePartyCount(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): number {
-  const frozen = readFrozenCanonicalManifestPartyCount();
-  if (frozen >= 2) {
-    return Math.min(frozen, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
-  }
-
   const intake = roleContext?.intakeText?.trim() ?? "";
   const draftPartyNames =
     roleContext?.draftPartyNames ??
@@ -292,7 +287,14 @@ function resolveCanonicalNoticePartyCount(
       intakeText: intake,
       draftPartyNames,
     });
-    return Math.min(Math.max(resolved.count, 2), PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+    if (resolved.count >= 2) {
+      return Math.min(resolved.count, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+    }
+  }
+
+  const frozen = readFrozenCanonicalManifestPartyCount();
+  if (frozen >= 2) {
+    return Math.min(frozen, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
   }
 
   const authoritativeRows = parties.filter((p) => p.partyLegalName.trim().length >= 2).length;

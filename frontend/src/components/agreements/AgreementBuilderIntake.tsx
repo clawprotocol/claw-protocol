@@ -7869,8 +7869,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               if (!isPaidProSoTEstablishmentFailure(establishMsg)) {
                 clearPartialPaidProAuthoritativeState();
                 clearAuthoritativeAgreementDocument();
+                clearPaidProPostAcceptanceValidatorCache();
               }
-              clearPaidProPostAcceptanceValidatorCache();
               clearPaidProSourceOfTruth();
               setProFullDraftQualityRetry(true);
               setPremiumPersistedFlowActive(false);

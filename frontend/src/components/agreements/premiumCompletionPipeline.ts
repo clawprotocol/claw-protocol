@@ -118,6 +118,10 @@ import {
 } from "./agreementIntentContract";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
+  previewRecoverPaidProFreezeCandidate,
+  resolvePaidProFreezeCommitText,
+} from "./paidProFreezeCandidate";
+import {
   countNumberedAgreementSections,
   MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING,
 } from "./paidProMutualConsultingQualityFloor";
@@ -2878,7 +2882,38 @@ async function runPremiumCompletionInner(
           agreement_family: familyDecision.family,
         });
         winningPremiumBodyText = doc;
-        markPaidProPipelineAcceptedCorpusHash(doc);
+        const freezeSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+        let freezeCommit = resolvePaidProFreezeCommitText({
+          text: doc,
+          source: freezeSource,
+          draft: mergedForApi,
+          intakeText: rawForSoT || rawIntake,
+          agreementGenerationId: input.agreementGenerationId ?? null,
+          generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+          surface: "premium_completion_pipeline_accept",
+        });
+        if (!freezeCommit.ok) {
+          const recovery = previewRecoverPaidProFreezeCandidate({
+            draft: mergedForApi,
+            intakeText: rawForSoT || rawIntake,
+            surface: "premium_completion_pipeline_accept_recovery",
+          });
+          if (recovery.ok) {
+            doc = recovery.text;
+            freezeCommit = resolvePaidProFreezeCommitText({
+              text: doc,
+              source: freezeSource,
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              agreementGenerationId: input.agreementGenerationId ?? null,
+              generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+              surface: "premium_completion_pipeline_accept_recovery",
+            });
+          }
+        } else {
+          doc = freezeCommit.text;
+        }
+        winningPremiumBodyText = doc;
         if (serverGenDegraded) {
           const fc = (effectiveFull.server_generation_failure_code || "").trim();
           if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {

@@ -121,7 +121,6 @@ export function hasPaidProPipelineSessionAcceptance(args: {
     const incomingHash = paidProPipelineAcceptedCorpusHash(t);
     const acceptedHash = readPaidProPipelineAcceptedCorpusHash();
     if (incomingHash && acceptedHash && incomingHash === acceptedHash) return true;
-    return true;
   }
   return false;
 }

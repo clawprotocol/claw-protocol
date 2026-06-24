@@ -310,6 +310,19 @@ export function preparePaidProFreezeCandidateText(
     repairs.push(...contaminationRepair.repairs);
   }
 
+  if (parties.length >= 2) {
+    const noticePrep = applyPaidProNoticeContactAuthority(safeForCommit, {
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+      surface: `${surface}_prep_notice`,
+      blockOnUnresolved: false,
+    });
+    if (noticePrep.repairs.length > 0) {
+      safeForCommit = noticePrep.text;
+      repairs.push(...noticePrep.repairs.slice(0, 12));
+    }
+  }
+
   return {
     text: safeForCommit,
     hash: hashPaidProCorpus(safeForCommit),
@@ -396,6 +409,14 @@ export function assertPaidProFreezeCandidateGates(
     );
   }
 
+  const noticeFinalize = applyPaidProNoticeContactAuthority(safeForCommit, {
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+    surface: `${surface}_freeze_finalize_notices`,
+    blockOnUnresolved: true,
+  });
+  safeForCommit = noticeFinalize.text;
+
   if (containsUnresolvedRenderTokens(safeForCommit)) {
     throw new Error(
       "[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority",
@@ -415,14 +436,6 @@ export function assertPaidProFreezeCandidateGates(
     signerNames: prep.reviewParties.map((p) => p.signerName),
     surface: `${surface}_pre_notice_finalize`,
   });
-
-  const noticeFinalize = applyPaidProNoticeContactAuthority(safeForCommit, {
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-    surface: `${surface}_freeze_finalize_notices`,
-    blockOnUnresolved: true,
-  });
-  safeForCommit = noticeFinalize.text;
 
   const finalizeBoundary = applyPaidProDocumentBoundaryAuthority(safeForCommit, {
     draft: args.draft ?? null,
@@ -521,6 +534,24 @@ export function buildPaidProFreezeCandidate(
 ): PaidProFreezeCandidateGateResult {
   const prep = preparePaidProFreezeCandidateText(args);
   return evaluatePaidProFreezeCandidateGates(prep, args);
+}
+
+/**
+ * Resolve freeze-gated authoritative text for pipeline acceptance / SoT commit.
+ * When gates pass, returns the repaired corpus that freeze establishment must use — not the raw server body.
+ */
+export function resolvePaidProFreezeCommitText(
+  args: PreparePaidProFreezeCandidateArgs,
+): PaidProFreezeCandidateGateResult {
+  const result = buildPaidProFreezeCandidate(args);
+  if (result.ok) {
+    markPaidProPipelineValidationPassed({
+      text: result.text,
+      source: args.source ?? "server_full_draft",
+    });
+    markPaidProPipelineAcceptedCorpusHash(result.text);
+  }
+  return result;
 }
 
 /** Preview whether deterministic recovery can pass freeze gates (no SoT commit). */

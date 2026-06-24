@@ -307,6 +307,11 @@ def dispatch_stripe_event(economics: EconomicsStore, event: Dict[str, Any]) -> D
         genesis_result = dispatch_genesis_stripe_side_effect(economics, etype, data)
     except Exception:
         _log.exception("genesis_stripe_side_effect failed type=%s", etype)
+    if etype == "checkout.session.completed":
+        from backend.billing.stripe_subscription_sync import handle_checkout_session_completed
+
+        checkout_result = handle_checkout_session_completed(economics, data)
+        return {**checkout_result, "genesis": genesis_result}
     if etype == "invoice.paid":
         legacy = handle_invoice_paid(economics, data)
         return {**legacy, "genesis": genesis_result}

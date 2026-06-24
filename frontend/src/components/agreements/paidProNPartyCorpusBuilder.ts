@@ -15,6 +15,7 @@ import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNorma
 import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import { PAID_PRO_RECOVERY_MIN_DISPLAY_LEN } from "./paidProPostCheckoutRenderGate";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 
 function oxfordPartyList(parties: readonly string[]): string {
   if (parties.length <= 1) return parties[0] ?? "";
@@ -139,12 +140,6 @@ export function buildNPartyPaidProServerCorpus(args: {
   ];
 
   let body = blocks.join("\n\n").trim();
-  const minLen = args.minLen ?? PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
-  const padTarget = minLen + 600;
-  while (body.length < padTarget) {
-    body +=
-      "\n\nOperational Detail. The Parties will cooperate in good faith on milestones, deliverables, reporting, and change orders under this Agreement.";
-  }
 
   const execution = enforcePaidProSingleExecutionBlock(body, {
     intakeText: intake,
@@ -161,6 +156,11 @@ export function buildNPartyPaidProServerCorpus(args: {
   if (countPaidProExecutionBlocks(body) !== 1) {
     const retry = enforcePaidProSingleExecutionBlock(body, { intakeText: intake, draftPartyNames: [...parties] });
     body = retry.text;
+  }
+
+  const minLen = args.minLen ?? PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
+  if (body.length < minLen) {
+    body = padOperativeCorpusBeforeWitness(body, minLen);
   }
 
   return body.trim();
