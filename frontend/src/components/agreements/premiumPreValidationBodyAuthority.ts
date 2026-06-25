@@ -15,6 +15,7 @@ import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants"
 import {
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
   SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN,
+  isDegradedJsonParseWithoutSubstantiveServerFull,
 } from "./premiumAcceptancePolicy";
 import { scanPremiumOutputForDevContextLeak } from "./premiumOutputDevContextGuard";
 
@@ -29,6 +30,15 @@ export function isSubstantivePremiumServerFullDocument(
   serverFullLen: number,
   effectiveFull: PremiumFullDraftResult,
 ): boolean {
+  if (
+    isDegradedJsonParseWithoutSubstantiveServerFull({
+      generationOutcome: effectiveFull.generation_outcome,
+      failureCode: effectiveFull.server_generation_failure_code,
+      wireServerFullDocumentText: effectiveFull.server_full_document_text,
+    })
+  ) {
+    return false;
+  }
   if (serverFullLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return true;
   if (serverFullLen >= SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN) return true;
   return (

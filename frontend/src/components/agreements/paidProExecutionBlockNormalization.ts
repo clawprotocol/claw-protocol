@@ -513,7 +513,7 @@ export function enforcePaidProSingleExecutionBlock(
 
   const body = operativeBodyWithoutExecutionTails(text);
   const expectedPartyCount = Math.max(manifestLegalNames.length, authoritativePartyCount, roles.length);
-  const useEntityHeadings = manifestLegalNames.length >= 3;
+  const useEntityHeadings = manifestLegalNames.length >= 3 && !quadParty;
 
   const identities: CanonicalPartyIdentity[] =
     manifestRoles && manifestLegalNames.length >= 2

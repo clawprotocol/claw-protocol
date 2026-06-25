@@ -6,6 +6,7 @@ import {
   getAcceptedPremiumCanonicalText,
 } from "./acceptedPremiumCanonicalCorpus";
 import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
+import { shouldAutoEstablishPaidProSourceOfTruthFromRenderPath } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { getPaidProDocumentForSurface } from "./paidProSourceOfTruth";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
 import { shouldPreserveAcceptedServerFullDraftText } from "./proCorpusSourcePath";
@@ -332,18 +333,35 @@ function maybeEstablishAcceptedPremiumCanonicalText(args: {
   rawAcceptedBody: string;
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
+  pipelineSource?: string;
 }): string {
   const raw = trim(args.rawAcceptedBody);
   if (raw.length < 500) return raw;
   const existing = getAcceptedPremiumCanonicalText();
   if (existing.length >= 500) return existing;
   if (!hasCurrentSessionProEntitlement()) return raw;
-  return establishAcceptedPremiumCanonicalCorpus({
-    rawAcceptedBody: raw,
-    draft: args.draft,
-    intakeText: args.intakeText,
-    pipelineSource: "server_full_draft",
-  }).text;
+  const pipelineSource = trim(args.pipelineSource) || "server_full_draft";
+  if (!shouldAutoEstablishPaidProSourceOfTruthFromRenderPath({ body: raw, pipelineSource })) {
+    return raw;
+  }
+  try {
+    return establishAcceptedPremiumCanonicalCorpus({
+      rawAcceptedBody: raw,
+      draft: args.draft,
+      intakeText: args.intakeText,
+      pipelineSource,
+    }).text;
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("[paid-pro-sot-auto-establish-blocked]", {
+        message: err instanceof Error ? err.message : String(err),
+        len: raw.length,
+        pipelineSource,
+      });
+    }
+    return raw;
+  }
 }
 
 function preferLongerAuthoritativeServerBody(
@@ -359,6 +377,7 @@ function preferLongerAuthoritativeServerBody(
       rawAcceptedBody: b,
       draft,
       intakeText,
+      pipelineSource: "server_full_draft",
     });
   }
   return a;
@@ -383,6 +402,7 @@ export function resolvePremiumRenderSource(args: ResolvePremiumRenderSourceArgs)
       rawAcceptedBody: paidAuthoritative,
       draft: args.draft,
       intakeText: args.intakeText,
+      pipelineSource: "server_full_draft",
     });
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console

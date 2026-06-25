@@ -10,6 +10,7 @@ import {
   SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
 } from "./premiumAcceptancePolicy";
 import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
+import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
 export const PAID_PRO_ACCEPTED_SERVER_SHORTENING_MAX_RATIO = 0.9;
@@ -60,6 +61,35 @@ function trim(s: string | null | undefined): string {
 export function hasLatchedLongAcceptedServerFullDraft(): boolean {
   const latched = getLatchedAcceptedServerFullDraftAuthority();
   return latched !== null && latched.freezeEstablished;
+}
+
+/**
+ * Render resolver may only auto-commit SoT when the premium pipeline already accepted the corpus
+ * (or a freeze-established latch exists). Substantive length alone is insufficient — prevents
+ * degraded/json_parse document_text or tiny fallbacks from masquerading as server_full_draft SoT.
+ */
+export function shouldAutoEstablishPaidProSourceOfTruthFromRenderPath(args: {
+  body: string;
+  pipelineSource: string;
+}): boolean {
+  const body = trim(args.body);
+  const source = trim(args.pipelineSource) || "server_full_draft";
+  if (!body || body.length < 500) return false;
+  if (
+    source === "rejected_paid_corpus" ||
+    source === "fallback_preview" ||
+    source === "fallback_preview_error" ||
+    source === "premium_degraded_server_local_recovery" ||
+    source === "structural_recovery" ||
+    source === "deterministic_recovery_freeze_candidate"
+  ) {
+    return false;
+  }
+  const latched = getLatchedAcceptedServerFullDraftAuthority();
+  if (latched?.freezeEstablished && latched.body.trim().length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+    return body.length >= latched.len || body.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+  }
+  return hasPaidProPipelineSessionAcceptance({ text: body, source });
 }
 
 export function logPremiumAuthorityCandidateRejectedShorterThanAccepted(payload: {

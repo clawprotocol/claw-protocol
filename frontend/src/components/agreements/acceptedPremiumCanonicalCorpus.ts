@@ -87,12 +87,13 @@ export function establishAcceptedPremiumCanonicalCorpus(
   args: EstablishAcceptedPremiumCanonicalCorpusArgs,
 ): AcceptedPremiumCanonicalRecord {
   const raw = trim(args.rawAcceptedBody);
-  const source = isAuthoritativePremiumPipelineRenderSource(args.pipelineSource)
-    ? "server_full_draft"
-    : "server_full_draft";
+  const pipelineSource = trim(args.pipelineSource) || "server_full_draft";
+  if (!isAuthoritativePremiumPipelineRenderSource(pipelineSource)) {
+    throw new Error(`[paid-pro-sot-commit-blocked] non_authoritative_pipeline_source:${pipelineSource}`);
+  }
   const record = establishPaidProSourceOfTruth({
     text: raw,
-    source,
+    source: pipelineSource,
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
   });

@@ -97,7 +97,7 @@ import {
 } from "./paidProSessionEligibility";
 import {
   preparePaidProFreezeCandidateText,
-  assertPaidProFreezeCandidateGates,
+  evaluatePaidProFreezeCandidateGates,
 } from "./paidProFreezeCandidate";
 import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 
@@ -206,6 +206,7 @@ const FORBIDDEN_PAID_PRO_SOT_SOURCES: ReadonlySet<string> = new Set([
   "fallback_preview",
   "fallback_preview_error",
   "stale_intake",
+  "premium_degraded_server_local_recovery",
 ]);
 
 export function establishPaidProSourceOfTruth(args: {
@@ -246,6 +247,32 @@ export function establishPaidProSourceOfTruth(args: {
   });
   if (!establishmentGate.allowed) {
     throw new Error(`[paid-pro-sot-establishment-suppressed] ${establishmentGate.reason}`);
+  }
+  const wireLen = trim(args.text).length;
+  const generationOutcome = trim(args.generationOutcome).toLowerCase();
+  const mislabeledSubstantiveServerSource =
+    (requestedSource === "server_full_draft" ||
+      requestedSource === "server_full_draft_retry" ||
+      requestedSource === "server_full_draft_degraded") &&
+    wireLen > 0 &&
+    wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    !args.allowShorterOverwrite &&
+    !hasPaidProPipelineSessionAcceptance({ text: trim(args.text), source: requestedSource });
+  if (mislabeledSubstantiveServerSource) {
+    throw new Error(
+      `[paid-pro-sot-establishment-blocked] mislabeled_server_full_draft_below_substantive_min;len=${wireLen}`,
+    );
+  }
+  if (
+    generationOutcome === "degraded" &&
+    wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    (requestedSource === "server_full_draft" || requestedSource === "server_full_draft_degraded") &&
+    !args.allowShorterOverwrite &&
+    !hasPaidProPipelineSessionAcceptance({ text: trim(args.text), source: requestedSource })
+  ) {
+    throw new Error(
+      `[paid-pro-sot-establishment-blocked] degraded_response_without_substantive_server_full;len=${wireLen}`,
+    );
   }
   // First-authoritative-success-wins latch: once a substantive SoT is committed, a later automated
   // premium response (e.g. a duplicate request that came back degraded/json_parse) must never
@@ -315,7 +342,6 @@ export function establishPaidProSourceOfTruth(args: {
       text: trim(args.text),
       source: requestedSource,
     });
-  const wireLen = trim(args.text).length;
   const substantiveServerDraft =
     requestedSource === "server_full_draft" && wireLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
   if (minimumSubstance.applies && !minimumSubstance.ok) {
@@ -360,7 +386,7 @@ export function establishPaidProSourceOfTruth(args: {
   const reviewParties = prep.reviewParties;
   const parties = prep.parties;
   const partyNames = parties.map((p) => p.name);
-  let safeForCommit = assertPaidProFreezeCandidateGates(prep, {
+  const freezeGateArgs = {
     text: args.text,
     source: requestedSource,
     draft: args.draft ?? null,
@@ -369,7 +395,14 @@ export function establishPaidProSourceOfTruth(args: {
     generationOutcome: args.generationOutcome,
     reviewSessionId: args.reviewSessionId,
     surface: "establish_paid_pro_source_of_truth",
-  });
+  };
+  const primaryFreezeGate = evaluatePaidProFreezeCandidateGates(prep, freezeGateArgs);
+  if (!primaryFreezeGate.ok) {
+    throw new Error(
+      `[paid-pro-sot-establishment-blocked] ${primaryFreezeGate.rejectReason ?? "freeze_gates_failed"}`,
+    );
+  }
+  let safeForCommit = primaryFreezeGate.text;
   const authoritativeSignerCount = resolveAuthoritativeSignerCount({
     intakeText: args.intakeText ?? null,
     draftParties: parties,
@@ -395,19 +428,20 @@ export function establishPaidProSourceOfTruth(args: {
       blockOnUnresolved: false,
     });
     if (noticeRetry.repairs.length > 0) {
-      safeForCommit = assertPaidProFreezeCandidateGates(
+      const retryGate = evaluatePaidProFreezeCandidateGates(
         { ...prep, text: noticeRetry.text, hash: hashPaidProCorpus(noticeRetry.text) },
         {
+          ...freezeGateArgs,
           text: noticeRetry.text,
-          source: requestedSource,
-          draft: args.draft ?? null,
-          intakeText: args.intakeText ?? null,
-          agreementGenerationId: args.agreementGenerationId,
-          generationOutcome: args.generationOutcome,
-          reviewSessionId: args.reviewSessionId,
           surface: "establish_paid_pro_source_of_truth_snapshot_retry",
         },
       );
+      if (!retryGate.ok) {
+        throw new Error(
+          `[paid-pro-sot-establishment-blocked] ${retryGate.rejectReason ?? "freeze_gates_failed"}`,
+        );
+      }
+      safeForCommit = retryGate.text;
       snapshotForFreeze = buildCanonicalAgreementSnapshot({
         surface: "paid_pro_source_of_truth_establish_retry",
         tier: "pro",
@@ -594,7 +628,15 @@ export function hydratePaidProSourceOfTruth(args: {
 }): PaidProSourceOfTruth | null {
   const text = trim(args.text);
   if (text.length < 500) return null;
-  if ((args.source || "server_full_draft") !== "server_full_draft") return null;
+  const source = trim(args.source) || "server_full_draft";
+  if (source !== "server_full_draft" && source !== "server_full_draft_degraded") return null;
+  if (
+    text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    !hasPaidProPipelineSessionAcceptance({ text, source }) &&
+    !trim(args.hash)
+  ) {
+    return null;
+  }
   const establishmentGate = evaluatePaidProSourceOfTruthEstablishment({
     source: args.source ?? "server_full_draft",
     agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,

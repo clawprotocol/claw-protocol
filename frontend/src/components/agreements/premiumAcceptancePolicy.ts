@@ -81,6 +81,23 @@ export function serverFullDocumentWinsOverClientGates(args: {
   return args.serverFullDocumentLen >= SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN;
 }
 
+/**
+ * Degraded nonfatal parse (e.g. json_parse) with no `server_full_document_text` on the wire cannot
+ * establish paid Pro SoT as `server_full_draft` — only labeled recovery or display-only fallback paths
+ * may surface a body. A substantive wire `server_full_document_text` (even below the 10k SoT floor)
+ * is still distinct from a document_text-only degraded payload.
+ */
+export function isDegradedJsonParseWithoutSubstantiveServerFull(args: {
+  generationOutcome?: string | null;
+  failureCode?: string | null | undefined;
+  wireServerFullDocumentText?: string | null;
+}): boolean {
+  const outcome = (args.generationOutcome || "").trim().toLowerCase();
+  if (outcome !== "degraded") return false;
+  if (!isNonfatalGenerationFailureCode(args.failureCode)) return false;
+  return (args.wireServerFullDocumentText || "").trim().length === 0;
+}
+
 /** A paid body has the required commercial sections (services/IP/term/governing-law/signature). */
 export function premiumBodyHasRequiredPaidSections(args: {
   text: string;

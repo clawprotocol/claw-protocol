@@ -231,9 +231,11 @@ import {
   freezeSessionPremiumBodyForGeneration,
   getFrozenPremiumBodyForSession,
   isLongCommerciallyUsablePremiumBody,
+  isDegradedJsonParseWithoutSubstantiveServerFull,
   isNonfatalGenerationFailureCode,
   isNonfatalParseDegradedPaidAccept,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+  SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN,
   SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
   logPremiumAcceptanceDecision,
   partyPlaceholderRepairYieldsAuthoritativePaidBody,
@@ -1960,8 +1962,9 @@ async function runPremiumCompletionInner(
       }
       let effectiveFull: PremiumFullDraftResult = full;
       const wireDocumentText = (full.document_text || "").trim();
-      const wireServerFullDocumentText =
-        (full.server_full_document_text || "").trim() || extractPremiumApiServerCorpusText(full);
+      const wireServerFullDocumentText = (full.server_full_document_text || "").trim();
+      const wireGenerationOutcomeOnWire = (full.generation_outcome || "").trim();
+      const wireFailureCodeOnWire = (full.server_generation_failure_code || "").trim();
       const wireAuthoritativeBodyLen = authoritativeWirePremiumBodyLen({
         wireDocumentText,
         wireServerFullDocumentText,
@@ -2182,7 +2185,10 @@ async function runPremiumCompletionInner(
         effectiveFull = {
           ...effectiveFull,
           document_text: doc,
-          generation_outcome: legacyGenerationOutcomeFromClassification(classified),
+          generation_outcome:
+            wireGenerationOutcomeOnWire === "degraded"
+              ? wireGenerationOutcomeOnWire
+              : legacyGenerationOutcomeFromClassification(classified),
         };
       }
       const firstCallOutcomeDegraded = (full.generation_outcome || "").trim() === "degraded";
@@ -2230,7 +2236,9 @@ async function runPremiumCompletionInner(
           effectiveFull = {
             ...effectiveFull,
             document_text: doc,
-            server_full_document_text: doc,
+            ...(wireServerFullDocumentText
+              ? { server_full_document_text: wireServerFullDocumentText }
+              : {}),
             authoritative_draft: doc,
           };
         }
@@ -2353,7 +2361,14 @@ async function runPremiumCompletionInner(
           { advisoryOnly: true },
         );
       }
-      if (shouldFreezePremiumPipelineRecoveryCandidate(doc, effectiveFull.server_generation_failure_code)) {
+      if (
+        shouldFreezePremiumPipelineRecoveryCandidate(doc, effectiveFull.server_generation_failure_code) &&
+        !isDegradedJsonParseWithoutSubstantiveServerFull({
+          generationOutcome: wireGenerationOutcomeOnWire,
+          failureCode: wireFailureCodeOnWire,
+          wireServerFullDocumentText: wireServerFullDocumentText,
+        })
+      ) {
         freezeSessionPremiumBodyForGeneration(input.agreementGenerationId, doc, "server_full_draft");
       }
       {
@@ -2768,17 +2783,25 @@ async function runPremiumCompletionInner(
       // and clear soft structural rejections so a complete server document is never dropped to
       // "Retry Pro draft" (which let a short fallback masquerade as the SoT). Fatal placeholders and
       // dev-context leaks are still enforced (hard failure codes + the finalize pass below).
+      const authoritativeServerFullOnWire = wireServerFullDocumentText;
+      const degradedJsonParseWithoutSubstantiveServerFull =
+        isDegradedJsonParseWithoutSubstantiveServerFull({
+          generationOutcome: wireGenerationOutcomeOnWire,
+          failureCode: wireFailureCodeOnWire,
+          wireServerFullDocumentText: wireServerFullDocumentText,
+        });
       const serverFullDoc =
-        (effectiveFull.server_full_document_text || "").trim() ||
-        extractPremiumApiServerCorpusText(effectiveFull);
+        authoritativeServerFullOnWire || extractPremiumApiServerCorpusText(effectiveFull);
       const serverFailureCodeForWin = (effectiveFull.server_generation_failure_code || "").trim();
       const serverHardFailureForWin =
         serverFailureCodeForWin === "airlock_blocked" || serverFailureCodeForWin === "dev_context_leak";
-      const serverFullDocumentAuthoritative = serverFullDocumentWinsOverClientGates({
-        serverFullDocumentLen: serverFullDoc.length,
-        httpOk: true,
-        hardStructuralFailure: serverHardFailureForWin,
-      });
+      const serverFullDocumentAuthoritative =
+        authoritativeServerFullOnWire.length >= SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN &&
+        serverFullDocumentWinsOverClientGates({
+          serverFullDocumentLen: authoritativeServerFullOnWire.length,
+          httpOk: true,
+          hardStructuralFailure: serverHardFailureForWin,
+        });
       if (serverFullDocumentAuthoritative) {
         const adoptedServerFull = applyAcceptedProCorpusSafeDisplay(serverFullDoc, {
           draft: mergedForApi,
@@ -2848,12 +2871,14 @@ async function runPremiumCompletionInner(
         placeholderOk: placeholderClientOk,
       });
       const structuralFatalCount = countStructuralFatals(acc.reasons);
-      const longAdvisoryAccept = shouldPreserveLongPremiumDespiteSoftGateFailure({
-        bodyLen: (doc || "").length,
-        fatalPlaceholderCount,
-        structuralFatalCount,
-        httpOk: true,
-      });
+      const longAdvisoryAccept =
+        !degradedJsonParseWithoutSubstantiveServerFull &&
+        shouldPreserveLongPremiumDespiteSoftGateFailure({
+          bodyLen: (doc || "").length,
+          fatalPlaceholderCount,
+          structuralFatalCount,
+          httpOk: true,
+        });
       // A `degraded` HTTP-200 body whose only failure is a nonfatal parse error (e.g. json_parse)
       // must NOT be rejected when it is long, placeholder-clean, structurally sound and has the
       // required paid sections. Only the intelligence metadata degrades — the agreement body stays
@@ -2872,6 +2897,7 @@ async function runPremiumCompletionInner(
         });
       }
       const jsonParseNonfatalAccept =
+        !degradedJsonParseWithoutSubstantiveServerFull &&
         !standardClientGatesPass &&
         !longAdvisoryAccept &&
         acc.ok &&
@@ -2895,6 +2921,7 @@ async function runPremiumCompletionInner(
           r === "empty_body",
       );
       const jsonParseDisplayRecoverableAccept =
+        !degradedJsonParseWithoutSubstantiveServerFull &&
         !standardClientGatesPass &&
         !longAdvisoryAccept &&
         !jsonParseNonfatalAccept &&
@@ -2922,6 +2949,7 @@ async function runPremiumCompletionInner(
       // authoritative once it is structurally clean, placeholder-free, and section-complete. This
       // accepts the repaired body even when vPaid soft-fails — without it the paid user is stranded.
       const partyPlaceholderRepairAccept =
+        !degradedJsonParseWithoutSubstantiveServerFull &&
         partyPlaceholderRepairResolvesPaidBody &&
         acc.ok &&
         placeholderClientOk &&
@@ -3065,7 +3093,7 @@ async function runPremiumCompletionInner(
             effectiveFull: {
               ...effectiveFull,
               document_text: wireDocumentText,
-              server_full_document_text: wireServerFullDocumentText || wireDocumentText,
+              server_full_document_text: wireServerFullDocumentText,
             },
             draft: mergedForApi,
             intakeText: rawForSoT || rawIntake,
@@ -3096,6 +3124,12 @@ async function runPremiumCompletionInner(
             ) {
               doc = wireDisplay;
               freezeCommit = wireFreezeDirect;
+              if (
+                freezeCommit.text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+                authoritativeServerFullOnWire.length === 0
+              ) {
+                freezeAcceptedSource = "structural_recovery";
+              }
             }
             if (!freezeCommit.ok) {
               const wirePrepared = preparePaidProServerDocumentForAcceptance(
@@ -3119,6 +3153,12 @@ async function runPremiumCompletionInner(
               ) {
                 doc = wirePrepared.text;
                 freezeCommit = wireFreeze;
+                if (
+                  freezeCommit.text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+                  authoritativeServerFullOnWire.length === 0
+                ) {
+                  freezeAcceptedSource = "structural_recovery";
+                }
               }
             }
           }
@@ -3186,6 +3226,19 @@ async function runPremiumCompletionInner(
               }
             }
           }
+        }
+        if (
+          freezeCommit.ok &&
+          (freezeAcceptedSource === "server_full_draft" ||
+            freezeAcceptedSource === "server_full_draft_retry") &&
+          freezeCommit.text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+          authoritativeServerFullOnWire.length === 0
+        ) {
+          freezeCommit = {
+            ...freezeCommit,
+            ok: false,
+            rejectReason: "mislabeled_server_full_draft_below_substantive_min",
+          };
         }
         if (import.meta.env.MODE !== "test") {
           // eslint-disable-next-line no-console
@@ -3464,7 +3517,10 @@ async function runPremiumCompletionInner(
           const preserved = preservedPlaceholder.text.trim();
           doc = preserved;
           winningPremiumBodyText = preserved;
-          premiumRenderSource = (frozenReject?.source || "server_full_draft") as PremiumRenderSource;
+          premiumRenderSource = (frozenReject?.source ||
+            (degradedJsonParseWithoutSubstantiveServerFull
+              ? "rejected_paid_corpus"
+              : "server_full_draft")) as PremiumRenderSource;
           const preservedFamily = resolveAuthoritativePaidProAgreementFamily({
             intakeText: rawForSoT || rawIntake,
             draft: merged,

@@ -7,6 +7,7 @@
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import { rejectPremiumDegradedFiller } from "./premiumFullDraftClientAcceptance";
+import { isDegradedJsonParseWithoutSubstantiveServerFull } from "./premiumAcceptancePolicy";
 
 const WIRE_DOCUMENT_FIELD_GROUPS: readonly (readonly string[])[] = [
   ["server_full_document_text", "serverFullDocumentText"],
@@ -165,14 +166,27 @@ export function normalizePremiumFullDraftResponsePayload(
   const base = (raw ?? {}) as PremiumFullDraftResult & Record<string, unknown>;
   const picked = pickAuthoritativePremiumWireDocument(base);
   const authoritativeText = picked.text;
+  const rawServerFull = String(base.server_full_document_text ?? "").trim();
+  const degradedWithoutWireServerFull = isDegradedJsonParseWithoutSubstantiveServerFull({
+    generationOutcome: base.generation_outcome,
+    failureCode: base.server_generation_failure_code,
+    wireServerFullDocumentText: rawServerFull,
+  });
+  let mergedServerFullDocumentText: string;
+  if (rawServerFull.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
+    mergedServerFullDocumentText = rawServerFull;
+  } else if (degradedWithoutWireServerFull) {
+    mergedServerFullDocumentText = rawServerFull;
+  } else if (authoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
+    mergedServerFullDocumentText = authoritativeText;
+  } else {
+    mergedServerFullDocumentText = rawServerFull || authoritativeText;
+  }
   const wire: PremiumFullDraftResult = {
     ...base,
     document_text: authoritativeText || String(base.document_text ?? "").trim(),
     authoritative_draft: authoritativeText || String(base.authoritative_draft ?? "").trim(),
-    server_full_document_text:
-      authoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN
-        ? authoritativeText
-        : String(base.server_full_document_text ?? "").trim() || authoritativeText,
+    server_full_document_text: mergedServerFullDocumentText,
   };
   return {
     wire,

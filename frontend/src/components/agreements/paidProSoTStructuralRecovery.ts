@@ -28,6 +28,7 @@ export function isPaidProSoTStructuralEstablishmentFailure(message: string): boo
 export function isPaidProSoTEstablishmentFailure(message: string): boolean {
   return (
     isPaidProSoTStructuralEstablishmentFailure(message) ||
+    message.includes("[paid-pro-sot-establishment-blocked]") ||
     message.includes("[paid-pro-clause-family-structural-blocked]") ||
     message.includes("[paid-pro-document-boundary-blocked]") ||
     message.includes("missing_notices_heading")
@@ -116,12 +117,12 @@ export function tryRecoverPaidProSourceOfTruthFromStructuralFailure(args: {
 
   markPaidProPipelineValidationPassed({
     text: preview.text,
-    source: args.source ?? "server_full_draft_retry",
+    source: args.source ?? "deterministic_recovery_freeze_candidate",
   });
   try {
     const record = establishPaidProSourceOfTruth({
       text: preview.text,
-      source: args.source ?? "server_full_draft_retry",
+      source: args.source ?? "deterministic_recovery_freeze_candidate",
       draft,
       intakeText: args.intakeText,
       agreementGenerationId: args.agreementGenerationId,
