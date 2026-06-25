@@ -75,7 +75,7 @@ export function buildPaidProAcceptancePipelineTracePayload(args: {
     len: text.length,
     hash: text.length >= 80 ? hashPaidProCorpus(text) : text.length > 0 ? `len:${text.length}` : "empty",
     headingAnomalyCount: headingAnomalies.length,
-    headingAnomalyDetails: formatPaidProSectionHeadingTitleAnomalyDetails(text, headingAnomalies).slice(0, 5),
+    headingAnomalyDetails: formatPaidProSectionHeadingTitleAnomalyDetails(text, headingAnomalies).slice(0, 12),
     missingSections: substance?.missingSections ?? [],
     executionSignatureDetected: executionBlockCount > 0 || witnessMatches.length > 0,
     witnessCount: witnessMatches.length,

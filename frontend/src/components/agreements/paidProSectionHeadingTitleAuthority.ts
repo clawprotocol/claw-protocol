@@ -109,6 +109,16 @@ function semanticTokensOverlap(fragmentText: string, canonicalTitle: string): bo
   return overlap >= Math.min(2, fragmentTokens.length);
 }
 
+function fragmentLinesAllContinuationFragments(lines: readonly string[]): boolean {
+  return (
+    lines.length > 0 &&
+    lines.every(
+      (line) =>
+        isPaidProHeadingContinuationFragment(line) || isDanglingPaidProMainHeadingPrefix(line),
+    )
+  );
+}
+
 /** Remove orphan title fragments immediately before canonical numbered section headings. */
 export function repairOrphanSemanticHeadingFragmentsBeforeCanonicalHeadings(text: string): {
   text: string;
@@ -163,7 +173,8 @@ export function repairOrphanSemanticHeadingFragmentsBeforeCanonicalHeadings(text
     const removeOrphans =
       ALL_CAPS_SECTION_HEADING_RE.test(nextTrimmed) ||
       semanticTokensOverlap(fragmentText, canonical.title) ||
-      fragmentContainedInCanonicalTitle(fragmentText, canonical.title);
+      fragmentContainedInCanonicalTitle(fragmentText, canonical.title) ||
+      fragmentLinesAllContinuationFragments(fragmentLines);
     if (removeOrphans) {
       for (let k = i; k < nextIdx; k += 1) {
         if (lines[k]!.trim()) skip.add(k);
@@ -300,17 +311,64 @@ export function formatPaidProSectionHeadingTitleAnomalyDetails(
   lineIndex: number;
   prevLine: string | null;
   nextLine: string | null;
+  sectionNumber: string | null;
+  canonicalTitle: string | null;
+  canonicalTitleMatch: boolean;
+  canonicalTitleMatchDecision: string;
 }> {
   const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
-  return anomalies.map((a) => ({
-    code: a.code,
-    line: a.line,
-    lineIndex: a.lineIndex,
-    prevLine:
-      a.lineIndex > 0 ? (lines[a.lineIndex - 1]?.trim() || null) : null,
-    nextLine:
-      a.lineIndex + 1 < lines.length ? (lines[a.lineIndex + 1]?.trim() || null) : null,
-  }));
+  return anomalies.map((a) => {
+    const trimmed = a.line.includes(" / ")
+      ? a.line.split(" / ")[0]!.trim()
+      : a.line.trim();
+    const main = parseMainSectionPrefixLine(trimmed);
+    const subsection = trimmed.match(SUBSECTION_PREFIX_RE);
+    const sectionNumber = main?.sectionNum ?? subsection?.[1] ?? null;
+    const canonicalTitle = main?.title ?? subsection?.[2]?.trim() ?? null;
+    let canonicalTitleMatchDecision = "none";
+    let canonicalTitleMatch = false;
+    if (a.code === "orphan_title_fragment_before_section" && a.lineIndex + 1 < lines.length) {
+      const nextTrimmed = lines[nextNonEmptyLineIndex(lines, a.lineIndex + 1) ?? a.lineIndex + 1]?.trim() ?? "";
+      const canonical = parseMainSectionPrefixLine(nextTrimmed);
+      if (canonical) {
+        const fragmentText = a.line.replace(/\s\/\s/g, " ");
+        if (ALL_CAPS_SECTION_HEADING_RE.test(nextTrimmed)) {
+          canonicalTitleMatchDecision = "all_caps_heading";
+          canonicalTitleMatch = true;
+        } else if (fragmentContainedInCanonicalTitle(fragmentText, canonical.title)) {
+          canonicalTitleMatchDecision = "fragment_contained_in_canonical_title";
+          canonicalTitleMatch = true;
+        } else if (semanticTokensOverlap(fragmentText, canonical.title)) {
+          canonicalTitleMatchDecision = "semantic_token_overlap";
+          canonicalTitleMatch = true;
+        } else if (
+          fragmentLinesAllContinuationFragments(a.line.split(" / ").map((s) => s.trim()))
+        ) {
+          canonicalTitleMatchDecision = "continuation_fragment_stack";
+          canonicalTitleMatch = true;
+        }
+      }
+    } else if (a.code === "duplicate_semantic_and_canonical_heading") {
+      canonicalTitleMatchDecision = "duplicate_semantic_canonical_pair";
+      canonicalTitleMatch = true;
+    } else if (a.code === "numbered_heading_title_continuation_split") {
+      canonicalTitleMatchDecision = "split_title_continuation";
+    } else if (a.code === "false_fragment_section_heading") {
+      canonicalTitleMatchDecision = "false_fragment_section_title";
+    }
+    return {
+      code: a.code,
+      line: a.line,
+      lineIndex: a.lineIndex,
+      prevLine: a.lineIndex > 0 ? (lines[a.lineIndex - 1]?.trim() || null) : null,
+      nextLine:
+        a.lineIndex + 1 < lines.length ? (lines[a.lineIndex + 1]?.trim() || null) : null,
+      sectionNumber,
+      canonicalTitle,
+      canonicalTitleMatch,
+      canonicalTitleMatchDecision,
+    };
+  });
 }
 
 function repairCommaTerminatedNumberedHeadings(text: string): { text: string; repairs: string[] } {

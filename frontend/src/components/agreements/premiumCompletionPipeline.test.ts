@@ -1450,7 +1450,7 @@ describe("runPremiumCompletion needs_details party-placeholder repair", () => {
   it("repairs [ORG_1]/[ORG_2] with known parties and accepts (no failed premium recovery)", async () => {
     const out = await runNeedsDetailsWithPartyPlaceholders({ bodyLen: 3_000, forceValidateFail: false });
     expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
-    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    expect(out.premiumRenderSource).toBe("deterministic_recovery_freeze_candidate");
     const body = out.winningPremiumBodyText;
     expect(body).toContain("Blue Canyon Analytics LLC");
     expect(body).toContain("Iron Vale Systems Inc.");
@@ -1466,7 +1466,7 @@ describe("runPremiumCompletion needs_details party-placeholder repair", () => {
   it("accepts the repaired body even when the paid quality gate soft-fails (advisory accept)", async () => {
     const out = await runNeedsDetailsWithPartyPlaceholders({ bodyLen: 3_000, forceValidateFail: true });
     expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
-    expect(out.premiumRenderSource).toMatch(/server_full_draft/);
+    expect(out.premiumRenderSource).toBe("deterministic_recovery_freeze_candidate");
     expect(out.premiumCompletionOutcome).toBe(
       "authoritative_draft_complete_with_recommended_clarifications",
     );

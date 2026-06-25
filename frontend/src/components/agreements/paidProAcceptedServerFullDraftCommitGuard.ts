@@ -7,6 +7,7 @@ import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPa
 import {
   getLatchedAcceptedServerFullDraftAuthority,
   LONG_PREMIUM_AUTHORITATIVE_MIN_LEN,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
 } from "./premiumAcceptancePolicy";
 import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
@@ -27,6 +28,8 @@ const FORBIDDEN_AUTOMATED_SHORTENING_SOURCES: ReadonlySet<string> = new Set([
   "live_generated_preview",
   "legacy_snapshot",
   "preview_premium_deliverable",
+  "structural_recovery",
+  "deterministic_recovery_freeze_candidate",
 ]);
 
 export type GuardPaidProAcceptedServerFullDraftCommitArgs = {
@@ -88,17 +91,37 @@ export function guardPaidProAcceptedServerFullDraftCommit(
   const generationOutcome = trim(args.generationOutcome).toLowerCase();
 
   const latched = getLatchedAcceptedServerFullDraftAuthority();
+  const mislabeledSubstantiveServerSource =
+    (candidateSource === "server_full_draft" ||
+      candidateSource === "server_full_draft_retry" ||
+      candidateSource === "server_full_draft_degraded") &&
+    candidateLen > 0 &&
+    candidateLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+
   if (!latched || !latched.freezeEstablished || latched.len < LONG_PREMIUM_AUTHORITATIVE_MIN_LEN) {
+    if (mislabeledSubstantiveServerSource) {
+      logPremiumAuthorityCandidateRejectedShorterThanAccepted({
+        acceptedLen: 0,
+        candidateLen,
+        source: candidateSource || null,
+        renderSource: renderSource || null,
+        reason: "mislabeled_server_full_draft_below_substantive_min",
+        acceptedHash: "",
+        candidateHash,
+      });
+    }
     return {
       text: candidate,
-      rejected: false,
+      rejected: mislabeledSubstantiveServerSource,
       acceptedLen: 0,
       candidateLen,
       acceptedHash: "",
       candidateHash,
       source: candidateSource || null,
       renderSource: renderSource || null,
-      reason: args.reason ?? "no_latched_authority",
+      reason: mislabeledSubstantiveServerSource
+        ? "mislabeled_server_full_draft_below_substantive_min"
+        : args.reason ?? "no_latched_authority",
     };
   }
 

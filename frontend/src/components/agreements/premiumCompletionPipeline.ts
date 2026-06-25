@@ -276,6 +276,8 @@ export type PremiumRenderSource =
   | "server_full_draft"
   | "server_full_draft_retry"
   | "server_full_draft_degraded"
+  | "structural_recovery"
+  | "deterministic_recovery_freeze_candidate"
   | "fallback_preview"
   | "fallback_preview_error"
   | "snapshot_server_full_draft"
@@ -3022,7 +3024,7 @@ async function runPremiumCompletionInner(
           wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
           freezePrepTrim.length >= Math.floor(wireCorpusForFreeze.length * 0.9) &&
           freezePrepTrim.length <= Math.ceil(wireCorpusForFreeze.length * 1.15);
-        const preparedForFreeze = skipThinPrepareForSubstantiveWire
+        let preparedForFreeze = skipThinPrepareForSubstantiveWire
           ? { text: freezePrepTrim, repairs: [] as string[] }
           : preparePaidProServerDocumentForAcceptance(
               freezePrepInput,
@@ -3035,8 +3037,19 @@ async function runPremiumCompletionInner(
           if (headingPrep.repairs.length > 0) {
             preparedForFreeze.text = headingPrep.text;
           }
+          if (detectPaidProSectionHeadingTitleAnomalies(preparedForFreeze.text).length > 0) {
+            preparedForFreeze = preparePaidProServerDocumentForAcceptance(
+              freezePrepInput,
+              mergedForApi,
+              rawForSoT || rawIntake,
+              { surface: "premium_completion_pipeline_freeze_prep_heading_retry" },
+            );
+          }
         }
         doc = preparedForFreeze.text;
+        let freezeAcceptedSource: PremiumRenderSource = usedClientRetry
+          ? "server_full_draft_retry"
+          : "server_full_draft";
         let freezeCommit = resolvePaidProFreezeCommitText({
           text: doc,
           source: freezeSource,
@@ -3110,16 +3123,21 @@ async function runPremiumCompletionInner(
             }
           }
         }
-        if (!freezeCommit.ok) {
-          const authoritativeServerLen = Math.max(
-            wireAuthoritativeBodyLen,
-            serverFullDocumentAuthoritative ? wireCorpusForFreeze.length : 0,
-          );
-          const substantiveAuthoritativeServer =
-            serverFullDocumentAuthoritative &&
-            authoritativeServerLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+        const authoritativeServerLenForRecovery = Math.max(
+          wireAuthoritativeBodyLen,
+          serverFullDocumentAuthoritative ? wireCorpusForFreeze.length : 0,
+        );
+        const substantiveAuthoritativeServer =
+          serverFullDocumentAuthoritative &&
+          authoritativeServerLenForRecovery >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+        const generationOutcomeOk =
+          !effectiveFull.generation_outcome ||
+          String(effectiveFull.generation_outcome).trim().toLowerCase() === "ok";
+        const blockRecoveryForSubstantiveServer =
+          substantiveAuthoritativeServer && generationOutcomeOk && fatalPlaceholderCount === 0;
 
-          if (!substantiveAuthoritativeServer) {
+        if (!freezeCommit.ok) {
+          if (!blockRecoveryForSubstantiveServer) {
             const recovery = previewRecoverPaidProFreezeCandidate({
               draft: mergedForApi,
               intakeText: rawForSoT || rawIntake,
@@ -3133,10 +3151,11 @@ async function runPremiumCompletionInner(
             ) {
               doc = recovery.text;
               freezeCommit = recovery;
+              freezeAcceptedSource = "deterministic_recovery_freeze_candidate";
             }
           }
         }
-        if (!freezeCommit.ok) {
+        if (!freezeCommit.ok && !blockRecoveryForSubstantiveServer) {
           const structural = buildPaidProStructuralRecoveryBody({
             intakeText: rawForSoT || rawIntake,
             draft: mergedForApi,
@@ -3151,7 +3170,7 @@ async function runPremiumCompletionInner(
             doc = structuralPrep.text;
             const structuralGate = buildPaidProFreezeCandidate({
               text: doc,
-              source: freezeSource,
+              source: "structural_recovery",
               draft: mergedForApi,
               intakeText: rawForSoT || rawIntake,
               agreementGenerationId: input.agreementGenerationId ?? null,
@@ -3159,21 +3178,11 @@ async function runPremiumCompletionInner(
               surface: "premium_completion_pipeline_structural_recovery",
             });
             if (structuralGate.ok) {
-              const minStructuralLen =
-                serverFullDocumentAuthoritative
-                  ? Math.max(
-                      PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
-                      Math.floor(doc.length * 0.85),
-                    )
-                  : wireAuthoritativeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
-                    ? Math.max(
-                        PAID_PRO_RECOVERY_MIN_DISPLAY_LEN,
-                        Math.floor(wireAuthoritativeBodyLen * 0.85),
-                      )
-                    : PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
+              const minStructuralLen = PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
               if (structuralGate.text.length >= minStructuralLen) {
                 doc = structuralGate.text;
                 freezeCommit = structuralGate;
+                freezeAcceptedSource = "structural_recovery";
               }
             }
           }
@@ -3250,20 +3259,25 @@ async function runPremiumCompletionInner(
           winningPremiumBodyText = doc;
           tracePaidProAcceptancePipelineStage({
             stage: "premium_completion_pipeline_final",
-            source: premiumRenderSource,
+            source: freezeAcceptedSource,
             text: doc,
             rawIntake: rawForSoT || rawIntake,
             draft: mergedForApi,
           });
-          if (serverGenDegraded) {
+          if (
+            freezeAcceptedSource === "structural_recovery" ||
+            freezeAcceptedSource === "deterministic_recovery_freeze_candidate"
+          ) {
+            premiumRenderSource = freezeAcceptedSource;
+          } else if (serverGenDegraded) {
             const fc = (effectiveFull.server_generation_failure_code || "").trim();
             if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {
               premiumRenderSource = "server_full_draft_degraded";
             } else {
-              premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+              premiumRenderSource = freezeAcceptedSource;
             }
           } else {
-            premiumRenderSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+            premiumRenderSource = freezeAcceptedSource;
           }
           outMerged = applyAuthoritativeFamilyToDraft(outMerged, familyDecision);
           if (import.meta.env.DEV) {
