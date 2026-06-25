@@ -195,7 +195,9 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     !explicitMultiParty &&
     count > 2 &&
     manifestPartyCount < 3 &&
-    partySlotCount < 3
+    partySlotCount < 3 &&
+    labeledCount < 3 &&
+    quotedCount < 3
   ) {
     count = 2;
     source = "party_slot_count";
@@ -318,24 +320,43 @@ export function resolveReadonlyHtmlSignerCount(
     manifestPartyCount?: number | null;
   },
 ): number {
-  const slotNames = selectAuthoritativeTwoPartySlots(args.draftPartyNames ?? args.partyNames ?? []);
   const authority = readConsumedPaidProSignerMetadataAuthority();
   const manifestCount =
     args.manifestPartyCount ??
     authority?.parties?.filter((p) => String(p.partyLegalName ?? "").trim().length >= 2).length ??
     0;
+  const partyNameRows = (args.partyNames ?? args.draftPartyNames ?? [])
+    .map((n) => String(n || "").trim())
+    .filter((n) => n.length >= 2);
+  const labeledIntakeCount = labeledPartyLegalEntities(String(args.intakeText ?? "")).filter(
+    isAuthoritativeLegalEntityName,
+  ).length;
+  const preserveMultiPartyRows = manifestCount >= 3 || labeledIntakeCount >= 3;
+  const draftPartyNamesForCore = preserveMultiPartyRows
+    ? partyNameRows.length >= 2
+      ? partyNameRows
+      : (args.draftPartyNames ?? args.partyNames ?? [])
+    : selectAuthoritativeTwoPartySlots(args.draftPartyNames ?? args.partyNames ?? []);
 
   const resolution = resolveAuthoritativeSignerCountCore({
     ...args,
-    draftPartyNames: slotNames,
+    draftPartyNames: draftPartyNamesForCore,
+    manifestPartyCount: manifestCount >= 2 ? manifestCount : args.manifestPartyCount,
   });
   let count = resolution.count;
   if (manifestCount >= 2) {
     count = Math.max(count, Math.min(manifestCount, PAID_PRO_AUTHORITY_MAX_PARTIES));
   }
+  const intakeEmpty = String(args.intakeText ?? "").trim().length === 0;
+  if (
+    partyNameRows.length >= 3 &&
+    count < partyNameRows.length &&
+    (labeledIntakeCount >= 3 || manifestCount >= 3 || (intakeEmpty && manifestCount < 3))
+  ) {
+    count = Math.min(partyNameRows.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  }
 
-  const derivedFromPartyNames = (args.partyNames ?? []).filter((n) => String(n || "").trim().length >= 2)
-    .length;
+  const derivedFromPartyNames = partyNameRows.length;
   const derivedFromCorpus = inferCorpusDerivedSignerCount(args.corpusPlain);
   if (derivedFromPartyNames > count) {
     logSignerCountConsumerMismatch({

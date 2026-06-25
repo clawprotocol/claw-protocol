@@ -1713,6 +1713,7 @@ async function runPremiumCompletionInner(
   let outMerged: ParsedDraftShape = merged;
   let winningPremiumBodyText = "";
   let lastWireAuthoritativeBodyLen = 0;
+  let lastWireServerFullDocumentLen = 0;
   let premiumBodyHardRejectedForDevContextLeak = false;
   const intakeLowerGlobal = (rawForSoT || rawIntake).toLowerCase();
   const premiumRejectCtx = {
@@ -1970,6 +1971,7 @@ async function runPremiumCompletionInner(
         wireServerFullDocumentText,
       });
       lastWireAuthoritativeBodyLen = wireAuthoritativeBodyLen;
+      lastWireServerFullDocumentLen = wireServerFullDocumentText.length;
       if (wireServerFullDocumentText.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
         tracePaidProAcceptancePipelineStage({
           stage: "raw_server_full_draft_received",
@@ -3026,7 +3028,12 @@ async function runPremiumCompletionInner(
           agreement_family: familyDecision.family,
         });
         winningPremiumBodyText = doc;
-        const freezeSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+        const freezeSource =
+          degradedJsonParseWithoutSubstantiveServerFull && authoritativeServerFullOnWire.length === 0
+            ? "server_full_draft_degraded"
+            : usedClientRetry
+              ? "server_full_draft_retry"
+              : "server_full_draft";
         const wireCorpusForFreeze = (
           wireServerFullDocumentText ||
           wireDocumentText ||
@@ -3075,9 +3082,12 @@ async function runPremiumCompletionInner(
           }
         }
         doc = preparedForFreeze.text;
-        let freezeAcceptedSource: PremiumRenderSource = usedClientRetry
-          ? "server_full_draft_retry"
-          : "server_full_draft";
+        let freezeAcceptedSource: PremiumRenderSource =
+          degradedJsonParseWithoutSubstantiveServerFull && authoritativeServerFullOnWire.length === 0
+            ? "server_full_draft_degraded"
+            : usedClientRetry
+              ? "server_full_draft_retry"
+              : "server_full_draft";
         let freezeCommit = resolvePaidProFreezeCommitText({
           text: doc,
           source: freezeSource,
@@ -3231,13 +3241,16 @@ async function runPremiumCompletionInner(
           freezeCommit.ok &&
           (freezeAcceptedSource === "server_full_draft" ||
             freezeAcceptedSource === "server_full_draft_retry") &&
-          freezeCommit.text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
-          authoritativeServerFullOnWire.length === 0
+          authoritativeServerFullOnWire.length === 0 &&
+          (degradedJsonParseWithoutSubstantiveServerFull ||
+            freezeCommit.text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN)
         ) {
           freezeCommit = {
             ...freezeCommit,
             ok: false,
-            rejectReason: "mislabeled_server_full_draft_below_substantive_min",
+            rejectReason: degradedJsonParseWithoutSubstantiveServerFull
+              ? "mislabeled_server_full_without_wire_server_full"
+              : "mislabeled_server_full_draft_below_substantive_min",
           };
         }
         if (import.meta.env.MODE !== "test") {
@@ -3357,7 +3370,7 @@ async function runPremiumCompletionInner(
           freezeAcceptedPremiumBodyForSession(
             input.agreementGenerationId,
             doc,
-            usedClientRetry ? "server_full_draft_retry" : "server_full_draft",
+            premiumRenderSource,
           );
           markPaidProPipelineValidationPassed({
             text: doc,
@@ -3930,6 +3943,10 @@ async function runPremiumCompletionInner(
       (serverDegradedHttpMetaForRecovery?.code === "json_parse" ||
         serverGenerationDegraded?.code === "json_parse" ||
         premiumJsonParseDegradedAttemptCount >= 1);
+    const degradedJsonParseNoWireServerFull =
+      premiumJsonParseDegradedAttemptCount > 0 &&
+      lastWireServerFullDocumentLen === 0 &&
+      lastWireAuthoritativeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
     const tryDeterministicIntakeRecovery = () => {
       const intakeLocalRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
         draft: outMerged,
@@ -3969,8 +3986,9 @@ async function runPremiumCompletionInner(
     if (
       rejectedPaidCorpusDueToClientGates &&
       !premiumBodyHardRejectedForDevContextLeak &&
-      !jsonParseClientRejected &&
-      lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+      (degradedJsonParseNoWireServerFull ||
+        (!jsonParseClientRejected &&
+          lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN))
     ) {
       const deterministic = tryDeterministicIntakeRecovery();
       if (deterministic.accepted) {
