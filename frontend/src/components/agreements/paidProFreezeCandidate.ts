@@ -51,6 +51,7 @@ import {
 } from "./premiumPartyNamesHandoff";
 import {
   hasPaidProPipelineSessionAcceptance,
+  hasPaidProPipelineValidationForCorpus,
   markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import {
@@ -124,6 +125,39 @@ export function preparePaidProFreezeCandidateText(
   const requestedSource = (args.source ?? "server_full_draft").trim();
   const surface = args.surface ?? "paid_pro_freeze_candidate";
   const repairs: string[] = [];
+  const inputTrimmed = trim(args.text);
+  const inputPipelineHash = paidProPipelineAcceptedCorpusHash(inputTrimmed);
+  const pipelineHashEarly = readPaidProPipelineAcceptedCorpusHash();
+  if (
+    inputTrimmed.length >= 4000 &&
+    inputPipelineHash &&
+    pipelineHashEarly &&
+    inputPipelineHash === pipelineHashEarly &&
+    hasPaidProPipelineValidationForCorpus({
+      text: inputTrimmed,
+      source: requestedSource,
+    })
+  ) {
+    const reviewParties = resolvePartiesForReviewRender({
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+    });
+    const parties: CanonicalAgreementSnapshotParty[] = reviewParties
+      .map((p) => ({
+        name: p.partyLegalName.trim(),
+        role: null,
+        email: p.signerEmail?.trim() || null,
+        partyAddress: p.partyAddress?.trim() || null,
+      }))
+      .filter((p) => p.name.length >= 2);
+    return {
+      text: inputTrimmed,
+      hash: hashPaidProCorpus(inputTrimmed),
+      reviewParties,
+      parties,
+      repairs: ["freeze_prep_skipped_pipeline_validated_corpus"],
+    };
+  }
 
   const authorityGuard = guardPaidProAcceptedServerFullDraftCommit({
     candidateText: args.text,
@@ -401,8 +435,18 @@ export function assertPaidProFreezeCandidateGates(
 ): string {
   const surface = args.surface ?? "paid_pro_freeze_candidate";
   const inputTrimmed = trim(args.text);
+  const requestedSource = args.source ?? "server_full_draft";
   const inputPipelineHash = paidProPipelineAcceptedCorpusHash(inputTrimmed);
   const pipelineHash = readPaidProPipelineAcceptedCorpusHash();
+  if (
+    inputTrimmed.length >= 4000 &&
+    inputPipelineHash &&
+    pipelineHash &&
+    inputPipelineHash === pipelineHash &&
+    hasPaidProPipelineValidationForCorpus({ text: inputTrimmed, source: requestedSource })
+  ) {
+    return inputTrimmed;
+  }
   if (
     inputPipelineHash &&
     pipelineHash &&

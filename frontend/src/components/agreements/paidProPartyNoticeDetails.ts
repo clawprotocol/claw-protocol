@@ -18,7 +18,7 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
-import { isAuthoritativeLegalEntityName, collapseDuplicateNoticeEntityLines } from "./paidProPartyNamePreserve";
+import { isAuthoritativeLegalEntityName, collapseDuplicateNoticeEntityLines, collapseDuplicatedLegalEntityPhrase } from "./paidProPartyNamePreserve";
 import { isIntakeSectionLabelLine } from "./intakeSectionLabels";
 import { readFrozenCanonicalManifestPartyNames, readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
@@ -609,27 +609,39 @@ function expandFusedIfToNoticeStanza(stanza: string): string {
   return `If to ${fused[1].trim()}:\n${fused[2].trim()}`;
 }
 
-function normalizeIfToNoticeStanzaHeader(stanza: string): string {
+export function normalizeNoticeStanzaLines(stanza: string, fullNames?: readonly string[]): string {
   const lines = stanza.split("\n");
-  if (lines.length === 0) return stanza;
-  const first = (lines[0] ?? "").trim();
-  const match = first.match(/^If to\s+(.+?)\s*:?\s*$/i);
-  if (!match?.[1]) return stanza;
-  const entity = match[1].trim();
-  const normalized = `If to ${entity}:`;
-  if (first === normalized) return stanza;
-  lines[0] = normalized;
-  return lines.join("\n");
+  const out = lines.map((line, idx) => {
+    const trimmed = line.trim();
+    if (idx === 0) {
+      const match = trimmed.match(/^If to\s+(.+?)\s*:?\s*$/i);
+      if (!match?.[1]) return line;
+      const entity = collapseDuplicatedLegalEntityPhrase(match[1].trim(), fullNames);
+      const normalized = `If to ${entity}:`;
+      return trimmed === normalized ? line : normalized;
+    }
+    if (/^Attn:/i.test(trimmed) || /^Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed) || /^Address/i.test(trimmed)) {
+      return line;
+    }
+    const entityOnly = trimmed.replace(/:$/, "").trim();
+    if (!entityOnly) return line;
+    const collapsed = collapseDuplicatedLegalEntityPhrase(entityOnly, fullNames);
+    if (collapsed === entityOnly) return line;
+    const normalized = trimmed.endsWith(":") ? `${collapsed}:` : collapsed;
+    const indent = line.match(/^\s*/)?.[0] ?? "";
+    return `${indent}${normalized}`;
+  });
+  return out.join("\n");
 }
 
-function stripInvalidNoticeStanzaLines(stanza: string): string {
+function stripInvalidNoticeStanzaLines(stanza: string, fullNames?: readonly string[]): string {
   const stripped = stanza
     .split("\n")
     .filter((line) => !isIntakeSectionLabelLine(line.trim()))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return normalizeIfToNoticeStanzaHeader(stripped);
+  return normalizeNoticeStanzaLines(stripped, fullNames);
 }
 
 function buildIfToNoticeStanza(
@@ -871,7 +883,6 @@ export function repairIncompleteIfToNoticeStanzas(
   );
   if (collapsed !== text) {
     text = collapsed;
-    repairs.push("notice:collapse_duplicate_entity_lines");
   }
 
   if (DANGLING_IF_TO_RE.test(text) || /Notices[\s\S]*\nIf to\s*$/i.test(text)) {
@@ -951,12 +962,12 @@ export function repairIncompleteIfToNoticeStanzas(
       !requiredEmail ||
       new RegExp(`Email:\\s*${escapeRegExp(requiredEmail)}`, "i").test(existing);
     if (noticeStanzaComplete(existing, party) && stanzaHasAuthorityEmail) {
-      rebuiltStanzas.push(stripInvalidNoticeStanzaLines(existing));
+      rebuiltStanzas.push(stripInvalidNoticeStanzaLines(existing, canonicalNames));
       stanzaCount += 1;
       continue;
     }
     rebuiltStanzas.push(
-      stripInvalidNoticeStanzaLines(buildIfToNoticeStanza(party, authorityParties, roleContext)),
+      stripInvalidNoticeStanzaLines(buildIfToNoticeStanza(party, authorityParties, roleContext), canonicalNames),
     );
     repairs.push(`notice:rebuild_stanza_party_${i + 1}`);
     stanzaCount += 1;

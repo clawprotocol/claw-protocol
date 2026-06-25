@@ -28,9 +28,14 @@ import {
   assessProMinimumSubstanceCached,
   hasPaidProAuthoritativeValidationPassed,
   hasPaidProPipelineSessionAcceptance,
+  hasPaidProPipelineValidationForCorpus,
   markPaidProAuthoritativeValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import { corpusHashForScanCache, runCachedCorpusScan } from "./paidProCorpusScanCache";
+import {
+  paidProPipelineAcceptedCorpusHash,
+  readPaidProPipelineAcceptedCorpusHash,
+} from "./paidProPipelineAcceptedCorpus";
 import { removeOrphanPartyLinesBeforeExecutionTail } from "./paidProOrphanPartyLines";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
@@ -403,8 +408,23 @@ function preparePaidProServerDocumentForAcceptanceCore(
   if (isDeterministicQuadPartyProFallbackSurface(surface)) {
     return { text: (raw || "").replace(/\r\n?/g, "\n").trim(), repairs: [] };
   }
+  const normalizedInput = (raw || "").replace(/\r\n?/g, "\n").trim();
+  const inputPipelineHash = paidProPipelineAcceptedCorpusHash(normalizedInput);
+  const pipelineAcceptedHash = readPaidProPipelineAcceptedCorpusHash();
+  if (
+    normalizedInput.length >= 4000 &&
+    inputPipelineHash &&
+    pipelineAcceptedHash &&
+    inputPipelineHash === pipelineAcceptedHash &&
+    hasPaidProPipelineValidationForCorpus({
+      text: normalizedInput,
+      source: "server_full_draft",
+    })
+  ) {
+    return { text: normalizedInput, repairs: ["prepare:skipped_pipeline_validated_corpus"] };
+  }
   const repairs: string[] = [];
-  let out = (raw || "").replace(/\r\n?/g, "\n").trim();
+  let out = normalizedInput;
   const lineSeparated = extractLineSeparatedLegalEntityParties(intakeText);
   const draftPartyNames = (draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())

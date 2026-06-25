@@ -341,20 +341,29 @@ export function detectPaidProMalformedMultiPartyOpening(
   const body = (text || "").replace(/\r\n/g, "\n").trim();
   if (!body) return true;
   const preSec1 = openingSliceBeforeSection1(body);
-  const enteredCount = (preSec1.match(/\bentered\s+into\b/gi) ?? []).length;
-  const amongCount = (preSec1.match(/\bby\s+and\s+among\b/gi) ?? []).length;
-  const betweenCount = (preSec1.match(/\bby\s+and\s+between\b/gi) ?? []).length;
+  const openingScan =
+    preSec1.trim().length >= 40 ? preSec1 : body.slice(0, Math.min(body.length, 6_000));
+  const enteredCount = (openingScan.match(/\bentered\s+into\b/gi) ?? []).length;
+  const amongCount = (openingScan.match(/\bby\s+and\s+among\b/gi) ?? []).length;
+  const betweenCount = (openingScan.match(/\bby\s+and\s+between\b/gi) ?? []).length;
   if (enteredCount > 1 || (amongCount > 0 && betweenCount > 0)) return true;
-  if (records.some((r) => !preSec1.includes(r.fullLegalName.trim()))) return true;
+  if (records.some((r) => !openingScan.includes(r.fullLegalName.trim()))) return true;
   const roleMarks = records.filter((r) => {
     const role = r.roleLabel.trim();
     if (!role || role.toLowerCase() === r.fullLegalName.trim().toLowerCase()) return false;
-    return new RegExp(`\\(\\s*["']?${role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*\\)`, "i").test(preSec1);
+    return new RegExp(`\\(\\s*["']?${role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*\\)`, "i").test(
+      openingScan,
+    );
   });
   if (roleMarks.length < Math.min(2, records.length)) return true;
   for (const record of records) {
     const name = record.fullLegalName.trim();
-    if (new RegExp(`${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(preSec1)) {
+    if (
+      new RegExp(
+        `${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+        "i",
+      ).test(openingScan)
+    ) {
       return true;
     }
   }

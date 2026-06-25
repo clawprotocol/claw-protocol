@@ -26,10 +26,93 @@ export function logPaidProNoticeBlock(payload: PaidProNoticeBlockLogPayload): vo
   console.info("[paid-pro-notice-block]", payload);
 }
 
+function isStandaloneNoticeEntityPhrase(line: string, fullNames: readonly string[]): boolean {
+  const t = line.trim().replace(/:$/, "").trim();
+  if (!t || t.length > 120) return false;
+  return fullNames.some((full) => partyLegalNamesMatch(t, full));
+}
+
+function isLikelyDuplicatedEntityLine(line: string, fullNames: readonly string[]): boolean {
+  const t = line.trim().replace(/:$/, "").trim();
+  if (!t || /\b(?:shall|will|must|may|agrees?)\b/i.test(t)) return false;
+  return fullNames.some((full) => {
+    const doubled = `${full} ${full}`;
+    return partyLegalNamesMatch(t, doubled) || t.toLowerCase() === doubled.toLowerCase();
+  });
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Collapse adjacent duplicate legal-entity phrases (malformed notice headers / entity lines). */
+export function collapseDuplicatedLegalEntityPhrase(
+  phrase: string,
+  fullNames?: readonly string[],
+): string {
+  let out = (phrase || "").replace(/\s+/g, " ").trim();
+  if (!out) return out;
+  const names = (fullNames ?? []).filter((n) => n.trim().length >= 2);
+  for (const full of names) {
+    const escaped = escapeRe(full.trim());
+    const re = new RegExp(`(${escaped})\\s+\\1`, "gi");
+    if (re.test(out)) {
+      re.lastIndex = 0;
+      out = out.replace(re, "$1");
+    }
+    if (partyLegalNamesMatch(out, `${full} ${full}`)) {
+      out = full.trim();
+    }
+  }
+  return out.trim();
+}
+
+/** Normalize duplicated phrases inside `If to …:` header lines. */
+export function collapseDuplicatedIfToHeaderLines(text: string, fullNames: readonly string[]): string {
+  if (!text || fullNames.length < 1) return text;
+  const lines = text.split("\n");
+  let changed = false;
+  const out = lines.map((line) => {
+    const trimmed = line.trim();
+    const match = trimmed.match(/^If to\s+(.+?)\s*:?\s*$/i);
+    if (!match?.[1]) return line;
+    const entity = collapseDuplicatedLegalEntityPhrase(match[1].trim(), fullNames);
+    const normalized = `If to ${entity}:`;
+    if (trimmed === normalized) return line;
+    changed = true;
+    const indent = line.match(/^\s*/)?.[0] ?? "";
+    return `${indent}${normalized}`;
+  });
+  return changed ? out.join("\n") : text;
+}
+
+/** Collapse duplicated entity phrases on standalone lines (outside notice block repair). */
+export function collapseStandaloneDuplicatedEntityLines(
+  text: string,
+  fullNames: readonly string[],
+): string {
+  if (!text || fullNames.length < 1) return text;
+  const lines = text.split("\n");
+  let changed = false;
+  const out = lines.map((line) => {
+    const trimmed = line.trim();
+    if (!isLikelyDuplicatedEntityLine(trimmed, fullNames)) return line;
+    const collapsed = collapseDuplicatedLegalEntityPhrase(trimmed.replace(/:$/, "").trim(), fullNames);
+    const normalized = trimmed.endsWith(":") ? `${collapsed}:` : collapsed;
+    if (trimmed === normalized) return line;
+    changed = true;
+    const indent = line.match(/^\s*/)?.[0] ?? "";
+    return `${indent}${normalized}`;
+  });
+  return changed ? out.join("\n") : text;
+}
+
 function isNoticeAddresseeEntityLine(line: string, fullNames: readonly string[], headerEntity: string): boolean {
   const trimmed = line.trim().replace(/:$/, "").trim();
   if (!trimmed || /^Attn:/i.test(trimmed)) return false;
+  if (isLikelyDuplicatedEntityLine(trimmed, fullNames)) return true;
   if (headerEntity && partyLegalNamesMatch(trimmed, headerEntity)) return true;
+  if (isStandaloneNoticeEntityPhrase(trimmed, fullNames)) return true;
   return fullNames.some((full) => partyLegalNamesMatch(trimmed, full));
 }
 
@@ -39,7 +122,9 @@ function isNoticeAddresseeEntityLine(line: string, fullNames: readonly string[],
  */
 export function collapseDuplicateNoticeEntityLines(text: string, fullNames: readonly string[]): string {
   if (!text || fullNames.length < 1) return text;
-  const lines = text.split("\n");
+  let working = collapseDuplicatedIfToHeaderLines(text, fullNames);
+  working = collapseStandaloneDuplicatedEntityLines(working, fullNames);
+  const lines = working.split("\n");
   const out: string[] = [];
   let inNoticeBlock = false;
   let sawEntityLineInBlock = false;
@@ -68,10 +153,16 @@ export function collapseDuplicateNoticeEntityLines(text: string, fullNames: read
       if (inNoticeBlock) flushNoticeLog();
       inNoticeBlock = true;
       sawEntityLineInBlock = false;
-      headerEntity = (ifToMatch[1] ?? "").trim();
-      blockRenderedLines = [trimmed];
+      headerEntity = collapseDuplicatedLegalEntityPhrase((ifToMatch[1] ?? "").trim(), fullNames);
+      const normalizedHeader = `If to ${headerEntity}:`;
+      blockRenderedLines = [normalizedHeader];
       removedDuplicateInBlock = false;
-      out.push(line);
+      if (trimmed === normalizedHeader) {
+        out.push(line);
+      } else {
+        const indent = line.match(/^\s*/)?.[0] ?? "";
+        out.push(`${indent}${normalizedHeader}`);
+      }
       continue;
     }
 
@@ -125,10 +216,6 @@ const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)\.?$/i;
 
 export const PREAMBLE_MAX_LEN = 4_500;
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /** Candidate short labels that may appear instead of the full legal name. */
 export function shortFormsFromLegalName(full: string): string[] {
