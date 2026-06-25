@@ -11,6 +11,7 @@ import {
   looksLikeStackedPartyPersonNameLine,
   looksLikeStackedPartyTitleLine,
 } from "./starterPartyIdentityIsolation";
+import { isIntakeSectionLabelLine, isInvalidPartyMetadataValue } from "./intakeSectionLabels";
 import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
@@ -101,7 +102,7 @@ function applyStackedPartyLine(block: LabeledPartyBlock, line: string): void {
     block.signerTitle = cleanFieldValue(t);
     return;
   }
-  if (!block.address) {
+  if (!block.address && !isIntakeSectionLabelLine(t) && !isInvalidPartyMetadataValue(t)) {
     block.address = cleanFieldValue(t);
   }
 }
@@ -182,6 +183,11 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) continue;
+
+    if (isIntakeSectionLabelLine(line)) {
+      currentIndex = null;
+      continue;
+    }
 
     const roleInline = line.match(PARTY_BLOCK_WITH_ROLE_INLINE_RE);
     if (roleInline?.[1] && roleInline[2] && roleInline[3]) {

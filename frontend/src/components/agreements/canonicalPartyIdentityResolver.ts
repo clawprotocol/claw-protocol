@@ -8,6 +8,7 @@ import {
   labeledPartyLegalEntities,
   tripartiteRoleLabelForPartyIndex,
 } from "./labeledPartyBlockParse";
+import { isInvalidPartyMetadataValue } from "./intakeSectionLabels";
 import { resolveCanonicalPartyRoleLabel, isGenericCanonicalRole } from "./canonicalPartyRoleAuthority";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
@@ -693,12 +694,7 @@ export function repairFusedExecutionRecitalClause(text: string): { text: string;
 
 function optionalPartyAddressPhrase(address: string | null | undefined): string {
   const clean = String(address ?? "").replace(/\s+/g, " ").trim();
-  if (!clean) return "";
-  if (/^\[.*\]$/.test(clean)) return "";
-  if (/^(?:address|client address|service provider address|principal place of business|principal office|notice address|mailing address|n\/a|none|tbd|not supplied)$/i.test(clean)) {
-    return "";
-  }
-  if (!/[A-Za-z0-9]/.test(clean)) return "";
+  if (!clean || isInvalidPartyMetadataValue(clean)) return "";
   return `, with its principal place of business at ${clean}`;
 }
 

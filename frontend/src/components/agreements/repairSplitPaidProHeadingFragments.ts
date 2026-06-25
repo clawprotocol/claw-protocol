@@ -78,8 +78,11 @@ function collectHeadingContinuationFragmentLines(
   startIdx: number,
 ): { parts: string[]; nextIdx: number } {
   const parts: string[] = [];
+  if (startIdx < 0 || startIdx >= lines.length) {
+    return { parts, nextIdx: startIdx };
+  }
   let idx: number | null = startIdx;
-  while (idx != null) {
+  while (idx != null && idx < lines.length) {
     const trimmed = lines[idx]!.trim();
     if (!trimmed) {
       idx = nextNonEmptyLineIndex(lines, idx + 1);
@@ -273,6 +276,31 @@ export function repairSplitPaidProHeadingFragments(text: string): RepairSplitPai
             repairs.push(`split_subsection_heading_fragment:${subsection.sectionNum}:peeled_body`);
             continue;
           }
+        }
+      }
+    }
+
+    if (
+      !prefix &&
+      !subsection &&
+      isPaidProHeadingContinuationFragment(trimmed) &&
+      !EXECUTION_LINE_RE.test(trimmed)
+    ) {
+      const collected = collectHeadingContinuationFragmentLines(lines, i + 1);
+      if (collected.parts.length > 0) {
+        const merged = [trimmed, ...collected.parts].join(" ");
+        if (
+          !BODY_VERB_RE.test(merged) &&
+          merged.split(/\s+/).filter(Boolean).length >= 2 &&
+          merged.split(/\s+/).filter(Boolean).length <= 12 &&
+          !BODY_SENTENCE_START_RE.test(merged)
+        ) {
+          out.push(merged);
+          for (let k = i + 1; k < collected.nextIdx; k += 1) {
+            if (lines[k]!.trim()) skip.add(k);
+          }
+          repairs.push("orphan_heading_fragment_merged");
+          continue;
         }
       }
     }

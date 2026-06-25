@@ -18,7 +18,8 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { isAuthoritativeLegalEntityName, collapseDuplicateNoticeEntityLines } from "./paidProPartyNamePreserve";
+import { isIntakeSectionLabelLine } from "./intakeSectionLabels";
 import { readFrozenCanonicalManifestPartyNames, readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
@@ -608,6 +609,29 @@ function expandFusedIfToNoticeStanza(stanza: string): string {
   return `If to ${fused[1].trim()}:\n${fused[2].trim()}`;
 }
 
+function normalizeIfToNoticeStanzaHeader(stanza: string): string {
+  const lines = stanza.split("\n");
+  if (lines.length === 0) return stanza;
+  const first = (lines[0] ?? "").trim();
+  const match = first.match(/^If to\s+(.+?)\s*:?\s*$/i);
+  if (!match?.[1]) return stanza;
+  const entity = match[1].trim();
+  const normalized = `If to ${entity}:`;
+  if (first === normalized) return stanza;
+  lines[0] = normalized;
+  return lines.join("\n");
+}
+
+function stripInvalidNoticeStanzaLines(stanza: string): string {
+  const stripped = stanza
+    .split("\n")
+    .filter((line) => !isIntakeSectionLabelLine(line.trim()))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return normalizeIfToNoticeStanzaHeader(stripped);
+}
+
 function buildIfToNoticeStanza(
   party: PaidProSignerMetadataParty,
   authorityParties: readonly PaidProSignerMetadataParty[],
@@ -750,6 +774,36 @@ export function findNoticesSectionStart(text: string): number {
 
 const TOP_LEVEL_OPERATIVE_HEADING_RE = /^\s*\d+\.(?!\d)\s+\S/;
 
+type OperativeNoticeLayout = {
+  before: string;
+  noticesFamily: string;
+  middle: string;
+  after: string;
+};
+
+function sliceOperativeNoticeLayout(corpus: string): OperativeNoticeLayout | null {
+  const noticesIdx = findNoticesSectionStart(corpus);
+  if (noticesIdx < 0) return null;
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const operativeEnd = witnessIdx >= 0 ? witnessIdx : corpus.length;
+  const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(corpus, noticesIdx);
+  return {
+    before: corpus.slice(0, noticesIdx),
+    noticesFamily: corpus.slice(noticesIdx, noticesFamilyEnd),
+    middle: corpus.slice(noticesFamilyEnd, operativeEnd),
+    after: corpus.slice(operativeEnd),
+  };
+}
+
+function joinOperativeNoticeLayout(layout: OperativeNoticeLayout): string {
+  const middleSuffix = layout.middle.trimEnd() ? `\n\n${layout.middle.trimEnd()}` : "";
+  return layout.after.trimStart()
+    ? `${layout.before}${layout.noticesFamily}${middleSuffix}\n\n${layout.after.trimStart()}`
+        .replace(/\n{3,}/g, "\n\n")
+        .trimEnd()
+    : `${layout.before}${layout.noticesFamily}${middleSuffix}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
 /** Exclusive end index of the Notices clause family (before the next top-level operative section). */
 export function resolveOperativeNoticesFamilyEnd(text: string, noticesStart: number): number {
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
@@ -807,6 +861,18 @@ export function repairIncompleteIfToNoticeStanzas(
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
   const repairs: string[] = [];
   let text = corpus.replace(/\r\n/g, "\n");
+
+  const canonicalNames = authorityParties.map((party) =>
+    resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext),
+  );
+  const collapsed = collapseDuplicateNoticeEntityLines(
+    text,
+    canonicalNames.filter((n) => n.length >= 2),
+  );
+  if (collapsed !== text) {
+    text = collapsed;
+    repairs.push("notice:collapse_duplicate_entity_lines");
+  }
 
   if (DANGLING_IF_TO_RE.test(text) || /Notices[\s\S]*\nIf to\s*$/i.test(text)) {
     text = text.replace(/\nIf to\s*:?\s*$/i, "");
@@ -885,18 +951,20 @@ export function repairIncompleteIfToNoticeStanzas(
       !requiredEmail ||
       new RegExp(`Email:\\s*${escapeRegExp(requiredEmail)}`, "i").test(existing);
     if (noticeStanzaComplete(existing, party) && stanzaHasAuthorityEmail) {
-      rebuiltStanzas.push(existing);
+      rebuiltStanzas.push(stripInvalidNoticeStanzaLines(existing));
       stanzaCount += 1;
       continue;
     }
-    rebuiltStanzas.push(buildIfToNoticeStanza(party, authorityParties, roleContext));
+    rebuiltStanzas.push(
+      stripInvalidNoticeStanzaLines(buildIfToNoticeStanza(party, authorityParties, roleContext)),
+    );
     repairs.push(`notice:rebuild_stanza_party_${i + 1}`);
     stanzaCount += 1;
   }
 
   if (!repairs.length) {
     const trimmedOnly = trimOperativeNoticeStanzasToPartyCount(text, authorityParties.length);
-    if (trimmedOnly.repairs.length > 0) {
+    if (trimmedOnly.repairs.length > 0 && trimmedOnly.text.length >= text.length - 100) {
       logPaidProNoticeSectionIntegrity({
         repairs: trimmedOnly.repairs,
         partyCount: authorityParties.length,
@@ -915,7 +983,7 @@ export function repairIncompleteIfToNoticeStanzas(
     : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   logPaidProNoticeSectionIntegrity({ repairs, partyCount: authorityParties.length, stanzaCount });
   const trimmed = trimOperativeNoticeStanzasToPartyCount(text, authorityParties.length);
-  if (trimmed.repairs.length > 0) {
+  if (trimmed.repairs.length > 0 && trimmed.text.length >= text.length - 100) {
     repairs.push(...trimmed.repairs);
     text = trimmed.text;
   }
@@ -927,32 +995,34 @@ export function trimOperativeNoticeStanzasToPartyCount(
   partyCount: number,
 ): { text: string; repairs: string[] } {
   if (partyCount < 2) return { text: corpus, repairs: [] };
-  const noticesIdx = findNoticesSectionStart(corpus);
-  if (noticesIdx < 0) return { text: corpus, repairs: [] };
-  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
-  const end = witnessIdx >= 0 ? witnessIdx : corpus.length;
-  const before = corpus.slice(0, noticesIdx);
-  const region = corpus.slice(noticesIdx, end);
-  const after = corpus.slice(end);
-  const blocks = region.split(/\n(?=If to\s+)/i);
+  const layout = sliceOperativeNoticeLayout(corpus);
+  if (!layout) return { text: corpus, repairs: [] };
+  const blocks = layout.noticesFamily.split(/\n(?=If to\s+)/i);
   const stanzaBlocks = blocks.slice(1).filter((s) => s.trim());
   if (stanzaBlocks.length <= partyCount) return { text: corpus, repairs: [] };
   const intro = blocks[0] ?? "";
-  const kept = stanzaBlocks.slice(0, partyCount);
-  const mergedNotices = `${intro.trimEnd()}\n\n${kept.join("\n\n")}`.replace(/\n{3,}/g, "\n\n").trimEnd();
-  const text = after.trimStart()
-    ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
-    : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
-  return { text, repairs: ["notice:trim_excess_stanzas"] };
+  const kept: string[] = [];
+  const seen = new Set<string>();
+  for (const stanza of stanzaBlocks) {
+    const entity = stanza.match(/^If to\s+(.+?):/i)?.[1]?.trim().toLowerCase() ?? "";
+    if (entity && seen.has(entity)) continue;
+    if (entity) seen.add(entity);
+    kept.push(stanza);
+    if (kept.length >= partyCount) break;
+  }
+  const mergedFamily = `${intro.trimEnd()}\n\n${kept.join("\n\n")}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return {
+    text: joinOperativeNoticeLayout({ ...layout, noticesFamily: mergedFamily }),
+    repairs: ["notice:trim_excess_stanzas"],
+  };
 }
 
-/** Count operative If-to stanzas between the numbered Notices heading and execution witness. */
+/** Count operative If-to stanzas in the notices-to-witness region. */
 export function countOperativeIfToNoticeStanzas(corpus: string): number {
   const noticesIdx = findNoticesSectionStart(corpus);
   if (noticesIdx < 0) return 0;
   const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
-  const end = witnessIdx >= 0 ? witnessIdx : corpus.length;
-  const region = corpus.slice(noticesIdx, end);
+  const region = corpus.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : corpus.length);
   return (region.match(/^If to\s+/gim) || []).length;
 }
 

@@ -10,7 +10,7 @@ import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIs
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
 
-const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:\s*$/i;
+const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:?\s*$/i;
 
 export type PaidProNoticeBlockLogPayload = {
   partyId: string;
@@ -27,7 +27,7 @@ export function logPaidProNoticeBlock(payload: PaidProNoticeBlockLogPayload): vo
 }
 
 function isNoticeAddresseeEntityLine(line: string, fullNames: readonly string[], headerEntity: string): boolean {
-  const trimmed = line.trim();
+  const trimmed = line.trim().replace(/:$/, "").trim();
   if (!trimmed || /^Attn:/i.test(trimmed)) return false;
   if (headerEntity && partyLegalNamesMatch(trimmed, headerEntity)) return true;
   return fullNames.some((full) => partyLegalNamesMatch(trimmed, full));
@@ -38,7 +38,7 @@ function isNoticeAddresseeEntityLine(line: string, fullNames: readonly string[],
  * Short-label expansion can introduce a second canonical entity line — drop consecutive dupes at source.
  */
 export function collapseDuplicateNoticeEntityLines(text: string, fullNames: readonly string[]): string {
-  if (!text || fullNames.length < 2) return text;
+  if (!text || fullNames.length < 1) return text;
   const lines = text.split("\n");
   const out: string[] = [];
   let inNoticeBlock = false;
