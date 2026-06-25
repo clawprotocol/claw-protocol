@@ -254,6 +254,7 @@ describe("TEST437 — Brand Licensing degraded json_parse without server_full", 
       ),
     ).toBe(4);
     const html = buildPremiumAgreementReadonlyHtml(out.winningPremiumBodyText, {
+      signatureSectionMode: "collaboration",
       intakeText: TEST437_BRAND_LICENSING_INTAKE,
       partyNames: [...test437AllParties()],
       draftPartyNames: [...test437AllParties()],

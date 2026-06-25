@@ -46,7 +46,7 @@ export function test437BrandLicensingDraft(): ParsedDraftShape {
   return {
     title: "Brand Licensing and Distribution Agreement",
     jurisdiction: "Oklahoma",
-    agreement_family: "licensing_agreement",
+    agreement_family: "services_agreement",
     parties: [
       { name: BRIGHT_PEAK, role: "Licensor" } as never,
       { name: EVERGREEN, role: "Brand Owner" } as never,
