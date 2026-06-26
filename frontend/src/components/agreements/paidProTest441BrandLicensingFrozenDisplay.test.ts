@@ -201,6 +201,7 @@ describe("TEST441 — Brand Licensing frozen/display corpus authority", () => {
       parseDraft: async () => draft,
     });
 
+    expect(out.proIntentGateMessage).toBeNull();
     expect(out.premiumDegradedServerLocalRecovery).toBe(true);
     expect(out.premiumRenderSource).toBe(PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE);
     expect(out.winningPremiumBodyText.length).toBeGreaterThan(TEST441_MIN_FROZEN_LEN);

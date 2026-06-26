@@ -11,6 +11,10 @@ import {
 import { extractIntakePayment, hasExplicitPerInstallmentAmountInIntake, normalizeCurrency } from "./intakeCurrencyParse";
 import { isLikelyFiveSectionStarterShellPro } from "./premiumFullDraftClientAcceptance";
 import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
+import {
+  BRAND_LICENSING_AGREEMENT_TITLE_UPPER,
+  intakeDescribesBrandLicensingDistributionManufacturingStack,
+} from "./paidProAgreementTitleScope";
 
 const FOUNDRY_CUES = /\b(60\s*\/\s*40|40\s*\/\s*60|vesting|founder equity|cap table|four-?year|cliff|accelerat)/i;
 /** Estate/family context only — exclude modal “will” (e.g. “Party A will pay”). */
@@ -287,6 +291,66 @@ function contractConsulting(raw: string): AgreementIntentContract {
   };
 }
 
+/** Quad-party manufacture / distribute / license / marketplace stack — not logo or graphic design services. */
+function contractBrandLicensingManufacturingDistribution(raw: string): AgreementIntentContract {
+  return {
+    intent_id: "consulting_services",
+    expected_title_terms: [
+      BRAND_LICENSING_AGREEMENT_TITLE_UPPER,
+      "Manufacturing",
+      "Distribution",
+      "Licensing",
+      "Marketing",
+      "Services",
+      "Agreement",
+      "Professional",
+    ],
+    required_material_terms: [
+      "manufactur",
+      "distribut",
+      "licens",
+      "royalty",
+      "trademark",
+      "wholesale",
+      "services",
+      "agreement",
+      "shall",
+    ],
+    forbidden_misclassifications: ["sibling estate partition", "founder cliff", "lease premises"],
+    minimum_section_expectations:
+      "Manufacturing, distribution, licensing, and marketing cooperation among named entities — royalty/margin economics, IP/trademark license terms, quality, notices, and Oklahoma or stated governing law.",
+    ambiguity_policy: "allow_neutral_draft",
+    pro_strict: true,
+    user_fact_summary: factSummary(raw),
+  };
+}
+
+function paidProDocumentIsBrandLicensingManufacturingStack(
+  rawIntake: string,
+  title: string,
+  body: string,
+): boolean {
+  if (intakeDescribesBrandLicensingDistributionManufacturingStack(rawIntake)) return true;
+  const head = `${(title || "").trim()}\n${(body || "").trim()}`.slice(0, 4_000);
+  if (/MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(head)) return true;
+  if (head.includes(BRAND_LICENSING_AGREEMENT_TITLE_UPPER)) return true;
+  return false;
+}
+
+function isBrandLicensingIntentContract(c: AgreementIntentContract): boolean {
+  return c.expected_title_terms.includes(BRAND_LICENSING_AGREEMENT_TITLE_UPPER);
+}
+
+/** Brand licensing stack must not accept a generic SERVICES AGREEMENT shell title. */
+function hasBrandLicensingAgreementTitleFit(title: string, body: string): boolean {
+  const first = firstLineOrTitle(title, body).replace(/\s+/g, " ").trim();
+  if (/^services agreement\.?$/i.test(first)) return false;
+  if (/MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(first)) return true;
+  if (first.includes(BRAND_LICENSING_AGREEMENT_TITLE_UPPER)) return true;
+  const head = `${(title || "").trim()}\n${(body || "").trim()}`.slice(0, 2_500);
+  return /MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(head);
+}
+
 /** True when intake describes a B2B/commercial services deal (not family estate administration). */
 export function isCommercialServicesIntake(raw: string | null | undefined): boolean {
   const t = collapse((raw || "").replace(/\r\n/g, "\n"));
@@ -358,6 +422,11 @@ export function resolvePaidProIntentContract(args: {
     contract.intent_id === "estate_family_admin"
   ) {
     contract = contractConsulting(raw);
+  } else if (
+    contract.intent_id === "design_creative" &&
+    intakeDescribesBrandLicensingDistributionManufacturingStack(raw)
+  ) {
+    contract = contractBrandLicensingManufacturingDistribution(raw);
   }
 
   return contract;
@@ -459,6 +528,9 @@ export function resolveAgreementIntentContract(rawIntake: string | null | undefi
       { id: "web_presence", title: "Web Development Agreement", clausePackSeed: "" } as DeterministicIntentResolution,
       raw,
     );
+  }
+  if (intakeDescribesBrandLicensingDistributionManufacturingStack(raw)) {
+    return contractBrandLicensingManufacturingDistribution(raw);
   }
   if (DESIGN.test(raw)) {
     return fromDeterministic(
@@ -731,8 +803,16 @@ export function validateIntentContractForPaidProOutput(args: {
       return { ok: false, reasons: ["intent:founder_title_not_found"] };
     }
   } else {
+    if (isBrandLicensingIntentContract(c) && !hasBrandLicensingAgreementTitleFit(tline, text)) {
+      return {
+        ok: false,
+        reasons: ["intent:brand_licensing_title_requires_manufacturing_distribution_stack"],
+      };
+    }
     if (c.intent_id === "design_creative") {
-      if (!hasDesignServiceAgreementTitleFit(tline, text)) {
+      if (paidProDocumentIsBrandLicensingManufacturingStack(args.rawIntake, tline, text)) {
+        /* Trademark / brand-asset license terms in a manufacturing/distribution stack — not logo design services. */
+      } else if (!hasDesignServiceAgreementTitleFit(tline, text)) {
         return { ok: false, reasons: ["intent:design_title_requires_logo_or_design_services"] };
       }
     } else if (!hasExpectedTitleFit(c, tline, text) && c.expected_title_terms.length) {
@@ -756,7 +836,7 @@ export function validateIntentContractForPaidProOutput(args: {
     return { ok: false, reasons: x.reasons.map((r) => `intent:cross_contamination:${r}`) };
   }
 
-  if (c.intent_id === "design_creative") {
+  if (c.intent_id === "design_creative" && !paidProDocumentIsBrandLicensingManufacturingStack(args.rawIntake, tline, text)) {
     const dReason = designCreativeCrossCategoryPhrases(tline, text, args.rawIntake);
     if (dReason) {
       return { ok: false, reasons: [dReason] };

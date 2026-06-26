@@ -39,6 +39,7 @@ import {
 } from "./paidProFreezeCandidate";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicationAuthority";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -453,16 +454,31 @@ export function validatePaidProOutput(args: {
   });
   const intentContractForValidation = resolvedIntentContract;
   if (intentContractForValidation) {
+    const intentValidationText =
+      serverFullDocExists && intakeDescribesBrandLicensingDistributionManufacturingStack(rawI)
+        ? rawInput
+        : bodyForGates;
     const vi = validateIntentContractForPaidProOutput({
       contract: intentContractForValidation,
-      text: bodyForGates,
+      text: intentValidationText,
       rawIntake: args.rawIntake,
       draftTitle: args.draft?.title,
       authoritativeProPipelineAccepted: isAuthoritativePremiumPipelineProvenance(args.premiumPipelineSource),
       agreementValidation: args.agreementValidation ?? null,
     });
     if (!vi.ok) {
-      if (conciseQuality.applies && conciseQuality.ok && serverFullDocExists) {
+      const intentTitleCategoryFailure = vi.reasons.some((r) =>
+        r.startsWith("intent:brand_licensing_title") ||
+        r.startsWith("intent:design_title_requires") ||
+        r.startsWith("intent:title_mismatch_category") ||
+        r.startsWith("intent:generic_agreement_title"),
+      );
+      if (
+        !intentTitleCategoryFailure &&
+        conciseQuality.applies &&
+        conciseQuality.ok &&
+        serverFullDocExists
+      ) {
         logDecision(true, ["concise_commercial_services_override"], "intent_contract_override");
         return { ok: true, reasons: [] };
       }

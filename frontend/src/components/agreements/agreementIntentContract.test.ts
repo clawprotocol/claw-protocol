@@ -30,6 +30,16 @@ describe("agreementIntentContract (LawDog Pro universal)", () => {
     expect(c.expected_title_terms[0].toLowerCase()).toMatch(/logo|design/);
   });
 
+  it("routes quad-party brand licensing stack to consulting_services — not design_creative", () => {
+    const intake =
+      "Outdoor products brand. Evergreen Outdoor Brands LLC manufactures distributes and sells with Atlas Consumer Products Inc. " +
+      "Horizon Wholesale Group LLC wholesale distributor North America. BrightPeak Retail Solutions LLC Amazon Shopify ecommerce. " +
+      "8% royalty gross product sales. 14% wholesale distribution margin. trademark usage. Oklahoma governing law.";
+    const c = resolveAgreementIntentContract(intake);
+    expect(c.intent_id).not.toBe("design_creative");
+    expect(c.intent_id).toBe("consulting_services");
+  });
+
   it("rejects misclassified commercial boilerplate in body for a design prompt", () => {
     const c = resolveAgreementIntentContract("logo design 2k revisions");
     const bad = [
