@@ -17,6 +17,7 @@ import { preparePaidProFrozenDisplayPlain, preparePaidProReviewDisplayPlain } fr
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 import { auditPaidProReviewRenderSotParity } from "./paidProReviewSotParity";
 import { resolvePaidProFreezeCommitText } from "./paidProFreezeCandidate";
+import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import {
   countOperativeIfToNoticeStanzas,
@@ -105,6 +106,23 @@ describe("TEST429 — four-party North Star foundational recital, notice, tail, 
     expect(server).toMatch(/^\s*1\.2\s+Lead\s*$/m);
     expect(server).toMatch(/^\s*4\.4\s+Revenue\s*$/m);
     expect(server).toMatch(new RegExp(`${NORTH_STAR}\\s+${NORTH_STAR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  });
+
+  it("validatePaidProOutput runs on acceptance-prepared server_full_draft without freeze-path rejections", () => {
+    const server = buildTest429MalformedFourPartyServerCorpus();
+    latchAcceptedServerFullDraftAuthority(server, "server_full_draft");
+
+    const validation = validatePaidProOutput({
+      text: server,
+      rawIntake: TEST429_FOUR_PARTY_NORTH_STAR_INTAKE,
+      draft: test429Draft(),
+      premiumPipelineSource: "server_full_draft",
+    });
+    expect(validation.reasons).not.toContain("duplicate_miscellaneous_section");
+    expect(validation.reasons).not.toContain("duplicate_opening_recital");
+    expect(validation.reasons).not.toContain("section_heading_title_anomaly");
+    expect(validation.reasons).not.toContain("freeze_candidate_rejected");
+    expect(validation.reasons).not.toContain("substantive_server_draft_recovery_blocked");
   });
 
   it("freeze produces clean canonical SoT with four-party recital, notices, and execution parity", () => {

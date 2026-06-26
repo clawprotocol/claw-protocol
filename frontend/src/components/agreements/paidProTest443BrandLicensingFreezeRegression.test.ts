@@ -184,10 +184,22 @@ describe("TEST443 — Brand licensing server-full freeze after heading title ano
     expectBrandLicensingFreezeReadyCorpus(freezeCommit.text);
   });
 
-  it("validatePaidProOutput surfaces pass without section_heading_title_anomaly", () => {
+  it("validatePaidProOutput accepts raw server_full_draft without freeze-path rejections", () => {
     const draft = test443BrightPeakFirstDraft();
+    const raw = buildTest443ServerFullWithHeadingTitleAnomaly();
+    const validation = validatePaidProOutput({
+      text: raw,
+      rawIntake: TEST443_LIVE_INTAKE,
+      draft,
+      premiumPipelineSource: "server_full_draft",
+    });
+    expect(validation.reasons).not.toContain("section_heading_title_anomaly");
+    expect(validation.reasons).not.toContain("duplicate_miscellaneous_section");
+    expect(validation.reasons).not.toContain("freeze_candidate_rejected");
+    expect(validation.reasons).not.toContain("substantive_server_draft_recovery_blocked");
+
     const prepared = preparePaidProServerDocumentForAcceptance(
-      buildTest443ServerFullWithHeadingTitleAnomaly(),
+      raw,
       draft,
       TEST443_LIVE_INTAKE,
       { surface: "test443_validate" },
@@ -200,13 +212,6 @@ describe("TEST443 — Brand licensing server-full freeze after heading title ano
     });
     expect(freezeCandidate.ok, freezeCandidate.rejectReason ?? "freeze_failed").toBe(true);
     expect(freezeCandidate.rejectReason).not.toBe("section_heading_title_anomaly");
-    const validation = validatePaidProOutput({
-      text: freezeCandidate.text,
-      rawIntake: TEST443_LIVE_INTAKE,
-      draft,
-      premiumPipelineSource: "server_full_draft",
-    });
-    expect(validation.reasons).not.toContain("section_heading_title_anomaly");
   });
 
   it("canonical snapshot allows generic on-file notice contact language", () => {

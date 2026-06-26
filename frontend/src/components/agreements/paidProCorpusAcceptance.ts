@@ -28,6 +28,7 @@ import {
 import {
   assessConciseCommercialServicesProQuality,
   logPaidProValidationDecision,
+  preparePaidProServerDocumentForAcceptance,
   validateProMinimumSubstance,
 } from "./paidProConciseServicesQuality";
 import { corpusHasPaidProSyntheticMalformedSectionHeadings } from "./paidProSyntheticMalformedSectionHeadings";
@@ -208,27 +209,63 @@ export function validatePaidProOutput(args: {
   /** Backend deterministic validation — contextualizes intent routing for minimalist valid deals. */
   agreementValidation?: AgreementValidationResult | null;
 }): { ok: boolean; reasons: string[] } {
-  const t = args.text || "";
-  const docLen = t.trim().length;
+  const rawInput = args.text || "";
+  const inputLen = rawInput.trim().length;
   const rawI = String(args.rawIntake || "");
   const pipelineSource = args.premiumPipelineSource ?? null;
+  const inputHash = paidProPipelineAcceptedCorpusHash(rawInput);
   const serverFullDocExists =
     isAuthoritativePremiumPipelineProvenance(pipelineSource) &&
-    docLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+    inputLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+  const substantiveServerDraft =
+    serverFullDocExists && inputLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+
+  let validationInput = rawInput;
+  let preparationStage = "raw_input";
+  const acceptanceRepairs: string[] = [];
+  if (substantiveServerDraft) {
+    const prep = preparePaidProServerDocumentForAcceptance(
+      rawInput,
+      args.draft ?? null,
+      rawI,
+      { surface: "validatePaidProOutput_acceptance_prep" },
+    );
+    validationInput = prep.text;
+    acceptanceRepairs.push(...prep.repairs);
+    preparationStage = "preparePaidProServerDocumentForAcceptance";
+  }
+
+  const t = validationInput;
+  const docLen = t.trim().length;
+  const preparedHash = paidProPipelineAcceptedCorpusHash(t);
   const conciseQuality = assessConciseCommercialServicesProQuality({
     text: t,
     rawIntake: rawI,
     draft: args.draft ?? null,
     agreementValidation: args.agreementValidation ?? null,
   });
-  const logDecision = (accepted: boolean, reasons: string[]) => {
+  const logDecision = (
+    accepted: boolean,
+    reasons: string[],
+    validationStage: string,
+    rejectedRule?: string | null,
+  ) => {
     logPaidProValidationDecision({
       accepted,
       reasons,
+      allReasons: reasons,
+      rejectedRule: rejectedRule ?? (accepted ? null : reasons[0] ?? "validation_failed"),
+      validationStage,
+      preparationStage,
       docLen,
+      inputLen,
+      preparedLen: docLen,
+      inputHash,
+      preparedHash,
+      acceptanceRepairs,
       source: pipelineSource,
       serverFullDocExists,
-      serverLen: docLen,
+      serverLen: inputLen,
       recoveryCandidateLen: docLen,
       acceptedSource: accepted ? pipelineSource : null,
       rejectedReason: accepted ? null : reasons[0] ?? "validation_failed",
@@ -236,11 +273,6 @@ export function validatePaidProOutput(args: {
       requiredFactsMissing: conciseQuality.requiredFactsMissing,
     });
   };
-  logPremiumValidationSource({
-    originalIntake: rawI,
-    paidDocText: t,
-    draftFamily: args.draft?.agreement_family ?? null,
-  });
   const logVpaidDevFail = (reasons: string[]) => {
     if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
       const diag = buildPaidProValidationDiagnostics(t, rawI);
@@ -279,17 +311,24 @@ export function validatePaidProOutput(args: {
       });
     }
   };
+  const rejectAt = (validationStage: string, reasons: string[]) => {
+    logVpaidDevFail(reasons);
+    logDecision(false, reasons, validationStage, reasons[0] ?? "validation_failed");
+    return { ok: false as const, reasons };
+  };
+  logPremiumValidationSource({
+    originalIntake: rawI,
+    paidDocText: t,
+    draftFamily: args.draft?.agreement_family ?? null,
+  });
   const dcl = rejectDevContextLeakInPremiumBody(t);
   if (!dcl.ok) {
-    logVpaidDevFail(dcl.reasons);
-    logDecision(false, dcl.reasons);
-    return dcl;
+    return rejectAt("dev_context_leak", dcl.reasons);
   }
   if (corpusHasPaidProSyntheticMalformedSectionHeadings(t)) {
-    const reasons = ["section_structure_synthetic_malformed_headings"];
-    logVpaidDevFail(reasons);
-    logDecision(false, reasons);
-    return { ok: false, reasons };
+    return rejectAt("section_structure_synthetic_malformed_headings", [
+      "section_structure_synthetic_malformed_headings",
+    ]);
   }
   const freezeCandidate = buildPaidProFreezeCandidate({
     text: t,
@@ -302,8 +341,6 @@ export function validatePaidProOutput(args: {
   const validationCorpus = freezeCandidate.ok ? freezeCandidate.text : preparedCandidateText;
   const preparedStableHash = paidProPipelineAcceptedCorpusHash(preparedCandidateText);
   const validationCorpusHash = paidProPipelineAcceptedCorpusHash(validationCorpus);
-  const substantiveServerDraft =
-    serverFullDocExists && docLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
   logPaidProFreezeCandidateDecision({
     accepted: freezeCandidate.ok,
     source: pipelineSource ?? "server_full_draft",
@@ -321,19 +358,13 @@ export function validatePaidProOutput(args: {
       validationCorpusForGates = duplicationAuthority.text;
     }
     if (duplicationAuthority.rejected) {
-      const reasons = duplicationAuthority.reasons;
-      logVpaidDevFail(reasons);
-      logDecision(false, reasons);
-      return { ok: false, reasons };
+      return rejectAt("paid_pro_corpus_duplication", duplicationAuthority.reasons);
     }
     if (
       serverFullDocExists &&
       validationCorpus.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
     ) {
-      const reasons = ["freeze_candidate_thin_vs_server_full"];
-      logVpaidDevFail(reasons);
-      logDecision(false, reasons);
-      return { ok: false, reasons };
+      return rejectAt("freeze_candidate_thin_vs_server_full", ["freeze_candidate_thin_vs_server_full"]);
     }
   }
   if (!freezeCandidate.ok) {
@@ -354,28 +385,28 @@ export function validatePaidProOutput(args: {
         candidateLen: recovery.text.length,
       });
       if (recovery.ok) {
-        logDecision(true, [
+        logDecision(
+          true,
+          [
+            "deterministic_recovery_freeze_candidate_ok",
+            freezeCandidate.rejectReason ?? "server_freeze_failed",
+          ],
           "deterministic_recovery_freeze_candidate_ok",
-          freezeCandidate.rejectReason ?? "server_freeze_failed",
-        ]);
+        );
         return {
           ok: true,
           reasons: ["deterministic_recovery_freeze_candidate_ok"],
         };
       }
     } else if (substantiveServerDraft) {
-      const reasons = [
+      return rejectAt("paid_pro_validation", [
         freezeCandidate.rejectReason ?? "freeze_candidate_rejected",
         "substantive_server_draft_recovery_blocked",
-      ];
-      logVpaidDevFail(reasons);
-      logDecision(false, reasons);
-      return { ok: false, reasons };
+      ]);
     }
-    const reasons = [freezeCandidate.rejectReason ?? "freeze_candidate_rejected"];
-    logVpaidDevFail(reasons);
-    logDecision(false, reasons);
-    return { ok: false, reasons };
+    return rejectAt("paid_pro_validation", [
+      freezeCandidate.rejectReason ?? "freeze_candidate_rejected",
+    ]);
   }
   const bodyForGates = validationCorpusForGates;
   const intakeLower = rawI.toLowerCase();
@@ -389,9 +420,7 @@ export function validatePaidProOutput(args: {
     const reasons = minimumSubstance.missingSections.length
       ? minimumSubstance.missingSections.map((s) => `minimum_substance_missing:${s}`)
       : ["minimum_substance_failed"];
-    logVpaidDevFail(reasons);
-    logDecision(false, reasons);
-    return { ok: false, reasons };
+    return rejectAt("minimum_substance", reasons);
   }
   const acc = rejectPremiumBodyForProRender(bodyForGates, {
     intakeLower,
@@ -399,28 +428,22 @@ export function validatePaidProOutput(args: {
     partyNames: args.draft?.parties?.map((p) => p.name) ?? null,
   });
   if (!acc.ok) {
-    logVpaidDevFail(acc.reasons);
-    logDecision(false, acc.reasons);
-    return acc;
+    return rejectAt("rejectPremiumBodyForProRender", acc.reasons);
   }
   const s = rejectPaidProStitchedOrThinShell(bodyForGates, intakeLower);
   if (!s.ok) {
     if (conciseQuality.applies && conciseQuality.ok && serverFullDocExists) {
       /* concise commercial services server body — not a stitched starter shell */
     } else {
-      logVpaidDevFail(s.reasons);
-      logDecision(false, s.reasons);
-      return s;
+      return rejectAt("rejectPaidProStitchedOrThinShell", s.reasons);
     }
   }
   const drift = rejectProUpgradeSourceFactDrift(bodyForGates, { intakeLower });
   if (!drift.ok) {
-    logVpaidDevFail(drift.reasons);
-    logDecision(false, drift.reasons);
-    return drift;
+    return rejectAt("rejectProUpgradeSourceFactDrift", drift.reasons);
   }
   if (args.intentContractMode === "base_only") {
-    logDecision(true, []);
+    logDecision(true, [], "base_only_pass");
     return { ok: true, reasons: [] };
   }
   const resolvedIntentContract = resolvePaidProIntentContract({
@@ -440,12 +463,10 @@ export function validatePaidProOutput(args: {
     });
     if (!vi.ok) {
       if (conciseQuality.applies && conciseQuality.ok && serverFullDocExists) {
-        logDecision(true, ["concise_commercial_services_override"]);
+        logDecision(true, ["concise_commercial_services_override"], "intent_contract_override");
         return { ok: true, reasons: [] };
       }
-      logVpaidDevFail(vi.reasons);
-      logDecision(false, vi.reasons);
-      return { ok: false, reasons: vi.reasons };
+      return rejectAt("validateIntentContractForPaidProOutput", vi.reasons);
     }
   } else if (import.meta.env.MODE !== "test" && !args.skipFounderTitleCheck && isFounderEquityVestingIntent(args.rawIntake)) {
     const titleG = getResolvedTitleForFounderGating(
@@ -453,22 +474,27 @@ export function validatePaidProOutput(args: {
       t,
     );
     if (!hasRequiredFounderPremiumTitle(titleG, t)) {
-      logVpaidDevFail(["founder_premium_title_phrase_required"]);
-      logDecision(false, ["founder_premium_title_phrase_required"]);
-      return { ok: false, reasons: ["founder_premium_title_phrase_required"] };
+      return rejectAt("founder_premium_title_phrase_required", ["founder_premium_title_phrase_required"]);
     }
   }
-  if (conciseQuality.malformedOpening) {
+  const finalConciseQuality = assessConciseCommercialServicesProQuality({
+    text: bodyForGates,
+    rawIntake: rawI,
+    draft: args.draft ?? null,
+    agreementValidation: args.agreementValidation ?? null,
+  });
+  if (finalConciseQuality.malformedOpening) {
     if (serverFullDocExists && freezeCandidate.ok) {
-      logDecision(true, ["concise_malformed_opening_overridden_after_freeze_pass"]);
+      logDecision(true, ["concise_malformed_opening_overridden_after_freeze_pass"], "final_concise_quality");
       return { ok: true, reasons: [] };
     }
-    const reasons = ["concise_services_malformed_opening"];
-    logVpaidDevFail(reasons);
-    logDecision(false, reasons);
-    return { ok: false, reasons };
+    return rejectAt("concise_services_malformed_opening", ["concise_services_malformed_opening"]);
   }
-  logDecision(true, conciseQuality.applies && conciseQuality.ok ? ["concise_commercial_services"] : []);
+  logDecision(
+    true,
+    finalConciseQuality.applies && finalConciseQuality.ok ? ["concise_commercial_services"] : [],
+    "accepted",
+  );
   return { ok: true, reasons: [] };
 }
 

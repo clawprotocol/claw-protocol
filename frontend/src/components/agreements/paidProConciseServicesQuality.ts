@@ -339,7 +339,16 @@ export function logProMinimumSubstanceDecision(payload: {
 export function logPaidProValidationDecision(payload: {
   accepted: boolean;
   reasons: string[];
+  allReasons?: string[];
+  rejectedRule?: string | null;
+  validationStage?: string;
+  preparationStage?: string;
   docLen: number;
+  inputLen?: number;
+  preparedLen?: number;
+  inputHash?: string | null;
+  preparedHash?: string | null;
+  acceptanceRepairs?: string[];
   source?: string | null;
   serverFullDocExists?: boolean;
   serverLen?: number;
@@ -349,14 +358,34 @@ export function logPaidProValidationDecision(payload: {
   requiredFactsFound?: string[];
   requiredFactsMissing?: string[];
 }): void {
+  if (import.meta.env.MODE === "test") return;
+
+  const enriched = {
+    ...payload,
+    allReasons: payload.allReasons ?? payload.reasons,
+    rejectedRule:
+      payload.rejectedRule ??
+      (payload.accepted ? null : payload.reasons[0] ?? "validation_failed"),
+    rejectedReason:
+      payload.rejectedReason ??
+      (payload.accepted ? null : payload.reasons[0] ?? "validation_failed"),
+  };
+
+  if (!payload.accepted) {
+    // eslint-disable-next-line no-console
+    console.info("[paid-pro-validation-decision]", enriched);
+    return;
+  }
+
   if (
     !shouldLogPaidProAuthoritySurfaceEvent({
       event: "paid-pro-validation-decision",
       surface: payload.source ?? "unknown",
       hash: String(payload.docLen),
-      source: payload.accepted ? "accepted" : "blocked",
+      source: "accepted",
       payloadSignature: JSON.stringify({
         reasons: payload.reasons,
+        validationStage: payload.validationStage ?? "accepted",
         serverFullDocExists: Boolean(payload.serverFullDocExists),
         requiredFactsMissing: payload.requiredFactsMissing ?? [],
       }),
@@ -365,7 +394,7 @@ export function logPaidProValidationDecision(payload: {
     return;
   }
   // eslint-disable-next-line no-console
-  console.info("[paid-pro-validation-decision]", payload);
+  console.info("[paid-pro-validation-decision]", enriched);
 }
 
 /** Repair malformed openings and expand thin AI workflow services bodies before acceptance gates. */
