@@ -27,6 +27,14 @@ import {
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
 
+function isAuthoritativeRecoveryPipelineSource(source: string): boolean {
+  return (
+    source === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE ||
+    source === PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE ||
+    source === "structural_recovery"
+  );
+}
+
 export type PostCheckoutRecoverySotCommitResult =
   | {
       committed: true;
@@ -75,8 +83,7 @@ export function previewPostCheckoutRecoverySotCommit(args: {
     displayPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN
       ? displayPlain
       : meetsPaidProDegradedRecoveryDisplayRequirements(rawBody, args.intakeText) &&
-          (args.premiumRenderSource === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE ||
-            args.premiumRenderSource === PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE)
+          isAuthoritativeRecoveryPipelineSource(args.premiumRenderSource)
         ? rawBody
         : "";
   if (resolvedDisplayPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {

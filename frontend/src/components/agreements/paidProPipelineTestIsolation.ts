@@ -18,10 +18,14 @@ import { clearCurrentSessionProEntitlementMarkers } from "./paidProSessionEligib
 import { clearPremiumPartyNamesHandoff, resetPremiumRecipientHandoffDedupForTests } from "./premiumPartyNamesHandoff";
 import { clearConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { clearProGenerationAdoptionForTests } from "./paidProGenerationAdoption";
+import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 
 /** Clear cross-test Paid Pro pipeline caches and in-memory authority without touching sessionStorage. */
 export function resetPaidProPipelineTestIsolation(): void {
   clearPaidProSourceOfTruth();
+  clearProGenerationAdoptionForTests();
+  clearAcceptedProCorpusSafeDisplayCacheForTests();
   clearPaidProCorpusScanCache();
   clearPaidProPostAcceptanceValidatorCache();
   clearPremiumParseSessionGuard();

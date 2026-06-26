@@ -135,6 +135,11 @@ import {
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { markPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import {
+  logProGenerationAdoptionCommitted,
+  readProGenerationAdoption,
+  tryCommitProGenerationAdoption,
+} from "./paidProGenerationAdoption";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
 import {
@@ -3245,18 +3250,60 @@ async function runPremiumCompletionInner(
         if (
           freezeCommit.ok &&
           (freezeAcceptedSource === "server_full_draft" ||
-            freezeAcceptedSource === "server_full_draft_retry") &&
+            freezeAcceptedSource === "server_full_draft_retry" ||
+            freezeAcceptedSource === "server_full_draft_degraded") &&
           authoritativeServerFullOnWire.length === 0 &&
           (degradedJsonParseWithoutSubstantiveServerFull ||
             freezeCommit.text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN)
         ) {
-          freezeCommit = {
-            ...freezeCommit,
-            ok: false,
-            rejectReason: degradedJsonParseWithoutSubstantiveServerFull
-              ? "mislabeled_server_full_without_wire_server_full"
-              : "mislabeled_server_full_draft_below_substantive_min",
-          };
+          const mislabeledReason = degradedJsonParseWithoutSubstantiveServerFull
+            ? "mislabeled_server_full_without_wire_server_full"
+            : "mislabeled_server_full_draft_below_substantive_min";
+          let structuralRecovered = false;
+          if (intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake)) {
+            const structural = buildPaidProStructuralRecoveryBody({
+              intakeText: rawForSoT || rawIntake,
+              draft: mergedForApi,
+            });
+            if (structural.ok) {
+              const structuralPrep = preparePaidProServerDocumentForAcceptance(
+                structural.body,
+                mergedForApi,
+                rawForSoT || rawIntake,
+                { surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery" },
+              );
+              const structuralGate = buildPaidProFreezeCandidate({
+                text: structuralPrep.text,
+                source: "structural_recovery",
+                draft: mergedForApi,
+                intakeText: rawForSoT || rawIntake,
+                agreementGenerationId: input.agreementGenerationId ?? null,
+                generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+                surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery",
+              });
+              if (
+                structuralGate.ok &&
+                structuralGate.text.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+                brandLicensingFreezeAuthorityPasses(
+                  structuralGate.text,
+                  rawForSoT || rawIntake,
+                  mergedForApi,
+                )
+              ) {
+                doc = structuralGate.text;
+                freezeCommit = structuralGate;
+                freezeAcceptedSource = "structural_recovery";
+                structuralRecovered = true;
+              }
+            }
+          }
+          if (!structuralRecovered) {
+            freezeCommit = {
+              ...freezeCommit,
+              ok: false,
+              rejectReason: mislabeledReason,
+            };
+          }
         }
         if (import.meta.env.MODE !== "test") {
           // eslint-disable-next-line no-console
@@ -3370,6 +3417,32 @@ async function runPremiumCompletionInner(
               source: premiumRenderSource,
               freezeHash: freezeCommit.hash,
             });
+          }
+          const adoptionFp =
+            input.premiumRequestIntakeFingerprint ?? shortIntakeFingerprint(rawForSoT || rawIntake);
+          const adoptionEligible =
+            doc.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+            (doc.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+              freezeAcceptedSource === "structural_recovery" ||
+              freezeAcceptedSource === "deterministic_recovery_freeze_candidate");
+          if (adoptionEligible) {
+            const adoptionCommit = tryCommitProGenerationAdoption({
+              generationId: input.agreementGenerationId ?? "",
+              intakeFingerprint: adoptionFp,
+              intakeText: rawForSoT || rawIntake,
+              body: doc,
+              source: premiumRenderSource,
+              freezeCandidateHash: freezeCommit.hash ?? null,
+            });
+            if (adoptionCommit.committed && adoptionCommit.record) {
+              logProGenerationAdoptionCommitted({
+                generationId: input.agreementGenerationId ?? "",
+                source: premiumRenderSource,
+                bodyLen: doc.length,
+                hash: adoptionCommit.record.hash,
+                freezeCandidateHash: freezeCommit.hash ?? null,
+              });
+            }
           }
           paidProPerfSpanStart("post_accept_commit_render");
           freezeAcceptedPremiumBodyForSession(
@@ -4014,6 +4087,57 @@ async function runPremiumCompletionInner(
   if (premiumRenderSource === "rejected_paid_corpus") {
     const docTrimForSuppress = (winningPremiumBodyText || "").trim();
     const intakeForRecovery = rawForSoT || rawIntake;
+    const adoptionFpForReturn =
+      input.premiumRequestIntakeFingerprint ?? shortIntakeFingerprint(intakeForRecovery);
+    const adoptedCorpus = readProGenerationAdoption(
+      input.agreementGenerationId,
+      adoptionFpForReturn,
+    );
+    if (adoptedCorpus && adoptedCorpus.body.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+      premiumRenderSource = adoptedCorpus.source as PremiumRenderSource;
+      if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
+      outMerged = stripClientPremiumArtifactBlocksFromDraft({
+        ...outMerged,
+        premium_full_document_text: adoptedCorpus.body,
+        premium_server_full_document_text:
+          String(outMerged.premium_server_full_document_text ?? "").trim() || adoptedCorpus.body,
+      });
+      freezeAcceptedPremiumBodyForSession(
+        input.agreementGenerationId,
+        adoptedCorpus.body,
+        premiumRenderSource,
+      );
+      markPaidProPipelineValidationPassed({
+        text: adoptedCorpus.body,
+        source: premiumRenderSource,
+      });
+      logPremiumAcceptanceDecision({
+        accepted: true,
+        reason: "pro_generation_adoption_latch",
+        bodyLen: adoptedCorpus.body.length,
+        fatalPlaceholderCount: 0,
+        structuralFatalCount: 0,
+        generationOutcome: (lastWireGenerationOutcome || "ok").trim(),
+        renderSource: premiumRenderSource,
+      });
+      return {
+        premiumDraft: outMerged,
+        premiumParties,
+        recipientCandidates,
+        winningPremiumBodyText: adoptedCorpus.body,
+        premiumRenderSource,
+        premiumReview,
+        premiumFinalizeAudit,
+        premiumReviewRoute,
+        staleIntakeOrGeneration: false,
+        agreementGenerationId: input.agreementGenerationId,
+        premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+        founderDetailsGateMessage: null,
+        proIntentGateMessage: null,
+        serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+        tierADiagnostic: tierADiag,
+      };
+    }
     const serverRecoveryCandidate = (
       pipelineNormalizedAuthoritativeText || docTrimForSuppress
     ).trim();
@@ -4067,6 +4191,16 @@ async function runPremiumCompletionInner(
           markPaidProPipelineValidationPassed({
             text: recovered,
             source: premiumRenderSource,
+          });
+          tryCommitProGenerationAdoption({
+            generationId: input.agreementGenerationId ?? "",
+            intakeFingerprint:
+              input.premiumRequestIntakeFingerprint ??
+              shortIntakeFingerprint(intakeForRecovery),
+            intakeText: intakeForRecovery,
+            body: recovered,
+            source: premiumRenderSource,
+            freezeCandidateHash: brandFreeze.hash ?? null,
           });
           logPremiumAcceptanceDecision({
             accepted: true,

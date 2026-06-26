@@ -56,6 +56,10 @@ export type AcceptedProCorpusSafeDisplayOpts = {
   agreementGenerationId?: string | null;
   /** Recovery render source or pipeline recovery kind for cache namespacing. */
   recoveryKind?: string | null;
+  /** Pipeline or corpus source kind — prevents starter cache poisoning Pro path. */
+  sourceKind?: string | null;
+  /** Authoritative party count for cache namespacing. */
+  partyCount?: number | null;
 };
 
 export type AcceptedProCorpusSafeDisplayResult = {

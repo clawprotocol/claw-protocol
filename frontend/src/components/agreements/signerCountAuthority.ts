@@ -26,6 +26,8 @@ import {
 } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { countRealParties } from "./starterPartyLimits";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
 
 const LOG_PREFIX = "[signer-count-authority]";
 
@@ -215,8 +217,16 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     source = labeledCount >= frozenManifestCount ? "labeled_parties" : "party_slot_count";
   }
 
+  let finalCount = Math.max(2, Math.min(count, PAID_PRO_AUTHORITY_MAX_PARTIES));
+  if (intake && intakeDescribesBrandLicensingDistributionManufacturingStack(intake)) {
+    const quadNames = resolveDeterministicQuadPartyNames(intake, null).filter(isAuthoritativeLegalEntityName);
+    if (quadNames.length >= 4) {
+      finalCount = Math.min(finalCount, 4);
+    }
+  }
+
   return {
-    count: Math.max(2, Math.min(count, PAID_PRO_AUTHORITY_MAX_PARTIES)),
+    count: finalCount,
     source,
     labeledCount: authoritativeIntakeCount,
     draftCount: Math.max(draftCount, collapsedDraft),

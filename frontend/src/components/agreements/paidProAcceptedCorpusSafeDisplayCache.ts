@@ -34,7 +34,9 @@ export function buildAcceptedProCorpusSafeDisplayCacheKey(
   const surface = opts?.surface ?? "accepted_pro_corpus_safe_display";
   const generationId = (opts?.agreementGenerationId ?? "").trim() || "no-gen";
   const recoveryKind = (opts?.recoveryKind ?? "").trim() || "no-recovery";
-  return `${corpusHash}|${intakeFp}|${draftFp}|${generationId}|${recoveryKind}|${surfaceMode(opts)}|${surface}`;
+  const sourceKind = (opts?.sourceKind ?? "").trim() || "no-source";
+  const partyCount = opts?.partyCount ?? 0;
+  return `${corpusHash}|${intakeFp}|${draftFp}|${generationId}|${recoveryKind}|${sourceKind}|party:${partyCount}|${surfaceMode(opts)}|${surface}`;
 }
 
 function corpusHashForCache(corpus: string): string {

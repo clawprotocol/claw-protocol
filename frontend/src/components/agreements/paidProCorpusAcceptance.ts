@@ -245,6 +245,8 @@ export function validatePaidProOutput(args: {
     draft: args.draft ?? null,
     agreementValidation: args.agreementValidation ?? null,
   });
+  let freezeCandidateHashForLog: string | null = null;
+  let intentValidationHashForLog: string | null = null;
   const logDecision = (
     accepted: boolean,
     reasons: string[],
@@ -272,6 +274,8 @@ export function validatePaidProOutput(args: {
       rejectedReason: accepted ? null : reasons[0] ?? "validation_failed",
       requiredFactsFound: conciseQuality.requiredFactsFound,
       requiredFactsMissing: conciseQuality.requiredFactsMissing,
+      freezeCandidateHash: freezeCandidateHashForLog,
+      intentValidationHash: intentValidationHashForLog,
     });
   };
   const logVpaidDevFail = (reasons: string[]) => {
@@ -342,6 +346,7 @@ export function validatePaidProOutput(args: {
   const validationCorpus = freezeCandidate.ok ? freezeCandidate.text : preparedCandidateText;
   const preparedStableHash = paidProPipelineAcceptedCorpusHash(preparedCandidateText);
   const validationCorpusHash = paidProPipelineAcceptedCorpusHash(validationCorpus);
+  freezeCandidateHashForLog = freezeCandidate.hash ?? validationCorpusHash;
   logPaidProFreezeCandidateDecision({
     accepted: freezeCandidate.ok,
     source: pipelineSource ?? "server_full_draft",
@@ -454,10 +459,13 @@ export function validatePaidProOutput(args: {
   });
   const intentContractForValidation = resolvedIntentContract;
   if (intentContractForValidation) {
-    const intentValidationText =
-      serverFullDocExists && intakeDescribesBrandLicensingDistributionManufacturingStack(rawI)
-        ? rawInput
+    const intentValidationText = freezeCandidate.ok
+      ? validationCorpusForGates
+      : serverFullDocExists && intakeDescribesBrandLicensingDistributionManufacturingStack(rawI)
+        ? t
         : bodyForGates;
+    const intentValidationHash = paidProPipelineAcceptedCorpusHash(intentValidationText);
+    intentValidationHashForLog = intentValidationHash;
     const vi = validateIntentContractForPaidProOutput({
       contract: intentContractForValidation,
       text: intentValidationText,
@@ -466,6 +474,16 @@ export function validatePaidProOutput(args: {
       authoritativeProPipelineAccepted: isAuthoritativePremiumPipelineProvenance(args.premiumPipelineSource),
       agreementValidation: args.agreementValidation ?? null,
     });
+    if (import.meta.env.DEV && freezeCandidate.ok) {
+      const freezeHash = paidProPipelineAcceptedCorpusHash(validationCorpusForGates);
+      if (freezeHash && intentValidationHash && freezeHash !== intentValidationHash) {
+        // eslint-disable-next-line no-console
+        console.warn("[paid-pro-intent-validation-hash-divergence]", {
+          freezeCandidateHash: freezeHash,
+          intentValidationHash,
+        });
+      }
+    }
     if (!vi.ok) {
       const intentTitleCategoryFailure = vi.reasons.some((r) =>
         r.startsWith("intent:brand_licensing_title") ||

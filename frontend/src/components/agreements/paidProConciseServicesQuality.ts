@@ -357,6 +357,8 @@ export function logPaidProValidationDecision(payload: {
   rejectedReason?: string | null;
   requiredFactsFound?: string[];
   requiredFactsMissing?: string[];
+  freezeCandidateHash?: string | null;
+  intentValidationHash?: string | null;
 }): void {
   if (import.meta.env.MODE === "test") return;
 

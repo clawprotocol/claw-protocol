@@ -4,6 +4,7 @@
 
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { hasProGenerationAdoptionForSession } from "./paidProGenerationAdoption";
 import {
   isPremiumGenerationApiUnavailableForUi,
   isPremiumGenerationApiUnavailablePipelineSource,
@@ -20,6 +21,7 @@ export function isPaidProApiFailureBlockingPaidProAuthority(
   args: PaidProApiFailureGuardContext,
 ): boolean {
   if (args.hasPaidProSourceOfTruth ?? hasPaidProSourceOfTruth()) return false;
+  if (hasProGenerationAdoptionForSession()) return false;
   return isPremiumGenerationApiUnavailableForUi({
     premiumPostCheckoutPhase: args.premiumPostCheckoutPhase,
     pipelineSource: args.premiumRenderSource,
@@ -45,6 +47,7 @@ export function shouldBlockPaidProCanonicalFreezeOnApiFailure(args: {
   hasEligibleRecoveryCorpus?: boolean;
 }): boolean {
   if (args.hasPaidProSourceOfTruth ?? hasPaidProSourceOfTruth()) return false;
+  if (hasProGenerationAdoptionForSession()) return false;
   const pipeline = String(args.premiumRenderSource || "").trim();
   if (
     REJECTED_PAID_CORPUS_PIPELINE_SOURCES.has(pipeline) &&
