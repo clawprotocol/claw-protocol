@@ -39,6 +39,9 @@ import {
   writeAcceptedProCorpusSafeDisplayCache,
 } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { readPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 import { applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
 import { repairAgreementTemplatePlaceholders, repairPaidProFreezePlaceholderAuthority } from "./agreementTemplatePlaceholderSafety";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
@@ -165,8 +168,20 @@ export function applyAcceptedProCorpusSafeDisplay(
         : cached.text.length > 0
           ? `len:${cached.text.length}`
           : "empty";
-    logPaidProSafeDisplayCacheHit({ surface, cacheKey, inputHash, outputHash });
-    return tracePaidProQaPassWithText("applyAcceptedProCorpusSafeDisplay", `${surface}:cache_hit`, input, () => cached);
+    const pipelineAcceptedHash = readPaidProPipelineAcceptedCorpusHash();
+    const pipelineAcceptedSubstantive =
+      input.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+      (hasPaidProPipelineSessionAcceptance({ text: input, source: opts?.sourceKind ?? "server_full_draft" }) ||
+        (pipelineAcceptedHash && pipelineAcceptedHash === inputHash));
+    const staleStarterCache =
+      pipelineAcceptedSubstantive &&
+      cached.text.length < Math.floor(input.length * 0.85) &&
+      pipelineAcceptedHash &&
+      outputHash !== pipelineAcceptedHash;
+    if (!staleStarterCache) {
+      logPaidProSafeDisplayCacheHit({ surface, cacheKey, inputHash, outputHash });
+      return tracePaidProQaPassWithText("applyAcceptedProCorpusSafeDisplay", `${surface}:cache_hit`, input, () => cached);
+    }
   }
   const result = tracePaidProQaPassWithText("applyAcceptedProCorpusSafeDisplay", surface, input, () =>
     applyAcceptedProCorpusSafeDisplayCore(raw, opts),

@@ -1158,18 +1158,41 @@ export function repairPaidProFreezePlaceholderAuthority(
 export function logPreFreezePlaceholderRejectionDetails(
   text: string,
   issues: readonly string[],
-  ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
+  ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames"> & {
+    surface?: string | null;
+    corpusHash?: string | null;
+    freezeGatesPassed?: boolean;
+    snapshotIntegrityOk?: boolean;
+  },
 ): void {
   if (typeof import.meta !== "undefined" && import.meta.env.MODE === "test") return;
   const scanCtx = { intakeRaw: ctx.intakeRaw ?? "", partyNames: normPartyNames(ctx.partyNames) };
   const fatal = analyzeTemplatePlaceholderFragments(text, scanCtx).filter((d) => d.fatal);
+  const identityTokens = listUnresolvedIdentityPlaceholderTokens(text);
+  const issueDetails = issues.map((issue) => ({
+    code: issue,
+    category: issue,
+    token: issue,
+    reason: "canonical_snapshot_placeholder_issue",
+    surface: ctx.surface ?? "establish_paid_pro_source_of_truth",
+  }));
+  const fatalDetails = fatal.slice(0, 12).map((decision) => ({
+    code: decision.category || "fatal_bracket",
+    category: decision.category ?? null,
+    token: decision.token,
+    reason: decision.fatal ? "fatal_placeholder" : "nonfatal_placeholder",
+    surface: ctx.surface ?? "analyzeTemplatePlaceholderFragments",
+    snippet: decision.contextSnippet || decision.token,
+    lineKind: decision.lineKind ?? null,
+    sectionKind: decision.sectionKind ?? null,
+  }));
   for (const decision of fatal.slice(0, 12)) {
     logPaidProPlaceholderContext({
       placeholder: decision.token,
       surroundingText: decision.contextSnippet || decision.token,
     });
   }
-  for (const token of listUnresolvedIdentityPlaceholderTokens(text).slice(0, 12)) {
+  for (const token of identityTokens.slice(0, 12)) {
     const idx = text.toLowerCase().indexOf(token.toLowerCase());
     logPaidProPlaceholderContext({
       placeholder: token,
@@ -1179,9 +1202,15 @@ export function logPreFreezePlaceholderRejectionDetails(
   // eslint-disable-next-line no-console
   console.warn("[paid-pro-sot-freeze-placeholder-reject]", {
     issues: [...issues],
+    issueDetails,
+    fatalDetails,
     fatalTokens: fatal.map((d) => d.token).slice(0, 16),
-    identityTokens: listUnresolvedIdentityPlaceholderTokens(text).slice(0, 16),
+    identityTokens: identityTokens.slice(0, 16),
     docLen: text.length,
+    corpusHash: ctx.corpusHash ?? null,
+    scannerSurface: ctx.surface ?? "establish_paid_pro_source_of_truth",
+    freezeGatesPassed: ctx.freezeGatesPassed ?? false,
+    snapshotIntegrityOk: ctx.snapshotIntegrityOk ?? null,
   });
 }
 

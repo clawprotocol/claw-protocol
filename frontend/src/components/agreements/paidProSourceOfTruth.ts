@@ -24,9 +24,11 @@ import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 import {
   buildCanonicalAgreementSnapshot,
   clearFrozenCanonicalAgreementCorpus,
+  collectFatalPaidProPlaceholderIssueCodes,
   freezeCanonicalAgreementSnapshot,
   hasFrozenCanonicalAgreementCorpus,
   readCanonicalAgreementCorpusForSurface,
+  type CanonicalAgreementSnapshot,
   type CanonicalAgreementSurface,
 } from "./canonicalAgreementSnapshot";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
@@ -101,6 +103,75 @@ import {
   evaluatePaidProFreezeCandidateGates,
 } from "./paidProFreezeCandidate";
 import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
+import { resolveNoticeStructuralValidationParties } from "./paidProPartyNoticeDetails";
+import {
+  readPremiumRecipientHandoff,
+  resolveHandoffPartySlotCount,
+} from "./premiumPartyNamesHandoff";
+import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+
+function buildPaidProSotCanonicalSnapshotArgs(args: {
+  surface: string;
+  safeForCommit: string;
+  intakeText?: string | null;
+  parties: Array<{ name: string; role?: string | null; email?: string | null; partyAddress?: string | null }>;
+  reviewParties: ReturnType<typeof preparePaidProFreezeCandidateText>["reviewParties"];
+  authoritativeSignerCount: number;
+  reviewSessionId?: string | null;
+  draft?: ParsedDraftShape | null;
+  freezeGatesPassed: boolean;
+}): Parameters<typeof buildCanonicalAgreementSnapshot>[0] {
+  const draftPartyNames = (args.draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter(Boolean);
+  const handoffPartySlots = (() => {
+    const handoff = readPremiumRecipientHandoff();
+    if (!handoff) return args.reviewParties.length;
+    return resolveHandoffPartySlotCount(handoff, args.reviewParties.length);
+  })();
+  const structuralParties = resolveNoticeStructuralValidationParties(args.reviewParties, {
+    intakeText: args.intakeText ?? null,
+    draftPartyNames,
+    acceptedCorpus: args.safeForCommit,
+  });
+  return {
+    surface: args.surface,
+    tier: "pro",
+    candidates: [{ source: "server_full_document_text", text: args.safeForCommit }],
+    intakeText: args.intakeText ?? null,
+    parties: args.parties,
+    signerState: { complete: false, signerCount: args.authoritativeSignerCount },
+    minLen: 500,
+    reviewSessionId: args.reviewSessionId,
+    forceAuthoritativePreservation: true,
+    skipClauseFamilyPlaceholderIssues: args.freezeGatesPassed,
+    clauseFamilyStructuralContext: {
+      parties: structuralParties,
+      draftPartyCount: args.draft?.parties?.length ?? args.parties.length,
+      intakeText: args.intakeText ?? null,
+      draftPartyNames,
+      acceptedCorpus: args.safeForCommit,
+      handoffPartySlots,
+    },
+  };
+}
+
+function isPaidProSotFreezeEstablishmentBlocked(
+  snapshot: CanonicalAgreementSnapshot,
+  corpusText: string,
+  freezeGatesPassed: boolean,
+  ctx: { intakeRaw: string; partyNames: readonly string[] },
+): boolean {
+  const fatalIssues = collectFatalPaidProPlaceholderIssueCodes(corpusText, {
+    intakeText: ctx.intakeRaw,
+    partyNames: ctx.partyNames,
+  });
+  if (fatalIssues.length > 0) return true;
+  if (freezeGatesPassed) {
+    return !snapshot.canonicalText.trim() || snapshot.canonicalText.length < 500;
+  }
+  return !snapshot.integrityOk || snapshot.placeholderIssues.length > 0;
+}
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -409,19 +480,26 @@ export function establishPaidProSourceOfTruth(args: {
     draftParties: parties,
     manifestPartyCount: parties.length,
   }).count;
-  const snapshot = buildCanonicalAgreementSnapshot({
-    surface: "paid_pro_source_of_truth_establish",
-    tier: "pro",
-    candidates: [{ source: "server_full_document_text", text: safeForCommit }],
-    intakeText: args.intakeText ?? null,
-    parties,
-    signerState: { complete: false, signerCount: authoritativeSignerCount },
-    minLen: 500,
-    reviewSessionId: args.reviewSessionId,
-    forceAuthoritativePreservation: true,
-  });
+  const snapshot = buildCanonicalAgreementSnapshot(
+    buildPaidProSotCanonicalSnapshotArgs({
+      surface: "paid_pro_source_of_truth_establish",
+      safeForCommit,
+      intakeText: args.intakeText,
+      parties,
+      reviewParties,
+      authoritativeSignerCount,
+      reviewSessionId: args.reviewSessionId,
+      draft: args.draft ?? null,
+      freezeGatesPassed: primaryFreezeGate.ok,
+    }),
+  );
   let snapshotForFreeze = snapshot;
-  if (!snapshot.integrityOk || snapshot.placeholderIssues.length > 0) {
+  if (
+    isPaidProSotFreezeEstablishmentBlocked(snapshot, safeForCommit, primaryFreezeGate.ok, {
+      intakeRaw: args.intakeText ?? "",
+      partyNames,
+    })
+  ) {
     const noticeRetry = applyPaidProNoticeContactAuthority(safeForCommit, {
       draft: args.draft ?? null,
       intakeText: args.intakeText ?? null,
@@ -443,23 +521,34 @@ export function establishPaidProSourceOfTruth(args: {
         );
       }
       safeForCommit = retryGate.text;
-      snapshotForFreeze = buildCanonicalAgreementSnapshot({
-        surface: "paid_pro_source_of_truth_establish_retry",
-        tier: "pro",
-        candidates: [{ source: "server_full_document_text", text: safeForCommit }],
-        intakeText: args.intakeText ?? null,
-        parties,
-        signerState: { complete: false, signerCount: authoritativeSignerCount },
-        minLen: 500,
-        reviewSessionId: args.reviewSessionId,
-        forceAuthoritativePreservation: true,
-      });
+      snapshotForFreeze = buildCanonicalAgreementSnapshot(
+        buildPaidProSotCanonicalSnapshotArgs({
+          surface: "paid_pro_source_of_truth_establish_retry",
+          safeForCommit,
+          intakeText: args.intakeText,
+          parties,
+          reviewParties,
+          authoritativeSignerCount,
+          reviewSessionId: args.reviewSessionId,
+          draft: args.draft ?? null,
+          freezeGatesPassed: retryGate.ok,
+        }),
+      );
     }
   }
-  if (!snapshotForFreeze.integrityOk || snapshotForFreeze.placeholderIssues.length > 0) {
+  if (
+    isPaidProSotFreezeEstablishmentBlocked(snapshotForFreeze, safeForCommit, primaryFreezeGate.ok, {
+      intakeRaw: args.intakeText ?? "",
+      partyNames,
+    })
+  ) {
     logPreFreezePlaceholderRejectionDetails(safeForCommit, snapshotForFreeze.placeholderIssues, {
       intakeRaw: args.intakeText ?? "",
       partyNames,
+      surface: "establish_paid_pro_source_of_truth",
+      corpusHash: paidProPipelineAcceptedCorpusHash(safeForCommit) ?? hashPaidProCorpus(safeForCommit),
+      freezeGatesPassed: primaryFreezeGate.ok,
+      snapshotIntegrityOk: snapshotForFreeze.integrityOk,
     });
     throw new Error(
       `[paid-pro-sot-freeze-blocked] integrityOk=${snapshotForFreeze.integrityOk} placeholders=${snapshotForFreeze.placeholderIssues.join(",") || "none"}`,
@@ -487,17 +576,19 @@ export function establishPaidProSourceOfTruth(args: {
       preFreezePlain: frozenText,
       postFreezePlain: acceptedCorpusText,
     });
-    const reconcileSnapshot = buildCanonicalAgreementSnapshot({
-      surface: "paid_pro_source_of_truth_establish",
-      tier: "pro",
-      candidates: [{ source: "server_full_document_text", text: acceptedCorpusText }],
-      intakeText: args.intakeText ?? null,
-      parties,
-      signerState: { complete: false, signerCount: authoritativeSignerCount },
-      minLen: 500,
-      reviewSessionId: args.reviewSessionId,
-      forceAuthoritativePreservation: true,
-    });
+    const reconcileSnapshot = buildCanonicalAgreementSnapshot(
+      buildPaidProSotCanonicalSnapshotArgs({
+        surface: "paid_pro_source_of_truth_establish",
+        safeForCommit: acceptedCorpusText,
+        intakeText: args.intakeText,
+        parties,
+        reviewParties,
+        authoritativeSignerCount,
+        reviewSessionId: args.reviewSessionId,
+        draft: args.draft ?? null,
+        freezeGatesPassed: true,
+      }),
+    );
     freezeCanonicalAgreementSnapshot(reconcileSnapshot, "server_full_document_text");
   }
   logProCorpusSourceMap({

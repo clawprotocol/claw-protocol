@@ -38,6 +38,8 @@ import {
   previewRecoverPaidProFreezeCandidate,
 } from "./paidProFreezeCandidate";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { hasProGenerationAdoptionForSession } from "./paidProGenerationAdoption";
+import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicationAuthority";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 
@@ -374,7 +376,20 @@ export function validatePaidProOutput(args: {
     }
   }
   if (!freezeCandidate.ok) {
+    const pipelineAcceptedSubstantive =
+      validationCorpus.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+      (hasPaidProPipelineSessionAcceptance({
+        text: validationCorpus,
+        source: pipelineSource ?? "server_full_draft",
+      }) ||
+        hasProGenerationAdoptionForSession());
     if (!serverFullDocExists) {
+      if (pipelineAcceptedSubstantive) {
+        return rejectAt("paid_pro_validation", [
+          freezeCandidate.rejectReason ?? "freeze_candidate_rejected",
+          "substantive_pipeline_accepted_recovery_blocked",
+        ]);
+      }
       const recovery = previewRecoverPaidProFreezeCandidate({
         draft: args.draft ?? null,
         intakeText: rawI,

@@ -26,6 +26,7 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import { AUTHORITATIVE_BODY_PRESERVE_MIN_WINNING_LEN } from "./premiumAuthoritativeBodyPreservation";
 import { validateClauseFamilyStructuralIntegrity } from "./clauseFamilyStructuralIntegrity";
+import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
@@ -138,6 +139,16 @@ export type BuildCanonicalAgreementSnapshotArgs = {
   reviewSessionId?: string | null;
   /** When true, skip integrity shrink/repair — authoritative boundary-repaired body is final. */
   forceAuthoritativePreservation?: boolean;
+  /** When true, clause-family structural codes are not added to placeholderIssues (freeze gates already validated). */
+  skipClauseFamilyPlaceholderIssues?: boolean;
+  clauseFamilyStructuralContext?: {
+    parties?: readonly PaidProSignerMetadataParty[];
+    draftPartyCount?: number;
+    intakeText?: string | null;
+    draftPartyNames?: readonly string[] | null;
+    acceptedCorpus?: string | null;
+    handoffPartySlots?: number;
+  };
 };
 
 let frozenCanonicalAgreementCorpus: CanonicalAgreementSnapshot | null = null;
@@ -258,6 +269,14 @@ function collectPlaceholderIssues(
     }
   }
   return [...issues];
+}
+
+/** Fatal placeholder codes only — aligns with paid validation / freeze gate semantics. */
+export function collectFatalPaidProPlaceholderIssueCodes(
+  text: string,
+  opts?: { intakeText?: string | null; partyNames?: readonly string[] },
+): string[] {
+  return collectPlaceholderIssues(text, opts);
 }
 
 function collectBlockerIssues(text: string): string[] {
@@ -396,20 +415,37 @@ export function buildCanonicalAgreementSnapshot(
     partyNames,
   });
   const blockerIssues = collectBlockerIssues(canonicalText);
-  if (args.tier === "pro" && canonicalText.length >= 500) {
-    const structuralParties = parties.map((p, partyIndex) => ({
-      partyIndex,
-      partyLegalName: p.name,
-      signerEmail: String(p.email ?? "").trim(),
-      signerName: "",
-      signerTitle: "",
-      partyAddress: String(p.partyAddress ?? "").trim(),
-    }));
+  if (args.tier === "pro" && canonicalText.length >= 500 && !args.skipClauseFamilyPlaceholderIssues) {
+    const structuralParties: PaidProSignerMetadataParty[] =
+      args.clauseFamilyStructuralContext?.parties?.map((party, partyIndex) => ({
+        partyIndex,
+        partyLegalName: party.partyLegalName,
+        signerEmail: party.signerEmail ?? "",
+        signerName: party.signerName ?? "",
+        signerTitle: party.signerTitle ?? "",
+        partyAddress: party.partyAddress ?? "",
+      })) ??
+      parties.map((p, partyIndex) => ({
+        partyIndex,
+        partyLegalName: p.name,
+        signerEmail: String(p.email ?? "").trim(),
+        signerName: "",
+        signerTitle: "",
+        partyAddress: String(p.partyAddress ?? "").trim(),
+      }));
     const structural = validateClauseFamilyStructuralIntegrity(canonicalText, {
       parties: structuralParties,
-      draftPartyCount: parties.length,
+      draftPartyCount:
+        args.clauseFamilyStructuralContext?.draftPartyCount ?? parties.length,
       phase: "post_acceptance",
       surface: args.surface,
+      handoffPartySlots: args.clauseFamilyStructuralContext?.handoffPartySlots,
+      intakeText: args.clauseFamilyStructuralContext?.intakeText ?? args.intakeText,
+      draftPartyNames:
+        args.clauseFamilyStructuralContext?.draftPartyNames ??
+        parties.map((p) => p.name),
+      acceptedCorpus:
+        args.clauseFamilyStructuralContext?.acceptedCorpus ?? canonicalText,
     });
     for (const violation of structural.violations) {
       if (!placeholderIssues.includes(violation.code)) {
