@@ -30,6 +30,8 @@ import {
   resolveAuthoritativeWitnessIndex,
   stripPreWitnessExecutionPollutionFromPrefix,
 } from "./paidProExecutionBlockNormalization";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
 
 export const PARTY_NOTICE_DETAILS_HEADING = "Party Notice Details:";
 
@@ -282,6 +284,15 @@ function resolveCanonicalNoticePartyCount(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): number {
+  const intake = roleContext?.intakeText?.trim() ?? "";
+  if (intake && intakeDescribesBrandLicensingDistributionManufacturingStack(intake)) {
+    const quadNames = resolveDeterministicQuadPartyNames(intake, null)
+      .filter(isAuthoritativeLegalEntityName);
+    if (quadNames.length >= 4) {
+      return 4;
+    }
+  }
+
   const authoritativeFromParties = parties.filter(
     (p) =>
       String(p.partyLegalName ?? "").trim().length >= 2 &&
@@ -298,8 +309,6 @@ function resolveCanonicalNoticePartyCount(
   if (authoritativeDraftNames >= 2) {
     return Math.min(authoritativeDraftNames, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
   }
-
-  const intake = roleContext?.intakeText?.trim() ?? "";
 
   if (intake) {
     const resolved = resolveAuthoritativeSignerCount({

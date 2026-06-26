@@ -197,13 +197,45 @@ export function assertBrandLicensingFrozenCorpusAuthorityForFreeze(
   ) {
     throw new Error("[paid-pro-sot-freeze-blocked] brand_licensing_professional_corpus_defect");
   }
-  const structure = applySectionStructureIntegrity(text, {
+  const structureRepaired = applySectionStructureIntegrity(corpus, {
+    source: "brand_licensing_freeze_final",
+    repair: true,
+  });
+  corpus = structureRepaired.text.trimEnd();
+  const structure = applySectionStructureIntegrity(corpus, {
     source: "brand_licensing_freeze_final",
     repair: false,
   });
   if (structure.anomalyCount > 0) {
-    throw new Error(
-      `[paid-pro-sot-freeze-blocked] brand_licensing_section_structure_anomaly:${structure.anomalyCount}`,
-    );
+    const authorityRepair = applyBrandLicensingFrozenCorpusAuthority(corpus, draft ?? null, intake);
+    corpus = authorityRepair.text.trimEnd();
+    const structureRepairedAgain = applySectionStructureIntegrity(corpus, {
+      source: "brand_licensing_freeze_final_retry",
+      repair: true,
+    });
+    corpus = structureRepairedAgain.text.trimEnd();
+    const verify = applySectionStructureIntegrity(corpus, {
+      source: "brand_licensing_freeze_final_verify",
+      repair: false,
+    });
+    if (verify.anomalyCount > 0) {
+      throw new Error(
+        `[paid-pro-sot-freeze-blocked] brand_licensing_section_structure_anomaly:${verify.anomalyCount}`,
+      );
+    }
+  }
+}
+
+/** Non-throwing freeze gate preview for pipeline preserve/recovery decisions. */
+export function brandLicensingFreezeAuthorityPasses(
+  text: string,
+  intakeText: string | null | undefined,
+  draft?: ParsedDraftShape | null,
+): boolean {
+  try {
+    assertBrandLicensingFrozenCorpusAuthorityForFreeze(text, intakeText, draft ?? null);
+    return true;
+  } catch {
+    return false;
   }
 }

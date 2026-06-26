@@ -52,6 +52,10 @@ export type AcceptedProCorpusSafeDisplayOpts = {
   appendExecutionBlockIfMissing?: boolean;
   /** QA perf trace label only — does not affect output. */
   surface?: string;
+  /** Session generation id — prevents starter/free corpus cache poisoning Pro path. */
+  agreementGenerationId?: string | null;
+  /** Recovery render source or pipeline recovery kind for cache namespacing. */
+  recoveryKind?: string | null;
 };
 
 export type AcceptedProCorpusSafeDisplayResult = {

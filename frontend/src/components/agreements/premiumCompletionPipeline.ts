@@ -197,6 +197,10 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import {
+  brandLicensingFreezeAuthorityPasses,
+} from "./paidProBrandLicensingFreezeAuthority";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { resolvePremiumPreValidationBody } from "./premiumPreValidationBodyAuthority";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { markPaidProLocalPostProcessingEndAt } from "./paidProQaPerfTrace";
@@ -1714,6 +1718,7 @@ async function runPremiumCompletionInner(
   let winningPremiumBodyText = "";
   let lastWireAuthoritativeBodyLen = 0;
   let lastWireServerFullDocumentLen = 0;
+  let lastWireGenerationOutcome = "";
   let premiumBodyHardRejectedForDevContextLeak = false;
   const intakeLowerGlobal = (rawForSoT || rawIntake).toLowerCase();
   const premiumRejectCtx = {
@@ -1972,6 +1977,7 @@ async function runPremiumCompletionInner(
       });
       lastWireAuthoritativeBodyLen = wireAuthoritativeBodyLen;
       lastWireServerFullDocumentLen = wireServerFullDocumentText.length;
+      lastWireGenerationOutcome = wireGenerationOutcomeOnWire;
       if (wireServerFullDocumentText.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
         tracePaidProAcceptancePipelineStage({
           stage: "raw_server_full_draft_received",
@@ -2393,6 +2399,12 @@ async function runPremiumCompletionInner(
             failureCode: effectiveFull.server_generation_failure_code,
             accRejected: true,
           });
+        const brandLicensingDegradedJsonParseRetry =
+          intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake) &&
+          String(effectiveFull.generation_outcome || "").trim() === "degraded" &&
+          String(effectiveFull.server_generation_failure_code || "").trim() === "json_parse" &&
+          !(wireServerFullDocumentText || "").trim() &&
+          (doc || "").trim().length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
         if (skipStructuralRetry) {
           paidProPerfRecordInstant("json_parse_degraded_handling", 0, {
             outcome: "skip_structural_retry",
@@ -2409,7 +2421,7 @@ async function runPremiumCompletionInner(
             (globalThis as { __paidProAllowStructuralRetryInTest?: boolean }).__paidProAllowStructuralRetryInTest,
           );
         if (
-          !acc0.ok &&
+          (brandLicensingDegradedJsonParseRetry || !acc0.ok) &&
           structuralRetryEnabled &&
           !isLongCommerciallyUsablePremiumBody(doc.length) &&
           !skipStructuralRetry
@@ -2460,6 +2472,14 @@ async function runPremiumCompletionInner(
               doc = frozen.body;
               usedClientRetry = true;
               effectiveFull = full2;
+              const retryWireServerFull = (full2.server_full_document_text || "").trim();
+              const retryWireDoc = (full2.document_text || "").trim();
+              lastWireAuthoritativeBodyLen = authoritativeWirePremiumBodyLen({
+                wireDocumentText: retryWireDoc,
+                wireServerFullDocumentText: retryWireServerFull,
+              });
+              lastWireServerFullDocumentLen = retryWireServerFull.length;
+              lastWireGenerationOutcome = (full2.generation_outcome || "").trim();
               if (
                 (full2.generation_outcome || "").trim() === "degraded" &&
                 (full2.server_generation_failure_code || "").trim() === "json_parse"
@@ -3173,39 +3193,24 @@ async function runPremiumCompletionInner(
             }
           }
         }
-        const authoritativeServerLenForRecovery = Math.max(
-          wireAuthoritativeBodyLen,
-          serverFullDocumentAuthoritative ? wireCorpusForFreeze.length : 0,
-        );
-        const substantiveAuthoritativeServer =
-          serverFullDocumentAuthoritative &&
-          authoritativeServerLenForRecovery >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
-        const generationOutcomeOk =
-          !effectiveFull.generation_outcome ||
-          String(effectiveFull.generation_outcome).trim().toLowerCase() === "ok";
-        const blockRecoveryForSubstantiveServer =
-          substantiveAuthoritativeServer && generationOutcomeOk && fatalPlaceholderCount === 0;
-
         if (!freezeCommit.ok) {
-          if (!blockRecoveryForSubstantiveServer) {
-            const recovery = previewRecoverPaidProFreezeCandidate({
-              draft: mergedForApi,
-              intakeText: rawForSoT || rawIntake,
-              surface: "premium_completion_pipeline_accept_recovery",
-            });
-            const serverLen = doc.length;
-            if (
-              recovery.ok &&
-              (serverLen < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
-                recovery.text.length >= Math.floor(serverLen * 0.85))
-            ) {
-              doc = recovery.text;
-              freezeCommit = recovery;
-              freezeAcceptedSource = "deterministic_recovery_freeze_candidate";
-            }
+          const recovery = previewRecoverPaidProFreezeCandidate({
+            draft: mergedForApi,
+            intakeText: rawForSoT || rawIntake,
+            surface: "premium_completion_pipeline_accept_recovery",
+          });
+          const serverLen = doc.length;
+          if (
+            recovery.ok &&
+            (serverLen < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
+              recovery.text.length >= Math.floor(serverLen * 0.85))
+          ) {
+            doc = recovery.text;
+            freezeCommit = recovery;
+            freezeAcceptedSource = "deterministic_recovery_freeze_candidate";
           }
         }
-        if (!freezeCommit.ok && !blockRecoveryForSubstantiveServer) {
+        if (!freezeCommit.ok) {
           const structural = buildPaidProStructuralRecoveryBody({
             intakeText: rawForSoT || rawIntake,
             draft: mergedForApi,
@@ -3522,11 +3527,112 @@ async function runPremiumCompletionInner(
             frozenReject.body.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) ||
           (preservedRecovery.text.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
             !(doc || "").trim());
+        const preserveBlockedByStructuralFatals =
+          structuralFatalCount > 0 || fatalPlaceholderCount > 0;
+        const intakeSForPreserve = (rawForSoT || rawIntake || "").trim();
+        const brandLicensingPreserveIntake =
+          intakeSForPreserve.length > 0 &&
+          intakeDescribesBrandLicensingDistributionManufacturingStack(intakeSForPreserve);
+        let brandStructuralRecoveryCommitted = false;
         if (
           shouldAttemptPreserve &&
-          preservedPlaceholder.ok &&
-          preservedPlaceholder.text.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+          !preserveBlockedByStructuralFatals &&
+          brandLicensingPreserveIntake
         ) {
+          const structural = buildPaidProStructuralRecoveryBody({
+            intakeText: intakeSForPreserve,
+            draft: mergedForApi,
+          });
+          if (structural.ok) {
+            const structuralPrep = preparePaidProServerDocumentForAcceptance(
+              structural.body,
+              mergedForApi,
+              intakeSForPreserve,
+              { surface: "premium_completion_pipeline:brand_preserved_structural_recovery" },
+            );
+            const structuralGate = buildPaidProFreezeCandidate({
+              text: structuralPrep.text,
+              source: "structural_recovery",
+              draft: mergedForApi,
+              intakeText: intakeSForPreserve,
+              agreementGenerationId: input.agreementGenerationId ?? null,
+              generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+              surface: "premium_completion_pipeline:brand_preserved_structural_recovery",
+            });
+            if (
+              structuralGate.ok &&
+              structuralGate.text.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+              brandLicensingFreezeAuthorityPasses(
+                structuralGate.text,
+                intakeSForPreserve,
+                mergedForApi,
+              )
+            ) {
+              const recovered = structuralGate.text.trim();
+              doc = recovered;
+              winningPremiumBodyText = recovered;
+              premiumRenderSource = "structural_recovery";
+              const preservedFamily = resolveAuthoritativePaidProAgreementFamily({
+                intakeText: intakeSForPreserve,
+                draft: merged,
+                serverFamilyHint: effectiveFull.agreement_family,
+                inputAgreementFamily: input.agreementFamily ?? null,
+                traceId: traceCtx.traceId,
+                sessionGenerationId: input.agreementGenerationId ?? null,
+                intakeFingerprint,
+              });
+              outMerged = applyAuthoritativeFamilyToDraft(
+                stripClientPremiumArtifactBlocksFromDraft({
+                  ...merged,
+                  premium_full_document_text: recovered,
+                  premium_server_full_document_text:
+                    (effectiveFull.server_full_document_text || "").trim() || recovered,
+                  premium_server_repair_document_text:
+                    (effectiveFull.server_repair_document_text || "").trim() || null,
+                  premium_full_draft_key_terms: effectiveFull.key_terms_found,
+                  premium_full_draft_missing_info: effectiveFull.missing_material_info,
+                  title: (effectiveFull.title || "").trim() || merged.title,
+                  agreement_family: preservedFamily.family,
+                }),
+                preservedFamily,
+              );
+              premiumCompletionOutcome =
+                premiumCompletionOutcome ||
+                "authoritative_draft_complete_with_recommended_clarifications";
+              freezeAcceptedPremiumBodyForSession(
+                input.agreementGenerationId,
+                recovered,
+                premiumRenderSource,
+              );
+              markPaidProPipelineValidationPassed({
+                text: recovered,
+                source: premiumRenderSource,
+              });
+              brandStructuralRecoveryCommitted = true;
+              logPremiumAcceptanceDecision({
+                accepted: true,
+                reason: "brand_licensing_structural_recovery_after_soft_reject",
+                bodyLen: recovered.length,
+                fatalPlaceholderCount,
+                structuralFatalCount,
+                generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+                renderSource: premiumRenderSource,
+              });
+            }
+          }
+        }
+        const preservedFreezeEligible =
+          shouldAttemptPreserve &&
+          !preserveBlockedByStructuralFatals &&
+          preservedPlaceholder.ok &&
+          preservedPlaceholder.text.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+          (!brandLicensingPreserveIntake ||
+            brandLicensingFreezeAuthorityPasses(
+              preservedPlaceholder.text.trim(),
+              intakeSForPreserve,
+              mergedForApi,
+            ));
+        if (!brandStructuralRecoveryCommitted && preservedFreezeEligible) {
           const preserved = preservedPlaceholder.text.trim();
           doc = preserved;
           winningPremiumBodyText = preserved;
@@ -3560,6 +3666,15 @@ async function runPremiumCompletionInner(
           premiumCompletionOutcome =
             premiumCompletionOutcome ||
             "authoritative_draft_complete_with_recommended_clarifications";
+          freezeAcceptedPremiumBodyForSession(
+            input.agreementGenerationId,
+            preserved,
+            premiumRenderSource,
+          );
+          markPaidProPipelineValidationPassed({
+            text: preserved,
+            source: premiumRenderSource,
+          });
           logPremiumAcceptanceDecision({
             accepted: true,
             reason: "preserved_long_corpus_after_soft_reject",
@@ -3569,7 +3684,13 @@ async function runPremiumCompletionInner(
             generationOutcome: (effectiveFull.generation_outcome || "").trim(),
             renderSource: premiumRenderSource,
           });
-        } else if (acc.ok || founderDetailsGateMessage || proIntentGateMessage) {
+        } else if (
+          acc.ok ||
+          founderDetailsGateMessage ||
+          proIntentGateMessage ||
+          preserveBlockedByStructuralFatals ||
+          (shouldAttemptPreserve && brandLicensingPreserveIntake && !brandStructuralRecoveryCommitted)
+        ) {
           premiumRenderSource = "rejected_paid_corpus";
           rejectedPaidCorpusDueToClientGates = true;
         }
@@ -3896,6 +4017,86 @@ async function runPremiumCompletionInner(
     const serverRecoveryCandidate = (
       pipelineNormalizedAuthoritativeText || docTrimForSuppress
     ).trim();
+    const brandLicensingSubstantiveServerRejected =
+      rejectedPaidCorpusDueToClientGates &&
+      intakeDescribesBrandLicensingDistributionManufacturingStack(intakeForRecovery) &&
+      Math.max(
+        serverRecoveryCandidate.length,
+        String(outMerged.premium_server_full_document_text ?? "").trim().length,
+      ) >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+    if (brandLicensingSubstantiveServerRejected) {
+      const brandStructural = buildPaidProStructuralRecoveryBody({
+        intakeText: intakeForRecovery,
+        draft: outMerged,
+      });
+      if (brandStructural.ok) {
+        const brandPrep = preparePaidProServerDocumentForAcceptance(
+          brandStructural.body,
+          outMerged,
+          intakeForRecovery,
+          { surface: "premium_completion_pipeline:brand_rejected_structural_recovery" },
+        );
+        const brandFreeze = buildPaidProFreezeCandidate({
+          text: brandPrep.text,
+          source: "structural_recovery",
+          draft: outMerged,
+          intakeText: intakeForRecovery,
+          agreementGenerationId: input.agreementGenerationId ?? null,
+          generationOutcome: (lastWireGenerationOutcome || "ok").trim(),
+          surface: "premium_completion_pipeline:brand_rejected_structural_recovery",
+        });
+        if (
+          brandFreeze.ok &&
+          brandFreeze.text.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+          brandLicensingFreezeAuthorityPasses(brandFreeze.text, intakeForRecovery, outMerged)
+        ) {
+          const recovered = brandFreeze.text.trim();
+          premiumRenderSource = "structural_recovery";
+          if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
+          outMerged = stripClientPremiumArtifactBlocksFromDraft({
+            ...outMerged,
+            premium_full_document_text: recovered,
+            premium_server_full_document_text:
+              String(outMerged.premium_server_full_document_text ?? "").trim() || recovered,
+          });
+          freezeAcceptedPremiumBodyForSession(
+            input.agreementGenerationId,
+            recovered,
+            premiumRenderSource,
+          );
+          markPaidProPipelineValidationPassed({
+            text: recovered,
+            source: premiumRenderSource,
+          });
+          logPremiumAcceptanceDecision({
+            accepted: true,
+            reason: "brand_licensing_structural_recovery_after_rejected_corpus",
+            bodyLen: recovered.length,
+            fatalPlaceholderCount: 0,
+            structuralFatalCount: 0,
+            generationOutcome: (lastWireGenerationOutcome || "ok").trim(),
+            renderSource: premiumRenderSource,
+          });
+          return {
+            premiumDraft: outMerged,
+            premiumParties,
+            recipientCandidates,
+            winningPremiumBodyText: recovered,
+            premiumRenderSource,
+            premiumReview,
+            premiumFinalizeAudit,
+            premiumReviewRoute,
+            staleIntakeOrGeneration: false,
+            agreementGenerationId: input.agreementGenerationId,
+            premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+            founderDetailsGateMessage: null,
+            proIntentGateMessage: null,
+            serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+            tierADiagnostic: tierADiag,
+          };
+        }
+      }
+    }
     const suppressDegradedLocalRecovery =
       !rejectedPaidCorpusDueToClientGates &&
       pipelineNormalizedAuthoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN &&
@@ -4029,7 +4230,9 @@ async function runPremiumCompletionInner(
         };
       }
     }
-    const skipServerDegradedRecovery = jsonParseClientRejected;
+    const skipServerDegradedRecovery =
+      jsonParseClientRejected &&
+      lastWireServerFullDocumentLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
     if (
       !skipServerDegradedRecovery &&
       serverRecoveryCandidate.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&

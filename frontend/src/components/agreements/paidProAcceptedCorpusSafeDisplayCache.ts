@@ -32,7 +32,9 @@ export function buildAcceptedProCorpusSafeDisplayCacheKey(
   const intakeFp = opts?.intakeText ? shortIntakeFingerprint(opts.intakeText) : "no-intake";
   const draftFp = draftFingerprint(opts?.draft);
   const surface = opts?.surface ?? "accepted_pro_corpus_safe_display";
-  return `${corpusHash}|${intakeFp}|${draftFp}|${surfaceMode(opts)}|${surface}`;
+  const generationId = (opts?.agreementGenerationId ?? "").trim() || "no-gen";
+  const recoveryKind = (opts?.recoveryKind ?? "").trim() || "no-recovery";
+  return `${corpusHash}|${intakeFp}|${draftFp}|${generationId}|${recoveryKind}|${surfaceMode(opts)}|${surface}`;
 }
 
 function corpusHashForCache(corpus: string): string {

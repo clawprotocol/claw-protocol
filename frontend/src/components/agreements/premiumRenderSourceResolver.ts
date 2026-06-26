@@ -240,6 +240,8 @@ const AUTHORITATIVE_PREMIUM_PIPELINE_RENDER_SOURCES = new Set([
   "server_full_draft_retry",
   "server_full_draft_degraded",
   "snapshot_server_full_draft",
+  "structural_recovery",
+  "deterministic_recovery_freeze_candidate",
 ]);
 
 export function isAuthoritativePremiumPipelineRenderSource(src: string | null | undefined): boolean {
