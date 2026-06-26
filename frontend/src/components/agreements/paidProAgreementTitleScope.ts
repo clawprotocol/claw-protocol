@@ -60,6 +60,19 @@ function intakeScopeBlob(intake: string): string {
   return intake;
 }
 
+function intakeDescribesBrandLicensingDistributionManufacturingStack(intake: string): boolean {
+  const scope = intakeScopeBlob(intake);
+  const blob = `${scope} ${intake}`.toLowerCase();
+  const licensing =
+    /\b(?:brand\s+licensing|licensing\s+and\s+distribution)\b/.test(blob) || /\blicensing\b/.test(blob);
+  const distribution = /\bdistribut/.test(blob);
+  const manufacturing = /\bmanufactur/.test(blob);
+  const marketing = /\bmarketing\b|\be-?commerce\b/.test(blob);
+  if (licensing && distribution) return true;
+  const hits = [licensing, distribution, manufacturing, marketing].filter(Boolean).length;
+  return hits >= 3;
+}
+
 export function intakeExplicitlyRequestsImplementationTitleScope(intake: string): boolean {
   const blob = intakeScopeBlob(intake);
   if (!blob.trim()) return false;
@@ -162,6 +175,19 @@ export function resolveAgreementTitleFromIntakeScope(
           recitalPhrase: "Consulting Services Agreement",
           source: "consulting-services",
         };
+    logAgreementTitleScopeDecision(decision, intake);
+    return decision;
+  }
+
+  if (
+    intakeDescribesBrandLicensingDistributionManufacturingStack(intake) &&
+    (!explicit || genericExplicitServices || /^distribution agreement$/i.test(explicit))
+  ) {
+    const decision = {
+      titleUpper: "MANUFACTURING, DISTRIBUTION, LICENSING AND MARKETING SERVICES AGREEMENT",
+      recitalPhrase: "Manufacturing, Distribution, Licensing and Marketing Services Agreement",
+      source: "brand-licensing-distribution-manufacturing",
+    };
     logAgreementTitleScopeDecision(decision, intake);
     return decision;
   }

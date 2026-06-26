@@ -47,6 +47,9 @@ function recitalAgreementPhrase(title: string): string {
   if (/MUTUAL\s+SERVICES/i.test(upper)) {
     return "Mutual Services Agreement";
   }
+  if (/MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(upper)) {
+    return "Manufacturing, Distribution, Licensing and Marketing Services Agreement";
+  }
   return "Services Agreement";
 }
 

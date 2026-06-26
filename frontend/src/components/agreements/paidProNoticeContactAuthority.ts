@@ -8,7 +8,7 @@ import { ensureOperativeIfToNoticeDelivery, ensureCanonicalNoticesSectionHeading
 import { repairProfessionalCorpusContamination } from "./paidProProfessionalCorpusContamination";
 import type { PaidProPartyRoleContext } from "./paidProSignerMetadataAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
-import { mergeLabeledPartyAuthorityIntoParties } from "./paidProSignerMetadataAuthority";
+import { mergeLabeledPartyAuthorityIntoParties, mergeDraftSignerContactFieldsOntoParties } from "./paidProSignerMetadataAuthority";
 import { manifestRecordsForPaidProAcceptance } from "./paidProAcceptanceExecutionBlockInvariant";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import {
@@ -37,7 +37,10 @@ export function applyPaidProNoticeContactAuthority(
 ): PaidProNoticeContactAuthorityResult {
   const surface = opts?.surface ?? "paid_pro_notice_contact_authority";
   const intakeRaw = opts?.intakeText ?? null;
-  let parties = resolvePartiesForReviewRender({ draft: opts?.draft, intakeText: intakeRaw });
+  let parties = mergeDraftSignerContactFieldsOntoParties(
+    resolvePartiesForReviewRender({ draft: opts?.draft, intakeText: intakeRaw }),
+    opts?.draft,
+  );
   const manifestRecords = manifestRecordsForPaidProAcceptance({
     draft: opts?.draft ?? null,
     intakeText: intakeRaw,
@@ -58,7 +61,10 @@ export function applyPaidProNoticeContactAuthority(
       signerTitle: (record.signerTitle?.trim() || "").trim(),
       partyAddress: (record.partyAddress?.trim() || "").trim(),
     }));
-    parties = mergeLabeledPartyAuthorityIntoParties(fromManifest, intakeRaw);
+    parties = mergeDraftSignerContactFieldsOntoParties(
+      mergeLabeledPartyAuthorityIntoParties(fromManifest, intakeRaw),
+      opts?.draft,
+    );
   }
   const repairs: string[] = [];
   let out = (raw || "").replace(/\r\n/g, "\n");

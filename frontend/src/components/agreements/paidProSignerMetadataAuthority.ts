@@ -7,6 +7,7 @@ import {
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
 import type { CanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   isIndividualPartyName,
   type CanonicalPartyIdentity,
@@ -89,6 +90,42 @@ export function preserveSlotIndexedSignerMetadataParties(
     });
   }
   return out;
+}
+
+/** Hydrate signer contact fields from structured draft party rows when authority slots are still blank. */
+export function mergeDraftSignerContactFieldsOntoParties(
+  parties: readonly PaidProSignerMetadataParty[],
+  draft?: ParsedDraftShape | null,
+): PaidProSignerMetadataParty[] {
+  const draftParties = draft?.parties ?? [];
+  if (!draftParties.length) return [...parties];
+  return parties.map((party) => {
+    const byIndex = draftParties[party.partyIndex] as {
+      name?: string;
+      signerEmail?: string;
+      partyAddress?: string;
+      signerName?: string;
+      signerTitle?: string;
+    } | undefined;
+    const byName = draftParties.find(
+      (p: { name?: string }) =>
+        String(p.name ?? "").trim().toLowerCase() ===
+        party.partyLegalName.trim().toLowerCase(),
+    ) as typeof byIndex;
+    const draftParty = byIndex?.name?.trim() ? byIndex : byName;
+    if (!draftParty) return party;
+    const email = String(draftParty.signerEmail ?? "").trim();
+    const address = String(draftParty.partyAddress ?? "").trim();
+    const signerName = String(draftParty.signerName ?? "").trim();
+    const signerTitle = String(draftParty.signerTitle ?? "").trim();
+    return {
+      ...party,
+      signerEmail: party.signerEmail.trim() || email,
+      partyAddress: party.partyAddress.trim() || address,
+      signerName: party.signerName.trim() || signerName,
+      signerTitle: party.signerTitle.trim() || signerTitle,
+    };
+  });
 }
 
 /** Intake / draft canonical names when slot parties lack authoritative legal entities. */

@@ -668,6 +668,10 @@ function buildIfToNoticeStanza(
   return lines.join("\n");
 }
 
+function noticeStanzaUsesGenericPrimaryContactFallback(stanza: string): boolean {
+  return /primary business address and email on file/i.test(stanza);
+}
+
 function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty): boolean {
   const trimmed = stanza.trim();
   if (!trimmed) return false;
@@ -712,6 +716,41 @@ function inferNoticesSectionNumber(beforeRegion: string): number {
   return sectionNum;
 }
 
+/** Remove a standalone `N. NOTICES` line when the same section already has a composite heading including Notices. */
+export function removeRedundantNoticesSubheading(text: string): { text: string; repairs: string[] } {
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+  const lines = head.split("\n");
+  const compositeSectionNums = new Set<string>();
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const composite = trimmed.match(/^(\d+)\.\s+.*\bNotices\b/i);
+    if (composite?.[1] && /\band\b/i.test(trimmed)) {
+      compositeSectionNums.add(composite[1]);
+    }
+  }
+
+  if (compositeSectionNums.size === 0) return { text, repairs: [] };
+
+  const repairs: string[] = [];
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const standalone = trimmed.match(/^(\d+)\.\s+NOTICES\s*$/i);
+    if (standalone?.[1] && compositeSectionNums.has(standalone[1])) {
+      repairs.push("notice:remove_redundant_notices_subheading");
+      continue;
+    }
+    out.push(line);
+  }
+
+  if (!repairs.length) return { text, repairs: [] };
+  const newHead = out.join("\n").replace(/\n{3,}/g, "\n\n");
+  return { text: `${newHead}${tail}`, repairs };
+}
+
 /**
  * Insert or normalize a canonical `N. NOTICES` heading before operative If-to stanzas.
  * Pre-freeze only — repairs missing or notice-equivalent headings instead of rejecting.
@@ -723,10 +762,19 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
   const repairs: string[] = [];
   let text = (corpus || "").replace(/\r\n/g, "\n");
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
-  const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
-  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+  let head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
+  let tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
   const stanzaCount = (head.match(/^If to\s+/gim) || []).length;
   if (stanzaCount < 1) return { text: corpus, repairs: [] };
+
+  const redundantNotices = removeRedundantNoticesSubheading(text);
+  if (redundantNotices.repairs.length > 0) {
+    text = redundantNotices.text;
+    repairs.push(...redundantNotices.repairs);
+    const witnessIdxAfter = resolveAuthoritativeWitnessIndex(text);
+    head = witnessIdxAfter >= 0 ? text.slice(0, witnessIdxAfter) : text;
+    tail = witnessIdxAfter >= 0 ? text.slice(witnessIdxAfter) : "";
+  }
 
   if (corpusHasCanonicalNoticesHeading(head)) {
     const eq = head.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
@@ -961,7 +1009,14 @@ export function repairIncompleteIfToNoticeStanzas(
     const stanzaHasAuthorityEmail =
       !requiredEmail ||
       new RegExp(`Email:\\s*${escapeRegExp(requiredEmail)}`, "i").test(existing);
-    if (noticeStanzaComplete(existing, party) && stanzaHasAuthorityEmail) {
+    const authorityHasContact = party.signerEmail.trim() || party.partyAddress.trim();
+    const shouldRebuildForAuthority =
+      authorityHasContact && noticeStanzaUsesGenericPrimaryContactFallback(existing);
+    if (
+      noticeStanzaComplete(existing, party) &&
+      stanzaHasAuthorityEmail &&
+      !shouldRebuildForAuthority
+    ) {
       rebuiltStanzas.push(stripInvalidNoticeStanzaLines(existing, canonicalNames));
       stanzaCount += 1;
       continue;

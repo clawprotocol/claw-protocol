@@ -53,6 +53,7 @@ import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicati
 import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNormalize";
 import { insertBeforeExecutionTail } from "./paidProMutualConsultingQualityFloorInsert";
 import { gateOperativeClauseFamilyAppend } from "./documentCompositionAuthority";
+import { applyPaidProExecutiveDraftPolish } from "./paidProExecutiveDraftPolish";
 
 function intakeJurisdictionFromSources(
   intakeText: string,
@@ -553,6 +554,12 @@ function preparePaidProServerDocumentForAcceptanceCore(
   if (governingLaw.text !== out) {
     out = governingLaw.text;
     repairs.push(...governingLaw.repairs);
+  }
+
+  const executivePolish = applyPaidProExecutiveDraftPolish(out, intakeText, draft);
+  if (executivePolish.text !== out) {
+    out = executivePolish.text;
+    repairs.push(...executivePolish.repairs);
   }
 
   const preservedLegal = preserveFullLegalPartyNamesInOpeningAndSignatures(

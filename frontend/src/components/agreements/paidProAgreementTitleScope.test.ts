@@ -52,6 +52,18 @@ describe("paidProAgreementTitleScope", () => {
     expect(title.titleUpper).toMatch(/IMPLEMENTATION/i);
   });
 
+  it("brand licensing distribution intake uses manufacturing licensing marketing title", () => {
+    const intake = [
+      "Create a four-party brand licensing and distribution agreement.",
+      "Manufacturer produces licensed goods. Distributor handles wholesale distribution.",
+      "Marketing and e-commerce management. Oklahoma law governs.",
+    ].join(" ");
+    const title = resolveAgreementTitleFromIntakeScope(intake);
+    expect(title.titleUpper).toBe(
+      "MANUFACTURING, DISTRIBUTION, LICENSING AND MARKETING SERVICES AGREEMENT",
+    );
+  });
+
   it("explicit software prompt may include Software", () => {
     const title = resolveAgreementTitleFromIntakeScope(SOFTWARE_INTAKE);
     expect(title.titleUpper).toMatch(/SOFTWARE/i);

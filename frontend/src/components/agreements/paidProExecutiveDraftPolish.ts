@@ -1,0 +1,208 @@
+/**
+ * Pre-freeze executive-grade drafting polish — governing law, notice headings, transaction titles.
+ * Does not mutate frozen SoT after acceptance; runs only during acceptance prep / pre-freeze normalization.
+ */
+
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { resolveAgreementTitleFromIntakeScope } from "./paidProAgreementTitleScope";
+import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
+import { removeRedundantNoticesSubheading } from "./paidProPartyNoticeDetails";
+import {
+  PREMIUM_JURISDICTION_PLACEHOLDER,
+  resolveFinalGoverningLaw,
+} from "./premiumDraftTransform";
+
+const WEAK_GOVERNING_LAW_PRIMARY_RE =
+  /This Agreement shall be governed by the laws of the jurisdiction mutually agreed by the parties in writing/i;
+
+const WEAK_VENUE_RE =
+  /shall be brought exclusively in a court of competent jurisdiction mutually agreed by the parties in writing or, if not agreed, in a court of competent jurisdiction where the defendant party is located/i;
+
+const PAID_PRO_STANDALONE_TITLE_LINE_RE =
+  /^(?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,120}AGREEMENT\s*$/i;
+
+const GENERIC_DOCUMENT_TITLES = new Set(["SERVICES AGREEMENT", "MUTUAL SERVICES AGREEMENT"]);
+
+function formatGoverningLawClause(jurisdiction: string): string {
+  const j = jurisdiction.trim();
+  if (/^state of\s+/i.test(j)) {
+    const state = j.replace(/^state of\s+/i, "").trim();
+    return `This Agreement shall be governed by the laws of the State of ${state}, without regard to conflict-of-law principles.`;
+  }
+  return `This Agreement shall be governed by the laws of ${j}, without regard to conflict-of-law principles.`;
+}
+
+function formatVenueClause(jurisdiction: string, roleFallback = "Brand Owner"): string {
+  const loc = jurisdiction.replace(/^state of\s+/i, "").trim();
+  return `Any legal action or proceeding arising out of or relating to this Agreement shall be brought exclusively in a court of competent jurisdiction located in ${loc} (or the principal place of business of ${roleFallback} if no exclusive forum is designated in the operative notice addresses).`;
+}
+
+function resolveBrandOwnerRoleLabel(
+  intakeText: string,
+  draft?: ParsedDraftShape | null,
+): string {
+  const fromDraft = (draft?.parties ?? []).find((p) =>
+    /\bbrand\s+owner\b/i.test(String(p?.role ?? "")),
+  );
+  if (fromDraft?.role?.trim()) return fromDraft.role.trim();
+  if (/\bbrand\s+owner\b/i.test(intakeText)) return "Brand Owner";
+  return "Brand Owner";
+}
+
+function extractCanonicalTitleUpper(opening: string): string | null {
+  const match = opening.match(
+    /\b((?:MUTUAL\s+)?(?:MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING\s+AND\s+MARKETING\s+SERVICES|CONSULTING\s+(?:AND\s+IMPLEMENTATION\s+|SERVICES\s+)?|SERVICES\s+)?(?:CONSULTING\s+AND\s+IMPLEMENTATION\s+|CONSULTING\s+SERVICES\s+|BUSINESS\s+CONSULTING\s+|SOFTWARE\s+DEVELOPMENT\s+SERVICES\s+)?AGREEMENT)\b/i,
+  );
+  return match?.[1]?.replace(/\s+/g, " ").trim().toUpperCase() ?? null;
+}
+
+/** Replace open-ended "mutually agreed later" governing law and venue when intake supplies jurisdiction. */
+export function repairWeakGoverningLawAndVenueClauses(
+  text: string,
+  intakeText: string,
+  draft?: ParsedDraftShape | null,
+): { text: string; repairs: string[] } {
+  const body = (text || "").replace(/\r\n/g, "\n");
+  if (!WEAK_GOVERNING_LAW_PRIMARY_RE.test(body) && !WEAK_VENUE_RE.test(body)) {
+    return { text: body, repairs: [] };
+  }
+
+  const jurisdiction = resolveFinalGoverningLaw(
+    intakeText,
+    draft ?? {
+      title: "",
+      jurisdiction: "",
+      purpose: "",
+      payment_terms: "",
+      parties: [],
+      duration: "",
+      due_date: null,
+      effective_date: null,
+      payment: { amount: 0, cadence: "", valid: false },
+    },
+    "",
+  );
+  if (!jurisdiction || jurisdiction === PREMIUM_JURISDICTION_PLACEHOLDER) {
+    return { text: body, repairs: [] };
+  }
+
+  const repairs: string[] = [];
+  let out = body;
+  const govClause = formatGoverningLawClause(jurisdiction);
+  const venueClause = formatVenueClause(jurisdiction, resolveBrandOwnerRoleLabel(intakeText, draft));
+
+  const weakGovBlockRe =
+    /This Agreement shall be governed by the laws of the jurisdiction mutually agreed by the parties in writing\.?\s*(?:If the parties do not separately agree[^.\n]*\.)?/gi;
+  if (weakGovBlockRe.test(out)) {
+    out = out.replace(weakGovBlockRe, govClause);
+    repairs.push("governing_law:repair_weak_mutual_agreement_primary");
+  }
+
+  out = out.replace(
+    /(^\s*\d+\.\d+\s+Governing Law[^\n]*\n+)([\s\S]*?)(?=^\s*\d+\.\d+\s+|\nIN WITNESS)/im,
+    (match, heading, bodyPart) => {
+      if (!WEAK_GOVERNING_LAW_PRIMARY_RE.test(bodyPart)) return match;
+      repairs.push("governing_law:repair_weak_subsection");
+      return `${heading}${govClause}\n`;
+    },
+  );
+
+  if (WEAK_VENUE_RE.test(out)) {
+    out = out.replace(WEAK_VENUE_RE, venueClause);
+    repairs.push("venue:repair_weak_mutual_agreement");
+  }
+
+  return { text: out, repairs: [...new Set(repairs)] };
+}
+
+/** Replace generic SERVICES AGREEMENT title when intake scope is transaction-specific. */
+export function reconcilePaidProDocumentTitleWithIntakeScope(
+  text: string,
+  intakeText: string,
+): { text: string; repairs: string[] } {
+  const scoped = resolveAgreementTitleFromIntakeScope(intakeText);
+  if (scoped.source === "generic-services") return { text, repairs: [] };
+
+  const body = (text || "").replace(/\r\n/g, "\n");
+  const witnessIdx = resolveAuthoritativeWitnessIndex(body);
+  const opening = witnessIdx >= 0 ? body.slice(0, witnessIdx) : body;
+  const tail = witnessIdx >= 0 ? body.slice(witnessIdx) : "";
+  const sec1Idx = opening.search(/^\s*1\.\s+(?!\d)/m);
+  const head = sec1Idx >= 0 ? opening.slice(0, sec1Idx) : opening.slice(0, 2_500);
+  const remainder = sec1Idx >= 0 ? opening.slice(sec1Idx) : "";
+
+  const currentTitle = extractCanonicalTitleUpper(head) ?? "";
+  if (currentTitle === scoped.titleUpper) return { text, repairs: [] };
+  const replaceableWeakTitle =
+    GENERIC_DOCUMENT_TITLES.has(currentTitle) ||
+    currentTitle === "DISTRIBUTION AGREEMENT" ||
+    currentTitle === "LICENSE AGREEMENT";
+  if (currentTitle && !replaceableWeakTitle) return { text, repairs: [] };
+
+  const targetTitle = scoped.titleUpper;
+  const recitalPhrase = scoped.recitalPhrase;
+  const lines = head.split("\n");
+  let titleLineIdx = lines.findIndex((l) => PAID_PRO_STANDALONE_TITLE_LINE_RE.test(l.trim()));
+
+  if (titleLineIdx < 0) {
+    const glued = head.match(/^(SERVICES AGREEMENT|MUTUAL SERVICES AGREEMENT)\s+(This\b)/i);
+    if (!glued) return { text, repairs: [] };
+    const newHead = head.replace(
+      /^(?:MUTUAL\s+)?SERVICES\s+AGREEMENT/i,
+      targetTitle,
+    );
+    const rebuilt = `${newHead.trimEnd()}\n\n${remainder.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+    return {
+      text: `${rebuilt}${tail ? `\n\n${tail.trimStart()}` : ""}`.replace(/\n{3,}/g, "\n\n").trimEnd(),
+      repairs: ["title:reconcile_intake_scope"],
+    };
+  }
+
+  lines[titleLineIdx] = targetTitle;
+  for (let i = titleLineIdx + 1; i < lines.length; i += 1) {
+    const trimmed = lines[i]?.trim() ?? "";
+    if (/^This\s+/i.test(trimmed)) {
+      lines[i] = trimmed.replace(
+        /This\s+(?:Mutual\s+)?[A-Za-z][\s\S]{0,220}?Agreement/i,
+        `This ${recitalPhrase}`,
+      );
+      break;
+    }
+  }
+
+  const newHead = lines.join("\n");
+  const rebuilt = `${newHead.trimEnd()}\n\n${remainder.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return {
+    text: `${rebuilt}${tail ? `\n\n${tail.trimStart()}` : ""}`.replace(/\n{3,}/g, "\n\n").trimEnd(),
+    repairs: ["title:reconcile_intake_scope"],
+  };
+}
+
+export function applyPaidProExecutiveDraftPolish(
+  text: string,
+  intakeText: string,
+  draft?: ParsedDraftShape | null,
+): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = (text || "").replace(/\r\n/g, "\n");
+
+  const titleRepair = reconcilePaidProDocumentTitleWithIntakeScope(out, intakeText);
+  if (titleRepair.repairs.length > 0) {
+    out = titleRepair.text;
+    repairs.push(...titleRepair.repairs);
+  }
+
+  const noticesHeading = removeRedundantNoticesSubheading(out);
+  if (noticesHeading.repairs.length > 0) {
+    out = noticesHeading.text;
+    repairs.push(...noticesHeading.repairs);
+  }
+
+  const governingLaw = repairWeakGoverningLawAndVenueClauses(out, intakeText, draft);
+  if (governingLaw.repairs.length > 0) {
+    out = governingLaw.text;
+    repairs.push(...governingLaw.repairs);
+  }
+
+  return { text: out.trimEnd(), repairs: [...new Set(repairs)] };
+}
