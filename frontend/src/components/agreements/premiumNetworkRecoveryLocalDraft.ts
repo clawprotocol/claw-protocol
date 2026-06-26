@@ -14,9 +14,11 @@ import {
 import { assessPaidProMutualConsultingProfessionalStructure } from "./paidProMutualConsultingQualityFloor";
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
 import {
-  buildDeterministicQuadPartyMutualServicesProFallback,
+  buildDeterministicQuadPartyProFallback,
   resolveDeterministicQuadPartyNames,
 } from "./deterministicQuadPartyProFallback";
+import { applyPaidProExecutiveDraftPolish } from "./paidProExecutiveDraftPolish";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 
 export const PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE = "premium_network_local_recovery" as const;
 export const PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE =
@@ -59,7 +61,7 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
 
   let body = "";
   if (quadPartyNames.length >= 4) {
-    const quad = buildDeterministicQuadPartyMutualServicesProFallback({
+    const quad = buildDeterministicQuadPartyProFallback({
       draft: draftForRecovery,
       rawIntake,
       partyNames: quadPartyNames,
@@ -74,13 +76,18 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
     body = buildPremiumPostCheckoutStitchedBody(draftForRecovery, rawIntake);
   }
 
-  if (quadPartyNames.length >= 4) {
-    // Quad deterministic fallback already ran placeholder + acceptance prep.
+  if (quadPartyNames.length >= 4 && intakeDescribesBrandLicensingDistributionManufacturingStack(rawIntake)) {
+    const executivePolish = applyPaidProExecutiveDraftPolish(body, rawIntake, draftForRecovery);
+    body = executivePolish.text;
+    const prepared = preparePaidProServerDocumentForAcceptance(body, draftForRecovery, rawIntake, {
+      surface: args.recoverySurface,
+    });
+    body = prepared.text;
   } else if (labeledBlocks.length >= 3) {
     if (/\[(?:Not yet specified|YOUR COMPANY|SERVICE PROVIDER NAME)\]/i.test(body)) {
       return { ok: false, body: "", reasons: ["placeholder_blocked"] };
     }
-  } else {
+  } else if (quadPartyNames.length < 4) {
     const ph = finalizeUserVisibleAgreementPlainText(body, {
       intakeRaw: rawIntake,
       partyNames,

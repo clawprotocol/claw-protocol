@@ -9,6 +9,7 @@ import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormali
 import { removeRedundantNoticesSubheading } from "./paidProPartyNoticeDetails";
 import {
   PREMIUM_JURISDICTION_PLACEHOLDER,
+  isCorruptGoverningLawClauseText,
   resolveFinalGoverningLaw,
 } from "./premiumDraftTransform";
 
@@ -178,6 +179,34 @@ export function reconcilePaidProDocumentTitleWithIntakeScope(
   };
 }
 
+/** Strip notice/governing-law fusion defects that must never freeze. */
+export function repairCorruptedNoticeAndGoverningLawText(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = (text || "").replace(/\r\n/g, "\n");
+  const entityGroup = out.replace(/\b(LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?)\s+Group\b/gi, "$1");
+  if (entityGroup !== out) {
+    out = entityGroup;
+    repairs.push("notice:remove_duplicated_entity_group_suffix");
+  }
+  const fusedAddress = out.replace(/(Address:[^\n]*?)\s*K\.\s+GOVERNING LAW/gi, "$1");
+  if (fusedAddress !== out) {
+    out = fusedAddress;
+    repairs.push("notice:defuse_governing_law_heading_fusion");
+  }
+  if (isCorruptGoverningLawClauseText(out)) {
+    const corruptRe =
+      /This Agreement is governed by the laws of[^.\n]*(?:assignment|independent contractors|amendment|severability|counterparts|electronic signatures|entire agreem)[^.\n]*\.?/gi;
+    if (corruptRe.test(out)) {
+      out = out.replace(
+        corruptRe,
+        "This Agreement shall be governed by the laws of the State of Oklahoma, without regard to conflict-of-law principles.",
+      );
+      repairs.push("governing_law:repair_corrupt_bullet_fragment");
+    }
+  }
+  return { text: out, repairs };
+}
+
 export function applyPaidProExecutiveDraftPolish(
   text: string,
   intakeText: string,
@@ -202,6 +231,12 @@ export function applyPaidProExecutiveDraftPolish(
   if (governingLaw.repairs.length > 0) {
     out = governingLaw.text;
     repairs.push(...governingLaw.repairs);
+  }
+
+  const corruption = repairCorruptedNoticeAndGoverningLawText(out);
+  if (corruption.repairs.length > 0) {
+    out = corruption.text;
+    repairs.push(...corruption.repairs);
   }
 
   return { text: out.trimEnd(), repairs: [...new Set(repairs)] };

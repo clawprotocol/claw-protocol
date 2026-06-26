@@ -14,6 +14,7 @@ import {
 import { PAID_PRO_RECOVERY_MIN_DISPLAY_LEN } from "./paidProPostCheckoutRenderGate";
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
+import { resolveAgreementTitleFromIntakeScope } from "./paidProAgreementTitleScope";
 
 export function resolvePaidProRecoveryPartyNames(
   intakeText: string,
@@ -88,7 +89,7 @@ export function buildPaidProStructuralRecoveryBody(args: {
     parties: partyNames.slice(0, partyCount),
     intakeText: intake,
     draft,
-    title: draft.title,
+    title: resolveAgreementTitleFromIntakeScope(intake).titleUpper,
     minLen,
   });
 

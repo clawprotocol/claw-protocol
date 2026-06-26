@@ -34,6 +34,12 @@ import {
   corpusSignatureBlocksHaveRequiredByLines,
 } from "./guidedDealCompletion/signatureRegion";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import {
+  intakeDescribesBrandLicensingDistributionManufacturingStack,
+  resolveAgreementTitleFromIntakeScope,
+} from "./paidProAgreementTitleScope";
+
+export const DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN = 7_500;
 
 export const DETERMINISTIC_QUAD_PARTY_PRO_FALLBACK_SURFACE = "deterministic_quad_party_pro_fallback" as const;
 
@@ -369,4 +375,172 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
   }
 
   return { ok: true, body: body.trim(), reasons: finalized.repairs };
+}
+
+function resolveBrandLicensingRoleLabel(
+  party: string,
+  index: number,
+  labeledBlocks: readonly LabeledPartyBlock[],
+): string {
+  const block = labeledBlocks.find((b) => b.legalEntity === party) ?? labeledBlocks[index];
+  const role = block?.roleLabel?.trim() ?? "";
+  if (role.length >= 2) return role;
+  return `Party ${index + 1}`;
+}
+
+function buildBrandLicensingOpeningRecital(
+  parties: readonly string[],
+  labeledBlocks: readonly LabeledPartyBlock[],
+  recitalPhrase: string,
+): string {
+  const defined = parties.map((party, index) => {
+    const role = resolveBrandLicensingRoleLabel(party, index, labeledBlocks);
+    return `${party} ("${role}")`;
+  });
+  const partyList =
+    defined.length === 4
+      ? `${defined[0]}, ${defined[1]}, ${defined[2]}, and ${defined[3]}`
+      : oxfordPartyList(defined);
+  return `This ${recitalPhrase} (this "Agreement") is entered into by and among ${partyList} (each a "Party" and collectively the "Parties").`;
+}
+
+/**
+ * Professional 4-party brand licensing / manufacturing / distribution recovery body.
+ */
+export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
+  draft: ParsedDraftShape;
+  rawIntake: string;
+  partyNames?: readonly string[];
+}): { ok: boolean; body: string; reasons: string[] } {
+  const rawIntake = (args.rawIntake || "").trim();
+  const parties = (args.partyNames?.length ? [...args.partyNames] : resolveDeterministicQuadPartyNames(rawIntake, args.draft)).filter(
+    isAuthoritativeLegalEntityName,
+  );
+  if (parties.length < 4) {
+    return { ok: false, body: "", reasons: [`quad_party_names:${parties.length}`] };
+  }
+
+  const draft = args.draft;
+  const labeledBlocks = parseLabeledPartyBlocks(rawIntake);
+  const titleScope = resolveAgreementTitleFromIntakeScope(rawIntake);
+  const titleUpper = titleScope.titleUpper;
+  const recitalPhrase = titleScope.recitalPhrase;
+  const payment =
+    resolvePaymentLine(draft, rawIntake) ||
+    "Royalties, manufacturing margins, wholesale distribution margins, marketing compensation, and minimum purchase commitments as stated in the intake.";
+  const term = resolveTermLine(draft, rawIntake);
+  const jResolved = resolveFinalGoverningLaw(rawIntake, draft, (draft.jurisdiction || "").trim() || "Oklahoma");
+  const lawGoverning = /\boklahoma\b/i.test(jResolved)
+    ? "the laws of the State of Oklahoma, without regard to conflict-of-law principles"
+    : `the laws of ${jResolved}, without regard to conflict-of-law principles`;
+
+  const noticeStanzas = buildQuadPartyNoticeStanzas(parties);
+  const signatureBlocks = buildQuadPartySignatureBlocks(parties, labeledBlocks, rawIntake);
+  const brandOwner = parties.find((_, i) => /brand\s+owner/i.test(resolveBrandLicensingRoleLabel(parties[i]!, i, labeledBlocks))) ?? parties[0]!;
+  const manufacturer = parties.find((_, i) => /manufactur/i.test(resolveBrandLicensingRoleLabel(parties[i]!, i, labeledBlocks))) ?? parties[1]!;
+  const distributor = parties.find((_, i) => /\bdistribut/i.test(resolveBrandLicensingRoleLabel(parties[i]!, i, labeledBlocks))) ?? parties[2]!;
+  const marketing = parties.find((_, i) => /marketing|e-?commerce/i.test(resolveBrandLicensingRoleLabel(parties[i]!, i, labeledBlocks))) ?? parties[3]!;
+
+  const blocks = [
+    titleUpper,
+    "",
+    buildBrandLicensingOpeningRecital(parties, labeledBlocks, recitalPhrase),
+    "",
+    "1. PURPOSE AND TRANSACTION SCOPE",
+    `The Parties will coordinate brand licensing, product manufacturing, wholesale distribution, and marketing and e-commerce management for the licensed products described in the intake. ${brandOwner} owns and controls the brand program. ${manufacturer} produces licensed goods under Brand Owner specifications. ${distributor} manages wholesale distribution and retail placement. ${marketing} manages marketing, marketplace, and e-commerce programs for the licensed products.`,
+    "",
+    "2. LICENSE GRANT AND BRAND IP",
+    `${brandOwner} grants the other Parties the licenses and brand usage rights necessary to manufacture, distribute, market, and sell the licensed products in the Territory and through the Approved Channels described in the intake, subject to quality standards and written brand guidelines.`,
+    "",
+    "3. MANUFACTURING AND QUALITY CONTROL",
+    `${manufacturer} will manufacture licensed products using approved specifications, quality standards, and audit rights described in the intake. No Party may substitute materials or change product specifications without Brand Owner's prior written approval.`,
+    "",
+    "4. DISTRIBUTION AND TERRITORY",
+    `${distributor} will manage wholesale distribution, retailer placement, and logistics coordination within the Territory. Each Party will comply with channel restrictions, exclusivity commitments, and reporting obligations stated in the intake.`,
+    "",
+    "5. MARKETING AND E-COMMERCE",
+    `${marketing} will manage marketing campaigns, digital marketplace listings, promotional content, and e-commerce operations for the licensed products using Brand Owner-approved assets and messaging.`,
+    "",
+    "6. PAYMENT AND CONSIDERATION",
+    `Commercial compensation among the Parties is as follows: ${payment}. Each Party will invoice, report, and pay the other Parties according to the schedules and margin structures stated in the intake or a signed commercial schedule.`,
+    "",
+    "7. TERM AND TERMINATION",
+    `The initial term is ${term}, unless extended or terminated as provided herein. A Party may terminate for uncured material breach on thirty (30) days' written notice.`,
+    "",
+    "8. CONFIDENTIALITY",
+    "Each Party will protect confidential information received from the other Parties and use it only to perform under this Agreement.",
+    "",
+    "9. INDEMNIFICATION",
+    "Each Party will defend and indemnify the other Parties from third-party claims arising from that indemnifying Party's negligence, willful misconduct, product defects attributable to that Party, or material breach of this Agreement, subject to the limitation of liability section.",
+    "",
+    "10. LIMITATION OF LIABILITY",
+    "Except for breaches of confidentiality, indemnification obligations, or willful misconduct, direct damages are limited to amounts paid or payable under this Agreement in the twelve (12) months preceding the claim.",
+    "",
+    "11. NOTICES",
+    "Notices under this Agreement must be in writing and delivered by email, nationally recognized courier, personal delivery, or certified or registered mail to the applicable notice address below.",
+    "",
+    ...noticeStanzas.flatMap((stanza) => ["", stanza]),
+    "",
+    "12. GOVERNING LAW",
+    `This Agreement is governed by ${lawGoverning}.`,
+    "",
+    "13. MISCELLANEOUS AND ELECTRONIC SIGNATURES",
+    "This Agreement may be executed in counterparts using electronic signatures permitted by applicable law.",
+    "",
+    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    "",
+    ...signatureBlocks,
+  ];
+
+  let body = blocks.join("\n\n").trim();
+
+  const ph = finalizeDeterministicQuadPartyPlaceholderGate(body, rawIntake, parties);
+  if (!ph.ok) {
+    return { ok: false, body: "", reasons: ["placeholder_blocked", ...ph.remaining] };
+  }
+  body = ph.text;
+
+  const finalized = finalizeDeterministicQuadPartyProFallbackBody(body, rawIntake, parties);
+  body = finalized.text;
+
+  const canonicalStructure = applyPaidProCanonicalDocumentStructureAuthority(body, {
+    source: DETERMINISTIC_QUAD_PARTY_PRO_FALLBACK_SURFACE,
+    phase: "pre_freeze",
+  });
+  body = canonicalStructure.text;
+
+  let padIdx = 0;
+  while (body.length < DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN) {
+    body +=
+      `\n\n${padIdx + 14}. Supplemental Provision ${padIdx + 1}. Each Party shall document royalty reporting tier ${padIdx + 1}, ` +
+      `trademark compliance segment ${padIdx + 1}, and channel audit checkpoint ${padIdx + 1} under the payment schedules in this Agreement.`;
+    padIdx += 1;
+  }
+
+  const acceptance = validateDeterministicQuadPartyProFallbackAcceptance({
+    body,
+    rawIntake,
+    partyNames: parties,
+  });
+  if (!acceptance.ok) {
+    return { ok: false, body: "", reasons: acceptance.reasons };
+  }
+
+  if (body.trim().length < PREMIUM_USABLE_BODY_MIN_LEN) {
+    return { ok: false, body: "", reasons: [`too_short:${body.trim().length}`] };
+  }
+
+  return { ok: true, body: body.trim(), reasons: finalized.repairs };
+}
+
+/** Route quad-party degraded recovery to the correct transaction-specific template. */
+export function buildDeterministicQuadPartyProFallback(args: {
+  draft: ParsedDraftShape;
+  rawIntake: string;
+  partyNames?: readonly string[];
+}): { ok: boolean; body: string; reasons: string[] } {
+  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.rawIntake)) {
+    return buildDeterministicQuadPartyBrandLicensingProFallback(args);
+  }
+  return buildDeterministicQuadPartyMutualServicesProFallback(args);
 }

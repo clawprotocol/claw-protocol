@@ -5,6 +5,9 @@
  * not app/product workflow vocabulary unless the intake requests it.
  */
 
+import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+
 const LOG_PREFIX = "[paid-pro-domain-scope-guard]";
 
 export type DomainScopeCategory =
@@ -285,6 +288,17 @@ function neutralizeRecitalAndInlinePhrases(text: string, intake: string): { text
   return { text: out, repairs };
 }
 
+function intakeHasMultiPartySpecializedCommercialRoles(intake: string): boolean {
+  const blocks = parseLabeledPartyBlocks(intake);
+  if (blocks.length < 4) return false;
+  const generic = new Set(["client", "service provider", "party 1", "party 2", "party 3", "party 4"]);
+  const specialized = blocks.filter((block) => {
+    const role = block.roleLabel.trim().toLowerCase();
+    return role.length >= 3 && !generic.has(role);
+  });
+  return specialized.length >= 3;
+}
+
 export function sanitizePaidProDomainScopeContamination(
   corpus: string,
   intake: string | null | undefined,
@@ -293,6 +307,13 @@ export function sanitizePaidProDomainScopeContamination(
   const intakeText = (intake || "").trim();
   let text = (corpus || "").replace(/\r\n/g, "\n").trim();
   if (!text) return { text, repairs: [] };
+
+  if (
+    intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText) ||
+    intakeHasMultiPartySpecializedCommercialRoles(intakeText)
+  ) {
+    return { text, repairs: [] };
+  }
 
   if (intakeExplicitlyRequestsDomainScope(intakeText)) {
     return { text, repairs: [] };

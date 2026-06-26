@@ -108,6 +108,25 @@ export function isLikelyCategoryOrTradeLabel(s: string): boolean {
   return false;
 }
 
+/** Bullet-list fragments and prompt checklists must never become governing-law jurisdiction text. */
+export function isCorruptGoverningLawClauseText(s: string): boolean {
+  const t = (s || "").trim();
+  if (!t) return true;
+  if (/\*/.test(t)) return true;
+  if (/^\s*[A-K]\.\s+/m.test(t)) return true;
+  const markers = [
+    "assignment",
+    "independent contractor",
+    "amendment",
+    "severability",
+    "counterparts",
+    "electronic signature",
+    "entire agreem",
+  ];
+  const hits = markers.filter((m) => new RegExp(`\\b${m.replace(/\s+/g, "\\s+")}`, "i").test(t)).length;
+  return hits >= 3;
+}
+
 function stripInstructionNoise(line: string): string {
   return line
     .replace(/^\s*(?:please|i\s+need|we\s+need|create|draft|help\s+me)\b[^.!?]*[.!?]?\s*/i, "")
@@ -258,9 +277,11 @@ export function resolveFinalGoverningLaw(
   const r = resolvePremiumJurisdiction(parsed, rawIntake);
   if (r !== PREMIUM_JURISDICTION_PLACEHOLDER) return r;
   const pj = nz(parsed.jurisdiction);
-  if (pj && !/^tbd$/i.test(pj) && !isLikelyCategoryOrTradeLabel(pj)) return pj.slice(0, 160);
+  if (pj && !/^tbd$/i.test(pj) && !isLikelyCategoryOrTradeLabel(pj) && !isCorruptGoverningLawClauseText(pj)) {
+    return pj.slice(0, 160);
+  }
   const fd = nz(fallbackDefault);
-  if (fd && !isLikelyCategoryOrTradeLabel(fd)) return fd.slice(0, 160);
+  if (fd && !isLikelyCategoryOrTradeLabel(fd) && !isCorruptGoverningLawClauseText(fd)) return fd.slice(0, 160);
   return PREMIUM_JURISDICTION_PLACEHOLDER;
 }
 
@@ -276,12 +297,18 @@ export function resolvePremiumJurisdiction(parsed: ParsedDraftShape, rawIntake: 
 
   const structured = parseIntakeToStructuredAgreement(rawIntake.trim());
   const fromStructured = structured.governing_law.trim();
-  if (fromStructured && !isLikelyCategoryOrTradeLabel(fromStructured)) {
+  if (
+    fromStructured &&
+    !isLikelyCategoryOrTradeLabel(fromStructured) &&
+    !isCorruptGoverningLawClauseText(fromStructured)
+  ) {
     return fromStructured.slice(0, 160);
   }
 
   const cur = nz(parsed.jurisdiction);
-  if (!cur || /^tbd$/i.test(cur) || isLikelyCategoryOrTradeLabel(cur)) return PREMIUM_JURISDICTION_PLACEHOLDER;
+  if (!cur || /^tbd$/i.test(cur) || isLikelyCategoryOrTradeLabel(cur) || isCorruptGoverningLawClauseText(cur)) {
+    return PREMIUM_JURISDICTION_PLACEHOLDER;
+  }
   if (jurisdictionAppearsInIntake(cur, rawLower)) return cur;
 
   return PREMIUM_JURISDICTION_PLACEHOLDER;

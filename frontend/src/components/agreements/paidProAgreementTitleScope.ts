@@ -60,7 +60,7 @@ function intakeScopeBlob(intake: string): string {
   return intake;
 }
 
-function intakeDescribesBrandLicensingDistributionManufacturingStack(intake: string): boolean {
+export function intakeDescribesBrandLicensingDistributionManufacturingStack(intake: string): boolean {
   const scope = intakeScopeBlob(intake);
   const blob = `${scope} ${intake}`.toLowerCase();
   const licensing =
