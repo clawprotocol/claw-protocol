@@ -20,6 +20,8 @@ import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGu
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualConsultingQualityFloor";
 import { applyPaidProDomainScopeGuard } from "./paidProDomainScopeGuard";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import { PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE } from "./premiumNetworkRecoveryLocalDraft";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { stripMalformedProReviewDisplayArtifacts } from "./polishProAgreementDisplayLayer";
@@ -410,6 +412,14 @@ function preparePaidProServerDocumentForAcceptanceCore(
     return { text: (raw || "").replace(/\r\n?/g, "\n").trim(), repairs: [] };
   }
   const normalizedInput = (raw || "").replace(/\r\n?/g, "\n").trim();
+  if (
+    intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText) &&
+    (surface === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE ||
+      surface.includes("premium_degraded_server_local_recovery"))
+  ) {
+    const executivePolish = applyPaidProExecutiveDraftPolish(normalizedInput, intakeText, draft);
+    return { text: executivePolish.text.trim(), repairs: executivePolish.repairs };
+  }
   const inputPipelineHash = paidProPipelineAcceptedCorpusHash(normalizedInput);
   const pipelineAcceptedHash = readPaidProPipelineAcceptedCorpusHash();
   if (

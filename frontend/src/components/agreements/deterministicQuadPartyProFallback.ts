@@ -17,6 +17,7 @@ import {
   type LabeledPartyBlock,
 } from "./labeledPartyBlockParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
@@ -76,16 +77,19 @@ export function resolveDeterministicQuadPartyNames(
   draft?: ParsedDraftShape | null,
 ): string[] {
   const intake = String(rawIntake || "").trim();
+  const draftNames = (draft?.parties ?? [])
+    .map((p) => String(p.name || "").trim())
+    .filter(isAuthoritativeLegalEntityName);
+  if (draftNames.length >= 4) return draftNames.slice(0, 4);
+
+  const proseBrandOrder = resolveBrandLicensingPartyOrderFromProseIntake(intake);
+  if (proseBrandOrder.length >= 4) return proseBrandOrder.slice(0, 4);
+
   const labeled = labeledPartyLegalEntities(intake);
   if (labeled.length >= 4) return labeled.slice(0, 4);
 
   const fromGate = resolveStarterGatePartyLegalEntities(intake);
   if (fromGate.length >= 4) return fromGate.slice(0, 4);
-
-  const draftNames = (draft?.parties ?? [])
-    .map((p) => String(p.name || "").trim())
-    .filter(isAuthoritativeLegalEntityName);
-  if (draftNames.length >= 4) return draftNames.slice(0, 4);
 
   const entities = dedupeEntityCandidatesToLegalParties(
     extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
@@ -93,6 +97,22 @@ export function resolveDeterministicQuadPartyNames(
   if (entities.length >= 4) return entities.slice(0, 4);
 
   return [];
+}
+
+/** Prose intakes like "Evergreen Outdoor Brands LLC is the Brand Owner." */
+export function resolveBrandLicensingPartyOrderFromProseIntake(rawIntake: string): string[] {
+  const parties: string[] = [];
+  for (const line of String(rawIntake || "").split("\n")) {
+    const trimmed = line.trim();
+    const match = trimmed.match(
+      /^(.+?(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited))\s+is\s+the\s+/i,
+    );
+    if (!match?.[1]) continue;
+    const name = match[1].replace(/\s+/g, " ").trim();
+    if (!isAuthoritativeLegalEntityName(name)) continue;
+    if (!parties.some((p) => partyLegalNamesMatch(p, name))) parties.push(name);
+  }
+  return parties;
 }
 
 function intakeField(rawIntake: string, label: string): string {
@@ -130,7 +150,7 @@ function resolveTermLine(draft: ParsedDraftShape, rawIntake: string): string {
   );
 }
 
-function buildQuadPartyNoticeStanzas(parties: readonly string[]): string[] {
+export function buildQuadPartyNoticeStanzas(parties: readonly string[]): string[] {
   return parties.map((party) =>
     [
       `If to ${party}:`,
@@ -377,11 +397,37 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
   return { ok: true, body: body.trim(), reasons: finalized.repairs };
 }
 
+function resolveBrandLicensingRoleFromProse(rawIntake: string, party: string): string | null {
+  for (const line of String(rawIntake || "").split("\n")) {
+    const match = line.trim().match(
+      /^(.+?(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited))\s+is\s+the\s+([A-Za-z&][A-Za-z0-9\s&-]*?)(?:\s+and\s+(?:controls|will|manages|handles|produces)\b|[.,]|$)/i,
+    );
+    if (!match?.[1] || !match?.[2]) continue;
+    if (!partyLegalNamesMatch(match[1].trim(), party)) continue;
+    const role = match[2].replace(/\s+/g, " ").trim();
+    if (role.length >= 2) return role;
+  }
+  return null;
+}
+
 function resolveBrandLicensingRoleLabel(
   party: string,
   index: number,
   labeledBlocks: readonly LabeledPartyBlock[],
+  draft?: ParsedDraftShape | null,
+  rawIntake?: string,
 ): string {
+  const fromProse = rawIntake ? resolveBrandLicensingRoleFromProse(rawIntake, party) : null;
+  if (fromProse) return fromProse;
+
+  const fromDraft = (draft?.parties ?? []).find((p) =>
+    partyLegalNamesMatch(String(p?.name ?? "").trim(), party),
+  );
+  const draftRole = String(fromDraft?.role ?? "").trim();
+  if (draftRole.length >= 2 && !/^(?:party|client|service provider)$/i.test(draftRole)) {
+    return draftRole;
+  }
+
   const block = labeledBlocks.find((b) => b.legalEntity === party) ?? labeledBlocks[index];
   const role = block?.roleLabel?.trim() ?? "";
   if (role.length >= 2) return role;
@@ -392,9 +438,11 @@ function buildBrandLicensingOpeningRecital(
   parties: readonly string[],
   labeledBlocks: readonly LabeledPartyBlock[],
   recitalPhrase: string,
+  draft?: ParsedDraftShape | null,
+  rawIntake?: string,
 ): string {
   const defined = parties.map((party, index) => {
-    const role = resolveBrandLicensingRoleLabel(party, index, labeledBlocks);
+    const role = resolveBrandLicensingRoleLabel(party, index, labeledBlocks, draft, rawIntake);
     return `${party} ("${role}")`;
   });
   const partyList =
@@ -436,15 +484,27 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
 
   const noticeStanzas = buildQuadPartyNoticeStanzas(parties);
   const signatureBlocks = buildQuadPartySignatureBlocks(parties, labeledBlocks, rawIntake);
-  const brandOwner = parties.find((_, i) => /brand\s+owner/i.test(resolveBrandLicensingRoleLabel(parties[i]!, i, labeledBlocks))) ?? parties[0]!;
-  const manufacturer = parties.find((_, i) => /manufactur/i.test(resolveBrandLicensingRoleLabel(parties[i]!, i, labeledBlocks))) ?? parties[1]!;
-  const distributor = parties.find((_, i) => /\bdistribut/i.test(resolveBrandLicensingRoleLabel(parties[i]!, i, labeledBlocks))) ?? parties[2]!;
-  const marketing = parties.find((_, i) => /marketing|e-?commerce/i.test(resolveBrandLicensingRoleLabel(parties[i]!, i, labeledBlocks))) ?? parties[3]!;
+  const brandOwner =
+    parties.find((party, i) =>
+      /brand\s+owner/i.test(resolveBrandLicensingRoleLabel(party, i, labeledBlocks, draft, rawIntake)),
+    ) ?? parties[0]!;
+  const manufacturer =
+    parties.find((party, i) =>
+      /manufactur/i.test(resolveBrandLicensingRoleLabel(party, i, labeledBlocks, draft, rawIntake)),
+    ) ?? parties[1]!;
+  const distributor =
+    parties.find((party, i) =>
+      /\bdistribut/i.test(resolveBrandLicensingRoleLabel(party, i, labeledBlocks, draft, rawIntake)),
+    ) ?? parties[2]!;
+  const marketing =
+    parties.find((party, i) =>
+      /marketing|e-?commerce/i.test(resolveBrandLicensingRoleLabel(party, i, labeledBlocks, draft, rawIntake)),
+    ) ?? parties[3]!;
 
   const blocks = [
     titleUpper,
     "",
-    buildBrandLicensingOpeningRecital(parties, labeledBlocks, recitalPhrase),
+    buildBrandLicensingOpeningRecital(parties, labeledBlocks, recitalPhrase, draft, rawIntake),
     "",
     "1. PURPOSE AND TRANSACTION SCOPE",
     `The Parties will coordinate brand licensing, product manufacturing, wholesale distribution, and marketing and e-commerce management for the licensed products described in the intake. ${brandOwner} owns and controls the brand program. ${manufacturer} produces licensed goods under Brand Owner specifications. ${distributor} manages wholesale distribution and retail placement. ${marketing} manages marketing, marketplace, and e-commerce programs for the licensed products.`,

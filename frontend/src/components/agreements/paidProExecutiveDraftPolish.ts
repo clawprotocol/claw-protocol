@@ -4,9 +4,20 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { resolveAgreementTitleFromIntakeScope } from "./paidProAgreementTitleScope";
+import {
+  intakeDescribesBrandLicensingDistributionManufacturingStack,
+  resolveAgreementTitleFromIntakeScope,
+} from "./paidProAgreementTitleScope";
 import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
-import { removeRedundantNoticesSubheading } from "./paidProPartyNoticeDetails";
+import {
+  findNoticesSectionStart,
+  removeRedundantNoticesSubheading,
+  resolveOperativeNoticesFamilyEnd,
+} from "./paidProPartyNoticeDetails";
+import {
+  buildQuadPartyNoticeStanzas,
+  resolveBrandLicensingPartyOrderFromProseIntake,
+} from "./deterministicQuadPartyProFallback";
 import {
   PREMIUM_JURISDICTION_PLACEHOLDER,
   isCorruptGoverningLawClauseText,
@@ -179,6 +190,94 @@ export function reconcilePaidProDocumentTitleWithIntakeScope(
   };
 }
 
+/** Detect notice/governing-law boundary defects that must block brand-licensing recovery freeze. */
+export function hasBrandLicensingNoticeOrGoverningLawCorruption(text: string): boolean {
+  const body = (text || "").replace(/\r\n/g, "\n");
+  if (!body.trim()) return false;
+  return (
+    /:zon\s+Wholesale/i.test(body) ||
+    /\bLLC\s+Group\s+Attention/i.test(body) ||
+    /Address:[^\n]*\bGOVERNING LAW\b/i.test(body) ||
+    /the\s+the\s*["']Parties["']\)\.\s*GOVERNING LAW/i.test(body) ||
+    /If to[^\n:]+:[a-z]{1,4}\s+[A-Za-z][^\n:]{4,80}?\s*:[a-z]{1,4}/i.test(body)
+  );
+}
+
+function resolveBrandLicensingRecoveryParties(
+  intakeText: string,
+  draft?: ParsedDraftShape | null,
+): string[] {
+  const fromProse = resolveBrandLicensingPartyOrderFromProseIntake(intakeText);
+  if (fromProse.length >= 4) return fromProse.slice(0, 4);
+  const fromDraft = (draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((n) => n.length >= 4);
+  if (fromDraft.length >= 4) return fromDraft.slice(0, 4);
+  return [];
+}
+
+function rebuildBrandLicensingNoticesAndGoverningLawSection(
+  text: string,
+  parties: readonly string[],
+  intakeText: string,
+  draft?: ParsedDraftShape | null,
+): { text: string; repairs: string[] } {
+  if (parties.length < 4) return { text, repairs: [] };
+  const body = (text || "").replace(/\r\n/g, "\n");
+  const noticesIdx = findNoticesSectionStart(body);
+  if (noticesIdx < 0) return { text: body, repairs: [] };
+
+  const witnessIdx = resolveAuthoritativeWitnessIndex(body);
+  const noticesEnd = witnessIdx >= 0 ? witnessIdx : body.length;
+  const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(body, noticesIdx);
+  const before = body.slice(0, noticesIdx);
+  const afterNoticesFamily = body.slice(noticesFamilyEnd, noticesEnd);
+  const tail = body.slice(noticesEnd);
+
+  const jurisdiction = resolveFinalGoverningLaw(
+    intakeText,
+    draft ?? {
+      title: "",
+      jurisdiction: "",
+      purpose: "",
+      payment_terms: "",
+      parties: [],
+      duration: "",
+      due_date: null,
+      effective_date: null,
+      payment: { amount: 0, cadence: "", valid: false },
+    },
+    (draft?.jurisdiction || "").trim() || "Oklahoma",
+  );
+  const governingClause = /\boklahoma\b/i.test(jurisdiction)
+    ? "This Agreement is governed by the laws of the State of Oklahoma, without regard to conflict-of-law principles."
+    : `This Agreement is governed by the laws of ${jurisdiction}, without regard to conflict-of-law principles.`;
+
+  const noticeStanzas = buildQuadPartyNoticeStanzas(parties);
+  const rebuilt = [
+    "11. NOTICES",
+    "Notices under this Agreement must be in writing and delivered by email, nationally recognized courier, personal delivery, or certified or registered mail to the applicable notice address below.",
+    "",
+    ...noticeStanzas.flatMap((stanza) => ["", stanza]),
+    "",
+    "12. GOVERNING LAW",
+    governingClause,
+  ].join("\n");
+
+  const miscMatch = afterNoticesFamily.match(/^\s*(\d+)\.\s+MISCELLANEOUS/i);
+  const miscBlock = miscMatch
+    ? afterNoticesFamily.replace(/^\s*\d+\.\s+MISCELLANEOUS/i, "13. MISCELLANEOUS")
+    : afterNoticesFamily.trim()
+      ? `13. MISCELLANEOUS AND ELECTRONIC SIGNATURES\n\n${afterNoticesFamily.trim()}`
+      : "13. MISCELLANEOUS AND ELECTRONIC SIGNATURES\nThis Agreement may be executed in counterparts using electronic signatures permitted by applicable law.";
+
+  const merged = `${before.trimEnd()}\n\n${rebuilt}\n\n${miscBlock.trim()}\n\n${tail.trimStart()}`
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+
+  return { text: merged, repairs: ["notice:rebuild_brand_licensing_operative_region"] };
+}
+
 /** Strip notice/governing-law fusion defects that must never freeze. */
 export function repairCorruptedNoticeAndGoverningLawText(text: string): { text: string; repairs: string[] } {
   const repairs: string[] = [];
@@ -192,6 +291,22 @@ export function repairCorruptedNoticeAndGoverningLawText(text: string): { text: 
   if (fusedAddress !== out) {
     out = fusedAddress;
     repairs.push("notice:defuse_governing_law_heading_fusion");
+  }
+  const fusedPartiesAddress = out.replace(
+    /Address:\s*primary business address on file with the\s+the\s*["']Parties["']\)\.\s*GOVERNING LAW/gi,
+    "Address: primary business address on file with the Party",
+  );
+  if (fusedPartiesAddress !== out) {
+    out = fusedPartiesAddress;
+    repairs.push("notice:defuse_parties_governing_law_fusion");
+  }
+  const truncatedHorizon = out.replace(
+    /If to Horizon Wholesale Group LLC:[a-z]{1,4}\s+Wholesale Group\s*:[a-z]{1,4}\s+Wholesale Group\s*:/gi,
+    "If to Horizon Wholesale Group LLC:\nHorizon Wholesale Group LLC",
+  );
+  if (truncatedHorizon !== out) {
+    out = truncatedHorizon;
+    repairs.push("notice:repair_truncated_horizon_header");
   }
   if (isCorruptGoverningLawClauseText(out)) {
     const corruptRe =
@@ -237,6 +352,18 @@ export function applyPaidProExecutiveDraftPolish(
   if (corruption.repairs.length > 0) {
     out = corruption.text;
     repairs.push(...corruption.repairs);
+  }
+
+  if (
+    intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText) &&
+    hasBrandLicensingNoticeOrGoverningLawCorruption(out)
+  ) {
+    const parties = resolveBrandLicensingRecoveryParties(intakeText, draft);
+    if (parties.length >= 4) {
+      const rebuilt = rebuildBrandLicensingNoticesAndGoverningLawSection(out, parties, intakeText, draft);
+      out = rebuilt.text;
+      repairs.push(...rebuilt.repairs);
+    }
   }
 
   return { text: out.trimEnd(), repairs: [...new Set(repairs)] };

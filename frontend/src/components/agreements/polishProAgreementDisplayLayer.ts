@@ -13,6 +13,7 @@ import {
   stripIrrelevantFixedFeeBoilerplate,
   intakeSpecifiesSimpleFixedFee,
 } from "./canonicalPartyIdentityResolver";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { normalizeProAgreementSectionContinuity } from "./normalizeProAgreementSectionContinuity";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import {
@@ -84,7 +85,28 @@ function canonicalPartyNamesFromDraft(draft: ParsedDraftShape | null | undefined
   return (draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
     .filter((name) => name.length >= 2)
-    .slice(0, 2);
+    .slice(0, 12);
+}
+
+function roleLabelsFromDraft(draft: ParsedDraftShape | null | undefined): string[] {
+  return (draft?.parties ?? [])
+    .map((p) => String(p?.role ?? "").trim())
+    .filter((role) => role.length >= 2)
+    .slice(0, 12);
+}
+
+function brandLicensingRecoveryOpeningIsPreserved(
+  text: string,
+  intakeText: string | null | undefined,
+  partyCount: number,
+): boolean {
+  if (partyCount < 4) return false;
+  if (!intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText ?? "")) return false;
+  const head = text.slice(0, Math.min(text.length, 4_000));
+  if (!/MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(head)) return false;
+  if (/\(\s*["']Client["']\s*\)/i.test(head)) return false;
+  if (/\(\s*["']Service Provider["']\s*\)/i.test(head)) return false;
+  return true;
 }
 
 /** Remove duplicate confidentiality paragraphs (normalized content match). */
@@ -193,7 +215,8 @@ const FUSED_TITLE_OPENING_RE =
 
 function isAgreementTitleParagraph(part: string): boolean {
   const t = part.trim();
-  return t.length <= 90 && /\bAGREEMENT\b/i.test(t) && !/[.!?]$/.test(t);
+  const maxLen = /MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(t) ? 160 : 120;
+  return t.length <= maxLen && /\bAGREEMENT\b/i.test(t) && !/[.!?]$/.test(t);
 }
 
 function isOpeningParagraph(part: string): boolean {
@@ -561,36 +584,48 @@ export function polishProAgreementDisplayLayer(
   let out = basicNormalize(input);
 
   const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
+  const roleLabels = roleLabelsFromDraft(opts?.draft);
   const records = resolveCanonicalPartyIdentitiesFromSources({
     rawIntake: opts?.intakeText ?? null,
     starterNames: partyNames,
+    roleLabels: roleLabels.length >= 2 ? roleLabels : undefined,
     generatedBody: input,
   });
 
-  const structuredOpening = normalizeAgreementOpeningStructure(out, {
-    records,
-    reviewDisplayMode: opts?.reviewDisplayMode,
-    retainSignatureExecutionBlock: opts?.retainSignatureExecutionBlock,
-  });
-  out = structuredOpening.text;
-  repairs.push(...structuredOpening.repairs);
+  const preserveBrandLicensingOpening = brandLicensingRecoveryOpeningIsPreserved(
+    out,
+    opts?.intakeText ?? null,
+    partyNames.length,
+  );
 
-  const opening = repairDuplicateAgreementOpening(out, records);
-  out = opening.text;
-  repairs.push(...opening.repairs);
-
-  if (records.length >= 2) {
-    const party = repairCanonicalPartyIdentityInCorpus(out, records, {
-      intakeRaw: opts?.intakeText ?? null,
-      partyNames,
+  if (!preserveBrandLicensingOpening) {
+    const structuredOpening = normalizeAgreementOpeningStructure(out, {
+      records,
+      reviewDisplayMode: opts?.reviewDisplayMode,
+      retainSignatureExecutionBlock: opts?.retainSignatureExecutionBlock,
     });
-    out = party.text;
-    repairs.push(...party.repairs);
-  }
+    out = structuredOpening.text;
+    repairs.push(...structuredOpening.repairs);
 
-  const opening2 = repairDuplicateAgreementOpening(out, records);
-  out = opening2.text;
-  repairs.push(...opening2.repairs);
+    const opening = repairDuplicateAgreementOpening(out, records);
+    out = opening.text;
+    repairs.push(...opening.repairs);
+
+    if (records.length >= 2) {
+      const party = repairCanonicalPartyIdentityInCorpus(out, records, {
+        intakeRaw: opts?.intakeText ?? null,
+        partyNames,
+      });
+      out = party.text;
+      repairs.push(...party.repairs);
+    }
+
+    const opening2 = repairDuplicateAgreementOpening(out, records);
+    out = opening2.text;
+    repairs.push(...opening2.repairs);
+  } else {
+    repairs.push("display:preserve_brand_licensing_opening");
+  }
 
   if (opts?.reviewDisplayMode) {
     const reviewArtifacts = stripMalformedProReviewDisplayArtifacts(out);

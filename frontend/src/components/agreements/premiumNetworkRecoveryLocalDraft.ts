@@ -15,8 +15,11 @@ import { assessPaidProMutualConsultingProfessionalStructure } from "./paidProMut
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
 import {
   buildDeterministicQuadPartyProFallback,
+  resolveBrandLicensingPartyOrderFromProseIntake,
   resolveDeterministicQuadPartyNames,
 } from "./deterministicQuadPartyProFallback";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { applyPaidProExecutiveDraftPolish } from "./paidProExecutiveDraftPolish";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 
@@ -48,11 +51,37 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
   const labeledBlocks = parseLabeledPartyBlocks(rawIntake);
   const stripped = stripClientPremiumArtifactBlocksFromDraft(args.draft);
   const repairedParties = repairDraftPartiesFromIntakeAuthority(stripped.parties ?? [], rawIntake);
+  const prosePartyOrder =
+    intakeDescribesBrandLicensingDistributionManufacturingStack(rawIntake)
+      ? resolveBrandLicensingPartyOrderFromProseIntake(rawIntake)
+      : [];
+  const draftAuthoritativeNames = (args.draft.parties ?? [])
+    .map((p) => String(p.name || "").trim())
+    .filter(isAuthoritativeLegalEntityName);
+  const authoritativeQuadNames =
+    prosePartyOrder.length >= 4
+      ? prosePartyOrder.slice(0, 4)
+      : draftAuthoritativeNames.length >= 4
+        ? draftAuthoritativeNames.slice(0, 4)
+        : resolveDeterministicQuadPartyNames(rawIntake, args.draft);
   const draftForRecovery: ParsedDraftShape = {
     ...stripped,
-    parties: repairedParties.length ? repairedParties : stripped.parties,
+    parties:
+      authoritativeQuadNames.length >= 4
+        ? authoritativeQuadNames.map((name) => {
+            const fromDraft = (args.draft.parties ?? []).find((p) =>
+              partyLegalNamesMatch(String(p?.name ?? "").trim(), name),
+            );
+            const fromRepaired = repairedParties.find((p) =>
+              partyLegalNamesMatch(String(p?.name ?? "").trim(), name),
+            );
+            return (fromRepaired ?? fromDraft ?? { name, role: "party" }) as never;
+          })
+        : repairedParties.length
+          ? repairedParties
+          : stripped.parties,
   };
-  const quadPartyNames = resolveDeterministicQuadPartyNames(rawIntake, draftForRecovery);
+  const quadPartyNames = authoritativeQuadNames;
   const partyNames = labeledPartyLegalEntities(rawIntake).length
     ? labeledPartyLegalEntities(rawIntake)
     : quadPartyNames.length >= 4
@@ -79,10 +108,6 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
   if (quadPartyNames.length >= 4 && intakeDescribesBrandLicensingDistributionManufacturingStack(rawIntake)) {
     const executivePolish = applyPaidProExecutiveDraftPolish(body, rawIntake, draftForRecovery);
     body = executivePolish.text;
-    const prepared = preparePaidProServerDocumentForAcceptance(body, draftForRecovery, rawIntake, {
-      surface: args.recoverySurface,
-    });
-    body = prepared.text;
   } else if (labeledBlocks.length >= 3) {
     if (/\[(?:Not yet specified|YOUR COMPANY|SERVICE PROVIDER NAME)\]/i.test(body)) {
       return { ok: false, body: "", reasons: ["placeholder_blocked"] };

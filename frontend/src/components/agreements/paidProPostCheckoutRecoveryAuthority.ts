@@ -17,6 +17,11 @@ import {
   type PaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { analyzePaidProSectionStructureCompleteness } from "./paidProSectionStructureCompletenessAuthority";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import {
+  hasBrandLicensingNoticeOrGoverningLawCorruption,
+} from "./paidProExecutiveDraftPolish";
+import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import {
   PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
@@ -98,6 +103,48 @@ export function previewPostCheckoutRecoverySotCommit(args: {
       rawBodyLen,
       displayPlainLen: resolvedDisplayPlain.length,
     };
+  }
+  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText)) {
+    if (hasBrandLicensingNoticeOrGoverningLawCorruption(resolvedDisplayPlain)) {
+      return {
+        eligible: false,
+        displayPlain: resolvedDisplayPlain,
+        blockReason: "recovery_brand_licensing_notice_governing_law_corruption",
+        rawBodyLen,
+        displayPlainLen: resolvedDisplayPlain.length,
+      };
+    }
+    const structure = applySectionStructureIntegrity(resolvedDisplayPlain, {
+      source: "brand_licensing_recovery_sot_preview",
+      repair: false,
+    });
+    if (structure.anomalyCount > 0) {
+      return {
+        eligible: false,
+        displayPlain: resolvedDisplayPlain,
+        blockReason: `recovery_brand_licensing_section_structure_anomaly:${structure.anomalyCount}`,
+        rawBodyLen,
+        displayPlainLen: resolvedDisplayPlain.length,
+      };
+    }
+    if (!/MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(resolvedDisplayPlain)) {
+      return {
+        eligible: false,
+        displayPlain: resolvedDisplayPlain,
+        blockReason: "recovery_brand_licensing_title_missing",
+        rawBodyLen,
+        displayPlainLen: resolvedDisplayPlain.length,
+      };
+    }
+    if (/\(\s*["']Client["']\s*\)/i.test(resolvedDisplayPlain.slice(0, 4_000))) {
+      return {
+        eligible: false,
+        displayPlain: resolvedDisplayPlain,
+        blockReason: "recovery_brand_licensing_client_role_label",
+        rawBodyLen,
+        displayPlainLen: resolvedDisplayPlain.length,
+      };
+    }
   }
   return {
     eligible: true,
