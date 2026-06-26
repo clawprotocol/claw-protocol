@@ -23,6 +23,10 @@ import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
 import type { CanonicalPartyIdentityRecord } from "./canonicalPartyIdentityResolver";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import {
+  detectOpeningRecitalCrossMappedLegalNameAliases,
+  detectOpeningRecitalRoleLabelInversion,
+} from "./paidProOpeningRoleLabelConsistency";
 
 export function brandLicensingFrozenCorpusHasProfessionalDefects(text: string): boolean {
   const trimmed = (text || "").trim();
@@ -37,6 +41,24 @@ export function brandLicensingFrozenCorpusHasProfessionalDefects(text: string): 
   if (/Address:[^\n]*\bGOVERNING LAW\b/i.test(trimmed)) return true;
   if (hasBrandLicensingNoticeOrGoverningLawCorruption(trimmed)) return true;
   if (/\b11\.\s+NOTICES\b/i.test(trimmed) && !/12\.\s+GOVERNING LAW/i.test(trimmed)) return true;
+  return false;
+}
+
+/** Opening recital maps a party legal name into another party's quoted alias (live TEST442 defect). */
+export function brandLicensingOpeningRecitalNeedsAuthorityRepair(
+  text: string,
+  intakeText: string | null | undefined,
+  draft?: ParsedDraftShape | null,
+): boolean {
+  const intake = String(intakeText || "").trim();
+  if (!intake || !intakeDescribesBrandLicensingDistributionManufacturingStack(intake)) {
+    return false;
+  }
+  const records = manifestRecordsFromBrandLicensingProseIntake(intake, draft ?? null);
+  if (records.length < 4) return false;
+  const partyNames = records.map((r) => r.fullLegalName);
+  if (detectOpeningRecitalCrossMappedLegalNameAliases(text, partyNames)) return true;
+  if (detectOpeningRecitalRoleLabelInversion(text, records)) return true;
   return false;
 }
 
@@ -94,9 +116,24 @@ export function applyBrandLicensingFrozenCorpusAuthority(
   out = executive.text;
   repairs.push(...executive.repairs);
 
+  const proseRecords = manifestRecordsFromBrandLicensingProseIntake(intake, draft ?? null);
+  const proseParties =
+    proseRecords.length >= 4
+      ? proseRecords.map((r) => r.fullLegalName).filter(isAuthoritativeLegalEntityName)
+      : [];
   const parties = resolveDeterministicQuadPartyNames(intake, draft).filter(isAuthoritativeLegalEntityName);
-  if (parties.length >= 4 && brandLicensingFrozenCorpusHasProfessionalDefects(out)) {
-    const opening = rebuildBrandLicensingDocumentOpeningAuthority(out, intake, draft ?? null, parties);
+  const openingPartyOrder = proseParties.length >= 4 ? proseParties : parties;
+  const needsOpeningAuthority =
+    openingPartyOrder.length >= 4 &&
+    (brandLicensingFrozenCorpusHasProfessionalDefects(out) ||
+      brandLicensingOpeningRecitalNeedsAuthorityRepair(out, intake, draft ?? null));
+  if (needsOpeningAuthority) {
+    const opening = rebuildBrandLicensingDocumentOpeningAuthority(
+      out,
+      intake,
+      draft ?? null,
+      openingPartyOrder,
+    );
     if (opening.text !== out) {
       out = opening.text;
       repairs.push(...opening.repairs);
@@ -147,11 +184,17 @@ export function assertBrandLicensingFrozenCorpusAuthorityForFreeze(
   const intake = String(intakeText || "").trim();
   if (!intake || !intakeDescribesBrandLicensingDistributionManufacturingStack(intake)) return;
   let corpus = (text || "").trim();
-  if (brandLicensingFrozenCorpusHasProfessionalDefects(corpus)) {
+  if (
+    brandLicensingFrozenCorpusHasProfessionalDefects(corpus) ||
+    brandLicensingOpeningRecitalNeedsAuthorityRepair(corpus, intake, draft ?? null)
+  ) {
     const repaired = applyBrandLicensingFrozenCorpusAuthority(corpus, draft ?? null, intake);
     corpus = repaired.text;
   }
-  if (brandLicensingFrozenCorpusHasProfessionalDefects(corpus)) {
+  if (
+    brandLicensingFrozenCorpusHasProfessionalDefects(corpus) ||
+    brandLicensingOpeningRecitalNeedsAuthorityRepair(corpus, intake, draft ?? null)
+  ) {
     throw new Error("[paid-pro-sot-freeze-blocked] brand_licensing_professional_corpus_defect");
   }
   const structure = applySectionStructureIntegrity(text, {

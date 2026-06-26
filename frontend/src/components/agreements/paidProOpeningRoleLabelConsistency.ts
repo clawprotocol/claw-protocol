@@ -5,6 +5,7 @@
 
 import type { CanonicalPartyIdentityRecord } from "./canonicalPartyIdentityResolver";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
 const OPENING_ROLE_SCAN_MAX = 12_000;
 const WITNESS_RE = /\bIN WITNESS WHEREOF\b/i;
@@ -94,6 +95,34 @@ export function repairOpeningRecitalRoleLabelsFromManifest(
 
   const out = body.slice(0, start) + slice + body.slice(end);
   return { text: out, repairs: [...new Set(repairs)] };
+}
+
+/** Detect quoted parenthetical aliases that are another party's legal entity name (TEST442). */
+export function detectOpeningRecitalCrossMappedLegalNameAliases(
+  text: string,
+  partyNames: readonly string[],
+): boolean {
+  if (partyNames.length < 3) return false;
+  const body = (text || "").replace(/\r\n/g, "\n");
+  const { start, end } = openingSliceBounds(body);
+  const slice = body.slice(start, end);
+
+  for (const legal of partyNames) {
+    const trimmed = legal.trim();
+    if (!trimmed) continue;
+    const re = entityRoleParentheticalRe(trimmed);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(slice)) !== null) {
+      const alias = (m[3] || "").trim();
+      if (!alias || !isAuthoritativeLegalEntityName(alias)) continue;
+      const matchesSelf = partyLegalNamesMatch(trimmed, alias);
+      const matchesOther = partyNames.some(
+        (other) => !partyLegalNamesMatch(other, trimmed) && partyLegalNamesMatch(other, alias),
+      );
+      if (!matchesSelf && matchesOther) return true;
+    }
+  }
+  return false;
 }
 
 /** Detect any manifest entity with a wrong parenthetical role in the opening slice. */

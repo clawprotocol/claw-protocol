@@ -14,7 +14,7 @@ import {
   intakeSpecifiesSimpleFixedFee,
 } from "./canonicalPartyIdentityResolver";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
-import { applyBrandLicensingFrozenCorpusAuthority } from "./paidProBrandLicensingFreezeAuthority";
+import { applyBrandLicensingFrozenCorpusAuthority, brandLicensingOpeningRecitalNeedsAuthorityRepair } from "./paidProBrandLicensingFreezeAuthority";
 import { normalizeProAgreementSectionContinuity } from "./normalizeProAgreementSectionContinuity";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import {
@@ -100,6 +100,7 @@ function brandLicensingRecoveryOpeningIsPreserved(
   text: string,
   intakeText: string | null | undefined,
   partyCount: number,
+  draft?: ParsedDraftShape | null,
 ): boolean {
   if (partyCount < 4) return false;
   if (!intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText ?? "")) return false;
@@ -107,6 +108,9 @@ function brandLicensingRecoveryOpeningIsPreserved(
   if (!/MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(head)) return false;
   if (/\(\s*["']Client["']\s*\)/i.test(head)) return false;
   if (/\(\s*["']Service Provider["']\s*\)/i.test(head)) return false;
+  if (brandLicensingOpeningRecitalNeedsAuthorityRepair(text, intakeText ?? null, draft ?? null)) {
+    return false;
+  }
   return true;
 }
 
@@ -612,6 +616,7 @@ export function polishProAgreementDisplayLayer(
     out,
     opts?.intakeText ?? null,
     partyNames.length,
+    opts?.draft ?? null,
   );
 
   if (!preserveBrandLicensingOpening) {

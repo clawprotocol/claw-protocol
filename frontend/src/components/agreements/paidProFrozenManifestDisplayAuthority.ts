@@ -5,12 +5,19 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
+  intakeDescribesBrandLicensingDistributionManufacturingStack,
+} from "./paidProAgreementTitleScope";
+import {
   buildPartyEntries,
+  buildPartyEntriesFromManifestRecords,
   frozenManifestRecitalNeedsRewrite,
   normalizeOpeningRecital,
   normalizeSignatureBlockHeadings,
 } from "./paidProAgreementPolish";
-import { canonicalPartyRecordsFromSignerIdentities } from "./canonicalPartyIdentityResolver";
+import {
+  canonicalPartyRecordsFromSignerIdentities,
+  type CanonicalPartyIdentityRecord,
+} from "./canonicalPartyIdentityResolver";
 import {
   authorityPartiesToCanonicalPartyIdentities,
   type PaidProSignerMetadataParty,
@@ -22,6 +29,8 @@ import {
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
+import { brandLicensingOpeningRecitalNeedsAuthorityRepair } from "./paidProBrandLicensingFreezeAuthority";
+import { detectOpeningRecitalRoleLabelInversion } from "./paidProOpeningRoleLabelConsistency";
 
 export function repairMalformedSectionAnyReference(text: string): { text: string; repaired: boolean } {
   if (!/\bSection\s+Any\b/i.test(text)) return { text, repaired: false };
@@ -82,6 +91,21 @@ function resolveFrozenManifestDisplayPartyNames(
   return frozenNames;
 }
 
+function brandLicensingFrozenManifestOpeningIsAuthoritative(
+  text: string,
+  intakeText: string | null | undefined,
+  draft?: ParsedDraftShape | null,
+  intakeRecords: readonly CanonicalPartyIdentityRecord[] = [],
+): boolean {
+  if (!intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText ?? "")) return false;
+  if (intakeRecords.length < 4) return false;
+  if (brandLicensingOpeningRecitalNeedsAuthorityRepair(text, intakeText ?? null, draft ?? null)) return false;
+  if (detectOpeningRecitalRoleLabelInversion(text, intakeRecords)) return false;
+  const head = text.slice(0, Math.min(text.length, 4_000));
+  if (!/MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(head)) return false;
+  return true;
+}
+
 /**
  * When canonical manifest has 3+ parties, align visible recital/signature with manifest names.
  */
@@ -100,7 +124,13 @@ export function applyFrozenManifestPaidProDisplayAuthority(
   const repairs: string[] = [];
   let out = (text || "").replace(/\r\n/g, "\n");
   const parties = partiesFromManifestNames(names);
-  const partyEntries = buildPartyEntries(names);
+  const brandLicensingIntake = intakeDescribesBrandLicensingDistributionManufacturingStack(
+    opts?.intakeText ?? "",
+  );
+  const partyEntries =
+    intakeRecords.length >= 3
+      ? buildPartyEntriesFromManifestRecords(intakeRecords)
+      : buildPartyEntries(names);
 
   const sectionAny = repairMalformedSectionAnyReference(out);
   if (sectionAny.repaired) {
@@ -112,27 +142,45 @@ export function applyFrozenManifestPaidProDisplayAuthority(
     intakeRecords.length >= 3 &&
     !analyzeMultiPartyExecutionBlockShape(out, intakeRecords).malformed &&
     !corpusHasTwoPartyRoleSignatureTail(out);
+  const brandOpeningAuthoritative = brandLicensingFrozenManifestOpeningIsAuthoritative(
+    out,
+    opts?.intakeText ?? null,
+    opts?.draft ?? null,
+    intakeRecords,
+  );
   if (
     executionCanonical &&
     !sectionAny.repaired &&
     !frozenManifestRecitalNeedsRewrite(out, names) &&
-    repairMalformedPaidProAgreementRecital(out, parties).text === out
+    (brandOpeningAuthoritative ||
+      repairMalformedPaidProAgreementRecital(out, parties).text === out)
   ) {
     return { text: out, repairs: [] };
   }
 
-  const malformedRecital = repairMalformedPaidProAgreementRecital(out, parties);
-  if (malformedRecital.text !== out) {
-    out = malformedRecital.text;
-    repairs.push(...malformedRecital.repairs.map((tag) => `frozen_manifest:${tag}`));
+  if (!brandOpeningAuthoritative) {
+    const malformedRecital = repairMalformedPaidProAgreementRecital(out, parties);
+    if (malformedRecital.text !== out) {
+      out = malformedRecital.text;
+      repairs.push(...malformedRecital.repairs.map((tag) => `frozen_manifest:${tag}`));
+    }
   }
 
-  const recital = normalizeOpeningRecital(out, partyEntries, "high", {
-    forceRewrite: frozenManifestRecitalNeedsRewrite(out, names),
-  });
-  if (recital.log.applied) {
-    out = recital.text;
-    repairs.push("frozen_manifest:recital_polish");
+  const recitalNeedsRewrite =
+    !brandOpeningAuthoritative &&
+    (frozenManifestRecitalNeedsRewrite(out, names) ||
+      (brandLicensingIntake &&
+        intakeRecords.length >= 4 &&
+        (brandLicensingOpeningRecitalNeedsAuthorityRepair(out, opts?.intakeText ?? null, opts?.draft ?? null) ||
+          detectOpeningRecitalRoleLabelInversion(out, intakeRecords))));
+  if (recitalNeedsRewrite || !brandOpeningAuthoritative) {
+    const recital = normalizeOpeningRecital(out, partyEntries, "high", {
+      forceRewrite: recitalNeedsRewrite,
+    });
+    if (recital.log.applied) {
+      out = recital.text;
+      repairs.push("frozen_manifest:recital_polish");
+    }
   }
 
   const sig = normalizeSignatureBlockHeadings(out, partyEntries);
