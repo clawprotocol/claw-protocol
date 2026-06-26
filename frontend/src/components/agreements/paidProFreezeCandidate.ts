@@ -687,6 +687,11 @@ export function assertPaidProFreezeCandidateGates(
     args.draft ?? null,
   );
 
+  const postBrandHeading = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
+  if (postBrandHeading.repairs.length > 0) {
+    safeForCommit = postBrandHeading.text;
+  }
+
   return safeForCommit;
 }
 

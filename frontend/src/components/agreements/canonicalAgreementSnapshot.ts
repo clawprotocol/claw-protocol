@@ -226,12 +226,26 @@ function preserveCanonicalLegalParties(args: {
   });
 }
 
+function textForHardPlaceholderScan(text: string): string {
+  return text
+    .replace(
+      /\b(?:Email|Address):\s*primary business (?:email|address) on file with the (?:Party|Parties|other Parties)\.?/gi,
+      " ",
+    )
+    .replace(
+      /\bPrimary business address and email on file with the (?:Party|Parties|other Parties)\.?/gi,
+      " ",
+    )
+    .replace(/^PARTY\s+\d+\s*:?\s*$/gim, " ");
+}
+
 function collectPlaceholderIssues(
   text: string,
   opts?: { intakeText?: string | null; partyNames?: readonly string[] },
 ): string[] {
   const issues = new Set<string>();
-  if (HARD_PLACEHOLDER_RE.test(text)) issues.add("unresolved_identity_or_address_placeholder");
+  const placeholderScanText = textForHardPlaceholderScan(text);
+  if (HARD_PLACEHOLDER_RE.test(placeholderScanText)) issues.add("unresolved_identity_or_address_placeholder");
   const fatal = analyzeTemplatePlaceholderFragments(text, {
     intakeRaw: opts?.intakeText ?? null,
     partyNames: opts?.partyNames ? [...opts.partyNames] : [],

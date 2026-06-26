@@ -8,6 +8,7 @@ import { stripPreWitnessExecutionPollutionFromPrefix, resolveAuthoritativeWitnes
 import { repairGluedSectionHeadingsInText } from "./documentSectionHeadingSplit";
 import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubsections";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
+import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadingTitleAuthority";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
@@ -272,6 +273,11 @@ export function preparePaidProReviewDisplayPlain(
   if (splitTail.repairs.length > 0) {
     out = splitTail.text;
     repairs.push(...splitTail.repairs);
+  }
+  const headingTitle = applyPaidProSectionHeadingTitleAuthority(out);
+  if (headingTitle.repairs.length > 0) {
+    out = headingTitle.text;
+    repairs.push(...headingTitle.repairs.map((r) => `heading_title:${r}`));
   }
   return { text: out, repairs: [...new Set(repairs)] };
 }

@@ -13,6 +13,58 @@ export type AgreementTitleScopeDecision = {
   source: string;
 };
 
+export const BRAND_LICENSING_AGREEMENT_TITLE_UPPER =
+  "MANUFACTURING, DISTRIBUTION, LICENSING AND MARKETING SERVICES AGREEMENT";
+
+const AGREEMENT_DOCUMENT_TITLE_BODY_VERB_RE =
+  /\b(?:will|shall|must|may|should|are|is|was|were|have|has|had|agrees?|represents?)\b/i;
+
+/** Document title line (not a numbered section) — exempt from orphan heading-fragment heuristics. */
+export function isAuthoritativePaidProAgreementDocumentTitleLine(line: string): boolean {
+  const t = line.replace(/\s+/g, " ").trim();
+  if (!t || t.length < 12 || t.length > 240) return false;
+  if (/^\d+\.\s/.test(t)) return false;
+  if (/MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(t) && /\bAGREEMENT\b/i.test(t)) return true;
+  if (/^MANUFACTURING,\s+DISTRIBUTION,?\s*$/i.test(t)) return true;
+  if (/^LICENSING AND MARKETING SERVICES AGREEMENT$/i.test(t)) return true;
+  if (
+    /\bAGREEMENT\b/i.test(t) &&
+    /^[A-Z0-9][A-Z0-9\s,&'"\-–—]+$/.test(t) &&
+    !AGREEMENT_DOCUMENT_TITLE_BODY_VERB_RE.test(t) &&
+    !/["“”]/.test(t) &&
+    t.split(/\s+/).filter(Boolean).length <= 24
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Merge split all-caps brand-licensing title lines before section-heading scans. */
+export function repairMultilinePaidProAgreementDocumentTitle(text: string): {
+  text: string;
+  repairs: string[];
+} {
+  const repairs: string[] = [];
+  const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i]!.trim();
+    const nextTrimmed = (lines[i + 1] ?? "").trim();
+    if (
+      /^MANUFACTURING,\s+DISTRIBUTION,?\s*$/i.test(trimmed) &&
+      /^LICENSING AND MARKETING SERVICES AGREEMENT$/i.test(nextTrimmed)
+    ) {
+      out.push(BRAND_LICENSING_AGREEMENT_TITLE_UPPER);
+      repairs.push("merge_multiline_brand_licensing_title");
+      i += 1;
+      continue;
+    }
+    out.push(lines[i]!);
+  }
+  if (repairs.length === 0) return { text, repairs };
+  return { text: out.join("\n"), repairs };
+}
+
 export const SPECIALIZED_TITLE_WORD_RES: ReadonlyArray<{ id: string; pattern: RegExp }> = [
   { id: "implementation", pattern: /\bimplementation\b/i },
   { id: "software", pattern: /\bsoftware\b/i },

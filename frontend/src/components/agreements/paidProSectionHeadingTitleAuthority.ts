@@ -4,6 +4,10 @@
  */
 
 import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
+import {
+  isAuthoritativePaidProAgreementDocumentTitleLine,
+  repairMultilinePaidProAgreementDocumentTitle,
+} from "./paidProAgreementTitleScope";
 import { isPaidProNumberedSectionHeadingLine } from "./paidProNumberedSectionHeading";
 import {
   isDanglingPaidProMainHeadingPrefix,
@@ -64,6 +68,7 @@ export function isIncompletePaidProHeadingTitle(title: string): boolean {
 function isOrphanTitleFragmentLine(line: string): boolean {
   const t = line.trim();
   if (!t || t.length < 2) return false;
+  if (isAuthoritativePaidProAgreementDocumentTitleLine(t)) return false;
   if (/^\d+\./.test(t)) return false;
   if (EXECUTION_LINE_RE.test(t)) return false;
   if (isPaidProNumberedSectionHeadingLine(t)) return false;
@@ -136,6 +141,10 @@ export function repairOrphanSemanticHeadingFragmentsBeforeCanonicalHeadings(text
     if (skip.has(i)) continue;
     const line = lines[i]!;
     const trimmed = line.trim();
+    if (!trimmed || isAuthoritativePaidProAgreementDocumentTitleLine(trimmed)) {
+      out.push(line);
+      continue;
+    }
     if (!trimmed || !isOrphanTitleFragmentLine(trimmed)) {
       out.push(line);
       continue;
@@ -202,6 +211,7 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
   for (let i = 0; i < lines.length; i += 1) {
     const trimmed = lines[i]!.trim();
     if (!trimmed) continue;
+    if (isAuthoritativePaidProAgreementDocumentTitleLine(trimmed)) continue;
 
     const prefix = parseMainSectionPrefixLine(trimmed);
     if (prefix) {
@@ -415,6 +425,12 @@ export function applyPaidProSectionHeadingTitleAuthority(text: string): {
 } {
   const repairs: string[] = [];
   let out = (text || "").replace(/\r\n/g, "\n");
+
+  const multilineTitle = repairMultilinePaidProAgreementDocumentTitle(out);
+  if (multilineTitle.repairs.length > 0) {
+    out = multilineTitle.text;
+    repairs.push(...multilineTitle.repairs);
+  }
 
   const fragmentMerge = repairOrphanNumberFragmentContinuationLines(out);
   if (fragmentMerge.repairs.length > 0) {
