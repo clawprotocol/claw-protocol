@@ -1163,12 +1163,17 @@ export function logPreFreezePlaceholderRejectionDetails(
     corpusHash?: string | null;
     freezeGatesPassed?: boolean;
     snapshotIntegrityOk?: boolean;
+    blockedBy?: string | null;
   },
 ): void {
   if (typeof import.meta !== "undefined" && import.meta.env.MODE === "test") return;
   const scanCtx = { intakeRaw: ctx.intakeRaw ?? "", partyNames: normPartyNames(ctx.partyNames) };
   const fatal = analyzeTemplatePlaceholderFragments(text, scanCtx).filter((d) => d.fatal);
   const identityTokens = listUnresolvedIdentityPlaceholderTokens(text);
+  if (fatal.length === 0 && identityTokens.length === 0) {
+    logPaidProSotEstablishmentNonfatalIssueWarn(text, issues, ctx);
+    return;
+  }
   const issueDetails = issues.map((issue) => ({
     code: issue,
     category: issue,
@@ -1211,6 +1216,42 @@ export function logPreFreezePlaceholderRejectionDetails(
     scannerSurface: ctx.surface ?? "establish_paid_pro_source_of_truth",
     freezeGatesPassed: ctx.freezeGatesPassed ?? false,
     snapshotIntegrityOk: ctx.snapshotIntegrityOk ?? null,
+    blockedBy: ctx.blockedBy ?? "fatal_placeholder",
+  });
+}
+
+export function logPaidProSotEstablishmentNonfatalIssueWarn(
+  text: string,
+  issues: readonly string[],
+  ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames"> & {
+    surface?: string | null;
+    corpusHash?: string | null;
+    freezeGatesPassed?: boolean;
+    snapshotIntegrityOk?: boolean;
+    acceptedFreezeHash?: string | null;
+    adoptedHash?: string | null;
+    canonicalSnapshotSelectedHash?: string | null;
+    sotCandidateHash?: string | null;
+    blockedBy?: string | null;
+  },
+): void {
+  if (typeof import.meta !== "undefined" && import.meta.env.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-sot-establishment-nonfatal-issue]", {
+    issues: [...issues],
+    docLen: text.length,
+    corpusHash: ctx.corpusHash ?? null,
+    scannerSurface: ctx.surface ?? "establish_paid_pro_source_of_truth",
+    freezeGatesPassed: ctx.freezeGatesPassed ?? false,
+    snapshotIntegrityOk: ctx.snapshotIntegrityOk ?? null,
+    acceptedFreezeHash: ctx.acceptedFreezeHash ?? null,
+    adoptedHash: ctx.adoptedHash ?? null,
+    canonicalSnapshotSelectedHash: ctx.canonicalSnapshotSelectedHash ?? null,
+    sotCandidateHash: ctx.sotCandidateHash ?? null,
+    blockedBy: null,
+    fatalTokens: [],
+    identityTokens: [],
+    fatalDetails: [],
   });
 }
 

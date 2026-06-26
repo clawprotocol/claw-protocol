@@ -13,7 +13,16 @@ import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelin
 import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycleDiff";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
-import { logPreFreezePlaceholderRejectionDetails } from "./agreementTemplatePlaceholderSafety";
+import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { readProGenerationAdoption } from "./paidProGenerationAdoption";
+import {
+  logPaidProSotEstablishmentDecision,
+  resolvePaidProSotEstablishmentDecision,
+} from "./paidProSotEstablishmentGate";
+import {
+  logPaidProSotEstablishmentNonfatalIssueWarn,
+  logPreFreezePlaceholderRejectionDetails,
+} from "./agreementTemplatePlaceholderSafety";
 import {
   hasPaidProPipelineSessionAcceptance,
 } from "./paidProPostAcceptanceValidatorCache";
@@ -24,7 +33,7 @@ import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 import {
   buildCanonicalAgreementSnapshot,
   clearFrozenCanonicalAgreementCorpus,
-  collectFatalPaidProPlaceholderIssueCodes,
+  freezePaidProEstablishedCanonicalSnapshot,
   freezeCanonicalAgreementSnapshot,
   hasFrozenCanonicalAgreementCorpus,
   readCanonicalAgreementCorpusForSurface,
@@ -108,7 +117,6 @@ import {
   readPremiumRecipientHandoff,
   resolveHandoffPartySlotCount,
 } from "./premiumPartyNamesHandoff";
-import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 
 function buildPaidProSotCanonicalSnapshotArgs(args: {
   surface: string;
@@ -156,21 +164,64 @@ function buildPaidProSotCanonicalSnapshotArgs(args: {
   };
 }
 
-function isPaidProSotFreezeEstablishmentBlocked(
-  snapshot: CanonicalAgreementSnapshot,
-  corpusText: string,
-  freezeGatesPassed: boolean,
-  ctx: { intakeRaw: string; partyNames: readonly string[] },
-): boolean {
-  const fatalIssues = collectFatalPaidProPlaceholderIssueCodes(corpusText, {
-    intakeText: ctx.intakeRaw,
-    partyNames: ctx.partyNames,
+function resolvePaidProSotEstablishmentHashes(args: {
+  safeForCommit: string;
+  acceptedFreezeHash?: string | null;
+  agreementGenerationId?: string | null;
+  intakeFingerprint?: string | null;
+}): { acceptedFreezeHash: string | null; adoptedHash: string | null; sotCandidateHash: string } {
+  const sotCandidateHash =
+    paidProPipelineAcceptedCorpusHash(args.safeForCommit) ?? hashPaidProCorpus(args.safeForCommit);
+  const adopted = readProGenerationAdoption(
+    args.agreementGenerationId ?? null,
+    args.intakeFingerprint ?? null,
+  );
+  return {
+    acceptedFreezeHash: args.acceptedFreezeHash ?? primaryFreezeGateHashOrNull(args.safeForCommit),
+    adoptedHash: adopted?.hash ?? adopted?.freezeCandidateHash ?? null,
+    sotCandidateHash,
+  };
+}
+
+function primaryFreezeGateHashOrNull(text: string): string | null {
+  return paidProPipelineAcceptedCorpusHash(text);
+}
+
+function evaluatePaidProSotEstablishmentForSnapshot(args: {
+  snapshot: CanonicalAgreementSnapshot;
+  safeForCommit: string;
+  freezeGatesPassed: boolean;
+  acceptedFreezeHash: string | null;
+  adoptedHash: string | null;
+  intakeRaw: string;
+  partyNames: readonly string[];
+  surface: string;
+}) {
+  const decision = resolvePaidProSotEstablishmentDecision({
+    snapshot: args.snapshot,
+    corpusText: args.safeForCommit,
+    freezeGatesPassed: args.freezeGatesPassed,
+    acceptedFreezeHash: args.acceptedFreezeHash,
+    adoptedHash: args.adoptedHash,
+    intakeRaw: args.intakeRaw,
+    partyNames: args.partyNames,
   });
-  if (fatalIssues.length > 0) return true;
-  if (freezeGatesPassed) {
-    return !snapshot.canonicalText.trim() || snapshot.canonicalText.length < 500;
+  logPaidProSotEstablishmentDecision(decision, args.surface);
+  if (decision.warnOnly) {
+    logPaidProSotEstablishmentNonfatalIssueWarn(args.safeForCommit, decision.placeholderIssueCodes, {
+      intakeRaw: args.intakeRaw,
+      partyNames: args.partyNames,
+      surface: args.surface,
+      corpusHash: decision.sotCandidateHash,
+      freezeGatesPassed: decision.freezeGatesPassed,
+      snapshotIntegrityOk: args.snapshot.integrityOk,
+      acceptedFreezeHash: decision.acceptedFreezeHash,
+      adoptedHash: decision.adoptedHash,
+      canonicalSnapshotSelectedHash: decision.canonicalSnapshotSelectedHash,
+      sotCandidateHash: decision.sotCandidateHash,
+    });
   }
-  return !snapshot.integrityOk || snapshot.placeholderIssues.length > 0;
+  return decision;
 }
 
 export type PaidProSourceOfTruth = {
@@ -475,12 +526,22 @@ export function establishPaidProSourceOfTruth(args: {
     );
   }
   let safeForCommit = primaryFreezeGate.text;
+  let freezeGatesPassed = primaryFreezeGate.ok;
+  let acceptedFreezeHash = primaryFreezeGate.hash ?? null;
   const authoritativeSignerCount = resolveAuthoritativeSignerCount({
     intakeText: args.intakeText ?? null,
     draftParties: parties,
     manifestPartyCount: parties.length,
   }).count;
-  const snapshot = buildCanonicalAgreementSnapshot(
+  const intakeRaw = args.intakeText ?? "";
+  const hashBundle = () =>
+    resolvePaidProSotEstablishmentHashes({
+      safeForCommit,
+      acceptedFreezeHash,
+      agreementGenerationId: args.agreementGenerationId ?? null,
+    });
+
+  let snapshotForFreeze = buildCanonicalAgreementSnapshot(
     buildPaidProSotCanonicalSnapshotArgs({
       surface: "paid_pro_source_of_truth_establish",
       safeForCommit,
@@ -490,16 +551,21 @@ export function establishPaidProSourceOfTruth(args: {
       authoritativeSignerCount,
       reviewSessionId: args.reviewSessionId,
       draft: args.draft ?? null,
-      freezeGatesPassed: primaryFreezeGate.ok,
+      freezeGatesPassed,
     }),
   );
-  let snapshotForFreeze = snapshot;
-  if (
-    isPaidProSotFreezeEstablishmentBlocked(snapshot, safeForCommit, primaryFreezeGate.ok, {
-      intakeRaw: args.intakeText ?? "",
-      partyNames,
-    })
-  ) {
+  let establishmentDecision = evaluatePaidProSotEstablishmentForSnapshot({
+    snapshot: snapshotForFreeze,
+    safeForCommit,
+    freezeGatesPassed,
+    acceptedFreezeHash: hashBundle().acceptedFreezeHash,
+    adoptedHash: hashBundle().adoptedHash,
+    intakeRaw,
+    partyNames,
+    surface: "establish_paid_pro_source_of_truth",
+  });
+
+  if (establishmentDecision.blocked) {
     const noticeRetry = applyPaidProNoticeContactAuthority(safeForCommit, {
       draft: args.draft ?? null,
       intakeText: args.intakeText ?? null,
@@ -521,6 +587,8 @@ export function establishPaidProSourceOfTruth(args: {
         );
       }
       safeForCommit = retryGate.text;
+      freezeGatesPassed = retryGate.ok;
+      acceptedFreezeHash = retryGate.hash ?? acceptedFreezeHash;
       snapshotForFreeze = buildCanonicalAgreementSnapshot(
         buildPaidProSotCanonicalSnapshotArgs({
           surface: "paid_pro_source_of_truth_establish_retry",
@@ -531,30 +599,45 @@ export function establishPaidProSourceOfTruth(args: {
           authoritativeSignerCount,
           reviewSessionId: args.reviewSessionId,
           draft: args.draft ?? null,
-          freezeGatesPassed: retryGate.ok,
+          freezeGatesPassed,
         }),
       );
+      establishmentDecision = evaluatePaidProSotEstablishmentForSnapshot({
+        snapshot: snapshotForFreeze,
+        safeForCommit,
+        freezeGatesPassed,
+        acceptedFreezeHash: hashBundle().acceptedFreezeHash,
+        adoptedHash: hashBundle().adoptedHash,
+        intakeRaw,
+        partyNames,
+        surface: "establish_paid_pro_source_of_truth_retry",
+      });
     }
   }
-  if (
-    isPaidProSotFreezeEstablishmentBlocked(snapshotForFreeze, safeForCommit, primaryFreezeGate.ok, {
-      intakeRaw: args.intakeText ?? "",
-      partyNames,
-    })
-  ) {
+
+  if (establishmentDecision.blocked) {
     logPreFreezePlaceholderRejectionDetails(safeForCommit, snapshotForFreeze.placeholderIssues, {
-      intakeRaw: args.intakeText ?? "",
+      intakeRaw,
       partyNames,
       surface: "establish_paid_pro_source_of_truth",
-      corpusHash: paidProPipelineAcceptedCorpusHash(safeForCommit) ?? hashPaidProCorpus(safeForCommit),
-      freezeGatesPassed: primaryFreezeGate.ok,
+      corpusHash: establishmentDecision.sotCandidateHash,
+      freezeGatesPassed,
       snapshotIntegrityOk: snapshotForFreeze.integrityOk,
+      blockedBy: establishmentDecision.blockedBy,
     });
     throw new Error(
-      `[paid-pro-sot-freeze-blocked] integrityOk=${snapshotForFreeze.integrityOk} placeholders=${snapshotForFreeze.placeholderIssues.join(",") || "none"}`,
+      `[paid-pro-sot-freeze-blocked] integrityOk=${snapshotForFreeze.integrityOk} placeholders=${snapshotForFreeze.placeholderIssues.join(",") || "none"} blockedBy=${establishmentDecision.blockedBy ?? "unknown"}`,
     );
   }
-  const frozen = freezeCanonicalAgreementSnapshot(snapshotForFreeze, "server_full_document_text");
+
+  const forceFreeze =
+    freezeGatesPassed &&
+    (establishmentDecision.warnOnly || !snapshotForFreeze.integrityOk);
+  const frozen = freezePaidProEstablishedCanonicalSnapshot(
+    snapshotForFreeze,
+    "server_full_document_text",
+    forceFreeze,
+  );
   const frozenText = frozen?.canonicalText ?? safeForCommit;
   const preEstablishFreezeHash = frozen?.hash ?? null;
   const driftGuard = enforceAuthoritativeProCorpusDisplay({

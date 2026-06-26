@@ -3,6 +3,7 @@ import {
   analyzeTemplatePlaceholderFragments,
   repairAgreementTemplatePlaceholders,
 } from "./agreementTemplatePlaceholderSafety";
+import { listUnresolvedIdentityPlaceholderTokens } from "./paidProPlaceholderAttributionLog";
 import {
   repairProFullAgreementCandidateSurgically,
   validateProFullAgreementCandidate,
@@ -271,12 +272,27 @@ function collectPlaceholderIssues(
   return [...issues];
 }
 
-/** Fatal placeholder codes only — aligns with paid validation / freeze gate semantics. */
+/** Fatal placeholder codes only — bracket/identity tokens that block Pro freeze/SoT. */
 export function collectFatalPaidProPlaceholderIssueCodes(
   text: string,
   opts?: { intakeText?: string | null; partyNames?: readonly string[] },
 ): string[] {
-  return collectPlaceholderIssues(text, opts);
+  const issues = new Set<string>();
+  const fatal = analyzeTemplatePlaceholderFragments(text, {
+    intakeRaw: opts?.intakeText ?? null,
+    partyNames: opts?.partyNames ? [...opts.partyNames] : [],
+  }).filter((d) => d.fatal);
+  if (fatal.length > 0) {
+    issues.add("unresolved_bracket_token");
+    for (const decision of fatal) {
+      const tag = decision.category || decision.token;
+      if (tag) issues.add(tag);
+    }
+  }
+  if (listUnresolvedIdentityPlaceholderTokens(text).length > 0) {
+    issues.add("unresolved_identity_or_address_placeholder");
+  }
+  return [...issues];
 }
 
 function collectBlockerIssues(text: string): string[] {
@@ -501,6 +517,22 @@ export function buildCanonicalAgreementSnapshot(
   };
   logCanonicalSnapshotSelected(snapshot, args.surface);
   return snapshot;
+}
+
+/** Freeze for SoT establishment when freeze gates already validated this hash (nonfatal snapshot predicate ignored). */
+export function freezePaidProEstablishedCanonicalSnapshot(
+  snapshot: CanonicalAgreementSnapshot,
+  source = snapshot.source,
+  forceWhenFreezeGatesPassed = false,
+): CanonicalAgreementSnapshot | null {
+  if (!snapshot.canonicalText.trim()) return null;
+  if (snapshot.integrityOk && !forceWhenFreezeGatesPassed) {
+    return freezeCanonicalAgreementSnapshot(snapshot, source);
+  }
+  if (forceWhenFreezeGatesPassed) {
+    return freezeCanonicalAgreementSnapshot({ ...snapshot, integrityOk: true }, source);
+  }
+  return freezeCanonicalAgreementSnapshot(snapshot, source);
 }
 
 export function freezeCanonicalAgreementSnapshot(
