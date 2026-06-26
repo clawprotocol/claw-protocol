@@ -53,6 +53,7 @@ import {
   hydrateAuthoritativeAgreementDocument,
 } from "./authoritativeAgreementDocument";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
+import { extendPaidProAuthorityHashContinuitySurface } from "./paidProAuthorityHashContinuity";
 import {
   clearPaidProPinnedSignerAppliedCorpus,
   resolvePaidProFinalHydratedCorpusForSurface,
@@ -564,6 +565,11 @@ export function establishPaidProSourceOfTruth(args: {
       pipelineSource: args.source ?? "server_full_draft",
       rawAcceptedLen: trim(args.text).length,
     },
+  });
+  const authoritativeDoc = authoritativeDocumentForSurface("paid_pro_source_of_truth_establish");
+  extendPaidProAuthorityHashContinuitySurface({
+    canonicalSnapshotHash: frozen?.hash ?? record.hash,
+    authoritativeSnapshotHash: authoritativeDoc?.authoritativeHash ?? record.hash,
   });
   if (reviewParties.length >= 2) {
     setConsumedPaidProSignerMetadataAuthority({

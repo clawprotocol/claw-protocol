@@ -19,12 +19,14 @@ import { clearPremiumPartyNamesHandoff, resetPremiumRecipientHandoffDedupForTest
 import { clearConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { clearProGenerationAdoptionForTests } from "./paidProGenerationAdoption";
+import { clearPaidProAuthorityHashContinuityForTests } from "./paidProAuthorityHashContinuity";
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 
 /** Clear cross-test Paid Pro pipeline caches and in-memory authority without touching sessionStorage. */
 export function resetPaidProPipelineTestIsolation(): void {
   clearPaidProSourceOfTruth();
   clearProGenerationAdoptionForTests();
+  clearPaidProAuthorityHashContinuityForTests();
   clearAcceptedProCorpusSafeDisplayCacheForTests();
   clearPaidProCorpusScanCache();
   clearPaidProPostAcceptanceValidatorCache();

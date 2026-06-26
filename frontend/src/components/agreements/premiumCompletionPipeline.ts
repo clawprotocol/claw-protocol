@@ -134,12 +134,18 @@ import {
 } from "./paidProMutualConsultingQualityFloor";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
-import { markPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { markPaidProPipelineAcceptedCorpusHash, paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import {
   logProGenerationAdoptionCommitted,
   readProGenerationAdoption,
   tryCommitProGenerationAdoption,
 } from "./paidProGenerationAdoption";
+import {
+  commitPaidProAuthorityHashContinuity,
+  hasPaidProValidatedAuthorityHashLatch,
+  recordForbiddenPostValidatedRecoveryStage,
+  shouldBlockPostValidatedRecoveryPaths,
+} from "./paidProAuthorityHashContinuity";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import { buildPremiumPostCheckoutStitchedBody } from "./premiumCheckoutStitchedBody";
 import {
@@ -1199,6 +1205,12 @@ function premiumStructuralRetryShouldKeepPriorDocument(
   const next = nextDoc.trim();
   if (!prior) return false;
   if (!next) return true;
+  if (
+    next.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    prior.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+  ) {
+    return false;
+  }
   const priorFillerOk = rejectPremiumDegradedFiller(prior).ok;
   const nextFillerOk = rejectPremiumDegradedFiller(next).ok;
   if (priorFillerOk && !nextFillerOk) return true;
@@ -1972,10 +1984,22 @@ async function runPremiumCompletionInner(
         tierADiag.schemaValidationReasons = (full.schema_validation_reasons || []).filter(Boolean).slice(0, 8);
       }
       let effectiveFull: PremiumFullDraftResult = full;
-      const wireDocumentText = (full.document_text || "").trim();
-      const wireServerFullDocumentText = (full.server_full_document_text || "").trim();
-      const wireGenerationOutcomeOnWire = (full.generation_outcome || "").trim();
-      const wireFailureCodeOnWire = (full.server_generation_failure_code || "").trim();
+      let wireDocumentText = (full.document_text || "").trim();
+      let wireServerFullDocumentText = (full.server_full_document_text || "").trim();
+      let wireGenerationOutcomeOnWire = (full.generation_outcome || "").trim();
+      let wireFailureCodeOnWire = (full.server_generation_failure_code || "").trim();
+      const syncPremiumWireMetadataFromEffective = (payload: PremiumFullDraftResult) => {
+        wireDocumentText = (payload.document_text || "").trim();
+        wireServerFullDocumentText = (payload.server_full_document_text || "").trim();
+        wireGenerationOutcomeOnWire = (payload.generation_outcome || "").trim();
+        wireFailureCodeOnWire = (payload.server_generation_failure_code || "").trim();
+        lastWireAuthoritativeBodyLen = authoritativeWirePremiumBodyLen({
+          wireDocumentText,
+          wireServerFullDocumentText,
+        });
+        lastWireServerFullDocumentLen = wireServerFullDocumentText.length;
+        lastWireGenerationOutcome = wireGenerationOutcomeOnWire;
+      };
       const wireAuthoritativeBodyLen = authoritativeWirePremiumBodyLen({
         wireDocumentText,
         wireServerFullDocumentText,
@@ -2477,14 +2501,7 @@ async function runPremiumCompletionInner(
               doc = frozen.body;
               usedClientRetry = true;
               effectiveFull = full2;
-              const retryWireServerFull = (full2.server_full_document_text || "").trim();
-              const retryWireDoc = (full2.document_text || "").trim();
-              lastWireAuthoritativeBodyLen = authoritativeWirePremiumBodyLen({
-                wireDocumentText: retryWireDoc,
-                wireServerFullDocumentText: retryWireServerFull,
-              });
-              lastWireServerFullDocumentLen = retryWireServerFull.length;
-              lastWireGenerationOutcome = (full2.generation_outcome || "").trim();
+              syncPremiumWireMetadataFromEffective(full2);
               if (
                 (full2.generation_outcome || "").trim() === "degraded" &&
                 (full2.server_generation_failure_code || "").trim() === "json_parse"
@@ -2540,6 +2557,7 @@ async function runPremiumCompletionInner(
                 doc = (regen.document_text || "").trim();
                 effectiveFull = regen;
                 usedClientRetry = true;
+                syncPremiumWireMetadataFromEffective(regen);
               }
             } catch {
               /* doc may still be leaking; cleared below */
@@ -2716,6 +2734,7 @@ async function runPremiumCompletionInner(
                   doc = nextDoc;
                   effectiveFull = fr;
                   usedClientRetry = true;
+                  syncPremiumWireMetadataFromEffective(fr);
                   acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
                   vPaid = validatePaidProOutput({
                     text: doc,
@@ -2810,7 +2829,8 @@ async function runPremiumCompletionInner(
       // and clear soft structural rejections so a complete server document is never dropped to
       // "Retry Pro draft" (which let a short fallback masquerade as the SoT). Fatal placeholders and
       // dev-context leaks are still enforced (hard failure codes + the finalize pass below).
-      const authoritativeServerFullOnWire = wireServerFullDocumentText;
+      const authoritativeServerFullOnWire =
+        wireServerFullDocumentText || (effectiveFull.server_full_document_text || "").trim();
       const degradedJsonParseWithoutSubstantiveServerFull =
         isDegradedJsonParseWithoutSubstantiveServerFull({
           generationOutcome: wireGenerationOutcomeOnWire,
@@ -2897,6 +2917,31 @@ async function runPremiumCompletionInner(
         vPaidOk: vPaid.ok,
         placeholderOk: placeholderClientOk,
       });
+      const substantiveValidatedLen = Math.max(
+        (doc || "").trim().length,
+        wireServerFullDocumentText.length,
+        (effectiveFull.server_full_document_text || "").trim().length,
+      );
+      const serverFailureCodeForVpaidWin = (effectiveFull.server_generation_failure_code || "").trim();
+      const serverHardFailureForVpaidWin =
+        serverFailureCodeForVpaidWin === "airlock_blocked" ||
+        serverFailureCodeForVpaidWin === "dev_context_leak";
+      const vPaidAuthoritativeSubstantive =
+        vPaid.ok &&
+        placeholderClientOk &&
+        substantiveValidatedLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+        !serverHardFailureForVpaidWin;
+      if (vPaidAuthoritativeSubstantive && !acc.ok) {
+        acc = { ok: true, reasons: ["vpaid_authoritative_substantive_bypass"] };
+        if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[premium-flow] vpaid_authoritative_structural_bypass", {
+            substantiveValidatedLen,
+            priorAccReasons: lastClientGateTrace?.accReasons ?? [],
+            accStructuralHash: paidProPipelineAcceptedCorpusHash(doc || ""),
+          });
+        }
+      }
       const structuralFatalCount = countStructuralFatals(acc.reasons);
       const longAdvisoryAccept =
         !degradedJsonParseWithoutSubstantiveServerFull &&
@@ -2910,7 +2955,10 @@ async function runPremiumCompletionInner(
       // must NOT be rejected when it is long, placeholder-clean, structurally sound and has the
       // required paid sections. Only the intelligence metadata degrades — the agreement body stays
       // authoritative. Without this a complete ~9k draft is wrongly dropped to "Retry Pro draft".
-      const standardClientGatesPass = acc.ok && vPaid.ok && placeholderClientOk;
+      const standardClientGatesPass =
+        vPaid.ok &&
+        placeholderClientOk &&
+        (acc.ok || vPaidAuthoritativeSubstantive);
       if (import.meta.env.MODE !== "test") {
         // eslint-disable-next-line no-console
         console.info("[premium-flow] premium_rewrite_response_received", {
@@ -3216,35 +3264,62 @@ async function runPremiumCompletionInner(
           }
         }
         if (!freezeCommit.ok) {
-          const structural = buildPaidProStructuralRecoveryBody({
-            intakeText: rawForSoT || rawIntake,
-            draft: mergedForApi,
-          });
-          if (structural.ok) {
-            const structuralPrep = preparePaidProServerDocumentForAcceptance(
-              structural.body,
-              mergedForApi,
-              rawForSoT || rawIntake,
-              { surface: "premium_completion_pipeline_structural_recovery" },
-            );
-            doc = structuralPrep.text;
-            const structuralGate = buildPaidProFreezeCandidate({
-              text: doc,
-              source: "structural_recovery",
-              draft: mergedForApi,
+          if (!vPaidAuthoritativeSubstantive) {
+            const structural = buildPaidProStructuralRecoveryBody({
               intakeText: rawForSoT || rawIntake,
-              agreementGenerationId: input.agreementGenerationId ?? null,
-              generationOutcome: (effectiveFull.generation_outcome || "").trim(),
-              surface: "premium_completion_pipeline_structural_recovery",
+              draft: mergedForApi,
             });
-            if (structuralGate.ok) {
-              const minStructuralLen = PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
-              if (structuralGate.text.length >= minStructuralLen) {
-                doc = structuralGate.text;
-                freezeCommit = structuralGate;
-                freezeAcceptedSource = "structural_recovery";
+            if (structural.ok) {
+              const structuralPrep = preparePaidProServerDocumentForAcceptance(
+                structural.body,
+                mergedForApi,
+                rawForSoT || rawIntake,
+                { surface: "premium_completion_pipeline_structural_recovery" },
+              );
+              doc = structuralPrep.text;
+              const structuralGate = buildPaidProFreezeCandidate({
+                text: doc,
+                source: "structural_recovery",
+                draft: mergedForApi,
+                intakeText: rawForSoT || rawIntake,
+                agreementGenerationId: input.agreementGenerationId ?? null,
+                generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+                surface: "premium_completion_pipeline_structural_recovery",
+              });
+              if (structuralGate.ok) {
+                const minStructuralLen = PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
+                if (structuralGate.text.length >= minStructuralLen) {
+                  doc = structuralGate.text;
+                  freezeCommit = structuralGate;
+                  freezeAcceptedSource = "structural_recovery";
+                }
               }
             }
+          }
+        }
+        if (
+          !freezeCommit.ok &&
+          vPaidAuthoritativeSubstantive &&
+          wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+        ) {
+          const vpaidWireDisplay = applyAcceptedProCorpusSafeDisplay(wireCorpusForFreeze, {
+            draft: mergedForApi,
+            intakeText: rawForSoT || rawIntake,
+            surface: "premium_completion_pipeline:vpaid_authoritative_wire_freeze",
+          }).text.trim();
+          const vpaidWireFreeze = resolvePaidProFreezeCommitText({
+            text: vpaidWireDisplay,
+            source: freezeSource,
+            draft: mergedForApi,
+            intakeText: rawForSoT || rawIntake,
+            agreementGenerationId: input.agreementGenerationId ?? null,
+            generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+            surface: "premium_completion_pipeline:vpaid_authoritative_wire_freeze",
+          });
+          if (vpaidWireFreeze.ok && vpaidWireFreeze.text.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+            doc = vpaidWireDisplay;
+            freezeCommit = vpaidWireFreeze;
+            freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
           }
         }
         if (
@@ -3260,7 +3335,10 @@ async function runPremiumCompletionInner(
             ? "mislabeled_server_full_without_wire_server_full"
             : "mislabeled_server_full_draft_below_substantive_min";
           let structuralRecovered = false;
-          if (intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake)) {
+          if (
+            !vPaidAuthoritativeSubstantive &&
+            intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake)
+          ) {
             const structural = buildPaidProStructuralRecoveryBody({
               intakeText: rawForSoT || rawIntake,
               draft: mergedForApi,
@@ -3444,6 +3522,15 @@ async function runPremiumCompletionInner(
               });
             }
           }
+          if (vPaid.ok && doc.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN && placeholderClientOk) {
+            commitPaidProAuthorityHashContinuity({
+              generationId: input.agreementGenerationId ?? "",
+              intakeFingerprint: adoptionFp,
+              body: doc,
+              vPaidValidationHash: paidProPipelineAcceptedCorpusHash(doc) ?? undefined,
+              acceptedFreezeHash: freezeCommit.hash ?? paidProPipelineAcceptedCorpusHash(doc) ?? undefined,
+            });
+          }
           paidProPerfSpanStart("post_accept_commit_render");
           freezeAcceptedPremiumBodyForSession(
             input.agreementGenerationId,
@@ -3506,17 +3593,30 @@ async function runPremiumCompletionInner(
                 : undefined,
             accepted: true,
             advisoryOnly: advisoryAccept && (!vPaid.ok || !placeholderClientOk),
+            accStructuralHash: paidProPipelineAcceptedCorpusHash(doc),
+            vPaidValidationHash: paidProPipelineAcceptedCorpusHash(doc),
+            substantiveValidatedLen,
+            vPaidAuthoritativeSubstantive,
           });
         }
       } else {
         const intakeSForGate = (rawForSoT || rawIntake) || "";
+        const adoptionFpForReject =
+          input.premiumRequestIntakeFingerprint ?? shortIntakeFingerprint(intakeSForGate);
+        if (shouldBlockPostValidatedRecoveryPaths(input.agreementGenerationId, adoptionFpForReject)) {
+          recordForbiddenPostValidatedRecoveryStage("pipeline_client_gates_rejected");
+        }
         const vpaidDiag = acc.ok && !vPaid.ok ? buildPaidProValidationDiagnostics(doc || "", intakeSForGate) : null;
         logPremiumCompletionDebug({
           stage: "pipeline_client_gates_rejected",
           accStructuralOk: acc.ok,
           accStructuralReasons: acc.reasons.slice(0, 20),
+          accStructuralHash: paidProPipelineAcceptedCorpusHash(doc || ""),
           validationOk: vPaid.ok,
           validationReasons: vPaid.reasons.slice(0, 20),
+          vPaidValidationHash: paidProPipelineAcceptedCorpusHash(doc || ""),
+          substantiveValidatedLen,
+          vPaidAuthoritativeSubstantive,
           docLen: (doc || "").length,
           intakeLen: intakeSForGate.length,
           normalizedSourceField:
@@ -3594,20 +3694,23 @@ async function runPremiumCompletionInner(
           agreementFamily: merged.agreement_family ?? null,
           surface: "premium_completion_pipeline:preserved_recovery",
         });
+        const intakeSForPreserve = (rawForSoT || rawIntake || "").trim();
+        const brandLicensingPreserveIntake =
+          intakeSForPreserve.length > 0 &&
+          intakeDescribesBrandLicensingDistributionManufacturingStack(intakeSForPreserve);
         const shouldAttemptPreserve =
           longAdvisoryAccept ||
+          (brandLicensingPreserveIntake && degradedJsonParseWithoutSubstantiveServerFull) ||
           (frozenReject &&
             frozenReject.body.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) ||
           (preservedRecovery.text.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
             !(doc || "").trim());
         const preserveBlockedByStructuralFatals =
-          structuralFatalCount > 0 || fatalPlaceholderCount > 0;
-        const intakeSForPreserve = (rawForSoT || rawIntake || "").trim();
-        const brandLicensingPreserveIntake =
-          intakeSForPreserve.length > 0 &&
-          intakeDescribesBrandLicensingDistributionManufacturingStack(intakeSForPreserve);
+          fatalPlaceholderCount > 0 ||
+          (structuralFatalCount > 0 && !brandLicensingPreserveIntake);
         let brandStructuralRecoveryCommitted = false;
         if (
+          !vPaidAuthoritativeSubstantive &&
           shouldAttemptPreserve &&
           !preserveBlockedByStructuralFatals &&
           brandLicensingPreserveIntake
@@ -3682,6 +3785,27 @@ async function runPremiumCompletionInner(
                 source: premiumRenderSource,
               });
               brandStructuralRecoveryCommitted = true;
+              proIntentGateMessage = null;
+              const adoptionFpPreserve =
+                input.premiumRequestIntakeFingerprint ??
+                shortIntakeFingerprint(intakeSForPreserve);
+              tryCommitProGenerationAdoption({
+                generationId: input.agreementGenerationId ?? "",
+                intakeFingerprint: adoptionFpPreserve,
+                intakeText: intakeSForPreserve,
+                body: recovered,
+                source: premiumRenderSource,
+                freezeCandidateHash: structuralGate.hash ?? null,
+              });
+              if (vPaid.ok && recovered.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+                commitPaidProAuthorityHashContinuity({
+                  generationId: input.agreementGenerationId ?? "",
+                  intakeFingerprint: adoptionFpPreserve,
+                  body: recovered,
+                  vPaidValidationHash: paidProPipelineAcceptedCorpusHash(recovered) ?? undefined,
+                  acceptedFreezeHash: structuralGate.hash ?? paidProPipelineAcceptedCorpusHash(recovered) ?? undefined,
+                });
+              }
               logPremiumAcceptanceDecision({
                 accepted: true,
                 reason: "brand_licensing_structural_recovery_after_soft_reject",
@@ -3705,14 +3829,30 @@ async function runPremiumCompletionInner(
               intakeSForPreserve,
               mergedForApi,
             ));
-        if (!brandStructuralRecoveryCommitted && preservedFreezeEligible) {
+        const skipPreservedRecoveryAfterValidatedServer =
+          vPaidAuthoritativeSubstantive ||
+          hasPaidProValidatedAuthorityHashLatch(input.agreementGenerationId, adoptionFpForReject) ||
+          shouldBlockPostValidatedRecoveryPaths(input.agreementGenerationId, adoptionFpForReject) ||
+          (vPaid.ok &&
+            substantiveValidatedLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+            placeholderClientOk);
+        if (
+          !brandStructuralRecoveryCommitted &&
+          preservedFreezeEligible &&
+          !skipPreservedRecoveryAfterValidatedServer
+        ) {
           const preserved = preservedPlaceholder.text.trim();
           doc = preserved;
           winningPremiumBodyText = preserved;
-          premiumRenderSource = (frozenReject?.source ||
-            (degradedJsonParseWithoutSubstantiveServerFull
-              ? "rejected_paid_corpus"
-              : "server_full_draft")) as PremiumRenderSource;
+          const preservedLen = preserved.length;
+          premiumRenderSource = (
+            frozenReject?.source ||
+            (preservedLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+              ? PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE
+              : degradedJsonParseWithoutSubstantiveServerFull
+                ? "rejected_paid_corpus"
+                : "server_full_draft")
+          ) as PremiumRenderSource;
           const preservedFamily = resolveAuthoritativePaidProAgreementFamily({
             intakeText: rawForSoT || rawIntake,
             draft: merged,
@@ -3758,11 +3898,12 @@ async function runPremiumCompletionInner(
             renderSource: premiumRenderSource,
           });
         } else if (
-          acc.ok ||
-          founderDetailsGateMessage ||
-          proIntentGateMessage ||
-          preserveBlockedByStructuralFatals ||
-          (shouldAttemptPreserve && brandLicensingPreserveIntake && !brandStructuralRecoveryCommitted)
+          !brandStructuralRecoveryCommitted &&
+          (acc.ok ||
+            founderDetailsGateMessage ||
+            proIntentGateMessage ||
+            preserveBlockedByStructuralFatals ||
+            (shouldAttemptPreserve && brandLicensingPreserveIntake))
         ) {
           premiumRenderSource = "rejected_paid_corpus";
           rejectedPaidCorpusDueToClientGates = true;
@@ -4141,14 +4282,21 @@ async function runPremiumCompletionInner(
     const serverRecoveryCandidate = (
       pipelineNormalizedAuthoritativeText || docTrimForSuppress
     ).trim();
-    const brandLicensingSubstantiveServerRejected =
+    const brandLicensingRejectedRecoveryEligible =
       rejectedPaidCorpusDueToClientGates &&
       intakeDescribesBrandLicensingDistributionManufacturingStack(intakeForRecovery) &&
-      Math.max(
+      (Math.max(
         serverRecoveryCandidate.length,
         String(outMerged.premium_server_full_document_text ?? "").trim().length,
-      ) >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
-    if (brandLicensingSubstantiveServerRejected) {
+      ) >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+        isDegradedJsonParseWithoutSubstantiveServerFull({
+          generationOutcome: lastWireGenerationOutcome,
+          failureCode:
+            serverDegradedHttpMetaForRecovery?.code ?? serverGenerationDegraded?.code ?? null,
+          wireServerFullDocumentText:
+            lastWireServerFullDocumentLen > 0 ? "present" : "",
+        }));
+    if (brandLicensingRejectedRecoveryEligible) {
       const brandStructural = buildPaidProStructuralRecoveryBody({
         intakeText: intakeForRecovery,
         draft: outMerged,
@@ -4202,6 +4350,17 @@ async function runPremiumCompletionInner(
             source: premiumRenderSource,
             freezeCandidateHash: brandFreeze.hash ?? null,
           });
+          if (recovered.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+            commitPaidProAuthorityHashContinuity({
+              generationId: input.agreementGenerationId ?? "",
+              intakeFingerprint:
+                input.premiumRequestIntakeFingerprint ??
+                shortIntakeFingerprint(intakeForRecovery),
+              body: recovered,
+              vPaidValidationHash: paidProPipelineAcceptedCorpusHash(recovered) ?? undefined,
+              acceptedFreezeHash: brandFreeze.hash ?? paidProPipelineAcceptedCorpusHash(recovered) ?? undefined,
+            });
+          }
           logPremiumAcceptanceDecision({
             accepted: true,
             reason: "brand_licensing_structural_recovery_after_rejected_corpus",
