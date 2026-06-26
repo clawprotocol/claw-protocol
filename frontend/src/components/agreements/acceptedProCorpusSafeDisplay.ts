@@ -42,6 +42,8 @@ import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
 import { repairAgreementTemplatePlaceholders, repairPaidProFreezePlaceholderAuthority } from "./agreementTemplatePlaceholderSafety";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import { applyBrandLicensingFrozenCorpusAuthority } from "./paidProBrandLicensingFreezeAuthority";
 
 export type AcceptedProCorpusSafeDisplayOpts = {
   draft?: ParsedDraftShape | null;
@@ -183,6 +185,14 @@ function applyAcceptedProCorpusSafeDisplayCore(
   repairs.push(...entityNeutral.repairs);
 
   const intakeRaw = opts?.intakeText ?? null;
+  if (intakeRaw && intakeDescribesBrandLicensingDistributionManufacturingStack(intakeRaw)) {
+    const brandAuthority = applyBrandLicensingFrozenCorpusAuthority(out, opts?.draft ?? null, intakeRaw);
+    if (brandAuthority.text !== out) {
+      out = brandAuthority.text;
+      repairs.push(...brandAuthority.repairs);
+    }
+  }
+
   const partyNames = canonicalPartyNamesFromAcceptanceContext(opts?.draft, intakeRaw);
   const hasAuthoritativeParties = paidProSafeDisplayHasAuthoritativeParties(intakeRaw, partyNames);
   const records = resolvePaidProSafeDisplayPartyRecords(intakeRaw, partyNames, opts?.draft);
@@ -237,10 +247,12 @@ function applyAcceptedProCorpusSafeDisplayCore(
   }
 
   if (hasAuthoritativeParties && records.length >= 2) {
-    const openingGuard = ensurePaidProServicesAgreementOpening(out, records, intakeRaw);
-    if (openingGuard.text !== out) {
-      out = openingGuard.text;
-      repairs.push(...openingGuard.repairs);
+    if (!intakeDescribesBrandLicensingDistributionManufacturingStack(intakeRaw ?? "")) {
+      const openingGuard = ensurePaidProServicesAgreementOpening(out, records, intakeRaw);
+      if (openingGuard.text !== out) {
+        out = openingGuard.text;
+        repairs.push(...openingGuard.repairs);
+      }
     }
   }
 

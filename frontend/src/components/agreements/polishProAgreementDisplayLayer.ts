@@ -14,6 +14,7 @@ import {
   intakeSpecifiesSimpleFixedFee,
 } from "./canonicalPartyIdentityResolver";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import { applyBrandLicensingFrozenCorpusAuthority } from "./paidProBrandLicensingFreezeAuthority";
 import { normalizeProAgreementSectionContinuity } from "./normalizeProAgreementSectionContinuity";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import {
@@ -582,6 +583,21 @@ export function polishProAgreementDisplayLayer(
   }
   const repairs: string[] = [];
   let out = basicNormalize(input);
+
+  if (
+    opts?.intakeText &&
+    intakeDescribesBrandLicensingDistributionManufacturingStack(opts.intakeText)
+  ) {
+    const brandAuthority = applyBrandLicensingFrozenCorpusAuthority(
+      out,
+      opts?.draft ?? null,
+      opts.intakeText,
+    );
+    if (brandAuthority.text !== out) {
+      out = brandAuthority.text;
+      repairs.push(...brandAuthority.repairs);
+    }
+  }
 
   const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
   const roleLabels = roleLabelsFromDraft(opts?.draft);

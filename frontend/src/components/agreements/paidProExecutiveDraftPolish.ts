@@ -203,7 +203,7 @@ export function hasBrandLicensingNoticeOrGoverningLawCorruption(text: string): b
   );
 }
 
-function resolveBrandLicensingRecoveryParties(
+export function resolveBrandLicensingRecoveryParties(
   intakeText: string,
   draft?: ParsedDraftShape | null,
 ): string[] {
@@ -216,7 +216,7 @@ function resolveBrandLicensingRecoveryParties(
   return [];
 }
 
-function rebuildBrandLicensingNoticesAndGoverningLawSection(
+export function rebuildBrandLicensingNoticesAndGoverningLawSection(
   text: string,
   parties: readonly string[],
   intakeText: string,

@@ -65,6 +65,11 @@ import { resolvePartiesForReviewRender } from "./paidProReviewRenderCorpus";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import type { CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapshot";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import {
+  assertBrandLicensingFrozenCorpusAuthorityForFreeze,
+  applyBrandLicensingFrozenCorpusAuthority,
+} from "./paidProBrandLicensingFreezeAuthority";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { buildPaidProStructuralRecoveryBody } from "./paidProStructuralRecovery";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
@@ -263,7 +268,10 @@ export function preparePaidProFreezeCandidateText(
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
   });
-  if (acceptanceManifestForOpening.length >= 3) {
+  if (
+    acceptanceManifestForOpening.length >= 3 &&
+    !intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")
+  ) {
     const adjacentDup = repairAdjacentDuplicatePartyNamesInOpening(
       safeForCommit,
       acceptanceManifestForOpening,
@@ -293,7 +301,10 @@ export function preparePaidProFreezeCandidateText(
     });
     safeForCommit = recital.text;
     if (recital.log.applied) repairs.push("opening:normalize_multiparty_recital");
-  } else if (intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList)) {
+  } else if (
+    intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList) &&
+    !intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")
+  ) {
     const identityRecords = resolveCanonicalPartyIdentitiesFromIntake(
       args.intakeText ?? "",
       partyNameList,
@@ -321,6 +332,18 @@ export function preparePaidProFreezeCandidateText(
   if (orphanSectionRepair.repairs.length > 0) {
     safeForCommit = orphanSectionRepair.text;
     repairs.push(...orphanSectionRepair.repairs);
+  }
+
+  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+    const brandAuthority = applyBrandLicensingFrozenCorpusAuthority(
+      safeForCommit,
+      args.draft ?? null,
+      args.intakeText ?? null,
+    );
+    if (brandAuthority.text !== safeForCommit) {
+      safeForCommit = brandAuthority.text;
+      repairs.push(...brandAuthority.repairs);
+    }
   }
 
   const reviewParties = resolvePartiesForReviewRender({
@@ -647,6 +670,23 @@ export function assertPaidProFreezeCandidateGates(
     );
   }
 
+  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+    const finalBrand = applyBrandLicensingFrozenCorpusAuthority(
+      safeForCommit,
+      args.draft ?? null,
+      args.intakeText ?? null,
+    );
+    if (finalBrand.text !== safeForCommit) {
+      safeForCommit = finalBrand.text;
+    }
+  }
+
+  assertBrandLicensingFrozenCorpusAuthorityForFreeze(
+    safeForCommit,
+    args.intakeText ?? null,
+    args.draft ?? null,
+  );
+
   return safeForCommit;
 }
 
@@ -685,6 +725,12 @@ export function evaluatePaidProFreezeCandidateGates(
 }
 
 function extractPaidProFreezeRejectReason(message: string): string {
+  if (message.includes("brand_licensing_professional_corpus_defect")) {
+    return "brand_licensing_professional_corpus_defect";
+  }
+  if (message.includes("brand_licensing_section_structure_anomaly")) {
+    return message.match(/brand_licensing_section_structure_anomaly:\d+/)?.[0] ?? "brand_licensing_section_structure_anomaly";
+  }
   if (message.includes("section_heading_title_anomaly")) return "section_heading_title_anomaly";
   if (message.includes("missing_notices_heading")) return "missing_notices_heading";
   if (message.includes("section_structure_synthetic_malformed_headings")) {

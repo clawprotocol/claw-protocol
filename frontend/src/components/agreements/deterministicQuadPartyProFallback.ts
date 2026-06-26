@@ -77,12 +77,19 @@ export function resolveDeterministicQuadPartyNames(
   draft?: ParsedDraftShape | null,
 ): string[] {
   const intake = String(rawIntake || "").trim();
+  const proseBrandOrder = resolveBrandLicensingPartyOrderFromProseIntake(intake);
+  if (
+    intakeDescribesBrandLicensingDistributionManufacturingStack(intake) &&
+    proseBrandOrder.length >= 4
+  ) {
+    return proseBrandOrder.slice(0, 4);
+  }
+
   const draftNames = (draft?.parties ?? [])
     .map((p) => String(p.name || "").trim())
     .filter(isAuthoritativeLegalEntityName);
   if (draftNames.length >= 4) return draftNames.slice(0, 4);
 
-  const proseBrandOrder = resolveBrandLicensingPartyOrderFromProseIntake(intake);
   if (proseBrandOrder.length >= 4) return proseBrandOrder.slice(0, 4);
 
   const labeled = labeledPartyLegalEntities(intake);
@@ -397,7 +404,8 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
   return { ok: true, body: body.trim(), reasons: finalized.repairs };
 }
 
-function resolveBrandLicensingRoleFromProse(rawIntake: string, party: string): string | null {
+/** Role from prose lines like "Evergreen Outdoor Brands LLC is the Brand Owner." */
+export function resolveBrandLicensingRoleFromProseIntake(rawIntake: string, party: string): string | null {
   for (const line of String(rawIntake || "").split("\n")) {
     const match = line.trim().match(
       /^(.+?(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited))\s+is\s+the\s+([A-Za-z&][A-Za-z0-9\s&-]*?)(?:\s+and\s+(?:controls|will|manages|handles|produces)\b|[.,]|$)/i,
@@ -417,7 +425,7 @@ function resolveBrandLicensingRoleLabel(
   draft?: ParsedDraftShape | null,
   rawIntake?: string,
 ): string {
-  const fromProse = rawIntake ? resolveBrandLicensingRoleFromProse(rawIntake, party) : null;
+  const fromProse = rawIntake ? resolveBrandLicensingRoleFromProseIntake(rawIntake, party) : null;
   if (fromProse) return fromProse;
 
   const fromDraft = (draft?.parties ?? []).find((p) =>
@@ -450,6 +458,52 @@ function buildBrandLicensingOpeningRecital(
       ? `${defined[0]}, ${defined[1]}, ${defined[2]}, and ${defined[3]}`
       : oxfordPartyList(defined);
   return `This ${recitalPhrase} (this "Agreement") is entered into by and among ${partyList} (each a "Party" and collectively the "Parties").`;
+}
+
+/** Replace title + opening recital for brand licensing intakes when server/freeze prep used generic services labels. */
+export function rebuildBrandLicensingDocumentOpeningAuthority(
+  text: string,
+  rawIntake: string,
+  draft?: ParsedDraftShape | null,
+  partyNames?: readonly string[],
+): { text: string; repairs: string[] } {
+  const intake = String(rawIntake || "").trim();
+  if (!intakeDescribesBrandLicensingDistributionManufacturingStack(intake)) {
+    return { text, repairs: [] };
+  }
+  const parties = (
+    partyNames?.length
+      ? [...partyNames]
+      : resolveDeterministicQuadPartyNames(intake, draft)
+  )
+    .filter(isAuthoritativeLegalEntityName)
+    .slice(0, 4);
+  if (parties.length < 4) return { text, repairs: [] };
+
+  const body = (text || "").replace(/\r\n/g, "\n").trim();
+  const titleScope = resolveAgreementTitleFromIntakeScope(intake);
+  const labeledBlocks = parseLabeledPartyBlocks(intake);
+  const opening = buildBrandLicensingOpeningRecital(
+    parties,
+    labeledBlocks,
+    titleScope.recitalPhrase,
+    draft,
+    intake,
+  );
+  const sec1Match = body.match(/\n\s*1\.\s+[A-Z]/);
+  const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
+  const remainderStart =
+    sec1Match?.index != null && sec1Match.index >= 0
+      ? sec1Match.index
+      : witnessIdx >= 0
+        ? witnessIdx
+        : body.length;
+  const remainder = body.slice(remainderStart).trimStart();
+  const head = [titleScope.titleUpper, "", opening, ""].join("\n");
+  return {
+    text: remainder ? `${head}${remainder}` : head.trimEnd(),
+    repairs: ["brand_licensing:rebuild_opening_authority"],
+  };
 }
 
 /**

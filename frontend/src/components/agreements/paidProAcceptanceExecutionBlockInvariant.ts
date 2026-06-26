@@ -10,6 +10,8 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
 import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import { manifestRecordsFromBrandLicensingProseIntake } from "./paidProBrandLicensingFreezeAuthority";
 import { isGenericCanonicalRole } from "./canonicalPartyRoleAuthority";
 import {
   labeledPartyBlockRoleLabel,
@@ -314,11 +316,15 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
 }): CanonicalPartyIdentityRecord[] {
-  const intakeAuthority = resolveIntakeAuthorityPartyNames(args.intakeText);
-  const frozenNames = readFrozenCanonicalManifestPartyNames().filter(isAuthoritativeLegalEntityName);
-
   const intakeText = args.intakeText ?? null;
   const draft = args.draft ?? null;
+  if (intakeText && intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText)) {
+    const fromBrandProse = manifestRecordsFromBrandLicensingProseIntake(intakeText, draft);
+    if (fromBrandProse.length >= 4) return fromBrandProse;
+  }
+
+  const intakeAuthority = resolveIntakeAuthorityPartyNames(intakeText);
+  const frozenNames = readFrozenCanonicalManifestPartyNames().filter(isAuthoritativeLegalEntityName);
 
   if (intakeAuthority.length >= 3) {
     if (frozenNames.length < intakeAuthority.length) {
