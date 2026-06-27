@@ -2453,7 +2453,7 @@ async function runPremiumCompletionInner(
           (brandLicensingDegradedJsonParseRetry || !acc0.ok) &&
           structuralRetryEnabled &&
           !isLongCommerciallyUsablePremiumBody(doc.length) &&
-          !skipStructuralRetry
+          (!skipStructuralRetry || brandLicensingDegradedJsonParseRetry)
         ) {
           const preStructuralRetryDoc = doc;
           const preStructuralRetryFull = effectiveFull;
@@ -3120,8 +3120,15 @@ async function runPremiumCompletionInner(
           serverFullDocumentAuthoritative &&
           wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
           wireCorpusForFreeze.length > docTrimForFreeze.length;
+        const brandLicensingSubstantiveWireFreeze =
+          intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake) &&
+          wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+          (serverFullDocumentAuthoritative ||
+            authoritativeServerFullOnWire.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
         const freezePrepInput =
-          preferAuthoritativeWireForFreeze || useWireCorpusForFreeze
+          preferAuthoritativeWireForFreeze ||
+          useWireCorpusForFreeze ||
+          brandLicensingSubstantiveWireFreeze
             ? wireCorpusForFreeze
             : doc;
         const freezePrepTrim = (freezePrepInput || "").trim();
@@ -4282,6 +4289,10 @@ async function runPremiumCompletionInner(
     const serverRecoveryCandidate = (
       pipelineNormalizedAuthoritativeText || docTrimForSuppress
     ).trim();
+    const substantiveServerFullOnWire =
+      lastWireServerFullDocumentLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+      String(outMerged.premium_server_full_document_text ?? "").trim().length >=
+        SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
     const brandLicensingRejectedRecoveryEligible =
       rejectedPaidCorpusDueToClientGates &&
       intakeDescribesBrandLicensingDistributionManufacturingStack(intakeForRecovery) &&
@@ -4480,6 +4491,7 @@ async function runPremiumCompletionInner(
     if (
       rejectedPaidCorpusDueToClientGates &&
       !premiumBodyHardRejectedForDevContextLeak &&
+      !substantiveServerFullOnWire &&
       (degradedJsonParseNoWireServerFull ||
         (!jsonParseClientRejected &&
           lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN))
@@ -4527,6 +4539,7 @@ async function runPremiumCompletionInner(
       jsonParseClientRejected &&
       lastWireServerFullDocumentLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
     if (
+      !substantiveServerFullOnWire &&
       !skipServerDegradedRecovery &&
       serverRecoveryCandidate.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
       meetsPaidProDegradedRecoveryDisplayRequirements(serverRecoveryCandidate, intakeForRecovery)
@@ -4593,7 +4606,12 @@ async function runPremiumCompletionInner(
           premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
         })
       : null;
-    if (!blockLateThinWireRecovery && localRecovery.ok && degradedRecoveryPreview?.eligible) {
+    if (
+      !substantiveServerFullOnWire &&
+      !blockLateThinWireRecovery &&
+      localRecovery.ok &&
+      degradedRecoveryPreview?.eligible
+    ) {
       const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
       if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
       logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.accepted, {

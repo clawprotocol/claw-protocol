@@ -18,6 +18,13 @@ import {
   resolveBrandLicensingRoleFromProseIntake,
   resolveDeterministicQuadPartyNames,
 } from "./deterministicQuadPartyProFallback";
+import {
+  assertBrandLicensingRoleFidelityForFreeze,
+  resolveBrandLicensingAuthoritativeRoleMap,
+  resolveBrandLicensingPartyOrderFromIntake,
+} from "./paidProBrandLicensingRoleMap";
+import { assertNoRepeatedSupplementalProvisionsForFreeze } from "./paidProSupplementalProvisionsFillerGate";
+import { repairBrandLicensingRoleFidelityInCorpus } from "./paidProBrandLicensingRoleFidelityRepair";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
 import type { CanonicalPartyIdentityRecord } from "./canonicalPartyIdentityResolver";
@@ -37,6 +44,8 @@ export function brandLicensingFrozenCorpusHasProfessionalDefects(text: string): 
   if (!/MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(trimmed.slice(0, 600))) return true;
   if (/\(\s*["']Client["']\s*\)/i.test(head)) return true;
   if (/\(\s*["']Service Provider["']\s*\)/i.test(head)) return true;
+  if (/\bService Provider\s*\(\s*["']/i.test(head)) return true;
+  if (/\bClient\s*\(\s*["']/i.test(head)) return true;
   if (/the\s+the\s*["']Parties["']\)\.\s*GOVERNING LAW/i.test(trimmed)) return true;
   if (/Address:[^\n]*\bGOVERNING LAW\b/i.test(trimmed)) return true;
   if (hasBrandLicensingNoticeOrGoverningLawCorruption(trimmed)) return true;
@@ -59,6 +68,8 @@ export function brandLicensingOpeningRecitalNeedsAuthorityRepair(
   const partyNames = records.map((r) => r.fullLegalName);
   if (detectOpeningRecitalCrossMappedLegalNameAliases(text, partyNames)) return true;
   if (detectOpeningRecitalRoleLabelInversion(text, records)) return true;
+  if (/\bService Provider\s*\(\s*["']Master Distributor["']\s*\)/i.test(text)) return true;
+  if (/\bClient\s*\(\s*["']Marketing/i.test(text)) return true;
   return false;
 }
 
@@ -69,14 +80,20 @@ export function manifestRecordsFromBrandLicensingProseIntake(
   const intake = String(intakeText || "").trim();
   if (!intake) return [];
   const labeled = parseLabeledPartyBlocks(intake);
-  const proseOrder = resolveBrandLicensingPartyOrderFromProseIntake(intake);
+  const proseOrder = resolveBrandLicensingPartyOrderFromIntake(intake);
+  const fallbackProse = resolveBrandLicensingPartyOrderFromProseIntake(intake);
   const parties =
     proseOrder.length >= 4
       ? proseOrder.slice(0, 4)
-      : resolveDeterministicQuadPartyNames(intake, draft).slice(0, 4);
+      : fallbackProse.length >= 4
+        ? fallbackProse.slice(0, 4)
+        : resolveDeterministicQuadPartyNames(intake, draft).slice(0, 4);
   if (parties.length < 4) return [];
 
+  const roleMap = resolveBrandLicensingAuthoritativeRoleMap(intake, draft);
+
   return parties.map((fullLegalName, index) => {
+    const fromMap = roleMap.find((e) => partyLegalNamesMatch(e.fullLegalName, fullLegalName));
     const fromProse = resolveBrandLicensingRoleFromProseIntake(intake, fullLegalName);
     const fromDraft = (draft?.parties ?? []).find((p) =>
       partyLegalNamesMatch(String(p?.name ?? "").trim(), fullLegalName),
@@ -84,6 +101,7 @@ export function manifestRecordsFromBrandLicensingProseIntake(
     const draftRole = String(fromDraft?.role ?? "").trim();
     const block = labeled.find((b) => partyLegalNamesMatch(b.legalEntity, fullLegalName)) ?? labeled[index];
     const roleLabel =
+      fromMap?.roleLabel ||
       (fromProse && fromProse.length >= 2 ? fromProse : null) ||
       (draftRole.length >= 2 && !/^(?:party|client|service provider)$/i.test(draftRole) ? draftRole : null) ||
       (block?.roleLabel?.trim().length >= 2 ? block.roleLabel.trim() : null) ||
@@ -122,7 +140,8 @@ export function applyBrandLicensingFrozenCorpusAuthority(
       ? proseRecords.map((r) => r.fullLegalName).filter(isAuthoritativeLegalEntityName)
       : [];
   const parties = resolveDeterministicQuadPartyNames(intake, draft).filter(isAuthoritativeLegalEntityName);
-  const openingPartyOrder = proseParties.length >= 4 ? proseParties : parties;
+  const openingPartyOrder =
+    proseParties.length >= 4 ? proseParties : resolveBrandLicensingPartyOrderFromIntake(intake).slice(0, 4);
   const needsOpeningAuthority =
     openingPartyOrder.length >= 4 &&
     (brandLicensingFrozenCorpusHasProfessionalDefects(out) ||
@@ -197,6 +216,12 @@ export function assertBrandLicensingFrozenCorpusAuthorityForFreeze(
   ) {
     throw new Error("[paid-pro-sot-freeze-blocked] brand_licensing_professional_corpus_defect");
   }
+  const roleRepair = repairBrandLicensingRoleFidelityInCorpus(corpus, intake, draft ?? null);
+  if (roleRepair.text !== corpus) {
+    corpus = roleRepair.text.trimEnd();
+  }
+  assertBrandLicensingRoleFidelityForFreeze(corpus, intake, draft ?? null);
+  assertNoRepeatedSupplementalProvisionsForFreeze(corpus);
   const structureRepaired = applySectionStructureIntegrity(corpus, {
     source: "brand_licensing_freeze_final",
     repair: true,

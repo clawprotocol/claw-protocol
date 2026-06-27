@@ -58,9 +58,11 @@ export function buildTest443SubstantiveBrandLicensingServerBody(
     throw new Error(`test443_fallback_failed:${fallback.reasons.join(",")}`);
   }
   let body = padOperativeCorpusBeforeWitness(fallback.body, TEST443_MIN_SERVER_LEN);
+  let padIdx = 0;
   while (body.length < TEST443_MIN_SERVER_LEN) {
+    padIdx += 1;
     body +=
-      "\n\nSupplemental commercial provision. Each Party shall maintain inventory reporting under Oklahoma commercial standards.";
+      `\n\nSupplemental commercial provision ${padIdx}. Each Party shall maintain inventory reporting tier ${padIdx} under Oklahoma commercial standards.`;
   }
   return body;
 }

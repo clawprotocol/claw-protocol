@@ -15,7 +15,7 @@ import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNorma
 import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import { PAID_PRO_RECOVERY_MIN_DISPLAY_LEN } from "./paidProPostCheckoutRenderGate";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
-import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
 
 function oxfordPartyList(parties: readonly string[]): string {
   if (parties.length <= 1) return parties[0] ?? "";
@@ -29,9 +29,9 @@ function buildNoticeStanzas(
 ): string[] {
   return parties.map((party, index) => {
     const block = labeled.find((b) => b.legalEntity === party) ?? labeled[index];
-    const email = (block?.signerEmail || "").trim() || "primary business email on file with the Party";
+    const email = (block?.signerEmail || "").trim() || "provided during signer setup";
     const address =
-      (block?.address || "").trim() || "primary business address on file with the Party";
+      (block?.address || "").trim() || "provided during signer setup";
     const attn = block?.signerName
       ? `${block.signerName}${block.signerTitle ? `, ${block.signerTitle}` : ""}`
       : "Authorized Signer";
@@ -160,7 +160,7 @@ export function buildNPartyPaidProServerCorpus(args: {
 
   const minLen = args.minLen ?? PAID_PRO_RECOVERY_MIN_DISPLAY_LEN;
   if (body.length < minLen) {
-    body = padOperativeCorpusBeforeWitness(body, minLen);
+    body = expandOperativeCorpusWithUniqueSupplements(body, minLen);
   }
 
   return body.trim();

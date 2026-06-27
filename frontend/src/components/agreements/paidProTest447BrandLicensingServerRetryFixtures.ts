@@ -119,9 +119,11 @@ export function buildTest447ServerRetryDefectiveBody(
       ? `${buildTest447CorruptedNoticeRegionWithFifthParty()}\n\n${clean.slice(witnessIdx)}`
       : buildTest447CorruptedNoticeRegionWithFifthParty();
   let body = `${head}\n\n${tail}`;
+  let padIdx = 0;
   while (body.length < TEST447_MIN_SERVER_LEN) {
+    padIdx += 1;
     body +=
-      "\n\nSupplemental commercial provision. Each Party shall maintain inventory reporting under Oklahoma commercial standards.";
+      `\n\nSupplemental commercial provision ${padIdx}. Each Party shall maintain inventory reporting tier ${padIdx} under Oklahoma commercial standards.`;
   }
   if (body.length < TEST447_MIN_SERVER_LEN) {
     throw new Error(`test447_defective_body_too_short:${body.length}`);

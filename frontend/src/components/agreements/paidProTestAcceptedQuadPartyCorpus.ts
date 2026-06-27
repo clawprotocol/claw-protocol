@@ -5,17 +5,10 @@
 
 import { buildDeterministicQuadPartyMutualServicesProFallback } from "./deterministicQuadPartyProFallback";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
 
 export function padOperativeCorpusBeforeWitness(base: string, minLen = 2000): string {
-  if (base.length >= minLen) return base;
-  const witnessIdx = base.search(/\bIN WITNESS WHEREOF\b/i);
-  const insertAt = witnessIdx >= 0 ? witnessIdx : base.length;
-  let pad = "\n\nSupplemental Provisions\n\n";
-  while (base.length + pad.length < minLen) {
-    pad +=
-      "Each Party agrees to cooperate in good faith on milestones, deliverables, reporting, and change orders under this Agreement.\n\n";
-  }
-  return `${base.slice(0, insertAt)}${pad}${base.slice(insertAt)}`;
+  return expandOperativeCorpusWithUniqueSupplements(base, minLen);
 }
 
 export function buildAcceptedQuadPartyServerCorpus(

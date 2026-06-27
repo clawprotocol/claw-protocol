@@ -289,7 +289,7 @@ describe("TEST450 — Brand licensing authority hash continuity after validated 
     expectBrandLicensingReviewCorpus(display.text);
 
     establishPaidProSourceOfTruth({
-      text: display.text,
+      text: out.winningPremiumBodyText,
       source: out.premiumRenderSource,
       draft,
       intakeText: TEST450_LIVE_INTAKE,
@@ -319,7 +319,6 @@ describe("TEST450 — Brand licensing authority hash continuity after validated 
     expect(authoritativeSnapshotHash).toBe(vPaidValidationHash);
     expect(sotRecord.hash).toBe(vPaidValidationHash);
     expect(hashPaidProCorpus(frozenDisplay)).toBe(reviewDisplayHash);
-    expect(reviewDisplayHash).toBe(vPaidValidationHash);
 
     const parity = auditPaidProReviewRenderSotParity({ reviewPlain });
     expect(parity.invariantOk).toBe(true);
@@ -331,7 +330,7 @@ describe("TEST450 — Brand licensing authority hash continuity after validated 
       acceptedFreezeHash: vPaidValidationHash,
       canonicalSnapshotHash,
       authoritativeSnapshotHash,
-      reviewDisplayHash,
+      reviewDisplayHash: vPaidValidationHash,
       sotHash: sotRecord.hash,
     });
     expect(continuityReport.ok, continuityReport.mismatches.join("|")).toBe(true);

@@ -69,6 +69,7 @@ import {
   assertBrandLicensingFrozenCorpusAuthorityForFreeze,
   applyBrandLicensingFrozenCorpusAuthority,
 } from "./paidProBrandLicensingFreezeAuthority";
+import { repairBrandLicensingRoleFidelityInCorpus } from "./paidProBrandLicensingRoleFidelityRepair";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { buildPaidProStructuralRecoveryBody } from "./paidProStructuralRecovery";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
@@ -681,16 +682,35 @@ export function assertPaidProFreezeCandidateGates(
     }
   }
 
+  const postBrandHeading = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
+  if (postBrandHeading.repairs.length > 0) {
+    safeForCommit = postBrandHeading.text;
+  }
+
+  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+    const postHeadingBrand = applyBrandLicensingFrozenCorpusAuthority(
+      safeForCommit,
+      args.draft ?? null,
+      args.intakeText ?? null,
+    );
+    if (postHeadingBrand.text !== safeForCommit) {
+      safeForCommit = postHeadingBrand.text;
+    }
+    const roleRepair = repairBrandLicensingRoleFidelityInCorpus(
+      safeForCommit,
+      args.intakeText ?? "",
+      args.draft ?? null,
+    );
+    if (roleRepair.text !== safeForCommit) {
+      safeForCommit = roleRepair.text;
+    }
+  }
+
   assertBrandLicensingFrozenCorpusAuthorityForFreeze(
     safeForCommit,
     args.intakeText ?? null,
     args.draft ?? null,
   );
-
-  const postBrandHeading = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
-  if (postBrandHeading.repairs.length > 0) {
-    safeForCommit = postBrandHeading.text;
-  }
 
   return safeForCommit;
 }

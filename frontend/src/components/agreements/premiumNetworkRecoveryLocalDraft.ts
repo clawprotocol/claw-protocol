@@ -18,6 +18,10 @@ import {
   resolveBrandLicensingPartyOrderFromProseIntake,
   resolveDeterministicQuadPartyNames,
 } from "./deterministicQuadPartyProFallback";
+import {
+  resolveBrandLicensingAuthoritativeRoleMap,
+  resolveBrandLicensingPartyOrderFromIntake,
+} from "./paidProBrandLicensingRoleMap";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { applyPaidProExecutiveDraftPolish } from "./paidProExecutiveDraftPolish";
@@ -51,10 +55,15 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
   const labeledBlocks = parseLabeledPartyBlocks(rawIntake);
   const stripped = stripClientPremiumArtifactBlocksFromDraft(args.draft);
   const repairedParties = repairDraftPartiesFromIntakeAuthority(stripped.parties ?? [], rawIntake);
+  const brandLicensingPartyOrder = intakeDescribesBrandLicensingDistributionManufacturingStack(rawIntake)
+    ? resolveBrandLicensingPartyOrderFromIntake(rawIntake)
+    : [];
   const prosePartyOrder =
-    intakeDescribesBrandLicensingDistributionManufacturingStack(rawIntake)
-      ? resolveBrandLicensingPartyOrderFromProseIntake(rawIntake)
-      : [];
+    brandLicensingPartyOrder.length >= 4
+      ? brandLicensingPartyOrder
+      : intakeDescribesBrandLicensingDistributionManufacturingStack(rawIntake)
+        ? resolveBrandLicensingPartyOrderFromProseIntake(rawIntake)
+        : [];
   const draftAuthoritativeNames = (args.draft.parties ?? [])
     .map((p) => String(p.name || "").trim())
     .filter(isAuthoritativeLegalEntityName);
@@ -75,7 +84,14 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
             const fromRepaired = repairedParties.find((p) =>
               partyLegalNamesMatch(String(p?.name ?? "").trim(), name),
             );
-            return (fromRepaired ?? fromDraft ?? { name, role: "party" }) as never;
+            const fromRoleMap = resolveBrandLicensingAuthoritativeRoleMap(rawIntake, args.draft).find((e) =>
+              partyLegalNamesMatch(e.fullLegalName, name),
+            );
+            const role =
+              fromRoleMap?.roleLabel ||
+              String(fromRepaired?.role ?? fromDraft?.role ?? "").trim() ||
+              "party";
+            return (fromRepaired ?? fromDraft ?? { name, role }) as never;
           })
         : repairedParties.length
           ? repairedParties

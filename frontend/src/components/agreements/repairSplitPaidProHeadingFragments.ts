@@ -131,6 +131,28 @@ export function isDanglingPaidProMainHeadingPrefix(title: string): boolean {
   return false;
 }
 
+/** True when a numbered line title is a false clause fragment, not operative section body text. */
+function looksLikeFalseTopSectionHeadingTitle(title: string): boolean {
+  const trimmed = title.trim();
+  if (/^If to\b/i.test(trimmed)) return true;
+  if (!/^(?:The|Each|Either|Any|Unless|When)\b/i.test(trimmed)) return false;
+  if (trimmed.length > 48) return false;
+  if (BODY_VERB_RE.test(trimmed)) return false;
+  if (BODY_SENTENCE_START_RE.test(trimmed) && BODY_VERB_RE.test(trimmed)) return false;
+  if (/^[A-Z][A-Z\s/&,\-'.]{4,}$/.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (
+    words.length >= 4 &&
+    /\b(?:shall|will|must|may|should|agrees?|represents?|provides?|performs?|protects?|continues?|acknowledge)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return false;
+  }
+  if (words.length > 4) return false;
+  return true;
+}
+
 export function isPaidProHeadingContinuationFragment(line: string): boolean {
   const t = line.trim();
   if (!t || t.length < 2 || t.length > 72) return false;
@@ -199,7 +221,7 @@ export function repairSplitPaidProHeadingFragments(text: string): RepairSplitPai
     const line = lines[i]!;
     const trimmed = line.trim();
     const prefix = parseMainSectionPrefixLine(trimmed);
-    if (prefix && /^(?:If|The|Each|Either|Any|Unless|When)\b/i.test(prefix.title)) {
+    if (prefix && looksLikeFalseTopSectionHeadingTitle(prefix.title)) {
       const prevLine = out.length > 0 ? out[out.length - 1]?.trim() ?? "" : "";
       if (prevLine && !/^\d+\.\s+[A-Z]/.test(prevLine)) {
         out[out.length - 1] = `${prevLine} ${prefix.title}`.trim();

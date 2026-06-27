@@ -12,14 +12,20 @@ import {
   resolveAuthoritativeIntakePartyNames,
 } from "./partySlotIdentityNormalize";
 import { PAID_PRO_RECOVERY_MIN_DISPLAY_LEN } from "./paidProPostCheckoutRenderGate";
-import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
-import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
 import {
   intakeDescribesBrandLicensingDistributionManufacturingStack,
   resolveAgreementTitleFromIntakeScope,
 } from "./paidProAgreementTitleScope";
 import { buildDeterministicQuadPartyBrandLicensingProFallback } from "./deterministicQuadPartyProFallback";
+import {
+  assessBrandLicensingRoleFidelity,
+  resolveBrandLicensingPartyOrderFromIntake,
+} from "./paidProBrandLicensingRoleMap";
+import {
+  expandOperativeCorpusWithUniqueSupplements,
+  stripRepeatedSupplementalProvisionsFiller,
+} from "./paidProSupplementalProvisionsFillerGate";
 
 export function resolvePaidProRecoveryPartyNames(
   intakeText: string,
@@ -92,19 +98,28 @@ export function buildPaidProStructuralRecoveryBody(args: {
   const minLen = args.minLen ?? PAID_PRO_RECOVERY_MIN_DISPLAY_LEN + 1200;
 
   if (intakeDescribesBrandLicensingDistributionManufacturingStack(intake)) {
+    const roleOrder = resolveBrandLicensingPartyOrderFromIntake(intake).filter(isAuthoritativeLegalEntityName);
     const brandFallback = buildDeterministicQuadPartyBrandLicensingProFallback({
       draft,
       rawIntake: intake,
+      partyNames: roleOrder.length >= 4 ? roleOrder.slice(0, 4) : undefined,
     });
     if (brandFallback.ok) {
       let body = brandFallback.body;
-      const targetLen = Math.max(minLen, SUBSTANTIVE_SERVER_DRAFT_MIN_LEN, 15_000);
-      if (body.length < targetLen) {
-        body = padOperativeCorpusBeforeWitness(body, targetLen);
-        while (body.length < targetLen) {
-          body +=
-            "\n\nSupplemental commercial provision. Each Party shall maintain inventory reporting under Oklahoma commercial standards.";
-        }
+      const displayMin = Math.max(minLen, PAID_PRO_RECOVERY_MIN_DISPLAY_LEN);
+      if (body.length < displayMin) {
+        body = expandOperativeCorpusWithUniqueSupplements(body, displayMin);
+      }
+      const fillerStripped = stripRepeatedSupplementalProvisionsFiller(body);
+      body = fillerStripped.text;
+      const fidelity = assessBrandLicensingRoleFidelity(body, intake, draft);
+      if (!fidelity.ok) {
+        return {
+          ok: false,
+          body: "",
+          partyCount: 4,
+          reason: `brand_licensing_role_fidelity:${fidelity.defects.join(",")}`,
+        };
       }
       if (body.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
         return { ok: true, body, partyCount: 4, reason: null };
@@ -121,7 +136,8 @@ export function buildPaidProStructuralRecoveryBody(args: {
   });
 
   if (body.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
-    body = padOperativeCorpusBeforeWitness(body, PAID_PRO_RECOVERY_MIN_DISPLAY_LEN + 200);
+    body = expandOperativeCorpusWithUniqueSupplements(body, PAID_PRO_RECOVERY_MIN_DISPLAY_LEN + 200);
+    body = stripRepeatedSupplementalProvisionsFiller(body).text;
   }
 
   if (body.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {

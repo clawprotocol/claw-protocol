@@ -472,7 +472,7 @@ export function formatNoticeAddressLines(address: string): string[] {
 }
 
 const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE =
-  "Primary business address and email on file with the other Parties.";
+  "Notice details to be completed in signer setup.";
 
 export function isBareEntityOnlyNoticeStanza(stanza: string): boolean {
   const lines = stanza
@@ -960,6 +960,24 @@ export function repairIncompleteIfToNoticeStanzas(
         partyCount: authorityParties.length,
         stanzaCount: authorityParties.length,
       });
+    } else if (authorityParties.length >= 2) {
+      const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+      const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
+      const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+      const sectionNum = inferNoticesSectionNumber(head);
+      const partiesBlock = authorityParties
+        .map((p) => buildIfToNoticeStanza(p, authorityParties, roleContext))
+        .join("\n\n");
+      const noticesBlock = `\n\n${sectionNum}. NOTICES\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n${partiesBlock}`;
+      text = `${head.trimEnd()}${noticesBlock}${tail ? `\n\n${tail.trimStart()}` : ""}`
+        .replace(/\n{3,}/g, "\n\n")
+        .trimEnd();
+      repairs.push("notice:insert_missing_notices_region");
+      logPaidProNoticeSectionIntegrity({
+        repairs,
+        partyCount: authorityParties.length,
+        stanzaCount: authorityParties.length,
+      });
     }
     return { text: text.trimEnd(), repairs };
   }
@@ -1156,7 +1174,9 @@ export function ensureOperativeIfToNoticeDelivery(
     return false;
   });
 
+  const missingNoticesRegion = noticesIdx < 0;
   const missing =
+    missingNoticesRegion ||
     stanzasMissingPerPartyContact ||
     authorityParties.some((p) => {
       const email = p.signerEmail.trim();

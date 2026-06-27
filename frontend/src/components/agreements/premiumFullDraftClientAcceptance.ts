@@ -66,6 +66,12 @@ export function rejectPremiumDegradedFiller(body: string): PremiumClientAcceptan
   if (goodFaithCount > 2) {
     reasons.push("degraded_filler:repeated_good_faith_clause");
   }
+  const milestonesGoodFaith =
+    "each party agrees to cooperate in good faith on milestones, deliverables, reporting";
+  const milestonesCount = countLinesContaining(body, milestonesGoodFaith);
+  if (milestonesCount > 1) {
+    reasons.push("degraded_filler:repeated_supplemental_milestones_clause");
+  }
   const uniq = [...new Set(reasons)];
   return { ok: uniq.length === 0, reasons: uniq };
 }

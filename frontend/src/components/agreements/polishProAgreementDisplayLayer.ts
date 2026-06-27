@@ -14,7 +14,8 @@ import {
   intakeSpecifiesSimpleFixedFee,
 } from "./canonicalPartyIdentityResolver";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
-import { applyBrandLicensingFrozenCorpusAuthority, brandLicensingOpeningRecitalNeedsAuthorityRepair } from "./paidProBrandLicensingFreezeAuthority";
+import { applyBrandLicensingFrozenCorpusAuthority, brandLicensingFrozenCorpusHasProfessionalDefects, brandLicensingOpeningRecitalNeedsAuthorityRepair } from "./paidProBrandLicensingFreezeAuthority";
+import { stripRepeatedSupplementalProvisionsFiller } from "./paidProSupplementalProvisionsFillerGate";
 import { normalizeProAgreementSectionContinuity } from "./normalizeProAgreementSectionContinuity";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import {
@@ -189,6 +190,8 @@ export function stripUnsuppliedPartyAddressPlaceholders(
     /\b(?:principal\s+office|mailing\s+address|notice\s+address)\s*(?:is|:)?\s*(?:\[.*?\]|to\s+be\s+provided|not\s+supplied|________________)/i,
     /\b(?:at|located\s+at)\s+\[?(?:address|principal office|mailing address)\]?/i,
     /\[(?:corporation|entity type|address|principal office|mailing address)\]/i,
+    /\bprimary business (?:email|address) on file with the Party\b/i,
+    /\bAs stated in the agreement\.?\b/i,
   ];
   const kept = text.split("\n").filter((line) => {
     const t = line.trim();
@@ -588,9 +591,17 @@ export function polishProAgreementDisplayLayer(
   const repairs: string[] = [];
   let out = basicNormalize(input);
 
+  const fillerStrip = stripRepeatedSupplementalProvisionsFiller(out);
+  if (fillerStrip.repairs.length > 0 || fillerStrip.strippedCount > 0) {
+    out = fillerStrip.text;
+    repairs.push(...fillerStrip.repairs);
+  }
+
   if (
     opts?.intakeText &&
-    intakeDescribesBrandLicensingDistributionManufacturingStack(opts.intakeText)
+    intakeDescribesBrandLicensingDistributionManufacturingStack(opts.intakeText) &&
+    (brandLicensingFrozenCorpusHasProfessionalDefects(out) ||
+      brandLicensingOpeningRecitalNeedsAuthorityRepair(out, opts.intakeText, opts?.draft ?? null))
   ) {
     const brandAuthority = applyBrandLicensingFrozenCorpusAuthority(
       out,

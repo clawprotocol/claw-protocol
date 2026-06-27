@@ -269,13 +269,16 @@ function applyAcceptedProCorpusSafeDisplayCore(
     };
   }
 
-  if (hasAuthoritativeParties && records.length >= 2) {
-    if (!intakeDescribesBrandLicensingDistributionManufacturingStack(intakeRaw ?? "")) {
-      const openingGuard = ensurePaidProServicesAgreementOpening(out, records, intakeRaw);
-      if (openingGuard.text !== out) {
-        out = openingGuard.text;
-        repairs.push(...openingGuard.repairs);
-      }
+  if (
+    hasAuthoritativeParties &&
+    records.length === 2 &&
+    (opts?.draft?.parties ?? []).filter((p) => String(p?.name ?? "").trim().length >= 2).length <= 2 &&
+    !intakeDescribesBrandLicensingDistributionManufacturingStack(intakeRaw ?? "")
+  ) {
+    const openingGuard = ensurePaidProServicesAgreementOpening(out, records, intakeRaw);
+    if (openingGuard.text !== out) {
+      out = openingGuard.text;
+      repairs.push(...openingGuard.repairs);
     }
   }
 

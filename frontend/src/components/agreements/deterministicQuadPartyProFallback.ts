@@ -39,6 +39,17 @@ import {
   intakeDescribesBrandLicensingDistributionManufacturingStack,
   resolveAgreementTitleFromIntakeScope,
 } from "./paidProAgreementTitleScope";
+import {
+  resolveBrandLicensingAuthoritativeRoleMap,
+  resolveBrandLicensingEntityForRoleSlot,
+  resolveBrandLicensingPartyOrderFromIntake,
+  resolveBrandLicensingRoleLabelForEntity,
+  sanitizeBrandLicensingTermLine,
+  assessBrandLicensingRoleFidelity,
+} from "./paidProBrandLicensingRoleMap";
+import {
+  stripRepeatedSupplementalProvisionsFiller,
+} from "./paidProSupplementalProvisionsFillerGate";
 
 export const DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN = 7_500;
 
@@ -77,7 +88,9 @@ export function resolveDeterministicQuadPartyNames(
   draft?: ParsedDraftShape | null,
 ): string[] {
   const intake = String(rawIntake || "").trim();
-  const proseBrandOrder = resolveBrandLicensingPartyOrderFromProseIntake(intake);
+  const brandOrder = resolveBrandLicensingPartyOrderFromIntake(intake);
+  const proseBrandOrder =
+    brandOrder.length >= 4 ? brandOrder : resolveBrandLicensingPartyOrderFromProseIntake(intake);
   if (
     intakeDescribesBrandLicensingDistributionManufacturingStack(intake) &&
     proseBrandOrder.length >= 4
@@ -163,8 +176,8 @@ export function buildQuadPartyNoticeStanzas(parties: readonly string[]): string[
       `If to ${party}:`,
       party,
       "Attention: Authorized Signer",
-      "Email: primary business email on file with the Party",
-      "Address: primary business address on file with the Party",
+      "Email: provided during signer setup",
+      "Address: provided during signer setup",
     ].join("\n"),
   );
 }
@@ -425,7 +438,13 @@ function resolveBrandLicensingRoleLabel(
   draft?: ParsedDraftShape | null,
   rawIntake?: string,
 ): string {
-  const fromProse = rawIntake ? resolveBrandLicensingRoleFromProseIntake(rawIntake, party) : null;
+  const intake = String(rawIntake || "").trim();
+  const fromAuthority = intake
+    ? resolveBrandLicensingRoleLabelForEntity(party, intake, draft, labeledBlocks)
+    : null;
+  if (fromAuthority) return fromAuthority;
+
+  const fromProse = intake ? resolveBrandLicensingRoleFromProseIntake(intake, party) : null;
   if (fromProse) return fromProse;
 
   const fromDraft = (draft?.parties ?? []).find((p) =>
@@ -439,6 +458,18 @@ function resolveBrandLicensingRoleLabel(
   const block = labeledBlocks.find((b) => b.legalEntity === party) ?? labeledBlocks[index];
   const role = block?.roleLabel?.trim() ?? "";
   if (role.length >= 2) return role;
+
+  const mapEntry = intake
+    ? resolveBrandLicensingAuthoritativeRoleMap(intake, draft).find((e) =>
+        partyLegalNamesMatch(e.fullLegalName, party),
+      )
+    : null;
+  if (mapEntry?.roleLabel) return mapEntry.roleLabel;
+
+  const explicitRoles = intake ? resolveBrandLicensingAuthoritativeRoleMap(intake, draft) : [];
+  if (explicitRoles.some((e) => e.slot != null)) {
+    return mapEntry?.roleLabel || resolveBrandLicensingRoleLabelForEntity(party, intake, draft, labeledBlocks) || party;
+  }
   return `Party ${index + 1}`;
 }
 
@@ -530,7 +561,7 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
   const payment =
     resolvePaymentLine(draft, rawIntake) ||
     "Royalties, manufacturing margins, wholesale distribution margins, marketing compensation, and minimum purchase commitments as stated in the intake.";
-  const term = resolveTermLine(draft, rawIntake);
+  const term = sanitizeBrandLicensingTermLine(resolveTermLine(draft, rawIntake));
   const jResolved = resolveFinalGoverningLaw(rawIntake, draft, (draft.jurisdiction || "").trim() || "Oklahoma");
   const lawGoverning = /\boklahoma\b/i.test(jResolved)
     ? "the laws of the State of Oklahoma, without regard to conflict-of-law principles"
@@ -538,22 +569,37 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
 
   const noticeStanzas = buildQuadPartyNoticeStanzas(parties);
   const signatureBlocks = buildQuadPartySignatureBlocks(parties, labeledBlocks, rawIntake);
+
   const brandOwner =
+    resolveBrandLicensingEntityForRoleSlot("brand_owner", rawIntake, draft, parties) ??
     parties.find((party, i) =>
       /brand\s+owner/i.test(resolveBrandLicensingRoleLabel(party, i, labeledBlocks, draft, rawIntake)),
-    ) ?? parties[0]!;
+    ) ??
+    parties[0]!;
   const manufacturer =
+    resolveBrandLicensingEntityForRoleSlot("manufacturer", rawIntake, draft, parties) ??
     parties.find((party, i) =>
       /manufactur/i.test(resolveBrandLicensingRoleLabel(party, i, labeledBlocks, draft, rawIntake)),
-    ) ?? parties[1]!;
+    ) ??
+    parties[1]!;
   const distributor =
+    resolveBrandLicensingEntityForRoleSlot("master_distributor", rawIntake, draft, parties) ??
     parties.find((party, i) =>
       /\bdistribut/i.test(resolveBrandLicensingRoleLabel(party, i, labeledBlocks, draft, rawIntake)),
-    ) ?? parties[2]!;
+    ) ??
+    parties[2]!;
   const marketing =
+    resolveBrandLicensingEntityForRoleSlot("marketing_ecommerce_manager", rawIntake, draft, parties) ??
     parties.find((party, i) =>
       /marketing|e-?commerce/i.test(resolveBrandLicensingRoleLabel(party, i, labeledBlocks, draft, rawIntake)),
-    ) ?? parties[3]!;
+    ) ??
+    parties[3]!;
+
+  const territoryPhrase = /\bunited states and canada\b/i.test(rawIntake)
+    ? "the United States and Canada"
+    : /\bnorth america\b/i.test(rawIntake)
+      ? "North America"
+      : "the Territory described in the intake";
 
   const blocks = [
     titleUpper,
@@ -561,37 +607,37 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
     buildBrandLicensingOpeningRecital(parties, labeledBlocks, recitalPhrase, draft, rawIntake),
     "",
     "1. PURPOSE AND TRANSACTION SCOPE",
-    `The Parties will coordinate brand licensing, product manufacturing, wholesale distribution, and marketing and e-commerce management for the licensed products described in the intake. ${brandOwner} owns and controls the brand program. ${manufacturer} produces licensed goods under Brand Owner specifications. ${distributor} manages wholesale distribution and retail placement. ${marketing} manages marketing, marketplace, and e-commerce programs for the licensed products.`,
+    `The Parties will coordinate brand licensing, product manufacturing, wholesale distribution, and marketing and e-commerce management for the licensed products described in the intake. ${brandOwner} owns and controls the brand program, intellectual property, trademarks, and product specifications. ${manufacturer} manufactures licensed goods under Brand Owner specifications and approved materials. ${distributor} manages exclusive wholesale distribution and retail placement within ${territoryPhrase}. ${marketing} manages marketing campaigns, digital marketplace listings, promotional content, analytics, and e-commerce operations for the licensed products.`,
     "",
     "2. LICENSE GRANT AND BRAND IP",
-    `${brandOwner} grants the other Parties the licenses and brand usage rights necessary to manufacture, distribute, market, and sell the licensed products in the Territory and through the Approved Channels described in the intake, subject to quality standards and written brand guidelines.`,
+    `${brandOwner} grants the other Parties the licenses and brand usage rights necessary to manufacture, distribute, market, and sell the licensed products in ${territoryPhrase} and through the Approved Channels described in the intake, subject to quality standards, trademark guidelines, and written brand usage rules. Brand Owner retains all right, title, and interest in the brand program, trademarks, logos, product designs, and related intellectual property except as expressly licensed herein.`,
     "",
-    "3. MANUFACTURING AND QUALITY CONTROL",
-    `${manufacturer} will manufacture licensed products using approved specifications, quality standards, and audit rights described in the intake. No Party may substitute materials or change product specifications without Brand Owner's prior written approval.`,
+    "3. TRADEMARK AND BRAND GUIDELINES",
+    `Each Party will use Brand Owner trademarks, logos, and marketing assets only as permitted in written brand guidelines issued by ${brandOwner}. No Party may modify trademarks, create derivative marks, or use Brand Owner assets outside approved channels without prior written consent.`,
     "",
-    "4. DISTRIBUTION AND TERRITORY",
-    `${distributor} will manage wholesale distribution, retailer placement, and logistics coordination within the Territory. Each Party will comply with channel restrictions, exclusivity commitments, and reporting obligations stated in the intake.`,
+    "4. MANUFACTURING, QUALITY CONTROL, AND AUDIT RIGHTS",
+    `${manufacturer} will manufacture licensed products using approved specifications, materials, bills of materials, and production processes supplied or approved by ${brandOwner}. ${brandOwner} may inspect manufacturing facilities, review production records, and audit quality control processes used by ${manufacturer}. No substitution of materials or changes to specifications may occur without Brand Owner's prior written approval.`,
     "",
-    "5. MARKETING AND E-COMMERCE",
-    `${marketing} will manage marketing campaigns, digital marketplace listings, promotional content, and e-commerce operations for the licensed products using Brand Owner-approved assets and messaging.`,
+    "5. DISTRIBUTION, TERRITORY, AND EXCLUSIVITY",
+    `${distributor} will manage wholesale distribution, retailer placement, and logistics coordination within ${territoryPhrase} on an exclusive basis where stated in the intake. Each Party will comply with channel restrictions, exclusivity commitments, and territory limitations described in the intake or a signed commercial schedule.`,
     "",
-    "6. PAYMENT AND CONSIDERATION",
-    `Commercial compensation among the Parties is as follows: ${payment}. Each Party will invoice, report, and pay the other Parties according to the schedules and margin structures stated in the intake or a signed commercial schedule.`,
+    "6. MARKETING AND E-COMMERCE",
+    `${marketing} will manage marketing campaigns, Amazon, Shopify, Walmart Marketplace, digital advertising, customer analytics, and e-commerce operations for the licensed products using Brand Owner-approved assets, pricing policies, and messaging.`,
     "",
-    "7. TERM AND TERMINATION",
+    "7. INVENTORY REPORTING AND PAYMENT",
+    `Each Party involved in manufacturing, distribution, or e-commerce sales will provide inventory, sales, and channel reports on the schedules stated in the intake. Commercial compensation among the Parties is as follows: ${payment}. Each Party will invoice, report, and pay the other Parties according to the schedules, royalty waterfalls, and margin structures stated in the intake or a signed commercial schedule.`,
+    "",
+    "8. RETURNS, WARRANTIES, AND INSURANCE",
+    `Each Party will handle returns, product recalls, and customer warranty claims within its channel responsibilities. ${manufacturer} warrants that licensed products will conform to approved specifications at delivery. Each Party will maintain commercially reasonable insurance covering its activities under this Agreement, including general liability and product liability coverage where applicable.`,
+    "",
+    "9. CONFIDENTIALITY, INDEMNIFICATION, AND LIMITATION OF LIABILITY",
+    "Each Party will protect confidential information received from the other Parties and use it only to perform under this Agreement. Each Party will defend and indemnify the other Parties from third-party claims arising from that indemnifying Party's negligence, willful misconduct, product defects attributable to that Party, or material breach of this Agreement. Except for breaches of confidentiality, indemnification obligations, or willful misconduct, direct damages are limited to amounts paid or payable under this Agreement in the twelve (12) months preceding the claim.",
+    "",
+    "10. TERM AND TERMINATION",
     `The initial term is ${term}, unless extended or terminated as provided herein. A Party may terminate for uncured material breach on thirty (30) days' written notice.`,
     "",
-    "8. CONFIDENTIALITY",
-    "Each Party will protect confidential information received from the other Parties and use it only to perform under this Agreement.",
-    "",
-    "9. INDEMNIFICATION",
-    "Each Party will defend and indemnify the other Parties from third-party claims arising from that indemnifying Party's negligence, willful misconduct, product defects attributable to that Party, or material breach of this Agreement, subject to the limitation of liability section.",
-    "",
-    "10. LIMITATION OF LIABILITY",
-    "Except for breaches of confidentiality, indemnification obligations, or willful misconduct, direct damages are limited to amounts paid or payable under this Agreement in the twelve (12) months preceding the claim.",
-    "",
     "11. NOTICES",
-    "Notices under this Agreement must be in writing and delivered by email, nationally recognized courier, personal delivery, or certified or registered mail to the applicable notice address below.",
+    "Notices under this Agreement must be in writing and delivered by email, nationally recognized courier, personal delivery, or certified or registered mail to the applicable notice address below. Notice contact details may be completed during signer setup before execution.",
     "",
     ...noticeStanzas.flatMap((stanza) => ["", stanza]),
     "",
@@ -630,6 +676,7 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
       `trademark compliance segment ${padIdx + 1}, and channel audit checkpoint ${padIdx + 1} under the payment schedules in this Agreement.`;
     padIdx += 1;
   }
+  body = stripRepeatedSupplementalProvisionsFiller(body).text;
 
   const acceptance = validateDeterministicQuadPartyProFallbackAcceptance({
     body,
@@ -638,6 +685,15 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
   });
   if (!acceptance.ok) {
     return { ok: false, body: "", reasons: acceptance.reasons };
+  }
+
+  const roleFidelity = assessBrandLicensingRoleFidelity(body, rawIntake, draft);
+  if (!roleFidelity.ok) {
+    return {
+      ok: false,
+      body: "",
+      reasons: ["brand_licensing_role_fidelity", ...roleFidelity.defects],
+    };
   }
 
   if (body.trim().length < PREMIUM_USABLE_BODY_MIN_LEN) {

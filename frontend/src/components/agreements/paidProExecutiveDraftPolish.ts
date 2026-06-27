@@ -12,7 +12,6 @@ import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormali
 import {
   findNoticesSectionStart,
   removeRedundantNoticesSubheading,
-  resolveOperativeNoticesFamilyEnd,
 } from "./paidProPartyNoticeDetails";
 import {
   buildQuadPartyNoticeStanzas,
@@ -224,15 +223,23 @@ export function rebuildBrandLicensingNoticesAndGoverningLawSection(
 ): { text: string; repairs: string[] } {
   if (parties.length < 4) return { text, repairs: [] };
   const body = (text || "").replace(/\r\n/g, "\n");
+  if (
+    /\b11\.\s+NOTICES\b/i.test(body) &&
+    /\b12\.\s+GOVERNING LAW\b/i.test(body) &&
+    /\b13\.\s+MISCELLANEOUS/i.test(body) &&
+    !hasBrandLicensingNoticeOrGoverningLawCorruption(body)
+  ) {
+    return { text: body, repairs: [] };
+  }
+
   const noticesIdx = findNoticesSectionStart(body);
   if (noticesIdx < 0) return { text: body, repairs: [] };
 
   const witnessIdx = resolveAuthoritativeWitnessIndex(body);
   const noticesEnd = witnessIdx >= 0 ? witnessIdx : body.length;
-  const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(body, noticesIdx);
   const before = body.slice(0, noticesIdx);
-  const afterNoticesFamily = body.slice(noticesFamilyEnd, noticesEnd);
-  const tail = body.slice(noticesEnd);
+  const operativeTail = body.slice(noticesIdx, noticesEnd);
+  const executionTail = body.slice(noticesEnd);
 
   const jurisdiction = resolveFinalGoverningLaw(
     intakeText,
@@ -264,14 +271,15 @@ export function rebuildBrandLicensingNoticesAndGoverningLawSection(
     governingClause,
   ].join("\n");
 
-  const miscMatch = afterNoticesFamily.match(/^\s*(\d+)\.\s+MISCELLANEOUS/i);
-  const miscBlock = miscMatch
-    ? afterNoticesFamily.replace(/^\s*\d+\.\s+MISCELLANEOUS/i, "13. MISCELLANEOUS")
-    : afterNoticesFamily.trim()
-      ? `13. MISCELLANEOUS AND ELECTRONIC SIGNATURES\n\n${afterNoticesFamily.trim()}`
+  const miscRelativeIdx = operativeTail.search(/(?:^|\n)\s*\d+\.\s+MISCELLANEOUS/i);
+  const miscBlock =
+    miscRelativeIdx >= 0
+      ? operativeTail
+          .slice(miscRelativeIdx)
+          .replace(/^\s*\d+\.\s+MISCELLANEOUS/i, "13. MISCELLANEOUS AND ELECTRONIC SIGNATURES")
       : "13. MISCELLANEOUS AND ELECTRONIC SIGNATURES\nThis Agreement may be executed in counterparts using electronic signatures permitted by applicable law.";
 
-  const merged = `${before.trimEnd()}\n\n${rebuilt}\n\n${miscBlock.trim()}\n\n${tail.trimStart()}`
+  const merged = `${before.trimEnd()}\n\n${rebuilt}\n\n${miscBlock.trim()}\n\n${executionTail.trimStart()}`
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd();
 

@@ -123,6 +123,33 @@ function openingSliceBeforeSection1(text: string): string {
   return match >= 0 ? text.slice(0, match) : text.slice(0, 2_500);
 }
 
+/**
+ * Preserve substantive numbered sections that appear before the first Section 1 anchor.
+ * Wire malformations may insert commercial sections (e.g. Revenue Allocation) ahead of Section 1.
+ */
+function extractPreservedOperativePrefixBeforeSectionOne(operative: string, sec1Idx: number): string {
+  if (sec1Idx <= 0) return "";
+  const prefix = operative.slice(0, sec1Idx).trim();
+  if (!prefix) return "";
+
+  const numberedSectionRe = /^\s*(\d+)\.\s+(?!\d+\.)([A-Z])/gm;
+  const matches = [...prefix.matchAll(numberedSectionRe)];
+  if (matches.length === 0) return "";
+
+  const blocks: string[] = [];
+  for (let i = 0; i < matches.length; i += 1) {
+    const m = matches[i]!;
+    const sectionNum = Number(m[1]);
+    if (!Number.isFinite(sectionNum) || sectionNum <= 1) continue;
+    const start = m.index ?? 0;
+    const nextStart =
+      i + 1 < matches.length ? (matches[i + 1]!.index ?? prefix.length) : prefix.length;
+    const block = prefix.slice(start, nextStart).trim();
+    if (block) blocks.push(block);
+  }
+  return blocks.join("\n\n").trim();
+}
+
 /** True when paid Pro services corpus lacks a valid title + recital before Section 1. */
 export function detectPaidProMalformedServicesOpening(
   text: string,
@@ -402,12 +429,17 @@ export function repairPaidProMultiPartyAgreementOpening(
 
   const { operative, executionTail } = splitOperativeAndExecutionTail(body);
   const sec1Idx = findOpeningSectionOneIndex(operative);
+  const preservedPrefix = extractPreservedOperativePrefixBeforeSectionOne(operative, sec1Idx);
   const operativeRemainder = sec1Idx >= 0 ? operative.slice(sec1Idx).trim() : operative;
-  const remainder = executionTail
-    ? `${operativeRemainder}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
+  const remainderBody = preservedPrefix
+    ? `${preservedPrefix}\n\n${operativeRemainder}`.replace(/\n{3,}/g, "\n\n").trim()
     : operativeRemainder;
+  const remainder = executionTail
+    ? `${remainderBody}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
+    : remainderBody;
   const opening = buildCanonicalPaidProMultiPartyOpeningRecital(records, intakeText);
   repairs.push("opening:prepend_canonical_multiparty_recital");
+  if (preservedPrefix) repairs.push("opening:preserve_pre_section_one_operative_blocks");
   return { text: `${opening}${remainder}`, repairs };
 }
 
