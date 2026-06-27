@@ -89,6 +89,7 @@ import {
   relocatePostWitnessNumberedPaddingBeforeWitness,
   stripNumberedOperativeSectionsAfterExecution,
 } from "./paidProSupplementalProvisionsFillerGate";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
@@ -777,6 +778,24 @@ export function assertPaidProFreezeCandidateGates(
   const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
   if (preClauseNoticesHeading.repairs.length > 0) {
     safeForCommit = preClauseNoticesHeading.text;
+  }
+
+  const canonicalNoticePartyCount = resolveAuthoritativeSignerCount({
+    intakeText: args.intakeText ?? null,
+    draftPartyNames: prep.parties.map((p) => p.name),
+    manifestPartyCount: prep.parties.length,
+  }).count;
+  if (
+    freezeEntryText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    canonicalNoticePartyCount >= 2
+  ) {
+    const trimmedNotices = trimOperativeNoticeStanzasToPartyCount(
+      safeForCommit,
+      canonicalNoticePartyCount,
+    );
+    if (trimmedNotices.repairs.length > 0) {
+      safeForCommit = trimmedNotices.text;
+    }
   }
 
   assertClauseFamilyStructuralIntegrityForFreeze(safeForCommit, {

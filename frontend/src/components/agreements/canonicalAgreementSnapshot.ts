@@ -1,7 +1,11 @@
 import { applyProCorpusIntegrity, type ProCorpusIntegrityReport } from "./proCorpusIntegrity";
 import {
   analyzeTemplatePlaceholderFragments,
+  demoteNoticeSignerSetupDraftingFatals,
+  demotePaidProSignatureOnlyFatals,
+  prepareAgreementTextForPlaceholderScan,
   repairAgreementTemplatePlaceholders,
+  resolvePlaceholderPartyNamesWithMeta,
 } from "./agreementTemplatePlaceholderSafety";
 import { listUnresolvedIdentityPlaceholderTokens } from "./paidProPlaceholderAttributionLog";
 import {
@@ -277,11 +281,28 @@ export function collectFatalPaidProPlaceholderIssueCodes(
   text: string,
   opts?: { intakeText?: string | null; partyNames?: readonly string[] },
 ): string[] {
+  const intakeRaw = opts?.intakeText ?? "";
+  const partyNames = opts?.partyNames ? [...opts.partyNames] : [];
+  const prepared = prepareAgreementTextForPlaceholderScan(text);
+  const partyResolution = resolvePlaceholderPartyNamesWithMeta(
+    { intakeRaw, partyNames },
+    prepared,
+  );
+  let remainingDetail = analyzeTemplatePlaceholderFragments(prepared, {
+    intakeRaw,
+    partyNames: partyResolution.names,
+  });
+  const sigDemotion = demotePaidProSignatureOnlyFatals(
+    remainingDetail,
+    prepared.length,
+    partyResolution,
+  );
+  remainingDetail = sigDemotion.decisions;
+  const noticeDemotion = demoteNoticeSignerSetupDraftingFatals(remainingDetail);
+  remainingDetail = noticeDemotion.decisions;
+
   const issues = new Set<string>();
-  const fatal = analyzeTemplatePlaceholderFragments(text, {
-    intakeRaw: opts?.intakeText ?? null,
-    partyNames: opts?.partyNames ? [...opts.partyNames] : [],
-  }).filter((d) => d.fatal);
+  const fatal = remainingDetail.filter((d) => d.fatal);
   if (fatal.length > 0) {
     issues.add("unresolved_bracket_token");
     for (const decision of fatal) {
@@ -289,7 +310,7 @@ export function collectFatalPaidProPlaceholderIssueCodes(
       if (tag) issues.add(tag);
     }
   }
-  if (listUnresolvedIdentityPlaceholderTokens(text).length > 0) {
+  if (listUnresolvedIdentityPlaceholderTokens(prepared).length > 0) {
     issues.add("unresolved_identity_or_address_placeholder");
   }
   return [...issues];

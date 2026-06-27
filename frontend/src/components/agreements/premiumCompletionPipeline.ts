@@ -3158,6 +3158,10 @@ async function runPremiumCompletionInner(
           wireDocumentText ||
           (doc || "").trim()
         ).trim();
+        const wireHasSubstantiveServerFullCorpus =
+          originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+          wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+          authoritativeServerFullOnWire.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
         const docTrimForFreeze = (doc || "").trim();
         const useWireCorpusForFreeze =
           wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
@@ -3262,7 +3266,8 @@ async function runPremiumCompletionInner(
               freezeCommit = wireFreezeDirect;
               if (
                 freezeCommit.text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
-                authoritativeServerFullOnWire.length === 0
+                authoritativeServerFullOnWire.length === 0 &&
+                !wireHasSubstantiveServerFullCorpus
               ) {
                 freezeAcceptedSource = "structural_recovery";
               }
@@ -3291,7 +3296,8 @@ async function runPremiumCompletionInner(
                 freezeCommit = wireFreeze;
                 if (
                   freezeCommit.text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
-                  authoritativeServerFullOnWire.length === 0
+                  authoritativeServerFullOnWire.length === 0 &&
+                  !wireHasSubstantiveServerFullCorpus
                 ) {
                   freezeAcceptedSource = "structural_recovery";
                 }
@@ -3348,7 +3354,7 @@ async function runPremiumCompletionInner(
           }
         }
         if (!freezeCommit.ok) {
-          if (!vPaidAuthoritativeSubstantive) {
+          if (!vPaidAuthoritativeSubstantive && !wireHasSubstantiveServerFullCorpus) {
             const structural = buildPaidProStructuralRecoveryBody({
               intakeText: rawForSoT || rawIntake,
               draft: mergedForApi,
@@ -3395,6 +3401,7 @@ async function runPremiumCompletionInner(
             : "mislabeled_server_full_draft_below_substantive_min";
           let structuralRecovered = false;
           if (
+            !wireHasSubstantiveServerFullCorpus &&
             !vPaidAuthoritativeSubstantive &&
             intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake)
           ) {
@@ -3494,13 +3501,17 @@ async function runPremiumCompletionInner(
             doc.length < Math.floor(wireCorpusForFreeze.length * 0.85);
           const jsonParseWireWinRestore =
             jsonParseNonfatalAccept && wireLenBelowSubstantiveFloor;
-          const substantiveBrandWireWinRestore =
-            intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake) &&
-            originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+          const substantiveWireWinRestore =
+            (originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+              wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) &&
             doc.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
-          if (substantiveBrandWireWinRestore) {
+          if (substantiveWireWinRestore) {
+            const substantiveWireSource =
+              originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+                ? originalWireServerFullDocumentText
+                : wireCorpusForFreeze;
             const wireDisplayed = applyAcceptedProCorpusSafeDisplay(
-              originalWireServerFullDocumentText,
+              substantiveWireSource,
               {
                 draft: mergedForApi,
                 intakeText: rawForSoT || rawIntake,
@@ -3513,13 +3524,13 @@ async function runPremiumCompletionInner(
               wireDisplayed.length >=
               Math.max(
                 SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
-                Math.floor(originalWireServerFullDocumentText.length * 0.85),
+                Math.floor(substantiveWireSource.length * 0.85),
               )
                 ? wireDisplayed
-                : originalWireServerFullDocumentText;
+                : substantiveWireSource;
             doc = wireCandidate;
             const postWitnessWire = finalizeSubstantiveWireAfterWitnessCleanup(
-              originalWireServerFullDocumentText,
+              substantiveWireSource,
               doc,
             );
             if (postWitnessWire.repairs.length > 0) {
@@ -3551,7 +3562,10 @@ async function runPremiumCompletionInner(
             outMerged = stripClientPremiumArtifactBlocksFromDraft({
               ...outMerged,
               premium_full_document_text: doc,
-              premium_server_full_document_text: originalWireServerFullDocumentText,
+              premium_server_full_document_text:
+                substantiveWireSource.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+                  ? substantiveWireSource
+                  : originalWireServerFullDocumentText,
             });
           } else if (jsonParseWireWinRestore) {
             const wireDisplayed = applyAcceptedProCorpusSafeDisplay(wireCorpusForFreeze, {
@@ -3603,6 +3617,14 @@ async function runPremiumCompletionInner(
             doc = postWitnessCommit.text;
           }
           winningPremiumBodyText = doc;
+          if (
+            wireHasSubstantiveServerFullCorpus &&
+            doc.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+            (freezeAcceptedSource === "structural_recovery" ||
+              freezeAcceptedSource === "deterministic_recovery_freeze_candidate")
+          ) {
+            freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+          }
           tracePaidProAcceptancePipelineStage({
             stage: "premium_completion_pipeline_final",
             source: freezeAcceptedSource,

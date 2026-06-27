@@ -17,6 +17,8 @@ import {
   hasFalseFragmentSectionHeading,
   repairOrphanNumberFragmentContinuationLines,
 } from "./paidProOrphanSectionNumberRepair";
+import { classifyPaidProDocumentBlocks } from "./paidProDocumentBlockClassifier";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 
 export type PaidProSectionHierarchyMarker = {
   major: number;
@@ -52,6 +54,30 @@ const TOP_LEVEL_HEADING_RE = /^(\d{1,2})\.\s+(?!\d+\.\d)(.+)$/;
 
 const MAX_REPAIRABLE_MISSING_PARENTS = 2;
 const MAX_REPAIRABLE_MISSING_INTERMEDIATES = 4;
+
+function countRemainingHeadingBodyCollapses(text: string): number {
+  return classifyPaidProDocumentBlocks(text).filter((block) => {
+    if (block.kind !== "main_section_heading") return false;
+    const remainder = block.block.slice(block.firstLine.length).trim();
+    return Boolean(
+      remainder && !isPaidProNumberedSectionHeadingLine(remainder.split("\n")[0]?.trim() ?? ""),
+    );
+  }).length;
+}
+
+function shouldWarnOnlySectionHeadingTitleAnomaliesForSubstantiveFreeze(
+  text: string,
+  diagnostics: PaidProSectionStructureCompletenessDiagnostics,
+): boolean {
+  if (text.trim().length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) return false;
+  if (diagnostics.sectionHeadingTitleAnomalies.length === 0) return false;
+  if (diagnostics.missingParentSections.length > 0) return false;
+  if (diagnostics.missingIntermediateSections.length > 0) return false;
+  if (diagnostics.syntheticMalformedHeadings.length > 0) return false;
+  if (diagnostics.fatal) return false;
+  if (countRemainingHeadingBodyCollapses(text) > 0) return false;
+  return true;
+}
 
 let lastCompletenessLogKey = "";
 
@@ -476,15 +502,23 @@ export function applyPaidProSectionStructureCompletenessAuthority(
     };
   }
 
+  const warnOnlyTitleAnomalies = shouldWarnOnlySectionHeadingTitleAnomaliesForSubstantiveFreeze(
+    out,
+    analysis,
+  );
+  if (warnOnlyTitleAnomalies && analysis.sectionHeadingTitleAnomalies.length > 0) {
+    repairs.push("section_heading_title_anomaly:warn_only_substantive_freeze");
+  }
+
   const rejected =
     analysis.fatal ||
     analysis.missingParentSections.length > 0 ||
     analysis.missingIntermediateSections.length > 0 ||
     analysis.syntheticMalformedHeadings.length > 0 ||
-    analysis.sectionHeadingTitleAnomalies.length > 0;
+    (!warnOnlyTitleAnomalies && analysis.sectionHeadingTitleAnomalies.length > 0);
 
   const rejectReason = rejected
-    ? analysis.sectionHeadingTitleAnomalies.length > 0
+    ? analysis.sectionHeadingTitleAnomalies.length > 0 && !warnOnlyTitleAnomalies
       ? "section_heading_title_anomaly"
       : analysis.syntheticMalformedHeadings.length > 0
         ? "section_structure_synthetic_malformed_headings"
