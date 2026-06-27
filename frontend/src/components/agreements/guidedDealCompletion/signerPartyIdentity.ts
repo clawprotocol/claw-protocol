@@ -624,11 +624,12 @@ export function mergeDraftPartiesFromCanonicalIdentities<
 >(draft: T, identities: readonly CanonicalPartyIdentity[]): T {
   const parties = [...(draft.parties ?? [])];
   for (const id of identities) {
-    if (!id.partyDisplayName) continue;
+    if (!id?.partyDisplayName) continue;
     while (parties.length <= id.index) {
       parties.push({ name: "", role: "party", email: "" });
     }
     const prev = parties[id.index] ?? {};
+    const isIndividual = id.isIndividual ?? isIndividualPartyName(id.partyDisplayName);
     parties[id.index] = {
       ...prev,
       name: id.partyDisplayName,
@@ -636,10 +637,10 @@ export function mergeDraftPartiesFromCanonicalIdentities<
       role: prev.role || "party",
       signerName:
         id.representativeName ??
-        (id.isIndividual ? id.partyDisplayName : undefined) ??
+        (isIndividual ? id.partyDisplayName : undefined) ??
         prev.signerName ??
         undefined,
-      signerTitle: id.isIndividual
+      signerTitle: isIndividual
         ? id.title ?? undefined
         : id.title ?? prev.signerTitle ?? undefined,
     };

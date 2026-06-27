@@ -894,6 +894,11 @@ import {
 } from "./paidProDisplayPlainAuthority";
 import { resolvePaidProSignerFinalizeRawCorpus } from "./paidProSignerFinalizeRawCorpus";
 import {
+  evaluatePaidProSigningHandoffReadiness,
+  resolvePaidProSigningHandoffPartyManifest,
+  resolvePaidProSigningHandoffSignerManifest,
+} from "./paidProSigningHandoffAuthority";
+import {
   auditPaidProReviewLinkCorpusParity,
   logPaidProReviewLinkCorpusParity,
   resolvePaidProReviewLinkCorpusPlain,
@@ -1343,7 +1348,6 @@ import {
 } from "./guidedDealCompletion/guidedReviewSigningContinuity";
 import {
   assertGuidedVs01SigningHandoffReady,
-  buildGuidedSignaturePacketFromManifest,
   logGuidedSignatureCorpusSelected,
   logGuidedSignatureGenericSendBypassed,
   logGuidedSignaturePacketBuilt,
@@ -21733,10 +21737,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setAgreementDocumentText(corpusText);
     freezeGuidedAuthoritativeCorpusSnapshot(corpusText, "continue_to_signing");
     acceptGuidedReviewCorpus(corpusText, "signature");
-    canonicalSignerManifestRef.current = buildGuidedSignaturePacketFromManifest(
-      guidedFinalPartyManifest,
-      peekPremiumSenderSignFirst() ?? true,
-    );
+    const signingHandoffManifest = resolvePaidProSigningHandoffPartyManifest({
+      fallbackManifest: guidedFinalPartyManifest,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+    });
+    const signingHandoffReadiness = evaluatePaidProSigningHandoffReadiness({
+      manifest: signingHandoffManifest,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+      requiredPartyCount: guidedPreReviewSignerSlots.requiredCount,
+    });
+    if (!signingHandoffReadiness.ok) {
+      setGuidedFinalizeModalBlockedMessage(
+        "Signer details or the final agreement are not ready for signing. Return to final review and try again.",
+      );
+      return "";
+    }
+    canonicalSignerManifestRef.current = resolvePaidProSigningHandoffSignerManifest({
+      manifest: signingHandoffReadiness.manifest,
+      signFirst: peekPremiumSenderSignFirst() ?? true,
+      intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+    });
     setGuidedAuthVersionNonce((n) => n + 1);
     const recipientEmails = [
       recipient1Email.trim(),
@@ -25219,8 +25242,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
 
+      const signingHandoffManifest = resolvePaidProSigningHandoffPartyManifest({
+        fallbackManifest: guidedFinalPartyManifest,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+      });
       const handoffAssert = assertGuidedVs01SigningHandoffReady({
-        manifest: guidedFinalPartyManifest,
+        manifest: signingHandoffManifest,
         corpusSource: selected.source,
         corpusBody: selected.body,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,

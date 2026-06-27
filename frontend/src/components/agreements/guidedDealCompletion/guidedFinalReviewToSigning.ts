@@ -19,6 +19,7 @@ import {
   corpusSignatureBlocksHaveRequiredByLines,
 } from "./signatureRegion";
 import { resolveSignerCountFromManifest } from "../signerCountAuthority";
+import { isIndividualPartyName } from "./signerPartyIdentity";
 import {
   renumberGuidedTopLevelSectionsSequentially,
   stripGuidedInstructionLeakLines,
@@ -458,14 +459,19 @@ export function buildGuidedSignaturePacketFromManifest(
   return {
     signFirst,
     entries: identities
-      .filter((id) => id.partyDisplayName.trim().length > 0)
-      .map((id, index) => ({
+      .filter(
+        (id): id is CanonicalPartyIdentity =>
+          Boolean(id) && id.partyDisplayName.trim().length > 0,
+      )
+      .map((id, index) => {
+        const isIndividual = id.isIndividual ?? isIndividualPartyName(id.partyDisplayName);
+        return {
         partyName: id.partyDisplayName.trim(),
         signerName:
           id.representativeName?.trim() &&
           normLoosePartyName(id.representativeName) !== normLoosePartyName(id.partyDisplayName)
             ? id.representativeName.trim()
-            : id.isIndividual
+            : isIndividual
               ? id.partyDisplayName.trim()
               : id.representativeName?.trim() || id.partyDisplayName.trim(),
         title: id.title?.trim() || null,
@@ -473,7 +479,8 @@ export function buildGuidedSignaturePacketFromManifest(
         signingOrder: signFirst ? index : identities.length - index - 1,
         reviewStatus: "pending" as const,
         signatureStatus: "pending" as const,
-      })),
+      };
+      }),
   };
 }
 
@@ -735,6 +742,9 @@ export function assertGuidedVs01SigningHandoffReady(args: {
     },
     "guided_vs01_handoff",
   );
+  if (parties.length < 2) {
+    return { ok: false, reason: "manifest_party_rows_missing" };
+  }
   if (partyCount < 2) {
     return { ok: false, reason: "manifest_party_count" };
   }
@@ -751,9 +761,14 @@ export function assertGuidedVs01SigningHandoffReady(args: {
   if (!corpusSignatureBlocksHaveRequiredByLines(body, partyCount)) {
     return { ok: false, reason: "missing_by_signature_lines" };
   }
-  const p0 = parties[0]!;
-  const p1 = parties[1]!;
-  if (p0.isIndividual && !p0.isSenderSide) {
+  const p0 = parties[0];
+  const p1 = parties[1];
+  if (!p0 || !p1) {
+    return { ok: false, reason: "manifest_party_rows_missing" };
+  }
+  const p0Individual = p0.isIndividual ?? isIndividualPartyName(p0.partyName);
+  const p1Individual = p1.isIndividual ?? isIndividualPartyName(p1.partyName);
+  if (p0Individual && !p0.isSenderSide) {
     return { ok: false, reason: "sender_must_be_entity_or_primary" };
   }
   if (
@@ -769,7 +784,7 @@ export function assertGuidedVs01SigningHandoffReady(args: {
   ) {
     return { ok: false, reason: "counterparty_entity_mismatch" };
   }
-  if (p1.isIndividual && p1.signerTitle?.trim() && !p1.signerName?.trim()) {
+  if (p1Individual && p1.signerTitle?.trim() && !p1.signerName?.trim()) {
     return { ok: false, reason: "individual_title_without_signer" };
   }
   return { ok: true };

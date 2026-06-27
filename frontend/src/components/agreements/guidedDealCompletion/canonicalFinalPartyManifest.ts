@@ -372,7 +372,8 @@ export function manifestToCanonicalPartyIdentities(
     representativeName: p.signerName,
     title: p.signerTitle,
     blockHeading: blockHeadingForManifestParty(p),
-    isIndividual: p.partyName ? isIndividualPartyName(p.partyName) : false,
+    isIndividual:
+      p.isIndividual ?? (p.partyName ? isIndividualPartyName(p.partyName) : false),
   }));
 }
 
