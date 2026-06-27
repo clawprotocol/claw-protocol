@@ -15,9 +15,16 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { applyBrandLicensingFrozenCorpusAuthority, brandLicensingFrozenCorpusHasProfessionalDefects, brandLicensingOpeningRecitalNeedsAuthorityRepair } from "./paidProBrandLicensingFreezeAuthority";
-import { stripRepeatedSupplementalProvisionsFiller } from "./paidProSupplementalProvisionsFillerGate";
-import { normalizeProAgreementSectionContinuity } from "./normalizeProAgreementSectionContinuity";
+import { finalizeSubstantiveWireAfterWitnessCleanup, stripRepeatedSupplementalProvisionsFiller } from "./paidProSupplementalProvisionsFillerGate";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
+import { trimOperativeNoticeStanzasToPartyCount } from "./paidProPartyNoticeDetails";
+import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
+import { normalizeProAgreementSectionContinuity } from "./normalizeProAgreementSectionContinuity";
+import {
+  ensurePaidProAcceptanceExecutionBlockInvariant,
+  isGenericPaidProAcceptanceManifestFallback,
+  resolveAcceptanceManifestRecordsForExecution,
+} from "./paidProAcceptanceExecutionBlockInvariant";
 import {
   getAcceptedPremiumDisplayText,
   isAcceptedPremiumCanonicalEstablished,
@@ -740,6 +747,79 @@ export function polishProAgreementDisplayLayer(
     if (reconciled.repairs > 0) {
       out = reconciled.text;
       repairs.push("display:reconcile_execution_block_roles");
+    }
+  }
+
+  if (
+    opts?.intakeText &&
+    intakeDescribesBrandLicensingDistributionManufacturingStack(opts.intakeText) &&
+    opts?.draft
+  ) {
+    const manifest = resolveAcceptanceManifestRecordsForExecution({
+      draft: opts.draft,
+      intakeText: opts.intakeText,
+    });
+    if (manifest.length >= 3 && !isGenericPaidProAcceptanceManifestFallback(manifest)) {
+      const trimmedNotices = trimOperativeNoticeStanzasToPartyCount(out, manifest.length);
+      if (trimmedNotices.repairs.length > 0) {
+        out = trimmedNotices.text;
+        repairs.push(...trimmedNotices.repairs);
+      }
+    }
+    const structureIntegrity = applySectionStructureIntegrity(out, {
+      source: "polishProAgreementDisplayLayer:brand_licensing_final",
+      repair: true,
+    });
+    if (structureIntegrity.text !== out) {
+      out = structureIntegrity.text;
+      repairs.push(...structureIntegrity.repairs.map((r) => `section_structure:${r}`));
+    }
+    const structureResidual = applySectionStructureIntegrity(out, {
+      source: "polishProAgreementDisplayLayer:brand_licensing_residual_check",
+      repair: false,
+    });
+    if (structureResidual.anomalyCount > 0) {
+      const brandAuthority = applyBrandLicensingFrozenCorpusAuthority(
+        out,
+        opts.draft,
+        opts.intakeText,
+      );
+      if (brandAuthority.text !== out) {
+        out = brandAuthority.text;
+        repairs.push(...brandAuthority.repairs);
+      }
+      const structureRetry = applySectionStructureIntegrity(out, {
+        source: "polishProAgreementDisplayLayer:brand_licensing_authority_retry",
+        repair: true,
+      });
+      if (structureRetry.text !== out) {
+        out = structureRetry.text;
+        repairs.push(...structureRetry.repairs.map((r) => `section_structure:${r}`));
+      }
+    }
+    const witnessIdx = out.search(/\bIN WITNESS WHEREOF\b/i);
+    if (
+      witnessIdx >= 0 &&
+      manifest.length >= 3 &&
+      !isGenericPaidProAcceptanceManifestFallback(manifest)
+    ) {
+      const afterWitness = out.slice(witnessIdx);
+      const hasGenericExecutionLabels =
+        /^\s*CLIENT\s*:/im.test(afterWitness) ||
+        /^\s*SERVICE PROVIDER\s*:/im.test(afterWitness) ||
+        /^\s*PARTY\s+[34]\s*:/im.test(afterWitness);
+      if (hasGenericExecutionLabels) {
+        const execInvariant = ensurePaidProAcceptanceExecutionBlockInvariant(out, manifest);
+        if (execInvariant.text !== out) {
+          out = execInvariant.text;
+          repairs.push(...execInvariant.repairs, "display:brand_licensing_execution_manifest_repair");
+        }
+      }
+      const witnessCleanup = finalizeSubstantiveWireAfterWitnessCleanup(out, out);
+      if (witnessCleanup.repairs.length > 0) {
+        out = witnessCleanup.text;
+        repairs.push(...witnessCleanup.repairs);
+      }
     }
   }
 

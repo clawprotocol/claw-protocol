@@ -42,6 +42,9 @@ import {
   neutralizeHarmlessEntityMetadataPlaceholders,
 } from "./harmlessEntityMetadataPlaceholders";
 import { runCachedCorpusScan } from "./paidProCorpusScanCache";
+import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -57,6 +60,7 @@ export type PlaceholderTokenCategory =
   | "signature_region_slot"
   | "soft_field_label"
   | "drafting_phrase"
+  | "notice_signer_setup_scaffold"
   | "schedule_stub"
   | "angle_stub"
   | "other";
@@ -302,7 +306,7 @@ const TO_BE_COMPLETED_EXACT_RE = /\bto\s+be\s+completed\b/gi;
 const CONTEXTUAL_DRAFTING_STUB_POSITIVE_RE =
   /\b(?:schedule\s+a|statement\s+of\s+work|\bsow\b|milestones?|deliverables?|implementation\s+schedule|workstreams?)\b/i;
 const CONTEXTUAL_DRAFTING_STUB_NEGATIVE_RE =
-  /\b(?:notice\s+address|address\s+for\s+notice|email\s+for\s+notice|party\s+notice\s+details|effective\s+date|recitals?|in\s+witness\s+whereof)\b/i;
+  /\b(?:notice\s+address|address\s+for\s+notice|email\s+for\s+notice|party\s+notice\s+details|effective\s+date|recitals?|in\s+witness\s+whereof|signer\s+setup|provided during signer setup)\b/i;
 const CONTEXTUAL_DRAFTING_STUB_CONTEXT_RADIUS = 160;
 const CONTEXTUAL_DRAFTING_STUB_REPLACEMENT = "as confirmed by the Parties in writing";
 const SCHEDULE_STUB_RE = /\bschedule\s+a\b[^.\n]{0,120}\b(?:tbd|placeholder|to\s+be\s+completed|\[)\b/gi;
@@ -432,6 +436,20 @@ export function resolvePlaceholderPartyNamesWithMeta(
   }
   const corpusAmong = 0;
   const anchorsFound = corpusHasResolvedPartyAnchors(corpusText || "", names, ctx.intakeRaw);
+  const intakeRaw = String(ctx.intakeRaw || "").trim();
+  if (intakeRaw && intakeDescribesBrandLicensingDistributionManufacturingStack(intakeRaw)) {
+    const quad = resolveDeterministicQuadPartyNames(intakeRaw, null)
+      .filter(isAuthoritativeLegalEntityName)
+      .slice(0, 4);
+    if (quad.length >= 4) {
+      return {
+        names: quad,
+        partyCount: quad.length,
+        anchorsFound: corpusHasResolvedPartyAnchors(corpusText || "", quad, intakeRaw),
+        sources: { mergedParties, intakeExtraction, corpusBetween, corpusAmong },
+      };
+    }
+  }
   return {
     names,
     partyCount: names.length,
@@ -611,6 +629,63 @@ export function demotePaidProSignatureOnlyFatals(
     };
   });
   return { decisions: next, demoted: demotedCount > 0, demotedCount };
+}
+
+function isNoticeSignerSetupScaffoldingContext(text: string, index: number): boolean {
+  const start = Math.max(0, index - 220);
+  const end = Math.min(text.length, index + 220);
+  const window = text.slice(start, end);
+  if (/provided during signer setup/i.test(window)) return true;
+  if (/Notice details to be completed in signer setup/i.test(window)) return true;
+  if (/\bsigner setup\b/i.test(window) && /\b(?:Email|Address|Attn|Attention|If to)\b/i.test(window)) {
+    return true;
+  }
+  if (/\bIf to\s+/i.test(window) && /\b(?:Email|Address)\s*:\s*provided during signer setup/i.test(window)) {
+    return true;
+  }
+  const noticesIdx = text.search(/\b\d+\.\s+NOTICES\b/i);
+  if (noticesIdx >= 0 && index >= noticesIdx) {
+    const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+    if (witnessIdx < 0 || index < witnessIdx) {
+      if (/\bto be completed\b/i.test(window) && /\b(?:notice|email|address|attn|attention)\b/i.test(window)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function isNoticeSignerSetupDraftingToken(token: string, snippet: string): boolean {
+  if (!/\bto be completed\b/i.test(token) && !/provided during signer setup/i.test(snippet)) {
+    return false;
+  }
+  return isNoticeSignerSetupScaffoldingContext(`${snippet}\n${token}`, Math.max(0, snippet.length - 1));
+}
+
+/** Demote notice contact-detail scaffolding fatals — signer details are collected later in Pro review. */
+export function demoteNoticeSignerSetupDraftingFatals(
+  decisions: PlaceholderTokenDecision[],
+): { decisions: PlaceholderTokenDecision[]; demoted: boolean; demotedCount: number } {
+  let demotedCount = 0;
+  const next = decisions.map((d) => {
+    if (!d.fatal || d.category !== "drafting_phrase") return d;
+    if (!isNoticeSignerSetupDraftingToken(d.token, d.contextSnippet)) return d;
+    demotedCount += 1;
+    return {
+      ...d,
+      fatal: false,
+      category: "notice_signer_setup_scaffold" as const,
+    };
+  });
+  return { decisions: next, demoted: demotedCount > 0, demotedCount };
+}
+
+export function remainingFatalsAreNoticeSignerSetupScaffoldingOnly(
+  remainingDetail: readonly PlaceholderTokenDecision[],
+): boolean {
+  const fatals = remainingDetail.filter((d) => d.fatal);
+  if (fatals.length === 0) return false;
+  return fatals.every((d) => isNoticeSignerSetupDraftingToken(d.token, d.contextSnippet));
 }
 
 function contextSnippet(text: string, index: number, radius = 60): string {
@@ -860,7 +935,8 @@ export function classifyTemplateFragment(
   }
   if (DRAFTING_STUB_PHRASE_RE.test(token)) {
     DRAFTING_STUB_PHRASE_RE.lastIndex = 0;
-    return { ...base, category: "drafting_phrase", fatal: !inExec };
+    const noticeScaffold = isNoticeSignerSetupScaffoldingContext(text, index);
+    return { ...base, category: "drafting_phrase", fatal: !inExec && !noticeScaffold };
   }
   if (SCHEDULE_STUB_RE.test(token)) {
     SCHEDULE_STUB_RE.lastIndex = 0;
@@ -1479,6 +1555,8 @@ function finalizeUserVisibleAgreementPlainTextCore(
     partyResolution,
   );
   remainingDetail = demotion.decisions;
+  const noticeDemotion = demoteNoticeSignerSetupDraftingFatals(remainingDetail);
+  remainingDetail = noticeDemotion.decisions;
   const remainingFatal = remainingDetail.filter((d) => d.fatal).map((d) => d.token);
   const remaining = [...new Set(remainingDetail.map((d) => d.token))].slice(0, 40);
 

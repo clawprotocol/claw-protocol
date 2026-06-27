@@ -200,9 +200,14 @@ import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryab
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 import {
   finalizeUserVisibleAgreementPlainText,
+  remainingFatalsAreNoticeSignerSetupScaffoldingOnly,
   repairContextualDraftingStubPhrases,
   resolvePlaceholderPartyNamesWithMeta,
 } from "./agreementTemplatePlaceholderSafety";
+import {
+  finalizeSubstantiveWireAfterWitnessCleanup,
+} from "./paidProSupplementalProvisionsFillerGate";
+import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import {
   intakeHasFullLegalEntityParties,
   resolveCanonicalPartyIdentitiesFromSources,
@@ -1782,6 +1787,8 @@ async function runPremiumCompletionInner(
   } | null = null;
   let pipelineNormalizedAuthoritativeText = "";
   let rejectedPaidCorpusDueToClientGates = false;
+  let placeholderRemainingDetail: import("./agreementTemplatePlaceholderSafety").PlaceholderTokenDecision[] =
+    [];
   let premiumJsonParseDegradedAttemptCount = 0;
 
   try {
@@ -1986,6 +1993,7 @@ async function runPremiumCompletionInner(
       let effectiveFull: PremiumFullDraftResult = full;
       let wireDocumentText = (full.document_text || "").trim();
       let wireServerFullDocumentText = (full.server_full_document_text || "").trim();
+      const originalWireServerFullDocumentText = wireServerFullDocumentText;
       let wireGenerationOutcomeOnWire = (full.generation_outcome || "").trim();
       let wireFailureCodeOnWire = (full.server_generation_failure_code || "").trim();
       const syncPremiumWireMetadataFromEffective = (payload: PremiumFullDraftResult) => {
@@ -2883,8 +2891,18 @@ async function runPremiumCompletionInner(
           agreementFamily: merged.agreement_family ?? null,
           surface: "premium_completion_pipeline",
         });
+        placeholderRemainingDetail = ph.remainingDetail;
         fatalPlaceholderCount = ph.remainingFatal.length;
-        if (!ph.ok) {
+        const substantiveLenBeforePlaceholder = Math.max(
+          (doc || "").trim().length,
+          wireServerFullDocumentText.length,
+          (effectiveFull.server_full_document_text || "").trim().length,
+        );
+        const noticeScaffoldingOnlyBlock =
+          !ph.ok &&
+          remainingFatalsAreNoticeSignerSetupScaffoldingOnly(ph.remainingDetail) &&
+          substantiveLenBeforePlaceholder >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+        if (!ph.ok && !noticeScaffoldingOnlyBlock) {
           placeholderClientOk = false;
           if (!proIntentGateMessage) {
             proIntentGateMessage =
@@ -2899,7 +2917,35 @@ async function runPremiumCompletionInner(
             accepted: false,
           });
         } else {
-          doc = ph.text;
+          const substantivePhCorpusPreserve =
+            intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake) &&
+            substantiveLenBeforePlaceholder >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+            ph.text.length < Math.floor(substantiveLenBeforePlaceholder * 0.85);
+          if (substantivePhCorpusPreserve) {
+            doc =
+              wireServerFullDocumentText.length >= substantiveLenBeforePlaceholder
+                ? wireServerFullDocumentText
+                : (doc || "").trim().length >= substantiveLenBeforePlaceholder
+                  ? doc
+                  : ph.text;
+            logPremiumCompletionDebug({
+              stage: "pipeline_placeholder_substantive_corpus_preserved",
+              phLen: ph.text.length,
+              preservedLen: doc.length,
+              substantiveLen: substantiveLenBeforePlaceholder,
+            });
+          } else {
+            doc = ph.text;
+          }
+          if (noticeScaffoldingOnlyBlock) {
+            placeholderClientOk = true;
+            fatalPlaceholderCount = 0;
+            logPremiumCompletionDebug({
+              stage: "pipeline_placeholder_notice_scaffolding_warn_only",
+              remaining_nonfatal: ph.remainingDetail.filter((d) => !d.fatal).map((d) => d.token),
+              substantiveLen: substantiveLenBeforePlaceholder,
+            });
+          }
         }
         paidProPerfRecordInstant(
           "placeholder_gate",
@@ -3254,20 +3300,51 @@ async function runPremiumCompletionInner(
           }
         }
         if (!freezeCommit.ok) {
-          const recovery = previewRecoverPaidProFreezeCandidate({
-            draft: mergedForApi,
-            intakeText: rawForSoT || rawIntake,
-            surface: "premium_completion_pipeline_accept_recovery",
-          });
-          const serverLen = doc.length;
           if (
-            recovery.ok &&
-            (serverLen < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
-              recovery.text.length >= Math.floor(serverLen * 0.85))
+            vPaidAuthoritativeSubstantive &&
+            wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
           ) {
-            doc = recovery.text;
-            freezeCommit = recovery;
-            freezeAcceptedSource = "deterministic_recovery_freeze_candidate";
+            const vpaidWireDisplay = applyAcceptedProCorpusSafeDisplay(wireCorpusForFreeze, {
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              surface: "premium_completion_pipeline:vpaid_authoritative_wire_freeze",
+            }).text.trim();
+            const vpaidWireFreeze = resolvePaidProFreezeCommitText({
+              text: vpaidWireDisplay,
+              source: freezeSource,
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              agreementGenerationId: input.agreementGenerationId ?? null,
+              generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+              surface: "premium_completion_pipeline:vpaid_authoritative_wire_freeze",
+            });
+            if (vpaidWireFreeze.ok && vpaidWireFreeze.text.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+              doc = vpaidWireDisplay;
+              freezeCommit = vpaidWireFreeze;
+              freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+            }
+          }
+        }
+        if (!freezeCommit.ok) {
+          const skipDeterministicRecoveryForSubstantiveWire =
+            vPaidAuthoritativeSubstantive &&
+            wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+          if (!skipDeterministicRecoveryForSubstantiveWire) {
+            const recovery = previewRecoverPaidProFreezeCandidate({
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              surface: "premium_completion_pipeline_accept_recovery",
+            });
+            const serverLen = doc.length;
+            if (
+              recovery.ok &&
+              (serverLen < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
+                recovery.text.length >= Math.floor(serverLen * 0.85))
+            ) {
+              doc = recovery.text;
+              freezeCommit = recovery;
+              freezeAcceptedSource = "deterministic_recovery_freeze_candidate";
+            }
           }
         }
         if (!freezeCommit.ok) {
@@ -3302,31 +3379,6 @@ async function runPremiumCompletionInner(
                 }
               }
             }
-          }
-        }
-        if (
-          !freezeCommit.ok &&
-          vPaidAuthoritativeSubstantive &&
-          wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
-        ) {
-          const vpaidWireDisplay = applyAcceptedProCorpusSafeDisplay(wireCorpusForFreeze, {
-            draft: mergedForApi,
-            intakeText: rawForSoT || rawIntake,
-            surface: "premium_completion_pipeline:vpaid_authoritative_wire_freeze",
-          }).text.trim();
-          const vpaidWireFreeze = resolvePaidProFreezeCommitText({
-            text: vpaidWireDisplay,
-            source: freezeSource,
-            draft: mergedForApi,
-            intakeText: rawForSoT || rawIntake,
-            agreementGenerationId: input.agreementGenerationId ?? null,
-            generationOutcome: (effectiveFull.generation_outcome || "").trim(),
-            surface: "premium_completion_pipeline:vpaid_authoritative_wire_freeze",
-          });
-          if (vpaidWireFreeze.ok && vpaidWireFreeze.text.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
-            doc = vpaidWireDisplay;
-            freezeCommit = vpaidWireFreeze;
-            freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
           }
         }
         if (
@@ -3437,18 +3489,98 @@ async function runPremiumCompletionInner(
           }
         } else {
           doc = freezeCommit.text;
-          const jsonParseWireWinRestore =
-            jsonParseNonfatalAccept &&
-            wireCorpusForFreeze.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+          const wireLenBelowSubstantiveFloor =
+            wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
             doc.length < Math.floor(wireCorpusForFreeze.length * 0.85);
-          if (jsonParseWireWinRestore) {
+          const jsonParseWireWinRestore =
+            jsonParseNonfatalAccept && wireLenBelowSubstantiveFloor;
+          const substantiveBrandWireWinRestore =
+            intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake) &&
+            originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+            doc.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+          if (substantiveBrandWireWinRestore) {
+            const wireDisplayed = applyAcceptedProCorpusSafeDisplay(
+              originalWireServerFullDocumentText,
+              {
+                draft: mergedForApi,
+                intakeText: rawForSoT || rawIntake,
+                surface: "premium_completion_pipeline:substantive_brand_wire_winning",
+                agreementGenerationId: input.agreementGenerationId ?? null,
+                sourceKind: freezeSource,
+              },
+            ).text.trim();
+            const wireCandidate =
+              wireDisplayed.length >=
+              Math.max(
+                SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
+                Math.floor(originalWireServerFullDocumentText.length * 0.85),
+              )
+                ? wireDisplayed
+                : originalWireServerFullDocumentText;
+            doc = wireCandidate;
+            const postWitnessWire = finalizeSubstantiveWireAfterWitnessCleanup(
+              originalWireServerFullDocumentText,
+              doc,
+            );
+            if (postWitnessWire.repairs.length > 0) {
+              doc = postWitnessWire.text;
+            }
+            const substantiveWireFreeze = resolvePaidProFreezeCommitText({
+              text: doc,
+              source: freezeSource,
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              agreementGenerationId: input.agreementGenerationId ?? null,
+              generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+              surface: "premium_completion_pipeline:substantive_brand_wire_winning_freeze",
+            });
+            if (substantiveWireFreeze.ok) {
+              doc = substantiveWireFreeze.text;
+              freezeCommit = substantiveWireFreeze;
+            } else {
+              freezeCommit = {
+                ok: true,
+                text: doc,
+                hash: hashPaidProCorpus(doc),
+                rejectReason: null,
+                reviewParties: freezeCommit.reviewParties,
+                parties: freezeCommit.parties,
+              };
+            }
+            freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+            outMerged = stripClientPremiumArtifactBlocksFromDraft({
+              ...outMerged,
+              premium_full_document_text: doc,
+              premium_server_full_document_text: originalWireServerFullDocumentText,
+            });
+          } else if (jsonParseWireWinRestore) {
             const wireDisplayed = applyAcceptedProCorpusSafeDisplay(wireCorpusForFreeze, {
               draft: mergedForApi,
               intakeText: rawForSoT || rawIntake,
               surface: "premium_completion_pipeline:json_parse_wire_winning",
+              agreementGenerationId: input.agreementGenerationId ?? null,
+              sourceKind: freezeSource,
             }).text.trim();
             if (wireDisplayed.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
-              doc = wireDisplayed;
+              const wireWinFreeze = resolvePaidProFreezeCommitText({
+                text: wireDisplayed,
+                source: freezeSource,
+                draft: mergedForApi,
+                intakeText: rawForSoT || rawIntake,
+                agreementGenerationId: input.agreementGenerationId ?? null,
+                generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+                surface: "premium_completion_pipeline:json_parse_wire_freeze",
+              });
+              if (
+                wireWinFreeze.ok &&
+                wireWinFreeze.text.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+              ) {
+                doc = wireWinFreeze.text;
+                freezeCommit = wireWinFreeze;
+                freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+              } else {
+                doc = wireDisplayed;
+              }
               outMerged = stripClientPremiumArtifactBlocksFromDraft({
                 ...outMerged,
                 premium_full_document_text: doc,
@@ -3458,6 +3590,17 @@ async function runPremiumCompletionInner(
                     : doc,
               });
             }
+          }
+          const postWitnessCommit = finalizeSubstantiveWireAfterWitnessCleanup(
+            originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+              ? originalWireServerFullDocumentText
+              : wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+                ? wireCorpusForFreeze
+                : doc,
+            doc,
+          );
+          if (postWitnessCommit.repairs.length > 0) {
+            doc = postWitnessCommit.text;
           }
           winningPremiumBodyText = doc;
           tracePaidProAcceptancePipelineStage({
@@ -3715,12 +3858,20 @@ async function runPremiumCompletionInner(
         const preserveBlockedByStructuralFatals =
           fatalPlaceholderCount > 0 ||
           (structuralFatalCount > 0 && !brandLicensingPreserveIntake);
+        const substantiveServerFullNoticeScaffoldingOnlyReject =
+          Math.max(
+            (doc || "").trim().length,
+            (effectiveFull.server_full_document_text || "").trim().length,
+            wireServerFullDocumentText.length,
+          ) >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+          remainingFatalsAreNoticeSignerSetupScaffoldingOnly(placeholderRemainingDetail);
         let brandStructuralRecoveryCommitted = false;
         if (
           !vPaidAuthoritativeSubstantive &&
           shouldAttemptPreserve &&
           !preserveBlockedByStructuralFatals &&
-          brandLicensingPreserveIntake
+          brandLicensingPreserveIntake &&
+          !substantiveServerFullNoticeScaffoldingOnlyReject
         ) {
           const structural = buildPaidProStructuralRecoveryBody({
             intakeText: intakeSForPreserve,
@@ -3915,6 +4066,17 @@ async function runPremiumCompletionInner(
           premiumRenderSource = "rejected_paid_corpus";
           rejectedPaidCorpusDueToClientGates = true;
         }
+        if (
+          !brandStructuralRecoveryCommitted &&
+          !(winningPremiumBodyText || "").trim() &&
+          brandLicensingPreserveIntake &&
+          degradedJsonParseWithoutSubstantiveServerFull &&
+          lastWireAuthoritativeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+          lastWireAuthoritativeBodyLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+        ) {
+          premiumRenderSource = "rejected_paid_corpus";
+          rejectedPaidCorpusDueToClientGates = true;
+        }
       }
     }
   } catch (e) {
@@ -3936,6 +4098,73 @@ async function runPremiumCompletionInner(
     premiumRenderSource !== "premium_generation_retryable" &&
     premiumRenderSource !== "premium_full_draft_cors_blocked"
   ) {
+    const intakeForThinWireRecovery = (rawForSoT || rawIntake || "").trim();
+    const thinWireFailureCode =
+      serverDegradedHttpMetaForRecovery?.code ?? serverGenerationDegraded?.code ?? null;
+    const substantiveWirePresent =
+      Math.max(
+        lastWireServerFullDocumentLen,
+        String(outMerged.premium_server_full_document_text ?? "").trim().length,
+        pipelineNormalizedAuthoritativeText.length,
+      ) >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+    const thinWireBrandLicensingJsonParse =
+      intakeForThinWireRecovery.length > 0 &&
+      intakeDescribesBrandLicensingDistributionManufacturingStack(intakeForThinWireRecovery) &&
+      (lastWireGenerationOutcome === "degraded" || Boolean(serverGenerationDegraded)) &&
+      isNonfatalGenerationFailureCode(thinWireFailureCode) &&
+      !substantiveWirePresent &&
+      lastWireAuthoritativeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+      lastWireAuthoritativeBodyLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+    if (thinWireBrandLicensingJsonParse) {
+      const thinLocalRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
+        draft: outMerged,
+        rawIntake: intakeForThinWireRecovery,
+        intakeLower: intakeLowerGlobal,
+        recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+      });
+      const thinPreview = thinLocalRecovery.ok
+        ? previewPostCheckoutRecoverySotCommit({
+            body: thinLocalRecovery.body,
+            draft: outMerged,
+            intakeText: intakeForThinWireRecovery,
+            premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+          })
+        : null;
+      if (
+        thinLocalRecovery.ok &&
+        meetsPaidProDegradedRecoveryDisplayRequirements(
+          thinLocalRecovery.body,
+          intakeForThinWireRecovery,
+        )
+      ) {
+        clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
+        const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+        winningPremiumBodyText = thinLocalRecovery.body;
+        premiumRenderSource = recoverySource;
+        outMerged = stripClientPremiumArtifactBlocksFromDraft({
+          ...outMerged,
+          premium_full_document_text: thinLocalRecovery.body,
+        });
+        freezeAcceptedPremiumBodyForSession(
+          input.agreementGenerationId,
+          thinLocalRecovery.body,
+          recoverySource,
+        );
+        markPaidProPipelineValidationPassed({
+          text: thinLocalRecovery.body,
+          source: recoverySource,
+        });
+        logPremiumCompletionDebug({
+          stage: "premium_degraded_server_local_recovery",
+          recoveryCandidateEligible: true,
+          premiumRenderSource: recoverySource,
+          bodyLen: thinLocalRecovery.body.length,
+          displayPlainLen: thinPreview?.displayPlainLen ?? thinLocalRecovery.body.length,
+          note: "thin_wire_json_parse_fallback_guard",
+        });
+      }
+    }
+    if (!(winningPremiumBodyText || "").trim()) {
     const stripped = stripClientPremiumArtifactBlocksFromDraft(outMerged);
     const rawSoT = rawForSoT || rawIntake;
     let fb =
@@ -4014,6 +4243,7 @@ async function runPremiumCompletionInner(
         fbLen,
         candidateLen,
       });
+    }
     }
   }
 
@@ -4296,6 +4526,10 @@ async function runPremiumCompletionInner(
     const brandLicensingRejectedRecoveryEligible =
       rejectedPaidCorpusDueToClientGates &&
       intakeDescribesBrandLicensingDistributionManufacturingStack(intakeForRecovery) &&
+      !(
+        substantiveServerFullOnWire &&
+        remainingFatalsAreNoticeSignerSetupScaffoldingOnly(placeholderRemainingDetail)
+      ) &&
       (Math.max(
         serverRecoveryCandidate.length,
         String(outMerged.premium_server_full_document_text ?? "").trim().length,

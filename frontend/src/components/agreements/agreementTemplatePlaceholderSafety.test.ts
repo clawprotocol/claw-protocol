@@ -319,6 +319,28 @@ describe("repairContextualDraftingStubPhrases", () => {
     expectStillFatalDraftingStub(`${pad}\nPayment mechanics shall be to be completed.\n${pad}`);
   });
 
+  it("demotes notice If-to signer-setup scaffolding on substantive brand-licensing corpus", () => {
+    const notices = [
+      "11. NOTICES",
+      "Notices under this Agreement must be in writing.",
+      "",
+      "If to Evergreen Outdoor Brands LLC:",
+      "Evergreen Outdoor Brands LLC",
+      "Attention: Authorized Signer",
+      "Email: to be completed",
+      "Address: provided during signer setup",
+    ].join("\n");
+    const raw = `${pad}\n${notices}\n${pad}`;
+    const fin = finalizeUserVisibleAgreementPlainText(raw, {
+      intakeRaw:
+        "Evergreen Outdoor Brands LLC (Brand Owner) and Atlas Consumer Products Inc. (Manufacturer) brand licensing agreement.",
+      partyNames: ["Evergreen Outdoor Brands LLC", "Atlas Consumer Products Inc."],
+      surface: "premium_completion_pipeline",
+    });
+    expect(fin.ok, fin.remainingFatal.join("|")).toBe(true);
+    expect(fin.remainingDetail.filter((d) => d.fatal)).toHaveLength(0);
+  });
+
   it("leaves signature and execution context unchanged", () => {
     const raw =
       `${pad}\nIN WITNESS WHEREOF, the Parties have executed this Agreement.\n` +

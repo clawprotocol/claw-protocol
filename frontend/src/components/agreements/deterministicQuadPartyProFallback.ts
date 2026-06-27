@@ -48,6 +48,8 @@ import {
   assessBrandLicensingRoleFidelity,
 } from "./paidProBrandLicensingRoleMap";
 import {
+  expandOperativeCorpusWithUniqueSupplements,
+  stripNumberedOperativeSectionsAfterExecution,
   stripRepeatedSupplementalProvisionsFiller,
 } from "./paidProSupplementalProvisionsFillerGate";
 
@@ -186,10 +188,14 @@ function buildQuadPartySignatureBlocks(
   parties: readonly string[],
   labeledBlocks: readonly LabeledPartyBlock[],
   rawIntake: string,
+  draft?: ParsedDraftShape | null,
 ): string[] {
+  const brandLicensing = intakeDescribesBrandLicensingDistributionManufacturingStack(rawIntake);
   return parties.map((party, index) => {
     const block = labeledBlocks.find((b) => b.legalEntity === party) ?? labeledBlocks[index];
-    const heading = multiPartyExecutionBlockHeading(index, rawIntake);
+    const heading = brandLicensing
+      ? resolveBrandLicensingRoleLabel(party, index, labeledBlocks, draft, rawIntake).toUpperCase()
+      : multiPartyExecutionBlockHeading(index, rawIntake);
     return [
       `${heading}:`,
       party,
@@ -327,7 +333,7 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
 
   const partyList = oxfordPartyList(parties);
   const noticeStanzas = buildQuadPartyNoticeStanzas(parties);
-  const signatureBlocks = buildQuadPartySignatureBlocks(parties, labeledBlocks, rawIntake);
+  const signatureBlocks = buildQuadPartySignatureBlocks(parties, labeledBlocks, rawIntake, args.draft);
 
   const blocks = [
     title.toUpperCase(),
@@ -568,7 +574,7 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
     : `the laws of ${jResolved}, without regard to conflict-of-law principles`;
 
   const noticeStanzas = buildQuadPartyNoticeStanzas(parties);
-  const signatureBlocks = buildQuadPartySignatureBlocks(parties, labeledBlocks, rawIntake);
+  const signatureBlocks = buildQuadPartySignatureBlocks(parties, labeledBlocks, rawIntake, args.draft);
 
   const brandOwner =
     resolveBrandLicensingEntityForRoleSlot("brand_owner", rawIntake, draft, parties) ??
@@ -669,14 +675,11 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
   });
   body = canonicalStructure.text;
 
-  let padIdx = 0;
-  while (body.length < DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN) {
-    body +=
-      `\n\n${padIdx + 14}. Supplemental Provision ${padIdx + 1}. Each Party shall document royalty reporting tier ${padIdx + 1}, ` +
-      `trademark compliance segment ${padIdx + 1}, and channel audit checkpoint ${padIdx + 1} under the payment schedules in this Agreement.`;
-    padIdx += 1;
+  if (body.length < DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN) {
+    body = expandOperativeCorpusWithUniqueSupplements(body, DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN);
   }
   body = stripRepeatedSupplementalProvisionsFiller(body).text;
+  body = stripNumberedOperativeSectionsAfterExecution(body).text;
 
   const acceptance = validateDeterministicQuadPartyProFallbackAcceptance({
     body,

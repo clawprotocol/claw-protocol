@@ -471,8 +471,7 @@ export function formatNoticeAddressLines(address: string): string[] {
   return [trimmed];
 }
 
-const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE =
-  "Notice details to be completed in signer setup.";
+const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE = "provided during signer setup.";
 
 export function isBareEntityOnlyNoticeStanza(stanza: string): boolean {
   const lines = stanza
@@ -1088,11 +1087,47 @@ export function trimOperativeNoticeStanzasToPartyCount(
   partyCount: number,
 ): { text: string; repairs: string[] } {
   if (partyCount < 2) return { text: corpus, repairs: [] };
+
+  const trimRegionIfToStanzas = (text: string): { text: string; repairs: string[] } => {
+    const noticesIdx = findNoticesSectionStart(text);
+    if (noticesIdx < 0) return { text, repairs: [] };
+    const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+    const end = witnessIdx >= 0 ? witnessIdx : text.length;
+    const before = text.slice(0, noticesIdx);
+    const region = text.slice(noticesIdx, end);
+    const after = text.slice(end);
+    const blocks = region.split(/\n(?=If to\s+)/i);
+    const intro = blocks[0] ?? "";
+    const stanzas = blocks.slice(1).filter((s) => s.trim());
+    if (stanzas.length <= partyCount) return { text, repairs: [] };
+    const kept: string[] = [];
+    const seen = new Set<string>();
+    for (const stanza of stanzas) {
+      const entity = stanza.match(/^If to\s+(.+?):/i)?.[1]?.trim().toLowerCase() ?? "";
+      if (entity && seen.has(entity)) continue;
+      if (entity) seen.add(entity);
+      kept.push(stanza);
+      if (kept.length >= partyCount) break;
+    }
+    const trimmedRegion = `${intro.trimEnd()}\n\n${kept.join("\n\n")}`
+      .replace(/\n{3,}/g, "\n\n")
+      .trimEnd();
+    return {
+      text: `${before}${trimmedRegion}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd(),
+      repairs: ["notice:trim_excess_stanzas"],
+    };
+  };
+
   const layout = sliceOperativeNoticeLayout(corpus);
-  if (!layout) return { text: corpus, repairs: [] };
+  if (!layout) {
+    return trimRegionIfToStanzas(corpus);
+  }
   const blocks = layout.noticesFamily.split(/\n(?=If to\s+)/i);
   const stanzaBlocks = blocks.slice(1).filter((s) => s.trim());
-  if (stanzaBlocks.length <= partyCount) return { text: corpus, repairs: [] };
+  if (stanzaBlocks.length <= partyCount) {
+    const regionTrim = trimRegionIfToStanzas(corpus);
+    return regionTrim.repairs.length > 0 ? regionTrim : { text: corpus, repairs: [] };
+  }
   const intro = blocks[0] ?? "";
   const kept: string[] = [];
   const seen = new Set<string>();
@@ -1104,8 +1139,12 @@ export function trimOperativeNoticeStanzasToPartyCount(
     if (kept.length >= partyCount) break;
   }
   const mergedFamily = `${intro.trimEnd()}\n\n${kept.join("\n\n")}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  const layoutTrimmed = joinOperativeNoticeLayout({ ...layout, noticesFamily: mergedFamily });
+  if (countOperativeIfToNoticeStanzas(layoutTrimmed) > partyCount) {
+    return trimRegionIfToStanzas(layoutTrimmed);
+  }
   return {
-    text: joinOperativeNoticeLayout({ ...layout, noticesFamily: mergedFamily }),
+    text: layoutTrimmed,
     repairs: ["notice:trim_excess_stanzas"],
   };
 }

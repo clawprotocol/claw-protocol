@@ -21,6 +21,7 @@ import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRole
 import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualConsultingQualityFloor";
 import { applyPaidProDomainScopeGuard } from "./paidProDomainScopeGuard";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 import { PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE } from "./premiumNetworkRecoveryLocalDraft";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
@@ -625,6 +626,19 @@ function preparePaidProServerDocumentForAcceptanceCore(
   ) {
     out = corpusSnapshotBeforePrepareMutations;
     repairs.push("prepare:execution_invariant_final_restored");
+  }
+
+  if (
+    intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText) &&
+    normalizedInput.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    out.length <
+      Math.max(
+        SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
+        Math.floor(normalizedInput.length * 0.85),
+      )
+  ) {
+    out = normalizedInput;
+    repairs.push("prepare:substantive_brand_licensing_corpus_preserved");
   }
 
   const result = { text: out.trim(), repairs: [...new Set(repairs)] };

@@ -23,13 +23,18 @@ import {
   resolveBrandLicensingAuthoritativeRoleMap,
   resolveBrandLicensingPartyOrderFromIntake,
 } from "./paidProBrandLicensingRoleMap";
-import { assertNoRepeatedSupplementalProvisionsForFreeze } from "./paidProSupplementalProvisionsFillerGate";
+import {
+  assertNoNumberedOperativeSectionAfterWitness,
+  assertNoRepeatedSupplementalProvisionsForFreeze,
+  stripNumberedOperativeSectionsAfterExecution,
+} from "./paidProSupplementalProvisionsFillerGate";
 import { repairBrandLicensingRoleFidelityInCorpus } from "./paidProBrandLicensingRoleFidelityRepair";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
 import type { CanonicalPartyIdentityRecord } from "./canonicalPartyIdentityResolver";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 import {
   detectOpeningRecitalCrossMappedLegalNameAliases,
   detectOpeningRecitalRoleLabelInversion,
@@ -128,6 +133,7 @@ export function applyBrandLicensingFrozenCorpusAuthority(
   }
 
   const repairs: string[] = [];
+  const entryLen = (text || "").replace(/\r\n/g, "\n").trim().length;
   let out = (text || "").replace(/\r\n/g, "\n").trim();
 
   const executive = applyPaidProExecutiveDraftPolish(out, intake, draft ?? null);
@@ -192,6 +198,17 @@ export function applyBrandLicensingFrozenCorpusAuthority(
     repairs.push(...structure.repairs.map((r) => `section_structure:${r}`));
   }
 
+  if (
+    entryLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    out.length <
+      Math.max(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN, Math.floor(entryLen * 0.85))
+  ) {
+    return {
+      text: (text || "").replace(/\r\n/g, "\n").trim(),
+      repairs: [...new Set([...repairs, "brand_licensing:substantive_corpus_preserved"])],
+    };
+  }
+
   return { text: out.trimEnd(), repairs: [...new Set(repairs)] };
 }
 
@@ -221,6 +238,11 @@ export function assertBrandLicensingFrozenCorpusAuthorityForFreeze(
     corpus = roleRepair.text.trimEnd();
   }
   assertBrandLicensingRoleFidelityForFreeze(corpus, intake, draft ?? null);
+  const postWitness = stripNumberedOperativeSectionsAfterExecution(corpus);
+  if (postWitness.strippedCount > 0) {
+    corpus = postWitness.text.trimEnd();
+  }
+  assertNoNumberedOperativeSectionAfterWitness(corpus);
   assertNoRepeatedSupplementalProvisionsForFreeze(corpus);
   const structureRepaired = applySectionStructureIntegrity(corpus, {
     source: "brand_licensing_freeze_final",

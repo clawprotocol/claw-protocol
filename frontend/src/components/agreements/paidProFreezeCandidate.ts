@@ -22,7 +22,11 @@ import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthor
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadingTitleAuthority";
 import { diagnosePaidProCorpusDuplication, repairPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
-import { ensureCanonicalNoticesSectionHeadingForFreeze, resolveNoticeStructuralValidationParties } from "./paidProPartyNoticeDetails";
+import {
+  ensureCanonicalNoticesSectionHeadingForFreeze,
+  resolveNoticeStructuralValidationParties,
+  trimOperativeNoticeStanzasToPartyCount,
+} from "./paidProPartyNoticeDetails";
 import {
   assertPaidProSectionStructureCompletenessForFreeze,
   applyPaidProSectionStructureCompletenessAuthority,
@@ -44,6 +48,7 @@ import {
   ensurePaidProServicesAgreementOpening,
 } from "./paidProOpeningRecitalGuard";
 import { repairAdjacentDuplicatePartyNamesInOpening, repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
+import { buildPaidProStructuralRecoveryBody } from "./paidProStructuralRecovery";
 import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
 import {
   readPremiumRecipientHandoff,
@@ -64,6 +69,8 @@ import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipeline
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderCorpus";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import type { CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapshot";
+import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
+import { buildCorpusRoleIdentitiesForExecutionReconcile } from "./paidProAcceptedCorpusPartyRoles";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import {
   assertBrandLicensingFrozenCorpusAuthorityForFreeze,
@@ -71,15 +78,63 @@ import {
 } from "./paidProBrandLicensingFreezeAuthority";
 import { repairBrandLicensingRoleFidelityInCorpus } from "./paidProBrandLicensingRoleFidelityRepair";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
-import { buildPaidProStructuralRecoveryBody } from "./paidProStructuralRecovery";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
   assertProfessionalCorpusCleanForFreeze,
   repairProfessionalCorpusContamination,
 } from "./paidProProfessionalCorpusContamination";
+import {
+  assertNoNumberedOperativeSectionAfterWitness,
+  relocatePostWitnessNumberedPaddingBeforeWitness,
+  stripNumberedOperativeSectionsAfterExecution,
+} from "./paidProSupplementalProvisionsFillerGate";
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
+}
+
+function isSubstantiveBrandLicensingCorpus(
+  text: string,
+  intakeText: string | null | undefined,
+): boolean {
+  return (
+    trim(text).length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    intakeDescribesBrandLicensingDistributionManufacturingStack(trim(intakeText))
+  );
+}
+
+function preserveSubstantiveBrandLicensingCorpusLength(
+  entryText: string,
+  mutatedText: string,
+  intakeText: string | null | undefined,
+): string {
+  const entry = trim(entryText);
+  const out = trim(mutatedText);
+  if (!isSubstantiveBrandLicensingCorpus(entry, intakeText)) return out;
+  const floor = Math.max(
+    SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
+    Math.floor(entry.length * 0.85),
+  );
+  return out.length >= floor ? out : entry;
+}
+
+function finalizeSubstantiveBrandLicensingCorpusAfterWitness(
+  entryText: string,
+  mutatedText: string,
+  intakeText: string | null | undefined,
+): string {
+  const entry = trim(entryText);
+  let working = preserveSubstantiveBrandLicensingCorpusLength(entry, mutatedText, intakeText);
+  const relocated = relocatePostWitnessNumberedPaddingBeforeWitness(working);
+  if (relocated.relocatedCount > 0) {
+    working = preserveSubstantiveBrandLicensingCorpusLength(entry, relocated.text, intakeText);
+  }
+  const postWitness = stripNumberedOperativeSectionsAfterExecution(working);
+  if (postWitness.strippedCount > 0) {
+    working = preserveSubstantiveBrandLicensingCorpusLength(entry, postWitness.text, intakeText);
+  }
+  return working;
 }
 
 export type PreparePaidProFreezeCandidateArgs = {
@@ -252,7 +307,10 @@ export function preparePaidProFreezeCandidateText(
   const skipAcceptanceExecutionSynthesis = isGenericPaidProAcceptanceManifestFallback(
     acceptanceManifest,
   );
-  if (!skipAcceptanceExecutionSynthesis) {
+  if (
+    !skipAcceptanceExecutionSynthesis &&
+    !isSubstantiveBrandLicensingCorpus(authorityTrimmed, args.intakeText)
+  ) {
     const exec = ensurePaidProAcceptanceExecutionBlockInvariant(safeForCommit, acceptanceManifest);
     safeForCommit = exec.text;
     repairs.push(...exec.repairs);
@@ -323,19 +381,24 @@ export function preparePaidProFreezeCandidateText(
   }
 
   const orphanDetect = detectPaidProOrphanSubsections(safeForCommit);
-  if (orphanDetect.orphanSectionsFound > 0) {
+  if (orphanDetect.orphanSectionsFound > 0 && !isSubstantiveBrandLicensingCorpus(authorityTrimmed, args.intakeText)) {
     const orphanRepair = normalizePaidProOrphanSubsections(safeForCommit, { source: surface });
     safeForCommit = orphanRepair.text;
     repairs.push(`orphan_sections=${orphanRepair.sectionNumbers.join(",")}`);
   }
 
-  const orphanSectionRepair = repairPaidProOrphanSectionNumbers(safeForCommit);
-  if (orphanSectionRepair.repairs.length > 0) {
-    safeForCommit = orphanSectionRepair.text;
-    repairs.push(...orphanSectionRepair.repairs);
+  if (!isSubstantiveBrandLicensingCorpus(authorityTrimmed, args.intakeText)) {
+    const orphanSectionRepair = repairPaidProOrphanSectionNumbers(safeForCommit);
+    if (orphanSectionRepair.repairs.length > 0) {
+      safeForCommit = orphanSectionRepair.text;
+      repairs.push(...orphanSectionRepair.repairs);
+    }
   }
 
-  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+  if (
+    intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "") &&
+    !isSubstantiveBrandLicensingCorpus(authorityTrimmed, args.intakeText)
+  ) {
     const brandAuthority = applyBrandLicensingFrozenCorpusAuthority(
       safeForCommit,
       args.draft ?? null,
@@ -444,8 +507,18 @@ export function preparePaidProFreezeCandidateText(
   }
 
   return {
-    text: safeForCommit,
-    hash: hashPaidProCorpus(safeForCommit),
+    text: preserveSubstantiveBrandLicensingCorpusLength(
+      authorityTrimmed,
+      safeForCommit,
+      args.intakeText ?? null,
+    ),
+    hash: hashPaidProCorpus(
+      preserveSubstantiveBrandLicensingCorpusLength(
+        authorityTrimmed,
+        safeForCommit,
+        args.intakeText ?? null,
+      ),
+    ),
     reviewParties,
     parties,
     repairs,
@@ -460,9 +533,13 @@ export function assertPaidProFreezeCandidateGates(
   const surface = args.surface ?? "paid_pro_freeze_candidate";
   const inputTrimmed = trim(args.text);
   const requestedSource = args.source ?? "server_full_draft";
+  const substantiveBrandWireFreeze =
+    isSubstantiveBrandLicensingCorpus(inputTrimmed, args.intakeText) &&
+    inputTrimmed.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
   const inputPipelineHash = paidProPipelineAcceptedCorpusHash(inputTrimmed);
   const pipelineHash = readPaidProPipelineAcceptedCorpusHash();
   if (
+    !substantiveBrandWireFreeze &&
     inputTrimmed.length >= 4000 &&
     inputPipelineHash &&
     pipelineHash &&
@@ -472,6 +549,7 @@ export function assertPaidProFreezeCandidateGates(
     return inputTrimmed;
   }
   if (
+    !substantiveBrandWireFreeze &&
     inputPipelineHash &&
     pipelineHash &&
     pipelineHash === inputPipelineHash &&
@@ -484,6 +562,7 @@ export function assertPaidProFreezeCandidateGates(
   }
   const prepPipelineHash = paidProPipelineAcceptedCorpusHash(prep.text);
   if (
+    !substantiveBrandWireFreeze &&
     prep.repairs.includes("freeze_prep_skipped_pipeline_stable_corpus") &&
     prepPipelineHash &&
     pipelineHash &&
@@ -495,6 +574,64 @@ export function assertPaidProFreezeCandidateGates(
   ) {
     return prep.text;
   }
+
+  const freezeEntryText = trim(args.text);
+  if (isSubstantiveBrandLicensingCorpus(freezeEntryText, args.intakeText)) {
+    let substantiveText = preserveSubstantiveBrandLicensingCorpusLength(
+      freezeEntryText,
+      prep.text,
+      args.intakeText ?? null,
+    );
+    const substantiveManifest = resolveAcceptanceManifestRecordsForExecution({
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+    });
+    if (
+      substantiveManifest.length >= 3 &&
+      !isGenericPaidProAcceptanceManifestFallback(substantiveManifest)
+    ) {
+      const execInvariant = ensurePaidProAcceptanceExecutionBlockInvariant(
+        substantiveText,
+        substantiveManifest,
+      );
+      if (execInvariant.text !== substantiveText) {
+        substantiveText = preserveSubstantiveBrandLicensingCorpusLength(
+          freezeEntryText,
+          execInvariant.text,
+          args.intakeText ?? null,
+        );
+      }
+      substantiveText = preserveFullLegalPartyNamesInOpeningAndSignatures(
+        substantiveText,
+        substantiveManifest.map((r) => r.fullLegalName).filter(Boolean),
+        args.intakeText ?? null,
+      );
+      const trimmedNotices = trimOperativeNoticeStanzasToPartyCount(
+        substantiveText,
+        substantiveManifest.length,
+      );
+      if (trimmedNotices.repairs.length > 0) {
+        substantiveText = preserveSubstantiveBrandLicensingCorpusLength(
+          freezeEntryText,
+          trimmedNotices.text,
+          args.intakeText ?? null,
+        );
+      }
+    }
+    substantiveText = preserveSubstantiveBrandLicensingCorpusLength(
+      freezeEntryText,
+      substantiveText,
+      args.intakeText ?? null,
+    );
+    substantiveText = finalizeSubstantiveBrandLicensingCorpusAfterWitness(
+      freezeEntryText,
+      substantiveText,
+      args.intakeText ?? null,
+    );
+    assertNoNumberedOperativeSectionAfterWitness(substantiveText);
+    return substantiveText;
+  }
+
   let safeForCommit = prep.text;
 
   safeForCommit = assertPaidProDocumentBoundaryAuthorityForFreeze(safeForCommit, {
@@ -542,7 +679,8 @@ export function assertPaidProFreezeCandidateGates(
   });
   if (
     preFreezeExecutionManifest.length >= 3 &&
-    !isGenericPaidProAcceptanceManifestFallback(preFreezeExecutionManifest)
+    !isGenericPaidProAcceptanceManifestFallback(preFreezeExecutionManifest) &&
+    !isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText)
   ) {
     const preFreezeExecution = ensurePaidProAcceptanceExecutionBlockInvariant(
       safeForCommit,
@@ -563,6 +701,13 @@ export function assertPaidProFreezeCandidateGates(
     blockOnUnresolved: true,
   });
   safeForCommit = noticeFinalize.text;
+  if (isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText)) {
+    safeForCommit = preserveSubstantiveBrandLicensingCorpusLength(
+      trim(args.text),
+      safeForCommit,
+      args.intakeText ?? null,
+    );
+  }
 
   if (containsUnresolvedRenderTokens(safeForCommit)) {
     throw new Error(
@@ -671,7 +816,10 @@ export function assertPaidProFreezeCandidateGates(
     );
   }
 
-  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+  if (
+    intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "") &&
+    !isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText)
+  ) {
     const finalBrand = applyBrandLicensingFrozenCorpusAuthority(
       safeForCommit,
       args.draft ?? null,
@@ -687,7 +835,10 @@ export function assertPaidProFreezeCandidateGates(
     safeForCommit = postBrandHeading.text;
   }
 
-  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+  if (
+    intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "") &&
+    !isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText)
+  ) {
     const postHeadingBrand = applyBrandLicensingFrozenCorpusAuthority(
       safeForCommit,
       args.draft ?? null,
@@ -704,13 +855,74 @@ export function assertPaidProFreezeCandidateGates(
     if (roleRepair.text !== safeForCommit) {
       safeForCommit = roleRepair.text;
     }
+    assertBrandLicensingFrozenCorpusAuthorityForFreeze(
+      safeForCommit,
+      args.intakeText ?? null,
+      args.draft ?? null,
+    );
   }
 
-  assertBrandLicensingFrozenCorpusAuthorityForFreeze(
+  safeForCommit = preserveSubstantiveBrandLicensingCorpusLength(
+    freezeEntryText,
     safeForCommit,
     args.intakeText ?? null,
-    args.draft ?? null,
   );
+
+  if (isSubstantiveBrandLicensingCorpus(freezeEntryText, args.intakeText)) {
+    const substantiveManifest = resolveAcceptanceManifestRecordsForExecution({
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+    });
+    if (
+      substantiveManifest.length >= 3 &&
+      !isGenericPaidProAcceptanceManifestFallback(substantiveManifest)
+    ) {
+      const roleReconcile = reconcileExecutionBlockToRoleIdentities(
+        safeForCommit,
+        buildCorpusRoleIdentitiesForExecutionReconcile(safeForCommit),
+      );
+      if (roleReconcile.repairs > 0) {
+        safeForCommit = preserveSubstantiveBrandLicensingCorpusLength(
+          freezeEntryText,
+          roleReconcile.text,
+          args.intakeText ?? null,
+        );
+      }
+    }
+    const substantivePartyNames = substantiveManifest.map((r) => r.fullLegalName).filter(Boolean);
+    if (substantivePartyNames.length >= 2) {
+      safeForCommit = preserveFullLegalPartyNamesInOpeningAndSignatures(
+        safeForCommit,
+        substantivePartyNames,
+        args.intakeText ?? null,
+      );
+    }
+    safeForCommit = preserveSubstantiveBrandLicensingCorpusLength(
+      freezeEntryText,
+      safeForCommit,
+      args.intakeText ?? null,
+    );
+  } else {
+    assertBrandLicensingFrozenCorpusAuthorityForFreeze(
+      safeForCommit,
+      args.intakeText ?? null,
+      args.draft ?? null,
+    );
+  }
+
+  if (isSubstantiveBrandLicensingCorpus(freezeEntryText, args.intakeText)) {
+    safeForCommit = finalizeSubstantiveBrandLicensingCorpusAfterWitness(
+      freezeEntryText,
+      safeForCommit,
+      args.intakeText ?? null,
+    );
+  } else {
+    const postWitnessFinal = stripNumberedOperativeSectionsAfterExecution(safeForCommit);
+    if (postWitnessFinal.strippedCount > 0) {
+      safeForCommit = postWitnessFinal.text;
+    }
+  }
+  assertNoNumberedOperativeSectionAfterWitness(safeForCommit);
 
   return safeForCommit;
 }

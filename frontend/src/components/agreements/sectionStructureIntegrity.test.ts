@@ -68,10 +68,17 @@ describe("sectionStructureIntegrity", () => {
     expect(analysis.diagnostics.some((d) => d.code === "mixed_subsection_scheme")).toBe(true);
   });
 
-  it("Case C — duplicate top-level section identifiers are detected", () => {
+  it("Case C — duplicate top-level section identifiers are detected and repaired", () => {
     const input = ["4. Liability", "4. Confidentiality", "5. Termination"].join("\n\n");
     const analysis = analyzeSectionStructureIntegrity(input);
     expect(analysis.diagnostics.some((d) => d.code === "duplicate_section_identifier")).toBe(true);
+
+    const repaired = repairSectionStructureIntegrity(input);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.text).toContain("4. Liability");
+    expect(repaired.text).toContain("Confidentiality");
+    expect(repaired.text).not.toMatch(/^4\.\s+Confidentiality/m);
+    expect(repaired.anomalyCount).toBe(0);
   });
 
   it("Case D — skipped top-level section identifiers are detected", () => {

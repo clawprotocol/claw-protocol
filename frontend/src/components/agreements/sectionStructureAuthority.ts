@@ -362,6 +362,34 @@ export function analyzeSectionStructureIntegrity(text: string): SectionStructure
   return { diagnostics, anomalyCount: diagnostics.length };
 }
 
+function repairDuplicateSectionIdentifiers(
+  lines: string[],
+  duplicateDiagnostics: readonly SectionStructureDiagnostic[],
+): { lines: string[]; repairs: string[] } {
+  const repairs: string[] = [];
+  if (duplicateDiagnostics.length === 0) {
+    return { lines, repairs };
+  }
+
+  const out = [...lines];
+  for (const diagnostic of duplicateDiagnostics) {
+    if (diagnostic.code !== "duplicate_section_identifier" || diagnostic.lineIndex == null) continue;
+    const line = out[diagnostic.lineIndex];
+    if (!line) continue;
+    const trimmed = line.trim();
+    if (!isPaidProNumberedSectionHeadingLine(trimmed)) continue;
+    const match = trimmed.match(TOP_LEVEL_NUM_RE);
+    if (!match?.[2]) continue;
+    const demoted = match[2].trim();
+    if (demoted && demoted !== trimmed) {
+      out[diagnostic.lineIndex] = demoted;
+      repairs.push(`duplicate_section_identifier:demoted:${match[1]}`);
+    }
+  }
+
+  return { lines: out, repairs };
+}
+
 function repairOrphanNumberingRestarts(lines: string[]): { lines: string[]; repairs: string[] } {
   const repairs: string[] = [];
   const out = [...lines];
@@ -448,6 +476,15 @@ export function repairSectionStructureIntegrity(
   if (collapse.repairs.length > 0) {
     lines = collapse.lines;
     repairs.push(...collapse.repairs);
+  }
+
+  const duplicates = repairDuplicateSectionIdentifiers(
+    lines,
+    analysis.diagnostics.filter((d) => d.code === "duplicate_section_identifier"),
+  );
+  if (duplicates.repairs.length > 0) {
+    lines = duplicates.lines;
+    repairs.push(...duplicates.repairs);
   }
 
   const orphan = repairOrphanNumberingRestarts(lines);

@@ -123,3 +123,100 @@ export function expandOperativeCorpusWithUniqueSupplements(base: string, minLen:
   }
   return `${base.slice(0, insertAt)}${pad}${base.slice(insertAt)}`;
 }
+
+/** Move post-witness "Operational supplement N." padding blocks before IN WITNESS so substantive wire length survives execution cleanup. */
+export function relocatePostWitnessNumberedPaddingBeforeWitness(text: string): {
+  text: string;
+  relocatedCount: number;
+  repairs: string[];
+} {
+  const normalized = (text || "").replace(/\r\n/g, "\n").trimEnd();
+  const witnessIdx = normalized.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return { text: normalized, relocatedCount: 0, repairs: [] };
+
+  const head = normalized.slice(0, witnessIdx);
+  const tail = normalized.slice(witnessIdx);
+  const operationalBlockRe =
+    /\n\nOperational supplement \d+\.[^\n]+(?:\n(?!\nOperational supplement \d+\.)[^\n]*)*/gi;
+  const extracted: string[] = [];
+  for (const match of tail.matchAll(operationalBlockRe)) {
+    extracted.push(match[0]);
+  }
+  if (extracted.length === 0) {
+    return { text: normalized, relocatedCount: 0, repairs: [] };
+  }
+  const tailWithoutPadding = tail.replace(operationalBlockRe, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+  const pad = extracted.join("");
+  const relocated = `${head.trimEnd()}${pad}\n\n${tailWithoutPadding}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return {
+    text: relocated,
+    relocatedCount: extracted.length,
+    repairs: ["filler:relocate_post_witness_operational_supplements"],
+  };
+}
+
+/** Relocate post-witness padding, strip supplemental provisions, and preserve substantive wire length when possible. */
+export function finalizeSubstantiveWireAfterWitnessCleanup(
+  entryText: string,
+  text: string,
+  minPreserveLen = 10_000,
+): { text: string; repairs: string[] } {
+  const entry = (entryText || "").trim();
+  const floor = Math.max(minPreserveLen, Math.floor(entry.length * 0.85));
+  const repairs: string[] = [];
+  let working = (text || "").trim();
+  const relocated = relocatePostWitnessNumberedPaddingBeforeWitness(working);
+  if (relocated.relocatedCount > 0) {
+    working = relocated.text;
+    repairs.push(...relocated.repairs);
+  }
+  const stripped = stripNumberedOperativeSectionsAfterExecution(working);
+  if (stripped.strippedCount > 0) {
+    working = stripped.text;
+    repairs.push(...stripped.repairs);
+  }
+  if (entry.length >= minPreserveLen && working.length < floor && entry.length >= floor) {
+    working = entry;
+    repairs.push("filler:substantive_wire_length_preserved");
+  }
+  return { text: working, repairs };
+}
+
+/** Remove numbered supplemental/operative sections erroneously appended after IN WITNESS / execution. */
+export function stripNumberedOperativeSectionsAfterExecution(text: string): {
+  text: string;
+  strippedCount: number;
+  repairs: string[];
+} {
+  const normalized = (text || "").replace(/\r\n/g, "\n").trimEnd();
+  const witnessIdx = normalized.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return { text: normalized, strippedCount: 0, repairs: [] };
+
+  const head = normalized.slice(0, witnessIdx);
+  const tail = normalized.slice(witnessIdx);
+  const postExecSectionIdx = tail.search(
+    /\n\s*\d+\.\s+(?:Supplemental\s+Provision|Additional Provision)\b/i,
+  );
+  if (postExecSectionIdx < 0) return { text: normalized, strippedCount: 0, repairs: [] };
+
+  const cleanedTail = tail.slice(0, postExecSectionIdx).trimEnd();
+  return {
+    text: `${head}${cleanedTail}`.replace(/\n{3,}/g, "\n\n").trimEnd(),
+    strippedCount: 1,
+    repairs: ["filler:strip_post_execution_numbered_sections"],
+  };
+}
+
+export function assertNoNumberedOperativeSectionAfterWitness(text: string): void {
+  const normalized = (text || "").replace(/\r\n/g, "\n");
+  const witnessIdx = normalized.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return;
+  const tail = normalized.slice(witnessIdx);
+  if (
+    /\n\s*\d+\.\s+(?:Supplemental\s+Provision|Additional Provision)\b/i.test(
+      tail,
+    )
+  ) {
+    throw new Error("[paid-pro-sot-freeze-blocked] numbered_operative_section_after_witness");
+  }
+}

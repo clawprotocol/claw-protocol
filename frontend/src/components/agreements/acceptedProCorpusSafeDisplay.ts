@@ -178,7 +178,10 @@ export function applyAcceptedProCorpusSafeDisplay(
       cached.text.length < Math.floor(input.length * 0.85) &&
       pipelineAcceptedHash &&
       outputHash !== pipelineAcceptedHash;
-    if (!staleStarterCache) {
+    const substantiveWireStaleCache =
+      input.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+      cached.text.length < Math.floor(input.length * 0.85);
+    if (!staleStarterCache && !substantiveWireStaleCache) {
       logPaidProSafeDisplayCacheHit({ surface, cacheKey, inputHash, outputHash });
       return tracePaidProQaPassWithText("applyAcceptedProCorpusSafeDisplay", `${surface}:cache_hit`, input, () => cached);
     }
