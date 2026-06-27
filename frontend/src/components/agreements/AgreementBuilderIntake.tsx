@@ -25639,7 +25639,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeRaw: intakeForHydration,
       surface: "finalize_paid_pro_signer_metadata",
       signatureRegionOnly: true,
-      repairRecital: true,
+      repairRecital: rawCorpusResolution.source !== "paid_pro_source_of_truth",
     });
     auditPaidProSignerFinalizeCorpus(hydrated.corpus);
     const signatureBlockModel = buildCanonicalSignerManifest({
@@ -25657,6 +25657,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText: intakeForHydration,
       authorityParties: authority.parties,
       replaceExisting: true,
+      preserveFrozenServerFullHydratedCorpus:
+        rawCorpusResolution.source === "paid_pro_source_of_truth",
     });
     pinFinalizedSignerAppliedCorpus(hydrated.corpus, "paid_pro_signer_metadata_finalize");
     if (import.meta.env.DEV) {

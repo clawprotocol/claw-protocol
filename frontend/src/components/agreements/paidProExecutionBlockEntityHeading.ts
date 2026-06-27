@@ -254,6 +254,34 @@ export function repairExecutionBlockEntityHeadingLines(
   return { text: lines.join("\n"), repairs: [...new Set(repairs)] };
 }
 
+/** Remove back-to-back duplicate legal-entity heading lines in the execution tail. */
+export function stripDuplicateConsecutiveExecutionEntityLines(corpus: string): {
+  text: string;
+  repairs: string[];
+} {
+  const raw = (corpus || "").replace(/\r\n/g, "\n");
+  const witnessIdx = raw.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return { text: raw, repairs: [] };
+
+  const lines = raw.split("\n");
+  const repairs: string[] = [];
+  for (let i = witnessIdx + 1; i < lines.length - 1; i += 1) {
+    const current = (lines[i] ?? "").trim();
+    const next = (lines[i + 1] ?? "").trim();
+    if (!current || !next) continue;
+    if (SIG_FIELD_RE.test(current) || SIG_FIELD_RE.test(next)) continue;
+    if (/^by\s*:/i.test(next)) continue;
+    if (PARTY_ROLE_HEADING_RE.test(current) || PARTY_ROLE_HEADING_RE.test(next)) continue;
+    if (!ENTITY_SUFFIX_TAIL_RE.test(current) || !ENTITY_SUFFIX_TAIL_RE.test(next)) continue;
+    if (partyLegalNamesMatch(current.replace(/:$/, ""), next.replace(/:$/, ""))) {
+      lines.splice(i + 1, 1);
+      repairs.push("execution:strip_duplicate_consecutive_entity_line");
+      i -= 1;
+    }
+  }
+  return { text: lines.join("\n"), repairs: [...new Set(repairs)] };
+}
+
 export function auditExecutionBlockDisplayIntegrity(args: {
   text: string;
   signerMetadata?: AuthoritativeSigningSnapshotRecipientMetadata | null;

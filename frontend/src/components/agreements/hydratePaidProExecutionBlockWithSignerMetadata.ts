@@ -145,6 +145,8 @@ function hydrateFieldLine(
 export type HydratePaidProExecutionBlockOpts = {
   /** When true (finalize), replace populated Name/Title/Email/Address with latest authority. */
   overwriteExistingMetadata?: boolean;
+  /** Frozen server_full SoT — skip heading/contact structural repairs that mutate operative text. */
+  frozenCorpusImmutable?: boolean;
 };
 
 export function hydratePaidProExecutionBlockWithSignerMetadata(
@@ -163,7 +165,10 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
     return { corpus: raw, applied: false, fieldsHydrated: 0, missingFields: ["insufficient_parties"] };
   }
 
-  const repairedHeadings = repairExecutionBlockEntityHeadingLines(raw, parties);
+  const immutable = opts?.frozenCorpusImmutable === true;
+  const repairedHeadings = immutable
+    ? { text: raw, repairs: [] as string[] }
+    : repairExecutionBlockEntityHeadingLines(raw, parties);
   let working = repairedHeadings.text;
 
   const witnessIdx = working.search(/\bIN WITNESS WHEREOF\b/i);
@@ -245,10 +250,12 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
     offset += lines[i].length + 1;
   }
 
-  const normalized = applyContactAuthorityExecutionBlockIntegrity(lines.join("\n"), {
-    source: "hydrate_paid_pro_execution_block",
-    ensureNoticesClause: false,
-  }).text;
+  const normalized = immutable
+    ? lines.join("\n")
+    : applyContactAuthorityExecutionBlockIntegrity(lines.join("\n"), {
+        source: "hydrate_paid_pro_execution_block",
+        ensureNoticesClause: false,
+      }).text;
   const integrity = auditExecutionBlockDisplayIntegrity({
     text: normalized,
     signerMetadata: recipientMetadata,

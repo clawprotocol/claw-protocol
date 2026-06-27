@@ -27,6 +27,7 @@ import {
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { applySignatureNoticeContactFieldsToCorpus } from "./paidProPartyNoticeDetails";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { stripDuplicateConsecutiveExecutionEntityLines } from "./paidProExecutionBlockEntityHeading";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   extractPartyAddressesFromExecutionBlockCorpus,
@@ -140,6 +141,8 @@ export type CreateAuthoritativeSigningSnapshotArgs = {
   intakeText?: string | null;
   /** Slot-indexed authority parties for finalize — avoids recipient-metadata roundtrip loss. */
   authorityParties?: readonly PaidProSignerMetadataParty[];
+  /** When true, corpus was hydrated from frozen server_full SoT — store verbatim without re-synthesis. */
+  preserveFrozenServerFullHydratedCorpus?: boolean;
 };
 
 /**
@@ -171,55 +174,65 @@ export function createAuthoritativeSigningSnapshot(
     partyAddresses: args.signerMetadata.partyAddresses ?? [],
   };
   let rawInput = (args.corpus || "").trim();
-  rawInput = ensureExecutionBlockNoticeContactFieldLines(rawInput).text.trim();
-  let corpus = finalizePaidProSigningCorpusText(
-    applyCanonicalPartyLegalNamesToSigningCorpus(rawInput, parties).text,
-    parties,
-    {
-      acceptedCorpus: rawInput,
-      intakeText: args.intakeText ?? null,
-      draftPartyNames: parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2),
-    },
-  ).text.trim();
-  if (signerMetadataAuthorityHasHydratableFields(signerMetadata)) {
-    const roleContext = { acceptedCorpus: (args.corpus || "").trim() };
-    const hydrateOpts = { overwriteExistingMetadata: true as const };
-    const hydrateFrom = (input: string) =>
-      hydratePaidProExecutionBlockWithSignerMetadata(input, signerMetadata, roleContext, hydrateOpts);
-    const hydration = hydrateFrom(corpus);
-    if (hydration.applied) {
-      corpus = hydration.corpus.trim();
-    } else if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0) {
-      const retry = hydrateFrom((args.corpus || "").trim());
-      if (retry.applied) corpus = retry.corpus.trim();
-    }
-    if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0 && hasPaidProSourceOfTruth()) {
-      const sot = getPaidProSourceOfTruthText().trim();
-      if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN && sot !== corpus) {
-        const sotHydration = hydrateFrom(sot);
-        if (
-          sotHydration.applied &&
-          countBlankSignerMetadataLinesInExecutionBlock(sotHydration.corpus) <
-            countBlankSignerMetadataLinesInExecutionBlock(corpus)
-        ) {
-          corpus = sotHydration.corpus.trim();
+  const frozenServerFullMinimalHydration =
+    args.preserveFrozenServerFullHydratedCorpus === true &&
+    countBlankSignerMetadataLinesInExecutionBlock(rawInput, parties) === 0;
+
+  let corpus: string;
+  if (frozenServerFullMinimalHydration) {
+    const dedupe = stripDuplicateConsecutiveExecutionEntityLines(rawInput);
+    corpus = dedupe.text.trim();
+  } else {
+    rawInput = ensureExecutionBlockNoticeContactFieldLines(rawInput).text.trim();
+    corpus = finalizePaidProSigningCorpusText(
+      applyCanonicalPartyLegalNamesToSigningCorpus(rawInput, parties).text,
+      parties,
+      {
+        acceptedCorpus: rawInput,
+        intakeText: args.intakeText ?? null,
+        draftPartyNames: parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2),
+      },
+    ).text.trim();
+    if (signerMetadataAuthorityHasHydratableFields(signerMetadata)) {
+      const roleContext = { acceptedCorpus: (args.corpus || "").trim() };
+      const hydrateOpts = { overwriteExistingMetadata: true as const };
+      const hydrateFrom = (input: string) =>
+        hydratePaidProExecutionBlockWithSignerMetadata(input, signerMetadata, roleContext, hydrateOpts);
+      const hydration = hydrateFrom(corpus);
+      if (hydration.applied) {
+        corpus = hydration.corpus.trim();
+      } else if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0) {
+        const retry = hydrateFrom((args.corpus || "").trim());
+        if (retry.applied) corpus = retry.corpus.trim();
+      }
+      if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0 && hasPaidProSourceOfTruth()) {
+        const sot = getPaidProSourceOfTruthText().trim();
+        if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN && sot !== corpus) {
+          const sotHydration = hydrateFrom(sot);
+          if (
+            sotHydration.applied &&
+            countBlankSignerMetadataLinesInExecutionBlock(sotHydration.corpus) <
+              countBlankSignerMetadataLinesInExecutionBlock(corpus)
+          ) {
+            corpus = sotHydration.corpus.trim();
+          }
         }
       }
+      if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0 && parties.length >= 2) {
+        const notice = applySignatureNoticeContactFieldsToCorpus(corpus, parties, roleContext);
+        if (notice.applied) corpus = notice.text.trim();
+        const finalHydration = hydrateFrom(corpus);
+        if (finalHydration.applied) corpus = finalHydration.corpus.trim();
+      }
     }
-    if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0 && parties.length >= 2) {
-      const notice = applySignatureNoticeContactFieldsToCorpus(corpus, parties, roleContext);
-      if (notice.applied) corpus = notice.text.trim();
-      const finalHydration = hydrateFrom(corpus);
-      if (finalHydration.applied) corpus = finalHydration.corpus.trim();
-    }
-  }
-  if (parties.length >= 2) {
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, parties, {
-      intakeText: args.intakeText ?? null,
-      draftPartyNames: parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2),
-    });
-    if (noticeDelivery.repairs.length > 0) {
-      corpus = noticeDelivery.text.trim();
+    if (parties.length >= 2) {
+      const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, parties, {
+        intakeText: args.intakeText ?? null,
+        draftPartyNames: parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2),
+      });
+      if (noticeDelivery.repairs.length > 0) {
+        corpus = noticeDelivery.text.trim();
+      }
     }
   }
   const hash = hashPaidProCorpus(corpus);

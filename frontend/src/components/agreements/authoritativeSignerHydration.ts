@@ -44,6 +44,10 @@ import {
   type LiveSignerMetadataUiState,
 } from "./paidProSignerMetadataAuthority";
 import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
+import {
+  buildFrozenServerFullSignerMetadataHydration,
+  shouldUseFrozenServerFullSourceOfTruthMinimalHydration,
+} from "./paidProFrozenServerFullSignerHydration";
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import {
   countBlankSignerMetadataLinesInExecutionBlock,
@@ -167,6 +171,16 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   let rawCorpus = (args.rawCorpus || "").trim();
   const rawCorpusLenBeforeHydration = rawCorpus.length;
   const isFinalizeSurface = args.surface === "finalize_paid_pro_signer_metadata";
+
+  if (shouldUseFrozenServerFullSourceOfTruthMinimalHydration(rawCorpus)) {
+    return buildFrozenServerFullSignerMetadataHydration({
+      rawCorpus,
+      authority: args.authority,
+      intakeRaw: args.intakeRaw,
+      surface: args.surface,
+    });
+  }
+
   if (args.repairRecital) {
     rawCorpus = repairMalformedPaidProAgreementRecital(rawCorpus, args.authority.parties).text;
   }

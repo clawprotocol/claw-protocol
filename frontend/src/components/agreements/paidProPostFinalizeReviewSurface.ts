@@ -10,14 +10,15 @@ import {
   type AuthoritativeSigningSnapshotRecipientMetadata,
 } from "./authoritativeSigningSnapshot";
 import {
+  detectExecutionHeadingMetadataLeak,
+  repairExecutionBlockEntityHeadingLines,
+  stripDuplicateConsecutiveExecutionEntityLines,
+} from "./paidProExecutionBlockEntityHeading";
+import {
   countBlankSignerMetadataLinesInExecutionBlock,
   hydratePaidProExecutionBlockWithSignerMetadata,
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
-import {
-  detectExecutionHeadingMetadataLeak,
-  repairExecutionBlockEntityHeadingLines,
-} from "./paidProExecutionBlockEntityHeading";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { applySignatureNoticeContactFieldsToCorpus } from "./paidProPartyNoticeDetails";
 import { recipientMetadataToAuthorityParties } from "./paidProSignerMetadataAuthority";
@@ -54,6 +55,23 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
     return body;
   }
 
+  if (headingLeak && authorityParties.length >= 2) {
+    const dedupe = stripDuplicateConsecutiveExecutionEntityLines(body);
+    if (dedupe.repairs.length > 0) {
+      body = dedupe.text.trim();
+    }
+    const repaired = repairExecutionBlockEntityHeadingLines(body, authorityParties);
+    if (repaired.repairs.length > 0) {
+      body = repaired.text.trim();
+    }
+    if (
+      countBlankSignerMetadataLinesInExecutionBlock(body) === 0 &&
+      !detectExecutionHeadingMetadataLeak(body).leak
+    ) {
+      return body;
+    }
+  }
+
   if (meta && signerMetadataAuthorityHasHydratableFields(meta)) {
     const parties = recipientMetadataToAuthorityParties(meta);
     const roleContext = { acceptedCorpus: body };
@@ -86,9 +104,13 @@ function finalizePostFinalizeReviewPlain(
   plain: string,
   draft?: AgreementDraft | ParsedDraftShape | null,
 ): string {
-  const body = enrichPaidProPostFinalizeDisplayCorpus(plain, draft);
+  const body = (plain || "").trim();
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
-  return body;
+  const snapshotCorpus = readAuthoritativeSigningCorpus().trim();
+  if (snapshotCorpus.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN && snapshotCorpus === body) {
+    return body;
+  }
+  return enrichPaidProPostFinalizeDisplayCorpus(body, draft);
 }
 
 export function resolvePaidProPostFinalizeReviewPlain(
