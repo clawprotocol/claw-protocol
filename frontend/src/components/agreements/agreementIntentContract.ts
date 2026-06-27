@@ -793,8 +793,17 @@ export function validateIntentContractForPaidProOutput(args: {
     }
     return false;
   };
-  const firstLine = firstLineOrTitle(tline, text).toLowerCase();
-  if (firstLine === "agreement" || firstLine === "agreement.") {
+  const titleFirstLine = firstLineOrTitle(tline, text).toLowerCase();
+  const bodyFirstLine = firstLineOrTitle("", text).toLowerCase();
+  const genericOnlyBecauseDraftTitle =
+    (titleFirstLine === "agreement" || titleFirstLine === "agreement.") &&
+    bodyFirstLine !== titleFirstLine &&
+    bodyFirstLine.length >= 12;
+  if (
+    (titleFirstLine === "agreement" || titleFirstLine === "agreement.") &&
+    !genericOnlyBecauseDraftTitle &&
+    !(isBrandLicensingIntentContract(c) && hasBrandLicensingAgreementTitleFit("", text))
+  ) {
     return { ok: false, reasons: ["intent:generic_agreement_title"] };
   }
 

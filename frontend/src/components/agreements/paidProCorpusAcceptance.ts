@@ -42,6 +42,8 @@ import { hasProGenerationAdoptionForSession } from "./paidProGenerationAdoption"
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicationAuthority";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import { getPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -506,6 +508,34 @@ export function validatePaidProOutput(args: {
         r.startsWith("intent:title_mismatch_category") ||
         r.startsWith("intent:generic_agreement_title"),
       );
+      const sot = getPaidProSourceOfTruth();
+      const validationHash = intentValidationHash ?? paidProPipelineAcceptedCorpusHash(intentValidationText);
+      const postFreezeServerFullIntentWarnOnly =
+        sot != null &&
+        sot.text.trim().length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+        isAuthoritativePremiumPipelineRenderSource(pipelineSource ?? "") &&
+        (pipelineSource === "server_full_draft" ||
+          pipelineSource === "server_full_draft_retry" ||
+          pipelineSource === "server_full_draft_degraded" ||
+          sot.source === "server_full_draft" ||
+          sot.source === "server_full_draft_retry" ||
+          sot.source === "server_full_draft_degraded") &&
+        validationHash != null &&
+        sot.hash === validationHash &&
+        intakeDescribesBrandLicensingDistributionManufacturingStack(rawI) &&
+        vi.reasons.every((r) =>
+          r === "intent:generic_agreement_title" ||
+          r.startsWith("intent:brand_licensing_title"),
+        ) &&
+        /MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(intentValidationText.slice(0, 2_500));
+      if (postFreezeServerFullIntentWarnOnly) {
+        logDecision(
+          true,
+          [...vi.reasons, "post_freeze_server_full_intent_title_warn_only"],
+          "post_freeze_intent_title_warn_only",
+        );
+        return { ok: true, reasons: [] };
+      }
       if (
         !intentTitleCategoryFailure &&
         conciseQuality.applies &&

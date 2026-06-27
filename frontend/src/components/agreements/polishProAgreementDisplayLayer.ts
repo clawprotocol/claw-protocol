@@ -17,7 +17,7 @@ import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./p
 import { applyBrandLicensingFrozenCorpusAuthority, brandLicensingFrozenCorpusHasProfessionalDefects, brandLicensingOpeningRecitalNeedsAuthorityRepair } from "./paidProBrandLicensingFreezeAuthority";
 import { finalizeSubstantiveWireAfterWitnessCleanup, stripRepeatedSupplementalProvisionsFiller } from "./paidProSupplementalProvisionsFillerGate";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
-import { trimOperativeNoticeStanzasToPartyCount } from "./paidProPartyNoticeDetails";
+import { trimOperativeNoticeStanzasToPartyCount, repairBareEntityOnlyNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { normalizeProAgreementSectionContinuity } from "./normalizeProAgreementSectionContinuity";
 import {
@@ -773,6 +773,11 @@ export function polishProAgreementDisplayLayer(
     if (structureIntegrity.text !== out) {
       out = structureIntegrity.text;
       repairs.push(...structureIntegrity.repairs.map((r) => `section_structure:${r}`));
+    }
+    const noticeFormat = repairBareEntityOnlyNoticeStanzas(out);
+    if (noticeFormat.repairs.length > 0) {
+      out = noticeFormat.text;
+      repairs.push(...noticeFormat.repairs);
     }
     const structureResidual = applySectionStructureIntegrity(out, {
       source: "polishProAgreementDisplayLayer:brand_licensing_residual_check",

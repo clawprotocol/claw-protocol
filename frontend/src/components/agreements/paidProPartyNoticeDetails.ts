@@ -472,6 +472,9 @@ export function formatNoticeAddressLines(address: string): string[] {
 }
 
 const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE = "provided during signer setup.";
+const NOTICE_SIGNER_SETUP_EMAIL_LINE = "Email: provided during signer setup";
+const NOTICE_SIGNER_SETUP_ADDRESS_LINE = "Address: provided during signer setup";
+const NOTICE_SIGNER_SETUP_ATTENTION_LINE = "Attention: Authorized Signer";
 
 export function isBareEntityOnlyNoticeStanza(stanza: string): boolean {
   const lines = stanza
@@ -504,6 +507,47 @@ export function hasBareEntityOnlyNoticeStanzas(text: string): boolean {
   return blocks.some((block) => isBareEntityOnlyNoticeStanza(block.trim()));
 }
 
+function noticeStanzaNeedsProfessionalSignerSetupFormat(stanza: string): boolean {
+  const trimmed = expandFusedIfToNoticeStanza(stanza.trim());
+  if (!/^If to\s+/im.test(trimmed)) return false;
+  const hasEmail = /^Email(?:\s+for\s+Notice)?\s*:/im.test(trimmed);
+  const hasAddress = /^Address(?:\s+for\s+Notice)?\s*:/im.test(trimmed);
+  const hasAttention = /^(?:Attn|Attention)\s*:/im.test(trimmed);
+  if (hasEmail && hasAddress && hasAttention) return false;
+  if (isBareEntityOnlyNoticeStanza(trimmed)) return true;
+  if (/provided during signer setup/i.test(trimmed) && (!hasEmail || !hasAddress || !hasAttention)) {
+    return true;
+  }
+  return false;
+}
+
+function buildProfessionalSignerSetupNoticeStanza(stanza: string): string {
+  const normalized = expandFusedIfToNoticeStanza(stanza.trim());
+  const headingMatch = normalized.match(/^If to\s+(.+?):\s*/im);
+  const entity = headingMatch?.[1]?.trim() ?? "";
+  if (!entity) return stanza.trim();
+  const bodyLine = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(1)
+    .join(" ")
+    .replace(new RegExp(`^${entity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`, "i"), "")
+    .replace(/provided during signer setup\.?/gi, "")
+    .trim();
+  const entityLine =
+    bodyLine && ENTITY_SUFFIX_LINE_RE.test(bodyLine) && bodyLine.length >= entity.length
+      ? bodyLine.replace(/:$/, "").trim()
+      : entity;
+  return [
+    `If to ${entity}:`,
+    entityLine,
+    NOTICE_SIGNER_SETUP_ATTENTION_LINE,
+    NOTICE_SIGNER_SETUP_EMAIL_LINE,
+    NOTICE_SIGNER_SETUP_ADDRESS_LINE,
+  ].join("\n");
+}
+
 /** Append safe notice destination wording to bare entity-name-only stanzas (display-only). */
 export function repairBareEntityOnlyNoticeStanzas(corpus: string): { text: string; repairs: string[] } {
   const noticesIdx = findNoticesSectionStart(corpus);
@@ -522,10 +566,9 @@ export function repairBareEntityOnlyNoticeStanzas(corpus: string): { text: strin
   const repairs: string[] = [];
   const rebuilt = stanzas.map((stanza) => {
     const trimmed = stanza.trim();
-    const normalized = expandFusedIfToNoticeStanza(trimmed);
-    if (!isBareEntityOnlyNoticeStanza(normalized)) return trimmed;
-    repairs.push("notice:append_primary_contact_fallback");
-    return `${normalized}\n${NOTICE_PRIMARY_CONTACT_FALLBACK_LINE}`;
+    if (!noticeStanzaNeedsProfessionalSignerSetupFormat(trimmed)) return trimmed;
+    repairs.push("notice:professional_signer_setup_stanza");
+    return buildProfessionalSignerSetupNoticeStanza(trimmed);
   });
   if (!repairs.length) return { text: corpus, repairs: [] };
 

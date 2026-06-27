@@ -99,6 +99,25 @@ function isNumericListItemLine(trimmed: string): boolean {
   return /^\d+\.\s+(?!\d)/.test(trimmed) && !isPaidProNumberedSectionHeadingLine(trimmed);
 }
 
+/** Reject glued-heading splits that leave a single-word tail (e.g. "2. Additional" / "deliverables"). */
+function wouldInvalidlySplitGluedHeadingLine(trimmed: string): boolean {
+  const split = splitGluedSectionHeadingFromLine(trimmed);
+  if (split === trimmed) return false;
+  const parts = split
+    .split("\n")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length !== 2) return false;
+  const bodyWords = (parts[1] ?? "").split(/\s+/).filter(Boolean);
+  return bodyWords.length === 1 && (parts[1]?.length ?? 0) < 32;
+}
+
+function shouldAttemptHeadingBodyCollapseSplit(trimmed: string): boolean {
+  if (isNumericListItemLine(trimmed)) return false;
+  if (wouldInvalidlySplitGluedHeadingLine(trimmed)) return false;
+  return splitGluedSectionHeadingFromLine(trimmed) !== trimmed;
+}
+
 function collectTopSectionHeadings(lines: readonly string[]): { lineIndex: number; number: number; title: string }[] {
   const headings: { lineIndex: number; number: number; title: string }[] = [];
   for (let i = 0; i < lines.length; i += 1) {
@@ -129,7 +148,8 @@ function detectHeadingBodyCollapse(lines: readonly string[]): SectionStructureDi
       });
       continue;
     }
-    if (splitGluedSectionHeadingFromLine(trimmed) !== trimmed) {
+    if (isNumericListItemLine(trimmed)) continue;
+    if (shouldAttemptHeadingBodyCollapseSplit(trimmed)) {
       diagnostics.push({
         code: "heading_body_collapse",
         message: "Section heading glued to body text on same line",
@@ -141,8 +161,14 @@ function detectHeadingBodyCollapse(lines: readonly string[]): SectionStructureDi
   return diagnostics;
 }
 
+function hasSubsectionEvidenceForSection(lines: readonly string[], sectionNum: number): boolean {
+  const subRe = new RegExp(`^${sectionNum}\\.\\d+(?:\\.\\d+)*`);
+  return lines.some((line) => subRe.test(line.trim()));
+}
+
 function detectDuplicateAndSkippedSections(
   headings: readonly { lineIndex: number; number: number; title: string }[],
+  lines: readonly string[],
 ): SectionStructureDiagnostic[] {
   const diagnostics: SectionStructureDiagnostic[] = [];
   const seen = new Map<number, number>();
@@ -166,12 +192,21 @@ function detectDuplicateAndSkippedSections(
       const prev = sorted[i - 1]!;
       const curr = sorted[i]!;
       if (curr.number - prev.number > 1) {
-        diagnostics.push({
-          code: "skipped_section_identifier",
-          message: `Skipped top-level section number between ${prev.number} and ${curr.number}`,
-          lineIndex: curr.lineIndex,
-          detail: curr.title,
-        });
+        let hasMissingSectionWithoutSubsections = false;
+        for (let missing = prev.number + 1; missing < curr.number; missing += 1) {
+          if (!hasSubsectionEvidenceForSection(lines, missing)) {
+            hasMissingSectionWithoutSubsections = true;
+            break;
+          }
+        }
+        if (hasMissingSectionWithoutSubsections) {
+          diagnostics.push({
+            code: "skipped_section_identifier",
+            message: `Skipped top-level section number between ${prev.number} and ${curr.number}`,
+            lineIndex: curr.lineIndex,
+            detail: curr.title,
+          });
+        }
       }
     }
   }
@@ -353,7 +388,7 @@ export function analyzeSectionStructureIntegrity(text: string): SectionStructure
   const lines = head.split("\n");
   const diagnostics: SectionStructureDiagnostic[] = [
     ...detectHeadingBodyCollapse(lines),
-    ...detectDuplicateAndSkippedSections(collectTopSectionHeadings(lines)),
+    ...detectDuplicateAndSkippedSections(collectTopSectionHeadings(lines), lines),
     ...detectMixedSubsectionScheme(lines),
     ...detectOrphanNumberingRestarts(lines),
     ...detectExecutionBlockContamination(tail, witnessLineIndex),
@@ -432,19 +467,41 @@ function repairOrphanNumberingRestarts(lines: string[]): { lines: string[]; repa
   return { lines: out, repairs };
 }
 
+/** Sentence-ending period glued to a top-level section heading (e.g. "...termination.12. Disputes"). */
+const JOINED_TOP_LEVEL_SECTION_HEADING_RE = /([a-z)])(\.)(\d{1,2}\.\s+)(?=[A-Z][A-Za-z])/g;
+
+export function repairJoinedTopLevelSectionHeadings(text: string): { text: string; repairs: string[] } {
+  const normalized = (text || "").replace(/\r\n/g, "\n");
+  if (!JOINED_TOP_LEVEL_SECTION_HEADING_RE.test(normalized)) {
+    return { text: normalized, repairs: [] };
+  }
+  JOINED_TOP_LEVEL_SECTION_HEADING_RE.lastIndex = 0;
+  let repairs = 0;
+  const repaired = normalized.replace(JOINED_TOP_LEVEL_SECTION_HEADING_RE, (_match, prior, period, heading) => {
+    repairs += 1;
+    return `${prior}${period}\n\n${heading}`;
+  });
+  return {
+    text: repaired.replace(/\n{3,}/g, "\n\n"),
+    repairs: repairs > 0 ? [`joined_top_level_section_heading:${repairs}`] : [],
+  };
+}
+
 function repairHeadingBodyCollapse(lines: string[]): { lines: string[]; repairs: string[] } {
   const repairs: string[] = [];
   const out = lines.map((line) => {
-    const split = splitGluedSectionHeadingFromLine(line);
-    if (split !== line) {
-      repairs.push("heading_body_collapse:split");
-      return split;
-    }
     const trimmed = line.trim();
     const glued = trimmed.match(HEADING_BODY_GLUE_RE);
     if (glued?.[1] && glued[2]) {
       repairs.push("heading_body_collapse:main_subsection_split");
       return `${glued[1].trim()}\n${glued[2].trim()}`;
+    }
+    if (isNumericListItemLine(trimmed)) return line;
+    if (wouldInvalidlySplitGluedHeadingLine(trimmed)) return line;
+    const split = splitGluedSectionHeadingFromLine(line);
+    if (split !== line) {
+      repairs.push("heading_body_collapse:split");
+      return split;
     }
     return line;
   });
@@ -468,8 +525,10 @@ export function repairSectionStructureIntegrity(
   }
 
   const analysis = priorAnalysis ?? analyzeSectionStructureIntegrity(normalized);
-  const { head, tail } = splitBeforeWitness(normalized);
-  const repairs: string[] = [];
+  const joinedHeadings = repairJoinedTopLevelSectionHeadings(normalized);
+  const workingText = joinedHeadings.text;
+  const { head, tail } = splitBeforeWitness(workingText);
+  const repairs: string[] = [...joinedHeadings.repairs];
 
   let lines = head.split("\n");
   const collapse = repairHeadingBodyCollapse(lines);

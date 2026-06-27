@@ -279,5 +279,10 @@ export function preparePaidProReviewDisplayPlain(
     out = headingTitle.text;
     repairs.push(...headingTitle.repairs.map((r) => `heading_title:${r}`));
   }
+  const bareNotices = repairBareEntityOnlyNoticeStanzas(out);
+  if (bareNotices.repairs.length > 0) {
+    out = bareNotices.text;
+    repairs.push(...bareNotices.repairs);
+  }
   return { text: out, repairs: [...new Set(repairs)] };
 }

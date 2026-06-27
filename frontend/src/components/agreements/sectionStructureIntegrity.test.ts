@@ -5,6 +5,7 @@ import { guardPaidProReviewRenderCorpus } from "./paidProReviewRenderCorpus";
 import {
   analyzeSectionStructureIntegrity,
   applySectionStructureIntegrity,
+  repairJoinedTopLevelSectionHeadings,
   repairSectionStructureIntegrity,
   resetSectionStructureIntegrityLogsForTests,
 } from "./sectionStructureAuthority";
@@ -133,6 +134,15 @@ describe("sectionStructureIntegrity", () => {
     ].join("\n\n");
     const analysis = analyzeSectionStructureIntegrity(input);
     expect(analysis.anomalyCount).toBe(0);
+  });
+
+  it("Case J — joined top-level section heading after sentence period is repaired", () => {
+    const input =
+      "11.6 Survival. Certain provisions shall survive expiration or termination.12. Disputes, Governing Law and Notices";
+    const repaired = repairJoinedTopLevelSectionHeadings(input);
+    expect(repaired.repairs.length).toBeGreaterThan(0);
+    expect(repaired.text).toContain("termination.\n\n12. Disputes");
+    expect(repaired.text).not.toMatch(/termination\.12\./);
   });
 
   it("Case I — Test379/380/381/382 starter previews remain structurally sound", () => {
