@@ -6129,12 +6129,54 @@ def post_vs01_signer_complete(
         except HTTPException:
             auth_mode = None
     if not auth_mode:
-        from backend.security.agreement_read_scope import recipient_access_token_from_request
-        from backend.services.vs01_signer_completion import vs01_open_signing_link_completion_allowed
+        from backend.security.agreement_read_scope import (
+            recipient_access_token_from_request,
+            resolve_signing_token_secret_raw,
+            validate_recipient_access_token_for_agreement,
+        )
+        from backend.security.signing_token_secret import SigningTokenSecretMissingInProductionError
+        from backend.services.vs01_signer_completion import (
+            assert_recipient_signer_completion_binding,
+            resolve_participant_id_for_signer_role,
+            vs01_open_signing_link_completion_allowed,
+        )
 
         tok = recipient_access_token_from_request(request)
         if tok:
-            assert_agreement_recipient_write_allowed(request, aid, allowed_modes=("sign",))
+            try:
+                secret_raw = resolve_signing_token_secret_raw()
+            except SigningTokenSecretMissingInProductionError as e:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "signing_token_secret_not_configured", "message": str(e)},
+                ) from e
+            draft_for_auth = _load_or_404(aid)
+            participant_id = resolve_participant_id_for_signer_role(
+                draft_for_auth.model_dump(),
+                signer_role_id,
+                body.participant_id or "",
+            )
+            token_out = validate_recipient_access_token_for_agreement(
+                token=tok,
+                path_agreement_id=aid,
+                query_agreement_id=None,
+                secret_raw=secret_raw,
+                consume_single_use=False,
+                log_validation=False,
+            )
+            token_party_id = str(token_out.get("recipient_party_id") or "").strip()
+            assert_agreement_recipient_write_allowed(
+                request,
+                aid,
+                allowed_modes=("sign",),
+                bind_participant_id=participant_id or token_party_id or None,
+            )
+            assert_recipient_signer_completion_binding(
+                draft_for_auth.model_dump(),
+                signer_role_id=signer_role_id,
+                participant_id=participant_id,
+                token_party_id=token_party_id,
+            )
             auth_mode = "recipient"
         else:
             draft_for_auth = _load_or_404(aid)
@@ -7081,6 +7123,20 @@ def post_completed_signed_export_pdf(
     draft = _load_or_404(aid)
     if not _agreement_draft_fully_executed(draft):
         raise HTTPException(status_code=403, detail="agreement_not_fully_executed")
+
+    from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
+
+    ensured = ensure_fully_executed_snapshot_on_draft(draft.model_dump(), agreement_id=aid)
+    if ensured.mutated:
+        now = _utc_now_iso()
+        next_draft = _merge_agreement_draft(
+            draft,
+            updated_at=now,
+            vs01_signing_packet_v1=ensured.draft_dict.get("vs01_signing_packet_v1"),
+        )
+        _save_draft_sync(next_draft.model_dump(), request)
+        draft = next_draft
+
     return build_completed_signed_pdf_response(agreement_id=aid, draft=draft)
 
 

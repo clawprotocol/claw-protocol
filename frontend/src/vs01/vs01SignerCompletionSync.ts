@@ -22,6 +22,11 @@ import {
   attachFullyExecutedSnapshotToPortable,
   signatureTextForSignerRole,
 } from "./vs01FullyExecutedSignedSnapshot";
+import {
+  assertVs01CompletionIdentityAuthoritative,
+  findPortableRoleBySignerRoleId,
+  portableRolePartyId,
+} from "./vs01RecipientIdentityAuthority";
 
 export type RecordVs01SignerCompletionArgs = {
   agreementId: string;
@@ -179,15 +184,64 @@ function applyLocalSignerPacketStatus(
   return patchSignerPacketStatus(agreementId, signerRoleId, "signed", keys);
 }
 
+function resolveAuthoritativeCompletionIdentity(args: RecordVs01SignerCompletionArgs): {
+  signerRoleId: string;
+  participantId: string;
+  partyIndex: number;
+  blocked?: { code: string; message: string };
+} {
+  const signerRoleId = args.signerRoleId.trim();
+  const documentId = args.documentId.trim();
+  const portable = documentId ? loadVs01CanonicalPacketPortable(documentId) : null;
+  const guard = assertVs01CompletionIdentityAuthoritative({
+    portable,
+    signerRoleId,
+    participantId: args.participantId,
+  });
+  if (!guard.ok) {
+    return {
+      signerRoleId,
+      participantId: (args.participantId ?? "").trim(),
+      partyIndex: args.partyIndex ?? 0,
+      blocked: { code: guard.code, message: guard.message },
+    };
+  }
+  const role = portable ? findPortableRoleBySignerRoleId(portable, signerRoleId) : null;
+  const participantId =
+    (role ? portableRolePartyId(role) : "") ||
+    (args.participantId ?? "").trim();
+  const partyIndex = role?.partyIndex ?? args.partyIndex ?? 0;
+  return { signerRoleId, participantId, partyIndex };
+}
+
 async function recordVs01SignerCompletionInner(
   args: RecordVs01SignerCompletionArgs,
 ): Promise<RecordVs01SignerCompletionResult> {
   const agreementId = args.agreementId.trim();
-  const signerRoleId = args.signerRoleId.trim();
   const documentId = args.documentId.trim();
+  const authoritative = resolveAuthoritativeCompletionIdentity(args);
+  if (authoritative.blocked) {
+    if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+      // eslint-disable-next-line no-console
+      console.warn("[vs01-recipient-identity-mismatch]", {
+        code: authoritative.blocked.code,
+        surface: "completion_persist",
+      });
+    }
+    return {
+      localSnapshot: readSigningPacketStatus(agreementId),
+      fullySigned: false,
+      serverSynced: false,
+      serverFullyExecuted: false,
+      completionEmailsSent: false,
+      corpusStamped: false,
+    };
+  }
+  const signerRoleId = authoritative.signerRoleId;
+  const participantId = authoritative.participantId;
   const signingDateIso = (args.signingDateIso ?? "").trim() || todayIsoDateLocal();
   const signedDateDisplay = formatSigningDateDisplayFromIso(signingDateIso);
-  const partyIndex = args.partyIndex ?? 0;
+  const partyIndex = authoritative.partyIndex;
   const isLocalBridge = agreementId.startsWith("local_ag_");
 
   const optimisticFinal =
@@ -213,7 +267,7 @@ async function recordVs01SignerCompletionInner(
         agreementId,
         {
           signer_role_id: signerRoleId,
-          participant_id: (args.participantId ?? "").trim(),
+          participant_id: participantId,
           document_id: documentId,
           display_name: (args.displayName ?? "").trim(),
           signed_date_iso: signingDateIso,
@@ -245,7 +299,7 @@ async function recordVs01SignerCompletionInner(
               agreementId,
               {
                 signer_role_id: signerRoleId,
-                participant_id: (args.participantId ?? "").trim(),
+                participant_id: participantId,
                 document_id: documentId,
                 display_name: (args.displayName ?? "").trim(),
                 signed_date_iso: signingDateIso,

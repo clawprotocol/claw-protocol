@@ -16,6 +16,7 @@ import {
   ensureRecipientFieldDefaults,
   normalizeRecipientManifestCounterparties,
 } from "./recipientManifestUrl";
+import { scopeRecipientManifestToLockedSigner } from "./vs01RecipientFieldScope";
 import { filterPacketManifestFieldsForRole } from "./vs01SigningPacketManifest";
 import {
   hydrateRecipientSigningFields,
@@ -103,10 +104,16 @@ function hydrateFieldsFromPortable(args: {
   const allCps = counterpartiesFromPortable();
   const cpMap = new Map(allCps.map((c) => [c.id, c]));
   const lock = (lockedSignerRoleId ?? "").trim();
+  const scopedManifestFields = scopeRecipientManifestToLockedSigner({
+    fields: manifestFields,
+    lockedCounterpartyId,
+    lockedSignerRoleId,
+    portableRoles: hydratedPortable.roles,
+  });
   const displayFields = hydrateRecipientSigningFields(
     stripLockedSignerEditableValuesOnHydrate(
       ensureRecipientFieldDefaults(
-        manifestFields,
+        scopedManifestFields,
         recipientName,
         recipientEmail,
         {

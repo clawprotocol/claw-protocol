@@ -53,6 +53,7 @@ export type Vs01UrlBootstrapResult = {
   step: Vs01Step;
   furthestStep: Vs01Step;
   recipientSignerMode: boolean;
+  recipientIndex: number;
   recipientLockedCounterpartyId: string;
   /** From `agreement_id` query — used with {@link recipientLockedSignerRoleId} for field scoping. */
   recipientAgreementId: string;
@@ -335,6 +336,7 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     step: RECIPIENT_SIGNER_STEP,
     furthestStep: RECIPIENT_SIGNER_STEP,
     recipientSignerMode: true,
+    recipientIndex,
     recipientLockedCounterpartyId: lockedId,
     recipientAgreementId,
     recipientLockedSignerRoleId,

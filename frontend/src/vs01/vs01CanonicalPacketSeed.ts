@@ -183,8 +183,9 @@ export function buildVs01CanonicalPacketPortable(args: {
     witnessPageIndex: args.witnessPageIndex,
     initialsPolicy: {
       enabled:
-        args.initialsEnabled !== false &&
-        fields.some((f) => f.type === "initials" && f.autoInitials === true),
+        args.initialsEnabled === true ||
+        (args.initialsEnabled !== false &&
+          fields.some((f) => f.type === "initials" && f.autoInitials === true)),
       bodyPagesOnly: fields.every((f) => f.type !== "initials" || f.page !== args.witnessPageIndex),
     },
     fieldCount: fields.length,

@@ -98,10 +98,15 @@ async function enrichSigningTargetsWithRecipientTokens(
       continue;
     }
     const role = roles.find((r) => r.roleId === target.signer_role_id);
+    const partyIdForToken = (
+      role?.vs01CounterpartyId ??
+      role?.partyId ??
+      ""
+    ).trim();
     const mint = await mintRecipientAccessTokenResult(agreementId, {
       mode: "sign",
       role: "signer",
-      recipient_party_id: role?.partyId ?? role?.vs01CounterpartyId ?? undefined,
+      recipient_party_id: partyIdForToken || undefined,
     });
     if (mint.ok && mint.data.token) {
       out.push({

@@ -251,6 +251,8 @@ export type ResolveFinalVs01CorpusOrBlockArgs = {
   vs01CheckPhase?: PaidProVs01CheckPhase;
   signaturePreparationRequested?: boolean;
   prepareSignatureLinksRequested?: boolean;
+  /** VS01 portable / prepare role count — authoritative on recipient signing when >= 3. */
+  manifestPartyCount?: number;
 };
 
 export type Vs01WitnessRequirement = {
@@ -271,6 +273,7 @@ function resolveVs01AuthoritativeSignerCount(
   });
   const labeledCount = labeledPartyLegalEntities(args.intakeText ?? "").length;
   const manifestPartyCount = Math.max(
+    args.manifestPartyCount ?? 0,
     readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
       (p) => String(p.partyLegalName ?? "").trim().length >= 2,
     ).length ?? 0,

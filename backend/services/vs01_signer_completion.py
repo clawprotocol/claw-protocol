@@ -252,6 +252,75 @@ def all_signers_signed_from_audit(draft: Dict[str, Any], audit: List[Any]) -> bo
     return False
 
 
+def portable_party_id_for_signer_role(draft: Dict[str, Any], signer_role_id: str) -> str:
+    """Party / counterparty id bound to a VS01 portable role row."""
+    stored = draft.get("vs01_signing_packet_v1")
+    portable = stored.get("portable") if isinstance(stored, dict) else None
+    roles = portable.get("roles") if isinstance(portable, dict) else None
+    rid = (signer_role_id or "").strip()
+    if not rid or not isinstance(roles, list):
+        return ""
+    for role in roles:
+        if not isinstance(role, dict):
+            continue
+        if str(role.get("roleId") or "").strip() != rid:
+            continue
+        return str(role.get("vs01CounterpartyId") or role.get("partyId") or "").strip()
+    return ""
+
+
+def assert_recipient_signer_completion_binding(
+    draft: Dict[str, Any],
+    *,
+    signer_role_id: str,
+    participant_id: str,
+    token_party_id: str = "",
+) -> None:
+    """
+    Recipient token + body must match the portable packet row for signer_role_id.
+    Prevents completing another party while holding a valid token for a different party.
+    """
+    from fastapi import HTTPException
+
+    rid = (signer_role_id or "").strip()
+    pid = (participant_id or "").strip()
+    tok_pid = (token_party_id or "").strip()
+    required = required_vs01_signer_role_ids(draft)
+    if required and rid not in required:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "signer_role_not_in_packet",
+                "message": "This signing link does not match this agreement.",
+            },
+        )
+    packet_pid = portable_party_id_for_signer_role(draft, rid)
+    if tok_pid and packet_pid and tok_pid != packet_pid:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "signer_token_role_mismatch",
+                "message": "This signing link does not match your invite.",
+            },
+        )
+    if tok_pid and pid and tok_pid != pid:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "recipient_party_token_mismatch",
+                "message": "This signing link does not match your invite.",
+            },
+        )
+    if pid and packet_pid and pid != packet_pid:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "completion_participant_role_mismatch",
+                "message": "This signing link does not match your invite.",
+            },
+        )
+
+
 def resolve_participant_id_for_signer_role(
     draft: Dict[str, Any],
     signer_role_id: str,

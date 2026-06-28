@@ -47,6 +47,7 @@ export function resolveRecipientCanonicalSigningPacket(args: {
       guidedPro: true,
       premiumComplete: corpusPlain.length >= 1500,
       freeBaselinePlain: args.freeBaselinePlain ?? null,
+      manifestPartyCount: args.roles.length >= 2 ? args.roles.length : undefined,
     });
     if (!gate.allowed) return null;
     const corpus = gate.corpus.trim();

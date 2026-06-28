@@ -71,11 +71,11 @@ import {
 import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
 import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
 import { paidProPacketReadyDashboardPath } from "./vs01PaidProPacketReadyNavigation";
-import { hydrateVs01RecipientFromServerPacket } from "./vs01RecipientServerHydration";
+import { bootstrapVs01RecipientSigningAuthority } from "./vs01RecipientAuthorityBootstrap";
+import type { Vs01RecipientIdentityAuthority } from "./vs01RecipientIdentityAuthority";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
 import { readSigningPacketStatus } from "./vs01SigningPacketStatusStore";
 import { recordVs01SignerCompletion } from "./vs01SignerCompletionSync";
-import { partyIndexFromSignerRoleId } from "./vs01RecipientFieldScope";
 import {
   clearVs01DraftState,
   loadVs01DraftState,
@@ -200,6 +200,8 @@ export function Vs01Wizard({
   }, [navigate]);
   const countedSignatureReceiptRef = useRef<string | null>(null);
   const didLogVs01RouteMount = useRef(false);
+  const recipientAuthorityResolvedRef = useRef(false);
+  const recipientAuthorityIdentityRef = useRef<Vs01RecipientIdentityAuthority | null>(null);
   /** Paid Pro `/app/esign/:id?agreement_bridge=1` — LawDog already collected signers; never show VS01 details step. */
   const [paidProAgreementBridgeSkip] = useState(() =>
     computePaidProAgreementBridgeSkip(seedDocumentId, hideStepper),
@@ -215,6 +217,12 @@ export function Vs01Wizard({
   const [step, setStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.step ?? initialStep);
   /** Furthest step visited — gates Receipt until assign step satisfied. */
   const [furthestStep, setFurthestStep] = useState<Vs01Step>(() => VS01_URL_BOOT?.furthestStep ?? initialStep);
+  const [recipientLockedCpId, setRecipientLockedCpId] = useState<string | null>(
+    () => RECIPIENT_LOCKED_CP_ID,
+  );
+  const [recipientLockedSignerRoleId, setRecipientLockedSignerRoleId] = useState<string | null>(
+    () => RECIPIENT_LOCKED_SIGNER_ROLE_ID,
+  );
   const [recipientPlacedFields, setRecipientPlacedFields] = useState<Vs01RecipientPlacedField[]>(
     () => INITIAL_RECIPIENT_FIELDS
   );
@@ -300,49 +308,41 @@ export function Vs01Wizard({
   }, [seedDocumentId, hideStepper]);
 
   useEffect(() => {
-    if (!RECIPIENT_SIGNER_DEEP_LINK || !RECIPIENT_LOCKED_CP_ID) return;
+    if (!RECIPIENT_SIGNER_DEEP_LINK || !recipientLockedCpId) return;
+    if (recipientAuthorityResolvedRef.current) return;
     const agreementId = RECIPIENT_AGREEMENT_ID;
     const did = (documentId ?? VS01_URL_BOOT?.documentId ?? "").trim();
     if (!agreementId || !did) {
       setRecipientServerHydrationPending(false);
       return;
     }
-    const hasCanonical = hasVs01CanonicalPacketCached(did);
-    const lacksSignatureField =
-      recipientPlacedFields.length > 0 &&
-      RECIPIENT_LOCKED_SIGNER_ROLE_ID &&
-      !recipientPlacedFields.some(
-        (f) =>
-          f.type === "signature" &&
-          (f.assignedSignerRoleId ?? "").trim() === RECIPIENT_LOCKED_SIGNER_ROLE_ID.trim(),
-      );
-    const needsFields = recipientPlacedFields.length === 0 || lacksSignatureField;
-    const needsCanonical = !hasCanonical;
-    if (!needsFields && !needsCanonical) {
-      setRecipientServerHydrationPending(false);
-      return;
-    }
     let cancelled = false;
     setRecipientServerHydrationPending(true);
-    const lockedCp = RECIPIENT_LOCKED_CP_ID;
+    const lockedCp = recipientLockedCpId;
     const recipientName =
       (VS01_URL_BOOT?.counterparties.find((c) => c.id === lockedCp)?.name ?? "").trim() ||
       (counterparties.find((c) => c.id === lockedCp)?.name ?? "").trim();
     const recipientEmail =
       (VS01_URL_BOOT?.counterparties.find((c) => c.id === lockedCp)?.email ?? "").trim() ||
       (counterparties.find((c) => c.id === lockedCp)?.email ?? "").trim();
-    void hydrateVs01RecipientFromServerPacket({
+    void bootstrapVs01RecipientSigningAuthority({
       agreementId,
       documentId: did,
       packetRevision: VS01_URL_BOOT?.packetRevision ?? null,
-      lockedCounterpartyId: lockedCp,
-      lockedSignerRoleId: RECIPIENT_LOCKED_SIGNER_ROLE_ID,
-      recipientName: recipientName || "Recipient",
-      recipientEmail,
+      recipientAccessToken: RECIPIENT_ACCESS_TOKEN,
+      urlSignerRoleId: recipientLockedSignerRoleId,
+      urlCounterpartyId: lockedCp,
+      urlRecipientIndex: VS01_URL_BOOT?.recipientIndex ?? null,
+      urlRecipientName: recipientName || "Recipient",
+      urlRecipientEmail: recipientEmail,
     }).then((result) => {
       if (cancelled) return;
       setRecipientServerHydrationPending(false);
-      if (result.ok && result.fields.length > 0) {
+      if (result.ok) {
+        recipientAuthorityResolvedRef.current = true;
+        recipientAuthorityIdentityRef.current = result.identity;
+        setRecipientLockedSignerRoleId(result.identity.lockedSignerRoleId);
+        setRecipientLockedCpId(result.identity.lockedCounterpartyId);
         setRecipientPlacedFields(result.fields);
         if (result.counterparties.length > 0) {
           setCounterparties(result.counterparties);
@@ -355,14 +355,24 @@ export function Vs01Wizard({
           agreementIdShort: agreementId.slice(0, 16),
           documentIdShort: did.slice(0, 8),
           fieldCount: result.fields.length,
-          source: result.source,
+          source: "server_packet",
+          signerCount: result.signerCount,
+          initialsEnabled: result.initialsEnabled,
+          identitySource: result.identity.source,
         });
-      } else if (result.inviteSuperseded) {
+        return;
+      }
+      if ("mismatch" in result && result.mismatch) {
+        setError(result.mismatch.message);
+        return;
+      }
+      if ("inviteSuperseded" in result && result.inviteSuperseded) {
         setError(
-          result.inviteSupersededMessage?.trim() ||
-            "This invite was replaced. Ask the sender for the latest link.",
+          result.message?.trim() || "This invite was replaced. Ask the sender for the latest link.",
         );
-      } else if (import.meta.env.DEV) {
+        return;
+      }
+      if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.warn("[vs01-recipient-server-hydration-miss]", {
           agreementIdShort: agreementId.slice(0, 16),
@@ -373,12 +383,7 @@ export function Vs01Wizard({
     return () => {
       cancelled = true;
     };
-  }, [
-    recipientPlacedFields.length,
-    documentId,
-    counterparties,
-    vs01LinkedAgreementId,
-  ]);
+  }, [documentId, recipientLockedCpId]);
 
   useEffect(() => {
     bridgeHandoffSnapshotRef.current = null;
@@ -1184,7 +1189,7 @@ export function Vs01Wizard({
   const esignGate = access.check("esign_flow");
   const signatureGate = access.check("signature_request");
 
-  if (RECIPIENT_SIGNER_DEEP_LINK && RECIPIENT_LOCKED_CP_ID) {
+  if (RECIPIENT_SIGNER_DEEP_LINK && recipientLockedCpId) {
     return (
       <>
         {error ? (
@@ -1222,9 +1227,9 @@ export function Vs01Wizard({
             <RecipientSigningView
               documentId={documentId}
               counterparties={counterparties}
-              lockedCounterpartyId={RECIPIENT_LOCKED_CP_ID}
+              lockedCounterpartyId={recipientLockedCpId}
               recipientAgreementId={RECIPIENT_AGREEMENT_ID || null}
-              lockedSignerRoleId={RECIPIENT_LOCKED_SIGNER_ROLE_ID}
+              lockedSignerRoleId={recipientLockedSignerRoleId}
               packetRevision={VS01_URL_BOOT?.packetRevision ?? null}
               recipientFields={recipientPlacedFields}
               senderPlacedFields={senderPlacedFields}
@@ -1232,20 +1237,26 @@ export function Vs01Wizard({
               onRecipientFieldsChange={setRecipientPlacedFields}
               onError={setError}
               onFinishSigning={() => {
+                if (!recipientAuthorityResolvedRef.current || !recipientAuthorityIdentityRef.current) {
+                  setError(
+                    "Your signing session could not be verified. Open the link from your email or ask the sender to resend.",
+                  );
+                  return;
+                }
+                const authority = recipientAuthorityIdentityRef.current;
                 setRecipientSigningFinished(true);
                 const aid = RECIPIENT_AGREEMENT_ID.trim();
-                const roleKey = (RECIPIENT_LOCKED_SIGNER_ROLE_ID ?? "").trim();
+                const roleKey = authority.lockedSignerRoleId.trim();
                 if (aid && roleKey) {
                   void recordVs01SignerCompletion({
                     agreementId: aid,
                     documentId: documentId ?? "",
                     signerRoleId: roleKey,
-                    partyIndex: partyIndexFromSignerRoleId(roleKey),
-                    participantId: RECIPIENT_LOCKED_CP_ID,
+                    partyIndex: authority.partyIndex,
+                    participantId: authority.lockedCounterpartyId,
                     displayName:
-                      VS01_URL_BOOT?.counterparties.find((c) => c.id === RECIPIENT_LOCKED_CP_ID)
-                        ?.signerName ??
-                      VS01_URL_BOOT?.counterparties.find((c) => c.id === RECIPIENT_LOCKED_CP_ID)?.name ??
+                      counterparties.find((c) => c.id === authority.lockedCounterpartyId)?.signerName ??
+                      authority.recipientName ??
                       null,
                     recipientFields: recipientPlacedFields,
                     recipientAccessToken: RECIPIENT_ACCESS_TOKEN || null,
@@ -1259,7 +1270,7 @@ export function Vs01Wizard({
                       agreementId: aid,
                       documentId: documentId ?? undefined,
                       signerRoleId: roleKey,
-                      partyIndex: partyIndexFromSignerRoleId(roleKey),
+                      partyIndex: authority.partyIndex,
                       fieldType: "signature",
                       status: "signed",
                     });
@@ -1269,7 +1280,7 @@ export function Vs01Wizard({
                         agreement_id: aid.slice(0, 16),
                         document_id: documentId?.slice(0, 16) ?? null,
                         signer_role_id: roleKey.slice(0, 24),
-                        party_index: partyIndexFromSignerRoleId(roleKey),
+                        party_index: authority.partyIndex,
                         field_type: "signature",
                         signed_by: roleKey.slice(0, 24),
                         remaining_signers: remainingSigners,
