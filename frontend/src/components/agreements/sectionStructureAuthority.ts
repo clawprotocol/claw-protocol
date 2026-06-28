@@ -469,21 +469,55 @@ function repairOrphanNumberingRestarts(lines: string[]): { lines: string[]; repa
 
 /** Sentence-ending period glued to a top-level section heading (e.g. "...termination.12. Disputes"). */
 const JOINED_TOP_LEVEL_SECTION_HEADING_RE = /([a-z)])(\.)(\d{1,2}\.\s+)(?=[A-Z][A-Za-z])/g;
+/** e.g. venue.12.4 Notices — subsection glued to prior sentence without line break. */
+const JOINED_SUBSECTION_HEADING_RE =
+  /([a-zA-Z0-9),.;])(\.)(\d{1,2}\.\d+(?:\.\d+)?\s+)(?=[A-Z][A-Za-z])/g;
+
+export function repairJoinedSubsectionHeadings(text: string): { text: string; repairs: string[] } {
+  const normalized = (text || "").replace(/\r\n/g, "\n");
+  if (!JOINED_SUBSECTION_HEADING_RE.test(normalized)) {
+    return { text: normalized, repairs: [] };
+  }
+  JOINED_SUBSECTION_HEADING_RE.lastIndex = 0;
+  let repairs = 0;
+  const repaired = normalized.replace(
+    JOINED_SUBSECTION_HEADING_RE,
+    (_match, prior, period, heading) => {
+      repairs += 1;
+      return `${prior}${period}\n\n${heading}`;
+    },
+  );
+  return {
+    text: repaired.replace(/\n{3,}/g, "\n\n"),
+    repairs: repairs > 0 ? [`joined_subsection_heading:${repairs}`] : [],
+  };
+}
 
 export function repairJoinedTopLevelSectionHeadings(text: string): { text: string; repairs: string[] } {
   const normalized = (text || "").replace(/\r\n/g, "\n");
-  if (!JOINED_TOP_LEVEL_SECTION_HEADING_RE.test(normalized)) {
-    return { text: normalized, repairs: [] };
+  const subsection = repairJoinedSubsectionHeadings(normalized);
+  const working = subsection.text;
+  if (!JOINED_TOP_LEVEL_SECTION_HEADING_RE.test(working)) {
+    return {
+      text: working,
+      repairs: subsection.repairs,
+    };
   }
   JOINED_TOP_LEVEL_SECTION_HEADING_RE.lastIndex = 0;
-  let repairs = 0;
-  const repaired = normalized.replace(JOINED_TOP_LEVEL_SECTION_HEADING_RE, (_match, prior, period, heading) => {
+  let repairs = subsection.repairs.length;
+  const repaired = working.replace(JOINED_TOP_LEVEL_SECTION_HEADING_RE, (_match, prior, period, heading) => {
     repairs += 1;
     return `${prior}${period}\n\n${heading}`;
   });
+  const repairTags = [
+    ...subsection.repairs,
+    ...(repairs > subsection.repairs.length
+      ? [`joined_top_level_section_heading:${repairs - subsection.repairs.length}`]
+      : []),
+  ];
   return {
     text: repaired.replace(/\n{3,}/g, "\n\n"),
-    repairs: repairs > 0 ? [`joined_top_level_section_heading:${repairs}`] : [],
+    repairs: repairTags,
   };
 }
 

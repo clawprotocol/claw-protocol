@@ -145,6 +145,15 @@ describe("sectionStructureIntegrity", () => {
     expect(repaired.text).not.toMatch(/termination\.12\./);
   });
 
+  it("Case K — joined subsection heading venue.12.4 Notices is repaired", () => {
+    const input =
+      "Each party consents to that jurisdiction and venue.12.4 Notices must be delivered in writing.";
+    const repaired = repairJoinedTopLevelSectionHeadings(input);
+    expect(repaired.repairs.some((r) => r.includes("joined_subsection_heading"))).toBe(true);
+    expect(repaired.text).toContain("venue.\n\n12.4 Notices");
+    expect(repaired.text).not.toMatch(/venue\.12\.4 Notices/);
+  });
+
   it("Case I — Test379/380/381/382 starter previews remain structurally sound", () => {
     const intakes = [
       TEST379_FOUR_PARTY_LOGISTICS_PLATFORM_INTAKE,

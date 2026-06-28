@@ -1,4 +1,4 @@
-import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
+import type { Vs01SigningPacketModel, Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
 import { canonicalPageTypography } from "./vs01CanonicalPageLayoutContract";
 
 export type Vs01CanonicalPageRenderMetrics = {
@@ -67,6 +67,38 @@ export function signingPacketHasVisibleText(pages: readonly Vs01SigningPacketPag
       p.flowLines.some((line) => line.trim().length > 0) ||
       p.textBlocks.some((b) => b.text.trim().length > 0),
   );
+}
+
+/** Canonical-only bridge path: paginated pages with non-empty flow/text blocks. */
+export function signingPacketHasPaginatedCorpus(
+  model: Pick<Vs01SigningPacketModel, "pages"> | null | undefined,
+): boolean {
+  return Boolean(model?.pages?.length && signingPacketHasVisibleText(model.pages));
+}
+
+export function resolveVs01CanonicalBridgeTextRendered(args: {
+  bridgeMode: boolean;
+  signingPacketModel: Pick<Vs01SigningPacketModel, "pages"> | null | undefined;
+  corpusGateAllowed: boolean;
+  corpusTextLen: number;
+}): boolean | undefined {
+  if (!args.bridgeMode) return undefined;
+  if (args.corpusTextLen < 80) return false;
+  if (!args.corpusGateAllowed) return false;
+  return signingPacketHasPaginatedCorpus(args.signingPacketModel);
+}
+
+export function resolveVs01CanonicalBridgeSignatureLinesRendered(args: {
+  bridgeMode: boolean;
+  signingPacketModel: Pick<Vs01SigningPacketModel, "diagnostics" | "fields"> | null | undefined;
+  roleCount: number;
+}): boolean | undefined {
+  if (!args.bridgeMode) return undefined;
+  const anchorCount = args.signingPacketModel?.diagnostics.signatureAnchorCount ?? 0;
+  if (anchorCount >= args.roleCount && args.roleCount > 0) return true;
+  const signatureFields =
+    args.signingPacketModel?.fields.filter((f) => f.type === "signature" && !f.autoInitials).length ?? 0;
+  return signatureFields >= args.roleCount && args.roleCount > 0;
 }
 
 export function signingPacketTotalCharCount(pages: readonly Vs01SigningPacketPage[]): number {

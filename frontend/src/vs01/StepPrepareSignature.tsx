@@ -132,7 +132,11 @@ import {
 } from "./buildVs01SigningPacketModel";
 import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
 import { Vs01SignatureDomFieldShell } from "./Vs01SignatureDomFieldShell";
-import { signingPacketHasVisibleText } from "./vs01CanonicalPageRender";
+import {
+  resolveVs01CanonicalBridgeSignatureLinesRendered,
+  resolveVs01CanonicalBridgeTextRendered,
+  signingPacketHasPaginatedCorpus,
+} from "./vs01CanonicalPageRender";
 import {
   logVs01PreviewViewportGeometry,
   readPreparePreviewViewportGeometry,
@@ -683,7 +687,10 @@ export function StepPrepareSignature({
   ]);
 
   const canonicalPageLayouts = useMemo(
-    () => (signingPacketModel?.allowed ? signingPacketLayoutsFromModel(signingPacketModel) : null),
+    () =>
+      signingPacketHasPaginatedCorpus(signingPacketModel)
+        ? signingPacketLayoutsFromModel(signingPacketModel!)
+        : null,
     [signingPacketModel],
   );
   const effectivePageLayouts = agreementBridgePlacementCopy ? canonicalPageLayouts : pageLayouts;
@@ -695,17 +702,18 @@ export function StepPrepareSignature({
   }, [agreementBridgePlacementCopy]);
 
   useEffect(() => {
-    if (!agreementBridgePlacementCopy || !signingPacketModel?.allowed) return;
-    setNumPages(signingPacketModel.pages.length);
+    if (!agreementBridgePlacementCopy || !signingPacketHasPaginatedCorpus(signingPacketModel)) return;
+    setNumPages(signingPacketModel!.pages.length);
     setPdfDocReady(true);
+    if (!signingPacketModel!.fields.length) return;
     setFields((prev) => {
       const manualNonAuto = prev.filter((f) => f.assignmentSource !== "prepare_active_role" && !f.autoInitials);
-      return [...manualNonAuto, ...signingPacketModel.fields];
+      return [...manualNonAuto, ...signingPacketModel!.fields];
     });
   }, [agreementBridgePlacementCopy, signingPacketModel, setFields]);
 
   useLayoutEffect(() => {
-    if (!agreementBridgePlacementCopy || !signingPacketModel?.allowed) return;
+    if (!agreementBridgePlacementCopy || !signingPacketHasPaginatedCorpus(signingPacketModel)) return;
     const scrollEl = pagesInnerRef.current?.closest(".vs01-sign-scroll") as HTMLElement | null;
     const firstStack = pageStackRefs.current.get(0);
     const firstSurface = pageSurfaceRefs.current.get(0);
@@ -967,7 +975,11 @@ export function StepPrepareSignature({
   }, [prepareAgreementId, autoInitialsEveryPage]);
 
   const canonicalFieldsForGate =
-    agreementBridgePlacementCopy && signingPacketModel?.allowed ? signingPacketModel.fields : fields;
+    agreementBridgePlacementCopy &&
+    signingPacketModel &&
+    (signingPacketModel.allowed || signingPacketModel.fields.some((f) => f.type === "signature" && !f.autoInitials))
+      ? signingPacketModel.fields
+      : fields;
 
   const bridgePlacementFields = useMemo(
     () => canonicalFieldsForGate,
@@ -975,14 +987,15 @@ export function StepPrepareSignature({
   );
 
   const initialsPacketSummary = useMemo(() => {
-    const packetPageCount = signingPacketModel?.allowed ? signingPacketModel.pages.length : numPages;
+    const paginatedModel = signingPacketHasPaginatedCorpus(signingPacketModel);
+    const packetPageCount = paginatedModel ? signingPacketModel!.pages.length : numPages;
     if (!autoInitialsEveryPage || packetPageCount <= 0 || !prepareSignerRoles?.length) return null;
-    if (signingPacketModel?.allowed) {
+    if (paginatedModel) {
       return summarizeCanonicalSigningPacketInitials({
         fields: canonicalFieldsForGate,
         pageCount: packetPageCount,
         roleCount: prepareSignerRoles.length,
-        pages: signingPacketModel.pages,
+        pages: signingPacketModel!.pages,
       });
     }
     return summarizeVs01SigningPacketInitials({
@@ -1020,22 +1033,28 @@ export function StepPrepareSignature({
     });
   }, [agreementBridgePlacementCopy, prepareCorpusText, signingPacketModel, bridgeSession]);
 
-  const canonicalModelReady = Boolean(
-    agreementBridgePlacementCopy &&
-      signingPacketModel?.allowed &&
-      signingPacketModel.pages.length > 0 &&
-      signingPacketHasVisibleText(signingPacketModel.pages),
+  const canonicalBridgePaginationReady = Boolean(
+    resolveVs01CanonicalBridgeTextRendered({
+      bridgeMode: Boolean(agreementBridgePlacementCopy),
+      signingPacketModel,
+      corpusGateAllowed: prepareCorpusGate?.allowed !== false,
+      corpusTextLen: (prepareCorpusText ?? "").trim().length,
+    }),
   );
-  const canonicalModelHasText = canonicalModelReady;
-  const renderCanonicalModel = canonicalModelReady;
+  const renderCanonicalModel = canonicalBridgePaginationReady;
   const showCanonicalFinalizeBlocked = Boolean(
-    agreementBridgePlacementCopy && (!signingPacketModel?.allowed || !canonicalModelHasText),
+    agreementBridgePlacementCopy &&
+      (prepareCorpusGate?.allowed === false || !canonicalBridgePaginationReady),
   );
 
-  const canonicalTextRendered = agreementBridgePlacementCopy ? canonicalModelHasText : undefined;
-  const canonicalSignatureLinesRendered = agreementBridgePlacementCopy
-    ? Boolean(signingPacketModel?.diagnostics.signatureAnchorCount)
+  const canonicalTextRendered = agreementBridgePlacementCopy
+    ? canonicalBridgePaginationReady
     : undefined;
+  const canonicalSignatureLinesRendered = resolveVs01CanonicalBridgeSignatureLinesRendered({
+    bridgeMode: Boolean(agreementBridgePlacementCopy),
+    signingPacketModel,
+    roleCount: prepareSignerRoles?.length ?? 0,
+  });
 
   const packetReadiness = useMemo(
     () =>
