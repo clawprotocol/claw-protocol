@@ -68,7 +68,7 @@ export function buildFullPacketManifestFromCanonicalModel(args: {
   const seen = new Set<string>();
   const out: Vs01RecipientPlacedField[] = [];
   const roles = [...args.roles];
-  const ownerRole = roles[0]!;
+  const ownerRole = roles.find((r) => r.kind === "owner") ?? roles[0]!;
   for (const role of roles) {
     const cpId = recipientCounterpartyIdForPrepareRole(role);
     for (const sf of args.model.fields) {

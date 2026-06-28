@@ -4812,6 +4812,20 @@ button.vs01-upload-btn:disabled {
 .vs01-recipient-signing-scroll {
   min-height: 12rem;
   max-height: min(70vh, 52rem);
+  --vs01-recipient-footer-reserve: 9.5rem;
+  scroll-padding-bottom: var(--vs01-recipient-footer-reserve);
+}
+
+.vs01-recipient-signing-view .vs01-sign-pages-inner {
+  padding-bottom: calc(var(--vs01-recipient-footer-reserve, 9.5rem) + 1.25rem);
+}
+
+.vs01-recipient-signing-view .vs01-sign-page-surface--canonical {
+  overflow: visible;
+}
+
+.vs01-recipient-signing-view .vs01-canonical-flow-body {
+  overflow: visible;
 }
 
 @media (max-width: 640px) {

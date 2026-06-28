@@ -133,3 +133,67 @@ def test_stamp_witness_signature_and_date() -> None:
     assert ok2 is True
     assert "By: Owner Signer" in dated
     assert "June 15, 2026" in dated
+
+
+def _four_party_entity_witness_corpus() -> str:
+    entities = [
+        "Evergreen Outdoor Brands LLC",
+        "Atlas Consumer Products Inc.",
+        "Horizon Wholesale Group LLC",
+        "BrightPeak Retail Solutions LLC",
+    ]
+    blocks = []
+    for entity in entities:
+        blocks.append(
+            f"{entity}:\nBy: __________________________\nName: Signer\nTitle: CEO\n"
+            "Date: _____________________________\n"
+        )
+    return (
+        "x" * 1600
+        + "\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\n"
+        + "\n".join(blocks)
+    )
+
+
+def test_four_party_entity_witness_blocks_stamp_and_snapshot() -> None:
+    from backend.services.vs01_fully_executed_snapshot import (
+        build_snapshot_record,
+        count_signed_witness_blocks,
+    )
+
+    entities = [
+        "Evergreen Outdoor Brands LLC",
+        "Atlas Consumer Products Inc.",
+        "Horizon Wholesale Group LLC",
+        "BrightPeak Retail Solutions LLC",
+    ]
+    signers = ["Alice Owner", "Bob Atlas", "Carol Horizon", "Dan Bright"]
+    corpus = _four_party_entity_witness_corpus()
+    role_names = entities
+    for idx, signer in enumerate(signers):
+        corpus, ok = stamp_witness_block_party_signature(corpus, idx, signer, role_names)
+        assert ok is True
+        corpus, ok2 = stamp_witness_block_party_signing_date(corpus, idx, f"2026-06-{15 + idx}", role_names)
+        assert ok2 is True
+
+    signed, total = count_signed_witness_blocks(corpus, role_names)
+    assert signed == 4
+    assert total == 4
+    for signer in signers:
+        assert f"By: {signer}" in corpus
+
+    portable = {
+        "roles": [
+            {
+                "roleId": f"role_{i}",
+                "partyIndex": i,
+                "entityName": entities[i],
+                "requiresSignature": True,
+            }
+            for i in range(4)
+        ],
+        "fields": [],
+    }
+    snap = build_snapshot_record(corpus, portable)
+    assert snap is not None
+    assert len(snap["corpus_plain"]) >= 80

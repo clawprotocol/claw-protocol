@@ -26,6 +26,13 @@ import {
   countRequiredSignersFromHandoff,
   resolveRequiredSignerCount,
 } from "../agreement/resolveRequiredSignerCount";
+import {
+  applyVs01CompletionEventsByCanonicalIdentity,
+  assertVs01PublicVerifyCompletionIdentity,
+  completedParticipantIdsFromPublicVerify,
+  completedSignerRoleIdsFromPublicVerify,
+  type Vs01SignerStatusRow,
+} from "../vs01/vs01PublicVerifyCompletionIdentity";
 
 /**
  * Owner signing status source-of-truth order (Test361):
@@ -206,24 +213,27 @@ export function resolveOwnerSigningHandoff(
   return null;
 }
 
-function completedParticipantNames(verify: PublicVerifyPayload): Set<string> {
-  const names = new Set<string>();
-  for (const event of verify.signature_events) {
-    if (event.event_type !== "signature_completed") continue;
-    const name = (event.participant_display_name ?? "").trim().toLowerCase();
-    if (name) names.add(name);
+function buildSignerStatusRows(
+  handoff: PaidProVs01PostSignHandoffV1,
+  ownerRoleId: string,
+): Vs01SignerStatusRow[] {
+  const rows: Vs01SignerStatusRow[] = [];
+  if (ownerRoleId) {
+    rows.push({
+      key: ownerRoleId,
+      signerRoleId: ownerRoleId,
+      participantId: "owner",
+    });
   }
-  return names;
-}
-
-function nameMatchesCompleted(displayName: string, completed: Set<string>): boolean {
-  const dn = displayName.trim().toLowerCase();
-  if (!dn) return false;
-  if (completed.has(dn)) return true;
-  for (const name of completed) {
-    if (dn.includes(name) || name.includes(dn)) return true;
+  for (const signer of handoff.signers) {
+    const key = signerKeyForHandoffRow(signer, signer.signerRoleId);
+    rows.push({
+      key,
+      signerRoleId: (signer.signerRoleId ?? key).trim(),
+      participantId: (signer.counterpartyId ?? "").trim(),
+    });
   }
-  return false;
+  return rows;
 }
 
 /** Merge persisted public-verify signer events into a packet status snapshot for owner UI. */
@@ -232,32 +242,22 @@ export function packetStatusFromPublicVerify(
   handoff: PaidProVs01PostSignHandoffV1,
   ownerRoleId: string,
 ): Vs01SigningPacketStatusSnapshot {
+  assertVs01PublicVerifyCompletionIdentity(verify.signature_events);
+
   const existing = readSigningPacketStatus(handoff.agreementId);
-  const bySignerKey: Record<string, Vs01SignerPacketStatus> = {
-    ...(existing?.bySignerKey ?? {}),
-  };
-
-  if (ownerRoleId) bySignerKey[ownerRoleId] = bySignerKey[ownerRoleId] ?? "waiting";
-  for (const signer of handoff.signers) {
-    const key = signerKeyForHandoffRow(signer, signer.signerRoleId);
-    bySignerKey[key] = bySignerKey[key] ?? "waiting";
+  const rows = buildSignerStatusRows(handoff, ownerRoleId);
+  const bySignerKey: Record<string, Vs01SignerPacketStatus> = {};
+  for (const row of rows) {
+    const prior = existing?.bySignerKey[row.key];
+    bySignerKey[row.key] = prior === "opened" ? "opened" : "waiting";
   }
 
-  const completed = completedParticipantNames(verify);
-  if (ownerRoleId) {
-    const ownerName =
-      handoff.signers.find((s) => s.signerRoleId === ownerRoleId)?.displayName ?? "";
-    if (nameMatchesCompleted(ownerName, completed)) {
-      bySignerKey[ownerRoleId] = "signed";
-    }
-  }
-
-  for (const signer of handoff.signers) {
-    const key = signerKeyForHandoffRow(signer, signer.signerRoleId);
-    if (nameMatchesCompleted(signer.displayName, completed)) {
-      bySignerKey[key] = "signed";
-    }
-  }
+  applyVs01CompletionEventsByCanonicalIdentity({
+    bySignerKey,
+    rows,
+    completedRoleIds: completedSignerRoleIdsFromPublicVerify(verify.signature_events),
+    completedParticipantIds: completedParticipantIdsFromPublicVerify(verify.signature_events),
+  });
 
   const sig = verify.signature_status;
   const requiredCount = resolveRequiredSignerCount({
@@ -265,20 +265,12 @@ export function packetStatusFromPublicVerify(
     packetStatusSignerKeyCount: Object.keys(bySignerKey).length,
     handoffSignerCount: countRequiredSignersFromHandoff(handoff),
   });
-  let signedCount = Object.values(bySignerKey).filter((status) => status === "signed").length;
+  const signedCount = Object.values(bySignerKey).filter((status) => status === "signed").length;
   const serverSigned = Math.max(sig?.signatures_recorded ?? 0, 0);
   const fullyExecuted =
     Boolean(sig?.fully_executed) ||
     verify.signature_events.some((e) => e.event_type === "signed" && e.fully_executed) ||
     serverSigned >= requiredCount;
-
-  if (!fullyExecuted && serverSigned > signedCount) {
-    const waitingKeys = Object.keys(bySignerKey).filter((key) => bySignerKey[key] !== "signed");
-    for (let i = 0; i < serverSigned - signedCount && i < waitingKeys.length; i += 1) {
-      bySignerKey[waitingKeys[i]!] = "signed";
-      signedCount += 1;
-    }
-  }
 
   if (fullyExecuted) {
     for (const key of Object.keys(bySignerKey)) bySignerKey[key] = "signed";
@@ -297,7 +289,7 @@ export function packetStatusFromPublicVerify(
   const shouldPersist =
     snapshot.fullySigned ||
     signedCount > localSigned ||
-    (serverSigned > localSigned && serverSigned > 0);
+    (serverSigned > localSigned && serverSigned > 0 && signedCount >= serverSigned);
   if (shouldPersist) {
     writeSigningPacketStatus(snapshot);
   }

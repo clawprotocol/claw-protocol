@@ -629,6 +629,14 @@ export function assertPaidProFreezeCandidateGates(
       substantiveText,
       args.intakeText ?? null,
     );
+    const noticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(substantiveText);
+    if (noticesHeading.text !== substantiveText) {
+      substantiveText = preserveSubstantiveBrandLicensingCorpusLength(
+        freezeEntryText,
+        noticesHeading.text,
+        args.intakeText ?? null,
+      );
+    }
     assertNoNumberedOperativeSectionAfterWitness(substantiveText);
     return substantiveText;
   }

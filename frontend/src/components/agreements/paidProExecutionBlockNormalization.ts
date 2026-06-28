@@ -263,6 +263,28 @@ export function resolveAuthoritativeWitnessIndex(text: string): number {
   return last;
 }
 
+/** Ensure a blank line separates the last notice/address line from IN WITNESS WHEREOF. */
+export function ensureBlankLineBeforeWitnessBlock(text: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let out = (text || "").replace(/\r\n/g, "\n");
+  const fused = out.replace(/([^\n\s])(\s*IN WITNESS WHEREOF\b)/gi, (_match, before: string, witness: string) => {
+    repairs.push("execution_block:separate_fused_witness_heading");
+    return `${before}\n\n${witness.trimStart()}`;
+  });
+  if (fused !== out) out = fused;
+
+  const witnessIdx = resolveAuthoritativeWitnessIndex(out);
+  if (witnessIdx > 0) {
+    const prefix = out.slice(0, witnessIdx).trimEnd();
+    const tail = out.slice(witnessIdx);
+    if (prefix && !/\n\n\s*$/.test(`${prefix}\n`)) {
+      out = `${prefix}\n\n${tail}`;
+      repairs.push("execution_block:ensure_witness_separator");
+    }
+  }
+  return { text: out, repairs };
+}
+
 function operativeBodyWithoutExecutionTails(text: string): string {
   const inlineStripped = stripInlineStaleServerSignatureTailBeforeWitness(text);
   const lastWitness = resolveAuthoritativeWitnessIndex(inlineStripped.text);

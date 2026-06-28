@@ -110,7 +110,7 @@ export function resolveRecipientSigningDocumentFields(args: {
   packetRevision?: string | null;
 }): Vs01RecipientPlacedField[] {
   const roles = args.prepareRoles ?? [];
-  const ownerRole = roles[0];
+  const ownerRole = roles.find((r) => r.kind === "owner") ?? roles[0];
   const did = (args.documentId ?? "").trim();
   const portable = did ? loadVs01CanonicalPacketPortable(did) : null;
   const initialsEnabled = resolveRecipientInitialsEnabled({

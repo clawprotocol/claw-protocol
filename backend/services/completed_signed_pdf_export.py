@@ -478,10 +478,16 @@ def build_completed_signed_pdf_bytes(*, agreement_id: str, draft: Any) -> Tuple[
     Build canonical completed signed PDF bytes from stored fully_executed_snapshot only.
 
     Ignores any client/dashboard HTML so signature blocks stay identical across surfaces.
+    Lazily rebuilds missing snapshot from audit/portable when fully executed.
     """
-    corpus_plain = read_completed_signed_corpus_plain(
-        draft.model_dump() if hasattr(draft, "model_dump") else dict(draft)
-    )
+    draft_dict = draft.model_dump() if hasattr(draft, "model_dump") else dict(draft)
+    corpus_plain = read_completed_signed_corpus_plain(draft_dict)
+    if len(corpus_plain) < 80:
+        from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
+
+        ensured = ensure_fully_executed_snapshot_on_draft(draft_dict, agreement_id=agreement_id)
+        if ensured.snapshot_ready:
+            corpus_plain = read_completed_signed_corpus_plain(ensured.draft_dict)
     if len(corpus_plain) < 80:
         raise HTTPException(status_code=409, detail="signed_snapshot_unavailable")
 

@@ -46,7 +46,7 @@ export function buildPacketStatusCards(args: {
   statusByKey: Record<string, Vs01SignerPacketStatus>;
   ownerSigningUrl: string;
 }): PacketStatusCardRow[] {
-  const ownerRole = args.roles[0];
+  const ownerRole = args.roles.find((r) => r.kind === "owner") ?? args.roles[0];
   if (!ownerRole || ownerRole.kind !== "owner") return [];
 
   const ownerKey = args.handoff.ownerSignerRoleId ?? ownerRole.roleId;

@@ -29,6 +29,7 @@ import {
 import {
   resolveAuthoritativeWitnessIndex,
   stripPreWitnessExecutionPollutionFromPrefix,
+  ensureBlankLineBeforeWitnessBlock,
 } from "./paidProExecutionBlockNormalization";
 import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
 
@@ -799,7 +800,7 @@ export function repairCollapsedInlineNoticeStanzas(corpus: string): { text: stri
   if (!repairs.length) return { text: corpus, repairs: [] };
 
   const mergedRegion = `${intro.trimEnd()}\n\n${rebuilt.join("\n\n")}`.replace(/\n{3,}/g, "\n\n");
-  const text = `${before}${mergedRegion}${after}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  const text = `${before}${mergedRegion}\n\n${after}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   return { text, repairs };
 }
 
@@ -903,12 +904,18 @@ export function corpusHasCanonicalNoticesHeading(text: string): boolean {
 }
 
 function inferNoticesSectionNumber(beforeRegion: string): number {
-  let sectionNum = 10;
+  const sectionNums: number[] = [];
   for (const m of beforeRegion.matchAll(/(?:^|\n)(\d+)\.(?!\d)\s+/g)) {
     const n = Number.parseInt(m[1] ?? "", 10);
-    if (Number.isFinite(n)) sectionNum = Math.max(sectionNum, n);
+    if (Number.isFinite(n)) sectionNums.push(n);
   }
-  return sectionNum;
+  if (sectionNums.length === 0) return 11;
+  const set = new Set(sectionNums);
+  const max = Math.max(...sectionNums);
+  for (let n = 10; n <= max + 1; n += 1) {
+    if (!set.has(n)) return n;
+  }
+  return max + 1;
 }
 
 /** Remove a standalone `N. NOTICES` line when the same section already has a composite heading including Notices. */
@@ -943,7 +950,40 @@ export function removeRedundantNoticesSubheading(text: string): { text: string; 
 
   if (!repairs.length) return { text, repairs: [] };
   const newHead = out.join("\n").replace(/\n{3,}/g, "\n\n");
-  return { text: `${newHead}${tail}`, repairs };
+  return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+}
+
+function resolveNoticesHeadingInsertIndex(head: string): number {
+  const governingIdx = head.search(/(?:^|\n)\s*\d+\.\s+GOVERNING LAW\b/im);
+  const firstIfTo = head.search(/(?:^|\n)If to\s+/i);
+  if (governingIdx >= 0) {
+    if (firstIfTo >= 0 && firstIfTo < governingIdx) return firstIfTo;
+    return governingIdx;
+  }
+  if (firstIfTo >= 0) return firstIfTo;
+  return head.length;
+}
+
+/** Move a notices section that was appended after Governing Law back before it. */
+export function relocateMisplacedNoticesSectionBeforeGoverningLaw(corpus: string): {
+  text: string;
+  repairs: string[];
+} {
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const head = witnessIdx >= 0 ? corpus.slice(0, witnessIdx) : corpus;
+  const tail = witnessIdx >= 0 ? corpus.slice(witnessIdx) : "";
+  const noticesHeadingIdx = head.search(/(?:^|\n)\s*\d+\.\s+NOTICES\s*(?:\n|$)/im);
+  if (noticesHeadingIdx < 0) return { text: corpus, repairs: [] };
+  const governingIdx = head.search(/(?:^|\n)\s*\d+\.\s+GOVERNING LAW\b/im);
+  if (governingIdx < 0 || noticesHeadingIdx < governingIdx) return { text: corpus, repairs: [] };
+  const prefix = head.slice(0, governingIdx).trimEnd();
+  const suffix = head.slice(governingIdx, noticesHeadingIdx).trimEnd();
+  const noticesBlock = head.slice(noticesHeadingIdx).trimStart();
+  const parts = [prefix, noticesBlock, suffix].filter(Boolean);
+  return {
+    text: `${parts.join("\n\n")}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(),
+    repairs: ["notice:relocate_notices_before_governing_law"],
+  };
 }
 
 /**
@@ -955,7 +995,9 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
   repairs: string[];
 } {
   const repairs: string[] = [];
-  let text = (corpus || "").replace(/\r\n/g, "\n");
+  const relocated = relocateMisplacedNoticesSectionBeforeGoverningLaw(corpus);
+  let text = relocated.text;
+  if (relocated.repairs.length > 0) repairs.push(...relocated.repairs);
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   let head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
   let tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
@@ -985,7 +1027,7 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
         replacement +
         (lineEnd >= 0 ? head.slice(lineEnd) : "");
       repairs.push("notice:normalize_equivalent_heading_to_notices");
-      return { text: `${newHead}${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+      return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
     }
     return { text, repairs };
   }
@@ -993,27 +1035,30 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
   const firstIfTo = head.search(/(?:^|\n)If to\s+/i);
   if (firstIfTo < 0) return { text: corpus, repairs: [] };
 
-  const beforeIfTo = head.slice(0, firstIfTo);
-  const eqBefore = beforeIfTo.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
+  const insertAt = resolveNoticesHeadingInsertIndex(head);
+  const beforeInsert = head.slice(0, insertAt).trimEnd();
+  const afterInsert = head.slice(insertAt).trimStart();
+
+  const eqBefore = beforeInsert.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
   if (eqBefore?.index != null) {
     const lineStart = eqBefore.index;
-    const lineEnd = beforeIfTo.indexOf("\n", lineStart);
-    const oldLine = beforeIfTo.slice(lineStart, lineEnd >= 0 ? lineEnd : beforeIfTo.length).trim();
-    const num = oldLine.match(/^(\d+)/)?.[1] ?? String(inferNoticesSectionNumber(beforeIfTo.slice(0, lineStart)));
+    const lineEnd = beforeInsert.indexOf("\n", lineStart);
+    const oldLine = beforeInsert.slice(lineStart, lineEnd >= 0 ? lineEnd : beforeInsert.length).trim();
+    const num = oldLine.match(/^(\d+)/)?.[1] ?? String(inferNoticesSectionNumber(beforeInsert.slice(0, lineStart)));
     const newHead =
-      beforeIfTo.slice(0, lineStart).trimEnd() +
+      beforeInsert.slice(0, lineStart).trimEnd() +
       `\n\n${num}. NOTICES` +
-      (lineEnd >= 0 ? beforeIfTo.slice(lineEnd) : "") +
-      head.slice(firstIfTo);
+      (lineEnd >= 0 ? beforeInsert.slice(lineEnd) : "") +
+      (afterInsert ? `\n\n${afterInsert}` : "");
     repairs.push("notice:replace_equivalent_with_notices");
-    return { text: `${newHead}${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+    return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
   }
 
-  const sectionNum = inferNoticesSectionNumber(beforeIfTo);
-  const headingBlock = `\n\n${sectionNum}. NOTICES\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n`;
-  const newHead = `${beforeIfTo.trimEnd()}${headingBlock}${head.slice(firstIfTo).trimStart()}`;
+  const sectionNum = inferNoticesSectionNumber(beforeInsert);
+  const headingBlock = `${sectionNum}. NOTICES\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n`;
+  const newHead = `${beforeInsert}\n\n${headingBlock}${afterInsert}`;
   repairs.push("notice:insert_missing_notices_heading");
-  return { text: `${newHead}${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+  return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
 }
 
 export function findNoticesSectionStart(text: string): number {
@@ -1261,7 +1306,14 @@ export function repairIncompleteIfToNoticeStanzas(
 
   const mergedParts = [`${intro.trimEnd()}\n\n${rebuiltStanzas.join("\n\n")}`.replace(/\n{3,}/g, "\n\n").trimEnd()];
   if (tailAfterStanzas) mergedParts.push(tailAfterStanzas);
-  const mergedNotices = mergedParts.join("\n\n");
+  let mergedNotices = mergedParts.join("\n\n");
+  const preservedHeading = fullNoticesRegion.match(/(?:^|\n)\s*(\d+\.\s+NOTICES\s*)(?:\n|$)/im)?.[1]?.trim();
+  if (preservedHeading && !corpusHasCanonicalNoticesHeading(mergedNotices)) {
+    mergedNotices = `${preservedHeading}\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n${mergedNotices}`
+      .replace(/\n{3,}/g, "\n\n")
+      .trimEnd();
+    repairs.push("notice:preserve_notices_section_heading");
+  }
   text = after.trimStart()
     ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
     : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
@@ -1422,17 +1474,26 @@ export function ensureOperativeIfToNoticeDelivery(
   const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);
   if (!missing && !hasPlaceholderTokens && !hasExecutionPollution && !hasInlineMalformedNotices && !hasBareNoticeStanzas) {
     const trimmed = trimOperativeNoticeStanzasToPartyCount(corpus, authorityParties.length);
-    return trimmed.repairs.length > 0
-      ? { text: trimmed.text, repairs: trimmed.repairs }
-      : { text: corpus, repairs: [] };
+    const witnessSeparated = ensureBlankLineBeforeWitnessBlock(trimmed.text);
+    const text = witnessSeparated.text;
+    const repairs = [...trimmed.repairs, ...witnessSeparated.repairs];
+    if (repairs.length > 0 || text !== corpus) {
+      return { text, repairs };
+    }
+    return { text: corpus, repairs: [] };
   }
   const repaired = repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);
-  const trimmed = trimOperativeNoticeStanzasToPartyCount(repaired.text, authorityParties.length);
+  const witnessSeparated = ensureBlankLineBeforeWitnessBlock(repaired.text);
+  const merged = {
+    text: witnessSeparated.text,
+    repairs: [...repaired.repairs, ...witnessSeparated.repairs],
+  };
+  const trimmed = trimOperativeNoticeStanzasToPartyCount(merged.text, authorityParties.length);
   if (trimmed.repairs.length > 0) {
     return {
       text: trimmed.text,
-      repairs: [...repaired.repairs, ...trimmed.repairs],
+      repairs: [...merged.repairs, ...trimmed.repairs],
     };
   }
-  return repaired;
+  return merged;
 }

@@ -7,8 +7,13 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from backend.services.vs01_execution_block_heading import (
+    extract_role_entity_names_from_portable,
+    is_entity_legal_name_heading_line,
+    party_index_at_witness_line,
+)
 from backend.services.vs01_signer_completion import (
     all_signers_signed_from_audit,
     extract_fully_executed_snapshot_from_portable,
@@ -20,14 +25,54 @@ _log = logging.getLogger(__name__)
 
 _WITNESS_RE = re.compile(r"\bIN WITNESS WHEREOF\b", re.I)
 _CLIENT_BLOCK_RE = re.compile(r"\n\s*CLIENT\s*:\s*(?:\n|$)", re.I)
-_PARTY_BLOCK_HEADING_RE = re.compile(
-    r"^\s*(?:CLIENT|SERVICE\s+PROVIDER|PROVIDER|COUNTERPARTY|PARTY\s+\d+)\s*:?\s*$",
-    re.I,
-)
-
-
 def _fingerprint_corpus(corpus: str) -> str:
     return hashlib.sha256(corpus.encode("utf-8")).hexdigest()
+
+
+def resolve_witness_execution_scan_start(corpus_plain: str) -> int:
+    length = len(corpus_plain)
+    tail_guard = int(length * 0.45)
+    lines = corpus_plain.split("\n")
+    cluster_top_idx = -1
+    for i in range(len(lines) - 1, -1, -1):
+        trimmed = lines[i].strip()
+        if is_entity_legal_name_heading_line(trimmed):
+            cluster_top_idx = i if cluster_top_idx < 0 else min(cluster_top_idx, i)
+            continue
+        if cluster_top_idx < 0:
+            continue
+        if not trimmed:
+            continue
+        if re.match(r"^(?:By|Name|Title|Date|Signature)\s*:", trimmed, re.I):
+            continue
+        if re.match(r"^IN WITNESS WHEREOF\b", trimmed, re.I):
+            cluster_top_idx = min(cluster_top_idx, i)
+            break
+        break
+    entity_cluster_start = (
+        -1
+        if cluster_top_idx < 0
+        else 0
+        if cluster_top_idx == 0
+        else len("\n".join(lines[:cluster_top_idx])) + 1
+    )
+
+    witness_matches = list(re.finditer(r"\bIN WITNESS WHEREOF\b", corpus_plain, re.I))
+    witness_start = -1
+    for match in reversed(witness_matches):
+        if match.start() >= tail_guard:
+            witness_start = match.start()
+            break
+    if witness_start < 0 and witness_matches:
+        witness_start = witness_matches[-1].start()
+
+    if entity_cluster_start >= tail_guard and entity_cluster_start > witness_start:
+        return entity_cluster_start
+    if witness_start >= 0:
+        return witness_start
+    if entity_cluster_start >= tail_guard:
+        return entity_cluster_start
+    return signature_patch_start_index(corpus_plain)
 
 
 def signature_patch_start_index(text: str) -> int:
@@ -57,19 +102,6 @@ def signature_patch_start_index(text: str) -> int:
     return length // 2
 
 
-def _party_index_at_line(lines: List[str], line_index: int, patch_start: int) -> int:
-    party_index = -1
-    offset = 0
-    for i in range(line_index + 1):
-        if offset < patch_start:
-            offset += len(lines[i]) + (1 if i > 0 else 0)
-            continue
-        if _PARTY_BLOCK_HEADING_RE.match(lines[i].strip()):
-            party_index += 1
-        offset += len(lines[i]) + (1 if i > 0 else 0)
-    return max(0, party_index)
-
-
 def _witness_by_line_is_blank(trimmed: str) -> bool:
     if not re.match(r"^by\s*:", trimmed, re.I):
         return False
@@ -95,14 +127,14 @@ def _format_signing_date_display(iso: str) -> str:
         return t
 
 
-def stamp_witness_block_party_signature(
-    corpus_plain: str, party_index: int, signature_text: str
+def _stamp_signature_in_text(
+    text: str,
+    party_index: int,
+    sig: str,
+    role_entity_names: Optional[Sequence[str]],
 ) -> Tuple[str, bool]:
-    sig = (signature_text or "").strip()
-    if not sig:
-        return corpus_plain, False
-    patch_start = signature_patch_start_index(corpus_plain)
-    lines = corpus_plain.split("\n")
+    patch_start = resolve_witness_execution_scan_start(text)
+    lines = text.split("\n")
     for i, line in enumerate(lines):
         line_start = len("\n".join(lines[:i])) + (1 if i > 0 else 0)
         if line_start < patch_start:
@@ -110,23 +142,43 @@ def stamp_witness_block_party_signature(
         trimmed = line.strip()
         if not _witness_by_line_is_blank(trimmed):
             continue
-        if _party_index_at_line(lines, i, patch_start) != party_index:
+        if party_index_at_witness_line(lines, i, patch_start, role_entity_names) != party_index:
             continue
         indent = re.match(r"^\s*", line).group(0) if re.match(r"^\s*", line) else ""
         lines[i] = f"{indent}By: {sig}"
         return "\n".join(lines), True
-    return corpus_plain, False
+    return text, False
 
 
-def stamp_witness_block_party_signing_date(
-    corpus_plain: str, party_index: int, signing_date_iso: str
+def stamp_witness_block_party_signature(
+    corpus_plain: str,
+    party_index: int,
+    signature_text: str,
+    role_entity_names: Optional[Sequence[str]] = None,
 ) -> Tuple[str, bool]:
-    iso = (signing_date_iso or "").strip() or datetime.now(timezone.utc).date().isoformat()
-    display = _format_signing_date_display(iso)
-    if not display:
+    sig = (signature_text or "").strip()
+    if not sig:
         return corpus_plain, False
-    patch_start = signature_patch_start_index(corpus_plain)
-    lines = corpus_plain.split("\n")
+    stamped, ok = _stamp_signature_in_text(corpus_plain, party_index, sig, role_entity_names)
+    if ok or len(corpus_plain) < 8000:
+        return stamped, ok
+    tail_len = min(len(corpus_plain), 8000)
+    offset = len(corpus_plain) - tail_len
+    tail = corpus_plain[offset:]
+    tail_stamped, tail_ok = _stamp_signature_in_text(tail, party_index, sig, role_entity_names)
+    if not tail_ok:
+        return corpus_plain, False
+    return corpus_plain[:offset] + tail_stamped, True
+
+
+def _stamp_date_in_text(
+    text: str,
+    party_index: int,
+    display: str,
+    role_entity_names: Optional[Sequence[str]],
+) -> Tuple[str, bool]:
+    patch_start = resolve_witness_execution_scan_start(text)
+    lines = text.split("\n")
     for i, line in enumerate(lines):
         line_start = len("\n".join(lines[:i])) + (1 if i > 0 else 0)
         if line_start < patch_start:
@@ -134,16 +186,41 @@ def stamp_witness_block_party_signing_date(
         trimmed = line.strip()
         if not _witness_date_line_is_blank(trimmed):
             continue
-        if _party_index_at_line(lines, i, patch_start) != party_index:
+        if party_index_at_witness_line(lines, i, patch_start, role_entity_names) != party_index:
             continue
         indent = re.match(r"^\s*", line).group(0) if re.match(r"^\s*", line) else ""
         lines[i] = f"{indent}Date: {display}"
         return "\n".join(lines), True
-    return corpus_plain, False
+    return text, False
 
 
-def count_signed_witness_blocks(corpus_plain: str) -> Tuple[int, int]:
-    patch_start = signature_patch_start_index(corpus_plain)
+def stamp_witness_block_party_signing_date(
+    corpus_plain: str,
+    party_index: int,
+    signing_date_iso: str,
+    role_entity_names: Optional[Sequence[str]] = None,
+) -> Tuple[str, bool]:
+    iso = (signing_date_iso or "").strip() or datetime.now(timezone.utc).date().isoformat()
+    display = _format_signing_date_display(iso)
+    if not display:
+        return corpus_plain, False
+    stamped, ok = _stamp_date_in_text(corpus_plain, party_index, display, role_entity_names)
+    if ok or len(corpus_plain) < 8000:
+        return stamped, ok
+    tail_len = min(len(corpus_plain), 8000)
+    offset = len(corpus_plain) - tail_len
+    tail = corpus_plain[offset:]
+    tail_stamped, tail_ok = _stamp_date_in_text(tail, party_index, display, role_entity_names)
+    if not tail_ok:
+        return corpus_plain, False
+    return corpus_plain[:offset] + tail_stamped, True
+
+
+def _count_signed_witness_blocks_at(
+    corpus_plain: str,
+    role_entity_names: Optional[Sequence[str]] = None,
+) -> Tuple[int, int]:
+    patch_start = resolve_witness_execution_scan_start(corpus_plain)
     lines = corpus_plain.split("\n")
     party_by_signed: Dict[int, Dict[str, bool]] = {}
     for i, line in enumerate(lines):
@@ -151,16 +228,27 @@ def count_signed_witness_blocks(corpus_plain: str) -> Tuple[int, int]:
         if line_start < patch_start:
             continue
         trimmed = line.strip()
-        party_index = _party_index_at_line(lines, i, patch_start)
+        party_index = party_index_at_witness_line(lines, i, patch_start, role_entity_names)
         entry = party_by_signed.setdefault(party_index, {"by": False, "date": False})
         if re.match(r"^by\s*:", trimmed, re.I) and not _witness_by_line_is_blank(trimmed):
             entry["by"] = True
         if re.match(r"^date\s*:", trimmed, re.I) and not _witness_date_line_is_blank(trimmed):
             entry["date"] = True
     blocks = list(party_by_signed.values())
-    total = len(blocks)
     signed = sum(1 for b in blocks if b["by"] and b["date"])
-    return signed, total
+    return signed, len(blocks)
+
+
+def count_signed_witness_blocks(
+    corpus_plain: str,
+    role_entity_names: Optional[Sequence[str]] = None,
+) -> Tuple[int, int]:
+    signed, total = _count_signed_witness_blocks_at(corpus_plain, role_entity_names)
+    if total >= 4 or len(corpus_plain) < 8000:
+        return signed, total
+    tail = corpus_plain[-min(len(corpus_plain), 8000):]
+    tail_signed, tail_total = _count_signed_witness_blocks_at(tail, role_entity_names)
+    return max(signed, tail_signed), max(total, tail_total)
 
 
 def parse_signature_completed_events(audit: Any) -> List[Dict[str, str]]:
@@ -208,13 +296,25 @@ def build_snapshot_record(corpus_plain: str, portable: Dict[str, Any]) -> Option
     corpus = (corpus_plain or "").strip()
     if len(corpus) < 80:
         return None
-    signed, total = count_signed_witness_blocks(corpus)
+    role_entity_names = extract_role_entity_names_from_portable(portable)
+    signed, total = count_signed_witness_blocks(corpus, role_entity_names)
     roles = portable.get("roles") if isinstance(portable.get("roles"), list) else []
     required_roles = sum(
         1 for r in roles if isinstance(r, dict) and r.get("requiresSignature", True) is not False
     )
     required = max(total, required_roles, 2)
-    if signed < required:
+    sig_fields_filled = sum(
+        1
+        for field in portable.get("fields") or []
+        if isinstance(field, dict)
+        and str(field.get("type") or "") == "signature"
+        and not field.get("autoInitials")
+        and str(field.get("value") or "").strip()
+    )
+    tail_filled_by = len(
+        re.findall(r"^[^\n]*by\s*:\s*(?!_{2,})\S", corpus[-8000:], flags=re.I | re.M)
+    )
+    if signed < required and not (sig_fields_filled >= required and tail_filled_by >= required):
         return None
     signer_role_ids = [
         str(r.get("roleId") or "").strip()
@@ -251,6 +351,7 @@ def reconstruct_corpus_from_audit_and_portable(draft: Dict[str, Any]) -> Optiona
 
     fields = portable.get("fields") if isinstance(portable.get("fields"), list) else []
     roles = portable.get("roles") if isinstance(portable.get("roles"), list) else []
+    role_entity_names = extract_role_entity_names_from_portable(portable)
     for event in events:
         rid = event["signer_role_id"]
         role = next(
@@ -260,12 +361,16 @@ def reconstruct_corpus_from_audit_and_portable(draft: Dict[str, Any]) -> Optiona
         party_index = int(role.get("partyIndex") or 0) if isinstance(role, dict) else 0
         sig = signature_text_for_signer_role(fields, rid) or event.get("display_name") or ""
         if sig:
-            corpus, _ = stamp_witness_block_party_signature(corpus, party_index, sig)
+            corpus, _ = stamp_witness_block_party_signature(
+                corpus, party_index, sig, role_entity_names
+            )
         iso = (event.get("signed_date_iso") or "").strip()
         if not iso:
             at = str(event.get("signed_at") or "").strip()
             iso = at[:10] if len(at) >= 10 else datetime.now(timezone.utc).date().isoformat()
-        corpus, _ = stamp_witness_block_party_signing_date(corpus, party_index, iso)
+        corpus, _ = stamp_witness_block_party_signing_date(
+            corpus, party_index, iso, role_entity_names
+        )
     return corpus
 
 

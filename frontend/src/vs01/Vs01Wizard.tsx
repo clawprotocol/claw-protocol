@@ -1537,7 +1537,7 @@ export function Vs01Wizard({
                 counterparties,
                 bridge: bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession(),
               });
-              const ownerRole = roles[0]!;
+              const ownerRole = roles.find((r) => r.kind === "owner") ?? roles[0]!;
 
               if (!rid) {
                 const gate = canFinishPreparingSigningPacket({

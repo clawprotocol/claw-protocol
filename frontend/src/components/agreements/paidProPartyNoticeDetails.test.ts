@@ -5,6 +5,8 @@ import {
   buildPartyNoticeDetailsBlock,
   corpusHasPartyNoticeDetails,
   ensureExecutionBlockNoticeContactFieldLines,
+  repairCollapsedInlineNoticeStanzas,
+  relocateMisplacedNoticesSectionBeforeGoverningLaw,
 } from "./paidProPartyNoticeDetails";
 import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "./authoritativeSignerHydration";
@@ -250,5 +252,53 @@ describe("paidProPartyNoticeDetails", () => {
     expect(fingerprintAgreementBody(h1.corpus)).toBe(fingerprintAgreementBody(h2.corpus));
     expect(h2.corpus).not.toMatch(/changed@test\.com/i);
     expect(h2.corpus).not.toMatch(/Email for Notice:/i);
+  });
+
+  it("repairCollapsedInlineNoticeStanzas preserves IN WITNESS when padding immediately precedes execution", () => {
+    const padding = Array.from({ length: 3 }, (_, i) =>
+      `Operational supplement ${i + 1}. Each Party shall maintain inventory reporting tier ${i + 1} under Oklahoma comm`,
+    ).join("\n\n");
+    const corpus = [
+      "11. NOTICES",
+      "Notices under this Agreement must be in writing.",
+      "",
+      "If to Evergreen Outdoor Brands LLC: Evergreen Outdoor Brands LLC Attn: Authorized Signer Email: to be completed Address: provided during signer setup",
+      "",
+      "If to Atlas Consumer Products Inc.: Atlas Consumer Products Inc. Attn: Authorized Signer Email: provided during signer setup Address: provided during signer setup",
+      "",
+      padding,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "Evergreen Outdoor Brands LLC:",
+      "By: ______________________________",
+    ].join("\n");
+    const repaired = repairCollapsedInlineNoticeStanzas(corpus);
+    expect(repaired.text).toMatch(/\bIN WITNESS WHEREOF\b/i);
+    expect(repaired.text).not.toMatch(/commIN WITNESS/i);
+    expect(repaired.repairs.length).toBeGreaterThan(0);
+  });
+
+  it("relocateMisplacedNoticesSectionBeforeGoverningLaw moves trailing notices before section 12", () => {
+    const corpus = [
+      "10. TERM AND TERMINATION",
+      "Term text.",
+      "",
+      "12. GOVERNING LAW",
+      "Oklahoma law.",
+      "",
+      "13. MISCELLANEOUS AND ELECTRONIC SIGNATURES",
+      "Counterparts.",
+      "",
+      "11. NOTICES",
+      "",
+      "If to Evergreen Outdoor Brands LLC:",
+      "Evergreen Outdoor Brands LLC",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    ].join("\n");
+    const relocated = relocateMisplacedNoticesSectionBeforeGoverningLaw(corpus);
+    expect(relocated.text).toMatch(/10\. TERM[\s\S]*11\. NOTICES[\s\S]*12\. GOVERNING LAW/);
+    expect(relocated.text.indexOf("11. NOTICES")).toBeLessThan(relocated.text.indexOf("12. GOVERNING LAW"));
   });
 });

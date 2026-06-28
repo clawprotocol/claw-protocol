@@ -6,6 +6,8 @@ export type PublicVerifySignatureEvent = {
   agreement_version_hash?: string;
   locked_version_id?: string;
   participant_display_name?: string;
+  signer_role_id?: string;
+  participant_id?: string;
   typed_name?: string;
   fully_executed?: boolean;
 };

@@ -115,7 +115,7 @@ export function OwnerSigningStatusPage({ agreementId }: OwnerSigningStatusPagePr
         resolvedHandoff.ownerSignerRoleId ??
         portableRolesToPrepareRoles(
           loadVs01CanonicalPacketPortable(resolvedHandoff.vs01DocumentId)?.roles ?? [],
-        )[0]?.roleId ??
+        ).find((r) => r.kind === "owner")?.roleId ??
         "";
       if (verify && ownerRoleId) {
         packetStatusFromPublicVerify(verify, resolvedHandoff, ownerRoleId);

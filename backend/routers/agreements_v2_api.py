@@ -8942,8 +8942,11 @@ def _public_signature_events(audit: Any) -> List[Dict[str, Any]]:
         }
         if et in ("signature_initiated", "signature_completed"):
             row["participant_display_name"] = val.get("participant_display_name")
-        if et == "signature_completed" and val.get("typed_name"):
-            row["typed_name"] = val.get("typed_name")
+        if et == "signature_completed":
+            row["signer_role_id"] = val.get("signer_role_id")
+            row["participant_id"] = val.get("participant_id")
+            if val.get("typed_name"):
+                row["typed_name"] = val.get("typed_name")
         if et == "signed" and val.get("fully_executed"):
             row["fully_executed"] = True
         events.append(row)

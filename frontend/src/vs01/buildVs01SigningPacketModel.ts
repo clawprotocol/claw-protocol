@@ -373,12 +373,15 @@ export function witnessPageTrailingBlankNorm(
   return Math.max(0, pageBottom - stackBottom - marginNorm);
 }
 
-function compactWitnessPageLayout(page: Vs01SigningPacketPage): Vs01SigningPacketPage {
+function compactWitnessPageLayout(page: Vs01SigningPacketPage, roleCount = 2): Vs01SigningPacketPage {
   if (!isWitnessSigningPacketPage(page)) return page;
   const stackBottom = canonicalFlowStackBottomNorm(page);
+  const extraWitnessMarginPt =
+    roleCount > 3 ? (roleCount - 2) * VS01_PACKET_LINE_HEIGHT_PT * 3 : 0;
+  const witnessMarginPt = VS01_PACKET_WITNESS_BOTTOM_MARGIN_PT + extraWitnessMarginPt;
   const compactBottom = Math.min(
     FOOTER_TOP,
-    stackBottom + VS01_PACKET_WITNESS_BOTTOM_MARGIN_PT / VS01_PACKET_PAGE_HEIGHT_PT,
+    stackBottom + witnessMarginPt / VS01_PACKET_PAGE_HEIGHT_PT,
   );
   const collapsedBand = {
     x: CONTENT_X,
@@ -826,7 +829,7 @@ export function buildVs01SigningPacketModel(args: {
         width: CONTENT_WIDTH,
         height: VS01_PACKET_MARGIN_BOTTOM_PT / VS01_PACKET_PAGE_HEIGHT_PT,
       },
-    });
+    }, roles.length);
   });
 
   for (const role of roles) {

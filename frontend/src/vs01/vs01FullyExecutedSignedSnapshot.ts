@@ -13,6 +13,7 @@ import type { Vs01RecipientPlacedField } from "./types";
 import {
   countSignedWitnessBlocks,
   formatSigningDateDisplayFromIso,
+  extractRoleEntityNamesFromPortableRoles,
   stampWitnessBlockPartySignature,
   stampWitnessBlockPartySigningDate,
 } from "./vs01WitnessBlockSigningDate";
@@ -105,19 +106,21 @@ export function applySignerCompletionToPortablePacket(args: {
     (args.signatureText || "").trim() ||
     signatureTextForSignerRole(args.recipientFields ?? args.portable.fields, args.signerRoleId);
 
+  const roleEntityNames = extractRoleEntityNamesFromPortableRoles(args.portable.roles);
+
   let corpus = args.portable.seed.corpusPlain;
   let corpusStamped = false;
   let signatureStamped = false;
 
   if (signatureText) {
-    const sig = stampWitnessBlockPartySignature(corpus, args.partyIndex, signatureText);
+    const sig = stampWitnessBlockPartySignature(corpus, args.partyIndex, signatureText, roleEntityNames);
     if (sig.stamped) {
       corpus = sig.text;
       signatureStamped = true;
     }
   }
 
-  const dated = stampWitnessBlockPartySigningDate(corpus, args.partyIndex, signingDateIso);
+  const dated = stampWitnessBlockPartySigningDate(corpus, args.partyIndex, signingDateIso, roleEntityNames);
   if (dated.stamped) {
     corpus = dated.text;
     corpusStamped = true;
@@ -153,9 +156,21 @@ export function buildFullyExecutedSignedSnapshot(
     boundary: "vs01_signed_snapshot",
   }).text.trim();
   if (corpusPlain.length < 80) return null;
-  const { signed, total } = countSignedWitnessBlocks(corpusPlain);
-  const required = Math.max(total, portable.roles.filter((r) => r.requiresSignature !== false).length, 2);
-  if (signed < required) return null;
+  const roleEntityNames = extractRoleEntityNamesFromPortableRoles(portable.roles);
+  const { signed, total } = countSignedWitnessBlocks(corpusPlain, roleEntityNames);
+  const requiredRoles = portable.roles.filter((r) => r.requiresSignature !== false).length;
+  const required = Math.max(total, requiredRoles, 2);
+  const sigFieldsFilled = portable.fields.filter(
+    (f) =>
+      f.type === "signature" &&
+      !f.autoInitials &&
+      typeof f.value === "string" &&
+      f.value.trim().length > 0,
+  ).length;
+  const tailFilledBy = (corpusPlain.slice(-8000).match(/^[^\n]*by\s*:\s*(?!_{2,})\S/im) || []).length;
+  const witnessComplete = signed >= required;
+  const fieldsComplete = sigFieldsFilled >= required && tailFilledBy >= required;
+  if (!witnessComplete && !fieldsComplete) return null;
 
   const signerRoleIds = portable.roles
     .filter((r) => r.requiresSignature !== false)

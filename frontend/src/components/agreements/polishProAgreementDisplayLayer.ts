@@ -17,7 +17,7 @@ import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./p
 import { applyBrandLicensingFrozenCorpusAuthority, brandLicensingFrozenCorpusHasProfessionalDefects, brandLicensingOpeningRecitalNeedsAuthorityRepair } from "./paidProBrandLicensingFreezeAuthority";
 import { finalizeSubstantiveWireAfterWitnessCleanup, stripRepeatedSupplementalProvisionsFiller } from "./paidProSupplementalProvisionsFillerGate";
 import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
-import { trimOperativeNoticeStanzasToPartyCount, repairBareEntityOnlyNoticeStanzas, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
+import { trimOperativeNoticeStanzasToPartyCount, repairBareEntityOnlyNoticeStanzas, repairCollapsedInlineNoticeStanzas, relocateMisplacedNoticesSectionBeforeGoverningLaw } from "./paidProPartyNoticeDetails";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { normalizeProAgreementSectionContinuity } from "./normalizeProAgreementSectionContinuity";
 import {
@@ -783,6 +783,11 @@ export function polishProAgreementDisplayLayer(
     if (collapsedNotices.repairs.length > 0) {
       out = collapsedNotices.text;
       repairs.push(...collapsedNotices.repairs);
+    }
+    const relocatedNotices = relocateMisplacedNoticesSectionBeforeGoverningLaw(out);
+    if (relocatedNotices.repairs.length > 0) {
+      out = relocatedNotices.text;
+      repairs.push(...relocatedNotices.repairs);
     }
     const structureResidual = applySectionStructureIntegrity(out, {
       source: "polishProAgreementDisplayLayer:brand_licensing_residual_check",
