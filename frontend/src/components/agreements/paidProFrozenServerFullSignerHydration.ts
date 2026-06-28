@@ -9,7 +9,7 @@ import {
   authorityPartiesToCanonicalPartyIdentities,
   authorityPartiesToRecipientMetadata,
 } from "./paidProSignerMetadataAuthority";
-import { applySignatureNoticeContactFieldsToCorpus, ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
+import { applySignatureNoticeContactFieldsToCorpus, ensureOperativeIfToNoticeDelivery, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
 import {
   countBlankSignerMetadataLinesInExecutionBlock,
   hydratePaidProExecutionBlockWithSignerMetadata,
@@ -91,6 +91,11 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
   const joined = repairJoinedTopLevelSectionHeadings(corpus);
   if (joined.repairs.length > 0) {
     corpus = joined.text;
+  }
+
+  const collapsedNotices = repairCollapsedInlineNoticeStanzas(corpus);
+  if (collapsedNotices.repairs.length > 0) {
+    corpus = collapsedNotices.text;
   }
 
   const signerCount = args.authority.parties.length;

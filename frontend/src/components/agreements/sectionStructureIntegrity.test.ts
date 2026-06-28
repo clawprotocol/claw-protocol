@@ -154,6 +154,14 @@ describe("sectionStructureIntegrity", () => {
     expect(repaired.text).not.toMatch(/venue\.12\.4 Notices/);
   });
 
+  it("Case L — word-glued subsection heading void12.2 Notices is repaired", () => {
+    const input = "Any prohibited assignment is void12.2 Notices";
+    const repaired = repairJoinedTopLevelSectionHeadings(input);
+    expect(repaired.repairs.some((r) => r.includes("word_glued_subsection_heading"))).toBe(true);
+    expect(repaired.text).toContain("void.\n\n12.2 Notices");
+    expect(repaired.text).not.toMatch(/void12\.2 Notices/);
+  });
+
   it("Case I — Test379/380/381/382 starter previews remain structurally sound", () => {
     const intakes = [
       TEST379_FOUR_PARTY_LOGISTICS_PLATFORM_INTAKE,

@@ -14,7 +14,7 @@ import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberR
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
-import { repairBareEntityOnlyNoticeStanzas, ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
+import { repairBareEntityOnlyNoticeStanzas, ensureOperativeIfToNoticeDelivery, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
@@ -214,6 +214,11 @@ export function preparePaidProFrozenDisplayPlain(
       repairs.push(...bareNotices.repairs);
     }
   }
+  const collapsedNotices = repairCollapsedInlineNoticeStanzas(out);
+  if (collapsedNotices.repairs.length > 0) {
+    out = collapsedNotices.text;
+    repairs.push(...collapsedNotices.repairs);
+  }
 
   return { text: out.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs: [...new Set(repairs)] };
 }
@@ -283,6 +288,11 @@ export function preparePaidProReviewDisplayPlain(
   if (bareNotices.repairs.length > 0) {
     out = bareNotices.text;
     repairs.push(...bareNotices.repairs);
+  }
+  const collapsedNotices = repairCollapsedInlineNoticeStanzas(out);
+  if (collapsedNotices.repairs.length > 0) {
+    out = collapsedNotices.text;
+    repairs.push(...collapsedNotices.repairs);
   }
   return { text: out, repairs: [...new Set(repairs)] };
 }

@@ -661,10 +661,146 @@ function ensureNoticeAuthorityPartyLegalEntities(
 
 function expandFusedIfToNoticeStanza(stanza: string): string {
   const trimmed = stanza.trim();
-  if (trimmed.includes("\n")) return trimmed;
+  if (trimmed.includes("\n")) {
+    return expandCollapsedInlineNoticeStanza(trimmed);
+  }
   const fused = trimmed.match(/^If to\s+(.+?):\s*(.+)$/i);
   if (!fused?.[1] || !fused?.[2]) return trimmed;
-  return `If to ${fused[1].trim()}:\n${fused[2].trim()}`;
+  const expanded = `If to ${fused[1].trim()}:\n${fused[2].trim()}`;
+  return expandCollapsedInlineNoticeStanza(expanded);
+}
+
+/** True when Attn/Email/address are fused on one line instead of canonical multiline blocks. */
+export function isCollapsedInlineNoticeStanza(stanza: string): boolean {
+  const trimmed = (stanza || "").trim();
+  if (!/^If to\s+/i.test(trimmed)) return false;
+  const lines = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return false;
+  if (lines.length === 1) {
+    return /\b(?:Attn|Attention):\s*.+\s+Email:/i.test(lines[0] ?? "");
+  }
+  if (lines.some((line) => /\b(?:Attn|Attention):\s*.+\s+Email:/i.test(line))) return true;
+  const headingLine = lines[0] ?? "";
+  if (/^If to\s+.+\s*:\s*.+\b(?:Attn|Attention):/i.test(headingLine)) return true;
+  const secondLine = lines[1] ?? "";
+  const entityAttnFused = secondLine.match(/^(.+?)\s+(?:Attn|Attention):\s*(.+)$/i);
+  if (entityAttnFused?.[1] && ENTITY_SUFFIX_LINE_RE.test(entityAttnFused[1])) return true;
+  return false;
+}
+
+/** Expand inline fused notice rows into canonical multiline display blocks. */
+export function expandCollapsedInlineNoticeStanza(stanza: string): string {
+  const trimmed = (stanza || "").trim();
+  if (!/^If to\s+/i.test(trimmed)) return trimmed;
+
+  const lines = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const headingMatch = lines[0]?.match(/^If to\s+(.+?):\s*$/i);
+  const entityFromHeading = headingMatch?.[1]?.trim() ?? "";
+  const fusedSecond = lines[1]?.match(/^(.+?)\s+(?:Attn|Attention):\s*(.+)$/i);
+  if (
+    entityFromHeading &&
+    fusedSecond?.[1] &&
+    ENTITY_SUFFIX_LINE_RE.test(fusedSecond[1]) &&
+    !/\bEmail:/i.test(lines[1] ?? "")
+  ) {
+    const entityLine = fusedSecond[1].trim();
+    const attnPart = fusedSecond[2]?.trim() ?? "";
+    const attnLine = /provided during signer setup/i.test(attnPart)
+      ? NOTICE_SIGNER_SETUP_ATTENTION_LINE
+      : `Attention: ${attnPart}`;
+    return [lines[0]!, entityLine, attnLine, ...lines.slice(2)].join("\n");
+  }
+
+  if (!isCollapsedInlineNoticeStanza(trimmed)) return trimmed;
+  const fused = trimmed.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+  const fusedHeadingMatch = fused.match(/^If to\s+(.+?):\s*(.*)$/i);
+  if (!fusedHeadingMatch?.[1]) return trimmed;
+
+  const entity = fusedHeadingMatch[1].trim();
+  let body = (fusedHeadingMatch[2] ?? "").trim();
+  body = body.replace(new RegExp(`^${escapeRegExp(entity)}\\s*`, "i"), "").trim();
+
+  const inlineMatch = body.match(
+    /^(?:Attn|Attention):\s*(.+?)\s+Email:\s*(\S+)(?:\s+(.*))?$/i,
+  );
+  if (!inlineMatch) return trimmed;
+
+  const attnPart = inlineMatch[1]?.trim() ?? "";
+  const email = inlineMatch[2]?.trim() ?? "";
+  const addressPart = (inlineMatch[3] ?? "").trim();
+
+  const outLines: string[] = [`If to ${entity}:`, entity];
+
+  if (/provided during signer setup/i.test(attnPart)) {
+    outLines.push(NOTICE_SIGNER_SETUP_ATTENTION_LINE);
+  } else if (attnPart) {
+    outLines.push(`Attention: ${attnPart}`);
+  }
+
+  if (/provided during signer setup/i.test(email)) {
+    outLines.push(NOTICE_SIGNER_SETUP_EMAIL_LINE);
+  } else if (email) {
+    outLines.push(`Email: ${email}`);
+  }
+
+  if (/provided during signer setup/i.test(addressPart)) {
+    outLines.push(NOTICE_SIGNER_SETUP_ADDRESS_LINE);
+  } else if (addressPart) {
+    if (/^Address:/i.test(addressPart)) {
+      const addrBody = addressPart.replace(/^Address:\s*/i, "").trim();
+      const addrLines = formatNoticeAddressLines(addrBody);
+      if (addrLines.length > 0) outLines.push(...addrLines);
+    } else {
+      const addrLines = formatNoticeAddressLines(addressPart);
+      if (addrLines.length > 0) outLines.push(...addrLines);
+    }
+  }
+
+  return outLines.join("\n");
+}
+
+/** True when operative notice stanzas are collapsed inline (single-line Attn/Email fusion). */
+export function hasCollapsedInlineNoticeStanzas(text: string): boolean {
+  const corpus = (text || "").replace(/\r\n/g, "\n");
+  const noticesIdx = findNoticesSectionStart(corpus);
+  if (noticesIdx < 0) return false;
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const region = corpus.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : corpus.length);
+  const blocks = region.split(/\n(?=If to\s+)/i).slice(1);
+  return blocks.some((block) => isCollapsedInlineNoticeStanza(block.trim()));
+}
+
+/** Display-only repair: expand collapsed inline notice stanzas into multiline blocks. */
+export function repairCollapsedInlineNoticeStanzas(corpus: string): { text: string; repairs: string[] } {
+  const noticesIdx = findNoticesSectionStart(corpus);
+  if (noticesIdx < 0) return { text: corpus, repairs: [] };
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const noticesEnd = witnessIdx >= 0 ? witnessIdx : corpus.length;
+  const before = corpus.slice(0, noticesIdx);
+  const fullRegion = corpus.slice(noticesIdx, noticesEnd);
+  const after = corpus.slice(noticesEnd);
+
+  const blocks = fullRegion.split(/\n(?=If to\s+)/i);
+  const intro = blocks[0] ?? "";
+  const stanzas = blocks.slice(1);
+  const repairs: string[] = [];
+  const rebuilt = stanzas.map((stanza) => {
+    const trimmed = stanza.trim();
+    if (!isCollapsedInlineNoticeStanza(trimmed)) return trimmed;
+    repairs.push("notice:expand_collapsed_inline_stanza");
+    return expandCollapsedInlineNoticeStanza(trimmed);
+  });
+  if (!repairs.length) return { text: corpus, repairs: [] };
+
+  const mergedRegion = `${intro.trimEnd()}\n\n${rebuilt.join("\n\n")}`.replace(/\n{3,}/g, "\n\n");
+  const text = `${before}${mergedRegion}${after}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return { text, repairs };
 }
 
 export function normalizeNoticeStanzaLines(stanza: string, fullNames?: readonly string[]): string {
@@ -733,6 +869,7 @@ function noticeStanzaUsesGenericPrimaryContactFallback(stanza: string): boolean 
 function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty): boolean {
   const trimmed = stanza.trim();
   if (!trimmed) return false;
+  if (isCollapsedInlineNoticeStanza(trimmed)) return false;
   if (noticeStanzaContainsPlaceholderTokens(trimmed)) return false;
   if (noticeStanzaHasExecutionPollution(trimmed)) return false;
   if (noticeStanzaHasRoleLabelCorruption(trimmed)) return false;
@@ -1093,7 +1230,12 @@ export function repairIncompleteIfToNoticeStanzas(
       stanzaHasAuthorityEmail &&
       !shouldRebuildForAuthority
     ) {
-      rebuiltStanzas.push(stripInvalidNoticeStanzaLines(existing, canonicalNames));
+      rebuiltStanzas.push(
+        stripInvalidNoticeStanzaLines(
+          expandCollapsedInlineNoticeStanza(existing),
+          canonicalNames,
+        ),
+      );
       stanzaCount += 1;
       continue;
     }

@@ -472,6 +472,31 @@ const JOINED_TOP_LEVEL_SECTION_HEADING_RE = /([a-z)])(\.)(\d{1,2}\.\s+)(?=[A-Z][
 /** e.g. venue.12.4 Notices — subsection glued to prior sentence without line break. */
 const JOINED_SUBSECTION_HEADING_RE =
   /([a-zA-Z0-9),.;])(\.)(\d{1,2}\.\d+(?:\.\d+)?\s+)(?=[A-Z][A-Za-z])/g;
+/** e.g. void12.2 Notices — word ending glued to subsection without sentence period. */
+const WORD_GLUED_SUBSECTION_HEADING_RE =
+  /([a-zA-Z)])(1[0-9]|[2-9])\.(\d+)\s+([A-Z][A-Za-z ,&/-]+)/g;
+
+export function repairWordGluedSubsectionHeadings(text: string): { text: string; repairs: string[] } {
+  const normalized = (text || "").replace(/\r\n/g, "\n");
+  if (!WORD_GLUED_SUBSECTION_HEADING_RE.test(normalized)) {
+    return { text: normalized, repairs: [] };
+  }
+  WORD_GLUED_SUBSECTION_HEADING_RE.lastIndex = 0;
+  let repairs = 0;
+  const repaired = normalized.replace(
+    WORD_GLUED_SUBSECTION_HEADING_RE,
+    (_match, prior: string, section: string, subsection: string, title: string) => {
+      const subNum = Number.parseInt(subsection, 10);
+      if (!Number.isFinite(subNum) || subNum <= 0) return _match;
+      repairs += 1;
+      return `${prior}.\n\n${section}.${subsection} ${title}`;
+    },
+  );
+  return {
+    text: repaired.replace(/\n{3,}/g, "\n\n"),
+    repairs: repairs > 0 ? [`word_glued_subsection_heading:${repairs}`] : [],
+  };
+}
 
 export function repairJoinedSubsectionHeadings(text: string): { text: string; repairs: string[] } {
   const normalized = (text || "").replace(/\r\n/g, "\n");
@@ -495,25 +520,25 @@ export function repairJoinedSubsectionHeadings(text: string): { text: string; re
 
 export function repairJoinedTopLevelSectionHeadings(text: string): { text: string; repairs: string[] } {
   const normalized = (text || "").replace(/\r\n/g, "\n");
-  const subsection = repairJoinedSubsectionHeadings(normalized);
+  const wordGlued = repairWordGluedSubsectionHeadings(normalized);
+  const subsection = repairJoinedSubsectionHeadings(wordGlued.text);
   const working = subsection.text;
+  const repairs: string[] = [...wordGlued.repairs, ...subsection.repairs];
   if (!JOINED_TOP_LEVEL_SECTION_HEADING_RE.test(working)) {
     return {
       text: working,
-      repairs: subsection.repairs,
+      repairs,
     };
   }
   JOINED_TOP_LEVEL_SECTION_HEADING_RE.lastIndex = 0;
-  let repairs = subsection.repairs.length;
+  let topLevelRepairs = 0;
   const repaired = working.replace(JOINED_TOP_LEVEL_SECTION_HEADING_RE, (_match, prior, period, heading) => {
-    repairs += 1;
+    topLevelRepairs += 1;
     return `${prior}${period}\n\n${heading}`;
   });
   const repairTags = [
-    ...subsection.repairs,
-    ...(repairs > subsection.repairs.length
-      ? [`joined_top_level_section_heading:${repairs - subsection.repairs.length}`]
-      : []),
+    ...repairs,
+    ...(topLevelRepairs > 0 ? [`joined_top_level_section_heading:${topLevelRepairs}`] : []),
   ];
   return {
     text: repaired.replace(/\n{3,}/g, "\n\n"),
