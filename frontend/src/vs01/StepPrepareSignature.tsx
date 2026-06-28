@@ -1809,6 +1809,11 @@ export function StepPrepareSignature({
       source: "canonical_model",
       pageCount: signingPacketModel.pages.length,
       fieldCount: signingPacketModel.fields.length,
+      signatureFieldCount: signingPacketModel.diagnostics.signatureFieldCount,
+      expectedSignerCount: signingPacketModel.diagnostics.expectedSignerCount,
+      signatureAnchorCount: signingPacketModel.diagnostics.signatureAnchorCount,
+      missingPartyIndices: signingPacketModel.diagnostics.missingSignaturePartyIndices ?? [],
+      anchorSources: signingPacketModel.diagnostics.signatureAnchorSources ?? [],
     });
   }, [renderCanonicalModel, signingPacketModel]);
 

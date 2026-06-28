@@ -21,6 +21,11 @@ import {
 import type { Vs01NormalizedRect } from "./vs01FieldCssGeometry";
 import { buildFlowLineDescriptors, flowLinesForPage, isCanonicalDocumentTitleLine } from "./vs01CanonicalTextLayout";
 import {
+  createExecutionBlockHeadingScanState,
+  executionBlockHeadingStateAfterPage,
+  type ExecutionBlockHeadingScanState,
+} from "./vs01ExecutionBlockHeading";
+import {
   canonicalCorpusLineIncrementalStackUnits,
   canonicalDescriptorDomStackUnits,
   canonicalPageRenderStackUnits,
@@ -82,6 +87,9 @@ export type Vs01SigningPacketDiagnostics = {
   signatureFieldCount: number;
   initialsFieldCount: number;
   validationErrors: string[];
+  expectedSignerCount?: number;
+  missingSignaturePartyIndices?: number[];
+  signatureAnchorSources?: Array<{ partyIndex: number; source: "canonical_text_flow" | "dom_measured_underline" }>;
 };
 
 export type Vs01SigningPacketModel = {
@@ -200,9 +208,17 @@ export const VS01_CANONICAL_SIGNATURE_UNDERLINE_WIDTH_NORM = 190 / VS01_PACKET_P
  */
 export function findSignatureLinePlacementsFromFlowPage(
   page: Pick<Vs01SigningPacketPage, "flowLines" | "contentRect" | "textBlocks" | "pageIndex">,
+  options?: {
+    roleEntityNames?: readonly string[];
+    headingScanState?: ExecutionBlockHeadingScanState;
+  },
 ): Vs01ByLinePlacement[] {
   const flowLines = flowLinesForPage(page);
-  const descriptors = buildFlowLineDescriptors(flowLines, { pageIndex: page.pageIndex ?? 0 });
+  const descriptors = buildFlowLineDescriptors(flowLines, {
+    pageIndex: page.pageIndex ?? 0,
+    roleEntityNames: options?.roleEntityNames,
+    headingScanState: options?.headingScanState,
+  });
   const contentTop = page.contentRect.y;
   const contentX = page.contentRect.x;
   let cursorY = contentTop;
@@ -230,6 +246,7 @@ export function findSignatureLinePlacementsFromFlowPage(
           width,
           height: lineStackHeight * SIGNATURE_UNDERLINE_HEIGHT_FRAC,
           lineText,
+          source: "canonical_text_flow",
         });
       }
     }
@@ -760,19 +777,28 @@ export function buildVs01SigningPacketModel(args: {
   if (!corpusGate.allowed) validationErrors.push(corpusGate.blockReason ?? "corpus_gate_blocked");
   const layouts = corpusGate.allowed ? paginateCorpus(corpusGate.corpus) : [];
   const roles = [...args.roles];
+  const roleEntityNames = roles.map((r) => r.entityName?.trim() || r.partyName?.trim()).filter(Boolean);
   const fields: PlacedSigningField[] = [];
+  let headingScanState = createExecutionBlockHeadingScanState();
   const pages: Vs01SigningPacketPage[] = layouts.map((slice) => {
-    const signatureLineAnchors = findSignatureLinePlacementsFromFlowPage({
-      pageIndex: slice.pageIndex,
-      flowLines: slice.flowLines,
-      textBlocks: slice.textRects,
-      contentRect: {
-        x: CONTENT_X,
-        y: CONTENT_TOP,
-        width: CONTENT_WIDTH,
-        height: CONTENT_BOTTOM_LIMIT - CONTENT_TOP,
+    const signatureLineAnchors = findSignatureLinePlacementsFromFlowPage(
+      {
+        pageIndex: slice.pageIndex,
+        flowLines: slice.flowLines,
+        textBlocks: slice.textRects,
+        contentRect: {
+          x: CONTENT_X,
+          y: CONTENT_TOP,
+          width: CONTENT_WIDTH,
+          height: CONTENT_BOTTOM_LIMIT - CONTENT_TOP,
+        },
       },
-    });
+      { roleEntityNames, headingScanState },
+    );
+    headingScanState = {
+      ...headingScanState,
+      ...executionBlockHeadingStateAfterPage(headingScanState),
+    };
     const contentRect = {
       x: CONTENT_X,
       y: CONTENT_TOP,
@@ -843,6 +869,20 @@ export function buildVs01SigningPacketModel(args: {
   }
 
   const signatureAnchorCount = pages.reduce((sum, p) => sum + p.signatureLineAnchors.length, 0);
+  const anchorPartyIndices = [
+    ...new Set(
+      pages.flatMap((p) => p.signatureLineAnchors.map((a) => a.partyIndex)).sort((a, b) => a - b),
+    ),
+  ];
+  const missingSignaturePartyIndices = roles
+    .map((r) => r.partyIndex)
+    .filter((idx) => !anchorPartyIndices.includes(idx));
+  const signatureAnchorSources = pages.flatMap((p) =>
+    p.signatureLineAnchors.map((a) => ({
+      partyIndex: a.partyIndex,
+      source: a.source === "dom_measured_underline" ? ("dom_measured_underline" as const) : ("canonical_text_flow" as const),
+    })),
+  );
   const geometryErrors = validateVs01SigningPacketGeometry({
     pages,
     fields,
@@ -857,7 +897,23 @@ export function buildVs01SigningPacketModel(args: {
     signatureFieldCount: fields.filter((f) => f.type === "signature").length,
     initialsFieldCount: fields.filter((f) => f.type === "initials").length,
     validationErrors: [...new Set(validationErrors)],
+    expectedSignerCount: roles.length,
+    missingSignaturePartyIndices,
+    signatureAnchorSources,
   };
+
+  if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
+    if (roles.length >= 3 && (signatureAnchorCount < roles.length || missingSignaturePartyIndices.length > 0)) {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-signature-field-readiness]", {
+        expectedSignerCount: roles.length,
+        signatureAnchorCount,
+        signatureFieldCount: diagnostics.signatureFieldCount,
+        missingPartyIndices: missingSignaturePartyIndices,
+        anchorSources: signatureAnchorSources,
+      });
+    }
+  }
 
   return {
     allowed: corpusGate.allowed && diagnostics.validationErrors.length === 0,

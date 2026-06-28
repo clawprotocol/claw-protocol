@@ -3,6 +3,11 @@
  */
 
 import { signaturePatchStartIndex } from "../components/agreements/guidedDealCompletion/signatureRegion";
+import {
+  createExecutionBlockHeadingScanState,
+  resolveSignatureExecutionPartyIndex,
+  scanExecutionBlockHeadingLine,
+} from "./vs01ExecutionBlockHeading";
 
 export type Vs01TextRectKind = "body" | "heading" | "document_title" | "signature_label" | "footer";
 
@@ -29,6 +34,7 @@ export type Vs01ByLinePlacement = {
   width: number;
   height: number;
   lineText: string;
+  source?: "canonical_text_flow" | "dom_measured_underline";
 };
 
 const CORPUS_CONTENT_TOP = 0.088;
@@ -358,11 +364,6 @@ export function mergePageLayoutForInitials(
   return pdfLayout ?? corpusLayout;
 }
 
-const BLOCK_HEADING_RES = [
-  { re: /^\s*CLIENT\s*:?\s*$/i, partyIndex: 0, label: "CLIENT" },
-  { re: /^\s*SERVICE PROVIDER\s*:?\s*$/i, partyIndex: 1, label: "SERVICE PROVIDER" },
-  { re: /^\s*PARTY\s+(\d+)\s*:?\s*$/i, partyIndex: -1, label: "PARTY" },
-];
 
 export function parseSignatureLineWidth(lineText: string, lineRectWidth: number): number {
   const underline = lineText.match(/_+/);
@@ -389,27 +390,24 @@ function isSignatureExecutionLine(text: string): boolean {
 /** Locate witness-block `By:` / `Signature:` lines from rendered/simulated page text geometry. */
 export function findSignatureLinePlacementsFromPageLayout(
   layout: Vs01PageTextLayout | null | undefined,
+  options?: { roleEntityNames?: readonly string[] },
 ): Vs01ByLinePlacement[] {
   if (!layout?.textRects.length) return [];
   const sorted = [...layout.textRects].sort((a, b) => a.y - b.y || a.x - b.x);
-  let current: { partyIndex: number; blockHeading: string } | null = null;
+  const headingState = createExecutionBlockHeadingScanState();
   const out: Vs01ByLinePlacement[] = [];
 
   for (const rect of sorted) {
     const trimmed = rect.text.trim();
     if (!trimmed) continue;
-    for (const h of BLOCK_HEADING_RES) {
-      const m = trimmed.match(h.re);
-      if (m) {
-        const partyIndex = h.partyIndex >= 0 ? h.partyIndex : Math.max(0, Number(m[1]) - 1);
-        current = { partyIndex, blockHeading: h.label };
-        break;
-      }
-    }
+    scanExecutionBlockHeadingLine(trimmed, headingState, options?.roleEntityNames);
     if (!isSignatureExecutionLine(trimmed)) continue;
-    const partyIndex =
-      current?.partyIndex ?? (out.length === 0 ? 0 : out.length === 1 ? 1 : out.length);
-    const blockHeading = current?.blockHeading ?? (partyIndex === 0 ? "CLIENT" : "SERVICE PROVIDER");
+    const partyIndex = resolveSignatureExecutionPartyIndex({
+      state: headingState,
+      priorSignatureExecutionLineCount: out.length,
+    });
+    const blockHeading =
+      headingState.current?.blockHeading ?? (partyIndex === 0 ? "CLIENT" : "SERVICE PROVIDER");
     if (out.some((a) => a.partyIndex === partyIndex)) continue;
     const width = parseSignatureLineWidth(trimmed, rect.width);
     const x = signatureLinePrefixNormX(trimmed, rect.x);
@@ -421,6 +419,7 @@ export function findSignatureLinePlacementsFromPageLayout(
       width,
       height: rect.height,
       lineText: trimmed,
+      source: "canonical_text_flow",
     });
   }
   return out.sort((a, b) => a.partyIndex - b.partyIndex);

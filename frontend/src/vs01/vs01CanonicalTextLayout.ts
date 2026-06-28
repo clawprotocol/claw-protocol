@@ -1,6 +1,13 @@
 import type { Vs01SigningPacketPage } from "./buildVs01SigningPacketModel";
 import type { Vs01NormTextRect } from "./vs01PageTextLayout";
 import { splitGluedSectionHeadingFromLine, splitInlineNumberedSectionMarkerFromLine } from "../components/agreements/documentSectionHeadingSplit";
+import {
+  createExecutionBlockHeadingScanState,
+  isEntityExecutionBlockHeadingLine,
+  resolveSignatureExecutionPartyIndex,
+  scanExecutionBlockHeadingLine,
+  type ExecutionBlockHeadingScanState,
+} from "./vs01ExecutionBlockHeading";
 
 /** First-page agreement title — mirrors paid Pro document_title classification. */
 export function isCanonicalDocumentTitleLine(line: string): boolean {
@@ -23,15 +30,11 @@ export type Vs01CanonicalFlowLineDescriptor = {
   blockHeading: string | null;
 };
 
-const BLOCK_HEADING_RES = [
-  { re: /^\s*CLIENT\s*:?\s*$/i, partyIndex: 0, label: "CLIENT" },
-  { re: /^\s*SERVICE PROVIDER\s*:?\s*$/i, partyIndex: 1, label: "SERVICE PROVIDER" },
-  { re: /^\s*PARTY\s+(\d+)\s*:?\s*$/i, partyIndex: -1, label: "PARTY" },
-];
 
-function classifyLineKind(line: string): Vs01NormTextRect["kind"] {
+function classifyLineKind(line: string, inWitnessBlock: boolean): Vs01NormTextRect["kind"] {
   const t = line.trim();
   if (/^(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(t)) return "heading";
+  if (inWitnessBlock && isEntityExecutionBlockHeadingLine(t, true)) return "heading";
   if (/^(?:By|Signature|Name|Title|Date|Email\s+for\s+Notices?|Address\s+for\s+Notices?)\s*:/i.test(t)) {
     return "signature_label";
   }
@@ -53,9 +56,14 @@ export function flowLinesForPage(page: Pick<Vs01SigningPacketPage, "flowLines" |
 
 export function buildFlowLineDescriptors(
   flowLines: readonly string[],
-  options?: { pageIndex?: number },
+  options?: {
+    pageIndex?: number;
+    roleEntityNames?: readonly string[];
+    headingScanState?: ExecutionBlockHeadingScanState;
+  },
 ): Vs01CanonicalFlowLineDescriptor[] {
-  let current: { partyIndex: number; blockHeading: string } | null = null;
+  const headingState =
+    options?.headingScanState ?? createExecutionBlockHeadingScanState();
   let documentTitleAssigned = false;
   const allowDocumentTitle = (options?.pageIndex ?? 0) === 0;
   const out: Vs01CanonicalFlowLineDescriptor[] = [];
@@ -63,22 +71,19 @@ export function buildFlowLineDescriptors(
   const pushDescriptor = (text: string) => {
     const trimmed = text.trim();
     if (trimmed) {
-      for (const h of BLOCK_HEADING_RES) {
-        const m = trimmed.match(h.re);
-        if (m) {
-          const partyIndex = h.partyIndex >= 0 ? h.partyIndex : Math.max(0, Number(m[1]) - 1);
-          current = { partyIndex, blockHeading: h.label };
-          break;
-        }
-      }
+      scanExecutionBlockHeadingLine(trimmed, headingState, options?.roleEntityNames);
     }
     const isSigLine = Boolean(trimmed && isSignatureExecutionLine(trimmed));
     let partyIndex: number | null = null;
     if (isSigLine) {
-      partyIndex =
-        current?.partyIndex ?? (out.filter((l) => l.isSignatureExecutionLine).length === 0 ? 0 : 1);
+      partyIndex = resolveSignatureExecutionPartyIndex({
+        state: headingState,
+        priorSignatureExecutionLineCount: out.filter((l) => l.isSignatureExecutionLine).length,
+      });
     }
-    let kind: Vs01NormTextRect["kind"] = trimmed ? classifyLineKind(trimmed) : "body";
+    let kind: Vs01NormTextRect["kind"] = trimmed
+      ? classifyLineKind(trimmed, headingState.inWitnessBlock)
+      : "body";
     if (
       allowDocumentTitle &&
       !documentTitleAssigned &&
@@ -94,7 +99,7 @@ export function buildFlowLineDescriptors(
       kind,
       isSignatureExecutionLine: isSigLine,
       partyIndex,
-      blockHeading: current?.blockHeading ?? null,
+      blockHeading: headingState.current?.blockHeading ?? null,
     });
   };
 
