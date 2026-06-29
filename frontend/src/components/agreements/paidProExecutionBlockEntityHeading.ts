@@ -28,6 +28,8 @@ const SIG_FIELD_RE =
 
 const ENTITY_SUFFIX_TAIL_RE =
   /^(.+?\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\.?)/i;
+const ENTITY_MARKER_RE =
+  /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
 
 export const EXECUTION_HEADING_METADATA_LEAK_MARKERS: readonly RegExp[] = [
   /with\s+Sarah\s+Mitchell/i,
@@ -254,7 +256,7 @@ export function repairExecutionBlockEntityHeadingLines(
   return { text: lines.join("\n"), repairs: [...new Set(repairs)] };
 }
 
-/** Remove back-to-back duplicate legal-entity heading lines in the execution tail. */
+/** Remove duplicate legal-entity heading lines within each execution party block. */
 export function stripDuplicateConsecutiveExecutionEntityLines(corpus: string): {
   text: string;
   repairs: string[];
@@ -264,21 +266,50 @@ export function stripDuplicateConsecutiveExecutionEntityLines(corpus: string): {
   if (witnessIdx < 0) return { text: raw, repairs: [] };
 
   const lines = raw.split("\n");
+  const witnessLineIdx = raw.slice(0, witnessIdx).split("\n").length - 1;
   const repairs: string[] = [];
-  for (let i = witnessIdx + 1; i < lines.length - 1; i += 1) {
-    const current = (lines[i] ?? "").trim();
-    const next = (lines[i + 1] ?? "").trim();
-    if (!current || !next) continue;
-    if (SIG_FIELD_RE.test(current) || SIG_FIELD_RE.test(next)) continue;
-    if (/^by\s*:/i.test(next)) continue;
-    if (PARTY_ROLE_HEADING_RE.test(current) || PARTY_ROLE_HEADING_RE.test(next)) continue;
-    if (!ENTITY_SUFFIX_TAIL_RE.test(current) || !ENTITY_SUFFIX_TAIL_RE.test(next)) continue;
-    if (partyLegalNamesMatch(current.replace(/:$/, ""), next.replace(/:$/, ""))) {
-      lines.splice(i + 1, 1);
-      repairs.push("execution:strip_duplicate_consecutive_entity_line");
-      i -= 1;
+
+  const isEntityLine = (trimmed: string): boolean => {
+    if (!trimmed || SIG_FIELD_RE.test(trimmed) || /^by\s*:/i.test(trimmed)) return false;
+    if (PARTY_ROLE_HEADING_RE.test(trimmed)) return false;
+    const bare = trimmed.replace(/:$/, "").trim();
+    return ENTITY_SUFFIX_TAIL_RE.test(bare) || (ENTITY_MARKER_RE.test(bare) && bare.length >= 4 && bare.length <= 140);
+  };
+
+  const isPartyBlockStart = (trimmed: string): boolean =>
+    /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*$/i.test(trimmed) ||
+    (trimmed.endsWith(":") && isEntityLine(trimmed));
+
+  for (let i = witnessLineIdx + 1; i < lines.length; i += 1) {
+    const trimmed = (lines[i] ?? "").trim();
+    if (!isPartyBlockStart(trimmed) && !isEntityLine(trimmed)) continue;
+
+    const seenEntities: string[] = [];
+    let j = isPartyBlockStart(trimmed) ? i + 1 : i;
+    while (j < lines.length) {
+      const lineTrimmed = (lines[j] ?? "").trim();
+      if (!lineTrimmed) {
+        j += 1;
+        continue;
+      }
+      if (/^by\s*:/i.test(lineTrimmed) || SIG_FIELD_RE.test(lineTrimmed)) break;
+      if (/^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:/i.test(lineTrimmed)) break;
+      if (!isEntityLine(lineTrimmed)) break;
+      const entity = lineTrimmed.replace(/:$/, "").trim();
+      const duplicate = seenEntities.some((seen) => partyLegalNamesMatch(seen, entity));
+      if (duplicate) {
+        lines.splice(j, 1);
+        repairs.push("execution:strip_duplicate_party_entity_line");
+        continue;
+      }
+      seenEntities.push(entity);
+      j += 1;
+    }
+    if (isPartyBlockStart(trimmed)) {
+      i = j - 1;
     }
   }
+
   return { text: lines.join("\n"), repairs: [...new Set(repairs)] };
 }
 

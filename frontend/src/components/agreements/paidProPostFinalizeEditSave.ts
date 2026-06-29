@@ -17,7 +17,8 @@ import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { auditPaidProReviewRenderSotParity } from "./paidProReviewSotParity";
 import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
-import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
+import { finalizePaidProPostFinalizeClauseEditCorpus } from "./paidProSignerSigningCorpusHygiene";
+import { stripDuplicateConsecutiveExecutionEntityLines } from "./paidProExecutionBlockEntityHeading";
 import {
   readConsumedPaidProSignerMetadataAuthority,
   recipientMetadataToAuthorityParties,
@@ -113,7 +114,7 @@ export function commitPaidProPostFinalizeClauseEditRevision(args: {
 
   let corpus = applyCanonicalPartyLegalNamesToSigningCorpus(editedPlain, parties, roleContext).text.trim();
   corpus = enforcePaidProSingleExecutionBlock(corpus).text.trim();
-  corpus = finalizePaidProSigningCorpusText(corpus, parties, {
+  corpus = finalizePaidProPostFinalizeClauseEditCorpus(corpus, parties, {
     acceptedCorpus: editedPlain,
     ...roleContext,
   }).text.trim();
@@ -136,6 +137,11 @@ export function commitPaidProPostFinalizeClauseEditRevision(args: {
   }
   if (blankSignerLinesRemaining > 0) {
     return fail("blank_signer_lines_remaining", blankSignerLinesRemaining);
+  }
+
+  const dedupe = stripDuplicateConsecutiveExecutionEntityLines(corpus);
+  if (dedupe.repairs.length > 0) {
+    corpus = dedupe.text.trim();
   }
 
   const replaced = replaceAuthoritativeSigningSnapshotCorpus({

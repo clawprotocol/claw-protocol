@@ -10,6 +10,7 @@ import {
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
 import { enforcePaidProSingleExecutionBlock, resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
+import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import {
   applySignatureNoticeContactFieldsToCorpus,
   corpusHasPartyNoticeDetails,
@@ -19,6 +20,12 @@ import {
 } from "./paidProPartyNoticeDetails";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
 import { repairDocumentBoundaryFusion } from "./paidProDocumentBoundaryAuthority";
+import { repairGluedSectionHeadingsInText } from "./documentSectionHeadingSplit";
+import {
+  repairExecutionBlockEntityHeadingLines,
+  stripDuplicateConsecutiveExecutionEntityLines,
+} from "./paidProExecutionBlockEntityHeading";
+import { repairSectionStructureIntegrity } from "./sectionStructureAuthority";
 import { enforceUserVisibleRenderTokenAuthority } from "./userVisibleRenderTokenAuthority";
 
 const PARTY_NOTICE_HEADING_RE = /^\s*Party Notice Details:\s*$/i;
@@ -189,12 +196,29 @@ export function finalizePaidProSigningCorpusText(
     repairs.push(...contactAuthority.repairs.map((tag) => `contact_authority:${tag}`));
   }
 
+  const gluedHeadings = repairGluedSectionHeadingsInText(text);
+  if (gluedHeadings !== text) {
+    text = gluedHeadings;
+    repairs.push("glued_section_headings_pre_notice");
+  }
+  const structure = repairSectionStructureIntegrity(text);
+  if (structure.repaired) {
+    text = structure.text;
+    repairs.push(...structure.repairs.map((tag) => `structure:${tag}`));
+  }
+
   if (parties && parties.length >= 2) {
     const noticeDelivery = ensureOperativeIfToNoticeDelivery(text, parties, roleContext);
     if (noticeDelivery.repairs.length > 0) {
       text = noticeDelivery.text;
       repairs.push(...noticeDelivery.repairs.map((tag) => `notice_delivery:${tag}`));
     }
+  }
+
+  const dedupeExecution = stripDuplicateConsecutiveExecutionEntityLines(text);
+  if (dedupeExecution.repairs.length > 0) {
+    text = dedupeExecution.text;
+    repairs.push(...dedupeExecution.repairs);
   }
 
   const outputIntegrity = enforceUserVisibleRenderTokenAuthority(text, {
@@ -213,6 +237,87 @@ export function finalizePaidProSigningCorpusText(
   if (fusion.text !== text) {
     text = fusion.text;
     repairs.push(...fusion.repairs.map((r) => `signing:${r}`));
+  }
+
+  return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), repairs };
+}
+
+/**
+ * Post-finalize clause edit — hydrate execution block only. User-edited operative/notices text is authority.
+ */
+export function finalizePaidProPostFinalizeClauseEditCorpus(
+  corpus: string,
+  parties?: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  let text = (corpus || "").replace(/\r\n/g, "\n").trimEnd();
+
+  const stripped = stripPaidProSignerSummaryBlocksFromCorpus(text);
+  if (stripped.removed > 0) {
+    text = stripped.text;
+    repairs.push(`strip_signer_summary_blocks:${stripped.removed}`);
+  }
+
+  const execInvariant = parties?.length
+    ? analyzePaidProExecutionBlockInvariant(text, { expectedParties: parties.length })
+    : null;
+  const execution =
+    execInvariant?.ok && execInvariant.executionBlockCount === 1
+      ? { text, repairs: [] as string[] }
+      : enforcePaidProSingleExecutionBlock(text, {
+          authorityParties: parties?.map((p) => ({ partyLegalName: p.partyLegalName })),
+          intakeText: roleContext?.intakeText ?? null,
+          draftPartyNames: roleContext?.draftPartyNames ?? parties?.map((p) => p.partyLegalName) ?? null,
+        });
+  if (execution.text !== text) {
+    text = execution.text;
+    repairs.push(...execution.repairs);
+  }
+
+  let dedupe = stripDuplicateConsecutiveExecutionEntityLines(text);
+  if (dedupe.repairs.length > 0) {
+    text = dedupe.text;
+    repairs.push(...dedupe.repairs);
+  }
+
+  if (parties && parties.length >= 2) {
+    const headingRepair = repairExecutionBlockEntityHeadingLines(text, parties);
+    if (headingRepair.repairs.length > 0) {
+      text = headingRepair.text;
+      repairs.push(...headingRepair.repairs);
+    }
+    dedupe = stripDuplicateConsecutiveExecutionEntityLines(text);
+    if (dedupe.repairs.length > 0) {
+      text = dedupe.text;
+      repairs.push(...dedupe.repairs);
+    }
+    const notice = fillPaidProSignatureNoticeFieldsAfterExecutionRepair(text, parties, roleContext);
+    if (notice.applied) {
+      text = notice.text;
+      repairs.push("signature_notice_contact_strip_post_execution");
+    }
+  }
+
+  const contactAuthority = applyContactAuthorityExecutionBlockIntegrity(text, {
+    source: "finalize_paid_pro_post_finalize_clause_edit",
+    ensureNoticesClause: false,
+  });
+  if (contactAuthority.repaired) {
+    text = contactAuthority.text;
+    repairs.push(...contactAuthority.repairs.map((tag) => `contact_authority:${tag}`));
+  }
+
+  const fusion = repairDocumentBoundaryFusion(text);
+  if (fusion.text !== text) {
+    text = fusion.text;
+    repairs.push(...fusion.repairs.map((r) => `signing:${r}`));
+  }
+
+  const finalDedupe = stripDuplicateConsecutiveExecutionEntityLines(text);
+  if (finalDedupe.repairs.length > 0) {
+    text = finalDedupe.text;
+    repairs.push(...finalDedupe.repairs);
   }
 
   return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), repairs };

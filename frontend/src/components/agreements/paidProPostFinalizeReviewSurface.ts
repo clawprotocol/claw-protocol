@@ -42,6 +42,11 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
   let body = (plain || "").trim();
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
 
+  const dedupeStart = stripDuplicateConsecutiveExecutionEntityLines(body);
+  if (dedupeStart.repairs.length > 0) {
+    body = dedupeStart.text.trim();
+  }
+
   const snap = getAuthoritativeSigningSnapshot();
   const meta = snap?.signerMetadata ?? null;
   const authorityParties =

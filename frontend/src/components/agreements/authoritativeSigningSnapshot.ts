@@ -234,6 +234,10 @@ export function createAuthoritativeSigningSnapshot(
         corpus = noticeDelivery.text.trim();
       }
     }
+    const dedupe = stripDuplicateConsecutiveExecutionEntityLines(corpus);
+    if (dedupe.repairs.length > 0) {
+      corpus = dedupe.text.trim();
+    }
   }
   const hash = hashPaidProCorpus(corpus);
   const frozenAt = Date.now();

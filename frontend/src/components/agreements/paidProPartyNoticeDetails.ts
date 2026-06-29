@@ -4,6 +4,7 @@
  */
 
 import { findSignatureRegionStart } from "./guidedDealCompletion/signatureRegion";
+import { repairGluedSectionHeadingsInText } from "./documentSectionHeadingSplit";
 import { PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES } from "./paidProNPartySignerSetup";
 import {
   mergeLabeledPartyAuthorityIntoParties,
@@ -643,6 +644,7 @@ function resolveNoticeStanzaLegalEntity(
     if (corpusLegal.length >= 2 && isAuthoritativeLegalEntityName(corpusLegal)) return corpusLegal;
   }
   if (fromDraft.length >= 2) return fromDraft;
+  if (direct.length >= 2) return direct;
   logPaidProNoticeEntityMissingDiagnostic({
     partyIndex: party.partyIndex,
     resolvedLegal: `Party ${party.partyIndex + 1}`,
@@ -655,10 +657,17 @@ function ensureNoticeAuthorityPartyLegalEntities(
   roleContext?: PaidProPartyRoleContext | null,
 ): PaidProSignerMetadataParty[] {
   return parties.map((party) => {
+    const direct = party.partyLegalName.trim();
+    if (direct.length >= 2 && isAuthoritativeLegalEntityName(direct)) return party;
     const legal = resolveNoticeStanzaLegalEntity(party, parties, roleContext);
-    if (legal === party.partyLegalName.trim()) return party;
+    if (/^Party\s+\d+$/i.test(legal)) return party;
+    if (legal === direct) return party;
     return { ...party, partyLegalName: legal };
   });
+}
+
+function noticeIntroAlreadyHasDeliveryLanguage(intro: string): boolean {
+  return /notices?\s+(?:under|for)\s+this\s+agreement\s+must\s+be\s+in\s+writing/i.test(intro);
 }
 
 function expandFusedIfToNoticeStanza(stanza: string): string {
@@ -1195,7 +1204,50 @@ export function repairIncompleteIfToNoticeStanzas(
     : enrichNoticeAuthorityParties(cappedParties, roleContext);
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
   const repairs: string[] = [];
-  let text = corpus.replace(/\r\n/g, "\n");
+  let text = repairGluedSectionHeadingsInText(corpus.replace(/\r\n/g, "\n"));
+  if (text !== corpus) repairs.push("notice:split_glued_section_headings");
+
+  const noticesIdxEarly = findNoticesSectionStart(text);
+  if (noticesIdxEarly >= 0) {
+    const witnessIdxEarly = resolveAuthoritativeWitnessIndex(text);
+    const noticesEndEarly = witnessIdxEarly >= 0 ? witnessIdxEarly : text.length;
+    const fullNoticesRegionEarly = text.slice(noticesIdxEarly, noticesEndEarly);
+    const existingStanzasEarly = fullNoticesRegionEarly
+      .split(/\n(?=If to\s+)/i)
+      .slice(1)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const consumedEarly = new Set<number>();
+    let allCompleteEarly = existingStanzasEarly.length === authorityParties.length;
+    if (allCompleteEarly && existingStanzasEarly.length >= 2) {
+      for (let i = 0; i < authorityParties.length; i++) {
+        const party = authorityParties[i]!;
+        const existing = findExistingNoticeStanzaForParty(
+          party,
+          authorityParties,
+          roleContext,
+          existingStanzasEarly,
+          i,
+          consumedEarly,
+        );
+        if (!noticeStanzaComplete(existing, party)) {
+          allCompleteEarly = false;
+          break;
+        }
+      }
+    } else {
+      allCompleteEarly = false;
+    }
+    const noticesRegionEarly = text.slice(noticesIdxEarly, noticesEndEarly);
+    if (
+      allCompleteEarly &&
+      !NOTICE_PLACEHOLDER_TOKEN_RE.test(noticesRegionEarly) &&
+      !noticesRegionHasExecutionPollution(noticesRegionEarly) &&
+      !hasInlineMalformedNoticeStanzas(fullNoticesRegionEarly)
+    ) {
+      return { text, repairs };
+    }
+  }
 
   const canonicalNames = authorityParties.map((party) =>
     resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext),
@@ -1352,9 +1404,10 @@ export function repairIncompleteIfToNoticeStanzas(
   let mergedNotices = mergedParts.join("\n\n");
   const preservedHeading = fullNoticesRegion.match(/(?:^|\n)\s*(\d+\.\s+NOTICES\s*)(?:\n|$)/im)?.[1]?.trim();
   if (preservedHeading && !corpusHasCanonicalNoticesHeading(mergedNotices)) {
-    mergedNotices = `${preservedHeading}\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n${mergedNotices}`
-      .replace(/\n{3,}/g, "\n\n")
-      .trimEnd();
+    const introBlock = noticeIntroAlreadyHasDeliveryLanguage(mergedNotices)
+      ? `${preservedHeading}\n\n${mergedNotices}`
+      : `${preservedHeading}\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n${mergedNotices}`;
+    mergedNotices = introBlock.replace(/\n{3,}/g, "\n\n").trimEnd();
     repairs.push("notice:preserve_notices_section_heading");
   }
   text = after.trimStart()
@@ -1491,8 +1544,17 @@ export function ensureOperativeIfToNoticeDelivery(
   };
 
   const stanzaBlocks = noticesRegion.split(/\n(?=If to\s+)/i).slice(1).map((s) => s.trim());
+  const consumedStanzaIndexes = new Set<number>();
   const stanzasMissingPerPartyContact = authorityParties.some((party, index) => {
-    const stanza = stanzaBlocks[index] ?? "";
+    const stanza =
+      findExistingNoticeStanzaForParty(
+        party,
+        authorityParties,
+        roleContext,
+        stanzaBlocks,
+        index,
+        consumedStanzaIndexes,
+      ) ?? stanzaBlocks[index] ?? "";
     const email = party.signerEmail.trim();
     if (email && !noticeStanzaComplete(stanza, party)) return true;
     const addr = party.partyAddress.trim();
