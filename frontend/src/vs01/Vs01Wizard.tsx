@@ -229,6 +229,9 @@ export function Vs01Wizard({
   const [recipientServerHydrationPending, setRecipientServerHydrationPending] = useState(
     () => RECIPIENT_NEEDS_SERVER_HYDRATION,
   );
+  const [recipientAuthoritativeInitialsEnabled, setRecipientAuthoritativeInitialsEnabled] = useState<
+    boolean | null | undefined
+  >(() => (RECIPIENT_NEEDS_SERVER_HYDRATION ? null : undefined));
   const [recipientSigningFinished, setRecipientSigningFinished] = useState(false);
   const [senderPlacedFields, setSenderPlacedFields] = useState<PlacedSigningField[]>([]);
   const [senderSignatureRef, setSenderSignatureRef] = useState<Vs01SenderSignatureRef | null>(null);
@@ -314,6 +317,7 @@ export function Vs01Wizard({
     const did = (documentId ?? VS01_URL_BOOT?.documentId ?? "").trim();
     if (!agreementId || !did) {
       setRecipientServerHydrationPending(false);
+      setRecipientAuthoritativeInitialsEnabled(null);
       return;
     }
     let cancelled = false;
@@ -344,6 +348,7 @@ export function Vs01Wizard({
         setRecipientLockedSignerRoleId(result.identity.lockedSignerRoleId);
         setRecipientLockedCpId(result.identity.lockedCounterpartyId);
         setRecipientPlacedFields(result.fields);
+        setRecipientAuthoritativeInitialsEnabled(result.initialsEnabled);
         if (result.counterparties.length > 0) {
           setCounterparties(result.counterparties);
         }
@@ -363,15 +368,18 @@ export function Vs01Wizard({
         return;
       }
       if ("mismatch" in result && result.mismatch) {
+        setRecipientAuthoritativeInitialsEnabled(null);
         setError(result.mismatch.message);
         return;
       }
       if ("inviteSuperseded" in result && result.inviteSuperseded) {
+        setRecipientAuthoritativeInitialsEnabled(null);
         setError(
           result.message?.trim() || "This invite was replaced. Ask the sender for the latest link.",
         );
         return;
       }
+      setRecipientAuthoritativeInitialsEnabled(null);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.warn("[vs01-recipient-server-hydration-miss]", {
@@ -1302,6 +1310,7 @@ export function Vs01Wizard({
               manifestDecodeError={VS01_URL_BOOT?.recipientManifestDecodeError ?? null}
               manifestParamPresent={VS01_URL_BOOT?.recipientManifestParamPresent ?? false}
               serverHydrationPending={recipientServerHydrationPending}
+              authoritativeInitialsEnabled={recipientAuthoritativeInitialsEnabled}
             />
           )}
         </div>

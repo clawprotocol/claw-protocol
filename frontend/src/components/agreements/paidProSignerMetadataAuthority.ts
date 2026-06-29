@@ -56,7 +56,49 @@ export function authorityPartiesFromLabeledPartyIntake(
   }));
 }
 
-/** Preserve slot-index consumed signer metadata when intake merge would blank legal names or contact fields. */
+function authorityPartyForLegalEntity(
+  legalName: string,
+  source: readonly PaidProSignerMetadataParty[],
+  slotIndex: number,
+): PaidProSignerMetadataParty | undefined {
+  const trimmed = legalName.trim();
+  if (trimmed) {
+    const byName = source.find((p) => partyLegalNamesMatch(p.partyLegalName, trimmed));
+    if (byName) return byName;
+  }
+  return source.find((p) => (p.partyIndex ?? 0) === slotIndex) ?? source[slotIndex];
+}
+
+function mergeSignerContactFieldsForLegalEntity(args: {
+  slot: PaidProSignerMetadataParty;
+  auth: PaidProSignerMetadataParty | undefined;
+  source: readonly PaidProSignerMetadataParty[];
+  resolvedLegal: string;
+}): Pick<
+  PaidProSignerMetadataParty,
+  "signerEmail" | "signerName" | "signerTitle" | "partyAddress"
+> {
+  const canonicalAuth =
+    args.auth && partyLegalNamesMatch(args.auth.partyLegalName, args.resolvedLegal)
+      ? args.auth
+      : authorityPartyForLegalEntity(args.resolvedLegal, args.source, args.slot.partyIndex ?? 0);
+  if (canonicalAuth) {
+    return {
+      signerEmail: canonicalAuth.signerEmail.trim() || args.slot.signerEmail.trim(),
+      signerName: canonicalAuth.signerName.trim() || args.slot.signerName.trim(),
+      signerTitle: canonicalAuth.signerTitle.trim() || args.slot.signerTitle.trim(),
+      partyAddress: canonicalAuth.partyAddress.trim() || args.slot.partyAddress.trim(),
+    };
+  }
+  return {
+    signerEmail: args.slot.signerEmail.trim(),
+    signerName: args.slot.signerName.trim(),
+    signerTitle: args.slot.signerTitle.trim(),
+    partyAddress: args.slot.partyAddress.trim(),
+  };
+}
+
+/** Preserve consumed signer metadata — legal entity is canonical; contact fields bind by entity match. */
 export function preserveSlotIndexedSignerMetadataParties(
   merged: readonly PaidProSignerMetadataParty[],
   source: readonly PaidProSignerMetadataParty[],
@@ -66,8 +108,9 @@ export function preserveSlotIndexedSignerMetadataParties(
   const cap = maxSlots != null && maxSlots >= 2 ? Math.min(max, maxSlots) : max;
   const out: PaidProSignerMetadataParty[] = [];
   for (let i = 0; i < cap; i++) {
-    const slot = merged[i];
-    const auth = source.find((p) => (p.partyIndex ?? 0) === i) ?? source[i];
+    const slot = merged.find((p) => (p.partyIndex ?? 0) === i) ?? merged[i];
+    const slotLegal = resolveAuthorityPartyLegalNameField(slot?.partyLegalName ?? "", "");
+    const auth = authorityPartyForLegalEntity(slotLegal, source, i);
     if (!auth && slot) {
       out.push({ ...slot, partyIndex: i });
       continue;
@@ -77,16 +120,19 @@ export function preserveSlotIndexedSignerMetadataParties(
       continue;
     }
     if (!slot || !auth) continue;
+    const resolvedLegal =
+      resolveAuthorityPartyLegalNameField(slot.partyLegalName.trim() || auth.partyLegalName.trim(), "") ||
+      resolveAuthorityPartyLegalNameField(auth.partyLegalName.trim(), "");
+    const contact = mergeSignerContactFieldsForLegalEntity({
+      slot,
+      auth,
+      source,
+      resolvedLegal,
+    });
     out.push({
       partyIndex: i,
-      partyLegalName: resolveAuthorityPartyLegalNameField(
-        slot.partyLegalName.trim() || auth.partyLegalName.trim(),
-        "",
-      ) || resolveAuthorityPartyLegalNameField(auth.partyLegalName.trim(), ""),
-      signerEmail: slot.signerEmail.trim() || auth.signerEmail.trim(),
-      signerName: slot.signerName.trim() || auth.signerName.trim(),
-      signerTitle: slot.signerTitle.trim() || auth.signerTitle.trim(),
-      partyAddress: slot.partyAddress.trim() || auth.partyAddress.trim(),
+      partyLegalName: resolvedLegal,
+      ...contact,
     });
   }
   return out;
@@ -237,6 +283,21 @@ export function partyLegalNamesMatch(a: string, b: string): boolean {
   if (na === nb) return true;
   if (na.startsWith(nb) || nb.startsWith(na)) return true;
   return na.startsWith(`${nb} `) || nb.startsWith(`${na} `);
+}
+
+function resolveUiSlotIndexForLegalEntity(
+  ui: LiveSignerMetadataUiState,
+  legalName: string,
+  fallbackIndex: number,
+): number {
+  const legal = resolveAuthorityPartyLegalNameField(legalName.trim(), "");
+  if (!legal) return fallbackIndex;
+  const max = Math.max(ui.partyCount, 2);
+  for (let slot = 0; slot < max; slot++) {
+    const uiLegal = partyLegalNameForIndex(ui, slot);
+    if (uiLegal && partyLegalNamesMatch(uiLegal, legal)) return slot;
+  }
+  return fallbackIndex;
 }
 
 function resolveIntakeRoleLabelForLegalName(
@@ -479,16 +540,17 @@ export function buildPaidProSignerMetadataParties(
         : uiLegal && isAuthoritativeLegalEntityName(uiLegal)
           ? uiLegal
           : authorityLegal || uiLegal;
+    const uiSlot = resolveUiSlotIndexForLegalEntity(ui, resolvedLegal, i);
     parties.push({
       partyIndex: i,
       partyLegalName: sanitizeSignerPartyLegalEntityDisplay(resolvedLegal, {
         partyIndex: i,
         source: "metadata_authority",
       }),
-      signerEmail: signerEmailForIndex(ui, i),
-      signerName: norm(ui.partySignerNames[i]),
-      signerTitle: norm(ui.partySignerTitles[i]),
-      partyAddress: norm(ui.partyAddresses[i]),
+      signerEmail: signerEmailForIndex(ui, uiSlot),
+      signerName: norm(ui.partySignerNames[uiSlot]),
+      signerTitle: norm(ui.partySignerTitles[uiSlot]),
+      partyAddress: norm(ui.partyAddresses[uiSlot]),
     });
   }
   const filled = fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);

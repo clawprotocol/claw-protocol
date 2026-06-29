@@ -93,6 +93,8 @@ export type RecipientSigningViewProps = {
   manifestParamPresent?: boolean;
   /** Server packet fetch in flight — suppress false hydration-miss UI. */
   serverHydrationPending?: boolean;
+  /** Authoritative initials gate from server bootstrap; null while pending, undefined when not server-scoped. */
+  authoritativeInitialsEnabled?: boolean | null;
   /** Prepare-time packet revision from signing URL (`{hash}_{0|1}_{count}`). */
   packetRevision?: string | null;
 };
@@ -184,6 +186,7 @@ export function RecipientSigningView({
   manifestDecodeError = null,
   manifestParamPresent = false,
   serverHydrationPending = false,
+  authoritativeInitialsEnabled = null,
   packetRevision = null,
 }: RecipientSigningViewProps) {
   const cpById = useMemo(() => {
@@ -275,15 +278,30 @@ export function RecipientSigningView({
     lockedSignerRoleId,
   ]);
 
+  const [portableHydrationTick, setPortableHydrationTick] = useState(0);
+
+  useEffect(() => {
+    if (!serverHydrationPending) {
+      setPortableHydrationTick((n) => n + 1);
+    }
+  }, [serverHydrationPending]);
+
   const portablePacket = useMemo(() => {
     const did = documentId?.trim() ?? "";
     return did ? loadVs01CanonicalPacketPortable(did) : null;
-  }, [documentId]);
+    // Re-read local portable after server authority bootstrap completes.
+  }, [documentId, portableHydrationTick]);
 
-  const initialsEnabled = resolveRecipientInitialsEnabled({
-    portable: portablePacket,
-    packetRevision,
-  });
+  const initialsEnabledPending =
+    serverHydrationPending || authoritativeInitialsEnabled === null;
+  const initialsEnabled = initialsEnabledPending
+    ? false
+    : typeof authoritativeInitialsEnabled === "boolean"
+      ? authoritativeInitialsEnabled
+      : resolveRecipientInitialsEnabled({
+          portable: portablePacket,
+          packetRevision,
+        });
 
   const canonicalPacket = useMemo(() => {
     const did = documentId?.trim() ?? "";
@@ -658,15 +676,24 @@ export function RecipientSigningView({
   const signingActionOpts = { initialsEnabled };
 
   const editableMyFields = useMemo(
-    () => recipientFinishGateEditableFields(myFields, signingActionOpts),
-    [myFields, initialsEnabled],
+    () =>
+      initialsEnabledPending
+        ? []
+        : recipientFinishGateEditableFields(myFields, signingActionOpts),
+    [myFields, initialsEnabled, initialsEnabledPending],
   );
 
   const allComplete =
-    !manifestDecodeError && myFields.length > 0 && recipientFinishGateComplete(myFields, signingActionOpts);
-  const signingActionCount = countRecipientSigningActions(editableMyFields, signingActionOpts);
+    !initialsEnabledPending &&
+    !manifestDecodeError &&
+    myFields.length > 0 &&
+    recipientFinishGateComplete(myFields, signingActionOpts);
+  const signingActionCount = initialsEnabledPending
+    ? 0
+    : countRecipientSigningActions(editableMyFields, signingActionOpts);
 
   useEffect(() => {
+    if (initialsEnabledPending) return;
     const missing = editableMyFields
       .filter((f) => !recipientEditableFieldIsComplete(f))
       .map((f) => f.id);
@@ -683,6 +710,7 @@ export function RecipientSigningView({
   }, [
     editableMyFields,
     initialsEnabled,
+    initialsEnabledPending,
     lockedSignerRoleId,
     myFields.length,
     recipientAgreementId,
@@ -705,6 +733,10 @@ export function RecipientSigningView({
     : "This link does not include field placement data. Ask the sender to share an updated signing link after placing fields.";
 
   const handleFinish = useCallback(() => {
+    if (initialsEnabledPending) {
+      onError("Your signing fields are still loading. Please wait a moment and try again.");
+      return;
+    }
     if (manifestDecodeError) {
       onError(manifestDecodeError);
       return;
@@ -742,7 +774,7 @@ export function RecipientSigningView({
     }
     onError(null);
     onFinishSigning();
-  }, [allComplete, editableMyFields, hydrationMiss, initialsEnabled, lockedSignerRoleId, manifestDecodeError, myFields.length, onError, onFinishSigning]);
+  }, [allComplete, editableMyFields, hydrationMiss, initialsEnabled, initialsEnabledPending, lockedSignerRoleId, manifestDecodeError, myFields.length, onError, onFinishSigning]);
 
   const updateFieldValue = useCallback(
     (id: string, value: string) => updateField(id, { value }),
@@ -759,9 +791,11 @@ export function RecipientSigningView({
           Review and sign
         </h2>
         <p className="vs01-recipient-signing-subtitle">
-          {initialsEnabled
-            ? "Complete your signature and initials. Other signers' fields are shown for context and stay locked until they sign."
-            : "Complete your signature. Other signers' fields are shown for context and stay locked until they sign."}
+          {initialsEnabledPending
+            ? "Loading your signing fields from the secure packet…"
+            : initialsEnabled
+              ? "Complete your signature and initials. Other signers' fields are shown for context and stay locked until they sign."
+              : "Complete your signature. Other signers' fields are shown for context and stay locked until they sign."}
         </p>
         <p className="vs01-recipient-signing-signer">
           <span className="vs01-recipient-signing-name">{signerName}</span>
@@ -773,7 +807,12 @@ export function RecipientSigningView({
               <span className="vs01-recipient-signing-email">{signerEmail}</span>
             </>
           ) : null}
-          {signingActionCount > 0 ? (
+          {initialsEnabledPending ? (
+            <span className="vs01-recipient-signing-field-count">
+              {" · "}
+              Loading signing fields…
+            </span>
+          ) : signingActionCount > 0 ? (
             <span className="vs01-recipient-signing-field-count">
               {" · "}
               {recipientSigningActionsLabel(signingActionCount, signingActionOpts)}

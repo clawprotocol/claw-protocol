@@ -446,6 +446,23 @@ export function authorityPartiesFromIntakeSignerMetadata(
 }
 
 /** Merge intake authority into existing parties — fills empty fields only. */
+function intakeSlotForLegalEntity(
+  aligned: readonly CanonicalIntakeSignerSlot[],
+  legalName: string,
+  slotIndex: number,
+): CanonicalIntakeSignerSlot | undefined {
+  const trimmed = legalName.trim();
+  if (trimmed) {
+    const byName = aligned.find(
+      (slot) =>
+        slot.partyLegalName.trim() &&
+        entitiesMatchForSignerMetadata(slot.partyLegalName, trimmed),
+    );
+    if (byName) return byName;
+  }
+  return aligned[slotIndex];
+}
+
 export function mergeIntakeSignerMetadataIntoAuthorityParties(
   parties: readonly PaidProSignerMetadataParty[],
   intakeRaw: string | null | undefined,
@@ -455,16 +472,18 @@ export function mergeIntakeSignerMetadataIntoAuthorityParties(
   const count = Math.max(parties.length, aligned.length, 2);
   const out: PaidProSignerMetadataParty[] = [];
   for (let i = 0; i < count; i++) {
-    const cur = parties[i];
-    const intake = aligned[i];
+    const cur = parties.find((p) => (p.partyIndex ?? 0) === i) ?? parties[i];
     const legal =
       resolveAuthorityPartyLegalNameField(cur?.partyLegalName ?? "", "") ||
-      resolveAuthorityPartyLegalNameField(intake?.partyLegalName ?? "", "") ||
       resolveAuthorityPartyLegalNameField(legalEntities[i] ?? "", "") ||
       "";
+    const intake = intakeSlotForLegalEntity(aligned, legal, i);
     out.push({
       partyIndex: i,
-      partyLegalName: legal,
+      partyLegalName:
+        legal ||
+        resolveAuthorityPartyLegalNameField(intake?.partyLegalName ?? "", "") ||
+        "",
       signerEmail: cur?.signerEmail.trim() || intake?.signerEmail || "",
       signerName: cur?.signerName.trim() || intake?.signerName || "",
       signerTitle: cur?.signerTitle.trim() || intake?.signerTitle || "",

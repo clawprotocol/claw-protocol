@@ -52,18 +52,26 @@ function stripInitialsFromPortable(
  * Strip initials fields and force policy off unless explicitly enabled.
  * Prevents stale initials fields from re-enabling initials on later signer hydration.
  */
+function portableHasAuthoritativeInitials(
+  portable: Vs01CanonicalPacketPortableV1,
+): boolean {
+  return (
+    portable.initialsPolicy?.enabled === true &&
+    portable.fields.some((f) => f.type === "initials")
+  );
+}
+
 export function normalizeVs01PortableInitialsPolicy(
   portable: Vs01CanonicalPacketPortableV1,
   opts?: { packetRevision?: string | null },
 ): Vs01CanonicalPacketPortableV1 {
   const fromRevision = parseInitialsEnabledFromPacketRevision(opts?.packetRevision);
   if (fromRevision === false) {
+    // Server/stored portable with explicit initials beats stale URL revision suffix.
+    if (portableHasAuthoritativeInitials(portable)) return portable;
     return stripInitialsFromPortable(portable);
   }
-  if (portable.initialsPolicy?.enabled === true) {
-    const hasInitials = portable.fields.some((f) => f.type === "initials");
-    if (hasInitials) return portable;
-  }
+  if (portableHasAuthoritativeInitials(portable)) return portable;
   return stripInitialsFromPortable(portable);
 }
 
@@ -72,6 +80,9 @@ export function resolveRecipientInitialsEnabled(args: {
   portable: Vs01CanonicalPacketPortableV1 | null | undefined;
   packetRevision?: string | null;
 }): boolean {
+  if (args.portable && portableHasAuthoritativeInitials(args.portable)) {
+    return true;
+  }
   const fromRevision = parseInitialsEnabledFromPacketRevision(args.packetRevision);
   if (fromRevision === false) return false;
   const portable = args.portable

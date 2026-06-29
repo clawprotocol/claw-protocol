@@ -8,6 +8,7 @@ import { PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES } from "./paidProNPartySignerSetup
 import {
   mergeLabeledPartyAuthorityIntoParties,
   partyDisplayRoleLabelForAuthorityParty,
+  partyLegalNamesMatch,
   preserveSlotIndexedSignerMetadataParties,
   type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
@@ -1141,6 +1142,40 @@ export function resolveOperativeNoticesFamilyEnd(text: string, noticesStart: num
   return operativeEnd;
 }
 
+function noticeStanzaHeadingLegalEntity(stanza: string): string {
+  const header = stanza.trim().split("\n")[0]?.trim() ?? "";
+  const match = header.match(/^If to\s+(.+?)\s*:\s*$/i);
+  return match?.[1]?.trim() ?? "";
+}
+
+function findExistingNoticeStanzaForParty(
+  party: PaidProSignerMetadataParty,
+  authorityParties: readonly PaidProSignerMetadataParty[],
+  roleContext: PaidProPartyRoleContext | null | undefined,
+  existingStanzas: readonly string[],
+  slotIndex: number,
+  consumedStanzaIndexes: Set<number>,
+): string {
+  const legal = resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext);
+  if (legal) {
+    for (let j = 0; j < existingStanzas.length; j++) {
+      if (consumedStanzaIndexes.has(j)) continue;
+      const stanza = existingStanzas[j] ?? "";
+      const headingEntity = noticeStanzaHeadingLegalEntity(stanza);
+      if (headingEntity.length >= 2 && partyLegalNamesMatch(headingEntity, legal)) {
+        consumedStanzaIndexes.add(j);
+        return stanza.trim();
+      }
+    }
+  }
+  if (!consumedStanzaIndexes.has(slotIndex)) {
+    const fallback = existingStanzas[slotIndex]?.trim() ?? "";
+    if (fallback) consumedStanzaIndexes.add(slotIndex);
+    return fallback;
+  }
+  return "";
+}
+
 /**
  * Repair incomplete operative Notices stanzas (dangling "If to", missing Attn/Email lines).
  */
@@ -1259,10 +1294,18 @@ export function repairIncompleteIfToNoticeStanzas(
   }
   const rebuiltStanzas: string[] = [];
   let stanzaCount = 0;
+  const consumedExistingStanzas = new Set<number>();
 
   for (let i = 0; i < authorityParties.length; i++) {
     const party = authorityParties[i]!;
-    const existing = existingStanzas[i]?.trim() ?? "";
+    const existing = findExistingNoticeStanzaForParty(
+      party,
+      authorityParties,
+      roleContext,
+      existingStanzas,
+      i,
+      consumedExistingStanzas,
+    );
     const requiredEmail = party.signerEmail.trim();
     const stanzaHasAuthorityEmail =
       !requiredEmail ||
