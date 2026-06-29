@@ -17,6 +17,7 @@ import {
 } from "./paidProPartyNoticeDetails";
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 
 export type ClauseFamilyStructuralViolation = {
   family: OperativeClauseFamily | "structural";
@@ -89,6 +90,23 @@ function resolveCanonicalAuthorityPartyCount(
   roleContext?: PaidProPartyRoleContext | null,
 ): number {
   if (!parties?.length) return 0;
+  const intake = roleContext?.intakeText?.trim() ?? "";
+  const draftPartyNames =
+    roleContext?.draftPartyNames ??
+    parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2);
+
+  if (intake) {
+    const fromIntake = resolveAuthoritativeSignerCount({
+      intakeText: intake,
+      draftPartyNames,
+      draftParties: parties.map((p) => ({ name: p.partyLegalName })),
+      manifestPartyCount: parties.length,
+    }).count;
+    if (fromIntake >= 2) {
+      return fromIntake;
+    }
+  }
+
   const enriched = resolveNoticeStructuralValidationParties(parties, roleContext);
   return enriched.filter(
     (p) =>
@@ -225,6 +243,14 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
     violations.push({
       family: "notices",
       code: "missing_party_notice_stanzas",
+      message: `Expected ${requiredStanzas} If to notice stanzas; found ${stanzaCount}.`,
+    });
+  }
+
+  if (requiredStanzas > 0 && stanzaCount > requiredStanzas) {
+    violations.push({
+      family: "notices",
+      code: "excess_party_notice_stanzas",
       message: `Expected ${requiredStanzas} If to notice stanzas; found ${stanzaCount}.`,
     });
   }
