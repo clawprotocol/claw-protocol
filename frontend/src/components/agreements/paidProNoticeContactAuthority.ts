@@ -4,13 +4,19 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { ensureOperativeIfToNoticeDelivery, ensureCanonicalNoticesSectionHeadingForFreeze } from "./paidProPartyNoticeDetails";
+import {
+  ensureCanonicalNoticesSectionHeadingForFreeze,
+  ensureOperativeIfToNoticeDelivery,
+  repairDuplicateOperativeNoticeStanzas,
+  trimOperativeNoticeStanzasToPartyCount,
+} from "./paidProPartyNoticeDetails";
 import { repairProfessionalCorpusContamination } from "./paidProProfessionalCorpusContamination";
 import type { PaidProPartyRoleContext } from "./paidProSignerMetadataAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { mergeLabeledPartyAuthorityIntoParties, mergeDraftSignerContactFieldsOntoParties } from "./paidProSignerMetadataAuthority";
 import { manifestRecordsForPaidProAcceptance } from "./paidProAcceptanceExecutionBlockInvariant";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
+import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   containsUnresolvedRenderTokens,
   enforceUserVisibleRenderTokenAuthority,
@@ -83,9 +89,14 @@ export function applyPaidProNoticeContactAuthority(
   }
 
   if (parties.length >= 2) {
+    const canonicalPartyCount = resolveAuthoritativeSignerCount({
+      intakeText: intakeRaw,
+      draftPartyNames: roleContext.draftPartyNames ?? undefined,
+      manifestPartyCount: parties.length,
+    }).count;
     const contaminationRepair = repairProfessionalCorpusContamination(out, {
       partyNames: parties.map((p) => p.partyLegalName),
-      partyCount: parties.length,
+      partyCount: canonicalPartyCount,
       signerNames: parties.map((p) => p.signerName),
     });
     if (contaminationRepair.repairs.length > 0) {
@@ -99,6 +110,20 @@ export function applyPaidProNoticeContactAuthority(
     if (noticeDelivery.repairs.length > 0) {
       out = noticeDelivery.text;
       repairs.push(...noticeDelivery.repairs.map((r) => `notice:${r}`));
+    }
+    const noticeDedupe = repairDuplicateOperativeNoticeStanzas(
+      out,
+      canonicalPartyCount,
+      parties.map((p) => p.partyLegalName),
+    );
+    if (noticeDedupe.repairs.length > 0) {
+      out = noticeDedupe.text;
+      repairs.push(...noticeDedupe.repairs);
+    }
+    const trimmed = trimOperativeNoticeStanzasToPartyCount(out, canonicalPartyCount);
+    if (trimmed.repairs.length > 0) {
+      out = trimmed.text;
+      repairs.push(...trimmed.repairs);
     }
   }
 

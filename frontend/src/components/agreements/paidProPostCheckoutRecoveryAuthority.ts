@@ -10,12 +10,14 @@ import {
   meetsPaidProDegradedRecoveryDisplayRequirements,
   resolvePaidProPostCheckoutRecoveryDisplayPlain,
 } from "./paidProPostCheckoutRenderGate";
-import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import { hasLatchedLongAcceptedServerFullDraft } from "./paidProAcceptedServerFullDraftCommitGuard";
 import {
   establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruth,
+  hasPaidProSourceOfTruth,
   type PaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { analyzePaidProSectionStructureCompleteness } from "./paidProSectionStructureCompletenessAuthority";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import {
@@ -26,6 +28,11 @@ import {
   PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
+import {
+  evaluatePaidProFreezeCandidateGates,
+  preparePaidProFreezeCandidateText,
+  resolvePaidProFreezeCommitText,
+} from "./paidProFreezeCandidate";
 
 function isAuthoritativeRecoveryPipelineSource(source: string): boolean {
   return (
@@ -53,12 +60,41 @@ export type PostCheckoutRecoverySotPreview = {
   displayPlainLen: number;
 };
 
+function evaluateRecoveryFreezeGates(args: {
+  displayPlain: string;
+  draft: ParsedDraftShape;
+  intakeText: string;
+  premiumRenderSource: string;
+  reviewSessionId?: string | null;
+}): { ok: boolean; text: string; rejectReason: string | null } {
+  const freezeArgs = {
+    text: args.displayPlain,
+    source: "server_full_draft",
+    draft: args.draft,
+    intakeText: args.intakeText,
+    generationOutcome: "degraded",
+    reviewSessionId: args.reviewSessionId ?? null,
+    surface: "post_checkout_recovery_freeze_preview",
+  };
+  const prep = preparePaidProFreezeCandidateText({
+    ...freezeArgs,
+    source: args.premiumRenderSource,
+  });
+  const gates = evaluatePaidProFreezeCandidateGates(prep, freezeArgs);
+  return {
+    ok: gates.ok,
+    text: gates.ok ? gates.text : prep.text,
+    rejectReason: gates.rejectReason,
+  };
+}
+
 /** Same gates as {@link tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth} without mutating SoT. */
 export function previewPostCheckoutRecoverySotCommit(args: {
   body: string;
   draft: ParsedDraftShape;
   intakeText: string;
   premiumRenderSource: string;
+  reviewSessionId?: string | null;
 }): PostCheckoutRecoverySotPreview {
   const rawBodyLen = (args.body || "").trim().length;
   if (hasLatchedLongAcceptedServerFullDraft()) {
@@ -153,12 +189,28 @@ export function previewPostCheckoutRecoverySotCommit(args: {
       };
     }
   }
+  const freezeGates = evaluateRecoveryFreezeGates({
+    displayPlain: resolvedDisplayPlain,
+    draft: args.draft,
+    intakeText: args.intakeText,
+    premiumRenderSource: args.premiumRenderSource,
+    reviewSessionId: args.reviewSessionId,
+  });
+  if (!freezeGates.ok) {
+    return {
+      eligible: false,
+      displayPlain: resolvedDisplayPlain,
+      blockReason: freezeGates.rejectReason ?? "recovery_freeze_gates_failed",
+      rawBodyLen,
+      displayPlainLen: resolvedDisplayPlain.length,
+    };
+  }
   return {
     eligible: true,
-    displayPlain: resolvedDisplayPlain,
+    displayPlain: freezeGates.text,
     blockReason: "",
     rawBodyLen,
-    displayPlainLen: resolvedDisplayPlain.length,
+    displayPlainLen: freezeGates.text.length,
   };
 }
 
@@ -206,11 +258,32 @@ export function tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth(args: {
   premiumRenderSource: string;
   reviewSessionId?: string | null;
 }): PostCheckoutRecoverySotCommitResult {
+  if (hasPaidProSourceOfTruth()) {
+    const existing = getPaidProSourceOfTruth()!;
+    if (
+      existing.text.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+      hasPaidProPipelineSessionAcceptance({ text: existing.text, source: existing.source })
+    ) {
+      const frozen = freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
+        text: existing.text,
+        draft: args.draft,
+        intakeText: args.intakeText,
+        reviewSessionId: args.reviewSessionId ?? null,
+      });
+      return {
+        committed: true,
+        record: existing,
+        canonicalSnapshotFrozen: Boolean(frozen?.hash),
+        reviewCorpusLen: existing.text.length,
+      };
+    }
+  }
   const preview = previewPostCheckoutRecoverySotCommit({
     body: args.body,
     draft: args.draft,
     intakeText: args.intakeText,
     premiumRenderSource: args.premiumRenderSource,
+    reviewSessionId: args.reviewSessionId,
   });
   if (!preview.eligible) {
     return {
@@ -219,13 +292,25 @@ export function tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth(args: {
       reviewCorpusLen: preview.rawBodyLen,
     };
   }
+  const freezeCommit = resolvePaidProFreezeCommitText({
+    text: preview.displayPlain,
+    source: "server_full_draft",
+    draft: args.draft,
+    intakeText: args.intakeText,
+    generationOutcome: "degraded",
+    reviewSessionId: args.reviewSessionId ?? null,
+    surface: "post_checkout_recovery_sot_commit",
+  });
+  if (!freezeCommit.ok) {
+    return {
+      committed: false,
+      reason: freezeCommit.rejectReason ?? "recovery_freeze_gates_failed",
+      reviewCorpusLen: preview.displayPlainLen,
+    };
+  }
   try {
-    markPaidProPipelineValidationPassed({
-      text: preview.displayPlain,
-      source: args.premiumRenderSource,
-    });
     const record = establishPaidProSourceOfTruth({
-      text: preview.displayPlain,
+      text: freezeCommit.text,
       source: "server_full_draft",
       draft: args.draft,
       intakeText: args.intakeText,

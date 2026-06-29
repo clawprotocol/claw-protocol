@@ -1489,6 +1489,65 @@ export function trimOperativeNoticeStanzasToPartyCount(
   };
 }
 
+/** Remove duplicate If-to stanzas and placeholder Party N entities before freeze contamination gates. */
+export function repairDuplicateOperativeNoticeStanzas(
+  corpus: string,
+  partyCount: number,
+  authoritativePartyNames?: readonly string[],
+): { text: string; repairs: string[] } {
+  if (partyCount < 2) return { text: corpus, repairs: [] };
+  let text = corpus;
+  const repairs: string[] = [];
+
+  const trimmed = trimOperativeNoticeStanzasToPartyCount(text, partyCount);
+  if (trimmed.repairs.length > 0) {
+    text = trimmed.text;
+    repairs.push(...trimmed.repairs);
+  }
+
+  const noticesIdx = findNoticesSectionStart(text);
+  if (noticesIdx < 0) return { text, repairs };
+
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  const end = witnessIdx >= 0 ? witnessIdx : text.length;
+  const before = text.slice(0, noticesIdx);
+  const region = text.slice(noticesIdx, end);
+  const after = text.slice(end);
+  const blocks = region.split(/\n(?=If to\s+)/i);
+  const intro = blocks[0] ?? "";
+  const stanzas = blocks.slice(1).filter((s) => s.trim());
+  const kept: string[] = [];
+  const seen = new Set<string>();
+  const hasAuthoritativeNames =
+    (authoritativePartyNames ?? []).filter((n) => n.trim().length >= 2).length >= 2;
+
+  for (const stanza of stanzas) {
+    const entity = stanza.match(/^If to\s+(.+?):/i)?.[1]?.trim() ?? "";
+    const entityLower = entity.toLowerCase();
+    if (hasAuthoritativeNames && /^party\s+\d+$/i.test(entity)) {
+      repairs.push("notice:strip_placeholder_stanza");
+      continue;
+    }
+    if (entityLower && seen.has(entityLower)) {
+      repairs.push("notice:strip_duplicate_stanza_entity");
+      continue;
+    }
+    if (entityLower) seen.add(entityLower);
+    kept.push(stanza);
+    if (kept.length >= partyCount) break;
+  }
+
+  if (kept.length === stanzas.length && repairs.length === 0) {
+    return { text, repairs: [] };
+  }
+
+  const trimmedRegion = `${intro.trimEnd()}\n\n${kept.join("\n\n")}`
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+  text = `${before}${trimmedRegion}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return { text, repairs: [...new Set(repairs)] };
+}
+
 /** Count operative If-to stanzas in the notices-to-witness region. */
 export function countOperativeIfToNoticeStanzas(corpus: string): number {
   const noticesIdx = findNoticesSectionStart(corpus);

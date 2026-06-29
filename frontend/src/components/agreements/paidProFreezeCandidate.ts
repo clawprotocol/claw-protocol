@@ -24,6 +24,7 @@ import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadin
 import { diagnosePaidProCorpusDuplication, repairPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
 import {
   ensureCanonicalNoticesSectionHeadingForFreeze,
+  repairDuplicateOperativeNoticeStanzas,
   resolveNoticeStructuralValidationParties,
   trimOperativeNoticeStanzasToPartyCount,
 } from "./paidProPartyNoticeDetails";
@@ -758,6 +759,36 @@ export function assertPaidProFreezeCandidateGates(
     `${surface}_pre_freeze`,
   );
 
+  const canonicalNoticePartyCount = resolveAuthoritativeSignerCount({
+    intakeText: args.intakeText ?? null,
+    draftPartyNames: prep.parties.map((p) => p.name),
+    manifestPartyCount: prep.parties.length,
+  }).count;
+  if (
+    freezeEntryText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    canonicalNoticePartyCount >= 2
+  ) {
+    const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
+    if (preClauseNoticesHeading.repairs.length > 0) {
+      safeForCommit = preClauseNoticesHeading.text;
+    }
+    const noticeDedupe = repairDuplicateOperativeNoticeStanzas(
+      safeForCommit,
+      canonicalNoticePartyCount,
+      prep.parties.map((p) => p.name),
+    );
+    if (noticeDedupe.repairs.length > 0) {
+      safeForCommit = noticeDedupe.text;
+    }
+    const trimmedNotices = trimOperativeNoticeStanzasToPartyCount(
+      safeForCommit,
+      canonicalNoticePartyCount,
+    );
+    if (trimmedNotices.repairs.length > 0) {
+      safeForCommit = trimmedNotices.text;
+    }
+  }
+
   safeForCommit = assertProfessionalCorpusCleanForFreeze(safeForCommit, {
     partyNames: prep.parties.map((p) => p.name),
     partyCount: prep.parties.length,
@@ -788,21 +819,24 @@ export function assertPaidProFreezeCandidateGates(
     safeForCommit = preClauseNoticesHeading.text;
   }
 
-  const canonicalNoticePartyCount = resolveAuthoritativeSignerCount({
-    intakeText: args.intakeText ?? null,
-    draftPartyNames: prep.parties.map((p) => p.name),
-    manifestPartyCount: prep.parties.length,
-  }).count;
   if (
     freezeEntryText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
     canonicalNoticePartyCount >= 2
   ) {
-    const trimmedNotices = trimOperativeNoticeStanzasToPartyCount(
+    const postBoundaryNoticeDedupe = repairDuplicateOperativeNoticeStanzas(
+      safeForCommit,
+      canonicalNoticePartyCount,
+      prep.parties.map((p) => p.name),
+    );
+    if (postBoundaryNoticeDedupe.repairs.length > 0) {
+      safeForCommit = postBoundaryNoticeDedupe.text;
+    }
+    const trimmedNoticesPostBoundary = trimOperativeNoticeStanzasToPartyCount(
       safeForCommit,
       canonicalNoticePartyCount,
     );
-    if (trimmedNotices.repairs.length > 0) {
-      safeForCommit = trimmedNotices.text;
+    if (trimmedNoticesPostBoundary.repairs.length > 0) {
+      safeForCommit = trimmedNoticesPostBoundary.text;
     }
   }
 
