@@ -859,6 +859,8 @@ import {
   runPaidProSignerMetadataAuthoritySeed,
 } from "./paidProSignerMetadataSeed";
 import { establishCanonicalPartyMetadataAtStage } from "./canonicalPartyMetadataAuthority";
+import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
+import { hydrateCanonicalPartyMetadataAfterCheckoutRestore } from "./paidProCheckoutRestoreMetadataHydrate";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 import {
   isPaidProPostFinalizeHydratedCorpusLocked,
@@ -5329,12 +5331,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (legalEntities.length >= 2) {
         const seed = runPaidProSignerMetadataAuthoritySeed({
           stage: "commit_parsed_draft_review",
-          legalEntities,
+          legalEntities: resolveLegalEntitiesForCanonicalMetadata({
+            legalEntities,
+            intakeText: intakeCombinedRef.current || intakeCombined,
+            draft: nextDraft,
+          }),
           intakeText: intakeCombinedRef.current || intakeCombined,
           corpusText: getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "",
           draft: nextDraft,
           uiSignerNames: partySignerNamesRef.current,
           uiSignerTitles: partySignerTitlesRef.current,
+          authoritativePartyCount: resolveAuthoritativeSignerCount({
+            intakeText: intakeCombinedRef.current || intakeCombined,
+            draftParties: nextDraft.parties,
+            manifestPartyCount: legalEntities.length,
+          }).count,
         });
         if (seed.draftChanged && seed.draft) nextDraft = seed.draft;
         if (seed.uiChanged) {
@@ -8325,9 +8336,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }
           });
         }
-        const checkoutLegalEntities = (merged.draft.parties ?? [])
-          .map((p) => String((p as { name?: string }).name ?? "").trim())
-          .filter(Boolean);
+        const checkoutLegalEntities = resolveLegalEntitiesForCanonicalMetadata({
+          legalEntities: (merged.draft.parties ?? [])
+            .map((p) => String((p as { name?: string }).name ?? "").trim())
+            .filter(Boolean),
+          intakeText: mergedIntake,
+          draft: merged.draft,
+        });
         if (checkoutLegalEntities.length >= 2) {
           establishCanonicalPartyMetadataAtStage({
             stage: "after-premium",
@@ -9718,7 +9733,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (assessment.parties.length >= 2) {
         establishCanonicalPartyMetadataAtStage({
           stage: "created",
-          legalEntities: assessment.parties,
+          legalEntities: resolveLegalEntitiesForCanonicalMetadata({
+            legalEntities: assessment.parties,
+            intakeText: rawIntake,
+          }),
           intakeText: rawIntake,
           mutationSource: "structured_intake",
         });
@@ -10011,6 +10029,47 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hasPreview: Boolean(snap.previewText?.trim()),
       inputLen: snap.intakeText.length,
     });
+    if (snap.intakeText.trim() && snap.draft) {
+      const restored = hydrateCanonicalPartyMetadataAfterCheckoutRestore({
+        intakeText: snap.intakeText,
+        draft: snap.draft,
+      });
+      if (restored.seed?.uiChanged) {
+        setPartySignerNames(restored.seed.names);
+        setPartySignerTitles(restored.seed.titles);
+      }
+      if (restored.seed?.contactFieldsChanged || restored.seed?.emails.some(Boolean)) {
+        if (restored.seed?.emails[0]) {
+          setRecipient1Email((prev) => (prev.trim() ? prev : restored.seed!.emails[0]!));
+        }
+        if (restored.seed?.emails[1]) {
+          setRecipient2Email((prev) => (prev.trim() ? prev : restored.seed!.emails[1]!));
+        }
+        const partyCount = restored.seed?.names.length ?? 0;
+        if (partyCount > 2 && restored.seed) {
+          setExtraPartyReviewEmails((prev) => {
+            const next = prev.slice();
+            while (next.length < partyCount - 2) next.push("");
+            for (let i = 2; i < partyCount; i++) {
+              const em = restored.seed!.emails[i]?.trim() ?? "";
+              if (em && !(next[i - 2] ?? "").trim()) next[i - 2] = em;
+            }
+            return next;
+          });
+        }
+        if (restored.seed?.addresses.some(Boolean)) {
+          setPartyAddresses((prev) => {
+            const next = prev.slice();
+            while (next.length < partyCount) next.push("");
+            for (let i = 0; i < partyCount; i++) {
+              const addr = restored.seed!.addresses[i]?.trim() ?? "";
+              if (addr && !(next[i] ?? "").trim()) next[i] = addr;
+            }
+            return next;
+          });
+        }
+      }
+    }
   }, [
     checkoutBackRestoreActive,
     createProductionTwoPane,
@@ -14088,12 +14147,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (e1) setRecipient1Email((prev) => (prev.trim() ? prev : e1));
     if (e2) setRecipient2Email((prev) => (prev.trim() ? prev : e2));
     const parties = draft.parties ?? [];
-    const cap = Math.min(parties.length, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
-    if (cap > 0) {
-      const legalEntities = parties
-        .slice(0, cap)
+    const intakeForCap = intakeCombinedRef.current || intakeCombined;
+    const resolvedEntities = resolveLegalEntitiesForCanonicalMetadata({
+      legalEntities: parties
+        .slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS)
         .map((p) => String((p as { name?: string }).name ?? "").trim())
-        .filter(Boolean);
+        .filter(Boolean),
+      intakeText: intakeForCap,
+      draft,
+    });
+    const cap = Math.min(
+      Math.max(
+        resolveAuthoritativeSignerCount({
+          intakeText: intakeForCap,
+          draftParties: parties,
+          manifestPartyCount: resolvedEntities.length,
+        }).count,
+        resolvedEntities.length,
+        2,
+      ),
+      MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS,
+    );
+    if (cap > 0) {
+      const legalEntities = resolvedEntities.slice(0, cap);
       const seed = runPaidProSignerMetadataAuthoritySeed({
         stage: "draft_parties_prefill",
         legalEntities,
@@ -14102,6 +14178,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draft,
         uiSignerNames: partySignerNames,
         uiSignerTitles: partySignerTitles,
+        authoritativePartyCount: cap,
       });
       if (seed.uiChanged) {
         setPartySignerNames(seed.names);
@@ -16346,7 +16423,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [paidProPostFinalizeHydrationBlocked, premiumSurfaceGateTick, reviewDocRefreshTick]);
 
   useEffect(() => {
-    if (!acceptedPaidProAuthorityActive || !paidProFirstReviewSurfaceActive) return;
+    const signerPrefillSurfaceActive =
+      paidProFirstReviewSurfaceActive ||
+      checkoutBackRestoreActive ||
+      paidProPostCheckoutFirstReviewActive;
+    if (!acceptedPaidProAuthorityActive && !checkoutBackRestoreActive) return;
+    if (!signerPrefillSurfaceActive) return;
     if (paidProSignerMetadataFinalized || premiumRecipientUxActive) return;
     const intakeText = currentPremiumMergedIntakeKey || intakeCombined;
     if (!intakeText.trim()) return;
@@ -16448,6 +16530,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     acceptedPaidProAuthorityActive,
     paidProFirstReviewSurfaceActive,
+    checkoutBackRestoreActive,
+    paidProPostCheckoutFirstReviewActive,
     paidProSignerMetadataFinalized,
     premiumRecipientUxActive,
     currentPremiumMergedIntakeKey,

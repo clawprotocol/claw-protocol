@@ -14,6 +14,10 @@ import {
   type LiveSignerMetadataUiState,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
+import {
+  canonicalBundleToAuthorityParties,
+  readCanonicalPartyMetadata,
+} from "./canonicalPartyMetadataAuthority";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 import {
   hasPaidProSourceOfTruth,
@@ -32,6 +36,43 @@ export type ResolvePaidProReviewRenderPartiesArgs = {
   intakeText?: string | null;
   liveSignerMetadataUi?: LiveSignerMetadataUiState | null;
 };
+
+function mergeCanonicalBundleWhenSignerMetadataPresent(
+  parties: readonly PaidProSignerMetadataParty[],
+  intakeRaw: string,
+): PaidProSignerMetadataParty[] {
+  const merged = mergeLabeledPartyAuthorityIntoParties(parties, intakeRaw);
+  const canonical = readCanonicalPartyMetadata();
+  if (!canonical?.parties?.length) return merged;
+  const fromCanonical = canonicalBundleToAuthorityParties(canonical);
+  const hasSignerSignal = fromCanonical.some(
+    (p) => p.signerName.trim() || p.signerEmail.trim() || p.signerTitle.trim() || p.partyAddress.trim(),
+  );
+  if (!hasSignerSignal) return merged;
+  const cap = Math.max(merged.length, fromCanonical.length);
+  const out: PaidProSignerMetadataParty[] = [];
+  for (let i = 0; i < cap; i += 1) {
+    const base = merged[i] ?? fromCanonical[i];
+    const canon = fromCanonical[i];
+    if (!base) {
+      if (canon) out.push(canon);
+      continue;
+    }
+    if (!canon) {
+      out.push(base);
+      continue;
+    }
+    out.push({
+      ...base,
+      partyLegalName: base.partyLegalName.trim() || canon.partyLegalName,
+      signerName: base.signerName.trim() || canon.signerName,
+      signerTitle: base.signerTitle.trim() || canon.signerTitle,
+      signerEmail: base.signerEmail.trim() || canon.signerEmail,
+      partyAddress: base.partyAddress.trim() || canon.partyAddress,
+    });
+  }
+  return out.length ? out : merged;
+}
 
 function pickSignerField(
   consumed: string,
@@ -131,7 +172,9 @@ export function resolvePartiesForReviewRender(
   };
 
   const draftAuthorityParties = partiesFromDraftAuthority();
-  if (draftAuthorityParties) return draftAuthorityParties;
+  if (draftAuthorityParties) {
+    return mergeCanonicalBundleWhenSignerMetadataPresent(draftAuthorityParties, intakeRaw);
+  }
 
   const frozenManifestNames = readFrozenCanonicalManifestPartyNames();
   const livePartiesEarly = args?.liveSignerMetadataUi
@@ -163,7 +206,7 @@ export function resolvePartiesForReviewRender(
       return mergeLabeledPartyAuthorityIntoParties(liveParties, intakeRaw);
     }
     if (labeledAuthority.length >= slotCount) {
-      return labeledAuthority;
+      return mergeCanonicalBundleWhenSignerMetadataPresent(labeledAuthority, intakeRaw);
     }
     const fromDraft = partiesFromDraftAuthority();
     if (fromDraft) return fromDraft;
@@ -172,8 +215,11 @@ export function resolvePartiesForReviewRender(
 
   const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
   if (consumed && consumed.length >= 2) {
-    const merged = mergeLabeledPartyAuthorityIntoParties(
-      mergeLiveSignerFieldsOntoParties(consumed, liveParties, preferLiveSignerFields),
+    const merged = mergeCanonicalBundleWhenSignerMetadataPresent(
+      mergeLabeledPartyAuthorityIntoParties(
+        mergeLiveSignerFieldsOntoParties(consumed, liveParties, preferLiveSignerFields),
+        intakeRaw,
+      ),
       intakeRaw,
     );
     if (frozenManifestNames.length >= 3 && merged.length < frozenManifestNames.length) {

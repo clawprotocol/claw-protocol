@@ -659,6 +659,27 @@ function extractScopeAndMeta(lower: string, text: string): FieldMeta {
   if (/\bclean\b/i.test(lower)) {
     return { text: "Cleaning services", confidence: 0.78, signal: true, inferred: false };
   }
+  if (
+    /\b(?:biotech|pharmaceutical|manufacturing|supply chain|regulatory|medical device|healthcare analytics)\b/i.test(
+      lower,
+    )
+  ) {
+    const industryScope = text.match(
+      /\b(?:develop|provide|deliver|license|manufacture|distribute|consult on)\s+([^.!\n]{12,220})/i,
+    );
+    if (industryScope?.[1]) {
+      const scoped = normalizeIntakeFieldText(industryScope[1], 220);
+      if (scoped.length >= 12 && !/\bconsult/i.test(scoped)) {
+        return { text: scoped, confidence: 0.82, signal: true, inferred: false };
+      }
+    }
+    return {
+      text: "Biotech, manufacturing, supply-chain, and regulatory services described in this Agreement",
+      confidence: 0.8,
+      signal: true,
+      inferred: true,
+    };
+  }
   if (/\bconsult/i.test(lower)) {
     return { text: "Consulting / advisory services", confidence: 0.78, signal: true, inferred: false };
   }

@@ -13,6 +13,7 @@ import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthority
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
+import { normalizePaidProCopyQuality } from "./paidProCopyQualityNormalize";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
 import { repairBareEntityOnlyNoticeStanzas, ensureOperativeIfToNoticeDelivery, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
@@ -293,6 +294,11 @@ export function preparePaidProReviewDisplayPlain(
   if (collapsedNotices.repairs.length > 0) {
     out = collapsedNotices.text;
     repairs.push(...collapsedNotices.repairs);
+  }
+  const copyQuality = normalizePaidProCopyQuality(out);
+  if (copyQuality.repairs.length > 0) {
+    out = copyQuality.text;
+    repairs.push(...copyQuality.repairs.map((r) => `copy_quality:${r}`));
   }
   return { text: out, repairs: [...new Set(repairs)] };
 }

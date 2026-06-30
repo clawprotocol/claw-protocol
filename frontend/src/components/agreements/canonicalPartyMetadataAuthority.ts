@@ -6,6 +6,7 @@
 import {
   alignIntakeSignerMetadataToLegalEntities,
 } from "./structuredIntakePartyContactParse";
+import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
 import {
   assertCanonicalMetadataNotFromAgreementBody,
   type CanonicalMutableMutationSource,
@@ -96,9 +97,10 @@ let activeBundleHash: string | null = null;
 let lastFieldCounts: CanonicalPartyMetadataFieldCounts | null = null;
 let lastProjectionBundleId: string | null = null;
 
-function diagnosticsEnabled(): boolean {
+function diagnosticsEnabled(partyCount = 0): boolean {
   return (
     paidProSignerMetadataForensicLineageEnabled() ||
+    partyCount >= 3 ||
     (typeof import.meta !== "undefined" && import.meta.env?.DEV === true)
   );
 }
@@ -295,11 +297,18 @@ export function logCanonicalPartyMetadataDiagnostics(
   const counts = computeCanonicalPartyMetadataFieldCounts(bundle);
   if (bundle?.bundleId) activeBundleId = bundle.bundleId;
   if (bundle?.bundleHash) activeBundleHash = bundle.bundleHash;
-  if (diagnosticsEnabled()) {
+  if (diagnosticsEnabled(counts.partyCount)) {
     const losses = detectFieldCountLoss(prior ?? null, counts);
     // eslint-disable-next-line no-console
     console.info(STAGE_LOG_TAGS[stage], {
       ...counts,
+      signerNameCount: counts.signerNameCount,
+      signerEmailCount: counts.emailCount,
+      signerTitleCount: counts.titleCount,
+      addressCount: counts.addressCount,
+      bundleId: counts.bundleId,
+      bundleHash: counts.bundleHash,
+      source: counts.source,
       fieldCounts: {
         entity: counts.entityCount,
         signerName: counts.signerNameCount,
@@ -408,7 +417,10 @@ export function buildCanonicalPartyMetadataBundle(args: {
 }): CanonicalPartyMetadataBundle {
   assertCanonicalMetadataNotFromAgreementBody(args.mutationSource ?? "");
   const now = new Date().toISOString();
-  const legalEntities = (args.legalEntities ?? []).map((e) => trimField(e)).filter(Boolean);
+  const legalEntities = resolveLegalEntitiesForCanonicalMetadata({
+    legalEntities: args.legalEntities,
+    intakeText: args.intakeText,
+  });
   const partyCount =
     legalEntities.length >= 2
       ? legalEntities.length

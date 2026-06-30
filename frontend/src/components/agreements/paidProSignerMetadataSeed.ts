@@ -10,6 +10,7 @@ import {
   readCanonicalPartyMetadata,
 } from "./canonicalPartyMetadataAuthority";
 import { alignIntakeSignerMetadataToLegalEntities } from "./structuredIntakePartyContactParse";
+import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
 import type { PremiumRecipientHandoffV2 } from "./premiumPartyNamesHandoff";
 import { logPaidProSignerMetadataPipelineDiagnostics } from "./paidProSignerMetadataPipelineDiagnostics";
 import { linearPremiumRecipientSlots } from "./premiumPartyNamesHandoff";
@@ -94,6 +95,11 @@ function buildUiPartiesFromSeedArgs(
 export function runPaidProSignerMetadataAuthoritySeed(
   args: PaidProSignerMetadataSeedArgs,
 ): PaidProSignerMetadataSeedResult {
+  const resolvedLegalEntities = resolveLegalEntitiesForCanonicalMetadata({
+    legalEntities: args.legalEntities,
+    intakeText: args.intakeText,
+    draft: args.draft ?? null,
+  });
   const partyCount = (() => {
     const consumedCount =
       readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
@@ -102,7 +108,7 @@ export function runPaidProSignerMetadataAuthoritySeed(
     const effectiveMax = readSignerMetadataEffectiveMax().partySlots;
     const raw = Math.max(
       args.authoritativePartyCount ?? 0,
-      args.legalEntities.length,
+      resolvedLegalEntities.length,
       consumedCount,
       effectiveMax,
       args.uiSignerNames?.length ?? 0,
@@ -113,8 +119,10 @@ export function runPaidProSignerMetadataAuthoritySeed(
     }
     return raw;
   })();
-  const intakeAligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, args.legalEntities);
-  const canonicalLegalEntities = intakeAligned.map((s) => s.partyLegalName || args.legalEntities[s.partyIndex] || "");
+  const intakeAligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, resolvedLegalEntities);
+  const canonicalLegalEntities = intakeAligned.map(
+    (s, i) => s.partyLegalName || resolvedLegalEntities[i] || args.legalEntities[i] || "",
+  );
 
   const sources: UniversalSignerMetadataSources = {
     legalEntities: canonicalLegalEntities,

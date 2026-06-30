@@ -314,8 +314,16 @@ function hydrateTextWhenSignerMetadataComplete(
 ): string {
   if (!shouldHydratePaidProReviewSurfacesFromConsumedAuthority(parties)) return text;
   if (!consumedAuthoritySignerMetadataComplete(parties)) return text;
-  const authority = readConsumedPaidProSignerMetadataAuthority();
-  if (!authority) return text;
+  const consumed = readConsumedPaidProSignerMetadataAuthority();
+  const authority =
+    consumed ??
+    ({
+      parties: parties.map((p, partyIndex) => ({ ...p, partyIndex: p.partyIndex ?? partyIndex })),
+      source: "live_ui" as const,
+      hash: "",
+      updatedAt: Date.now(),
+    });
+  if (!authority.parties?.length) return text;
   const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
     rawCorpus: text,
     authority,
