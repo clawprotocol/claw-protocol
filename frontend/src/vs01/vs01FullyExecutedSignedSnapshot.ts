@@ -18,6 +18,10 @@ import {
   stampWitnessBlockPartySigningDate,
 } from "./vs01WitnessBlockSigningDate";
 import { sanitizeVs01RenderCorpus } from "./vs01CorpusOrphanSectionSanitizer";
+import {
+  assertCompletedExecutionMetadataInvariant,
+  resolveAuthoritativeCompletedExecutionCorpus,
+} from "./paidProCompletedExecutionMetadataAuthority";
 
 export type Vs01FullyExecutedSignedSnapshotV1 = {
   v: 1;
@@ -62,10 +66,12 @@ export function signatureTextForSignerRole(
   signerRoleId: string,
 ): string {
   const rid = signerRoleId.trim();
+  if (!rid) return "";
   const sigField = fields.find(
     (f) =>
       f.type === "signature" &&
-      ((f.assignedSignerRoleId ?? "").trim() === rid || (!f.assignedSignerRoleId && rid)),
+      !f.autoInitials &&
+      (f.assignedSignerRoleId ?? "").trim() === rid,
   );
   const v = typeof sigField?.value === "string" ? sigField.value.trim() : "";
   if (v) return v;
@@ -261,21 +267,32 @@ export function reconstructSignedCorpusFromAuditAndPortable(args: {
 export function resolveVs01FullyExecutedSignedCorpus(
   draft: AgreementDraft | null | undefined,
 ): { text: string; source: "fully_executed_snapshot" | "reconstructed" | "portable_packet" } | null {
-  const snap = readFullyExecutedSnapshotFromDraft(draft);
-  if (snap?.corpusPlain?.trim()) {
-    return { text: snap.corpusPlain.trim(), source: "fully_executed_snapshot" };
-  }
+  if (!draft) return null;
 
   const stored = (draft as { vs01_signing_packet_v1?: Record<string, unknown> })?.vs01_signing_packet_v1;
-  const portable = stored?.portable as Vs01CanonicalPacketPortableV1 | undefined;
+  const portable = (stored?.portable as Vs01CanonicalPacketPortableV1 | undefined) ?? null;
+  const snap = readFullyExecutedSnapshotFromDraft(draft);
+
+  const authoritative = resolveAuthoritativeCompletedExecutionCorpus({
+    draft,
+    portable,
+    snapshotCorpus: snap?.corpusPlain ?? null,
+    preferSource: snap?.corpusPlain?.trim() ? "fully_executed_snapshot" : undefined,
+  });
+  if (authoritative) {
+    return { text: authoritative.text, source: authoritative.source };
+  }
+
   if (portable) {
-    const rebuilt = reconstructSignedCorpusFromAuditAndPortable({ draft: draft!, portable });
-    if (rebuilt?.trim()) {
-      return { text: rebuilt.trim(), source: "reconstructed" };
-    }
     const fromPortable = buildFullyExecutedSignedSnapshot(portable);
     if (fromPortable?.corpusPlain?.trim()) {
-      return { text: fromPortable.corpusPlain.trim(), source: "portable_packet" };
+      const text = fromPortable.corpusPlain.trim();
+      assertCompletedExecutionMetadataInvariant({
+        corpusPlain: text,
+        portable,
+        source: "portable_packet",
+      });
+      return { text, source: "portable_packet" };
     }
   }
   return null;

@@ -8,7 +8,9 @@ import {
   buildFullyExecutedSignedSnapshot,
   readFullyExecutedSnapshotFromDraft,
   resolveVs01FullyExecutedSignedCorpus,
+  signatureTextForSignerRole,
 } from "./vs01FullyExecutedSignedSnapshot";
+import type { Vs01RecipientPlacedField } from "./types";
 import type { Vs01CanonicalPacketPortableV1 } from "./vs01CanonicalPacketSeed";
 import { countSignedWitnessBlocks } from "./vs01WitnessBlockSigningDate";
 
@@ -174,6 +176,39 @@ describe("vs01FullyExecutedSignedSnapshot (Test362)", () => {
     expect(snap?.corpusPlain).toMatch(/Date: June 15, 2026/);
     expect(snap?.corpusPlain).toMatch(/Date: June 16, 2026/);
     expect(countSignedWitnessBlocks(snap!.corpusPlain)).toEqual({ signed: 2, total: 2 });
+  });
+
+  it("signatureTextForSignerRole requires exact assignedSignerRoleId match", () => {
+    const fields: Vs01RecipientPlacedField[] = [
+      {
+        id: "sig0",
+        counterpartyId: "owner",
+        type: "signature",
+        page: 1,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.05,
+        assignedPartyIndex: 0,
+        assignedSignerRoleId: OWNER_ROLE,
+        value: "Hue Lorrey",
+      },
+      {
+        id: "sig1",
+        counterpartyId: "cp1",
+        type: "signature",
+        page: 1,
+        x: 0.1,
+        y: 0.2,
+        width: 0.2,
+        height: 0.05,
+        assignedPartyIndex: 1,
+        assignedSignerRoleId: "",
+        value: "Hue Lorrey",
+      },
+    ];
+    expect(signatureTextForSignerRole(fields, CP_ROLE)).toBe("");
+    expect(signatureTextForSignerRole(fields, OWNER_ROLE)).toBe("Hue Lorrey");
   });
 
   it("resolveVs01FullyExecutedSignedCorpus prefers server fully_executed_snapshot", () => {

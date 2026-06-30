@@ -53,6 +53,23 @@ def _draft_with_portable(aid: str = "ag_test363") -> dict:
     }
 
 
+def test_signature_text_for_signer_role_requires_exact_role_match() -> None:
+    fields = [
+        {
+            "type": "signature",
+            "assignedSignerRoleId": "role_owner",
+            "value": "Owner Signer",
+        },
+        {
+            "type": "signature",
+            "assignedSignerRoleId": "",
+            "value": "Owner Signer",
+        },
+    ]
+    assert signature_text_for_signer_role(fields, "role_owner") == "Owner Signer"
+    assert signature_text_for_signer_role(fields, "role_cp") == ""
+
+
 def test_reconstruct_corpus_stamps_both_signers() -> None:
     draft = _draft_with_portable()
     draft["audit_log"] = [

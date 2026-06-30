@@ -278,13 +278,17 @@ def parse_signature_completed_events(audit: Any) -> List[Dict[str, str]]:
 
 def signature_text_for_signer_role(fields: Any, signer_role_id: str) -> str:
     rid = (signer_role_id or "").strip()
+    if not rid:
+        return ""
     for field in fields or []:
         if not isinstance(field, dict):
             continue
         if str(field.get("type") or "") != "signature":
             continue
+        if field.get("autoInitials"):
+            continue
         assigned = str(field.get("assignedSignerRoleId") or "").strip()
-        if assigned and assigned != rid:
+        if assigned != rid:
             continue
         value = str(field.get("value") or "").strip()
         if value:
@@ -382,6 +386,51 @@ class EnsureFullyExecutedSnapshotResult:
     snapshot_ready: bool
 
 
+def _normalize_signer_label(value: str) -> str:
+    return " ".join((value or "").split()).lower()
+
+
+def completed_execution_by_name_violations(corpus_plain: str) -> List[str]:
+    """Return invariant violations when any party By: differs from that block's Name:."""
+    corpus = (corpus_plain or "").strip()
+    if len(corpus) < 80:
+        return []
+    patch_start = resolve_witness_execution_scan_start(corpus)
+    lines = corpus.split("\n")
+    violations: List[str] = []
+    current_by = ""
+    current_name = ""
+    party_idx = -1
+
+    def flush() -> None:
+        nonlocal current_by, current_name, party_idx, violations
+        by = current_by.strip()
+        name = current_name.strip()
+        if by and name and _normalize_signer_label(by) != _normalize_signer_label(name):
+            violations.append(f"party {party_idx}: By {by!r} != Name {name!r}")
+        current_by = ""
+        current_name = ""
+
+    for i, line in enumerate(lines):
+        line_start = len("\n".join(lines[:i])) + (1 if i > 0 else 0)
+        if line_start < patch_start:
+            continue
+        trimmed = line.strip()
+        if not trimmed:
+            continue
+        if is_entity_legal_name_heading_line(trimmed):
+            flush()
+            party_idx += 1
+            continue
+        if re.match(r"^by\s*:", trimmed, re.I):
+            current_by = re.sub(r"^by\s*:\s*", "", trimmed, flags=re.I).strip()
+            continue
+        if re.match(r"^name\s*:", trimmed, re.I):
+            current_name = re.sub(r"^name\s*:\s*", "", trimmed, flags=re.I).strip()
+    flush()
+    return violations
+
+
 def ensure_fully_executed_snapshot_on_draft(
     draft: Dict[str, Any],
     *,
@@ -389,11 +438,27 @@ def ensure_fully_executed_snapshot_on_draft(
 ) -> EnsureFullyExecutedSnapshotResult:
     aid = (agreement_id or str(draft.get("id") or "")).strip()
     if fully_executed_snapshot_ready(draft):
-        _log.info(
-            "[vs01-final-signed-snapshot] agreement_id=%s source=existing snapshot_ready=true",
+        existing = read_fully_executed_snapshot_from_draft(draft)
+        corpus = str((existing or {}).get("corpus_plain") or "")
+        violations = completed_execution_by_name_violations(corpus)
+        if not violations:
+            _log.info(
+                "[vs01-final-signed-snapshot] agreement_id=%s source=existing snapshot_ready=true",
+                aid,
+            )
+            return EnsureFullyExecutedSnapshotResult(draft, False, "existing", True)
+        _log.warning(
+            "[vs01-final-signed-snapshot] agreement_id=%s source=existing_invalid violations=%s — rebuilding",
             aid,
+            violations,
         )
-        return EnsureFullyExecutedSnapshotResult(draft, False, "existing", True)
+        draft = {
+            **draft,
+            "vs01_signing_packet_v1": {
+                **(draft.get("vs01_signing_packet_v1") or {}),
+                "fully_executed_snapshot": None,
+            },
+        }
 
     stored = draft.get("vs01_signing_packet_v1")
     if not isinstance(stored, dict):
