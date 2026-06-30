@@ -409,13 +409,16 @@ export function buildCanonicalPartyMetadataBundle(args: {
   assertCanonicalMetadataNotFromAgreementBody(args.mutationSource ?? "");
   const now = new Date().toISOString();
   const legalEntities = (args.legalEntities ?? []).map((e) => trimField(e)).filter(Boolean);
-  const partyCount = Math.max(
-    legalEntities.length,
-    args.uiParties?.length ?? 0,
-    args.consumedAuthority?.parties.length ?? 0,
-    args.existing?.parties.length ?? 0,
-    1,
-  );
+  const partyCount =
+    legalEntities.length >= 2
+      ? legalEntities.length
+      : Math.max(
+          legalEntities.length,
+          args.uiParties?.length ?? 0,
+          args.consumedAuthority?.parties.length ?? 0,
+          args.existing?.parties.length ?? 0,
+          1,
+        );
   const intakeAligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, legalEntities);
   const intakeRecords = intakeAligned.slice(0, partyCount).map((slot, i) => {
     const existingRecord = findCanonicalPartyByLegalEntity(args.existing ?? null, slot.partyLegalName);
@@ -523,12 +526,16 @@ export function projectCanonicalMetadataToSurfaces(
   stage: CanonicalPartyMetadataStage = "review",
 ): { handoffWritten: boolean; consumedWritten: boolean; bundleId: string; bundleHash: string } {
   const authorityParties = canonicalBundleToAuthorityParties(bundle);
-  const hasSignal = authorityParties.some(
-    (p) => p.signerName.trim() || p.signerTitle.trim() || p.signerEmail.trim() || p.partyAddress.trim() || p.partyLegalName.trim(),
+  const hasSignerSignal = authorityParties.some(
+    (p) =>
+      p.signerName.trim() ||
+      p.signerTitle.trim() ||
+      p.signerEmail.trim() ||
+      p.partyAddress.trim(),
   );
   let handoffWritten = false;
   let consumedWritten = false;
-  if (hasSignal && authorityParties.length >= 2) {
+  if (hasSignerSignal && authorityParties.length >= 2) {
     writePremiumRecipientHandoffFromAuthorityParties(authorityParties);
     handoffWritten = true;
     logProjection(stage, "handoff", bundle);

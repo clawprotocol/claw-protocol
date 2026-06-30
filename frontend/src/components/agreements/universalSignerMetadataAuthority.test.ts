@@ -18,6 +18,7 @@ import {
   linearPremiumRecipientSlots,
   persistPremiumRecipientHandoff,
   readPremiumRecipientHandoff,
+  resetPremiumRecipientHandoffDedupForTests,
 } from "./premiumPartyNamesHandoff";
 import { BLUE_CANYON_QA_HOME_PROMPT } from "./intakeSignerInstructionParse";
 
@@ -48,6 +49,8 @@ describe("universalSignerMetadataAuthority", () => {
   afterEach(() => {
     clearAuthoritativeSigningSnapshot();
     storage.clear();
+    resetPremiumRecipientHandoffDedupForTests();
+    clearConsumedPaidProSignerMetadataAuthority();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });

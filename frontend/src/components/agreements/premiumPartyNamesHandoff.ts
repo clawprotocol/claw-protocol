@@ -8,6 +8,9 @@ import {
   signerMetadataInputRaw,
 } from "../../agreement/signerMetadataNormalize";
 
+import {
+  clearCanonicalPartyMetadata,
+} from "./canonicalPartyMetadataAuthority";
 import { invalidatePremiumRecipientHandoffReadCache } from "./premiumRecipientHandoffReadCache";
 import {
   applyPremiumRecipientHandoffReadGate,
@@ -22,6 +25,10 @@ import {
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import {
+  canonicalBundleToAuthorityParties,
+  readCanonicalPartyMetadata,
+} from "./canonicalPartyMetadataAuthority";
 import {
   isLikelyHumanSignerName,
   looksLikeConcatenatedSignerNames,
@@ -53,6 +60,7 @@ export function resetPremiumRecipientHandoffDedupForTests(): void {
   lastHandoffReadLogFingerprint = "";
   lastHandoffWriteLogFingerprint = "";
   lastPersistedHandoffFingerprint = "";
+  clearCanonicalPartyMetadata();
   resetPaidProPremiumRecipientHandoffReadGateForTests();
 }
 
@@ -365,14 +373,18 @@ export function writePremiumRecipientHandoffFromAuthorityParties(
   }[],
 ): void {
   if (parties.length < 2) return;
-  const slots: PremiumRecipientHandoffSlot[] = parties.map((party) => ({
-    name: String(party.partyLegalName ?? "").trim(),
-    email: String(party.signerEmail ?? "").trim(),
-    role: "party",
-    signerName: signerMetadataInputRaw(party.signerName),
-    signerTitle: signerMetadataInputRaw(party.signerTitle),
-    partyAddress: String(party.partyAddress ?? "").trim(),
-  }));
+  const cur = readPremiumRecipientHandoff();
+  const curSlots = linearPremiumRecipientSlots(cur, Math.max(parties.length, 2));
+  const slots: PremiumRecipientHandoffSlot[] = parties.map((party, i) =>
+    mergeSlot(curSlots[i] ?? emptySlot(), {
+      name: String(party.partyLegalName ?? "").trim(),
+      email: String(party.signerEmail ?? "").trim(),
+      role: "party",
+      signerName: signerMetadataInputRaw(party.signerName),
+      signerTitle: signerMetadataInputRaw(party.signerTitle),
+      partyAddress: String(party.partyAddress ?? "").trim(),
+    }, { preserveSignerFieldsOnEmptyPatch: true }),
+  );
   writePremiumRecipientHandoffLinear(slots, parties.length);
 }
 
@@ -480,16 +492,29 @@ export function persistPremiumRecipientHandoff(patch: {
   }
 }
 
+function resolveAuthorityPartiesForHandoffMerge(): NonNullable<
+  ReturnType<typeof readConsumedPaidProSignerMetadataAuthority>
+>["parties"] | null {
+  const consumed = readConsumedPaidProSignerMetadataAuthority();
+  if (consumed?.parties?.some((p) => p.signerName.trim() || p.signerEmail.trim())) {
+    return consumed.parties;
+  }
+  const canonical = readCanonicalPartyMetadata();
+  if (canonical?.parties?.some((p) => p.signerName.trim() || p.signerEmail.trim())) {
+    return canonicalBundleToAuthorityParties(canonical);
+  }
+  return consumed?.parties ?? null;
+}
+
 function mergeHandoffPayloadFromConsumedSignerAuthority(
   payload: PremiumRecipientHandoffV2,
   partySlotCount: number,
 ): PremiumRecipientHandoffV2 {
-  if (!hasPaidProSourceOfTruth()) return payload;
-  const consumed = readConsumedPaidProSignerMetadataAuthority();
-  if (!consumed?.parties?.length) return payload;
+  const authorityParties = resolveAuthorityPartiesForHandoffMerge();
+  if (!authorityParties?.length) return payload;
   const slots = linearPremiumRecipientSlots(payload, partySlotCount);
   const mergedSlots = slots.map((slot, i) => {
-    const auth = consumed.parties[i];
+    const auth = authorityParties[i];
     if (!auth) return slot;
     return mergeSlot(slot, {
       name: slot.name || auth.partyLegalName,
@@ -497,7 +522,7 @@ function mergeHandoffPayloadFromConsumedSignerAuthority(
       signerName: slot.signerName || auth.signerName,
       signerTitle: slot.signerTitle || auth.signerTitle,
       partyAddress: slot.partyAddress || auth.partyAddress,
-    });
+    }, { preserveSignerFieldsOnEmptyPatch: true });
   });
   const party1 = mergedSlots[0] ?? payload.party1;
   const party2 = mergedSlots[1] ?? payload.party2;
@@ -511,19 +536,64 @@ function mergeHandoffPayloadFromConsumedSignerAuthority(
   };
 }
 
+function canonicalSignerMetadataFloor(): ReturnType<typeof readSignerMetadataEffectiveMax> {
+  const max = readSignerMetadataEffectiveMax();
+  const canonical = readCanonicalPartyMetadata();
+  if (!canonical?.parties?.length) return max;
+  const canonicalHandoff: PremiumRecipientHandoffV2 = {
+    v: 2,
+    party1: {
+      name: canonical.parties[0]?.partyLegalName ?? "",
+      email: canonical.parties[0]?.signerEmail ?? "",
+      role: "party",
+      signerName: canonical.parties[0]?.signerName ?? "",
+      signerTitle: canonical.parties[0]?.signerTitle ?? "",
+      partyAddress: canonical.parties[0]?.partyAddress ?? "",
+    },
+    party2: {
+      name: canonical.parties[1]?.partyLegalName ?? "",
+      email: canonical.parties[1]?.signerEmail ?? "",
+      role: "party",
+      signerName: canonical.parties[1]?.signerName ?? "",
+      signerTitle: canonical.parties[1]?.signerTitle ?? "",
+      partyAddress: canonical.parties[1]?.partyAddress ?? "",
+    },
+    savedAt: Date.now(),
+    ...(canonical.parties.length > 2
+      ? {
+          partyIndexSlots: canonical.parties.slice(2).map((p) => ({
+            name: p.partyLegalName,
+            email: p.signerEmail,
+            role: "party",
+            signerName: p.signerName,
+            signerTitle: p.signerTitle,
+            partyAddress: p.partyAddress,
+          })),
+        }
+      : {}),
+  };
+  const canonicalCounts = countSignerMetadataSlots(canonicalHandoff, canonical.parties.length);
+  return {
+    partySlots: Math.max(max.partySlots, canonicalCounts.partySlots),
+    slotsWithSignerName: Math.max(max.slotsWithSignerName, canonicalCounts.slotsWithSignerName),
+    slotsWithSignerTitle: Math.max(max.slotsWithSignerTitle, canonicalCounts.slotsWithSignerTitle),
+    slotsWithSignerEmail: Math.max(max.slotsWithSignerEmail, canonicalCounts.slotsWithSignerEmail),
+  };
+}
+
 function wouldHandoffWriteDowngradeSignerMetadata(
   payload: PremiumRecipientHandoffV2,
   partySlotCount: number,
 ): boolean {
-  if (!hasPaidProSourceOfTruth()) return false;
-  const max = readSignerMetadataEffectiveMax();
-  if (max.slotsWithSignerName < 3) return false;
+  const max = canonicalSignerMetadataFloor();
+  if (max.slotsWithSignerName < 1) return false;
   const newCounts = countSignerMetadataSlots(payload, partySlotCount);
+  if (newCounts.partySlots > max.partySlots) return false;
   if (newCounts.slotsWithSignerName < max.slotsWithSignerName) return true;
-  if (max.slotsWithSignerTitle >= 3 && newCounts.slotsWithSignerTitle < max.slotsWithSignerTitle) {
+  if (max.slotsWithSignerTitle >= 1 && newCounts.slotsWithSignerTitle < max.slotsWithSignerTitle) {
     return true;
   }
-  if (max.slotsWithSignerEmail >= 3 && newCounts.slotsWithSignerEmail < max.slotsWithSignerEmail) {
+  if (max.slotsWithSignerEmail >= 1 && newCounts.slotsWithSignerEmail < max.slotsWithSignerEmail) {
     return true;
   }
   return false;
@@ -561,8 +631,15 @@ export function writePremiumRecipientHandoffExact(
   authoritativePartyCount?: number,
 ): void {
   try {
+    const cur = readPremiumRecipientHandoff();
+    const curSlots = linearPremiumRecipientSlots(cur, Math.max(2 + (partyIndexSlots?.length ?? 0), 2));
+    const mergedParty1 = mergeSlot(curSlots[0] ?? emptySlot(), party1, { preserveSignerFieldsOnEmptyPatch: true });
+    const mergedParty2 = mergeSlot(curSlots[1] ?? emptySlot(), party2, { preserveSignerFieldsOnEmptyPatch: true });
     const extra = (partyIndexSlots ?? []).filter(
       (s) => s && (s.name || s.email || s.partyAddress),
+    );
+    const mergedExtra = extra.map((s, i) =>
+      mergeSlot(curSlots[i + 2] ?? emptySlot(), s, { preserveSignerFieldsOnEmptyPatch: true }),
     );
     const mapExtraSlot = (s: PremiumRecipientHandoffSlot): PremiumRecipientHandoffSlot => ({
       name: String(s.name ?? "").trim(),
@@ -575,23 +652,23 @@ export function writePremiumRecipientHandoffExact(
     const payload: PremiumRecipientHandoffV2 = {
       v: 2,
       party1: {
-        name: String(party1.name ?? "").trim(),
-        email: String(party1.email ?? "").trim(),
-        role: String(party1.role ?? "").trim() || "party",
-        signerName: String(party1.signerName ?? "").trim(),
-        signerTitle: String(party1.signerTitle ?? "").trim(),
-        partyAddress: String(party1.partyAddress ?? "").trim(),
+        name: String(mergedParty1.name ?? "").trim(),
+        email: String(mergedParty1.email ?? "").trim(),
+        role: String(mergedParty1.role ?? "").trim() || "party",
+        signerName: String(mergedParty1.signerName ?? "").trim(),
+        signerTitle: String(mergedParty1.signerTitle ?? "").trim(),
+        partyAddress: String(mergedParty1.partyAddress ?? "").trim(),
       },
       party2: {
-        name: String(party2.name ?? "").trim(),
-        email: String(party2.email ?? "").trim(),
-        role: String(party2.role ?? "").trim() || "party",
-        signerName: String(party2.signerName ?? "").trim(),
-        signerTitle: String(party2.signerTitle ?? "").trim(),
-        partyAddress: String(party2.partyAddress ?? "").trim(),
+        name: String(mergedParty2.name ?? "").trim(),
+        email: String(mergedParty2.email ?? "").trim(),
+        role: String(mergedParty2.role ?? "").trim() || "party",
+        signerName: String(mergedParty2.signerName ?? "").trim(),
+        signerTitle: String(mergedParty2.signerTitle ?? "").trim(),
+        partyAddress: String(mergedParty2.partyAddress ?? "").trim(),
       },
       savedAt: Date.now(),
-      ...(extra.length > 0 ? { partyIndexSlots: extra.map(mapExtraSlot) } : {}),
+      ...(mergedExtra.length > 0 ? { partyIndexSlots: mergedExtra.map(mapExtraSlot) } : {}),
     };
     if (
       !payload.party1.name &&

@@ -19,6 +19,7 @@ import { resolveLegalIdentitiesFromExtraction } from "./legalIdentityResolution"
 import {
   extractNumberedListPartyLegalEntities,
 } from "./partySlotIdentityNormalize";
+import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 
 export type LabeledPartyBlock = {
   /** 1-based index from the prompt ("Party 1" → 1). */
@@ -51,12 +52,15 @@ const QUOTED_ROLE_LINE_RE =
 const INLINE_QUOTED_ROLE_RE =
   /\b([A-Z][\w.&'’\-]+(?:\s+[A-Z][\w.&'’\-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\s*\(\s*["“”']([^"”'\n]{2,72})["”']\s*\)/g;
 
-/** Strip list bullets before labeled-field matching (TEST477 representative intake). */
+/** Strip list bullets and numbered list prefixes before labeled-field matching. */
 export function stripIntakeBulletPrefix(line: string): string {
   return String(line ?? "")
     .replace(/^\s*[*•\u2022\-–—]\s+/, "")
+    .replace(/^\s*\d+[.)]\s+/, "")
     .trim();
 }
+
+const REPRESENTED_BY_HEADER_RE = /^\s*represented\s+by\s*:?\s*$/i;
 
 const LABELED_FIELD_RES: ReadonlyArray<{ key: keyof Omit<LabeledPartyBlock, "index">; re: RegExp }> = [
   {
@@ -65,15 +69,62 @@ const LABELED_FIELD_RES: ReadonlyArray<{ key: keyof Omit<LabeledPartyBlock, "ind
   },
   {
     key: "signerName",
-    re: /^\s*(?:signer\s+name|representative(?:\s*\([^)]*\))?|human\s+signer|authorized\s+representative|rep\.?)\s*[:\-]\s*(.+)$/i,
+    re: /^\s*(?:signer\s+name|representative(?:\s+name)?(?:\s*\([^)]*\))?|human\s+signer|authorized\s+representative|represented\s+by|rep\.?)\s*[:\-]\s*(.+)$/i,
   },
-  { key: "signerTitle", re: /^\s*(?:signer\s+title|title)\s*[:\-]\s*(.+)$/i },
+  { key: "signerTitle", re: /^\s*(?:signer\s+title|representative\s+title|title)\s*[:\-]\s*(.+)$/i },
   { key: "signerEmail", re: /^\s*(?:signer\s+email|email)\s*[:\-]\s*(.+)$/i },
   {
     key: "address",
     re: /^\s*(?:address|physical\s+address|mailing\s+address|party\s+address)\s*[:\-]\s*(.+)$/i,
   },
 ];
+
+const ENTITY_INLINE_CONTACT_RE =
+  /^(.{4,120}?(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\.?\s*[—–-]\s*(.+)$/i;
+
+function splitRepresentedByInlineValue(value: string): { name: string; title: string } {
+  const t = value.replace(/\s+/g, " ").trim();
+  if (!t) return { name: "", title: "" };
+  const commaIdx = t.indexOf(",");
+  if (commaIdx < 0) return { name: cleanFieldValue(t), title: "" };
+  return {
+    name: cleanFieldValue(t.slice(0, commaIdx)),
+    title: cleanFieldValue(t.slice(commaIdx + 1)),
+  };
+}
+
+function applyRepresentedByField(block: LabeledPartyBlock, rawValue: string): void {
+  const split = splitRepresentedByInlineValue(rawValue);
+  if (split.name && !block.signerName) block.signerName = split.name;
+  if (split.title && !block.signerTitle) block.signerTitle = split.title;
+}
+
+function isAddressContinuationLine(line: string): boolean {
+  const t = stripIntakeBulletPrefix(line);
+  if (!t) return false;
+  if (matchLabeledPartyField(t)) return false;
+  if (PARTY_BLOCK_HEADER_RE.test(t) || COORDINATOR_BLOCK_HEADER_RE.test(t)) return false;
+  if (ROLE_LABEL_PARTY_HEADER_RE.test(t)) return false;
+  if (isIntakeSectionLabelLine(t)) return false;
+  if (looksLikeStackedPartyEmailLine(t)) return false;
+  if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return false;
+  if (REPRESENTED_BY_HEADER_RE.test(t)) return false;
+  return true;
+}
+
+function appendMultilineAddress(block: LabeledPartyBlock, firstLine: string, lines: string[], startIndex: number): number {
+  let continued = cleanFieldValue(firstLine);
+  let index = startIndex;
+  while (index + 1 < lines.length) {
+    const nextRaw = lines[index + 1]?.trim() ?? "";
+    if (!nextRaw) break;
+    if (!isAddressContinuationLine(nextRaw)) break;
+    continued = `${continued}, ${cleanFieldValue(stripIntakeBulletPrefix(nextRaw))}`.replace(/\s+/g, " ").trim();
+    index += 1;
+  }
+  block.address = continued;
+  return index;
+}
 
 function matchLabeledPartyField(line: string): { key: keyof Omit<LabeledPartyBlock, "index">; value: string } | null {
   const normalized = stripIntakeBulletPrefix(line);
@@ -84,6 +135,24 @@ function matchLabeledPartyField(line: string): { key: keyof Omit<LabeledPartyBlo
     return { key, value: cleanFieldValue(m[1]) };
   }
   return null;
+}
+
+function applyLabeledFieldToBlock(
+  block: LabeledPartyBlock,
+  labeled: { key: keyof Omit<LabeledPartyBlock, "index">; value: string },
+  rawLine: string,
+  lines: string[],
+  lineIndex: number,
+): number {
+  if (labeled.key === "signerName" && /represented\s+by/i.test(rawLine)) {
+    applyRepresentedByField(block, labeled.value);
+    return lineIndex;
+  }
+  if (labeled.key === "address") {
+    return appendMultilineAddress(block, labeled.value, lines, lineIndex);
+  }
+  block[labeled.key] = labeled.value;
+  return lineIndex;
 }
 
 /** Treat Unknown / TBD / [Not yet specified] as blank — never a literal party or signer value. */
@@ -193,19 +262,8 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
   const blocksByIndex = new Map<number, LabeledPartyBlock>();
   let currentIndex: number | null = null;
 
-  const flushField = (line: string) => {
-    if (currentIndex == null) return;
-    const block = blocksByIndex.get(currentIndex) ?? emptyBlock(currentIndex);
-    const labeled = matchLabeledPartyField(line);
-    if (labeled) {
-      block[labeled.key] = labeled.value;
-    } else {
-      applyStackedPartyLine(block, stripIntakeBulletPrefix(line));
-    }
-    blocksByIndex.set(currentIndex, block);
-  };
-
-  for (const rawLine of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const rawLine = lines[lineIndex] ?? "";
     const line = rawLine.trim();
     if (!line) continue;
 
@@ -215,7 +273,7 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
     }
 
     const roleInline = line.match(PARTY_BLOCK_WITH_ROLE_INLINE_RE);
-    if (roleInline?.[1] && roleInline[2] && roleInline[3]) {
+    if (roleInline?.[1] && roleInline?.[2] && roleInline?.[3]) {
       currentIndex = Number.parseInt(roleInline[1], 10);
       if (!Number.isFinite(currentIndex) || currentIndex < 1) {
         currentIndex = null;
@@ -229,7 +287,7 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
     }
 
     const roleHeader = line.match(PARTY_BLOCK_WITH_ROLE_HEADER_RE);
-    if (roleHeader?.[1] && roleHeader[2]) {
+    if (roleHeader?.[1] && roleHeader?.[2]) {
       currentIndex = Number.parseInt(roleHeader[1], 10);
       if (!Number.isFinite(currentIndex) || currentIndex < 1) {
         currentIndex = null;
@@ -260,7 +318,29 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
     }
 
     if (currentIndex != null) {
-      flushField(line);
+      const block = blocksByIndex.get(currentIndex) ?? emptyBlock(currentIndex);
+      const normalized = stripIntakeBulletPrefix(line);
+      if (REPRESENTED_BY_HEADER_RE.test(normalized)) {
+        const nextLine = stripIntakeBulletPrefix(lines[lineIndex + 1]?.trim() ?? "");
+        if (nextLine && !matchLabeledPartyField(nextLine) && looksLikeStackedPartyPersonNameLine(nextLine)) {
+          if (!block.signerName) block.signerName = cleanFieldValue(nextLine);
+          lineIndex += 1;
+          const titleLine = stripIntakeBulletPrefix(lines[lineIndex + 1]?.trim() ?? "");
+          const titleField = titleLine ? matchLabeledPartyField(titleLine) : null;
+          if (titleField?.key === "signerTitle" && !block.signerTitle) {
+            block.signerTitle = titleField.value;
+            lineIndex += 1;
+          }
+        }
+      } else {
+        const labeled = matchLabeledPartyField(line);
+        if (labeled) {
+          lineIndex = applyLabeledFieldToBlock(block, labeled, line, lines, lineIndex);
+        } else {
+          applyStackedPartyLine(block, normalized);
+        }
+      }
+      blocksByIndex.set(currentIndex, block);
     }
   }
 
@@ -292,7 +372,8 @@ export function parseEntityHeaderContactBlocks(raw: string): LabeledPartyBlock[]
     current = null;
   };
 
-  for (const rawLine of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const rawLine = lines[lineIndex] ?? "";
     const line = stripIntakeBulletPrefix(rawLine.trim());
     if (!line) continue;
     if (isIntakeSectionLabelLine(line)) {
@@ -309,8 +390,22 @@ export function parseEntityHeaderContactBlocks(raw: string): LabeledPartyBlock[]
       if (!current) current = emptyBlock(blocks.length + 1);
       if (labeled.key === "legalEntity" && !current.legalEntity) {
         current.legalEntity = labeled.value;
+      } else if (labeled.key === "signerName" && /represented\s+by/i.test(line)) {
+        applyRepresentedByField(current, labeled.value);
+      } else if (labeled.key === "address") {
+        lineIndex = appendMultilineAddress(current, labeled.value, lines.map((l) => l.trim()), lineIndex);
       } else if (labeled.key !== "legalEntity" && !current[labeled.key]) {
         current[labeled.key] = labeled.value;
+      }
+      continue;
+    }
+
+    if (REPRESENTED_BY_HEADER_RE.test(line)) {
+      if (!current) current = emptyBlock(blocks.length + 1);
+      const nextLine = stripIntakeBulletPrefix(lines[lineIndex + 1]?.trim() ?? "");
+      if (nextLine && !matchLabeledPartyField(nextLine) && looksLikeStackedPartyPersonNameLine(nextLine)) {
+        if (!current.signerName) current.signerName = cleanFieldValue(nextLine);
+        lineIndex += 1;
       }
       continue;
     }
@@ -322,7 +417,10 @@ export function parseEntityHeaderContactBlocks(raw: string): LabeledPartyBlock[]
     ) {
       flushCurrent();
       current = emptyBlock(blocks.length + 1);
-      current.legalEntity = cleanFieldValue(line);
+      const entityOnly = line.split(/\s*[—–-]\s+/)[0]?.trim() ?? line;
+      current.legalEntity = cleanFieldValue(
+        looksLikeStackedPartyLegalEntityLine(entityOnly) ? entityOnly : line,
+      );
       continue;
     }
 
@@ -335,17 +433,82 @@ export function parseEntityHeaderContactBlocks(raw: string): LabeledPartyBlock[]
   return blocks;
 }
 
+function parseInlineContactTail(tail: string): Pick<LabeledPartyBlock, "signerName" | "signerTitle" | "signerEmail" | "address"> {
+  const parts = tail
+    .split(",")
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (parts.length === 0) {
+    return { signerName: "", signerTitle: "", signerEmail: "", address: "" };
+  }
+  let signerName = cleanFieldValue(parts[0] ?? "");
+  let signerTitle = "";
+  let signerEmail = "";
+  let address = "";
+  const rest = parts.slice(1);
+  const emailIdx = rest.findIndex((p) => looksLikeEmail(stripRecipientEmailNoise(p)));
+  if (emailIdx >= 0) {
+    const rawEmail = stripRecipientEmailNoise(rest[emailIdx] ?? "");
+    signerEmail = looksLikeEmail(rawEmail) ? rawEmail : "";
+    if (emailIdx === 0 && rest.length > 1) {
+      signerTitle = cleanFieldValue(rest[0] ?? "");
+      address = cleanFieldValue(rest.slice(emailIdx + 1).join(", "));
+    } else {
+      signerTitle = cleanFieldValue(rest.slice(0, emailIdx).join(", "));
+      address = cleanFieldValue(rest.slice(emailIdx + 1).join(", "));
+    }
+  } else if (rest.length === 1) {
+    signerTitle = cleanFieldValue(rest[0] ?? "");
+  } else if (rest.length >= 2) {
+    signerTitle = cleanFieldValue(rest[0] ?? "");
+    address = cleanFieldValue(rest.slice(1).join(", "));
+  }
+  return { signerName, signerTitle, signerEmail, address };
+}
+
+/** Entity — Name, Title, email, address inline clauses (TEST479 Aurora-style intake). */
+export function parseEntityInlineContactBlocks(raw: string): LabeledPartyBlock[] {
+  const text = String(raw || "").replace(/\r\n/g, "\n");
+  const blocks: LabeledPartyBlock[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of text.split("\n")) {
+    const line = stripIntakeBulletPrefix(rawLine.trim());
+    if (!line) continue;
+    const match = line.match(ENTITY_INLINE_CONTACT_RE);
+    if (!match?.[1] || !match[2]) continue;
+    const legalEntity = cleanFieldValue(match[1]);
+    if (legalEntity.length < 4 || !looksLikeStackedPartyLegalEntityLine(legalEntity)) continue;
+    const key = legalEntity.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const parsed = parseInlineContactTail(match[2]);
+    const hasEmail = Boolean(parsed.signerEmail);
+    const hasHumanName =
+      Boolean(parsed.signerName) && looksLikeStackedPartyPersonNameLine(parsed.signerName);
+    if (!hasEmail && !hasHumanName) continue;
+    blocks.push({
+      index: blocks.length + 1,
+      roleLabel: "",
+      legalEntity,
+      ...parsed,
+    });
+  }
+  return blocks;
+}
+
 /** Labeled Party N blocks plus entity-heading contact blocks (deduped by legal entity). */
 export function parseAllStructuredPartyContactBlocks(raw: string): LabeledPartyBlock[] {
   const labeled = parseLabeledPartyBlocks(raw);
   const entityHeaders = parseEntityHeaderContactBlocks(raw);
-  if (labeled.length === 0) return entityHeaders;
-  if (entityHeaders.length === 0) return labeled;
+  const inlineEntity = parseEntityInlineContactBlocks(raw);
+  const mergedSources = [...labeled, ...entityHeaders, ...inlineEntity];
+  if (mergedSources.length === 0) return [];
 
-  const seen = new Set(labeled.map((b) => b.legalEntity.toLowerCase()));
-  const merged = [...labeled];
-  for (const block of entityHeaders) {
+  const seen = new Set<string>();
+  const merged: LabeledPartyBlock[] = [];
+  for (const block of mergedSources) {
     const key = block.legalEntity.toLowerCase();
+    if (!key) continue;
     if (seen.has(key)) {
       const idx = merged.findIndex((b) => b.legalEntity.toLowerCase() === key);
       if (idx >= 0) {
@@ -354,6 +517,7 @@ export function parseAllStructuredPartyContactBlocks(raw: string): LabeledPartyB
         if (!target.signerTitle && block.signerTitle) target.signerTitle = block.signerTitle;
         if (!target.signerEmail && block.signerEmail) target.signerEmail = block.signerEmail;
         if (!target.address && block.address) target.address = block.address;
+        if (!target.legalEntity && block.legalEntity) target.legalEntity = block.legalEntity;
       }
       continue;
     }

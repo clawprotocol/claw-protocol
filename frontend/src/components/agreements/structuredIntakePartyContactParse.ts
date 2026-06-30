@@ -7,6 +7,7 @@
 export {
   parseAllStructuredPartyContactBlocks,
   parseEntityHeaderContactBlocks,
+  parseEntityInlineContactBlocks,
   parseLabeledPartyBlocks,
   labeledPartyBlocksForSignerMetadata,
   stripIntakeBulletPrefix,

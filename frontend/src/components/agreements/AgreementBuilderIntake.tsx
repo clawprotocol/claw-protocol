@@ -858,6 +858,7 @@ import {
   readHandoffContactFieldsForSeed,
   runPaidProSignerMetadataAuthoritySeed,
 } from "./paidProSignerMetadataSeed";
+import { establishCanonicalPartyMetadataAtStage } from "./canonicalPartyMetadataAuthority";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 import {
   isPaidProPostFinalizeHydratedCorpusLocked,
@@ -8324,6 +8325,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }
           });
         }
+        const checkoutLegalEntities = (merged.draft.parties ?? [])
+          .map((p) => String((p as { name?: string }).name ?? "").trim())
+          .filter(Boolean);
+        if (checkoutLegalEntities.length >= 2) {
+          establishCanonicalPartyMetadataAtStage({
+            stage: "after-premium",
+            legalEntities: checkoutLegalEntities,
+            intakeText: mergedIntake,
+            mutationSource: "structured_intake",
+          });
+        }
         writePremiumRecipientHandoffExact(
           premiumHandoffSlotFromParty(
             merged.draft.parties?.[0] ?? { role: "party", email: rc0.email },
@@ -9703,6 +9715,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hasDraft: false,
         fromHomeAutoGenerate: Boolean(homeHeroAutoGenerateRef.current),
       });
+      if (assessment.parties.length >= 2) {
+        establishCanonicalPartyMetadataAtStage({
+          stage: "created",
+          legalEntities: assessment.parties,
+          intakeText: rawIntake,
+          mutationSource: "structured_intake",
+        });
+      }
       return true;
     },
     [],

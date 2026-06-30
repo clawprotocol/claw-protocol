@@ -153,7 +153,7 @@ export function runPaidProSignerMetadataAuthoritySeed(
     intakeText: args.intakeText,
     uiParties,
     mutationSource: hasUserEdits ? "user_edited_ui" : "structured_intake",
-    replaceSession: true,
+    replaceSession: false,
     project: true,
   });
 
