@@ -667,16 +667,31 @@ export function buildSnapshotPaidProSignerMetadataAuthority(): PaidProSignerMeta
   };
 }
 
-/** Promote live UI edits into the consumed authority store (all downstream surfaces read this). */
+/** Promote live UI edits into the consumed authority store (projection from canonical bundle). */
 export function setConsumedPaidProSignerMetadataAuthority(
   authority: PaidProSignerMetadataAuthority,
+  opts?: { projectionBundleId?: string },
 ): void {
   consumedLiveAuthority = authority;
+  if (opts?.projectionBundleId) {
+    lastConsumedProjectionBundleId = opts.projectionBundleId;
+  }
   clearPaidProVisibleRenderMemo();
+}
+
+let lastConsumedProjectionBundleId: string | null = null;
+
+export function readConsumedProjectionBundleId(): string | null {
+  return lastConsumedProjectionBundleId;
+}
+
+export function clearConsumedProjectionBundleId(): void {
+  lastConsumedProjectionBundleId = null;
 }
 
 export function clearConsumedPaidProSignerMetadataAuthority(): void {
   consumedLiveAuthority = null;
+  clearConsumedProjectionBundleId();
 }
 
 /** Snapshot wins after finalize; otherwise the last promoted live authority. */

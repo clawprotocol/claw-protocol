@@ -5,7 +5,7 @@
  */
 
 import { normalizeSignerMetadataForSave } from "../../agreement/signerMetadataNormalize";
-import { parseLabeledPartyBlocks, type LabeledPartyBlock } from "./labeledPartyBlockParse";
+import { parseAllStructuredPartyContactBlocks, type LabeledPartyBlock } from "./labeledPartyBlockParse";
 import {
   sanitizePartyLegalNameFromIntakeFragment,
 } from "./intakeSignerInstructionParse";
@@ -257,7 +257,7 @@ export function extractCanonicalIntakeSignerMetadata(
   if (!raw.trim()) return [];
   const out: ExtractedIntakeSignerMetadata[] = [];
 
-  for (const block of parseLabeledPartyBlocks(raw)) {
+  for (const block of parseAllStructuredPartyContactBlocks(raw)) {
     pushExtracted(out, fromLabeledBlock(block));
   }
 
@@ -414,7 +414,7 @@ export function alignIntakeSignerMetadataToLegalEntities(
 }
 
 function partiesFromLabeledBlocks(intakeRaw: string | null | undefined): PaidProSignerMetadataParty[] {
-  return parseLabeledPartyBlocks(String(intakeRaw || "")).map((block, partyIndex) => ({
+  return parseAllStructuredPartyContactBlocks(String(intakeRaw || "")).map((block, partyIndex) => ({
     partyIndex,
     partyLegalName: block.legalEntity,
     signerEmail: block.signerEmail,

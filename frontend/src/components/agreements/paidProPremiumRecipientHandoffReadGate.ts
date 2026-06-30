@@ -18,6 +18,7 @@ import {
   readSignerMetadataEffectiveMax,
   resetSignerMetadataEffectiveMaxForTests,
 } from "./signerMetadataEffective";
+import { readCanonicalPartyMetadata } from "./canonicalPartyMetadataAuthority";
 
 let lastPopulatedHandoff: PremiumRecipientHandoffV2 | null = null;
 let sessionEverHadPopulatedHandoff = false;
@@ -93,31 +94,21 @@ export function applyPremiumRecipientHandoffReadGate(
     explicitPartySlotCount >= 2 &&
     explicitPartySlotCount < indexedHandoffSlots
   ) {
-    lastPopulatedHandoff = null;
-    sessionEverHadPopulatedHandoff = false;
-    latchSignerMetadataEffectiveMax({
-      partySlots: explicitPartySlotCount,
-      slotsWithSignerName: 0,
-      slotsWithSignerTitle: 0,
-      slotsWithSignerEmail: 0,
-    });
-    const cleared: PremiumRecipientHandoffV2 = trimPremiumRecipientHandoffToPartyCount(
-      {
-        v: 2,
-        party1: { name: "", email: "", role: "party", signerName: "", signerTitle: "", partyAddress: "" },
-        party2: { name: "", email: "", role: "party", signerName: "", signerTitle: "", partyAddress: "" },
-        savedAt: handoff.savedAt,
-      },
-      explicitPartySlotCount,
-    );
+    const trimmed = trimPremiumRecipientHandoffToPartyCount(handoff, explicitPartySlotCount);
+    const counts = countSignerMetadataSlots(trimmed, explicitPartySlotCount);
+    if (counts.slotsWithSignerName > 0) {
+      lastPopulatedHandoff = trimmed;
+      sessionEverHadPopulatedHandoff = true;
+    }
+    latchSignerMetadataEffectiveMax(counts);
     logSignerMetadataEffective({
-      source: "handoff_read_party_count_shrink_cleared",
-      partySlots: explicitPartySlotCount,
-      slotsWithSignerName: 0,
-      slotsWithSignerTitle: 0,
+      source: "handoff_read_party_count_trimmed",
+      partySlots: counts.partySlots,
+      slotsWithSignerName: counts.slotsWithSignerName,
+      slotsWithSignerTitle: counts.slotsWithSignerTitle,
       ignoredEmptyRead: false,
     });
-    return cleared;
+    return trimmed;
   }
   const rawSlotCount = Math.max(
     explicitPartySlotCount ?? 0,
@@ -192,6 +183,58 @@ export function applyPremiumRecipientHandoffReadGate(
   }
 
   if (populatedCount === 0) {
+    const canonical = readCanonicalPartyMetadata();
+    if (canonical?.parties?.length) {
+      const canonicalHandoff: PremiumRecipientHandoffV2 = trimPremiumRecipientHandoffToPartyCount(
+        {
+          v: 2,
+          party1: {
+            name: canonical.parties[0]?.partyLegalName ?? "",
+            email: canonical.parties[0]?.signerEmail ?? "",
+            role: "party",
+            signerName: canonical.parties[0]?.signerName ?? "",
+            signerTitle: canonical.parties[0]?.signerTitle ?? "",
+            partyAddress: canonical.parties[0]?.partyAddress ?? "",
+          },
+          party2: {
+            name: canonical.parties[1]?.partyLegalName ?? "",
+            email: canonical.parties[1]?.signerEmail ?? "",
+            role: "party",
+            signerName: canonical.parties[1]?.signerName ?? "",
+            signerTitle: canonical.parties[1]?.signerTitle ?? "",
+            partyAddress: canonical.parties[1]?.partyAddress ?? "",
+          },
+          savedAt: handoff.savedAt,
+          ...(canonical.parties.length > 2
+            ? {
+                partyIndexSlots: canonical.parties.slice(2).map((p) => ({
+                  name: p.partyLegalName,
+                  email: p.signerEmail,
+                  role: "party",
+                  signerName: p.signerName,
+                  signerTitle: p.signerTitle,
+                  partyAddress: p.partyAddress,
+                })),
+              }
+            : {}),
+        },
+        partySlotCount,
+      );
+      const canonicalCounts = countSignerMetadataSlots(canonicalHandoff, partySlotCount);
+      if (canonicalCounts.slotsWithSignerName > 0) {
+        lastPopulatedHandoff = canonicalHandoff;
+        sessionEverHadPopulatedHandoff = true;
+        latchSignerMetadataEffectiveMax(canonicalCounts);
+        logSignerMetadataEffective({
+          source: "handoff_read_canonical_metadata_restored",
+          partySlots: canonicalCounts.partySlots,
+          slotsWithSignerName: canonicalCounts.slotsWithSignerName,
+          slotsWithSignerTitle: canonicalCounts.slotsWithSignerTitle,
+          ignoredEmptyRead: false,
+        });
+        return canonicalHandoff;
+      }
+    }
     logSignerMetadataEffective({
       source: "handoff_read_empty",
       partySlots: counts.partySlots,

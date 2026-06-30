@@ -13,6 +13,7 @@ import {
   clearAuthoritativeSigningSnapshot,
   createAuthoritativeSigningSnapshot,
 } from "./authoritativeSigningSnapshot";
+import { clearConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
   linearPremiumRecipientSlots,
   persistPremiumRecipientHandoff,
@@ -28,6 +29,7 @@ describe("universalSignerMetadataAuthority", () => {
 
   beforeEach(() => {
     resetSignerMetadataLossDetectionBaseline();
+    clearConsumedPaidProSignerMetadataAuthority();
     vi.stubEnv("VITE_PAID_PRO_SIGNER_METADATA_DEBUG", "1");
     vi.stubGlobal("sessionStorage", {
       getItem: (key: string) => storage.get(key) ?? null,

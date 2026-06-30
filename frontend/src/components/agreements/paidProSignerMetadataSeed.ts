@@ -1,28 +1,28 @@
 /**
- * Orchestrates universal signer metadata seeding across Paid Pro UI and draft state.
+ * Orchestrates canonical party metadata seeding — single mutable owner, projections only downstream.
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
-  alignIntakeSignerMetadataToLegalEntities,
-  mergeIntakeSignerMetadataIntoAuthorityParties,
-} from "./intakeSignerMetadataAuthority";
+  logCanonicalPartyMetadataDiagnostics,
+  mapCanonicalStageFromSeedStage,
+  mutateCanonicalPartyMetadata,
+  readCanonicalPartyMetadata,
+} from "./canonicalPartyMetadataAuthority";
+import { alignIntakeSignerMetadataToLegalEntities } from "./structuredIntakePartyContactParse";
 import type { PremiumRecipientHandoffV2 } from "./premiumPartyNamesHandoff";
 import { logPaidProSignerMetadataPipelineDiagnostics } from "./paidProSignerMetadataPipelineDiagnostics";
-import {
-  linearPremiumRecipientSlots,
-  writePremiumRecipientHandoffFromAuthorityParties,
-  writePremiumRecipientHandoffSignerMetadata,
-} from "./premiumPartyNamesHandoff";
+import { linearPremiumRecipientSlots } from "./premiumPartyNamesHandoff";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { readSignerMetadataEffectiveMax } from "./signerMetadataEffective";
+import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import {
   detectAndLogSignerMetadataLoss,
   hydrateSignerMetadataArraysNonDestructive,
   logSignerMetadataHandoff,
   mergeSignerMetadataIntoDraftParties,
   presenceFromResolved,
-  resolveUniversalSignerMetadataBySlot,
+  resolveUniversalSignerMetadataBySlotForCanonicalSeed,
   type UniversalSignerMetadataSources,
 } from "./universalSignerMetadataAuthority";
 
@@ -70,6 +70,27 @@ function hydrateStringArrayNonDestructive(
   return { values, changed };
 }
 
+function buildUiPartiesFromSeedArgs(
+  args: PaidProSignerMetadataSeedArgs,
+  partyCount: number,
+  legalEntities: readonly string[],
+): PaidProSignerMetadataParty[] {
+  const intakeAligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, legalEntities);
+  const parties: PaidProSignerMetadataParty[] = [];
+  for (let i = 0; i < partyCount; i += 1) {
+    const slot = intakeAligned[i];
+    parties.push({
+      partyIndex: i,
+      partyLegalName: legalEntities[i] || slot?.partyLegalName || "",
+      signerName: (args.uiSignerNames?.[i] ?? "").trim() || slot?.signerName || "",
+      signerTitle: (args.uiSignerTitles?.[i] ?? "").trim() || slot?.signerTitle || "",
+      signerEmail: (args.uiSignerEmails?.[i] ?? "").trim() || slot?.signerEmail || "",
+      partyAddress: (args.uiPartyAddresses?.[i] ?? "").trim() || slot?.partyAddress || "",
+    });
+  }
+  return parties;
+}
+
 export function runPaidProSignerMetadataAuthoritySeed(
   args: PaidProSignerMetadataSeedArgs,
 ): PaidProSignerMetadataSeedResult {
@@ -98,13 +119,13 @@ export function runPaidProSignerMetadataAuthoritySeed(
   const sources: UniversalSignerMetadataSources = {
     legalEntities: canonicalLegalEntities,
     intakeText: args.intakeText,
-    corpusText: args.corpusText,
+    corpusText: null,
     draftParties: args.draft?.parties ?? null,
     handoff: args.handoff ?? null,
     uiSignerNames: args.uiSignerNames,
     uiSignerTitles: args.uiSignerTitles,
   };
-  const resolved = resolveUniversalSignerMetadataBySlot(sources);
+  const resolved = resolveUniversalSignerMetadataBySlotForCanonicalSeed(sources);
   const presence = presenceFromResolved(args.stage, resolved);
   logSignerMetadataHandoff(presence);
   detectAndLogSignerMetadataLoss(presence);
@@ -116,27 +137,47 @@ export function runPaidProSignerMetadataAuthoritySeed(
     stage: args.stage,
   });
 
-  const intakeNames = intakeAligned.map((s) => s.signerName);
-  const intakeTitles = intakeAligned.map((s) => s.signerTitle);
-  const intakeEmails = intakeAligned.map((s) => s.signerEmail);
-  const intakeAddresses = intakeAligned.map((s) => s.partyAddress);
-
-  const namesHydrated = hydrateStringArrayNonDestructive(hydrated.names, intakeNames, partyCount);
-  const titlesHydrated = hydrateStringArrayNonDestructive(hydrated.titles, intakeTitles, partyCount);
-  const emailsHydrated = hydrateStringArrayNonDestructive(args.uiSignerEmails ?? [], intakeEmails, partyCount);
-  const addressesHydrated = hydrateStringArrayNonDestructive(
-    args.uiPartyAddresses ?? [],
-    intakeAddresses,
-    partyCount,
+  const uiParties = buildUiPartiesFromSeedArgs(args, partyCount, canonicalLegalEntities);
+  const hasUserEdits = uiParties.some(
+    (_, i) =>
+      (args.uiSignerNames?.[i] ?? "").trim() ||
+      (args.uiSignerTitles?.[i] ?? "").trim() ||
+      (args.uiSignerEmails?.[i] ?? "").trim() ||
+      (args.uiPartyAddresses?.[i] ?? "").trim(),
   );
 
-  const names = namesHydrated.values;
-  const titles = titlesHydrated.values;
-  const emails = emailsHydrated.values;
-  const addresses = addressesHydrated.values;
+  const canonicalStage = mapCanonicalStageFromSeedStage(args.stage);
+  const bundle = mutateCanonicalPartyMetadata({
+    stage: canonicalStage,
+    legalEntities: canonicalLegalEntities,
+    intakeText: args.intakeText,
+    uiParties,
+    mutationSource: hasUserEdits ? "user_edited_ui" : "structured_intake",
+    replaceSession: true,
+    project: true,
+  });
+
+  const names = bundle.parties.map((p) => p.signerName);
+  const titles = bundle.parties.map((p) => p.signerTitle);
+  const emails = bundle.parties.map((p) => p.signerEmail);
+  const addresses = bundle.parties.map((p) => p.partyAddress);
+
+  const intakeNames = intakeAligned.map((s) => s.signerName);
+  const intakeTitles = intakeAligned.map((s) => s.signerTitle);
+  const namesHydrated = hydrateStringArrayNonDestructive(names, intakeNames, partyCount);
+  const titlesHydrated = hydrateStringArrayNonDestructive(titles, intakeTitles, partyCount);
+
+  const uiWasEmpty =
+    !(args.uiSignerNames ?? []).some((n) => n.trim()) &&
+    !(args.uiSignerTitles ?? []).some((t) => t.trim());
   const uiChanged =
-    hydrated.changed || namesHydrated.changed || titlesHydrated.changed;
-  const contactFieldsChanged = emailsHydrated.changed || addressesHydrated.changed;
+    hydrated.changed ||
+    namesHydrated.changed ||
+    titlesHydrated.changed ||
+    (uiWasEmpty &&
+      bundle.parties.some((p) => p.signerName.trim() || p.signerTitle.trim()));
+  const contactFieldsChanged =
+    emails.some(Boolean) || addresses.some(Boolean) || namesHydrated.changed || titlesHydrated.changed;
 
   let draft = args.draft ?? null;
   let draftChanged = false;
@@ -146,39 +187,9 @@ export function runPaidProSignerMetadataAuthoritySeed(
     draft = merged as ParsedDraftShape;
   }
 
-  const authorityParties = mergeIntakeSignerMetadataIntoAuthorityParties(
-    intakeAligned.map((slot, i) => ({
-      partyIndex: i,
-      partyLegalName: slot.partyLegalName,
-      signerEmail: emails[i] ?? slot.signerEmail,
-      signerName: names[i] ?? slot.signerName,
-      signerTitle: titles[i] ?? slot.signerTitle,
-      partyAddress: addresses[i] ?? slot.partyAddress,
-    })),
-    args.intakeText,
-    canonicalLegalEntities,
+  const hasSignerSignal = bundle.parties.some(
+    (p) => p.signerName.trim() || p.signerTitle.trim() || p.signerEmail.trim() || p.partyAddress.trim(),
   );
-
-  const hasSignerSignal = authorityParties.some(
-    (p) =>
-      p.signerName.trim() ||
-      p.signerTitle.trim() ||
-      p.signerEmail.trim() ||
-      p.partyAddress.trim(),
-  );
-
-  if (hasSignerSignal) {
-    writePremiumRecipientHandoffFromAuthorityParties(authorityParties);
-  } else if (hydrated.changed) {
-    writePremiumRecipientHandoffSignerMetadata({
-      signerNames: names,
-      signerTitles: titles,
-      partyLegalNames: canonicalLegalEntities,
-      partyEmails: emails,
-      partyAddresses: addresses,
-      authoritativePartyCount: partyCount,
-    });
-  }
 
   logPaidProSignerMetadataPipelineDiagnostics({
     stage: args.stage,
@@ -187,8 +198,10 @@ export function runPaidProSignerMetadataAuthoritySeed(
     draftParties: draft?.parties ?? undefined,
     uiSignerNames: names,
     uiSignerTitles: titles,
-    executionBlockSignerSource: hasSignerSignal ? "intake_signer_metadata_authority" : null,
+    executionBlockSignerSource: hasSignerSignal ? "canonical_party_metadata_authority" : null,
   });
+
+  logCanonicalPartyMetadataDiagnostics(canonicalStage, readCanonicalPartyMetadata() ?? bundle);
 
   return {
     names,

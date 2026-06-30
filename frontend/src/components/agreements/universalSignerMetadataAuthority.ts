@@ -10,7 +10,7 @@
  */
 
 import { normalizeSignerMetadataForSave } from "../../agreement/signerMetadataNormalize";
-import { parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
+import { parseAllStructuredPartyContactBlocks } from "./labeledPartyBlockParse";
 import { extractIntakeContacts } from "./paidProIntakeContactSubstitution";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import {
@@ -254,7 +254,7 @@ export function extractSignerMetadataFromIntakeContacts(
 function extractSignerMetadataFromLabeledPartyBlocks(
   intakeRaw: string | null | undefined,
 ): EntitySignerMetadataCandidate[] {
-  return parseLabeledPartyBlocks(String(intakeRaw || ""))
+  return parseAllStructuredPartyContactBlocks(String(intakeRaw || ""))
     .filter((block) => block.legalEntity.length >= 2)
     .map((block) => ({
       entity: block.legalEntity,
@@ -501,6 +501,25 @@ function mergeCandidatesByEntity(
 export function resolveUniversalSignerMetadataBySlot(
   sources: UniversalSignerMetadataSources,
 ): ResolvedEntitySignerMetadata[] {
+  return resolveUniversalSignerMetadataBySlotInternal(sources, {
+    allowCorpusInference: true,
+  });
+}
+
+/** Canonical seed path — agreement body must never supply metadata authority. */
+export function resolveUniversalSignerMetadataBySlotForCanonicalSeed(
+  sources: UniversalSignerMetadataSources,
+): ResolvedEntitySignerMetadata[] {
+  return resolveUniversalSignerMetadataBySlotInternal(
+    { ...sources, corpusText: null },
+    { allowCorpusInference: false },
+  );
+}
+
+function resolveUniversalSignerMetadataBySlotInternal(
+  sources: UniversalSignerMetadataSources,
+  opts: { allowCorpusInference: boolean },
+): ResolvedEntitySignerMetadata[] {
   const legalEntities = sources.legalEntities
     .map((e) => sanitizePartyLegalNameFromIntakeFragment(e.replace(/\s+/g, " ").trim()))
     .filter(Boolean);
@@ -516,7 +535,9 @@ export function resolveUniversalSignerMetadataBySlot(
     ...candidatesFromHandoff(handoff, partyCount, legalEntities),
     ...candidatesFromDraftParties(sources.draftParties, legalEntities),
     ...intakeExtract.candidates,
-    ...extractSignerMetadataFromCorpus(sources.corpusText ?? "", legalEntities),
+    ...(opts.allowCorpusInference
+      ? extractSignerMetadataFromCorpus(sources.corpusText ?? "", legalEntities)
+      : []),
   ];
 
   // UI edits (highest) — slot index keyed
