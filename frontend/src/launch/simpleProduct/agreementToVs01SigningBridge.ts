@@ -1,5 +1,6 @@
 import {
   resolveCreatorCoordinatorOnlyChecked,
+  logCoordinatorCheckboxAuthorityOnce,
 } from "../../components/agreements/paidProCoordinatorCheckboxAuthority";
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import { resolveAuthoritativeSignerCount } from "../../components/agreements/signerCountAuthority";
@@ -661,10 +662,11 @@ export function buildAgreementVs01BridgeSession(params: {
   const reviewerApproved = Boolean(params.reviewerApprovedCleanHandoff);
   const draftCorpus = resolveBridgeAgreementCorpusFromDraft(params.draft);
   const agreementCorpusText = (params.agreementCorpusText ?? "").trim() || draftCorpus;
-  const coordinatorOnly = resolveCreatorCoordinatorOnlyChecked({
+  const coordinatorAuthority = resolveCreatorCoordinatorOnlyChecked({
     draft: params.draft,
     recipientSetup: params.recipientSetup,
-  }).checked;
+  });
+  const coordinatorOnly = coordinatorAuthority.checked;
   const signerNames = params.recipientSetup?.recipientPartySignerNames?.map((x) => String(x ?? "")) ?? [];
   const signerTitles = params.recipientSetup?.recipientPartySignerTitles?.map((x) => String(x ?? "")) ?? [];
   const uiState = paidProSignerSetupUiStateFromRecipientSetup(parties, params.recipientSetup, signerNames, signerTitles);
@@ -674,6 +676,11 @@ export function buildAgreementVs01BridgeSession(params: {
     draftParties: parties,
   });
   const creatorIsParty = !coordinatorOnly;
+  logCoordinatorCheckboxAuthorityOnce(params.agreementId, {
+    checked: coordinatorAuthority.checked,
+    creatorIsParty,
+    source: coordinatorAuthority.source,
+  });
   return {
     vs01DocumentId: params.vs01DocumentId.trim(),
     agreementId: params.agreementId.trim(),

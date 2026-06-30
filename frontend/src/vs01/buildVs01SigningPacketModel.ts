@@ -43,6 +43,10 @@ import {
   type PlacedSigningField,
 } from "./signingFields";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import {
+  coordinatorExcludedFromSignerRoles,
+  logCoordinatorCheckboxVs01Once,
+} from "../components/agreements/paidProCoordinatorCheckboxAuthority";
 import { PREPARE_FIELD_ASSIGNMENT_SOURCE } from "./vs01PrepareFieldPlacement";
 import { defaultPrepareTemplateStoredValue } from "./vs01PrepareTemplateField";
 import {
@@ -916,6 +920,24 @@ export function buildVs01SigningPacketModel(args: {
         anchorSources: signatureAnchorSources,
       });
     }
+  }
+
+  if (guidedPro && args.bridge) {
+    const creatorIsParty = args.bridge.creatorIsParty !== false;
+    const checked = !creatorIsParty;
+    logCoordinatorCheckboxVs01Once(args.bridge.agreementId, {
+      checked,
+      creatorIsParty,
+      legalPartyCount: args.bridge.legalParties?.length ?? roles.length,
+      signerInviteCount: roles.length,
+      coordinatorExcludedFromSignerRoles: coordinatorExcludedFromSignerRoles({
+        checked,
+        creatorIsParty,
+        roleKinds: roles.map((r) => r.kind),
+        roleEmails: roles.map((r) => r.signerEmail),
+        coordinatorEmail: args.bridge.creatorEmail,
+      }),
+    });
   }
 
   return {
