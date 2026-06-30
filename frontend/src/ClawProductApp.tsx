@@ -72,6 +72,7 @@ import { Vs01Wizard } from "./vs01/Vs01Wizard";
 import { getVs01UrlBootstrap } from "./vs01/vs01UrlBootstrap";
 import { readAgreementVs01BridgeSession } from "./launch/simpleProduct/agreementToVs01SigningBridge";
 import { logVs01CopyContext, resolveVs01EsignShellCopy } from "./vs01/vs01EsignShellCopy";
+import { isRecipientSigningPublicSurface } from "./launch/completedAgreementViewContext";
 import { ClawPublicFeedView } from "./feed/ClawPublicFeedView";
 import { parseClawPublicFeedPath } from "./feed/clawPublicFeed";
 import { TermsPage } from "./launch/legal/TermsPage";
@@ -385,11 +386,17 @@ function AgreementReviewGate(props: {
 }
 
 /** `/app/esign/:id` — supports `?agreement_bridge=1` paid Pro VS01 handoff (see resolveVs01EsignShellCopy). */
-function AppEsignDocumentShell(props: { seed: string; search: string }) {
-  const { seed, search } = props;
+function AppEsignDocumentShell(props: { seed: string; search: string; pathname: string }) {
+  const { seed, search, pathname } = props;
   const [vs01Step, setVs01Step] = useState(0);
   const bridge = typeof window !== "undefined" ? readAgreementVs01BridgeSession() : null;
   const shellCopy = resolveVs01EsignShellCopy({ search, seedDocumentId: seed, bridge, vs01Step });
+  const recipientPublicSigning = isRecipientSigningPublicSurface(pathname, search);
+  const navMode = recipientPublicSigning
+    ? "public_completed"
+    : shellCopy.navVariant === "esign_bridge_focused"
+      ? "esign_bridge_focused"
+      : "default";
 
   useEffect(() => {
     const b = typeof window !== "undefined" ? readAgreementVs01BridgeSession() : null;
@@ -413,7 +420,7 @@ function AppEsignDocumentShell(props: { seed: string; search: string }) {
     <AppShell
       title={shellCopy.title}
       subtitle={shellCopy.subtitle}
-      navMode={shellCopy.navVariant === "esign_bridge_focused" ? "esign_bridge_focused" : "default"}
+      navMode={navMode}
     >
       <Vs01Wizard key={`esign-${seed}`} seedDocumentId={seed} hideStepper onStepChange={setVs01Step} />
     </AppShell>
@@ -728,7 +735,7 @@ export function ClawProductApp() {
           return <RedirectEsignNewToQuick search={search} />;
         }
         const seed = sub.id;
-        return <AppEsignDocumentShell seed={seed} search={search || ""} />;
+        return <AppEsignDocumentShell seed={seed} search={search || ""} pathname={pathname} />;
       }
       default:
         break;

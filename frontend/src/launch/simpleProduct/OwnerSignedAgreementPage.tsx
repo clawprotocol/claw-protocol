@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   agreementPublicVerifyPath,
@@ -8,9 +8,15 @@ import {
 import { downloadCompletedSignedAgreementPdf } from "../../agreement/completedSignedAgreementPdfDownload";
 import { resolveRequiredSignerCount } from "../../agreement/resolveRequiredSignerCount";
 import { PremiumAgreementReadonlyView } from "../../components/agreements/PremiumAgreementReadonlyView";
+import { useAuth } from "../../auth/AuthProvider";
 import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
 import { CREATOR_COMPLETED_PILL, CREATOR_DOWNLOAD_PDF_LABEL } from "../creatorDashboardCopy";
 import { useLaunchNav } from "../LaunchNavContext";
+import {
+  readAuthenticatedWorkspaceSession,
+  resolveCompletedAgreementViewContext,
+  shouldShowBackToDashboard,
+} from "../completedAgreementViewContext";
 import { loadOwnerSignedAgreementPreview } from "../ownerSignedAgreementView";
 import { AppShell } from "../AppShell";
 
@@ -30,7 +36,8 @@ function formatSignatureSummary(verify: PublicVerifyPayload | null): string | nu
 
 export function OwnerSignedAgreementPage(props: Props) {
   const { agreementId } = props;
-  const { navigate } = useLaunchNav();
+  const { navigate, pathname, search } = useLaunchNav();
+  const auth = useAuth();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [title, setTitle] = useState("Agreement");
@@ -43,6 +50,19 @@ export function OwnerSignedAgreementPage(props: Props) {
   >(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+
+  const viewContext = useMemo(
+    () =>
+      resolveCompletedAgreementViewContext({
+        pathname,
+        search,
+        agreementId,
+        hasAuthSession: Boolean(auth.user),
+        hasWorkspaceSession: readAuthenticatedWorkspaceSession(),
+      }),
+    [pathname, search, agreementId, auth.user],
+  );
+  const showBackToDashboard = shouldShowBackToDashboard(viewContext);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,12 +100,14 @@ export function OwnerSignedAgreementPage(props: Props) {
     <AppShell
       title={title}
       subtitle="Fully signed agreement — read-only proof copy with verification metadata."
+      navMode={showBackToDashboard ? "default" : "public_completed"}
     >
       <div
         className="space-y-4"
         data-testid="owner-signed-agreement-page"
         data-agreement-id={agreementId}
         data-corpus-source={corpusSource ?? undefined}
+        data-completed-view-surface={viewContext.surface}
       >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span
@@ -183,14 +205,16 @@ export function OwnerSignedAgreementPage(props: Props) {
           >
             {pdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
           </button>
-          <button
-            type="button"
-            className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-            data-testid="owner-signed-agreement-back"
-            onClick={() => navigate("/app")}
-          >
-            Back to dashboard
-          </button>
+          {showBackToDashboard ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+              data-testid="owner-signed-agreement-back"
+              onClick={() => navigate("/app")}
+            >
+              Back to dashboard
+            </button>
+          ) : null}
         </div>
         {pdfError ? (
           <p className="text-sm text-amber-200/95" role="alert" data-testid="owner-signed-agreement-pdf-error">

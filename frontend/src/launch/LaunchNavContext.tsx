@@ -22,6 +22,10 @@ import {
 } from "./simpleProduct/checkoutEntryScroll";
 import type { SimpleSendHandoff } from "./simpleProduct/simpleSendHandoff";
 import { buildSimpleSendHistoryState } from "./simpleProduct/simpleSendHandoff";
+import {
+  markAuthenticatedWorkspaceSession,
+  shouldMarkWorkspaceSessionForPath,
+} from "./completedAgreementViewContext";
 
 export type LaunchNavigateOptions = {
   heroIntake?: string;
@@ -68,6 +72,9 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
     syncLawdogFlowFromPathname(window.location.pathname);
     rememberAffiliateCodeFromPathname(window.location.pathname);
     rememberAffiliateCodeFromSearch(window.location.search);
+    if (shouldMarkWorkspaceSessionForPath(window.location.pathname)) {
+      markAuthenticatedWorkspaceSession();
+    }
     const genesisCode = captureGenesisReferralFromSearch(
       window.location.search,
       window.location.pathname,
@@ -120,6 +127,9 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
       };
     }
     window.history.pushState(state, "", p);
+    if (shouldMarkWorkspaceSessionForPath(pathOnly)) {
+      markAuthenticatedWorkspaceSession();
+    }
     if (isSimpleCheckoutPath(pathOnly)) {
       resetCheckoutEntryScroll();
     }

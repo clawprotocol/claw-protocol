@@ -8,9 +8,10 @@ import { useAccess } from "../access/AccessContext";
 import { DisclosureFooter } from "../compliance/DisclosureFooter";
 import { JoySocialFooter } from "../joy/JoySocialFooter";
 import { LawdogLogoLink } from "../components/ui/LawdogLogoLink";
+import { LawdogBrand } from "../components/ui/LawdogBrand";
 import "../joy/joy.css";
 
-export type AppShellNavMode = "default" | "esign_bridge_focused" | "minimal";
+export type AppShellNavMode = "default" | "esign_bridge_focused" | "minimal" | "public_completed";
 
 type OverflowNavItem = {
   label: string;
@@ -35,6 +36,7 @@ export function AppShell(props: {
   const showLegacyQuickPath = access.tier === "free";
   const esignBridgeNav = navMode === "esign_bridge_focused";
   const minimalNav = navMode === "minimal";
+  const publicCompletedNav = navMode === "public_completed";
   const [moreOpen, setMoreOpen] = useState(false);
 
   const overflowItems: OverflowNavItem[] = [
@@ -59,11 +61,21 @@ export function AppShell(props: {
           aria-label="App"
           data-testid="app-shell-primary-nav"
           data-app-shell-nav={
-            minimalNav ? "minimal" : esignBridgeNav ? "esign_bridge_focused" : "default"
+            publicCompletedNav
+              ? "public_completed"
+              : minimalNav
+                ? "minimal"
+                : esignBridgeNav
+                  ? "esign_bridge_focused"
+                  : "default"
           }
         >
           <div className="flex items-center gap-3">
-            <LawdogLogoLink homeHref="/app" wordmark surface="dark" />
+            {publicCompletedNav ? (
+              <LawdogBrand variant="wordmark" size="md" surface="dark" />
+            ) : (
+              <LawdogLogoLink homeHref="/app" wordmark surface="dark" />
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {minimalNav ? (
@@ -105,7 +117,7 @@ export function AppShell(props: {
                 </button>
               </>
             ) : null}
-            {!minimalNav && !esignBridgeNav ? (
+            {!minimalNav && !esignBridgeNav && !publicCompletedNav ? (
               <>
                 <button
                   type="button"
