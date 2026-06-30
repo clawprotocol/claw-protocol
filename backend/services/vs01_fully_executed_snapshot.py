@@ -276,10 +276,23 @@ def parse_signature_completed_events(audit: Any) -> List[Dict[str, str]]:
     return out
 
 
-def signature_text_for_signer_role(fields: Any, signer_role_id: str) -> str:
+def _normalize_email(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def signature_text_for_signer_role(
+    fields: Any,
+    signer_role_id: str,
+    *,
+    party_index: int = -1,
+    signer_email: Optional[str] = None,
+    audit_display_name: Optional[str] = None,
+    role_signer_name: Optional[str] = None,
+) -> str:
     rid = (signer_role_id or "").strip()
     if not rid:
         return ""
+    target_email = _normalize_email(signer_email)
     for field in fields or []:
         if not isinstance(field, dict):
             continue
@@ -293,7 +306,48 @@ def signature_text_for_signer_role(fields: Any, signer_role_id: str) -> str:
         value = str(field.get("value") or "").strip()
         if value:
             return value
+    if party_index >= 0 and target_email:
+        for field in fields or []:
+            if not isinstance(field, dict):
+                continue
+            if str(field.get("type") or "") != "signature":
+                continue
+            if field.get("autoInitials"):
+                continue
+            if str(field.get("assignedSignerRoleId") or "").strip():
+                continue
+            if int(field.get("assignedPartyIndex") or -1) != party_index:
+                continue
+            field_mail = _normalize_email(field.get("assignedSignerEmail"))
+            if field_mail and field_mail == target_email:
+                value = str(field.get("value") or "").strip()
+                if value:
+                    return value
+    audit_name = str(audit_display_name or "").strip()
+    if audit_name:
+        return audit_name
+    role_name = str(role_signer_name or "").strip()
+    if role_name:
+        return role_name
     return ""
+
+
+def strip_witness_execution_overlays(corpus_plain: str) -> str:
+    """Reset filled witness By/Date lines before audit replay."""
+    patch_start = resolve_witness_execution_scan_start(corpus_plain)
+    lines = corpus_plain.split("\n")
+    for i, line in enumerate(lines):
+        line_start = 0 if i == 0 else len("\n".join(lines[:i])) + 1
+        if line_start < patch_start:
+            continue
+        trimmed = line.strip()
+        indent_match = re.match(r"^\s*", line)
+        indent = indent_match.group(0) if indent_match else ""
+        if re.match(r"^by\s*:", trimmed, re.I) and not _witness_by_line_is_blank(trimmed):
+            lines[i] = f"{indent}By: ______________________________"
+        elif re.match(r"^date\s*:", trimmed, re.I) and not _witness_date_line_is_blank(trimmed):
+            lines[i] = f"{indent}Date: ______________________________"
+    return "\n".join(lines)
 
 
 def build_snapshot_record(corpus_plain: str, portable: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -353,6 +407,7 @@ def reconstruct_corpus_from_audit_and_portable(draft: Dict[str, Any]) -> Optiona
     if not events:
         return None
 
+    corpus = strip_witness_execution_overlays(corpus)
     fields = portable.get("fields") if isinstance(portable.get("fields"), list) else []
     roles = portable.get("roles") if isinstance(portable.get("roles"), list) else []
     role_entity_names = extract_role_entity_names_from_portable(portable)
@@ -363,7 +418,19 @@ def reconstruct_corpus_from_audit_and_portable(draft: Dict[str, Any]) -> Optiona
             None,
         )
         party_index = int(role.get("partyIndex") or 0) if isinstance(role, dict) else 0
-        sig = signature_text_for_signer_role(fields, rid) or event.get("display_name") or ""
+        signer_email = ""
+        role_signer_name = ""
+        if isinstance(role, dict):
+            signer_email = str(role.get("signerEmail") or role.get("reviewEmail") or "").strip()
+            role_signer_name = str(role.get("signerName") or "").strip()
+        sig = signature_text_for_signer_role(
+            fields,
+            rid,
+            party_index=party_index,
+            signer_email=signer_email or None,
+            audit_display_name=event.get("display_name"),
+            role_signer_name=role_signer_name or None,
+        )
         if sig:
             corpus, _ = stamp_witness_block_party_signature(
                 corpus, party_index, sig, role_entity_names
@@ -401,13 +468,16 @@ def completed_execution_by_name_violations(corpus_plain: str) -> List[str]:
     current_by = ""
     current_name = ""
     party_idx = -1
+    rows: List[Tuple[int, str, str]] = []
 
     def flush() -> None:
-        nonlocal current_by, current_name, party_idx, violations
+        nonlocal current_by, current_name, party_idx, violations, rows
         by = current_by.strip()
         name = current_name.strip()
         if by and name and _normalize_signer_label(by) != _normalize_signer_label(name):
             violations.append(f"party {party_idx}: By {by!r} != Name {name!r}")
+        if by or name:
+            rows.append((party_idx, by, name))
         current_by = ""
         current_name = ""
 
@@ -428,6 +498,21 @@ def completed_execution_by_name_violations(corpus_plain: str) -> List[str]:
         if re.match(r"^name\s*:", trimmed, re.I):
             current_name = re.sub(r"^name\s*:\s*", "", trimmed, flags=re.I).strip()
     flush()
+
+    for i in range(1, len(rows)):
+        prev_idx, prev_by, prev_name = rows[i - 1]
+        idx, by, name = rows[i]
+        if (
+            by
+            and prev_by
+            and name
+            and prev_name
+            and _normalize_signer_label(by) == _normalize_signer_label(prev_by)
+            and _normalize_signer_label(name) != _normalize_signer_label(prev_name)
+        ):
+            violations.append(
+                f"party {idx} By duplicates party {prev_idx} signer {by!r} while Name differs"
+            )
     return violations
 
 
@@ -467,32 +552,47 @@ def ensure_fully_executed_snapshot_on_draft(
 
     snap = extract_fully_executed_snapshot_from_portable(portable) if portable else None
     if snap:
-        next_stored = {**stored, "fully_executed_snapshot": snap}
-        _log.info(
-            "[vs01-final-signed-snapshot] agreement_id=%s source=portable_snapshot snapshot_ready=true",
+        snap_corpus = str(snap.get("corpus_plain") or "")
+        snap_violations = completed_execution_by_name_violations(snap_corpus)
+        if not snap_violations:
+            next_stored = {**stored, "fully_executed_snapshot": snap}
+            _log.info(
+                "[vs01-final-signed-snapshot] agreement_id=%s source=portable_snapshot snapshot_ready=true",
+                aid,
+            )
+            return EnsureFullyExecutedSnapshotResult(
+                {**draft, "vs01_signing_packet_v1": next_stored},
+                True,
+                "portable_snapshot",
+                True,
+            )
+        _log.warning(
+            "[vs01-final-signed-snapshot] agreement_id=%s source=portable_snapshot_invalid violations=%s — rebuilding",
             aid,
-        )
-        return EnsureFullyExecutedSnapshotResult(
-            {**draft, "vs01_signing_packet_v1": next_stored},
-            True,
-            "portable_snapshot",
-            True,
+            snap_violations,
         )
 
     seed = portable.get("seed") if isinstance(portable.get("seed"), dict) else {}
     corpus = str(seed.get("corpusPlain") or "")
     built = build_snapshot_record(corpus, portable) if corpus else None
     if built:
-        next_stored = {**stored, "fully_executed_snapshot": built}
-        _log.info(
-            "[vs01-final-signed-snapshot] agreement_id=%s source=portable_corpus snapshot_ready=true",
+        built_violations = completed_execution_by_name_violations(str(built.get("corpus_plain") or ""))
+        if not built_violations:
+            next_stored = {**stored, "fully_executed_snapshot": built}
+            _log.info(
+                "[vs01-final-signed-snapshot] agreement_id=%s source=portable_corpus snapshot_ready=true",
+                aid,
+            )
+            return EnsureFullyExecutedSnapshotResult(
+                {**draft, "vs01_signing_packet_v1": next_stored},
+                True,
+                "portable_corpus",
+                True,
+            )
+        _log.warning(
+            "[vs01-final-signed-snapshot] agreement_id=%s source=portable_corpus_invalid violations=%s — rebuilding",
             aid,
-        )
-        return EnsureFullyExecutedSnapshotResult(
-            {**draft, "vs01_signing_packet_v1": next_stored},
-            True,
-            "portable_corpus",
-            True,
+            built_violations,
         )
 
     audit = draft.get("audit_log") or []

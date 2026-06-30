@@ -11,6 +11,7 @@ import {
   reconstructSignedCorpusFromAuditAndPortable,
   resolveVs01FullyExecutedSignedCorpus,
 } from "../vs01/vs01FullyExecutedSignedSnapshot";
+import { logCompletedExecutionCorpusOverlaySources } from "../vs01/paidProCompletedExecutionMetadataAuthority";
 import { findVs01CanonicalPacketPortableByAgreementId } from "../vs01/vs01CanonicalPacketSeed";
 import { postVs01EnsureSignedSnapshot } from "../agreement/agreementWorkspaceApi";
 import { fetchPublicAgreementVerify } from "../agreement/agreementPublicVerify";
@@ -48,12 +49,22 @@ function resolveSignedCorpusFromLocalPortable(
 ): { text: string; source: Exclude<OwnerSignedAgreementCorpusSource, "missing"> } | null {
   const localPortable = findVs01CanonicalPacketPortableByAgreementId(agreementId);
   if (!localPortable) return null;
-  const rebuilt = reconstructSignedCorpusFromAuditAndPortable({ draft, portable: localPortable });
+  const rebuilt = reconstructSignedCorpusFromAuditAndPortable({
+    draft,
+    portable: localPortable,
+    source: "ownerSignedAgreementView:local_portable",
+  });
   if (!rebuilt?.trim()) {
     const snap = localPortable.fullyExecutedSnapshot?.corpusPlain?.trim();
     if (snap) return { text: snap, source: "local_portable" };
     return null;
   }
+  logCompletedExecutionCorpusOverlaySources({
+    agreementId,
+    source: "ownerSignedAgreementView:local_portable",
+    corpusPlain: rebuilt.trim(),
+    portable: localPortable,
+  });
   return { text: rebuilt.trim(), source: "local_portable" };
 }
 
@@ -127,6 +138,13 @@ export async function loadOwnerSignedAgreementPreview(
     agreementId: id,
     corpusSource: signed.source,
     snapshotReady: true,
+  });
+
+  logCompletedExecutionCorpusOverlaySources({
+    agreementId: id,
+    source: `ownerSignedAgreementView:${signed.source}`,
+    corpusPlain: signed.text,
+    portable: findVs01CanonicalPacketPortableByAgreementId(id) ?? undefined,
   });
 
   const renderDraft = cloneOwnerReadOnlyDraft(renderBaseDraft);

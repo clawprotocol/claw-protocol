@@ -110,6 +110,7 @@ function persistSignerCompletionToPortablePacket(args: {
   signerRoleId: string;
   partyIndex: number;
   signingDateIso: string;
+  displayName?: string | null;
   recipientFields?: readonly Vs01RecipientPlacedField[];
   attachFinalSnapshot: boolean;
 }): {
@@ -122,9 +123,16 @@ function persistSignerCompletionToPortablePacket(args: {
   const portable = loadVs01CanonicalPacketPortable(did);
   if (!portable) return { portable: null, corpusStamped: false, signatureStamped: false };
 
+  const role = portable.roles.find((r) => (r.roleId ?? "").trim() === args.signerRoleId.trim());
   const signatureText = signatureTextForSignerRole(
     args.recipientFields ?? portable.fields,
     args.signerRoleId,
+    {
+      partyIndex: args.partyIndex,
+      signerEmail: role?.signerEmail ?? role?.reviewEmail,
+      roleSignerName: role?.signerName,
+      auditDisplayName: args.displayName,
+    },
   );
 
   const applied = applySignerCompletionToPortablePacket({
@@ -253,6 +261,7 @@ async function recordVs01SignerCompletionInner(
     signerRoleId,
     partyIndex,
     signingDateIso,
+    displayName: args.displayName,
     recipientFields: args.recipientFields,
     attachFinalSnapshot: optimisticFinal,
   });
@@ -287,6 +296,7 @@ async function recordVs01SignerCompletionInner(
           signerRoleId,
           partyIndex,
           signingDateIso,
+          displayName: args.displayName,
           recipientFields: args.recipientFields,
           attachFinalSnapshot: true,
         });

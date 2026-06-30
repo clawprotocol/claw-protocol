@@ -14,6 +14,10 @@ import {
   reconstructSignedCorpusFromAuditAndPortable,
 } from "./vs01FullyExecutedSignedSnapshot";
 import { resolveWitnessExecutionScanStart } from "./vs01WitnessBlockSigningDate";
+import {
+  logCompletedSignerOverlaySource,
+  resolveCompletedSignerByText,
+} from "./completedSignerOverlayResolver";
 
 export type CompletedExecutionBlockRow = {
   partyIndex: number;
@@ -170,6 +174,25 @@ export function validateCompletedExecutionMetadataInvariant(args: {
   }
 
   for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i]!;
+    const prev = i > 0 ? rows[i - 1]! : null;
+    const by = row.byValue.trim();
+    const name = row.nameValue.trim();
+    if (prev && by && prev.byValue.trim()) {
+      if (
+        normalizeSignerLabel(by) === normalizeSignerLabel(prev.byValue) &&
+        name &&
+        prev.nameValue.trim() &&
+        normalizeSignerLabel(name) !== normalizeSignerLabel(prev.nameValue)
+      ) {
+        violations.push(
+          `party ${row.partyIndex} By duplicates party ${prev.partyIndex} signer "${by}" while Name differs`,
+        );
+      }
+    }
+  }
+
+  for (let i = 0; i < rows.length; i += 1) {
     for (let j = i + 1; j < rows.length; j += 1) {
       const a = rows[i]!;
       const b = rows[j]!;
@@ -183,6 +206,49 @@ export function validateCompletedExecutionMetadataInvariant(args: {
   }
 
   return { ok: violations.length === 0, rows, violations };
+}
+
+/** Log resolved By/Name per party once for a completed artifact surface. */
+export function logCompletedExecutionCorpusOverlaySources(args: {
+  agreementId: string;
+  source: string;
+  corpusPlain: string;
+  portable?: Vs01CanonicalPacketPortableV1 | null;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const roleEntityNames = args.portable
+    ? extractRoleEntityNamesFromPortableRoles(args.portable.roles)
+    : undefined;
+  const parsed = parseCompletedExecutionBlocksFromCorpus(args.corpusPlain, roleEntityNames);
+  const rows = enrichRowsFromPortable(parsed, args.portable);
+  for (const row of rows) {
+    const role =
+      args.portable?.roles.find((r) => (r.partyIndex ?? -1) === row.partyIndex) ??
+      args.portable?.roles[row.partyIndex];
+    const signerRoleId = (role?.roleId ?? row.signerRoleId).trim() || `party_${row.partyIndex}`;
+    const resolved = resolveCompletedSignerByText({
+      agreementId: args.agreementId,
+      source: args.source,
+      signerRoleId,
+      partyIndex: row.partyIndex,
+      signerEmail: role?.signerEmail ?? role?.reviewEmail,
+      roleSignerName: role?.signerName ?? row.nameValue,
+      auditDisplayName: row.nameValue,
+      fields: args.portable?.fields ?? [],
+    });
+    logCompletedSignerOverlaySource({
+      agreementId: args.agreementId,
+      source: args.source,
+      partyIndex: row.partyIndex,
+      partyName: row.partyLegalName,
+      signerRoleId,
+      auditDisplayName: row.nameValue,
+      fieldAssignedSignerRoleId: resolved.fieldAssignedSignerRoleId,
+      resolvedBy: row.byValue.trim() || resolved.byText,
+      resolvedName: row.nameValue.trim() || (role?.signerName ?? "").trim(),
+      fallbackUsed: resolved.fallbackUsed,
+    });
+  }
 }
 
 export function assertCompletedExecutionMetadataInvariant(args: {

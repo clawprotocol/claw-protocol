@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from backend.services.vs01_fully_executed_snapshot import (
+    completed_execution_by_name_violations,
     ensure_fully_executed_snapshot_on_draft,
     reconstruct_corpus_from_audit_and_portable,
     stamp_witness_block_party_signature,
     stamp_witness_block_party_signing_date,
+    strip_witness_execution_overlays,
 )
 from backend.services.vs01_signer_completion import (
     build_fully_executed_signed_event,
@@ -214,3 +216,103 @@ def test_four_party_entity_witness_blocks_stamp_and_snapshot() -> None:
     snap = build_snapshot_record(corpus, portable)
     assert snap is not None
     assert len(snap["corpus_plain"]) >= 80
+
+
+def _three_party_witness_corpus() -> str:
+    entities = [
+        "Stonebridge Wellness LLC",
+        "NovaPath Learning Inc",
+        "ClearSpring Distribution LLC",
+    ]
+    names = ["Sandra Wells", "Caleb Price", "Maya Coleman"]
+    blocks = []
+    for entity, name in zip(entities, names):
+        blocks.append(
+            f"{entity}:\nBy: __________________________\nName: {name}\nTitle: Officer\n"
+            "Date: _____________________________\n"
+        )
+    return (
+        "x" * 1600
+        + "\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\n"
+        + "\n".join(blocks)
+    )
+
+
+def test_reconstruct_three_party_strips_corrupted_party2_by() -> None:
+    """TEST499/TEST475: party 2 By must not inherit party 1 after audit replay."""
+    entities = [
+        "Stonebridge Wellness LLC",
+        "NovaPath Learning Inc",
+        "ClearSpring Distribution LLC",
+    ]
+    role_ids = ["role_stonebridge", "role_novapath", "role_clearspring"]
+    signers = ["Sandra Wells", "Caleb Price", "Maya Coleman"]
+    corpus = _three_party_witness_corpus()
+    for idx, signer in enumerate(signers[:2]):
+        corpus, _ = stamp_witness_block_party_signature(corpus, idx, signer, entities)
+        corpus, _ = stamp_witness_block_party_signing_date(corpus, idx, "2026-06-30", entities)
+    corpus, _ = stamp_witness_block_party_signature(corpus, 2, "Caleb Price", entities)
+    assert "ClearSpring Distribution LLC" in corpus
+    violations = completed_execution_by_name_violations(corpus)
+    assert violations
+
+    draft = {
+        "id": "ag_test499",
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "portable": {
+                "v": 1,
+                "seed": {
+                    "v": 1,
+                    "documentId": "doc_test499",
+                    "agreementId": "ag_test499",
+                    "corpusPlain": corpus,
+                    "corpusHash": "h",
+                    "savedAt": "2026-06-30T00:00:00Z",
+                },
+                "fields": [
+                    {
+                        "type": "signature",
+                        "assignedSignerRoleId": "role_stonebridge",
+                        "value": "Sandra Wells",
+                    },
+                    {"type": "signature", "assignedSignerRoleId": "", "value": "Caleb Price"},
+                    {"type": "signature", "assignedSignerRoleId": "", "value": "Caleb Price"},
+                ],
+                "roles": [
+                    {
+                        "roleId": role_ids[i],
+                        "partyIndex": i,
+                        "entityName": entities[i],
+                        "signerName": signers[i],
+                        "requiresSignature": True,
+                    }
+                    for i in range(3)
+                ],
+                "pageCount": 15,
+                "witnessPageIndex": 14,
+                "initialsPolicy": {"enabled": False, "bodyPagesOnly": True},
+                "fieldCount": 3,
+            },
+        },
+        "audit_log": [
+            build_signature_completed_event(
+                signer_role_id=role_ids[i],
+                participant_id=f"p{i}",
+                display_name=signers[i],
+                document_id="doc_test499",
+                signed_at=f"2026-06-30T1{i}:00:00.000Z",
+                signed_date_iso="2026-06-30",
+                signed_date_display="June 30, 2026",
+                locked_version_id=None,
+                agreement_version_hash=None,
+            )
+            for i in range(3)
+        ],
+    }
+    rebuilt = reconstruct_corpus_from_audit_and_portable(draft)
+    assert rebuilt is not None
+    assert "By: Maya Coleman" in rebuilt
+    assert completed_execution_by_name_violations(rebuilt) == []
+    stripped = strip_witness_execution_overlays(corpus)
+    assert "By: Caleb Price" not in stripped.split("ClearSpring Distribution LLC")[-1]

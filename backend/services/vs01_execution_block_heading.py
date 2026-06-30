@@ -131,6 +131,36 @@ def scan_execution_block_heading_line(
     return None
 
 
+def _entity_party_index_from_witness_line(
+    lines: List[str],
+    target_line_index: int,
+    patch_start: int,
+    role_entity_names: Optional[Sequence[str]] = None,
+) -> Optional[int]:
+    for j in range(target_line_index - 1, -1, -1):
+        line_start = 0 if j == 0 else len("\n".join(lines[:j])) + 1
+        if line_start < patch_start:
+            break
+        trimmed = lines[j].strip()
+        if not trimmed:
+            continue
+        if re.match(r"^(?:By|Name|Title|Date|Signature|Email|Address)\s*:", trimmed, re.I):
+            continue
+        if is_entity_legal_name_heading_line(trimmed):
+            entity_label = re.sub(r":\s*$", "", trimmed).strip()
+            from_roles = party_index_for_entity_label(entity_label, role_entity_names)
+            if from_roles is not None:
+                return from_roles
+            entity_state = ExecutionBlockHeadingScanState(in_witness_block=True)
+            heading = trimmed if trimmed.endswith(":") else f"{trimmed}:"
+            match = scan_execution_block_heading_line(heading, entity_state, role_entity_names)
+            if match:
+                return match.party_index
+        if is_witness_block_marker_line(trimmed):
+            break
+    return None
+
+
 def party_index_at_witness_line(
     lines: List[str],
     target_line_index: int,
@@ -149,34 +179,20 @@ def party_index_at_witness_line(
         if re.match(r"^by\s*:", trimmed, re.I):
             by_line_index += 1
             if i == target_line_index:
-                prev_trimmed = lines[i - 1].strip() if i > 0 else ""
-                prev2_trimmed = lines[i - 2].strip() if i > 1 else ""
-                prev_entity = (
-                    is_entity_legal_name_heading_line(prev_trimmed)
-                    or is_entity_legal_name_heading_line(prev2_trimmed)
+                from_entity = _entity_party_index_from_witness_line(
+                    lines, i, patch_start, role_entity_names
                 )
-                if prev_entity:
-                    return (
-                        state.current.party_index
-                        if state.current is not None
-                        else max(0, by_line_index)
-                    )
+                if from_entity is not None:
+                    return from_entity
                 return max(0, by_line_index)
         if re.match(r"^date\s*:", trimmed, re.I):
             date_line_index += 1
             if i == target_line_index:
-                prev_trimmed = lines[i - 1].strip() if i > 0 else ""
-                prev2_trimmed = lines[i - 2].strip() if i > 1 else ""
-                prev_entity = (
-                    is_entity_legal_name_heading_line(prev_trimmed)
-                    or is_entity_legal_name_heading_line(prev2_trimmed)
+                from_entity = _entity_party_index_from_witness_line(
+                    lines, i, patch_start, role_entity_names
                 )
-                if prev_entity:
-                    return (
-                        state.current.party_index
-                        if state.current is not None
-                        else max(0, date_line_index)
-                    )
+                if from_entity is not None:
+                    return from_entity
                 return max(0, date_line_index)
     if state.current is not None:
         return state.current.party_index

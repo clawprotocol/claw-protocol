@@ -206,6 +206,27 @@ export function stampWitnessBlockPartySignature(
   return stampWithTailFallback(corpusPlain, stampIn);
 }
 
+/**
+ * Reset filled witness-block By/Date lines to blank placeholders before audit replay.
+ * Preserves Name/Title and clause body — execution overlay only.
+ */
+export function stripWitnessExecutionOverlays(corpusPlain: string): string {
+  const patchStart = resolveWitnessExecutionScanStart(corpusPlain);
+  const lines = corpusPlain.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const lineStart = lines.slice(0, i).join("\n").length + (i > 0 ? 1 : 0);
+    if (lineStart < patchStart) continue;
+    const trimmed = lines[i]!.trim();
+    const indent = lines[i]!.match(/^\s*/)?.[0] ?? "";
+    if (/^by\s*:/i.test(trimmed) && !witnessByLineIsBlank(trimmed)) {
+      lines[i] = `${indent}By: ______________________________`;
+    } else if (/^date\s*:/i.test(trimmed) && !witnessDateLineIsBlank(trimmed)) {
+      lines[i] = `${indent}Date: ______________________________`;
+    }
+  }
+  return lines.join("\n");
+}
+
 /** True when witness-block By: line for partyIndex is filled (prior signer completed). */
 export function witnessBlockPartyHasFilledSignature(
   corpusPlain: string,

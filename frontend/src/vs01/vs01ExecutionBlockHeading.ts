@@ -145,6 +145,31 @@ export function executionBlockHeadingStateAfterPage(
   };
 }
 
+function entityPartyIndexFromWitnessLine(
+  lines: readonly string[],
+  targetLineIndex: number,
+  patchStart: number,
+  roleEntityNames?: readonly string[],
+): number | null {
+  for (let j = targetLineIndex - 1; j >= 0; j -= 1) {
+    const lineStart = j === 0 ? 0 : lines.slice(0, j).join("\n").length + 1;
+    if (lineStart < patchStart) break;
+    const trimmed = lines[j]!.trim();
+    if (!trimmed) continue;
+    if (/^(?:By|Name|Title|Date|Signature|Email|Address)\s*:/i.test(trimmed)) continue;
+    if (isEntityLegalNameHeadingLine(trimmed)) {
+      const entityLabel = trimmed.replace(/:\s*$/, "").trim();
+      const fromRoles = partyIndexForEntityLabel(entityLabel, roleEntityNames);
+      if (fromRoles != null) return fromRoles;
+      const state = createExecutionBlockHeadingScanState({ inWitnessBlock: true });
+      const match = scanExecutionBlockHeadingLine(trimmed.endsWith(":") ? trimmed : `${trimmed}:`, state, roleEntityNames);
+      if (match) return match.partyIndex;
+    }
+    if (isWitnessBlockMarkerLine(trimmed)) break;
+  }
+  return null;
+}
+
 /** Party block index for a witness-region line (entity legal names + CLIENT/SERVICE PROVIDER). */
 export function partyIndexAtWitnessLine(
   lines: readonly string[],
@@ -163,26 +188,16 @@ export function partyIndexAtWitnessLine(
     if (/^by\s*:/i.test(trimmed)) {
       byLineIndex += 1;
       if (i === targetLineIndex) {
-        const prevTrimmed = i > 0 ? lines[i - 1]!.trim() : "";
-        const prev2Trimmed = i > 1 ? lines[i - 2]!.trim() : "";
-        const prevEntity =
-          isEntityLegalNameHeadingLine(prevTrimmed) || isEntityLegalNameHeadingLine(prev2Trimmed);
-        if (prevEntity) {
-          return state.current?.partyIndex ?? Math.max(0, byLineIndex);
-        }
+        const fromEntity = entityPartyIndexFromWitnessLine(lines, i, patchStart, roleEntityNames);
+        if (fromEntity != null) return fromEntity;
         return Math.max(0, byLineIndex);
       }
     }
     if (/^date\s*:/i.test(trimmed)) {
       dateLineIndex += 1;
       if (i === targetLineIndex) {
-        const prevTrimmed = i > 0 ? lines[i - 1]!.trim() : "";
-        const prev2Trimmed = i > 1 ? lines[i - 2]!.trim() : "";
-        const prevEntity =
-          isEntityLegalNameHeadingLine(prevTrimmed) || isEntityLegalNameHeadingLine(prev2Trimmed);
-        if (prevEntity) {
-          return state.current?.partyIndex ?? Math.max(0, dateLineIndex);
-        }
+        const fromEntity = entityPartyIndexFromWitnessLine(lines, i, patchStart, roleEntityNames);
+        if (fromEntity != null) return fromEntity;
         return Math.max(0, dateLineIndex);
       }
     }

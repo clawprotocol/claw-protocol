@@ -4,8 +4,11 @@
 
 import {
   applySignerCompletionToPortablePacket,
-  signatureTextForSignerRole,
 } from "./vs01FullyExecutedSignedSnapshot";
+import {
+  resolveCompletedSignerByText,
+  logCompletedSignerOverlaySource,
+} from "./completedSignerOverlayResolver";
 import {
   storeVs01CanonicalPacketPortable,
   type Vs01CanonicalPacketPortableV1,
@@ -117,7 +120,28 @@ export function hydratePortableSignerMarksForRecipientView(args: {
     const partyIndex = role.partyIndex ?? 0;
     const corpusHasSig = witnessBlockPartyHasFilledSignature(portable.seed.corpusPlain, partyIndex);
     const markedSigned = isRecipientSignerMarkedComplete(agreementId, rid);
-    const sig = signatureTextForSignerRole(portable.fields, rid);
+    const resolved = resolveCompletedSignerByText({
+      agreementId,
+      source: "hydratePortableSignerMarksForRecipientView",
+      signerRoleId: rid,
+      partyIndex,
+      signerEmail: role.signerEmail ?? role.reviewEmail,
+      roleSignerName: role.signerName,
+      fields: portable.fields,
+    });
+    const sig = resolved.byText;
+    logCompletedSignerOverlaySource({
+      agreementId,
+      source: "hydratePortableSignerMarksForRecipientView",
+      partyIndex,
+      partyName: (role.entityName || role.partyName || "").trim(),
+      signerRoleId: rid,
+      auditDisplayName: (role.signerName ?? "").trim(),
+      fieldAssignedSignerRoleId: resolved.fieldAssignedSignerRoleId,
+      resolvedBy: sig,
+      resolvedName: (role.signerName ?? "").trim(),
+      fallbackUsed: resolved.fallbackUsed,
+    });
     if (!sig || (!corpusHasSig && !markedSigned)) continue;
 
     const applied = applySignerCompletionToPortablePacket({

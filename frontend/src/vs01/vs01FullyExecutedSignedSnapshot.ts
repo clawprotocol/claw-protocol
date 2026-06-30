@@ -16,12 +16,18 @@ import {
   extractRoleEntityNamesFromPortableRoles,
   stampWitnessBlockPartySignature,
   stampWitnessBlockPartySigningDate,
+  stripWitnessExecutionOverlays,
 } from "./vs01WitnessBlockSigningDate";
 import { sanitizeVs01RenderCorpus } from "./vs01CorpusOrphanSectionSanitizer";
 import {
   assertCompletedExecutionMetadataInvariant,
+  logCompletedExecutionCorpusOverlaySources,
   resolveAuthoritativeCompletedExecutionCorpus,
 } from "./paidProCompletedExecutionMetadataAuthority";
+import {
+  resolveCompletedSignerByFromEvent,
+  resolveCompletedSignerByText,
+} from "./completedSignerOverlayResolver";
 
 export type Vs01FullyExecutedSignedSnapshotV1 = {
   v: 1;
@@ -64,18 +70,19 @@ export function parseSignatureCompletedEventsFromAudit(
 export function signatureTextForSignerRole(
   fields: readonly Vs01RecipientPlacedField[],
   signerRoleId: string,
+  opts?: { partyIndex?: number; signerEmail?: string | null; auditDisplayName?: string | null; roleSignerName?: string | null },
 ): string {
-  const rid = signerRoleId.trim();
-  if (!rid) return "";
-  const sigField = fields.find(
-    (f) =>
-      f.type === "signature" &&
-      !f.autoInitials &&
-      (f.assignedSignerRoleId ?? "").trim() === rid,
-  );
-  const v = typeof sigField?.value === "string" ? sigField.value.trim() : "";
-  if (v) return v;
-  return "";
+  const resolved = resolveCompletedSignerByText({
+    agreementId: "",
+    source: "signatureTextForSignerRole",
+    signerRoleId,
+    partyIndex: opts?.partyIndex ?? -1,
+    signerEmail: opts?.signerEmail,
+    roleSignerName: opts?.roleSignerName,
+    auditDisplayName: opts?.auditDisplayName,
+    fields,
+  });
+  return resolved.byText;
 }
 
 function mergeRecipientFields(
@@ -108,9 +115,14 @@ export function applySignerCompletionToPortablePacket(args: {
   signatureStamped: boolean;
 } {
   const signingDateIso = (args.signingDateIso || "").trim() || new Date().toISOString().slice(0, 10);
+  const role = args.portable.roles.find((r) => (r.roleId ?? "").trim() === args.signerRoleId.trim());
   const signatureText =
     (args.signatureText || "").trim() ||
-    signatureTextForSignerRole(args.recipientFields ?? args.portable.fields, args.signerRoleId);
+    signatureTextForSignerRole(args.recipientFields ?? args.portable.fields, args.signerRoleId, {
+      partyIndex: args.partyIndex,
+      signerEmail: role?.signerEmail ?? role?.reviewEmail,
+      roleSignerName: role?.signerName,
+    });
 
   const roleEntityNames = extractRoleEntityNamesFromPortableRoles(args.portable.roles);
 
@@ -235,28 +247,41 @@ export function readFullyExecutedSnapshotFromDraft(
 export function reconstructSignedCorpusFromAuditAndPortable(args: {
   draft: AgreementDraft;
   portable: Vs01CanonicalPacketPortableV1 | null;
+  source?: string;
 }): string | null {
   const events = parseSignatureCompletedEventsFromAudit(args.draft.audit_log);
   if (!events.length || !args.portable) return null;
 
-  let portable = args.portable;
+  const agreementId = String(args.draft.id ?? args.portable.seed.agreementId).trim();
+  const overlaySource = args.source ?? "reconstructSignedCorpusFromAuditAndPortable";
+  const baseline = stripWitnessExecutionOverlays(args.portable.seed.corpusPlain);
+
+  let portable: Vs01CanonicalPacketPortableV1 = {
+    ...args.portable,
+    seed: {
+      ...args.portable.seed,
+      corpusPlain: baseline,
+    },
+  };
+
   for (const event of events) {
-    const role = portable.roles.find((r) => r.roleId === event.signerRoleId);
-    const partyIndex = role?.partyIndex ?? 0;
-    const sig =
-      signatureTextForSignerRole(portable.fields, event.signerRoleId) ||
-      event.displayName;
+    const resolved = resolveCompletedSignerByFromEvent({
+      agreementId,
+      source: overlaySource,
+      portable,
+      event,
+    });
     const applied = applySignerCompletionToPortablePacket({
       portable,
-      agreementId: String(args.draft.id ?? portable.seed.agreementId),
+      agreementId,
       documentId: portable.seed.documentId,
       signerRoleId: event.signerRoleId,
-      partyIndex,
+      partyIndex: resolved.partyIndex,
       signingDateIso:
         event.signedDateIso ||
         (event.signedAt ? event.signedAt.slice(0, 10) : "") ||
         new Date().toISOString().slice(0, 10),
-      signatureText: sig,
+      signatureText: resolved.byText,
     });
     portable = applied.portable;
   }
@@ -280,6 +305,15 @@ export function resolveVs01FullyExecutedSignedCorpus(
     preferSource: snap?.corpusPlain?.trim() ? "fully_executed_snapshot" : undefined,
   });
   if (authoritative) {
+    const agreementId = String(draft.id ?? portable?.seed?.agreementId ?? "").trim();
+    if (agreementId) {
+      logCompletedExecutionCorpusOverlaySources({
+        agreementId,
+        source: `resolveVs01FullyExecutedSignedCorpus:${authoritative.source}`,
+        corpusPlain: authoritative.text,
+        portable,
+      });
+    }
     return { text: authoritative.text, source: authoritative.source };
   }
 
