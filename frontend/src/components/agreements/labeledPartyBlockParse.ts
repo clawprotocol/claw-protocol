@@ -16,6 +16,9 @@ import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties 
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { resolveLegalIdentitiesFromExtraction } from "./legalIdentityResolution";
+import {
+  extractNumberedListPartyLegalEntities,
+} from "./partySlotIdentityNormalize";
 
 export type LabeledPartyBlock = {
   /** 1-based index from the prompt ("Party 1" → 1). */
@@ -315,10 +318,12 @@ export function resolveStarterGatePartyLegalEntities(raw: string): string[] {
   const intake = String(raw || "").trim();
   const labeled = labeledPartyLegalEntities(intake);
   if (labeled.length >= 3) return labeled;
+  const numbered = extractNumberedListPartyLegalEntities(intake);
+  if (numbered.length >= 3) return numbered;
   const quoted = quotedRolePartyLegalEntities(intake);
   if (quoted.length >= 3) return dedupeEntityCandidatesToLegalParties(quoted);
   const roleLabeled = roleLabelPartyLegalEntities(intake);
-  const merged = dedupeEntityCandidatesToLegalParties([...labeled, ...quoted, ...roleLabeled]);
+  const merged = dedupeEntityCandidatesToLegalParties([...labeled, ...quoted, ...roleLabeled, ...numbered]);
   if (merged.length >= 3) return merged;
 
   const resolved = resolveLegalIdentitiesFromExtraction({
@@ -326,19 +331,22 @@ export function resolveStarterGatePartyLegalEntities(raw: string): string[] {
     intakeText: intake,
   }).map((r) => r.legalEntityName);
   if (resolved.length >= 3) return resolved;
-  if (resolved.length >= 2) return resolved;
+  if (resolved.length >= 2 && numbered.length < 3) return resolved;
 
-  const betweenAuthoritative = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
-  if (betweenAuthoritative.length === 2) {
-    return dedupeEntityCandidatesToLegalParties(betweenAuthoritative);
-  }
   const fromProse = dedupeEntityCandidatesToLegalParties(extractAgreementEntityCandidates(intake));
   const combined = dedupeEntityCandidatesToLegalParties([...merged, ...fromProse]);
   const fallbackResolved = resolveLegalIdentitiesFromExtraction({
     candidates: combined,
     intakeText: intake,
   }).map((r) => r.legalEntityName);
-  return fallbackResolved.length >= 2 ? fallbackResolved : fallbackResolved;
+  if (fallbackResolved.length >= 3) return fallbackResolved;
+  if (fallbackResolved.length >= 2) return fallbackResolved;
+
+  const betweenAuthoritative = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
+  if (betweenAuthoritative.length >= 2) {
+    return dedupeEntityCandidatesToLegalParties(betweenAuthoritative);
+  }
+  return fallbackResolved;
 }
 
 export const TRIPARTITE_LABELED_PARTY_ROLE_LABELS = [

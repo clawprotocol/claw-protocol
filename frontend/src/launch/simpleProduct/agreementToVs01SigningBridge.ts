@@ -1,3 +1,6 @@
+import {
+  resolveCreatorCoordinatorOnlyChecked,
+} from "../../components/agreements/paidProCoordinatorCheckboxAuthority";
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import { resolveAuthoritativeSignerCount } from "../../components/agreements/signerCountAuthority";
 import {
@@ -658,7 +661,10 @@ export function buildAgreementVs01BridgeSession(params: {
   const reviewerApproved = Boolean(params.reviewerApprovedCleanHandoff);
   const draftCorpus = resolveBridgeAgreementCorpusFromDraft(params.draft);
   const agreementCorpusText = (params.agreementCorpusText ?? "").trim() || draftCorpus;
-  const coordinatorOnly = Boolean(params.draft?.creator_coordinator_only ?? params.recipientSetup?.creatorCoordinatorOnly);
+  const coordinatorOnly = resolveCreatorCoordinatorOnlyChecked({
+    draft: params.draft,
+    recipientSetup: params.recipientSetup,
+  }).checked;
   const signerNames = params.recipientSetup?.recipientPartySignerNames?.map((x) => String(x ?? "")) ?? [];
   const signerTitles = params.recipientSetup?.recipientPartySignerTitles?.map((x) => String(x ?? "")) ?? [];
   const uiState = paidProSignerSetupUiStateFromRecipientSetup(parties, params.recipientSetup, signerNames, signerTitles);

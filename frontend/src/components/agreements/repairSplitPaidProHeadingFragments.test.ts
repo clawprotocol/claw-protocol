@@ -137,4 +137,22 @@ describe("repairSplitPaidProHeadingFragments", () => {
     expect(text).not.toMatch(/3\.7 Joint\s*\n\s*Client Responsibility for Payment/i);
     expect(repairs).toContain("split_subsection_heading_fragment:3.7");
   });
+
+  it("does not merge 10.4 Notices with the first If to stanza (TEST494 composite §10)", () => {
+    const raw = [
+      "10. Assignment, Dispute Resolution, Notices and Miscellaneous",
+      "",
+      "10.4 Notices",
+      "",
+      "If to Stonebridge Wellness LLC:",
+      "Attention: Authorized Signer",
+      "Email: provided during signer setup.",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    ].join("\n");
+    const { text, repairs } = repairSplitPaidProHeadingFragments(raw);
+    expect(text).toMatch(/10\.4\s+Notices\s*\n\nIf to Stonebridge/i);
+    expect(repairs).not.toContain("split_subsection_heading_fragment:10.4");
+    expect(isPaidProHeadingContinuationFragment("If to Stonebridge Wellness LLC:")).toBe(false);
+  });
 });

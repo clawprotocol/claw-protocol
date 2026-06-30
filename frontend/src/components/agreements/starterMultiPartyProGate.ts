@@ -6,6 +6,7 @@ import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { parseLabeledPartyBlocks, resolveStarterGatePartyLegalEntities } from "./labeledPartyBlockParse";
+import { maxNumberedListPartyIndex } from "./partySlotIdentityNormalize";
 import { countRealParties } from "./starterPartyLimits";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 
@@ -282,8 +283,9 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   const parties = resolveStarterGatePartyLegalEntities(intake);
   const extractedEntityCount = parties.length;
   const indexedPartyMax = maxIndexedPartyOrSigner(intake);
+  const numberedPartyMax = maxNumberedListPartyIndex(intake);
   const signerSlots = countSignerDetailSlots(intake);
-  const partyCount = Math.max(extractedEntityCount, indexedPartyMax);
+  const partyCount = Math.max(extractedEntityCount, indexedPartyMax, numberedPartyMax);
   const revenuePctCount = countRevenueSharePercentages(intake);
   const hasRevenueShare = detectRevenueShareLanguage(intake);
   const hasCoordinator = detectCoordinatorOrNonPartyActor(intake);
@@ -293,7 +295,7 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   const hasSignerOverflow = detectSignerCandidateOverflow(intake);
   const reasons: StarterComplexityGateReason[] = [];
 
-  if (extractedEntityCount > 2 || indexedPartyMax >= 3) {
+  if (extractedEntityCount > 2 || indexedPartyMax >= 3 || numberedPartyMax >= 3) {
     reasons.push("three_plus_legal_parties");
   }
   if (hasRevenueShare && (partyCount >= 2 || revenuePctCount >= 3)) {

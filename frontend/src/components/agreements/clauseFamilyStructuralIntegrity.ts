@@ -89,23 +89,25 @@ function resolveCanonicalAuthorityPartyCount(
   parties?: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): number {
-  if (!parties?.length) return 0;
   const intake = roleContext?.intakeText?.trim() ?? "";
   const draftPartyNames =
     roleContext?.draftPartyNames ??
-    parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2);
+    parties?.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2) ??
+    [];
 
   if (intake) {
     const fromIntake = resolveAuthoritativeSignerCount({
       intakeText: intake,
       draftPartyNames,
-      draftParties: parties.map((p) => ({ name: p.partyLegalName })),
-      manifestPartyCount: parties.length,
+      draftParties: (parties ?? []).map((p) => ({ name: p.partyLegalName })),
+      manifestPartyCount: parties?.length ?? 0,
     }).count;
     if (fromIntake >= 2) {
       return fromIntake;
     }
   }
+
+  if (!parties?.length) return 0;
 
   const enriched = resolveNoticeStructuralValidationParties(parties, roleContext);
   return enriched.filter(
@@ -130,7 +132,7 @@ function isTestMode(): boolean {
 
 export function logNoticeStanzaValidationDiagnostic(payload: {
   surface?: string;
-  phase: "pre_acceptance" | "post_acceptance";
+  phase: "pre_acceptance" | "post_acceptance" | "hydrate_replay";
   canonicalAuthorityPartyCount: number;
   draftPartyCount?: number;
   handoffPartySlots?: number;
@@ -139,6 +141,9 @@ export function logNoticeStanzaValidationDiagnostic(payload: {
   violations: string[];
 }): void {
   if (isTestMode()) return;
+  const isHydrateReplay =
+    payload.phase === "hydrate_replay" ||
+    (payload.surface?.includes("hydrate") ?? false);
   const excessSlots =
     payload.handoffPartySlots != null &&
     payload.canonicalAuthorityPartyCount >= 2 &&
@@ -146,7 +151,8 @@ export function logNoticeStanzaValidationDiagnostic(payload: {
   if (
     payload.violations.length === 0 &&
     !excessSlots &&
-    payload.noticeStanzaCount >= payload.canonicalAuthorityPartyCount
+    payload.noticeStanzaCount >= payload.canonicalAuthorityPartyCount &&
+    !(isHydrateReplay && payload.canonicalAuthorityPartyCount === 0)
   ) {
     return;
   }
@@ -154,6 +160,7 @@ export function logNoticeStanzaValidationDiagnostic(payload: {
   console.info("[paid-pro-notice-stanza-validation]", {
     ...payload,
     excessPartySlotsVsAuthority: excessSlots,
+    diagnosticOnly: isHydrateReplay,
   });
 }
 

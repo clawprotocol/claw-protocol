@@ -11,6 +11,7 @@
 
 import {
   extractAgreementEntityCandidates,
+  dedupeEntityCandidatesToLegalParties,
   textContainsUnresolvedIdentityPlaceholders,
 } from "../../agreement/partyPlaceholderDisplay";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
@@ -24,6 +25,8 @@ import {
   normalizeAgreementPartyName,
   resolveAuthoritativeIntakePartyNames,
 } from "./partySlotIdentityNormalize";
+import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
 import { looksLikeEmail } from "./recipientEmailValidation";
 import {
   collapseRepeatedEntityMentionCandidate,
@@ -197,8 +200,42 @@ export function resolveExtractedCandidatesToLegalEntities(
     return resolved;
   }
 
-  if (intakeAuthority.length === 2) {
-    return intakeAuthority.map((legalEntityName) => ({
+  const poolEntities = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
+  );
+  const poolEntityCount = poolEntities.length;
+  const explicitOrdered: string[] = [];
+  const explicitSeen = new Set<string>();
+  for (const raw of candidates) {
+    if (isLegalIdentityRoleAlias(raw)) continue;
+    const isolated = sanitizeExtractionCandidateForResolution(raw);
+    const roleAliasProbe = isolated.replace(/^between\s+/i, "").trim();
+    if (
+      !isolated ||
+      !isAuthoritativeLegalEntityName(isolated) ||
+      !PARTY_ENTITY_SUFFIX_RE.test(isolated) ||
+      isJurisdictionOrGeographyCandidate(raw) ||
+      isLegalIdentityRoleAlias(isolated) ||
+      isLegalIdentityRoleAlias(roleAliasProbe)
+    ) {
+      continue;
+    }
+    if ([...explicitSeen].some((prev) => partyLegalNamesMatch(prev, isolated))) continue;
+    explicitSeen.add(isolated);
+    explicitOrdered.push(isolated);
+  }
+
+  if (poolEntityCount < 3 && explicitOrdered.length >= 2) {
+    return explicitOrdered.slice(0, 2).map((legalEntityName) => ({
+      legalEntityName,
+      resolvedFrom: "extraction" as const,
+    }));
+  }
+
+  if (intakeAuthority.length === 2 && poolEntityCount < 3) {
+    const betweenOrdered = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
+    const ordered = betweenOrdered.length === 2 ? betweenOrdered : intakeAuthority;
+    return ordered.map((legalEntityName) => ({
       legalEntityName,
       resolvedFrom: "intake_authority" as const,
     }));

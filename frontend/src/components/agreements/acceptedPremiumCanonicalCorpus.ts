@@ -121,6 +121,7 @@ export function hydrateAcceptedPremiumCanonicalCorpusFromSnapshot(
     hash: trim(snap.paidProSourceOfTruthHash || snap.acceptedPremiumCanonicalHash),
     accepted_at: snap.paidProSourceOfTruthAcceptedAt ?? snap.savedAt,
     source: "server_full_draft",
+    draft: snap.premiumDraft ?? null,
   });
   return record ? toAcceptedRecord(record) : null;
 }

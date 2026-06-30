@@ -29,8 +29,12 @@ function parseSubsectionPrefixLine(
   return { sectionNum: m[1], title: m[2].trim(), full: trimmed };
 }
 
+const COMPLETE_SUBSECTION_HEADING_TITLE_RE =
+  /^(?:Notices|Notice(?:\s+Addresses?)?|Assignment|Miscellaneous|Governing Law(?:\s+and\s+Venue)?|Independent Contractors)$/i;
+
 function isSubsectionDanglingPrefix(title: string): boolean {
   if (!title || title.length < 3) return false;
+  if (COMPLETE_SUBSECTION_HEADING_TITLE_RE.test(title.trim())) return false;
   if (/\.\s+[A-Za-z]/.test(title)) return false;
   if (BODY_VERB_RE.test(title)) return false;
   if (DANGLING_HEADING_TAIL_RE.test(title)) return true;
@@ -159,7 +163,8 @@ export function isPaidProHeadingContinuationFragment(line: string): boolean {
   if (SUBSECTION_RE.test(t)) return false;
   if (/^\d+\.\s/.test(t)) return false;
   if (EXECUTION_LINE_RE.test(t)) return false;
-  if (/^(?:By|Name|Title|Date|Email|Address|Signature)\s*:/i.test(t)) return false;
+  if (/^If to\s+/i.test(t)) return false;
+  if (/^(?:By|Name|Title|Date|Email|Address|Signature|Attention|Attn)\s*:/i.test(t)) return false;
 
 const HEADING_PARTICLE_WORD_RE = /^(?:for|of|and|or|the|to|in|on|at|by|with|upon|under|per|a|an)$/i;
 

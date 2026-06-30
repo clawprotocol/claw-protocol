@@ -91,7 +91,7 @@ import {
   hashPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
-import { writePremiumRecipientHandoffLinear } from "./premiumPartyNamesHandoff";
+import { writePremiumRecipientHandoffLinear, readPremiumRecipientHandoff, resolveHandoffPartySlotCount } from "./premiumPartyNamesHandoff";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
 import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import { resolvePaidProFrozenDisplayAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
@@ -114,9 +114,9 @@ import {
 import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 import { resolveNoticeStructuralValidationParties } from "./paidProPartyNoticeDetails";
 import {
-  readPremiumRecipientHandoff,
-  resolveHandoffPartySlotCount,
-} from "./premiumPartyNamesHandoff";
+  assertPaidProHydrateAuthorityInvariant,
+  resolvePaidProHydrateStructuralContext,
+} from "./paidProHydrateAuthority";
 
 function buildPaidProSotCanonicalSnapshotArgs(args: {
   surface: string;
@@ -805,6 +805,8 @@ export function hydratePaidProSourceOfTruth(args: {
   source?: string | null;
   reviewSessionId?: string | null;
   agreementGenerationId?: string | null;
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
 }): PaidProSourceOfTruth | null {
   const text = trim(args.text);
   if (text.length < 500) return null;
@@ -832,12 +834,37 @@ export function hydratePaidProSourceOfTruth(args: {
     textLen: text.length,
   });
   if (!establishmentGate.allowed) return null;
+
+  const hydrateCtx = resolvePaidProHydrateStructuralContext({
+    text,
+    hash: args.hash,
+    intakeText: args.intakeText ?? null,
+    draft: args.draft ?? null,
+  });
+  assertPaidProHydrateAuthorityInvariant(hydrateCtx, "paid_pro_source_of_truth_hydrate");
+
   const snapshot = buildCanonicalAgreementSnapshot({
     surface: "paid_pro_source_of_truth_hydrate",
     tier: "pro",
     candidates: [{ source: "server_full_document_text", text }],
     minLen: 500,
     reviewSessionId: args.reviewSessionId ?? null,
+    intakeText: args.intakeText ?? null,
+    parties: hydrateCtx.structuralParties.map((party) => ({
+      name: party.partyLegalName,
+      role: "party",
+      email: party.signerEmail,
+      partyAddress: party.partyAddress,
+    })),
+    skipClauseFamilyPlaceholderIssues: hydrateCtx.replayFromFrozenHash,
+    clauseFamilyStructuralContext: {
+      parties: hydrateCtx.structuralParties,
+      draftPartyCount: hydrateCtx.draftPartyNames.length,
+      intakeText: args.intakeText ?? null,
+      draftPartyNames: hydrateCtx.draftPartyNames,
+      acceptedCorpus: text,
+      handoffPartySlots: hydrateCtx.handoffPartySlots,
+    },
   });
   const frozen = freezeCanonicalAgreementSnapshot(snapshot, "server_full_document_text");
   const record: PaidProSourceOfTruth = {

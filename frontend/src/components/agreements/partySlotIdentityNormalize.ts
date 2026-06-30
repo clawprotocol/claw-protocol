@@ -13,6 +13,7 @@ import {
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
 } from "./paidProPartyNamePreserve";
+import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 
 const STANDALONE_SUFFIX_RE =
   /^(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?$/i;
@@ -25,6 +26,75 @@ const NATURAL_COMPANY_ALIAS_RE =
 
 const ENTITY_SUFFIX_CONTINUATION_RE =
   /^(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\b/i;
+
+const NUMBERED_PARTY_ENTITY_LINE_RE =
+  /^\s*(\d+)\.\s+(.+)$/;
+
+const REVENUE_SHARE_ALLOCATION_LINE_RE =
+  /^\s*[-*•]?\s*(.+?\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\s*:\s*\d+(?:\.\d+)?\s*%\s*$/i;
+
+/** True when a line is a revenue-split allocation (`Entity LLC: 45%`), not a party identity line. */
+export function isRevenueShareAllocationLine(line: string): boolean {
+  return REVENUE_SHARE_ALLOCATION_LINE_RE.test(String(line || "").trim());
+}
+
+function extractLegalEntityFromIntakeLine(line: string): string {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return "";
+  const revenueMatch = trimmed.match(REVENUE_SHARE_ALLOCATION_LINE_RE);
+  if (revenueMatch?.[1]) {
+    return normalizeAgreementPartyName(isolateLegalEntityFromContaminatedName(revenueMatch[1]));
+  }
+  const numbered = trimmed.match(NUMBERED_PARTY_ENTITY_LINE_RE);
+  const body = numbered?.[2] ?? trimmed;
+  const entityPrefix = body.match(
+    /^([A-Z][^(\n—–-]{2,160}?\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))/i,
+  );
+  if (entityPrefix?.[1]) {
+    return normalizeAgreementPartyName(isolateLegalEntityFromContaminatedName(entityPrefix[1]));
+  }
+  return normalizeAgreementPartyName(isolateLegalEntityFromContaminatedName(trimmed));
+}
+
+/** Ordered legal entities from numbered intake lines (`1. Acme LLC — role…`). */
+export function extractNumberedListPartyLegalEntities(intakeRaw: string): string[] {
+  const lines = String(intakeRaw || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  for (const line of lines) {
+    if (!NUMBERED_PARTY_ENTITY_LINE_RE.test(line)) continue;
+    const entity = extractLegalEntityFromIntakeLine(line);
+    if (
+      entity.length >= 3 &&
+      !isInvalidPartySlotLegalEntity(entity) &&
+      isAuthoritativeLegalEntityName(entity) &&
+      !out.some((existing) => partyLegalNamesMatch(existing, entity))
+    ) {
+      out.push(entity);
+    }
+  }
+  return out;
+}
+
+/** Highest index from numbered party list lines (`1.`, `2.`, `3.`). */
+export function maxNumberedListPartyIndex(intakeRaw: string): number {
+  const lines = String(intakeRaw || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  let max = 0;
+  for (const line of lines) {
+    const m = line.match(NUMBERED_PARTY_ENTITY_LINE_RE);
+    if (!m?.[1]) continue;
+    const idx = Number.parseInt(m[1], 10);
+    if (Number.isFinite(idx) && idx > max) max = idx;
+  }
+  return max;
+}
 
 export function isStandaloneLegalEntitySuffix(name: string): boolean {
   return STANDALONE_SUFFIX_RE.test((name || "").replace(/\s+/g, " ").trim());
@@ -86,17 +156,27 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
     .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n));
   if (labeled.length >= 3) return labeled;
+  const numbered = extractNumberedListPartyLegalEntities(intake);
+  if (numbered.length >= 3) return numbered;
   const lineSeparated = extractLineSeparatedLegalEntityParties(intake);
-  if (lineSeparated.length === 2 && labeled.length <= 2) return lineSeparated;
+  const entityPool = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
+  ).filter((n) => !isInvalidPartySlotLegalEntity(n));
+  if (entityPool.length >= 3) return entityPool;
+  if (numbered.length >= 2 && numbered.length >= entityPool.length) return numbered;
+  const fromBetween = collapsePartySlotCandidates(extractBetweenPartyNameList(intake)).filter(
+    (n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n) && isAuthoritativeLegalEntityName(n),
+  );
+  if (fromBetween.length >= 2 && fromBetween.length >= lineSeparated.length) return fromBetween;
+  if (lineSeparated.length >= 2) return lineSeparated;
+  if (entityPool.length >= 2) return entityPool;
   if (labeled.length >= 2) return labeled;
   const quoted = quotedRolePartyLegalEntities(intake)
     .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n));
   if (quoted.length >= 2) return quoted;
-  const entityPool = dedupeEntityCandidatesToLegalParties(
-    extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
-  ).filter((n) => !isInvalidPartySlotLegalEntity(n));
   if (entityPool.length >= 2) return entityPool;
+  if (numbered.length >= 2) return numbered;
   return collapsePartySlotCandidates(extractBetweenPartyNameList(intake)).filter(
     (n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n) && isAuthoritativeLegalEntityName(n),
   );
@@ -112,14 +192,19 @@ export function extractLineSeparatedLegalEntityParties(intakeRaw: string): strin
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+  const numberedMax = maxNumberedListPartyIndex(intakeRaw);
+  const targetCount = numberedMax >= 3 ? numberedMax : 2;
   const out: string[] = [];
   for (const line of lines) {
-    if (/^\$/.test(line) || /^\d/.test(line) && /\bmonth/i.test(line)) continue;
+    if (/^\$/.test(line) || (/^\d/.test(line) && /\bmonth/i.test(line))) continue;
+    if (isRevenueShareAllocationLine(line)) continue;
     if (/^(?:term|fee|payment|governing|duration|oklahoma|texas|law)\b/i.test(line)) continue;
     if (/workflow|consulting|automation|services?\b/i.test(line) && !PARTY_ENTITY_SUFFIX_RE.test(line)) {
       continue;
     }
-    const normalized = normalizeAgreementPartyName(line);
+    const normalized = NUMBERED_PARTY_ENTITY_LINE_RE.test(line)
+      ? extractLegalEntityFromIntakeLine(line)
+      : normalizeAgreementPartyName(isolateLegalEntityFromContaminatedName(line));
     if (
       normalized.length >= 3 &&
       !isInvalidPartySlotLegalEntity(normalized) &&
@@ -128,7 +213,7 @@ export function extractLineSeparatedLegalEntityParties(intakeRaw: string): strin
       if (!out.some((existing) => partyLegalNamesMatch(existing, normalized))) {
         out.push(normalized);
       }
-      if (out.length >= 2) break;
+      if (out.length >= targetCount) break;
     }
   }
   return out;

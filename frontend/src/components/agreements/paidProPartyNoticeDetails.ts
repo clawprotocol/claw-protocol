@@ -455,11 +455,16 @@ export function logPaidProNoticeSectionIntegrity(payload: {
   repairs: string[];
   partyCount: number;
   stanzaCount: number;
+  phase?: "preview_repair" | "freeze_commit" | "post_signer_hydrate";
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   if (!payload.repairs.length) return;
   // eslint-disable-next-line no-console
-  console.info("[paid-pro-notice-section-integrity]", payload);
+  console.info("[paid-pro-notice-section-integrity]", {
+    ...payload,
+    phase: payload.phase ?? "preview_repair",
+    diagnosticOnly: (payload.phase ?? "preview_repair") === "preview_repair",
+  });
 }
 
 /** Optional-contact display: omit missing email/address; never emit placeholder tokens. */
@@ -928,6 +933,27 @@ function inferNoticesSectionNumber(beforeRegion: string): number {
   return max + 1;
 }
 
+/** True when a standalone NOTICES parent heading appears between §N and §N.1. */
+export function hasMisplacedStandaloneNoticesBeforeSubsection(corpus: string): boolean {
+  const text = (corpus || "").replace(/\r\n/g, "\n");
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i]?.trim() ?? "";
+    const standaloneNotices = trimmed.match(/^(\d+)\.\s+NOTICES\s*$/i);
+    if (!standaloneNotices) continue;
+    const prevMain = lines
+      .slice(0, i)
+      .map((line) => line.trim())
+      .reverse()
+      .find((line) => /^\d+\.(?!\d)\s+\S/.test(line));
+    const nextLine = lines.slice(i + 1).find((line) => line.trim().length > 0)?.trim() ?? "";
+    const prevNum = prevMain?.match(/^(\d+)\./)?.[1];
+    const nextSub = nextLine.match(/^(\d+)\.(\d+)\b/);
+    if (prevNum && nextSub && nextSub[1] === prevNum) return true;
+  }
+  return false;
+}
+
 /** Remove a standalone `N. NOTICES` line when the same section already has a composite heading including Notices. */
 export function removeRedundantNoticesSubheading(text: string): { text: string; repairs: string[] } {
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
@@ -974,6 +1000,53 @@ function resolveNoticesHeadingInsertIndex(head: string): number {
   return head.length;
 }
 
+/** True when an insert point sits between a top-level section heading and its first subsection. */
+function isInsertPointInsideSectionBeforeSubsection(head: string, insertAt: number): boolean {
+  if (insertAt <= 0) return false;
+  const prefix = head.slice(0, insertAt);
+  const suffix = head.slice(insertAt).trimStart();
+  const mainSections = [...prefix.matchAll(/(?:^|\n)(\d+)\.(?!\d)\s+[^\n]+/g)];
+  const lastMain = mainSections[mainSections.length - 1]?.[1];
+  if (!lastMain) return false;
+  return new RegExp(`^${lastMain}\\.\\d+\\b`).test(suffix);
+}
+
+/** Remove a standalone NOTICES heading wrongly inserted before a parent section's first subsection. */
+export function removeMisplacedNoticesHeadingBeforeSubsection(corpus: string): {
+  text: string;
+  repairs: string[];
+} {
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const head = witnessIdx >= 0 ? corpus.slice(0, witnessIdx) : corpus;
+  const tail = witnessIdx >= 0 ? corpus.slice(witnessIdx) : "";
+  const lines = head.split("\n");
+  const repairs: string[] = [];
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i]?.trim() ?? "";
+    const standaloneNotices = trimmed.match(/^(\d+)\.\s+NOTICES\s*$/i);
+    if (standaloneNotices) {
+      const prevMain = out
+        .map((line) => line.trim())
+        .reverse()
+        .find((line) => /^\d+\.(?!\d)\s+\S/.test(line));
+      const nextLine = lines.slice(i + 1).find((line) => line.trim().length > 0)?.trim() ?? "";
+      const prevNum = prevMain?.match(/^(\d+)\./)?.[1];
+      const nextSub = nextLine.match(/^(\d+)\.(\d+)\b/);
+      if (prevNum && nextSub && nextSub[1] === prevNum) {
+        repairs.push("notice:remove_misplaced_notices_before_subsection");
+        continue;
+      }
+    }
+    out.push(lines[i] ?? "");
+  }
+  if (!repairs.length) return { text: corpus, repairs: [] };
+  return {
+    text: `${out.join("\n")}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(),
+    repairs,
+  };
+}
+
 /** Move a notices section that was appended after Governing Law back before it. */
 export function relocateMisplacedNoticesSectionBeforeGoverningLaw(corpus: string): {
   text: string;
@@ -1005,8 +1078,11 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
   repairs: string[];
 } {
   const repairs: string[] = [];
-  const relocated = relocateMisplacedNoticesSectionBeforeGoverningLaw(corpus);
-  let text = relocated.text;
+  const misplaced = removeMisplacedNoticesHeadingBeforeSubsection(corpus);
+  let text = misplaced.text;
+  if (misplaced.repairs.length > 0) repairs.push(...misplaced.repairs);
+  const relocated = relocateMisplacedNoticesSectionBeforeGoverningLaw(text);
+  text = relocated.text;
   if (relocated.repairs.length > 0) repairs.push(...relocated.repairs);
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   let head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
@@ -1046,6 +1122,9 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
   if (firstIfTo < 0) return { text: corpus, repairs: [] };
 
   const insertAt = resolveNoticesHeadingInsertIndex(head);
+  if (isInsertPointInsideSectionBeforeSubsection(head, insertAt)) {
+    return { text, repairs };
+  }
   const beforeInsert = head.slice(0, insertAt).trimEnd();
   const afterInsert = head.slice(insertAt).trimStart();
 
@@ -1073,6 +1152,10 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
 
 export function findNoticesSectionStart(text: string): number {
   const normalized = (text || "").replace(/\r\n/g, "\n");
+  const operativeSubsection = normalized.match(
+    /(?:^|\n)\s*\d+\.\d+(?:\.\s*|\s+)(?:Notices|Notice\s+Addresses?)\b/i,
+  );
+  if (operativeSubsection?.index != null) return operativeSubsection.index;
   const canonical = normalized.match(NOTICES_SECTION_HEADING_RE);
   if (canonical?.index != null) return canonical.index;
   const equivalent = normalized.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
