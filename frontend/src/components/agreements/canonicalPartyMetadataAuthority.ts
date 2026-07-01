@@ -6,7 +6,13 @@
 import {
   alignIntakeSignerMetadataToLegalEntities,
 } from "./structuredIntakePartyContactParse";
+import { extractIntakeContacts } from "./paidProIntakeContactSubstitution";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
+import {
+  linearPremiumRecipientSlots,
+  readPremiumRecipientHandoff,
+} from "./premiumPartyNamesHandoff";
+import { resolveUniversalSignerMetadataBySlotForCanonicalSeed } from "./universalSignerMetadataAuthority";
 import {
   assertCanonicalMetadataNotFromAgreementBody,
   type CanonicalMutableMutationSource,
@@ -167,6 +173,124 @@ function recordFromAuthorityParty(
   };
 }
 
+function intakeRecordForSlot(
+  slot: {
+    partyLegalName: string;
+    signerName: string;
+    signerTitle: string;
+    signerEmail: string;
+    partyAddress: string;
+  },
+  partyIndex: number,
+  existingPartyId?: string,
+): CanonicalPartyMetadataRecord {
+  return recordFromAuthorityParty(
+    {
+      partyIndex,
+      partyLegalName: slot.partyLegalName,
+      signerName: slot.signerName,
+      signerTitle: slot.signerTitle,
+      signerEmail: slot.signerEmail,
+      partyAddress: slot.partyAddress,
+    },
+    "structured_intake",
+    existingPartyId,
+  );
+}
+
+/** Unify intake parser, universal resolver, contacts, and handoff into canonical records. */
+function synchronizeIntakeSignerMetadataIntoRecords(
+  records: CanonicalPartyMetadataRecord[],
+  args: {
+    legalEntities: readonly string[];
+    intakeText?: string | null;
+    uiSignerNames?: readonly string[];
+    uiSignerTitles?: readonly string[];
+  },
+): void {
+  const legalEntities = args.legalEntities;
+  if (records.length === 0 || legalEntities.length === 0) return;
+
+  const intakeAligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, legalEntities);
+  const resolved = resolveUniversalSignerMetadataBySlotForCanonicalSeed({
+    legalEntities,
+    intakeText: args.intakeText,
+    corpusText: null,
+    uiSignerNames: args.uiSignerNames,
+    uiSignerTitles: args.uiSignerTitles,
+  });
+  const contacts = extractIntakeContacts(args.intakeText);
+  const handoffSlots = linearPremiumRecipientSlots(readPremiumRecipientHandoff(), records.length);
+
+  for (let i = 0; i < records.length; i += 1) {
+    const record = records[i]!;
+    const aligned = intakeAligned[i];
+    if (aligned) {
+      mergeRecordFields(record, intakeRecordForSlot(aligned, i, record.partyId));
+    }
+    const uni = resolved[i];
+    if (uni?.signerName || uni?.signerTitle) {
+      mergeRecordFields(
+        record,
+        intakeRecordForSlot(
+          {
+            partyLegalName: record.partyLegalName,
+            signerName: uni.signerName,
+            signerTitle: uni.signerTitle,
+            signerEmail: "",
+            partyAddress: "",
+          },
+          i,
+          record.partyId,
+        ),
+      );
+    }
+    const emailHint =
+      record.signerEmail.trim() ||
+      aligned?.signerEmail.trim() ||
+      handoffSlots[i]?.email.trim() ||
+      "";
+    let contact = emailHint
+      ? contacts.find((c) => c.email.toLowerCase() === emailHint.toLowerCase())
+      : undefined;
+    if (!contact?.name.trim() && contacts[i]?.name.trim()) contact = contacts[i];
+    if (contact?.name.trim() || contact?.title.trim() || contact?.email.trim()) {
+      mergeRecordFields(
+        record,
+        intakeRecordForSlot(
+          {
+            partyLegalName: record.partyLegalName,
+            signerName: contact.name,
+            signerTitle: contact.title,
+            signerEmail: contact.email,
+            partyAddress: "",
+          },
+          i,
+          record.partyId,
+        ),
+      );
+    }
+    const ho = handoffSlots[i];
+    if (ho) {
+      mergeRecordFields(
+        record,
+        recordFromAuthorityParty(
+          {
+            partyIndex: i,
+            partyLegalName: ho.name || record.partyLegalName,
+            signerName: ho.signerName || "",
+            signerTitle: ho.signerTitle || "",
+            signerEmail: ho.email || "",
+            partyAddress: ho.partyAddress || "",
+          },
+          "freeze_snapshot",
+          record.partyId,
+        ),
+      );
+    }
+  }
+}
+
 function mergeRecordFields(
   target: CanonicalPartyMetadataRecord,
   incoming: CanonicalPartyMetadataRecord,
@@ -299,6 +423,14 @@ export function logCanonicalPartyMetadataDiagnostics(
   if (bundle?.bundleHash) activeBundleHash = bundle.bundleHash;
   if (diagnosticsEnabled(counts.partyCount)) {
     const losses = detectFieldCountLoss(prior ?? null, counts);
+    const authoritySplit =
+      counts.emailCount > counts.signerNameCount && counts.emailCount >= 2
+        ? {
+            authoritySplit: "email_without_signer_name" as const,
+            emailCount: counts.emailCount,
+            signerNameCount: counts.signerNameCount,
+          }
+        : null;
     // eslint-disable-next-line no-console
     console.info(STAGE_LOG_TAGS[stage], {
       ...counts,
@@ -318,6 +450,7 @@ export function logCanonicalPartyMetadataDiagnostics(
       },
       partyIds: bundle?.parties.map((p) => p.partyId) ?? [],
       ...(losses.length ? { dataLoss: losses } : {}),
+      ...(authoritySplit ?? {}),
     });
   }
   lastFieldCounts = counts;
@@ -478,6 +611,12 @@ export function buildCanonicalPartyMetadataBundle(args: {
     }
     merged.push(base);
   }
+  synchronizeIntakeSignerMetadataIntoRecords(merged, {
+    legalEntities,
+    intakeText: args.intakeText,
+    uiSignerNames: args.uiParties?.map((p) => p.signerName),
+    uiSignerTitles: args.uiParties?.map((p) => p.signerTitle),
+  });
   const hasUiSignal = uiRecords.some((p) => p.signerName || p.signerTitle || p.signerEmail || p.partyAddress);
   const hasIntakeSignal = intakeRecords.some(
     (p) => p.signerName || p.signerTitle || p.signerEmail || p.partyAddress || p.partyLegalName,
@@ -516,7 +655,7 @@ export function mutateCanonicalPartyMetadata(args: MutateCanonicalPartyMetadataA
   const consumed = args.replaceSession ? null : readConsumedPaidProSignerMetadataAuthority();
   const mutationSource =
     args.mutationSource ??
-    (args.uiParties?.some((p) => p.signerName.trim() || p.signerEmail.trim())
+    (args.uiParties?.some((p) => p.signerName.trim() || p.signerTitle.trim())
       ? "user_edited_ui"
       : "structured_intake");
   const built = buildCanonicalPartyMetadataBundle({
@@ -577,7 +716,7 @@ export function establishCanonicalPartyMetadataAtStage(
     intakeText: args.intakeText,
     uiParties: args.uiParties,
     mutationSource:
-      args.uiParties?.some((p) => p.signerName.trim() || p.signerEmail.trim())
+      args.uiParties?.some((p) => p.signerName.trim() || p.signerTitle.trim())
         ? "user_edited_ui"
         : "structured_intake",
     replaceSession: args.skipConsumedAuthority === true,
