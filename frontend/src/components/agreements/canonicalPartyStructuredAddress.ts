@@ -1,12 +1,91 @@
 /**
  * Canonical structured party address — single authority for lossless intake → pipeline propagation.
- * Normalizes display whitespace; never drops address components during merge.
+ * Normalizes display whitespace; never drops valid address components; rejects party/prose boundaries.
  */
 
 import { isPartyMetadataLabelValue } from "./intakeSectionLabels";
+import { looksLikeStackedPartyLegalEntityLine } from "./starterPartyIdentityIsolation";
+
+const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
+const PARTY_BLOCK_WITH_ROLE_HEADER_RE =
+  /^\s*party\s*(\d+)\s*(?:\(\s*[^)]+\s*\))?\s*:?\s*$/i;
+const PARTY_BLOCK_WITH_ROLE_INLINE_RE =
+  /^\s*party\s*(\d+)\s*\(\s*[^)]+\s*\)\s*:\s*.+$/i;
+const PARTY_ROLE_PAREN_RE = /\bparty\s+\d+\s*\([^)]+\)/i;
+const HORIZONTAL_RULE_RE = /^[\s—–\-_=]+$/;
+const INTAKE_INSTRUCTION_LINE_RE =
+  /^\s*(?:draft\b|include\s+(?:provisions|a\b)|commercial\s+terms|require\b|requirement\b|governing\s+law|term(?:ination)?\b|payment\b|background\b|scope\b)/i;
+const INLINE_ADDRESS_BOUNDARY_RE =
+  /,\s*(?:party\s+\d+\b(?:\s*\([^)]*\))?|draft\b|include\b|require\b|commercial\s+terms\b)/i;
+
+export type PartyAddressBoundaryTrimDiagnostic = {
+  slot?: number;
+  removedSuffixPreview: string;
+  source: string;
+};
 
 function cleanAddressLine(line: string): string {
   return String(line ?? "").replace(/\s+/g, " ").trim();
+}
+
+function diagnosticsEnabled(): boolean {
+  return (
+    typeof import.meta !== "undefined" &&
+    (import.meta.env?.DEV === true || import.meta.env?.MODE === "test")
+  );
+}
+
+export function logPartyAddressBoundaryTrimmed(diag: PartyAddressBoundaryTrimDiagnostic): void {
+  if (!diagnosticsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[party-address-boundary-trimmed]", diag);
+}
+
+/** True when a line is a hard stop for multiline address capture (next party / prose / labels). */
+export function isPartyAddressBoundaryLine(line: string | null | undefined): boolean {
+  const t = cleanAddressLine(String(line ?? ""));
+  if (!t) return false;
+  if (isPartyMetadataLabelValue(t)) return true;
+  if (PARTY_BLOCK_HEADER_RE.test(t)) return true;
+  if (PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(t)) return true;
+  if (PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(t)) return true;
+  if (PARTY_ROLE_PAREN_RE.test(t)) return true;
+  if (HORIZONTAL_RULE_RE.test(t)) return true;
+  if (INTAKE_INSTRUCTION_LINE_RE.test(t)) return true;
+  if (/^\s*coordinator\s*[:\-]?\s*$/i.test(t)) return true;
+  if (/^\s*(?:client|service\s+provider|provider|contractor|consultant)\s*:\s*$/i.test(t)) return true;
+  if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return true;
+  if (/\bdraft\s+a\s+(?:detailed\s+)?(?:agreement|contract)\b/i.test(t)) return true;
+  if (/\bunder\s+which\b/i.test(t) && t.length > 40) return true;
+  return false;
+}
+
+/** True when a comma-separated address segment is non-address metadata or prose. */
+export function isPartyAddressContaminationSegment(segment: string | null | undefined): boolean {
+  const t = cleanAddressLine(String(segment ?? ""));
+  if (!t) return true;
+  if (isPartyAddressBoundaryLine(t)) return true;
+  if (PARTY_ROLE_PAREN_RE.test(t)) return true;
+  if (/\bdraft\s+a\b/i.test(t)) return true;
+  if (/\b(?:exclusive|regulatory|quality|distributor|manufacturer|licensor|consultant)\b/i.test(t) && /\bparty\s+\d+\b/i.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+function trimAddressSegmentAtInlineBoundary(segment: string): { value: string; removed: string } {
+  const t = cleanAddressLine(segment);
+  if (!t) return { value: "", removed: "" };
+  const match = t.match(INLINE_ADDRESS_BOUNDARY_RE);
+  if (match?.index != null && match.index >= 0) {
+    const value = t.slice(0, match.index).replace(/,\s*$/, "").trim();
+    const removed = t.slice(match.index).trim();
+    return { value, removed };
+  }
+  if (isPartyAddressContaminationSegment(t)) {
+    return { value: "", removed: t };
+  }
+  return { value: t, removed: "" };
 }
 
 /** Split stored address into logical lines (newline or comma-separated segments). */
@@ -16,12 +95,39 @@ export function splitCanonicalPartyAddressLines(address: string | null | undefin
   const lines = raw.includes("\n")
     ? raw.split(/\n/).map(cleanAddressLine).filter(Boolean)
     : raw.split(/\s*,\s*/).map(cleanAddressLine).filter(Boolean);
-  return lines.filter((line) => !isPartyMetadataLabelValue(line));
+  const out: string[] = [];
+  for (const line of lines) {
+    if (isPartyAddressContaminationSegment(line)) break;
+    const { value, removed } = trimAddressSegmentAtInlineBoundary(line);
+    if (removed) {
+      logPartyAddressBoundaryTrimmed({
+        removedSuffixPreview: removed.slice(0, 120),
+        source: "splitCanonicalPartyAddressLines",
+      });
+    }
+    if (value) out.push(value);
+    if (removed) break;
+  }
+  return out.filter((line) => !isPartyMetadataLabelValue(line));
 }
 
 /** Join address lines for canonical storage (comma-separated display form). */
 export function joinCanonicalPartyAddressLines(lines: readonly string[]): string {
-  const parts = lines.map(cleanAddressLine).filter((line) => line && !isPartyMetadataLabelValue(line));
+  const parts: string[] = [];
+  for (const rawLine of lines) {
+    const line = cleanAddressLine(rawLine);
+    if (!line || isPartyMetadataLabelValue(line)) continue;
+    if (isPartyAddressContaminationSegment(line)) break;
+    const { value, removed } = trimAddressSegmentAtInlineBoundary(line);
+    if (removed) {
+      logPartyAddressBoundaryTrimmed({
+        removedSuffixPreview: removed.slice(0, 120),
+        source: "joinCanonicalPartyAddressLines",
+      });
+    }
+    if (value) parts.push(value);
+    if (removed) break;
+  }
   const seen = new Set<string>();
   const out: string[] = [];
   for (const part of parts) {
@@ -34,15 +140,35 @@ export function joinCanonicalPartyAddressLines(lines: readonly string[]): string
 }
 
 /**
+ * Remove party-boundary / prose contamination from a stored address.
+ * Preserves valid multi-line and international address components.
+ */
+export function sanitizeCanonicalPartyAddress(
+  value: string | null | undefined,
+  opts?: { slot?: number; source?: string },
+): string {
+  const joined = joinCanonicalPartyAddressLines(splitCanonicalPartyAddressLines(value));
+  const raw = String(value ?? "").trim();
+  if (raw && joined && raw.length > joined.length + 4) {
+    logPartyAddressBoundaryTrimmed({
+      slot: opts?.slot,
+      removedSuffixPreview: raw.slice(joined.length).trim().slice(0, 120),
+      source: opts?.source ?? "sanitizeCanonicalPartyAddress",
+    });
+  }
+  return joined;
+}
+
+/**
  * Merge two address strings without dropping components from either side.
- * Prefers the superset when one contains the other; otherwise unions segments.
+ * Stops at party/prose boundaries; never unions contamination segments.
  */
 export function mergeCanonicalPartyAddresses(
   existing: string | null | undefined,
   incoming: string | null | undefined,
 ): string {
-  const a = joinCanonicalPartyAddressLines(splitCanonicalPartyAddressLines(existing));
-  const b = joinCanonicalPartyAddressLines(splitCanonicalPartyAddressLines(incoming));
+  const a = sanitizeCanonicalPartyAddress(existing, { source: "mergeCanonicalPartyAddresses:existing" });
+  const b = sanitizeCanonicalPartyAddress(incoming, { source: "mergeCanonicalPartyAddresses:incoming" });
   if (!b) return a;
   if (!a) return b;
   if (a === b) return a;
@@ -53,12 +179,18 @@ export function mergeCanonicalPartyAddresses(
   return joinCanonicalPartyAddressLines([...splitCanonicalPartyAddressLines(a), ...splitCanonicalPartyAddressLines(b)]);
 }
 
-/** Normalize intake address for canonical storage — preserves all non-empty lines. */
-export function normalizeCanonicalPartyAddress(value: string | null | undefined): string {
+/** Normalize intake address for canonical storage — preserves valid lines, rejects boundaries. */
+export function normalizeCanonicalPartyAddress(
+  value: string | null | undefined,
+  opts?: { slot?: number; source?: string },
+): string {
   const raw = String(value ?? "").replace(/\r\n/g, "\n").trim();
   if (!raw || isPartyMetadataLabelValue(raw)) return "";
   if (raw.includes("\n")) {
-    return joinCanonicalPartyAddressLines(raw.split(/\n/));
+    return sanitizeCanonicalPartyAddress(raw, { ...opts, source: opts?.source ?? "normalizeCanonicalPartyAddress" });
   }
-  return cleanAddressLine(raw);
+  return sanitizeCanonicalPartyAddress(cleanAddressLine(raw), {
+    ...opts,
+    source: opts?.source ?? "normalizeCanonicalPartyAddress",
+  });
 }

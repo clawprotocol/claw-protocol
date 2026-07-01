@@ -36,9 +36,15 @@ export function looksLikeStackedPartyPersonNameLine(line: string): boolean {
   return PERSON_NAME_LINE_RE.test(t);
 }
 
+const INTAKE_INSTRUCTION_ENTITY_RE =
+  /\b(?:require|draft|include\s+(?:provisions|a\b)|commercial\s+terms|execution\s+block|representative\s+name|mailing\s+address\s+for|under\s+which|specialized\s+services)\b/i;
+
 export function looksLikeStackedPartyLegalEntityLine(line: string): boolean {
   const t = norm(line);
   if (!t || looksLikeStackedPartyEmailLine(t)) return false;
+  if (t.length > 90) return false;
+  if (INTAKE_INSTRUCTION_ENTITY_RE.test(t)) return false;
+  if (/\bfor\s+each\s+company\b/i.test(t)) return false;
   return PARTY_ENTITY_SUFFIX_RE.test(t);
 }
 

@@ -21,7 +21,7 @@ import { entitiesMatchForSignerMetadata } from "./universalSignerMetadataAuthori
 import { isPartyMetadataLabelValue } from "./intakeSectionLabels";
 import {
   mergeCanonicalPartyAddresses,
-  normalizeCanonicalPartyAddress,
+  sanitizeCanonicalPartyAddress,
 } from "./canonicalPartyStructuredAddress";
 import {
   hashPaidProSignerMetadataAuthority,
@@ -139,8 +139,8 @@ function trimField(value: string | null | undefined): string {
   return isPartyMetadataLabelValue(t) ? "" : t;
 }
 
-function trimPartyAddressField(value: string | null | undefined): string {
-  return normalizeCanonicalPartyAddress(value);
+function trimPartyAddressField(value: string | null | undefined, slot?: number): string {
+  return sanitizeCanonicalPartyAddress(value, { slot, source: "canonicalPartyMetadataAuthority" });
 }
 
 function sanitizeSignerMetadataField(value: string | null | undefined): string {
@@ -185,7 +185,7 @@ function recordFromAuthorityParty(
     signerName: sanitizeSignerMetadataField(party.signerName),
     signerTitle: sanitizeSignerMetadataField(party.signerTitle),
     signerEmail: trimField(party.signerEmail),
-    partyAddress: trimPartyAddressField(party.partyAddress),
+    partyAddress: trimPartyAddressField(party.partyAddress, partyIndex),
     source,
   };
 }

@@ -17,7 +17,12 @@ import {
   isPartyMetadataFieldLabelLine,
   isPartyMetadataLabelValue,
 } from "./intakeSectionLabels";
-import { joinCanonicalPartyAddressLines, mergeCanonicalPartyAddresses } from "./canonicalPartyStructuredAddress";
+import {
+  isPartyAddressBoundaryLine,
+  joinCanonicalPartyAddressLines,
+  mergeCanonicalPartyAddresses,
+  normalizeCanonicalPartyAddress,
+} from "./canonicalPartyStructuredAddress";
 import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
@@ -141,7 +146,9 @@ function consumeAddressHeaderStackedFields(
     index += 1;
   }
   if (parts.length > 0) {
-    block.address = joinCanonicalPartyAddressLines(parts);
+    block.address = normalizeCanonicalPartyAddress(joinCanonicalPartyAddressLines(parts), {
+      source: "consumeAddressHeaderStackedFields",
+    });
   }
   return index - 1;
 }
@@ -190,8 +197,10 @@ function applyRepresentedByField(block: LabeledPartyBlock, rawValue: string): vo
 function isAddressContinuationLine(line: string): boolean {
   const t = stripIntakeBulletPrefix(line);
   if (!t) return false;
+  if (isPartyAddressBoundaryLine(t)) return false;
   if (matchLabeledPartyField(t)) return false;
   if (PARTY_BLOCK_HEADER_RE.test(t) || COORDINATOR_BLOCK_HEADER_RE.test(t)) return false;
+  if (PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(t) || PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(t)) return false;
   if (ROLE_LABEL_PARTY_HEADER_RE.test(t)) return false;
   if (isIntakeSectionLabelLine(t)) return false;
   if (looksLikeStackedPartyEmailLine(t)) return false;
@@ -213,7 +222,9 @@ function appendMultilineAddress(block: LabeledPartyBlock, firstLine: string, lin
     parts.push(cleanFieldValue(stripIntakeBulletPrefix(nextRaw)));
     index += 1;
   }
-  block.address = joinCanonicalPartyAddressLines(parts);
+  block.address = normalizeCanonicalPartyAddress(joinCanonicalPartyAddressLines(parts), {
+    source: "appendMultilineAddress",
+  });
   return index;
 }
 

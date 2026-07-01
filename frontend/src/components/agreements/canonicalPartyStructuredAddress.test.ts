@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  isPartyAddressBoundaryLine,
   joinCanonicalPartyAddressLines,
   mergeCanonicalPartyAddresses,
   normalizeCanonicalPartyAddress,
+  sanitizeCanonicalPartyAddress,
   splitCanonicalPartyAddressLines,
 } from "./canonicalPartyStructuredAddress";
 
@@ -35,5 +37,21 @@ describe("canonicalPartyStructuredAddress", () => {
     const normalized = normalizeCanonicalPartyAddress("910 Harbor Commerce Blvd\n\nTampa, FL 33602");
     expect(normalized).toBe("910 Harbor Commerce Blvd, Tampa, FL 33602");
     expect(normalizeCanonicalPartyAddress("Address:")).toBe("");
+  });
+
+  it("stops at party headings and agreement prose (TEST484)", () => {
+    const contaminated =
+      "1400 Capital Plaza, Alexandria, VA 22314, Draft a detailed agreement under which each party";
+    expect(sanitizeCanonicalPartyAddress(contaminated)).toBe(
+      "1400 Capital Plaza, Alexandria, VA 22314",
+    );
+    expect(
+      joinCanonicalPartyAddressLines([
+        "4220 Industrial Drive",
+        "Fort Wayne, IN 46808",
+        "Party 3 (Exclusive Distributor)",
+      ]),
+    ).toBe("4220 Industrial Drive, Fort Wayne, IN 46808");
+    expect(isPartyAddressBoundaryLine("Party 4 (Regulatory & Quality Consultant)")).toBe(true);
   });
 });
