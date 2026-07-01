@@ -10,6 +10,7 @@ import {
   readCanonicalPartyMetadata,
 } from "./canonicalPartyMetadataAuthority";
 import { alignIntakeSignerMetadataToLegalEntities } from "./structuredIntakePartyContactParse";
+import { mergeCanonicalPartyAddresses } from "./canonicalPartyStructuredAddress";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
 import type { PremiumRecipientHandoffV2 } from "./premiumPartyNamesHandoff";
 import { logPaidProSignerMetadataPipelineDiagnostics } from "./paidProSignerMetadataPipelineDiagnostics";
@@ -102,11 +103,10 @@ function buildUiPartiesFromSeedArgs(
         slot?.signerEmail ||
         handoffContacts.emails[i] ||
         "",
-      partyAddress:
-        (args.uiPartyAddresses?.[i] ?? "").trim() ||
-        slot?.partyAddress ||
-        handoffContacts.addresses[i] ||
-        "",
+      partyAddress: mergeCanonicalPartyAddresses(
+        slot?.partyAddress || handoffContacts.addresses[i] || "",
+        args.uiPartyAddresses?.[i] ?? "",
+      ),
     });
   }
   return parties;
@@ -177,8 +177,7 @@ export function runPaidProSignerMetadataAuthoritySeed(
   const hasUserEdits = uiParties.some(
     (_, i) =>
       (args.uiSignerNames?.[i] ?? "").trim() ||
-      (args.uiSignerTitles?.[i] ?? "").trim() ||
-      (args.uiPartyAddresses?.[i] ?? "").trim(),
+      (args.uiSignerTitles?.[i] ?? "").trim(),
   );
 
   const canonicalStage = mapCanonicalStageFromSeedStage(args.stage);
@@ -196,6 +195,10 @@ export function runPaidProSignerMetadataAuthoritySeed(
   const titles = bundle.parties.map((p) => p.signerTitle);
   const emails = bundle.parties.map((p) => p.signerEmail);
   const addresses = bundle.parties.map((p) => p.partyAddress);
+  const intakeAddresses = intakeAligned.map((s) => s.partyAddress);
+  const finalAddresses = Array.from({ length: partyCount }, (_, i) =>
+    mergeCanonicalPartyAddresses(addresses[i] ?? "", intakeAddresses[i] ?? ""),
+  );
 
   const resolvedNames = resolved.map((r) => r.signerName);
   const resolvedTitles = resolved.map((r) => r.signerTitle);
@@ -217,7 +220,7 @@ export function runPaidProSignerMetadataAuthoritySeed(
       bundle.parties.some((p) => p.signerName.trim() || p.signerTitle.trim()));
   const contactFieldsChanged =
     emails.some(Boolean) ||
-    addresses.some(Boolean) ||
+    finalAddresses.some(Boolean) ||
     finalNames.changed ||
     finalTitles.changed;
 
@@ -249,7 +252,7 @@ export function runPaidProSignerMetadataAuthoritySeed(
     names: finalNames.values,
     titles: finalTitles.values,
     emails,
-    addresses,
+    addresses: finalAddresses,
     uiChanged,
     contactFieldsChanged,
     draft,

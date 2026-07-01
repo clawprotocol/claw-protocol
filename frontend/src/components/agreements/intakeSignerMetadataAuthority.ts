@@ -12,6 +12,7 @@ import {
 import { entitiesMatchForSignerMetadata } from "./universalSignerMetadataAuthority";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 
 export type IntakeSignerMetadataSource =
@@ -75,7 +76,7 @@ function cleanEmail(value: string | null | undefined): string {
 }
 
 function cleanAddress(value: string | null | undefined): string {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
+  return normalizeCanonicalPartyAddress(value);
 }
 
 function isLegalEntityName(value: string): boolean {

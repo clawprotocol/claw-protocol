@@ -3,6 +3,7 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { mergeCanonicalPartyAddresses } from "./canonicalPartyStructuredAddress";
 import {
   resolveCanonicalPartyIdentitiesFromIntake,
   resolveCanonicalPartyIdentitiesFromSources,
@@ -68,7 +69,7 @@ function mergeCanonicalBundleWhenSignerMetadataPresent(
       signerName: base.signerName.trim() || canon.signerName,
       signerTitle: base.signerTitle.trim() || canon.signerTitle,
       signerEmail: base.signerEmail.trim() || canon.signerEmail,
-      partyAddress: base.partyAddress.trim() || canon.partyAddress,
+      partyAddress: mergeCanonicalPartyAddresses(base.partyAddress, canon.partyAddress),
     });
   }
   return out.length ? out : merged;

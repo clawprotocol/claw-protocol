@@ -20,6 +20,10 @@ import {
 import { entitiesMatchForSignerMetadata } from "./universalSignerMetadataAuthority";
 import { isPartyMetadataLabelValue } from "./intakeSectionLabels";
 import {
+  mergeCanonicalPartyAddresses,
+  normalizeCanonicalPartyAddress,
+} from "./canonicalPartyStructuredAddress";
+import {
   hashPaidProSignerMetadataAuthority,
   paidProSignerMetadataForensicLineageEnabled,
   readConsumedPaidProSignerMetadataAuthority,
@@ -135,6 +139,10 @@ function trimField(value: string | null | undefined): string {
   return isPartyMetadataLabelValue(t) ? "" : t;
 }
 
+function trimPartyAddressField(value: string | null | undefined): string {
+  return normalizeCanonicalPartyAddress(value);
+}
+
 function sanitizeSignerMetadataField(value: string | null | undefined): string {
   const raw = trimField(value);
   if (!raw) return "";
@@ -177,7 +185,7 @@ function recordFromAuthorityParty(
     signerName: sanitizeSignerMetadataField(party.signerName),
     signerTitle: sanitizeSignerMetadataField(party.signerTitle),
     signerEmail: trimField(party.signerEmail),
-    partyAddress: trimField(party.partyAddress),
+    partyAddress: trimPartyAddressField(party.partyAddress),
     source,
   };
 }
@@ -323,7 +331,17 @@ function mergeRecordFields(
   assign("signerName");
   assign("signerTitle");
   assign("signerEmail");
-  assign("partyAddress");
+  const nextAddress = incoming.partyAddress.trim();
+  if (nextAddress) {
+    const merged = mergeCanonicalPartyAddresses(target.partyAddress, nextAddress);
+    const intakeEnrichment =
+      incoming.source === "structured_intake" && target.partyAddress.trim().length > 0;
+    if (!target.partyAddress.trim()) {
+      target.partyAddress = merged;
+    } else if (intakeEnrichment || !userEdited || merged.length >= target.partyAddress.length) {
+      target.partyAddress = merged;
+    }
+  }
   if (userEdited) target.source = incoming.source;
   else if (incoming.source === "structured_intake" && target.source === "generic_placeholder") {
     target.source = incoming.source;

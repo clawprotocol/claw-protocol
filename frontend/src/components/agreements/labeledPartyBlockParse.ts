@@ -11,7 +11,13 @@ import {
   looksLikeStackedPartyPersonNameLine,
   looksLikeStackedPartyTitleLine,
 } from "./starterPartyIdentityIsolation";
-import { isIntakeSectionLabelLine, isInvalidPartyMetadataValue, isPartyMetadataFieldLabelLine, isPartyMetadataLabelValue } from "./intakeSectionLabels";
+import {
+  isIntakeSectionLabelLine,
+  isInvalidPartyMetadataValue,
+  isPartyMetadataFieldLabelLine,
+  isPartyMetadataLabelValue,
+} from "./intakeSectionLabels";
+import { joinCanonicalPartyAddressLines, mergeCanonicalPartyAddresses } from "./canonicalPartyStructuredAddress";
 import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
@@ -125,14 +131,17 @@ function consumeAddressHeaderStackedFields(
   const parts: string[] = [];
   while (index < lines.length) {
     const candidate = stripIntakeBulletPrefix(lines[index]?.trim() ?? "");
-    if (!candidate) break;
+    if (!candidate) {
+      index += 1;
+      continue;
+    }
     if (!parts.length && !isAddressContinuationLine(candidate)) break;
     if (parts.length > 0 && !isAddressContinuationLine(candidate)) break;
     parts.push(cleanFieldValue(candidate));
     index += 1;
   }
   if (parts.length > 0) {
-    block.address = parts.join(", ").replace(/\s+/g, " ").trim();
+    block.address = joinCanonicalPartyAddressLines(parts);
   }
   return index - 1;
 }
@@ -192,16 +201,19 @@ function isAddressContinuationLine(line: string): boolean {
 }
 
 function appendMultilineAddress(block: LabeledPartyBlock, firstLine: string, lines: string[], startIndex: number): number {
-  let continued = cleanFieldValue(firstLine);
+  const parts = [cleanFieldValue(firstLine)];
   let index = startIndex;
   while (index + 1 < lines.length) {
     const nextRaw = lines[index + 1]?.trim() ?? "";
-    if (!nextRaw) break;
+    if (!nextRaw) {
+      index += 1;
+      continue;
+    }
     if (!isAddressContinuationLine(nextRaw)) break;
-    continued = `${continued}, ${cleanFieldValue(stripIntakeBulletPrefix(nextRaw))}`.replace(/\s+/g, " ").trim();
+    parts.push(cleanFieldValue(stripIntakeBulletPrefix(nextRaw)));
     index += 1;
   }
-  block.address = continued;
+  block.address = joinCanonicalPartyAddressLines(parts);
   return index;
 }
 
@@ -286,6 +298,10 @@ function applyStackedPartyLine(block: LabeledPartyBlock, line: string): void {
   }
   if (!block.signerTitle && looksLikeUnlabeledSignerTitleLine(t)) {
     block.signerTitle = cleanFieldValue(t);
+    return;
+  }
+  if (block.address && isAddressContinuationLine(t)) {
+    block.address = mergeCanonicalPartyAddresses(block.address, cleanFieldValue(t));
     return;
   }
   if (!block.address && !isIntakeSectionLabelLine(t) && !isInvalidPartyMetadataValue(t)) {
