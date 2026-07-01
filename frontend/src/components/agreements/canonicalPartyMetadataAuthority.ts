@@ -18,6 +18,7 @@ import {
   type CanonicalMutableMutationSource,
 } from "./canonicalPartyMetadataGuard";
 import { entitiesMatchForSignerMetadata } from "./universalSignerMetadataAuthority";
+import { isPartyMetadataLabelValue } from "./intakeSectionLabels";
 import {
   hashPaidProSignerMetadataAuthority,
   paidProSignerMetadataForensicLineageEnabled,
@@ -130,7 +131,15 @@ function createBundleId(): string {
 }
 
 function trimField(value: string | null | undefined): string {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
+  const t = String(value ?? "").replace(/\s+/g, " ").trim();
+  return isPartyMetadataLabelValue(t) ? "" : t;
+}
+
+function sanitizeSignerMetadataField(value: string | null | undefined): string {
+  const raw = trimField(value);
+  if (!raw) return "";
+  const normalized = signerMetadataInputRaw(raw);
+  return isPartyMetadataLabelValue(normalized) ? "" : normalized;
 }
 
 function recordFingerprint(p: CanonicalPartyMetadataRecord): string {
@@ -165,8 +174,8 @@ function recordFromAuthorityParty(
     partyIndex,
     partyLegalName,
     roleLabel: "",
-    signerName: signerMetadataInputRaw(party.signerName),
-    signerTitle: signerMetadataInputRaw(party.signerTitle),
+    signerName: sanitizeSignerMetadataField(party.signerName),
+    signerTitle: sanitizeSignerMetadataField(party.signerTitle),
     signerEmail: trimField(party.signerEmail),
     partyAddress: trimField(party.partyAddress),
     source,

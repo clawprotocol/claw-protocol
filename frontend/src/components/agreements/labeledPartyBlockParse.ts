@@ -11,7 +11,7 @@ import {
   looksLikeStackedPartyPersonNameLine,
   looksLikeStackedPartyTitleLine,
 } from "./starterPartyIdentityIsolation";
-import { isIntakeSectionLabelLine, isInvalidPartyMetadataValue } from "./intakeSectionLabels";
+import { isIntakeSectionLabelLine, isInvalidPartyMetadataValue, isPartyMetadataFieldLabelLine, isPartyMetadataLabelValue } from "./intakeSectionLabels";
 import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
@@ -60,7 +60,86 @@ export function stripIntakeBulletPrefix(line: string): string {
     .trim();
 }
 
+function looksLikeUnlabeledSignerTitleLine(line: string): boolean {
+  const t = stripIntakeBulletPrefix(line);
+  if (!t || isPartyMetadataFieldLabelLine(t)) return false;
+  if (looksLikeStackedPartyEmailLine(t)) return false;
+  if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return false;
+  if (looksLikeStackedPartyPersonNameLine(t)) return false;
+  if (looksLikeStackedPartyTitleLine(t)) return true;
+  if (
+    /\b(?:president|director|officer|operations|executive|manager|consultant|member|partner|secretary|treasurer|vp|vice)\b/i.test(
+      t,
+    )
+  ) {
+    return t.split(/\s+/).length <= 8;
+  }
+  return false;
+}
+
+function isPositionalSignerTitleCandidate(line: string): boolean {
+  const t = stripIntakeBulletPrefix(line);
+  if (!t || isPartyMetadataFieldLabelLine(t)) return false;
+  if (matchLabeledPartyField(t)) return false;
+  if (looksLikeStackedPartyEmailLine(t)) return false;
+  if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return false;
+  if (PARTY_BLOCK_HEADER_RE.test(t) || COORDINATOR_BLOCK_HEADER_RE.test(t)) return false;
+  return true;
+}
+
+function consumeRepresentedByStackedFields(
+  block: LabeledPartyBlock,
+  lines: string[],
+  startIndex: number,
+): number {
+  let index = startIndex + 1;
+  while (index < lines.length) {
+    const candidate = stripIntakeBulletPrefix(lines[index]?.trim() ?? "");
+    if (!candidate) {
+      index += 1;
+      continue;
+    }
+    if (matchLabeledPartyField(candidate) || isPartyMetadataFieldLabelLine(candidate)) break;
+    if (PARTY_BLOCK_HEADER_RE.test(candidate) || COORDINATOR_BLOCK_HEADER_RE.test(candidate)) break;
+    if (!block.signerName && looksLikeStackedPartyPersonNameLine(candidate)) {
+      block.signerName = cleanFieldValue(candidate);
+      index += 1;
+      continue;
+    }
+    if (!block.signerTitle && block.signerName && isPositionalSignerTitleCandidate(candidate)) {
+      block.signerTitle = cleanFieldValue(candidate);
+      index += 1;
+      break;
+    }
+    break;
+  }
+  return index - 1;
+}
+
+function consumeAddressHeaderStackedFields(
+  block: LabeledPartyBlock,
+  lines: string[],
+  startIndex: number,
+): number {
+  let index = startIndex + 1;
+  const parts: string[] = [];
+  while (index < lines.length) {
+    const candidate = stripIntakeBulletPrefix(lines[index]?.trim() ?? "");
+    if (!candidate) break;
+    if (!parts.length && !isAddressContinuationLine(candidate)) break;
+    if (parts.length > 0 && !isAddressContinuationLine(candidate)) break;
+    parts.push(cleanFieldValue(candidate));
+    index += 1;
+  }
+  if (parts.length > 0) {
+    block.address = parts.join(", ").replace(/\s+/g, " ").trim();
+  }
+  return index - 1;
+}
+
 const REPRESENTED_BY_HEADER_RE = /^\s*represented\s+by\s*:?\s*$/i;
+const ADDRESS_HEADER_ONLY_RE =
+  /^\s*(?:address|physical\s+address|mailing\s+address|party\s+address)\s*:?\s*$/i;
 
 const LABELED_FIELD_RES: ReadonlyArray<{ key: keyof Omit<LabeledPartyBlock, "index">; re: RegExp }> = [
   {
@@ -132,7 +211,9 @@ function matchLabeledPartyField(line: string): { key: keyof Omit<LabeledPartyBlo
   for (const { key, re } of LABELED_FIELD_RES) {
     const m = normalized.match(re);
     if (!m?.[1]) continue;
-    return { key, value: cleanFieldValue(m[1]) };
+    const value = cleanFieldValue(m[1]);
+    if (!value) continue;
+    return { key, value };
   }
   return null;
 }
@@ -166,7 +247,9 @@ export function isUnknownIntakePlaceholderValue(value: string | null | undefined
 
 function cleanFieldValue(value: string): string {
   const t = value.replace(/\s+/g, " ").trim();
-  return isUnknownIntakePlaceholderValue(t) ? "" : t;
+  if (isUnknownIntakePlaceholderValue(t)) return "";
+  if (isPartyMetadataLabelValue(t)) return "";
+  return t;
 }
 
 function emptyBlock(index: number): LabeledPartyBlock {
@@ -197,7 +280,11 @@ function applyStackedPartyLine(block: LabeledPartyBlock, line: string): void {
     block.signerName = cleanFieldValue(t);
     return;
   }
-  if (!block.signerTitle && looksLikeStackedPartyTitleLine(t)) {
+  if (!block.signerTitle && block.signerName && isPositionalSignerTitleCandidate(t)) {
+    block.signerTitle = cleanFieldValue(t);
+    return;
+  }
+  if (!block.signerTitle && looksLikeUnlabeledSignerTitleLine(t)) {
     block.signerTitle = cleanFieldValue(t);
     return;
   }
@@ -321,17 +408,9 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
       const block = blocksByIndex.get(currentIndex) ?? emptyBlock(currentIndex);
       const normalized = stripIntakeBulletPrefix(line);
       if (REPRESENTED_BY_HEADER_RE.test(normalized)) {
-        const nextLine = stripIntakeBulletPrefix(lines[lineIndex + 1]?.trim() ?? "");
-        if (nextLine && !matchLabeledPartyField(nextLine) && looksLikeStackedPartyPersonNameLine(nextLine)) {
-          if (!block.signerName) block.signerName = cleanFieldValue(nextLine);
-          lineIndex += 1;
-          const titleLine = stripIntakeBulletPrefix(lines[lineIndex + 1]?.trim() ?? "");
-          const titleField = titleLine ? matchLabeledPartyField(titleLine) : null;
-          if (titleField?.key === "signerTitle" && !block.signerTitle) {
-            block.signerTitle = titleField.value;
-            lineIndex += 1;
-          }
-        }
+        lineIndex = consumeRepresentedByStackedFields(block, lines, lineIndex);
+      } else if (ADDRESS_HEADER_ONLY_RE.test(normalized)) {
+        lineIndex = consumeAddressHeaderStackedFields(block, lines, lineIndex);
       } else {
         const labeled = matchLabeledPartyField(line);
         if (labeled) {
@@ -402,11 +481,13 @@ export function parseEntityHeaderContactBlocks(raw: string): LabeledPartyBlock[]
 
     if (REPRESENTED_BY_HEADER_RE.test(line)) {
       if (!current) current = emptyBlock(blocks.length + 1);
-      const nextLine = stripIntakeBulletPrefix(lines[lineIndex + 1]?.trim() ?? "");
-      if (nextLine && !matchLabeledPartyField(nextLine) && looksLikeStackedPartyPersonNameLine(nextLine)) {
-        if (!current.signerName) current.signerName = cleanFieldValue(nextLine);
-        lineIndex += 1;
-      }
+      lineIndex = consumeRepresentedByStackedFields(current, lines, lineIndex);
+      continue;
+    }
+
+    if (ADDRESS_HEADER_ONLY_RE.test(line)) {
+      if (!current) current = emptyBlock(blocks.length + 1);
+      lineIndex = consumeAddressHeaderStackedFields(current, lines, lineIndex);
       continue;
     }
 

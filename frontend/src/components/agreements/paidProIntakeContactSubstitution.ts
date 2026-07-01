@@ -9,6 +9,7 @@ import {
   normalizePlaceholderToken,
   parseSignatureContactSlot,
 } from "./agreementTemplatePlaceholderSafety";
+import { isPartyMetadataLabelValue } from "./intakeSectionLabels";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 
 export type IntakeContactRecord = {
@@ -50,11 +51,19 @@ export function extractIntakeContacts(intakeRaw: string | null | undefined): Int
     const low = email.toLowerCase();
     if (seenEmails.has(low)) continue;
     seenEmails.add(low);
-    const beforeEmail = trimmed.slice(0, trimmed.lastIndexOf(email)).replace(/^\s*[*•\-]\s*/, "").trim();
+    const beforeEmail = trimmed
+      .slice(0, trimmed.lastIndexOf(email))
+      .replace(/^\s*[*•\-]\s*/, "")
+      .replace(/^(?:signer\s+)?email\s*:\s*/i, "")
+      .trim();
     const segments = beforeEmail.split(/\s*[—–-]\s*/).map((s) => s.replace(/\s+/g, " ").trim());
     const name = segments[0] || "";
     const title = segments[1] || "";
     const companyHint = segments[2] || segments[1]?.replace(/^.*\bat\s+/i, "").trim() || "";
+    if (isPartyMetadataLabelValue(name)) {
+      records.push({ name: "", title: "", companyHint: "", email, line: trimmed.slice(0, 200) });
+      continue;
+    }
     records.push({
       name,
       title,

@@ -64,4 +64,26 @@ describe("labeledPartyBlockParse", () => {
     expect(blocks[1]?.legalEntity).toBe("Harbor Peak Automation LLC");
     expect(blocks[1]?.signerEmail).toBe("michael@harborpeakautomation.com");
   });
+
+  it("parses Represented by header with positional title and multiline Address (TEST482)", () => {
+    const intake = `Party 1:
+Aurora Biotech Innovations LLC
+Represented by:
+Emma Richardson
+Chief Executive Officer
+Email: emma.richardson@aurorabiotech.com
+Address:
+1850 Innovation Parkway
+Madison, WI 53703`;
+    const blocks = parseLabeledPartyBlocks(intake);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      legalEntity: "Aurora Biotech Innovations LLC",
+      signerName: "Emma Richardson",
+      signerTitle: "Chief Executive Officer",
+      signerEmail: "emma.richardson@aurorabiotech.com",
+      address: "1850 Innovation Parkway, Madison, WI 53703",
+    });
+    expect(blocks[0]?.signerName).not.toBe("Email:");
+  });
 });
