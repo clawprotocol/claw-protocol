@@ -31,6 +31,53 @@ import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProF
 
 const LOG_PREFIX = "[signer-count-authority]";
 
+export type SignerCountLogDedupeState = {
+  lastResolveSignature: string;
+  lastConsumerBySurface: Map<string, string>;
+  lastMismatchBySurface: Map<string, string>;
+  lastCorpusInflationSignature: string;
+};
+
+function createSignerCountLogDedupeState(): SignerCountLogDedupeState {
+  return {
+    lastResolveSignature: "",
+    lastConsumerBySurface: new Map(),
+    lastMismatchBySurface: new Map(),
+    lastCorpusInflationSignature: "",
+  };
+}
+
+const signerCountLogDedupe = createSignerCountLogDedupeState();
+
+/** Reset dedupe caches — tests only. */
+export function resetSignerCountAuthorityDiagnosticsForTests(): void {
+  signerCountLogDedupe.lastResolveSignature = "";
+  signerCountLogDedupe.lastConsumerBySurface.clear();
+  signerCountLogDedupe.lastMismatchBySurface.clear();
+  signerCountLogDedupe.lastCorpusInflationSignature = "";
+}
+
+export function shouldEmitDedupedLog(
+  getCurrent: () => string,
+  setCurrent: (next: string) => void,
+  signature: string,
+): boolean {
+  if (getCurrent() === signature) return false;
+  setCurrent(signature);
+  return true;
+}
+
+export function shouldEmitDedupedSurfaceLog(
+  cache: Map<string, string>,
+  surface: string,
+  signature: string,
+): boolean {
+  const prev = cache.get(surface);
+  if (prev === signature) return false;
+  cache.set(surface, signature);
+  return true;
+}
+
 export type SignerCountAuthorityResolution = {
   count: number;
   source:
@@ -73,8 +120,7 @@ export function logSignerCountAuthority(
   context?: string,
 ): void {
   if (isTestMode()) return;
-  // eslint-disable-next-line no-console
-  console.info(LOG_PREFIX, {
+  const payload = {
     context: context ?? "resolve",
     count: resolution.count,
     source: resolution.source,
@@ -83,7 +129,20 @@ export function logSignerCountAuthority(
     corpusBlockCount: resolution.corpusBlockCount,
     partySlotCount: resolution.partySlotCount,
     manifestConsumerCount: resolution.manifestConsumerCount,
-  });
+  };
+  if (
+    !shouldEmitDedupedLog(
+      () => signerCountLogDedupe.lastResolveSignature,
+      (next) => {
+        signerCountLogDedupe.lastResolveSignature = next;
+      },
+      JSON.stringify(payload),
+    )
+  ) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.info(LOG_PREFIX, payload);
 }
 
 export function logSignerCountConsumerMismatch(payload: {
@@ -101,6 +160,16 @@ export function logSignerCountConsumerMismatch(payload: {
   ) {
     return;
   }
+  const signature = JSON.stringify(payload);
+  if (
+    !shouldEmitDedupedSurfaceLog(
+      signerCountLogDedupe.lastMismatchBySurface,
+      payload.surface,
+      signature,
+    )
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.warn(`${LOG_PREFIX}-mismatch`, payload);
 }
@@ -113,6 +182,16 @@ export function logSignerCountConsumer(payload: {
   source: SignerCountAuthorityResolution["source"];
 }): void {
   if (isTestMode()) return;
+  const signature = JSON.stringify(payload);
+  if (
+    !shouldEmitDedupedSurfaceLog(
+      signerCountLogDedupe.lastConsumerBySurface,
+      payload.surface,
+      signature,
+    )
+  ) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.info(`${LOG_PREFIX}-consumer`, payload);
 }
@@ -170,12 +249,24 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   }
 
   if (corpusBlockCount > count && count >= 2 && !isTestMode() && import.meta.env?.DEV) {
-    // eslint-disable-next-line no-console
-    console.info(LOG_PREFIX, {
+    const inflationPayload = {
       context: "corpus_inflation_ignored",
       corpusBlockCount,
       authoritativeCount: count,
-    });
+    };
+    const signature = JSON.stringify(inflationPayload);
+    if (
+      shouldEmitDedupedLog(
+        () => signerCountLogDedupe.lastCorpusInflationSignature,
+        (next) => {
+          signerCountLogDedupe.lastCorpusInflationSignature = next;
+        },
+        signature,
+      )
+    ) {
+      // eslint-disable-next-line no-console
+      console.info(LOG_PREFIX, inflationPayload);
+    }
   }
 
   const betweenDeduped = dedupeEntityCandidatesToLegalParties(

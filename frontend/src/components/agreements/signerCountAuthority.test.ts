@@ -13,9 +13,12 @@ import {
   assertSignerCountNotFromCorpus,
   consumeAuthoritativeSignerCount,
   inferCorpusDerivedSignerCount,
+  resetSignerCountAuthorityDiagnosticsForTests,
   resolveAuthoritativeSignerCount,
   resolveSignerCountFromIdentities,
   resolveSignerCountFromManifest,
+  shouldEmitDedupedLog,
+  shouldEmitDedupedSurfaceLog,
 } from "./signerCountAuthority";
 
 const BLUE = "Blue Canyon Analytics LLC";
@@ -303,5 +306,51 @@ describe("signerCountAuthority", () => {
         draftPartyNames: [BLUE, HARBOR],
       }).source,
     ).toBe("labeled_parties");
+  });
+
+  it("dedupes identical resolve and consumer log signatures", () => {
+    resetSignerCountAuthorityDiagnosticsForTests();
+    let last = "";
+    const setLast = (next: string) => {
+      last = next;
+    };
+    const sig = JSON.stringify({ count: 4, source: "labeled_parties" });
+    expect(shouldEmitDedupedLog(() => last, setLast, sig)).toBe(true);
+    expect(shouldEmitDedupedLog(() => last, setLast, sig)).toBe(false);
+    expect(
+      shouldEmitDedupedLog(
+        () => last,
+        setLast,
+        JSON.stringify({ count: 3, source: "labeled_parties" }),
+      ),
+    ).toBe(true);
+
+    const cache = new Map<string, string>();
+    const consumerSig = JSON.stringify({
+      surface: "enforcePaidProSingleExecutionBlock",
+      authoritativeCount: 4,
+      consumerCount: 4,
+      matched: true,
+      source: "labeled_parties",
+    });
+    expect(
+      shouldEmitDedupedSurfaceLog(cache, "enforcePaidProSingleExecutionBlock", consumerSig),
+    ).toBe(true);
+    expect(
+      shouldEmitDedupedSurfaceLog(cache, "enforcePaidProSingleExecutionBlock", consumerSig),
+    ).toBe(false);
+    expect(
+      shouldEmitDedupedSurfaceLog(
+        cache,
+        "enforcePaidProSingleExecutionBlock",
+        JSON.stringify({
+          surface: "enforcePaidProSingleExecutionBlock",
+          authoritativeCount: 3,
+          consumerCount: 4,
+          matched: false,
+          source: "labeled_parties",
+        }),
+      ),
+    ).toBe(true);
   });
 });
