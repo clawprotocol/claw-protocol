@@ -18,9 +18,15 @@ const INTAKE_INSTRUCTION_LINE_RE =
 const INLINE_ADDRESS_BOUNDARY_RE =
   /,\s*(?:party\s+\d+\b(?:\s*\([^)]*\))?|draft\b|include\b|require\b|commercial\s+terms\b)/i;
 
+/** Instructional / execution prose fused after a notice or intake address line (TEST486). */
+const NOTICE_INSTRUCTION_INLINE_BOUNDARY_RE =
+  /,\s*(?:each party should\b|signature block\b|in witness whereof\b|parties (?:shall )?execute\b|parties (?:have|may) (?:signed|executed)\b)/i;
+
 function inlineAddressBoundaryMatch(segment: string): RegExpMatchArray | null {
   const partyMatch = segment.match(INLINE_ADDRESS_BOUNDARY_RE);
   if (partyMatch) return partyMatch;
+  const noticeMatch = segment.match(NOTICE_INSTRUCTION_INLINE_BOUNDARY_RE);
+  if (noticeMatch) return noticeMatch;
   return segment.match(STRUCTURED_PROMPT_SECTION_INLINE_BOUNDARY_RE);
 }
 
@@ -76,6 +82,10 @@ export function isPartyAddressContaminationSegment(segment: string | null | unde
   if (PARTY_ROLE_PAREN_RE.test(t)) return true;
   if (isStructuredPromptSectionLabelToken(t)) return true;
   if (/\bdraft\s+a\b/i.test(t)) return true;
+  if (/\beach party should\b/i.test(t)) return true;
+  if (/\bsignature block\b/i.test(t)) return true;
+  if (/\bin witness whereof\b/i.test(t)) return true;
+  if (/^(?:By|Name|Title|Date)\s*:/i.test(t)) return true;
   if (/\b(?:exclusive|regulatory|quality|distributor|manufacturer|licensor|consultant)\b/i.test(t) && /\bparty\s+\d+\b/i.test(t)) {
     return true;
   }

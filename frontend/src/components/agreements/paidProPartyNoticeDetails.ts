@@ -22,6 +22,11 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import { isAuthoritativeLegalEntityName, collapseDuplicateNoticeEntityLines, collapseDuplicatedLegalEntityPhrase } from "./paidProPartyNamePreserve";
 import { isIntakeSectionLabelLine } from "./intakeSectionLabels";
+import {
+  isPartyAddressBoundaryLine,
+  sanitizeCanonicalPartyAddress,
+} from "./canonicalPartyStructuredAddress";
+import { isAddressContinuationLine } from "./labeledPartyBlockParse";
 import { readFrozenCanonicalManifestPartyNames, readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
@@ -467,6 +472,23 @@ export function logPaidProNoticeSectionIntegrity(payload: {
   });
 }
 
+/**
+ * Display-only: split a single-line US address into street + city/state/ZIP for notice stanza layout.
+ * Not used for extraction or boundary detection.
+ */
+export function formatUsNoticeAddressForDisplay(address: string): string[] {
+  const trimmed = address.trim();
+  if (!trimmed) return [];
+  const usAddress = trimmed.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/i);
+  if (usAddress) {
+    return [
+      usAddress[1].trim(),
+      `${usAddress[2].trim()}, ${usAddress[3].toUpperCase()} ${usAddress[4]}`,
+    ];
+  }
+  return [trimmed];
+}
+
 /** Optional-contact display: omit missing email/address; never emit placeholder tokens. */
 export function formatNoticeAddressLines(address: string): string[] {
   const trimmed = address.trim();
@@ -476,14 +498,199 @@ export function formatNoticeAddressLines(address: string): string[] {
     .map((line) => line.trim())
     .filter(Boolean);
   if (explicitLines.length > 1) return explicitLines;
-  const usAddress = trimmed.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/i);
-  if (usAddress) {
-    return [
-      usAddress[1].trim(),
-      `${usAddress[2].trim()}, ${usAddress[3].toUpperCase()} ${usAddress[4]}`,
-    ];
+  return formatUsNoticeAddressForDisplay(trimmed);
+}
+
+const NOTICE_ADDRESS_HEADER_RE = /^Address(?:\s+for\s+Notice)?\s*:\s*(.*)$/i;
+
+const NOTICE_ADDRESS_EXECUTION_LINE_RE =
+  /^(?:By|Name|Title|Date|CLIENT|SERVICE\s+PROVIDER)\s*:/i;
+
+const NOTICE_ADDRESS_INSTRUCTIONAL_LINE_RE =
+  /\b(?:each party should\b|signature block\b|in witness whereof\b|parties (?:shall )?execute\b)/i;
+
+/** True when a line must stop multiline notice-address capture (execution, headings, prose). */
+export function isNoticeAddressCaptureBoundaryLine(line: string | null | undefined): boolean {
+  const t = String(line ?? "").replace(/\s+/g, " ").trim();
+  if (!t) return true;
+  if (isPartyAddressBoundaryLine(t)) return true;
+  if (isIntakeSectionLabelLine(t)) return true;
+  if (noticeStanzaHasExecutionPollution(t)) return true;
+  if (NOTICE_ADDRESS_EXECUTION_LINE_RE.test(t)) return true;
+  if (/^If to\s+/i.test(t)) return true;
+  if (/^\d+\.(?!\d)\s+\S/.test(t)) return true;
+  if (NOTICE_ADDRESS_INSTRUCTIONAL_LINE_RE.test(t)) return true;
+  if (/^\s*IN WITNESS WHEREOF\b/i.test(t)) return true;
+  return false;
+}
+
+/**
+ * Not postal validation — true when a line may continue a multiline notice Address block.
+ * Aligns with intake `isAddressContinuationLine`; adds notice-specific prose guards only.
+ */
+export function isNoticeAddressContinuationLine(line: string | null | undefined): boolean {
+  const t = String(line ?? "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (isNoticeAddressCaptureBoundaryLine(t)) return false;
+  if (/^(?:Attn|Attention|Email)\s*:/i.test(t)) return false;
+  if (/\b(?:should|shall|must|will|may)\b/i.test(t) && t.length > 40) return false;
+  return isAddressContinuationLine(t);
+}
+
+/** Sanitize a notice address value extracted from an operative If-to stanza. */
+export function sanitizeNoticeStanzaAddress(value: string | null | undefined): string {
+  return sanitizeCanonicalPartyAddress(value, { source: "sanitizeNoticeStanzaAddress" });
+}
+
+/** Extract the Address block from one operative If-to notice stanza with deterministic boundaries. */
+export function extractNoticeAddressFromStanza(stanza: string): string {
+  const lines = (stanza || "").replace(/\r\n/g, "\n").split("\n");
+  const captured: string[] = [];
+  let capturing = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
+    if (headerMatch) {
+      const inlineBody = (headerMatch[1] ?? "").trim();
+      if (inlineBody) {
+        const sanitizedInline = sanitizeNoticeStanzaAddress(inlineBody);
+        if (sanitizedInline) captured.push(sanitizedInline);
+        capturing = false;
+      } else {
+        capturing = true;
+      }
+      continue;
+    }
+    if (!capturing) continue;
+    if (isNoticeAddressCaptureBoundaryLine(trimmed)) break;
+    if (/^(?:Attn|Attention|Email)\s*:/i.test(trimmed)) break;
+    if (!isNoticeAddressContinuationLine(trimmed)) break;
+    captured.push(trimmed);
   }
-  return [trimmed];
+
+  if (captured.length === 0) return "";
+  if (captured.length === 1) return captured[0]!;
+  return sanitizeNoticeStanzaAddress(captured.join("\n"));
+}
+
+/** Extract notice addresses from operative If-to stanzas in a finalized agreement body. */
+export function extractPartyAddressesFromOperativeNoticeStanzas(corpus: string): string[] {
+  const text = (corpus || "").replace(/\r\n/g, "\n");
+  const noticesIdx = findNoticesSectionStart(text);
+  if (noticesIdx < 0) return [];
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  const region = text.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : text.length);
+  const stanzas = region.split(/\n(?=If to\s+)/i).slice(1).map((s) => s.trim()).filter(Boolean);
+  return stanzas.map((stanza) => extractNoticeAddressFromStanza(stanza));
+}
+
+/** True when a notice stanza Address block contains non-address prose beyond a valid postal line. */
+export function noticeStanzaHasAddressPollution(stanza: string): boolean {
+  if (noticeStanzaContainsPlaceholderTokens(stanza)) return false;
+  const lines = (stanza || "").replace(/\r\n/g, "\n").split("\n");
+  let capturing = false;
+  const rawParts: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
+    if (headerMatch) {
+      const inlineBody = (headerMatch[1] ?? "").trim();
+      if (inlineBody) rawParts.push(inlineBody);
+      else capturing = true;
+      continue;
+    }
+    if (!capturing) continue;
+    if (isNoticeAddressCaptureBoundaryLine(trimmed)) break;
+    if (/^(?:Attn|Attention|Email)\s*:/i.test(trimmed)) break;
+    rawParts.push(trimmed);
+  }
+
+  if (!rawParts.length) return false;
+  const rawJoined = rawParts.join(", ").replace(/\s+/g, " ").trim();
+  const sanitized = sanitizeNoticeStanzaAddress(rawJoined);
+  if (!sanitized) return rawJoined.length > 0;
+  return rawJoined.length > sanitized.length + 4 || NOTICE_ADDRESS_INSTRUCTIONAL_LINE_RE.test(rawJoined);
+}
+
+/** Repair Address lines inside one operative If-to notice stanza. */
+export function sanitizeNoticeStanzaAddressContent(stanza: string): { stanza: string; repaired: boolean } {
+  if (!/Address(?:\s+for\s+Notice)?\s*:/i.test(stanza || "")) {
+    return { stanza, repaired: false };
+  }
+  const sanitized = extractNoticeAddressFromStanza(stanza);
+  const formatted = formatNoticeAddressLines(sanitized);
+  const lines = (stanza || "").replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let inAddress = false;
+  let repaired = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
+    if (headerMatch) {
+      const inlineBody = (headerMatch[1] ?? "").trim();
+      if (formatted.length === 0 && !inlineBody) {
+        inAddress = true;
+        out.push(line);
+        continue;
+      }
+      if (formatted.length <= 1) {
+        const nextValue = formatted[0] ?? sanitized;
+        const nextLine = `Address: ${nextValue}`;
+        if (trimmed !== nextLine) repaired = true;
+        out.push(nextLine);
+        inAddress = false;
+        continue;
+      }
+      if (trimmed !== "Address:") repaired = true;
+      out.push("Address:");
+      out.push(...formatted);
+      inAddress = false;
+      continue;
+    }
+    if (inAddress) {
+      if (
+        isNoticeAddressCaptureBoundaryLine(trimmed) ||
+        /^(?:Attn|Attention|Email|If to)\s*:/i.test(trimmed)
+      ) {
+        inAddress = false;
+        out.push(line);
+        continue;
+      }
+      repaired = true;
+      continue;
+    }
+    out.push(line);
+  }
+
+  return { stanza: out.join("\n"), repaired };
+}
+
+function repairNoticeStanzaAddressBoundariesInCorpus(corpus: string): { text: string; repairs: string[] } {
+  const noticesIdx = findNoticesSectionStart(corpus);
+  if (noticesIdx < 0) return { text: corpus, repairs: [] };
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const end = witnessIdx >= 0 ? witnessIdx : corpus.length;
+  const before = corpus.slice(0, noticesIdx);
+  const region = corpus.slice(noticesIdx, end);
+  const after = corpus.slice(end);
+  const blocks = region.split(/\n(?=If to\s+)/i);
+  const intro = blocks[0] ?? "";
+  const stanzas = blocks.slice(1);
+  const repairs: string[] = [];
+  const rebuilt = stanzas.map((stanza) => {
+    const { stanza: sanitized, repaired } = sanitizeNoticeStanzaAddressContent(stanza);
+    if (repaired) repairs.push("notice:sanitize_stanza_address_boundary");
+    return sanitized;
+  });
+  if (!repairs.length) return { text: corpus, repairs: [] };
+  const mergedRegion = `${intro.trimEnd()}\n\n${rebuilt.join("\n\n")}`.replace(/\n{3,}/g, "\n\n");
+  return {
+    text: `${before}${mergedRegion}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd(),
+    repairs,
+  };
 }
 
 const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE = "provided during signer setup.";
@@ -851,7 +1058,11 @@ function stripInvalidNoticeStanzaLines(stanza: string, fullNames?: readonly stri
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return normalizeNoticeStanzaLines(stripped, fullNames);
+  const normalized = normalizeNoticeStanzaLines(stripped, fullNames);
+  if (!noticeStanzaHasAddressPollution(normalized)) {
+    return normalized;
+  }
+  return sanitizeNoticeStanzaAddressContent(normalized).stanza;
 }
 
 function buildIfToNoticeStanza(
@@ -888,6 +1099,7 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
   if (isCollapsedInlineNoticeStanza(trimmed)) return false;
   if (noticeStanzaContainsPlaceholderTokens(trimmed)) return false;
   if (noticeStanzaHasExecutionPollution(trimmed)) return false;
+  if (noticeStanzaHasAddressPollution(trimmed)) return false;
   if (noticeStanzaHasRoleLabelCorruption(trimmed)) return false;
   if (DANGLING_IF_TO_RE.test(`\n${trimmed}`)) return false;
   if (/^If to\s*:\s*$/i.test(trimmed)) return false;
@@ -1328,6 +1540,11 @@ export function repairIncompleteIfToNoticeStanzas(
       !noticesRegionHasExecutionPollution(noticesRegionEarly) &&
       !hasInlineMalformedNoticeStanzas(fullNoticesRegionEarly)
     ) {
+      const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(text);
+      if (addressRepair.repairs.length > 0) {
+        repairs.push(...addressRepair.repairs);
+        return { text: addressRepair.text, repairs };
+      }
       return { text, repairs };
     }
   }
@@ -1720,10 +1937,16 @@ export function ensureOperativeIfToNoticeDelivery(
   const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
   const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);
   if (!missing && !hasPlaceholderTokens && !hasExecutionPollution && !hasInlineMalformedNotices && !hasBareNoticeStanzas) {
-    const trimmed = trimOperativeNoticeStanzasToPartyCount(corpus, authorityParties.length);
+    const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(corpus);
+    const baseText = addressRepair.repairs.length > 0 ? addressRepair.text : corpus;
+    const trimmed = trimOperativeNoticeStanzasToPartyCount(baseText, authorityParties.length);
     const witnessSeparated = ensureBlankLineBeforeWitnessBlock(trimmed.text);
     const text = witnessSeparated.text;
-    const repairs = [...trimmed.repairs, ...witnessSeparated.repairs];
+    const repairs = [
+      ...addressRepair.repairs,
+      ...trimmed.repairs,
+      ...witnessSeparated.repairs,
+    ];
     if (repairs.length > 0 || text !== corpus) {
       return { text, repairs };
     }

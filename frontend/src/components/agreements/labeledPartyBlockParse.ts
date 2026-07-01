@@ -195,7 +195,8 @@ function applyRepresentedByField(block: LabeledPartyBlock, rawValue: string): vo
   if (split.title && !block.signerTitle) block.signerTitle = split.title;
 }
 
-function isAddressContinuationLine(line: string): boolean {
+/** Boundary-only: true when a line may continue a multiline address block (not postal validation). */
+export function isAddressContinuationLine(line: string): boolean {
   const t = stripIntakeBulletPrefix(line);
   if (!t) return false;
   if (isPartyAddressBoundaryLine(t)) return false;
