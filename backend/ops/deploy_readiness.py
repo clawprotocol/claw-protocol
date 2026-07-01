@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from backend.config.deployment_runtime import (
     admin_anchor_http_trigger_enabled,
+    is_production_named_claw_environment,
     public_runtime_summary,
 )
 from backend.config.feed_anchor_policy import (
@@ -54,8 +55,10 @@ from backend.db.readiness import (
     affiliate_ledger_database_readiness,
     agreement_database_readiness,
     anchoring_database_readiness,
+    economics_persistence_readiness,
     onramp_payments_database_readiness,
     operator_alerts_database_readiness,
+    production_launch_config_readiness,
     timeline_database_readiness,
     usage_economics_database_readiness,
 )
@@ -64,7 +67,7 @@ SmokeProfile = Literal["read_only", "standard", "deep"]
 
 
 def _is_production_named_environment() -> bool:
-    return os.getenv("CLAW_ENVIRONMENT", "local").strip().lower() in ("production", "prod")
+    return is_production_named_claw_environment()
 
 
 def effective_smoke_profile() -> SmokeProfile:
@@ -205,6 +208,8 @@ def gather_deploy_readiness() -> Dict[str, Any]:
         "affiliate_ledger_postgresql": affiliate_ledger_database_readiness(),
         "operator_alerts_postgresql": operator_alerts_database_readiness(),
         "economics_sqlite": _sqlite_select_one(economics_db_path()),
+        "economics_persistence": economics_persistence_readiness(),
+        "production_launch_config": production_launch_config_readiness(),
     }
 
     get_claw_feed_store().init_schema()
@@ -346,6 +351,10 @@ def gather_deploy_readiness() -> Dict[str, Any]:
         }
 
     critical_keys = ["usage_db", "treasury_db", "treasury_spine", "economics_sqlite"]
+    if _is_production_named_environment():
+        critical_keys.extend(["economics_persistence", "production_launch_config"])
+    elif (checks.get("production_launch_config") or {}).get("status") == "error":
+        critical_keys.append("production_launch_config")
     if use_postgresql_for_timeline():
         critical_keys.append("timeline_postgresql")
     else:

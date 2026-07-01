@@ -52,6 +52,7 @@ def _relaxed_draft_limits_in_dev() -> bool:
 
 
 def subject_has_paid_plan(subject_ref: str, economics: Optional[EconomicsStore] = None) -> bool:
+    from backend.billing.subscription_authority import is_subscription_entitled
     from backend.utils.enforce import org_id_from_subject
 
     oid = org_id_from_subject(subject_ref)
@@ -60,14 +61,7 @@ def subject_has_paid_plan(subject_ref: str, economics: Optional[EconomicsStore] 
     eco = economics or get_economics_store()
     eco.init_schema()
     row = subs.get_subscription_for_org(eco, oid)
-    if not row:
-        return False
-    if str(row.get("status") or "").lower() != "active":
-        return False
-    code = str(row.get("plan_code") or "").lower().strip()
-    if not code or code in ("free", "trial"):
-        return False
-    return True
+    return is_subscription_entitled(row)
 
 
 def _maybe_flag_abuse(*, subject_ref: str, ip: str, store: UsageEconomicsStore) -> None:

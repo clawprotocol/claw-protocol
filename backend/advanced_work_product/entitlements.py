@@ -5,6 +5,7 @@ import os
 from typing import Literal
 
 from backend.billing import subscriptions as subs
+from backend.billing.subscription_authority import is_subscription_entitled
 from backend.economics.store import EconomicsStore, get_economics_store
 
 AwpTier = Literal["none", "limited", "full"]
@@ -28,13 +29,9 @@ def awp_tier_for_org(org_id: str, economics: EconomicsStore | None = None) -> Aw
     eco = economics or get_economics_store()
     eco.init_schema()
     row = subs.get_subscription_for_org(eco, oid)
-    if not row:
-        return "none"
-    if str(row.get("status") or "").lower() != "active":
+    if not is_subscription_entitled(row):
         return "none"
     code = str(row.get("plan_code") or "").lower().strip()
-    if not code or code in ("free", "trial"):
-        return "none"
     if code in ("pro", "enterprise", "team", "institutional"):
         return "full"
     if code == "starter":

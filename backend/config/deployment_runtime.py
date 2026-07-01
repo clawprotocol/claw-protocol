@@ -50,6 +50,11 @@ def is_production_like_claw_environment() -> bool:
     return not is_relaxed_claw_environment()
 
 
+def is_production_named_claw_environment() -> bool:
+    """Railway production / prod — stricter deploy gates than staging."""
+    return claw_environment() in ("production", "prod")
+
+
 def admin_http_request_authorized(request: Any) -> bool:
     """
     Same rules as ``main._admin_ok`` for shared-secret operator HTTP surfaces.

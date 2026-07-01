@@ -53,6 +53,15 @@ def collect_env_warnings() -> List[str]:
             warnings.append(
                 "CLAW_DATABASE_URL unset — launch Postgres domains use SQLite fallback (ephemeral on PaaS)."
             )
+        if not _is_set("CLAW_ECONOMICS_DB_PATH"):
+            warnings.append(
+                "CLAW_ECONOMICS_DB_PATH unset — economics subscriptions/affiliates use default SQLite "
+                "path (ephemeral on PaaS); deploy-readiness fails in production until set."
+            )
+        if not _is_set("STRIPE_SECRET_KEY"):
+            warnings.append("STRIPE_SECRET_KEY unset — Stripe checkout unavailable.")
+        if not _is_set("CLAW_API_BASE") and not _is_set("LAWDOG_API_ORIGIN"):
+            warnings.append("CLAW_API_BASE unset — webhook return URLs may be misconfigured.")
     else:
         if _is_set("CLAW_STRIPE_WEBHOOK_DEV_UNSIGNED"):
             warnings.append(
@@ -82,6 +91,10 @@ def public_env_snapshot() -> dict:
         "stripe_webhook_secret_configured": _is_set("STRIPE_WEBHOOK_SECRET"),
         "admin_secret_configured": _is_set("CLAW_ADMIN_SECRET"),
         "database_url_configured": _is_set("CLAW_DATABASE_URL") or _is_set("DATABASE_URL"),
+        "economics_db_path_explicit": _is_set("CLAW_ECONOMICS_DB_PATH"),
+        "stripe_checkout_configured": __import__(
+            "backend.billing.stripe_config", fromlist=["is_stripe_checkout_configured"]
+        ).is_stripe_checkout_configured(),
         "openai_configured": _is_set("OPENAI_API_KEY"),
         "signing_token_secret_configured": operator_signing_token_secret_configured(),
         "signing_token_env_var_detected": detected_signing_token_env_var(),

@@ -5,14 +5,12 @@ import {
   PAID_MONTHLY_SUBSCRIPTION_MATERIAL_SHORT,
   TAX_VAT_LOCATION_NEUTRAL,
 } from "./disclosureCopy";
-import { useLaunchNav } from "../launch/LaunchNavContext";
 import { SpaLink } from "../launch/SpaLink";
 
 /**
  * Narrow billing context — not primary pricing UI; keeps renewal / allowance language honest.
  */
 export function BillingTermsNotice() {
-  const { navigate } = useLaunchNav();
   return (
     <section
       className="rounded-xl border border-slate-700/70 bg-slate-950/50 p-4 text-left"
@@ -26,14 +24,13 @@ export function BillingTermsNotice() {
         <li>{PAID_MONTHLY_SUBSCRIPTION_MATERIAL_SHORT}</li>
         <li>{PAID_ANNUAL_SUBSCRIPTION_MATERIAL_SHORT}</li>
         <li>
-          Cancel, change plans, or update payment anytime from{" "}
-          <button
-            type="button"
-            className="inline min-h-9 cursor-pointer rounded border-0 bg-transparent px-0.5 py-0 font-medium text-emerald-400/95 underline-offset-2 hover:text-emerald-300 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500/70"
-            onClick={() => navigate("/app/billing")}
+          To cancel, change plans, or update payment, contact{" "}
+          <a
+            href="mailto:support@lawdog.me"
+            className="font-medium text-emerald-400/95 underline-offset-2 hover:text-emerald-300 hover:underline"
           >
-            Billing
-          </button>
+            support@lawdog.me
+          </a>
           .
         </li>
         <li>{DOWNGRADE_ACCESS_SHORT}</li>

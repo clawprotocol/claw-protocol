@@ -16,6 +16,10 @@ from typing import Any, Dict, Optional
 from backend.affiliates import operator_alerts as op_alerts
 from backend.affiliates import service as affiliate_service
 from backend.billing import pricing
+from backend.billing.subscription_authority import (
+    apply_invoice_paid_subscription_renewal,
+    apply_stripe_subscription_object,
+)
 from backend.economics import config as econ_config
 from backend.economics.store import EconomicsStore
 
@@ -44,10 +48,11 @@ def _metadata_org_id(obj: Dict[str, Any]) -> Optional[str]:
 
 def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Create a pending affiliate earning when invoice is paid, attribution exists, and plan is eligible.
-    Idempotent on Stripe invoice id.
+    Sync canonical subscription renewal, then create affiliate earning when eligible.
+    Idempotent on Stripe invoice id for earnings.
     """
     economics.init_schema()
+    subscription_sync = apply_invoice_paid_subscription_renewal(economics, invoice)
     inv_id = str(invoice.get("id") or "").strip()
     if not inv_id:
         return {"ok": False, "error": "missing_invoice_id"}
@@ -58,11 +63,11 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
         org_id = economics.get_org_for_stripe_customer(customer_id)
     if not org_id:
         _log.info("invoice.paid skip: no org_id invoice=%s", inv_id)
-        return {"ok": True, "ignored": True, "reason": "no_org_mapping"}
+        return {**subscription_sync, "ok": True, "ignored": True, "reason": "no_org_mapping"}
 
     amount_cents = int(invoice.get("amount_paid") or 0)
     if amount_cents <= 0:
-        return {"ok": True, "ignored": True, "reason": "zero_amount"}
+        return {**subscription_sync, "ok": True, "ignored": True, "reason": "zero_amount"}
 
     sub_sid = invoice.get("subscription")
     stripe_sub_id: Optional[str] = None
@@ -73,21 +78,26 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
 
     if stripe_sub_id and not economics.subscription_qualifies_for_affiliate_earning(stripe_sub_id):
         _log.info("invoice.paid skip: subscription not qualifying sub=%s", stripe_sub_id)
-        return {"ok": True, "ignored": True, "reason": "subscription_inactive"}
+        return {
+            **subscription_sync,
+            "ok": True,
+            "ignored": True,
+            "reason": "subscription_inactive",
+        }
 
     active = affiliate_service.get_active_affiliate_for_org(org_id, economics=economics)
     if not active or not active.get("affiliate"):
-        return {"ok": True, "ignored": True, "reason": "no_attribution"}
+        return {**subscription_sync, "ok": True, "ignored": True, "reason": "no_attribution"}
     aff_row = active["affiliate"]
     aff_id = str(aff_row["id"])
     owner = (aff_row.get("owner_org_id") or "").strip()
     if owner and owner == org_id:
         _log.info("invoice.paid skip: self_referral org=%s", org_id)
-        return {"ok": True, "ignored": True, "reason": "self_referral"}
+        return {**subscription_sync, "ok": True, "ignored": True, "reason": "self_referral"}
 
     attr = active.get("attribution") or {}
     if str(attr.get("momentum_credit_state") or "") == "excluded":
-        return {"ok": True, "ignored": True, "reason": "attribution_excluded"}
+        return {**subscription_sync, "ok": True, "ignored": True, "reason": "attribution_excluded"}
 
     sub_row = economics.get_subscription_by_org(org_id)
     plan_code = str(sub_row.get("plan_code") or "starter") if sub_row else "starter"
@@ -96,18 +106,18 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
         plan_code = str(link["plan_code"])
 
     if not pricing.affiliate_eligible_for_plan(plan_code):
-        return {"ok": True, "ignored": True, "reason": "plan_not_eligible"}
+        return {**subscription_sync, "ok": True, "ignored": True, "reason": "plan_not_eligible"}
 
     bps = pricing.affiliate_bps_for_plan(plan_code)
     if bps <= 0:
-        return {"ok": True, "ignored": True, "reason": "zero_bps"}
+        return {**subscription_sync, "ok": True, "ignored": True, "reason": "zero_bps"}
 
     basis = (Decimal(amount_cents) / Decimal(100)).quantize(Decimal("0.01"))
     payout_amt = (basis * Decimal(bps) / Decimal("10000")).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
     if payout_amt <= 0:
-        return {"ok": True, "ignored": True, "reason": "zero_payout"}
+        return {**subscription_sync, "ok": True, "ignored": True, "reason": "zero_payout"}
 
     billing_reason = str(invoice.get("billing_reason") or "")
     earning_type = "recurring" if billing_reason == "subscription_cycle" else "initial"
@@ -162,7 +172,7 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
         risk_hold=risk_hold,
     )
     if not inserted:
-        return {"ok": True, "duplicate": True, "invoice_id": inv_id}
+        return {**subscription_sync, "ok": True, "duplicate": True, "invoice_id": inv_id}
 
     try:
         from backend.affiliates import trust_ledger as _trust
@@ -201,40 +211,33 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
         },
         economics=economics,
     )
-    return {"ok": True, "earning_id": earning_id, "invoice_id": inv_id}
+    return {
+        **subscription_sync,
+        "ok": True,
+        "earning_id": earning_id,
+        "invoice_id": inv_id,
+    }
 
 
 def handle_subscription_updated(economics: EconomicsStore, sub: Dict[str, Any]) -> Dict[str, Any]:
     economics.init_schema()
+    authority = apply_stripe_subscription_object(economics, sub)
+    if not authority.get("ok"):
+        return authority
+    if authority.get("ignored"):
+        return authority
     sid = str(sub.get("id") or "").strip()
-    if not sid:
-        return {"ok": False, "error": "missing_subscription_id"}
-    org_id = _metadata_org_id(sub) or economics.get_org_for_stripe_customer(
-        str(sub.get("customer") or "").strip()
-    )
-    if not org_id:
-        return {"ok": True, "ignored": True, "reason": "no_org_mapping"}
     status = str(sub.get("status") or "unknown")
-    plan_code = None
-    items = sub.get("items", {})
-    if isinstance(items, dict):
-        data = items.get("data") or []
-        if data and isinstance(data[0], dict):
-            price = (data[0].get("price") or {}).get("metadata") or {}
-            if isinstance(price, dict) and price.get("plan_code"):
-                plan_code = str(price["plan_code"]).strip()
-    economics.upsert_stripe_subscription_org(
-        stripe_subscription_id=sid,
-        org_id=org_id,
-        plan_code=plan_code,
-        status=status,
-    )
     if status in ("canceled", "unpaid", "incomplete_expired"):
         n = economics.cancel_affiliate_earnings_for_stripe_subscription(
             sid, reason="subscription_inactive"
         )
-        return {"ok": True, "subscription_id": sid, "cancelled_earnings": n}
-    return {"ok": True, "subscription_id": sid, "status": status}
+        return {**authority, "cancelled_earnings": n}
+    return authority
+
+
+def handle_subscription_created(economics: EconomicsStore, sub: Dict[str, Any]) -> Dict[str, Any]:
+    return handle_subscription_updated(economics, sub)
 
 
 def handle_subscription_deleted(economics: EconomicsStore, sub: Dict[str, Any]) -> Dict[str, Any]:
@@ -242,19 +245,11 @@ def handle_subscription_deleted(economics: EconomicsStore, sub: Dict[str, Any]) 
     sid = str(sub.get("id") or "").strip()
     if not sid:
         return {"ok": False, "error": "missing_subscription_id"}
-    cust = str(sub.get("customer") or "").strip()
-    org_id = _metadata_org_id(sub) or (
-        economics.get_org_for_stripe_customer(cust) if cust else None
-    )
-    if org_id:
-        economics.upsert_stripe_subscription_org(
-            stripe_subscription_id=sid,
-            org_id=org_id,
-            plan_code=None,
-            status="canceled",
-        )
+    deleted = dict(sub)
+    deleted["status"] = "canceled"
+    authority = apply_stripe_subscription_object(economics, deleted)
     n = economics.cancel_affiliate_earnings_for_stripe_subscription(sid, reason="subscription_deleted")
-    return {"ok": True, "subscription_id": sid, "cancelled_earnings": n}
+    return {**authority, "cancelled_earnings": n}
 
 
 def handle_charge_dispute_created(economics: EconomicsStore, dispute: Dict[str, Any]) -> Dict[str, Any]:
@@ -315,6 +310,8 @@ def dispatch_stripe_event(economics: EconomicsStore, event: Dict[str, Any]) -> D
     if etype == "invoice.paid":
         legacy = handle_invoice_paid(economics, data)
         return {**legacy, "genesis": genesis_result}
+    if etype == "customer.subscription.created":
+        return handle_subscription_created(economics, data)
     if etype == "customer.subscription.updated":
         return handle_subscription_updated(economics, data)
     if etype == "customer.subscription.deleted":

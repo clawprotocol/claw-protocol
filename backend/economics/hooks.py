@@ -75,6 +75,7 @@ def after_claw_key_issued(
                 org_id=org_id,
                 user_id=user_id,
                 plan_code=plan_code,
+                use_demo_expiry=True,
             )
 
     if eco.claim_payment_hook_step(payment_id, "accrual_emitted"):

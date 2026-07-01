@@ -470,7 +470,17 @@ class EconomicsStore:
             from backend.economics.genesis_referral_store import ensure_genesis_referral_schema
 
             ensure_genesis_referral_schema(con)
+            self._ensure_subscription_authority_columns(con)
             self._backfill_key_ledger(con)
+
+    def _ensure_subscription_authority_columns(self, con: sqlite3.Connection) -> None:
+        cols = {str(r[1]) for r in con.execute("PRAGMA table_info(subscriptions)").fetchall()}
+        if "stripe_subscription_id" not in cols:
+            con.execute("ALTER TABLE subscriptions ADD COLUMN stripe_subscription_id TEXT")
+        if "stripe_customer_id" not in cols:
+            con.execute("ALTER TABLE subscriptions ADD COLUMN stripe_customer_id TEXT")
+        if "current_period_end" not in cols:
+            con.execute("ALTER TABLE subscriptions ADD COLUMN current_period_end TEXT")
 
     def _backfill_key_ledger(self, con: sqlite3.Connection) -> None:
         rows = con.execute("SELECT org_id, keys_available FROM key_balances").fetchall()
@@ -517,17 +527,37 @@ class EconomicsStore:
         status: str,
         payment_id: Optional[str],
         expires_at: Optional[str],
+        stripe_subscription_id: Optional[str] = None,
+        stripe_customer_id: Optional[str] = None,
+        current_period_end: Optional[str] = None,
+        canceled_at: Optional[str] = None,
     ) -> None:
         now = _utc_now()
         with self._conn() as con:
+            self._ensure_subscription_authority_columns(con)
             con.execute(
                 """
                 INSERT INTO subscriptions (
                   id, org_id, user_id, plan_code, status, started_at,
-                  renewed_at, expires_at, canceled_at, payment_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)
+                  renewed_at, expires_at, canceled_at, payment_id, created_at,
+                  stripe_subscription_id, stripe_customer_id, current_period_end
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (sub_id, org_id, user_id, plan_code, status, now, expires_at, payment_id, now),
+                (
+                    sub_id,
+                    org_id,
+                    user_id,
+                    plan_code,
+                    status,
+                    now,
+                    expires_at,
+                    canceled_at,
+                    payment_id,
+                    now,
+                    stripe_subscription_id,
+                    stripe_customer_id,
+                    current_period_end,
+                ),
             )
 
     def get_subscription_by_org(self, org_id: str) -> Optional[Dict[str, Any]]:
@@ -549,6 +579,89 @@ class EconomicsStore:
                 """,
                 (renewed_at, payment_id, org_id, org_id),
             )
+
+    def upsert_subscription_authority(
+        self,
+        *,
+        org_id: str,
+        user_id: Optional[str],
+        plan_code: str,
+        status: str,
+        expires_at: Optional[str],
+        current_period_end: Optional[str],
+        canceled_at: Optional[str],
+        stripe_subscription_id: Optional[str],
+        stripe_customer_id: Optional[str],
+        payment_id: Optional[str],
+        renewed_at: Optional[str],
+    ) -> str:
+        """Insert or update the canonical subscriptions row for an org."""
+        oid = (org_id or "").strip()
+        if not oid:
+            raise ValueError("org_id required")
+        now = _utc_now()
+        existing = self.get_subscription_by_org(oid)
+        with self._conn() as con:
+            self._ensure_subscription_authority_columns(con)
+            if existing is None:
+                sub_id = str(uuid.uuid4())
+                con.execute(
+                    """
+                    INSERT INTO subscriptions (
+                      id, org_id, user_id, plan_code, status, started_at,
+                      renewed_at, expires_at, canceled_at, payment_id, created_at,
+                      stripe_subscription_id, stripe_customer_id, current_period_end
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        sub_id,
+                        oid,
+                        user_id,
+                        plan_code,
+                        status,
+                        now,
+                        renewed_at,
+                        expires_at,
+                        canceled_at,
+                        payment_id,
+                        now,
+                        stripe_subscription_id,
+                        stripe_customer_id,
+                        current_period_end,
+                    ),
+                )
+                return sub_id
+            sub_id = str(existing["id"])
+            con.execute(
+                """
+                UPDATE subscriptions SET
+                  user_id = COALESCE(?, user_id),
+                  plan_code = ?,
+                  status = ?,
+                  renewed_at = COALESCE(?, renewed_at),
+                  expires_at = COALESCE(?, expires_at),
+                  current_period_end = COALESCE(?, current_period_end),
+                  canceled_at = ?,
+                  payment_id = COALESCE(?, payment_id),
+                  stripe_subscription_id = COALESCE(?, stripe_subscription_id),
+                  stripe_customer_id = COALESCE(?, stripe_customer_id)
+                WHERE id = ?
+                """,
+                (
+                    user_id,
+                    plan_code,
+                    status,
+                    renewed_at,
+                    expires_at,
+                    current_period_end,
+                    canceled_at,
+                    payment_id,
+                    stripe_subscription_id,
+                    stripe_customer_id,
+                    sub_id,
+                ),
+            )
+            return sub_id
 
     # --- key balances ---
 

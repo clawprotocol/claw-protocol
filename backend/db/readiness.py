@@ -294,6 +294,104 @@ def timeline_database_readiness() -> Dict[str, Any]:
         }
 
 
+def economics_persistence_readiness() -> Dict[str, Any]:
+    """
+    Production must not silently rely on default ephemeral economics SQLite.
+
+    Requires ``CLAW_ECONOMICS_DB_PATH`` on a persistent volume, or non-production environment.
+    """
+    import os
+    import sqlite3
+
+    from backend.config.deployment_runtime import is_production_named_claw_environment
+    from backend.economics.store import economics_db_path
+
+    if not is_production_named_claw_environment():
+        return {"status": "skipped", "detail": "non-production environment"}
+
+    explicit = os.getenv("CLAW_ECONOMICS_DB_PATH", "").strip()
+    path = economics_db_path()
+    if not explicit:
+        return {
+            "status": "error",
+            "backend": "sqlite",
+            "path": path,
+            "explicit_path_configured": False,
+            "detail": (
+                "production requires CLAW_ECONOMICS_DB_PATH on persistent storage "
+                "(default economics SQLite path is ephemeral on PaaS)"
+            ),
+        }
+    try:
+        with sqlite3.connect(os.path.expanduser(path), timeout=10.0) as con:
+            con.execute("SELECT 1")
+        return {
+            "status": "ok",
+            "backend": "sqlite",
+            "path": path,
+            "explicit_path_configured": True,
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "backend": "sqlite",
+            "path": path,
+            "explicit_path_configured": True,
+            "detail": str(e)[:400],
+        }
+
+
+def production_launch_config_readiness() -> Dict[str, Any]:
+    """Fail closed when production-critical env is missing (no secret values)."""
+    import os
+
+    from backend.billing.stripe_config import is_stripe_checkout_configured
+    from backend.config.agreement_signing_token import operator_signing_token_secret_configured
+
+    env = os.getenv("CLAW_ENVIRONMENT", "").strip().lower() or "local"
+    pg_configured = bool(
+        os.getenv("CLAW_DATABASE_URL", "").strip() or os.getenv("DATABASE_URL", "").strip()
+    )
+
+    if env not in ("production", "prod"):
+        if pg_configured and env in ("local", ""):
+            return {
+                "status": "error",
+                "detail": "managed Postgres configured but CLAW_ENVIRONMENT is not production/prod",
+                "missing_keys": ["CLAW_ENVIRONMENT"],
+                "configured_environment": env,
+            }
+        return {"status": "skipped", "detail": f"CLAW_ENVIRONMENT={env}"}
+
+    missing: list[str] = []
+    if not os.getenv("CLAW_ECONOMICS_DB_PATH", "").strip():
+        missing.append("CLAW_ECONOMICS_DB_PATH")
+    if not (os.getenv("CLAW_DATABASE_URL", "").strip() or os.getenv("DATABASE_URL", "").strip()):
+        missing.append("CLAW_DATABASE_URL")
+    if not os.getenv("CLAW_CORS_ALLOW_ORIGINS", "").strip():
+        missing.append("CLAW_CORS_ALLOW_ORIGINS")
+    if not operator_signing_token_secret_configured():
+        missing.append("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET")
+    if not os.getenv("CLAW_ADMIN_SECRET", "").strip():
+        missing.append("CLAW_ADMIN_SECRET")
+    if not os.getenv("STRIPE_WEBHOOK_SECRET", "").strip():
+        missing.append("STRIPE_WEBHOOK_SECRET")
+    if not is_stripe_checkout_configured():
+        missing.append("STRIPE_SECRET_KEY")
+        missing.append("STRIPE_PRICE_PRO_MONTHLY")
+    api_base = os.getenv("CLAW_API_BASE", "").strip() or os.getenv("LAWDOG_API_ORIGIN", "").strip()
+    if not api_base:
+        missing.append("CLAW_API_BASE")
+
+    if missing:
+        return {
+            "status": "error",
+            "detail": "missing production-critical configuration",
+            "missing_keys": missing,
+        }
+    return {"status": "ok", "missing_keys": []}
+
+
 def launch_postgres_readiness_for_readyz() -> Dict[str, Any]:
     """
     Domains that should fail ``GET /v1/readyz`` (503) when Postgres is configured but unreachable.

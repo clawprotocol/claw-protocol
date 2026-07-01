@@ -25,7 +25,7 @@ export const ESIGN_INTENT_FINISH_SIGNING_ACTION =
 export const ELECTRONIC_RECORDS_SIGN_CUE = "You are completing this electronically.";
 /** Monthly self-serve: auto-renew each period until canceled. */
 export const PAID_MONTHLY_SUBSCRIPTION_MATERIAL_SHORT =
-  "Billed monthly. Your subscription renews each billing period until you cancel from Billing.";
+  "Billed monthly. Your subscription renews each billing period until you cancel. To cancel or change plans, contact support@lawdog.me.";
 /** Annual self-serve: upfront term; do not imply same auto-renew cadence as monthly. */
 export const PAID_ANNUAL_SUBSCRIPTION_MATERIAL_SHORT =
   "Billed annually as one upfront charge for the term shown at checkout. Continuation or renewal after that term follows the Terms of Service.";
@@ -33,9 +33,9 @@ export const PAID_ANNUAL_SUBSCRIPTION_MATERIAL_SHORT =
 export function paidSubscriptionRenewalMaterialLine(cadence: PricingCadence): string {
   return cadence === "monthly" ? PAID_MONTHLY_SUBSCRIPTION_MATERIAL_SHORT : PAID_ANNUAL_SUBSCRIPTION_MATERIAL_SHORT;
 }
-/** In-app: Billing / checkout — cancellation and payment updates. */
+/** In-app: billing support contact — no self-serve Customer Portal yet. */
 export const MANAGE_BILLING_FROM_BILLING_SHORT =
-  "Cancel, change your plan, or update payment from Billing when it is available for your workspace.";
+  "To cancel, change your plan, or update payment, contact support@lawdog.me.";
 /** Before payment — refunds bounded by governing terms, not implied flexibility. */
 export const CHECKOUT_REFUNDS_AND_CREDITS_TERMS_SHORT =
   "Refunds and credits only as described in the Terms of Service and on your order at purchase.";

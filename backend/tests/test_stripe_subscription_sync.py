@@ -13,7 +13,16 @@ from backend.treasury.treasury_store import get_treasury_store
 @pytest.fixture()
 def economics_store(tmp_path, monkeypatch):
     db = tmp_path / "econ.sqlite"
-    monkeypatch.setenv("CLAW_ECONOMICS_DB", str(db))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(db))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite"))
+    from backend.economics.store import reset_economics_store_for_tests
+    from backend.payments.store import reset_onramp_store_for_tests
+    import backend.treasury.treasury_store as treasury_mod
+
+    reset_economics_store_for_tests()
+    reset_onramp_store_for_tests()
+    treasury_mod._store = None
     eco = get_economics_store()
     eco.init_schema()
     return eco
@@ -38,6 +47,8 @@ def test_checkout_session_completed_syncs_subscription(economics_store) -> None:
     assert row is not None
     assert row["plan_code"] == "pro"
     assert row["status"] == "active"
+    assert row["stripe_subscription_id"] == "sub_test_431"
+    assert row["stripe_customer_id"] == "cus_test_431"
 
 
 def test_checkout_session_ignored_when_not_paid(economics_store) -> None:

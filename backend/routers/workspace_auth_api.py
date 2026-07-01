@@ -111,5 +111,6 @@ async def demo_activate_subscription(body: BindUserOrgIn) -> Dict[str, Any]:
         org_id=org_id,
         user_id=body.user_id.strip(),
         plan_code="pro",
+        use_demo_expiry=True,
     )
     return {"ok": True, "org_id": org_id, "subscription": eco.get_subscription_by_org(org_id)}
