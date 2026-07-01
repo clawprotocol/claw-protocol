@@ -29,7 +29,13 @@ import { LawdogReferralRedirect, parseLawdogReferralPath } from "./launch/Lawdog
 import { AffiliatePayoutOpsPage } from "./launch/affiliate/AffiliatePayoutOpsPage";
 import { GenesisAffiliateDashboardPage } from "./launch/genesisReferral/GenesisAffiliateDashboardPage";
 import { GenesisReferralOpsPage } from "./launch/genesisReferral/GenesisReferralOpsPage";
+import { AdminConsoleAccessGate, AdminConsoleUnavailable } from "./launch/AdminConsoleAccessGate";
 import { AdminConsolePage } from "./launch/AdminConsolePage";
+import {
+  canAccessAdminConsoleWithoutServerAuth,
+  isAdminConsoleDeploymentEnabled,
+  requiresAdminConsoleServerAuth,
+} from "./launch/adminConsoleAccess";
 import { canAccessOperatorGrowthDashboard, OperatorGrowthDashboard } from "./launch/ops/OperatorGrowthDashboard";
 import { OperatorPaidFunnelDashboard } from "./launch/ops/OperatorPaidFunnelDashboard";
 import { OperatorStarterProRefineDashboard } from "./launch/ops/OperatorStarterProRefineDashboard";
@@ -572,25 +578,8 @@ export function ClawProductApp() {
     return <LawdogReferralRedirect userSlug={lawdogReferralSlug} />;
   }
 
-  if (appMatch?.kind === "adminConsole" && !featureFlags.adminConsoleUi) {
-    return (
-      <AppShell
-        title="Unavailable"
-        subtitle="Internal admin is not enabled in this deployment."
-      >
-        <p className="max-w-md text-sm text-slate-400">
-          This page is for operator tools only. Customer builds leave it off; use an internal build with admin
-          console enabled if you need it.
-        </p>
-        <button
-          type="button"
-          className="vs01-btn vs01-btn--secondary mt-6"
-          onClick={() => navigate("/app")}
-        >
-          Back to dashboard
-        </button>
-      </AppShell>
-    );
+  if (appMatch?.kind === "adminConsole" && !isAdminConsoleDeploymentEnabled()) {
+    return <AdminConsoleUnavailable />;
   }
 
   if (appMatch?.kind === "affiliatePayoutOps" && !featureFlags.affiliateAdminUi) {
@@ -704,7 +693,13 @@ export function ClawProductApp() {
           </AppShell>
         );
       case "adminConsole":
-        return <AdminConsolePage />;
+        if (requiresAdminConsoleServerAuth()) {
+          return <AdminConsoleAccessGate />;
+        }
+        if (canAccessAdminConsoleWithoutServerAuth()) {
+          return <AdminConsolePage />;
+        }
+        return <AdminConsoleUnavailable />;
       case "receipt":
         return <UsageReceiptPage usageId={appMatch.id} />;
       case "agreements": {
