@@ -117,15 +117,44 @@ describe("resolveQaPaymentBypassState", () => {
   it("keeps production origin disabled even when the QA flag is set", () => {
     vi.stubGlobal("window", { location: { origin: "https://app.lawdog.ai" } });
     expect(
-      resolveQaPaymentBypassState({
-        PROD: true,
-        DEV: false,
-        MODE: "production",
-        VITE_LAWDOG_QA_PAYMENT_BYPASS: "1",
-      }),
+      resolveQaPaymentBypassState(
+        {
+          PROD: true,
+          DEV: false,
+          MODE: "production",
+          VITE_LAWDOG_QA_PAYMENT_BYPASS: "1",
+        },
+        {
+          authorized: false,
+          reason: "not_authorized",
+          checkedAt: "2026-01-01T00:00:00Z",
+        },
+      ),
     ).toMatchObject({
       enabled: false,
-      reason: "qa_origin_or_env_required",
+      reason: "not_authorized",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps lawdog.me disabled for anonymous visitors with only the QA flag", () => {
+    vi.stubGlobal("window", { location: { origin: "https://lawdog.me" } });
+    expect(
+      resolveQaPaymentBypassState(
+        {
+          PROD: true,
+          DEV: false,
+          VITE_LAWDOG_QA_PAYMENT_BYPASS: "1",
+        },
+        {
+          authorized: false,
+          reason: "not_authorized",
+          checkedAt: "2026-01-01T00:00:00Z",
+        },
+      ),
+    ).toMatchObject({
+      enabled: false,
+      reason: "not_authorized",
     });
     vi.unstubAllGlobals();
   });
@@ -160,6 +189,50 @@ describe("resolveQaPaymentBypassState", () => {
       enabled: true,
       reason: "explicit_non_production_env",
       deploymentEnv: "staging",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("denies lawdog.me when server reports expired admin session", () => {
+    vi.stubGlobal("window", { location: { origin: "https://lawdog.me" } });
+    expect(
+      resolveQaPaymentBypassState(
+        {
+          PROD: true,
+          DEV: false,
+          VITE_LAWDOG_QA_PAYMENT_BYPASS: "1",
+        },
+        {
+          authorized: false,
+          reason: "admin_session_expired",
+          checkedAt: "2026-01-01T00:00:00Z",
+        },
+      ),
+    ).toMatchObject({
+      enabled: false,
+      reason: "admin_session_expired",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("denies lawdog.me when auth endpoint fails closed", () => {
+    vi.stubGlobal("window", { location: { origin: "https://lawdog.me" } });
+    expect(
+      resolveQaPaymentBypassState(
+        {
+          PROD: true,
+          DEV: false,
+          VITE_LAWDOG_QA_PAYMENT_BYPASS: "1",
+        },
+        {
+          authorized: false,
+          reason: "auth_endpoint_unreachable",
+          checkedAt: "2026-01-01T00:00:00Z",
+        },
+      ),
+    ).toMatchObject({
+      enabled: false,
+      reason: "auth_endpoint_unreachable",
     });
     vi.unstubAllGlobals();
   });

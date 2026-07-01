@@ -15,6 +15,7 @@ import {
   readAdminConsoleSecret,
   writeAdminConsoleSecret,
 } from "./adminConsoleApi";
+import { bootstrapQaPaymentBypassAdminSession } from "./genesisBetaPaymentBypassAuth";
 
 type FounderTab = "hq" | "money" | "users" | "queue" | "partners" | "systems" | "links";
 
@@ -86,6 +87,7 @@ export function AdminConsolePage() {
     setError(null);
     try {
       writeAdminConsoleSecret(secret);
+      void bootstrapQaPaymentBypassAdminSession(secret);
       const [o, u, a, d, af, au, pb] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminUsers(),

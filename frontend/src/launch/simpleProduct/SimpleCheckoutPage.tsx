@@ -61,6 +61,11 @@ import {
   resolveDevPaymentBypassState,
   resolveQaPaymentBypassState,
 } from "../devPaymentBypass";
+import {
+  refreshGenesisBetaPaymentBypassAuth,
+  type GenesisBetaPaymentBypassAuth,
+} from "../genesisBetaPaymentBypassAuth";
+import { useAuth } from "../../auth/AuthProvider";
 import { isLocalBrowserOrigin } from "../../lib/clawApi";
 import { logPaymentFlowStage } from "../../components/agreements/paymentFlowProgression";
 import { ensureAffiliateAttributionForOrg, getAffiliateCodeForAttribution } from "../affiliate/affiliateAttributionContext";
@@ -71,7 +76,6 @@ import {
   isStripeCheckoutApiConfigured,
 } from "../billingCheckoutApi";
 import { syncDemoSubscriptionEntitlementIfApplicable } from "../billingCheckoutDemoSync";
-import { useAuth } from "../../auth/AuthProvider";
 import { resetCheckoutEntryScroll } from "./checkoutEntryScroll";
 import { SimpleFlowShell } from "./SimpleFlowShell";
 import { SpaLink } from "../SpaLink";
@@ -476,9 +480,13 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const returnParsed = extractAgreementIdFromSendReturnUrl(returnTo);
 
   const isCreateAgreementCheckout = agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && !isSingleAgreementCheckout;
+  const [genesisBetaAuth, setGenesisBetaAuth] = useState<GenesisBetaPaymentBypassAuth | undefined>(undefined);
   const devPaymentBypassState = useMemo(() => resolveDevPaymentBypassState(), []);
   const devPaymentBypassActive = isCreateAgreementCheckout && devPaymentBypassState.enabled;
-  const qaPaymentBypassState = useMemo(() => resolveQaPaymentBypassState(), []);
+  const qaPaymentBypassState = useMemo(
+    () => resolveQaPaymentBypassState(undefined, genesisBetaAuth),
+    [genesisBetaAuth],
+  );
   const qaPaymentBypassActive = isCreateAgreementCheckout && qaPaymentBypassState.enabled;
   const localSmokeBypassBlocked =
     isCreateAgreementCheckout && isLocalBrowserOrigin() && !devPaymentBypassState.enabled;
@@ -487,9 +495,23 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   );
 
   useEffect(() => {
+    if (!isCreateAgreementCheckout) {
+      setGenesisBetaAuth(undefined);
+      return;
+    }
+    let cancelled = false;
+    void refreshGenesisBetaPaymentBypassAuth(user?.id).then((auth) => {
+      if (!cancelled) setGenesisBetaAuth(auth);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCreateAgreementCheckout, user?.id]);
+
+  useEffect(() => {
     if (!isCreateAgreementCheckout) return;
     logDevPaymentBypassState();
-    logQaPaymentBypassState();
+    logQaPaymentBypassState(undefined, genesisBetaAuth);
     if (localSmokeBypassBlocked) {
       console.warn("[dev-payment-bypass-disabled-blocking-local-smoke]");
     }
@@ -499,11 +521,21 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       );
     }
     if (qaPaymentBypassActive) {
-      console.info(
-        "[QA PAYMENT BYPASS] active — explicit staging/QA checkout bypass enabled with VITE_LAWDOG_QA_PAYMENT_BYPASS=1",
-      );
+      console.info("[QA PAYMENT BYPASS] active — server authorization passed", {
+        authorized: qaPaymentBypassState.betaAuth?.authorized ?? false,
+        reason: qaPaymentBypassState.reason,
+        deployment: qaPaymentBypassState.deploymentEnv,
+        host: qaPaymentBypassState.origin,
+      });
     }
-  }, [isCreateAgreementCheckout, devPaymentBypassActive, qaPaymentBypassActive, localSmokeBypassBlocked]);
+  }, [
+    isCreateAgreementCheckout,
+    devPaymentBypassActive,
+    qaPaymentBypassActive,
+    localSmokeBypassBlocked,
+    genesisBetaAuth,
+    qaPaymentBypassState,
+  ]);
 
   useEffect(() => {
     if (!isCreateAgreementCheckout) {

@@ -43,10 +43,13 @@ describe("SimpleCheckoutPage dev payment bypass (static)", () => {
     expect(checkout).toContain("Dev payment bypass is disabled");
   });
 
-  it("gates staging QA bypass with a dedicated flag and visible checkout button", () => {
+  it("gates staging QA bypass with genesis beta auth and visible checkout button", () => {
     expect(bypass).toContain("VITE_LAWDOG_QA_PAYMENT_BYPASS");
     expect(bypass).toContain("resolveQaPaymentBypassState");
     expect(bypass).toContain("isRecognizedQaPaymentBypassOrigin");
+    expect(bypass).toContain("isPublicProductionHostname");
+    expect(bypass).toContain("qa_server_");
+    expect(checkout).toContain("refreshGenesisBetaPaymentBypassAuth");
     expect(checkout).toContain("resolveQaPaymentBypassState");
     expect(checkout).toContain("qaPaymentBypassActive");
     expect(checkout).toContain("QA bypass checkout");

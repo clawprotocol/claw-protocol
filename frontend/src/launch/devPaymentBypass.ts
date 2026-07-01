@@ -1,4 +1,5 @@
 import { isLocalBrowserOrigin } from "../lib/clawApi";
+import type { GenesisBetaPaymentBypassAuth } from "./genesisBetaPaymentBypassAuth";
 
 /**
  * DEV / local smoke: one-click “payment success” for create-flow checkout (premium post-return testing).
@@ -36,6 +37,12 @@ export type QaPaymentBypassState = {
   readonly prod: boolean;
   readonly envValue: string;
   readonly deploymentEnv: string;
+  readonly betaAuth?: GenesisBetaPaymentBypassAuth;
+  readonly gates?: {
+    readonly envFlag: boolean;
+    readonly originOrDeployment: boolean;
+    readonly betaAuth: boolean;
+  };
 };
 
 const QA_PAYMENT_BYPASS_ENABLED = "1";
@@ -98,9 +105,24 @@ export function isRecognizedQaPaymentBypassOrigin(origin = readOrigin()): boolea
   const host = hostnameFromOrigin(origin);
   if (!host) return false;
   if (host === "localhost" || host === "127.0.0.1" || host === "::1") return false;
-  if (host === "app.lawdog.ai" || host === "lawdog.ai" || host === "www.lawdog.ai") return false;
+  if (isPublicProductionHostname(host)) return false;
   if (host.endsWith(".railway.app") || host.endsWith(".up.railway.app")) return true;
   return QA_ORIGIN_TOKEN.test(host);
+}
+
+export function isPublicProductionHostname(host: string): boolean {
+  const h = (host || "").trim().toLowerCase();
+  return (
+    h === "lawdog.me" ||
+    h === "www.lawdog.me" ||
+    h === "lawdog.ai" ||
+    h === "www.lawdog.ai" ||
+    h === "app.lawdog.ai"
+  );
+}
+
+function isPublicProductionOrigin(origin = readOrigin()): boolean {
+  return isPublicProductionHostname(hostnameFromOrigin(origin));
 }
 
 function resolveDeploymentEnv(e: DevPaymentBypassEnv): string {
@@ -122,7 +144,10 @@ function isExplicitNonProductionEnv(value: string): boolean {
   return /^pr[-_]\d+$/.test(v) || /^preview[-_]/.test(v) || /^review[-_]/.test(v);
 }
 
-export function resolveQaPaymentBypassState(env?: DevPaymentBypassEnv): QaPaymentBypassState {
+export function resolveQaPaymentBypassState(
+  env?: DevPaymentBypassEnv,
+  betaAuth?: GenesisBetaPaymentBypassAuth | null,
+): QaPaymentBypassState {
   const e = env ?? (import.meta.env as DevPaymentBypassEnv);
   const envValue = e.VITE_LAWDOG_QA_PAYMENT_BYPASS ?? "";
   const origin = readOrigin();
@@ -130,17 +155,68 @@ export function resolveQaPaymentBypassState(env?: DevPaymentBypassEnv): QaPaymen
   const deploymentEnv = resolveDeploymentEnv(e);
   const recognizedOrigin = isRecognizedQaPaymentBypassOrigin(origin);
   const explicitNonProductionEnv = isExplicitNonProductionEnv(deploymentEnv);
+  const publicProduction = isPublicProductionOrigin(origin);
+  const envFlag = envValue === QA_PAYMENT_BYPASS_ENABLED;
+  const originOrDeployment = recognizedOrigin || explicitNonProductionEnv;
 
-  if (envValue !== QA_PAYMENT_BYPASS_ENABLED) {
-    return { enabled: false, reason: "qa_env_flag_not_enabled", origin, prod, envValue, deploymentEnv };
+  const base = { origin, prod, envValue, deploymentEnv };
+
+  if (!envFlag) {
+    return {
+      ...base,
+      enabled: false,
+      reason: "qa_env_flag_not_enabled",
+      gates: { envFlag: false, originOrDeployment, betaAuth: false },
+    };
   }
   if (recognizedOrigin) {
-    return { enabled: true, reason: "recognized_qa_origin", origin, prod, envValue, deploymentEnv };
+    return {
+      ...base,
+      enabled: true,
+      reason: "recognized_qa_origin",
+      gates: { envFlag: true, originOrDeployment: true, betaAuth: false },
+    };
   }
   if (explicitNonProductionEnv) {
-    return { enabled: true, reason: "explicit_non_production_env", origin, prod, envValue, deploymentEnv };
+    return {
+      ...base,
+      enabled: true,
+      reason: "explicit_non_production_env",
+      gates: { envFlag: true, originOrDeployment: true, betaAuth: false },
+    };
   }
-  return { enabled: false, reason: "qa_origin_or_env_required", origin, prod, envValue, deploymentEnv };
+  if (publicProduction) {
+    if (betaAuth == null) {
+      return {
+        ...base,
+        enabled: false,
+        reason: "qa_auth_pending",
+        gates: { envFlag: true, originOrDeployment: false, betaAuth: false },
+      };
+    }
+    if (betaAuth.authorized) {
+      return {
+        ...base,
+        enabled: true,
+        reason: `qa_server_${betaAuth.reason}`,
+        betaAuth,
+        gates: { envFlag: true, originOrDeployment: false, betaAuth: true },
+      };
+    }
+    return {
+      ...base,
+      enabled: false,
+      reason: betaAuth.reason || "not_authorized",
+      betaAuth,
+      gates: { envFlag: true, originOrDeployment: false, betaAuth: false },
+    };
+  }
+  return {
+    ...base,
+    enabled: false,
+    reason: "qa_origin_or_env_required",
+    gates: { envFlag: true, originOrDeployment: false, betaAuth: false },
+  };
 }
 
 export function isQaCreateFlowPaymentBypassEnabled(env?: DevPaymentBypassEnv): boolean {
@@ -156,11 +232,20 @@ export function logDevPaymentBypassState(env?: DevPaymentBypassEnv): DevPaymentB
   return state;
 }
 
-export function logQaPaymentBypassState(env?: DevPaymentBypassEnv): QaPaymentBypassState {
-  const state = resolveQaPaymentBypassState(env);
+export function logQaPaymentBypassState(
+  env?: DevPaymentBypassEnv,
+  betaAuth?: GenesisBetaPaymentBypassAuth | null,
+): QaPaymentBypassState {
+  const state = resolveQaPaymentBypassState(env, betaAuth);
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") {
     return state;
   }
-  console.info("[qa-payment-bypass-state]", state);
+  console.info("[qa-payment-bypass-state]", {
+    enabled: state.enabled,
+    authorized: state.betaAuth?.authorized ?? false,
+    reason: state.reason,
+    deployment: state.deploymentEnv,
+    host: state.origin,
+  });
   return state;
 }
