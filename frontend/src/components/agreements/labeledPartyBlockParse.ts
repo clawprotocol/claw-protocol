@@ -16,6 +16,7 @@ import {
   isInvalidPartyMetadataValue,
   isPartyMetadataFieldLabelLine,
   isPartyMetadataLabelValue,
+  isStructuredPromptSectionLabelToken,
 } from "./intakeSectionLabels";
 import {
   isPartyAddressBoundaryLine,
@@ -203,6 +204,7 @@ function isAddressContinuationLine(line: string): boolean {
   if (PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(t) || PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(t)) return false;
   if (ROLE_LABEL_PARTY_HEADER_RE.test(t)) return false;
   if (isIntakeSectionLabelLine(t)) return false;
+  if (isStructuredPromptSectionLabelToken(t)) return false;
   if (looksLikeStackedPartyEmailLine(t)) return false;
   if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return false;
   if (REPRESENTED_BY_HEADER_RE.test(t)) return false;
@@ -315,7 +317,12 @@ function applyStackedPartyLine(block: LabeledPartyBlock, line: string): void {
     block.address = mergeCanonicalPartyAddresses(block.address, cleanFieldValue(t));
     return;
   }
-  if (!block.address && !isIntakeSectionLabelLine(t) && !isInvalidPartyMetadataValue(t)) {
+  if (
+    !block.address &&
+    !isIntakeSectionLabelLine(t) &&
+    !isStructuredPromptSectionLabelToken(t) &&
+    !isInvalidPartyMetadataValue(t)
+  ) {
     block.address = cleanFieldValue(t);
   }
 }

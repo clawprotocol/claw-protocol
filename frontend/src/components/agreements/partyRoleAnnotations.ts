@@ -44,7 +44,7 @@ const ROLE_TOKEN_RE = new RegExp(`\\b(?:${ROLE_TOKEN_SOURCE.join("|")})\\b`, "i"
  * create phantom party segments. Truncate the "between …" / first-line clause here first.
  */
 export const LABELED_FIELD_AFTER_PARTY_LIST_RE =
-  /\b(?:property|premises|address|purchase\s+price|rent|deposit|security\s+deposit|closing\s+date|effective\s+date|term|governing\s+law|jurisdiction|venue|scope|services|purpose|ownership|members?|management|management\s+structure|contact|witness|notary)\s*[:\-]/i;
+  /\b(?:property|premises|address|purchase\s+price|rent|deposit|security\s+deposit|closing\s+date|effective\s+date|initial\s+term|term|governing\s+law|jurisdiction|venue|scope(?:\s+of\s+work)?|services|purpose|ownership|members?|management|management\s+structure|contact|witness|notary|governance|compensation|commercial\s+terms|background|confidentialit(?:y|ies)|deliverables?|payment(?:\s+schedule)?|revenue\s+allocation|liability)\s*[:\-]/i;
 
 export function truncatePartyClauseTailAtLabeledFields(s: string): string {
   const t = (s || "").trim();

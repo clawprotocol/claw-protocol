@@ -9,6 +9,7 @@ import {
   tripartiteRoleLabelForPartyIndex,
 } from "./labeledPartyBlockParse";
 import { isInvalidPartyMetadataValue } from "./intakeSectionLabels";
+import { sanitizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
 import { resolveCanonicalPartyRoleLabel, isGenericCanonicalRole } from "./canonicalPartyRoleAuthority";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
@@ -693,7 +694,7 @@ export function repairFusedExecutionRecitalClause(text: string): { text: string;
 }
 
 function optionalPartyAddressPhrase(address: string | null | undefined): string {
-  const clean = String(address ?? "").replace(/\s+/g, " ").trim();
+  const clean = sanitizeCanonicalPartyAddress(address, { source: "optionalPartyAddressPhrase" });
   if (!clean || isInvalidPartyMetadataValue(clean)) return "";
   return `, with its principal place of business at ${clean}`;
 }

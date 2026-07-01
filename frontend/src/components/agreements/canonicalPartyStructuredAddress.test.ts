@@ -53,5 +53,7 @@ describe("canonicalPartyStructuredAddress", () => {
       ]),
     ).toBe("4220 Industrial Drive, Fort Wayne, IN 46808");
     expect(isPartyAddressBoundaryLine("Party 4 (Regulatory & Quality Consultant)")).toBe(true);
+    expect(isPartyAddressBoundaryLine("Purpose,")).toBe(true);
+    expect(isPartyAddressBoundaryLine("Initial Term,")).toBe(true);
   });
 });

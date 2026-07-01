@@ -5,6 +5,7 @@
  */
 import type { AgreementFamily } from "./agreementFamilyRouter";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { splitTextAtStructuredPromptSectionLabels } from "./intakeSectionLabels";
 import { AGREEMENT_PREVIEW_ESIGN_NOTICE } from "./agreementPreviewConstants";
 
 const PREMIUM_SCHEDULE_FALLBACK =
@@ -375,6 +376,9 @@ function mergeShortSequential(chunks: string[], minLen: number): string[] {
 
 /** Split single-paragraph purposes so per-chunk theme routing can surface workstream headings. */
 function splitMonolithicPurposeForTheming(cleaned: string): string[] {
+  const byStructuredSections = splitTextAtStructuredPromptSectionLabels(cleaned);
+  if (byStructuredSections.length >= 2) return byStructuredSections;
+
   const base = splitSmartParagraphs(cleaned);
   if (base.length !== 1) return base;
   const block = base[0];

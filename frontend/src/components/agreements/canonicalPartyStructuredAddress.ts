@@ -3,7 +3,7 @@
  * Normalizes display whitespace; never drops valid address components; rejects party/prose boundaries.
  */
 
-import { isPartyMetadataLabelValue } from "./intakeSectionLabels";
+import { isPartyMetadataLabelValue, isIntakeSectionLabelLine, isStructuredPromptSectionLabelToken, STRUCTURED_PROMPT_SECTION_INLINE_BOUNDARY_RE } from "./intakeSectionLabels";
 import { looksLikeStackedPartyLegalEntityLine } from "./starterPartyIdentityIsolation";
 
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
@@ -17,6 +17,12 @@ const INTAKE_INSTRUCTION_LINE_RE =
   /^\s*(?:draft\b|include\s+(?:provisions|a\b)|commercial\s+terms|require\b|requirement\b|governing\s+law|term(?:ination)?\b|payment\b|background\b|scope\b)/i;
 const INLINE_ADDRESS_BOUNDARY_RE =
   /,\s*(?:party\s+\d+\b(?:\s*\([^)]*\))?|draft\b|include\b|require\b|commercial\s+terms\b)/i;
+
+function inlineAddressBoundaryMatch(segment: string): RegExpMatchArray | null {
+  const partyMatch = segment.match(INLINE_ADDRESS_BOUNDARY_RE);
+  if (partyMatch) return partyMatch;
+  return segment.match(STRUCTURED_PROMPT_SECTION_INLINE_BOUNDARY_RE);
+}
 
 export type PartyAddressBoundaryTrimDiagnostic = {
   slot?: number;
@@ -52,6 +58,8 @@ export function isPartyAddressBoundaryLine(line: string | null | undefined): boo
   if (PARTY_ROLE_PAREN_RE.test(t)) return true;
   if (HORIZONTAL_RULE_RE.test(t)) return true;
   if (INTAKE_INSTRUCTION_LINE_RE.test(t)) return true;
+  if (isIntakeSectionLabelLine(t)) return true;
+  if (isStructuredPromptSectionLabelToken(t)) return true;
   if (/^\s*coordinator\s*[:\-]?\s*$/i.test(t)) return true;
   if (/^\s*(?:client|service\s+provider|provider|contractor|consultant)\s*:\s*$/i.test(t)) return true;
   if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return true;
@@ -66,6 +74,7 @@ export function isPartyAddressContaminationSegment(segment: string | null | unde
   if (!t) return true;
   if (isPartyAddressBoundaryLine(t)) return true;
   if (PARTY_ROLE_PAREN_RE.test(t)) return true;
+  if (isStructuredPromptSectionLabelToken(t)) return true;
   if (/\bdraft\s+a\b/i.test(t)) return true;
   if (/\b(?:exclusive|regulatory|quality|distributor|manufacturer|licensor|consultant)\b/i.test(t) && /\bparty\s+\d+\b/i.test(t)) {
     return true;
@@ -76,7 +85,7 @@ export function isPartyAddressContaminationSegment(segment: string | null | unde
 function trimAddressSegmentAtInlineBoundary(segment: string): { value: string; removed: string } {
   const t = cleanAddressLine(segment);
   if (!t) return { value: "", removed: "" };
-  const match = t.match(INLINE_ADDRESS_BOUNDARY_RE);
+  const match = inlineAddressBoundaryMatch(t);
   if (match?.index != null && match.index >= 0) {
     const value = t.slice(0, match.index).replace(/,\s*$/, "").trim();
     const removed = t.slice(match.index).trim();
