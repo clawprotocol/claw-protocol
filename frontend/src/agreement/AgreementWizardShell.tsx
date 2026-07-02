@@ -595,7 +595,18 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
         ) : null}
 
         {step > 0 && agreementId?.trim() && !showPostVs01SimpleFirst ? (
-          <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} />
+          step === 1 ? (
+            <details className="mb-4 rounded-lg border border-slate-800/60 bg-slate-950/25 px-3 py-2">
+              <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:content-none [&::-webkit-details-marker]:hidden">
+                Agreement Memory &amp; reuse
+              </summary>
+              <div className="mt-3 border-t border-slate-800/50 pt-3">
+                <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} compact />
+              </div>
+            </details>
+          ) : (
+            <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} />
+          )
         ) : null}
 
         {step > 0 && agreementId?.trim() && wizardDraftReady && wizardBoot === "ready" && !postVs01SignatureFirstLanding ? (

@@ -21,6 +21,7 @@ vi.mock("./genesisBetaPaymentBypassAuth", () => ({
 }));
 
 vi.mock("./adminConsoleApi", () => ({
+  readAdminConsoleSecret: vi.fn(() => ""),
   writeAdminConsoleSecret: vi.fn(),
 }));
 

@@ -24,6 +24,8 @@ import {
   type AgreementReadinessLevel,
 } from "../../agreement/agreementReadiness";
 import { AgreementReadinessCard } from "./AgreementReadinessCard";
+import { AgreementReadySummaryCard } from "./AgreementReadySummaryCard";
+import { AgreementDetailsReadOnlyPanel } from "./AgreementDetailsReadOnlyPanel";
 import { SIMPLE_HOME_REVISION_COMPARE_ANCHOR_ID } from "./simpleHomeRevisionCompareAnchor";
 import { substitutePartyPlaceholdersInUserFacingText } from "../../agreement/partyPlaceholderDisplay";
 import { isOwnerProposalReviewQaEnabled } from "../../agreement/ownerProposalReviewQa";
@@ -833,6 +835,10 @@ const AgreementReview: React.FC<Props> = ({
   );
   const [auditOpen, setAuditOpen] = useState(false);
   const [status, setStatus] = useState<"Draft" | "Complete Draft" | "Signed">("Draft");
+  /** Wizard details step: summary-first presentation before full editor. */
+  const [workspaceDetailsPresentation, setWorkspaceDetailsPresentation] = useState<
+    "summary" | "readonly" | "editor"
+  >("summary");
   const [editInstruction, setEditInstruction] = useState("");
   const [versionBundle, setVersionBundle] = useState<AgreementVersionBundle | null>(null);
   /** Latest GET `signing_lock` snapshot — applied when version bundle is rebuilt (avoids stale lock flash). */
@@ -950,6 +956,7 @@ const AgreementReview: React.FC<Props> = ({
 
   const isWorkspace =
     (embeddedInCard && section !== "all") || isSimpleHomeReview;
+  const workspaceReviewFirstDetails = Boolean(embeddedInCard && section === "details" && isWorkspace);
   /** Free/starter simple-home send intentionally hides rich history widgets for stability. */
   const showWorkspaceRichHistory = Boolean(isWorkspace && !isSimpleHomeReview);
   const collaborationReadOnly = Boolean(
@@ -1556,6 +1563,10 @@ const AgreementReview: React.FC<Props> = ({
 
   useEffect(() => {
     simpleHomeEditLoggedRef.current = false;
+  }, [agreementId]);
+
+  useEffect(() => {
+    setWorkspaceDetailsPresentation("summary");
   }, [agreementId]);
 
   useEffect(() => {
@@ -4093,6 +4104,47 @@ const AgreementReview: React.FC<Props> = ({
       </div>
     ) : null;
 
+  const workspaceAdvancedPanel = (
+    <>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--compact text-[11px]"
+          onClick={() => void copyPublicVerifyLinkOnly()}
+        >
+          Copy public verify link
+        </button>
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--compact text-[11px]"
+          onClick={() => void copySocialSummaryFn()}
+        >
+          Copy summary (email / social)
+        </button>
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--compact text-[11px] text-slate-400"
+          onClick={() => stubAgreementPdf()}
+        >
+          Download PDF (soon)
+        </button>
+      </div>
+      {onBackToNew && !postVs01SignatureFirstLanding ? (
+        <button type="button" className="btn text-xs font-medium text-slate-200" onClick={onBackToNew}>
+          Reset draft
+        </button>
+      ) : null}
+      <p className="text-[10px] text-slate-600">
+        Agreement ID (for support): <span className="font-mono text-slate-500">{draft.id}</span>
+      </p>
+      {shareFlash ? <p className="text-[10px] text-emerald-400/95">{shareFlash}</p> : null}
+      <p className="text-[10px] leading-snug text-slate-500">
+        Owners merge revisions into the draft; recipients review or propose changes; signatures happen after the
+        agreement is stable and locked.
+      </p>
+    </>
+  );
+
   const headerBlock = isWorkspace ? (
     <div className="border-b border-slate-800/80 pb-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -6254,7 +6306,59 @@ const AgreementReview: React.FC<Props> = ({
     </div>
   ) : null;
 
-  const detailsStepBlock = (
+  const workspaceDetailsNav =
+    workspaceReviewFirstDetails && workspaceDetailsPresentation !== "summary" ? (
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+          onClick={() => setWorkspaceDetailsPresentation("summary")}
+        >
+          Back to summary
+        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {workspaceDetailsPresentation === "readonly" ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+              onClick={() => setWorkspaceDetailsPresentation("editor")}
+            >
+              Edit details
+            </button>
+          ) : null}
+          <details className="rounded-lg border border-slate-800/60 bg-slate-950/25 px-2 py-1.5">
+            <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:content-none [&::-webkit-details-marker]:hidden">
+              Advanced options
+            </summary>
+            <div className="mt-2 space-y-3 border-t border-slate-800/50 pt-2">{workspaceAdvancedPanel}</div>
+          </details>
+        </div>
+      </div>
+    ) : null;
+
+  const detailsStepBlock = workspaceReviewFirstDetails ? (
+    workspaceDetailsPresentation === "summary" ? (
+      <AgreementReadySummaryCard
+        draft={draft}
+        onReviewAgreement={() => setWorkspaceDetailsPresentation("readonly")}
+        onEditDetails={() => setWorkspaceDetailsPresentation("editor")}
+        advancedPanel={workspaceAdvancedPanel}
+      />
+    ) : (
+      <>
+        {workspaceDetailsNav}
+        {workspaceDetailsPresentation === "readonly" ? (
+          <AgreementDetailsReadOnlyPanel draft={draft} />
+        ) : (
+          <>
+            {coreMetaGrid}
+            {extendedDetailsGrid}
+            {partiesSection}
+          </>
+        )}
+      </>
+    )
+  ) : (
     <>
       {coreMetaGrid}
       {extendedDetailsGrid}
@@ -7932,11 +8036,14 @@ const AgreementReview: React.FC<Props> = ({
     );
   }
 
+  const showWorkspaceReviewFirstSummary =
+    workspaceReviewFirstDetails && workspaceDetailsPresentation === "summary";
+
   return (
     <>
       <section className={outerClass}>
-        {headerBlock}
-        {workspaceStateBannerEl}
+        {!showWorkspaceReviewFirstSummary ? headerBlock : null}
+        {!showWorkspaceReviewFirstSummary ? workspaceStateBannerEl : null}
         {show("details") ? detailsStepBlock : null}
         {show("draft") ? draftBlock : null}
         {show("recipients") ? recipientsBlock : null}

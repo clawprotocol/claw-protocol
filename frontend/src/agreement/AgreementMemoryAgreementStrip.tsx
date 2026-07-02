@@ -17,8 +17,8 @@ const PAYWALL_COPY = {
 };
 
 /** Productivity strip — assistive memory; proof stays on canonical records. */
-export function AgreementMemoryAgreementStrip(props: { agreementId: string }) {
-  const { agreementId } = props;
+export function AgreementMemoryAgreementStrip(props: { agreementId: string; compact?: boolean }) {
+  const { agreementId, compact = false } = props;
   const { navigate } = useLaunchNav();
   const access = useAccess();
   const { openPowerPaywall } = usePowerPaywall();
@@ -93,7 +93,13 @@ export function AgreementMemoryAgreementStrip(props: { agreementId: string }) {
   }
 
   return (
-    <div className="mb-4 rounded-lg border border-slate-800/90 bg-slate-950/40 px-3 py-3">
+    <div
+      className={
+        compact
+          ? "rounded-lg border border-slate-800/70 bg-slate-950/30 px-2 py-2"
+          : "mb-4 rounded-lg border border-slate-800/90 bg-slate-950/40 px-3 py-3"
+      }
+    >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agreement Memory</p>
         {tier === "none" ? (
