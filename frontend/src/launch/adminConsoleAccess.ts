@@ -12,10 +12,17 @@ function readEnv(env?: DevPaymentBypassEnv): DevPaymentBypassEnv {
   return env ?? (import.meta.env as DevPaymentBypassEnv);
 }
 
-/** Operator deployments: explicit admin-console flag or internal QA payment bypass build. */
+/**
+ * Operator deployments: explicit admin-console flag, internal QA bypass build, or public
+ * production host (lawdog.me / lawdog.ai — still gated by server auth on those hosts).
+ */
 export function isAdminConsoleDeploymentEnabled(env?: DevPaymentBypassEnv): boolean {
   const e = readEnv(env);
-  return featureFlags.adminConsoleUi || e.VITE_LAWDOG_QA_PAYMENT_BYPASS === QA_OPERATOR_DEPLOYMENT_FLAG;
+  return (
+    featureFlags.adminConsoleUi ||
+    e.VITE_LAWDOG_QA_PAYMENT_BYPASS === QA_OPERATOR_DEPLOYMENT_FLAG ||
+    isPublicProductionAdminConsoleHost()
+  );
 }
 
 export function readPublicProductionAdminHost(): string {

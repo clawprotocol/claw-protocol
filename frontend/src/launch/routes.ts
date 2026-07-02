@@ -31,9 +31,13 @@ export type AppSection =
   | { kind: "opsGenesisReferral" }
   | { kind: "adminConsole" };
 
+/** Operator Founder HQ — canonical path is `/app/admin`; aliases for bookmarks and ops links. */
+const ADMIN_CONSOLE_PATHS = new Set(["/app/admin", "/app/founder", "/founder", "/admin"]);
+
 export function matchAppPath(pathname: string): AppSection | null {
   const p = (pathname.replace(/\/$/, "") || "/").split("?")[0];
   if (p === "/dashboard") return { kind: "dashboard" };
+  if (ADMIN_CONSOLE_PATHS.has(p)) return { kind: "adminConsole" };
   if (!p.startsWith("/app")) return null;
   if (p === "/app") return { kind: "dashboard" };
   if (p === "/app/billing") return { kind: "billing" };
@@ -50,7 +54,6 @@ export function matchAppPath(pathname: string): AppSection | null {
   if (p === "/app/ops/starter-pro-refine") return { kind: "opsStarterProRefine" };
   if (p === "/app/genesis-referral") return { kind: "genesisReferral" };
   if (p === "/app/ops/genesis-referral") return { kind: "opsGenesisReferral" };
-  if (p === "/app/admin") return { kind: "adminConsole" };
   if (p === "/app/create") return { kind: "simpleCreate" };
   if (p === "/app/quick") return { kind: "quickSend" };
 
