@@ -14,7 +14,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from backend.utils.canon_json import canon_json_bytes
 
@@ -140,17 +140,59 @@ def _load_draft_postgres(agreement_id: str) -> Dict[str, Any]:
     return parsed
 
 
-def list_draft_agreement_ids_newest_first() -> List[str]:
+def _cap_list_limit(limit: Optional[int]) -> Optional[int]:
+    if limit is None:
+        return None
+    return max(1, min(int(limit), 500))
+
+
+def _json_array_field(raw: Any) -> List[Any]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
+def _admin_metadata_slice_from_draft(agreement_id: str, draft: Dict[str, Any]) -> Dict[str, Any]:
+    """Admin-safe draft projection (no body/purpose/payment fields)."""
+    return {
+        "id": agreement_id,
+        "created_at": draft.get("created_at"),
+        "updated_at": draft.get("updated_at"),
+        "title": draft.get("title"),
+        "review_sent_at": draft.get("review_sent_at"),
+        "parties": draft.get("parties") if isinstance(draft.get("parties"), list) else [],
+        "audit_log": draft.get("audit_log") if isinstance(draft.get("audit_log"), list) else [],
+        "versions": draft.get("versions") if isinstance(draft.get("versions"), list) else [],
+    }
+
+
+def list_draft_agreement_ids_newest_first(limit: Optional[int] = None) -> List[str]:
     """Return draft ids newest first (mtime for files; ``updated_at`` for Postgres)."""
+    cap = _cap_list_limit(limit)
     if _use_postgres():
         from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
 
         with agreement_postgres_connection() as cx:
-            cur = pg_execute(
-                cx,
-                "SELECT id FROM agreement_drafts ORDER BY updated_at DESC",
-                (),
-            )
+            if cap is None:
+                cur = pg_execute(
+                    cx,
+                    "SELECT id FROM agreement_drafts ORDER BY updated_at DESC",
+                    (),
+                )
+            else:
+                cur = pg_execute(
+                    cx,
+                    "SELECT id FROM agreement_drafts ORDER BY updated_at DESC LIMIT ?",
+                    (cap,),
+                )
             rows = cur.fetchall()
         return [str(r[0]) for r in rows]
     paths: List[tuple[int, str]] = []
@@ -163,4 +205,74 @@ def list_draft_agreement_ids_newest_first() -> List[str]:
             continue
         paths.append((st.st_mtime_ns, path.stem))
     paths.sort(key=lambda t: -t[0])
-    return [aid for _, aid in paths]
+    ids = [aid for _, aid in paths]
+    if cap is None:
+        return ids
+    return ids[:cap]
+
+
+def _list_draft_admin_metadata_postgres(limit: int) -> List[Dict[str, Any]]:
+    from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+
+    with agreement_postgres_connection() as cx:
+        cur = pg_execute(
+            cx,
+            """
+            SELECT
+              id,
+              payload->>'created_at' AS created_at,
+              payload->>'updated_at' AS updated_at,
+              payload->>'title' AS title,
+              payload->>'review_sent_at' AS review_sent_at,
+              payload->'parties' AS parties,
+              payload->'audit_log' AS audit_log,
+              payload->'versions' AS versions
+            FROM agreement_drafts
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = cur.fetchall()
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        aid = str(row[0])
+        out.append(
+            {
+                "id": aid,
+                "created_at": row[1],
+                "updated_at": row[2],
+                "title": row[3],
+                "review_sent_at": row[4],
+                "parties": _json_array_field(row[5]),
+                "audit_log": _json_array_field(row[6]),
+                "versions": _json_array_field(row[7]),
+            }
+        )
+    return out
+
+
+def _list_draft_admin_metadata_files(limit: int) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for aid in list_draft_agreement_ids_newest_first(limit=limit):
+        try:
+            draft = load_draft(aid)
+        except Exception:
+            continue
+        if not isinstance(draft, dict):
+            continue
+        out.append(_admin_metadata_slice_from_draft(aid, draft))
+    return out
+
+
+def list_draft_admin_metadata_newest_first(limit: int = 200) -> List[Dict[str, Any]]:
+    """
+    Newest-first admin-safe draft metadata.
+
+    Postgres: one connection, one ``LIMIT`` query with JSONB field projection.
+    Local files: bounded id listing then per-file ``load_draft`` (dev/small datasets).
+    """
+    cap = _cap_list_limit(limit) or 200
+    if _use_postgres():
+        return _list_draft_admin_metadata_postgres(cap)
+    return _list_draft_admin_metadata_files(cap)

@@ -121,3 +121,103 @@ def test_admin_flag_action_is_audited(monkeypatch, tmp_path):
     assert a.status_code == 200
     actions = a.json().get("actions") or []
     assert any(x.get("action_type") == "flag_agreement" and x.get("target_id") == "ag_admin_2" for x in actions)
+
+
+def _admin_draft_slice(agreement_id: str, *, title: str = "Agreement") -> dict:
+    return {
+        "id": agreement_id,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-02T00:00:00Z",
+        "title": title,
+        "review_sent_at": "",
+        "parties": [{"name": "A", "role": "owner", "email": "a@example.com"}],
+        "audit_log": [],
+        "versions": [],
+    }
+
+
+def test_admin_agreements_pg_path_does_not_call_load_draft(monkeypatch, tmp_path):
+    _seed_env(monkeypatch, tmp_path)
+    from backend.services import agreement_draft_store as ads
+
+    many = [_admin_draft_slice(f"ag_pg_{i}") for i in range(300)]
+    batch_limits: list[int] = []
+    load_draft_calls: list[str] = []
+
+    monkeypatch.setattr(ads, "_use_postgres", lambda: True)
+    monkeypatch.setattr(
+        "backend.routers.admin_console_api.list_draft_admin_metadata_newest_first",
+        lambda limit=200: batch_limits.append(limit) or many[:limit],
+    )
+    monkeypatch.setattr(ads, "load_draft", lambda aid: load_draft_calls.append(aid) or {})
+
+    client = TestClient(app)
+    r = client.get(
+        "/v1/admin/agreements?limit=50",
+        headers={"x-claw-admin-secret": "admin-test-secret"},
+    )
+    assert r.status_code == 200
+    assert len(r.json().get("agreements") or []) == 50
+    assert batch_limits == [50]
+    assert load_draft_calls == []
+
+
+def test_admin_overview_pg_path_does_not_call_load_draft(monkeypatch, tmp_path):
+    _seed_env(monkeypatch, tmp_path)
+    from backend.services import agreement_draft_store as ads
+
+    many = [_admin_draft_slice(f"ag_ov_{i}") for i in range(400)]
+    batch_limits: list[int] = []
+    load_draft_calls: list[str] = []
+
+    monkeypatch.setattr(ads, "_use_postgres", lambda: True)
+    monkeypatch.setattr(
+        "backend.routers.admin_console_api.list_draft_admin_metadata_newest_first",
+        lambda limit=200: batch_limits.append(limit) or many[:limit],
+    )
+    monkeypatch.setattr(ads, "load_draft", lambda aid: load_draft_calls.append(aid) or {})
+
+    client = TestClient(app)
+    r = client.get("/v1/admin/overview", headers={"x-claw-admin-secret": "admin-test-secret"})
+    assert r.status_code == 200
+    assert batch_limits == [250]
+    assert load_draft_calls == []
+
+
+def test_admin_agreements_local_respects_limit_bounded_load_draft(monkeypatch, tmp_path):
+    _seed_env(monkeypatch, tmp_path)
+    from backend.services import agreement_draft_store as ads
+
+    load_draft_calls: list[str] = []
+    real_load = ads.load_draft
+
+    def counting_load(aid: str):
+        load_draft_calls.append(aid)
+        return real_load(aid)
+
+    monkeypatch.setattr(ads, "load_draft", counting_load)
+
+    for i in range(8):
+        save_draft(
+            {
+                "id": f"ag_local_{i}",
+                "title": f"Agreement {i}",
+                "purpose": "private body",
+                "parties": [{"name": "A", "role": "owner"}],
+                "versions": [],
+                "audit_log": [],
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": f"2026-01-0{i + 1}T00:00:00Z",
+            }
+        )
+
+    client = TestClient(app)
+    r = client.get(
+        "/v1/admin/agreements?limit=3",
+        headers={"x-claw-admin-secret": "admin-test-secret"},
+    )
+    assert r.status_code == 200
+    assert len(r.json().get("agreements") or []) == 3
+    assert len(load_draft_calls) == 3
+    assert "purpose" not in (r.json().get("agreements") or [{}])[0]
+

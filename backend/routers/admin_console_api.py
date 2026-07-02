@@ -15,7 +15,7 @@ from backend.economics.store import get_economics_store
 from backend.integrations.webhook_dispatch import retry_delivery
 from backend.integrations import webhook_store
 from backend.ops.break_glass_audit import BreakGlassAction, log_break_glass_event
-from backend.routers.agreements_v2_api import list_draft_agreement_ids_newest_first, load_draft
+from backend.services.agreement_draft_store import list_draft_admin_metadata_newest_first
 from backend.usage_economics.store import get_usage_economics_store
 
 router = APIRouter(prefix="/v1/admin", tags=["admin-v1"])
@@ -86,54 +86,66 @@ def _safe_bool(v: Any) -> bool:
     return False
 
 
+def _admin_metadata_row(
+    aid: str,
+    d: Dict[str, Any],
+    *,
+    owner_map: Dict[str, Optional[str]],
+    flags_map: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    parties = d.get("parties") if isinstance(d.get("parties"), list) else []
+    recipient_count = sum(1 for p in parties if str((p or {}).get("role") or "").strip())
+    recipient_emails_present = any(str((p or {}).get("email") or "").strip() for p in parties)
+    review_sent = str(d.get("review_sent_at") or "").strip()
+    signed = any(
+        isinstance(e, dict) and str(e.get("event_type") or "") == "signed"
+        for e in (d.get("audit_log") or [])
+    )
+    owner_ref = owner_map.get(aid) or ""
+    fg = flags_map.get(aid) or {}
+    versions = d.get("versions") if isinstance(d.get("versions"), list) else []
+    return {
+        "agreement_id": aid,
+        "owner_user_id": owner_ref or None,
+        "owner_email": _parse_subject_email(owner_ref),
+        "created_at": str(d.get("created_at") or ""),
+        "updated_at": str(d.get("updated_at") or d.get("created_at") or ""),
+        "product_tier": "premium" if recipient_count > 1 else "free",
+        "flow_type": "signature" if signed else "review_send",
+        "current_phase": "signed" if signed else ("sent" if review_sent else "draft"),
+        "agreement_title": str(d.get("title") or "").strip() or "Untitled agreement",
+        "party_count": len(parties),
+        "recipient_count": recipient_count,
+        "recipient_emails_present": bool(recipient_emails_present),
+        "delivery_state": "sent" if review_sent else "pending",
+        "proof_state": "signed" if signed else "pending",
+        "last_event_at": review_sent or str(d.get("updated_at") or ""),
+        "last_error_code": None,
+        "last_error_at": None,
+        "has_active_link": bool(review_sent),
+        "version_count": len(versions),
+        "is_flagged_abuse": bool(int(fg.get("is_flagged_abuse") or 0)),
+    }
+
+
 def _load_agreements_metadata(limit: int = 200) -> List[Dict[str, Any]]:
+    cap = max(1, min(limit, 500))
     ustore = get_usage_economics_store()
     ustore.init_schema()
-    all_ids = list_draft_agreement_ids_newest_first()
-    ids = all_ids[: max(1, min(limit, 500))]
+    draft_slices = list_draft_admin_metadata_newest_first(limit=cap)
+    ids = [str(d.get("id") or "").strip() for d in draft_slices if str(d.get("id") or "").strip()]
     owner_map = ustore.owner_subjects_for_agreement_ids(ids)
     flags_map = get_admin_console_store().get_agreement_flags_map(ids)
-    rows: List[Dict[str, Any]] = []
-    for aid in ids:
-        try:
-            d = load_draft(aid)
-        except Exception:
-            continue
-        parties = d.get("parties") if isinstance(d.get("parties"), list) else []
-        recipient_count = sum(1 for p in parties if str((p or {}).get("role") or "").strip())
-        recipient_emails_present = any(str((p or {}).get("email") or "").strip() for p in parties)
-        review_sent = str(d.get("review_sent_at") or "").strip()
-        signed = any(
-            isinstance(e, dict) and str(e.get("event_type") or "") == "signed"
-            for e in (d.get("audit_log") or [])
+    return [
+        _admin_metadata_row(
+            aid,
+            d,
+            owner_map=owner_map,
+            flags_map=flags_map,
         )
-        owner_ref = owner_map.get(aid) or ""
-        fg = flags_map.get(aid) or {}
-        rows.append(
-            {
-                "agreement_id": aid,
-                "owner_user_id": owner_ref or None,
-                "owner_email": _parse_subject_email(owner_ref),
-                "created_at": str(d.get("created_at") or ""),
-                "updated_at": str(d.get("updated_at") or d.get("created_at") or ""),
-                "product_tier": "premium" if recipient_count > 1 else "free",
-                "flow_type": "signature" if signed else "review_send",
-                "current_phase": "signed" if signed else ("sent" if review_sent else "draft"),
-                "agreement_title": str(d.get("title") or "").strip() or "Untitled agreement",
-                "party_count": len(parties),
-                "recipient_count": recipient_count,
-                "recipient_emails_present": bool(recipient_emails_present),
-                "delivery_state": "sent" if review_sent else "pending",
-                "proof_state": "signed" if signed else "pending",
-                "last_event_at": review_sent or str(d.get("updated_at") or ""),
-                "last_error_code": None,
-                "last_error_at": None,
-                "has_active_link": bool(review_sent),
-                "version_count": len(d.get("versions") or []),
-                "is_flagged_abuse": bool(int(fg.get("is_flagged_abuse") or 0)),
-            }
-        )
-    return rows
+        for aid, d in ((str(x.get("id") or "").strip(), x) for x in draft_slices)
+        if aid
+    ]
 
 
 @router.get("/overview")
