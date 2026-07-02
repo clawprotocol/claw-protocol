@@ -331,45 +331,7 @@ def admin_affiliates(request: Request, limit: int = Query(default=200, ge=1, le=
     _admin_identity(request)
     eco = get_economics_store()
     eco.init_schema()
-    out: List[Dict[str, Any]] = []
-    with eco._conn() as con:
-        rows = con.execute(
-            """
-            SELECT a.id AS affiliate_id, a.owner_org_id AS owner_user_id, a.affiliate_code, a.display_name,
-                   a.status, a.created_at,
-                   (SELECT COUNT(*) FROM affiliate_attributions aa WHERE aa.affiliate_id = a.id AND aa.expires_at IS NULL) AS referred_count,
-                   (SELECT COUNT(*) FROM affiliate_earnings ae WHERE ae.affiliate_id = a.id AND ae.status IN ('payable','paid')) AS paying_conversions,
-                   COALESCE((SELECT SUM(ae.amount_usd) FROM affiliate_earnings ae WHERE ae.affiliate_id = a.id), 0.0) AS gross_amount,
-                   COALESCE((SELECT SUM(ae.amount_usd) FROM affiliate_earnings ae WHERE ae.affiliate_id = a.id AND ae.status = 'paid'), 0.0) AS paid_amount,
-                   COALESCE((SELECT SUM(ae.amount_usd) FROM affiliate_earnings ae WHERE ae.affiliate_id = a.id AND ae.status = 'payable'), 0.0) AS commission_due
-            FROM affiliates a
-            ORDER BY datetime(a.created_at) DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        for r in rows:
-            d = dict(r)
-            out.append(
-                {
-                    "affiliate_id": d.get("affiliate_id"),
-                    "owner_user_id": d.get("owner_user_id"),
-                    "affiliate_code": d.get("affiliate_code"),
-                    "display_name": d.get("display_name"),
-                    "status": d.get("status"),
-                    "created_at": d.get("created_at"),
-                    "default_payout_method": "usdc_wallet",
-                    "notes_internal": None,
-                    "referred_count": int(d.get("referred_count") or 0),
-                    "paying_conversions": int(d.get("paying_conversions") or 0),
-                    "gross_attributable_revenue": float(d.get("gross_amount") or 0.0),
-                    "net_attributable_revenue": float(d.get("gross_amount") or 0.0),
-                    "commission_due": float(d.get("commission_due") or 0.0),
-                    "commission_paid": float(d.get("paid_amount") or 0.0),
-                    "hold_state": str(d.get("status") or "") == "hold",
-                }
-            )
-    return {"affiliates": out}
+    return {"affiliates": eco.list_admin_affiliate_summaries(limit=limit)}
 
 
 @router.get("/affiliate-payout-batches")

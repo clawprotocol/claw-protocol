@@ -2015,6 +2015,88 @@ class EconomicsStore:
         finally:
             con.close()
 
+    def list_admin_affiliate_summaries(self, *, limit: int = 200) -> List[Dict[str, Any]]:
+        """
+        Operator admin affiliate rows: SQLite ``affiliates`` + attributions; earnings from Postgres
+        ledger when ``use_postgresql_for_affiliate_ledger()`` else economics SQLite.
+        """
+        lim = max(1, min(int(limit), 500))
+        earnings_by_affiliate: Dict[str, Dict[str, Any]] = {}
+        if _affiliate_ledger_pg():
+            from backend.economics import affiliate_ledger_postgres as alp
+
+            earnings_by_affiliate = alp.list_affiliate_earnings_admin_aggregates_by_affiliate()
+        with self._conn() as con:
+            if _affiliate_ledger_pg():
+                rows = con.execute(
+                    """
+                    SELECT a.id AS affiliate_id, a.owner_org_id AS owner_user_id, a.affiliate_code,
+                           a.display_name, a.status, a.created_at,
+                           (SELECT COUNT(*) FROM affiliate_attributions aa
+                            WHERE aa.affiliate_id = a.id AND aa.expires_at IS NULL) AS referred_count
+                    FROM affiliates a
+                    ORDER BY datetime(a.created_at) DESC
+                    LIMIT ?
+                    """,
+                    (lim,),
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    """
+                    SELECT a.id AS affiliate_id, a.owner_org_id AS owner_user_id, a.affiliate_code,
+                           a.display_name, a.status, a.created_at,
+                           (SELECT COUNT(*) FROM affiliate_attributions aa
+                            WHERE aa.affiliate_id = a.id AND aa.expires_at IS NULL) AS referred_count,
+                           (SELECT COUNT(*) FROM affiliate_earnings ae
+                            WHERE ae.affiliate_id = a.id AND ae.status IN ('payable','paid')) AS paying_conversions,
+                           COALESCE((SELECT SUM(ae.amount_usd) FROM affiliate_earnings ae
+                            WHERE ae.affiliate_id = a.id), 0.0) AS gross_amount,
+                           COALESCE((SELECT SUM(ae.amount_usd) FROM affiliate_earnings ae
+                            WHERE ae.affiliate_id = a.id AND ae.status = 'paid'), 0.0) AS paid_amount,
+                           COALESCE((SELECT SUM(ae.amount_usd) FROM affiliate_earnings ae
+                            WHERE ae.affiliate_id = a.id AND ae.status = 'payable'), 0.0) AS commission_due
+                    FROM affiliates a
+                    ORDER BY datetime(a.created_at) DESC
+                    LIMIT ?
+                    """,
+                    (lim,),
+                ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            aid = str(d.get("affiliate_id") or "")
+            if _affiliate_ledger_pg():
+                agg = earnings_by_affiliate.get(aid) or {}
+                paying_conversions = int(agg.get("paying_conversions") or 0)
+                gross_amount = float(agg.get("gross_amount") or 0.0)
+                paid_amount = float(agg.get("paid_amount") or 0.0)
+                commission_due = float(agg.get("commission_due") or 0.0)
+            else:
+                paying_conversions = int(d.get("paying_conversions") or 0)
+                gross_amount = float(d.get("gross_amount") or 0.0)
+                paid_amount = float(d.get("paid_amount") or 0.0)
+                commission_due = float(d.get("commission_due") or 0.0)
+            out.append(
+                {
+                    "affiliate_id": d.get("affiliate_id"),
+                    "owner_user_id": d.get("owner_user_id"),
+                    "affiliate_code": d.get("affiliate_code"),
+                    "display_name": d.get("display_name"),
+                    "status": d.get("status"),
+                    "created_at": d.get("created_at"),
+                    "default_payout_method": "usdc_wallet",
+                    "notes_internal": None,
+                    "referred_count": int(d.get("referred_count") or 0),
+                    "paying_conversions": paying_conversions,
+                    "gross_attributable_revenue": gross_amount,
+                    "net_attributable_revenue": gross_amount,
+                    "commission_due": commission_due,
+                    "commission_paid": paid_amount,
+                    "hold_state": str(d.get("status") or "") == "hold",
+                }
+            )
+        return out
+
     def affiliate_earnings_usd_summary(self, affiliate_id: str) -> Dict[str, float]:
         """Sums affiliate_earnings by lifecycle status (USD)."""
         aid = (affiliate_id or "").strip()

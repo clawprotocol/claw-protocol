@@ -61,6 +61,37 @@ def test_admin_agreements_is_metadata_only(monkeypatch, tmp_path):
     assert row["owner_email"] == "owner@example.com"
 
 
+def test_admin_affiliates_empty_fresh_economics_db(monkeypatch, tmp_path):
+    _seed_env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    r = client.get(
+        "/v1/admin/affiliates",
+        headers={"x-claw-admin-secret": "admin-test-secret"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"affiliates": []}
+
+
+def test_admin_affiliates_pg_ledger_without_sqlite_earnings_table(monkeypatch, tmp_path):
+    """Regression: CLAW_DATABASE_URL moves earnings to Postgres; admin must not query SQLite affiliate_earnings."""
+    _seed_env(monkeypatch, tmp_path)
+    from backend.economics import store as eco_store
+
+    monkeypatch.setattr(eco_store, "_affiliate_ledger_pg", lambda: True)
+    monkeypatch.setattr(
+        "backend.economics.affiliate_ledger_postgres.list_affiliate_earnings_admin_aggregates_by_affiliate",
+        lambda: {},
+    )
+    eco_store.reset_economics_store_for_tests()
+    client = TestClient(app)
+    r = client.get(
+        "/v1/admin/affiliates",
+        headers={"x-claw-admin-secret": "admin-test-secret"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"affiliates": []}
+
+
 def test_admin_flag_action_is_audited(monkeypatch, tmp_path):
     _seed_env(monkeypatch, tmp_path)
     from backend.usage_economics.store import get_usage_economics_store

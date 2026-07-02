@@ -477,6 +477,35 @@ def create_draft_payout_batch_atomic(
             )
 
 
+def list_affiliate_earnings_admin_aggregates_by_affiliate() -> Dict[str, Dict[str, Any]]:
+    """
+    Per-affiliate commission rollups for operator admin (Founder HQ).
+
+    ``affiliates`` / ``affiliate_attributions`` stay on economics SQLite; earnings live here when
+    ``use_postgresql_for_affiliate_ledger()``.
+    """
+    with _ledger_tx() as conn:
+        cur = conn.execute(
+            """
+            SELECT affiliate_id,
+                   COUNT(*) FILTER (WHERE status IN ('payable', 'paid')) AS paying_conversions,
+                   COALESCE(SUM(amount_usd), 0) AS gross_amount,
+                   COALESCE(SUM(amount_usd) FILTER (WHERE status = 'paid'), 0) AS paid_amount,
+                   COALESCE(SUM(amount_usd) FILTER (WHERE status = 'payable'), 0) AS commission_due
+            FROM affiliate_earnings
+            GROUP BY affiliate_id
+            """
+        )
+        rows = cur.fetchall()
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        d = _row_dict(row)
+        aid = str(d.get("affiliate_id") or "").strip()
+        if aid:
+            out[aid] = d
+    return out
+
+
 def affiliate_earnings_usd_summary(affiliate_id: str) -> Dict[str, float]:
     aid = (affiliate_id or "").strip()
     out = {"pending_usd": 0.0, "payable_usd": 0.0, "paid_usd": 0.0}
