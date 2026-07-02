@@ -27,6 +27,9 @@ describe("matchAppPath", () => {
     expect(matchAppPath("/app/ops/growth")).toEqual({ kind: "opsGrowth" });
     expect(matchAppPath("/app/ops/starter-pro-refine")).toEqual({ kind: "opsStarterProRefine" });
     expect(matchAppPath("/app/admin")).toEqual({ kind: "adminConsole" });
+    expect(matchAppPath("/app/founder")).toEqual({ kind: "adminConsole" });
+    expect(matchAppPath("/founder")).toEqual({ kind: "adminConsole" });
+    expect(matchAppPath("/admin")).toEqual({ kind: "adminConsole" });
     expect(matchAppPath("/app/affiliate")).toEqual({ kind: "affiliate" });
     expect(matchAppPath("/app/settings")).toEqual({ kind: "settings" });
     expect(matchAppPath("/app/signatures")).toEqual({ kind: "signatures" });

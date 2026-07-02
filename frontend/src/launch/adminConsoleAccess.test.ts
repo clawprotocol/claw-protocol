@@ -70,16 +70,26 @@ describe("public production admin console gating", () => {
     ).toBe(false);
   });
 
-  it("keeps anonymous production builds without operator flags disabled", () => {
+  it("enables the admin route shell on public production hosts with server auth", () => {
     vi.stubGlobal("window", { location: { origin: "https://lawdog.me" } });
     expect(
       isAdminConsoleDeploymentEnabled({
         PROD: true,
         DEV: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       requiresAdminConsoleServerAuth({
+        PROD: true,
+        DEV: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps admin console off on non-operator production hosts without flags", () => {
+    vi.stubGlobal("window", { location: { origin: "https://customer.example.com" } });
+    expect(
+      isAdminConsoleDeploymentEnabled({
         PROD: true,
         DEV: false,
       }),

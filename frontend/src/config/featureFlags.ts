@@ -41,9 +41,9 @@ export const featureFlags = {
   /** Internal operator dashboard: funnel, experiments, share metrics (local persistence). */
   opsGrowthDashboard: getFlag("VITE_CLAW_FEATURE_OPS_GROWTH", false),
   /**
-   * `/app/admin` — x-claw-admin-secret console. Off by default so customer-facing prod builds do not ship the route.
-   * Set `VITE_CLAW_FEATURE_ADMIN_CONSOLE=1` or deploy with `VITE_LAWDOG_QA_PAYMENT_BYPASS=1` on internal operator hosts.
-   * Public production lawdog.me still requires server authorization before rendering `/app/admin`.
+   * `/app/admin` (aliases: `/founder`, `/admin`, `/app/founder`) — x-claw-admin-secret console.
+   * Off by default on generic customer builds; enabled on lawdog.me / lawdog.ai (server auth required)
+   * or when `VITE_CLAW_FEATURE_ADMIN_CONSOLE=1` / `VITE_LAWDOG_QA_PAYMENT_BYPASS=1` on internal hosts.
    */
   adminConsoleUi: getFlag("VITE_CLAW_FEATURE_ADMIN_CONSOLE", false),
   /** Backend-backed billing & keys (vs local-only tier demo) */
