@@ -8,6 +8,9 @@ fastapi
 uvicorn[standard]
 python-multipart
 
+# Postgres (CLAW_DATABASE_URL / timeline, agreements, usage economics, etc.)
+psycopg[binary]>=3.2,<4
+
 # VS01 agreement signing-seed HTML→PDF (Docker/Railway installs this file; keep in sync with backend needs)
 pypdf>=6.0.0
 pymupdf>=1.24.0
