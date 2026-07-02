@@ -28,6 +28,11 @@ CORS_ALLOW_REQUEST_HEADERS: List[str] = [
     "X-Claw-Review-First-Persist",
     "X-Claw-Recipient-Access-Token",
     "X-Claw-Recipient-Link-Mint-Key",
+    # Operator admin console + QA authorization (split-origin SPA).
+    "X-Claw-Admin-Secret",
+    "X-Claw-Admin-User-Id",
+    "X-Claw-Admin-Email",
+    "X-Claw-User-Id",
 ]
 
 CORS_ALLOW_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
@@ -138,12 +143,16 @@ def origin_is_allowed(origin: str) -> bool:
 
 def apply_cors_headers_to_response(response: Response, origin: str) -> Response:
     """Attach ACAO + credentials when origin is allowed (idempotent)."""
-    if response.headers.get("access-control-allow-origin"):
-        return response
     normalized = normalize_cors_origin(origin)
     if not normalized or not origin_is_allowed(normalized):
         return response
-    response.headers["Access-Control-Allow-Origin"] = normalized
+    existing_acao = (response.headers.get("access-control-allow-origin") or "").strip()
+    # Starlette CORSMiddleware may emit "*" even with allow_credentials=True; browsers reject
+    # credentialed cross-origin responses unless ACAO matches the request Origin exactly.
+    if existing_acao and existing_acao != "*" and existing_acao == normalized:
+        pass
+    else:
+        response.headers["Access-Control-Allow-Origin"] = normalized
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers.setdefault("Access-Control-Allow-Methods", CORS_ALLOW_METHODS)
     response.headers.setdefault("Access-Control-Allow-Headers", cors_allow_request_headers_csv())

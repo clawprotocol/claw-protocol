@@ -22,8 +22,12 @@ from backend.cors_policy import (
 def test_cors_allow_request_headers_includes_paid_pro_perf_trace_case_insensitive() -> None:
     assert "X-Claw-Paid-Pro-Perf-Trace" in CORS_ALLOW_REQUEST_HEADERS
     assert "X-Claw-Review-First-Persist" in CORS_ALLOW_REQUEST_HEADERS
+    assert "X-Claw-Admin-Secret" in CORS_ALLOW_REQUEST_HEADERS
+    assert "X-Claw-User-Id" in CORS_ALLOW_REQUEST_HEADERS
     assert cors_allow_request_header_allowed("x-claw-review-first-persist")
     assert cors_allow_request_header_allowed("x-claw-paid-pro-perf-trace")
+    assert cors_allow_request_header_allowed("x-claw-admin-secret")
+    assert cors_allow_request_header_allowed("x-claw-user-id")
     assert cors_allow_request_header_allowed("X-CLAW-ORG-ID")
     assert cors_allow_request_header_allowed("content-type")
     assert not cors_allow_request_header_allowed("x-claw-unknown-header")
@@ -197,3 +201,133 @@ def test_http_error_response_includes_perf_trace_header_when_sent(
     assert res.headers.get("access-control-allow-origin") == origin
     allow_headers = (res.headers.get("access-control-allow-headers") or "").lower()
     assert "x-claw-paid-pro-perf-trace" in allow_headers
+
+
+def test_options_admin_overview_preflight_allows_admin_secret_header(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="claw.cors")
+    origin = "https://believable-gentleness-production-3ab6.up.railway.app"
+    res = client.options(
+        "/v1/admin/overview",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "content-type, x-claw-admin-secret",
+        },
+    )
+    assert res.status_code in (200, 204)
+    assert res.headers.get("access-control-allow-origin") == origin
+    assert res.headers.get("access-control-allow-credentials") == "true"
+    allow_headers = (res.headers.get("access-control-allow-headers") or "").lower()
+    assert "x-claw-admin-secret" in allow_headers
+    assert "content-type" in allow_headers
+
+
+def test_admin_overview_forbidden_includes_acao_for_allowed_origin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ADMIN_CONSOLE_DB_PATH", str(tmp_path / "admin.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLAW_ADMIN_SECRET", "admin-test-secret")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "https://lawdog.me")
+    from backend.main import app
+
+    client = TestClient(app)
+    origin = "https://lawdog.me"
+    res = client.get(
+        "/v1/admin/overview",
+        headers={"Origin": origin, "x-claw-admin-secret": "wrong-secret"},
+    )
+    assert res.status_code == 403
+    assert res.headers.get("access-control-allow-origin") == origin
+    assert res.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_qa_payment_bypass_authorization_includes_acao_for_allowed_origin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "https://lawdog.me")
+    from backend.main import app
+
+    client = TestClient(app)
+    origin = "https://lawdog.me"
+    res = client.get(
+        "/v1/workspace/qa-payment-bypass/authorization",
+        headers={"Origin": origin},
+    )
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == origin
+    assert res.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_options_admin_overview_preflight_allows_admin_secret_header(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="claw.cors")
+    origin = "https://believable-gentleness-production-3ab6.up.railway.app"
+    res = client.options(
+        "/v1/admin/overview",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "content-type, x-claw-admin-secret",
+        },
+    )
+    assert res.status_code in (200, 204)
+    assert res.headers.get("access-control-allow-origin") == origin
+    assert res.headers.get("access-control-allow-credentials") == "true"
+    allow_headers = (res.headers.get("access-control-allow-headers") or "").lower()
+    assert "x-claw-admin-secret" in allow_headers
+    assert "content-type" in allow_headers
+
+
+def test_admin_overview_forbidden_includes_acao_for_allowed_origin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ADMIN_CONSOLE_DB_PATH", str(tmp_path / "admin.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLAW_ADMIN_SECRET", "admin-test-secret")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "https://lawdog.me")
+    from backend.main import app
+
+    client = TestClient(app)
+    origin = "https://lawdog.me"
+    res = client.get(
+        "/v1/admin/overview",
+        headers={"Origin": origin, "x-claw-admin-secret": "wrong-secret"},
+    )
+    assert res.status_code == 403
+    assert res.headers.get("access-control-allow-origin") == origin
+    assert res.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_qa_payment_bypass_authorization_includes_acao_for_allowed_origin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "https://lawdog.me")
+    from backend.main import app
+
+    client = TestClient(app)
+    origin = "https://lawdog.me"
+    res = client.get(
+        "/v1/workspace/qa-payment-bypass/authorization",
+        headers={"Origin": origin},
+    )
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == origin
+    assert res.headers.get("access-control-allow-credentials") == "true"
