@@ -8,6 +8,7 @@ import {
   refreshGenesisBetaPaymentBypassAuth,
   type GenesisBetaPaymentBypassAuth,
 } from "./genesisBetaPaymentBypassAuth";
+import { writeAdminConsoleSecret } from "./adminConsoleApi";
 
 function AdminConsoleUnavailable() {
   const { navigate } = useLaunchNav();
@@ -26,7 +27,7 @@ function AdminConsoleUnavailable() {
 
 function AdminConsoleBootstrapForm(props: {
   userId?: string | null;
-  onBootstrapped: (auth: GenesisBetaPaymentBypassAuth) => void;
+  onBootstrapped: (auth: GenesisBetaPaymentBypassAuth, adminSecret: string) => void;
 }) {
   const [secret, setSecret] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -49,7 +50,8 @@ function AdminConsoleBootstrapForm(props: {
         setError("Operator session was not authorized after bootstrap.");
         return;
       }
-      props.onBootstrapped(auth);
+      writeAdminConsoleSecret(trimmed);
+      props.onBootstrapped(auth, trimmed);
     } catch {
       setError("Could not reach the operator authorization service.");
     } finally {
@@ -99,6 +101,12 @@ function AdminConsoleBootstrapForm(props: {
 export function AdminConsoleAccessGate() {
   const { user } = useAuth();
   const [auth, setAuth] = useState<GenesisBetaPaymentBypassAuth | undefined>(undefined);
+  const [adminApiSecret, setAdminApiSecret] = useState<string | undefined>(undefined);
+
+  const onBootstrapped = (nextAuth: GenesisBetaPaymentBypassAuth, adminSecret: string) => {
+    setAdminApiSecret(adminSecret.trim());
+    setAuth(nextAuth);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -119,10 +127,10 @@ export function AdminConsoleAccessGate() {
   }
 
   if (auth.authorized) {
-    return <AdminConsolePage />;
+    return <AdminConsolePage initialAdminSecret={adminApiSecret} />;
   }
 
-  return <AdminConsoleBootstrapForm userId={user?.id} onBootstrapped={setAuth} />;
+  return <AdminConsoleBootstrapForm userId={user?.id} onBootstrapped={onBootstrapped} />;
 }
 
 export { AdminConsoleUnavailable };

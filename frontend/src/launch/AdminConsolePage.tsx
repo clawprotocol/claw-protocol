@@ -36,8 +36,8 @@ function moneyValue(v: unknown): string {
   return `$${v.toFixed(2)}`;
 }
 
-export function AdminConsolePage() {
-  const [secret, setSecret] = useState(() => readAdminConsoleSecret());
+export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
+  const [secret, setSecret] = useState(() => props.initialAdminSecret?.trim() || readAdminConsoleSecret());
   const [tab, setTab] = useState<FounderTab>("hq");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -112,10 +112,16 @@ export function AdminConsolePage() {
   };
 
   useEffect(() => {
+    const bootstrapSecret = props.initialAdminSecret?.trim();
+    if (!bootstrapSecret) return;
+    writeAdminConsoleSecret(bootstrapSecret);
+    setSecret(bootstrapSecret);
+  }, [props.initialAdminSecret]);
+
+  useEffect(() => {
     if (!hasSecret) return;
     void reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasSecret]);
 
   const doAction = async (id: string, fn: () => Promise<unknown>) => {
     setBusyId(id);

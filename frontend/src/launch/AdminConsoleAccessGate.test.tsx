@@ -20,10 +20,15 @@ vi.mock("./genesisBetaPaymentBypassAuth", () => ({
   bootstrapQaPaymentBypassAdminSession: vi.fn(),
 }));
 
+vi.mock("./adminConsoleApi", () => ({
+  writeAdminConsoleSecret: vi.fn(),
+}));
+
 import {
   bootstrapQaPaymentBypassAdminSession,
   refreshGenesisBetaPaymentBypassAuth,
 } from "./genesisBetaPaymentBypassAuth";
+import { writeAdminConsoleSecret } from "./adminConsoleApi";
 
 describe("AdminConsoleAccessGate", () => {
   afterEach(() => {
@@ -87,6 +92,7 @@ describe("AdminConsoleAccessGate", () => {
       expect(screen.getByTestId("admin-console-page")).toBeTruthy();
     });
     expect(bootstrapQaPaymentBypassAdminSession).toHaveBeenCalledWith("ops-secret");
+    expect(writeAdminConsoleSecret).toHaveBeenCalledWith("ops-secret");
     expect(refreshGenesisBetaPaymentBypassAuth).toHaveBeenLastCalledWith(undefined);
   });
 
