@@ -175,7 +175,12 @@ import { buildUpgradeContextReasons } from "./upgradeContextReasons";
 import { FullDraftUpgradeDiffPreview } from "./FullDraftUpgradeDiffPreview";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { applyPremiumParseExtract } from "./intakePremiumParseApply";
-import { applySimpleFlowSmartDefaults, type ParsedDraftShape } from "./intakeSmartDefaults";
+import { type ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  applyPreGenerationIntakeDefaults,
+  computeBlockingIntakeGaps,
+  type IntakeBlockingField,
+} from "./intakeClarificationPolicy";
 import {
   buildCanonicalSimpleProductHandoffDraft,
   canonicalizeStarterDraftForReview,
@@ -1562,14 +1567,7 @@ type Props = {
   onHomeGuidedTransitionPhase?: (phase: "preparing" | "review_ready") => void;
 };
 
-type MissingKey =
-  | "title"
-  | "jurisdiction"
-  | "parties"
-  | "purpose"
-  | "payment_terms"
-  | "duration"
-  | "effective_date";
+type MissingKey = IntakeBlockingField;
 
 const FIELD_QUESTION: Record<MissingKey, string> = {
   title: "What should the agreement title be?",
@@ -5250,38 +5248,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     throw new Error("hydrate_failed");
   }
 
-  function computeMissing(next: ParsedDraftShape): MissingKey[] {
-    const fam = next.agreement_family;
-    if (fam === "operating_agreement" || fam === "nda") {
-      const out: MissingKey[] = [];
-      if (!(next.title || "").trim()) out.push("title");
-      if (!(next.jurisdiction || "").trim() || (next.jurisdiction || "").trim().toLowerCase() === "tbd")
-        out.push("jurisdiction");
-      if ((next.parties || []).length < 2) out.push("parties");
-      if (!(next.purpose || "").trim()) out.push("purpose");
-      return out;
-    }
-    if (fam === "generic_business_agreement") {
-      const out: MissingKey[] = [];
-      if (!(next.title || "").trim()) out.push("title");
-      if (!(next.jurisdiction || "").trim() || (next.jurisdiction || "").trim().toLowerCase() === "tbd")
-        out.push("jurisdiction");
-      if ((next.parties || []).length < 2) out.push("parties");
-      if (!(next.purpose || "").trim()) out.push("purpose");
-      if (!(next.duration || "").trim() && !(next.due_date || "").trim()) out.push("duration");
-      if (!(next.effective_date || "").trim()) out.push("effective_date");
-      return out;
-    }
-    const out: MissingKey[] = [];
-    if (!(next.title || "").trim()) out.push("title");
-    if (!(next.jurisdiction || "").trim() || (next.jurisdiction || "").trim().toLowerCase() === "tbd")
-      out.push("jurisdiction");
-    if ((next.parties || []).length < 2) out.push("parties");
-    if (!(next.purpose || "").trim()) out.push("purpose");
-    if (!(next.payment_terms || "").trim()) out.push("payment_terms");
-    if (!(next.duration || "").trim() && !(next.due_date || "").trim()) out.push("duration");
-    if (!(next.effective_date || "").trim()) out.push("effective_date");
-    return out;
+  function computeMissing(next: ParsedDraftShape, rawIntake?: string): MissingKey[] {
+    const intake = (rawIntake ?? intakeCombinedRef.current ?? intakeCombined).trim();
+    return computeBlockingIntakeGaps(next, intake);
+  }
+
+  function applyIntakePreGenerationDefaults(next: ParsedDraftShape, rawIntake: string): ParsedDraftShape {
+    if (rawIntake.trim().length < 8) return next;
+    let draft = applyPreGenerationIntakeDefaults(next, rawIntake);
+    draft = alignParsedWithCanonicalType(draft, rawIntake);
+    draft = normalizeParsedDraftLegalConcepts(draft, rawIntake);
+    return draft;
   }
 
   function commitParsedDraftToReviewFlow(
@@ -5289,20 +5266,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     opts?: { forceReviewDisplay?: boolean },
   ): void {
     let nextDraft = canonicalizeStarterDraftForReview(next);
-    if (simpleInstantProductionSurface) {
-      const raw = intakeCombined.trim();
-      if (raw.length >= 8) {
-        nextDraft = applySimpleFlowSmartDefaults(nextDraft, raw);
-        nextDraft = alignParsedWithCanonicalType(nextDraft, raw);
-        nextDraft = normalizeParsedDraftLegalConcepts(nextDraft, raw);
-      }
+    const raw = intakeCombined.trim();
+    if (raw.length >= 8) {
+      nextDraft = applyIntakePreGenerationDefaults(nextDraft, raw);
     }
-    const nextMissing = computeMissing(nextDraft);
+    const nextMissing = computeMissing(nextDraft, raw);
     setComplexityPendingParsed(null);
-    setMissing(simpleInstantProductionSurface && nextMissing.length > 0 ? [] : nextMissing);
+    setMissing(nextMissing);
     setMissingAnswer("");
-    const structuralFollowupBlocks =
-      nextMissing.length > 0 && !simpleInstantProductionSurface && !createProductionTwoPane;
+    const structuralFollowupBlocks = nextMissing.length > 0 && !createProductionTwoPane;
     if (structuralFollowupBlocks) {
       setDraft(nextDraft);
       setFollowUpDetailTotal(nextMissing.length);
@@ -9867,26 +9839,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       parsed = runIntakeDefaultsAndRoles(parsed, rawIntake, simpleProductFlow, intakePartyRoleLabels);
       parsed = alignParsedWithCanonicalType(parsed, rawIntake);
       parsed = normalizeParsedDraftLegalConcepts(parsed, rawIntake);
-      if (simpleInstantProductionSurface) {
-        parsed = applySimpleFlowSmartDefaults(parsed, rawIntake);
-        parsed = alignParsedWithCanonicalType(parsed, rawIntake);
-        parsed = normalizeParsedDraftLegalConcepts(parsed, rawIntake);
-      }
+      parsed = applyIntakePreGenerationDefaults(parsed, rawIntake);
       parsed = preserveInstallmentPaymentTermsOnDraft(parsed, rawIntake);
-      let nextMissing = computeMissing(parsed);
-      if (nextMissing.length > 0 && simpleInstantProductionSurface) {
-        parsed = applySimpleFlowSmartDefaults(parsed, rawIntake);
-        parsed = alignParsedWithCanonicalType(parsed, rawIntake);
-        parsed = normalizeParsedDraftLegalConcepts(parsed, rawIntake);
-        nextMissing = computeMissing(parsed);
-      }
+      const nextMissing = computeMissing(parsed, rawIntake);
       setMissing(nextMissing);
       setMissingAnswer("");
       if (nextMissing.length > 0) {
-        if (simpleInstantProductionSurface) {
-          setMissing([]);
-          setMissingAnswer("");
-        } else if (!createProductionTwoPane) {
+        if (!createProductionTwoPane) {
           setDraft(parsed);
           setFollowUpDetailTotal(nextMissing.length);
           setDisplayPhase("followup_required");
@@ -10411,13 +10370,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       next = runIntakeDefaultsAndRoles(next, intakeFallback, simpleProductFlow, intakePartyRoleLabels);
       next = alignParsedWithCanonicalType(next, intakeFallback);
       next = normalizeParsedDraftLegalConcepts(next, intakeFallback);
-      if (simpleInstantProductionSurface) {
-        next = applySimpleFlowSmartDefaults(next, intakeFallback);
-        next = alignParsedWithCanonicalType(next, intakeFallback);
-        next = normalizeParsedDraftLegalConcepts(next, intakeFallback);
-      }
-      const nextMissing = computeMissing(next);
-      setMissing(simpleInstantProductionSurface && nextMissing.length > 0 ? [] : nextMissing);
+      next = applyIntakePreGenerationDefaults(next, intakeFallback);
+      const nextMissing = computeMissing(next, intakeFallback);
+      setMissing(nextMissing);
       setMissingAnswer("");
       setComplexityPendingParsed(null);
       setReviewShowsSimplifiedAdvancedDraft(false);
@@ -11515,27 +11470,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         parsed = alignParsedWithCanonicalType(parsed, rawIntake);
       }
       parsed = normalizeParsedDraftLegalConcepts(parsed, rawIntake);
-      if (simpleInstantProductionSurface) {
-        parsed = applySimpleFlowSmartDefaults(parsed, rawIntake);
-        if (createProductionTwoPane) {
-          parsed = alignParsedWithCanonicalType(parsed, rawIntake);
-        }
-        parsed = normalizeParsedDraftLegalConcepts(parsed, rawIntake);
-      }
+      parsed = applyIntakePreGenerationDefaults(parsed, rawIntake);
       setDraft(parsed);
-      let nextMissing = computeMissing(parsed);
-      if (nextMissing.length > 0 && simpleInstantProductionSurface) {
-        parsed = applySimpleFlowSmartDefaults(parsed, rawIntake);
-        if (createProductionTwoPane) {
-          parsed = alignParsedWithCanonicalType(parsed, rawIntake);
-        }
-        parsed = normalizeParsedDraftLegalConcepts(parsed, rawIntake);
-        setDraft(parsed);
-        nextMissing = computeMissing(parsed);
-      }
-      setMissing(simpleInstantProductionSurface && nextMissing.length > 0 ? [] : nextMissing);
+      const nextMissing = computeMissing(parsed, rawIntake);
+      setMissing(nextMissing);
       setMissingAnswer("");
-      if (nextMissing.length === 0 || simpleInstantProductionSurface || createProductionTwoPane) {
+      if (nextMissing.length === 0 || createProductionTwoPane) {
         const ok = await runPersistAndOpen(parsed, rawIntake);
         if (!ok) setDisplayPhase("intake");
       } else {
@@ -11608,8 +11548,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       payment: extractIntakePayment(rawIntake),
     };
     patched = normalizeParsedDraftLegalConcepts(patched, rawIntake);
+    patched = applyIntakePreGenerationDefaults(patched, rawIntake);
     setDraft(patched);
-    const nextMissing = computeMissing(patched);
+    const nextMissing = computeMissing(patched, rawIntake);
     setMissing(nextMissing);
     setMissingAnswer("");
     if (nextMissing.length > 0) return;
