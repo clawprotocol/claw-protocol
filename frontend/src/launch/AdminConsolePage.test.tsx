@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AdminConsolePage } from "./AdminConsolePage";
 
@@ -30,6 +30,7 @@ vi.mock("./genesisBetaPaymentBypassAuth", () => ({
 }));
 
 import { fetchAdminOverview, writeAdminConsoleSecret } from "./adminConsoleApi";
+import { bootstrapQaPaymentBypassAdminSession } from "./genesisBetaPaymentBypassAuth";
 
 describe("AdminConsolePage connected state", () => {
   afterEach(() => {
@@ -43,5 +44,20 @@ describe("AdminConsolePage connected state", () => {
       expect(fetchAdminOverview).toHaveBeenCalled();
     });
     expect(writeAdminConsoleSecret).toHaveBeenCalledWith("ops-secret");
+    expect(bootstrapQaPaymentBypassAdminSession).toHaveBeenCalledWith("ops-secret");
+  });
+
+  it("connect reads autofilled input and bootstraps admin session", async () => {
+    const { getByRole } = render(<AdminConsolePage />);
+    const input = document.querySelector('input[placeholder="x-claw-admin-secret"]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    // Simulate password-manager autofill: DOM value set without React onChange.
+    input.value = "ops-secret";
+    fireEvent.click(getByRole("button", { name: "Connect" }));
+    await waitFor(() => {
+      expect(bootstrapQaPaymentBypassAdminSession).toHaveBeenCalledWith("ops-secret");
+      expect(writeAdminConsoleSecret).toHaveBeenCalledWith("ops-secret");
+      expect(fetchAdminOverview).toHaveBeenCalled();
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
 import {
   adminPayoutBatchAction,
@@ -37,6 +37,7 @@ function moneyValue(v: unknown): string {
 }
 
 export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
+  const secretInputRef = useRef<HTMLInputElement>(null);
   const [secret, setSecret] = useState(() => props.initialAdminSecret?.trim() || readAdminConsoleSecret());
   const [tab, setTab] = useState<FounderTab>("hq");
   const [loading, setLoading] = useState(false);
@@ -50,7 +51,6 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
   const [payoutBatches, setPayoutBatches] = useState<Record<string, unknown>[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const hasSecret = useMemo(() => secret.trim().length > 0, [secret]);
   const blockedDeliveries = useMemo(() => deliveries.filter(isDeliveryBlocked), [deliveries]);
   const disabledUsers = useMemo(
     () => users.filter((u) => String(u.account_status || "").toLowerCase() === "disabled"),
@@ -81,13 +81,22 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
   const deliveryFailureValue =
     typeof overview?.delivery_failures === "number" ? String(overview?.delivery_failures) : "Not connected";
 
-  const reload = async () => {
-    if (!hasSecret) return;
+  const loadFounderHq = useCallback(async (secretOverride?: string) => {
+    const trimmed = (
+      secretOverride ??
+      secretInputRef.current?.value.trim() ??
+      readAdminConsoleSecret().trim()
+    ).trim();
+    if (!trimmed) {
+      setError("Enter the admin secret to connect.");
+      return;
+    }
+    setSecret(trimmed);
     setLoading(true);
     setError(null);
     try {
-      writeAdminConsoleSecret(secret);
-      void bootstrapQaPaymentBypassAdminSession(secret);
+      writeAdminConsoleSecret(trimmed);
+      await bootstrapQaPaymentBypassAdminSession(trimmed);
       const [o, u, a, d, af, au, pb] = await Promise.all([
         fetchAdminOverview(),
         fetchAdminUsers(),
@@ -109,26 +118,24 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
+  const autoLoadedRef = useRef(false);
   useEffect(() => {
-    const bootstrapSecret = props.initialAdminSecret?.trim();
-    if (!bootstrapSecret) return;
+    const bootstrapSecret = props.initialAdminSecret?.trim() || readAdminConsoleSecret().trim();
+    if (!bootstrapSecret || autoLoadedRef.current) return;
+    autoLoadedRef.current = true;
     writeAdminConsoleSecret(bootstrapSecret);
     setSecret(bootstrapSecret);
-  }, [props.initialAdminSecret]);
-
-  useEffect(() => {
-    if (!hasSecret) return;
-    void reload();
-  }, [hasSecret]);
+    void loadFounderHq(bootstrapSecret);
+  }, [props.initialAdminSecret, loadFounderHq]);
 
   const doAction = async (id: string, fn: () => Promise<unknown>) => {
     setBusyId(id);
     setError(null);
     try {
       await fn();
-      await reload();
+      await loadFounderHq();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Action failed");
     } finally {
@@ -143,21 +150,21 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
           <label className="text-xs text-slate-400">Admin secret</label>
           <div className="mt-1 flex flex-col gap-2 sm:flex-row">
             <input
+              ref={secretInputRef}
               className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
               type="password"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
+              onInput={(e) => setSecret(e.currentTarget.value)}
               placeholder="x-claw-admin-secret"
             />
             <button
               type="button"
               className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              onClick={() => {
-                writeAdminConsoleSecret(secret);
-                void reload();
-              }}
+              disabled={loading}
+              onClick={() => void loadFounderHq()}
             >
-              Connect
+              {loading ? "Connecting…" : "Connect"}
             </button>
           </div>
         </div>
@@ -183,7 +190,7 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
               {label}
             </button>
           ))}
-          <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact" onClick={() => void reload()}>
+          <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact" onClick={() => void loadFounderHq()}>
             Refresh
           </button>
         </div>

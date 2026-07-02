@@ -8,7 +8,7 @@ import {
   refreshGenesisBetaPaymentBypassAuth,
   type GenesisBetaPaymentBypassAuth,
 } from "./genesisBetaPaymentBypassAuth";
-import { writeAdminConsoleSecret } from "./adminConsoleApi";
+import { writeAdminConsoleSecret, readAdminConsoleSecret } from "./adminConsoleApi";
 
 function AdminConsoleUnavailable() {
   const { navigate } = useLaunchNav();
@@ -127,7 +127,8 @@ export function AdminConsoleAccessGate() {
   }
 
   if (auth.authorized) {
-    return <AdminConsolePage initialAdminSecret={adminApiSecret} />;
+    const storedSecret = adminApiSecret?.trim() || readAdminConsoleSecret().trim();
+    return <AdminConsolePage initialAdminSecret={storedSecret || undefined} />;
   }
 
   return <AdminConsoleBootstrapForm userId={user?.id} onBootstrapped={onBootstrapped} />;
