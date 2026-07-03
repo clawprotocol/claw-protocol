@@ -10,6 +10,10 @@ import {
   hasCurrentSessionFreeStarterIntent,
   hasCurrentSessionProEntitlement,
 } from "./paidProSessionEligibility";
+import {
+  hasAcceptedPaidCreateFlowFreezeLatch,
+  resolveWorkspaceProSubscriptionEntitled,
+} from "./paidProCreateFlowReviewHandoff";
 
 export type ResolveSkipFreeStarterCreateSubmitInput = {
   tier: AccessTier;
@@ -22,6 +26,7 @@ export function resolveSkipFreeStarterCreateSubmit(
 ): boolean {
   if (tierAllowsAdvancedFullDraftReveal(input.tier)) return true;
   if (input.proAgreementEntitled) return true;
+  if (resolveWorkspaceProSubscriptionEntitled()) return true;
   return false;
 }
 
@@ -61,6 +66,7 @@ export function resolveFreeStarterReviewShellBlocked(
 ): boolean {
   if (input.premiumCheckoutCompleted) return true;
   if (hasPaidProSourceOfTruth()) return true;
+  if (hasAcceptedPaidCreateFlowFreezeLatch()) return true;
   if (input.paidProAuthoritative) return true;
   if (input.premiumPersistedFlowActive) return true;
   const body = (input.acceptedPipelineBody ?? "").trim();

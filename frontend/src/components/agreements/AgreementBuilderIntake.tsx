@@ -1515,6 +1515,10 @@ import {
   resolveSkipFreeStarterCreateSubmit,
   shouldAutoPersistReviewAgreementRow,
 } from "./paidProCreateFlowRouting";
+import {
+  shouldBlockFreeStarterReviewSurfaces,
+  tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff,
+} from "./paidProCreateFlowReviewHandoff";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -6160,12 +6164,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draft: merged.draft,
       });
       const snapshotPlain = snapshotCoalesce.text.trim();
+      const handoff = tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff({
+        winningBody: winning,
+        snapshotPlain,
+        pipelineSource: result.premiumRenderSource,
+        draft: merged.draft,
+        intakeText: mergedIntake,
+      });
+      const finalPlain = (
+        handoff.established && handoff.body.trim().length > snapshotPlain.length
+          ? handoff.body
+          : handoff.established
+            ? handoff.body
+            : snapshotPlain
+      ).trim();
       const mergedDraftPersist =
-        usePaidAuthoritativeBody && snapshotPlain.trim().length >= 500
+        (usePaidAuthoritativeBody || handoff.established) && finalPlain.length >= 500
           ? {
               ...merged.draft,
-              premium_full_document_text: snapshotPlain,
-              premium_server_full_document_text: snapshotPlain,
+              premium_full_document_text: finalPlain,
+              premium_server_full_document_text: finalPlain,
             }
           : merged.draft;
       const rc0 = result.recipientCandidates[0] ?? { name: "", email: "", role: "Party" };
@@ -6178,8 +6196,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumDraft: mergedDraftPersist,
         premiumParties: result.premiumParties,
         recipientCandidates,
-        premiumWinningBodyText: snapshotPlain,
-        premiumReadonlyPlainText: snapshotPlain,
+        premiumWinningBodyText: finalPlain,
+        premiumReadonlyPlainText: finalPlain,
         premiumReview: result.premiumReview ?? null,
         premiumFinalizeAudit: result.premiumFinalizeAudit ?? null,
         premiumReviewRoute: result.premiumReviewRoute ?? null,
@@ -6199,12 +6217,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (hydrated) {
         applyHydrationFromPremiumSnapshot(hydrated);
       }
+      if (handoff.established && finalPlain.length >= 500) {
+        setProUpgradeUseStarterView(false);
+        setProFullDraftQualityRetry(false);
+        agreementDocumentDirtyRef.current = false;
+        setAgreementDocumentText(collapseDuplicateEsignNoticesInFullPreview(finalPlain));
+        setCreateFlowPhase("draft_ready_for_review");
+        setDisplayPhase("review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setMobileWorkspacePane("preview");
+        setPreviewPaneRevealed(true);
+      }
       setPremiumPostCheckoutPhase(null);
       setPremiumPipelineUserMessage(null);
       bumpPremiumSurfaceGateTick();
       console.info("[premium-flow] entitled_rewrite_complete", {
         pipelineSource: result.premiumRenderSource,
-        bodyLen: snapshotPlain.length,
+        bodyLen: finalPlain.length,
+        paidReviewAuthorityEstablished: handoff.established,
       });
     } catch (e: unknown) {
       if (import.meta.env.DEV) {
@@ -13115,6 +13145,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const isFreeStarterReviewSurface = useMemo(() => {
     // HARD INVARIANT: paid checkout / QA bypass latched => starter surface is impossible.
     if (premiumCheckoutCompleted) return false;
+    if (shouldBlockFreeStarterReviewSurfaces()) return false;
     if (hasPaidProSourceOfTruth() || isAuthoritativePaidProReviewActive) return false;
     if (hasPaidPremiumCompletionSession()) return false;
     if (authoritativePremiumUiCommitted) return false;
