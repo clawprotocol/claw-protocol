@@ -21,8 +21,27 @@ import { resolveFreeStarterReviewShellActive } from "./freeStarterReviewShell";
 import { resolveIsFreeStreamlineDraftReview } from "./freeStreamlineDraftReview";
 import { CreateUiStage } from "./createUiStage";
 import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const PRO_BODY = `SERVICES AGREEMENT between Red Mesa Logistics LLC and Harbor Peak Automation LLC. ${"Substantive clause. ".repeat(900)}`;
+
+function test490ParsedDraft(premiumBody: string): ParsedDraftShape {
+  return {
+    title: "Services Agreement",
+    jurisdiction: "Delaware",
+    parties: [
+      { name: "Red Mesa Logistics LLC", role: "Client" },
+      { name: "Harbor Peak Automation LLC", role: "Service Provider" },
+    ],
+    purpose: "Workflow automation consulting",
+    payment_terms: "$24,000 after implementation; $24,000 after final acceptance",
+    duration: "12 months",
+    due_date: null,
+    effective_date: null,
+    payment: { amount: null, cadence: null, valid: true },
+    premium_server_full_document_text: premiumBody,
+  };
+}
 
 describe("TEST490 — paid create flow must not route into Free Starter review", () => {
   beforeEach(() => {
@@ -105,9 +124,7 @@ describe("TEST490 — paid create flow must not route into Free Starter review",
         isFreeStarterReviewSurface: true,
         premiumPaidDocumentSurface: false,
         paidProAuthoritative: false,
-        draft: {
-          premium_server_full_document_text: PRO_BODY,
-        },
+        draft: test490ParsedDraft(PRO_BODY),
         premiumRenderSource: "server_full_draft",
       }),
     ).toBe(false);

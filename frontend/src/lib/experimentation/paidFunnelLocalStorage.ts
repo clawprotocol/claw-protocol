@@ -9,6 +9,7 @@ const MAX_EVENTS = 5000;
 
 export type PaidFunnelEventName =
   | "free_draft_generated"
+  | "paid_create_submit_entitled_rewrite"
   | "premium_upsell_seen"
   | "premium_checkout_opened"
   | "premium_checkout_completed"

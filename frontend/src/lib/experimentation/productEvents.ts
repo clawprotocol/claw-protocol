@@ -126,6 +126,7 @@ export type ProductEventName =
   | "referral_conversion_recorded"
   | "save_for_later_clicked"
   | "free_draft_generated"
+  | "paid_create_submit_entitled_rewrite"
   | "premium_upgrade_clicked"
   | "checkout_success_returned"
   | "pro_draft_loaded"

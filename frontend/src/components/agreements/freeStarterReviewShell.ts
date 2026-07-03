@@ -57,10 +57,7 @@ export function resolveFreeStarterReviewShellActive(input: {
       paidProAuthoritative: input.paidProAuthoritative,
       premiumCheckoutCompleted: input.premiumCheckoutCompleted,
       premiumPersistedFlowActive: input.premiumPersistedFlowActive,
-      acceptedPipelineBody:
-        input.draft?.premium_server_full_document_text ??
-        input.draft?.server_full_document_text ??
-        null,
+      acceptedPipelineBody: input.draft?.premium_server_full_document_text ?? null,
       acceptedPipelineSource: input.premiumRenderSource,
     })
   ) {
