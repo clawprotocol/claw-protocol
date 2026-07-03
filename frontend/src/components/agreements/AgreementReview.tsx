@@ -24,8 +24,13 @@ import {
   type AgreementReadinessLevel,
 } from "../../agreement/agreementReadiness";
 import { AgreementReadinessCard } from "./AgreementReadinessCard";
-import { AgreementReadySummaryCard } from "./AgreementReadySummaryCard";
-import { AgreementDetailsReadOnlyPanel } from "./AgreementDetailsReadOnlyPanel";
+import { AgreementPostGenerationFlow } from "./AgreementPostGenerationFlow";
+import {
+  resolveSimpleHomeReviewPostGenerationContext,
+  resolveWizardDetailsPostGenerationContext,
+  shouldUseCanonicalPostGenerationFlow,
+} from "./agreementPostGenerationPolicy";
+import { useAgreementPostGenerationPresentation } from "./useAgreementPostGenerationPresentation";
 import { SIMPLE_HOME_REVISION_COMPARE_ANCHOR_ID } from "./simpleHomeRevisionCompareAnchor";
 import { substitutePartyPlaceholdersInUserFacingText } from "../../agreement/partyPlaceholderDisplay";
 import { isOwnerProposalReviewQaEnabled } from "../../agreement/ownerProposalReviewQa";
@@ -835,10 +840,6 @@ const AgreementReview: React.FC<Props> = ({
   );
   const [auditOpen, setAuditOpen] = useState(false);
   const [status, setStatus] = useState<"Draft" | "Complete Draft" | "Signed">("Draft");
-  /** Wizard details step: summary-first presentation before full editor. */
-  const [workspaceDetailsPresentation, setWorkspaceDetailsPresentation] = useState<
-    "summary" | "readonly" | "editor"
-  >("summary");
   const [editInstruction, setEditInstruction] = useState("");
   const [versionBundle, setVersionBundle] = useState<AgreementVersionBundle | null>(null);
   /** Latest GET `signing_lock` snapshot — applied when version bundle is rebuilt (avoids stale lock flash). */
@@ -957,6 +958,12 @@ const AgreementReview: React.FC<Props> = ({
   const isWorkspace =
     (embeddedInCard && section !== "all") || isSimpleHomeReview;
   const workspaceReviewFirstDetails = Boolean(embeddedInCard && section === "details" && isWorkspace);
+  const postGenerationPresentationResetKey = agreementId?.trim() || draft?.id || null;
+  const {
+    presentation: postGenerationPresentation,
+    setPresentation: setPostGenerationPresentation,
+    isSummaryMode: postGenerationSummaryMode,
+  } = useAgreementPostGenerationPresentation(postGenerationPresentationResetKey);
   /** Free/starter simple-home send intentionally hides rich history widgets for stability. */
   const showWorkspaceRichHistory = Boolean(isWorkspace && !isSimpleHomeReview);
   const collaborationReadOnly = Boolean(
@@ -1563,10 +1570,6 @@ const AgreementReview: React.FC<Props> = ({
 
   useEffect(() => {
     simpleHomeEditLoggedRef.current = false;
-  }, [agreementId]);
-
-  useEffect(() => {
-    setWorkspaceDetailsPresentation("summary");
   }, [agreementId]);
 
   useEffect(() => {
@@ -2238,6 +2241,28 @@ const AgreementReview: React.FC<Props> = ({
       simpleHomeEconomicsHydrated &&
       !simpleFlowUpsellSuppressed,
   );
+  const simpleHomePostGenerationContext = resolveSimpleHomeReviewPostGenerationContext({
+    section,
+    simpleFlowPhase,
+    canonicalUnpaidSendShell,
+    sendShellTierGatePending,
+  });
+  const simpleHomeCanonicalReview = shouldUseCanonicalPostGenerationFlow({
+    context: simpleHomePostGenerationContext,
+    hasDraft: Boolean(draft),
+    isReviewPhase: simpleFlowPhase === "review",
+  });
+  const wizardCanonicalDetailsFlow = shouldUseCanonicalPostGenerationFlow({
+    context: resolveWizardDetailsPostGenerationContext({
+      embeddedInCard: Boolean(embeddedInCard),
+      section,
+      isWorkspace,
+    }),
+    hasDraft: Boolean(draft),
+    isReviewPhase: true,
+  });
+  const simpleHomeCanonicalSummaryVisible =
+    simpleHomeCanonicalReview && postGenerationSummaryMode;
   const simplePreviewHtmlForFreeSend = useMemo(() => {
     const base = previewHtmlDisplay || "<p>No rendered document yet.</p>";
     if (!canonicalUnpaidSendShell) return base;
@@ -6306,56 +6331,56 @@ const AgreementReview: React.FC<Props> = ({
     </div>
   ) : null;
 
-  const workspaceDetailsNav =
-    workspaceReviewFirstDetails && workspaceDetailsPresentation !== "summary" ? (
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <button
-          type="button"
-          className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-          onClick={() => setWorkspaceDetailsPresentation("summary")}
-        >
-          Back to summary
-        </button>
-        <div className="flex flex-wrap items-center gap-2">
-          {workspaceDetailsPresentation === "readonly" ? (
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-              onClick={() => setWorkspaceDetailsPresentation("editor")}
-            >
-              Edit details
-            </button>
-          ) : null}
-          <details className="rounded-lg border border-slate-800/60 bg-slate-950/25 px-2 py-1.5">
-            <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:content-none [&::-webkit-details-marker]:hidden">
-              Advanced options
-            </summary>
-            <div className="mt-2 space-y-3 border-t border-slate-800/50 pt-2">{workspaceAdvancedPanel}</div>
-          </details>
+  const simpleHomeReviewEditorPanel = (
+    <>
+      <div
+        id="simple-flow-draft-details"
+        className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5"
+      >
+        <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">Key terms</h3>
+        <p className="mt-1 text-[11px] leading-snug text-slate-500">
+          Quick field edits — tap <span className="text-slate-400">Edit field</span> on each row.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-slate-500">
+          Confirm or edit — each field saves to your draft.
+        </p>
+        <div className="mt-6 space-y-3 border-b border-slate-800/55 pb-7">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            Title, dates &amp; jurisdiction
+          </p>
+          {coreMetaGrid}
+        </div>
+        <div className="mt-7 space-y-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            Scope, payment &amp; duration
+          </p>
+          {extendedDetailsGrid}
         </div>
       </div>
-    ) : null;
+      <div className="overflow-hidden rounded-xl border border-slate-800/70 bg-slate-950/[0.35]">{partiesSection}</div>
+    </>
+  );
 
   const detailsStepBlock = workspaceReviewFirstDetails ? (
-    workspaceDetailsPresentation === "summary" ? (
-      <AgreementReadySummaryCard
+    wizardCanonicalDetailsFlow ? (
+      <AgreementPostGenerationFlow
         draft={draft}
-        onReviewAgreement={() => setWorkspaceDetailsPresentation("readonly")}
-        onEditDetails={() => setWorkspaceDetailsPresentation("editor")}
+        presentation={postGenerationPresentation}
+        onPresentationChange={setPostGenerationPresentation}
         advancedPanel={workspaceAdvancedPanel}
-      />
-    ) : (
-      <>
-        {workspaceDetailsNav}
-        {workspaceDetailsPresentation === "readonly" ? (
-          <AgreementDetailsReadOnlyPanel draft={draft} />
-        ) : (
+        editorPanel={
           <>
             {coreMetaGrid}
             {extendedDetailsGrid}
             {partiesSection}
           </>
-        )}
+        }
+      />
+    ) : (
+      <>
+        {coreMetaGrid}
+        {extendedDetailsGrid}
+        {partiesSection}
       </>
     )
   ) : (
@@ -6542,7 +6567,7 @@ const AgreementReview: React.FC<Props> = ({
                     Read-only preview. Nothing is sent until you confirm.
                   </p>
                 </div>
-                {isSimpleHomeReview && draft && simpleFlowPhase === "review" ? (
+                {isSimpleHomeReview && draft && simpleFlowPhase === "review" && !simpleHomeCanonicalSummaryVisible ? (
                   <div className="mb-3 rounded-lg border border-emerald-900/30 bg-emerald-950/15 px-3 py-2.5 text-[11px] leading-relaxed sm:text-xs">
                     {SIMPLE_HOME_AGREEMENT_READY_LINES.map((line, i) => (
                       <p key={line} className={`${i > 0 ? "mt-1 " : ""}text-slate-300 last:text-slate-400`}>
@@ -6577,7 +6602,7 @@ const AgreementReview: React.FC<Props> = ({
             }`}
           >
             <div className="order-1 flex min-h-0 min-w-0 flex-col gap-8">
-              {premiumLawdogSimpleHome && simpleFlowPhase === "review" ? (
+              {premiumLawdogSimpleHome && simpleFlowPhase === "review" && !simpleHomeCanonicalSummaryVisible ? (
                 <div className="space-y-2">
                   <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-[1.625rem]">
                     {streamlinedPremiumIntentForCopy === "review"
@@ -6622,7 +6647,7 @@ const AgreementReview: React.FC<Props> = ({
                   </p>
                 </div>
               )}
-              {isSimpleHomeReview && draft && simpleFlowPhase === "review" ? (
+              {isSimpleHomeReview && draft && simpleFlowPhase === "review" && !simpleHomeCanonicalSummaryVisible ? (
                 <div className="mb-3 rounded-lg border border-emerald-900/30 bg-emerald-950/15 px-3 py-2.5 text-[11px] leading-relaxed sm:text-xs">
                   {SIMPLE_HOME_AGREEMENT_READY_LINES.map((line, i) => (
                     <p key={line} className={`${i > 0 ? "mt-1 " : ""}text-slate-300 last:text-slate-400`}>
@@ -6776,7 +6801,15 @@ const AgreementReview: React.FC<Props> = ({
                     </div>
                   ) : null}
                   {!simpleHomeReviewLinkSendStep ? (
-                    authoritativePartyNamesList.length > 2 ? (
+                    simpleHomeCanonicalReview && draft ? (
+                      <AgreementPostGenerationFlow
+                        draft={draft}
+                        presentation={postGenerationPresentation}
+                        onPresentationChange={setPostGenerationPresentation}
+                        advancedPanel={workspaceAdvancedPanel}
+                        editorPanel={simpleHomeReviewEditorPanel}
+                      />
+                    ) : authoritativePartyNamesList.length > 2 ? (
                       <div className="text-sm leading-snug text-slate-300">
                         <p>
                           <span className="font-medium text-slate-500">Agreement parties </span>
@@ -7234,34 +7267,46 @@ const AgreementReview: React.FC<Props> = ({
                 </>
               ) : (
                 <>
-                  <div
-                    id="simple-flow-draft-details"
-                    className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5"
-                  >
-                    <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">Key terms</h3>
-                    <p className="mt-1 text-[11px] leading-snug text-slate-500">
-                      Quick field edits — tap <span className="text-slate-400">Edit field</span> on each row.
-                    </p>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-500">
-                      Confirm or edit — each field saves to your draft.
-                    </p>
-                    <div className="mt-6 space-y-3 border-b border-slate-800/55 pb-7">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                        Title, dates &amp; jurisdiction
-                      </p>
-                      {coreMetaGrid}
-                    </div>
-                    <div className="mt-7 space-y-3">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                        Scope, payment &amp; duration
-                      </p>
-                      {extendedDetailsGrid}
-                    </div>
-                  </div>
+                  {simpleFlowPhase === "review" && simpleHomeCanonicalReview && draft ? (
+                    <AgreementPostGenerationFlow
+                      draft={draft}
+                      presentation={postGenerationPresentation}
+                      onPresentationChange={setPostGenerationPresentation}
+                      advancedPanel={workspaceAdvancedPanel}
+                      editorPanel={simpleHomeReviewEditorPanel}
+                    />
+                  ) : (
+                    <>
+                      <div
+                        id="simple-flow-draft-details"
+                        className="rounded-xl border border-slate-800/70 bg-slate-950/[0.35] px-5 py-5"
+                      >
+                        <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-300">Key terms</h3>
+                        <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                          Quick field edits — tap <span className="text-slate-400">Edit field</span> on each row.
+                        </p>
+                        <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                          Confirm or edit — each field saves to your draft.
+                        </p>
+                        <div className="mt-6 space-y-3 border-b border-slate-800/55 pb-7">
+                          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                            Title, dates &amp; jurisdiction
+                          </p>
+                          {coreMetaGrid}
+                        </div>
+                        <div className="mt-7 space-y-3">
+                          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                            Scope, payment &amp; duration
+                          </p>
+                          {extendedDetailsGrid}
+                        </div>
+                      </div>
 
-                  <div className="overflow-hidden rounded-xl border border-slate-800/70 bg-slate-950/[0.35]">
-                    {partiesSection}
-                  </div>
+                      <div className="overflow-hidden rounded-xl border border-slate-800/70 bg-slate-950/[0.35]">
+                        {partiesSection}
+                      </div>
+                    </>
+                  )}
 
                   {simpleFlowPhase === "send" ? (
                     simpleSendActionsUnlocked ? (
@@ -8037,7 +8082,7 @@ const AgreementReview: React.FC<Props> = ({
   }
 
   const showWorkspaceReviewFirstSummary =
-    workspaceReviewFirstDetails && workspaceDetailsPresentation === "summary";
+    workspaceReviewFirstDetails && wizardCanonicalDetailsFlow && postGenerationSummaryMode;
 
   return (
     <>

@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import type { AgreementDraft } from "../../agreement/agreementTypes";
+import type { AgreementReadySummaryDraftSource } from "./agreementReadySummaryModel";
 import { buildAgreementReadySummaryModel } from "./agreementReadySummaryModel";
 
 type Props = {
-  draft: AgreementDraft;
+  draft: AgreementReadySummaryDraftSource;
   onReviewAgreement: () => void;
   onEditDetails: () => void;
   advancedPanel?: ReactNode;

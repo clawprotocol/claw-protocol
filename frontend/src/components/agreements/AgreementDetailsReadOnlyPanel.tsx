@@ -1,9 +1,9 @@
-import type { AgreementDraft } from "../../agreement/agreementTypes";
+import type { AgreementReadySummaryDraftSource } from "./agreementReadySummaryModel";
 import { buildAgreementReadySummaryModel } from "./agreementReadySummaryModel";
 import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormalize";
 
 type Props = {
-  draft: AgreementDraft;
+  draft: AgreementReadySummaryDraftSource;
 };
 
 function ReadOnlyField(props: { label: string; value: string | null | undefined }) {

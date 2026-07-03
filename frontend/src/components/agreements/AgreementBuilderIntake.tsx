@@ -51,6 +51,13 @@ import {
 } from "../../launch/simpleProduct/starterQuickAdds";
 import { StarterQuickAddsRow } from "./StarterQuickAddsRow";
 import { StarterDraftDocumentSurface } from "./StarterDraftDocumentSurface";
+import { AgreementPostGenerationFlow } from "./AgreementPostGenerationFlow";
+import {
+  resolveIntakeCreateReviewPostGenerationContext,
+  shouldUseCanonicalPostGenerationFlow,
+} from "./agreementPostGenerationPolicy";
+import { agreementReadySummaryDraftFromParsed } from "./agreementReadySummaryModel";
+import { useAgreementPostGenerationPresentation } from "./useAgreementPostGenerationPresentation";
 import {
   NO_ATTORNEY_CLIENT,
   PRODUCT_NOT_LAW_FIRM,
@@ -22620,6 +22627,46 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !freeStarterReviewShellActive,
   );
 
+  const intakePostGenerationContext = useMemo(
+    () =>
+      resolveIntakeCreateReviewPostGenerationContext({
+        isFreeStreamlineDraftReview,
+        productionDraftPrimaryReviewSurface,
+        createUiStage: String(createUiStage),
+        createFlowPhase,
+        hasDraft: Boolean(draft),
+        paidProAuthoritative,
+        premiumPaidDocumentSurface,
+        premiumPersistedFlowActive,
+        showPrimaryGuidedCompletion,
+      }),
+    [
+      isFreeStreamlineDraftReview,
+      productionDraftPrimaryReviewSurface,
+      createUiStage,
+      createFlowPhase,
+      draft,
+      paidProAuthoritative,
+      premiumPaidDocumentSurface,
+      premiumPersistedFlowActive,
+      showPrimaryGuidedCompletion,
+    ],
+  );
+  const useIntakeCanonicalPostGeneration = shouldUseCanonicalPostGenerationFlow({
+    context: intakePostGenerationContext,
+    hasDraft: Boolean(draft),
+    isReviewPhase: createUiStage === CreateUiStage.DRAFT && createFlowPhase === "draft_ready_for_review",
+  });
+  const {
+    presentation: intakePostGenPresentation,
+    setPresentation: setIntakePostGenPresentation,
+    isSummaryMode: intakePostGenSummaryMode,
+  } = useAgreementPostGenerationPresentation(reviewAgreementId ?? null);
+  const intakePostGenerationSummaryDraft = useMemo(
+    () => (draft ? agreementReadySummaryDraftFromParsed(draft) : null),
+    [draft],
+  );
+
   const showGuidedUpdatedAgreementReady = Boolean(
     guidedProUxShowsUpdatedReadyCard(guidedProUxState) && !simpleProFinalReviewActive,
   );
@@ -28771,6 +28818,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               </span>
                             </div>
                           ) : null}
+                          {useIntakeCanonicalPostGeneration &&
+                          draft &&
+                          intakePostGenerationSummaryDraft &&
+                          createUiStage === CreateUiStage.DRAFT &&
+                          createFlowPhase === "draft_ready_for_review" ? (
+                            <div className="mb-4">
+                              <AgreementPostGenerationFlow
+                                draft={intakePostGenerationSummaryDraft}
+                                presentation={intakePostGenPresentation}
+                                onPresentationChange={setIntakePostGenPresentation}
+                                readonlyPreviewPanel={
+                                  useStarterDocumentPaperSurface ? (
+                                    <StarterDraftDocumentSurface
+                                      editorRef={agreementPreviewEditorRef}
+                                      id="claw-agreement-preview-readonly"
+                                      editRequestNonce={0}
+                                      parties={draft.parties}
+                                      intakeText={intakeCombined}
+                                      partiesLine={displayLivePreviewModel.partiesLine}
+                                      value={visibleStarterAgreementDocumentText}
+                                      disabled
+                                      onChange={() => {}}
+                                    />
+                                  ) : undefined
+                                }
+                                editorPanel={null}
+                              />
+                            </div>
+                          ) : null}
                           {showProReplacedStarterNudge ? (
                             <p
                               className="mb-3 text-xs leading-relaxed text-slate-500 sm:text-sm"
@@ -28917,7 +28993,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   {PAID_PRO_REVIEW_SHELL_SAFETY_LINE}
                                 </p>
                               </>
-                            ) : isFreeStreamlineDraftReview ? (
+                            ) : isFreeStreamlineDraftReview && !intakePostGenSummaryMode ? (
                               <>
                                 <span className="rounded-full border border-slate-600/70 bg-slate-900/80 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 sm:text-[11px]">
                                   {FREE_STARTER_REVIEW_BADGE}
@@ -29065,7 +29141,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   </>
                                 )}
                               </>
-                            ) : isFreeStreamlineDraftReview ? (
+                            ) : isFreeStreamlineDraftReview && !intakePostGenSummaryMode ? (
                               <span className="block text-slate-500">{STARTER_REVIEW_HELPER}</span>
                             ) : showUpgradeToFullDraftOnReview ? (
                               <>When you&apos;re happy here, use Continue at the bottom to add recipients — still no
@@ -30667,7 +30743,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   <PremiumProWaitContinuityCard />
                                 ) : null}
                               </>
-                            ) : productionDraftPrimaryReviewSurface ? (
+                            ) : productionDraftPrimaryReviewSurface &&
+                              !(useIntakeCanonicalPostGeneration && intakePostGenPresentation !== "editor") ? (
                               <div
                                 className={`rounded-lg transition-[box-shadow,ring-color] duration-500 ${
                                   !hasFullDraftAccess && !useStarterDocumentPaperSurface

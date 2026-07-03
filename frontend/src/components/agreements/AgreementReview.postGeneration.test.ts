@@ -2,14 +2,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("AgreementReview workspace review-first details", () => {
+describe("AgreementReview canonical post-generation wiring", () => {
   const agreementReviewPath = join(__dirname, "AgreementReview.tsx");
 
-  it("defaults wizard details step to summary-first presentation", () => {
+  it("uses shared post-generation flow across wizard and simple home review", () => {
     const source = readFileSync(agreementReviewPath, "utf8");
-    expect(source).toContain("workspaceReviewFirstDetails");
     expect(source).toContain("AgreementPostGenerationFlow");
-    expect(source).toContain("postGenerationSummaryMode");
+    expect(source).toContain("useAgreementPostGenerationPresentation");
+    expect(source).toContain("simpleHomeCanonicalReview");
+    expect(source).toContain("wizardCanonicalDetailsFlow");
     expect(source).toContain("showWorkspaceReviewFirstSummary");
   });
 });
