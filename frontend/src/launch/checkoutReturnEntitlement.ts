@@ -6,6 +6,7 @@ import { refreshSubscriptionEntitlement, writeCachedSubscriptionEntitlement } fr
 import { verifyBillingCheckoutSession } from "../launch/billingCheckoutApi";
 import { markPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
 import { getOrgId } from "../launch/orgContext";
+import { writePaidCheckoutOrgId } from "../launch/paidCheckoutOrgContext";
 
 export function readCheckoutSessionIdFromUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -36,6 +37,7 @@ export async function handleCheckoutReturnEntitlement(): Promise<boolean> {
       await refreshSubscriptionEntitlement(oid);
     }
     markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    writePaidCheckoutOrgId(oid);
     return true;
   } catch {
     return false;

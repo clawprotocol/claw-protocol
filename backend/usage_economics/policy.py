@@ -53,6 +53,7 @@ def _relaxed_draft_limits_in_dev() -> bool:
 
 def subject_has_paid_plan(subject_ref: str, economics: Optional[EconomicsStore] = None) -> bool:
     from backend.billing.subscription_authority import is_subscription_entitled
+    from backend.billing.workspace_billing_migration import migrate_entitled_subscription_to_org
     from backend.utils.enforce import org_id_from_subject
 
     oid = org_id_from_subject(subject_ref)
@@ -61,7 +62,26 @@ def subject_has_paid_plan(subject_ref: str, economics: Optional[EconomicsStore] 
     eco = economics or get_economics_store()
     eco.init_schema()
     row = subs.get_subscription_for_org(eco, oid)
-    return is_subscription_entitled(row)
+    if is_subscription_entitled(row):
+        return True
+    if oid.startswith("user-"):
+        uid = oid[5:].strip()
+        if uid:
+            by_user = eco.get_subscription_by_user_id(uid)
+            if is_subscription_entitled(by_user):
+                sub_org = str(by_user.get("org_id") or "").strip()
+                if sub_org and sub_org != oid:
+                    try:
+                        migrate_entitled_subscription_to_org(
+                            eco,
+                            from_org_id=sub_org,
+                            to_org_id=oid,
+                            user_id=uid,
+                        )
+                    except Exception:
+                        log.exception("lazy workspace billing migration failed org=%s user=%s", oid, uid)
+                return True
+    return False
 
 
 def _maybe_flag_abuse(*, subject_ref: str, ip: str, store: UsageEconomicsStore) -> None:

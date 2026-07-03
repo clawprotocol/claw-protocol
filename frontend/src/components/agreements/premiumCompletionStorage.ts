@@ -17,6 +17,7 @@ import {
 } from "../../launch/simpleProduct/premiumSendIntent";
 import { clearAcceptedPremiumCanonicalCorpus } from "./acceptedPremiumCanonicalCorpus";
 import { markCurrentSessionProEntitlementComplete } from "./paidProSessionEligibility";
+import { writePaidCheckoutOrgId } from "../../launch/paidCheckoutOrgContext";
 
 const KEY = "claw_premium_completion_snapshot_v1";
 
@@ -46,6 +47,7 @@ export function markPaidPremiumCompletionSession(options?: { source?: PaidPremiu
     markCurrentSessionProEntitlementComplete({
       source: marker.source === "qa_bypass" ? "qa_bypass" : "settled_checkout",
     });
+    writePaidCheckoutOrgId();
   } catch {
     /* ignore */
   }

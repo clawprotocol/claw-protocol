@@ -31,6 +31,8 @@ class BindUserOrgIn(BaseModel):
     email: Optional[str] = Field(default=None, max_length=256)
     display_name: Optional[str] = Field(default=None, max_length=256)
     previous_org_id: Optional[str] = Field(default=None, max_length=128)
+    """Pre-login checkout org (e.g. local-org) when subscription was activated before bind-user-org."""
+    subscription_source_org_id: Optional[str] = Field(default=None, max_length=128)
 
 
 def _stable_org_id_for_user(user_id: str) -> str:
@@ -81,12 +83,38 @@ async def bind_user_org(body: BindUserOrgIn) -> Dict[str, Any]:
         except Exception:
             _log.exception("migrate_org_agreements_failed prev=%s new=%s", prev, org_id)
 
+    billing_migrated = False
+    try:
+        from backend.billing.workspace_billing_migration import migrate_entitled_subscription_to_org
+        from backend.economics.store import get_economics_store
+
+        eco = get_economics_store()
+        eco.init_schema()
+        if prev and prev != org_id:
+            billing_migrated = migrate_entitled_subscription_to_org(
+                eco,
+                from_org_id=prev,
+                to_org_id=org_id,
+                user_id=user_id,
+            )
+        sub_src = (body.subscription_source_org_id or "").strip()
+        if sub_src and sub_src not in (org_id, prev):
+            billing_migrated = migrate_entitled_subscription_to_org(
+                eco,
+                from_org_id=sub_src,
+                to_org_id=org_id,
+                user_id=user_id,
+            ) or billing_migrated
+    except Exception:
+        _log.exception("migrate_workspace_billing_failed prev=%s new=%s", prev, org_id)
+
     return {
         "ok": True,
         "org_id": org_id,
         "user_id": user_id,
         "migrated_agreement_count": len(migrated_agreements),
         "migrated_agreement_ids": migrated_agreements[:50],
+        "billing_migrated": billing_migrated,
     }
 
 

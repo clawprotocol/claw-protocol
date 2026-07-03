@@ -4,6 +4,7 @@
 
 import { apiUrl, errorMessageFromResponse, readJson } from "../lib/clawApi";
 import { getOrgId, setOrgId } from "../launch/orgContext";
+import { readPaidCheckoutOrgId } from "../launch/paidCheckoutOrgContext";
 
 export type BindUserOrgResponse = {
   ok: boolean;
@@ -18,6 +19,7 @@ export async function bindAuthenticatedUserToWorkspace(args: {
   displayName?: string | null;
 }): Promise<BindUserOrgResponse> {
   const previousOrgId = getOrgId();
+  const subscriptionSourceOrgId = readPaidCheckoutOrgId();
   const res = await fetch(apiUrl("/v1/workspace/bind-user-org"), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -26,6 +28,7 @@ export async function bindAuthenticatedUserToWorkspace(args: {
       email: args.email ?? undefined,
       display_name: args.displayName ?? undefined,
       previous_org_id: previousOrgId,
+      subscription_source_org_id: subscriptionSourceOrgId ?? undefined,
     }),
   });
   if (!res.ok) {

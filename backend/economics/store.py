@@ -568,6 +568,59 @@ class EconomicsStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def get_subscription_by_user_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        uid = (user_id or "").strip()
+        if not uid:
+            return None
+        with self._conn() as con:
+            row = con.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (uid,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def migrate_workspace_billing_org(
+        self,
+        *,
+        from_org_id: str,
+        to_org_id: str,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Move subscription + Stripe org mirrors from one workspace org to another."""
+        src = (from_org_id or "").strip()
+        dst = (to_org_id or "").strip()
+        if not src or not dst or src == dst:
+            return
+        uid = (user_id or "").strip() or None
+        with self._conn() as con:
+            if uid:
+                con.execute(
+                    """
+                    UPDATE subscriptions
+                    SET org_id = ?, user_id = COALESCE(?, user_id)
+                    WHERE org_id = ?
+                    """,
+                    (dst, uid, src),
+                )
+            else:
+                con.execute(
+                    "UPDATE subscriptions SET org_id = ? WHERE org_id = ?",
+                    (dst, src),
+                )
+            con.execute(
+                "UPDATE stripe_customer_org SET org_id = ? WHERE org_id = ?",
+                (dst, src),
+            )
+            con.execute(
+                "UPDATE stripe_subscription_org SET org_id = ? WHERE org_id = ?",
+                (dst, src),
+            )
+
     def renew_subscription_payment(self, *, org_id: str, payment_id: str, renewed_at: str) -> None:
         with self._conn() as con:
             con.execute(

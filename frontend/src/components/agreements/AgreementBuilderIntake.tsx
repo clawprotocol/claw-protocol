@@ -566,6 +566,10 @@ import {
   type ReviewFirstPersistHttpError,
   type ReviewLinkPersistDiagnostics,
 } from "./reviewLinkPersistDiagnostics";
+import {
+  formatDraftCreateHttpUserMessage,
+  isDraftCreateHttpForbidden,
+} from "./draftCreateHttpError";
 import { formatAgreementPlainTextForEditing } from "../../agreement/formatAgreementPlainTextForEditing";
 import {
   explicitSignerNameForEntity,
@@ -11101,6 +11105,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setProductionSendBarAgreementId(null);
         return false;
       }
+      const draftHttpMsg = formatDraftCreateHttpUserMessage(e);
+      if (isDraftCreateHttpForbidden(e) || draftHttpMsg) {
+        setHardError(draftHttpMsg ?? "LawDog could not save this draft.");
+        setProductionSendBarPhase("idle");
+        setProductionSendBarAgreementId(null);
+        return false;
+      }
       const hydrate = msg === "hydrate_failed" || msg.toLowerCase().includes("hydrate");
       if (hydrate) {
         if (postedId) onCreateHydrateFailed?.(postedId);
@@ -11484,7 +11495,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setMissingAnswer("");
       if (nextMissing.length === 0 || createProductionTwoPane) {
         const ok = await runPersistAndOpen(parsed, rawIntake);
-        if (!ok) setDisplayPhase("intake");
+        if (!ok) {
+          setDisplayPhase("intake");
+          if (workspaceUi) {
+            setHardError((prev) => prev ?? "LawDog could not save this draft. Try again in a moment.");
+          }
+        }
       } else {
         setFollowUpDetailTotal(nextMissing.length);
         setDisplayPhase("followup_required");
