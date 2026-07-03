@@ -13,7 +13,9 @@ import { hasPaidProSourceOfTruth, getPaidProSourceOfTruthText } from "./paidProS
 import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
-import { readPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import {
+  readPaidProPipelineAcceptedCorpusHash,
+} from "./paidProPipelineAcceptedCorpus";
 
 export type AuthoritativeCreateFlowReviewShell = "paid_pro" | "free_starter";
 
@@ -68,10 +70,74 @@ export function shouldUsePaidProCreateFlowReviewShell(
   return resolveAuthoritativeCreateFlowReviewShell(input) === "paid_pro";
 }
 
-export function shouldBlockFreeStarterReviewSurfaces(
+/** Hard suppress Free Starter acquisition / conversion UI on `/app/create`. */
+export function shouldSuppressFreeStarterCreateFlowConversionUi(
   input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
 ): boolean {
   return shouldUsePaidProCreateFlowReviewShell(input);
+}
+
+export function shouldBlockFreeStarterReviewSurfaces(
+  input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
+): boolean {
+  return shouldSuppressFreeStarterCreateFlowConversionUi(input);
+}
+
+/**
+ * React dependency key for module-level paid signals (pipeline hash, SoT, workspace pro cache)
+ * that are not always mirrored in component state.
+ */
+export function readCreateFlowAuthoritativeReviewShellReactiveKey(): string {
+  const snap = readPremiumCompletionSnapshot();
+  const latched = getLatchedAcceptedServerFullDraftAuthority();
+  return [
+    readPaidProPipelineAcceptedCorpusHash() ?? "",
+    hasPaidProSourceOfTruth() ? "sot" : "",
+    latched?.freezeEstablished ? String(latched.body.trim().length) : "",
+    resolveCreateFlowWorkspaceProEntitled() ? "wpro" : "",
+    snap?.premiumAccepted ? "snap" : "",
+  ].join("|");
+}
+
+export function shouldUseStarterDocumentPaperSurfaceOnCreateFlow(input: {
+  shellInput?: ResolveAuthoritativeCreateFlowReviewShellInput;
+  isFreeStreamlineDraftReview: boolean;
+  createUiStage: (typeof CreateUiStage)[keyof typeof CreateUiStage];
+  paidProFirstReviewDisplayActive: boolean;
+  isAuthoritativePaidProReviewActive: boolean;
+}): boolean {
+  if (shouldSuppressFreeStarterCreateFlowConversionUi(input.shellInput ?? {})) return false;
+  return Boolean(
+    input.isFreeStreamlineDraftReview &&
+      input.createUiStage === CreateUiStage.DRAFT &&
+      !input.paidProFirstReviewDisplayActive &&
+      !input.isAuthoritativePaidProReviewActive,
+  );
+}
+
+export function shouldShowCreateFlowStarterProRefineUpsell(input: {
+  shellInput?: ResolveAuthoritativeCreateFlowReviewShellInput;
+  hasPaidPremiumCompletionSession: () => boolean;
+  authoritativePremiumUiCommitted: boolean;
+  paidProAuthoritative: boolean;
+  suppressIntakePremiumUpsell: boolean;
+  proAgreementEntitled: boolean;
+  isFreeStreamlineDraftReview: boolean;
+  isFreeStarterReviewSurface: boolean;
+  belowDocumentRefineSectionParentEligible: boolean;
+  premiumPaidDocumentSurface: boolean;
+  showStarterProRefineUpsellCardEligible: boolean;
+}): boolean {
+  if (shouldSuppressFreeStarterCreateFlowConversionUi(input.shellInput ?? {})) return false;
+  if (input.hasPaidPremiumCompletionSession()) return false;
+  if (input.authoritativePremiumUiCommitted) return false;
+  if (input.paidProAuthoritative) return false;
+  if (input.suppressIntakePremiumUpsell) return false;
+  if (input.proAgreementEntitled) return false;
+  if (input.isFreeStreamlineDraftReview || input.isFreeStarterReviewSurface) {
+    return input.belowDocumentRefineSectionParentEligible;
+  }
+  return input.showStarterProRefineUpsellCardEligible;
 }
 
 export type ComputeCreateFlowPaidProReviewReadyInput = ResolveAuthoritativeCreateFlowReviewShellInput & {

@@ -158,11 +158,14 @@ export function resolveReviewShellChrome(input: ResolveReviewShellChromeInput): 
   };
 }
 
-export function shouldGateGuidedRenderAuthorityForFreeReview(input: {
-  isFreeStreamlineDraftReview: boolean;
-  isFreeStarterReviewSurface: boolean;
-  premiumPaidDocumentSurface: boolean;
-}): boolean {
+export function shouldGateGuidedRenderAuthorityForFreeReview(
+  input: ResolveAuthoritativeCreateFlowReviewShellInput & {
+    isFreeStreamlineDraftReview: boolean;
+    isFreeStarterReviewSurface: boolean;
+    premiumPaidDocumentSurface: boolean;
+  },
+): boolean {
+  if (resolveAuthoritativeCreateFlowReviewShell(input) === "paid_pro") return false;
   if (input.isFreeStreamlineDraftReview || input.isFreeStarterReviewSurface) return true;
   if (!input.premiumPaidDocumentSurface) return true;
   return false;

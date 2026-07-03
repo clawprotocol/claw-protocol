@@ -1,6 +1,9 @@
 import { isAuthoritativePaidProReview } from "./authoritativePaidProReview";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
-import { shouldBlockFreeStarterReviewSurfaces } from "./authoritativeCreateFlowReviewShell";
+import {
+  shouldBlockFreeStarterReviewSurfaces,
+  shouldSuppressFreeStarterCreateFlowConversionUi,
+} from "./authoritativeCreateFlowReviewShell";
 import type { ResolveAuthoritativeCreateFlowReviewShellInput } from "./authoritativeCreateFlowReviewShell";
 import { CreateUiStage } from "./createUiStage";
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
@@ -37,6 +40,7 @@ export type ResolveIsFreeStreamlineDraftReviewInput = ResolveAuthoritativeCreate
  * When true, render StarterDraftDocumentSurface + ProConversionComparisonCard chrome.
  */
 export function resolveIsFreeStreamlineDraftReview(input: ResolveIsFreeStreamlineDraftReviewInput): boolean {
+  if (shouldSuppressFreeStarterCreateFlowConversionUi(input)) return false;
   if (!input.simpleProductFlow || !input.liveWorkspaceTwoPane || !input.createProductionTwoPane) return false;
   if (input.createUiStage !== CreateUiStage.DRAFT || !input.hasDraft) return false;
   if (shouldBlockFreeStarterReviewSurfaces(input)) return false;

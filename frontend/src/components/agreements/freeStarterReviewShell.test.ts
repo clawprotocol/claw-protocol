@@ -188,6 +188,17 @@ describe("shouldGateGuidedRenderAuthorityForFreeReview", () => {
       }),
     ).toBe(true);
   });
+
+  it("does not gate guided authority when authoritative create-flow shell is paid_pro", () => {
+    expect(
+      shouldGateGuidedRenderAuthorityForFreeReview({
+        workspaceProEntitled: true,
+        isFreeStreamlineDraftReview: true,
+        isFreeStarterReviewSurface: true,
+        premiumPaidDocumentSurface: false,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("AgreementBuilderIntake free starter shell wiring", () => {

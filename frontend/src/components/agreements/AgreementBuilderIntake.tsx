@@ -1522,7 +1522,12 @@ import {
 import {
   computeCreateFlowPaidProReviewReady,
   logAuthoritativeCreateFlowReviewShellResolved,
+  readCreateFlowAuthoritativeReviewShellReactiveKey,
+  resolveCreateFlowAuthoritativeReviewPlain,
+  shouldShowCreateFlowStarterProRefineUpsell,
+  shouldSuppressFreeStarterCreateFlowConversionUi,
   shouldUsePaidProCreateFlowReviewShell,
+  shouldUseStarterDocumentPaperSurfaceOnCreateFlow,
   type ResolveAuthoritativeCreateFlowReviewShellInput,
 } from "./authoritativeCreateFlowReviewShell";
 
@@ -12780,6 +12785,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const showUpgradeIntakeFullDraftCallout = useMemo(() => {
+    if (
+      shouldSuppressFreeStarterCreateFlowConversionUi({
+        workspaceProEntitled,
+        tier,
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+        paidProAuthoritative,
+      })
+    ) {
+      return false;
+    }
     if (suppressIntakePremiumUpsell) return false;
     if (freshSimpleCreateUx) return false;
     if (!showUpgradeToFullDraftCta) return false;
@@ -12796,6 +12812,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     livePreviewModel.partiesLine,
     freshSimpleCreateUx,
     suppressIntakePremiumUpsell,
+    workspaceProEntitled,
+    tier,
+    premiumPersistedFlowActive,
+    premiumSendPathUnlocked,
+    paidProAuthoritative,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
   ]);
 
   const upgradeIntentSignals = useMemo<UpgradeIntentSignal[]>(
@@ -12830,6 +12853,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const showUpgradeToFullDraftOnReview = useMemo(() => {
+    if (
+      shouldSuppressFreeStarterCreateFlowConversionUi({
+        workspaceProEntitled,
+        tier,
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+        paidProAuthoritative,
+      })
+    ) {
+      return false;
+    }
     if (suppressIntakePremiumUpsell) return false;
     if (hasPaidProSourceOfTruth()) return false;
     // HARD INVARIANT: paid checkout / QA bypass latched => never show a Pro upsell CTA.
@@ -12868,6 +12902,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSendPathUnlocked,
     suppressIntakePremiumUpsell,
     starterPartyCountRequiresPro,
+    workspaceProEntitled,
+    tier,
+    paidProAuthoritative,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
   ]);
 
   /** Stable Pro entitlement for this agreement (tier, session flags, snapshot, authoritative premium body). */
@@ -12972,6 +13011,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const createFlowAuthoritativeShellReactiveKey = readCreateFlowAuthoritativeReviewShellReactiveKey();
+  const suppressFreeStarterCreateFlowConversionUi = shouldSuppressFreeStarterCreateFlowConversionUi(
+    authoritativeCreateFlowReviewShellInput,
+  );
+
   const paidProReviewReadyBase = computeCreateFlowPaidProReviewReady({
     simpleProductFlow: Boolean(simpleProductFlow),
     liveWorkspaceTwoPane: Boolean(liveWorkspaceTwoPane),
@@ -13045,6 +13089,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const isAuthoritativePaidProReviewActive = useMemo(
     () =>
+      suppressFreeStarterCreateFlowConversionUi ||
       paidProFirstReviewDisplayActive ||
       isAuthoritativePaidProReview({
         isPaidPro: paidProAuthoritative || hasPaidProSourceOfTruth(),
@@ -13052,6 +13097,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       }),
     [
+      suppressFreeStarterCreateFlowConversionUi,
       paidProFirstReviewDisplayActive,
       paidProAuthoritative,
       draft,
@@ -13059,15 +13105,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeCombined,
       reviewDocRefreshTick,
       premiumSurfaceGateTick,
+      createFlowAuthoritativeShellReactiveKey,
     ],
   );
 
-  const authoritativePaidProReviewPlain = useMemo(
-    () =>
-      // Paid SoT fallback: when checkout is latched and a real SoT exists, resolve the body even if
-      // the active review predicate is transiently false (e.g. signer hydration mutated the draft so
-      // the draft-validated surface read briefly fails). The resolver still returns "" when no real
-      // SoT/authoritative corpus is available, so this never fabricates a body during generation.
+  const authoritativePaidProReviewPlain = useMemo(() => {
+    if (suppressFreeStarterCreateFlowConversionUi) {
+      const fromCreateFlow = resolveCreateFlowAuthoritativeReviewPlain({
+        agreementDocumentText,
+        draft: draft ?? null,
+      });
+      if (fromCreateFlow.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromCreateFlow;
+    }
+    return (
       isAuthoritativePaidProReviewActive ||
         (premiumCheckoutCompleted && hasPaidProSourceOfTruth()) ||
         (premiumCheckoutCompleted &&
@@ -13083,18 +13133,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumRenderSource:
               premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
           })
-        : "",
-    [
-      isAuthoritativePaidProReviewActive,
-      premiumCheckoutCompleted,
-      premiumTruthPipelineSource,
-      draft,
-      currentPremiumMergedIntakeKey,
-      intakeCombined,
-      reviewDocRefreshTick,
-      premiumSurfaceGateTick,
-    ],
-  );
+        : ""
+    );
+  }, [
+    suppressFreeStarterCreateFlowConversionUi,
+    agreementDocumentText,
+    isAuthoritativePaidProReviewActive,
+    premiumCheckoutCompleted,
+    premiumTruthPipelineSource,
+    draft,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+    createFlowAuthoritativeShellReactiveKey,
+  ]);
 
   /**
    * Length of the authoritative paid body for state/invariant reporting. When the active review
@@ -13244,6 +13297,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumCheckoutCompleted,
     workspaceProEntitled,
     authoritativeCreateFlowReviewShellInput,
+    createFlowAuthoritativeShellReactiveKey,
   ]);
   isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
 
@@ -13279,6 +13333,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       showUpgradeToFullDraftOnReview,
       workspaceProEntitled,
       authoritativeCreateFlowReviewShellInput,
+      createFlowAuthoritativeShellReactiveKey,
     ],
   );
 
@@ -13330,7 +13385,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return "";
     }
     let visible = stripPlaceholderBlockerFromPersistPlain(agreementDocumentText);
-    if (isFreeStreamlineDraftReview && draft && !agreementDocumentDirtyRef.current) {
+    if (
+      !suppressFreeStarterCreateFlowConversionUi &&
+      isFreeStreamlineDraftReview &&
+      draft &&
+      !agreementDocumentDirtyRef.current
+    ) {
       const resolved = resolveFreeStarterReviewBody({
         draft,
         rawIntake: resolveStarterPreviewIntakeText(
@@ -13352,6 +13412,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     agreementDocumentText,
     starterPreviewTransientGate,
     isFreeStreamlineDraftReview,
+    suppressFreeStarterCreateFlowConversionUi,
     draft,
     currentPremiumMergedIntakeKey,
     debouncedStepBuffer,
@@ -13363,6 +13424,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showStarterPreviewLoadingShell = useMemo(
     () =>
+      !suppressFreeStarterCreateFlowConversionUi &&
       isFreeStreamlineDraftReview &&
       shouldDeferStarterPreviewToLoadingShell({
         text: starterPreviewBodyForShell,
@@ -13372,6 +13434,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hasLocalDraft: Boolean(draft),
       }),
     [
+      suppressFreeStarterCreateFlowConversionUi,
       isFreeStreamlineDraftReview,
       starterPreviewBodyForShell,
       starterPreviewTransientGate,
@@ -13470,12 +13533,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [reviewAgreementId],
   );
 
-  const useStarterDocumentPaperSurface = Boolean(
-    isFreeStreamlineDraftReview &&
-      createUiStage === CreateUiStage.DRAFT &&
-      !paidProFirstReviewDisplayActive &&
-      !isAuthoritativePaidProReviewActive,
-  );
+  const useStarterDocumentPaperSurface = shouldUseStarterDocumentPaperSurfaceOnCreateFlow({
+    shellInput: authoritativeCreateFlowReviewShellInput,
+    isFreeStreamlineDraftReview,
+    createUiStage,
+    paidProFirstReviewDisplayActive,
+    isAuthoritativePaidProReviewActive,
+  });
 
   const freeStarterReviewShellActive = useMemo(
     () =>
@@ -13504,6 +13568,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
       authoritativeCreateFlowReviewShellInput,
+      createFlowAuthoritativeShellReactiveKey,
     ],
   );
 
@@ -13554,6 +13619,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
       authoritativeCreateFlowReviewShellInput,
+      createFlowAuthoritativeShellReactiveKey,
     ],
   );
 
@@ -13916,32 +13982,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
   }, [paidProCardAiInstruction, paidProCardEditDraft, runPersistedRefineFromStepBuffer]);
 
-  const showStarterProRefineUpsell = useMemo(() => {
-    if (shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return false;
-    if (hasPaidPremiumCompletionSession()) return false;
-    if (authoritativePremiumUiCommitted) return false;
-    if (paidProAuthoritative) return false;
-    if (suppressIntakePremiumUpsell) return false;
-    if (proAgreementEntitled) return false;
-    if (isFreeStreamlineDraftReview || isFreeStarterReviewSurface) {
-      return belowDocumentRefineSectionParentEligible;
-    }
-    return shouldShowStarterProRefineUpsellCard(
+  const showStarterProRefineUpsell = useMemo(
+    () =>
+      shouldShowCreateFlowStarterProRefineUpsell({
+        shellInput: authoritativeCreateFlowReviewShellInput,
+        hasPaidPremiumCompletionSession,
+        authoritativePremiumUiCommitted,
+        paidProAuthoritative,
+        suppressIntakePremiumUpsell,
+        proAgreementEntitled,
+        isFreeStreamlineDraftReview,
+        isFreeStarterReviewSurface,
+        belowDocumentRefineSectionParentEligible,
+        premiumPaidDocumentSurface,
+        showStarterProRefineUpsellCardEligible: shouldShowStarterProRefineUpsellCard(
+          belowDocumentRefineSectionParentEligible,
+          premiumPaidDocumentSurface,
+          suppressIntakePremiumUpsell,
+        ),
+      }),
+    [
+      proAgreementEntitled,
+      isFreeStreamlineDraftReview,
+      isFreeStarterReviewSurface,
+      suppressIntakePremiumUpsell,
       belowDocumentRefineSectionParentEligible,
       premiumPaidDocumentSurface,
-      suppressIntakePremiumUpsell,
-    );
-  }, [
-    proAgreementEntitled,
-    isFreeStreamlineDraftReview,
-    isFreeStarterReviewSurface,
-    suppressIntakePremiumUpsell,
-    belowDocumentRefineSectionParentEligible,
-    premiumPaidDocumentSurface,
-    premiumSurfaceGateTick,
-    paidProAuthoritative,
-    authoritativePremiumUiCommitted,
-  ]);
+      premiumSurfaceGateTick,
+      paidProAuthoritative,
+      authoritativePremiumUiCommitted,
+      authoritativeCreateFlowReviewShellInput,
+      createFlowAuthoritativeShellReactiveKey,
+    ],
+  );
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -17664,6 +17737,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           isFreeStreamlineDraftReview,
           isFreeStarterReviewSurface,
           premiumPaidDocumentSurface,
+          ...authoritativeCreateFlowReviewShellInput,
         }) &&
         session &&
         !isGuidedCompletionComplete(session),
@@ -18073,6 +18147,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const starterStrongProtectionsUpsellEl = useMemo(() => {
+    if (suppressFreeStarterCreateFlowConversionUi) return null;
     if (suppressIntakePremiumUpsell) return null;
     if (isFreeStreamlineDraftReview || showStarterProRefineUpsell) return null;
     if (!originalWordingIsPremiumOnlyOnStarter) return null;
@@ -18095,6 +18170,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     originalWordingIsPremiumOnlyOnStarter,
     beginAdvancedFullDraftCheckout,
     suppressIntakePremiumUpsell,
+    suppressFreeStarterCreateFlowConversionUi,
     isFreeStreamlineDraftReview,
     showStarterProRefineUpsell,
     tier,
@@ -20785,6 +20861,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const paidProStarterPreviewPlain = useMemo(() => {
+    if (suppressFreeStarterCreateFlowConversionUi) return "";
     if (!draft) return "";
     if (
       hasPaidProSourceOfTruth() &&
@@ -20814,7 +20891,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     } catch {
       return "";
     }
-  }, [draft, debouncedStepBuffer, reviewDocRefreshTick, premiumSurfaceGateTick]);
+  }, [draft, debouncedStepBuffer, reviewDocRefreshTick, premiumSurfaceGateTick, suppressFreeStarterCreateFlowConversionUi, createFlowAuthoritativeShellReactiveKey]);
 
   const guidedAuthoritativeVersionId = useMemo(() => {
     void guidedAuthVersionNonce;
@@ -23862,7 +23939,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!simpleProductFlow || !liveWorkspaceTwoPane) return;
-    if (freeStarterReviewShellActive) {
+    if (freeStarterReviewShellActive && !suppressFreeStarterCreateFlowConversionUi) {
       if (paidProReviewReadyBase) {
         logFreeReviewPaidShellBlocked({
           reason: "free_starter_review_active",
@@ -23900,6 +23977,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     isFreeStreamlineDraftReview,
     reviewShellChrome.title,
     showPrimaryGuidedCompletion,
+    suppressFreeStarterCreateFlowConversionUi,
   ]);
 
   const guidedCompletionActive = Boolean(
@@ -23915,6 +23993,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         isFreeStreamlineDraftReview,
         isFreeStarterReviewSurface,
         premiumPaidDocumentSurface,
+        ...authoritativeCreateFlowReviewShellInput,
       }) &&
       activeGuidedCompletionSession &&
       showPrimaryGuidedCompletion &&
@@ -29173,7 +29252,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   {PAID_PRO_REVIEW_SHELL_SAFETY_LINE}
                                 </p>
                               </>
-                            ) : isFreeStreamlineDraftReview && !intakePostGenSummaryMode ? (
+                            ) : isFreeStreamlineDraftReview &&
+                              !suppressFreeStarterCreateFlowConversionUi &&
+                              !intakePostGenSummaryMode ? (
                               <>
                                 <span className="rounded-full border border-slate-600/70 bg-slate-900/80 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 sm:text-[11px]">
                                   {FREE_STARTER_REVIEW_BADGE}
@@ -29321,7 +29402,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   </>
                                 )}
                               </>
-                            ) : isFreeStreamlineDraftReview && !intakePostGenSummaryMode ? (
+                            ) : isFreeStreamlineDraftReview &&
+                              !suppressFreeStarterCreateFlowConversionUi &&
+                              !intakePostGenSummaryMode ? (
                               <span className="block text-slate-500">{STARTER_REVIEW_HELPER}</span>
                             ) : showUpgradeToFullDraftOnReview ? (
                               <>When you&apos;re happy here, use Continue at the bottom to add recipients — still no
@@ -29335,6 +29418,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           {upgradeLockActive &&
                           productionDraftPrimaryReviewSurface &&
                           createUiStage === CreateUiStage.DRAFT &&
+                          !suppressFreeStarterCreateFlowConversionUi &&
                           !(isFreeStreamlineDraftReview && showStarterProRefineUpsell) ? (
                             <div ref={upgradeRequiredBlockRef} className="mx-auto mb-3 w-full max-w-none px-4 sm:px-0">
                               <ProConversionComparisonCard
@@ -31778,6 +31862,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     />
                   ) : null}
                   {showUpgradeIntakeFullDraftCallout &&
+                  !suppressFreeStarterCreateFlowConversionUi &&
                   createProductionTwoPane &&
                   createUiStage === CreateUiStage.INPUT &&
                   !hideIntakeMicrocopy &&
