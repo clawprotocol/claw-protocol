@@ -3,6 +3,7 @@
  * from the latched substantive corpus — never the short starter preview.
  */
 
+import { readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   establishAcceptedPremiumCanonicalCorpus,
@@ -24,7 +25,8 @@ import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 
 export function hasAcceptedPaidCreateFlowFreezeLatch(): boolean {
   const latched = getLatchedAcceptedServerFullDraftAuthority();
-  return Boolean(latched?.freezeEstablished && latched.body.trim().length >= 500);
+  if (latched?.freezeEstablished && latched.body.trim().length >= 500) return true;
+  return readPaidProPipelineAcceptedCorpusHash() !== null;
 }
 
 export function resolveWorkspaceProSubscriptionEntitled(): boolean {
@@ -32,14 +34,24 @@ export function resolveWorkspaceProSubscriptionEntitled(): boolean {
   return Boolean(subTier && tierAllowsAdvancedFullDraftReveal(subTier));
 }
 
+/** Cached subscription tier OR workspace billing probe — not React access tier alone. */
+export function resolveCreateFlowWorkspaceProEntitled(): boolean {
+  return resolveWorkspaceProSubscriptionEntitled() || readCachedWorkspaceProEntitlement();
+}
+
+export function hasPaidCreateFlowPipelineAcceptance(): boolean {
+  return readPaidProPipelineAcceptedCorpusHash() !== null;
+}
+
 export function shouldBlockFreeStarterReviewSurfaces(): boolean {
   if (hasPaidProSourceOfTruth()) return true;
   if (hasAcceptedPaidCreateFlowFreezeLatch()) return true;
-  if (hasCurrentSessionProEntitlement()) {
-    if (readPaidProPipelineAcceptedCorpusHash() !== null) return true;
-    const snap = readPremiumCompletionSnapshot();
-    if (snap?.premiumAccepted === true) return true;
-  }
+  const snap = readPremiumCompletionSnapshot();
+  const pipelineAccepted = hasPaidCreateFlowPipelineAcceptance();
+  const premiumSnapAccepted = snap?.premiumAccepted === true;
+  if (!pipelineAccepted && !premiumSnapAccepted) return false;
+  if (hasCurrentSessionProEntitlement()) return true;
+  if (resolveCreateFlowWorkspaceProEntitled()) return true;
   return false;
 }
 
@@ -66,7 +78,41 @@ export function resolveSubstantiveAcceptedPremiumBodyForReviewHandoff(args: {
       return { text, source: pipelineSource };
     }
   }
+  if (hasPaidCreateFlowPipelineAcceptance()) {
+    const winning = (args.winningBody || "").trim();
+    if (winning.length >= 500) {
+      return { text: winning, source: pipelineSource };
+    }
+  }
   return null;
+}
+
+/** Prefer pipeline-accepted corpus over short starter preview for create-flow display. */
+export function resolveCreateFlowPaidReviewDisplayPlain(args: {
+  winningBody: string;
+  snapshotPlain: string;
+  pipelineSource: string;
+  handoffBody?: string;
+  handoffEstablished?: boolean;
+}): string {
+  const snapshotPlain = (args.snapshotPlain || "").trim();
+  const handoffBody = (args.handoffBody || "").trim();
+  if (args.handoffEstablished && handoffBody.length >= 500) return handoffBody;
+  const substantive = resolveSubstantiveAcceptedPremiumBodyForReviewHandoff({
+    winningBody: args.winningBody,
+    snapshotPlain,
+    pipelineSource: args.pipelineSource,
+  });
+  const candidates = [
+    handoffBody,
+    substantive?.text ?? "",
+    (args.winningBody || "").trim(),
+    snapshotPlain,
+  ]
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 500)
+    .sort((a, b) => b.length - a.length);
+  return candidates[0] ?? snapshotPlain;
 }
 
 export type EstablishAcceptedPremiumCorpusForCreateFlowResult = {

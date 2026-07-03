@@ -25,7 +25,7 @@ import {
   normalizeAgreementDraftFromApi,
 } from "../../agreement/agreementDraftNormalize";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
-import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
+import { fetchWorkspaceProEntitlement, readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import { fetchAgreementDraft, fetchAgreementDraftWithSigningLock } from "../../agreement/agreementWorkspaceApi";
 import { apiUrl, resolveApiBase } from "../../lib/clawApi";
 import { PREMIUM_COMPLETION_ATTEMPT_MAX_MS } from "../../lib/premiumCompletionAttemptTimeout";
@@ -1517,6 +1517,7 @@ import {
 } from "./paidProCreateFlowRouting";
 import {
   shouldBlockFreeStarterReviewSurfaces,
+  resolveCreateFlowPaidReviewDisplayPlain,
   tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff,
 } from "./paidProCreateFlowReviewHandoff";
 
@@ -3340,6 +3341,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const fullDraftUpgradeBannerTimerRef = useRef(0);
   const optionalFullUpgradeInFlightRef = useRef(false);
   const entitledPremiumRewriteInFlightRef = useRef(false);
+  const paidCreateFlowAutoRewriteGenRef = useRef<string | null>(null);
   const premiumCheckoutRunGenRef = useRef(0);
   /** True while ~30s soft progress copy is shown (does not fail open or touch recovery flags). */
   const premiumModalExtendedWaitActiveRef = useRef(false);
@@ -3547,7 +3549,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draftHasFullDraftExpansion(d) ||
         premiumSendPathUnlocked ||
         premiumPersistedFlowActive
-      );
+      ) && !shouldBlockFreeStarterReviewSurfaces();
       const placeholderGate = {
         isGenerating: previewPlaceholderGateIsGeneratingRef.current,
         hasDraftPayload: starterReviewServerDraftReadyRef.current,
@@ -6171,15 +6173,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draft: merged.draft,
         intakeText: mergedIntake,
       });
-      const finalPlain = (
-        handoff.established && handoff.body.trim().length > snapshotPlain.length
-          ? handoff.body
-          : handoff.established
-            ? handoff.body
-            : snapshotPlain
-      ).trim();
+      const finalPlain = resolveCreateFlowPaidReviewDisplayPlain({
+        winningBody: winning,
+        snapshotPlain,
+        pipelineSource: result.premiumRenderSource,
+        handoffBody: handoff.body,
+        handoffEstablished: handoff.established,
+      });
+      markCurrentSessionProEntitlementComplete({ source: "pipeline_accepted" });
       const mergedDraftPersist =
-        (usePaidAuthoritativeBody || handoff.established) && finalPlain.length >= 500
+        finalPlain.length >= 500
           ? {
               ...merged.draft,
               premium_full_document_text: finalPlain,
@@ -6217,7 +6220,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (hydrated) {
         applyHydrationFromPremiumSnapshot(hydrated);
       }
-      if (handoff.established && finalPlain.length >= 500) {
+      if (finalPlain.length >= 500) {
         setProUpgradeUseStarterView(false);
         setProFullDraftQualityRetry(false);
         agreementDocumentDirtyRef.current = false;
@@ -9801,15 +9804,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const handoffSource = opts?.handoffSource ?? "runProductionLocalDraftParse";
     const fromHomeHandoff =
       handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
+    const workspaceProForSubmit =
+      readCachedWorkspaceProEntitlement() || (await fetchWorkspaceProEntitlement());
     const skipFreeStarterCreateSubmit = resolveSkipFreeStarterCreateSubmit({
       tier,
-      proAgreementEntitled: isProEntitledForAgreement({
-        tier,
-        draft: draft ?? null,
-        premiumSendPathUnlocked,
-        premiumPersistedFlowActive,
-        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
-      }),
+      proAgreementEntitled:
+        workspaceProForSubmit ||
+        isProEntitledForAgreement({
+          tier,
+          draft: draft ?? null,
+          premiumSendPathUnlocked,
+          premiumPersistedFlowActive,
+          premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+        }),
     });
     if (fromHomeHandoff) {
       resetStalePaidReviewShellForFreeStarter("home_create_submit", {
@@ -13212,6 +13219,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       showUpgradeToFullDraftOnReview,
     ],
   );
+
+  useEffect(() => {
+    if (!simpleProductFlow || !createProductionTwoPane) return;
+    if (!workspaceProEntitled) return;
+    if (entitledPremiumRewriteInFlightRef.current) return;
+    if (shouldBlockFreeStarterReviewSurfaces()) return;
+    if (!draft || createFlowPhase !== "draft_ready_for_review") return;
+    if (!isFreeStreamlineDraftReview && !isFreeStarterReviewSurface) return;
+    const gen = getOrInitSessionAgreementGenerationId();
+    if (paidCreateFlowAutoRewriteGenRef.current === gen) return;
+    paidCreateFlowAutoRewriteGenRef.current = gen;
+    void runEntitledPremiumImprovementRewrite();
+  }, [
+    simpleProductFlow,
+    createProductionTwoPane,
+    workspaceProEntitled,
+    draft,
+    createFlowPhase,
+    isFreeStreamlineDraftReview,
+    isFreeStarterReviewSurface,
+    premiumSurfaceGateTick,
+    runEntitledPremiumImprovementRewrite,
+  ]);
 
   const starterPreviewTransientGate = useMemo(
     () => ({

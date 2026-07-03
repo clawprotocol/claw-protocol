@@ -14,6 +14,11 @@ export function readCachedWorkspaceProEntitlement(): boolean {
   return workspaceProResolved === true;
 }
 
+/** Vitest: seed workspace billing resolution without network. */
+export function markWorkspaceProEntitlementResolvedForTests(entitled: boolean | null): void {
+  workspaceProResolved = entitled;
+}
+
 /** Workspace billing: Pro / paid plan for the current org (cached until invalidated). */
 export async function fetchWorkspaceProEntitlement(): Promise<boolean> {
   if (workspaceProResolved !== null) return workspaceProResolved;

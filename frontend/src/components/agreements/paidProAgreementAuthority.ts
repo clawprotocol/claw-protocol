@@ -1,6 +1,7 @@
 import type { AccessTier } from "../../access/types";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
+import { resolveCreateFlowWorkspaceProEntitled } from "./paidProCreateFlowReviewHandoff";
 import {
   hasStoredPaidPremiumCompletionSession,
   peekPremiumCompletionDoneInLocalStorage,
@@ -115,6 +116,9 @@ export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuth
   }
   if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) {
     return { authoritative: true, reason: "tier_allows_advanced_full_draft", corpusLen, premium_render_source };
+  }
+  if (resolveCreateFlowWorkspaceProEntitled()) {
+    return { authoritative: true, reason: "workspace_pro_entitlement", corpusLen, premium_render_source };
   }
   if (
     input.includeLocalCompletionMarker !== false &&
