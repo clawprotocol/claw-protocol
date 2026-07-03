@@ -14,7 +14,7 @@ import {
   hasAcceptedPaidCreateFlowFreezeLatch,
   resolveCreateFlowWorkspaceProEntitled,
   shouldBlockFreeStarterReviewSurfaces,
-} from "./paidProCreateFlowReviewHandoff";
+} from "./authoritativeCreateFlowReviewShell";
 
 export type ResolveSkipFreeStarterCreateSubmitInput = {
   tier: AccessTier;

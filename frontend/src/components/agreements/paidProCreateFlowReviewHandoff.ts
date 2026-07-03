@@ -3,57 +3,29 @@
  * from the latched substantive corpus — never the short starter preview.
  */
 
-import { readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   establishAcceptedPremiumCanonicalCorpus,
   isAcceptedPremiumCanonicalEstablished,
 } from "./acceptedPremiumCanonicalCorpus";
 import { commitPaidProAcceptanceStorageHygiene } from "./paidProAcceptanceRouting";
-import { subscriptionTierForAccess } from "../../access/subscriptionEntitlementCache";
-import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
 import {
   getLatchedAcceptedServerFullDraftAuthority,
   latchAcceptedServerFullDraftAuthority,
 } from "./premiumAcceptancePolicy";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
-import { readPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
-import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
-import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
-import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import {
+  hasPaidCreateFlowPipelineAcceptance,
+} from "./authoritativeCreateFlowReviewShell";
 
-export function hasAcceptedPaidCreateFlowFreezeLatch(): boolean {
-  const latched = getLatchedAcceptedServerFullDraftAuthority();
-  if (latched?.freezeEstablished && latched.body.trim().length >= 500) return true;
-  return readPaidProPipelineAcceptedCorpusHash() !== null;
-}
-
-export function resolveWorkspaceProSubscriptionEntitled(): boolean {
-  const subTier = subscriptionTierForAccess();
-  return Boolean(subTier && tierAllowsAdvancedFullDraftReveal(subTier));
-}
-
-/** Cached subscription tier OR workspace billing probe — not React access tier alone. */
-export function resolveCreateFlowWorkspaceProEntitled(): boolean {
-  return resolveWorkspaceProSubscriptionEntitled() || readCachedWorkspaceProEntitlement();
-}
-
-export function hasPaidCreateFlowPipelineAcceptance(): boolean {
-  return readPaidProPipelineAcceptedCorpusHash() !== null;
-}
-
-export function shouldBlockFreeStarterReviewSurfaces(): boolean {
-  if (hasPaidProSourceOfTruth()) return true;
-  if (hasAcceptedPaidCreateFlowFreezeLatch()) return true;
-  const snap = readPremiumCompletionSnapshot();
-  const pipelineAccepted = hasPaidCreateFlowPipelineAcceptance();
-  const premiumSnapAccepted = snap?.premiumAccepted === true;
-  if (!pipelineAccepted && !premiumSnapAccepted) return false;
-  if (hasCurrentSessionProEntitlement()) return true;
-  if (resolveCreateFlowWorkspaceProEntitled()) return true;
-  return false;
-}
+export {
+  hasAcceptedPaidCreateFlowFreezeLatch,
+  hasPaidCreateFlowPipelineAcceptance,
+  resolveCreateFlowWorkspaceProEntitled,
+  resolveWorkspaceProSubscriptionEntitled,
+  shouldBlockFreeStarterReviewSurfaces,
+} from "./authoritativeCreateFlowReviewShell";
 
 export function resolveSubstantiveAcceptedPremiumBodyForReviewHandoff(args: {
   winningBody: string;

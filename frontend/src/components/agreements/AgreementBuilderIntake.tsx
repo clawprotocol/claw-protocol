@@ -364,7 +364,6 @@ import {
   PAID_PRO_AUTHORITY_MIN_LEN,
 } from "./paidProAgreementAuthority";
 import {
-  computeSimpleCreatePaidProReviewReady,
   logProReviewSendSignatureClick,
   resolveSimpleCreateShellLifecycleStage,
 } from "../../launch/simpleProduct/simpleCreatePaidProReviewShell";
@@ -1520,6 +1519,12 @@ import {
   resolveCreateFlowPaidReviewDisplayPlain,
   tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff,
 } from "./paidProCreateFlowReviewHandoff";
+import {
+  computeCreateFlowPaidProReviewReady,
+  logAuthoritativeCreateFlowReviewShellResolved,
+  shouldUsePaidProCreateFlowReviewShell,
+  type ResolveAuthoritativeCreateFlowReviewShellInput,
+} from "./authoritativeCreateFlowReviewShell";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -3544,12 +3549,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ) {
         return resolvePaidProAuthoritativeDisplayPlain(paidProReviewSurfaceOptsRef.current);
       }
-      const starterPreview = !(
-        tierAllowsAdvancedFullDraftReveal(tier) ||
-        draftHasFullDraftExpansion(d) ||
-        premiumSendPathUnlocked ||
-        premiumPersistedFlowActive
-      ) && !shouldBlockFreeStarterReviewSurfaces();
+      const starterPreview =
+        !(
+          tierAllowsAdvancedFullDraftReveal(tier) ||
+          draftHasFullDraftExpansion(d) ||
+          premiumSendPathUnlocked ||
+          premiumPersistedFlowActive
+        ) &&
+        !shouldUsePaidProCreateFlowReviewShell({
+          workspaceProEntitled,
+          tier,
+          premiumPersistedFlowActive,
+          premiumSendPathUnlocked,
+        });
       const placeholderGate = {
         isGenerating: previewPlaceholderGateIsGeneratingRef.current,
         hasDraftPayload: starterReviewServerDraftReadyRef.current,
@@ -3594,6 +3606,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       tier,
       premiumSendPathUnlocked,
       premiumPersistedFlowActive,
+      workspaceProEntitled,
       debouncedStepBuffer,
       starterReviewServerDraftReadyTick,
       previewPlaceholderGateSyncTick,
@@ -9806,18 +9819,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
     const workspaceProForSubmit =
       readCachedWorkspaceProEntitlement() || (await fetchWorkspaceProEntitlement());
-    const skipFreeStarterCreateSubmit = resolveSkipFreeStarterCreateSubmit({
+    const paidProReviewShellForSubmit = shouldUsePaidProCreateFlowReviewShell({
+      workspaceProEntitled: workspaceProForSubmit,
       tier,
-      proAgreementEntitled:
-        workspaceProForSubmit ||
-        isProEntitledForAgreement({
-          tier,
-          draft: draft ?? null,
-          premiumSendPathUnlocked,
-          premiumPersistedFlowActive,
-          premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
-        }),
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+      paidProAuthoritative,
     });
+    const skipFreeStarterCreateSubmit =
+      paidProReviewShellForSubmit ||
+      resolveSkipFreeStarterCreateSubmit({
+        tier,
+        proAgreementEntitled:
+          workspaceProForSubmit ||
+          isProEntitledForAgreement({
+            tier,
+            draft: draft ?? null,
+            premiumSendPathUnlocked,
+            premiumPersistedFlowActive,
+            premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+          }),
+      });
     if (fromHomeHandoff) {
       resetStalePaidReviewShellForFreeStarter("home_create_submit", {
         skipFreeStarterLatch: skipFreeStarterCreateSubmit,
@@ -11704,14 +11726,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProAuthoritativeRef.current = paidProAuthoritative;
   }, [paidProAuthoritative]);
 
-  const paidProReviewReadyBase = computeSimpleCreatePaidProReviewReady({
-    simpleProductFlow,
-    liveWorkspaceTwoPane,
-    paidProAuthoritative,
-    createUiStage,
-    displayPhase,
-  });
-
   const ownerRecipientAcceptedAwaitingLock = useMemo(
     () =>
       Boolean(
@@ -12938,6 +12952,48 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     );
   }, [premiumPersistedFlowActive, premiumSendPathUnlocked, reviewDocRefreshTick, premiumSurfaceGateTick]);
 
+  const authoritativeCreateFlowReviewShellInput = useMemo(
+    (): ResolveAuthoritativeCreateFlowReviewShellInput => ({
+      workspaceProEntitled,
+      tier,
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+      paidProAuthoritative,
+      premiumCheckoutCompleted,
+    }),
+    [
+      workspaceProEntitled,
+      tier,
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+      paidProAuthoritative,
+      premiumSurfaceGateTick,
+      premiumCheckoutCompleted,
+    ],
+  );
+
+  const paidProReviewReadyBase = computeCreateFlowPaidProReviewReady({
+    simpleProductFlow: Boolean(simpleProductFlow),
+    liveWorkspaceTwoPane: Boolean(liveWorkspaceTwoPane),
+    paidProAuthoritative,
+    createUiStage,
+    displayPhase,
+    createFlowPhase,
+    ...authoritativeCreateFlowReviewShellInput,
+  });
+
+  useEffect(() => {
+    if (!simpleProductFlow || !createProductionTwoPane) return;
+    logAuthoritativeCreateFlowReviewShellResolved(authoritativeCreateFlowReviewShellInput);
+  }, [
+    simpleProductFlow,
+    createProductionTwoPane,
+    authoritativeCreateFlowReviewShellInput,
+    premiumSurfaceGateTick,
+    createFlowPhase,
+    displayPhase,
+  ]);
+
   const paidProPostCheckoutFirstReviewActive = useMemo(
     () =>
       isPaidProPostCheckoutRecoveryReviewActive({
@@ -13150,9 +13206,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    * `hasFullDraftAccess` / draft heuristics alone cannot surface paid Pro chrome without a checkout/session flag.
    */
   const isFreeStarterReviewSurface = useMemo(() => {
+    if (shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return false;
     // HARD INVARIANT: paid checkout / QA bypass latched => starter surface is impossible.
     if (premiumCheckoutCompleted) return false;
-    if (shouldBlockFreeStarterReviewSurfaces()) return false;
+    if (shouldBlockFreeStarterReviewSurfaces(authoritativeCreateFlowReviewShellInput)) return false;
     if (hasPaidProSourceOfTruth() || isAuthoritativePaidProReviewActive) return false;
     if (hasPaidPremiumCompletionSession()) return false;
     if (authoritativePremiumUiCommitted) return false;
@@ -13185,6 +13242,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     authoritativePremiumUiCommitted,
     isAuthoritativePaidProReviewActive,
     premiumCheckoutCompleted,
+    workspaceProEntitled,
+    authoritativeCreateFlowReviewShellInput,
   ]);
   isFreeStarterReviewSurfaceRef.current = isFreeStarterReviewSurface;
 
@@ -13203,6 +13262,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumSendPathUnlocked,
         hasPaidPremiumCompletionSession: hasPaidPremiumCompletionSession,
         showUpgradeToFullDraftOnReview,
+        ...authoritativeCreateFlowReviewShellInput,
       }),
     [
       simpleProductFlow,
@@ -13217,6 +13277,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSendPathUnlocked,
       premiumSurfaceGateTick,
       showUpgradeToFullDraftOnReview,
+      workspaceProEntitled,
+      authoritativeCreateFlowReviewShellInput,
     ],
   );
 
@@ -13224,7 +13286,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!simpleProductFlow || !createProductionTwoPane) return;
     if (!workspaceProEntitled) return;
     if (entitledPremiumRewriteInFlightRef.current) return;
-    if (shouldBlockFreeStarterReviewSurfaces()) return;
+    if (shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return;
     if (!draft || createFlowPhase !== "draft_ready_for_review") return;
     if (!isFreeStreamlineDraftReview && !isFreeStarterReviewSurface) return;
     const gen = getOrInitSessionAgreementGenerationId();
@@ -13427,6 +13489,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         draft: draft ?? null,
         premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        ...authoritativeCreateFlowReviewShellInput,
       }),
     [
       isFreeStreamlineDraftReview,
@@ -13440,6 +13503,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumTruthPipelineSource,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
+      authoritativeCreateFlowReviewShellInput,
     ],
   );
 
@@ -13459,38 +13523,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         isFreeStarterReviewSurface,
         premiumPaidDocumentSurface,
         paidProAuthoritative,
-        paidProReviewReadyBase:
-          paidProReviewReadyBase ||
-          computeSimpleCreatePaidProReviewReady({
-            simpleProductFlow,
-            liveWorkspaceTwoPane,
-            paidProAuthoritative: paidProAuthoritative || paidProPostCheckoutFirstReviewActive,
-            createUiStage,
-            displayPhase,
-          }),
+        paidProReviewReadyBase,
         guidedCompletionActive: false,
         premiumCheckoutCompleted,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         draft: draft ?? null,
         premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        simpleProductFlow: Boolean(simpleProductFlow),
+        liveWorkspaceTwoPane: Boolean(liveWorkspaceTwoPane),
+        createUiStage,
+        displayPhase,
+        createFlowPhase,
+        ...authoritativeCreateFlowReviewShellInput,
       }),
     [
       isFreeStreamlineDraftReview,
       isFreeStarterReviewSurface,
       premiumPaidDocumentSurface,
       paidProAuthoritative,
-      paidProPostCheckoutFirstReviewActive,
       paidProReviewReadyBase,
       simpleProductFlow,
       liveWorkspaceTwoPane,
       createUiStage,
       displayPhase,
+      createFlowPhase,
       premiumCheckoutCompleted,
       currentPremiumMergedIntakeKey,
       intakeCombined,
       premiumTruthPipelineSource,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
+      authoritativeCreateFlowReviewShellInput,
     ],
   );
 
@@ -13854,6 +13917,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [paidProCardAiInstruction, paidProCardEditDraft, runPersistedRefineFromStepBuffer]);
 
   const showStarterProRefineUpsell = useMemo(() => {
+    if (shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return false;
     if (hasPaidPremiumCompletionSession()) return false;
     if (authoritativePremiumUiCommitted) return false;
     if (paidProAuthoritative) return false;

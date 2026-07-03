@@ -75,7 +75,7 @@ describe("resolveFreeStarterReviewShellActive", () => {
       premiumCheckoutCompleted: true,
     });
     expect(chrome.blockPaidProShell).toBe(false);
-    expect(chrome.kind).not.toBe("free_starter");
+    expect(chrome.kind).toBe("paid_pro");
   });
 });
 
@@ -203,7 +203,7 @@ describe("AgreementBuilderIntake free starter shell wiring", () => {
   });
 
   it("does not show Pro agreement title on free streamline headings", () => {
-    expect(intake).toContain("isFreeStreamlineDraftReview ? (");
+    expect(intake).toMatch(/isFreeStreamlineDraftReview[^?]*\?/);
     expect(intake).toContain("STARTER_REVIEW_HEADLINE");
     expect(intake).not.toMatch(
       /isFreeStreamlineDraftReview\s*\?[\s\S]{0,200}SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE/,

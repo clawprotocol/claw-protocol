@@ -1,6 +1,7 @@
 import { isAuthoritativePaidProReview } from "./authoritativePaidProReview";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
-import { shouldBlockFreeStarterReviewSurfaces } from "./paidProCreateFlowReviewHandoff";
+import { shouldBlockFreeStarterReviewSurfaces } from "./authoritativeCreateFlowReviewShell";
+import type { ResolveAuthoritativeCreateFlowReviewShellInput } from "./authoritativeCreateFlowReviewShell";
 import { CreateUiStage } from "./createUiStage";
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
 
@@ -16,7 +17,7 @@ export type FreeReviewSurfaceSource =
   | "complexity_gate_starter"
   | "multi_party_pro_gate";
 
-export type ResolveIsFreeStreamlineDraftReviewInput = {
+export type ResolveIsFreeStreamlineDraftReviewInput = ResolveAuthoritativeCreateFlowReviewShellInput & {
   simpleProductFlow: boolean;
   liveWorkspaceTwoPane: boolean;
   createProductionTwoPane: boolean;
@@ -38,7 +39,7 @@ export type ResolveIsFreeStreamlineDraftReviewInput = {
 export function resolveIsFreeStreamlineDraftReview(input: ResolveIsFreeStreamlineDraftReviewInput): boolean {
   if (!input.simpleProductFlow || !input.liveWorkspaceTwoPane || !input.createProductionTwoPane) return false;
   if (input.createUiStage !== CreateUiStage.DRAFT || !input.hasDraft) return false;
-  if (shouldBlockFreeStarterReviewSurfaces()) return false;
+  if (shouldBlockFreeStarterReviewSurfaces(input)) return false;
   if (hasPaidProSourceOfTruth() || isAuthoritativePaidProReview({ isPaidPro: input.paidProAuthoritative })) {
     return false;
   }

@@ -12,10 +12,17 @@ import {
   PAID_PRO_REVIEW_SHELL_TITLE,
 } from "./authoritativePaidProReview";
 import type { FreeReviewSurfaceSource } from "./freeStreamlineDraftReview";
+import { CreateUiStage } from "./createUiStage";
+import type { CreateFlowProductionPhase } from "./createFlowTypes";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { isPaidProFirstReviewDisplayActive } from "./paidProPostCheckoutRenderGate";
 import { resolveFreeStarterReviewShellBlocked } from "./paidProCreateFlowRouting";
+import {
+  computeCreateFlowPaidProReviewReady,
+  resolveAuthoritativeCreateFlowReviewShell,
+  type ResolveAuthoritativeCreateFlowReviewShellInput,
+} from "./authoritativeCreateFlowReviewShell";
 
 export const FREE_STARTER_REVIEW_TITLE = "Review your draft";
 export const FREE_STARTER_REVIEW_SUBTITLE =
@@ -24,7 +31,7 @@ export const FREE_STARTER_REVIEW_BADGE = "Starter draft";
 
 export type ReviewShellKind = "free_starter" | "paid_pro" | "neutral";
 
-export type ResolveReviewShellChromeInput = {
+export type ResolveReviewShellChromeInput = ResolveAuthoritativeCreateFlowReviewShellInput & {
   isFreeStreamlineDraftReview: boolean;
   isFreeStarterReviewSurface: boolean;
   premiumPaidDocumentSurface: boolean;
@@ -35,9 +42,15 @@ export type ResolveReviewShellChromeInput = {
   intakeText?: string | null;
   draft?: import("./intakeSmartDefaults").ParsedDraftShape | null;
   premiumRenderSource?: string | null;
+  simpleProductFlow?: boolean;
+  liveWorkspaceTwoPane?: boolean;
+  createUiStage?: (typeof CreateUiStage)[keyof typeof CreateUiStage];
+  displayPhase?: string;
+  createFlowPhase?: CreateFlowProductionPhase;
 };
 
-export function resolveFreeStarterReviewShellActive(input: {
+export function resolveFreeStarterReviewShellActive(
+  input: ResolveAuthoritativeCreateFlowReviewShellInput & {
   isFreeStreamlineDraftReview: boolean;
   isFreeStarterReviewSurface: boolean;
   premiumPaidDocumentSurface: boolean;
@@ -49,6 +62,7 @@ export function resolveFreeStarterReviewShellActive(input: {
   draft?: import("./intakeSmartDefaults").ParsedDraftShape | null;
   premiumRenderSource?: string | null;
 }): boolean {
+  if (resolveAuthoritativeCreateFlowReviewShell(input) === "paid_pro") return false;
   if (
     resolveFreeStarterReviewShellBlocked({
       isFreeStreamlineDraftReview: input.isFreeStreamlineDraftReview,
@@ -103,47 +117,44 @@ export function resolveReviewShellChrome(input: ResolveReviewShellChromeInput): 
   paidProReviewReady: boolean;
   blockPaidProShell: boolean;
 } {
-  const blockPaidProShell = resolveFreeStarterReviewShellActive({
-    isFreeStreamlineDraftReview: input.isFreeStreamlineDraftReview,
-    isFreeStarterReviewSurface: input.isFreeStarterReviewSurface,
-    premiumPaidDocumentSurface: input.premiumPaidDocumentSurface,
-    paidProAuthoritative: input.paidProAuthoritative,
-    premiumCheckoutCompleted: input.premiumCheckoutCompleted,
-    intakeText: input.intakeText,
-    draft: input.draft,
-    premiumRenderSource: input.premiumRenderSource,
-  });
-  const paidProReviewReady = input.paidProReviewReadyBase && !blockPaidProShell;
-
-  if (blockPaidProShell) {
-    return {
-      kind: "free_starter",
-      title: FREE_STARTER_REVIEW_TITLE,
-      subtitle: FREE_STARTER_REVIEW_SUBTITLE,
-      badge: FREE_STARTER_REVIEW_BADGE,
-      paidProReviewReady: false,
-      blockPaidProShell: true,
-    };
-  }
-
-  if (paidProReviewReady || isAuthoritativePaidProReview({ isPaidPro: input.paidProAuthoritative })) {
+  const shell = resolveAuthoritativeCreateFlowReviewShell(input);
+  if (shell === "paid_pro") {
+    const paidProReviewReady =
+      (input.simpleProductFlow != null &&
+        input.liveWorkspaceTwoPane != null &&
+        input.createUiStage != null &&
+        input.displayPhase != null &&
+        computeCreateFlowPaidProReviewReady({
+          simpleProductFlow: Boolean(input.simpleProductFlow),
+          liveWorkspaceTwoPane: Boolean(input.liveWorkspaceTwoPane),
+          paidProAuthoritative: input.paidProAuthoritative,
+          createUiStage: input.createUiStage,
+          displayPhase: input.displayPhase,
+          createFlowPhase: input.createFlowPhase,
+          workspaceProEntitled: input.workspaceProEntitled,
+          tier: input.tier,
+          premiumPersistedFlowActive: input.premiumPersistedFlowActive,
+          premiumSendPathUnlocked: input.premiumSendPathUnlocked,
+        })) ||
+      input.paidProReviewReadyBase ||
+      input.paidProAuthoritative;
     return {
       kind: "paid_pro",
       title: PAID_PRO_REVIEW_SHELL_TITLE,
       subtitle: PAID_PRO_REVIEW_SHELL_SUBTITLE,
       badge: PAID_PRO_REVIEW_BADGE,
-      paidProReviewReady: true,
+      paidProReviewReady: Boolean(paidProReviewReady),
       blockPaidProShell: false,
     };
   }
 
   return {
-    kind: "neutral",
+    kind: "free_starter",
     title: FREE_STARTER_REVIEW_TITLE,
     subtitle: FREE_STARTER_REVIEW_SUBTITLE,
-    badge: null,
+    badge: FREE_STARTER_REVIEW_BADGE,
     paidProReviewReady: false,
-    blockPaidProShell: false,
+    blockPaidProShell: true,
   };
 }
 
