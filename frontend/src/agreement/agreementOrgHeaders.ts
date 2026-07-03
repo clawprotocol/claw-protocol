@@ -1,5 +1,6 @@
 import { getOrgId } from "../launch/orgContext";
 import { getAffiliateCodeForAttribution } from "../launch/affiliate/affiliateAttributionContext";
+import { resolvePrimaryEntitlementRepairOrg } from "../launch/paidCheckoutOrgContext";
 
 /** @alias use {@link clawAgreementHeaders} — same stable workspace identity for all agreement APIs. */
 export function getClawApiHeaders(extra?: HeadersInit): HeadersInit {
@@ -14,6 +15,10 @@ export function clawAgreementHeaders(extra?: HeadersInit): HeadersInit {
   const affiliateCode = getAffiliateCodeForAttribution();
   if (affiliateCode) {
     base["X-Claw-Affiliate-Code"] = affiliateCode;
+  }
+  const repairOrg = resolvePrimaryEntitlementRepairOrg();
+  if (repairOrg) {
+    base["X-Claw-Entitlement-Repair-Org"] = repairOrg;
   }
   if (!extra) return base;
   if (extra instanceof Headers) {

@@ -150,3 +150,143 @@ def test_lazy_subscription_migration_by_user_id(isolated_stores):
     _activate_pro_on_org(eco, "local-org", user_id=user_id)
     assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is True
     assert eco.get_subscription_by_org(stable_org) is not None
+
+
+def test_already_bound_user_repair_from_local_org_on_reload(isolated_stores):
+    """TEST489 — subscription stuck on local-org after first bind; reload repair succeeds."""
+    eco, usage = isolated_stores
+    client = TestClient(app)
+    user_id = "supabase-user-489"
+    stable_org = f"user-{user_id}"
+
+    _activate_pro_on_org(eco, "local-org")
+    usage.insert_agreement_owner(
+        agreement_id="ag_existing_services",
+        subject_ref=f"org:{stable_org}",
+        internal_keys_draft=1,
+    )
+
+    res = client.post(
+        "/v1/workspace/bind-user-org",
+        json={
+            "user_id": user_id,
+            "previous_org_id": stable_org,
+            "entitlement_repair_candidates": ["local-org", "org:local-org"],
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json().get("billing_migrated") is True
+    assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is True
+
+    h = {
+        "X-Claw-Org-Id": stable_org,
+        "X-Claw-Entitlement-Repair-Org": "local-org",
+    }
+    r = client.post(
+        "/api/agreements/draft",
+        headers=h,
+        json={
+            "title": "Red Mesa PSA",
+            "jurisdiction": "DE",
+            "parties": [{"name": "Red Mesa Logistics LLC", "role": "owner"}],
+            "purpose": "Professional services",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_draft_post_repair_header_normalizes_org_prefix(isolated_stores):
+    eco, usage = isolated_stores
+    client = TestClient(app)
+    user_id = "supabase-user-489b"
+    stable_org = f"user-{user_id}"
+
+    _activate_pro_on_org(eco, "local-org")
+    usage.insert_agreement_owner(
+        agreement_id="ag_bound_draft",
+        subject_ref=f"org:{stable_org}",
+        internal_keys_draft=1,
+    )
+
+    h = {
+        "X-Claw-Org-Id": stable_org,
+        "X-Claw-Entitlement-Repair-Org": "org:local-org",
+    }
+    r = client.post(
+        "/api/agreements/draft",
+        headers=h,
+        json={
+            "title": "T",
+            "jurisdiction": "CA",
+            "parties": [{"name": "A", "role": "owner"}],
+            "purpose": "p",
+            "payment_terms": "pt",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is True
+
+
+def test_draft_post_auto_repair_without_client_header_when_bound_has_agreements(isolated_stores):
+    """TEST489 — existing draft on user org triggers local-org repair on draft POST."""
+    eco, usage = isolated_stores
+    client = TestClient(app)
+    user_id = "supabase-user-489c"
+    stable_org = f"user-{user_id}"
+
+    _activate_pro_on_org(eco, "local-org")
+    usage.insert_agreement_owner(
+        agreement_id="ag_services_existing",
+        subject_ref=f"org:{stable_org}",
+        internal_keys_draft=1,
+    )
+
+    h = {"X-Claw-Org-Id": stable_org}
+    r = client.post(
+        "/api/agreements/draft",
+        headers=h,
+        json={
+            "title": "Harbor Peak PSA",
+            "jurisdiction": "DE",
+            "parties": [{"name": "Harbor Peak Automation LLC", "role": "owner"}],
+            "purpose": "p",
+            "payment_terms": "pt",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is True
+
+    _eco, _usage = isolated_stores
+    client = TestClient(app)
+    h = {"X-Claw-Org-Id": "test-org-free-489"}
+
+    draft_body = {
+        "title": "T",
+        "jurisdiction": "CA",
+        "parties": [{"name": "A", "role": "owner"}],
+        "purpose": "p",
+        "payment_terms": "pt",
+        "duration": None,
+        "due_date": None,
+        "effective_date": None,
+    }
+    for _ in range(2):
+        assert client.post("/api/agreements/draft", headers=h, json=draft_body).status_code == 200
+
+    r3 = client.post("/api/agreements/draft", headers=h, json={**draft_body, "title": "T3"})
+    assert r3.status_code == 403
+    detail = r3.json().get("detail") or {}
+    assert detail.get("code") == "draft_limit_reached"
+    assert detail.get("paywall") is True
+    assert isinstance(detail.get("message"), str)
+

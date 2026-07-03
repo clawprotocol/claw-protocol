@@ -52,3 +52,20 @@ export function isDraftCreateHttpForbidden(error: unknown): boolean {
   const err = error as ReviewFirstPersistHttpError;
   return err?.httpStatus === 403;
 }
+
+export function logDraftPostHttpFailure(args: {
+  status: number;
+  payload: unknown;
+  reviewFirstHandoffPersist?: boolean;
+}): void {
+  const detail = extractHttpDetailFromDraftResponseBody(args.payload);
+  const body = args.payload as { detail?: unknown };
+  // eslint-disable-next-line no-console
+  console.warn("[CLAW] draft POST error detail", {
+    status: args.status,
+    path: "/api/agreements/draft",
+    httpDetail: detail,
+    detail: body?.detail ?? null,
+    reviewFirstHandoffPersist: Boolean(args.reviewFirstHandoffPersist),
+  });
+}

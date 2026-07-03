@@ -84,6 +84,40 @@ def subject_has_paid_plan(subject_ref: str, economics: Optional[EconomicsStore] 
     return False
 
 
+def maybe_repair_workspace_entitlement_from_request(request: Request) -> bool:
+    """
+    Repair orphaned subscriptions for bound ``user-{id}`` workspaces when the client
+    supplies explicit repair org candidate(s). Returns True when a migration occurred.
+    """
+    from backend.billing.workspace_billing_migration import (
+        entitlement_repair_candidates_from_header,
+        repair_bound_user_workspace_entitlement,
+    )
+    from backend.utils.enforce import org_id_from_subject, resolve_subject_from_request
+
+    subject = resolve_subject_from_request(request)
+    oid = org_id_from_subject(subject)
+    if not oid or not oid.startswith("user-"):
+        return False
+    uid = oid[5:].strip()
+    if not uid:
+        return False
+    candidates = entitlement_repair_candidates_from_header(request)
+    client_signal = bool(candidates)
+    if not candidates:
+        candidates = ["local-org"]
+    eco = get_economics_store()
+    ustore = get_usage_economics_store()
+    return repair_bound_user_workspace_entitlement(
+        eco,
+        user_id=uid,
+        bound_org_id=oid,
+        candidate_source_org_ids=candidates,
+        usage_store=ustore,
+        require_client_repair_signal=client_signal,
+    )
+
+
 def _maybe_flag_abuse(*, subject_ref: str, ip: str, store: UsageEconomicsStore) -> None:
     try:
         n = store.record_ip_subject(ip=ip, subject_ref=subject_ref)

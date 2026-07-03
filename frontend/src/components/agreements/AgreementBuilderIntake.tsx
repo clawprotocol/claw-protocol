@@ -569,6 +569,8 @@ import {
 import {
   formatDraftCreateHttpUserMessage,
   isDraftCreateHttpForbidden,
+  logDraftPostHttpFailure,
+  readDraftCreateHttpErrorDetail,
 } from "./draftCreateHttpError";
 import { formatAgreementPlainTextForEditing } from "../../agreement/formatAgreementPlainTextForEditing";
 import {
@@ -5154,23 +5156,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         // eslint-disable-next-line no-console
         console.warn("[CLAW] draft POST failed", { status: res.status, path: "/api/agreements/draft" });
       }
-      const errBody = payload as { detail?: { paywall?: boolean; code?: string; message?: string } };
-      const d = errBody?.detail;
-      if (d && typeof d === "object" && d.paywall) {
-        triggerPaywall({ code: d.code, surface: "draft_create" });
-      }
-      const pe = payload as { detail?: unknown };
-      const detailKind =
-        typeof pe.detail === "string"
-          ? pe.detail.slice(0, 120)
-          : Array.isArray(pe.detail)
-            ? "validation_array"
-            : pe.detail != null && typeof pe.detail === "object"
-              ? "detail_object"
-              : "";
-      if (import.meta.env.PROD && !reviewFirstHandoffPersist) {
-        // eslint-disable-next-line no-console
-        console.warn("[CLAW] draft POST error detail (truncated)", { status: res.status, detailKind });
+      logDraftPostHttpFailure({ status: res.status, payload, reviewFirstHandoffPersist });
+      const paywallDetail = readDraftCreateHttpErrorDetail({
+        httpStatus: res.status,
+        responseBody: payload,
+      } as ReviewFirstPersistHttpError);
+      if (paywallDetail?.paywall) {
+        triggerPaywall({ code: paywallDetail.code, surface: "draft_create" });
       }
       const err = new Error(`create_failed_http_${res.status}`) as ReviewFirstPersistHttpError;
       err.httpStatus = res.status;

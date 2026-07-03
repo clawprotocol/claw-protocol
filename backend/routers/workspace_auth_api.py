@@ -33,6 +33,8 @@ class BindUserOrgIn(BaseModel):
     previous_org_id: Optional[str] = Field(default=None, max_length=128)
     """Pre-login checkout org (e.g. local-org) when subscription was activated before bind-user-org."""
     subscription_source_org_id: Optional[str] = Field(default=None, max_length=128)
+    """Explicit org ids that may hold an orphaned Pro subscription for this bound user."""
+    entitlement_repair_candidates: Optional[list[str]] = Field(default=None, max_length=8)
 
 
 def _stable_org_id_for_user(user_id: str) -> str:
@@ -85,19 +87,53 @@ async def bind_user_org(body: BindUserOrgIn) -> Dict[str, Any]:
 
     billing_migrated = False
     try:
-        from backend.billing.workspace_billing_migration import migrate_entitled_subscription_to_org
+        from backend.billing.workspace_billing_migration import (
+            migrate_entitled_subscription_to_org,
+            normalize_workspace_org_id,
+            repair_bound_user_workspace_entitlement,
+        )
         from backend.economics.store import get_economics_store
 
         eco = get_economics_store()
         eco.init_schema()
+        ustore = get_usage_economics_store()
+        ustore.init_schema()
+        repair_candidates: list[str] = []
+        for raw in body.entitlement_repair_candidates or []:
+            oid = normalize_workspace_org_id(str(raw or ""))
+            if oid and oid not in repair_candidates:
+                repair_candidates.append(oid)
+        sub_src = normalize_workspace_org_id(body.subscription_source_org_id or "")
+        if sub_src and sub_src not in repair_candidates:
+            repair_candidates.append(sub_src)
+        if prev and prev != org_id and prev not in repair_candidates:
+            repair_candidates.append(prev)
+
+        billing_migrated = repair_bound_user_workspace_entitlement(
+            eco,
+            user_id=user_id,
+            bound_org_id=org_id,
+            candidate_source_org_ids=repair_candidates,
+            usage_store=ustore,
+            require_client_repair_signal=bool(repair_candidates),
+        )
+        if not billing_migrated:
+            billing_migrated = repair_bound_user_workspace_entitlement(
+                eco,
+                user_id=user_id,
+                bound_org_id=org_id,
+                candidate_source_org_ids=["local-org"],
+                usage_store=ustore,
+                require_client_repair_signal=False,
+            )
+
         if prev and prev != org_id:
             billing_migrated = migrate_entitled_subscription_to_org(
                 eco,
                 from_org_id=prev,
                 to_org_id=org_id,
                 user_id=user_id,
-            )
-        sub_src = (body.subscription_source_org_id or "").strip()
+            ) or billing_migrated
         if sub_src and sub_src not in (org_id, prev):
             billing_migrated = migrate_entitled_subscription_to_org(
                 eco,
