@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLaunchNav } from "../launch/LaunchNavContext";
 import AgreementBuilderIntake, {
   clearAgreementCreatorIntakeStorage,
 } from "../components/agreements/AgreementBuilderIntake";
@@ -21,7 +20,13 @@ import {
   fetchAgreementDraft,
   type WorkspaceIndexAgreement,
 } from "./agreementWorkspaceApi";
+import { useLaunchNav } from "../launch/LaunchNavContext";
 import { useAccess } from "../access/AccessContext";
+import type { PremiumSendIntent } from "../launch/simpleProduct/premiumSendIntent";
+import {
+  buildWorkspaceCreateSimpleSendHandoff,
+  workspaceCreatePostSendPath,
+} from "./workspaceCreatePostGenerationHandoff";
 import type { GateResult } from "../access/types";
 import { UpgradeLimitNotice } from "../components/access/UpgradeLimitNotice";
 import { logProductEvent } from "../lib/experimentation/productEvents";
@@ -92,7 +97,7 @@ export type AgreementWizardShellProps = {
 /** Wraps intake + review with a VS01-style stepper; uses existing /api/agreements/* only. */
 export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
   const { startFreshWizard = false, openAgreementId = null } = props;
-  const { search } = useLaunchNav();
+  const { search, navigate } = useLaunchNav();
   const access = useAccess();
   const [workspaceMode, setWorkspaceMode] = useState<"landing" | "wizard">("landing");
   const [step, setStep] = useState(0);
@@ -318,7 +323,11 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
     })();
   }, [hydrateAndRouteSaved]);
 
-  const onCreated = useCallback((id: string, primedDraft: AgreementDraft) => {
+  const onCreated = useCallback((
+    id: string,
+    primedDraft: AgreementDraft,
+    handoff?: { premiumSendIntent?: PremiumSendIntent | null; openFlowPhase?: "review" | "send" },
+  ) => {
     const tid = String(id || "").trim();
     if (!tid) {
       console.error("[AgreementWizard] onCreated: backend did not return a valid agreement_id");
@@ -332,22 +341,25 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
       );
       return;
     }
-    console.log("[AgreementWizard] draft_ready after create + hydrate", tid, {
+    console.log("[AgreementWizard] draft_ready after create + hydrate — routing to send review", tid, {
       parties: primedDraft.parties?.length ?? 0,
       hasVersions: Array.isArray(primedDraft.versions),
     });
     setPostCreateRetryId(null);
-    setReviewPrimedDraft(primedDraft);
-    setWizardDraftReady(true);
-    setWizardBoot("ready");
     setOpenHydrateError(null);
     setIntakeResumeNotice(null);
-    setAgreementId(tid);
-    setStep(1);
-    setAllowedSteps(null);
-    setWorkspaceEntryMode("default");
     access.recordUsage("agreements_created");
-  }, [access]);
+    logProductEvent("agreement_created", { agreementId: tid, surface: "agreement_wizard" });
+    logProductEvent("draft_created", { agreementId: tid, surface: "agreement_wizard" });
+    navigate(workspaceCreatePostSendPath(tid), {
+      simpleSendHandoff: buildWorkspaceCreateSimpleSendHandoff({
+        agreementId: tid,
+        primedDraft,
+        tier: access.tier,
+        handoff,
+      }),
+    });
+  }, [access, navigate]);
 
   const onCreateHydrateFailed = useCallback((failedId: string) => {
     const tid = String(failedId || "").trim();
