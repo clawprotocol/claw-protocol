@@ -357,6 +357,10 @@ export function establishPaidProSourceOfTruth(args: {
     agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
     allowUserApprovedRevision: Boolean(args.allowShorterOverwrite),
     hasExistingSourceOfTruth: Boolean(paidProSourceOfTruth?.text),
+    pipelineSessionAccepted: hasPaidProPipelineSessionAcceptance({
+      text: trim(args.text),
+      source: requestedSource,
+    }),
   });
   logPaidProSourceOfTruthEstablishmentAttempt({
     source: requestedSource,
@@ -822,6 +826,7 @@ export function hydratePaidProSourceOfTruth(args: {
   const establishmentGate = evaluatePaidProSourceOfTruthEstablishment({
     source: args.source ?? "server_full_draft",
     agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    pipelineSessionAccepted: hasPaidProPipelineSessionAcceptance({ text, source }),
   });
   logPaidProSourceOfTruthEstablishmentAttempt({
     source: "hydratePaidProSourceOfTruth",

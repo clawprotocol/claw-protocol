@@ -19,7 +19,11 @@ type SessionMarkerV1 = {
   markedAt: number;
 };
 
-export type ProEntitlementSource = "settled_checkout" | "qa_bypass" | "entitled_rewrite";
+export type ProEntitlementSource =
+  | "settled_checkout"
+  | "qa_bypass"
+  | "entitled_rewrite"
+  | "pipeline_accepted";
 
 export type PaidProSourceOfTruthEstablishmentDecision = {
   allowed: boolean;
@@ -141,7 +145,13 @@ export function evaluatePaidProSourceOfTruthEstablishment(args?: {
   agreementGenerationId?: string | null;
   allowUserApprovedRevision?: boolean;
   hasExistingSourceOfTruth?: boolean;
+  /** Paid pipeline validation + freeze already succeeded for this corpus. */
+  pipelineSessionAccepted?: boolean;
 }): PaidProSourceOfTruthEstablishmentDecision {
+  if (args?.pipelineSessionAccepted) {
+    markCurrentSessionProIntent();
+    markCurrentSessionProEntitlementComplete({ source: "pipeline_accepted" });
+  }
   const generationId = getSessionAgreementGenerationId();
   const hasProEntitlement = hasCurrentSessionProEntitlement({
     generationId: args?.agreementGenerationId ?? undefined,

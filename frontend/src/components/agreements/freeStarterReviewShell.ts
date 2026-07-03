@@ -15,6 +15,7 @@ import type { FreeReviewSurfaceSource } from "./freeStreamlineDraftReview";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { isPaidProFirstReviewDisplayActive } from "./paidProPostCheckoutRenderGate";
+import { resolveFreeStarterReviewShellBlocked } from "./paidProCreateFlowRouting";
 
 export const FREE_STARTER_REVIEW_TITLE = "Review your draft";
 export const FREE_STARTER_REVIEW_SUBTITLE =
@@ -43,10 +44,28 @@ export function resolveFreeStarterReviewShellActive(input: {
   paidProAuthoritative: boolean;
   /** Hard invariant: any completed paid checkout / QA bypass forbids the starter shell. */
   premiumCheckoutCompleted?: boolean;
+  premiumPersistedFlowActive?: boolean;
   intakeText?: string | null;
   draft?: import("./intakeSmartDefaults").ParsedDraftShape | null;
   premiumRenderSource?: string | null;
 }): boolean {
+  if (
+    resolveFreeStarterReviewShellBlocked({
+      isFreeStreamlineDraftReview: input.isFreeStreamlineDraftReview,
+      isFreeStarterReviewSurface: input.isFreeStarterReviewSurface,
+      premiumPaidDocumentSurface: input.premiumPaidDocumentSurface,
+      paidProAuthoritative: input.paidProAuthoritative,
+      premiumCheckoutCompleted: input.premiumCheckoutCompleted,
+      premiumPersistedFlowActive: input.premiumPersistedFlowActive,
+      acceptedPipelineBody:
+        input.draft?.premium_server_full_document_text ??
+        input.draft?.server_full_document_text ??
+        null,
+      acceptedPipelineSource: input.premiumRenderSource,
+    })
+  ) {
+    return false;
+  }
   if (
     isPaidProFirstReviewDisplayActive({
       premiumCheckoutCompleted: input.premiumCheckoutCompleted,
@@ -151,7 +170,10 @@ export function preservePremiumCheckoutReturnInUrl(): boolean {
 }
 
 /** Clear stale paid/guided shell state when starting a new free starter review (not checkout return). */
-export function resetStalePaidReviewShellForFreeStarter(source: FreeReviewSurfaceSource): void {
+export function resetStalePaidReviewShellForFreeStarter(
+  source: FreeReviewSurfaceSource,
+  opts?: { skipFreeStarterLatch?: boolean },
+): void {
   if (preservePremiumCheckoutReturnInUrl()) return;
   if (source !== "home_create_submit" && source !== "local_parse" && source !== "create_submit") {
     if (source !== "complexity_gate_starter" && source !== "api_hydrate" && source !== "api_late_merge") {
@@ -159,6 +181,7 @@ export function resetStalePaidReviewShellForFreeStarter(source: FreeReviewSurfac
     }
   }
   clearStalePaidProAuthorityForFreshFreeStarter();
+  if (opts?.skipFreeStarterLatch) return;
   markCurrentSessionFreeStarterIntent();
 }
 

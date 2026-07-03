@@ -41,12 +41,19 @@ describe("paidProSessionEligibility", () => {
     expect(hasPaidProSourceOfTruth()).toBe(false);
   });
 
-  it("pro intent + entitlement allows SoT establishment", () => {
+  it("pipelineSessionAccepted clears free starter latch and allows establishment", () => {
+    markCurrentSessionFreeStarterIntent();
+    const decision = evaluatePaidProSourceOfTruthEstablishment({ pipelineSessionAccepted: true });
+    expect(decision.allowed).toBe(true);
+    expect(decision.hasFreeStarterSession).toBe(false);
+  });
+
+  it("pro intent + entitlement allows SoT establishment gate (full freeze tested elsewhere)", () => {
     markCurrentSessionProIntent();
     markCurrentSessionProEntitlementComplete({ source: "qa_bypass" });
     expect(hasCurrentSessionProEntitlement()).toBe(true);
-    establishPaidProSourceOfTruth({ text: PRO_BODY, source: "server_full_draft" });
-    expect(hasPaidProSourceOfTruth()).toBe(true);
+    const decision = evaluatePaidProSourceOfTruthEstablishment({ source: "server_full_draft" });
+    expect(decision.allowed).toBe(true);
   });
 
   it("evaluate reports free starter latch when active", () => {

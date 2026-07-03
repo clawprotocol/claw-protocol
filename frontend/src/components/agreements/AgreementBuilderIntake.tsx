@@ -1511,6 +1511,10 @@ import {
   resolveReviewShellChrome,
   shouldGateGuidedRenderAuthorityForFreeReview,
 } from "./freeStarterReviewShell";
+import {
+  resolveSkipFreeStarterCreateSubmit,
+  shouldAutoPersistReviewAgreementRow,
+} from "./paidProCreateFlowRouting";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -9767,8 +9771,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const handoffSource = opts?.handoffSource ?? "runProductionLocalDraftParse";
     const fromHomeHandoff =
       handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
+    const skipFreeStarterCreateSubmit = resolveSkipFreeStarterCreateSubmit({
+      tier,
+      proAgreementEntitled: isProEntitledForAgreement({
+        tier,
+        draft: draft ?? null,
+        premiumSendPathUnlocked,
+        premiumPersistedFlowActive,
+        premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
+      }),
+    });
     if (fromHomeHandoff) {
-      resetStalePaidReviewShellForFreeStarter("home_create_submit");
+      resetStalePaidReviewShellForFreeStarter("home_create_submit", {
+        skipFreeStarterLatch: skipFreeStarterCreateSubmit,
+      });
       clearCreateReviewAgreementResumeId();
       productionResumeHydratedRef.current = false;
       setReviewAgreementId(null);
@@ -9898,6 +9914,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setReviewDocRefreshTick((n) => n + 1);
       writeCreateReviewDraftReadyMarker();
       writeCreateReviewDraftSnapshot(parsed);
+      if (skipFreeStarterCreateSubmit) {
+        emitPaidFunnelEvent("paid_create_submit_entitled_rewrite", {
+          once: true,
+          extra: { source: fromHomeHandoff ? "home_create_submit" : "local_parse" },
+        });
+        if (fromHomeHandoff) {
+          homeAutoGenerateConsumedRef.current = true;
+        }
+        void runEntitledPremiumImprovementRewrite();
+        return true;
+      }
       commitFreeDraftForReview({
         source: fromHomeHandoff ? "home_create_submit" : "local_parse",
         fromHomeAutoGenerate: fromHomeHandoff,
@@ -9944,6 +9971,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     beginStarterDraftGeneration,
     currentPremiumMergedIntakeKey,
     intakeCombined,
+    runEntitledPremiumImprovementRewrite,
+    premiumSendPathUnlocked,
+    premiumPersistedFlowActive,
   ]);
 
   useLayoutEffect(() => {
@@ -10042,8 +10072,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
-    resetStalePaidReviewShellForFreeStarter("home_create_submit");
-  }, [homeHeroAutoGenerate, checkoutBackRestoreActive, paidProEditReturnResumeActive]);
+    resetStalePaidReviewShellForFreeStarter("home_create_submit", {
+      skipFreeStarterLatch: tierAllowsAdvancedFullDraftReveal(tier),
+    });
+  }, [homeHeroAutoGenerate, checkoutBackRestoreActive, paidProEditReturnResumeActive, tier]);
 
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
@@ -13330,6 +13362,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumPaidDocumentSurface,
         paidProAuthoritative,
         premiumCheckoutCompleted,
+        premiumPersistedFlowActive,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         draft: draft ?? null,
         premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
@@ -13340,6 +13373,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPaidDocumentSurface,
       paidProAuthoritative,
       premiumCheckoutCompleted,
+      premiumPersistedFlowActive,
       currentPremiumMergedIntakeKey,
       intakeCombined,
       premiumTruthPipelineSource,
@@ -14464,6 +14498,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!createProductionTwoPane || !productionDraftPrimaryReviewSurface || !draft || reviewAgreementId) return;
     if (authoritativePremiumUiCommitted) return;
     if (premiumPostCheckoutPhase === "processing" || premiumAuthoritativeRequestInFlightUi) return;
+    if (
+      !shouldAutoPersistReviewAgreementRow({
+        hasReviewAgreementId: Boolean(reviewAgreementId?.trim()),
+        skipFreeStarterCreateSubmit: resolveSkipFreeStarterCreateSubmit({
+          tier,
+          proAgreementEntitled,
+        }),
+      })
+    ) {
+      return;
+    }
     void ensureReviewAgreementWorkspaceId();
   }, [
     createProductionTwoPane,
@@ -14475,6 +14520,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     authoritativePremiumUiCommitted,
     premiumPostCheckoutPhase,
     premiumAuthoritativeRequestInFlightUi,
+    tier,
+    proAgreementEntitled,
   ]);
 
   useEffect(
