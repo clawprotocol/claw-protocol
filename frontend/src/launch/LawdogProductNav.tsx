@@ -61,7 +61,16 @@ export function LawdogProductNav(props: { activeId?: LawdogNavItemId }) {
             data-testid={item.testId}
             data-lawdog-nav-active={active ? "true" : "false"}
             aria-current={active ? "page" : undefined}
-            onClick={() => navigate(item.path)}
+            onClick={() => {
+              if (item.id === "create") {
+                navigate(item.path, {
+                  paidDashboardCreate: true,
+                  paidDashboardCreateSource: "workspace_nav_create",
+                });
+                return;
+              }
+              navigate(item.path);
+            }}
           >
             {item.label}
           </button>

@@ -1573,6 +1573,10 @@ import {
   shouldBypassStarterMultiPartyProGateForPaidCreate,
   RETURNING_PAID_CREATE_BOOTSTRAP_HELPER,
 } from "./returningPaidCreateBootstrap";
+import {
+  logPaidDashboardCreateContext,
+  readPaidDashboardCreateContext,
+} from "../../launch/paidDashboardCreateContext";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -3418,6 +3422,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   useEffect(() => {
     if (!simpleProductFlow) return;
+    const dashboardCreateContext = readPaidDashboardCreateContext();
+    if (dashboardCreateContext) {
+      logPaidDashboardCreateContext({
+        active: true,
+        source: dashboardCreateContext.source,
+      });
+      setWorkspaceProEntitled(true);
+    }
     if (resolveProvisionalWorkspaceProEntitledForCreate()) {
       setWorkspaceProEntitled(true);
     }

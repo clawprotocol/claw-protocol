@@ -18,6 +18,7 @@ import {
   resolveLawdogAgreementCreatedAt,
 } from "./lawdogDashboardPresentation";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
+import { markPaidDashboardCreateContext } from "./paidDashboardCreateContext";
 
 type Props = {
   rows: readonly WorkspaceIndexAgreement[];
@@ -138,6 +139,7 @@ export function LawdogAgreementsTable(props: Props) {
                       onClick={() => {
                         if (contentUnavailable) return;
                         initializeNewAgreementSession({ priorAgreementId: row.id });
+                        markPaidDashboardCreateContext("dashboard_duplicate");
                         onNavigate("/app/create");
                       }}
                     >

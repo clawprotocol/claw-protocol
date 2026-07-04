@@ -34,6 +34,7 @@ import { LawdogBrand } from "../components/ui/LawdogBrand";
 import { PricingGuaranteePanel } from "./LaunchOfferBlocks";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import { markLawdogFunnelStep } from "../tracking/lawdogSession";
+import { clearPaidDashboardCreateContext } from "./paidDashboardCreateContext";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 import { prepareFreshMarketingEntry } from "./marketingSession";
 import {
@@ -118,6 +119,7 @@ export function LaunchHomePage() {
     prepareFreshMarketingEntry();
     setLawdogEntryContext("new");
     clearCreateComplexityResume();
+    clearPaidDashboardCreateContext();
     setLawdogFocusCreateIntakeAfterNavigation();
     logProductEvent("homepage_cta_open_create_fresh", { surface: "seo_home" });
     navigate("/app/create");

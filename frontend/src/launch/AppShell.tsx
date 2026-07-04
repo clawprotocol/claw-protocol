@@ -91,7 +91,12 @@ export function AppShell(props: {
                 <button
                   type="button"
                   className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                  onClick={() => navigate("/app/create")}
+                  onClick={() =>
+                    navigate("/app/create", {
+                      paidDashboardCreate: true,
+                      paidDashboardCreateSource: "app_shell_new_agreement",
+                    })
+                  }
                 >
                   New agreement
                 </button>
@@ -130,7 +135,12 @@ export function AppShell(props: {
                 <button
                   type="button"
                   className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                  onClick={() => navigate("/app/create")}
+                  onClick={() =>
+                    navigate("/app/create", {
+                      paidDashboardCreate: true,
+                      paidDashboardCreateSource: "app_shell_new_agreement",
+                    })
+                  }
                 >
                   Create
                 </button>

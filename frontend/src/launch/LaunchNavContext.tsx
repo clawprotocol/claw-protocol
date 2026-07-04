@@ -26,6 +26,11 @@ import {
   markAuthenticatedWorkspaceSession,
   shouldMarkWorkspaceSessionForPath,
 } from "./completedAgreementViewContext";
+import {
+  clearPaidDashboardCreateContext,
+  isWorkspaceNavOrigin,
+  markPaidDashboardCreateContext,
+} from "./paidDashboardCreateContext";
 
 export type LaunchNavigateOptions = {
   heroIntake?: string;
@@ -42,6 +47,9 @@ export type LaunchNavigateOptions = {
   streamlinedSimpleFlow?: boolean;
   /** Canonical v1 send handoff (starter + premium fork). */
   simpleSendHandoff?: SimpleSendHandoff;
+  /** Authenticated workspace Dashboard → Create — latch paid-create context before billing fetch. */
+  paidDashboardCreate?: boolean;
+  paidDashboardCreateSource?: string;
 };
 
 type LaunchNav = {
@@ -103,6 +111,17 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
             return hasCheckoutBackRestoreSnapshot();
           }
         })();
+      if (options?.heroFromHome) {
+        clearPaidDashboardCreateContext();
+      } else if (options?.paidDashboardCreate) {
+        markPaidDashboardCreateContext(
+          options.paidDashboardCreateSource?.trim() || "dashboard_nav",
+        );
+      } else if (isWorkspaceNavOrigin(window.location.pathname)) {
+        markPaidDashboardCreateContext("workspace_nav_create");
+      } else {
+        clearPaidDashboardCreateContext();
+      }
       if (restoreStarterReview) {
         state = null;
       } else if (options?.heroFromHome) {

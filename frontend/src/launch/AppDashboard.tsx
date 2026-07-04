@@ -280,7 +280,10 @@ export function AppDashboard() {
     if (path !== "/app") return;
     draftingRedirectedRef.current = true;
     setLawdogFocusCreateIntakeAfterNavigation();
-    navigate("/app/create");
+    navigate("/app/create", {
+      paidDashboardCreate: true,
+      paidDashboardCreateSource: "dashboard_drafting_redirect",
+    });
   }, [entryResolved, pathname, navigate]);
 
   useEffect(() => {
@@ -446,7 +449,10 @@ export function AppDashboard() {
   const navigateToCreateNewAgreement = useCallback(() => {
     initializeNewAgreementSession();
     setLawdogFocusCreateIntakeAfterNavigation();
-    navigate("/app/create");
+    navigate("/app/create", {
+      paidDashboardCreate: true,
+      paidDashboardCreateSource: "dashboard_new_agreement",
+    });
   }, [navigate]);
 
   const currentUser = useMemo(() => resolveCurrentUser(), []);

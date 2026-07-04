@@ -8,12 +8,14 @@ import {
   type CreateOrHomeBanner,
   type ReEngagementSurface,
 } from "./reEngagementStore";
+import { markPaidDashboardCreateContext } from "./paidDashboardCreateContext";
+import type { LaunchNavigateOptions } from "./LaunchNavContext";
 
 type Props = {
   surface: ReEngagementSurface;
   banner: CreateOrHomeBanner;
   onDismiss: () => void;
-  navigate: (path: string) => void;
+  navigate: (path: string, options?: LaunchNavigateOptions) => void;
   /** SEO home uses light cards; in-app surfaces use dark panels. */
   theme?: "app" | "marketing";
 };
@@ -173,7 +175,10 @@ export function ReEngagementBanner(props: Props) {
   );
 }
 
-export function WorkspaceWinBackBanner(props: { onDismiss: () => void; navigate: (path: string) => void }) {
+export function WorkspaceWinBackBanner(props: {
+  onDismiss: () => void;
+  navigate: (path: string, options?: LaunchNavigateOptions) => void;
+}) {
   const { onDismiss, navigate } = props;
   const marked = useRef(false);
   useEffect(() => {
@@ -199,7 +204,11 @@ export function WorkspaceWinBackBanner(props: { onDismiss: () => void; navigate:
             acknowledgeReEngagementTouch();
             dismissReEngagementBanner("workspace", "winback");
             onDismiss();
-            navigate("/app/create");
+            markPaidDashboardCreateContext("reengagement_banner");
+            navigate("/app/create", {
+              paidDashboardCreate: true,
+              paidDashboardCreateSource: "reengagement_banner",
+            });
           }}
         >
           Continue

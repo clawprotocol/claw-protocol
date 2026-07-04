@@ -14,6 +14,10 @@ import {
   readPersistedWorkspaceUsageTierPaid,
 } from "../../agreement/agreementProFunnelGate";
 import { getOrgId } from "../../launch/orgContext";
+import {
+  hasPaidDashboardCreateContextActive,
+  isAppCreatePath,
+} from "../../launch/paidDashboardCreateContext";
 import { tierAllowsAdvancedFullDraftReveal, peekAdvancedFullDraftCheckoutGrant } from "./agreementAdvancedDraftAccess";
 import {
   isCreateFlowPaidAcceptedOrAuthoritativeActive,
@@ -57,7 +61,8 @@ export type PaidCreateGateBypassReasonCode =
   | "session_pro_intent"
   | "returning_paid_eligible"
   | "create_flow_paid_authoritative"
-  | "paid_pro_review_shell";
+  | "paid_pro_review_shell"
+  | "paid_dashboard_create_context";
 
 export type PaidCreateGateBypassDecision = {
   isAppCreate: boolean;
@@ -66,17 +71,27 @@ export type PaidCreateGateBypassDecision = {
   workspaceProCached: boolean;
   provisionalPaid: boolean;
   bypass: boolean;
+  reason: string | null;
   reasonCodes: PaidCreateGateBypassReasonCode[];
 };
 
-export function isAppCreatePath(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const p = window.location.pathname.replace(/\/$/, "") || "/";
-    return p === "/app/create";
-  } catch {
-    return false;
+export { isAppCreatePath };
+
+function resolvePrimaryBypassReason(
+  reasonCodes: PaidCreateGateBypassReasonCode[],
+): string | null {
+  if (reasonCodes.includes("paid_dashboard_create_context")) {
+    return "paid_dashboard_create_context";
   }
+  if (reasonCodes.includes("workspace_pro_entitled_state")) return "workspace_pro_entitled_state";
+  if (reasonCodes.includes("workspace_usage_tier_persisted_paid")) {
+    return "workspace_usage_tier_persisted_paid";
+  }
+  if (reasonCodes.includes("subscription_cache_active_premium")) {
+    return "subscription_cache_active_premium";
+  }
+  if (reasonCodes.includes("returning_paid_eligible")) return "returning_paid_eligible";
+  return reasonCodes[0] ?? null;
 }
 
 function readStaleSubscriptionCachePremium(): boolean {
@@ -93,6 +108,7 @@ function readStaleSubscriptionCachePremium(): boolean {
  * Uses subscription cache, workspace entitlement cache, persisted usage tier, and session checkout markers.
  */
 export function resolveProvisionalWorkspaceProEntitledForCreate(): boolean {
+  if (hasPaidDashboardCreateContextActive()) return true;
   if (resolveCreateFlowWorkspaceProEntitled()) return true;
   if (readCachedWorkspaceProEntitlement()) return true;
   if (readPersistedWorkspaceUsageTierPaid()) return true;
@@ -144,7 +160,10 @@ export function resolvePaidCreateGateBypassDecision(
   const reasonCodes: PaidCreateGateBypassReasonCode[] = [];
   const workspaceProCached = readCachedWorkspaceProEntitlement();
   const workspaceProEntitledState = Boolean(input.workspaceProEntitled);
+  const dashboardCreateContext = hasPaidDashboardCreateContextActive();
   const provisionalPaid = resolveProvisionalWorkspaceProEntitledForCreate();
+
+  if (dashboardCreateContext) reasonCodes.push("paid_dashboard_create_context");
 
   if (workspaceProEntitledState) reasonCodes.push("workspace_pro_entitled_state");
   if (workspaceProCached) reasonCodes.push("workspace_pro_cached");
@@ -201,6 +220,7 @@ export function resolvePaidCreateGateBypassDecision(
     workspaceProCached,
     provisionalPaid,
     bypass,
+    reason: bypass ? resolvePrimaryBypassReason(uniqueReasonCodes) : null,
     reasonCodes: uniqueReasonCodes,
   };
 }

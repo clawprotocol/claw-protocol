@@ -26,6 +26,7 @@ import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceVali
 import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
 import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
 import { resolveProvisionalWorkspaceProEntitledForCreate } from "./returningPaidCreateBootstrap";
+import { hasPaidDashboardCreateContextActive, isAppCreatePath } from "../../launch/paidDashboardCreateContext";
 
 /** Matches {@link GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN} — inlined to avoid simpleProFinalReviewCorpus import cycle. */
 const CREATE_FLOW_PIPELINE_ACCEPTED_MIN_LEN = 1500;
@@ -103,6 +104,7 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
 ): AuthoritativeCreateFlowReviewShell {
   if (input.premiumCheckoutCompleted) return "paid_pro";
+  if (isAppCreatePath() && hasPaidDashboardCreateContextActive()) return "paid_pro";
   if (hasPaidProSourceOfTruth()) return "paid_pro";
   if (input.paidProAuthoritative) return "paid_pro";
   if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
