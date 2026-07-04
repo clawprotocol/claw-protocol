@@ -1564,6 +1564,8 @@ import {
 import {
   planReturningPaidCreateSubmitBootstrap,
   resolveReturningPaidCreateEligible,
+  resolveProvisionalWorkspaceProEntitledForCreate,
+  shouldBypassStarterMultiPartyProGateForPaidCreate,
   RETURNING_PAID_CREATE_BOOTSTRAP_HELPER,
 } from "./returningPaidCreateBootstrap";
 
@@ -3407,10 +3409,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const { tier, refreshUsage } = useAccess();
   const { navigate } = useLaunchNav();
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(() =>
-    resolveCreateFlowWorkspaceProEntitled(),
+    resolveCreateFlowWorkspaceProEntitled() || resolveProvisionalWorkspaceProEntitledForCreate(),
   );
   useEffect(() => {
     if (!simpleProductFlow) return;
+    if (resolveProvisionalWorkspaceProEntitledForCreate()) {
+      setWorkspaceProEntitled(true);
+    }
     if (resolveCreateFlowWorkspaceProEntitled()) {
       setWorkspaceProEntitled(true);
     }
@@ -10220,15 +10225,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const rawIntake = (opts?.rawOverride ?? intakeCombined).trim();
     if (!rawIntake) return false;
-    if (
-      upgradeIntentDetectedRef.current &&
+    if (upgradeIntentDetectedRef.current &&
       !tierAllowsAdvancedFullDraftReveal(tier) &&
       draft &&
       !draftHasFullDraftExpansion(draft)
     ) {
       return false;
     }
-    if (commitStarterMultiPartyProGate(rawIntake)) {
+    const paidMultiPartyGateBypass = shouldBypassStarterMultiPartyProGateForPaidCreate({
+      tier,
+      workspaceProEntitled: workspaceProForSubmit,
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+      paidProAuthoritative,
+    });
+    if (!paidMultiPartyGateBypass && commitStarterMultiPartyProGate(rawIntake)) {
       await finalizeIntakeCapture();
       return false;
     }
@@ -10255,7 +10266,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       let parsed = await parseDraft(rawIntake);
       writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
       writeOriginalUserIntakeRawIfRicher(rawIntake);
-      if (rejectIneligibleStarterDraftAfterParse(rawIntake, parsed)) {
+      if (!paidMultiPartyGateBypass && rejectIneligibleStarterDraftAfterParse(rawIntake, parsed)) {
         commitStarterMultiPartyProGate(rawIntake);
         return false;
       }
@@ -12618,6 +12629,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (hydration.kind === "none") return;
 
     if (hydration.kind === "multi_party_pro_gate") {
+      if (
+        shouldBypassStarterMultiPartyProGateForPaidCreate({
+          tier,
+          workspaceProEntitled:
+            workspaceProEntitled || resolveProvisionalWorkspaceProEntitledForCreate(),
+          premiumPersistedFlowActive,
+          premiumSendPathUnlocked,
+          paidProAuthoritative,
+        })
+      ) {
+        clearCreateComplexityResume();
+        return;
+      }
       const assessment = assessStarterComplexityGate(hydration.rawIntake);
       if (!assessment.required) return;
       setStarterMultiPartyProGate(assessment);

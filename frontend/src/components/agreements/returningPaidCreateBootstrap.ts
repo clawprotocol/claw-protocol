@@ -4,8 +4,12 @@
  */
 
 import type { AccessTier } from "../../access/types";
-import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
+import { readCachedSubscriptionEntitlement } from "../../access/subscriptionEntitlementCache";
+import { getOrgId } from "../../launch/orgContext";
+import { tierAllowsAdvancedFullDraftReveal, peekAdvancedFullDraftCheckoutGrant } from "./agreementAdvancedDraftAccess";
+import { readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import {
+  isCreateFlowPaidAcceptedOrAuthoritativeActive,
   resolveCreateFlowWorkspaceProEntitled,
   shouldUsePaidProCreateFlowReviewShell,
   type ResolveAuthoritativeCreateFlowReviewShellInput,
@@ -14,6 +18,7 @@ import {
   hasCurrentSessionProEntitlement,
   hasCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
+import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 
 export type ResolveReturningPaidCreateEligibleInput = {
   tier?: AccessTier;
@@ -21,7 +26,28 @@ export type ResolveReturningPaidCreateEligibleInput = {
   premiumPersistedFlowActive?: boolean;
   premiumSendPathUnlocked?: boolean;
   premiumPostCheckoutPhase?: string | null;
+  paidProAuthoritative?: boolean;
+  premiumCheckoutCompleted?: boolean;
 };
+
+/**
+ * Synchronous paid/pro probes for Dashboard → Create before async billing fetch settles.
+ * Uses subscription cache, workspace entitlement cache, and session checkout markers.
+ */
+export function resolveProvisionalWorkspaceProEntitledForCreate(): boolean {
+  if (resolveCreateFlowWorkspaceProEntitled()) return true;
+  if (readCachedWorkspaceProEntitlement()) return true;
+  const sub = readCachedSubscriptionEntitlement();
+  const oid = getOrgId().trim();
+  if (sub?.orgId === oid) {
+    const statusActive = String(sub.status || "").toLowerCase() === "active";
+    const tierOk = Boolean(sub.tier && tierAllowsAdvancedFullDraftReveal(sub.tier));
+    if (statusActive && tierOk) return true;
+  }
+  if (hasPaidPremiumCompletionSession()) return true;
+  if (peekAdvancedFullDraftCheckoutGrant()) return true;
+  return false;
+}
 
 /** Paid workspace / subscription user creating another agreement on /app/create. */
 export function resolveReturningPaidCreateEligible(
@@ -29,13 +55,15 @@ export function resolveReturningPaidCreateEligible(
 ): boolean {
   if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) return true;
   if (input.workspaceProEntitled) return true;
-  if (resolveCreateFlowWorkspaceProEntitled()) return true;
+  if (resolveProvisionalWorkspaceProEntitledForCreate()) return true;
   if (
     shouldUsePaidProCreateFlowReviewShell({
       workspaceProEntitled: input.workspaceProEntitled,
       tier: input.tier,
       premiumPersistedFlowActive: input.premiumPersistedFlowActive,
       premiumSendPathUnlocked: input.premiumSendPathUnlocked,
+      paidProAuthoritative: input.paidProAuthoritative,
+      premiumCheckoutCompleted: input.premiumCheckoutCompleted,
     })
   ) {
     return true;
@@ -43,8 +71,36 @@ export function resolveReturningPaidCreateEligible(
   if (hasCurrentSessionProEntitlement() || hasCurrentSessionProIntent()) return true;
   if (input.premiumPersistedFlowActive) return true;
   if (input.premiumPostCheckoutPhase === "processing") return true;
+  if (input.paidProAuthoritative) return true;
   return false;
 }
+
+/**
+ * Paid / returning Dashboard → Create must never hit the public free multi-party Pro gate.
+ * Anonymous/free users still see the gate when assessStarterComplexityGate requires it.
+ */
+export function shouldBypassStarterMultiPartyProGateForPaidCreate(
+  input: ResolveReturningPaidCreateEligibleInput = {},
+): boolean {
+  if (resolveReturningPaidCreateEligible(input)) return true;
+  if (
+    isCreateFlowPaidAcceptedOrAuthoritativeActive({
+      workspaceProEntitled:
+        input.workspaceProEntitled ?? resolveProvisionalWorkspaceProEntitledForCreate(),
+      tier: input.tier,
+      premiumPersistedFlowActive: input.premiumPersistedFlowActive,
+      premiumSendPathUnlocked: input.premiumSendPathUnlocked,
+      paidProAuthoritative: input.paidProAuthoritative,
+      premiumCheckoutCompleted: input.premiumCheckoutCompleted,
+    })
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export const STARTER_MULTI_PARTY_PRO_GATE_PAID_BYPASS_HELPER =
+  "shouldBypassStarterMultiPartyProGateForPaidCreate";
 
 export type ReturningPaidCreateSubmitBootstrapPlan = {
   markProIntent: true;
