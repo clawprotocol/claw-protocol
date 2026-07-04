@@ -6,6 +6,7 @@
 import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { looksLikeAuthorizedSignersBulletLine } from "./intakeSignerMetadataAuthority";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
@@ -295,7 +296,9 @@ export function isDisallowedPartyPhrase(name: string): boolean {
 
 /** True when the label looks like a full legal entity (intake-authoritative), not body prose or titles. */
 export function isAuthoritativeLegalEntityName(name: string): boolean {
-  const t = isolateLegalEntityFromContaminatedName((name || "").replace(/\s+/g, " ").trim());
+  const raw = (name || "").replace(/\s+/g, " ").trim();
+  if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
+  const t = isolateLegalEntityFromContaminatedName(raw);
   if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
   if (/^(?:my|our|the|your|their|each|both|either)\s+company$/i.test(t)) return false;
   if (/^(?:client|customer|vendor|contractor|service\s+provider|provider|party\s*[ab])$/i.test(t)) {

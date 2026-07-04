@@ -1533,10 +1533,13 @@ import {
   FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
   planEnterCanonicalPaidProReviewFlow,
   planFinalizeCanonicalPaidProPipelineSuccess,
+  planCanonicalPaidProStaleUiReset,
   resolveCanonicalPaidProReviewCorpus,
+  isStalePaidRecoveryPipelineSource,
   shouldBlockDegradedPaidReviewBranchesAfterAcceptance,
   type EnterCanonicalPaidProReviewFlowArgs,
 } from "./enterCanonicalPaidProReviewFlow";
+import { readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
 import {
   computeCreateFlowPaidProReviewReady,
   hasPaidCreateFlowPipelineAcceptance,
@@ -1552,6 +1555,8 @@ import {
   shouldRenderCreateFlowPaidReviewHydratingSkeleton,
   shouldShowCreateFlowStarterProRefineUpsell,
   shouldSuppressFreeStarterCreateFlowConversionUi,
+  shouldSuppressPaidAcceptedDegradedRecoveryUi,
+  shouldSuppressPaidAcceptedFreeStarterSurfaces,
   shouldUsePaidProCreateFlowReviewShell,
   shouldUseStarterDocumentPaperSurfaceOnCreateFlow,
   type ResolveAuthoritativeCreateFlowReviewShellInput,
@@ -6129,11 +6134,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         corpusPlain: finalPlain,
         pipelineSource,
       });
+      const staleUiReset = planCanonicalPaidProStaleUiReset(pipelineSource);
+      setHardError(staleUiReset.hardError);
+      setPremiumTruthPipelineSource(staleUiReset.premiumTruthPipelineSource);
+      lastPremiumPipelineRenderSourceRef.current = staleUiReset.lastPremiumPipelineRenderSource;
+      setProFullDraftQualityRetry(staleUiReset.proFullDraftQualityRetry);
+      setProFullDraftCustomGateMessage(staleUiReset.proFullDraftCustomGateMessage);
+      setPremiumPostCheckoutPhase(staleUiReset.premiumPostCheckoutPhase);
+      setPremiumPipelineUserMessage(staleUiReset.premiumPipelineUserMessage);
       setProUpgradeUseStarterView(plan.ui.proUpgradeUseStarterView);
-      setProFullDraftQualityRetry(plan.ui.proFullDraftQualityRetry);
-      setPremiumPostCheckoutPhase(plan.ui.premiumPostCheckoutPhase);
-      setPremiumPipelineUserMessage(plan.ui.premiumPipelineUserMessage);
-      setProFullDraftCustomGateMessage(plan.ui.proFullDraftCustomGateMessage);
       agreementDocumentDirtyRef.current = plan.ui.agreementDocumentDirty;
       const collapsedPlain = collapseDuplicateEsignNoticesInFullPreview(finalPlain);
       setAgreementDocumentText(collapsedPlain);
@@ -13700,6 +13709,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const authoritativePremiumUiCommitted = useMemo(() => {
+    if (hasPaidProSourceOfTruth() || hasPaidCreateFlowPipelineAcceptance()) {
+      const pipelineBody = readPaidProPipelineAcceptedCorpusBody()?.trim() ?? "";
+      const sotBody = getPaidProSourceOfTruthText().trim();
+      if (Math.max(pipelineBody.length, sotBody.length) >= 500) return true;
+    }
     const snap = readPremiumCompletionSnapshot();
     const resolved = resolveAuthoritativePremiumCommitted({
       winningPremiumBodyText:
@@ -14581,8 +14595,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!showStarterProRefineUpsell) return;
+    if (shouldSuppressPaidAcceptedFreeStarterSurfaces({ shellInput: authoritativeCreateFlowReviewShellInput })) {
+      return;
+    }
     logProConversionCardVisible();
-  }, [showStarterProRefineUpsell]);
+  }, [showStarterProRefineUpsell, authoritativeCreateFlowReviewShellInput, createFlowAuthoritativeShellReactiveKey]);
 
   const handleStarterProConversionPrimaryClick = React.useCallback(() => {
     logProConversionPrimaryClick("starter_pro_refine_card");
@@ -17472,7 +17489,44 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     partySignerNames,
   ]);
 
+  const paidAcceptedDegradedRecoveryUiSuppressed = useMemo(
+    () =>
+      shouldSuppressPaidAcceptedDegradedRecoveryUi({
+        shellInput: authoritativeCreateFlowReviewShellInput,
+        simpleProFinalReviewActive,
+        guidedCompletionPhase,
+      }),
+    [
+      authoritativeCreateFlowReviewShellInput,
+      simpleProFinalReviewActive,
+      guidedCompletionPhase,
+      createFlowAuthoritativeShellReactiveKey,
+    ],
+  );
+
+  useEffect(() => {
+    if (!paidAcceptedDegradedRecoveryUiSuppressed) return;
+    setProFullDraftQualityRetry(false);
+    setProFullDraftCustomGateMessage(null);
+    setPremiumPostCheckoutPhase(null);
+    setPremiumPipelineUserMessage(null);
+    setHardError(null);
+    if (
+      isStalePaidRecoveryPipelineSource(premiumTruthPipelineSource) ||
+      isStalePaidRecoveryPipelineSource(lastPremiumPipelineRenderSourceRef.current)
+    ) {
+      const authoritativeSource = (premiumTruthPipelineSource || "server_full_draft").trim();
+      if (isAuthoritativePremiumPipelineRenderSource(authoritativeSource)) {
+        lastPremiumPipelineRenderSourceRef.current = authoritativeSource;
+      } else {
+        setPremiumTruthPipelineSource("server_full_draft");
+        lastPremiumPipelineRenderSourceRef.current = "server_full_draft";
+      }
+    }
+  }, [paidAcceptedDegradedRecoveryUiSuppressed, premiumTruthPipelineSource]);
+
   const premiumPaidUnavailableRetry = useMemo(() => {
+    if (paidAcceptedDegradedRecoveryUiSuppressed) return false;
     if (!premiumPaidDocumentSurface || proUpgradeUseStarterView || authoritativePremiumUiCommitted) {
       return false;
     }
@@ -19679,7 +19733,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !canProceedWithPaidProDocument,
   );
   const showPremiumNetworkRecoverablePanel = Boolean(
-    premiumPaidDocumentSurface &&
+    !paidAcceptedDegradedRecoveryUiSuppressed &&
+      premiumPaidDocumentSurface &&
       (hasPaidPremiumCompletionSession() || premiumPersistedFlowActive) &&
       (premiumPostCheckoutPhase === "premium_network_recoverable" ||
         premiumPostCheckoutPhase === "network_retry" ||
@@ -24610,7 +24665,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!simpleProductFlow || !liveWorkspaceTwoPane) return;
-    if (freeStarterReviewShellActive && !suppressFreeStarterCreateFlowConversionUi) {
+    if (freeStarterReviewShellActive && !suppressFreeStarterCreateFlowConversionUi && !paidAcceptedDegradedRecoveryUiSuppressed) {
       if (paidProReviewReadyBase) {
         logFreeReviewPaidShellBlocked({
           reason: "free_starter_review_active",
@@ -25221,7 +25276,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [showPrimaryGuidedCompletion, postCheckoutAdvisoryGaps.length]);
 
   const showProAmberRecoveryPanel = Boolean(
-    premiumPaidDocumentSurface &&
+    !paidAcceptedDegradedRecoveryUiSuppressed &&
+      premiumPaidDocumentSurface &&
       !authoritativePremiumUiCommitted &&
       !proUpgradeUseStarterView &&
       (premiumPaidUnavailableRetry || !canProceedWithPaidProDocument) &&
@@ -26689,7 +26745,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeRaw: intakeForHydration,
       surface: "finalize_paid_pro_signer_metadata",
       signatureRegionOnly: true,
-      repairRecital: rawCorpusResolution.source !== "paid_pro_source_of_truth",
+      repairRecital: false,
     });
     auditPaidProSignerFinalizeCorpus(hydrated.corpus);
     const signatureBlockModel = buildCanonicalSignerManifest({

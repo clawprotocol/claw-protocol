@@ -21,6 +21,10 @@ import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRole
 import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualConsultingQualityFloor";
 import { applyPaidProDomainScopeGuard } from "./paidProDomainScopeGuard";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
+import {
+  assessProfessionalProClauseCoverage,
+  logProfessionalProClauseCoverageDecision,
+} from "./paidProProfessionalClauseCoverage";
 import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 import { PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE } from "./premiumNetworkRecoveryLocalDraft";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
@@ -52,6 +56,7 @@ import {
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
+import { scrubAuthorizedSignerBulletPartyLabelsFromCorpus } from "./paidProAuthorizedSignerBulletCorpusScrub";
 import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicationAuthority";
 import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNormalize";
 import { insertBeforeExecutionTail } from "./paidProMutualConsultingQualityFloorInsert";
@@ -107,7 +112,7 @@ export type ConciseCommercialServicesFactId =
   | "ownership_work_product"
   | "confidentiality";
 
-export type ProMinimumSubstanceSection = ConciseCommercialServicesFactId;
+export type ProMinimumSubstanceSection = ConciseCommercialServicesFactId | `professional_${string}`;
 
 export type ConciseCommercialServicesQualityAssessment = {
   applies: boolean;
@@ -283,9 +288,19 @@ export function validateProMinimumSubstance(args: {
   source?: string | null;
 }): ConciseCommercialServicesQualityAssessment {
   const source = args.source ?? "unknown";
+  const professional = assessProfessionalProClauseCoverage({
+    text: args.text,
+    intake: args.rawIntake,
+  });
+  const pipelineLatchBlocksProfessionalGate =
+    professional.applies &&
+    !professional.ok &&
+    (hasPaidProAuthoritativeValidationPassed({ text: args.text, source }) ||
+      hasPaidProPipelineSessionAcceptance({ text: args.text, source }));
   if (
-    hasPaidProAuthoritativeValidationPassed({ text: args.text, source }) ||
-    hasPaidProPipelineSessionAcceptance({ text: args.text, source })
+    !pipelineLatchBlocksProfessionalGate &&
+    (hasPaidProAuthoritativeValidationPassed({ text: args.text, source }) ||
+      hasPaidProPipelineSessionAcceptance({ text: args.text, source }))
   ) {
     markPaidProAuthoritativeValidationPassed({ text: args.text, source });
     return {
@@ -304,6 +319,25 @@ export function validateProMinimumSubstance(args: {
     draft: args.draft,
     source,
   });
+  if (professional.applies && !professional.ok) {
+    logProfessionalProClauseCoverageDecision({
+      accepted: false,
+      docLen: professional.docLen,
+      missingClauses: professional.missingClauses,
+      source,
+    });
+    return {
+      applies: true,
+      ok: false,
+      docLen: professional.docLen,
+      requiredFactsFound: [],
+      requiredFactsMissing: [],
+      missingSections: professional.missingClauses.map(
+        (c) => `professional_${c}` as ProMinimumSubstanceSection,
+      ),
+      malformedOpening: false,
+    };
+  }
   logProMinimumSubstanceDecision({
     accepted: !decision.applies || decision.ok,
     missingSections: decision.missingSections,
@@ -602,6 +636,12 @@ function preparePaidProServerDocumentForAcceptanceCore(
   if (executivePolish.text !== out) {
     out = executivePolish.text;
     repairs.push(...executivePolish.repairs);
+  }
+
+  const scrubbedBullets = scrubAuthorizedSignerBulletPartyLabelsFromCorpus(out, intakeText, partyLegalNames);
+  if (scrubbedBullets !== out) {
+    out = scrubbedBullets;
+    repairs.push("party_identity:scrub_authorized_signer_bullet_labels");
   }
 
   const preservedLegal = preserveFullLegalPartyNamesInOpeningAndSignatures(

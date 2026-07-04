@@ -253,6 +253,8 @@ export type PremiumFullDraftResult = {
   generation_ok?: boolean;
   /** Client may retry premium-full-draft without losing checkout or free draft. */
   retryable?: boolean;
+  /** Operator-safe model identifier from premium-full-draft route (no secrets). */
+  generation_model?: string;
   pro_intelligence_packet?: Partial<ProAgreementIntelligencePacket>;
 };
 

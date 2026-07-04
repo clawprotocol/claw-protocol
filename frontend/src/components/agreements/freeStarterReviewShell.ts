@@ -16,6 +16,9 @@ import { CreateUiStage } from "./createUiStage";
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  shouldSuppressPaidAcceptedFreeStarterSurfaces,
+} from "./authoritativeCreateFlowReviewShell";
 import { isPaidProFirstReviewDisplayActive } from "./paidProPostCheckoutRenderGate";
 import { resolveFreeStarterReviewShellBlocked } from "./paidProCreateFlowRouting";
 import {
@@ -62,6 +65,7 @@ export function resolveFreeStarterReviewShellActive(
   draft?: import("./intakeSmartDefaults").ParsedDraftShape | null;
   premiumRenderSource?: string | null;
 }): boolean {
+  if (shouldSuppressPaidAcceptedFreeStarterSurfaces({ shellInput: input })) return false;
   if (resolveAuthoritativeCreateFlowReviewShell(input) === "paid_pro") return false;
   if (
     resolveFreeStarterReviewShellBlocked({
@@ -203,6 +207,7 @@ export function logFreeReviewShellResolved(args: {
   isGuidedCompletion: boolean;
   title: string;
 }): void {
+  if (shouldSuppressPaidAcceptedFreeStarterSurfaces()) return;
   console.info("[free-review-shell-resolved]", args);
 }
 

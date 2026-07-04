@@ -31,6 +31,10 @@ import {
   preparePaidProServerDocumentForAcceptance,
   validateProMinimumSubstance,
 } from "./paidProConciseServicesQuality";
+import {
+  assessProfessionalProClauseCoverage,
+  shouldRejectThinProfessionalProCorpus,
+} from "./paidProProfessionalClauseCoverage";
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
 import { corpusHasPaidProSyntheticMalformedSectionHeadings } from "./paidProSyntheticMalformedSectionHeadings";
 import {
@@ -431,6 +435,35 @@ export function validatePaidProOutput(args: {
         candidateLen: recovery.text.length,
       });
       if (recovery.ok) {
+        const wireProfessional = assessProfessionalProClauseCoverage({
+          text: rawInput,
+          intake: rawI,
+        });
+        if (shouldRejectThinProfessionalProCorpus(wireProfessional)) {
+          return rejectAt("professional_pro_clause_coverage", [
+            ...wireProfessional.missingClauses.map((c) => `professional_${c}`),
+            `docLen=${wireProfessional.docLen}`,
+          ]);
+        }
+        const professional = assessProfessionalProClauseCoverage({
+          text: recovery.text,
+          intake: rawI,
+        });
+        if (shouldRejectThinProfessionalProCorpus(professional)) {
+          return rejectAt("professional_pro_clause_coverage", [
+            ...professional.missingClauses.map((c) => `professional_${c}`),
+            `docLen=${professional.docLen}`,
+          ]);
+        }
+        const recoverySubstance = validateProMinimumSubstance({
+          text: recovery.text,
+          rawIntake: rawI,
+          draft: args.draft ?? null,
+          source: pipelineSource ?? "deterministic_recovery_freeze_candidate",
+        });
+        if (recoverySubstance.applies && !recoverySubstance.ok) {
+          return rejectAt("minimum_substance", recoverySubstance.missingSections);
+        }
         logDecision(
           true,
           [
@@ -462,6 +495,16 @@ export function validatePaidProOutput(args: {
     draft: args.draft ?? null,
     source: pipelineSource,
   });
+  const wireProfessional = assessProfessionalProClauseCoverage({
+    text: rawInput,
+    intake: rawI,
+  });
+  if (shouldRejectThinProfessionalProCorpus(wireProfessional)) {
+    return rejectAt("professional_pro_clause_coverage", [
+      ...wireProfessional.missingClauses.map((c) => `professional_${c}`),
+      `docLen=${wireProfessional.docLen}`,
+    ]);
+  }
   if (minimumSubstance.applies && !minimumSubstance.ok) {
     const reasons = minimumSubstance.missingSections.length
       ? minimumSubstance.missingSections.map((s) => `minimum_substance_missing:${s}`)

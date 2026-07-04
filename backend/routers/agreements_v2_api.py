@@ -808,6 +808,8 @@ class PremiumFullDraftResponse(BaseModel):
     server_generation_failure_message: str = ""
     """False when degraded/empty output must not be treated as a successful Pro generation."""
     generation_ok: bool = True
+    """Operator-safe model identifier for client diagnostics (no secrets)."""
+    generation_model: str = ""
     """True when the client may retry premium-full-draft without a new free draft."""
     retryable: bool = False
 
@@ -4966,6 +4968,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             generation_outcome=generation_outcome,
             schema_validation_reasons=final_reasons,
             generation_ok=bool(doc.strip()),
+            generation_model=str(llm_model or ""),
             retryable=False,
         )
         return _premium_full_draft_finalize_http_response(

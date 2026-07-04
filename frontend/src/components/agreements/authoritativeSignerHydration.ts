@@ -46,6 +46,7 @@ import {
 import { classifyPaidProCorpusLifecycleDiff } from "./paidProCorpusLifecycleDiff";
 import {
   buildFrozenServerFullSignerMetadataHydration,
+  shouldPreserveFrozenCanonicalCorpusOnSignerFinalize,
   shouldUseFrozenServerFullSourceOfTruthMinimalHydration,
 } from "./paidProFrozenServerFullSignerHydration";
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
@@ -57,7 +58,7 @@ import {
   logPaidProSignerMetadataHydrationMissing,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { repairExecutionBlockEntityHeadingLines } from "./paidProExecutionBlockEntityHeading";
-import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { hashPaidProCorpus, getPaidProSourceOfTruthText } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
 
 export type HydratedAuthoritativeSigningCorpusResult = {
@@ -171,6 +172,41 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   let rawCorpus = (args.rawCorpus || "").trim();
   const rawCorpusLenBeforeHydration = rawCorpus.length;
   const isFinalizeSurface = args.surface === "finalize_paid_pro_signer_metadata";
+
+  if (
+    isFinalizeSurface &&
+    shouldPreserveFrozenCanonicalCorpusOnSignerFinalize(rawCorpus)
+  ) {
+    const frozenCorpus = getPaidProSourceOfTruthText().trim();
+    const roleContext = {
+      intakeText: args.intakeRaw,
+      acceptedCorpus: frozenCorpus,
+    };
+    const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, roleContext);
+    const canonicalHash = resolvePaidProFrozenAuthoritativeHash();
+    const finalizedHash = hashPaidProCorpus(frozenCorpus);
+    logPaidProSignerFinalizeParity({
+      surface: args.surface,
+      rawLen: rawCorpusLenBeforeHydration,
+      hydratedLen: frozenCorpus.length,
+      lenDelta: 0,
+      invariantOk: canonicalHash === finalizedHash,
+      executionBlockCount: 0,
+      witnessCount: 0,
+      canonicalHash,
+      finalizedHash,
+      signerFieldOnlyDelta: true,
+      signerHydrationApplied: false,
+      blankSignerLinesRemaining: countBlankSignerMetadataLinesInExecutionBlock(frozenCorpus),
+    });
+    return {
+      corpus: frozenCorpus,
+      identities: [...identities],
+      signaturePolishCount: 0,
+      partyNoticeApplied: false,
+      rejected: false,
+    };
+  }
 
   if (shouldUseFrozenServerFullSourceOfTruthMinimalHydration(rawCorpus)) {
     return buildFrozenServerFullSignerMetadataHydration({

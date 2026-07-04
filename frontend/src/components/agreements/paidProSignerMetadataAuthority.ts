@@ -534,12 +534,15 @@ export function buildPaidProSignerMetadataParties(
     const frozenLegal = (frozenNames[i] ?? "").trim();
     const authorityLegal = authorityIdentities[i]?.legalEntityName ?? "";
     const uiLegal = partyLegalNameForIndex(ui, i);
+    const uiLegalClean = resolveAuthorityPartyLegalNameField(uiLegal, "");
+    const draftLegalClean = resolveAuthorityPartyLegalNameField(
+      (opts?.draftPartyNames?.[i] ?? "").trim(),
+      "",
+    );
     const resolvedLegal =
       hasFrozenManifest && frozenLegal
         ? frozenLegal
-        : uiLegal && isAuthoritativeLegalEntityName(uiLegal)
-          ? uiLegal
-          : authorityLegal || uiLegal;
+        : draftLegalClean || authorityLegal || uiLegalClean;
     const uiSlot = resolveUiSlotIndexForLegalEntity(ui, resolvedLegal, i);
     parties.push({
       partyIndex: i,

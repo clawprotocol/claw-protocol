@@ -10,7 +10,7 @@ import { CreateUiStage } from "./createUiStage";
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
 import { hasPaidProSourceOfTruth, getPaidProSourceOfTruthText } from "./paidProSourceOfTruth";
-import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import { readPremiumCompletionSnapshot, hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import {
@@ -22,9 +22,9 @@ import {
   hasRenderablePaidProFirstReviewCorpus,
   isPaidProPostCheckoutRecoveryReviewActive,
 } from "./paidProPostCheckoutRenderGate";
-import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
+import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
 
 /** Matches {@link GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN} — inlined to avoid simpleProFinalReviewCorpus import cycle. */
 const CREATE_FLOW_PIPELINE_ACCEPTED_MIN_LEN = 1500;
@@ -179,6 +179,7 @@ export function shouldShowCreateFlowStarterProRefineUpsell(input: {
   premiumPaidDocumentSurface: boolean;
   showStarterProRefineUpsellCardEligible: boolean;
 }): boolean {
+  if (shouldSuppressPaidAcceptedDegradedRecoveryUi({ shellInput: input.shellInput })) return false;
   if (shouldSuppressFreeStarterCreateFlowConversionUi(input.shellInput ?? {})) return false;
   if (input.hasPaidPremiumCompletionSession()) return false;
   if (input.authoritativePremiumUiCommitted) return false;
@@ -431,4 +432,30 @@ export function shouldRenderCreateFlowPaidReviewHydratingSkeleton(input: {
   if (input.multiPartyProGateActive) return false;
   if (input.simpleProFinalReviewShellActive) return false;
   return isCreateFlowPaidAcceptedOrAuthoritativeActive(input.shellInput ?? {});
+}
+
+export type ShouldSuppressPaidAcceptedDegradedRecoveryUiArgs = {
+  shellInput?: ResolveAuthoritativeCreateFlowReviewShellInput;
+  simpleProFinalReviewActive?: boolean;
+  guidedCompletionPhase?: GuidedCompletionPhase | string;
+  hasPaidSoT?: boolean;
+  pipelineAccepted?: boolean;
+};
+
+/** After paid acceptance, never show retry banners, conversion cards, or free/starter review shell. */
+export function shouldSuppressPaidAcceptedDegradedRecoveryUi(
+  args: ShouldSuppressPaidAcceptedDegradedRecoveryUiArgs = {},
+): boolean {
+  if (args.simpleProFinalReviewActive) return true;
+  if (args.guidedCompletionPhase === "applied") return true;
+  if (args.hasPaidSoT ?? hasPaidProSourceOfTruth()) return true;
+  if (args.pipelineAccepted ?? hasPaidCreateFlowPipelineAcceptance()) return true;
+  if (isCreateFlowPaidAcceptedOrAuthoritativeActive(args.shellInput ?? {})) return true;
+  return false;
+}
+
+export function shouldSuppressPaidAcceptedFreeStarterSurfaces(
+  args: ShouldSuppressPaidAcceptedDegradedRecoveryUiArgs = {},
+): boolean {
+  return shouldSuppressPaidAcceptedDegradedRecoveryUi(args);
 }

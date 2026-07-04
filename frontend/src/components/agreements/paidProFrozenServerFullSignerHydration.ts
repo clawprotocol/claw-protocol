@@ -28,23 +28,24 @@ import type { HydratedAuthoritativeSigningCorpusResult } from "./authoritativeSi
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
 import { repairJoinedTopLevelSectionHeadings } from "./sectionStructureAuthority";
 
-const FROZEN_SERVER_FULL_SOT_SOURCES = new Set([
-  "server_full_draft",
-  "server_full_draft_retry",
-  "server_full_draft_degraded",
-]);
-
 export function shouldUseFrozenServerFullSourceOfTruthMinimalHydration(rawCorpus: string): boolean {
+  return shouldUseFrozenPaidProSourceOfTruthMinimalHydration(rawCorpus);
+}
+
+/** Any established paid Pro SoT with matching raw corpus — metadata-only hydration path. */
+export function shouldUseFrozenPaidProSourceOfTruthMinimalHydration(rawCorpus: string): boolean {
   if (!hasPaidProSourceOfTruth()) return false;
   const sot = getPaidProSourceOfTruth();
   if (!sot) return false;
-  const source = (sot.source ?? "").trim();
-  if (!FROZEN_SERVER_FULL_SOT_SOURCES.has(source)) return false;
   if (sot.text.trim().length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
   const raw = (rawCorpus || "").trim();
   if (raw.length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
   const rawHash = hashPaidProCorpus(raw);
   return rawHash === sot.hash || raw === sot.text.trim();
+}
+
+export function shouldPreserveFrozenCanonicalCorpusOnSignerFinalize(rawCorpus: string): boolean {
+  return shouldUseFrozenPaidProSourceOfTruthMinimalHydration(rawCorpus);
 }
 
 /** Hydrate signer metadata into frozen server_full SoT without regenerating operative text. */

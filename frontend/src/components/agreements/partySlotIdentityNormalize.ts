@@ -14,6 +14,7 @@ import {
   isDisallowedPartyPhrase,
 } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
+import { looksLikeAuthorizedSignersBulletLine } from "./intakeSignerMetadataAuthority";
 
 const STANDALONE_SUFFIX_RE =
   /^(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?$/i;
@@ -199,6 +200,7 @@ export function extractLineSeparatedLegalEntityParties(intakeRaw: string): strin
     if (/^\$/.test(line) || (/^\d/.test(line) && /\bmonth/i.test(line))) continue;
     if (isRevenueShareAllocationLine(line)) continue;
     if (/^(?:term|fee|payment|governing|duration|oklahoma|texas|law)\b/i.test(line)) continue;
+    if (looksLikeAuthorizedSignersBulletLine(line)) continue;
     if (/workflow|consulting|automation|services?\b/i.test(line) && !PARTY_ENTITY_SUFFIX_RE.test(line)) {
       continue;
     }

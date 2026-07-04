@@ -277,6 +277,42 @@ export function commitCanonicalPaidProReviewSessionMarkers(args: {
   commitAcceptedPaidProCorpusHandoffSync(args);
 }
 
+const STALE_PAID_RECOVERY_PIPELINE_SOURCES = new Set([
+  "premium_network_retryable",
+  "premium_network_local_recovery",
+  "premium_degraded_server_local_recovery",
+  "premium_full_draft_cors_blocked",
+]);
+
+export function isStalePaidRecoveryPipelineSource(source: string | null | undefined): boolean {
+  const s = (source ?? "").trim();
+  return STALE_PAID_RECOVERY_PIPELINE_SOURCES.has(s);
+}
+
+/** React state/ref resets after canonical paid review entry succeeds. */
+export type CanonicalPaidProStaleUiResetPlan = {
+  hardError: null;
+  premiumTruthPipelineSource: string;
+  lastPremiumPipelineRenderSource: string;
+  proFullDraftQualityRetry: false;
+  proFullDraftCustomGateMessage: null;
+  premiumPostCheckoutPhase: null;
+  premiumPipelineUserMessage: null;
+};
+
+export function planCanonicalPaidProStaleUiReset(pipelineSource: string): CanonicalPaidProStaleUiResetPlan {
+  const source = (pipelineSource || "server_full_draft").trim();
+  return {
+    hardError: null,
+    premiumTruthPipelineSource: source,
+    lastPremiumPipelineRenderSource: source,
+    proFullDraftQualityRetry: false,
+    proFullDraftCustomGateMessage: null,
+    premiumPostCheckoutPhase: null,
+    premiumPipelineUserMessage: null,
+  };
+}
+
 /**
  * Synchronous post-acceptance corpus commit — same markers/refs first-time post-checkout uses.
  * Must run before paid review shell renders so resolvers never see len 0 after validation accepts.

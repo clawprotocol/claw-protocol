@@ -13,6 +13,11 @@ import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelin
 import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycleDiff";
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
+import {
+  assessProfessionalProClauseCoverage,
+  PROFESSIONAL_PRO_INTAKE_MIN_CORPUS_LEN,
+  logProfessionalProClauseCoverageDecision,
+} from "./paidProProfessionalClauseCoverage";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import { readProGenerationAdoption } from "./paidProGenerationAdoption";
 import {
@@ -457,6 +462,32 @@ export function establishPaidProSourceOfTruth(args: {
     draft: args.draft ?? null,
     source: requestedSource,
   });
+  const professionalCoverage = assessProfessionalProClauseCoverage({
+    text: trim(args.text) || prep.text,
+    intake: args.intakeText ?? "",
+  });
+  if (professionalCoverage.applies && !professionalCoverage.ok) {
+    const rejectThinProfessional =
+      professionalCoverage.docLen < PROFESSIONAL_PRO_INTAKE_MIN_CORPUS_LEN ||
+      professionalCoverage.missingClauses.includes("corpus_length");
+    if (rejectThinProfessional) {
+      logProfessionalProClauseCoverageDecision({
+        accepted: false,
+        docLen: professionalCoverage.docLen,
+        missingClauses: professionalCoverage.missingClauses,
+        source: requestedSource,
+      });
+      throw new Error(
+        `[professional-pro-clause-coverage-blocked] missing=${professionalCoverage.missingClauses.join(",")};len=${professionalCoverage.docLen}`,
+      );
+    }
+    logProfessionalProClauseCoverageDecision({
+      accepted: true,
+      docLen: professionalCoverage.docLen,
+      missingClauses: professionalCoverage.missingClauses,
+      source: `${requestedSource}:advisory`,
+    });
+  }
   const intakeHasConcreteServicesFacts =
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.intakeText ?? "") &&
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.draft?.purpose ?? "");
@@ -472,7 +503,7 @@ export function establishPaidProSourceOfTruth(args: {
   const substantiveServerDraft =
     requestedSource === "server_full_draft" && wireLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
   if (minimumSubstance.applies && !minimumSubstance.ok) {
-    if (pipelineAcceptedAfterSubstance) {
+    if (pipelineAcceptedAfterSubstance && !(professionalCoverage.applies && !professionalCoverage.ok)) {
       logProCorpusSourceMap({
         stage: "client_gates_passed",
         source: requestedSource,

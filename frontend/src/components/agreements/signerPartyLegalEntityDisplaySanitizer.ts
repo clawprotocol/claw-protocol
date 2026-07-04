@@ -5,6 +5,10 @@
  */
 
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
+import {
+  looksLikeAuthorizedSignersBulletLine,
+  stripAuthorizedSignersBulletLegalEntity,
+} from "./intakeSignerMetadataAuthority";
 
 const LEADING_CONNECTOR_CHAIN_RE =
   /^(?:(?:and|between)\s+)*(?:(?:engages?|hires?|retains?|appoints?|contracts?\s+with)\s+)+/i;
@@ -35,6 +39,7 @@ function norm(s: string): string {
 function hasRawDisplayPollutionMarkers(t: string): boolean {
   if (!t) return false;
   return (
+    looksLikeAuthorizedSignersBulletLine(t) ||
     LEADING_CONNECTOR_CHAIN_RE.test(t) ||
     SINGLE_LEADING_VERB_RE.test(t) ||
     NUMBERED_PARTIES_HEADING_PREFIX_RE.test(t) ||
@@ -99,6 +104,9 @@ export function sanitizeSignerPartyLegalEntityDisplay(
   let s = norm(raw);
   if (!s) return s;
   const before = s;
+  if (looksLikeAuthorizedSignersBulletLine(s)) {
+    s = stripAuthorizedSignersBulletLegalEntity(s);
+  }
   s = stripHeadingAndProsePrefixes(s);
   if (hasTrailingJurisdictionClausePollution(s)) {
     s = stripTrailingJurisdictionClause(s);

@@ -14,6 +14,7 @@ import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGu
 import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
 import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
+import { scrubAuthorizedSignerBulletPartyLabelsFromCorpus } from "./paidProAuthorizedSignerBulletCorpusScrub";
 import { repairProtectedLegalEntitySuffixes } from "./paidProProtectedEntityRepair";
 import { ensureOperativeIfToNoticeDelivery, repairIncompleteIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
@@ -419,6 +420,15 @@ export function applyPaidProReviewRenderSanitizer(
     const entityRepair = repairProtectedLegalEntitySuffixes(text, legalNames, ctx?.intakeText ?? null);
     if (entityRepair.repairs > 0) {
       text = entityRepair.text;
+      repaired = true;
+    }
+    const scrubbed = scrubAuthorizedSignerBulletPartyLabelsFromCorpus(
+      text,
+      ctx?.intakeText ?? null,
+      legalNames,
+    );
+    if (scrubbed !== text) {
+      text = scrubbed;
       repaired = true;
     }
     const preserved = preserveFullLegalPartyNamesInOpeningAndSignatures(

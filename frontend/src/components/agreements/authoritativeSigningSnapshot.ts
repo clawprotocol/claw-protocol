@@ -26,7 +26,7 @@ import {
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { applySignatureNoticeContactFieldsToCorpus } from "./paidProPartyNoticeDetails";
-import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { getPaidProSourceOfTruth, getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { stripDuplicateConsecutiveExecutionEntityLines } from "./paidProExecutionBlockEntityHeading";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
@@ -174,12 +174,21 @@ export function createAuthoritativeSigningSnapshot(
     partyAddresses: args.signerMetadata.partyAddresses ?? [],
   };
   let rawInput = (args.corpus || "").trim();
+  const sot = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruth() : null;
+  const preserveFrozenCanonicalCorpus =
+    Boolean(
+      sot &&
+        sot.text.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+        hashPaidProCorpus(rawInput) === sot.hash,
+    ) || args.preserveFrozenServerFullHydratedCorpus === true;
   const frozenServerFullMinimalHydration =
-    args.preserveFrozenServerFullHydratedCorpus === true &&
+    preserveFrozenCanonicalCorpus &&
     countBlankSignerMetadataLinesInExecutionBlock(rawInput, parties) === 0;
 
   let corpus: string;
-  if (frozenServerFullMinimalHydration) {
+  if (preserveFrozenCanonicalCorpus && sot) {
+    corpus = sot.text.trim();
+  } else if (frozenServerFullMinimalHydration) {
     const dedupe = stripDuplicateConsecutiveExecutionEntityLines(rawInput);
     corpus = dedupe.text.trim();
   } else {

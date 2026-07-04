@@ -221,6 +221,7 @@ import { resolvePremiumPreValidationBody } from "./premiumPreValidationBodyAutho
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { markPaidProLocalPostProcessingEndAt } from "./paidProQaPerfTrace";
 import { adaptPremiumFullDraftToProIntelligencePacket } from "./proAgreementIntelligence";
+import { logPaidProModelRoute } from "./paidProModelRouteLog";
 import {
   extractJointVentureEconomicsAnchors,
   isJointVentureEconomicsIntake,
@@ -1970,6 +1971,16 @@ async function runPremiumCompletionInner(
         });
       }
       logPremiumApiResultFromWire({ ok: true, status: 200, wire: full });
+      logPaidProModelRoute({
+        route: "premium_full_draft",
+        model: (full.generation_model || "").trim() || "premium_unresolved",
+        tier: "paid_pro",
+        source: "premium_completion_pipeline",
+        generationOutcome: (full.generation_outcome || "").trim() || null,
+        serverFullLen: String(full.server_full_document_text ?? "").trim().length,
+        documentLen: String(full.document_text ?? "").trim().length,
+        callReason,
+      });
       if (premiumApiResultHasAuthoritativeServerCorpus(full)) {
         markPremiumAuthoritativeServerCorpusAccepted();
       }

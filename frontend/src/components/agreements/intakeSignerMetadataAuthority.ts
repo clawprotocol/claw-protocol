@@ -121,6 +121,39 @@ export function looksLikeConcatenatedSignerNames(value: string): boolean {
   return nameLike >= 4;
 }
 
+/** Bullet line: "* Sarah Mitchell, CEO, Red Mesa Logistics LLC" */
+export function looksLikeAuthorizedSignersBulletLine(value: string): boolean {
+  const t = value.replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  return Boolean(parseAuthorizedSignersBulletLine(t));
+}
+
+/** Parse authorized-signers bullet into signer name, title, and legal entity. */
+export function parseAuthorizedSignersBulletLine(value: string): {
+  signerName: string;
+  signerTitle: string;
+  legalEntity: string;
+} | null {
+  const stripped = value.replace(/\s+/g, " ").trim().replace(/^\*+\s*/, "");
+  if (!stripped) return null;
+  AUTHORIZED_SIGNERS_BULLET_RE.lastIndex = 0;
+  const m = AUTHORIZED_SIGNERS_BULLET_RE.exec(`\n${stripped}`);
+  if (!m) return null;
+  const entity = normalizeExtractedLegalEntity((m[3] ?? "").trim());
+  if (!entity) return null;
+  return {
+    signerName: cleanSignerField(m[1], "signerName"),
+    signerTitle: cleanSignerField(m[2], "signerTitle"),
+    legalEntity: entity,
+  };
+}
+
+export function stripAuthorizedSignersBulletLegalEntity(value: string): string {
+  const parsed = parseAuthorizedSignersBulletLine(value);
+  if (parsed?.legalEntity) return parsed.legalEntity;
+  return normalizeExtractedLegalEntity(value) || value.replace(/\s+/g, " ").trim();
+}
+
 /** Legal entity field value — rejects signer names, scope phrases, and concatenated names. */
 export function resolveAuthorityPartyLegalNameField(
   value: string,
@@ -128,6 +161,9 @@ export function resolveAuthorityPartyLegalNameField(
 ): string {
   const t = value.replace(/\s+/g, " ").trim();
   if (!t) return fallback;
+  if (looksLikeAuthorizedSignersBulletLine(t)) {
+    return parseAuthorizedSignersBulletLine(t)?.legalEntity ?? fallback;
+  }
   if (isLikelyHumanSignerName(t) || looksLikeConcatenatedSignerNames(t)) return fallback;
   if (!isLegalEntityName(t) && !isAuthoritativeLegalEntityName(t)) return fallback;
   return t;
