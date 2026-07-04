@@ -280,3 +280,45 @@ export function commitCanonicalPaidProReviewSessionMarkers(args: {
 }
 
 export const CANONICAL_PAID_PRO_REVIEW_ENTRY_HELPER = "enterCanonicalPaidProReviewFlow";
+
+export type PlanFinalizeCanonicalPaidProPipelineSuccessArgs = EnterCanonicalPaidProReviewFlowArgs &
+  ResolveCanonicalPaidProReviewCorpusArgs;
+
+/** Shared post-payment / returning-paid pipeline success — same corpus + canonical entry plan. */
+export function planFinalizeCanonicalPaidProPipelineSuccess(
+  args: PlanFinalizeCanonicalPaidProPipelineSuccessArgs,
+): {
+  canEnterCanonicalReview: boolean;
+  blockedReason?: string;
+  corpusPlain: string;
+  canonicalPlan: CanonicalPaidProReviewFlowPlan;
+  /** Fresh pipeline success must not run snapshot hydration before canonical entry. */
+  skipPostGenerationSnapshotHydration: boolean;
+} {
+  const corpusPlain = (
+    resolveCanonicalPaidProReviewCorpus({
+      winningBody: args.winningBody,
+      snapshotPlain: args.snapshotPlain,
+      draft: args.draft,
+      agreementDocumentText: args.agreementDocumentText,
+      pipelineWinningBody: args.pipelineWinningBody,
+      hydratedPremiumBody: args.hydratedPremiumBody,
+      premiumDeliverablePlain: args.premiumDeliverablePlain,
+    }) || args.corpusPlain
+  ).trim();
+  const canonicalPlan = planEnterCanonicalPaidProReviewFlow({
+    ...args,
+    corpusPlain,
+    respectAlreadyOpened: false,
+  });
+  return {
+    canEnterCanonicalReview: canonicalPlan.shouldApply,
+    blockedReason: canonicalPlan.blockedReason,
+    corpusPlain,
+    canonicalPlan,
+    skipPostGenerationSnapshotHydration: true,
+  };
+}
+
+export const FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER =
+  "planFinalizeCanonicalPaidProPipelineSuccess";

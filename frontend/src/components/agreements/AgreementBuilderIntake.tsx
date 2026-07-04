@@ -428,6 +428,7 @@ import {
   resolveIntakeBootstrap,
   writeAgreementCreatorIntakeStorage,
   writeCreateReviewAgreementResumeId,
+  clearCreateReviewDraftReadyMarker,
   writeCreateReviewDraftReadyMarker,
   writeCreateReviewDraftSnapshot,
 } from "./agreementIntakeStorage";
@@ -1527,7 +1528,9 @@ import {
 import {
   CANONICAL_PAID_PRO_REVIEW_ENTRY_HELPER,
   commitCanonicalPaidProReviewSessionMarkers,
+  FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
   planEnterCanonicalPaidProReviewFlow,
+  planFinalizeCanonicalPaidProPipelineSuccess,
   resolveCanonicalPaidProReviewCorpus,
   shouldBlockDegradedPaidReviewBranchesAfterAcceptance,
   type EnterCanonicalPaidProReviewFlowArgs,
@@ -1553,6 +1556,7 @@ import {
 } from "./authoritativeCreateFlowReviewShell";
 import {
   planReturningPaidCreateSubmitBootstrap,
+  resolveReturningPaidCreateEligible,
   RETURNING_PAID_CREATE_BOOTSTRAP_HELPER,
 } from "./returningPaidCreateBootstrap";
 
@@ -6448,22 +6452,50 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             )
           : {}),
       });
-      const hydrated = readPremiumCompletionSnapshot();
-      if (hydrated) {
-        applyHydrationFromPremiumSnapshot(hydrated);
-      }
-      if (finalPlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
-        enterCanonicalPaidProReviewFlow({
-          source: "returning_paid_create",
-          respectAlreadyOpened: false,
-          corpusPlain: finalPlain,
-          pipelineSource: result.premiumRenderSource || "server_full_draft",
-          draft: mergedDraftPersist,
-          intakeText: mergedIntake,
-          agreementGenerationId: result.agreementGenerationId ?? sessionGenForPass,
-          generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
-          recipientCandidates,
-        });
+      commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true });
+      const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
+        source: "returning_paid_create",
+        corpusPlain: finalPlain,
+        winningBody: winning,
+        snapshotPlain: acceptedCorpusPlain || snapshotPlain,
+        premiumDeliverablePlain,
+        agreementDocumentText: agreementDocumentTextRef.current,
+        pipelineWinningBody: winning || premiumPipelineOutputBodyRef.current,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+        pipelineSource: result.premiumRenderSource || "server_full_draft",
+        draft: mergedDraftPersist,
+        intakeText: mergedIntake,
+        agreementGenerationId: result.agreementGenerationId ?? sessionGenForPass,
+        generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
+        recipientCandidates,
+      });
+      const canonicalEntered = finalizePlan.canEnterCanonicalReview
+        ? enterCanonicalPaidProReviewFlow({
+            source: "returning_paid_create",
+            respectAlreadyOpened: false,
+            corpusPlain: finalizePlan.corpusPlain,
+            pipelineSource: result.premiumRenderSource || "server_full_draft",
+            draft: mergedDraftPersist,
+            intakeText: mergedIntake,
+            agreementGenerationId: result.agreementGenerationId ?? sessionGenForPass,
+            generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
+            recipientCandidates,
+          })
+        : false;
+      if (!canonicalEntered) {
+        setProFullDraftQualityRetry(true);
+        setProFullDraftCustomGateMessage(
+          "Your Pro agreement is still preparing. Tap **Retry Pro draft** if this does not update shortly.",
+        );
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("[paid-pro-acceptance-routing]", {
+            source: "returning_paid_create",
+            finalizeHelper: FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
+            blockedReason: finalizePlan.blockedReason ?? "canonical_entry_failed",
+            corpusLen: finalizePlan.corpusPlain.length,
+          });
+        }
       }
       setPremiumPostCheckoutPhase(null);
       setPremiumPipelineUserMessage(null);
@@ -8032,10 +8064,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
           const paidProSotSource = result.premiumRenderSource || "server_full_draft";
           const commitPostCheckoutCanonicalReviewEntry = () => {
+            const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
+              source: "post_checkout_apply_success",
+              corpusPlain: snapshotPlain,
+              snapshotPlain,
+              winningBody: snapshotPlain,
+              pipelineWinningBody: snapshotPlain,
+              agreementDocumentText: agreementDocumentTextRef.current,
+              hydratedPremiumBody: hydratedPremiumBodyRef.current,
+              pipelineSource: paidProSotSource,
+              draft: mergedDraftPersist,
+              intakeText: mergedIntake,
+              agreementGenerationId: sessionGenId,
+              generationOutcome: generationOutcomeLabel,
+              recipientCandidates,
+            });
             enterCanonicalPaidProReviewFlow({
               source: "post_checkout_apply_success",
               respectAlreadyOpened: false,
-              corpusPlain: snapshotPlain,
+              corpusPlain: finalizePlan.corpusPlain,
               pipelineSource: paidProSotSource,
               draft: mergedDraftPersist,
               intakeText: mergedIntake,
@@ -10014,6 +10061,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const commitFreeDraftForReview = React.useCallback(
     (opts: { source: FreeReviewSurfaceSource; fromHomeAutoGenerate?: boolean }) => {
       if (
+        resolveReturningPaidCreateEligible({
+          tier,
+          workspaceProEntitled:
+            workspaceProEntitled || resolveCreateFlowWorkspaceProEntitled(),
+          premiumPersistedFlowActive,
+          premiumSendPathUnlocked,
+        })
+      ) {
+        return;
+      }
+      if (
         isCreateFlowPaidAcceptedOrAuthoritativeActive({
           workspaceProEntitled: readCachedWorkspaceProEntitlement(),
           tier,
@@ -10225,8 +10283,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setDebouncedStepBuffer("");
       agreementDocumentDirtyRef.current = false;
       setReviewDocRefreshTick((n) => n + 1);
-      writeCreateReviewDraftReadyMarker();
       writeCreateReviewDraftSnapshot(parsed);
+      if (skipFreeStarterCreateSubmit) {
+        clearCreateReviewDraftReadyMarker();
+      } else {
+        writeCreateReviewDraftReadyMarker();
+      }
       if (skipFreeStarterCreateSubmit) {
         emitPaidFunnelEvent("paid_create_submit_entitled_rewrite", {
           once: true,
@@ -10241,6 +10303,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             source: "returning_paid_create",
             entryHelper: RETURNING_PAID_CREATE_BOOTSTRAP_HELPER,
             bootstrap: Boolean(returningPaidBootstrap),
+            finalizeHelper: FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
           });
         }
         void runEntitledPremiumImprovementRewrite();
