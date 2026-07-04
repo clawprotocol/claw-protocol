@@ -1542,6 +1542,7 @@ import {
   readCreateFlowAuthoritativeReviewShellReactiveKey,
   resolveCanonicalPaidCreateFlowReviewCorpusLen,
   resolveCreateFlowAuthoritativeReviewPlain,
+  resolveCreateFlowWorkspaceProEntitled,
   shouldBlockLaunchProCheckoutForPaidCreateFlowReview,
   shouldRenderCreateFlowPaidReviewHydratingSkeleton,
   shouldShowCreateFlowStarterProRefineUpsell,
@@ -1550,6 +1551,10 @@ import {
   shouldUseStarterDocumentPaperSurfaceOnCreateFlow,
   type ResolveAuthoritativeCreateFlowReviewShellInput,
 } from "./authoritativeCreateFlowReviewShell";
+import {
+  planReturningPaidCreateSubmitBootstrap,
+  RETURNING_PAID_CREATE_BOOTSTRAP_HELPER,
+} from "./returningPaidCreateBootstrap";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -3390,9 +3395,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [reviewShowsSimplifiedAdvancedDraft, setReviewShowsSimplifiedAdvancedDraft] = useState(false);
   const { tier, refreshUsage } = useAccess();
   const { navigate } = useLaunchNav();
-  const [workspaceProEntitled, setWorkspaceProEntitled] = useState(false);
+  const [workspaceProEntitled, setWorkspaceProEntitled] = useState(() =>
+    resolveCreateFlowWorkspaceProEntitled(),
+  );
   useEffect(() => {
     if (!simpleProductFlow) return;
+    if (resolveCreateFlowWorkspaceProEntitled()) {
+      setWorkspaceProEntitled(true);
+    }
     let cancelled = false;
     void fetchWorkspaceProEntitlement().then((ok) => {
       if (!cancelled) setWorkspaceProEntitled(ok);
@@ -9894,6 +9904,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     runEntitledPremiumImprovementRewrite,
   ]);
 
+  const beginReturningPaidProCreateGeneration = React.useCallback(() => {
+    setHardError(null);
+    setProUpgradeUseStarterView(false);
+    setProFullDraftQualityRetry(false);
+    markCurrentSessionProIntent();
+    markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
+    setPremiumPersistedFlowActive(true);
+    setPremiumSendPathUnlocked(true);
+    setPremiumPostCheckoutPhase("processing");
+    setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
+    setCreateFlowPhase("generating_draft");
+    setDisplayPhase("generating_draft");
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setLoading(true);
+    setPreviewPaneRevealed(true);
+  }, []);
+
   const beginStarterDraftGeneration = React.useCallback(() => {
     if (
       shouldBlockStarterRegenerationAfterPaidAuthority({
@@ -10027,8 +10054,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const handoffSource = opts?.handoffSource ?? "runProductionLocalDraftParse";
     const fromHomeHandoff =
       handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
+    const workspaceProSync =
+      resolveCreateFlowWorkspaceProEntitled() || tierAllowsAdvancedFullDraftReveal(tier);
+    if (workspaceProSync) {
+      setWorkspaceProEntitled(true);
+    }
     const workspaceProForSubmit =
-      readCachedWorkspaceProEntitlement() || (await fetchWorkspaceProEntitlement());
+      workspaceProSync ||
+      readCachedWorkspaceProEntitlement() ||
+      (await fetchWorkspaceProEntitlement());
     const paidProReviewShellForSubmit = shouldUsePaidProCreateFlowReviewShell({
       workspaceProEntitled: workspaceProForSubmit,
       tier,
@@ -10113,7 +10147,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       displayPhase_before: displayPhase,
     });
     assignLocalDraftParseStickyMode();
-    beginStarterDraftGeneration();
+    const returningPaidBootstrap = planReturningPaidCreateSubmitBootstrap({
+      tier,
+      workspaceProEntitled: workspaceProForSubmit,
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+    });
+    if (returningPaidBootstrap) {
+      beginReturningPaidProCreateGeneration();
+    } else {
+      beginStarterDraftGeneration();
+    }
     await finalizeIntakeCapture();
     try {
       let parsed = await parseDraft(rawIntake);
@@ -10191,6 +10235,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (fromHomeHandoff) {
           homeAutoGenerateConsumedRef.current = true;
         }
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[paid-pro-acceptance-routing]", {
+            source: "returning_paid_create",
+            entryHelper: RETURNING_PAID_CREATE_BOOTSTRAP_HELPER,
+            bootstrap: Boolean(returningPaidBootstrap),
+          });
+        }
         void runEntitledPremiumImprovementRewrite();
         return true;
       }
@@ -10238,6 +10290,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     commitFreeDraftForReview,
     commitStarterMultiPartyProGate,
     beginStarterDraftGeneration,
+    beginReturningPaidProCreateGeneration,
     currentPremiumMergedIntakeKey,
     intakeCombined,
     runEntitledPremiumImprovementRewrite,
@@ -23422,6 +23475,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumPaidDocumentSurface,
         premiumPersistedFlowActive,
         showPrimaryGuidedCompletion,
+        shellInput: authoritativeCreateFlowReviewShellInput,
+        premiumPostCheckoutPhase,
       }),
     [
       isFreeStreamlineDraftReview,
@@ -23433,6 +23488,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPaidDocumentSurface,
       premiumPersistedFlowActive,
       showPrimaryGuidedCompletion,
+      authoritativeCreateFlowReviewShellInput,
+      premiumPostCheckoutPhase,
     ],
   );
   const useIntakeCanonicalPostGeneration = shouldUseCanonicalPostGenerationFlow({

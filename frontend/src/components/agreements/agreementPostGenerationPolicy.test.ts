@@ -76,4 +76,20 @@ describe("agreementPostGenerationPolicy", () => {
       }),
     ).toBeNull();
   });
+
+  it("skips intake create review for returning workspace-pro users", () => {
+    expect(
+      resolveIntakeCreateReviewPostGenerationContext({
+        isFreeStreamlineDraftReview: true,
+        productionDraftPrimaryReviewSurface: true,
+        createUiStage: "DRAFT",
+        createFlowPhase: "draft_ready_for_review",
+        hasDraft: true,
+        paidProAuthoritative: false,
+        premiumPaidDocumentSurface: false,
+        premiumPersistedFlowActive: false,
+        shellInput: { workspaceProEntitled: true, tier: "free" },
+      }),
+    ).toBeNull();
+  });
 });

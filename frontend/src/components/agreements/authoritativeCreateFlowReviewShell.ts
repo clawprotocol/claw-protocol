@@ -23,6 +23,7 @@ import {
 } from "./paidProPostCheckoutRenderGate";
 import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
+import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
 
 export type AuthoritativeCreateFlowReviewShell = "paid_pro" | "free_starter";
 
@@ -102,6 +103,7 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
   if (input.workspaceProEntitled || resolveCreateFlowWorkspaceProEntitled()) return "paid_pro";
   if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) return "paid_pro";
+  if (hasCurrentSessionProEntitlement()) return "paid_pro";
   if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
   if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
   const snap = readPremiumCompletionSnapshot();

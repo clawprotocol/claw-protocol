@@ -33,6 +33,9 @@ export function resolveSimpleHomeReviewPostGenerationContext(input: {
   return "simple_home_review";
 }
 
+import { shouldSuppressIntakeCanonicalPostGeneration } from "./returningPaidCreateBootstrap";
+import type { ResolveAuthoritativeCreateFlowReviewShellInput } from "./authoritativeCreateFlowReviewShell";
+
 export function resolveIntakeCreateReviewPostGenerationContext(input: {
   isFreeStreamlineDraftReview: boolean;
   productionDraftPrimaryReviewSurface: boolean;
@@ -43,12 +46,22 @@ export function resolveIntakeCreateReviewPostGenerationContext(input: {
   premiumPaidDocumentSurface: boolean;
   premiumPersistedFlowActive: boolean;
   showPrimaryGuidedCompletion?: boolean;
+  shellInput?: ResolveAuthoritativeCreateFlowReviewShellInput;
+  premiumPostCheckoutPhase?: string | null;
 }): PostGenerationFlowContext | null {
   if (!input.hasDraft || input.createUiStage !== "DRAFT") return null;
-  if (input.paidProAuthoritative || input.premiumPaidDocumentSurface || input.premiumPersistedFlowActive) {
+  if (
+    shouldSuppressIntakeCanonicalPostGeneration({
+      shellInput: input.shellInput,
+      premiumPersistedFlowActive: input.premiumPersistedFlowActive,
+      premiumPostCheckoutPhase: input.premiumPostCheckoutPhase,
+      paidProAuthoritative: input.paidProAuthoritative,
+      premiumPaidDocumentSurface: input.premiumPaidDocumentSurface,
+      showPrimaryGuidedCompletion: input.showPrimaryGuidedCompletion,
+    })
+  ) {
     return null;
   }
-  if (input.showPrimaryGuidedCompletion) return null;
   if (input.createFlowPhase !== "draft_ready_for_review") return null;
   if (input.isFreeStreamlineDraftReview || input.productionDraftPrimaryReviewSurface) {
     return "intake_create_review";
