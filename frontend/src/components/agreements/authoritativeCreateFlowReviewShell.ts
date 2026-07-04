@@ -387,6 +387,14 @@ export function isCanonicalPaidCreateFlowFirstReviewActive(input: {
     return input.productionDraftPrimaryReviewSurface && input.createUiStage === CreateUiStage.DRAFT;
   }
 
+  if (
+    hasPaidCreateFlowPipelineAcceptance() &&
+    corpusLen >= PAID_PRO_AUTHORITY_MIN_LEN &&
+    surfaceEligible
+  ) {
+    return true;
+  }
+
   return surfaceEligible;
 }
 

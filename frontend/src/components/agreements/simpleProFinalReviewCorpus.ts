@@ -56,6 +56,8 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   appliedAnswerCount?: number;
   /** When true, never use renderedAgreementPreview even if other sources are empty. */
   finalReviewAuthorityOnly?: boolean;
+  /** Pipeline-accepted paid corpus on /app/create when SoT/hydrated body is not yet promoted. */
+  pipelineWinningPlain?: string | null;
   /** Pre–signer-identity snapshot for recovery when patched body shrank. */
   recoveryAuthoritativePlain?: string | null;
   /** Immutable pinned signer-applied body — never compete with picker/server length. */
@@ -125,6 +127,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   const authoritative = norm(args.authoritativePlain);
   const rendered = norm(args.renderedPreviewPlain);
   const picker = norm(args.pickerPlain);
+  const pipelineWinning = norm(args.pipelineWinningPlain);
   const adt = norm(args.agreementDocumentPlain);
   const authorityOnly = Boolean(args.finalReviewAuthorityOnly);
   const recovery = norm(args.recoveryAuthoritativePlain);
@@ -152,6 +155,14 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   if (
     authorityOnly &&
     picked.plain.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
+    pipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN
+  ) {
+    picked = { plain: pipelineWinning, source: "picker_authoritative" };
+  }
+
+  if (
+    authorityOnly &&
+    picked.plain.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
     picker.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN
   ) {
     picked = { plain: picker, source: "picker_authoritative" };
@@ -164,6 +175,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   const authoritativeLen = Math.max(
     authoritative.length,
     picker.length,
+    pipelineWinning.length,
     adt.length,
     plainText.length,
   );

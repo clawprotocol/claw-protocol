@@ -10,6 +10,12 @@ import {
 } from "./authoritativePaidProReview";
 import { clearCreateReviewDraftReadyMarker } from "./agreementIntakeStorage";
 import { clearPersistedGuidedSession } from "./guidedDealCompletion/guidedSessionPersistence";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import {
+  hasPaidCreateFlowPipelineAcceptance,
+  resolveCreateFlowAuthoritativeReviewPlain,
+} from "./authoritativeCreateFlowReviewShell";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 export type ApplyPaidProAcceptanceRoutingArgs = {
   premiumRenderSource: string | null | undefined;
@@ -58,9 +64,46 @@ export function shouldOpenCanonicalPaidCreateFlowFirstReview(args: {
   }).openCanonicalFinalReview;
 }
 
-/** Side effects safe immediately after establishPaidProSourceOfTruth. */
+/** Side effects safe immediately after establishPaidProSourceOfTruth or pipeline acceptance. */
 export function commitPaidProAcceptanceStorageHygiene(): void {
-  if (!hasAcceptedPaidProAuthority()) return;
+  if (!hasAcceptedPaidProAuthority() && !hasPaidCreateFlowPipelineAcceptance()) return;
   clearCreateReviewDraftReadyMarker();
   clearPersistedGuidedSession();
+}
+
+export type ResolveCreateFlowAcceptedPipelineCorpusArgs = {
+  agreementDocumentText?: string;
+  draft?: ParsedDraftShape | null;
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
+};
+
+/** Winning paid corpus for create-flow first review — pipeline/snapshot, never short starter preview. */
+export function resolveCreateFlowAcceptedPipelineCorpusPlain(
+  args: ResolveCreateFlowAcceptedPipelineCorpusArgs,
+): string {
+  return resolveCreateFlowAuthoritativeReviewPlain({
+    agreementDocumentText: args.agreementDocumentText,
+    draft: args.draft ?? null,
+    pipelineWinningBody: args.pipelineWinningBody,
+    hydratedPremiumBody: args.hydratedPremiumBody,
+  }).trim();
+}
+
+/**
+ * After [paid-pro-validation-decision] accepted on /app/create, open the same first-time paid
+ * post-checkout Pro review workflow (guided applied + final review opened).
+ */
+export function shouldApplyCreateFlowPaidFirstReviewRouting(args: {
+  alreadyOpened: boolean;
+  premiumRenderSource?: string | null;
+  corpusPlain?: string | null;
+} & ResolveCreateFlowAcceptedPipelineCorpusArgs): boolean {
+  if (args.alreadyOpened) return false;
+  const corpusPlain = (args.corpusPlain ?? resolveCreateFlowAcceptedPipelineCorpusPlain(args)).trim();
+  if (corpusPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
+  return shouldOpenCanonicalPaidCreateFlowFirstReview({
+    premiumRenderSource: args.premiumRenderSource,
+    acceptedBodyLen: corpusPlain.length,
+  });
 }
