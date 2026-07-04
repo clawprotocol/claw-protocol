@@ -16,6 +16,13 @@ import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptanceP
 import {
   readPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import {
+  hasRenderablePaidProFirstReviewCorpus,
+  isPaidProPostCheckoutRecoveryReviewActive,
+} from "./paidProPostCheckoutRenderGate";
+import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
+import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 
 export type AuthoritativeCreateFlowReviewShell = "paid_pro" | "free_starter";
 
@@ -44,8 +51,46 @@ export function hasPaidCreateFlowPipelineAcceptance(): boolean {
 
 export function hasAcceptedPaidCreateFlowFreezeLatch(): boolean {
   const latched = getLatchedAcceptedServerFullDraftAuthority();
-  if (latched?.freezeEstablished && latched.body.trim().length >= 500) return true;
+  const latchedBody = latched?.body.trim() ?? "";
+  if (latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    if (latched?.freezeEstablished) return true;
+    if (hasPaidCreateFlowPipelineAcceptance()) return true;
+    if (
+      hasPaidProPipelineSessionAcceptance({
+        text: latchedBody,
+        source: latched?.source ?? "server_full_draft",
+      })
+    ) {
+      return true;
+    }
+  }
   return hasPaidCreateFlowPipelineAcceptance();
+}
+
+/**
+ * Hard parent invariant: once paid generation is accepted OR the authoritative shell is paid_pro,
+ * the create-flow route must never mount Free Starter acquisition / checkout branches.
+ */
+export function isCreateFlowPaidAcceptedOrAuthoritativeActive(
+  input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
+): boolean {
+  if (resolveAuthoritativeCreateFlowReviewShell(input) === "paid_pro") return true;
+  const latched = getLatchedAcceptedServerFullDraftAuthority();
+  const latchedBody = latched?.body.trim() ?? "";
+  if (latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    if (latched?.freezeEstablished) return true;
+    if (
+      hasPaidProPipelineSessionAcceptance({
+        text: latchedBody,
+        source: latched?.source ?? "server_full_draft",
+      })
+    ) {
+      return true;
+    }
+  }
+  const snap = readPremiumCompletionSnapshot();
+  if (snap?.premiumAccepted === true) return true;
+  return false;
 }
 
 export function resolveAuthoritativeCreateFlowReviewShell(
@@ -74,7 +119,7 @@ export function shouldUsePaidProCreateFlowReviewShell(
 export function shouldSuppressFreeStarterCreateFlowConversionUi(
   input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
 ): boolean {
-  return shouldUsePaidProCreateFlowReviewShell(input);
+  return isCreateFlowPaidAcceptedOrAuthoritativeActive(input);
 }
 
 export function shouldBlockFreeStarterReviewSurfaces(
@@ -173,16 +218,50 @@ export function computeCreateFlowPaidProReviewReady(
 export function resolveCreateFlowAuthoritativeReviewPlain(args: {
   agreementDocumentText?: string;
   draft?: ParsedDraftShape | null;
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
 }): string {
   const sot = getPaidProSourceOfTruthText().trim();
-  if (sot.length >= 500) return sot;
+  if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN) return sot;
   const snap = readPremiumCompletionSnapshot();
   const snapBody = (snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "").trim();
-  if (snap?.premiumAccepted && snapBody.length >= 500) return snapBody;
-  const draftPremium = String(args.draft?.premium_server_full_document_text ?? "").trim();
-  if (hasPaidCreateFlowPipelineAcceptance() && draftPremium.length >= 500) return draftPremium;
+  if (snap?.premiumAccepted && snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) return snapBody;
+  const latched = getLatchedAcceptedServerFullDraftAuthority();
+  const latchedBody = latched?.body.trim() ?? "";
+  const pipelineWinning = (args.pipelineWinningBody || "").trim();
+  const hydratedPremium = (args.hydratedPremiumBody || "").trim();
+  const draftPremium = String(
+    args.draft?.premium_server_full_document_text ??
+      args.draft?.premium_full_document_text ??
+      "",
+  ).trim();
+  const draftServerFull = String(
+    (args.draft as { server_full_document_text?: string | null } | null)?.server_full_document_text ??
+      "",
+  ).trim();
+  const paidAccepted =
+    hasPaidCreateFlowPipelineAcceptance() ||
+    hasAcceptedPaidCreateFlowFreezeLatch() ||
+    (latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+      Boolean(latched?.freezeEstablished || snap?.premiumAccepted));
+  const pipelineCandidates = [pipelineWinning, hydratedPremium, latchedBody, draftPremium, draftServerFull]
+    .map((s) => s.trim())
+    .filter((s) => s.length >= PAID_PRO_AUTHORITY_MIN_LEN);
+  if (paidAccepted && pipelineCandidates.length > 0) {
+    return pipelineCandidates.sort((a, b) => b.length - a.length)[0]!;
+  }
+  for (const candidate of pipelineCandidates) {
+    if (
+      hasPaidProPipelineSessionAcceptance({
+        text: candidate,
+        source: latched?.source ?? "server_full_draft",
+      })
+    ) {
+      return candidate;
+    }
+  }
   const doc = (args.agreementDocumentText || "").trim();
-  if (hasPaidCreateFlowPipelineAcceptance() && doc.length >= 500) return doc;
+  if (paidAccepted && doc.length >= PAID_PRO_AUTHORITY_MIN_LEN) return doc;
   return doc;
 }
 
@@ -199,4 +278,136 @@ export function logAuthoritativeCreateFlowReviewShellResolved(
     hasSourceOfTruth: hasPaidProSourceOfTruth(),
     premiumSnapAccepted: readPremiumCompletionSnapshot()?.premiumAccepted === true,
   });
+}
+
+/** Paid review on `/app/create` — same surface eligibility for post-checkout and returning subscribers. */
+export function isCanonicalPaidCreateFlowReviewSurfaceEligible(input: {
+  shellInput?: ResolveAuthoritativeCreateFlowReviewShellInput;
+  productionDraftPrimaryReviewSurface: boolean;
+  createUiStage: (typeof CreateUiStage)[keyof typeof CreateUiStage];
+  createFlowPhase?: CreateFlowProductionPhase;
+  hasDraft: boolean;
+}): boolean {
+  if (!shouldUsePaidProCreateFlowReviewShell(input.shellInput ?? {})) return false;
+  if (!input.productionDraftPrimaryReviewSurface) return false;
+  if (input.createUiStage !== CreateUiStage.DRAFT || !input.hasDraft) return false;
+  return (
+    input.createFlowPhase === "draft_ready_for_review" ||
+    input.createFlowPhase === "generating_draft"
+  );
+}
+
+export function resolveCanonicalPaidCreateFlowReviewCorpusLen(args: {
+  draft?: ParsedDraftShape | null;
+  agreementDocumentText?: string;
+  intakeText?: string | null;
+  premiumRenderSource?: string | null;
+  premiumCheckoutCompleted?: boolean;
+  premiumPostCheckoutPhase?: string | null;
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
+}): number {
+  if (hasPaidProSourceOfTruth()) {
+    return getPaidProSourceOfTruthText().trim().length;
+  }
+  const createFlowPlain = resolveCreateFlowAuthoritativeReviewPlain({
+    agreementDocumentText: args.agreementDocumentText,
+    draft: args.draft ?? null,
+    pipelineWinningBody: args.pipelineWinningBody,
+    hydratedPremiumBody: args.hydratedPremiumBody,
+  }).trim();
+  if (createFlowPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) return createFlowPlain.length;
+  if (
+    hasRenderablePaidProFirstReviewCorpus({
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+      premiumRenderSource: args.premiumRenderSource ?? null,
+      premiumCheckoutCompleted: args.premiumCheckoutCompleted,
+      premiumPostCheckoutPhase: args.premiumPostCheckoutPhase,
+    })
+  ) {
+    return Math.max(
+      createFlowPlain.length,
+      String(args.draft?.premium_server_full_document_text ?? "").trim().length,
+      String(args.draft?.premium_full_document_text ?? "").trim().length,
+    );
+  }
+  return createFlowPlain.length;
+}
+
+/**
+ * Single first-review entry for post-checkout (Path A) and returning paid subscribers (Path B).
+ * When true, mount SimpleProFinalReviewScreen — never the Free Starter review subtree.
+ */
+export function isCanonicalPaidCreateFlowFirstReviewActive(input: {
+  shellInput?: ResolveAuthoritativeCreateFlowReviewShellInput;
+  productionDraftPrimaryReviewSurface: boolean;
+  createUiStage: (typeof CreateUiStage)[keyof typeof CreateUiStage];
+  createFlowPhase?: CreateFlowProductionPhase;
+  hasDraft: boolean;
+  draft?: ParsedDraftShape | null;
+  intakeText?: string | null;
+  agreementDocumentText?: string;
+  premiumRenderSource?: string | null;
+  premiumCheckoutCompleted?: boolean;
+  premiumPostCheckoutPhase?: string | null;
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
+}): boolean {
+  const corpusLen = resolveCanonicalPaidCreateFlowReviewCorpusLen({
+    draft: input.draft ?? null,
+    agreementDocumentText: input.agreementDocumentText,
+    intakeText: input.intakeText ?? null,
+    premiumRenderSource: input.premiumRenderSource ?? null,
+    premiumCheckoutCompleted: input.premiumCheckoutCompleted,
+    premiumPostCheckoutPhase: input.premiumPostCheckoutPhase,
+    pipelineWinningBody: input.pipelineWinningBody,
+    hydratedPremiumBody: input.hydratedPremiumBody,
+  });
+  if (corpusLen < PAID_PRO_AUTHORITY_MIN_LEN) return false;
+
+  const surfaceEligible = isCanonicalPaidCreateFlowReviewSurfaceEligible({
+    shellInput: input.shellInput,
+    productionDraftPrimaryReviewSurface: input.productionDraftPrimaryReviewSurface,
+    createUiStage: input.createUiStage,
+    createFlowPhase: input.createFlowPhase,
+    hasDraft: input.hasDraft,
+  });
+
+  const postCheckoutPath =
+    Boolean(input.premiumCheckoutCompleted || hasPaidPremiumCompletionSession()) &&
+    isPaidProPostCheckoutRecoveryReviewActive({
+      draft: input.draft ?? null,
+      intakeText: input.intakeText ?? null,
+      premiumRenderSource: input.premiumRenderSource ?? null,
+      premiumCheckoutCompleted: input.premiumCheckoutCompleted,
+    });
+
+  if (postCheckoutPath || hasPaidProSourceOfTruth()) {
+    return input.productionDraftPrimaryReviewSurface && input.createUiStage === CreateUiStage.DRAFT;
+  }
+
+  return surfaceEligible;
+}
+
+/** Paid review shell active — block launch_pro_checkout and Free Starter CTAs. */
+export function shouldBlockLaunchProCheckoutForPaidCreateFlowReview(input: {
+  shellInput?: ResolveAuthoritativeCreateFlowReviewShellInput;
+  canonicalFirstReviewActive: boolean;
+}): boolean {
+  return (
+    input.canonicalFirstReviewActive ||
+    isCreateFlowPaidAcceptedOrAuthoritativeActive(input.shellInput ?? {})
+  );
+}
+
+/** Paid acceptance active but canonical review corpus not yet promoted — show hydrating skeleton only. */
+export function shouldRenderCreateFlowPaidReviewHydratingSkeleton(input: {
+  shellInput?: ResolveAuthoritativeCreateFlowReviewShellInput;
+  simpleProFinalReviewShellActive: boolean;
+  multiPartyProGateActive?: boolean;
+}): boolean {
+  if (input.multiPartyProGateActive) return false;
+  if (input.simpleProFinalReviewShellActive) return false;
+  return isCreateFlowPaidAcceptedOrAuthoritativeActive(input.shellInput ?? {});
 }

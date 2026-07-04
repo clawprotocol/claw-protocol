@@ -1521,9 +1521,15 @@ import {
 } from "./paidProCreateFlowReviewHandoff";
 import {
   computeCreateFlowPaidProReviewReady,
+  isCanonicalPaidCreateFlowFirstReviewActive,
+  isCanonicalPaidCreateFlowReviewSurfaceEligible,
+  isCreateFlowPaidAcceptedOrAuthoritativeActive,
   logAuthoritativeCreateFlowReviewShellResolved,
   readCreateFlowAuthoritativeReviewShellReactiveKey,
+  resolveCanonicalPaidCreateFlowReviewCorpusLen,
   resolveCreateFlowAuthoritativeReviewPlain,
+  shouldBlockLaunchProCheckoutForPaidCreateFlowReview,
+  shouldRenderCreateFlowPaidReviewHydratingSkeleton,
   shouldShowCreateFlowStarterProRefineUpsell,
   shouldSuppressFreeStarterCreateFlowConversionUi,
   shouldUsePaidProCreateFlowReviewShell,
@@ -9792,6 +9798,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const commitFreeDraftForReview = React.useCallback(
     (opts: { source: FreeReviewSurfaceSource; fromHomeAutoGenerate?: boolean }) => {
+      if (
+        isCreateFlowPaidAcceptedOrAuthoritativeActive({
+          workspaceProEntitled: readCachedWorkspaceProEntitlement(),
+          tier,
+          premiumPersistedFlowActive,
+          premiumSendPathUnlocked,
+          paidProAuthoritative,
+        })
+      ) {
+        return;
+      }
       resetStalePaidReviewShellForFreeStarter(opts.source);
       lastKnownGoodAuthoritativeDraftRef.current = "";
       hydratedPremiumBodyRef.current = "";
@@ -12929,6 +12946,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    */
   const premiumPaidDocumentSurface = useMemo(() => {
     if (!productionDraftPrimaryReviewSurface || createUiStage !== CreateUiStage.DRAFT) return false;
+    if (
+      isCanonicalPaidCreateFlowReviewSurfaceEligible({
+        shellInput: {
+          workspaceProEntitled,
+          tier,
+          premiumPersistedFlowActive,
+          premiumSendPathUnlocked,
+          paidProAuthoritative,
+        },
+        productionDraftPrimaryReviewSurface,
+        createUiStage,
+        createFlowPhase,
+        hasDraft: Boolean(draft),
+      })
+    ) {
+      return true;
+    }
     // HARD INVARIANT (fail closed): latched paid checkout / QA bypass keeps the paid surface on even when corpus validation fails (routes to FAILED_PREMIUM_CORPUS recovery, never a starter degrade).
     if (hasPaidProSourceOfTruth() || hasPaidPremiumCompletionSession()) return true;
     if (
@@ -12975,6 +13009,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft,
     reviewDocRefreshTick,
     premiumSurfaceGateTick,
+    workspaceProEntitled,
+    paidProAuthoritative,
+    createFlowPhase,
   ]);
   premiumPaidDocumentSurfaceRef.current = premiumPaidDocumentSurface;
 
@@ -13010,10 +13047,51 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumCheckoutCompleted,
     ],
   );
+  const authoritativeCreateFlowReviewShellInputRef = useRef(authoritativeCreateFlowReviewShellInput);
+  authoritativeCreateFlowReviewShellInputRef.current = authoritativeCreateFlowReviewShellInput;
 
   const createFlowAuthoritativeShellReactiveKey = readCreateFlowAuthoritativeReviewShellReactiveKey();
-  const suppressFreeStarterCreateFlowConversionUi = shouldSuppressFreeStarterCreateFlowConversionUi(
+  const createFlowPaidAcceptedOrAuthoritativeActive = isCreateFlowPaidAcceptedOrAuthoritativeActive(
     authoritativeCreateFlowReviewShellInput,
+  );
+  const suppressFreeStarterCreateFlowConversionUi = createFlowPaidAcceptedOrAuthoritativeActive;
+
+  const canonicalPaidCreateFlowFirstReviewActive = useMemo(
+    () =>
+      isCanonicalPaidCreateFlowFirstReviewActive({
+        shellInput: authoritativeCreateFlowReviewShellInput,
+        productionDraftPrimaryReviewSurface,
+        createUiStage,
+        createFlowPhase,
+        hasDraft: Boolean(draft),
+        draft: draft ?? null,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        agreementDocumentText,
+        premiumRenderSource: premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumCheckoutCompleted,
+        premiumPostCheckoutPhase,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current ||
+          premiumPipelineOutputBodyRef.current ||
+          readPremiumCompletionSnapshot()?.premiumWinningBodyText,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      }),
+    [
+      authoritativeCreateFlowReviewShellInput,
+      productionDraftPrimaryReviewSurface,
+      createUiStage,
+      createFlowPhase,
+      draft,
+      currentPremiumMergedIntakeKey,
+      intakeCombined,
+      agreementDocumentText,
+      premiumTruthPipelineSource,
+      premiumCheckoutCompleted,
+      premiumPostCheckoutPhase,
+      createFlowAuthoritativeShellReactiveKey,
+      reviewDocRefreshTick,
+      premiumSurfaceGateTick,
+    ],
   );
 
   const paidProReviewReadyBase = computeCreateFlowPaidProReviewReady({
@@ -13114,6 +13192,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const fromCreateFlow = resolveCreateFlowAuthoritativeReviewPlain({
         agreementDocumentText,
         draft: draft ?? null,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current ||
+          premiumPipelineOutputBodyRef.current ||
+          readPremiumCompletionSnapshot()?.premiumWinningBodyText,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
       });
       if (fromCreateFlow.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromCreateFlow;
     }
@@ -13495,6 +13578,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [isFreeStreamlineDraftReview, displayPhase, createFlowPhase, draft]);
 
   const freeTrackBlocksRecipientAdvance = useMemo(() => {
+    if (createFlowPaidAcceptedOrAuthoritativeActive) return false;
     if (!draft) return false;
     if (paidProAuthoritative) return false;
     if (premiumPersistedFlowActive) return false;
@@ -13503,6 +13587,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (tierAllowsAdvancedFullDraftReveal(tier)) return false;
     return isFreeStarterReviewSurface;
   }, [
+    createFlowPaidAcceptedOrAuthoritativeActive,
     draft,
     paidProAuthoritative,
     premiumPersistedFlowActive,
@@ -16429,6 +16514,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const paidProFirstReviewCorpusReady = useMemo(
     () =>
+      resolveCanonicalPaidCreateFlowReviewCorpusLen({
+        draft: draft ?? null,
+        agreementDocumentText,
+        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        premiumRenderSource:
+          premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumCheckoutCompleted,
+        premiumPostCheckoutPhase,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current ||
+          premiumPipelineOutputBodyRef.current ||
+          (premiumPaidReadonlyPick.plainText || "").trim() ||
+          readPremiumCompletionSnapshot()?.premiumWinningBodyText,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      }) >= PAID_PRO_AUTHORITY_MIN_LEN ||
       hasRenderablePaidProFirstReviewCorpus({
         draft: draft ?? null,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
@@ -16443,6 +16543,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }),
     [
       draft,
+      agreementDocumentText,
       currentPremiumMergedIntakeKey,
       intakeCombined,
       premiumTruthPipelineSource,
@@ -16451,6 +16552,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPaidReadonlyPick.plainText,
       reviewDocRefreshTick,
       premiumSurfaceGateTick,
+      createFlowAuthoritativeShellReactiveKey,
     ],
   );
 
@@ -16482,10 +16584,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const simpleProFinalReviewShellActive = useMemo(() => {
-    if (blockPaidProReviewShellWithoutCorpus) return false;
+    if (blockPaidProReviewShellWithoutCorpus && !canonicalPaidCreateFlowFirstReviewActive) return false;
     if (
-      (acceptedPaidProAuthorityActive || paidProPostCheckoutFirstReviewActive) &&
-      premiumPaidDocumentSurface &&
+      (acceptedPaidProAuthorityActive ||
+        paidProPostCheckoutFirstReviewActive ||
+        canonicalPaidCreateFlowFirstReviewActive) &&
+      (premiumPaidDocumentSurface || canonicalPaidCreateFlowFirstReviewActive) &&
       paidProFirstReviewCorpusReady &&
       !premiumRecipientUxActive &&
       createUiStage === CreateUiStage.DRAFT
@@ -16495,6 +16599,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return simpleProFinalReviewActive && paidProRuntimeAuthority.canRenderProReviewShell;
   }, [
     blockPaidProReviewShellWithoutCorpus,
+    canonicalPaidCreateFlowFirstReviewActive,
     acceptedPaidProAuthorityActive,
     paidProPostCheckoutFirstReviewActive,
     paidProFirstReviewCorpusReady,
@@ -19584,7 +19689,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             };
           }
         }
-        if (showUpgradeToFullDraftOnReview) {
+        if (
+          createFlowPaidAcceptedOrAuthoritativeActive ||
+          shouldBlockLaunchProCheckoutForPaidCreateFlowReview({
+            shellInput: authoritativeCreateFlowReviewShellInput,
+            canonicalFirstReviewActive: canonicalPaidCreateFlowFirstReviewActive,
+          })
+        ) {
+          if (!paidProFirstReviewCorpusReady) {
+            return {
+              label: resolveProductionTwoPaneLoadingUserCopy(),
+              action: "guided_continue",
+              disabled: true,
+              reason: "paid_pro_review_hydrating",
+            };
+          }
+        } else if (showUpgradeToFullDraftOnReview) {
           // Pro-required tier (13+ real parties) gets an explicit, lower-pressure label.
           // Streamline review uses unified Pro CTA; Pro-required tier keeps explicit label.
           const proRequiredCtaLabel = starterPartyCountRequiresPro
@@ -19724,7 +19844,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               : undefined,
           };
         }
-        if (freeTrackBlocksRecipientAdvance) {
+        if (
+          !shouldBlockLaunchProCheckoutForPaidCreateFlowReview({
+            shellInput: authoritativeCreateFlowReviewShellInput,
+            canonicalFirstReviewActive: canonicalPaidCreateFlowFirstReviewActive,
+          }) &&
+          freeTrackBlocksRecipientAdvance
+        ) {
           return {
             label: PRO_CTA_CONTINUE,
             action: "launch_pro_checkout",
@@ -19848,6 +19974,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedQuestionGateDecision,
     simpleProFinalReviewActive,
     paidProCanonicalStickyCta,
+    canonicalPaidCreateFlowFirstReviewActive,
+    authoritativeCreateFlowReviewShellInput,
+    paidProFirstReviewCorpusReady,
+    suppressFreeStarterCreateFlowConversionUi,
+    createFlowPaidAcceptedOrAuthoritativeActive,
+    createFlowAuthoritativeShellReactiveKey,
   ]);
 
   useEffect(() => {
@@ -20056,6 +20188,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       lastPremiumWinningCorpusRef.current ||
       hydratedPremiumBodyRef.current ||
       premiumPipelineOutputBodyRef.current ||
+      resolveCreateFlowAuthoritativeReviewPlain({
+        agreementDocumentText,
+        draft: draft ?? null,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current ||
+          premiumPipelineOutputBodyRef.current ||
+          snap?.premiumWinningBodyText,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      }) ||
       ""
     ).trim();
     return {
@@ -20071,6 +20212,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewDocRefreshTick,
     authoritativePremiumUiCommitted,
     paidBodyForGuidedCompletion,
+    agreementDocumentText,
+    draft,
+    createFlowAuthoritativeShellReactiveKey,
   ]);
 
   const paidProGuidedCorpusReady = useMemo(
@@ -27165,6 +27309,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           case "continue_to_recipients": {
             setHardError(null);
+            if (
+              isCreateFlowPaidAcceptedOrAuthoritativeActive(
+                authoritativeCreateFlowReviewShellInputRef.current,
+              )
+            ) {
+              await handOffProductionDraftToRecipients();
+              return;
+            }
             if (freeTrackBlocksRecipientAdvanceRef.current) {
               logFreeSendGatedToPro("continue_to_recipients");
               await launchUpgradeCheckoutFromStarterDraft();
@@ -27191,6 +27343,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           case "launch_pro_checkout": {
+            if (
+              isCreateFlowPaidAcceptedOrAuthoritativeActive(
+                authoritativeCreateFlowReviewShellInputRef.current,
+              )
+            ) {
+              return;
+            }
             setHardError(null);
             const checkoutSource = checkoutBackRestoreActive
               ? "restored_starter_review_cta"
@@ -31016,7 +31175,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     : ""
                                 }`}
                               >
-                                {useStarterDocumentPaperSurface && showStarterPreviewLoadingShell ? (
+                                {shouldRenderCreateFlowPaidReviewHydratingSkeleton({
+                                  shellInput: authoritativeCreateFlowReviewShellInput,
+                                  simpleProFinalReviewShellActive,
+                                  multiPartyProGateActive,
+                                }) ? (
+                                  <div
+                                    className="mb-4 motion-safe:animate-pulse rounded-xl border border-emerald-500/20 bg-slate-950/60 p-5 shadow-md shadow-emerald-950/10 sm:p-6"
+                                    role="status"
+                                    aria-live="polite"
+                                    aria-busy="true"
+                                    data-testid="paid-pro-create-flow-review-hydrating"
+                                  >
+                                    <p className="text-sm font-medium text-slate-200 sm:text-base">
+                                      {resolveProductionTwoPaneLoadingUserCopy()}
+                                    </p>
+                                    <div className="mt-5 space-y-3">
+                                      <div className="h-3 w-3/4 rounded bg-slate-800/90" />
+                                      <div className="h-3 w-full rounded bg-slate-800/70" />
+                                      <div className="h-24 w-full rounded-lg border border-slate-800/60 bg-[#0d1424]/80" />
+                                    </div>
+                                  </div>
+                                ) : useStarterDocumentPaperSurface && showStarterPreviewLoadingShell ? (
                                   <div
                                     className="mb-4 motion-safe:animate-pulse rounded-xl border border-emerald-500/20 bg-slate-950/60 p-5 shadow-md shadow-emerald-950/10 sm:p-6"
                                     role="status"
