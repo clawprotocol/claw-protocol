@@ -1562,7 +1562,12 @@ import {
   type ResolveAuthoritativeCreateFlowReviewShellInput,
 } from "./authoritativeCreateFlowReviewShell";
 import {
+  ensurePaidCreateEntitlementResolvedForSubmit,
+  logFatalPaidCreateGateAfterProvisionalEntitlement,
+  logReturningPaidCreateGateBypassDecision,
+  logStarterComplexityGateSkippedForPaidCreate,
   planReturningPaidCreateSubmitBootstrap,
+  resolvePaidCreateGateBypassDecision,
   resolveReturningPaidCreateEligible,
   resolveProvisionalWorkspaceProEntitledForCreate,
   shouldBypassStarterMultiPartyProGateForPaidCreate,
@@ -10029,10 +10034,44 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPreviewPaneRevealed(true);
   }, [draft, currentPremiumMergedIntakeKey, intakeCombined]);
 
+  const resolvePaidCreateGateBypassContext = React.useCallback(
+    (partyCount?: number | null) =>
+      resolvePaidCreateGateBypassDecision({
+        tier,
+        workspaceProEntitled:
+          workspaceProEntitled || resolveProvisionalWorkspaceProEntitledForCreate(),
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+        paidProAuthoritative: paidProAuthoritativeRef.current,
+        partyCount: partyCount ?? null,
+      }),
+    [tier, workspaceProEntitled, premiumPersistedFlowActive, premiumSendPathUnlocked],
+  );
+
+  const resolvePaidCreateSubmitEntitlement = React.useCallback(async (): Promise<boolean> => {
+    const entitled = await ensurePaidCreateEntitlementResolvedForSubmit({
+      tier,
+      workspaceProEntitled,
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+      paidProAuthoritative: paidProAuthoritativeRef.current,
+    });
+    if (entitled) {
+      setWorkspaceProEntitled(true);
+    }
+    return entitled;
+  }, [tier, workspaceProEntitled, premiumPersistedFlowActive, premiumSendPathUnlocked]);
+
   const commitStarterMultiPartyProGate = React.useCallback(
     (rawIntake: string): boolean => {
       const assessment = assessStarterComplexityGate(rawIntake);
       if (!assessment.required) return false;
+      const bypassDecision = resolvePaidCreateGateBypassContext(assessment.partyCount);
+      logReturningPaidCreateGateBypassDecision(bypassDecision);
+      if (bypassDecision.bypass) {
+        logStarterComplexityGateSkippedForPaidCreate(assessment, bypassDecision);
+        return false;
+      }
       writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
       writeOriginalUserIntakeRawIfRicher(rawIntake);
       stashCreateComplexityResume({
@@ -10078,9 +10117,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           mutationSource: "structured_intake",
         });
       }
+      if (bypassDecision.provisionalPaid) {
+        logFatalPaidCreateGateAfterProvisionalEntitlement(bypassDecision);
+      }
       return true;
     },
-    [],
+    [resolvePaidCreateGateBypassContext],
   );
 
   const handleStarterMultiPartyProGateEditPrompt = React.useCallback(() => {
@@ -10225,6 +10267,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const rawIntake = (opts?.rawOverride ?? intakeCombined).trim();
     if (!rawIntake) return false;
+    await resolvePaidCreateSubmitEntitlement();
+    const workspaceProAfterSubmitResolve =
+      resolveProvisionalWorkspaceProEntitledForCreate() || readCachedWorkspaceProEntitlement();
     if (upgradeIntentDetectedRef.current &&
       !tierAllowsAdvancedFullDraftReveal(tier) &&
       draft &&
@@ -10234,7 +10279,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const paidMultiPartyGateBypass = shouldBypassStarterMultiPartyProGateForPaidCreate({
       tier,
-      workspaceProEntitled: workspaceProForSubmit,
+      workspaceProEntitled: workspaceProForSubmit || workspaceProAfterSubmitResolve,
       premiumPersistedFlowActive,
       premiumSendPathUnlocked,
       paidProAuthoritative,
@@ -10399,6 +10444,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     commitStarterMultiPartyProGate,
     beginStarterDraftGeneration,
     beginReturningPaidProCreateGeneration,
+    resolvePaidCreateSubmitEntitlement,
     currentPremiumMergedIntakeKey,
     intakeCombined,
     runEntitledPremiumImprovementRewrite,
@@ -11936,6 +11982,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setLoading(true);
     setHardError(null);
     const rawIntake = intakeCombined.trim();
+    await resolvePaidCreateSubmitEntitlement();
     if (
       (createProductionTwoPane || (simpleProductFlow && liveWorkspaceTwoPane)) &&
       commitStarterMultiPartyProGate(rawIntake)
@@ -28111,6 +28158,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   createFlowPhase_before: createFlowPhase,
                   displayPhase_before: displayPhase,
                 });
+                await resolvePaidCreateSubmitEntitlement();
                 if (commitStarterMultiPartyProGate(rawSubmitted)) {
                   await finalizeIntakeCapture();
                   return;
@@ -28304,6 +28352,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             createFlowPhase_before: createFlowPhase,
             displayPhase_before: displayPhase,
           });
+          await resolvePaidCreateSubmitEntitlement();
           if (commitStarterMultiPartyProGate(rawSubmitted)) {
             return;
           }

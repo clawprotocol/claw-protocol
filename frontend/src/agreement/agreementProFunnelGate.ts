@@ -1,3 +1,4 @@
+import { getOrgId } from "../launch/orgContext";
 import {
   hasOneTimeAgreementUnlock,
   hasSimpleFlowSendUnlocked,
@@ -6,12 +7,68 @@ import { fetchAgreementUsageSummary } from "./agreementWorkspaceApi";
 
 let workspaceProResolved: boolean | null = null;
 
+const WORKSPACE_USAGE_TIER_CACHE_KEY = "claw_workspace_usage_tier_v1";
+
+type PersistedWorkspaceUsageTier = {
+  orgId: string;
+  tier: string;
+  fetchedAt: number;
+};
+
 export function invalidateWorkspaceProEntitlementCache(): void {
   workspaceProResolved = null;
 }
 
+export function clearPersistedWorkspaceUsageTierCache(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.removeItem(WORKSPACE_USAGE_TIER_CACHE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readPersistedWorkspaceUsageTierPaid(): boolean {
+  if (typeof localStorage === "undefined") return false;
+  const oid = getOrgId().trim();
+  if (!oid) return false;
+  try {
+    const raw = localStorage.getItem(WORKSPACE_USAGE_TIER_CACHE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as Partial<PersistedWorkspaceUsageTier>;
+    if (parsed?.orgId !== oid) return false;
+    return String(parsed.tier || "").trim().toLowerCase() === "paid";
+  } catch {
+    return false;
+  }
+}
+
+export function writePersistedWorkspaceUsageTier(tier: string, orgId?: string): void {
+  const oid = (orgId ?? getOrgId()).trim();
+  if (!oid) return;
+  const snap: PersistedWorkspaceUsageTier = {
+    orgId: oid,
+    tier: String(tier || "").trim().toLowerCase(),
+    fetchedAt: Date.now(),
+  };
+  try {
+    localStorage.setItem(WORKSPACE_USAGE_TIER_CACHE_KEY, JSON.stringify(snap));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Vitest: seed persisted usage tier without network. */
+export function markPersistedWorkspaceUsageTierForTests(tier: string | null, orgId?: string): void {
+  if (tier === null) {
+    clearPersistedWorkspaceUsageTierCache();
+    return;
+  }
+  writePersistedWorkspaceUsageTier(tier, orgId);
+}
+
 export function readCachedWorkspaceProEntitlement(): boolean {
-  return workspaceProResolved === true;
+  return workspaceProResolved === true || readPersistedWorkspaceUsageTierPaid();
 }
 
 /** Vitest: seed workspace billing resolution without network. */
@@ -23,6 +80,9 @@ export function markWorkspaceProEntitlementResolvedForTests(entitled: boolean | 
 export async function fetchWorkspaceProEntitlement(): Promise<boolean> {
   if (workspaceProResolved !== null) return workspaceProResolved;
   const res = await fetchAgreementUsageSummary();
+  if (res.ok && res.data?.tier) {
+    writePersistedWorkspaceUsageTier(res.data.tier);
+  }
   workspaceProResolved = Boolean(res.ok && res.data && res.data.tier === "paid");
   return workspaceProResolved;
 }
