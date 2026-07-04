@@ -1526,7 +1526,9 @@ import {
   resolveCreateFlowPaidAcceptedCorpusPlain,
 } from "./paidProCreateFlowReviewHandoff";
 import {
+  ACCEPTED_PAID_PRO_CORPUS_HANDOFF_HELPER,
   CANONICAL_PAID_PRO_REVIEW_ENTRY_HELPER,
+  commitAcceptedPaidProCorpusHandoffSync,
   commitCanonicalPaidProReviewSessionMarkers,
   FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
   planEnterCanonicalPaidProReviewFlow,
@@ -6122,6 +6124,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const plan = planEnterCanonicalPaidProReviewFlow(args);
       if (!plan.shouldApply) return false;
       const finalPlain = plan.corpusPlain;
+      const pipelineSource = plan.pipelineSource;
+      commitAcceptedPaidProCorpusHandoffSync({
+        corpusPlain: finalPlain,
+        pipelineSource,
+      });
       setProUpgradeUseStarterView(plan.ui.proUpgradeUseStarterView);
       setProFullDraftQualityRetry(plan.ui.proFullDraftQualityRetry);
       setPremiumPostCheckoutPhase(plan.ui.premiumPostCheckoutPhase);
@@ -6135,6 +6142,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hydratedPremiumBodyRef.current = plan.refs.hydratedPremiumBody;
       lastKnownGoodAuthoritativeDraftRef.current = plan.refs.lastKnownGoodAuthoritativeDraft;
       acceptedReviewCorpusRef.current = plan.refs.acceptedReviewCorpus;
+      authoritativeAgreementSnapshotRef.current = plan.refs.authoritativeAgreementSnapshot;
       guidedFinalReviewExplicitlyUnlockedRef.current = plan.refs.guidedFinalReviewExplicitlyUnlocked;
       if (plan.mergeDraftWithCorpus) {
         setDraft(mergeDraftForPaidCreateFlowPersist(args.draft, finalPlain));
@@ -6160,7 +6168,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (plan.markPipelineValidationPassed) {
         commitCanonicalPaidProReviewSessionMarkers({
           corpusPlain: finalPlain,
-          pipelineSource: plan.pipelineSource,
+          pipelineSource,
         });
       } else {
         commitPaidProAcceptanceStorageHygiene();
@@ -6174,6 +6182,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateUiStage(plan.ui.createUiStage);
       setMobileWorkspacePane(plan.ui.mobileWorkspacePane);
       setPreviewPaneRevealed(plan.ui.previewPaneRevealed);
+      setGuidedAuthVersionNonce((n) => n + 1);
+      setReviewDocRefreshTick((n) => n + 1);
       const parties = args.draft.parties ?? [];
       if (plan.signerHandoff && parties.length >= 2 && args.recipientCandidates?.length) {
         writePremiumRecipientHandoffExact(
@@ -6202,6 +6212,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         console.info("[paid-pro-acceptance-routing]", {
           source: args.source,
           entryHelper: CANONICAL_PAID_PRO_REVIEW_ENTRY_HELPER,
+          handoffHelper: ACCEPTED_PAID_PRO_CORPUS_HANDOFF_HELPER,
           premiumRenderSource: plan.pipelineSource,
           acceptedBodyLen: finalPlain.length,
           guidedPhase: plan.ui.guidedCompletionPhase,
@@ -6452,6 +6463,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             )
           : {}),
       });
+      const paidPipelineSource = result.premiumRenderSource || "server_full_draft";
+      if (finalPlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+        commitAcceptedPaidProCorpusHandoffSync({
+          corpusPlain: finalPlain,
+          pipelineSource: paidPipelineSource,
+        });
+        lastPremiumWinningCorpusRef.current = finalPlain;
+        premiumPipelineOutputBodyRef.current = finalPlain;
+        hydratedPremiumBodyRef.current = finalPlain;
+        lastKnownGoodAuthoritativeDraftRef.current = finalPlain;
+        acceptedReviewCorpusRef.current = finalPlain;
+        authoritativeAgreementSnapshotRef.current = finalPlain;
+        guidedFinalReviewExplicitlyUnlockedRef.current = true;
+      }
       commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true });
       const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
         source: "returning_paid_create",

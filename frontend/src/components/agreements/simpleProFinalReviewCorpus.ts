@@ -6,6 +6,7 @@ import { GUIDED_MIN_AUTHORITATIVE_BODY_LEN } from "./guidedDealCompletion/guided
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { readPaidProPipelineAcceptedCorpusBody, readPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 
 /** Final review requires a full Pro agreement — not a signature-only fragment. */
 export const GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN = 1500;
@@ -65,6 +66,23 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   /** Free Starter review: never prefer authoritative_hydrated over intake-repaired preview. */
   isFreeStarterReview?: boolean;
 }): SimpleProFinalReviewCorpusResolution {
+  const authorityOnly = Boolean(args.finalReviewAuthorityOnly);
+  const pipelineAccepted = readPaidProPipelineAcceptedCorpusBody()?.trim() ?? "";
+  if (
+    authorityOnly &&
+    !args.isFreeStarterReview &&
+    pipelineAccepted.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
+    readPaidProPipelineAcceptedCorpusHash() !== null
+  ) {
+    return {
+      plainText: pipelineAccepted,
+      source: "picker_authoritative",
+      authoritativeLen: pipelineAccepted.length,
+      renderedLen: norm(args.renderedPreviewPlain).length,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
   if (args.isFreeStarterReview && !hasPaidProSourceOfTruth()) {
     const rendered = norm(args.renderedPreviewPlain);
     const adt = norm(args.agreementDocumentPlain);
@@ -129,7 +147,6 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   const picker = norm(args.pickerPlain);
   const pipelineWinning = norm(args.pipelineWinningPlain);
   const adt = norm(args.agreementDocumentPlain);
-  const authorityOnly = Boolean(args.finalReviewAuthorityOnly);
   const recovery = norm(args.recoveryAuthoritativePlain);
 
   const authCandidates: { plain: string; source: SimpleProFinalReviewCorpusSource }[] = [];

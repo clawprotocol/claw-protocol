@@ -21,6 +21,7 @@ import { clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { clearProGenerationAdoptionForTests } from "./paidProGenerationAdoption";
 import { clearPaidProAuthorityHashContinuityForTests } from "./paidProAuthorityHashContinuity";
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
+import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
 
 /** Clear cross-test Paid Pro pipeline caches and in-memory authority without touching sessionStorage. */
 export function resetPaidProPipelineTestIsolation(): void {
@@ -28,6 +29,7 @@ export function resetPaidProPipelineTestIsolation(): void {
   clearProGenerationAdoptionForTests();
   clearPaidProAuthorityHashContinuityForTests();
   clearAcceptedProCorpusSafeDisplayCacheForTests();
+  clearPaidProPipelineAcceptedCorpusHashForTests();
   clearPaidProCorpusScanCache();
   clearPaidProPostAcceptanceValidatorCache();
   clearPremiumParseSessionGuard();

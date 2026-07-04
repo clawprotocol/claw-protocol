@@ -21,7 +21,7 @@ import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus
 import { resolveSimpleProFinalReviewActive } from "./simpleProFinalReviewPhase";
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { markPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { markPaidProPipelineAcceptedCorpusHash, readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 
 export type CanonicalPaidProReviewEntrySource =
@@ -68,6 +68,7 @@ export type CanonicalPaidProReviewCorpusRefPlan = {
   hydratedPremiumBody: string;
   lastKnownGoodAuthoritativeDraft: string;
   acceptedReviewCorpus: string;
+  authoritativeAgreementSnapshot: string;
   guidedFinalReviewExplicitlyUnlocked: true;
 };
 
@@ -197,6 +198,7 @@ function buildCorpusRefPlan(corpusPlain: string): CanonicalPaidProReviewCorpusRe
     hydratedPremiumBody: corpusPlain,
     lastKnownGoodAuthoritativeDraft: corpusPlain,
     acceptedReviewCorpus: corpusPlain,
+    authoritativeAgreementSnapshot: corpusPlain,
     guidedFinalReviewExplicitlyUnlocked: true,
   };
 }
@@ -272,12 +274,28 @@ export function commitCanonicalPaidProReviewSessionMarkers(args: {
   corpusPlain: string;
   pipelineSource: string;
 }): void {
+  commitAcceptedPaidProCorpusHandoffSync(args);
+}
+
+/**
+ * Synchronous post-acceptance corpus commit — same markers/refs first-time post-checkout uses.
+ * Must run before paid review shell renders so resolvers never see len 0 after validation accepts.
+ */
+export function commitAcceptedPaidProCorpusHandoffSync(args: {
+  corpusPlain: string;
+  pipelineSource: string;
+}): boolean {
   const body = args.corpusPlain.trim();
-  if (body.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return;
-  markPaidProPipelineValidationPassed({ text: body, source: args.pipelineSource });
+  if (body.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return false;
+  const pipelineSource = (args.pipelineSource || "server_full_draft").trim();
+  if (!isAuthoritativePremiumPipelineRenderSource(pipelineSource)) return false;
+  markPaidProPipelineValidationPassed({ text: body, source: pipelineSource });
   markPaidProPipelineAcceptedCorpusHash(body);
   commitPaidProAcceptanceStorageHygiene();
+  return (readPaidProPipelineAcceptedCorpusBody()?.trim().length ?? 0) >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 }
+
+export const ACCEPTED_PAID_PRO_CORPUS_HANDOFF_HELPER = "commitAcceptedPaidProCorpusHandoffSync";
 
 export const CANONICAL_PAID_PRO_REVIEW_ENTRY_HELPER = "enterCanonicalPaidProReviewFlow";
 

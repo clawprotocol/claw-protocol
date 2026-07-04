@@ -14,6 +14,7 @@ import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import {
+  readPaidProPipelineAcceptedCorpusBody,
   readPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
@@ -24,6 +25,9 @@ import {
 import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
+
+/** Matches {@link GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN} — inlined to avoid simpleProFinalReviewCorpus import cycle. */
+const CREATE_FLOW_PIPELINE_ACCEPTED_MIN_LEN = 1500;
 
 export type AuthoritativeCreateFlowReviewShell = "paid_pro" | "free_starter";
 
@@ -225,6 +229,13 @@ export function resolveCreateFlowAuthoritativeReviewPlain(args: {
 }): string {
   const sot = getPaidProSourceOfTruthText().trim();
   if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN) return sot;
+  const pipelineAcceptedBody = readPaidProPipelineAcceptedCorpusBody()?.trim() ?? "";
+  if (
+    pipelineAcceptedBody.length >= CREATE_FLOW_PIPELINE_ACCEPTED_MIN_LEN &&
+    hasPaidCreateFlowPipelineAcceptance()
+  ) {
+    return pipelineAcceptedBody;
+  }
   const snap = readPremiumCompletionSnapshot();
   const snapBody = (snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "").trim();
   if (snap?.premiumAccepted && snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) return snapBody;
