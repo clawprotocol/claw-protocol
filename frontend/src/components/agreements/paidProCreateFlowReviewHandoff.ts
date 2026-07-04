@@ -15,6 +15,10 @@ import {
 } from "./premiumAcceptancePolicy";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { readPremiumCompletionSnapshot, hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
+import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
+import { resolveCreateFlowAcceptedPipelineCorpusPlain } from "./paidProAcceptanceRouting";
 import {
   hasPaidCreateFlowPipelineAcceptance,
 } from "./authoritativeCreateFlowReviewShell";
@@ -143,4 +147,78 @@ export function latchAcceptedPremiumBodyForCreateFlowTest(
   source = "server_full_draft",
 ): void {
   latchAcceptedServerFullDraftAuthority(body, source, { freezeEstablished: true });
+}
+
+/** Paid accepted /app/create must persist via review-first handoff (bypasses free draft cap). */
+export function shouldUsePaidCreateFlowReviewFirstPersist(args?: {
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
+  agreementDocumentText?: string;
+  draft?: ParsedDraftShape | null;
+}): boolean {
+  if (hasPaidCreateFlowPipelineAcceptance()) return true;
+  if (readPremiumCompletionSnapshot()?.premiumAccepted === true) return true;
+  if (hasPaidPremiumCompletionSession()) return true;
+  if (hasCurrentSessionProEntitlement()) return true;
+  const corpusLen = resolveCreateFlowAcceptedPipelineCorpusPlain({
+    draft: args?.draft ?? null,
+    agreementDocumentText: args?.agreementDocumentText,
+    pipelineWinningBody: args?.pipelineWinningBody,
+    hydratedPremiumBody: args?.hydratedPremiumBody,
+  }).length;
+  if (corpusLen >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    const source = "server_full_draft";
+    const body = resolveCreateFlowAcceptedPipelineCorpusPlain({
+      draft: args?.draft ?? null,
+      agreementDocumentText: args?.agreementDocumentText,
+      pipelineWinningBody: args?.pipelineWinningBody,
+      hydratedPremiumBody: args?.hydratedPremiumBody,
+    });
+    if (hasPaidProPipelineSessionAcceptance({ text: body, source })) return true;
+  }
+  return false;
+}
+
+/** Merge accepted paid corpus onto draft before POST /api/agreements/draft. */
+export function mergeDraftForPaidCreateFlowPersist(
+  draft: ParsedDraftShape,
+  corpusPlain: string,
+): ParsedDraftShape {
+  const body = corpusPlain.trim();
+  if (body.length < PAID_PRO_AUTHORITY_MIN_LEN) return draft;
+  return {
+    ...draft,
+    premium_full_document_text: body,
+    premium_server_full_document_text: body,
+    purpose: body,
+  };
+}
+
+/** Accepted paid create-flow must not surface draft-limit / network-recoverable dead-ends. */
+export function shouldSuppressPremiumNetworkRecoverableForPaidCreateFlow(args?: {
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
+  agreementDocumentText?: string;
+  draft?: ParsedDraftShape | null;
+}): boolean {
+  if (!hasPaidCreateFlowPipelineAcceptance()) return false;
+  const corpusLen = resolveCreateFlowAcceptedPipelineCorpusPlain({
+    draft: args?.draft ?? null,
+    agreementDocumentText: args?.agreementDocumentText,
+    pipelineWinningBody: args?.pipelineWinningBody,
+    hydratedPremiumBody: args?.hydratedPremiumBody,
+  }).length;
+  return corpusLen >= PAID_PRO_AUTHORITY_MIN_LEN;
+}
+
+/** Non-fatal persist failure when paid create-flow already has accepted corpus. */
+export function shouldRecoverPaidCreateFlowFromPersistFailure(args: {
+  corpusPlain?: string | null;
+  paidCheckoutCompleted?: boolean;
+}): boolean {
+  if (args.paidCheckoutCompleted) return true;
+  if (!hasPaidCreateFlowPipelineAcceptance()) return false;
+  const corpus = (args.corpusPlain ?? "").trim();
+  if (corpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
+  return false;
 }

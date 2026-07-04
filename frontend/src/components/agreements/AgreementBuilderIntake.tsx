@@ -1520,6 +1520,10 @@ import {
   shouldBlockFreeStarterReviewSurfaces,
   resolveCreateFlowPaidReviewDisplayPlain,
   tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff,
+  shouldUsePaidCreateFlowReviewFirstPersist,
+  mergeDraftForPaidCreateFlowPersist,
+  shouldSuppressPremiumNetworkRecoverableForPaidCreateFlow,
+  shouldRecoverPaidCreateFlowFromPersistFailure,
 } from "./paidProCreateFlowReviewHandoff";
 import {
   computeCreateFlowPaidProReviewReady,
@@ -5232,11 +5236,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!snapshot) return null;
     const { n1: handoffParty1 } = getRecipientHandoffNamesFromDraft(snapshot);
     const party = pickRecipientNameForHandoff(recipient1Name, handoffParty1).trim() || "Party";
+    const useReviewFirstPersist = shouldUsePaidCreateFlowReviewFirstPersist({
+      draft: snapshot,
+      agreementDocumentText: agreementDocumentTextRef.current,
+      pipelineWinningBody:
+        lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+      hydratedPremiumBody: hydratedPremiumBodyRef.current,
+    });
+    const corpusPlain = resolveCreateFlowAcceptedPipelineCorpusPlain({
+      draft: snapshot,
+      agreementDocumentText: agreementDocumentTextRef.current,
+      pipelineWinningBody:
+        lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+      hydratedPremiumBody: hydratedPremiumBodyRef.current,
+    });
+    const draftForPersist =
+      useReviewFirstPersist && corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
+        ? mergeDraftForPaidCreateFlowPersist(snapshot, corpusPlain)
+        : snapshot;
     const p = (async (): Promise<string | null> => {
       reviewWorkspaceBootstrapDepthRef.current += 1;
       if (reviewWorkspaceBootstrapDepthRef.current === 1) setReviewWorkspaceBootstrapping(true);
       try {
-        const { id } = await postNewDraft(snapshot, party);
+        const { id } = await postNewDraft(draftForPersist, party, {
+          reviewFirstHandoffPersist: useReviewFirstPersist,
+        });
         const tid = String(id || "").trim();
         if (tid && reviewWorkspaceSessionRef.current === session) {
           setReviewAgreementId(tid);
@@ -5244,6 +5268,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         return null;
       } catch {
+        if (
+          useReviewFirstPersist &&
+          corpusPlain.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
+        ) {
+          return null;
+        }
         return null;
       } finally {
         reviewAgreementEnsurePromiseRef.current = null;
@@ -6073,6 +6103,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       setProUpgradeUseStarterView(false);
       setProFullDraftQualityRetry(false);
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
+      setProFullDraftCustomGateMessage(null);
       agreementDocumentDirtyRef.current = false;
       setAgreementDocumentText(collapseDuplicateEsignNoticesInFullPreview(finalPlain));
       lastPremiumWinningCorpusRef.current = finalPlain;
@@ -6080,6 +6113,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hydratedPremiumBodyRef.current = finalPlain;
       lastKnownGoodAuthoritativeDraftRef.current = finalPlain;
       acceptedReviewCorpusRef.current = finalPlain;
+      setDraft(mergeDraftForPaidCreateFlowPersist(args.draft, finalPlain));
       if (!hasPaidProSourceOfTruth()) {
         try {
           establishPaidProSourceOfTruth({
@@ -11312,13 +11346,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return false;
       }
       if (
-        paidCheckoutCompletedRef.current &&
+        shouldRecoverPaidCreateFlowFromPersistFailure({
+          paidCheckoutCompleted: paidCheckoutCompletedRef.current,
+          corpusPlain: resolveCreateFlowAcceptedPipelineCorpusPlain({
+            draft: parsed,
+            agreementDocumentText: agreementDocumentTextRef.current,
+            pipelineWinningBody:
+              lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+            hydratedPremiumBody: hydratedPremiumBodyRef.current,
+          }),
+        }) &&
         (hasPaidProSourceOfTruth() ||
           Boolean(readPremiumCompletionSnapshot()?.premiumAccepted) ||
+          hasPaidCreateFlowPipelineAcceptance() ||
           hydratedPremiumBodyRef.current.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN ||
           lastPremiumWinningCorpusRef.current.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN)
       ) {
         setHardError(null);
+        setPremiumPostCheckoutPhase(null);
+        setProFullDraftCustomGateMessage(null);
+        setProFullDraftQualityRetry(false);
         setProductionSendBarPhase("idle");
         setProductionSendBarAgreementId(null);
         return true;
@@ -11335,7 +11382,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return false;
       }
       const draftHttpMsg = formatDraftCreateHttpUserMessage(e);
+      const suppressDraftLimitForPaidCreate = shouldSuppressPremiumNetworkRecoverableForPaidCreateFlow({
+        draft: parsed,
+        agreementDocumentText: agreementDocumentTextRef.current,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      });
       if (isDraftCreateHttpForbidden(e) || draftHttpMsg) {
+        if (suppressDraftLimitForPaidCreate) {
+          setHardError(null);
+          setPremiumPostCheckoutPhase(null);
+          setProFullDraftCustomGateMessage(null);
+          setProFullDraftQualityRetry(false);
+          setProductionSendBarPhase("idle");
+          setProductionSendBarAgreementId(null);
+          return true;
+        }
         setHardError(draftHttpMsg ?? "LawDog could not save this draft.");
         setProductionSendBarPhase("idle");
         setProductionSendBarAgreementId(null);
@@ -17582,6 +17645,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const canProceedWithPaidProDocument = useMemo(() => {
     if (!premiumPaidDocumentSurface) return true;
+    if (
+      shouldSuppressPremiumNetworkRecoverableForPaidCreateFlow({
+        draft: draft ?? null,
+        agreementDocumentText,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      }) &&
+      paidProFirstReviewCorpusReady
+    ) {
+      if (proUpgradeUseStarterView) return false;
+      if (premiumPaidUnavailableRetry) return false;
+      return proTruthIsPremiumDocumentReady(premiumProTruthSnapshot);
+    }
     if (!paidProRuntimeAuthority.established || !paidProRuntimeAuthority.canRenderProReviewShell) return false;
     if (proUpgradeUseStarterView) return false;
     if (premiumPaidUnavailableRetry) return false;
@@ -17608,6 +17685,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumProTruthSnapshot,
     paidProRuntimeAuthority.established,
     paidProRuntimeAuthority.canRenderProReviewShell,
+    paidProFirstReviewCorpusReady,
+    agreementDocumentText,
   ]);
 
   /** “Continue to reviewer / signer” after checkout while still on DRAFT (before recipients). */
@@ -19433,7 +19512,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumTruthPipelineSource === "premium_network_retryable") &&
       !showPremiumCorsBlockedPanel &&
       !authoritativePremiumUiCommitted &&
-      !canProceedWithPaidProDocument,
+      !canProceedWithPaidProDocument &&
+      !shouldSuppressPremiumNetworkRecoverableForPaidCreateFlow({
+        draft: draft ?? null,
+        agreementDocumentText,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      }),
   );
   /** Canonical paid Pro review state — fail closed into FAILED_PREMIUM_CORPUS, never starter degrade. */
   const paidProReviewState = useMemo(
