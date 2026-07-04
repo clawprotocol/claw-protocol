@@ -1524,6 +1524,7 @@ import {
   mergeDraftForPaidCreateFlowPersist,
   shouldSuppressPremiumNetworkRecoverableForPaidCreateFlow,
   shouldRecoverPaidCreateFlowFromPersistFailure,
+  resolveCreateFlowPaidAcceptedCorpusPlain,
 } from "./paidProCreateFlowReviewHandoff";
 import {
   computeCreateFlowPaidProReviewReady,
@@ -3567,7 +3568,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ) {
         return resolvePaidProAuthoritativeDisplayPlain(paidProReviewSurfaceOptsRef.current);
       }
+      if (hasPaidCreateFlowPipelineAcceptance()) {
+        const pipelinePlain = resolveCreateFlowPaidAcceptedCorpusPlain({
+          winningBody:
+            lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+          snapshotPlain: agreementDocumentTextRef.current,
+          draft: d,
+          agreementDocumentText: agreementDocumentTextRef.current,
+          pipelineWinningBody:
+            lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+          hydratedPremiumBody: hydratedPremiumBodyRef.current,
+        });
+        if (pipelinePlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+          return pipelinePlain;
+        }
+      }
       const starterPreview =
+        !hasPaidCreateFlowPipelineAcceptance() &&
         !(
           tierAllowsAdvancedFullDraftReveal(tier) ||
           draftHasFullDraftExpansion(d) ||
@@ -6343,16 +6360,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draft: merged.draft,
       });
       const snapshotPlain = snapshotCoalesce.text.trim();
-      const handoff = tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff({
+      const premiumDeliverablePlain = buildAgreementPreviewTextCore(merged.draft, {
+        starterPreview: false,
+        premiumDeliverablePreview: true,
+        intakeText: mergedIntake,
+      }).trim();
+      const acceptedCorpusPlain = resolveCreateFlowPaidAcceptedCorpusPlain({
         winningBody: winning,
         snapshotPlain,
+        draft: merged.draft,
+        agreementDocumentText: agreementDocumentTextRef.current,
+        pipelineWinningBody: winning || premiumPipelineOutputBodyRef.current,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+        premiumDeliverablePlain,
+      });
+      const handoff = tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff({
+        winningBody: acceptedCorpusPlain || winning,
+        snapshotPlain: acceptedCorpusPlain || snapshotPlain,
         pipelineSource: result.premiumRenderSource,
         draft: merged.draft,
         intakeText: mergedIntake,
       });
       const finalPlain = resolveCreateFlowPaidReviewDisplayPlain({
-        winningBody: winning,
-        snapshotPlain,
+        winningBody: acceptedCorpusPlain || winning,
+        snapshotPlain: acceptedCorpusPlain || snapshotPlain,
         pipelineSource: result.premiumRenderSource,
         handoffBody: handoff.body,
         handoffEstablished: handoff.established,
@@ -6397,7 +6428,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (hydrated) {
         applyHydrationFromPremiumSnapshot(hydrated);
       }
-      if (finalPlain.length >= 500) {
+      if (finalPlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
         markPaidProPipelineValidationPassed({
           text: finalPlain,
           source: result.premiumRenderSource,
@@ -13310,13 +13341,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!hasPaidCreateFlowPipelineAcceptance()) return;
     const pipelineSource =
       premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current ?? "server_full_draft";
-    const corpusPlain = resolveCreateFlowAcceptedPipelineCorpusPlain({
-      agreementDocumentText,
-      draft,
-      pipelineWinningBody:
+    const corpusPlain = resolveCreateFlowPaidAcceptedCorpusPlain({
+      winningBody:
         lastPremiumWinningCorpusRef.current ||
         premiumPipelineOutputBodyRef.current ||
         readPremiumCompletionSnapshot()?.premiumWinningBodyText,
+      snapshotPlain: agreementDocumentText,
+      draft,
+      agreementDocumentText,
+      pipelineWinningBody:
+        lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
       hydratedPremiumBody: hydratedPremiumBodyRef.current,
     });
     if (
@@ -21297,6 +21331,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const paidProStarterPreviewPlain = useMemo(() => {
     if (suppressFreeStarterCreateFlowConversionUi) return "";
+    if (hasPaidCreateFlowPipelineAcceptance()) return "";
     if (!draft) return "";
     if (
       hasPaidProSourceOfTruth() &&
@@ -21357,6 +21392,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         len: sotPlain.length,
         finalizedHash: sotHash,
       };
+    }
+    if (hasPaidCreateFlowPipelineAcceptance() || isCreateFlowPaidAcceptedOrAuthoritativeActive()) {
+      const pipelinePlain = resolveCreateFlowPaidAcceptedCorpusPlain({
+        winningBody:
+          lastPremiumWinningCorpusRef.current ||
+          premiumPipelineOutputBodyRef.current ||
+          readPremiumCompletionSnapshot()?.premiumWinningBodyText,
+        snapshotPlain: agreementDocumentText,
+        draft: draft ?? null,
+        agreementDocumentText,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      });
+      if (pipelinePlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+        return {
+          body: pipelinePlain,
+          source: "paid_pro_review_render" as const,
+          len: pipelinePlain.length,
+          finalizedHash: "",
+        };
+      }
     }
     const rd = reviewDraft ?? draft;
     const serverFullDocumentText = (

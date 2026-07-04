@@ -31,6 +31,7 @@ import {
   preparePaidProServerDocumentForAcceptance,
   validateProMinimumSubstance,
 } from "./paidProConciseServicesQuality";
+import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
 import { corpusHasPaidProSyntheticMalformedSectionHeadings } from "./paidProSyntheticMalformedSectionHeadings";
 import {
   buildPaidProFreezeCandidate,
@@ -187,6 +188,28 @@ export function logPremiumValidationSource(args: {
     // eslint-disable-next-line no-console
     console.info("[premium-validation-source]", payload);
   }
+}
+
+/** Freeze-passed server corpus may still match starter-shell heuristics — trust freeze gates instead. */
+function shouldBypassStarterShellRenderRejection(args: {
+  acc: { ok: boolean; reasons: string[] };
+  stitched: { ok: boolean; reasons: string[] };
+  freezeOk: boolean;
+  bodyLen: number;
+}): boolean {
+  if (!args.freezeOk || args.bodyLen < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return false;
+  const starterShellReasons = new Set([
+    "starter_shell_five_section",
+    "starter_shell_five_or_stitched_preview",
+    "only_five_starter_headings",
+  ]);
+  const renderBlocked =
+    !args.acc.ok && args.acc.reasons.length > 0 && args.acc.reasons.every((r) => starterShellReasons.has(r));
+  const stitchedBlocked =
+    !args.stitched.ok &&
+    args.stitched.reasons.length > 0 &&
+    args.stitched.reasons.every((r) => starterShellReasons.has(r) || r.startsWith("banned_paid_stitch:"));
+  return renderBlocked || stitchedBlocked;
 }
 
 export function validatePaidProOutput(args: {
@@ -450,15 +473,26 @@ export function validatePaidProOutput(args: {
     intakeText: args.rawIntake,
     partyNames: args.draft?.parties?.map((p) => p.name) ?? null,
   });
-  if (!acc.ok) {
-    return rejectAt("rejectPremiumBodyForProRender", acc.reasons);
-  }
   const s = rejectPaidProStitchedOrThinShell(bodyForGates, intakeLower);
-  if (!s.ok) {
-    if (conciseQuality.applies && conciseQuality.ok && serverFullDocExists) {
-      /* concise commercial services server body — not a stitched starter shell */
-    } else {
-      return rejectAt("rejectPaidProStitchedOrThinShell", s.reasons);
+  if (
+    shouldBypassStarterShellRenderRejection({
+      acc,
+      stitched: s,
+      freezeOk: freezeCandidate.ok,
+      bodyLen: bodyForGates.trim().length,
+    })
+  ) {
+    /* substantive server draft passed freeze — do not re-reject as starter shell */
+  } else {
+    if (!acc.ok) {
+      return rejectAt("rejectPremiumBodyForProRender", acc.reasons);
+    }
+    if (!s.ok) {
+      if (conciseQuality.applies && conciseQuality.ok && serverFullDocExists) {
+        /* concise commercial services server body — not a stitched starter shell */
+      } else {
+        return rejectAt("rejectPaidProStitchedOrThinShell", s.reasons);
+      }
     }
   }
   const drift = rejectProUpgradeSourceFactDrift(bodyForGates, { intakeLower });

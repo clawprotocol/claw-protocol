@@ -16,6 +16,7 @@ import {
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
 import { readPremiumCompletionSnapshot, hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
 import { resolveCreateFlowAcceptedPipelineCorpusPlain } from "./paidProAcceptanceRouting";
@@ -194,6 +195,39 @@ export function mergeDraftForPaidCreateFlowPersist(
   };
 }
 
+/** Longest substantive paid corpus for create-flow review — never the short starter preview. */
+export function resolveCreateFlowPaidAcceptedCorpusPlain(args: {
+  winningBody?: string | null;
+  snapshotPlain?: string | null;
+  draft?: ParsedDraftShape | null;
+  agreementDocumentText?: string;
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
+  premiumDeliverablePlain?: string | null;
+}): string {
+  const draftPremium = String(
+    args.draft?.premium_server_full_document_text ?? args.draft?.premium_full_document_text ?? "",
+  ).trim();
+  const pipeline = resolveCreateFlowAcceptedPipelineCorpusPlain({
+    draft: args.draft ?? null,
+    agreementDocumentText: args.agreementDocumentText,
+    pipelineWinningBody: args.pipelineWinningBody,
+    hydratedPremiumBody: args.hydratedPremiumBody,
+  });
+  const candidates = [
+    (args.winningBody ?? "").trim(),
+    (args.snapshotPlain ?? "").trim(),
+    (args.premiumDeliverablePlain ?? "").trim(),
+    draftPremium,
+    pipeline,
+    (args.agreementDocumentText ?? "").trim(),
+  ]
+    .filter((s) => s.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN)
+    .sort((a, b) => b.length - a.length);
+  if (candidates[0]) return candidates[0];
+  return pipeline || (args.winningBody ?? "").trim() || (args.snapshotPlain ?? "").trim();
+}
+
 /** Accepted paid create-flow must not surface draft-limit / network-recoverable dead-ends. */
 export function shouldSuppressPremiumNetworkRecoverableForPaidCreateFlow(args?: {
   pipelineWinningBody?: string | null;
@@ -208,7 +242,7 @@ export function shouldSuppressPremiumNetworkRecoverableForPaidCreateFlow(args?: 
     pipelineWinningBody: args?.pipelineWinningBody,
     hydratedPremiumBody: args?.hydratedPremiumBody,
   }).length;
-  return corpusLen >= PAID_PRO_AUTHORITY_MIN_LEN;
+  return corpusLen >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 }
 
 /** Non-fatal persist failure when paid create-flow already has accepted corpus. */
@@ -219,6 +253,6 @@ export function shouldRecoverPaidCreateFlowFromPersistFailure(args: {
   if (args.paidCheckoutCompleted) return true;
   if (!hasPaidCreateFlowPipelineAcceptance()) return false;
   const corpus = (args.corpusPlain ?? "").trim();
-  if (corpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
+  if (corpus.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return true;
   return false;
 }

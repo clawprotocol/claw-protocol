@@ -10,7 +10,7 @@ import {
 } from "./authoritativePaidProReview";
 import { clearCreateReviewDraftReadyMarker } from "./agreementIntakeStorage";
 import { clearPersistedGuidedSession } from "./guidedDealCompletion/guidedSessionPersistence";
-import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
 import {
   hasPaidCreateFlowPipelineAcceptance,
   resolveCreateFlowAuthoritativeReviewPlain,
@@ -101,7 +101,7 @@ export function shouldApplyCreateFlowPaidFirstReviewRouting(args: {
 } & ResolveCreateFlowAcceptedPipelineCorpusArgs): boolean {
   if (args.alreadyOpened) return false;
   const corpusPlain = (args.corpusPlain ?? resolveCreateFlowAcceptedPipelineCorpusPlain(args)).trim();
-  if (corpusPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
+  if (corpusPlain.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return false;
   return shouldOpenCanonicalPaidCreateFlowFirstReview({
     premiumRenderSource: args.premiumRenderSource,
     acceptedBodyLen: corpusPlain.length,
