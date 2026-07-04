@@ -22,6 +22,7 @@ export type IntakeSignerMetadataSource =
   | "party_n_signer"
   | "for_role_signer"
   | "signed_by"
+  | "authorized_signers_bullet"
   | "intake_contact";
 
 export type ExtractedIntakeSignerMetadata = {
@@ -63,6 +64,10 @@ const FOR_ROLE_SIGNER_RE =
 
 /** "Signed by Joe Doe, CEO" — slot order only. */
 const SIGNED_BY_RE = /\bSigned\s+by\s+([^,\n]+?)(?:,\s*([^.\n]+?))?(?:\.|$)/gi;
+
+/** "Authorized signers:" bullets — * Sarah Mitchell, CEO, Red Mesa Logistics LLC */
+const AUTHORIZED_SIGNERS_BULLET_RE =
+  /(?:^|\n)\s*[*\-•]?\s*([A-Z][^,\n*]+?),\s*([^,\n]+?),\s*((?:[A-Za-z0-9][A-Za-z0-9\s&'.-]*?)(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?)\s*(?=\n|$)/gi;
 
 function cleanSignerField(value: string | null | undefined, field: "signerName" | "signerTitle"): string {
   const raw = String(value ?? "").trim();
@@ -321,6 +326,21 @@ export function extractCanonicalIntakeSignerMetadata(
       partyAddress: "",
       source: "signed_by",
     });
+  }
+
+  if (/\bauthorized\s+signers\b/i.test(raw)) {
+    AUTHORIZED_SIGNERS_BULLET_RE.lastIndex = 0;
+    for (const m of raw.matchAll(AUTHORIZED_SIGNERS_BULLET_RE)) {
+      const entity = sanitizePartyLegalNameFromIntakeFragment((m[3] ?? "").trim());
+      pushExtracted(out, {
+        legalEntity: entity,
+        signerName: cleanSignerField(m[1], "signerName"),
+        signerTitle: cleanSignerField(m[2], "signerTitle"),
+        signerEmail: "",
+        partyAddress: "",
+        source: "authorized_signers_bullet",
+      });
+    }
   }
 
   return out;

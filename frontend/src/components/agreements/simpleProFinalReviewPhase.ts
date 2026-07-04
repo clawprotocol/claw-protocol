@@ -19,6 +19,8 @@ export function resolveSimpleProFinalReviewActive(args: {
   guidedCompletionPhase: GuidedCompletionPhase;
   /** Frozen paid SoT after checkout — canonical final review without guided Q&A first. */
   acceptedPaidProAuthority?: boolean;
+  /** Returning paid /app/create after pipeline acceptance — same first-review entry as post-checkout. */
+  canonicalCreateFlowFirstReviewActive?: boolean;
   /** User explicitly opened final review — never auto-open from apply alone. */
   finalReviewExplicitlyOpened?: boolean;
   /** Guided signing confirmation replaces final review document surface. */
@@ -29,7 +31,7 @@ export function resolveSimpleProFinalReviewActive(args: {
 }): boolean {
   if (!args.premiumPaidDocumentSurface) return false;
   if (args.premiumRecipientUxActive) return false;
-  if (args.acceptedPaidProAuthority) {
+  if (args.acceptedPaidProAuthority || args.canonicalCreateFlowFirstReviewActive) {
     return (
       args.createFlowPhase === "draft_ready_for_review" ||
       args.createFlowPhase === "recipient_setup_required" ||

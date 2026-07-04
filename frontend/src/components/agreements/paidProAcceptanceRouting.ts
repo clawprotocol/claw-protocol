@@ -47,6 +47,17 @@ export function planPaidProAcceptanceUiRouting(
   };
 }
 
+/** Post-acceptance UI routing when corpus length alone is sufficient (returning paid create-flow). */
+export function shouldOpenCanonicalPaidCreateFlowFirstReview(args: {
+  premiumRenderSource?: string | null;
+  acceptedBodyLen: number;
+}): boolean {
+  return resolvePaidProAcceptanceRoutingMarkers({
+    premiumRenderSource: args.premiumRenderSource,
+    acceptedBodyLen: args.acceptedBodyLen,
+  }).openCanonicalFinalReview;
+}
+
 /** Side effects safe immediately after establishPaidProSourceOfTruth. */
 export function commitPaidProAcceptanceStorageHygiene(): void {
   if (!hasAcceptedPaidProAuthority()) return;

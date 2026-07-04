@@ -143,11 +143,19 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     }
   }
 
-  const picked = authorityOnly
+  let picked = authorityOnly
     ? authCandidates[0] ?? { plain: authoritative, source: "authoritative_hydrated" as const }
     : pickLongestAuthoritative(
         authCandidates.length ? authCandidates : [{ plain: authoritative, source: "authoritative_hydrated" }],
       );
+
+  if (
+    authorityOnly &&
+    picked.plain.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
+    picker.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN
+  ) {
+    picked = { plain: picker, source: "picker_authoritative" };
+  }
 
   let plainText = picked.plain;
   let source = picked.source;
