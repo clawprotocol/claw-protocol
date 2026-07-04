@@ -201,11 +201,12 @@ describe("TEST499 — returning paid create survives draft-limit 403 with accept
     ).toBe(true);
   });
 
-  it("8 — first-time post-checkout SoT establishment path unchanged", () => {
+  it("8 — first-time post-checkout and returning create share canonical review entry", () => {
     expect(intake).toContain("establishPaidProSourceOfTruth");
-    expect(intake).toContain("applyCreateFlowPaidAcceptanceFirstReviewRouting");
-    expect(intake).toContain('setGuidedCompletionPhase("applied")');
-    expect(intake).toContain('source: "create_flow_paid_acceptance"');
+    expect(intake).toContain("enterCanonicalPaidProReviewFlow");
+    expect(intake).toContain('source: "post_checkout_apply_success"');
+    expect(intake).toContain('source: "returning_paid_create"');
+    expect(intake).toContain("commitPostCheckoutCanonicalReviewEntry");
   });
 
   it("9 — true free users still surface draft_limit_reached on POST /draft", () => {

@@ -687,9 +687,7 @@ import { clearAuthoritativeAgreementDocument } from "./authoritativeAgreementDoc
 import {
   hasPaidProPipelineSessionAcceptance,
   clearPaidProPostAcceptanceValidatorCache,
-  markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
-import { markPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import {
   resolvePaidProAuthoritativeDisplayPlain,
   shouldSuppressCorpusEmbeddedSignatureForProReview,
@@ -1526,6 +1524,14 @@ import {
   shouldRecoverPaidCreateFlowFromPersistFailure,
   resolveCreateFlowPaidAcceptedCorpusPlain,
 } from "./paidProCreateFlowReviewHandoff";
+import {
+  CANONICAL_PAID_PRO_REVIEW_ENTRY_HELPER,
+  commitCanonicalPaidProReviewSessionMarkers,
+  planEnterCanonicalPaidProReviewFlow,
+  resolveCanonicalPaidProReviewCorpus,
+  shouldBlockDegradedPaidReviewBranchesAfterAcceptance,
+  type EnterCanonicalPaidProReviewFlowArgs,
+} from "./enterCanonicalPaidProReviewFlow";
 import {
   computeCreateFlowPaidProReviewReady,
   hasPaidCreateFlowPipelineAcceptance,
@@ -6096,46 +6102,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     bumpPremiumSurfaceGateTick();
   }
 
-  /** Same first-time post-checkout Pro review routing — reused by entitled rewrite and pipeline-acceptance latch. */
-  const applyCreateFlowPaidAcceptanceFirstReviewRouting = React.useCallback(
-    (args: {
-      corpusPlain: string;
-      pipelineSource: string;
-      draft: ParsedDraftShape;
-      intakeText: string;
-      agreementGenerationId?: string | null;
-      generationOutcome?: string | null;
-      recipientCandidates?: Array<{ name?: string; email?: string; role?: string }>;
-    }): boolean => {
-      const finalPlain = (args.corpusPlain || "").trim();
-      if (
-        !shouldApplyCreateFlowPaidFirstReviewRouting({
-          alreadyOpened:
-            guidedFinalReviewExplicitlyUnlockedRef.current || guidedFinalReviewExplicitlyOpened,
-          premiumRenderSource: args.pipelineSource,
-          corpusPlain: finalPlain,
-        })
-      ) {
-        return false;
+  /** Canonical first-time post-checkout AND returning paid create — one review entry path. */
+  const enterCanonicalPaidProReviewFlow = React.useCallback(
+    (args: EnterCanonicalPaidProReviewFlowArgs): boolean => {
+      const plan = planEnterCanonicalPaidProReviewFlow(args);
+      if (!plan.shouldApply) return false;
+      const finalPlain = plan.corpusPlain;
+      setProUpgradeUseStarterView(plan.ui.proUpgradeUseStarterView);
+      setProFullDraftQualityRetry(plan.ui.proFullDraftQualityRetry);
+      setPremiumPostCheckoutPhase(plan.ui.premiumPostCheckoutPhase);
+      setPremiumPipelineUserMessage(plan.ui.premiumPipelineUserMessage);
+      setProFullDraftCustomGateMessage(plan.ui.proFullDraftCustomGateMessage);
+      agreementDocumentDirtyRef.current = plan.ui.agreementDocumentDirty;
+      const collapsedPlain = collapseDuplicateEsignNoticesInFullPreview(finalPlain);
+      setAgreementDocumentText(collapsedPlain);
+      lastPremiumWinningCorpusRef.current = plan.refs.lastPremiumWinningCorpus;
+      premiumPipelineOutputBodyRef.current = plan.refs.premiumPipelineOutputBody;
+      hydratedPremiumBodyRef.current = plan.refs.hydratedPremiumBody;
+      lastKnownGoodAuthoritativeDraftRef.current = plan.refs.lastKnownGoodAuthoritativeDraft;
+      acceptedReviewCorpusRef.current = plan.refs.acceptedReviewCorpus;
+      guidedFinalReviewExplicitlyUnlockedRef.current = plan.refs.guidedFinalReviewExplicitlyUnlocked;
+      if (plan.mergeDraftWithCorpus) {
+        setDraft(mergeDraftForPaidCreateFlowPersist(args.draft, finalPlain));
       }
-      setProUpgradeUseStarterView(false);
-      setProFullDraftQualityRetry(false);
-      setPremiumPostCheckoutPhase(null);
-      setPremiumPipelineUserMessage(null);
-      setProFullDraftCustomGateMessage(null);
-      agreementDocumentDirtyRef.current = false;
-      setAgreementDocumentText(collapseDuplicateEsignNoticesInFullPreview(finalPlain));
-      lastPremiumWinningCorpusRef.current = finalPlain;
-      premiumPipelineOutputBodyRef.current = finalPlain;
-      hydratedPremiumBodyRef.current = finalPlain;
-      lastKnownGoodAuthoritativeDraftRef.current = finalPlain;
-      acceptedReviewCorpusRef.current = finalPlain;
-      setDraft(mergeDraftForPaidCreateFlowPersist(args.draft, finalPlain));
-      if (!hasPaidProSourceOfTruth()) {
+      if (plan.establishSourceOfTruth) {
         try {
           establishPaidProSourceOfTruth({
             text: finalPlain,
-            source: args.pipelineSource || "server_full_draft",
+            source: plan.pipelineSource,
             draft: args.draft,
             intakeText: args.intakeText,
             agreementGenerationId:
@@ -6143,22 +6137,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             generationOutcome: args.generationOutcome ?? "ok",
           });
         } catch {
-          /* pipeline acceptance still mounts canonical first review */
+          /* canonical review entry still mounts when pipeline acceptance latched */
         }
       }
-      commitPaidProAcceptanceStorageHygiene();
-      setGuidedCompletionPhase("applied");
-      setGuidedFinalReviewExplicitlyOpened(true);
-      guidedFinalReviewExplicitlyUnlockedRef.current = true;
-      setPremiumPersistedFlowActive(true);
-      setPremiumSendPathUnlocked(true);
-      setCreateFlowPhase("draft_ready_for_review");
-      setDisplayPhase("review");
-      setCreateUiStage(CreateUiStage.DRAFT);
-      setMobileWorkspacePane("preview");
-      setPreviewPaneRevealed(true);
+      if (plan.commitReviewArtifact) {
+        commitReviewArtifact({ plainText: collapsedPlain, source: "premium_authoritative" });
+      }
+      if (plan.markPipelineValidationPassed) {
+        commitCanonicalPaidProReviewSessionMarkers({
+          corpusPlain: finalPlain,
+          pipelineSource: plan.pipelineSource,
+        });
+      } else {
+        commitPaidProAcceptanceStorageHygiene();
+      }
+      setGuidedCompletionPhase(plan.ui.guidedCompletionPhase);
+      setGuidedFinalReviewExplicitlyOpened(plan.ui.guidedFinalReviewExplicitlyOpened);
+      setPremiumPersistedFlowActive(plan.ui.premiumPersistedFlowActive);
+      setPremiumSendPathUnlocked(plan.ui.premiumSendPathUnlocked);
+      setCreateFlowPhase(plan.ui.createFlowPhase);
+      setDisplayPhase(plan.ui.displayPhase);
+      setCreateUiStage(plan.ui.createUiStage);
+      setMobileWorkspacePane(plan.ui.mobileWorkspacePane);
+      setPreviewPaneRevealed(plan.ui.previewPaneRevealed);
       const parties = args.draft.parties ?? [];
-      if (parties.length >= 2 && args.recipientCandidates?.length) {
+      if (plan.signerHandoff && parties.length >= 2 && args.recipientCandidates?.length) {
         writePremiumRecipientHandoffExact(
           premiumHandoffSlotFromParty(
             parties[0] ?? { role: "party" },
@@ -6170,50 +6173,61 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ),
           buildPartyIndexSlotsFromPartiesAndCandidates(parties, args.recipientCandidates),
         );
-        const legalEntities = parties
-          .slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS)
-          .map((p) => String((p as { name?: string }).name ?? "").trim())
-          .filter(Boolean);
-        if (legalEntities.length >= 2) {
-          const seed = runPaidProSignerMetadataAuthoritySeed({
-            stage: "create_flow_paid_acceptance_routing",
-            legalEntities,
-            intakeText: args.intakeText,
-            corpusText: finalPlain,
-            draft: args.draft,
-            authoritativePartyCount: legalEntities.length,
-          });
-          if (seed.names.some((n) => n.trim()) || seed.titles.some((t) => t.trim())) {
-            writePremiumRecipientHandoffSignerMetadata({
-              signerNames: seed.names,
-              signerTitles: seed.titles,
-              partyLegalNames: legalEntities,
-              partyEmails: args.recipientCandidates.map((c) => c.email ?? ""),
-            });
-            setPartySignerNames(seed.names);
-            setPartySignerTitles(seed.titles);
-          }
-        }
+        writePremiumRecipientHandoffSignerMetadata({
+          signerNames: plan.signerHandoff.signerNames,
+          signerTitles: plan.signerHandoff.signerTitles,
+          partyLegalNames: plan.signerHandoff.partyLegalNames,
+          partyEmails: plan.signerHandoff.partyEmails,
+        });
+        setPartySignerNames(plan.signerHandoff.signerNames);
+        setPartySignerTitles(plan.signerHandoff.signerTitles);
       }
       bumpPremiumSurfaceGateTick();
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.info("[paid-pro-acceptance-routing]", {
-          source: "create_flow_paid_acceptance",
-          premiumRenderSource: args.pipelineSource,
+          source: args.source,
+          entryHelper: CANONICAL_PAID_PRO_REVIEW_ENTRY_HELPER,
+          premiumRenderSource: plan.pipelineSource,
           acceptedBodyLen: finalPlain.length,
-          guidedPhase: "applied",
-          finalReviewOpened: true,
+          guidedPhase: plan.ui.guidedCompletionPhase,
+          finalReviewOpened: plan.ui.guidedFinalReviewExplicitlyOpened,
         });
       }
       return true;
     },
     [
-      guidedFinalReviewExplicitlyOpened,
       bumpPremiumSurfaceGateTick,
       setPartySignerNames,
       setPartySignerTitles,
     ],
+  );
+
+  /** @deprecated Use enterCanonicalPaidProReviewFlow — kept as alias for returning paid create latch. */
+  const applyCreateFlowPaidAcceptanceFirstReviewRouting = React.useCallback(
+    (args: {
+      corpusPlain: string;
+      pipelineSource: string;
+      draft: ParsedDraftShape;
+      intakeText: string;
+      agreementGenerationId?: string | null;
+      generationOutcome?: string | null;
+      recipientCandidates?: Array<{ name?: string; email?: string; role?: string }>;
+    }): boolean =>
+      enterCanonicalPaidProReviewFlow({
+        source: "returning_paid_create",
+        respectAlreadyOpened: true,
+        alreadyOpened:
+          guidedFinalReviewExplicitlyUnlockedRef.current || guidedFinalReviewExplicitlyOpened,
+        corpusPlain: args.corpusPlain,
+        pipelineSource: args.pipelineSource,
+        draft: args.draft,
+        intakeText: args.intakeText,
+        agreementGenerationId: args.agreementGenerationId,
+        generationOutcome: args.generationOutcome,
+        recipientCandidates: args.recipientCandidates,
+      }),
+    [enterCanonicalPaidProReviewFlow, guidedFinalReviewExplicitlyOpened],
   );
 
   /**
@@ -6365,7 +6379,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumDeliverablePreview: true,
         intakeText: mergedIntake,
       }).trim();
-      const acceptedCorpusPlain = resolveCreateFlowPaidAcceptedCorpusPlain({
+      const acceptedCorpusPlain = resolveCanonicalPaidProReviewCorpus({
         winningBody: winning,
         snapshotPlain,
         draft: merged.draft,
@@ -6429,12 +6443,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         applyHydrationFromPremiumSnapshot(hydrated);
       }
       if (finalPlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
-        markPaidProPipelineValidationPassed({
-          text: finalPlain,
-          source: result.premiumRenderSource,
-        });
-        markPaidProPipelineAcceptedCorpusHash(finalPlain);
-        applyCreateFlowPaidAcceptanceFirstReviewRouting({
+        enterCanonicalPaidProReviewFlow({
+          source: "returning_paid_create",
+          respectAlreadyOpened: false,
           corpusPlain: finalPlain,
           pipelineSource: result.premiumRenderSource || "server_full_draft",
           draft: mergedDraftPersist,
@@ -6463,7 +6474,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     } finally {
       entitledPremiumRewriteInFlightRef.current = false;
     }
-  }, [draft, finalizeIntakeCapture, intakePartyRoleLabels, simpleProductFlow, resolveRawIntakeForPremiumCheckout, bumpPremiumSurfaceGateTick, applyCreateFlowPaidAcceptanceFirstReviewRouting]);
+  }, [draft, finalizeIntakeCapture, intakePartyRoleLabels, simpleProductFlow, resolveRawIntakeForPremiumCheckout, bumpPremiumSurfaceGateTick, enterCanonicalPaidProReviewFlow]);
 
   useLayoutEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow) return;
@@ -8010,6 +8021,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 : result.premiumRenderSource,
           });
           const paidProSotSource = result.premiumRenderSource || "server_full_draft";
+          const commitPostCheckoutCanonicalReviewEntry = () => {
+            enterCanonicalPaidProReviewFlow({
+              source: "post_checkout_apply_success",
+              respectAlreadyOpened: false,
+              corpusPlain: snapshotPlain,
+              pipelineSource: paidProSotSource,
+              draft: mergedDraftPersist,
+              intakeText: mergedIntake,
+              agreementGenerationId: sessionGenId,
+              generationOutcome: generationOutcomeLabel,
+              recipientCandidates,
+            });
+          };
           try {
             establishPaidProSourceOfTruth({
               text: snapshotPlain,
@@ -8019,23 +8043,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               agreementGenerationId: sessionGenId,
               generationOutcome: generationOutcomeLabel,
             });
-            commitPaidProAcceptanceStorageHygiene();
-            bumpPremiumSurfaceGateTick();
-            setGuidedCompletionPhase("applied");
-            setGuidedFinalReviewExplicitlyOpened(true);
-            guidedFinalReviewExplicitlyUnlockedRef.current = true;
-            setDisplayPhase("review");
-            setCreateFlowPhaseGuarded("draft_ready_for_review");
-            setPreviewPaneRevealed(true);
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.info("[paid-pro-acceptance-routing]", {
-                premiumRenderSource: result.premiumRenderSource,
-                acceptedBodyLen: snapshotPlain.length,
-                guidedPhase: "applied",
-                finalReviewOpened: true,
-              });
-            }
+            commitPostCheckoutCanonicalReviewEntry();
           } catch (establishErr) {
             const establishMsg =
               establishErr instanceof Error ? establishErr.message : String(establishErr);
@@ -8067,12 +8075,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 });
                 commitPaidProAcceptanceStorageHygiene();
                 bumpPremiumSurfaceGateTick();
-                setGuidedCompletionPhase("applied");
-                setGuidedFinalReviewExplicitlyOpened(true);
-                guidedFinalReviewExplicitlyUnlockedRef.current = true;
-                setDisplayPhase("review");
-                setCreateFlowPhaseGuarded("draft_ready_for_review");
-                setPreviewPaneRevealed(true);
+                commitPostCheckoutCanonicalReviewEntry();
                 setProFullDraftCustomGateMessage(
                   "Your Pro agreement was recovered using a deterministic structure-safe draft. Review before finalize.",
                 );
@@ -8092,12 +8095,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               if (hydrated) {
                 commitPaidProAcceptanceStorageHygiene();
                 bumpPremiumSurfaceGateTick();
-                setGuidedCompletionPhase("applied");
-                setGuidedFinalReviewExplicitlyOpened(true);
-                guidedFinalReviewExplicitlyUnlockedRef.current = true;
-                setDisplayPhase("review");
-                setCreateFlowPhaseGuarded("draft_ready_for_review");
-                setPreviewPaneRevealed(true);
+                commitPostCheckoutCanonicalReviewEntry();
                 setProFullDraftCustomGateMessage(
                   "Your Pro agreement is ready to review. Some signing checks may need attention before finalize.",
                 );
@@ -9727,6 +9725,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakePartyRoleLabels,
     finalizeIntakeCapture,
     bumpPremiumSurfaceGateTick,
+    enterCanonicalPaidProReviewFlow,
   ]);
 
   const upgradeContextReasons = useMemo(
@@ -19553,6 +19552,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         pipelineWinningBody:
           lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
         hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      }) &&
+      !shouldBlockDegradedPaidReviewBranchesAfterAcceptance({
+        corpusPlain: resolveCanonicalPaidProReviewCorpus({
+          winningBody: lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+          draft: draft ?? null,
+          agreementDocumentText,
+          pipelineWinningBody: premiumPipelineOutputBodyRef.current,
+          hydratedPremiumBody: hydratedPremiumBodyRef.current,
+          premiumDeliverablePlain: agreementDocumentText,
+        }),
+        pipelineAccepted: hasPaidCreateFlowPipelineAcceptance(),
+        canonicalReviewActive: isCreateFlowPaidAcceptedOrAuthoritativeActive(),
+        guidedCompletionPhase,
       }),
   );
   /** Canonical paid Pro review state — fail closed into FAILED_PREMIUM_CORPUS, never starter degrade. */

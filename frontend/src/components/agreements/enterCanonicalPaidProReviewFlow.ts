@@ -1,0 +1,282 @@
+/**
+ * Single canonical paid Pro first-review entry — post-checkout AND returning paid /app/create.
+ * Both paths must call `planEnterCanonicalPaidProReviewFlow` and apply the same UI/corpus plan.
+ */
+
+import { CreateUiStage } from "./createUiStage";
+import type { CreateFlowProductionPhase } from "./createFlowTypes";
+import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import {
+  hasPaidCreateFlowPipelineAcceptance,
+  isCreateFlowPaidAcceptedOrAuthoritativeActive,
+} from "./authoritativeCreateFlowReviewShell";
+import {
+  commitPaidProAcceptanceStorageHygiene,
+  shouldApplyCreateFlowPaidFirstReviewRouting,
+} from "./paidProAcceptanceRouting";
+import { resolveCreateFlowPaidAcceptedCorpusPlain } from "./paidProCreateFlowReviewHandoff";
+import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
+import { resolveSimpleProFinalReviewActive } from "./simpleProFinalReviewPhase";
+import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { markPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
+
+export type CanonicalPaidProReviewEntrySource =
+  | "post_checkout_apply_success"
+  | "returning_paid_create";
+
+export type EnterCanonicalPaidProReviewFlowArgs = {
+  source: CanonicalPaidProReviewEntrySource;
+  corpusPlain: string;
+  pipelineSource: string;
+  draft: ParsedDraftShape;
+  intakeText: string;
+  agreementGenerationId?: string | null;
+  generationOutcome?: string | null;
+  recipientCandidates?: Array<{ name?: string; email?: string; role?: string }>;
+  alreadyOpened?: boolean;
+  premiumRenderResolveSource?: string | null;
+  /** When true, skip re-entry if final review already opened (returning create latch). */
+  respectAlreadyOpened?: boolean;
+};
+
+export type CanonicalPaidProReviewUiPlan = {
+  proUpgradeUseStarterView: false;
+  proFullDraftQualityRetry: false;
+  premiumPostCheckoutPhase: null;
+  premiumPipelineUserMessage: null;
+  proFullDraftCustomGateMessage: null;
+  guidedCompletionPhase: "applied";
+  guidedFinalReviewExplicitlyOpened: true;
+  premiumPersistedFlowActive: true;
+  premiumSendPathUnlocked: true;
+  createFlowPhase: CreateFlowProductionPhase;
+  displayPhase: "review";
+  createUiStage: typeof CreateUiStage.DRAFT;
+  mobileWorkspacePane: "preview";
+  previewPaneRevealed: true;
+  agreementDocumentDirty: false;
+};
+
+export type CanonicalPaidProReviewCorpusRefPlan = {
+  agreementDocumentPlain: string;
+  lastPremiumWinningCorpus: string;
+  premiumPipelineOutputBody: string;
+  hydratedPremiumBody: string;
+  lastKnownGoodAuthoritativeDraft: string;
+  acceptedReviewCorpus: string;
+  guidedFinalReviewExplicitlyUnlocked: true;
+};
+
+export type CanonicalPaidProSignerHandoffPlan = {
+  signerNames: string[];
+  signerTitles: string[];
+  partyLegalNames: string[];
+  partyEmails: string[];
+};
+
+export type CanonicalPaidProReviewFlowPlan = {
+  shouldApply: boolean;
+  blockedReason?: string;
+  source: CanonicalPaidProReviewEntrySource;
+  corpusPlain: string;
+  pipelineSource: string;
+  ui: CanonicalPaidProReviewUiPlan;
+  refs: CanonicalPaidProReviewCorpusRefPlan;
+  establishSourceOfTruth: boolean;
+  commitReviewArtifact: boolean;
+  mergeDraftWithCorpus: boolean;
+  markPipelineValidationPassed: boolean;
+  signerHandoff: CanonicalPaidProSignerHandoffPlan | null;
+};
+
+export type ResolveCanonicalPaidProReviewCorpusArgs = {
+  winningBody?: string | null;
+  snapshotPlain?: string | null;
+  draft?: ParsedDraftShape | null;
+  agreementDocumentText?: string;
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
+  premiumDeliverablePlain?: string | null;
+};
+
+export function resolveCanonicalPaidProReviewCorpus(
+  args: ResolveCanonicalPaidProReviewCorpusArgs,
+): string {
+  return resolveCreateFlowPaidAcceptedCorpusPlain(args).trim();
+}
+
+export function planEnterCanonicalPaidProReviewFlow(
+  args: EnterCanonicalPaidProReviewFlowArgs,
+): CanonicalPaidProReviewFlowPlan {
+  const corpusPlain = (args.corpusPlain || "").trim();
+  const pipelineSource = (args.pipelineSource || "server_full_draft").trim();
+  const baseBlocked: CanonicalPaidProReviewFlowPlan = {
+    shouldApply: false,
+    blockedReason: "corpus_not_ready",
+    source: args.source,
+    corpusPlain,
+    pipelineSource,
+    ui: buildCanonicalUiPlan(),
+    refs: buildCorpusRefPlan(""),
+    establishSourceOfTruth: false,
+    commitReviewArtifact: false,
+    mergeDraftWithCorpus: false,
+    markPipelineValidationPassed: false,
+    signerHandoff: null,
+  };
+
+  if (corpusPlain.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+    return { ...baseBlocked, blockedReason: "corpus_below_guided_min" };
+  }
+  if (!isAuthoritativePremiumPipelineRenderSource(pipelineSource)) {
+    return { ...baseBlocked, blockedReason: "non_authoritative_pipeline_source" };
+  }
+  if (args.respectAlreadyOpened !== false && args.alreadyOpened) {
+    return { ...baseBlocked, blockedReason: "final_review_already_opened" };
+  }
+  if (
+    args.source === "returning_paid_create" &&
+    !shouldApplyCreateFlowPaidFirstReviewRouting({
+      alreadyOpened: Boolean(args.alreadyOpened),
+      premiumRenderSource: pipelineSource,
+      corpusPlain,
+    })
+  ) {
+    return { ...baseBlocked, blockedReason: "create_flow_routing_gate" };
+  }
+
+  return {
+    shouldApply: true,
+    source: args.source,
+    corpusPlain,
+    pipelineSource,
+    ui: buildCanonicalUiPlan(),
+    refs: buildCorpusRefPlan(corpusPlain),
+    establishSourceOfTruth: !hasPaidProSourceOfTruth(),
+    commitReviewArtifact: true,
+    mergeDraftWithCorpus: true,
+    markPipelineValidationPassed: true,
+    signerHandoff: planCanonicalPaidProSignerHandoff({
+      draft: args.draft,
+      intakeText: args.intakeText,
+      corpusPlain,
+      recipientCandidates: args.recipientCandidates,
+    }),
+  };
+}
+
+function buildCanonicalUiPlan(): CanonicalPaidProReviewUiPlan {
+  return {
+    proUpgradeUseStarterView: false,
+    proFullDraftQualityRetry: false,
+    premiumPostCheckoutPhase: null,
+    premiumPipelineUserMessage: null,
+    proFullDraftCustomGateMessage: null,
+    guidedCompletionPhase: "applied",
+    guidedFinalReviewExplicitlyOpened: true,
+    premiumPersistedFlowActive: true,
+    premiumSendPathUnlocked: true,
+    createFlowPhase: "draft_ready_for_review",
+    displayPhase: "review",
+    createUiStage: CreateUiStage.DRAFT,
+    mobileWorkspacePane: "preview",
+    previewPaneRevealed: true,
+    agreementDocumentDirty: false,
+  };
+}
+
+function buildCorpusRefPlan(corpusPlain: string): CanonicalPaidProReviewCorpusRefPlan {
+  return {
+    agreementDocumentPlain: corpusPlain,
+    lastPremiumWinningCorpus: corpusPlain,
+    premiumPipelineOutputBody: corpusPlain,
+    hydratedPremiumBody: corpusPlain,
+    lastKnownGoodAuthoritativeDraft: corpusPlain,
+    acceptedReviewCorpus: corpusPlain,
+    guidedFinalReviewExplicitlyUnlocked: true,
+  };
+}
+
+export function planCanonicalPaidProSignerHandoff(args: {
+  draft: ParsedDraftShape;
+  intakeText: string;
+  corpusPlain: string;
+  recipientCandidates?: Array<{ name?: string; email?: string; role?: string }>;
+}): CanonicalPaidProSignerHandoffPlan | null {
+  const parties = args.draft.parties ?? [];
+  if (parties.length < 2 || !args.recipientCandidates?.length) return null;
+  const legalEntities = parties
+    .slice(0, 8)
+    .map((p) => String((p as { name?: string }).name ?? "").trim())
+    .filter(Boolean);
+  if (legalEntities.length < 2) return null;
+  const seed = runPaidProSignerMetadataAuthoritySeed({
+    stage: "canonical_paid_pro_review_entry",
+    legalEntities,
+    intakeText: args.intakeText,
+    corpusText: args.corpusPlain,
+    draft: args.draft,
+    authoritativePartyCount: legalEntities.length,
+  });
+  if (!seed.names.some((n) => n.trim()) && !seed.titles.some((t) => t.trim())) return null;
+  return {
+    signerNames: seed.names,
+    signerTitles: seed.titles,
+    partyLegalNames: legalEntities,
+    partyEmails: args.recipientCandidates.map((c) => c.email ?? ""),
+  };
+}
+
+/** After paid acceptance, degraded branches (starter/retry/checkout/recipient-only) must not win. */
+export function shouldBlockDegradedPaidReviewBranchesAfterAcceptance(args: {
+  corpusPlain?: string | null;
+  pipelineAccepted?: boolean;
+  canonicalReviewActive?: boolean;
+  guidedCompletionPhase?: GuidedCompletionPhase;
+}): boolean {
+  const corpusLen = (args.corpusPlain ?? "").trim().length;
+  if (corpusLen >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+    if (args.pipelineAccepted || args.canonicalReviewActive) return true;
+    if (args.guidedCompletionPhase === "applied") return true;
+    if (hasPaidCreateFlowPipelineAcceptance() || isCreateFlowPaidAcceptedOrAuthoritativeActive()) return true;
+  }
+  return false;
+}
+
+export function shouldMountSimpleProFinalReviewForCanonicalEntry(args: {
+  premiumPaidDocumentSurface: boolean;
+  premiumRecipientUxActive: boolean;
+  createFlowPhase: CreateFlowProductionPhase;
+  guidedCompletionPhase: GuidedCompletionPhase;
+  canonicalCreateFlowFirstReviewActive: boolean;
+  finalReviewExplicitlyOpened: boolean;
+  paidProAuthoritative?: boolean;
+}): boolean {
+  return resolveSimpleProFinalReviewActive({
+    paidProAuthoritative: Boolean(args.paidProAuthoritative),
+    premiumPaidDocumentSurface: args.premiumPaidDocumentSurface,
+    premiumRecipientUxActive: args.premiumRecipientUxActive,
+    createFlowPhase: args.createFlowPhase,
+    guidedCompletionPhase: args.guidedCompletionPhase,
+    canonicalCreateFlowFirstReviewActive: args.canonicalCreateFlowFirstReviewActive,
+    finalReviewExplicitlyOpened: args.finalReviewExplicitlyOpened,
+  });
+}
+
+/** Side effects safe immediately after canonical entry (storage hygiene + pipeline latch). */
+export function commitCanonicalPaidProReviewSessionMarkers(args: {
+  corpusPlain: string;
+  pipelineSource: string;
+}): void {
+  const body = args.corpusPlain.trim();
+  if (body.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return;
+  markPaidProPipelineValidationPassed({ text: body, source: args.pipelineSource });
+  markPaidProPipelineAcceptedCorpusHash(body);
+  commitPaidProAcceptanceStorageHygiene();
+}
+
+export const CANONICAL_PAID_PRO_REVIEW_ENTRY_HELPER = "enterCanonicalPaidProReviewFlow";
