@@ -88,7 +88,6 @@ function draftHydratedFromSoT(body: string, base: ParsedDraftShape): ParsedDraft
     purpose: body,
     premium_server_full_document_text: body,
     premium_full_document_text: body,
-    server_full_document_text: body,
     premium_render_source: "server_full_document_text",
   };
 }
@@ -111,16 +110,16 @@ function captureTest514Surfaces(args: {
   const pdfExportPlain = reviewUi;
   const signerSetup = getPaidProDocumentForSurface("signer_setup", opts)?.text ?? "";
   const vs01Packet = getPaidProDocumentForSurface("vs01", opts)?.text ?? "";
-  const signerPage = getPaidProDocumentForSurface("vs01", { ...opts, skipUserVisibleDisplayPrep: true })?.text ?? "";
+  const signerPage = getPaidProDocumentForSurface("vs01", opts)?.text ?? "";
   const ownerCompleted = getPaidProDocumentForSurface("display", opts)?.text ?? "";
   const completionEmail = pickAuthoritativePlainForSendHandoff(args.draft)?.text ?? "";
   const persistedAgreement = longestPlainForAgreementPersist(args.draft, args.staleAgreementDocumentText ?? STARTER_STALE);
-  const downloadEndpoint = String(args.draft.server_full_document_text ?? "").trim();
+  const downloadEndpoint = String(args.draft.premium_server_full_document_text ?? "").trim();
   const vs01Resolution = resolveFinalVs01CorpusOrBlock({
     guidedPro: true,
     premiumAccepted: true,
     premiumComplete: true,
-    draft: args.draft as import("../../agreement/agreementTypes").AgreementDraft,
+    draft: args.draft as never,
     intakeText: args.intakeText,
     agreementCorpusText: vs01Packet,
   });
@@ -284,7 +283,7 @@ describe("TEST514 — canonical corpus identity across every post-freeze paid su
   });
 
   it("2 — stale agreementDocumentText and starter preview cannot override post-freeze resolvers", () => {
-    const { draft, intakeText } = armPostFreezeSession();
+    const { draft } = armPostFreezeSession();
     const sotText = getPaidProSourceOfTruthText();
     const createFlowPlain = resolveCreateFlowAuthoritativeReviewPlain({
       agreementDocumentText: STARTER_STALE,

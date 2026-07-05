@@ -202,8 +202,8 @@ describe("TEST513 — premium marker timing + canonical freeze gate", () => {
   it("4 — recoverable network failure result does not satisfy canonical-freeze premium gate", () => {
     const generationId = getOrInitSessionAgreementGenerationId();
     const recoverable: PremiumCompletionResult = {
-      premiumDraft: null,
-      premiumParties: null,
+      premiumDraft: test513Draft(),
+      premiumParties: test513Draft().parties.map((p) => ({ name: p.name, role: p.role })),
       recipientCandidates: [],
       winningPremiumBodyText: SERVER_PAID_BODY,
       premiumRenderSource: "premium_network_retryable",
