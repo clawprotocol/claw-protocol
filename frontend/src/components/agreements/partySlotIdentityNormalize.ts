@@ -97,6 +97,30 @@ export function maxNumberedListPartyIndex(intakeRaw: string): number {
   return max;
 }
 
+/** Explicit intake declarations like "all four parties" / "among the following four parties". */
+export function resolveDeclaredExplicitPartyCount(intakeRaw: string): number | null {
+  const t = String(intakeRaw || "").toLowerCase();
+  if (/\b(?:among|between)\s+(?:the\s+)?following\s+four\s+parties\b/.test(t)) return 4;
+  if (/\b(?:all\s+)?four\s+parties\b/.test(t)) return 4;
+  if (/\bfour[\s-]party\b/.test(t)) return 4;
+  if (/\b(?:among|between)\s+(?:the\s+)?following\s+three\s+parties\b/.test(t)) return 3;
+  if (/\b(?:all\s+)?three\s+parties\b/.test(t)) return 3;
+  if (/\bthree[\s-]party\b/.test(t)) return 3;
+  return null;
+}
+
+function mergeUniqueAuthoritativePartyNames(...groups: readonly string[][]): string[] {
+  const out: string[] = [];
+  for (const group of groups) {
+    for (const raw of group) {
+      const name = normalizeAgreementPartyName(raw);
+      if (name.length < 2 || !isAuthoritativeLegalEntityName(name)) continue;
+      if (!out.some((existing) => partyLegalNamesMatch(existing, name))) out.push(name);
+    }
+  }
+  return out;
+}
+
 export function isStandaloneLegalEntitySuffix(name: string): boolean {
   return STANDALONE_SUFFIX_RE.test((name || "").replace(/\s+/g, " ").trim());
 }
@@ -156,18 +180,30 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
   const labeled = labeledPartyLegalEntities(intake)
     .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n));
-  if (labeled.length >= 3) return labeled;
   const numbered = extractNumberedListPartyLegalEntities(intake);
-  if (numbered.length >= 3) return numbered;
   const lineSeparated = extractLineSeparatedLegalEntityParties(intake);
   const entityPool = dedupeEntityCandidatesToLegalParties(
     extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
   ).filter((n) => !isInvalidPartySlotLegalEntity(n));
-  if (entityPool.length >= 3) return entityPool;
-  if (numbered.length >= 2 && numbered.length >= entityPool.length) return numbered;
   const fromBetween = collapsePartySlotCandidates(extractBetweenPartyNameList(intake)).filter(
     (n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n) && isAuthoritativeLegalEntityName(n),
   );
+  const declaredCount = resolveDeclaredExplicitPartyCount(intake);
+  if (declaredCount !== null && declaredCount >= 3) {
+    const merged = mergeUniqueAuthoritativePartyNames(
+      numbered,
+      labeled,
+      entityPool,
+      fromBetween,
+      lineSeparated,
+    );
+    if (merged.length >= declaredCount) return merged.slice(0, declaredCount);
+    if (merged.length >= 3) return merged;
+  }
+  if (labeled.length >= 3) return labeled;
+  if (numbered.length >= 3) return numbered;
+  if (entityPool.length >= 3) return entityPool;
+  if (numbered.length >= 2 && numbered.length >= entityPool.length) return numbered;
   if (fromBetween.length >= 2 && fromBetween.length >= lineSeparated.length) return fromBetween;
   if (lineSeparated.length >= 2) return lineSeparated;
   if (entityPool.length >= 2) return entityPool;
@@ -273,8 +309,14 @@ export function resolveAuthoritativePartySlotCount(args: {
   const userExpanded = Math.max(0, args.userExpandedPartyCount ?? 0);
 
   const intake = String(args.intakeText ?? "").trim();
+  const declaredCount = resolveDeclaredExplicitPartyCount(intake);
   const labeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
   const quoted = quotedRolePartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  if (declaredCount !== null && declaredCount >= 3) {
+    const intakeNames = resolveAuthoritativeIntakePartyNames(intake);
+    if (intakeNames.length >= declaredCount) return declaredCount;
+    if (intakeNames.length >= 3) return intakeNames.length;
+  }
   if (quoted.length >= 3) return quoted.length;
   if (labeled.length >= 3) return labeled.length;
 

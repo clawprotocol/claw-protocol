@@ -15,6 +15,11 @@ import {
   readCanonicalAgreementCorpusForSurface,
 } from "./canonicalAgreementSnapshot";
 import {
+  acceptedPipelineReviewCorpusLen,
+  hasAcceptedPipelineReviewCorpusForRender,
+  readAcceptedPipelineReviewCorpusPlain,
+} from "./paidProAcceptedPipelineReviewCorpus";
+import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
@@ -29,11 +34,14 @@ export function resolveCanonicalReviewCorpusLenForRender(): number {
   }
   const frozen = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
   if (frozen?.canonicalText?.trim()) return frozen.canonicalText.trim().length;
+  const pipelineLen = acceptedPipelineReviewCorpusLen();
+  if (pipelineLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) return pipelineLen;
   return 0;
 }
 
 export function hasCanonicalReviewCorpusForRender(): boolean {
-  return hasPaidProSourceOfTruth() || hasFrozenCanonicalAgreementCorpus();
+  if (hasPaidProSourceOfTruth() || hasFrozenCanonicalAgreementCorpus()) return true;
+  return hasAcceptedPipelineReviewCorpusForRender();
 }
 
 export function shouldForcePaidProReviewDocumentRender(): boolean {
@@ -62,6 +70,7 @@ export function resetPaidProDocumentBodyRouterLogsForTests(): void {
 export function resolvePaidProDocumentBodyRouter(): PaidProDocumentBodyRouterState {
   const hasSoT = hasPaidProSourceOfTruth();
   const sotLen = hasSoT ? getPaidProSourceOfTruthText().trim().length : 0;
+  const pipelinePlain = readAcceptedPipelineReviewCorpusPlain();
   const canonicalReviewLen = resolveCanonicalReviewCorpusLenForRender();
   const hasCanonicalCorpus = hasCanonicalReviewCorpusForRender();
   if (hasCanonicalCorpus && canonicalReviewLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) {
@@ -71,7 +80,9 @@ export function resolvePaidProDocumentBodyRouter(): PaidProDocumentBodyRouterSta
       branch: "paid_pro_visible_shell_forced",
       reason: hasSoT
         ? "frozen_sot_len_meets_threshold"
-        : "canonical_review_corpus_len_meets_threshold",
+        : pipelinePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+          ? "pipeline_accepted_corpus_len_meets_threshold"
+          : "canonical_review_corpus_len_meets_threshold",
       forced: true,
     };
   }

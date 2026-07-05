@@ -74,6 +74,7 @@ import {
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruthState";
+import { readAcceptedPipelineReviewCorpusPlain } from "./paidProAcceptedPipelineReviewCorpus";
 import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
 import {
   buildPaidProReviewPlainMemoKey,
@@ -711,6 +712,14 @@ export function resolvePaidProReviewRenderSource(
       };
     }
   }
+  const pipelinePlain = readAcceptedPipelineReviewCorpusPlain();
+  if (pipelinePlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return {
+      source: "paid_pro_review_render",
+      hash: hashPaidProCorpus(pipelinePlain),
+      signerMetadataApplied: false,
+    };
+  }
   return { source: "none", hash: "", signerMetadataApplied: false };
 }
 
@@ -952,6 +961,8 @@ function resolvePaidProReviewRenderPlainInner(
     text = hydrated.text;
   } else if (hasPaidProSourceOfTruth()) {
     text = getPaidProSourceOfTruthText().trim();
+  } else {
+    text = readAcceptedPipelineReviewCorpusPlain();
   }
 
   if (text.length < PAID_PRO_AUTHORITY_MIN_LEN) return "";

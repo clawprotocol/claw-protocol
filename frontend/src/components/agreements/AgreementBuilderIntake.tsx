@@ -1539,7 +1539,10 @@ import {
   shouldBlockDegradedPaidReviewBranchesAfterAcceptance,
   type EnterCanonicalPaidProReviewFlowArgs,
 } from "./enterCanonicalPaidProReviewFlow";
-import { readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
+import {
+  markPaidProPipelineAcceptedCorpusHash,
+  readPaidProPipelineAcceptedCorpusBody,
+} from "./paidProPipelineAcceptedCorpus";
 import {
   computeCreateFlowPaidProReviewReady,
   hasPaidCreateFlowPipelineAcceptance,
@@ -8137,6 +8140,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 : result.premiumRenderSource,
           });
           const paidProSotSource = result.premiumRenderSource || "server_full_draft";
+          if (snapshotPlain.trim().length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+            markPaidProPipelineAcceptedCorpusHash(snapshotPlain);
+          }
           const commitPostCheckoutCanonicalReviewEntry = () => {
             const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
               source: "post_checkout_apply_success",
