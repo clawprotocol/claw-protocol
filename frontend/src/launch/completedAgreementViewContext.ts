@@ -66,6 +66,7 @@ export function shouldMarkWorkspaceSessionForPath(pathname: string): boolean {
   if (p.startsWith("/app/billing") || p.startsWith("/app/settings") || p.startsWith("/app/signatures")) {
     return true;
   }
+  if (p === "/founder" || p === "/admin" || p === "/app/founder" || p === "/app/admin") return true;
   if (/^\/app\/esign\//.test(p)) return false;
   return false;
 }

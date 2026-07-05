@@ -29,7 +29,7 @@ export function AppShell(props: {
   /** Slim footer: shorter legal strip on mobile-first app surfaces (e.g. partner / pre-payment). */
   compactFooter?: boolean;
 }) {
-  const { navigate } = useLaunchNav();
+  const { navigate, pathname } = useLaunchNav();
   const access = useAccess();
   const affiliateNav = useFeatureGate("affiliate_opportunity_enabled");
   const { children, title, subtitle, navMode = "default", compactFooter = false } = props;
@@ -44,6 +44,19 @@ export function AppShell(props: {
     { label: "Integrations", path: "/app/integrations", title: "Webhooks and API integration settings" },
     { label: "Settings", path: "/app/settings", title: "Account and workspace settings" },
   ];
+  const resolveTopNavCreateSource = (): "founder_top_nav_create" | "app_shell_top_nav_create" => {
+    const p = (pathname || "").replace(/\/$/, "") || "/";
+    if (p === "/founder" || p === "/admin" || p === "/app/founder" || p === "/app/admin") {
+      return "founder_top_nav_create";
+    }
+    return "app_shell_top_nav_create";
+  };
+  const navigateToPaidWorkspaceCreate = () => {
+    navigate("/app/create", {
+      paidDashboardCreate: true,
+      paidDashboardCreateSource: resolveTopNavCreateSource(),
+    });
+  };
   if (showLegacyQuickPath) {
     overflowItems.unshift({ label: "Quick send", path: "/app/quick", title: "Legacy quick send path" });
   }
@@ -91,12 +104,7 @@ export function AppShell(props: {
                 <button
                   type="button"
                   className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                  onClick={() =>
-                    navigate("/app/create", {
-                      paidDashboardCreate: true,
-                      paidDashboardCreateSource: "app_shell_new_agreement",
-                    })
-                  }
+                  onClick={navigateToPaidWorkspaceCreate}
                 >
                   New agreement
                 </button>
@@ -135,12 +143,7 @@ export function AppShell(props: {
                 <button
                   type="button"
                   className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                  onClick={() =>
-                    navigate("/app/create", {
-                      paidDashboardCreate: true,
-                      paidDashboardCreateSource: "app_shell_new_agreement",
-                    })
-                  }
+                  onClick={navigateToPaidWorkspaceCreate}
                 >
                   Create
                 </button>

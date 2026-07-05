@@ -1575,6 +1575,7 @@ import {
 } from "./returningPaidCreateBootstrap";
 import {
   logPaidDashboardCreateContext,
+  logPaidDashboardCreateContextOnMount,
   readPaidDashboardCreateContext,
 } from "../../launch/paidDashboardCreateContext";
 
@@ -3422,6 +3423,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   useEffect(() => {
     if (!simpleProductFlow) return;
+    logPaidDashboardCreateContextOnMount();
     const dashboardCreateContext = readPaidDashboardCreateContext();
     if (dashboardCreateContext) {
       logPaidDashboardCreateContext({

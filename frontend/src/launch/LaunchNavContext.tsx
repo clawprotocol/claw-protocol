@@ -28,7 +28,9 @@ import {
 } from "./completedAgreementViewContext";
 import {
   clearPaidDashboardCreateContext,
-  isWorkspaceNavOrigin,
+  isAuthenticatedWorkspacePath,
+  isPublicMarketingPath,
+  logPaidDashboardCreateNavigation,
   markPaidDashboardCreateContext,
 } from "./paidDashboardCreateContext";
 
@@ -100,6 +102,7 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
   const navigate = useCallback((to: string, options?: LaunchNavigateOptions) => {
     const p = to.startsWith("/") ? to : `/${to}`;
     const pathOnly = p.replace(/[?#].*$/, "");
+    const originPathname = typeof window !== "undefined" ? window.location.pathname : "/";
     let state: Record<string, unknown> | null = null;
     if (pathOnly === "/app/create") {
       const restoreStarterReview =
@@ -111,17 +114,39 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
             return hasCheckoutBackRestoreSnapshot();
           }
         })();
+      const sourceId =
+        options?.paidDashboardCreateSource?.trim() ||
+        (options?.paidDashboardCreate ? "paid_dashboard_create_option" : "create_nav");
+      let marked = false;
+      let cleared = false;
+      let markSource: string | null = null;
+      let clearReason: string | null = null;
+
       if (options?.heroFromHome) {
-        clearPaidDashboardCreateContext();
-      } else if (options?.paidDashboardCreate) {
-        markPaidDashboardCreateContext(
-          options.paidDashboardCreateSource?.trim() || "dashboard_nav",
-        );
-      } else if (isWorkspaceNavOrigin(window.location.pathname)) {
-        markPaidDashboardCreateContext("workspace_nav_create");
-      } else {
-        clearPaidDashboardCreateContext();
+        clearPaidDashboardCreateContext("hero_from_home");
+        cleared = true;
+        clearReason = "hero_from_home";
+      } else if (options?.paidDashboardCreate || isAuthenticatedWorkspacePath(originPathname)) {
+        markSource =
+          options?.paidDashboardCreateSource?.trim() ||
+          (isAuthenticatedWorkspacePath(originPathname) ? "workspace_nav_create" : "dashboard_nav");
+        marked = markPaidDashboardCreateContext(markSource);
+      } else if (isPublicMarketingPath(originPathname)) {
+        clearPaidDashboardCreateContext("public_marketing_origin");
+        cleared = true;
+        clearReason = "public_marketing_origin";
       }
+
+      logPaidDashboardCreateNavigation({
+        sourceId,
+        originPathname,
+        destination: pathOnly,
+        marked,
+        cleared,
+        markSource: marked ? markSource : null,
+        clearReason,
+      });
+
       if (restoreStarterReview) {
         state = null;
       } else if (options?.heroFromHome) {

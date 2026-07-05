@@ -17,6 +17,7 @@ import { getOrgId } from "../../launch/orgContext";
 import {
   hasPaidDashboardCreateContextActive,
   isAppCreatePath,
+  shouldFailClosedBypassForAuthenticatedWorkspaceCreate,
 } from "../../launch/paidDashboardCreateContext";
 import { tierAllowsAdvancedFullDraftReveal, peekAdvancedFullDraftCheckoutGrant } from "./agreementAdvancedDraftAccess";
 import {
@@ -62,7 +63,8 @@ export type PaidCreateGateBypassReasonCode =
   | "returning_paid_eligible"
   | "create_flow_paid_authoritative"
   | "paid_pro_review_shell"
-  | "paid_dashboard_create_context";
+  | "paid_dashboard_create_context"
+  | "authenticated_workspace_session_fallback";
 
 export type PaidCreateGateBypassDecision = {
   isAppCreate: boolean;
@@ -109,6 +111,7 @@ function readStaleSubscriptionCachePremium(): boolean {
  */
 export function resolveProvisionalWorkspaceProEntitledForCreate(): boolean {
   if (hasPaidDashboardCreateContextActive()) return true;
+  if (shouldFailClosedBypassForAuthenticatedWorkspaceCreate()) return true;
   if (resolveCreateFlowWorkspaceProEntitled()) return true;
   if (readCachedWorkspaceProEntitlement()) return true;
   if (readPersistedWorkspaceUsageTierPaid()) return true;
@@ -164,6 +167,9 @@ export function resolvePaidCreateGateBypassDecision(
   const provisionalPaid = resolveProvisionalWorkspaceProEntitledForCreate();
 
   if (dashboardCreateContext) reasonCodes.push("paid_dashboard_create_context");
+  if (shouldFailClosedBypassForAuthenticatedWorkspaceCreate()) {
+    reasonCodes.push("authenticated_workspace_session_fallback");
+  }
 
   if (workspaceProEntitledState) reasonCodes.push("workspace_pro_entitled_state");
   if (workspaceProCached) reasonCodes.push("workspace_pro_cached");

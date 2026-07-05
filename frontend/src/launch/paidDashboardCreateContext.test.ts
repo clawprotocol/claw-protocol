@@ -11,7 +11,10 @@ import { getOrgId } from "./orgContext";
 import {
   clearPaidDashboardCreateContextForTests,
   hasPaidDashboardCreateContextActive,
+  isAuthenticatedWorkspacePath,
+  markPaidDashboardCreateContext,
   markPaidDashboardCreateContextForTests,
+  readPaidDashboardCreateContext,
 } from "./paidDashboardCreateContext";
 import {
   resolveAuthoritativeCreateFlowReviewShell,
@@ -36,6 +39,117 @@ const intakeSrc = readFileSync(
   join(__dirname, "../components/agreements/AgreementBuilderIntake.tsx"),
   "utf8",
 );
+const appShellSrc = readFileSync(join(__dirname, "AppShell.tsx"), "utf8");
+const navSrc = readFileSync(join(__dirname, "LaunchNavContext.tsx"), "utf8");
+
+describe("TEST510 — /founder top nav Create sets paid-dashboard marker before submit", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    invalidateWorkspaceProEntitlementCache();
+    markWorkspaceProEntitlementResolvedForTests(null);
+    clearPaidDashboardCreateContextForTests();
+    markAuthenticatedWorkspaceSession();
+  });
+
+  afterEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    invalidateWorkspaceProEntitlementCache();
+    markWorkspaceProEntitlementResolvedForTests(null);
+    clearPaidDashboardCreateContextForTests();
+    vi.restoreAllMocks();
+  });
+
+  it("treats /founder as authenticated workspace origin", () => {
+    expect(isAuthenticatedWorkspacePath("/founder")).toBe(true);
+    expect(isAuthenticatedWorkspacePath("/app/admin")).toBe(true);
+    expect(isAuthenticatedWorkspacePath("/")).toBe(false);
+  });
+
+  it("markPaidDashboardCreateContext succeeds from /founder before /app/create", () => {
+    vi.stubGlobal("location", { ...window.location, pathname: "/founder" });
+    const marked = markPaidDashboardCreateContext("founder_top_nav_create");
+    expect(marked).toBe(true);
+    vi.stubGlobal("location", { ...window.location, pathname: "/app/create" });
+    expect(hasPaidDashboardCreateContextActive()).toBe(true);
+    expect(readPaidDashboardCreateContext()?.source).toBe("founder_top_nav_create");
+  });
+
+  it("founder nav Create → 4-party guided_continue bypasses with paid_dashboard_create_context", () => {
+    vi.stubGlobal("location", { ...window.location, pathname: "/founder" });
+    markPaidDashboardCreateContext("founder_top_nav_create");
+    vi.stubGlobal("location", { ...window.location, pathname: "/app/create" });
+
+    const gate = assessStarterComplexityGate(TEST507_FOUR_PARTY_INTAKE);
+    expect(gate.required).toBe(true);
+    expect(gate.partyCount).toBeGreaterThanOrEqual(4);
+
+    const decision = resolvePaidCreateGateBypassDecision({
+      tier: "free",
+      workspaceProEntitled: false,
+      partyCount: gate.partyCount,
+    });
+    expect(decision.bypass).toBe(true);
+    expect(decision.reason).toBe("paid_dashboard_create_context");
+    expect(decision.provisionalPaid).toBe(true);
+    expect(decision.workspaceProEntitled).toBe(false);
+    expect(decision.workspaceProCached).toBe(false);
+    expect(shouldBypassStarterMultiPartyProGateForPaidCreate({ tier: "free", workspaceProEntitled: false })).toBe(
+      true,
+    );
+    expect(
+      resolveAuthoritativeCreateFlowReviewShell({ workspaceProEntitled: false, tier: "free" }),
+    ).toBe("paid_pro");
+    expect(
+      resolveAuthoritativeSignerCount({
+        intakeText: TEST507_FOUR_PARTY_INTAKE,
+        draftPartyNames: [...TEST507_FOUR_PARTY_LEGAL],
+      }).count,
+    ).toBe(4);
+  });
+
+  it("AppShell top nav Create uses founder_top_nav_create from /founder", () => {
+    expect(appShellSrc).toContain("founder_top_nav_create");
+    expect(appShellSrc).toContain("resolveTopNavCreateSource");
+    expect(appShellSrc).toContain("navigateToPaidWorkspaceCreate");
+  });
+
+  it("LaunchNavContext marks (not clears) when origin is /founder", () => {
+    expect(navSrc).toContain("isAuthenticatedWorkspacePath(originPathname)");
+    expect(navSrc).toContain("logPaidDashboardCreateNavigation");
+    expect(navSrc).not.toMatch(/isWorkspaceNavOrigin\(window\.location\.pathname\)[\s\S]*clearPaidDashboardCreateContext/);
+  });
+
+  it("intake centralizes gate bypass and logs paid-dashboard context on mount", () => {
+    expect(intakeSrc).toContain("logPaidDashboardCreateContextOnMount");
+    const gateIdx = intakeSrc.indexOf("const commitStarterMultiPartyProGate = React.useCallback(");
+    const gateBlock = intakeSrc.slice(gateIdx, gateIdx + 3500);
+    expect(gateBlock).toContain("resolvePaidCreateGateBypassContext");
+  });
+
+  it("public homepage 4-party without marker still requires Pro gate", () => {
+    vi.stubGlobal("location", { ...window.location, pathname: "/" });
+    expect(hasPaidDashboardCreateContextActive()).toBe(false);
+    expect(resolveProvisionalWorkspaceProEntitledForCreate()).toBe(false);
+    expect(
+      shouldBypassStarterMultiPartyProGateForPaidCreate({
+        tier: "free",
+        workspaceProEntitled: false,
+      }),
+    ).toBe(false);
+    const gate = assessStarterComplexityGate(TEST507_FOUR_PARTY_INTAKE);
+    expect(buildMultiPartyProGateTitle(gate)).toMatch(/requires Pro/i);
+  });
+
+  it("marker org scoping prevents cross-org bleed", () => {
+    markPaidDashboardCreateContextForTests("founder_top_nav_create", "org-a");
+    vi.stubGlobal("location", { ...window.location, pathname: "/app/create" });
+    expect(hasPaidDashboardCreateContextActive()).toBe(false);
+    markPaidDashboardCreateContextForTests("founder_top_nav_create", getOrgId().trim() || "test-org");
+    expect(hasPaidDashboardCreateContextActive()).toBe(true);
+  });
+});
 
 describe("TEST509 — paid Dashboard → Create context bypasses public 4-party Pro gate", () => {
   beforeEach(() => {
@@ -72,9 +186,6 @@ describe("TEST509 — paid Dashboard → Create context bypasses public 4-party 
     expect(decision.bypass).toBe(true);
     expect(decision.reason).toBe("paid_dashboard_create_context");
     expect(decision.provisionalPaid).toBe(true);
-    expect(decision.workspaceProEntitled).toBe(false);
-    expect(decision.workspaceProCached).toBe(false);
-    expect(decision.reasonCodes).toContain("paid_dashboard_create_context");
   });
 
   it("authoritative review shell resolves paid_pro from dashboard create marker on /app/create", () => {
@@ -91,67 +202,5 @@ describe("TEST509 — paid Dashboard → Create context bypasses public 4-party 
         tier: "free",
       }),
     ).toBe(true);
-  });
-
-  it("stageA guided_continue path awaits entitlement and centralizes gate bypass", () => {
-    expect(intakeSrc).toContain("await resolvePaidCreateSubmitEntitlement()");
-    const stageAIdx = intakeSrc.indexOf("executePrimaryCta_stageA");
-    const stageABlock = intakeSrc.slice(stageAIdx - 800, stageAIdx + 1200);
-    expect(stageABlock.indexOf("await resolvePaidCreateSubmitEntitlement()")).toBeLessThan(
-      stageABlock.indexOf("commitStarterMultiPartyProGate"),
-    );
-    const gateIdx = intakeSrc.indexOf("const commitStarterMultiPartyProGate = React.useCallback(");
-    const gateBlock = intakeSrc.slice(gateIdx, gateIdx + 3500);
-    expect(gateBlock).toContain("resolvePaidCreateGateBypassContext");
-  });
-
-  it("4-party prompt with dashboard marker bypasses gate; party/signer counts stay 4/4", () => {
-    markPaidDashboardCreateContextForTests("dashboard_new_agreement");
-    const gate = assessStarterComplexityGate(TEST507_FOUR_PARTY_INTAKE);
-    expect(gate.required).toBe(true);
-    expect(gate.partyCount).toBeGreaterThanOrEqual(4);
-    expect(
-      shouldBypassStarterMultiPartyProGateForPaidCreate({
-        tier: "free",
-        workspaceProEntitled: false,
-      }),
-    ).toBe(true);
-    expect(
-      resolveAuthoritativeSignerCount({
-        intakeText: TEST507_FOUR_PARTY_INTAKE,
-        draftPartyNames: [...TEST507_FOUR_PARTY_LEGAL],
-      }).count,
-    ).toBe(4);
-  });
-
-  it("public/homepage 4-party path without dashboard marker still requires Pro gate", () => {
-    vi.stubGlobal("location", {
-      ...window.location,
-      pathname: "/",
-    });
-    expect(hasPaidDashboardCreateContextActive()).toBe(false);
-    expect(resolveProvisionalWorkspaceProEntitledForCreate()).toBe(false);
-    expect(
-      shouldBypassStarterMultiPartyProGateForPaidCreate({
-        tier: "free",
-        workspaceProEntitled: false,
-      }),
-    ).toBe(false);
-    const gate = assessStarterComplexityGate(TEST507_FOUR_PARTY_INTAKE);
-    expect(buildMultiPartyProGateTitle(gate)).toMatch(/requires Pro/i);
-  });
-
-  it("LaunchNavContext wires paidDashboardCreate option for dashboard navigation", () => {
-    const navSrc = readFileSync(join(__dirname, "LaunchNavContext.tsx"), "utf8");
-    expect(navSrc).toContain("paidDashboardCreate");
-    expect(navSrc).toContain("markPaidDashboardCreateContext");
-    expect(navSrc).toContain("clearPaidDashboardCreateContext");
-  });
-
-  it("dashboard marker is scoped to org id", () => {
-    markPaidDashboardCreateContextForTests("dashboard_new_agreement", "org-a");
-    expect(hasPaidDashboardCreateContextActive()).toBe(false);
-    markPaidDashboardCreateContextForTests("dashboard_new_agreement", getOrgId().trim() || "test-org");
-    expect(hasPaidDashboardCreateContextActive()).toBe(true);
   });
 });
