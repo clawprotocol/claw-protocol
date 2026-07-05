@@ -1017,6 +1017,11 @@ import {
   validatePaidProOutput,
 } from "./paidProCorpusAcceptance";
 import {
+  logPaidProGenerationTerminalTransition,
+  resolvePaidProGenerationFailurePostCheckoutPhase,
+  shouldRunModelPassFinallyDismissProcessing,
+} from "./paidProGenerationTerminalState";
+import {
   buildFreeStarterBaselinePlain,
   isAuthoritativePaidProCorpusForGuided,
   isFreeStarterCloneOnPaidPro,
@@ -6320,6 +6325,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const raw = resolveRawIntakeForPremiumCheckout(gateDraft);
     if (!raw?.trim() || !gateDraft) {
       entitledPremiumRewriteInFlightRef.current = false;
+      logPaidProGenerationTerminalTransition({
+        reason: "entitled_rewrite_aborted",
+        outcome: "retry_recoverable",
+      });
+      setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+      setPremiumPipelineUserMessage(null);
       return;
     }
     console.info("[premium-flow] entitled_rewrite_start", { rawLen: raw.length });
@@ -6451,6 +6462,56 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draft: merged.draft,
       });
       const snapshotPlain = snapshotCoalesce.text.trim();
+      const contractIc = resolveAgreementIntentContract(mergedIntake);
+      const fin = isPaidProFinishedAgreement({
+        text: snapshotPlain,
+        rawIntake: mergedIntake,
+        readonlyRenderSource: resolvedPersist.premium_render_source,
+        pipelineSource: result.premiumRenderSource,
+        stale: false,
+        intentContract: contractIc,
+        draft: merged.draft,
+        qualityRetryActive: false,
+        serverGenerationDegraded: Boolean(result.serverGenerationDegraded),
+      });
+      if (!fin.ok) {
+        logPaidProGenerationTerminalTransition({
+          reason: "entitled_rewrite_validation_failed",
+          outcome: "retry_recoverable",
+        });
+        setPremiumServerGenerationDegraded(null);
+        if (contractIc.pro_strict) {
+          const d = buildPremiumDetailsGateCopy(contractIc, fin.gate?.validation.reasons ?? fin.reasons);
+          setProFullDraftCustomGateMessage(
+            [d.title, d.body, "", d.bullets.map((b) => `• ${b}`).join("\n")].filter(Boolean).join("\n\n"),
+          );
+        } else {
+          setProFullDraftCustomGateMessage(null);
+        }
+        setProFullDraftQualityRetry(true);
+        setHardError(null);
+        premiumPipelineOutputBodyRef.current = "";
+        setPremiumRefineReview(null);
+        setPremiumFinalizeAudit(null);
+        setPremiumReviewRoute(null);
+        commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft), {
+          forceReviewDisplay: true,
+        });
+        setCreateFlowPhase("draft_ready_for_review");
+        setDisplayPhase("review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setPremiumPersistedFlowActive(false);
+        setPremiumSendPathUnlocked(false);
+        agreementDocumentDirtyRef.current = false;
+        setAgreementDocumentText("");
+        setReviewDocRefreshTick((n) => n + 1);
+        setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+        setPremiumPipelineUserMessage(null);
+        premiumModalExtendedWaitActiveRef.current = false;
+        setPremiumCheckoutModalExtendedWait(false);
+        setPremiumAuthoritativeRequestInFlight(false);
+        return;
+      }
       const premiumDeliverablePlain = buildAgreementPreviewTextCore(merged.draft, {
         starterPreview: false,
         premiumDeliverablePreview: true,
@@ -6560,10 +6621,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           })
         : false;
       if (!canonicalEntered) {
+        logPaidProGenerationTerminalTransition({
+          reason: "entitled_rewrite_canonical_blocked",
+          outcome: "retry_recoverable",
+        });
         setProFullDraftQualityRetry(true);
         setProFullDraftCustomGateMessage(
           "Your Pro agreement is still preparing. Tap **Retry Pro draft** if this does not update shortly.",
         );
+        setCreateFlowPhase("draft_ready_for_review");
+        setDisplayPhase("review");
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[paid-pro-acceptance-routing]", {
@@ -7737,7 +7804,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementDocumentDirtyRef.current = false;
           setAgreementDocumentText("");
           setReviewDocRefreshTick((n) => n + 1);
-          setPremiumPostCheckoutPhase("processing");
+          logPaidProGenerationTerminalTransition({
+            reason: "founder_intent_gate",
+            outcome: "retry_recoverable",
+          });
+          setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+          setPremiumPipelineUserMessage(null);
+          premiumModalExtendedWaitActiveRef.current = false;
+          setPremiumCheckoutModalExtendedWait(false);
+          setPremiumAuthoritativeRequestInFlight(false);
           setProFullDraftQualityRetry(true);
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
@@ -7948,7 +8023,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementDocumentDirtyRef.current = false;
           setAgreementDocumentText("");
           setReviewDocRefreshTick((n) => n + 1);
-          setPremiumPostCheckoutPhase("processing");
+          logPaidProGenerationTerminalTransition({
+            reason: "no_server_authority",
+            outcome: "retry_recoverable",
+          });
+          setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+          setPremiumPipelineUserMessage(null);
+          premiumModalExtendedWaitActiveRef.current = false;
+          setPremiumCheckoutModalExtendedWait(false);
+          setPremiumAuthoritativeRequestInFlight(false);
           logPremiumCompletionDebug({
             stage: "ui_apply_blocked_no_server_authority",
             snapshotWritten: false,
@@ -8079,7 +8162,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             agreementDocumentDirtyRef.current = false;
             setAgreementDocumentText("");
             setReviewDocRefreshTick((n) => n + 1);
-            setPremiumPostCheckoutPhase("processing");
+            logPaidProGenerationTerminalTransition({
+              reason: "paid_pro_gate_failed",
+              outcome: "retry_recoverable",
+            });
+            setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+            setPremiumPipelineUserMessage(null);
+            premiumModalExtendedWaitActiveRef.current = false;
+            setPremiumCheckoutModalExtendedWait(false);
+            setPremiumAuthoritativeRequestInFlight(false);
             emitPaidFunnelEvent("premium_checkout_completed", {
               extra: {
                 premium_generation_outcome: "needs_details",
@@ -8259,7 +8350,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               setProFullDraftQualityRetry(true);
               setPremiumPersistedFlowActive(false);
               setPremiumSendPathUnlocked(false);
-              setPremiumPostCheckoutPhase("processing");
+              logPaidProGenerationTerminalTransition({
+                reason: "sot_establishment_failed",
+                outcome: "retry_recoverable",
+              });
+              setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+              setPremiumPipelineUserMessage(null);
+              premiumModalExtendedWaitActiveRef.current = false;
+              setPremiumCheckoutModalExtendedWait(false);
+              setPremiumAuthoritativeRequestInFlight(false);
+              if (createProductionTwoPane && simpleProductFlow) {
+                setDisplayPhase("review");
+                setCreateFlowPhase("draft_ready_for_review");
+              }
               setProFullDraftCustomGateMessage(
                 isPaidProSoTEstablishmentFailure(establishMsg)
                   ? "LawDog could not lock section structure for your Pro agreement. Tap **Retry Pro draft** to regenerate a structure-safe version."
@@ -9714,14 +9817,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumNetworkRetryInFlight(false);
             setPremiumNetworkStillReconnecting(false);
             if (premiumPostCheckoutPhaseRef.current === "processing") {
-              if (paidCheckoutCompletedRef.current || hasPaidProSourceOfTruth()) {
+              if (
+                shouldRunModelPassFinallyDismissProcessing({
+                  currentPhase: premiumPostCheckoutPhaseRef.current,
+                  qualityRetryActive: proFullDraftQualityRetryRef.current,
+                  paidCheckoutCompleted: paidCheckoutCompletedRef.current,
+                  hasSourceOfTruth: hasPaidProSourceOfTruth(),
+                })
+              ) {
                 setPremiumPostCheckoutPhase(null);
                 setPremiumPipelineUserMessage(null);
                 if (import.meta.env.MODE !== "test") {
                   // eslint-disable-next-line no-console
-                  console.info("[premium-flow] processing_cleared_authoritative_present", {
+                  console.info("[premium-flow] processing_cleared_after_generation_terminal", {
                     paidCheckoutCompleted: paidCheckoutCompletedRef.current,
                     hasSourceOfTruth: hasPaidProSourceOfTruth(),
+                    qualityRetryActive: proFullDraftQualityRetryRef.current,
                   });
                 }
               } else {
