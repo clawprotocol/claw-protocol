@@ -199,7 +199,7 @@ export type ComputeCreateFlowPaidProReviewReadyInput = ResolveAuthoritativeCreat
   createFlowPhase?: CreateFlowProductionPhase;
 };
 
-/** Paid Pro review chrome on `/app/create` — workspace-pro and pipeline-accepted users included. */
+/** Paid Pro review chrome on `/app/create` — workspace-pro shell may show before corpus exists. */
 export function computeCreateFlowPaidProReviewReady(
   input: ComputeCreateFlowPaidProReviewReadyInput,
 ): boolean {
@@ -217,6 +217,38 @@ export function computeCreateFlowPaidProReviewReady(
   if (!input.paidProAuthoritative) return false;
   if (input.createUiStage === CreateUiStage.RECIPIENTS) return true;
   return input.createUiStage === CreateUiStage.DRAFT && input.displayPhase === "review";
+}
+
+/** "Agreement ready" title/chip — only when a renderable paid corpus exists (never empty shell). */
+export function computeCreateFlowPaidProReviewContentReady(
+  input: ComputeCreateFlowPaidProReviewReadyInput & {
+    draft?: import("./intakeSmartDefaults").ParsedDraftShape | null;
+    intakeText?: string | null;
+    agreementDocumentText?: string;
+    premiumRenderSource?: string | null;
+    premiumCheckoutCompleted?: boolean;
+    premiumPostCheckoutPhase?: string | null;
+    pipelineWinningBody?: string | null;
+    hydratedPremiumBody?: string | null;
+    authoritativeBodyLen?: number;
+    proFullDraftQualityRetry?: boolean;
+    createFlowDraftPersistBlocked?: boolean;
+  },
+): boolean {
+  if (input.proFullDraftQualityRetry || input.createFlowDraftPersistBlocked) return false;
+  if (!computeCreateFlowPaidProReviewReady(input)) return false;
+  if (typeof input.authoritativeBodyLen === "number" && input.authoritativeBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return true;
+  }
+  return hasRenderablePaidProFirstReviewCorpus({
+    draft: input.draft ?? null,
+    intakeText: input.intakeText ?? null,
+    premiumRenderSource: input.premiumRenderSource ?? null,
+    premiumCheckoutCompleted: input.premiumCheckoutCompleted,
+    premiumPostCheckoutPhase: input.premiumPostCheckoutPhase,
+    winningPremiumBodyText: input.pipelineWinningBody,
+    hydratedPremiumBody: input.hydratedPremiumBody,
+  });
 }
 
 /** Review plain text for paid create-flow shell when SoT is not yet frozen. */

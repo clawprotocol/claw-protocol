@@ -27,6 +27,10 @@ export type ResolvePaidProReviewStateArgs = {
   hasValidAuthoritativeCorpus: boolean;
   /** Authority candidates were evaluated and rejected (premium-unavailable-retry). */
   premiumCorpusValidationFailed: boolean;
+  /** Pro quality retry armed after validation / gate failure — terminal when body empty. */
+  proFullDraftQualityRetry?: boolean;
+  /** POST /api/agreements/draft failed (e.g. draft_limit_reached) — terminal recoverable. */
+  createFlowDraftPersistBlocked?: boolean;
   /**
    * Length of the authoritative body actually resolvable for render. When provided and zero while a
    * corpus is otherwise "valid", the surface must NOT report AUTHORITATIVE_READY (which would emit an
@@ -64,8 +68,12 @@ export function resolvePaidProReviewState(
   // recompute must never downgrade to FAILED_PREMIUM_CORPUS or a starter degrade. Hold/recover only.
   if (args.signerMetadataEditActive) return "GENERATING";
   if (args.premiumCorpusValidationFailed) return "FAILED_PREMIUM_CORPUS";
+  if (args.proFullDraftQualityRetry || args.createFlowDraftPersistBlocked) {
+    return "FAILED_PREMIUM_CORPUS";
+  }
   if (args.premiumGenerationInFlight) return "GENERATING";
-  // Paid authority exists but the body is momentarily empty: keep recovering, never fail/ready.
+  // Paid authority exists but the body is momentarily empty: keep recovering only when generation
+  // may still produce a corpus — never spin forever after validation/persist terminal failure.
   if (args.hasValidAuthoritativeCorpus && bodyKnownEmpty) return "GENERATING";
   // Checkout completed, generation finished, and no valid corpus exists: fail closed.
   if (args.premiumCheckoutCompleted) return "FAILED_PREMIUM_CORPUS";

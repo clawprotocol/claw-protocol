@@ -22,6 +22,7 @@ import {
 import { isPaidProFirstReviewDisplayActive } from "./paidProPostCheckoutRenderGate";
 import { resolveFreeStarterReviewShellBlocked } from "./paidProCreateFlowRouting";
 import {
+  computeCreateFlowPaidProReviewContentReady,
   computeCreateFlowPaidProReviewReady,
   resolveAuthoritativeCreateFlowReviewShell,
   type ResolveAuthoritativeCreateFlowReviewShellInput,
@@ -31,6 +32,10 @@ export const FREE_STARTER_REVIEW_TITLE = "Review your draft";
 export const FREE_STARTER_REVIEW_SUBTITLE =
   "Your starter draft is ready. Review it, then continue when you're ready.";
 export const FREE_STARTER_REVIEW_BADGE = "Starter draft";
+
+export const PAID_PRO_REVIEW_RECOVERING_TITLE = "Review your Pro agreement";
+export const PAID_PRO_REVIEW_RECOVERING_SUBTITLE =
+  "Your Pro agreement needs another pass before review. Use the recovery options below — your intake is still here.";
 
 export type ReviewShellKind = "free_starter" | "paid_pro" | "neutral";
 
@@ -50,6 +55,12 @@ export type ResolveReviewShellChromeInput = ResolveAuthoritativeCreateFlowReview
   createUiStage?: (typeof CreateUiStage)[keyof typeof CreateUiStage];
   displayPhase?: string;
   createFlowPhase?: CreateFlowProductionPhase;
+  agreementDocumentText?: string;
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
+  authoritativeBodyLen?: number;
+  proFullDraftQualityRetry?: boolean;
+  createFlowDraftPersistBlocked?: boolean;
 };
 
 export function resolveFreeStarterReviewShellActive(
@@ -119,6 +130,7 @@ export function resolveReviewShellChrome(input: ResolveReviewShellChromeInput): 
   subtitle: string;
   badge: string | null;
   paidProReviewReady: boolean;
+  paidProReviewContentReady: boolean;
   blockPaidProShell: boolean;
 } {
   const shell = resolveAuthoritativeCreateFlowReviewShell(input);
@@ -142,12 +154,37 @@ export function resolveReviewShellChrome(input: ResolveReviewShellChromeInput): 
         })) ||
       input.paidProReviewReadyBase ||
       input.paidProAuthoritative;
+    const paidProReviewContentReady = computeCreateFlowPaidProReviewContentReady({
+      simpleProductFlow: Boolean(input.simpleProductFlow),
+      liveWorkspaceTwoPane: Boolean(input.liveWorkspaceTwoPane),
+      paidProAuthoritative: input.paidProAuthoritative,
+      createUiStage: input.createUiStage ?? CreateUiStage.DRAFT,
+      displayPhase: input.displayPhase ?? "review",
+      createFlowPhase: input.createFlowPhase,
+      workspaceProEntitled: input.workspaceProEntitled,
+      tier: input.tier,
+      premiumPersistedFlowActive: input.premiumPersistedFlowActive,
+      premiumSendPathUnlocked: input.premiumSendPathUnlocked,
+      draft: input.draft ?? null,
+      intakeText: input.intakeText ?? null,
+      agreementDocumentText: input.agreementDocumentText,
+      premiumRenderSource: input.premiumRenderSource ?? null,
+      premiumCheckoutCompleted: input.premiumCheckoutCompleted,
+      pipelineWinningBody: input.pipelineWinningBody,
+      hydratedPremiumBody: input.hydratedPremiumBody,
+      authoritativeBodyLen: input.authoritativeBodyLen,
+      proFullDraftQualityRetry: input.proFullDraftQualityRetry,
+      createFlowDraftPersistBlocked: input.createFlowDraftPersistBlocked,
+    });
     return {
       kind: "paid_pro",
-      title: PAID_PRO_REVIEW_SHELL_TITLE,
-      subtitle: PAID_PRO_REVIEW_SHELL_SUBTITLE,
+      title: paidProReviewContentReady ? PAID_PRO_REVIEW_SHELL_TITLE : PAID_PRO_REVIEW_RECOVERING_TITLE,
+      subtitle: paidProReviewContentReady
+        ? PAID_PRO_REVIEW_SHELL_SUBTITLE
+        : PAID_PRO_REVIEW_RECOVERING_SUBTITLE,
       badge: PAID_PRO_REVIEW_BADGE,
       paidProReviewReady: Boolean(paidProReviewReady),
+      paidProReviewContentReady,
       blockPaidProShell: false,
     };
   }
@@ -158,6 +195,7 @@ export function resolveReviewShellChrome(input: ResolveReviewShellChromeInput): 
     subtitle: FREE_STARTER_REVIEW_SUBTITLE,
     badge: FREE_STARTER_REVIEW_BADGE,
     paidProReviewReady: false,
+    paidProReviewContentReady: false,
     blockPaidProShell: true,
   };
 }

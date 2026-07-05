@@ -209,12 +209,27 @@ describe("TEST499 — returning paid create survives draft-limit 403 with accept
     expect(intake).toContain("commitPostCheckoutCanonicalReviewEntry");
   });
 
-  it("9 — true free users still surface draft_limit_reached on POST /draft", () => {
+  it("9 — true free users still surface draft_limit_reached on POST /draft; paid dashboard skips persist without corpus", () => {
     markCurrentSessionFreeStarterIntent();
     expect(
       shouldAutoPersistReviewAgreementRow({
         hasReviewAgreementId: false,
         skipFreeStarterCreateSubmit: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoPersistReviewAgreementRow({
+        hasReviewAgreementId: false,
+        skipFreeStarterCreateSubmit: true,
+        qualityRetryActive: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoPersistReviewAgreementRow({
+        hasReviewAgreementId: false,
+        skipFreeStarterCreateSubmit: true,
+        draft: test499Draft(STARTER_PREVIEW, STARTER_PREVIEW),
+        pipelineWinningBody: STARTER_PREVIEW,
       }),
     ).toBe(false);
     expect(

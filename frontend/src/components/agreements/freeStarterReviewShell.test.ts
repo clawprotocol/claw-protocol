@@ -10,6 +10,7 @@ import {
 } from "./freeStarterReviewShell";
 import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
 import { writeAgreementCreatorIntakeStorage } from "./agreementIntakeStorage";
+import { CreateUiStage } from "./createUiStage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const RED_MESA_INTAKE =
@@ -104,9 +105,34 @@ describe("resolveReviewShellChrome", () => {
       paidProAuthoritative: true,
       paidProReviewReadyBase: true,
       guidedCompletionActive: true,
+      simpleProductFlow: true,
+      liveWorkspaceTwoPane: true,
+      createUiStage: CreateUiStage.DRAFT,
+      displayPhase: "review",
+      authoritativeBodyLen: 2000,
     });
     expect(chrome.title).toBe("Agreement ready");
     expect(chrome.paidProReviewReady).toBe(true);
+    expect(chrome.paidProReviewContentReady).toBe(true);
+  });
+
+  it("paid pro shell without corpus uses recovering title not Agreement ready", () => {
+    const chrome = resolveReviewShellChrome({
+      isFreeStreamlineDraftReview: false,
+      isFreeStarterReviewSurface: false,
+      premiumPaidDocumentSurface: true,
+      paidProAuthoritative: true,
+      paidProReviewReadyBase: true,
+      guidedCompletionActive: false,
+      simpleProductFlow: true,
+      liveWorkspaceTwoPane: true,
+      createUiStage: CreateUiStage.DRAFT,
+      displayPhase: "review",
+      proFullDraftQualityRetry: true,
+      authoritativeBodyLen: 0,
+    });
+    expect(chrome.title).not.toBe("Agreement ready");
+    expect(chrome.paidProReviewContentReady).toBe(false);
   });
 });
 

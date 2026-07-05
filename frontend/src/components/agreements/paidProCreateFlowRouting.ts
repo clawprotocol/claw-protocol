@@ -18,6 +18,9 @@ import {
 } from "./authoritativeCreateFlowReviewShell";
 import { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlowEntitlementProbe";
 import { hasPaidDashboardCreateContextActive } from "../../launch/paidDashboardCreateContext";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import { resolveCreateFlowAcceptedPipelineCorpusPlain } from "./paidProAcceptanceRouting";
+import { shouldUsePaidCreateFlowReviewFirstPersist } from "./paidProCreateFlowReviewHandoff";
 
 export type ResolveSkipFreeStarterCreateSubmitInput = {
   tier: AccessTier;
@@ -44,12 +47,49 @@ export function hasFreeStarterSessionWithoutProEntitlement(): boolean {
 /**
  * Free Starter upsell must not auto-POST /api/agreements/draft — that row is created once after paid acceptance.
  */
-export function shouldAutoPersistReviewAgreementRow(args: {
+export type ShouldAutoPersistReviewAgreementRowArgs = {
   hasReviewAgreementId: boolean;
   skipFreeStarterCreateSubmit: boolean;
-}): boolean {
+  /** When true, generation failed professional validation — never POST /draft. */
+  qualityRetryActive?: boolean;
+  draft?: import("./intakeSmartDefaults").ParsedDraftShape | null;
+  agreementDocumentText?: string;
+  pipelineWinningBody?: string | null;
+  hydratedPremiumBody?: string | null;
+};
+
+/** True when returning-paid / dashboard create has a validated pipeline corpus safe for review-first persist. */
+export function hasPaidCreateFlowPersistableCorpus(
+  args: Pick<
+    ShouldAutoPersistReviewAgreementRowArgs,
+    "draft" | "agreementDocumentText" | "pipelineWinningBody" | "hydratedPremiumBody"
+  >,
+): boolean {
+  if (
+    !shouldUsePaidCreateFlowReviewFirstPersist({
+      draft: args.draft ?? null,
+      agreementDocumentText: args.agreementDocumentText,
+      pipelineWinningBody: args.pipelineWinningBody,
+      hydratedPremiumBody: args.hydratedPremiumBody,
+    })
+  ) {
+    return false;
+  }
+  const corpusLen = resolveCreateFlowAcceptedPipelineCorpusPlain({
+    draft: args.draft ?? null,
+    agreementDocumentText: args.agreementDocumentText,
+    pipelineWinningBody: args.pipelineWinningBody,
+    hydratedPremiumBody: args.hydratedPremiumBody,
+  }).trim().length;
+  return corpusLen >= PAID_PRO_AUTHORITY_MIN_LEN;
+}
+
+export function shouldAutoPersistReviewAgreementRow(args: ShouldAutoPersistReviewAgreementRowArgs): boolean {
   if (args.hasReviewAgreementId) return false;
-  if (args.skipFreeStarterCreateSubmit) return true;
+  if (args.qualityRetryActive) return false;
+  if (args.skipFreeStarterCreateSubmit) {
+    return hasPaidCreateFlowPersistableCorpus(args);
+  }
   if (hasFreeStarterSessionWithoutProEntitlement()) return false;
   return true;
 }

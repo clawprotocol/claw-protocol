@@ -12,7 +12,9 @@ export type PaidProGenerationTerminalReason =
   | "paid_pro_gate_failed"
   | "entitled_rewrite_validation_failed"
   | "entitled_rewrite_canonical_blocked"
-  | "entitled_rewrite_aborted";
+  | "entitled_rewrite_aborted"
+  | "draft_limit_reached"
+  | "draft_persist_failed";
 
 export type PaidProGenerationTerminalOutcome = "review_ready" | "retry_recoverable" | "failed_recoverable";
 

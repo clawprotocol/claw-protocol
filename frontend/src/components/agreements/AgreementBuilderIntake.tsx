@@ -454,8 +454,6 @@ import {
   PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS,
   resolvePaidProReviewChipState,
   PAID_PRO_REVIEW_SHELL_SAFETY_LINE,
-  PAID_PRO_REVIEW_SHELL_SUBTITLE,
-  PAID_PRO_REVIEW_SHELL_TITLE,
   resolveAuthoritativePaidProReviewPlain,
   resolvePaidProFinalReviewVisiblePlain,
   suppressPaidProFinalReviewFinalizingState,
@@ -1521,6 +1519,12 @@ import {
   resolveSkipFreeStarterCreateSubmit,
   shouldAutoPersistReviewAgreementRow,
 } from "./paidProCreateFlowRouting";
+import {
+  formatPaidCreateFlowDraftPersistFailureMessage,
+  isDraftLimitReachedPersistError,
+  PAID_CREATE_FLOW_DRAFT_LIMIT_HEADLINE,
+  resolvePaidCreateFlowDraftPersistFailureHeadline,
+} from "./paidProCreateFlowPersistTerminal";
 import {
   shouldBlockFreeStarterReviewSurfaces,
   resolveCreateFlowPaidReviewDisplayPlain,
@@ -3959,6 +3963,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [signaturePreparationRequested, paidProInlineSignerSetupLatched, premiumSurfaceGateTick]);
   const [reviewFirstHandoffBusy, setReviewFirstHandoffBusy] = useState(false);
   const [reviewFirstHandoffError, setReviewFirstHandoffError] = useState<string | null>(null);
+  const [createFlowDraftPersistError, setCreateFlowDraftPersistError] = useState<string | null>(null);
   const [reviewFirstSigningTokenSecretMissing, setReviewFirstSigningTokenSecretMissing] = useState(false);
   const [reviewLinkPersistFailureDiagnostics, setReviewLinkPersistFailureDiagnostics] =
     useState<ReviewLinkPersistDiagnostics | null>(null);
@@ -5359,7 +5364,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return tid;
         }
         return null;
-      } catch {
+      } catch (e: unknown) {
+        const persistMsg = formatPaidCreateFlowDraftPersistFailureMessage(e);
+        if (useReviewFirstPersist || isDraftLimitReachedPersistError(e)) {
+          setCreateFlowDraftPersistError(persistMsg);
+          logPaidProGenerationTerminalTransition({
+            reason: isDraftLimitReachedPersistError(e) ? "draft_limit_reached" : "draft_persist_failed",
+            outcome: "failed_recoverable",
+          });
+          setProFullDraftCustomGateMessage((prev) => {
+            if (prev?.trim()) return prev;
+            return isDraftLimitReachedPersistError(e)
+              ? `${resolvePaidCreateFlowDraftPersistFailureHeadline(e)}\n\n${persistMsg}`
+              : persistMsg;
+          });
+          setProFullDraftQualityRetry(true);
+        }
         if (
           useReviewFirstPersist &&
           corpusPlain.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
@@ -6510,6 +6530,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumModalExtendedWaitActiveRef.current = false;
         setPremiumCheckoutModalExtendedWait(false);
         setPremiumAuthoritativeRequestInFlight(false);
+        setLoading(false);
+        setCreateFlowDraftPersistError(null);
         return;
       }
       const premiumDeliverablePlain = buildAgreementPreviewTextCore(merged.draft, {
@@ -14377,6 +14399,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         createUiStage,
         displayPhase,
         createFlowPhase,
+        agreementDocumentText,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+        authoritativeBodyLen: paidProAuthoritativeBodyLen,
+        proFullDraftQualityRetry,
+        createFlowDraftPersistBlocked: Boolean(createFlowDraftPersistError?.trim()),
         ...authoritativeCreateFlowReviewShellInput,
       }),
     [
@@ -14394,6 +14423,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       currentPremiumMergedIntakeKey,
       intakeCombined,
       premiumTruthPipelineSource,
+      agreementDocumentText,
+      paidProAuthoritativeBodyLen,
+      proFullDraftQualityRetry,
+      createFlowDraftPersistError,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
       authoritativeCreateFlowReviewShellInput,
@@ -14402,6 +14435,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const paidProReviewReady = reviewShellChrome.paidProReviewReady;
+  const paidProReviewContentReady = reviewShellChrome.paidProReviewContentReady;
 
   /** Paid Pro on `/app/create`: shell owns title/subtitle/control — suppress duplicate intake chrome. */
   const paidProReviewCompactChrome = Boolean(
@@ -15484,6 +15518,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!createProductionTwoPane || !productionDraftPrimaryReviewSurface || !draft || reviewAgreementId) return;
     if (authoritativePremiumUiCommitted) return;
     if (premiumPostCheckoutPhase === "processing" || premiumAuthoritativeRequestInFlightUi) return;
+    if (proFullDraftQualityRetry) return;
+    if (createFlowDraftPersistError) return;
     if (
       !shouldAutoPersistReviewAgreementRow({
         hasReviewAgreementId: Boolean(reviewAgreementId?.trim()),
@@ -15491,6 +15527,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           tier,
           proAgreementEntitled,
         }),
+        qualityRetryActive: proFullDraftQualityRetry,
+        draft,
+        agreementDocumentText,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
       })
     ) {
       return;
@@ -15506,8 +15548,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     authoritativePremiumUiCommitted,
     premiumPostCheckoutPhase,
     premiumAuthoritativeRequestInFlightUi,
+    proFullDraftQualityRetry,
+    createFlowDraftPersistError,
     tier,
     proAgreementEntitled,
+    agreementDocumentText,
   ]);
 
   useEffect(
@@ -16725,6 +16770,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     setProFullDraftQualityRetry(false);
     setProFullDraftCustomGateMessage(null);
+    setCreateFlowDraftPersistError(null);
     setPremiumServerGenerationDegraded(null);
     setHardError(null);
     if (!draft) {
@@ -20058,6 +20104,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           (premiumTruthPipelineSource === "premium_degraded_server_local_recovery" &&
             paidProAuthoritativeBodyLen >= 500),
         premiumCorpusValidationFailed: premiumPaidUnavailableRetry,
+        proFullDraftQualityRetry,
+        createFlowDraftPersistBlocked: Boolean(createFlowDraftPersistError?.trim()),
         authoritativeBodyLen: paidProAuthoritativeBodyLen,
         // Never fail closed while a paid SoT exists and signing has not been requested — even if the
         // authoritative render length transiently reads 0 (e.g. mid signer-metadata recompute).
@@ -20075,6 +20123,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       authoritativePremiumUiCommitted,
       canProceedWithPaidProDocument,
       premiumPaidUnavailableRetry,
+      proFullDraftQualityRetry,
+      createFlowDraftPersistError,
       paidProAuthoritativeBodyLen,
       paidProSignerMetadataEditGuardActive,
       paidProSigningCorpusFreezeActive,
@@ -20491,12 +20541,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             canonicalFirstReviewActive: canonicalPaidCreateFlowFirstReviewActive,
           })
         ) {
-          if (!paidProFirstReviewCorpusReady) {
+          if (
+            failedPremiumCorpusActive ||
+            proFullDraftQualityRetry ||
+            createFlowDraftPersistError
+          ) {
+            return {
+              label: PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL,
+              action: "guided_continue",
+              disabled: false,
+              reason: createFlowDraftPersistError
+                ? "draft_limit_reached_recover"
+                : "failed_premium_corpus_recover",
+            };
+          }
+          if (!paidProFirstReviewCorpusReady && (isGenerating || premiumAuthoritativeRequestInFlightUi)) {
             return {
               label: resolveProductionTwoPaneLoadingUserCopy(),
               action: "guided_continue",
               disabled: true,
               reason: "paid_pro_review_hydrating",
+            };
+          }
+          if (!paidProFirstReviewCorpusReady) {
+            return {
+              label: PREMIUM_NETWORK_RECOVERABLE_RETRY_LABEL,
+              action: "guided_continue",
+              disabled: false,
+              reason: "paid_pro_review_corpus_missing_recover",
             };
           }
         } else if (showUpgradeToFullDraftOnReview) {
@@ -20788,6 +20860,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     suppressFreeStarterCreateFlowConversionUi,
     createFlowPaidAcceptedOrAuthoritativeActive,
     createFlowAuthoritativeShellReactiveKey,
+    failedPremiumCorpusActive,
+    proFullDraftQualityRetry,
+    createFlowDraftPersistError,
+    premiumAuthoritativeRequestInFlightUi,
   ]);
 
   useEffect(() => {
@@ -25555,24 +25631,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPaidDocumentSurface &&
       !authoritativePremiumUiCommitted &&
       !proUpgradeUseStarterView &&
-      (premiumPaidUnavailableRetry || !canProceedWithPaidProDocument) &&
+      (premiumPaidUnavailableRetry ||
+        !canProceedWithPaidProDocument ||
+        proFullDraftQualityRetry ||
+        createFlowDraftPersistError) &&
       !premiumReturnWaitActive &&
       !showGuidedCompletionRecovery &&
       !showPremiumNetworkRecoverablePanel &&
       !showPremiumCorsBlockedPanel,
   );
-  const proAmberRecoveryHeadline = premiumGenerationApiUnavailable
-    ? PAID_PRO_API_UNAVAILABLE_HEADLINE
-    : premiumPaidUnavailableRetry
-      ? PAID_PRO_UNAVAILABLE_RETRY_HEADLINE
-      : sanitizeProUserMessage(proFullDraftCustomGateMessage) || PREMIUM_NETWORK_RECOVERABLE_HEADLINE;
-  const proAmberRecoveryBody = premiumGenerationApiUnavailable
-    ? PAID_PRO_API_UNAVAILABLE_BODY
-    : premiumPaidUnavailableRetry
-      ? PAID_PRO_UNAVAILABLE_RETRY_BODY
-      : sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
-        guidedCompletionFriendlyCopy.body ||
-        "Your intake is still available. Add or clarify details, retry a full Pro draft, or work from your starter version.";
+  const proAmberRecoveryHeadline = createFlowDraftPersistError
+    ? createFlowDraftPersistError.includes(PAID_CREATE_FLOW_DRAFT_LIMIT_HEADLINE) ||
+      createFlowDraftPersistError.toLowerCase().includes("active drafts")
+      ? PAID_CREATE_FLOW_DRAFT_LIMIT_HEADLINE
+      : "Could not save draft"
+    : premiumGenerationApiUnavailable
+      ? PAID_PRO_API_UNAVAILABLE_HEADLINE
+      : premiumPaidUnavailableRetry
+        ? PAID_PRO_UNAVAILABLE_RETRY_HEADLINE
+        : sanitizeProUserMessage(proFullDraftCustomGateMessage) || PREMIUM_NETWORK_RECOVERABLE_HEADLINE;
+  const proAmberRecoveryBody = createFlowDraftPersistError
+    ? createFlowDraftPersistError
+    : premiumGenerationApiUnavailable
+      ? PAID_PRO_API_UNAVAILABLE_BODY
+      : premiumPaidUnavailableRetry
+        ? PAID_PRO_UNAVAILABLE_RETRY_BODY
+        : sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
+          guidedCompletionFriendlyCopy.body ||
+          "Your intake is still available. Add or clarify details, retry a full Pro draft, or work from your starter version.";
   const showRetryAsPrimaryCta = Boolean(
     simpleCreateUnifiedBottomCta &&
       createProductionTwoPane &&
@@ -25581,6 +25667,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !hasPaidProSourceOfTruth() &&
       (showStrictRetryNeedsDetailsPanel ||
         showProAmberRecoveryPanel ||
+        failedPremiumCorpusActive ||
+        proFullDraftQualityRetry ||
+        createFlowDraftPersistError ||
         premiumGenerationApiUnavailable ||
         showPremiumNetworkRecoverablePanel ||
         showPremiumCorsBlockedPanel),
@@ -30284,14 +30373,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   {PAID_PRO_REVIEW_BADGE}
                                 </span>
                                 <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                  {PAID_PRO_REVIEW_SHELL_TITLE}
+                                  {reviewShellChrome.title}
                                 </h2>
                                 <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
-                                  {PAID_PRO_REVIEW_SHELL_SUBTITLE}
+                                  {reviewShellChrome.subtitle}
                                 </p>
-                                <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
-                                  {PAID_PRO_REVIEW_SHELL_SAFETY_LINE}
-                                </p>
+                                {paidProReviewContentReady ? (
+                                  <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
+                                    {PAID_PRO_REVIEW_SHELL_SAFETY_LINE}
+                                  </p>
+                                ) : null}
                               </>
                             ) : isFreeStreamlineDraftReview &&
                               !suppressFreeStarterCreateFlowConversionUi &&
