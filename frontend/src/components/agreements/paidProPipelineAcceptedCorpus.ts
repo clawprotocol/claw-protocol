@@ -4,7 +4,7 @@
  * Also retains the accepted body text for concise Pro corpora (<15k) before React ref handoff.
  */
 
-import { hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { hashPaidProCorpus } from "./paidProSourceOfTruthState";
 
 /** Matches guided final review minimum — inlined to avoid simpleProFinalReviewCorpus import cycle. */
 const PIPELINE_ACCEPTED_CORPUS_BODY_MIN_LEN = 1500;

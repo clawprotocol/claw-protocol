@@ -3,13 +3,11 @@
  * All create-flow review presentation must consult this module — downstream guards must not override it.
  */
 
-import { readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import type { AccessTier } from "../../access/types";
-import { subscriptionTierForAccess } from "../../access/subscriptionEntitlementCache";
 import { CreateUiStage } from "./createUiStage";
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
-import { hasPaidProSourceOfTruth, getPaidProSourceOfTruthText } from "./paidProSourceOfTruth";
+import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruthState";
 import { readPremiumCompletionSnapshot, hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
@@ -17,7 +15,7 @@ import {
   readPaidProPipelineAcceptedCorpusBody,
   readPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
-import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import {
   hasRenderablePaidProFirstReviewCorpus,
   isPaidProPostCheckoutRecoveryReviewActive,
@@ -26,6 +24,8 @@ import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceVali
 import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
 import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
 import { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlowEntitlementProbe";
+import { resolveCreateFlowWorkspaceProEntitled } from "./paidCreateFlowWorkspaceEntitlementProbe";
+import { hasPaidCreateFlowPipelineAcceptance } from "./paidCreateFlowPipelineAcceptanceProbe";
 import { hasPaidDashboardCreateContextActive, isAppCreatePath, shouldFailClosedBypassForAuthenticatedWorkspaceCreate } from "../../launch/paidDashboardCreateContext";
 
 /** Matches {@link GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN} — inlined to avoid simpleProFinalReviewCorpus import cycle. */
@@ -43,18 +43,11 @@ export type ResolveAuthoritativeCreateFlowReviewShellInput = {
   premiumCheckoutCompleted?: boolean;
 };
 
-export function resolveWorkspaceProSubscriptionEntitled(): boolean {
-  const subTier = subscriptionTierForAccess();
-  return Boolean(subTier && tierAllowsAdvancedFullDraftReveal(subTier));
-}
-
-export function resolveCreateFlowWorkspaceProEntitled(): boolean {
-  return resolveWorkspaceProSubscriptionEntitled() || readCachedWorkspaceProEntitlement();
-}
-
-export function hasPaidCreateFlowPipelineAcceptance(): boolean {
-  return readPaidProPipelineAcceptedCorpusHash() !== null;
-}
+export {
+  resolveCreateFlowWorkspaceProEntitled,
+  resolveWorkspaceProSubscriptionEntitled,
+} from "./paidCreateFlowWorkspaceEntitlementProbe";
+export { hasPaidCreateFlowPipelineAcceptance } from "./paidCreateFlowPipelineAcceptanceProbe";
 
 export function hasAcceptedPaidCreateFlowFreezeLatch(): boolean {
   const latched = getLatchedAcceptedServerFullDraftAuthority();

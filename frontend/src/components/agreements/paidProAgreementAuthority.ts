@@ -1,20 +1,20 @@
 import type { AccessTier } from "../../access/types";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
-import { resolveCreateFlowWorkspaceProEntitled } from "./paidProCreateFlowReviewHandoff";
+import { resolveCreateFlowWorkspaceProEntitled } from "./paidCreateFlowWorkspaceEntitlementProbe";
 import {
   hasStoredPaidPremiumCompletionSession,
   peekPremiumCompletionDoneInLocalStorage,
 } from "./premiumCompletionStorage";
 import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
-import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruthState";
 import {
   hasCurrentSessionFreeStarterIntent,
   hasCurrentSessionProEntitlement,
 } from "./paidProSessionEligibility";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 
-/** Minimum plain length to treat premium/server fields as authoritative Pro (aligns with send handoff). */
-export const PAID_PRO_AUTHORITY_MIN_LEN = 500;
+export { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 
 /** Draft-like shape for authority checks (parsed draft or API agreement row). */
 export type PaidProAgreementAuthorityDraft = Partial<ParsedDraftShape> & {

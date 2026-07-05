@@ -17,7 +17,10 @@ import {
   shouldFailClosedBypassForAuthenticatedWorkspaceCreate,
 } from "../../launch/paidDashboardCreateContext";
 import { tierAllowsAdvancedFullDraftReveal, peekAdvancedFullDraftCheckoutGrant } from "./agreementAdvancedDraftAccess";
-import { hasPaidPremiumCompletionSession, readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import {
+  hasPaidPremiumCompletionSessionForCreateProbe,
+  readPremiumCompletionSnapshotPremiumAcceptedForCreateProbe,
+} from "./paidCreateFlowPremiumSessionProbe";
 
 function readStaleSubscriptionCachePremium(): boolean {
   const cached = readCachedSubscriptionEntitlement();
@@ -56,9 +59,8 @@ export function resolveProvisionalWorkspaceProEntitledForCreate(): boolean {
     const tierOk = Boolean(sub.tier && tierAllowsAdvancedFullDraftReveal(sub.tier));
     if (statusActive && tierOk) return true;
   }
-  if (hasPaidPremiumCompletionSession()) return true;
-  const snap = readPremiumCompletionSnapshot();
-  if (snap?.premiumAccepted === true) return true;
+  if (hasPaidPremiumCompletionSessionForCreateProbe()) return true;
+  if (readPremiumCompletionSnapshotPremiumAcceptedForCreateProbe()) return true;
   if (peekAdvancedFullDraftCheckoutGrant()) return true;
   return false;
 }

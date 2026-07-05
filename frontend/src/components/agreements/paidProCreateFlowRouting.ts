@@ -4,7 +4,7 @@
 
 import type { AccessTier } from "../../access/types";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
-import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruthState";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import {
   hasCurrentSessionFreeStarterIntent,
@@ -16,7 +16,7 @@ import {
   shouldBlockFreeStarterReviewSurfaces,
   shouldUsePaidProCreateFlowReviewShell,
 } from "./authoritativeCreateFlowReviewShell";
-import { resolveProvisionalWorkspaceProEntitledForCreate } from "./returningPaidCreateBootstrap";
+import { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlowEntitlementProbe";
 import { hasPaidDashboardCreateContextActive } from "../../launch/paidDashboardCreateContext";
 
 export type ResolveSkipFreeStarterCreateSubmitInput = {

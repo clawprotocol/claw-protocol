@@ -3519,6 +3519,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumRecipientUxActive, setPremiumRecipientUxActive] = useState(false);
   /** Snapshot / completed premium: suppress starter paywall and “fix draft” friction. */
   const [premiumPersistedFlowActive, setPremiumPersistedFlowActive] = useState(false);
+  /** Synced from paidProAuthoritative in layout effect — must exist before hasFullDraftAccess / upgrade intent memos. */
+  const paidProAuthoritativeRef = useRef(false);
   /** Server signing lock `locked_version_id` from GET /agreements/:id (owner resume after recipient acceptance). */
   const [ownerResumeServerLockVid, setOwnerResumeServerLockVid] = useState<string | null>(null);
   /** Bumps when sessionStorage premium recipient gate changes so memos re-read peek helpers. */
@@ -4053,7 +4055,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }),
     );
   }, [draft?.parties?.length]);
-  const paidProAuthoritativeRef = useRef(false);
   useLayoutEffect(() => {
     recipient1NameRef.current = recipient1Name;
   }, [recipient1Name]);

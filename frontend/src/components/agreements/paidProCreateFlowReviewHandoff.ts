@@ -15,14 +15,12 @@ import {
 } from "./premiumAcceptancePolicy";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
-import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
 import { readPremiumCompletionSnapshot, hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
 import { resolveCreateFlowAcceptedPipelineCorpusPlain } from "./paidProAcceptanceRouting";
-import {
-  hasPaidCreateFlowPipelineAcceptance,
-} from "./authoritativeCreateFlowReviewShell";
+import { hasPaidCreateFlowPipelineAcceptance } from "./paidCreateFlowPipelineAcceptanceProbe";
 
 export {
   hasAcceptedPaidCreateFlowFreezeLatch,

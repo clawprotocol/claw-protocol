@@ -9,6 +9,9 @@ export const SEND_HANDOFF_AUTHORITATIVE_MIN_LEN = 500;
 /** Same floor as send handoff — minimum material Pro corpus for runtime authority. */
 export const PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN = SEND_HANDOFF_AUTHORITATIVE_MIN_LEN;
 
+/** Alias used across agreement authority and create-flow shell modules. */
+export const PAID_PRO_AUTHORITY_MIN_LEN = SEND_HANDOFF_AUTHORITATIVE_MIN_LEN;
+
 export type PremiumPipelineCorpusDraftLike = {
   premium_full_document_text?: string | null;
   premium_server_full_document_text?: string | null;

@@ -6,7 +6,7 @@
 import { CreateUiStage } from "./createUiStage";
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
 import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
-import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruthState";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import {
   hasPaidCreateFlowPipelineAcceptance,
