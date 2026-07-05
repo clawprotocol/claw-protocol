@@ -7,6 +7,7 @@ import { assessConciseCommercialServicesProQuality } from "./paidProConciseServi
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { corpusHashForScanCache } from "./paidProCorpusScanCache";
 import {
+  markPaidProPipelineAcceptedCorpusHash,
   paidProPipelineAcceptedCorpusHash,
   readPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
@@ -57,6 +58,15 @@ export function markPaidProPipelineValidationPassed(args: { text: string; source
   for (const source of sources) {
     markPaidProAuthoritativeValidationPassed({ text: args.text, source });
   }
+}
+
+/** Record full pipeline validation acceptance — required before review render / SoT handoff. */
+export function commitPaidProPipelineValidationAcceptance(args: {
+  text: string;
+  source: string;
+}): void {
+  markPaidProPipelineValidationPassed(args);
+  markPaidProPipelineAcceptedCorpusHash(args.text);
 }
 
 export function hasPaidProAuthoritativeValidationPassed(args: {
@@ -120,7 +130,9 @@ export function hasPaidProPipelineSessionAcceptance(args: {
   if (readPaidProPipelineAcceptedCorpusHash() !== null) {
     const incomingHash = paidProPipelineAcceptedCorpusHash(t);
     const acceptedHash = readPaidProPipelineAcceptedCorpusHash();
-    if (incomingHash && acceptedHash && incomingHash === acceptedHash) return true;
+    if (incomingHash && acceptedHash && incomingHash === acceptedHash) {
+      return hasPaidProPipelineValidationForCorpus({ text: t, source: args.source });
+    }
   }
   return false;
 }

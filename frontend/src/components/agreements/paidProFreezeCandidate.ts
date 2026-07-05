@@ -63,7 +63,6 @@ import {
 import {
   paidProPipelineAcceptedCorpusHash,
   readPaidProPipelineAcceptedCorpusHash,
-  markPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import { logProCorpusSourceMap } from "./proCorpusSourcePath";
 import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipelineTrace";
@@ -995,11 +994,6 @@ export function evaluatePaidProFreezeCandidateGates(
 ): PaidProFreezeCandidateGateResult {
   try {
     const text = assertPaidProFreezeCandidateGates(prep, args);
-    markPaidProPipelineValidationPassed({
-      text,
-      source: args.source ?? "server_full_draft",
-    });
-    markPaidProPipelineAcceptedCorpusHash(text);
     return {
       ok: true,
       text,
@@ -1087,13 +1081,6 @@ export function resolvePaidProFreezeCommitText(
   args: PreparePaidProFreezeCandidateArgs,
 ): PaidProFreezeCandidateGateResult {
   const result = buildPaidProFreezeCandidate(args);
-  if (result.ok) {
-    markPaidProPipelineValidationPassed({
-      text: result.text,
-      source: args.source ?? "server_full_draft",
-    });
-    markPaidProPipelineAcceptedCorpusHash(result.text);
-  }
   return result;
 }
 

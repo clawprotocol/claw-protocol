@@ -493,6 +493,8 @@ export function resolvePaidProSignerDetailsGate(
 
 export type ResolvePaidProInlineSignerSetupMountedArgs = {
   hasAcceptedPaidProAuthority: boolean;
+  /** Pipeline corpus accepted by validatePaidProOutput — may mount review before SoT freeze. */
+  hasProfessionallyValidatedReviewCorpus?: boolean;
   premiumPaidDocumentSurface: boolean;
   premiumRecipientUxActive: boolean;
   createUiStageIsDraft: boolean;
@@ -509,8 +511,10 @@ export type ResolvePaidProInlineSignerSetupMountedArgs = {
 export function resolvePaidProInlineSignerSetupMounted(
   args: ResolvePaidProInlineSignerSetupMountedArgs,
 ): boolean {
+  const reviewAuthority =
+    args.hasAcceptedPaidProAuthority || Boolean(args.hasProfessionallyValidatedReviewCorpus);
   return Boolean(
-    args.hasAcceptedPaidProAuthority &&
+    reviewAuthority &&
       args.premiumPaidDocumentSurface &&
       !args.premiumRecipientUxActive &&
       args.createUiStageIsDraft &&
@@ -544,6 +548,7 @@ export function shouldArmPaidProInlineSignerSetupLatch(args: {
 /** First paid Pro review entry — arm latch until user explicitly finalizes signer metadata. */
 export function shouldArmPaidProFirstReviewSignerSetupLatch(args: {
   hasAcceptedPaidProAuthority: boolean;
+  hasProfessionallyValidatedReviewCorpus?: boolean;
   premiumPaidDocumentSurface: boolean;
   premiumRecipientUxActive: boolean;
   createUiStageIsDraft: boolean;
@@ -557,8 +562,10 @@ export function shouldArmPaidProFirstReviewSignerSetupLatch(args: {
   if (args.alreadyLatched) return true;
   if (args.signaturePreparationRequested) return false;
   if (args.signerMetadataFinalized) return false;
+  const reviewAuthority =
+    args.hasAcceptedPaidProAuthority || Boolean(args.hasProfessionallyValidatedReviewCorpus);
   return Boolean(
-    args.hasAcceptedPaidProAuthority &&
+    reviewAuthority &&
       args.premiumPaidDocumentSurface &&
       !args.premiumRecipientUxActive &&
       args.createUiStageIsDraft &&

@@ -235,6 +235,7 @@ export function extractLineSeparatedLegalEntityParties(intakeRaw: string): strin
   for (const line of lines) {
     if (/^\$/.test(line) || (/^\d/.test(line) && /\bmonth/i.test(line))) continue;
     if (isRevenueShareAllocationLine(line)) continue;
+    if (/^total\s+(?:contract\s+value|project\s+fee)/i.test(line)) continue;
     if (/^(?:term|fee|payment|governing|duration|oklahoma|texas|law)\b/i.test(line)) continue;
     if (looksLikeAuthorizedSignersBulletLine(line)) continue;
     if (/workflow|consulting|automation|services?\b/i.test(line) && !PARTY_ENTITY_SUFFIX_RE.test(line)) {

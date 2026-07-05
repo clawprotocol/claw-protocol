@@ -33,7 +33,7 @@ import {
 } from "./paidProConciseServicesQuality";
 import {
   assessProfessionalProClauseCoverage,
-  shouldRejectThinProfessionalProCorpus,
+  shouldRejectProfessionalProCorpus,
 } from "./paidProProfessionalClauseCoverage";
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
 import { corpusHasPaidProSyntheticMalformedSectionHeadings } from "./paidProSyntheticMalformedSectionHeadings";
@@ -44,7 +44,10 @@ import {
 } from "./paidProFreezeCandidate";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import { hasProGenerationAdoptionForSession } from "./paidProGenerationAdoption";
-import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
+import {
+  commitPaidProPipelineValidationAcceptance,
+  hasPaidProPipelineSessionAcceptance,
+} from "./paidProPostAcceptanceValidatorCache";
 import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicationAuthority";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { getPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -278,6 +281,14 @@ export function validatePaidProOutput(args: {
   });
   let freezeCandidateHashForLog: string | null = null;
   let intentValidationHashForLog: string | null = null;
+  const recordPipelineValidationAcceptance = (corpus: string) => {
+    const accepted = (corpus || "").trim();
+    if (accepted.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return;
+    commitPaidProPipelineValidationAcceptance({
+      text: accepted,
+      source: pipelineSource ?? "server_full_draft",
+    });
+  };
   const logDecision = (
     accepted: boolean,
     reasons: string[],
@@ -439,7 +450,7 @@ export function validatePaidProOutput(args: {
           text: rawInput,
           intake: rawI,
         });
-        if (shouldRejectThinProfessionalProCorpus(wireProfessional)) {
+        if (shouldRejectProfessionalProCorpus(wireProfessional)) {
           return rejectAt("professional_pro_clause_coverage", [
             ...wireProfessional.missingClauses.map((c) => `professional_${c}`),
             `docLen=${wireProfessional.docLen}`,
@@ -449,7 +460,7 @@ export function validatePaidProOutput(args: {
           text: recovery.text,
           intake: rawI,
         });
-        if (shouldRejectThinProfessionalProCorpus(professional)) {
+        if (shouldRejectProfessionalProCorpus(professional)) {
           return rejectAt("professional_pro_clause_coverage", [
             ...professional.missingClauses.map((c) => `professional_${c}`),
             `docLen=${professional.docLen}`,
@@ -472,6 +483,7 @@ export function validatePaidProOutput(args: {
           ],
           "deterministic_recovery_freeze_candidate_ok",
         );
+        recordPipelineValidationAcceptance(recovery.text);
         return {
           ok: true,
           reasons: ["deterministic_recovery_freeze_candidate_ok"],
@@ -499,10 +511,20 @@ export function validatePaidProOutput(args: {
     text: rawInput,
     intake: rawI,
   });
-  if (shouldRejectThinProfessionalProCorpus(wireProfessional)) {
+  if (shouldRejectProfessionalProCorpus(wireProfessional)) {
     return rejectAt("professional_pro_clause_coverage", [
       ...wireProfessional.missingClauses.map((c) => `professional_${c}`),
       `docLen=${wireProfessional.docLen}`,
+    ]);
+  }
+  const preparedProfessional = assessProfessionalProClauseCoverage({
+    text: bodyForGates,
+    intake: rawI,
+  });
+  if (shouldRejectProfessionalProCorpus(preparedProfessional)) {
+    return rejectAt("professional_pro_clause_coverage", [
+      ...preparedProfessional.missingClauses.map((c) => `professional_${c}`),
+      `docLen=${preparedProfessional.docLen}`,
     ]);
   }
   if (minimumSubstance.applies && !minimumSubstance.ok) {
@@ -611,6 +633,7 @@ export function validatePaidProOutput(args: {
           [...vi.reasons, "post_freeze_server_full_intent_title_warn_only"],
           "post_freeze_intent_title_warn_only",
         );
+        recordPipelineValidationAcceptance(intentValidationText);
         return { ok: true, reasons: [] };
       }
       if (
@@ -620,6 +643,7 @@ export function validatePaidProOutput(args: {
         serverFullDocExists
       ) {
         logDecision(true, ["concise_commercial_services_override"], "intent_contract_override");
+        recordPipelineValidationAcceptance(intentValidationText);
         return { ok: true, reasons: [] };
       }
       return rejectAt("validateIntentContractForPaidProOutput", vi.reasons);
@@ -642,6 +666,7 @@ export function validatePaidProOutput(args: {
   if (finalConciseQuality.malformedOpening) {
     if (serverFullDocExists && freezeCandidate.ok) {
       logDecision(true, ["concise_malformed_opening_overridden_after_freeze_pass"], "final_concise_quality");
+      recordPipelineValidationAcceptance(bodyForGates);
       return { ok: true, reasons: [] };
     }
     return rejectAt("concise_services_malformed_opening", ["concise_services_malformed_opening"]);
@@ -651,6 +676,7 @@ export function validatePaidProOutput(args: {
     finalConciseQuality.applies && finalConciseQuality.ok ? ["concise_commercial_services"] : [],
     "accepted",
   );
+  recordPipelineValidationAcceptance(bodyForGates);
   return { ok: true, reasons: [] };
 }
 

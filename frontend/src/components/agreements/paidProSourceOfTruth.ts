@@ -15,7 +15,6 @@ import { resetPaidProCorpusLifecycleDiffForTests } from "./paidProCorpusLifecycl
 import { validateProMinimumSubstance } from "./paidProConciseServicesQuality";
 import {
   assessProfessionalProClauseCoverage,
-  PROFESSIONAL_PRO_INTAKE_MIN_CORPUS_LEN,
   logProfessionalProClauseCoverageDecision,
 } from "./paidProProfessionalClauseCoverage";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
@@ -450,26 +449,15 @@ export function establishPaidProSourceOfTruth(args: {
     intake: args.intakeText ?? "",
   });
   if (professionalCoverage.applies && !professionalCoverage.ok) {
-    const rejectThinProfessional =
-      professionalCoverage.docLen < PROFESSIONAL_PRO_INTAKE_MIN_CORPUS_LEN ||
-      professionalCoverage.missingClauses.includes("corpus_length");
-    if (rejectThinProfessional) {
-      logProfessionalProClauseCoverageDecision({
-        accepted: false,
-        docLen: professionalCoverage.docLen,
-        missingClauses: professionalCoverage.missingClauses,
-        source: requestedSource,
-      });
-      throw new Error(
-        `[professional-pro-clause-coverage-blocked] missing=${professionalCoverage.missingClauses.join(",")};len=${professionalCoverage.docLen}`,
-      );
-    }
     logProfessionalProClauseCoverageDecision({
-      accepted: true,
+      accepted: false,
       docLen: professionalCoverage.docLen,
       missingClauses: professionalCoverage.missingClauses,
-      source: `${requestedSource}:advisory`,
+      source: requestedSource,
     });
+    throw new Error(
+      `[professional-pro-clause-coverage-blocked] missing=${professionalCoverage.missingClauses.join(",")};len=${professionalCoverage.docLen}`,
+    );
   }
   const intakeHasConcreteServicesFacts =
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.intakeText ?? "") &&

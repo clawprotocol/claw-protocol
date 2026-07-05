@@ -625,6 +625,7 @@ import {
   resolveCanonicalReviewCorpusLenForRender,
   resolvePaidProDocumentBodyRouter,
 } from "./paidProDocumentBodyRouter";
+import { hasProfessionallyValidatedPipelineReviewCorpusForRender } from "./paidProAcceptedPipelineReviewCorpus";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
 import { PaidProReviewRenderInvariantProbe } from "./PaidProReviewRenderInvariantProbe";
 import {
@@ -1540,7 +1541,6 @@ import {
   type EnterCanonicalPaidProReviewFlowArgs,
 } from "./enterCanonicalPaidProReviewFlow";
 import {
-  markPaidProPipelineAcceptedCorpusHash,
   readPaidProPipelineAcceptedCorpusBody,
 } from "./paidProPipelineAcceptedCorpus";
 import {
@@ -8044,15 +8044,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             qualityRetryActive: false,
             serverGenerationDegraded: Boolean(result.serverGenerationDegraded),
           });
-          const authoritativeCommittedForGate = resolveAuthoritativePremiumCommitted({
-            winningPremiumBodyText: winning,
-            premiumRenderSource: result.premiumRenderSource,
-            premiumRenderResolveSource: resolvedPersist.premium_render_source,
-            generationOutcome: result.serverGenerationDegraded ? "degraded" : "needs_details",
-          });
           const skipQualityRetryForAdvisoryOnly =
-            authoritativeCommittedForGate.committed ||
-            (winning.length >= 15_000 && !result.structuralCatastrophic);
+            winning.length >= 15_000 && !result.structuralCatastrophic;
           if (!fin.ok && !skipQualityRetryForAdvisoryOnly) {
             setPremiumServerGenerationDegraded(null);
             if (contractIc.pro_strict) {
@@ -8140,9 +8133,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 : result.premiumRenderSource,
           });
           const paidProSotSource = result.premiumRenderSource || "server_full_draft";
-          if (snapshotPlain.trim().length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
-            markPaidProPipelineAcceptedCorpusHash(snapshotPlain);
-          }
           const commitPostCheckoutCanonicalReviewEntry = () => {
             const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
               source: "post_checkout_apply_success",
@@ -14383,6 +14373,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const paidProProfessionallyValidatedReviewCorpusActive = useMemo(
+    () => hasProfessionallyValidatedPipelineReviewCorpusForRender(),
+    [premiumSurfaceGateTick, reviewDocRefreshTick],
+  );
+
   const hideAgreementChangeRequestDuringPaidProSignerSetup = useMemo(
     () =>
       shouldHideAgreementChangeRequestForPaidPro({
@@ -14391,6 +14386,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             draft: draft ?? null,
             intakeText: currentPremiumMergedIntakeKey || intakeCombined,
           }),
+          hasProfessionallyValidatedReviewCorpus: paidProProfessionallyValidatedReviewCorpusActive,
           premiumPaidDocumentSurface,
           premiumRecipientUxActive,
           createUiStageIsDraft: createUiStage === CreateUiStage.DRAFT,
@@ -14417,6 +14413,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createUiStage,
       paidProInlineSignerSetupLatched,
       signaturePreparationRequested,
+      paidProProfessionallyValidatedReviewCorpusActive,
       paidProAuthoritative,
       createProductionTwoPane,
       premiumSignersSurfaceReady,
@@ -16491,6 +16488,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           draft: draft ?? null,
           intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         }),
+        hasProfessionallyValidatedReviewCorpus: paidProProfessionallyValidatedReviewCorpusActive,
         premiumPaidDocumentSurface,
         premiumRecipientUxActive,
         createUiStageIsDraft: createUiStage === CreateUiStage.DRAFT,
@@ -16506,6 +16504,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createUiStage,
       paidProInlineSignerSetupLatched,
       signaturePreparationRequested,
+      paidProProfessionallyValidatedReviewCorpusActive,
       premiumSurfaceGateTick,
     ],
   );
@@ -17232,6 +17231,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     () =>
       shouldArmPaidProFirstReviewSignerSetupLatch({
         hasAcceptedPaidProAuthority: acceptedPaidProAuthorityActive,
+        hasProfessionallyValidatedReviewCorpus: paidProProfessionallyValidatedReviewCorpusActive,
         premiumPaidDocumentSurface,
         premiumRecipientUxActive,
         createUiStageIsDraft: createUiStage === CreateUiStage.DRAFT,
@@ -17254,6 +17254,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProInlineSignerSetupLatched,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
+      paidProProfessionallyValidatedReviewCorpusActive,
     ],
   );
 

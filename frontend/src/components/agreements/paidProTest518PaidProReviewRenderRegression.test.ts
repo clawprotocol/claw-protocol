@@ -21,11 +21,10 @@ import {
 } from "./paidProReviewBranchInstrumentation";
 import {
   clearPaidProPostAcceptanceValidatorCache,
-  markPaidProPipelineValidationPassed,
+  commitPaidProPipelineValidationAcceptance,
 } from "./paidProPostAcceptanceValidatorCache";
 import {
   clearPaidProPipelineAcceptedCorpusHashForTests,
-  markPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import {
   clearCurrentSessionProEntitlementMarkers,
@@ -112,8 +111,7 @@ describe("TEST518 — paid Pro review mounts pipeline-accepted concise corpus", 
     expect(serverBody.length).toBeGreaterThanOrEqual(1500);
     expect(serverBody.length).toBeLessThan(10_000);
 
-    markPaidProPipelineAcceptedCorpusHash(serverBody);
-    markPaidProPipelineValidationPassed({ text: serverBody, source: "server_full_draft" });
+    commitPaidProPipelineValidationAcceptance({ text: serverBody, source: "server_full_draft" });
 
     logPremiumAuthoritativeCommit({
       bodyLen: serverBody.length,

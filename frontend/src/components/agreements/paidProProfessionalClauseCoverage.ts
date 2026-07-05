@@ -111,6 +111,14 @@ export function shouldRejectThinProfessionalProCorpus(
   );
 }
 
+/** Reject any professional-intake corpus that fails clause coverage — not only thin bodies. */
+export function shouldRejectProfessionalProCorpus(
+  assessment: ProfessionalProClauseCoverageAssessment,
+): boolean {
+  if (!assessment.applies || assessment.ok) return false;
+  return true;
+}
+
 export function logProfessionalProClauseCoverageDecision(payload: {
   accepted: boolean;
   docLen: number;

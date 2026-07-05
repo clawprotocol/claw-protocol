@@ -281,6 +281,9 @@ const DISALLOWED_PARTY_PHRASE_RE: readonly RegExp[] = [
   /^signer\s+unknown$/i,
   /^\[org_\d+\]$/i,
   /^\[email_\d+\]$/i,
+  /^total\s+contract\s+value:?/i,
+  /^contract\s+value:?/i,
+  /^total\s+project\s+fee:?/i,
 ];
 
 function normPartyLabel(s: string): string {
