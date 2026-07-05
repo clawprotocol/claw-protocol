@@ -25,7 +25,7 @@ import {
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
 import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
-import { resolveProvisionalWorkspaceProEntitledForCreate } from "./returningPaidCreateBootstrap";
+import { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlowEntitlementProbe";
 import { hasPaidDashboardCreateContextActive, isAppCreatePath, shouldFailClosedBypassForAuthenticatedWorkspaceCreate } from "../../launch/paidDashboardCreateContext";
 
 /** Matches {@link GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN} — inlined to avoid simpleProFinalReviewCorpus import cycle. */

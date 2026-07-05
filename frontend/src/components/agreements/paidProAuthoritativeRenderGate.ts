@@ -14,7 +14,7 @@ import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
-} from "./paidProSourceOfTruth";
+} from "./paidProSourceOfTruthState";
 import { resolvePaidProFrozenDisplayPlain } from "./paidProPostFreezeCorpusInvariant";
 import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRenderParties";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";

@@ -16,7 +16,7 @@ import {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hashPaidProCorpus,
-} from "./paidProSourceOfTruth";
+} from "./paidProSourceOfTruthState";
 
 export const PAID_PRO_AGREEMENT_BODY_PREFIX_MIN_LEN = 400;
 

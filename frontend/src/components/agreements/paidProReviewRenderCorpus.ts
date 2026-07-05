@@ -73,7 +73,7 @@ import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
-} from "./paidProSourceOfTruth";
+} from "./paidProSourceOfTruthState";
 import { tracePaidProQaPassText } from "./paidProQaPerfTrace";
 import {
   buildPaidProReviewPlainMemoKey,

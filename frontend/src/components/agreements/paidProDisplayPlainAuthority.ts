@@ -19,7 +19,7 @@ import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetad
 import { shouldUsePaidProSourceOfTruthDisplayOnly, resolvePaidProAuthoritativeDisplayPlain, type ResolvePaidProAuthoritativeDisplayPlainArgs } from "./paidProAuthoritativeRenderGate";
 import { enrichPaidProPostFinalizeDisplayCorpus } from "./paidProPostFinalizeReviewSurface";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
-import { hashPaidProCorpus, type PaidProDocumentSurface } from "./paidProSourceOfTruth";
+import { hashPaidProCorpus, type PaidProDocumentSurface } from "./paidProSourceOfTruthState";
 
 export type PaidProUserVisibleDisplaySurface =
   | PaidProDocumentSurface

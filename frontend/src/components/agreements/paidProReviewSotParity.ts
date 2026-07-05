@@ -11,7 +11,7 @@ import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { getFrozenCanonicalAgreementCorpus } from "./canonicalAgreementSnapshot";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { getPaidProSourceOfTruthText, hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { getPaidProSourceOfTruthText, hashPaidProCorpus, hasPaidProSourceOfTruth } from "./paidProSourceOfTruthState";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
 
 const SIGNER_FIELD_ONLY_CLASSIFICATIONS = new Set([

@@ -21,7 +21,7 @@ import {
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
   type PaidProDocumentSurface,
-} from "./paidProSourceOfTruth";
+} from "./paidProSourceOfTruthState";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import { consumedAuthoritySignerMetadataComplete } from "./paidProSignerMetadataCommitPolicy";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";

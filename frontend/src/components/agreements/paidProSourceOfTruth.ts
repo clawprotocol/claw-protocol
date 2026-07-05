@@ -45,7 +45,25 @@ import {
   type CanonicalAgreementSnapshot,
   type CanonicalAgreementSurface,
 } from "./canonicalAgreementSnapshot";
-import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import {
+  clearPaidProSourceOfTruthState,
+  getPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+  hashPaidProCorpus,
+  replacePaidProSourceOfTruth,
+  type PaidProDocumentSurface,
+  type PaidProSourceOfTruth,
+} from "./paidProSourceOfTruthState";
+
+export {
+  clearPaidProSourceOfTruthState,
+  getPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+  hashPaidProCorpus,
+  hasPaidProSourceOfTruth,
+  type PaidProDocumentSurface,
+  type PaidProSourceOfTruth,
+} from "./paidProSourceOfTruthState";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   buildPaidProNormalizedSurfaceDiffPayload,
@@ -230,23 +248,6 @@ function evaluatePaidProSotEstablishmentForSnapshot(args: {
   return decision;
 }
 
-export type PaidProSourceOfTruth = {
-  text: string;
-  hash: string;
-  accepted_at: number;
-  source: "server_full_draft";
-  reviewSessionId?: string;
-  signerManifestHash?: string;
-};
-
-export type PaidProDocumentSurface =
-  | "display"
-  | "copy"
-  | "review"
-  | "finalized"
-  | "signer_setup"
-  | "vs01";
-
 export type PaidProDocumentCorpusSource = PaidProFinalHydratedCorpusSource;
 
 export type PaidProDocumentForSurface = {
@@ -278,19 +279,12 @@ export type PaidProCorpusInvariant = {
   vs01_matches_or_execution_only: boolean;
 };
 
-let paidProSourceOfTruth: PaidProSourceOfTruth | null = null;
-
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
 }
 
-export function hashPaidProCorpus(text: string): string {
-  return fingerprintAgreementBody(text || "");
-}
-
 export function clearPaidProSourceOfTruth(): void {
-  const oldText = paidProSourceOfTruth?.text ?? "";
-  paidProSourceOfTruth = null;
+  const oldText = clearPaidProSourceOfTruthState()?.text ?? "";
   clearAuthoritativeAgreementDocument();
   clearFrozenCanonicalAgreementCorpus();
   clearPaidProSignerStagingDisplayCorpus();
@@ -309,18 +303,6 @@ export function clearPaidProSourceOfTruth(): void {
     sourceBefore: "server_full_draft",
     sourceAfter: null,
   });
-}
-
-export function getPaidProSourceOfTruth(): PaidProSourceOfTruth | null {
-  return paidProSourceOfTruth;
-}
-
-export function getPaidProSourceOfTruthText(): string {
-  return paidProSourceOfTruth?.text ?? "";
-}
-
-export function hasPaidProSourceOfTruth(): boolean {
-  return Boolean(paidProSourceOfTruth?.text && paidProSourceOfTruth.text.length >= 500);
 }
 
 /**
@@ -350,8 +332,8 @@ export function establishPaidProSourceOfTruth(args: {
   /** User-approved revisions may legitimately shorten the body; automated paths may not. Default false. */
   allowShorterOverwrite?: boolean;
 }): PaidProSourceOfTruth {
-  const sotBefore = paidProSourceOfTruth?.text ?? "";
-  const sourceBefore = paidProSourceOfTruth?.source ?? null;
+  const sotBefore = getPaidProSourceOfTruth()?.text ?? "";
+  const sourceBefore = getPaidProSourceOfTruth()?.source ?? null;
   const requestedSource = (args.source ?? "server_full_draft").trim();
   // Minimum commit gate: a rejected/recoverable/fallback corpus must never become the SoT, no matter
   // how long its body is — this is the last line of defense against a short rejected corpus leaking in.
@@ -362,7 +344,7 @@ export function establishPaidProSourceOfTruth(args: {
     source: requestedSource,
     agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
     allowUserApprovedRevision: Boolean(args.allowShorterOverwrite),
-    hasExistingSourceOfTruth: Boolean(paidProSourceOfTruth?.text),
+    hasExistingSourceOfTruth: Boolean(getPaidProSourceOfTruth()?.text),
     pipelineSessionAccepted: hasPaidProPipelineSessionAcceptance({
       text: trim(args.text),
       source: requestedSource,
@@ -411,7 +393,7 @@ export function establishPaidProSourceOfTruth(args: {
   // premium response (e.g. a duplicate request that came back degraded/json_parse) must never
   // overwrite, downgrade, or shorten it. Equal/longer bodies (and execution-block appends) may proceed;
   // genuine user-approved revisions opt in via `allowShorterOverwrite`.
-  const existingSot = paidProSourceOfTruth;
+  const existingSot = getPaidProSourceOfTruth();
   if (existingSot && !args.allowShorterOverwrite) {
     const incomingLen = trim(args.text).length;
     const sameOrLonger =
@@ -736,7 +718,7 @@ export function establishPaidProSourceOfTruth(args: {
     canFallback: false,
     reason: "authoritative_source_of_truth_established",
   });
-  paidProSourceOfTruth = record;
+  replacePaidProSourceOfTruth(record);
   logExecutionBlockLocation(record.text, "paid_pro_source_of_truth_establish");
   logExecutionBlockCount(record.text, "paid_pro_source_of_truth_establish");
   logPostFreezeCorpusDrift({
@@ -916,8 +898,8 @@ export function hydratePaidProSourceOfTruth(args: {
     reviewSessionId: frozen?.reviewSessionId,
     signerManifestHash: frozen?.signerManifestHash,
   };
-  const hydrateBefore = paidProSourceOfTruth?.text ?? "";
-  paidProSourceOfTruth = record;
+  const hydrateBefore = getPaidProSourceOfTruth()?.text ?? "";
+  replacePaidProSourceOfTruth(record);
   hydrateAuthoritativeAgreementDocument({
     fullCorpusText: record.text,
     authoritativeHash: record.hash,

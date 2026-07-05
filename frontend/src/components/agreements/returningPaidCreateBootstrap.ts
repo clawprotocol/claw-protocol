@@ -23,7 +23,6 @@ import { tierAllowsAdvancedFullDraftReveal, peekAdvancedFullDraftCheckoutGrant }
 import {
   isCreateFlowPaidAcceptedOrAuthoritativeActive,
   resolveCreateFlowWorkspaceProEntitled,
-  resolveWorkspaceProSubscriptionEntitled,
   shouldUsePaidProCreateFlowReviewShell,
   type ResolveAuthoritativeCreateFlowReviewShellInput,
 } from "./authoritativeCreateFlowReviewShell";
@@ -31,8 +30,11 @@ import {
   hasCurrentSessionProEntitlement,
   hasCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
-import { hasPaidPremiumCompletionSession, readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import type { StarterComplexityGateAssessment } from "./starterMultiPartyProGate";
+import { hasPaidPremiumCompletionSession, readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
+import { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlowEntitlementProbe";
+
+export { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlowEntitlementProbe";
 
 export type ResolveReturningPaidCreateEligibleInput = {
   tier?: AccessTier;
@@ -103,32 +105,6 @@ function readStaleSubscriptionCachePremium(): boolean {
   const statusActive = String(cached.status || "").toLowerCase() === "active";
   const tierOk = Boolean(cached.tier && tierAllowsAdvancedFullDraftReveal(cached.tier));
   return statusActive && tierOk;
-}
-
-/**
- * Synchronous paid/pro probes for Dashboard → Create before async billing fetch settles.
- * Uses subscription cache, workspace entitlement cache, persisted usage tier, and session checkout markers.
- */
-export function resolveProvisionalWorkspaceProEntitledForCreate(): boolean {
-  if (hasPaidDashboardCreateContextActive()) return true;
-  if (shouldFailClosedBypassForAuthenticatedWorkspaceCreate()) return true;
-  if (resolveCreateFlowWorkspaceProEntitled()) return true;
-  if (readCachedWorkspaceProEntitlement()) return true;
-  if (readPersistedWorkspaceUsageTierPaid()) return true;
-  if (resolveWorkspaceProSubscriptionEntitled()) return true;
-  if (readStaleSubscriptionCachePremium()) return true;
-  const sub = readCachedSubscriptionEntitlement();
-  const oid = getOrgId().trim();
-  if (sub?.orgId === oid) {
-    const statusActive = String(sub.status || "").toLowerCase() === "active";
-    const tierOk = Boolean(sub.tier && tierAllowsAdvancedFullDraftReveal(sub.tier));
-    if (statusActive && tierOk) return true;
-  }
-  if (hasPaidPremiumCompletionSession()) return true;
-  const snap = readPremiumCompletionSnapshot();
-  if (snap?.premiumAccepted === true) return true;
-  if (peekAdvancedFullDraftCheckoutGrant()) return true;
-  return false;
 }
 
 /** Paid workspace / subscription user creating another agreement on /app/create. */
