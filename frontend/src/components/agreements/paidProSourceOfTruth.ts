@@ -58,7 +58,7 @@ import {
   logPostFreezeCorpusDrift,
 } from "./paidProExecutionBlockInstrumentation";
 import { logPaidProFreezeEstablished } from "./paidProFreezeDiagnostics";
-import { latchPaidReviewSessionCanonicalSoTHash } from "./paidProReviewSessionCorpusInvariant";
+import { latchPaidReviewSessionCanonicalSoTHash } from "./paidProReviewSessionCorpusInvariantState";
 import {
   enforceAuthoritativeProCorpusDisplay,
   logProCorpusSourceMap,

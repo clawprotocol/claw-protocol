@@ -22,7 +22,7 @@ import { clearProGenerationAdoptionForTests } from "./paidProGenerationAdoption"
 import { clearPaidProAuthorityHashContinuityForTests } from "./paidProAuthorityHashContinuity";
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
-import { resetPaidReviewSessionCorpusInvariantForTests } from "./paidProReviewSessionCorpusInvariant";
+import { resetPaidReviewSessionCorpusInvariantForTests } from "./paidProReviewSessionCorpusInvariantState";
 
 /** Clear cross-test Paid Pro pipeline caches and in-memory authority without touching sessionStorage. */
 export function resetPaidProPipelineTestIsolation(): void {

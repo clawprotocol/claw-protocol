@@ -21,7 +21,7 @@ import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurface
 import {
   assertPaidReviewSessionPremiumGenerationBeforeCanonicalFreeze,
   verifyPaidReviewSessionPremiumGenerationBeforeCanonicalFreeze,
-} from "./paidProReviewSessionCorpusInvariant";
+} from "./paidProReviewSessionCorpusInvariantState";
 import type { GuidedCompletionSession } from "./guidedDealCompletion/types";
 import {
   MINIMUM_COMMERCIAL_SPECIFICITY_SCORE,

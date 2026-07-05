@@ -82,7 +82,7 @@ import {
 } from "./paidProVisibleRenderMemo";
 import { auditPaidProReviewRenderCorpus } from "./paidProCorpusLifecycleDiff";
 import { auditPaidProReviewRenderSotParity } from "./paidProReviewSotParity";
-import { assertPaidReviewSessionReviewCorpusHashParity } from "./paidProReviewSessionCorpusInvariant";
+import { assertPaidReviewSessionReviewCorpusHashParity } from "./paidProReviewSessionCorpusHashParity";
 import {
   logExecutionBlockCount,
   logExecutionBlockLocation,

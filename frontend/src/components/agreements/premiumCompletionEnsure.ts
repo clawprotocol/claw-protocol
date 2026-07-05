@@ -5,7 +5,7 @@ import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
 import { hasUsablePremiumBodyText, isPremiumRecoverablePipelineResult } from "./premiumPostCheckoutApplyEligible";
 import { resolveAuthoritativePremiumCommittedFromResult } from "./premiumAuthoritativeCommitted";
-import { markPaidReviewSessionPremiumGeneration } from "./paidProReviewSessionCorpusInvariant";
+import { markPaidReviewSessionPremiumGeneration } from "./paidProReviewSessionCorpusInvariantState";
 
 /** Snapshot as the same shape as a fresh pipeline result (for hydration / ensure). */
 export function premiumSnapshotToResult(snap: NonNullable<ReturnType<typeof readPremiumCompletionSnapshot>>): PremiumCompletionResult {
