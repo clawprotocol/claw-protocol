@@ -279,9 +279,13 @@ export function resolveCreateFlowAuthoritativeReviewPlain(args: {
       return candidate;
     }
   }
-  const doc = (args.agreementDocumentText || "").trim();
-  if (paidAccepted && doc.length >= PAID_PRO_AUTHORITY_MIN_LEN) return doc;
-  return doc;
+  if (paidAccepted) {
+    if (pipelineCandidates.length > 0) {
+      return pipelineCandidates.sort((a, b) => b.length - a.length)[0]!;
+    }
+    return "";
+  }
+  return (args.agreementDocumentText || "").trim();
 }
 
 export function logAuthoritativeCreateFlowReviewShellResolved(

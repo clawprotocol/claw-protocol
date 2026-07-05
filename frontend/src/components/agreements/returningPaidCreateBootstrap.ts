@@ -132,6 +132,26 @@ export function resolveProvisionalWorkspaceProEntitledForCreate(): boolean {
 }
 
 /** Paid workspace / subscription user creating another agreement on /app/create. */
+/**
+ * Paid workspace / dashboard create: user already has Pro access — never latch free-starter upgrade UX.
+ */
+export function resolvePaidCreateFlowFullDraftAccess(
+  input: ResolveReturningPaidCreateEligibleInput = {},
+): boolean {
+  if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) return true;
+  if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return true;
+  if (input.paidProAuthoritative) return true;
+  if (resolveReturningPaidCreateEligible(input)) return true;
+  return shouldUsePaidProCreateFlowReviewShell({
+    workspaceProEntitled: input.workspaceProEntitled ?? resolveProvisionalWorkspaceProEntitledForCreate(),
+    tier: input.tier,
+    premiumPersistedFlowActive: input.premiumPersistedFlowActive,
+    premiumSendPathUnlocked: input.premiumSendPathUnlocked,
+    paidProAuthoritative: input.paidProAuthoritative,
+    premiumCheckoutCompleted: input.premiumCheckoutCompleted,
+  });
+}
+
 export function resolveReturningPaidCreateEligible(
   input: ResolveReturningPaidCreateEligibleInput = {},
 ): boolean {

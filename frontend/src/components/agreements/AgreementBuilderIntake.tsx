@@ -1567,6 +1567,7 @@ import {
   logReturningPaidCreateGateBypassDecision,
   logStarterComplexityGateSkippedForPaidCreate,
   planReturningPaidCreateSubmitBootstrap,
+  resolvePaidCreateFlowFullDraftAccess,
   resolvePaidCreateGateBypassDecision,
   resolveReturningPaidCreateEligible,
   resolveProvisionalWorkspaceProEntitledForCreate,
@@ -3544,9 +3545,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       tierAllowsAdvancedFullDraftReveal(tier) ||
       draftHasFullDraftExpansion(draft) ||
       premiumSendPathUnlocked ||
-      premiumPersistedFlowActive;
+      premiumPersistedFlowActive ||
+      resolvePaidCreateFlowFullDraftAccess({
+        tier,
+        workspaceProEntitled,
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+        paidProAuthoritative: paidProAuthoritativeRef.current,
+      });
     upgradeLockActiveRef.current = intent && !fullDraftEntitled;
-  }, [tier, draft, premiumSendPathUnlocked, premiumPersistedFlowActive]);
+  }, [tier, draft, premiumSendPathUnlocked, premiumPersistedFlowActive, workspaceProEntitled]);
   /** Ref avoids listing `syncUpgradeIntentRefs` on the post-checkout premium effect — that callback changes whenever `draft`/tier/premium flags move, which aborts the async completion run mid-flight and blocks `applySuccess`. */
   const syncUpgradeIntentRefsRef = React.useRef(syncUpgradeIntentRefs);
   syncUpgradeIntentRefsRef.current = syncUpgradeIntentRefs;
@@ -3558,9 +3566,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         tierAllowsAdvancedFullDraftReveal(tier) ||
           draftHasFullDraftExpansion(draft) ||
           premiumSendPathUnlocked ||
-          premiumPersistedFlowActive,
+          premiumPersistedFlowActive ||
+          resolvePaidCreateFlowFullDraftAccess({
+            tier,
+            workspaceProEntitled,
+            premiumPersistedFlowActive,
+            premiumSendPathUnlocked,
+            paidProAuthoritative: paidProAuthoritativeRef.current,
+          }),
       ),
-    [tier, draft, premiumSendPathUnlocked, premiumPersistedFlowActive],
+    [tier, draft, premiumSendPathUnlocked, premiumPersistedFlowActive, workspaceProEntitled],
   );
   /** Latest access flag — post-checkout `applySuccess` must not close over a stale `hasFullDraftAccess` from effect init. */
   const hasFullDraftAccessRef = React.useRef(hasFullDraftAccess);
@@ -9877,6 +9892,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const handleUpgradeToFullDraft = React.useCallback(async (draftOverride?: ParsedDraftShape | null) => {
     if (!createProductionTwoPane || !simpleProductFlow) return;
     const gateDraft = draftOverride ?? draft;
+    const paidCreateFullDraftAccess = resolvePaidCreateFlowFullDraftAccess({
+      tier,
+      workspaceProEntitled: workspaceProEntitled || resolveProvisionalWorkspaceProEntitledForCreate(),
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+      paidProAuthoritative: paidProAuthoritativeRef.current,
+    });
+    if (paidCreateFullDraftAccess) {
+      setUpgradeIntentDetected(false);
+      syncUpgradeIntentRefs(false);
+      void runEntitledPremiumImprovementRewrite();
+      return;
+    }
     if (tierAllowsAdvancedFullDraftReveal(tier)) {
       void runEntitledPremiumImprovementRewrite();
       return;
@@ -9952,6 +9980,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     agreementDocumentText,
     resolveRawIntakeForPremiumCheckout,
     runEntitledPremiumImprovementRewrite,
+    workspaceProEntitled,
   ]);
 
   /**
@@ -9962,6 +9991,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const launchUpgradeCheckoutFromStarterDraft = React.useCallback(async () => {
     if (!createProductionTwoPane) return;
     const gateDraft = draft;
+    if (
+      resolvePaidCreateFlowFullDraftAccess({
+        tier,
+        workspaceProEntitled: workspaceProEntitled || resolveProvisionalWorkspaceProEntitledForCreate(),
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+        paidProAuthoritative: paidProAuthoritativeRef.current,
+      })
+    ) {
+      void runEntitledPremiumImprovementRewrite();
+      return;
+    }
     if (tierAllowsAdvancedFullDraftReveal(tier)) {
       void runEntitledPremiumImprovementRewrite();
       return;
@@ -10225,6 +10266,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     const skipFreeStarterCreateSubmit =
       paidProReviewShellForSubmit ||
+      resolveReturningPaidCreateEligible({
+        tier,
+        workspaceProEntitled: workspaceProForSubmit || resolveProvisionalWorkspaceProEntitledForCreate(),
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+        paidProAuthoritative,
+      }) ||
       resolveSkipFreeStarterCreateSubmit({
         tier,
         proAgreementEntitled:
@@ -13323,6 +13371,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const showUpgradeToFullDraftOnReview = useMemo(() => {
     if (
+      resolvePaidCreateFlowFullDraftAccess({
+        tier,
+        workspaceProEntitled,
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+        paidProAuthoritative,
+      })
+    ) {
+      return false;
+    }
+    if (
       shouldSuppressFreeStarterCreateFlowConversionUi({
         workspaceProEntitled,
         tier,
@@ -13936,25 +13995,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!simpleProductFlow || !createProductionTwoPane) return;
-    if (!workspaceProEntitled) return;
+    const provisionalPaid =
+      resolveProvisionalWorkspaceProEntitledForCreate() || workspaceProEntitled;
+    if (!provisionalPaid) return;
+    if (!shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return;
     if (entitledPremiumRewriteInFlightRef.current) return;
-    if (shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return;
+    if (hasPaidProSourceOfTruth()) return;
+    if (premiumPostCheckoutPhase === "processing") return;
     if (!draft || createFlowPhase !== "draft_ready_for_review") return;
-    if (!isFreeStreamlineDraftReview && !isFreeStarterReviewSurface) return;
+    if (!isFreeStreamlineDraftReview && !isFreeStarterReviewSurface && !showUpgradeToFullDraftOnReview) {
+      return;
+    }
     const gen = getOrInitSessionAgreementGenerationId();
     if (paidCreateFlowAutoRewriteGenRef.current === gen) return;
     paidCreateFlowAutoRewriteGenRef.current = gen;
+    setUpgradeIntentDetected(false);
+    syncUpgradeIntentRefs(false);
     void runEntitledPremiumImprovementRewrite();
   }, [
     simpleProductFlow,
     createProductionTwoPane,
     workspaceProEntitled,
+    authoritativeCreateFlowReviewShellInput,
     draft,
     createFlowPhase,
     isFreeStreamlineDraftReview,
     isFreeStarterReviewSurface,
+    showUpgradeToFullDraftOnReview,
+    premiumPostCheckoutPhase,
     premiumSurfaceGateTick,
     runEntitledPremiumImprovementRewrite,
+    syncUpgradeIntentRefs,
   ]);
 
   const starterPreviewTransientGate = useMemo(
@@ -28177,7 +28248,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   await finalizeIntakeCapture();
                   return;
                 }
-                beginStarterDraftGeneration();
+                const returningPaidBootstrap = planReturningPaidCreateSubmitBootstrap({
+                  tier,
+                  workspaceProEntitled:
+                    workspaceProEntitled || resolveProvisionalWorkspaceProEntitledForCreate(),
+                  premiumPersistedFlowActive,
+                  premiumSendPathUnlocked,
+                });
+                if (returningPaidBootstrap) {
+                  beginReturningPaidProCreateGeneration();
+                } else {
+                  beginStarterDraftGeneration();
+                }
                 trackFunnelEvent("generate_clicked", {
                   ready_state: guidedStructureComplete && !isGenerating,
                   intake_chars: rawSubmitted.length,
@@ -28370,7 +28452,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (commitStarterMultiPartyProGate(rawSubmitted)) {
             return;
           }
-          beginStarterDraftGeneration();
+          const returningPaidBootstrap = planReturningPaidCreateSubmitBootstrap({
+            tier,
+            workspaceProEntitled:
+              workspaceProEntitled || resolveProvisionalWorkspaceProEntitledForCreate(),
+            premiumPersistedFlowActive,
+            premiumSendPathUnlocked,
+          });
+          if (returningPaidBootstrap) {
+            beginReturningPaidProCreateGeneration();
+          } else {
+            beginStarterDraftGeneration();
+          }
           trackFunnelEvent("generate_clicked", {
             ready_state: guidedStructureComplete && !isGenerating,
             intake_chars: rawSubmitted.length,
@@ -30248,6 +30341,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           productionDraftPrimaryReviewSurface &&
                           createUiStage === CreateUiStage.DRAFT &&
                           !suppressFreeStarterCreateFlowConversionUi &&
+                          !resolvePaidCreateFlowFullDraftAccess({
+                            tier,
+                            workspaceProEntitled,
+                            premiumPersistedFlowActive,
+                            premiumSendPathUnlocked,
+                            paidProAuthoritative,
+                          }) &&
                           !(isFreeStreamlineDraftReview && showStarterProRefineUpsell) ? (
                             <div ref={upgradeRequiredBlockRef} className="mx-auto mb-3 w-full max-w-none px-4 sm:px-0">
                               <ProConversionComparisonCard
@@ -30367,7 +30467,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               </button>
                             </div>
                           ) : null}
-                          {reviewShowsSimplifiedAdvancedDraft && createUiStage === CreateUiStage.DRAFT
+                          {reviewShowsSimplifiedAdvancedDraft &&
+                          createUiStage === CreateUiStage.DRAFT &&
+                          !suppressFreeStarterCreateFlowConversionUi &&
+                          !paidProReviewReady
                             ? (() => {
                                 const rawSimplifiedBanner = intakeCombined.trim();
                                 const fam = draft?.agreement_family;

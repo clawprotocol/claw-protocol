@@ -58,6 +58,7 @@ import {
   logPostFreezeCorpusDrift,
 } from "./paidProExecutionBlockInstrumentation";
 import { logPaidProFreezeEstablished } from "./paidProFreezeDiagnostics";
+import { latchPaidReviewSessionCanonicalSoTHash } from "./paidProReviewSessionCorpusInvariant";
 import {
   enforceAuthoritativeProCorpusDisplay,
   logProCorpusSourceMap,
@@ -812,6 +813,10 @@ export function establishPaidProSourceOfTruth(args: {
     hash: record.hash,
     partyCount: reviewParties.length,
     signerCount: reviewParties.length,
+  });
+  latchPaidReviewSessionCanonicalSoTHash({
+    reviewSessionId: record.reviewSessionId,
+    canonicalPlain: record.text,
   });
   tracePaidProCorpusMutation({
     store: "paidProSourceOfTruth",

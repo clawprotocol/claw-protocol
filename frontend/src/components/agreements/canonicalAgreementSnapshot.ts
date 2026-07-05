@@ -18,6 +18,10 @@ import {
 } from "./guidedDealCompletion/guidedAnswerSemanticMerger";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
+import {
+  assertPaidReviewSessionPremiumGenerationBeforeCanonicalFreeze,
+  verifyPaidReviewSessionPremiumGenerationBeforeCanonicalFreeze,
+} from "./paidProReviewSessionCorpusInvariant";
 import type { GuidedCompletionSession } from "./guidedDealCompletion/types";
 import {
   MINIMUM_COMMERCIAL_SPECIFICITY_SCORE,
@@ -578,6 +582,19 @@ export function freezeCanonicalAgreementSnapshot(
   };
   frozenCanonicalAgreementCorpus = frozen;
   recordPaidProCorpusLifecycleCheckpoint("canonical_freeze", frozen.canonicalText);
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") {
+    verifyPaidReviewSessionPremiumGenerationBeforeCanonicalFreeze({
+      reviewSessionId: frozen.reviewSessionId,
+      source: frozen.source,
+      tier: snapshot.tier,
+    });
+  } else {
+    assertPaidReviewSessionPremiumGenerationBeforeCanonicalFreeze({
+      reviewSessionId: frozen.reviewSessionId,
+      source: frozen.source,
+      tier: snapshot.tier,
+    });
+  }
   logExecutionBlockLocation(frozen.canonicalText, `canonical-corpus-freeze:${frozen.source}`);
   logExecutionBlockCount(frozen.canonicalText, `canonical-corpus-freeze:${frozen.source}`);
   if (

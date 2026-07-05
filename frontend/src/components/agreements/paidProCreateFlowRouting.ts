@@ -14,7 +14,10 @@ import {
   hasAcceptedPaidCreateFlowFreezeLatch,
   resolveCreateFlowWorkspaceProEntitled,
   shouldBlockFreeStarterReviewSurfaces,
+  shouldUsePaidProCreateFlowReviewShell,
 } from "./authoritativeCreateFlowReviewShell";
+import { resolveProvisionalWorkspaceProEntitledForCreate } from "./returningPaidCreateBootstrap";
+import { hasPaidDashboardCreateContextActive } from "../../launch/paidDashboardCreateContext";
 
 export type ResolveSkipFreeStarterCreateSubmitInput = {
   tier: AccessTier;
@@ -28,6 +31,9 @@ export function resolveSkipFreeStarterCreateSubmit(
   if (tierAllowsAdvancedFullDraftReveal(input.tier)) return true;
   if (input.proAgreementEntitled) return true;
   if (resolveCreateFlowWorkspaceProEntitled()) return true;
+  if (resolveProvisionalWorkspaceProEntitledForCreate()) return true;
+  if (hasPaidDashboardCreateContextActive()) return true;
+  if (shouldUsePaidProCreateFlowReviewShell({ tier: input.tier })) return true;
   return false;
 }
 

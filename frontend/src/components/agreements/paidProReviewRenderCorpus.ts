@@ -82,6 +82,7 @@ import {
 } from "./paidProVisibleRenderMemo";
 import { auditPaidProReviewRenderCorpus } from "./paidProCorpusLifecycleDiff";
 import { auditPaidProReviewRenderSotParity } from "./paidProReviewSotParity";
+import { assertPaidReviewSessionReviewCorpusHashParity } from "./paidProReviewSessionCorpusInvariant";
 import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
@@ -880,6 +881,12 @@ export function resolvePaidProReviewRenderPlain(
   if (visible.length >= 200 && hasPaidProSourceOfTruth()) {
     auditPaidProReviewRenderCorpus(visible);
     auditPaidProReviewRenderSotParity({
+      reviewPlain: visible,
+      surface: "paid_pro_review_render_plain",
+      intakeText: args?.intakeText ?? null,
+      draft: args?.draft ?? null,
+    });
+    assertPaidReviewSessionReviewCorpusHashParity({
       reviewPlain: visible,
       surface: "paid_pro_review_render_plain",
       intakeText: args?.intakeText ?? null,

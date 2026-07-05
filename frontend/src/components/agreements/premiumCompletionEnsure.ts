@@ -3,6 +3,9 @@ import type { PremiumCompletionInput, PremiumCompletionResult } from "./premiumC
 import { runPremiumCompletion } from "./premiumCompletionPipeline";
 import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import { gapTraceNeedlesHit } from "./gapTraceNeedles";
+import { hasUsablePremiumBodyText, isPremiumRecoverablePipelineResult } from "./premiumPostCheckoutApplyEligible";
+import { resolveAuthoritativePremiumCommittedFromResult } from "./premiumAuthoritativeCommitted";
+import { markPaidReviewSessionPremiumGeneration } from "./paidProReviewSessionCorpusInvariant";
 
 /** Snapshot as the same shape as a fresh pipeline result (for hydration / ensure). */
 export function premiumSnapshotToResult(snap: NonNullable<ReturnType<typeof readPremiumCompletionSnapshot>>): PremiumCompletionResult {
@@ -62,7 +65,24 @@ function snapshotMatchesCurrentRequest(
   return true;
 }
 
+function markPremiumGenerationWhenAuthoritative(
+  result: PremiumCompletionResult,
+  reviewSessionId: string,
+  source: string,
+  snapshot?: NonNullable<ReturnType<typeof readPremiumCompletionSnapshot>> | null,
+): void {
+  if (result.staleIntakeOrGeneration) return;
+  if (isPremiumRecoverablePipelineResult(result)) return;
+  if (!hasUsablePremiumBodyText(result.winningPremiumBodyText)) return;
+  const { committed } = resolveAuthoritativePremiumCommittedFromResult(result, {
+    snapshot: snapshot ?? null,
+  });
+  if (!committed) return;
+  markPaidReviewSessionPremiumGeneration(reviewSessionId, source);
+}
+
 export async function ensurePremiumCompletion(input: PremiumCompletionInput): Promise<PremiumCompletionResult> {
+  const reviewSessionId = input.agreementGenerationId ?? getOrInitSessionAgreementGenerationId();
   const snap = readPremiumCompletionSnapshot();
   if (snap && snapshotMatchesCurrentRequest(snap, input)) {
     if (import.meta.env.MODE !== "test") {
@@ -87,11 +107,15 @@ export async function ensurePremiumCompletion(input: PremiumCompletionInput): Pr
         render_source: (snap as { premiumPipelineRenderSource?: string }).premiumPipelineRenderSource,
       });
     }
-    return premiumSnapshotToResult(snap);
+    const result = premiumSnapshotToResult(snap);
+    markPremiumGenerationWhenAuthoritative(result, reviewSessionId, "ensure_premium_completion_snapshot", snap);
+    return result;
   }
   console.info("[gap-trace] stage=ensure_premium_completion_run_pipeline", {
     snapshot_present: false,
     input_user_gap_answers_len: (input.userGapAnswers || "").trim().length,
   });
-  return runPremiumCompletion(input);
+  const result = await runPremiumCompletion(input);
+  markPremiumGenerationWhenAuthoritative(result, reviewSessionId, "ensure_premium_completion");
+  return result;
 }
