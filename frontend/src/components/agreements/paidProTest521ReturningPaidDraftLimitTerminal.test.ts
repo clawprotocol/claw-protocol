@@ -191,6 +191,7 @@ describe("TEST521 — returning paid create + validation fail + draft_limit_reac
         displayPhase: "review",
         createFlowPhase: "draft_ready_for_review",
         workspaceProEntitled: true,
+        proFullDraftQualityRetry: true,
       }),
     ).toBe(true);
   });

@@ -19,6 +19,10 @@ import {
   isAppCreatePath,
   shouldFailClosedBypassForAuthenticatedWorkspaceCreate,
 } from "../../launch/paidDashboardCreateContext";
+import {
+  isDashboardPaidCreateRouteActive,
+  planDashboardPaidCreateSubmitBootstrap,
+} from "./dashboardPaidCreateRoute";
 import { tierAllowsAdvancedFullDraftReveal, peekAdvancedFullDraftCheckoutGrant } from "./agreementAdvancedDraftAccess";
 import {
   isCreateFlowPaidAcceptedOrAuthoritativeActive,
@@ -66,6 +70,7 @@ export type PaidCreateGateBypassReasonCode =
   | "create_flow_paid_authoritative"
   | "paid_pro_review_shell"
   | "paid_dashboard_create_context"
+  | "dashboard_paid_create_route"
   | "authenticated_workspace_session_fallback";
 
 export type PaidCreateGateBypassDecision = {
@@ -84,6 +89,9 @@ export { isAppCreatePath };
 function resolvePrimaryBypassReason(
   reasonCodes: PaidCreateGateBypassReasonCode[],
 ): string | null {
+  if (reasonCodes.includes("dashboard_paid_create_route")) {
+    return "dashboard_paid_create_route";
+  }
   if (reasonCodes.includes("paid_dashboard_create_context")) {
     return "paid_dashboard_create_context";
   }
@@ -160,9 +168,11 @@ export function resolvePaidCreateGateBypassDecision(
   const workspaceProCached = readCachedWorkspaceProEntitlement();
   const workspaceProEntitledState = Boolean(input.workspaceProEntitled);
   const dashboardCreateContext = hasPaidDashboardCreateContextActive();
+  const dashboardPaidCreateRoute = isDashboardPaidCreateRouteActive();
   const provisionalPaid = resolveProvisionalWorkspaceProEntitledForCreate();
 
-  if (dashboardCreateContext) reasonCodes.push("paid_dashboard_create_context");
+  if (dashboardPaidCreateRoute) reasonCodes.push("dashboard_paid_create_route");
+  else if (dashboardCreateContext) reasonCodes.push("paid_dashboard_create_context");
   if (shouldFailClosedBypassForAuthenticatedWorkspaceCreate()) {
     reasonCodes.push("authenticated_workspace_session_fallback");
   }
@@ -305,6 +315,8 @@ export type ReturningPaidCreateSubmitBootstrapPlan = {
 export function planReturningPaidCreateSubmitBootstrap(
   input: ResolveReturningPaidCreateEligibleInput,
 ): ReturningPaidCreateSubmitBootstrapPlan | null {
+  const dashboardBootstrap = planDashboardPaidCreateSubmitBootstrap(input);
+  if (dashboardBootstrap) return dashboardBootstrap;
   if (!resolveReturningPaidCreateEligible(input)) return null;
   return {
     markProIntent: true,

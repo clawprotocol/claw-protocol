@@ -12,6 +12,7 @@ import {
   clearPaidDashboardCreateContextForTests,
   hasPaidDashboardCreateContextActive,
   isAuthenticatedWorkspacePath,
+  isDashboardPaidCreateRouteActive,
   markPaidDashboardCreateContext,
   markPaidDashboardCreateContextForTests,
   readPaidDashboardCreateContext,
@@ -67,13 +68,14 @@ describe("TEST510 — /founder top nav Create sets paid-dashboard marker before 
     expect(isAuthenticatedWorkspacePath("/")).toBe(false);
   });
 
-  it("markPaidDashboardCreateContext succeeds from /founder before /app/create", () => {
+  it("markPaidDashboardCreateContext normalizes founder entry to dashboard_paid_create", () => {
     vi.stubGlobal("location", { ...window.location, pathname: "/founder" });
     const marked = markPaidDashboardCreateContext("founder_top_nav_create");
     expect(marked).toBe(true);
     vi.stubGlobal("location", { ...window.location, pathname: "/app/create" });
     expect(hasPaidDashboardCreateContextActive()).toBe(true);
-    expect(readPaidDashboardCreateContext()?.source).toBe("founder_top_nav_create");
+    expect(readPaidDashboardCreateContext()?.source).toBe("dashboard_paid_create");
+    expect(isDashboardPaidCreateRouteActive()).toBe(true);
   });
 
   it("founder nav Create → 4-party guided_continue bypasses with paid_dashboard_create_context", () => {
@@ -91,7 +93,7 @@ describe("TEST510 — /founder top nav Create sets paid-dashboard marker before 
       partyCount: gate.partyCount,
     });
     expect(decision.bypass).toBe(true);
-    expect(decision.reason).toBe("paid_dashboard_create_context");
+    expect(decision.reason).toBe("dashboard_paid_create_route");
     expect(decision.provisionalPaid).toBe(true);
     expect(decision.workspaceProEntitled).toBe(false);
     expect(decision.workspaceProCached).toBe(false);
@@ -109,9 +111,8 @@ describe("TEST510 — /founder top nav Create sets paid-dashboard marker before 
     ).toBe(4);
   });
 
-  it("AppShell top nav Create uses founder_top_nav_create from /founder", () => {
-    expect(appShellSrc).toContain("founder_top_nav_create");
-    expect(appShellSrc).toContain("resolveTopNavCreateSource");
+  it("AppShell top nav Create uses dashboard_paid_create canonical route", () => {
+    expect(appShellSrc).toContain("dashboard_paid_create");
     expect(appShellSrc).toContain("navigateToPaidWorkspaceCreate");
   });
 
@@ -184,7 +185,7 @@ describe("TEST509 — paid Dashboard → Create context bypasses public 4-party 
       partyCount: 4,
     });
     expect(decision.bypass).toBe(true);
-    expect(decision.reason).toBe("paid_dashboard_create_context");
+    expect(decision.reason).toBe("dashboard_paid_create_route");
     expect(decision.provisionalPaid).toBe(true);
   });
 

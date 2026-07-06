@@ -40,6 +40,7 @@ import { corpusHasPaidProSyntheticMalformedSectionHeadings } from "./paidProSynt
 import {
   buildPaidProFreezeCandidate,
   logPaidProFreezeCandidateDecision,
+  logPaidProFreezeCandidatePrep,
   previewRecoverPaidProFreezeCandidate,
 } from "./paidProFreezeCandidate";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
@@ -281,6 +282,10 @@ export function validatePaidProOutput(args: {
   });
   let freezeCandidateHashForLog: string | null = null;
   let intentValidationHashForLog: string | null = null;
+  let validationCorpusHashForLog: string | null = null;
+  let freezePrepOk = false;
+  let freezePrepMatchesValidationInput = false;
+  let preparedCandidateLenForLog = 0;
   const recordPipelineValidationAcceptance = (corpus: string) => {
     const accepted = (corpus || "").trim();
     if (accepted.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return;
@@ -358,9 +363,21 @@ export function validatePaidProOutput(args: {
       });
     }
   };
-  const rejectAt = (validationStage: string, reasons: string[]) => {
+  const rejectAt = (validationStage: string, reasons: string[], rejectedRule?: string | null) => {
+    if (freezePrepOk) {
+      logPaidProFreezeCandidateDecision({
+        accepted: false,
+        source: pipelineSource ?? "server_full_draft",
+        preparedFreezeCandidateHash: freezeCandidateHashForLog ?? "",
+        validationInputHash: validationCorpusHashForLog,
+        validationInputMatchesPreparedFreeze: freezePrepMatchesValidationInput,
+        rejectReason: rejectedRule ?? reasons[0] ?? "validation_failed",
+        candidateLen: preparedCandidateLenForLog,
+        freezePrepWasOk: true,
+      });
+    }
     logVpaidDevFail(reasons);
-    logDecision(false, reasons, validationStage, reasons[0] ?? "validation_failed");
+    logDecision(false, reasons, validationStage, rejectedRule ?? reasons[0] ?? "validation_failed");
     return { ok: false as const, reasons };
   };
   logPremiumValidationSource({
@@ -389,13 +406,17 @@ export function validatePaidProOutput(args: {
   const preparedStableHash = paidProPipelineAcceptedCorpusHash(preparedCandidateText);
   const validationCorpusHash = paidProPipelineAcceptedCorpusHash(validationCorpus);
   freezeCandidateHashForLog = freezeCandidate.hash ?? validationCorpusHash;
-  logPaidProFreezeCandidateDecision({
-    accepted: freezeCandidate.ok,
+  validationCorpusHashForLog = validationCorpusHash;
+  freezePrepOk = freezeCandidate.ok;
+  freezePrepMatchesValidationInput =
+    Boolean(preparedStableHash) && validationCorpusHash === preparedStableHash;
+  preparedCandidateLenForLog = preparedCandidateText.length;
+  logPaidProFreezeCandidatePrep({
+    prepOk: freezeCandidate.ok,
     source: pipelineSource ?? "server_full_draft",
     preparedFreezeCandidateHash: freezeCandidate.hash,
     validationInputHash: validationCorpusHash,
-    validationInputMatchesPreparedFreeze:
-      Boolean(preparedStableHash) && validationCorpusHash === preparedStableHash,
+    validationInputMatchesPreparedFreeze: freezePrepMatchesValidationInput,
     rejectReason: freezeCandidate.rejectReason,
     candidateLen: preparedCandidateText.length,
   });
@@ -676,6 +697,18 @@ export function validatePaidProOutput(args: {
     finalConciseQuality.applies && finalConciseQuality.ok ? ["concise_commercial_services"] : [],
     "accepted",
   );
+  if (freezePrepOk) {
+    logPaidProFreezeCandidateDecision({
+      accepted: true,
+      source: pipelineSource ?? "server_full_draft",
+      preparedFreezeCandidateHash: freezeCandidateHashForLog ?? "",
+      validationInputHash: validationCorpusHashForLog,
+      validationInputMatchesPreparedFreeze: freezePrepMatchesValidationInput,
+      rejectReason: null,
+      candidateLen: preparedCandidateLenForLog,
+      freezePrepWasOk: true,
+    });
+  }
   recordPipelineValidationAcceptance(bodyForGates);
   return { ok: true, reasons: [] };
 }

@@ -1545,7 +1545,6 @@ import {
   commitAcceptedPaidProCorpusHandoffSync,
   commitCanonicalPaidProReviewSessionMarkers,
   FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
-  planEnterCanonicalPaidProReviewFlow,
   planFinalizeCanonicalPaidProPipelineSuccess,
   planCanonicalPaidProStaleUiReset,
   resolveCanonicalPaidProReviewCorpus,
@@ -1553,6 +1552,15 @@ import {
   shouldBlockDegradedPaidReviewBranchesAfterAcceptance,
   type EnterCanonicalPaidProReviewFlowArgs,
 } from "./enterCanonicalPaidProReviewFlow";
+import { gateFirstPaidCreateCanonicalReviewEntry } from "./paidProFirstPaidCreateFlowRoute";
+import {
+  DASHBOARD_PAID_CREATE_ROUTE_HELPER,
+  gateDashboardPaidCreateCanonicalReviewEntry,
+  isDashboardPaidCreateRouteActive,
+  planDashboardPaidCreateSubmitBootstrap,
+  planDashboardPaidCreateValidationFailureTerminal,
+  resolveDashboardPaidCreateCanonicalReviewSource,
+} from "./dashboardPaidCreateRoute";
 import {
   readPaidProPipelineAcceptedCorpusBody,
 } from "./paidProPipelineAcceptedCorpus";
@@ -6198,7 +6206,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Canonical first-time post-checkout AND returning paid create — one review entry path. */
   const enterCanonicalPaidProReviewFlow = React.useCallback(
     (args: EnterCanonicalPaidProReviewFlowArgs): boolean => {
-      const plan = planEnterCanonicalPaidProReviewFlow(args);
+      const plan = isDashboardPaidCreateRouteActive()
+        ? gateDashboardPaidCreateCanonicalReviewEntry(args)
+        : gateFirstPaidCreateCanonicalReviewEntry(args);
       if (!plan.shouldApply) return false;
       const finalPlain = plan.corpusPlain;
       const pipelineSource = plan.pipelineSource;
@@ -6321,7 +6331,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       recipientCandidates?: Array<{ name?: string; email?: string; role?: string }>;
     }): boolean =>
       enterCanonicalPaidProReviewFlow({
-        source: "returning_paid_create",
+        source: resolveDashboardPaidCreateCanonicalReviewSource(),
         respectAlreadyOpened: true,
         alreadyOpened:
           guidedFinalReviewExplicitlyUnlockedRef.current || guidedFinalReviewExplicitlyOpened,
@@ -6602,12 +6612,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             )
           : {}),
       });
-      const paidPipelineSource = result.premiumRenderSource || "server_full_draft";
       if (finalPlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
-        commitAcceptedPaidProCorpusHandoffSync({
-          corpusPlain: finalPlain,
-          pipelineSource: paidPipelineSource,
-        });
         lastPremiumWinningCorpusRef.current = finalPlain;
         premiumPipelineOutputBodyRef.current = finalPlain;
         hydratedPremiumBodyRef.current = finalPlain;
@@ -6617,8 +6622,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         guidedFinalReviewExplicitlyUnlockedRef.current = true;
       }
       commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true });
+      const dashboardCanonicalSource = resolveDashboardPaidCreateCanonicalReviewSource();
       const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
-        source: "returning_paid_create",
+        source: dashboardCanonicalSource,
         corpusPlain: finalPlain,
         winningBody: winning,
         snapshotPlain: acceptedCorpusPlain || snapshotPlain,
@@ -6635,7 +6641,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       const canonicalEntered = finalizePlan.canEnterCanonicalReview
         ? enterCanonicalPaidProReviewFlow({
-            source: "returning_paid_create",
+            source: dashboardCanonicalSource,
             respectAlreadyOpened: false,
             corpusPlain: finalizePlan.corpusPlain,
             pipelineSource: result.premiumRenderSource || "server_full_draft",
@@ -6651,16 +6657,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           reason: "entitled_rewrite_canonical_blocked",
           outcome: "retry_recoverable",
         });
+        const failureTerminal = isDashboardPaidCreateRouteActive()
+          ? planDashboardPaidCreateValidationFailureTerminal()
+          : null;
         setProFullDraftQualityRetry(true);
         setProFullDraftCustomGateMessage(
           "Your Pro agreement is still preparing. Tap **Retry Pro draft** if this does not update shortly.",
         );
-        setCreateFlowPhase("draft_ready_for_review");
-        setDisplayPhase("review");
+        setCreateFlowPhase(failureTerminal?.createFlowPhase ?? "draft_ready_for_review");
+        setDisplayPhase(failureTerminal?.displayPhase ?? "review");
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[paid-pro-acceptance-routing]", {
-            source: "returning_paid_create",
+            source: dashboardCanonicalSource,
+            routeHelper: isDashboardPaidCreateRouteActive() ? DASHBOARD_PAID_CREATE_ROUTE_HELPER : null,
             finalizeHelper: FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
             blockedReason: finalizePlan.blockedReason ?? "canonical_entry_failed",
             corpusLen: finalizePlan.corpusPlain.length,
@@ -10491,12 +10501,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       displayPhase_before: displayPhase,
     });
     assignLocalDraftParseStickyMode();
-    const returningPaidBootstrap = planReturningPaidCreateSubmitBootstrap({
-      tier,
-      workspaceProEntitled: workspaceProForSubmit,
-      premiumPersistedFlowActive,
-      premiumSendPathUnlocked,
-    });
+    const returningPaidBootstrap = isDashboardPaidCreateRouteActive()
+      ? planDashboardPaidCreateSubmitBootstrap({
+          tier,
+          workspaceProEntitled: workspaceProForSubmit,
+          premiumPersistedFlowActive,
+          premiumSendPathUnlocked,
+          paidProAuthoritative,
+        })
+      : planReturningPaidCreateSubmitBootstrap({
+          tier,
+          workspaceProEntitled: workspaceProForSubmit,
+          premiumPersistedFlowActive,
+          premiumSendPathUnlocked,
+        });
     if (returningPaidBootstrap) {
       beginReturningPaidProCreateGeneration();
     } else {
@@ -10586,8 +10604,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[paid-pro-acceptance-routing]", {
-            source: "returning_paid_create",
-            entryHelper: RETURNING_PAID_CREATE_BOOTSTRAP_HELPER,
+            source: isDashboardPaidCreateRouteActive()
+              ? "dashboard_paid_create"
+              : "returning_paid_create",
+            entryHelper: isDashboardPaidCreateRouteActive()
+              ? DASHBOARD_PAID_CREATE_ROUTE_HELPER
+              : RETURNING_PAID_CREATE_BOOTSTRAP_HELPER,
             bootstrap: Boolean(returningPaidBootstrap),
             finalizeHelper: FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
           });
@@ -13750,6 +13772,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createUiStage,
     displayPhase,
     createFlowPhase,
+    premiumPostCheckoutPhase,
+    proFullDraftQualityRetry,
     ...authoritativeCreateFlowReviewShellInput,
   });
 
@@ -13769,6 +13793,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (!simpleProductFlow || !createProductionTwoPane) return;
     if (!draft || createUiStage !== CreateUiStage.DRAFT) return;
+    if (isDashboardPaidCreateRouteActive()) return;
     if (!hasPaidCreateFlowPipelineAcceptance()) return;
     const pipelineSource =
       premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current ?? "server_full_draft";

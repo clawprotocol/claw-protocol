@@ -16,7 +16,11 @@ export const FOUNDER_ADMIN_CONSOLE_PATHS = [
   "/app/admin",
 ] as const;
 
+/** Canonical route marker for logged-in Dashboard → Create (all workspace create entries normalize here). */
+export const DASHBOARD_PAID_CREATE_ROUTE_SOURCE = "dashboard_paid_create" as const;
+
 export type PaidDashboardCreateContextSource =
+  | typeof DASHBOARD_PAID_CREATE_ROUTE_SOURCE
   | "dashboard_new_agreement"
   | "dashboard_drafting_redirect"
   | "workspace_nav_create"
@@ -26,6 +30,46 @@ export type PaidDashboardCreateContextSource =
   | "app_shell_new_agreement"
   | "reengagement_banner"
   | "send_edit_return";
+
+/** Workspace create entries that must normalize to {@link DASHBOARD_PAID_CREATE_ROUTE_SOURCE}. */
+const DASHBOARD_PAID_CREATE_LEGACY_SOURCES = new Set<string>([
+  "dashboard_new_agreement",
+  "dashboard_drafting_redirect",
+  "workspace_nav_create",
+  "founder_top_nav_create",
+  "app_shell_top_nav_create",
+  "dashboard_duplicate",
+  "app_shell_new_agreement",
+  "reengagement_banner",
+  "paid_dashboard_create_option",
+  "dashboard_nav",
+]);
+
+/** Resume/edit flows — not a fresh dashboard create route. */
+const DASHBOARD_PAID_CREATE_RESUME_SOURCES = new Set<string>(["send_edit_return"]);
+
+export function normalizeDashboardPaidCreateSource(
+  source: PaidDashboardCreateContextSource | string,
+): string {
+  const s = (source || "").trim();
+  if (!s || s === DASHBOARD_PAID_CREATE_ROUTE_SOURCE) return DASHBOARD_PAID_CREATE_ROUTE_SOURCE;
+  if (DASHBOARD_PAID_CREATE_RESUME_SOURCES.has(s)) return s;
+  if (DASHBOARD_PAID_CREATE_LEGACY_SOURCES.has(s)) return DASHBOARD_PAID_CREATE_ROUTE_SOURCE;
+  if (s.endsWith("_create") || s.includes("dashboard")) return DASHBOARD_PAID_CREATE_ROUTE_SOURCE;
+  return s;
+}
+
+export function isDashboardPaidCreateRouteActive(): boolean {
+  const ctx = readPaidDashboardCreateContext();
+  if (!ctx) return false;
+  const normalized = normalizeDashboardPaidCreateSource(ctx.source);
+  if (DASHBOARD_PAID_CREATE_RESUME_SOURCES.has(normalized)) return false;
+  return normalized === DASHBOARD_PAID_CREATE_ROUTE_SOURCE;
+}
+
+export function markDashboardPaidCreateRoute(): boolean {
+  return markPaidDashboardCreateContext(DASHBOARD_PAID_CREATE_ROUTE_SOURCE);
+}
 
 export type PaidDashboardCreateContextMarker = {
   v: 1;
@@ -142,17 +186,18 @@ export function markPaidDashboardCreateContext(
   if (typeof sessionStorage === "undefined") return false;
   const oid = getOrgId().trim();
   if (!oid) return false;
+  const storedSource = normalizeDashboardPaidCreateSource(source);
   try {
     const marker: PaidDashboardCreateContextMarker = {
       v: 1,
       orgId: oid,
-      source,
+      source: storedSource,
       markedAt: Date.now(),
     };
     sessionStorage.setItem(KEY, JSON.stringify(marker));
     logPaidDashboardCreateContext({
       active: true,
-      source,
+      source: storedSource,
       orgId: oid,
       path: typeof window !== "undefined" ? window.location.pathname : null,
     });
@@ -216,7 +261,7 @@ export function shouldFailClosedBypassForAuthenticatedWorkspaceCreate(): boolean
 
 /** Vitest: seed marker without navigation. */
 export function markPaidDashboardCreateContextForTests(
-  source: PaidDashboardCreateContextSource | string = "dashboard_new_agreement",
+  source: PaidDashboardCreateContextSource | string = DASHBOARD_PAID_CREATE_ROUTE_SOURCE,
   orgId?: string,
 ): void {
   if (typeof sessionStorage === "undefined") return;
@@ -224,7 +269,7 @@ export function markPaidDashboardCreateContextForTests(
   const marker: PaidDashboardCreateContextMarker = {
     v: 1,
     orgId: oid,
-    source,
+    source: normalizeDashboardPaidCreateSource(source),
     markedAt: Date.now(),
   };
   sessionStorage.setItem(KEY, JSON.stringify(marker));

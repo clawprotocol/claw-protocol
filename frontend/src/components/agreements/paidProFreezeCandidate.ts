@@ -166,6 +166,22 @@ export type PaidProFreezeCandidateGateResult = {
   parties: CanonicalAgreementSnapshotParty[];
 };
 
+/** Structural freeze prep only — not pipeline acceptance until validatePaidProOutput passes. */
+export function logPaidProFreezeCandidatePrep(payload: {
+  prepOk: boolean;
+  source: string;
+  preparedFreezeCandidateHash: string;
+  validationInputHash?: string | null;
+  validationInputMatchesPreparedFreeze?: boolean;
+  rejectReason?: string | null;
+  candidateLen: number;
+}): void {
+  if (import.meta.env.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-freeze-candidate-prep]", payload);
+}
+
+/** Final freeze acceptance — only when professional validation also passed (no silent contradiction). */
 export function logPaidProFreezeCandidateDecision(payload: {
   accepted: boolean;
   source: string;
@@ -174,6 +190,7 @@ export function logPaidProFreezeCandidateDecision(payload: {
   validationInputMatchesPreparedFreeze?: boolean;
   rejectReason?: string | null;
   candidateLen: number;
+  freezePrepWasOk?: boolean;
 }): void {
   if (import.meta.env.MODE === "test") return;
   // eslint-disable-next-line no-console

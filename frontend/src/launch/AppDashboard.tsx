@@ -282,7 +282,7 @@ export function AppDashboard() {
     setLawdogFocusCreateIntakeAfterNavigation();
     navigate("/app/create", {
       paidDashboardCreate: true,
-      paidDashboardCreateSource: "dashboard_drafting_redirect",
+      paidDashboardCreateSource: "dashboard_paid_create",
     });
   }, [entryResolved, pathname, navigate]);
 
@@ -451,7 +451,7 @@ export function AppDashboard() {
     setLawdogFocusCreateIntakeAfterNavigation();
     navigate("/app/create", {
       paidDashboardCreate: true,
-      paidDashboardCreateSource: "dashboard_new_agreement",
+      paidDashboardCreateSource: "dashboard_paid_create",
     });
   }, [navigate]);
 

@@ -22,10 +22,14 @@ import { resolveSimpleProFinalReviewActive } from "./simpleProFinalReviewPhase";
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { markPaidProPipelineAcceptedCorpusHash, readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
-import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
+import {
+  hasPaidProPipelineValidationForCorpus,
+  markPaidProPipelineValidationPassed,
+} from "./paidProPostAcceptanceValidatorCache";
 
 export type CanonicalPaidProReviewEntrySource =
   | "post_checkout_apply_success"
+  | "dashboard_paid_create"
   | "returning_paid_create";
 
 export type EnterCanonicalPaidProReviewFlowArgs = {
@@ -148,6 +152,15 @@ export function planEnterCanonicalPaidProReviewFlow(
     })
   ) {
     return { ...baseBlocked, blockedReason: "create_flow_routing_gate" };
+  }
+
+  if (
+    !hasPaidProPipelineValidationForCorpus({
+      text: corpusPlain,
+      source: pipelineSource,
+    })
+  ) {
+    return { ...baseBlocked, blockedReason: "validation_not_latched_for_corpus" };
   }
 
   return {

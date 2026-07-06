@@ -29,7 +29,7 @@ export function AppShell(props: {
   /** Slim footer: shorter legal strip on mobile-first app surfaces (e.g. partner / pre-payment). */
   compactFooter?: boolean;
 }) {
-  const { navigate, pathname } = useLaunchNav();
+  const { navigate } = useLaunchNav();
   const access = useAccess();
   const affiliateNav = useFeatureGate("affiliate_opportunity_enabled");
   const { children, title, subtitle, navMode = "default", compactFooter = false } = props;
@@ -44,17 +44,10 @@ export function AppShell(props: {
     { label: "Integrations", path: "/app/integrations", title: "Webhooks and API integration settings" },
     { label: "Settings", path: "/app/settings", title: "Account and workspace settings" },
   ];
-  const resolveTopNavCreateSource = (): "founder_top_nav_create" | "app_shell_top_nav_create" => {
-    const p = (pathname || "").replace(/\/$/, "") || "/";
-    if (p === "/founder" || p === "/admin" || p === "/app/founder" || p === "/app/admin") {
-      return "founder_top_nav_create";
-    }
-    return "app_shell_top_nav_create";
-  };
   const navigateToPaidWorkspaceCreate = () => {
     navigate("/app/create", {
       paidDashboardCreate: true,
-      paidDashboardCreateSource: resolveTopNavCreateSource(),
+      paidDashboardCreateSource: "dashboard_paid_create",
     });
   };
   if (showLegacyQuickPath) {

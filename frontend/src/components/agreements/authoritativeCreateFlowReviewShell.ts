@@ -27,6 +27,7 @@ import { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlo
 import { resolveCreateFlowWorkspaceProEntitled } from "./paidCreateFlowWorkspaceEntitlementProbe";
 import { hasPaidCreateFlowPipelineAcceptance } from "./paidCreateFlowPipelineAcceptanceProbe";
 import { hasPaidDashboardCreateContextActive, isAppCreatePath, shouldFailClosedBypassForAuthenticatedWorkspaceCreate } from "../../launch/paidDashboardCreateContext";
+import { computeDashboardPaidCreateReviewShellReady, isDashboardPaidCreateRouteActive } from "./dashboardPaidCreateRoute";
 
 export type AuthoritativeCreateFlowReviewShell = "paid_pro" | "free_starter";
 
@@ -194,13 +195,24 @@ export type ComputeCreateFlowPaidProReviewReadyInput = ResolveAuthoritativeCreat
   createUiStage: (typeof CreateUiStage)[keyof typeof CreateUiStage];
   displayPhase: string;
   createFlowPhase?: CreateFlowProductionPhase;
+  premiumPostCheckoutPhase?: string | null;
+  proFullDraftQualityRetry?: boolean;
 };
 
-/** Paid Pro review chrome on `/app/create` — workspace-pro shell may show before corpus exists. */
+/** Paid Pro review chrome on `/app/create` — dashboard route requires validated corpus before review content. */
 export function computeCreateFlowPaidProReviewReady(
   input: ComputeCreateFlowPaidProReviewReadyInput,
 ): boolean {
   if (!input.simpleProductFlow || !input.liveWorkspaceTwoPane) return false;
+  if (isDashboardPaidCreateRouteActive()) {
+    return computeDashboardPaidCreateReviewShellReady({
+      createUiStage: input.createUiStage,
+      displayPhase: input.displayPhase,
+      createFlowPhase: input.createFlowPhase,
+      premiumPostCheckoutPhase: input.premiumPostCheckoutPhase,
+      proFullDraftQualityRetry: input.proFullDraftQualityRetry,
+    });
+  }
   if (shouldUsePaidProCreateFlowReviewShell(input)) {
     if (input.createUiStage === CreateUiStage.RECIPIENTS) return true;
     return (
