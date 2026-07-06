@@ -329,6 +329,7 @@ import {
   resolveSignerSetupPartyIdentities,
   shouldArmPaidProFirstReviewSignerSetupLatch,
   logPaidProSignerSetupAutofinalizeDecision,
+  resolvePaidProIntakeLegalEntityAddressPrefillComplete,
   shouldShowPaidProForcedFirstReviewTrackChooser,
   type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
@@ -881,6 +882,7 @@ import {
 } from "./paidProSignerMetadataSeed";
 import { establishCanonicalPartyMetadataAtStage } from "./canonicalPartyMetadataAuthority";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
+import { intakePartyManifestIsAuthoritative } from "./intakePartyManifestAuthority";
 import { hydrateCanonicalPartyMetadataAfterCheckoutRestore } from "./paidProCheckoutRestoreMetadataHydrate";
 import { resolveUniversalSignerMetadataBySlot } from "./universalSignerMetadataAuthority";
 import {
@@ -17679,7 +17681,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         : handoffContacts.addresses,
       authoritativePartyCount: authoritativeSignerSetupPartyCount,
     });
-    if (!seed.uiChanged && !seed.contactFieldsChanged) return;
+    const manifestAuthoritative = intakePartyManifestIsAuthoritative(intakeText);
+    const shouldApplyPrefill =
+      manifestAuthoritative ||
+      seed.uiChanged ||
+      seed.contactFieldsChanged ||
+      seed.addresses.some(Boolean);
+    if (!shouldApplyPrefill) return;
     paidProIntakeSignerPrefillAttemptedRef.current = prefillKey;
     if (seed.uiChanged) {
       setPartySignerNames(seed.names);
@@ -17699,46 +17707,66 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return next;
         });
       }
-      if (seed.addresses.some(Boolean)) {
-        setPartyAddresses((prev) => {
+    }
+    if (manifestAuthoritative || seed.addresses.some(Boolean)) {
+      setPartyAddresses((prev) => {
+        const next = prev.slice();
+        while (next.length < authoritativeSignerSetupPartyCount) next.push("");
+        for (let i = 0; i < authoritativeSignerSetupPartyCount; i++) {
+          const addr = seed.addresses[i]?.trim() ?? "";
+          if (manifestAuthoritative) {
+            if (addr) next[i] = addr;
+          } else if (addr && !(next[i] ?? "").trim()) {
+            next[i] = addr;
+          }
+        }
+        return next;
+      });
+    }
+    if (manifestAuthoritative) {
+      if (legalEntities[0]?.trim()) setRecipient1Name(legalEntities[0]!.trim());
+      if (legalEntities[1]?.trim()) setRecipient2Name(legalEntities[1]!.trim());
+      if (authoritativeSignerSetupPartyCount > 2) {
+        setExtraPartyLegalNames((prev) => {
           const next = prev.slice();
-          while (next.length < authoritativeSignerSetupPartyCount) next.push("");
-          for (let i = 0; i < authoritativeSignerSetupPartyCount; i++) {
-            const addr = seed.addresses[i]?.trim() ?? "";
-            if (addr && !(next[i] ?? "").trim()) next[i] = addr;
+          while (next.length < authoritativeSignerSetupPartyCount - 2) next.push("");
+          for (let i = 2; i < authoritativeSignerSetupPartyCount; i++) {
+            const legal = legalEntities[i]?.trim() ?? "";
+            if (legal) next[i - 2] = legal;
           }
           return next;
         });
       }
-    }
-    setRecipient1Name((prev) =>
-      hydrateLegalEntityNameFromHandoff(
-        prev,
-        ho?.party1.name ?? "",
-        legalEntities[0],
-        undefined,
-        0,
-      ),
-    );
-    setRecipient2Name((prev) =>
-      hydrateLegalEntityNameFromHandoff(
-        prev,
-        ho?.party2.name ?? "",
-        legalEntities[1],
-        undefined,
-        1,
-      ),
-    );
-    if (authoritativeSignerSetupPartyCount > 2) {
-      setExtraPartyLegalNames((prev) => {
-        const next = prev.slice();
-        while (next.length < authoritativeSignerSetupPartyCount - 2) next.push("");
-        for (let i = 2; i < authoritativeSignerSetupPartyCount; i++) {
-          const legal = legalEntities[i]?.trim() ?? "";
-          if (legal && !(next[i - 2] ?? "").trim()) next[i - 2] = legal;
-        }
-        return next;
-      });
+    } else {
+      setRecipient1Name((prev) =>
+        hydrateLegalEntityNameFromHandoff(
+          prev,
+          ho?.party1.name ?? "",
+          legalEntities[0],
+          undefined,
+          0,
+        ),
+      );
+      setRecipient2Name((prev) =>
+        hydrateLegalEntityNameFromHandoff(
+          prev,
+          ho?.party2.name ?? "",
+          legalEntities[1],
+          undefined,
+          1,
+        ),
+      );
+      if (authoritativeSignerSetupPartyCount > 2) {
+        setExtraPartyLegalNames((prev) => {
+          const next = prev.slice();
+          while (next.length < authoritativeSignerSetupPartyCount - 2) next.push("");
+          for (let i = 2; i < authoritativeSignerSetupPartyCount; i++) {
+            const legal = legalEntities[i]?.trim() ?? "";
+            if (legal && !(next[i - 2] ?? "").trim()) next[i - 2] = legal;
+          }
+          return next;
+        });
+      }
     }
   }, [
     acceptedPaidProAuthorityActive,
@@ -17757,6 +17785,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
+    const intakeText = currentPremiumMergedIntakeKey || intakeCombined;
+    const intakeEntityAddressPrefillComplete = resolvePaidProIntakeLegalEntityAddressPrefillComplete({
+      intakeText,
+      partyCount: authoritativeSignerSetupPartyCount,
+      recipient1Name,
+      recipient2Name,
+      extraPartyLegalNames,
+      partyAddresses,
+    });
+    const intakePrefillComplete =
+      intakeEntityAddressPrefillComplete || paidProSignatureDetailsReady;
     if (!paidProFirstReviewSignerSetupRequired) {
       if (
         acceptedPaidProAuthorityActive &&
@@ -17778,7 +17817,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       reason: paidProSignatureDetailsReady
         ? "intake_prefill_requires_confirmation"
         : "signer_details_incomplete",
-      intakePrefillComplete: paidProSignatureDetailsReady,
+      intakePrefillComplete,
       signerMetadataFinalized: paidProSignerMetadataFinalized,
     });
     if (!paidProInlineSignerSetupLatched) {
@@ -17795,6 +17834,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProFirstReviewSurfaceActive,
     paidProSignatureDetailsReady,
     paidProSignerMetadataFinalized,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    authoritativeSignerSetupPartyCount,
+    recipient1Name,
+    recipient2Name,
+    extraPartyLegalNames,
+    partyAddresses,
   ]);
 
   const paidProCanonicalStickyCta = useMemo(() => {

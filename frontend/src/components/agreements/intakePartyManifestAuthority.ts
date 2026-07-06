@@ -6,7 +6,8 @@
 import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProSignerMetadataAuthority";
-import { extractLegalEntityFromIntakeLine } from "./partySlotIdentityNormalize";
+import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { extractLegalEntityFromIntakeLine, resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
 
 export type IntakePartyManifestRow = {
   /** 1-based index from numbered intake line. */
@@ -19,9 +20,19 @@ export type IntakePartyManifestRow = {
 
 const NUMBERED_MANIFEST_LINE_RE = /^\s*(\d+)[.)]\s+(.+)$/;
 const BULLET_MANIFEST_LINE_RE = /^\s*[-*•]\s+(.+)$/;
+/** Role-colon lines: `Client: Entity LLC, a Delaware corporation located at …` */
+const COLON_ROLE_MANIFEST_LINE_RE = /^([A-Za-z][A-Za-z\s/-]{0,80}):\s*(.+)$/;
 
 const US_CITY_STATE_ZIP_TAIL_RE =
   /,\s*([A-Za-z][A-Za-z\s.'-]{1,48}?),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\.?\s*$/;
+
+const COLON_MANIFEST_ADDRESS_RE =
+  /(?:with its principal office at|located at)\s+(.+?)\.?\s*$/i;
+
+const COLON_MANIFEST_ENTITY_TYPE_RE = /,\s*(a|an)\s+(.+)$/i;
+
+const NON_PARTY_COLON_ROLE_RE =
+  /^(?:term|fee|payment|governing|note|include|prepare|total|major|each|confidentiality|dispute|governing law)\b/i;
 
 function normalizeManifestEntity(raw: string): string {
   const entity = extractLegalEntityFromIntakeLine(raw);
@@ -34,6 +45,49 @@ function entityPrefixLength(body: string): number {
   if (!entity) return 0;
   const idx = body.toLowerCase().indexOf(entity.toLowerCase());
   return idx >= 0 ? idx + entity.length : entity.length;
+}
+
+function parseColonRoleManifestBody(
+  body: string,
+  partyNumber: number,
+  roleLabel: string,
+): IntakePartyManifestRow | null {
+  let rest = String(body ?? "").replace(/\s+/g, " ").trim();
+  if (!rest) return null;
+
+  let partyAddress = "";
+  const addressMatch = rest.match(COLON_MANIFEST_ADDRESS_RE);
+  if (addressMatch?.[1]) {
+    partyAddress = normalizeCanonicalPartyAddress(addressMatch[1]);
+    rest = rest.slice(0, addressMatch.index ?? 0).replace(/,\s*$/, "").trim();
+  }
+
+  let entityType = "";
+  const typeMatch = rest.match(COLON_MANIFEST_ENTITY_TYPE_RE);
+  if (typeMatch?.[2]) {
+    entityType = typeMatch[2].trim();
+    rest = rest.slice(0, typeMatch.index ?? 0).trim();
+  }
+
+  const partyLegalName = normalizeManifestEntity(rest);
+  if (!partyLegalName) return null;
+
+  return {
+    partyNumber,
+    partyLegalName,
+    roleLabel: roleLabel.replace(/\s+/g, " ").trim(),
+    entityType,
+    partyAddress,
+  };
+}
+
+function parseColonRoleManifestLine(line: string, partyNumber: number): IntakePartyManifestRow | null {
+  const m = line.match(COLON_ROLE_MANIFEST_LINE_RE);
+  if (!m?.[1] || !m[2]) return null;
+  const roleLabel = m[1].trim();
+  if (NON_PARTY_COLON_ROLE_RE.test(roleLabel)) return null;
+  if (NUMBERED_MANIFEST_LINE_RE.test(line) || BULLET_MANIFEST_LINE_RE.test(line)) return null;
+  return parseColonRoleManifestBody(m[2], partyNumber, roleLabel);
 }
 
 function parseManifestBody(body: string, partyNumber: number): IntakePartyManifestRow | null {
@@ -106,7 +160,7 @@ function parseManifestLine(line: string, fallbackIndex: number): IntakePartyMani
   return null;
 }
 
-/** Ordered manifest rows from numbered / bullet party list intake lines. */
+/** Ordered manifest rows from colon-role, numbered, or bullet party list intake lines. */
 export function extractIntakePartyManifestRows(
   intakeRaw: string | null | undefined,
 ): IntakePartyManifestRow[] {
@@ -115,6 +169,22 @@ export function extractIntakePartyManifestRows(
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+
+  const colonRows: IntakePartyManifestRow[] = [];
+  let colonCursor = 1;
+  for (const line of lines) {
+    const row = parseColonRoleManifestLine(line, colonCursor);
+    if (!row) continue;
+    if (colonRows.some((existing) => partyLegalNamesMatch(existing.partyLegalName, row.partyLegalName))) {
+      continue;
+    }
+    colonRows.push(row);
+    colonCursor += 1;
+  }
+  if (colonRows.length >= 2) {
+    return colonRows.map((row, i) => ({ ...row, partyNumber: i + 1 }));
+  }
+
   const out: IntakePartyManifestRow[] = [];
   let bulletCursor = 1;
   for (const line of lines) {
@@ -130,6 +200,60 @@ export function extractIntakePartyManifestRows(
     out.push(row);
   }
   return out.sort((a, b) => a.partyNumber - b.partyNumber);
+}
+
+/** True when intake declares an ordered multi-party manifest (colon, numbered, or bullet). */
+export function intakePartyManifestIsAuthoritative(intakeRaw: string | null | undefined): boolean {
+  const rows = extractIntakePartyManifestRows(intakeRaw);
+  if (rows.length < 2) return false;
+  const declared = resolveDeclaredExplicitPartyCount(String(intakeRaw ?? ""));
+  if (declared != null && declared >= 3) return rows.length >= declared;
+  return rows.length >= 2;
+}
+
+/** Build signer metadata parties from intake manifest — entity, role, and address only. */
+export function buildSignerMetadataPartiesFromIntakeManifest(
+  intakeRaw: string | null | undefined,
+): PaidProSignerMetadataParty[] {
+  return extractIntakePartyManifestRows(intakeRaw).map((row, partyIndex) => ({
+    partyIndex,
+    partyLegalName: row.partyLegalName,
+    signerName: "",
+    signerTitle: "",
+    signerEmail: "",
+    partyAddress: row.partyAddress,
+  }));
+}
+
+/** Merge intake manifest over corpus-derived review parties after freeze. */
+export function overlayIntakeManifestOnReviewParties(
+  intakeRaw: string | null | undefined,
+  reviewParties: readonly PaidProSignerMetadataParty[],
+): PaidProSignerMetadataParty[] {
+  const manifestParties = buildSignerMetadataPartiesFromIntakeManifest(intakeRaw);
+  if (!intakePartyManifestIsAuthoritative(intakeRaw) || manifestParties.length < 2) {
+    return [...reviewParties];
+  }
+  const manifestEntityKeys = new Set(
+    manifestParties.map((p) => p.partyLegalName.trim().toLowerCase()),
+  );
+  return manifestParties.map((manifest, i) => {
+    const byIndex = reviewParties[i];
+    const byEntity = reviewParties.find((p) =>
+      partyLegalNamesMatch(p.partyLegalName, manifest.partyLegalName),
+    );
+    const existing = byIndex && manifestEntityKeys.has(byIndex.partyLegalName.trim().toLowerCase())
+      ? byIndex
+      : byEntity;
+    return {
+      partyIndex: i,
+      partyLegalName: manifest.partyLegalName,
+      partyAddress: manifest.partyAddress || existing?.partyAddress || "",
+      signerName: existing?.signerName?.trim() || "",
+      signerTitle: existing?.signerTitle?.trim() || "",
+      signerEmail: existing?.signerEmail?.trim() || "",
+    };
+  });
 }
 
 /** Legal entities in manifest order — preferred authority for multi-party dashboard create. */

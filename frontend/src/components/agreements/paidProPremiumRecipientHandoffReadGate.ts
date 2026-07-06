@@ -19,6 +19,7 @@ import {
   resetSignerMetadataEffectiveMaxForTests,
 } from "./signerMetadataEffective";
 import { readCanonicalPartyMetadata } from "./canonicalPartyMetadataAuthority";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
 let lastPopulatedHandoff: PremiumRecipientHandoffV2 | null = null;
 let sessionEverHadPopulatedHandoff = false;
@@ -27,6 +28,17 @@ let latchedCorpusHash = "";
 function handoffSignerSlotCount(handoff: PremiumRecipientHandoffV2, partySlotCount: number): number {
   const slots = linearPremiumRecipientSlots(handoff, partySlotCount);
   return slots.filter((s) => signerMetadataInputRaw(s.signerName).length > 0).length;
+}
+
+function handoffEntityOrAddressSlotCount(
+  handoff: PremiumRecipientHandoffV2,
+  partySlotCount: number,
+): { entities: number; addresses: number } {
+  const slots = linearPremiumRecipientSlots(handoff, partySlotCount);
+  return {
+    entities: slots.filter((s) => isAuthoritativeLegalEntityName(String(s.name ?? "").trim())).length,
+    addresses: slots.filter((s) => String(s.partyAddress ?? "").trim().length >= 8).length,
+  };
 }
 
 function partySlotsAreKnown(handoff: PremiumRecipientHandoffV2): boolean {
@@ -122,15 +134,23 @@ export function applyPremiumRecipientHandoffReadGate(
     latchedCorpusHash = (opts?.corpusHash ?? "").trim();
   }
   const populatedCount = handoffSignerSlotCount(cappedHandoff, partySlotCount);
+  const entityAddressCounts = handoffEntityOrAddressSlotCount(cappedHandoff, partySlotCount);
 
   const counts = countSignerMetadataSlots(cappedHandoff, partySlotCount);
 
-  if (populatedCount > 0) {
+  if (
+    populatedCount > 0 ||
+    entityAddressCounts.entities >= 2 ||
+    entityAddressCounts.addresses >= 2
+  ) {
     lastPopulatedHandoff = cappedHandoff;
     sessionEverHadPopulatedHandoff = true;
     latchSignerMetadataEffectiveMax(counts);
     logSignerMetadataEffective({
-      source: "handoff_read_populated",
+      source:
+        populatedCount > 0
+          ? "handoff_read_populated"
+          : "handoff_read_intake_manifest_entities",
       partySlots: counts.partySlots,
       slotsWithSignerName: counts.slotsWithSignerName,
       slotsWithSignerTitle: counts.slotsWithSignerTitle,
@@ -221,7 +241,13 @@ export function applyPremiumRecipientHandoffReadGate(
         partySlotCount,
       );
       const canonicalCounts = countSignerMetadataSlots(canonicalHandoff, partySlotCount);
-      if (canonicalCounts.slotsWithSignerName > 0) {
+      const canonicalEntities = canonical.parties.filter((p) => p.partyLegalName.trim()).length;
+      const canonicalAddresses = canonical.parties.filter((p) => p.partyAddress.trim().length >= 8).length;
+      if (
+        canonicalCounts.slotsWithSignerName > 0 ||
+        canonicalEntities >= 2 ||
+        canonicalAddresses >= 2
+      ) {
         lastPopulatedHandoff = canonicalHandoff;
         sessionEverHadPopulatedHandoff = true;
         latchSignerMetadataEffectiveMax(canonicalCounts);

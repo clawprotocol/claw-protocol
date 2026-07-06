@@ -1,10 +1,14 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   TEST518_BLUE_HARBOR,
+  TEST518_BLUE_HARBOR_ADDRESS,
   TEST518_IRON_GATE,
+  TEST518_IRON_GATE_ADDRESS,
   TEST518_PRODUCTION_QUAD_PARTY_INTAKE,
   TEST518_REDWOOD,
+  TEST518_REDWOOD_ADDRESS,
   TEST518_SUMMIT,
+  TEST518_SUMMIT_ADDRESS,
   test518Draft,
 } from "./paidProTest518Fixtures";
 
@@ -22,6 +26,41 @@ export const TEST519_PARTY_ROLES = [
   { name: TEST518_BLUE_HARBOR, role: "Implementation Partner" },
   { name: TEST518_IRON_GATE, role: "Cybersecurity Auditor" },
 ] as const;
+
+export const TEST519_PARTY_ADDRESSES = [
+  TEST518_REDWOOD_ADDRESS,
+  TEST518_SUMMIT_ADDRESS,
+  TEST518_BLUE_HARBOR_ADDRESS,
+  TEST518_IRON_GATE_ADDRESS,
+] as const;
+
+/** TEST519 — colon-role party manifest (dashboard_paid_create production format). */
+export const TEST519_COLON_ROLE_DASHBOARD_CREATE_INTAKE = [
+  "Create a Professional Technology Services and AI Implementation Agreement among the following four parties:",
+  "",
+  `Client: ${TEST518_REDWOOD}, a Delaware corporation with its principal office at ${TEST518_REDWOOD_ADDRESS}.`,
+  `Lead Provider: ${TEST518_SUMMIT}, a Texas limited liability company located at ${TEST518_SUMMIT_ADDRESS}.`,
+  `Implementation Partner: ${TEST518_BLUE_HARBOR}, an Illinois limited liability company located at ${TEST518_BLUE_HARBOR_ADDRESS}.`,
+  `Cybersecurity Auditor: ${TEST518_IRON_GATE}, a Virginia limited liability company located at ${TEST518_IRON_GATE_ADDRESS}.`,
+  "",
+  `${TEST518_REDWOOD} will contribute de-identified clinical trial outcome data.`,
+  `${TEST518_SUMMIT} will develop and train predictive AI models.`,
+  `${TEST518_BLUE_HARBOR} will host cloud infrastructure and analytics pipelines.`,
+  `${TEST518_IRON_GATE} will provide continuous cybersecurity monitoring and incident response.`,
+  "",
+  "Total project fee is $450,000 payable in milestone installments.",
+  "Term: eighteen (18) months with ninety days of post-launch support.",
+  "",
+  "Major project decisions require approval from Redwood Biologics and Summit AI Consulting.",
+  "Each provider is responsible only for its assigned work.",
+  "",
+  "Include confidentiality, intellectual property ownership, limitation of liability, insurance requirements,",
+  "data privacy obligations, termination for cause and convenience, notice provisions, governing law (Delaware),",
+  "dispute resolution, force majeure, independent contractor status, assignment restrictions, amendment,",
+  "severability, waiver, and entire agreement clauses.",
+  "",
+  "Prepare the agreement for electronic signature by all four parties.",
+].join("\n");
 
 export function test519Draft(): ParsedDraftShape {
   return test518Draft();

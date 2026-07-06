@@ -114,7 +114,12 @@ import {
   hashPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
-import { writePremiumRecipientHandoffLinear, readPremiumRecipientHandoff, resolveHandoffPartySlotCount } from "./premiumPartyNamesHandoff";
+import { writePremiumRecipientHandoffFromAuthorityParties, readPremiumRecipientHandoff, resolveHandoffPartySlotCount } from "./premiumPartyNamesHandoff";
+import {
+  overlayIntakeManifestOnReviewParties,
+  intakePartyManifestIsAuthoritative,
+} from "./intakePartyManifestAuthority";
+import { establishCanonicalPartyMetadataAtStage } from "./canonicalPartyMetadataAuthority";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
 import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
 import { resolvePaidProFrozenDisplayAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
@@ -751,24 +756,27 @@ export function establishPaidProSourceOfTruth(args: {
     canonicalSnapshotHash: frozen?.hash ?? record.hash,
     authoritativeSnapshotHash: authoritativeDoc?.authoritativeHash ?? record.hash,
   });
+  let establishedHandoffPartyCount = reviewParties.length;
   if (reviewParties.length >= 2) {
+    const handoffParties = overlayIntakeManifestOnReviewParties(args.intakeText ?? null, reviewParties);
+    establishedHandoffPartyCount = handoffParties.length;
     setConsumedPaidProSignerMetadataAuthority({
-      parties: [...reviewParties],
+      parties: [...handoffParties],
       source: "server_full_draft",
-      hash: hashPaidProSignerMetadataAuthority(reviewParties),
+      hash: hashPaidProSignerMetadataAuthority(handoffParties),
       updatedAt: Date.now(),
     });
-    writePremiumRecipientHandoffLinear(
-      reviewParties.map((party) => ({
-        name: party.partyLegalName,
-        email: party.signerEmail,
-        role: "party",
-        signerName: party.signerName,
-        signerTitle: party.signerTitle,
-        partyAddress: party.partyAddress,
-      })),
-      reviewParties.length,
-    );
+    writePremiumRecipientHandoffFromAuthorityParties(handoffParties);
+    if (intakePartyManifestIsAuthoritative(args.intakeText ?? null)) {
+      establishCanonicalPartyMetadataAtStage({
+        stage: "after-freeze",
+        legalEntities: handoffParties.map((p) => p.partyLegalName),
+        intakeText: args.intakeText ?? null,
+        uiParties: handoffParties,
+        mutationSource: "structured_intake",
+        project: false,
+      });
+    }
   }
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
@@ -781,8 +789,8 @@ export function establishPaidProSourceOfTruth(args: {
   }
   logPaidProFreezeEstablished({
     hash: record.hash,
-    partyCount: reviewParties.length,
-    signerCount: reviewParties.length,
+    partyCount: establishedHandoffPartyCount,
+    signerCount: establishedHandoffPartyCount,
   });
   latchPaidReviewSessionCanonicalSoTHash({
     reviewSessionId: record.reviewSessionId,

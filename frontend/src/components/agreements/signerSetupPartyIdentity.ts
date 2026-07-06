@@ -34,10 +34,16 @@ import {
   resolveAuthoritativePartySlotCount,
   selectAuthoritativeTwoPartySlots,
 } from "./partySlotIdentityNormalize";
+import {
+  extractIntakePartyManifestRows,
+  findIntakePartyManifestRowForEntity,
+  intakePartyManifestIsAuthoritative,
+} from "./intakePartyManifestAuthority";
 
 export type SignerIdentitySource =
   | "sot_signature_block"
   | "authoritative_manifest"
+  | "intake_manifest"
   | "canonical_resolver"
   | "intake_extract"
   | "draft_party"
@@ -585,6 +591,34 @@ export function logPaidProSignerSetupAutofinalizeDecision(payload: {
   console.info("[paid-pro-signer-setup-autofinalize-decision]", payload);
 }
 
+/** Legal entity + address prefill from intake manifest — signer name/email may remain blank. */
+export function resolvePaidProIntakeLegalEntityAddressPrefillComplete(args: {
+  intakeText?: string | null;
+  partyCount: number;
+  recipient1Name: string;
+  recipient2Name: string;
+  extraPartyLegalNames?: readonly string[];
+  partyAddresses?: readonly string[];
+}): boolean {
+  if (!intakePartyManifestIsAuthoritative(args.intakeText)) return false;
+  const rows = extractIntakePartyManifestRows(args.intakeText);
+  const count = Math.max(args.partyCount, rows.length);
+  for (let i = 0; i < count; i += 1) {
+    const expected = rows[i]?.partyLegalName ?? "";
+    const actual =
+      i === 0
+        ? args.recipient1Name
+        : i === 1
+          ? args.recipient2Name
+          : args.extraPartyLegalNames?.[i - 2] ?? "";
+    if (expected && !partyLegalNamesMatch(actual, expected)) return false;
+    const expectedAddr = rows[i]?.partyAddress ?? "";
+    const actualAddr = args.partyAddresses?.[i] ?? "";
+    if (expectedAddr.trim() && !actualAddr.trim()) return false;
+  }
+  return rows.length >= 2;
+}
+
 /** Delivery-track chooser on forced document route — only after explicit signer metadata finalize. */
 export function shouldShowPaidProForcedFirstReviewTrackChooser(args: {
   forcedFirstReviewActive: boolean;
@@ -990,6 +1024,33 @@ export function resolveSignerSetupPartyIdentity(
   args: ResolveSignerSetupPartyIdentityArgs,
 ): SignerSetupPartyIdentity {
   const index = args.partyIndex;
+  const intakeText = String(args.intakeText ?? "").trim();
+  const bodyText = String(args.agreementBodyText ?? "").trim();
+
+  if (intakePartyManifestIsAuthoritative(intakeText)) {
+    const manifestRows = extractIntakePartyManifestRows(intakeText);
+    const manifestRow = findIntakePartyManifestRowForEntity(manifestRows, "", index);
+    if (manifestRow?.partyLegalName) {
+      const legalEntityName = sanitizeSlotLegalEntityDisplay(
+        manifestRow.partyLegalName,
+        index,
+        "resolve_signer_identity",
+      );
+      const displayName = legalEntityName
+        ? compactDisplayNameFromLegalEntity(legalEntityName)
+        : `Party ${index + 1}`;
+      if (args.log !== false) {
+        logSignerIdentitySource({
+          partyIndex: index,
+          legalEntityName,
+          displayName,
+          source: "intake_manifest",
+        });
+      }
+      return { legalEntityName, displayName, source: "intake_manifest" };
+    }
+  }
+
   const candidates: { name: string; source: SignerIdentitySource }[] = [];
 
   const authoritative = getAuthoritativeAgreementDocument();
@@ -1004,8 +1065,7 @@ export function resolveSignerSetupPartyIdentity(
       (p, j) => j !== index && norm(String(p?.name ?? "")).toLowerCase() === manifestName.toLowerCase(),
     );
 
-  const intakeText = String(args.intakeText ?? "").trim();
-  const bodyText = String(args.agreementBodyText ?? "").trim();
+  const intakeManifestAuthoritative = intakePartyManifestIsAuthoritative(intakeText);
   const starterNames = (args.draftPartyNames ?? [])
     .map((n) => norm(String(n ?? "")))
     .filter((n) => n.length >= 2);
@@ -1095,7 +1155,7 @@ export function resolveSignerSetupPartyIdentity(
     !candidateContainsMultipleEntities(signatureSlotEntity) &&
     !isDisallowedPartyPhrase(signatureSlotEntity) &&
     new Set(signatureEntitiesClean.map((e) => e.toLowerCase())).size >= 2;
-  if (signatureBlockAuthoritative) {
+  if (signatureBlockAuthoritative && !intakeManifestAuthoritative) {
     legalEntityName = signatureSlotEntity;
   }
 

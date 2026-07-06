@@ -96,6 +96,9 @@ function sanitizeHandoffSlotEntityName(
   const signerName = signerMetadataInputRaw(slot.signerName);
   const rawName = String(slot.name ?? "").trim();
   let name = resolveAuthorityPartyLegalNameField(rawName, "");
+  if (!name && rawName && isAuthoritativeLegalEntityName(rawName)) {
+    name = rawName.trim();
+  }
   if (!name && rawName && signerName && rawName.toLowerCase() === signerName.toLowerCase()) {
     name = "";
   }
@@ -258,7 +261,7 @@ export function resolveHandoffPartySlotCount(
 ): number {
   const indexed = 2 + (handoff.partyIndexSlots?.length ?? 0);
   if (authoritativeCount != null && authoritativeCount >= 2) {
-    return Math.min(indexed, authoritativeCount);
+    return authoritativeCount;
   }
   return Math.max(2, indexed);
 }
@@ -283,10 +286,10 @@ export function trimPremiumRecipientHandoffToPartyCount(
 }
 
 function authoritativeHandoffPartyCap(explicitAuthoritativeCount?: number): number | undefined {
-  const caps: number[] = [];
   if (explicitAuthoritativeCount != null && explicitAuthoritativeCount >= 2) {
-    caps.push(Math.min(explicitAuthoritativeCount, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS));
+    return Math.min(explicitAuthoritativeCount, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
   }
+  const caps: number[] = [];
   if (hasPaidProSourceOfTruth()) {
     const frozen = readFrozenCanonicalManifestPartyCount();
     if (frozen >= 2) caps.push(frozen);
@@ -362,6 +365,27 @@ function logReviewLinkSignerMetadataHandoffWrite(payload: PremiumRecipientHandof
   });
 }
 
+/** Post-freeze direct write — bypasses writeExact trim/cap that can drop intake manifest slots. */
+function writePremiumRecipientHandoffDirectLinear(
+  slots: PremiumRecipientHandoffSlot[],
+  partyCount: number,
+): void {
+  const n = Math.min(Math.max(partyCount, 2), MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
+  const trimmed = slots.slice(0, n);
+  const payload: PremiumRecipientHandoffV2 = {
+    v: 2,
+    party1: trimmed[0] ?? emptySlot(),
+    party2: trimmed[1] ?? emptySlot(),
+    savedAt: Date.now(),
+    ...(n > 2 ? { partyIndexSlots: trimmed.slice(2, n) } : {}),
+  };
+  sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
+  sessionStorage.removeItem(LEGACY_KEY);
+  invalidatePremiumRecipientHandoffReadCache();
+  logReviewLinkSignerMetadataHandoffWrite(payload);
+  latchSignerMetadataEffectiveMax(countSignerMetadataSlots(payload, n));
+}
+
 /** Persist full ordered party-indexed handoff from consumed signer metadata authority. */
 export function writePremiumRecipientHandoffFromAuthorityParties(
   parties: readonly {
@@ -385,6 +409,10 @@ export function writePremiumRecipientHandoffFromAuthorityParties(
       partyAddress: String(party.partyAddress ?? "").trim(),
     }, { preserveSignerFieldsOnEmptyPatch: true }),
   );
+  if (hasPaidProSourceOfTruth()) {
+    writePremiumRecipientHandoffDirectLinear(slots, parties.length);
+    return;
+  }
   writePremiumRecipientHandoffLinear(slots, parties.length);
 }
 
@@ -513,16 +541,21 @@ function mergeHandoffPayloadFromConsumedSignerAuthority(
   const authorityParties = resolveAuthorityPartiesForHandoffMerge();
   if (!authorityParties?.length) return payload;
   const slots = linearPremiumRecipientSlots(payload, partySlotCount);
-  const mergedSlots = slots.map((slot, i) => {
+  const mergedSlots = Array.from({ length: partySlotCount }, (_, i) => {
+    const slot = slots[i] ?? emptySlot();
     const auth = authorityParties[i];
     if (!auth) return slot;
-    return mergeSlot(slot, {
-      name: slot.name || auth.partyLegalName,
-      email: slot.email || auth.signerEmail,
-      signerName: slot.signerName || auth.signerName,
-      signerTitle: slot.signerTitle || auth.signerTitle,
-      partyAddress: slot.partyAddress || auth.partyAddress,
-    }, { preserveSignerFieldsOnEmptyPatch: true });
+    return mergeSlot(
+      slot,
+      {
+        name: slot.name || auth.partyLegalName,
+        email: slot.email || auth.signerEmail,
+        signerName: slot.signerName || auth.signerName,
+        signerTitle: slot.signerTitle || auth.signerTitle,
+        partyAddress: slot.partyAddress || auth.partyAddress,
+      },
+      { preserveSignerFieldsOnEmptyPatch: true },
+    );
   });
   const party1 = mergedSlots[0] ?? payload.party1;
   const party2 = mergedSlots[1] ?? payload.party2;
@@ -786,7 +819,7 @@ export function writePremiumRecipientHandoffLinear(
   const party2 = trimmed[1] ?? emptySlot();
   const partyIndexSlots =
     trimmed.length > 2 ? trimmed.slice(2, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS) : undefined;
-  writePremiumRecipientHandoffExact(party1, party2, partyIndexSlots);
+  writePremiumRecipientHandoffExact(party1, party2, partyIndexSlots, cap ?? authoritativePartyCount);
 }
 
 /** Force signer metadata onto session handoff (review-link payload) without dropping legal names/emails. */
