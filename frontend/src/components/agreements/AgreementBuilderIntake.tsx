@@ -6282,26 +6282,63 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setGuidedAuthVersionNonce((n) => n + 1);
       setReviewDocRefreshTick((n) => n + 1);
       const parties = args.draft.parties ?? [];
-      if (plan.signerHandoff && parties.length >= 2 && args.recipientCandidates?.length) {
+      if (plan.signerHandoff && plan.signerHandoff.partyLegalNames.length >= 2) {
+        const handoff = plan.signerHandoff;
+        const legalNames = handoff.partyLegalNames;
         writePremiumRecipientHandoffExact(
           premiumHandoffSlotFromParty(
             parties[0] ?? { role: "party" },
-            (parties[0]?.name || args.recipientCandidates[0]?.name || "").trim(),
+            (legalNames[0] || parties[0]?.name || args.recipientCandidates?.[0]?.name || "").trim(),
           ),
           premiumHandoffSlotFromParty(
             parties[1] ?? { role: "party" },
-            (parties[1]?.name || args.recipientCandidates[1]?.name || "").trim(),
+            (legalNames[1] || parties[1]?.name || args.recipientCandidates?.[1]?.name || "").trim(),
           ),
-          buildPartyIndexSlotsFromPartiesAndCandidates(parties, args.recipientCandidates),
+          legalNames.slice(2).map((name, i) => ({
+            name,
+            email: handoff.partyEmails[i + 2]?.trim() ?? "",
+            role: "party",
+            partyAddress: handoff.partyAddresses[i + 2]?.trim() ?? "",
+          })),
         );
         writePremiumRecipientHandoffSignerMetadata({
-          signerNames: plan.signerHandoff.signerNames,
-          signerTitles: plan.signerHandoff.signerTitles,
-          partyLegalNames: plan.signerHandoff.partyLegalNames,
-          partyEmails: plan.signerHandoff.partyEmails,
+          signerNames: handoff.signerNames,
+          signerTitles: handoff.signerTitles,
+          partyLegalNames: handoff.partyLegalNames,
+          partyEmails: handoff.partyEmails,
+          partyAddresses: handoff.partyAddresses,
+          authoritativePartyCount: handoff.partyLegalNames.length,
         });
-        setPartySignerNames(plan.signerHandoff.signerNames);
-        setPartySignerTitles(plan.signerHandoff.signerTitles);
+        setPartySignerNames(handoff.signerNames);
+        setPartySignerTitles(handoff.signerTitles);
+        if (legalNames[0]) {
+          setRecipient1Name((prev) => (prev.trim() ? prev : legalNames[0]!));
+        }
+        if (legalNames[1]) {
+          setRecipient2Name((prev) => (prev.trim() ? prev : legalNames[1]!));
+        }
+        if (handoff.partyAddresses.some(Boolean)) {
+          setPartyAddresses((prev) => {
+            const next = prev.slice();
+            while (next.length < handoff.partyAddresses.length) next.push("");
+            for (let i = 0; i < handoff.partyAddresses.length; i++) {
+              const addr = handoff.partyAddresses[i]?.trim() ?? "";
+              if (addr && !(next[i] ?? "").trim()) next[i] = addr;
+            }
+            return next;
+          });
+        }
+        if (legalNames.length > 2) {
+          setExtraPartyLegalNames((prev) => {
+            const next = prev.slice();
+            while (next.length < legalNames.length - 2) next.push("");
+            for (let i = 2; i < legalNames.length; i++) {
+              const legal = legalNames[i]?.trim() ?? "";
+              if (legal && !(next[i - 2] ?? "").trim()) next[i - 2] = legal;
+            }
+            return next;
+          });
+        }
       }
       bumpPremiumSurfaceGateTick();
       if (import.meta.env.DEV) {
@@ -17475,7 +17512,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const paidProForcedFirstReviewActive = paidProDocumentBodyRouter.branch === "paid_pro_visible_shell_forced";
-  const paidProFirstReviewSurfaceActive = simpleProFinalReviewShellActive || paidProForcedFirstReviewActive;
+  const paidProSignerSetupStickyCtaSurfaceActive = Boolean(
+    acceptedPaidProAuthorityActive &&
+      paidProFirstReviewCorpusReady &&
+      paidProCanonicalReviewSignerSetupActive,
+  );
+  const paidProFirstReviewSurfaceActive =
+    simpleProFinalReviewShellActive ||
+    paidProForcedFirstReviewActive ||
+    paidProSignerSetupStickyCtaSurfaceActive;
 
   const paidProSignerMetadataFinalized = hasAuthoritativeSigningSnapshot();
   /** Trust rail + status chip only — finalized snapshot must not show "Signer details needed". */
@@ -17597,23 +17642,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     const signerPrefillSurfaceActive =
       paidProFirstReviewSurfaceActive ||
+      paidProCanonicalReviewSignerSetupActive ||
       checkoutBackRestoreActive ||
       paidProPostCheckoutFirstReviewActive;
     if (!acceptedPaidProAuthorityActive && !checkoutBackRestoreActive) return;
     if (!signerPrefillSurfaceActive) return;
-    if (paidProSignerMetadataFinalized || premiumRecipientUxActive) return;
+    if (paidProSignerMetadataFinalized) return;
+    if (premiumRecipientUxActive && !paidProCanonicalReviewSignerSetupActive) return;
     const intakeText = currentPremiumMergedIntakeKey || intakeCombined;
     if (!intakeText.trim()) return;
-    const parties = draft?.parties ?? [];
-    const agreementBodyText =
-      getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "";
-    const slotIdentities = resolveSignerSetupPartyIdentities({
-      parties,
+    const legalEntities = resolveLegalEntitiesForCanonicalMetadata({
       intakeText,
-      agreementBodyText,
-      handoffSlots: linearPremiumRecipientSlots(readPremiumRecipientHandoff(), authoritativeSignerSetupPartyCount),
+      draft: draft ?? null,
     });
-    const legalEntities = slotIdentities.map((s) => s.legalEntityName).filter(Boolean);
     if (legalEntities.length < 2) return;
     const prefillKey = `${intakeText}|${legalEntities.join("|")}|${authoritativeSignerSetupPartyCount}`;
     if (paidProIntakeSignerPrefillAttemptedRef.current === prefillKey) return;
@@ -17623,7 +17664,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       stage: "paid_pro_first_review_intake_prefill",
       legalEntities,
       intakeText,
-      corpusText: agreementBodyText,
+      corpusText: null,
       draft: draft ?? null,
       handoff: ho,
       uiSignerNames: partySignerNamesRef.current,
@@ -17674,8 +17715,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hydrateLegalEntityNameFromHandoff(
         prev,
         ho?.party1.name ?? "",
-        slotIdentities[0]?.legalEntityName,
-        slotIdentities,
+        legalEntities[0],
+        undefined,
         0,
       ),
     );
@@ -17683,8 +17724,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hydrateLegalEntityNameFromHandoff(
         prev,
         ho?.party2.name ?? "",
-        slotIdentities[1]?.legalEntityName,
-        slotIdentities,
+        legalEntities[1],
+        undefined,
         1,
       ),
     );
@@ -17702,6 +17743,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     acceptedPaidProAuthorityActive,
     paidProFirstReviewSurfaceActive,
+    paidProCanonicalReviewSignerSetupActive,
     checkoutBackRestoreActive,
     paidProPostCheckoutFirstReviewActive,
     paidProSignerMetadataFinalized,
@@ -20689,7 +20731,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 : "failed_premium_corpus_recover",
             };
           }
-          if (!paidProFirstReviewCorpusReady && (isGenerating || premiumAuthoritativeRequestInFlightUi)) {
+          if (
+            !paidProFirstReviewCorpusReady &&
+            (isGenerating || premiumAuthoritativeRequestInFlightUi) &&
+            !paidProCanonicalReviewSignerSetupActive &&
+            !hasPaidProSourceOfTruth()
+          ) {
             return {
               label: resolveProductionTwoPaneLoadingUserCopy(),
               action: "guided_continue",

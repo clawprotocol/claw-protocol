@@ -39,7 +39,8 @@ export function isRevenueShareAllocationLine(line: string): boolean {
   return REVENUE_SHARE_ALLOCATION_LINE_RE.test(String(line || "").trim());
 }
 
-function extractLegalEntityFromIntakeLine(line: string): string {
+/** Extract legal entity from a numbered intake line body or full line. */
+export function extractLegalEntityFromIntakeLine(line: string): string {
   const trimmed = String(line || "").trim();
   if (!trimmed) return "";
   const revenueMatch = trimmed.match(REVENUE_SHARE_ALLOCATION_LINE_RE);

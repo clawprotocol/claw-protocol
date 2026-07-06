@@ -21,6 +21,7 @@ import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus
 import { resolveSimpleProFinalReviewActive } from "./simpleProFinalReviewPhase";
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
 import { markPaidProPipelineAcceptedCorpusHash, readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
 import {
   hasPaidProPipelineValidationForCorpus,
@@ -81,6 +82,7 @@ export type CanonicalPaidProSignerHandoffPlan = {
   signerTitles: string[];
   partyLegalNames: string[];
   partyEmails: string[];
+  partyAddresses: string[];
 };
 
 export type CanonicalPaidProReviewFlowPlan = {
@@ -222,27 +224,32 @@ export function planCanonicalPaidProSignerHandoff(args: {
   corpusPlain: string;
   recipientCandidates?: Array<{ name?: string; email?: string; role?: string }>;
 }): CanonicalPaidProSignerHandoffPlan | null {
-  const parties = args.draft.parties ?? [];
-  if (parties.length < 2 || !args.recipientCandidates?.length) return null;
-  const legalEntities = parties
-    .slice(0, 8)
-    .map((p) => String((p as { name?: string }).name ?? "").trim())
-    .filter(Boolean);
+  const legalEntities = resolveLegalEntitiesForCanonicalMetadata({
+    intakeText: args.intakeText,
+    draft: args.draft,
+  });
   if (legalEntities.length < 2) return null;
   const seed = runPaidProSignerMetadataAuthoritySeed({
     stage: "canonical_paid_pro_review_entry",
     legalEntities,
     intakeText: args.intakeText,
-    corpusText: args.corpusPlain,
+    corpusText: null,
     draft: args.draft,
     authoritativePartyCount: legalEntities.length,
   });
-  if (!seed.names.some((n) => n.trim()) && !seed.titles.some((t) => t.trim())) return null;
+  const hasIntakeEntitySignal = legalEntities.some(Boolean);
+  const hasIntakeContactSignal =
+    seed.addresses.some(Boolean) ||
+    seed.emails.some(Boolean) ||
+    seed.names.some((n) => n.trim()) ||
+    seed.titles.some((t) => t.trim());
+  if (!hasIntakeEntitySignal && !hasIntakeContactSignal) return null;
   return {
     signerNames: seed.names,
     signerTitles: seed.titles,
     partyLegalNames: legalEntities,
-    partyEmails: args.recipientCandidates.map((c) => c.email ?? ""),
+    partyEmails: args.recipientCandidates?.map((c) => c.email ?? "") ?? seed.emails,
+    partyAddresses: seed.addresses,
   };
 }
 

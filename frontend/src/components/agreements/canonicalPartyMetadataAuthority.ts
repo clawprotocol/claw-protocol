@@ -33,6 +33,10 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { writePremiumRecipientHandoffFromAuthorityParties } from "./premiumPartyNamesHandoff";
 import { signerMetadataInputRaw } from "../../agreement/signerMetadataNormalize";
+import {
+  extractIntakePartyManifestRows,
+  findIntakePartyManifestRowForEntity,
+} from "./intakePartyManifestAuthority";
 
 export const CANONICAL_PARTY_METADATA_SESSION_KEY = "claw:canonical-party-metadata:v1";
 
@@ -592,20 +596,30 @@ export function buildCanonicalPartyMetadataBundle(args: {
           1,
         );
   const intakeAligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, legalEntities);
+  const manifestRows = extractIntakePartyManifestRows(args.intakeText);
   const intakeRecords = intakeAligned.slice(0, partyCount).map((slot, i) => {
     const existingRecord = findCanonicalPartyByLegalEntity(args.existing ?? null, slot.partyLegalName);
-    return recordFromAuthorityParty(
+    const manifest = findIntakePartyManifestRowForEntity(
+      manifestRows,
+      slot.partyLegalName || legalEntities[i] || "",
+      i,
+    );
+    const record = recordFromAuthorityParty(
       {
         partyIndex: i,
         partyLegalName: slot.partyLegalName || legalEntities[i] || "",
         signerName: slot.signerName,
         signerTitle: slot.signerTitle,
         signerEmail: slot.signerEmail,
-        partyAddress: slot.partyAddress,
+        partyAddress: slot.partyAddress || manifest?.partyAddress || "",
       },
       "structured_intake",
       existingRecord?.partyId,
     );
+    if (manifest?.roleLabel.trim()) {
+      record.roleLabel = manifest.roleLabel.trim();
+    }
+    return record;
   });
   const consumedRecords = (args.consumedAuthority?.parties ?? []).map((p, i) => {
     const existingRecord =

@@ -14,6 +14,7 @@ import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValida
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { extractIntakePartyManifestRows } from "./intakePartyManifestAuthority";
 
 export type IntakeSignerMetadataSource =
   | "labeled_party_block"
@@ -23,7 +24,8 @@ export type IntakeSignerMetadataSource =
   | "for_role_signer"
   | "signed_by"
   | "authorized_signers_bullet"
-  | "intake_contact";
+  | "intake_contact"
+  | "numbered_party_manifest";
 
 export type ExtractedIntakeSignerMetadata = {
   legalEntity: string;
@@ -379,6 +381,18 @@ export function extractCanonicalIntakeSignerMetadata(
     }
   }
 
+  for (const row of extractIntakePartyManifestRows(raw)) {
+    pushExtracted(out, {
+      legalEntity: row.partyLegalName,
+      signerName: "",
+      signerTitle: "",
+      signerEmail: "",
+      partyAddress: row.partyAddress,
+      partyNumber: row.partyNumber,
+      source: "numbered_party_manifest",
+    });
+  }
+
   return out;
 }
 
@@ -417,6 +431,17 @@ export function alignIntakeSignerMetadataToLegalEntities(
   }
 
   const extracted = extractCanonicalIntakeSignerMetadata(intakeRaw);
+  const manifestRows = extractIntakePartyManifestRows(intakeRaw);
+  for (const manifest of manifestRows) {
+    const idx = manifest.partyNumber >= 1 ? manifest.partyNumber - 1 : -1;
+    if (idx < 0 || idx >= slots.length) continue;
+    if (!slots[idx]!.partyLegalName && manifest.partyLegalName) {
+      slots[idx]!.partyLegalName = manifest.partyLegalName;
+    }
+    if (manifest.partyAddress && !slots[idx]!.partyAddress) {
+      slots[idx]!.partyAddress = manifest.partyAddress;
+    }
+  }
   const unmatched: ExtractedIntakeSignerMetadata[] = [];
 
   for (const row of extracted) {

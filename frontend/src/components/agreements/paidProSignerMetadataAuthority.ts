@@ -268,8 +268,10 @@ export type PaidProPartyRoleContext = {
   acceptedCorpus?: string | null;
 };
 
+import { normalizeAgreementPartyName } from "./partySlotIdentityNormalize";
+
 function normalizedLegalNameKey(name: string): string {
-  return name
+  return normalizeAgreementPartyName(name)
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase()

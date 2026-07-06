@@ -222,7 +222,8 @@ export function runPaidProSignerMetadataAuthoritySeed(
     emails.some(Boolean) ||
     finalAddresses.some(Boolean) ||
     finalNames.changed ||
-    finalTitles.changed;
+    finalTitles.changed ||
+    bundle.parties.some((p) => p.partyLegalName.trim() || p.partyAddress.trim());
 
   let draft = args.draft ?? null;
   let draftChanged = false;

@@ -9,6 +9,8 @@ import { alignIntakeSignerMetadataToLegalEntities } from "./structuredIntakePart
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProSignerMetadataAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import { intakePartyManifestLegalEntities } from "./intakePartyManifestAuthority";
+import { resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
 
 const UI_MAX_PARTY_SLOTS = 4;
 
@@ -37,12 +39,15 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
     .map((b) => b.legalEntity)
     .filter(isAuthoritativeLegalEntityName);
 
+  const fromManifest = intakePartyManifestLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  const declaredPartyCount = resolveDeclaredExplicitPartyCount(intake);
+
   const authoritativeCount = Math.min(
     resolveAuthoritativeSignerCount({
       intakeText: intake || null,
       draftParties: args.draft?.parties,
       draftPartyNames: fromDraft.length ? fromDraft : explicit,
-      manifestPartyCount: Math.max(fromDraft.length, explicit.length, fromLabeled.length),
+      manifestPartyCount: Math.max(fromDraft.length, explicit.length, fromLabeled.length, fromManifest.length),
     }).count,
     UI_MAX_PARTY_SLOTS,
   );
@@ -51,14 +56,33 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
     explicit.length > UI_MAX_PARTY_SLOTS
       ? explicit.length
       : Math.min(
-          Math.max(authoritativeCount, explicit.length, fromLabeled.length, fromDraft.length, 2),
+          Math.max(
+            authoritativeCount,
+            explicit.length,
+            fromLabeled.length,
+            fromDraft.length,
+            fromManifest.length,
+            2,
+          ),
           UI_MAX_PARTY_SLOTS,
         );
 
-  const seedEntities = explicit.length ? explicit : fromDraft.length ? fromDraft : fromLabeled;
+  const manifestAuthoritative =
+    fromManifest.length >= 2 &&
+    (declaredPartyCount == null || fromManifest.length >= declaredPartyCount);
+  const seedEntities = manifestAuthoritative
+    ? fromManifest
+    : explicit.length
+      ? explicit
+      : fromDraft.length
+        ? fromDraft
+        : fromLabeled;
   const aligned = alignIntakeSignerMetadataToLegalEntities(intake, seedEntities);
 
   const pool: string[] = [];
+  if (manifestAuthoritative) {
+    for (const name of fromManifest) pushUniqueEntity(pool, name);
+  }
   for (const name of explicit) pushUniqueEntity(pool, name);
   for (const name of fromDraft) pushUniqueEntity(pool, name);
   for (const name of fromLabeled) pushUniqueEntity(pool, name);

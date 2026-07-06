@@ -5,7 +5,47 @@ export const TEST518_SUMMIT = "Summit AI Consulting LLC";
 export const TEST518_BLUE_HARBOR = "Blue Harbor Systems LLC";
 export const TEST518_IRON_GATE = "Iron Gate Security LLC";
 
-/** Production QA — multi-party biotech / AI / cloud / security stack (TEST518). */
+export const TEST518_REDWOOD_ADDRESS = "710 Discovery Parkway, Raleigh, NC 27609";
+export const TEST518_SUMMIT_ADDRESS = "1880 Legacy Drive, Plano, TX 75024";
+export const TEST518_BLUE_HARBOR_ADDRESS = "210 West Monroe Street, Chicago, IL 60606";
+export const TEST518_IRON_GATE_ADDRESS = "8300 Greensboro Drive, McLean, VA 22102";
+
+export const TEST518_PARTY_ROLES = [
+  "Client",
+  "Lead Provider",
+  "Implementation Partner",
+  "Cybersecurity Auditor",
+] as const;
+
+/** Production QA — dashboard_paid_create TEST518 intake with full party manifest metadata. */
+export const TEST518_DASHBOARD_CREATE_INTAKE = [
+  "Create a Professional Technology Services and AI Implementation Agreement among the following four parties:",
+  "",
+  `1. ${TEST518_REDWOOD} (Client), Delaware corporation, ${TEST518_REDWOOD_ADDRESS}`,
+  `2. ${TEST518_SUMMIT} (Lead Provider), Texas limited liability company, ${TEST518_SUMMIT_ADDRESS}`,
+  `3. ${TEST518_BLUE_HARBOR} (Implementation Partner), Illinois limited liability company, ${TEST518_BLUE_HARBOR_ADDRESS}`,
+  `4. ${TEST518_IRON_GATE} (Cybersecurity Auditor), Virginia limited liability company, ${TEST518_IRON_GATE_ADDRESS}`,
+  "",
+  `${TEST518_REDWOOD} will contribute de-identified clinical trial outcome data.`,
+  `${TEST518_SUMMIT} will develop and train predictive AI models.`,
+  `${TEST518_BLUE_HARBOR} will host cloud infrastructure and analytics pipelines.`,
+  `${TEST518_IRON_GATE} will provide continuous cybersecurity monitoring and incident response.`,
+  "",
+  "Total project fee is $450,000 payable in milestone installments.",
+  "Term: eighteen (18) months with ninety days of post-launch support.",
+  "",
+  "Major project decisions require approval from Redwood Biologics and Summit AI Consulting.",
+  "Each provider is responsible only for its assigned work.",
+  "",
+  "Include confidentiality, intellectual property ownership, limitation of liability, insurance requirements,",
+  "data privacy obligations, termination for cause and convenience, notice provisions, governing law (Delaware),",
+  "dispute resolution, force majeure, independent contractor status, assignment restrictions, amendment,",
+  "severability, waiver, and entire agreement clauses.",
+  "",
+  "Prepare the agreement for electronic signature by all four parties.",
+].join("\n");
+
+/** Legacy concise quad-party intake (role-only numbered list). */
 export const TEST518_PRODUCTION_QUAD_PARTY_INTAKE = [
   "Draft a comprehensive multi-party services agreement among the following four parties:",
   "",
@@ -32,6 +72,20 @@ export const TEST518_PRODUCTION_QUAD_PARTY_INTAKE = [
   "",
   "Prepare the agreement for electronic signature by all four parties.",
 ].join("\n");
+
+export const TEST518_LEGAL_ENTITIES = [
+  TEST518_REDWOOD,
+  TEST518_SUMMIT,
+  TEST518_BLUE_HARBOR,
+  TEST518_IRON_GATE,
+] as const;
+
+export const TEST518_PARTY_ADDRESSES = [
+  TEST518_REDWOOD_ADDRESS,
+  TEST518_SUMMIT_ADDRESS,
+  TEST518_BLUE_HARBOR_ADDRESS,
+  TEST518_IRON_GATE_ADDRESS,
+] as const;
 
 export function test518Draft(): ParsedDraftShape {
   return {
@@ -95,4 +149,15 @@ export function buildTest518ConciseServerBody(): string {
     "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
   ].join("\n");
   return header;
+}
+
+/** Wrong corpus-derived party order used to simulate stale generated-body contamination. */
+export function buildTest518WrongCorpusPartyOrderBody(): string {
+  return [
+    "CONSULTING SERVICES AGREEMENT",
+    "",
+    `This Agreement is entered into by and among ${TEST518_SUMMIT} ("Client"), ${TEST518_BLUE_HARBOR} ("Service Provider"), and ${TEST518_IRON_GATE} ("Service Provider").`,
+    "",
+    "Scope Inc. shall provide ancillary support.",
+  ].join("\n");
 }
