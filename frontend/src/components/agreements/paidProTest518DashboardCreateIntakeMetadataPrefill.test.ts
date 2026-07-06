@@ -201,7 +201,6 @@ describe("TEST518 — dashboard_paid_create intake metadata prefill", () => {
       recipient2Email: "",
       extraPartyReviewEmails: ["", ""],
       extraPartyLegalNames: legalEntities.slice(2),
-      partyAddresses: seed.addresses,
     });
     expect(gateIncomplete.complete).toBe(false);
     expect(gateIncomplete.blockers.length).toBeGreaterThan(0);
