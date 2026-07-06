@@ -33,6 +33,9 @@ export type ResolveGuidedRenderDocumentArgs = {
   guidedCompletionActive: boolean;
   /** After bulk apply — never fall back to structured preview over authoritative body. */
   postGuidedAuthoritativeReview?: boolean;
+  /** Paid /app/create — block unvalidated picker/hydrated/preview when no validated corpus. */
+  paidProCreateFlowReviewGate?: boolean;
+  validatedCorpusPlain?: string | null;
   authoritativeHydratedPlain?: string | null;
   pickerPlain?: string | null;
   pickerSource?: string | null;
@@ -185,6 +188,32 @@ export function resolveGuidedCompletionRenderDocument(
   const adt = norm(args.agreementDocumentPlain);
   const preview = norm(args.renderedPreviewPlain);
   const starter = norm(args.starterFallbackPlain);
+
+  if (args.paidProCreateFlowReviewGate) {
+    const validated = norm(args.validatedCorpusPlain);
+    if (validated.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
+      const resolution: GuidedRenderDocumentResolution = {
+        plainText: validated,
+        source: "authoritative_hydrated_premium",
+        usedLastKnownGood: false,
+        blockedEmptyState: Boolean(args.guidedCompletionActive),
+        authoritativeLen: validated.length,
+        downgradeBlocked: false,
+      };
+      logGuidedRenderAuthority(resolution, { guidedActive: args.guidedCompletionActive, paidProGate: true });
+      return resolution;
+    }
+    const resolution: GuidedRenderDocumentResolution = {
+      plainText: "",
+      source: "none",
+      usedLastKnownGood: false,
+      blockedEmptyState: false,
+      authoritativeLen: 0,
+      downgradeBlocked: false,
+    };
+    logGuidedRenderAuthority(resolution, { guidedActive: args.guidedCompletionActive, paidProGate: true });
+    return resolution;
+  }
 
   const postGuided = Boolean(args.postGuidedAuthoritativeReview);
   const authoritativeExists =

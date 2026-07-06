@@ -17,8 +17,7 @@ import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceVali
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
-import { readPremiumCompletionSnapshot, hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
-import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
+import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import { resolveCreateFlowAcceptedPipelineCorpusPlain } from "./paidProAcceptanceRouting";
 import { hasPaidCreateFlowPipelineAcceptance } from "./paidCreateFlowPipelineAcceptanceProbe";
 
@@ -156,25 +155,17 @@ export function shouldUsePaidCreateFlowReviewFirstPersist(args?: {
   draft?: ParsedDraftShape | null;
 }): boolean {
   if (hasPaidCreateFlowPipelineAcceptance()) return true;
-  if (readPremiumCompletionSnapshot()?.premiumAccepted === true) return true;
-  if (hasPaidPremiumCompletionSession()) return true;
-  if (hasCurrentSessionProEntitlement()) return true;
-  const corpusLen = resolveCreateFlowAcceptedPipelineCorpusPlain({
+  const corpusPlain = resolveCreateFlowAcceptedPipelineCorpusPlain({
     draft: args?.draft ?? null,
     agreementDocumentText: args?.agreementDocumentText,
     pipelineWinningBody: args?.pipelineWinningBody,
     hydratedPremiumBody: args?.hydratedPremiumBody,
-  }).length;
-  if (corpusLen >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    const source = "server_full_draft";
-    const body = resolveCreateFlowAcceptedPipelineCorpusPlain({
-      draft: args?.draft ?? null,
-      agreementDocumentText: args?.agreementDocumentText,
-      pipelineWinningBody: args?.pipelineWinningBody,
-      hydratedPremiumBody: args?.hydratedPremiumBody,
-    });
-    if (hasPaidProPipelineSessionAcceptance({ text: body, source })) return true;
+  }).trim();
+  if (corpusPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
+  if (hasPaidProPipelineSessionAcceptance({ text: corpusPlain, source: "server_full_draft" })) {
+    return true;
   }
+  if (readPremiumCompletionSnapshot()?.premiumAccepted === true) return true;
   return false;
 }
 
@@ -193,7 +184,7 @@ export function mergeDraftForPaidCreateFlowPersist(
   };
 }
 
-/** Longest substantive paid corpus for create-flow review — never the short starter preview. */
+/** Longest substantive paid corpus for create-flow review — validated pipeline only. */
 export function resolveCreateFlowPaidAcceptedCorpusPlain(args: {
   winningBody?: string | null;
   snapshotPlain?: string | null;
@@ -203,27 +194,14 @@ export function resolveCreateFlowPaidAcceptedCorpusPlain(args: {
   hydratedPremiumBody?: string | null;
   premiumDeliverablePlain?: string | null;
 }): string {
-  const draftPremium = String(
-    args.draft?.premium_server_full_document_text ?? args.draft?.premium_full_document_text ?? "",
-  ).trim();
   const pipeline = resolveCreateFlowAcceptedPipelineCorpusPlain({
     draft: args.draft ?? null,
     agreementDocumentText: args.agreementDocumentText,
     pipelineWinningBody: args.pipelineWinningBody,
     hydratedPremiumBody: args.hydratedPremiumBody,
   });
-  const candidates = [
-    (args.winningBody ?? "").trim(),
-    (args.snapshotPlain ?? "").trim(),
-    (args.premiumDeliverablePlain ?? "").trim(),
-    draftPremium,
-    pipeline,
-    (args.agreementDocumentText ?? "").trim(),
-  ]
-    .filter((s) => s.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN)
-    .sort((a, b) => b.length - a.length);
-  if (candidates[0]) return candidates[0];
-  return pipeline || (args.winningBody ?? "").trim() || (args.snapshotPlain ?? "").trim();
+  if (pipeline.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return pipeline;
+  return pipeline;
 }
 
 /** Accepted paid create-flow must not surface draft-limit / network-recoverable dead-ends. */

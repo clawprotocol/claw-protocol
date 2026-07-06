@@ -18685,6 +18685,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const renderDoc = resolveGuidedCompletionRenderDocument({
       guidedCompletionActive: guidedActive,
       postGuidedAuthoritativeReview,
+      paidProCreateFlowReviewGate: createFlowPaidAcceptedOrAuthoritativeActive,
+      validatedCorpusPlain: validatedPaidProReviewCorpus.plain,
       authoritativeHydratedPlain:
         lastPremiumWinningCorpusRef.current || hydratedPremiumBodyRef.current || premiumPipelineOutputBodyRef.current,
       pickerPlain: premiumPaidReadonlyPick.plainText,
@@ -21990,8 +21992,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         finalizedHash: sotHash,
       };
     }
-    if (hasPaidCreateFlowPipelineAcceptance() || isCreateFlowPaidAcceptedOrAuthoritativeActive()) {
-      const pipelinePlain = resolveCreateFlowPaidAcceptedCorpusPlain({
+    if (hasPaidCreateFlowPipelineAcceptance() || validatedPaidProReviewCorpus.len >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+      const pipelinePlain =
+        validatedPaidProReviewCorpus.plain.trim() ||
+        resolveCreateFlowPaidAcceptedCorpusPlain({
         winningBody:
           lastPremiumWinningCorpusRef.current ||
           premiumPipelineOutputBodyRef.current ||
@@ -22057,6 +22061,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeCombined,
     latestAcceptedCorpus,
     guidedSigningCorpusSelectionReady,
+    validatedPaidProReviewCorpus.plain,
+    validatedPaidProReviewCorpus.len,
   ]);
 
   const guidedAuthoritativeBodyPlain = useMemo(() => {
@@ -22065,6 +22071,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ? guidedFinalReviewAuthoritativeResolution.body.trim()
         : "";
     if (frozenFinalReview) return frozenFinalReview;
+    if (createFlowPaidAcceptedOrAuthoritativeActive) {
+      const validated = validatedPaidProReviewCorpus.plain.trim();
+      if (validated.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return validated;
+      return "";
+    }
     return pickBestPaidProAuthoritativeCorpusPlain(
       [
         finalizedSigningCorpusRef.current,
@@ -22087,6 +22098,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedFinalReviewAuthoritativeResolution.body,
     reviewDocRefreshTick,
     premiumSurfaceGateTick,
+    createFlowPaidAcceptedOrAuthoritativeActive,
+    validatedPaidProReviewCorpus.plain,
   ]);
 
   const guidedAuthoritativeBodyHash = useMemo(
@@ -25186,6 +25199,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       resolveGuidedCompletionRenderDocument({
         guidedCompletionActive,
         postGuidedAuthoritativeReview,
+        paidProCreateFlowReviewGate: createFlowPaidAcceptedOrAuthoritativeActive,
+        validatedCorpusPlain: validatedPaidProReviewCorpus.plain,
         authoritativeHydratedPlain:
           lastPremiumWinningCorpusRef.current ||
           hydratedPremiumBodyRef.current ||
@@ -25199,6 +25214,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     [
       guidedCompletionActive,
       postGuidedAuthoritativeReview,
+      createFlowPaidAcceptedOrAuthoritativeActive,
+      validatedPaidProReviewCorpus.plain,
       premiumPaidReadonlyPick.plainText,
       premiumPaidReadonlyPick.sourceUsed,
       agreementDocumentText,

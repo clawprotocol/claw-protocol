@@ -13,7 +13,6 @@ import { readPremiumCompletionSnapshot, hasPaidPremiumCompletionSession } from "
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import {
-  readPaidProPipelineAcceptedCorpusBody,
   readPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
@@ -28,9 +27,6 @@ import { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlo
 import { resolveCreateFlowWorkspaceProEntitled } from "./paidCreateFlowWorkspaceEntitlementProbe";
 import { hasPaidCreateFlowPipelineAcceptance } from "./paidCreateFlowPipelineAcceptanceProbe";
 import { hasPaidDashboardCreateContextActive, isAppCreatePath, shouldFailClosedBypassForAuthenticatedWorkspaceCreate } from "../../launch/paidDashboardCreateContext";
-
-/** Matches {@link GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN} — inlined to avoid simpleProFinalReviewCorpus import cycle. */
-const CREATE_FLOW_PIPELINE_ACCEPTED_MIN_LEN = 1500;
 
 export type AuthoritativeCreateFlowReviewShell = "paid_pro" | "free_starter";
 
@@ -253,57 +249,45 @@ export function resolveCreateFlowAuthoritativeReviewPlain(args: {
 }): string {
   const sot = getPaidProSourceOfTruthText().trim();
   if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN) return sot;
-  const pipelineAcceptedBody = readPaidProPipelineAcceptedCorpusBody()?.trim() ?? "";
-  if (
-    pipelineAcceptedBody.length >= CREATE_FLOW_PIPELINE_ACCEPTED_MIN_LEN &&
-    hasPaidCreateFlowPipelineAcceptance()
-  ) {
-    return pipelineAcceptedBody;
-  }
+
+  const validatedPipeline = readAcceptedPipelineReviewCorpusPlain();
+  if (validatedPipeline.length >= PAID_PRO_AUTHORITY_MIN_LEN) return validatedPipeline;
+
   const snap = readPremiumCompletionSnapshot();
   const snapBody = (snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "").trim();
-  if (snap?.premiumAccepted && snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) return snapBody;
+  if (
+    snap?.premiumAccepted &&
+    snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+    hasPaidProPipelineSessionAcceptance({ text: snapBody, source: "server_full_draft" })
+  ) {
+    return snapBody;
+  }
+
   const latched = getLatchedAcceptedServerFullDraftAuthority();
   const latchedBody = latched?.body.trim() ?? "";
+  if (
+    latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+    (latched?.freezeEstablished ||
+      hasPaidProPipelineSessionAcceptance({
+        text: latchedBody,
+        source: latched?.source ?? "server_full_draft",
+      }))
+  ) {
+    return latchedBody;
+  }
+
   const pipelineWinning = (args.pipelineWinningBody || "").trim();
   const hydratedPremium = (args.hydratedPremiumBody || "").trim();
-  const draftPremium = String(
-    args.draft?.premium_server_full_document_text ??
-      args.draft?.premium_full_document_text ??
-      "",
-  ).trim();
-  const draftServerFull = String(
-    (args.draft as { server_full_document_text?: string | null } | null)?.server_full_document_text ??
-      "",
-  ).trim();
-  const paidAccepted =
-    hasPaidCreateFlowPipelineAcceptance() ||
-    hasAcceptedPaidCreateFlowFreezeLatch() ||
-    (latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-      Boolean(latched?.freezeEstablished || snap?.premiumAccepted));
-  const pipelineCandidates = [pipelineWinning, hydratedPremium, latchedBody, draftPremium, draftServerFull]
-    .map((s) => s.trim())
-    .filter((s) => s.length >= PAID_PRO_AUTHORITY_MIN_LEN);
-  if (paidAccepted && pipelineCandidates.length > 0) {
-    return pipelineCandidates.sort((a, b) => b.length - a.length)[0]!;
-  }
-  for (const candidate of pipelineCandidates) {
+  for (const candidate of [pipelineWinning, hydratedPremium]) {
     if (
-      hasPaidProPipelineSessionAcceptance({
-        text: candidate,
-        source: latched?.source ?? "server_full_draft",
-      })
+      candidate.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+      hasPaidProPipelineSessionAcceptance({ text: candidate, source: "server_full_draft" })
     ) {
       return candidate;
     }
   }
-  if (paidAccepted) {
-    if (pipelineCandidates.length > 0) {
-      return pipelineCandidates.sort((a, b) => b.length - a.length)[0]!;
-    }
-    return "";
-  }
-  return (args.agreementDocumentText || "").trim();
+
+  return "";
 }
 
 export function logAuthoritativeCreateFlowReviewShellResolved(
@@ -358,6 +342,8 @@ export function resolveCanonicalPaidCreateFlowReviewCorpusLen(args: {
     hydratedPremiumBody: args.hydratedPremiumBody,
   }).trim();
   if (createFlowPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) return createFlowPlain.length;
+  const validatedLen = readAcceptedPipelineReviewCorpusPlain().length;
+  if (validatedLen >= PAID_PRO_AUTHORITY_MIN_LEN) return validatedLen;
   if (
     hasRenderablePaidProFirstReviewCorpus({
       draft: args.draft ?? null,
@@ -367,11 +353,7 @@ export function resolveCanonicalPaidCreateFlowReviewCorpusLen(args: {
       premiumPostCheckoutPhase: args.premiumPostCheckoutPhase,
     })
   ) {
-    return Math.max(
-      createFlowPlain.length,
-      String(args.draft?.premium_server_full_document_text ?? "").trim().length,
-      String(args.draft?.premium_full_document_text ?? "").trim().length,
-    );
+    return createFlowPlain.length;
   }
   return createFlowPlain.length;
 }

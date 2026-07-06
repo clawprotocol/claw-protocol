@@ -19,11 +19,7 @@ import { getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "../paidPr
 import { resolvePaidProFinalHydratedCorpusForSurface } from "../paidProFinalHydratedCorpus";
 import { resolvePaidProReviewRenderPlain, resolvePaidProReviewRenderSource } from "../paidProReviewRenderCorpus";
 import { logGuidedFinalReviewRenderStable } from "../paidProReviewStability";
-import {
-  readPaidProPipelineAcceptedCorpusBody,
-  readPaidProPipelineAcceptedCorpusHash,
-} from "../paidProPipelineAcceptedCorpus";
-import { hasPaidProPipelineSessionAcceptance } from "../paidProPostAcceptanceValidatorCache";
+import { readAcceptedPipelineReviewCorpusPlain } from "../paidProAcceptedPipelineReviewCorpus";
 
 export const GUIDED_FINAL_REVIEW_AUTHORITATIVE_MIN_LEN = 1500;
 
@@ -175,15 +171,8 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
     }
   }
 
-  const pipelineAcceptedBody = readPaidProPipelineAcceptedCorpusBody()?.trim() ?? "";
-  if (
-    pipelineAcceptedBody.length >= minLen &&
-    (readPaidProPipelineAcceptedCorpusHash() !== null ||
-      hasPaidProPipelineSessionAcceptance({
-        text: pipelineAcceptedBody,
-        source: "server_full_draft",
-      }))
-  ) {
+  const pipelineAcceptedBody = readAcceptedPipelineReviewCorpusPlain();
+  if (pipelineAcceptedBody.length >= minLen) {
     const resolution: GuidedFinalReviewAuthoritativeBodyResolution = {
       body: pipelineAcceptedBody,
       source: "paid_pro_review_render",
