@@ -47,6 +47,100 @@ export type PremiumAuthoritativeBodyResolution = {
   rejectedCandidates: PremiumWireDocumentRejection[];
 };
 
+export type PremiumWireServerFullPromotion = {
+  wire: PremiumFullDraftResult & Record<string, unknown>;
+  body: string;
+  promoted: boolean;
+  sourceField: string | null;
+};
+
+/** Apply canonical server-full aliases so downstream freeze/validation read one corpus. */
+export function applyPremiumWireAuthoritativeServerFullAliases(
+  wire: Partial<PremiumFullDraftResult> & Record<string, unknown>,
+  authoritativeBody: string,
+): PremiumFullDraftResult & Record<string, unknown> {
+  const body = String(authoritativeBody || "").trim();
+  const base = (wire ?? {}) as PremiumFullDraftResult & Record<string, unknown>;
+  if (body.length < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return base;
+  return {
+    ...base,
+    document_text: body,
+    server_full_document_text: body,
+    serverFullDocumentText: body,
+    full_document_text: body,
+    fullDocumentText: body,
+    authoritative_draft: body,
+    authoritativeDraft: body,
+  };
+}
+
+function readSubstantiveDegradedJsonParseDocumentText(
+  base: Record<string, unknown>,
+): { text: string; sourceField: string } | null {
+  if (!isDegradedNonfatalJsonParseWire(base)) return null;
+  for (const keys of [
+    ["document_text", "documentText"],
+    ["server_full_document_text", "serverFullDocumentText"],
+    ["full_document_text", "fullDocumentText"],
+    ["text"],
+    ["body"],
+  ] as const) {
+    const candidate = readWireStringField(base, keys);
+    if (!candidate) continue;
+    if (substantiveDegradedJsonParseWireBodyUsable(candidate, base)) {
+      return { text: candidate, sourceField: keys[0] ?? "document_text" };
+    }
+  }
+  return null;
+}
+
+export function promoteSubstantiveDegradedJsonParseWireToServerFull(
+  raw: Partial<PremiumFullDraftResult> & Record<string, unknown> | null | undefined,
+): PremiumWireServerFullPromotion {
+  const base = (raw ?? {}) as PremiumFullDraftResult & Record<string, unknown>;
+  const resolved = resolvePremiumFullDraftAuthoritativeBody(base);
+  let body = resolved.text;
+  let sourceField = resolved.sourceField;
+  if (body.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
+    const coerced = readSubstantiveDegradedJsonParseDocumentText(base);
+    if (coerced && coerced.text.length > body.length) {
+      body = coerced.text;
+      sourceField = coerced.sourceField;
+    }
+  }
+  const existingServerFull = readWireStringField(base, [
+    "server_full_document_text",
+    "serverFullDocumentText",
+  ]);
+  const promoted =
+    body.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+    existingServerFull.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+  const wire = promoted
+    ? applyPremiumWireAuthoritativeServerFullAliases(base, body)
+    : applyPremiumWireAuthoritativeServerFullAliases(
+        base,
+        existingServerFull.length >= body.length ? existingServerFull : body,
+      );
+  return { wire, body, promoted, sourceField };
+}
+
+export function premiumWireServerFullPromotionInvariantViolated(
+  raw: Partial<PremiumFullDraftResult> & Record<string, unknown> | null | undefined,
+): boolean {
+  const base = (raw ?? {}) as Record<string, unknown>;
+  const coerced = readSubstantiveDegradedJsonParseDocumentText(base);
+  if (!coerced) return false;
+  const serverFullLen = readWireStringField(base, [
+    "server_full_document_text",
+    "serverFullDocumentText",
+  ]).length;
+  const resolved = resolvePremiumFullDraftAuthoritativeBody(base);
+  return (
+    serverFullLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN ||
+    !resolved.hasAuthoritativeServerDocument
+  );
+}
+
 function readWireStringField(
   raw: Record<string, unknown> | null | undefined,
   keys: readonly string[],
@@ -273,9 +367,18 @@ export function normalizePremiumFullDraftResponsePayload(
   raw: Partial<PremiumFullDraftResult> & Record<string, unknown> | null | undefined,
 ): NormalizedPremiumFullDraftPayload {
   const base = (raw ?? {}) as PremiumFullDraftResult & Record<string, unknown>;
-  const resolved = resolvePremiumFullDraftAuthoritativeBody(base);
-  const authoritativeText = resolved.text;
-  const rawServerFull = String(base.server_full_document_text ?? "").trim();
+  const promotion = promoteSubstantiveDegradedJsonParseWireToServerFull(base);
+  const resolved = resolvePremiumFullDraftAuthoritativeBody(promotion.wire);
+  let authoritativeText = resolved.text;
+  let sourceField = resolved.sourceField ?? promotion.sourceField;
+  if (authoritativeText.length < promotion.body.length) {
+    authoritativeText = promotion.body;
+    sourceField = sourceField ?? promotion.sourceField ?? "document_text";
+  }
+  const rawServerFull = readWireStringField(base, [
+    "server_full_document_text",
+    "serverFullDocumentText",
+  ]);
   let mergedServerFullDocumentText: string;
   if (rawServerFull.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
     mergedServerFullDocumentText = rawServerFull;
@@ -284,16 +387,40 @@ export function normalizePremiumFullDraftResponsePayload(
   } else {
     mergedServerFullDocumentText = rawServerFull || authoritativeText;
   }
-  const wire: PremiumFullDraftResult = {
-    ...base,
-    document_text: authoritativeText || String(base.document_text ?? "").trim(),
-    authoritative_draft: authoritativeText || String(base.authoritative_draft ?? "").trim(),
-    server_full_document_text: mergedServerFullDocumentText,
-  };
+  const wire = applyPremiumWireAuthoritativeServerFullAliases(
+    {
+      ...base,
+      document_text: authoritativeText || String(base.document_text ?? "").trim(),
+      authoritative_draft: authoritativeText || String(base.authoritative_draft ?? "").trim(),
+      server_full_document_text: mergedServerFullDocumentText,
+    },
+    mergedServerFullDocumentText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN
+      ? mergedServerFullDocumentText
+      : authoritativeText,
+  ) as PremiumFullDraftResult;
+  if (
+    import.meta.env.DEV &&
+    premiumWireServerFullPromotionInvariantViolated({
+      ...base,
+      document_text: String(base.document_text ?? wire.document_text ?? ""),
+      server_full_document_text: wire.server_full_document_text,
+      generation_outcome: base.generation_outcome ?? wire.generation_outcome,
+      server_generation_failure_code:
+        base.server_generation_failure_code ?? wire.server_generation_failure_code,
+    })
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn("[premium-full-draft] server_full promotion invariant violated after normalize", {
+      documentLen: String(wire.document_text ?? "").trim().length,
+      serverFullLen: String(wire.server_full_document_text ?? "").trim().length,
+      generationOutcome: wire.generation_outcome,
+      failureCode: wire.server_generation_failure_code,
+    });
+  }
   return {
     wire,
     authoritativeText,
-    sourceField: resolved.sourceField,
+    sourceField,
     rejectedCandidates: resolved.rejectedCandidates,
   };
 }

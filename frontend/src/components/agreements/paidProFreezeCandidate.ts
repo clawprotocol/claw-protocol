@@ -78,7 +78,7 @@ import {
 } from "./paidProBrandLicensingFreezeAuthority";
 import { repairBrandLicensingRoleFidelityInCorpus } from "./paidProBrandLicensingRoleFidelityRepair";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
-import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN, PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN } from "./premiumAcceptancePolicy";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
   assertProfessionalCorpusCleanForFreeze,
@@ -118,6 +118,49 @@ function preserveSubstantiveBrandLicensingCorpusLength(
     Math.floor(entry.length * 0.85),
   );
   return out.length >= floor ? out : entry;
+}
+
+function isSubstantiveServerFullDraftSource(source: string | null | undefined): boolean {
+  const s = trim(source);
+  return (
+    s === "server_full_draft" ||
+    s === "server_full_draft_retry" ||
+    s === "server_full_draft_degraded" ||
+    s === "snapshot_server_full_draft"
+  );
+}
+
+function preserveSubstantiveServerFullDraftCorpusLength(
+  entryText: string,
+  mutatedText: string,
+  source: string | null | undefined,
+): string {
+  const entry = trim(entryText);
+  const out = trim(mutatedText);
+  if (!isSubstantiveServerFullDraftSource(source)) return out;
+  if (entry.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) return out;
+  const floor = Math.max(
+    PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+    Math.floor(entry.length * 0.85),
+  );
+  return out.length >= floor ? out : entry;
+}
+
+function finalizePreparedFreezeCandidateText(
+  entryText: string,
+  mutatedText: string,
+  args: { intakeText?: string | null; source?: string | null },
+): string {
+  const brandPreserved = preserveSubstantiveBrandLicensingCorpusLength(
+    entryText,
+    mutatedText,
+    args.intakeText ?? null,
+  );
+  return preserveSubstantiveServerFullDraftCorpusLength(
+    entryText,
+    brandPreserved,
+    args.source ?? null,
+  );
 }
 
 function finalizeSubstantiveBrandLicensingCorpusAfterWitness(
@@ -525,17 +568,15 @@ export function preparePaidProFreezeCandidateText(
   }
 
   return {
-    text: preserveSubstantiveBrandLicensingCorpusLength(
-      authorityTrimmed,
-      safeForCommit,
-      args.intakeText ?? null,
-    ),
+    text: finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
+      intakeText: args.intakeText ?? null,
+      source: requestedSource,
+    }),
     hash: hashPaidProCorpus(
-      preserveSubstantiveBrandLicensingCorpusLength(
-        authorityTrimmed,
-        safeForCommit,
-        args.intakeText ?? null,
-      ),
+      finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
+        intakeText: args.intakeText ?? null,
+        source: requestedSource,
+      }),
     ),
     reviewParties,
     parties,
@@ -1001,7 +1042,10 @@ export function assertPaidProFreezeCandidateGates(
   }
   assertNoNumberedOperativeSectionAfterWitness(safeForCommit);
 
-  return safeForCommit;
+  return finalizePreparedFreezeCandidateText(trim(args.text), safeForCommit, {
+    intakeText: args.intakeText ?? null,
+    source: requestedSource,
+  });
 }
 
 /** Non-throwing gate evaluation for acceptance / pipeline. */

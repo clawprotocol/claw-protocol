@@ -6,7 +6,10 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
-import { resolvePremiumFullDraftAuthoritativeBody } from "./premiumFullDraftResponseNormalization";
+import {
+  normalizePremiumFullDraftResponsePayload,
+  resolvePremiumFullDraftAuthoritativeBody,
+} from "./premiumFullDraftResponseNormalization";
 import { draftServerFullDocumentExists } from "./paidProRuntimeAuthorityEstablishment";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { hasUsablePremiumBodyText } from "./premiumPostCheckoutApplyEligible";
@@ -58,19 +61,24 @@ export function logPremiumApiResultFromWire(args: {
   wire: Partial<PremiumFullDraftResult> | null | undefined;
   error?: string | null;
 }): void {
-  const resolved = resolvePremiumFullDraftAuthoritativeBody(
+  const normalized = normalizePremiumFullDraftResponsePayload(
     args.wire as Partial<PremiumFullDraftResult> & Record<string, unknown> | null | undefined,
   );
-  const rawServerFull = String(args.wire?.server_full_document_text ?? "").trim();
-  const rawDocumentLen = String(args.wire?.document_text ?? "").trim().length;
-  const mergedServerLen = Math.max(rawServerFull.length, resolved.text.length);
+  const resolved = resolvePremiumFullDraftAuthoritativeBody(normalized.wire);
+  const corpus = extractPremiumApiServerCorpusText(normalized.wire);
+  const mergedServerLen = Math.max(
+    String(normalized.wire.server_full_document_text ?? "").trim().length,
+    String((normalized.wire as Record<string, unknown>).serverFullDocumentText ?? "").trim().length,
+    corpus.length,
+    resolved.text.length,
+  );
   logPremiumApiResult({
     ok: args.ok,
     status: args.status,
     hasServerFullDocumentText: mergedServerLen >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
     hasAuthoritativeServerDocument: resolved.hasAuthoritativeServerDocument,
     serverLen: mergedServerLen,
-    documentLen: resolved.text.length > 0 ? resolved.text.length : rawDocumentLen,
+    documentLen: resolved.text.length > 0 ? resolved.text.length : corpus.length,
     normalizedLen: resolved.text.length,
     normalizedSource: resolved.sourceField,
     keys: args.wire ? Object.keys(args.wire).slice(0, 24) : [],

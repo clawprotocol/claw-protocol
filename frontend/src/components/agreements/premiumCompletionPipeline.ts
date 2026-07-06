@@ -105,6 +105,7 @@ import {
 import {
   looksLikePremiumResponseJsonWrapper,
   normalizePremiumFullDraftResponsePayload,
+  promoteSubstantiveDegradedJsonParseWireToServerFull,
   resolvePremiumFullDraftAuthoritativeBody,
   tryUnwrapPremiumJsonEnvelopeDocument,
 } from "./premiumFullDraftResponseNormalization";
@@ -2035,6 +2036,19 @@ async function runPremiumCompletionInner(
       lastWireAuthoritativeBodyLen = wireAuthoritativeBodyLen;
       lastWireServerFullDocumentLen = wireServerFullDocumentText.length;
       lastWireGenerationOutcome = wireGenerationOutcomeOnWire;
+      if (
+        wireFailureCodeOnWire === "json_parse" &&
+        wireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+      ) {
+        const jsonParsePromotion = promoteSubstantiveDegradedJsonParseWireToServerFull(
+          effectiveFull as PremiumFullDraftResult & Record<string, unknown>,
+        );
+        if (jsonParsePromotion.body.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
+          effectiveFull = jsonParsePromotion.wire as PremiumFullDraftResult;
+          pipelineNormalizedAuthoritativeText = jsonParsePromotion.body;
+          syncPremiumWireMetadataFromEffective(effectiveFull);
+        }
+      }
       if (wireServerFullDocumentText.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
         tracePaidProAcceptancePipelineStage({
           stage: "raw_server_full_draft_received",
@@ -2263,6 +2277,19 @@ async function runPremiumCompletionInner(
               ? wireGenerationOutcomeOnWire
               : legacyGenerationOutcomeFromClassification(classified),
         };
+        if (
+          wireFailureCodeOnWire === "json_parse" &&
+          doc.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+        ) {
+          effectiveFull = promoteSubstantiveDegradedJsonParseWireToServerFull({
+            ...effectiveFull,
+            document_text: doc,
+            server_generation_failure_code: wireFailureCodeOnWire,
+            generation_outcome: (wireGenerationOutcomeOnWire || "degraded") as PremiumFullDraftResult["generation_outcome"],
+          }).wire as PremiumFullDraftResult;
+          pipelineNormalizedAuthoritativeText = doc;
+          syncPremiumWireMetadataFromEffective(effectiveFull);
+        }
       }
       const firstCallOutcomeDegraded = (full.generation_outcome || "").trim() === "degraded";
       let serverGenDegraded = firstCallOutcomeDegraded;
@@ -2286,7 +2313,17 @@ async function runPremiumCompletionInner(
           });
         }
         const hard0 = c0 === "airlock_blocked" || c0 === "dev_context_leak";
-        let authoritativeCandidate = (pipelineNormalizedAuthoritativeText || doc).trim();
+        const jsonParsePromotion = promoteSubstantiveDegradedJsonParseWireToServerFull({
+          ...effectiveFull,
+          document_text: doc || effectiveFull.document_text,
+          server_generation_failure_code: c0,
+          generation_outcome: (wireGenerationOutcomeOnWire || "degraded") as PremiumFullDraftResult["generation_outcome"],
+        });
+        let authoritativeCandidate = (
+          jsonParsePromotion.body ||
+          pipelineNormalizedAuthoritativeText ||
+          doc
+        ).trim();
         if (
           !authoritativeCandidate ||
           looksLikePremiumResponseJsonWrapper(authoritativeCandidate) ||
@@ -2301,37 +2338,42 @@ async function runPremiumCompletionInner(
             pipelineNormalizedAuthoritativeText = unwrapped.text;
           }
         }
-        if (hard0 || !rejectPremiumDegradedFiller(authoritativeCandidate).ok) {
-          const substantiveNonfatalJsonParse =
-            !hard0 &&
-            c0 === "json_parse" &&
-            Math.max(
-              authoritativeCandidate.length,
-              pipelineNormalizedAuthoritativeText.length,
-              (full.document_text || "").trim().length,
-            ) >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+        const substantiveNonfatalJsonParse =
+          !hard0 &&
+          c0 === "json_parse" &&
+          Math.max(
+            authoritativeCandidate.length,
+            pipelineNormalizedAuthoritativeText.length,
+            (full.document_text || "").trim().length,
+            jsonParsePromotion.body.length,
+          ) >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+        if (hard0) {
+          doc = "";
+          effectiveFull = { ...full, document_text: "", server_full_document_text: "" };
+        } else if (substantiveNonfatalJsonParse && authoritativeCandidate) {
+          doc = authoritativeCandidate;
+          effectiveFull = promoteSubstantiveDegradedJsonParseWireToServerFull({
+            ...effectiveFull,
+            document_text: doc,
+            server_generation_failure_code: c0,
+            generation_outcome: (wireGenerationOutcomeOnWire || "degraded") as PremiumFullDraftResult["generation_outcome"],
+          }).wire as PremiumFullDraftResult;
+          pipelineNormalizedAuthoritativeText = doc;
+          syncPremiumWireMetadataFromEffective(effectiveFull);
+        } else if (hard0 || !rejectPremiumDegradedFiller(authoritativeCandidate).ok) {
           if (!substantiveNonfatalJsonParse) {
             doc = "";
             effectiveFull = { ...full, document_text: "" };
-          } else if (authoritativeCandidate && authoritativeCandidate !== doc) {
-            doc = authoritativeCandidate;
-            effectiveFull = {
-              ...effectiveFull,
-              document_text: doc,
-              server_full_document_text: doc,
-              authoritative_draft: doc,
-            };
-            syncPremiumWireMetadataFromEffective(effectiveFull);
           }
-        } else if (authoritativeCandidate && authoritativeCandidate !== doc) {
+        } else if (authoritativeCandidate) {
           doc = authoritativeCandidate;
-          effectiveFull = {
+          effectiveFull = promoteSubstantiveDegradedJsonParseWireToServerFull({
             ...effectiveFull,
             document_text: doc,
-            server_full_document_text:
-              wireServerFullDocumentText || doc,
-            authoritative_draft: doc,
-          };
+            server_generation_failure_code: c0,
+            generation_outcome: (wireGenerationOutcomeOnWire || "degraded") as PremiumFullDraftResult["generation_outcome"],
+          }).wire as PremiumFullDraftResult;
+          pipelineNormalizedAuthoritativeText = doc;
           syncPremiumWireMetadataFromEffective(effectiveFull);
         }
       }
