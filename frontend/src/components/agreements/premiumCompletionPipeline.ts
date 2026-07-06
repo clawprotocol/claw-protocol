@@ -130,6 +130,7 @@ import {
   resolvePaidProFreezeCommitText,
 } from "./paidProFreezeCandidate";
 import { buildPaidProStructuralRecoveryBody } from "./paidProStructuralRecovery";
+import { attemptSubstantiveServerClauseFamilyStructuralRecovery } from "./clauseFamilyStructuralIntegrity";
 import {
   countNumberedAgreementSections,
   MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING,
@@ -1801,6 +1802,8 @@ async function runPremiumCompletionInner(
   let placeholderRemainingDetail: import("./agreementTemplatePlaceholderSafety").PlaceholderTokenDecision[] =
     [];
   let premiumJsonParseDegradedAttemptCount = 0;
+  let lastSubstantiveWireFreezeRejectReason: string | null = null;
+  let lastSubstantiveWireFreezeBodyLen = 0;
 
   try {
     const mergedForApi = stripClientPremiumArtifactBlocksFromDraft(merged);
@@ -3446,8 +3449,9 @@ async function runPremiumCompletionInner(
         }
         if (!freezeCommit.ok) {
           const skipDeterministicRecoveryForSubstantiveWire =
-            vPaidAuthoritativeSubstantive &&
-            wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+            wireHasSubstantiveServerFullCorpus ||
+            wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+            originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
           if (!skipDeterministicRecoveryForSubstantiveWire) {
             const recovery = previewRecoverPaidProFreezeCandidate({
               draft: mergedForApi,
@@ -3463,6 +3467,54 @@ async function runPremiumCompletionInner(
               doc = recovery.text;
               freezeCommit = recovery;
               freezeAcceptedSource = "deterministic_recovery_freeze_candidate";
+            }
+          }
+        }
+        if (
+          !freezeCommit.ok &&
+          (wireHasSubstantiveServerFullCorpus ||
+            wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN)
+        ) {
+          const substantiveWireSource =
+            wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+              ? wireCorpusForFreeze
+              : originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+                ? originalWireServerFullDocumentText
+                : doc;
+          const structuralRecovery = attemptSubstantiveServerClauseFamilyStructuralRecovery(
+            substantiveWireSource,
+            {
+              intakeText: rawForSoT || rawIntake,
+              draftPartyNames: (mergedForApi.parties ?? [])
+                .map((p) => String(p?.name ?? "").trim())
+                .filter(Boolean),
+              draftPartyCount: mergedForApi.parties?.length ?? 0,
+              surface: "premium_completion_pipeline:substantive_clause_family_recovery",
+            },
+          );
+          if (structuralRecovery.repaired) {
+            const substantivePrep = preparePaidProServerDocumentForAcceptance(
+              structuralRecovery.text,
+              mergedForApi,
+              rawForSoT || rawIntake,
+              { surface: "premium_completion_pipeline:substantive_clause_family_recovery_prep" },
+            );
+            const substantiveFreeze = resolvePaidProFreezeCommitText({
+              text: substantivePrep.text,
+              source: freezeSource,
+              draft: mergedForApi,
+              intakeText: rawForSoT || rawIntake,
+              agreementGenerationId: input.agreementGenerationId ?? null,
+              generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+              surface: "premium_completion_pipeline:substantive_clause_family_recovery_freeze",
+            });
+            if (
+              substantiveFreeze.ok &&
+              substantiveFreeze.text.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+            ) {
+              doc = substantiveFreeze.text;
+              freezeCommit = substantiveFreeze;
+              freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
             }
           }
         }
@@ -3583,12 +3635,26 @@ async function runPremiumCompletionInner(
           };
         }
         if (!freezeCommit.ok) {
+          const substantiveWireRejected =
+            wireHasSubstantiveServerFullCorpus ||
+            wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+            doc.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+          if (substantiveWireRejected) {
+            lastSubstantiveWireFreezeRejectReason =
+              freezeCommit.rejectReason ?? "clause_family_structural";
+            lastSubstantiveWireFreezeBodyLen = Math.max(
+              wireCorpusForFreeze.length,
+              doc.length,
+              freezeCommit.text.length,
+            );
+          }
           clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
           logPremiumCompletionDebug({
             stage: "pipeline_freeze_commit_rejected",
             accepted: false,
             rejectedReason: freezeCommit.rejectReason ?? "freeze_commit_failed",
             currentDocLen: doc.length,
+            substantiveWireBodyLen: lastSubstantiveWireFreezeBodyLen || undefined,
             premiumRenderSource: freezeSource,
           });
           logPremiumAcceptanceDecision({
@@ -3605,7 +3671,9 @@ async function runPremiumCompletionInner(
           rejectedPaidCorpusDueToClientGates = true;
           if (!proIntentGateMessage) {
             proIntentGateMessage =
-              "LawDog could not establish a structure-safe Pro agreement from the server response. Tap **Retry Pro draft** to try again.";
+              substantiveWireRejected && lastSubstantiveWireFreezeRejectReason
+                ? `LawDog received a full Pro draft (${lastSubstantiveWireFreezeBodyLen.toLocaleString()} characters) but could not freeze it: ${lastSubstantiveWireFreezeRejectReason.replace(/_/g, " ")}. Tap **Retry Pro draft** to repair and try again.`
+                : "LawDog could not establish a structure-safe Pro agreement from the server response. Tap **Retry Pro draft** to try again.";
           }
         } else {
           doc = freezeCommit.text;
@@ -4821,6 +4889,50 @@ async function runPremiumCompletionInner(
       (serverDegradedHttpMetaForRecovery?.code === "json_parse" ||
         serverGenerationDegraded?.code === "json_parse" ||
         premiumJsonParseDegradedAttemptCount >= 1);
+    if (rejectedPaidCorpusDueToClientGates && substantiveServerFullOnWire) {
+      if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
+      logDeterministicProFallbackDecision(
+        DETERMINISTIC_PRO_FALLBACK_REASON.noCanonicalFreezeAfterRejection,
+        {
+          localRecoveryOk: false,
+          recoverySotEligible: false,
+          recoverySotBlockReason: "substantive_server_full_structural_rejection",
+          jsonParseAttempts: premiumJsonParseDegradedAttemptCount,
+          substantiveWireBodyLen: lastSubstantiveWireFreezeBodyLen || serverRecoveryCandidate.length,
+          structuralRejectReason: lastSubstantiveWireFreezeRejectReason,
+        },
+      );
+      logPremiumCompletionDebug({
+        stage: "pipeline_return_rejected_paid_corpus",
+        accepted: false,
+        rejectedReason:
+          lastSubstantiveWireFreezeRejectReason ?? "substantive_server_structural_rejected",
+        premiumRenderSource: "rejected_paid_corpus",
+        lastClientGate: lastClientGateTrace,
+        localRecoveryAttempted: false,
+        localRecoveryOk: false,
+        localRecoverySuppressed: true,
+        substantiveWireBodyLen: lastSubstantiveWireFreezeBodyLen || serverRecoveryCandidate.length,
+      });
+      return {
+        premiumDraft: outMerged,
+        premiumParties,
+        recipientCandidates,
+        winningPremiumBodyText: "",
+        premiumRenderSource,
+        premiumReview,
+        premiumFinalizeAudit,
+        premiumReviewRoute,
+        staleIntakeOrGeneration: false,
+        agreementGenerationId: input.agreementGenerationId,
+        premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+        founderDetailsGateMessage: null,
+        proIntentGateMessage,
+        serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+        premiumDegradedServerRecoverable: true,
+        tierADiagnostic: tierADiag,
+      };
+    }
     const degradedJsonParseNoWireServerFull =
       premiumJsonParseDegradedAttemptCount > 0 &&
       lastWireServerFullDocumentLen === 0 &&
@@ -4964,6 +5076,7 @@ async function runPremiumCompletionInner(
     }
     const blockLateThinWireRecovery =
       premiumBodyHardRejectedForDevContextLeak ||
+      substantiveServerFullOnWire ||
       (lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
         premiumJsonParseDegradedAttemptCount > 0);
     const localRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({

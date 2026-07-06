@@ -1093,7 +1093,7 @@ function extractPaidProFreezeRejectReason(message: string): string {
     return "section_structure_completeness_unresolved";
   }
   if (message.includes("[paid-pro-clause-family-structural-blocked]")) {
-    const codes = message.match(/codes=([^\\]]+)/)?.[1];
+    const codes = message.match(/codes=([^\s]+(?:,[^\s]+)*)/)?.[1];
     return codes?.split(",")[0] ?? "clause_family_structural";
   }
   if (message.includes("[paid-pro-document-boundary-blocked]")) {

@@ -8,7 +8,11 @@ import { countStandaloneClauseFamilyHeadings, type OperativeClauseFamily } from 
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
 import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import {
+  corpusHasOperativeNoticesHeading,
+  ensureCanonicalNoticesSectionHeadingForFreeze,
+  ensureOperativeIfToNoticeDelivery,
   extractOperativeIfToNoticeStanzas,
+  findNoticesSectionStart,
   hasInlineMalformedNoticeStanzas,
   noticeStanzaContainsPlaceholderTokens,
   noticeStanzaHasExecutionPollution,
@@ -30,9 +34,6 @@ export type ClauseFamilyStructuralIntegrityReport = {
   violations: ClauseFamilyStructuralViolation[];
   familyPresence: Partial<Record<OperativeClauseFamily, boolean>>;
 };
-
-const NOTICES_HEADING_RE =
-  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notices|Notice\s+Addresses?)\b|(?:^|\n)\s*\d+\.\s+[^\n]*\bNotices\b/i;
 
 const NOTICES_OPERATIVE_TEXT_RE =
   /\bnotices?\s+(?:must|shall|are|is|will|may|under\s+this\s+agreement)\b/i;
@@ -72,12 +73,111 @@ function isOrphanLabelLine(lines: readonly string[], idx: number): boolean {
 /** Notices heading through execution witness — canonical stanza count authority. */
 function noticesRegionToWitness(corpus: string): string {
   const text = (corpus || "").replace(/\r\n/g, "\n");
-  const heading = text.match(NOTICES_HEADING_RE);
-  if (!heading || heading.index == null) return "";
-  const start = heading.index;
+  const start = findNoticesSectionStart(text);
+  if (start < 0) return "";
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   const end = witnessIdx >= 0 ? witnessIdx : text.length;
   return text.slice(start, end);
+}
+
+function extractClauseFamilyHeadingEvidence(corpus: string): Record<string, string | null> {
+  const text = (corpus || "").replace(/\r\n/g, "\n");
+  const lines = text.split("\n");
+  const pickHeading = (re: RegExp): string | null => {
+    const match = text.match(re);
+    if (!match?.[0]) return null;
+    return match[0].trim().slice(0, 120);
+  };
+  const noticesStart = findNoticesSectionStart(text);
+  const noticesSnippet =
+    noticesStart >= 0
+      ? text.slice(noticesStart, Math.min(noticesStart + 280, text.length)).trim().slice(0, 200)
+      : null;
+  const ifToLines = lines.filter((line) => /^If to\s+/i.test(line.trim())).slice(0, 6);
+  return {
+    noticesHeading: pickHeading(
+      /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notices|Notice\s+Provisions?|Notice\s+Addresses?|Notice\s+Delivery)\b[^\n]*/i,
+    ),
+    governingLawHeading: pickHeading(/(?:^|\n)\s*\d+\.(?!\d)\s*GOVERNING\s+LAW[^\n]*/i),
+    executionMarker: pickHeading(/(?:^|\n)\s*IN WITNESS WHEREOF[^\n]*/i),
+    noticesRegionSnippet: noticesSnippet,
+    ifToHeadingLines: ifToLines.length > 0 ? ifToLines.join(" | ") : null,
+  };
+}
+
+export function logClauseFamilyStructuralDiagnostic(
+  corpus: string,
+  report: ClauseFamilyStructuralIntegrityReport,
+  opts?: { surface?: string; phase?: string },
+): void {
+  if (report.ok || isTestMode()) return;
+  const failedFamilies = [...new Set(report.violations.map((v) => v.family))];
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-clause-family-structural-diagnostic]", {
+    surface: opts?.surface ?? "freeze",
+    phase: opts?.phase ?? "post_acceptance",
+    corpusLen: (corpus || "").trim().length,
+    ok: report.ok,
+    failedFamilies,
+    violationCodes: report.violations.map((v) => v.code),
+    violations: report.violations.map((v) => ({
+      family: v.family,
+      code: v.code,
+      message: v.message,
+    })),
+    familyPresence: report.familyPresence,
+    headingEvidence: extractClauseFamilyHeadingEvidence(corpus),
+  });
+}
+
+/** Targeted structural repair for substantive server_full drafts before freeze retry. */
+export function attemptSubstantiveServerClauseFamilyStructuralRecovery(
+  corpus: string,
+  opts?: {
+    parties?: readonly PaidProSignerMetadataParty[];
+    intakeText?: string | null;
+    draftPartyNames?: readonly string[] | null;
+    draftPartyCount?: number;
+    surface?: string;
+  },
+): {
+  text: string;
+  repaired: boolean;
+  repairs: string[];
+  report: ClauseFamilyStructuralIntegrityReport;
+} {
+  let text = (corpus || "").replace(/\r\n/g, "\n");
+  const repairs: string[] = [];
+  const roleContext: PaidProPartyRoleContext | null =
+    opts?.intakeText || opts?.draftPartyNames
+      ? {
+          intakeText: opts?.intakeText ?? null,
+          draftPartyNames: opts?.draftPartyNames ?? null,
+          acceptedCorpus: text,
+        }
+      : null;
+  const heading = ensureCanonicalNoticesSectionHeadingForFreeze(text);
+  if (heading.repairs.length > 0) {
+    text = heading.text;
+    repairs.push(...heading.repairs);
+  }
+  const authorityParties = resolveNoticeStructuralValidationParties(opts?.parties ?? [], roleContext);
+  if (authorityParties.length >= 2) {
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(text, authorityParties, roleContext);
+    if (noticeDelivery.repairs.length > 0) {
+      text = noticeDelivery.text;
+      repairs.push(...noticeDelivery.repairs);
+    }
+  }
+  const report = validateClauseFamilyStructuralIntegrity(text, {
+    parties: opts?.parties,
+    intakeText: opts?.intakeText,
+    draftPartyNames: opts?.draftPartyNames,
+    draftPartyCount: opts?.draftPartyCount,
+    surface: opts?.surface ?? "substantive_structural_recovery",
+    acceptedCorpus: text,
+  });
+  return { text, repaired: repairs.length > 0, repairs, report };
 }
 
 function countIfToStanzas(noticesRegion: string): number {
@@ -180,7 +280,7 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
 ): ClauseFamilyStructuralViolation[] {
   const violations: ClauseFamilyStructuralViolation[] = [];
   const text = (corpus || "").replace(/\r\n/g, "\n");
-  const hasProperHeading = NOTICES_HEADING_RE.test(text);
+  const hasOperativeNoticesFamily = corpusHasOperativeNoticesHeading(text);
   const region = noticesRegionToWitness(text);
   const noticeRoleContext: PaidProPartyRoleContext | null =
     opts?.intakeText || opts?.acceptedCorpus || opts?.draftPartyNames
@@ -214,7 +314,7 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
     });
   }
 
-  if (!hasProperHeading) {
+  if (!hasOperativeNoticesFamily) {
     violations.push({
       family: "notices",
       code: "missing_notices_heading",
@@ -427,7 +527,7 @@ export function validateClauseFamilyStructuralIntegrity(
     ok: violations.length === 0,
     violations,
     familyPresence: {
-      notices: NOTICES_HEADING_RE.test(corpus),
+      notices: corpusHasOperativeNoticesHeading(corpus),
       governing_law: countStandaloneClauseFamilyHeadings(corpus, "governing_law") > 0,
       execution_block: countPaidProExecutionBlocks(corpus) > 0,
     },
@@ -450,6 +550,10 @@ export function assertClauseFamilyStructuralIntegrityForFreeze(
     phase: opts?.phase ?? "post_acceptance",
   });
   if (!report.ok) {
+    logClauseFamilyStructuralDiagnostic(corpus, report, {
+      surface: opts?.surface ?? "freeze",
+      phase: opts?.phase ?? "post_acceptance",
+    });
     const codes = report.violations.map((v) => v.code).join(",");
     throw new Error(
       `[paid-pro-clause-family-structural-blocked] surface=${opts?.surface ?? "freeze"} codes=${codes}`,

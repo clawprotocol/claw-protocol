@@ -1122,13 +1122,13 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
 const NOTICES_SECTION_HEADING_RE =
   /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notices|Notice\s+Addresses?)\b|(?:^|\n)\s*\d+\.\s+[^\n]*\bNotices\b/i;
 
-/** Non-canonical numbered headings that still open an operative Notices clause family. */
-const NOTICE_EQUIVALENT_SECTION_HEADING_RE =
-  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notice\s+Delivery|Communications|Notice\s+and\s+Contact)\b/i;
-
 export function corpusHasCanonicalNoticesHeading(text: string): boolean {
   return NOTICES_SECTION_HEADING_RE.test((text || "").replace(/\r\n/g, "\n"));
 }
+
+/** Non-canonical numbered headings that still open an operative Notices clause family. */
+const NOTICE_EQUIVALENT_SECTION_HEADING_RE =
+  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notice\s+Provisions?|Notice\s+Delivery|Communications|Notice\s+and\s+Contact)\b/i;
 
 function inferNoticesSectionNumber(beforeRegion: string): number {
   const sectionNums: number[] = [];
@@ -1375,6 +1375,15 @@ export function findNoticesSectionStart(text: string): number {
   const ifTo = normalized.search(/(?:^|\n)If to\s+/i);
   if (ifTo >= 0 && (normalized.match(/^If to\s+/gim) || []).length >= 1) return ifTo;
   return -1;
+}
+
+/** Substance-based Notices family opener — canonical, equivalent, or operative If-to stanzas. */
+export function corpusHasOperativeNoticesHeading(text: string): boolean {
+  const normalized = (text || "").replace(/\r\n/g, "\n");
+  if (corpusHasCanonicalNoticesHeading(normalized)) return true;
+  if (NOTICE_EQUIVALENT_SECTION_HEADING_RE.test(normalized)) return true;
+  if (findNoticesSectionStart(normalized) >= 0) return true;
+  return (normalized.match(/^If to\s+/gim) || []).length >= 2;
 }
 
 const TOP_LEVEL_OPERATIVE_HEADING_RE = /^\s*\d+\.(?!\d)\s+\S/;
