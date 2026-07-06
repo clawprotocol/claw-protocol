@@ -37,14 +37,22 @@ def _reset_usage_economics_singleton():
 
 def _long_commercial_body(extra: str = "") -> str:
     base = (
-        "1. Scope. Designer shall deliver logo concepts and final files.\n"
-        "2. Payment. Client pays $1,500 upon execution.\n"
-        "3. IP. Work product vests in Client.\n"
-        "4. Term. Project completes within 30 days.\n"
+        "1. Scope. Designer shall deliver logo concepts, revisions, and final files.\n"
+        "2. Payment. Client pays a $1,500 flat fee; invoicing and compensation as stated.\n"
+        "3. Intellectual Property. Work product and ownership vest in Client upon payment.\n"
+        "4. Confidentiality. Each party protects the other's non-public information.\n"
+        "5. Term and Termination. Either party may terminate on written notice.\n"
+        "6. Limitation of Liability. Liability is limited except for gross negligence.\n"
+        "7. Dispute Resolution. Good-faith negotiation, then the selected venue/jurisdiction.\n"
+        "8. Governing Law. This agreement is governed by the law of the stated state.\n"
+        "9. Notices. Notices are sent to the designated email and mailing addresses.\n"
+        "10. Miscellaneous. Entire agreement; counterparts; electronic signatures are valid.\n"
+        "\nIN WITNESS WHEREOF, the parties execute this Agreement by their authorized signatures.\n"
+        "Signature: ______________________  Name: ______  Title: ______  Date: ______\n"
         + extra
     )
     while len(base) < 2200:
-        base += "\n5. Additional operative clause for acceptance and delivery standards.\n"
+        base += "\nAdditional operative clause for acceptance and delivery standards.\n"
     return base
 
 

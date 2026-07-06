@@ -67,6 +67,7 @@ from backend.agreements.premium_full_draft_quality_gate import (
     build_free_reference_blob,
     build_premium_full_draft_repair_user_payload,
     evaluate_premium_full_draft_quality,
+    premium_full_draft_body_meets_substance_floor,
     premium_full_draft_repair_system_prompt,
 )
 from backend.agreements.premium_simple_consulting_size_guard import enrich_user_payload_for_simple_consulting
@@ -897,76 +898,54 @@ def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
     return "unknown", f"{et}"
 
 
-_SUPPRESS_DEGRADED_FAKE_DOCUMENT_CODES: frozenset[str] = frozenset(
-    {
-        "airlock_blocked",
-        "dev_context_leak",
-    }
-)
-
-
-def _build_premium_full_draft_fallback_document(
-    intake_s: str,
-    ctx_dict: Optional[Dict[str, Any]],
-    failure_code: str,
-) -> str:
-    """Structured preview from intake + context when the Pro model path is unavailable (no repeated filler clauses)."""
-    title = ""
-    if ctx_dict:
-        title = str(ctx_dict.get("title") or "").strip()
-    if not title:
-        title = "Agreement"
-    blob = build_free_reference_blob(intake_s, ctx_dict).strip()
-    if len(blob) < 400:
-        blob = f"{(intake_s or '').strip()}\n\n{blob}".strip()
-    # Single neutral completion note — never emit many copies of the same generic “operative terms” line.
-    completion = (
-        "Complete operative commercial terms (scope, fees, liability, termination, and signatures) "
-        "from the summary above; refine after internal or external review before signing."
-    )
-    return (
-        f"# {title}\n\n"
-        f"*We saved your Pro upgrade. The automated full pass was not available for this run ({failure_code}). "
-        f"Below is a structured summary from your notes — you can edit freely. Use **Retry Pro draft** later for another full pass, or keep refining below.*\n\n"
-        f"## Summary from your intake\n\n{blob}\n\n"
-        f"## Commercial framework\n\n{completion}\n"
-    )
-
-
 def _premium_full_draft_degraded_response(
     *,
     intake_s: str,
     ctx_dict: Optional[Dict[str, Any]],
     failure_code: str,
     failure_message: str,
-    primary_full: str = "",
-    repair_body: str = "",
+    preserved_substantive_body: str = "",
 ) -> PremiumFullDraftResponse:
-    suppress_body = failure_code in _SUPPRESS_DEGRADED_FAKE_DOCUMENT_CODES
-    doc = (
-        ""
-        if suppress_body
-        else _build_premium_full_draft_fallback_document(intake_s, ctx_dict, failure_code)
-    )
+    """
+    Explicit premium-generation failure. The backend NEVER synthesizes a deterministic
+    starter/preview body here — a short "structured summary" would be a starter-style body
+    mislabeled as a completed Pro draft. Either:
+
+      * ``preserved_substantive_body`` is a real model corpus that cleared the substance floor
+        (e.g. the model returned prose we couldn't JSON-parse) — keep it as the authoritative body
+        and mark the generation OK (degraded metadata only), or
+      * there is no substantive body — return an EMPTY body with ``generation_ok=False`` +
+        ``retryable=True`` so the client shows an explicit retry, not local text.
+    """
+    preserved = (preserved_substantive_body or "").strip()
+    keep_body = False
+    if preserved:
+        floor_ok, _floor_reasons = premium_full_draft_body_meets_substance_floor(
+            preserved, intake=intake_s, context=ctx_dict
+        )
+        keep_body = floor_ok
+    doc = preserved if keep_body else ""
     fam = ""
     if ctx_dict:
         fam = str(ctx_dict.get("agreement_family") or "").strip()
     log.error(
-        "premium_full_draft event=degraded_response failure_code=%s failure_message=%s doc_len=%s suppress_body=%s",
+        "premium_full_draft event=degraded_response failure_code=%s failure_message=%s doc_len=%s preserved_body=%s",
         failure_code,
         failure_message[:200],
         len(doc),
-        int(suppress_body),
+        int(keep_body),
     )
-    if suppress_body:
+    if keep_body:
+        log.info(
+            "[CLAW] premium degraded preserved_substantive_body failure_code=%s doc_len=%s",
+            failure_code,
+            len(doc),
+        )
+    else:
         log.warning(
             "[CLAW] premium generation blocked category=%s stage=model_path suppress_fallback_document=1",
             failure_code,
         )
-    else:
-        log.info("[CLAW] premium degraded fallback_document failure_code=%s", failure_code)
-    srv_full = "" if suppress_body else (primary_full or "")
-    srv_repair = "" if suppress_body else (repair_body or "")
     empty_intelligence = AgreementIntelligence()
     agreement_validation = _validate_and_log_premium_agreement_draft(
         authoritative_draft=doc,
@@ -981,18 +960,20 @@ def _premium_full_draft_degraded_response(
         authoritative_draft=doc,
         agreement_intelligence=empty_intelligence,
         agreement_validation=agreement_validation,
-        server_full_document_text=srv_full,
-        server_repair_document_text=srv_repair,
+        server_full_document_text=doc,
+        server_repair_document_text="",
         key_terms_found=[],
         missing_material_info=[f"pro_model_unavailable:{failure_code}"],
         generation_outcome="degraded",
         schema_validation_reasons=(
-            [f"fallback_suppressed:{failure_code}"] if suppress_body else [f"fallback:{failure_code}"]
+            [f"preserved_substantive_body:{failure_code}"]
+            if keep_body
+            else [f"fallback_suppressed:{failure_code}"]
         ),
         server_generation_failure_code=failure_code,
         server_generation_failure_message=failure_message,
-        generation_ok=bool(doc.strip()),
-        retryable=suppress_body,
+        generation_ok=keep_body,
+        retryable=not keep_body,
     )
 
 
@@ -1012,6 +993,10 @@ def _degraded_user_message_for_code(code: str) -> str:
             "Please retry, or continue editing the starter draft."
         ),
         "empty_output": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** for another pass.",
+        "premium_generation_insufficient": (
+            "The full Pro draft didn't come back complete this time. Your Pro upgrade is saved — "
+            "please use **Retry Pro draft** to generate the full agreement again."
+        ),
         "dev_context_leak": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** for a fresh pass.",
         "payload_limits": "Your agreement is ready. Try shortening the intake and using **Retry Pro draft**, or keep editing the text below.",
     }
@@ -4655,7 +4640,47 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             (llm_model or ""),
         )
         intelligence_parse_start = time.perf_counter()
-        parsed = _extract_json_object(llm_text)
+        try:
+            parsed = _extract_json_object(llm_text)
+        except (json.JSONDecodeError, ValueError) as parse_exc:
+            # The model returned non-JSON. If the raw text is itself a substantive full corpus,
+            # preserve it (degraded metadata only). Otherwise this is a real json_parse failure —
+            # re-raise so the handler returns an explicit retry, never a synthesized starter body.
+            preserved_raw = (llm_text or "").strip()
+            floor_ok, floor_reasons = premium_full_draft_body_meets_substance_floor(
+                preserved_raw, intake=intake_s, context=ctx_dict
+            )
+            if floor_ok:
+                log.warning(
+                    "[premium-full-draft] event=json_parse_preserve_substantive_body "
+                    "session_hint=%s doc_len=%s exc_type=%s",
+                    session_hint,
+                    len(preserved_raw),
+                    type(parse_exc).__name__,
+                )
+                _safe_record_ai_call(request, request_ip)
+                dm = _premium_full_draft_degraded_response(
+                    intake_s=intake_s,
+                    ctx_dict=ctx_dict,
+                    failure_code="json_parse",
+                    failure_message=_degraded_user_message_for_code("json_parse"),
+                    preserved_substantive_body=preserved_raw,
+                )
+                return _premium_full_draft_finalize_http_response(
+                    dm,
+                    intake_len=len(intake_s),
+                    session_hint=session_hint,
+                    server_timing=server_timing,
+                    request=request,
+                )
+            log.warning(
+                "[premium-full-draft] event=json_parse_no_substantive_body "
+                "session_hint=%s doc_len=%s reasons=%s",
+                session_hint,
+                len(preserved_raw),
+                ",".join(floor_reasons),
+            )
+            raise
         out_primary = _normalize_premium_full_draft_result(parsed)
         if server_timing is not None:
             server_timing.record(
@@ -4908,6 +4933,42 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             )
         if not (out.document_text or "").strip():
             raise ValueError("empty_document_text")
+        # Substance floor: a short body / one lacking required Pro clause families or an execution
+        # mechanism is NOT a full Pro corpus, even after repair. Return an explicit failure/retry
+        # instead of emitting a 2k–3k starter-style body mislabeled as `server_full_draft`.
+        # (A long `needs_details` body clears the floor and is returned as authoritative.)
+        substance_ok, substance_reasons = premium_full_draft_body_meets_substance_floor(
+            doc, intake=intake_s, context=ctx_dict
+        )
+        if not substance_ok:
+            log.warning(
+                "[premium-full-draft] event=insufficient_substance status=200->503 session_hint=%s "
+                "doc_len=%s repair_used=%s reasons=%s",
+                session_hint,
+                len(doc),
+                int(repair_used),
+                ",".join(substance_reasons),
+            )
+            if server_timing is not None:
+                server_timing.record(
+                    "backend_validation",
+                    (time.perf_counter() - validation_started) * 1000,
+                    qualityOk=bool(ok_final),
+                    substanceOk=False,
+                )
+            dm = _premium_full_draft_degraded_response(
+                intake_s=intake_s,
+                ctx_dict=ctx_dict,
+                failure_code="premium_generation_insufficient",
+                failure_message=_degraded_user_message_for_code("premium_generation_insufficient"),
+            )
+            return _premium_full_draft_finalize_http_response(
+                dm,
+                intake_len=len(intake_s),
+                session_hint=session_hint,
+                server_timing=server_timing,
+                request=request,
+            )
         log.info(
             "premium_full_draft_quality_event event=premium_full_draft_render_source source=%s doc_len=%s",
             "server_repaired_accepted" if repair_used else "server_primary_accepted",

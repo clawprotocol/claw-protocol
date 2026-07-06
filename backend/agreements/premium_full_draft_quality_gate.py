@@ -99,6 +99,99 @@ def _section_signal_hits(doc: str) -> int:
     return hits
 
 
+# --- Server-side "substantive full Pro corpus" floor -------------------------------------------
+# A body that clears this floor is a real, signable full agreement. A body that does NOT clear it is
+# a starter/degraded shell and MUST be surfaced as an explicit failure/retry — never returned as a
+# `server_full_draft` or a short body mislabeled as a completed Pro draft. This floor is about the
+# STRUCTURAL substance of the document (length, clause families, execution mechanism). It is separate
+# from `evaluate_premium_full_draft_quality`, which also checks material-ask coverage / relevance and
+# whose non-structural failures are advisory `needs_details` (a long body may still be authoritative).
+
+PREMIUM_FULL_DRAFT_BASE_MIN_LEN = 1_600
+"""Absolute minimum length for any accepted Pro corpus (mirrors the quality gate's too-short bar)."""
+
+PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN = 6_000
+"""Higher floor for complex / multi-party agreements (matches simple-consulting target-min discipline)."""
+
+PREMIUM_FULL_DRAFT_MIN_CLAUSE_FAMILIES = 5
+"""Distinct operative clause families a full Pro corpus must contain."""
+
+_EXECUTION_MECHANISM_RE = re.compile(
+    r"(?:in\s+witness\s+whereof|signature|electronic(?:ally)?\s+sign|e-?sign|counterpart|"
+    r"executed\s+(?:as\s+of|by|this)|signed\s+by|\bby:\s|_{3,})",
+    re.I,
+)
+
+_COMPLEX_PREMIUM_INTAKE_RE = re.compile(
+    r"\b(?:three\s+parties|four\s+parties|five\s+parties|multi[-\s]?party|"
+    r"joint\s+venture|merger|acquisition|reseller|white[-\s]?label|"
+    r"indemnif|insurance|liability\s+cap|limitation\s+of\s+liability)\b",
+    re.I,
+)
+
+_CLAUSE_FAMILY_INTAKE_RES = (
+    re.compile(r"\bconfidential", re.I),
+    re.compile(r"\b(?:intellectual\s+property|\bip\b|work\s+product|ownership)\b", re.I),
+    re.compile(r"\b(?:liability|indemnif)\b", re.I),
+    re.compile(r"\binsurance\b", re.I),
+    re.compile(r"\bnotices?\b", re.I),
+    re.compile(r"\b(?:governing\s+law|jurisdiction|venue)\b", re.I),
+    re.compile(r"\b(?:arbitrat|mediat|dispute)\b", re.I),
+    re.compile(r"\bterminat", re.I),
+)
+
+
+def _premium_intake_party_count(context: Optional[Dict[str, Any]]) -> int:
+    parties = (context or {}).get("parties")
+    if isinstance(parties, list):
+        return sum(1 for p in parties if isinstance(p, dict) and str(p.get("name") or "").strip())
+    return 0
+
+
+def _premium_intake_clause_family_requests(intake: str) -> int:
+    low = intake or ""
+    return sum(1 for rx in _CLAUSE_FAMILY_INTAKE_RES if rx.search(low))
+
+
+def premium_full_draft_substance_min_len_for_context(
+    intake: str,
+    context: Optional[Dict[str, Any]],
+) -> int:
+    """Context-aware minimum length. Complex / multi-party intakes require a longer corpus."""
+    party_count = _premium_intake_party_count(context)
+    complex_signal = bool(_COMPLEX_PREMIUM_INTAKE_RE.search(intake or ""))
+    family_requests = _premium_intake_clause_family_requests(intake or "")
+    if party_count >= 3 or complex_signal or family_requests >= 4:
+        return PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN
+    return PREMIUM_FULL_DRAFT_BASE_MIN_LEN
+
+
+def premium_full_draft_body_meets_substance_floor(
+    document_text: str,
+    *,
+    intake: str = "",
+    context: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, List[str]]:
+    """
+    (ok, reasons) for whether ``document_text`` is a substantive, signable full Pro corpus.
+
+    Fails when the body is below the context-aware minimum length, lacks the required number of
+    operative clause families, or has no execution/signature mechanism. Callers must NOT return a
+    body that fails this floor as a completed Pro draft.
+    """
+    doc = (document_text or "").strip()
+    reasons: List[str] = []
+    min_len = premium_full_draft_substance_min_len_for_context(intake, context)
+    if len(doc) < min_len:
+        reasons.append(f"below_premium_substantive_min_len:{len(doc)}<{min_len}")
+    hits = _section_signal_hits(doc)
+    if hits < PREMIUM_FULL_DRAFT_MIN_CLAUSE_FAMILIES:
+        reasons.append(f"insufficient_clause_families:{hits}<{PREMIUM_FULL_DRAFT_MIN_CLAUSE_FAMILIES}")
+    if not _EXECUTION_MECHANISM_RE.search(doc):
+        reasons.append("missing_execution_mechanism")
+    return (len(reasons) == 0, reasons)
+
+
 def _similarity_ratio(a: str, b: str) -> float:
     if not a or not b:
         return 0.0

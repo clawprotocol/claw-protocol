@@ -87,10 +87,10 @@ def _evaluate(
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
 
+    from backend.agreements.premium_full_draft_quality_gate import build_free_reference_blob
     from backend.agreements.premium_generation_intelligence import build_premium_generation_intelligence_brief
     from backend.routers.agreements_v2_api import (
         PremiumFullDraftRequest,
-        _build_premium_full_draft_fallback_document,
         build_premium_full_draft_user_payload_for_airlock,
     )
 
@@ -100,7 +100,13 @@ def _evaluate(
     ctx = _ctx_for_prompt(prompt, title)
     body = PremiumFullDraftRequest(intake_text=prompt, context=ctx)
     payload, ctx_dict = build_premium_full_draft_user_payload_for_airlock(body)
-    degraded = _build_premium_full_draft_fallback_document(prompt, ctx_dict, "eval_no_llm")
+    # Local eval stand-in only (the production route no longer synthesizes a degraded body).
+    degraded = (
+        f"# {title}\n\n"
+        "*Local eval stand-in — no live Pro LLM output for this run "
+        "(automated full pass was not available).*\n\n"
+        f"{build_free_reference_blob(prompt, ctx_dict).strip()}\n"
+    )
 
     doc = (live_doc or degraded).strip()
     llm_reviewed = bool(live_doc and live_doc.strip())

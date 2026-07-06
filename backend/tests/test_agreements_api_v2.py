@@ -1153,7 +1153,8 @@ def test_premium_full_draft_saas_reseller_qa_prompt_not_airlock_blocked(monkeypa
     assert len((body.get("document_text") or "").strip()) > 5000
 
 
-def test_premium_full_draft_degraded_200_when_llm_fails(monkeypatch, tmp_path):
+def test_premium_full_draft_degraded_503_when_llm_fails(monkeypatch, tmp_path):
+    """Model failure returns an explicit empty-body retry — never a synthesized starter body."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     import backend.routers.agreements_v2_api as av2
@@ -1168,13 +1169,15 @@ def test_premium_full_draft_degraded_200_when_llm_fails(monkeypatch, tmp_path):
         headers=_ORG_H,
         json={"intake_text": "Any intake text for testing failure path."},
     )
-    assert res.status_code == 200
+    assert res.status_code == 503
     assert "application/json" in (res.headers.get("content-type") or "")
     body = res.json()
     assert body.get("generation_outcome") == "degraded"
     assert (body.get("server_generation_failure_code") or "") != ""
-    assert (body.get("document_text") or "").strip() != ""
-    assert "server_full_document_text" in body
+    assert (body.get("document_text") or "").strip() == ""
+    assert (body.get("server_full_document_text") or "").strip() == ""
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
 
 
 def test_premium_full_draft_degraded_airlock_returns_empty_document(monkeypatch, tmp_path):
@@ -1212,8 +1215,8 @@ def test_premium_full_draft_degraded_airlock_returns_empty_document(monkeypatch,
     assert any(str(x).startswith("fallback_suppressed:") for x in reasons)
 
 
-def test_premium_full_draft_degraded_no_repeated_operative_filler(monkeypatch, tmp_path):
-    """Degraded fallback must not repeat the same generic 'Operative terms' clause many times."""
+def test_premium_full_draft_degraded_never_synthesizes_starter_body(monkeypatch, tmp_path):
+    """The deterministic starter/preview fallback is removed: no local text on a model failure."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     import backend.routers.agreements_v2_api as av2
@@ -1228,11 +1231,18 @@ def test_premium_full_draft_degraded_no_repeated_operative_filler(monkeypatch, t
         headers=_ORG_H,
         json={"intake_text": "Any intake text for testing failure path."},
     )
-    assert res.status_code == 200
-    doc = (res.json().get("document_text") or "").strip()
-    assert doc
-    needle = "Operative terms. The parties intend to document"
-    assert doc.count(needle) <= 1
+    assert res.status_code == 503
+    body = res.json()
+    assert (body.get("document_text") or "").strip() == ""
+    for bad in (
+        "Operative terms. The parties intend to document",
+        "Summary from your intake",
+        "Commercial framework",
+        "automated full pass was not available",
+    ):
+        assert bad not in (body.get("document_text") or "")
+    reasons = body.get("schema_validation_reasons") or []
+    assert any(str(x).startswith("fallback_suppressed:") for x in reasons)
 
 
 def test_premium_full_draft_returns_503_structured_when_wire_encode_fails(monkeypatch, tmp_path):
