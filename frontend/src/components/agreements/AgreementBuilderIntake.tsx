@@ -782,10 +782,14 @@ import {
   resolvePremiumSignerDetailsGateDiagnostics,
   paidProSignerMetadataSessionActive as paidProSignerMetadataSessionActive_,
   resolveOrReuseFrozenForSignerEdit,
-  resolvePaidProReviewState,
   resolvePaidProSignerMetadataEditGuard,
   paidProPostSignerMetadataFreezeBlocksRecompute,
 } from "./paidProReviewStateMachine";
+import {
+  logPaidProReviewAuthorityResolved,
+  resolvePaidProReviewAuthority,
+  resolveValidatedPaidProReviewCorpus,
+} from "./paidProReviewAuthority";
 import {
   clearAuthoritativeSigningSnapshot,
   createAuthoritativeSigningSnapshot,
@@ -13692,6 +13696,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   authoritativeCreateFlowReviewShellInputRef.current = authoritativeCreateFlowReviewShellInput;
 
   const createFlowAuthoritativeShellReactiveKey = readCreateFlowAuthoritativeReviewShellReactiveKey();
+  const validatedPaidProReviewCorpus = useMemo(
+    () => resolveValidatedPaidProReviewCorpus(),
+    [premiumSurfaceGateTick, reviewDocRefreshTick, createFlowAuthoritativeShellReactiveKey],
+  );
   const createFlowPaidAcceptedOrAuthoritativeActive = isCreateFlowPaidAcceptedOrAuthoritativeActive(
     authoritativeCreateFlowReviewShellInput,
   );
@@ -13935,13 +13943,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    * SoT corpus so the authoritative length is never reported as 0 while paid authority exists.
    */
   const paidProAuthoritativeBodyLen = useMemo(() => {
+    if (validatedPaidProReviewCorpus.len > 0) return validatedPaidProReviewCorpus.len;
     const fromActive = authoritativePaidProReviewPlain.trim().length;
     if (fromActive > 0) return fromActive;
     if (hasPaidProSourceOfTruth()) {
       return getPaidProSourceOfTruthText().trim().length;
     }
     return 0;
-  }, [authoritativePaidProReviewPlain, reviewDocRefreshTick, premiumSurfaceGateTick]);
+  }, [
+    validatedPaidProReviewCorpus.len,
+    authoritativePaidProReviewPlain,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+  ]);
 
   const visibleAgreementDocumentForReview = useMemo(() => {
     if (!isAuthoritativePaidProReviewActive || !authoritativePaidProReviewPlain) {
@@ -20084,10 +20098,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         guidedCompletionPhase,
       }),
   );
-  /** Canonical paid Pro review state — fail closed into FAILED_PREMIUM_CORPUS, never starter degrade. */
-  const paidProReviewState = useMemo(
+  /** Canonical paid Pro review authority — single snapshot for state, title, body render, modal, retry. */
+  const paidProReviewAuthority = useMemo(
     () =>
-      resolvePaidProReviewState({
+      resolvePaidProReviewAuthority({
+        ...authoritativeCreateFlowReviewShellInput,
+        simpleProductFlow: Boolean(simpleProductFlow),
+        liveWorkspaceTwoPane: Boolean(liveWorkspaceTwoPane),
+        paidProAuthoritative,
+        createUiStage,
+        displayPhase,
+        createFlowPhase,
+        tier,
         premiumPaidDocumentSurface,
         premiumCheckoutCompleted,
         premiumGenerationInFlight:
@@ -20095,42 +20117,58 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumAuthoritativeRequestInFlightUi ||
           showPremiumNetworkRecoverablePanel ||
           premiumGenerationApiUnavailable,
-        hasValidAuthoritativeCorpus:
-          isAuthoritativePaidProReviewActive ||
-          authoritativePremiumUiCommitted ||
-          canProceedWithPaidProDocument ||
-          (premiumTruthPipelineSource === "premium_network_local_recovery" &&
-            paidProAuthoritativeBodyLen >= 500) ||
-          (premiumTruthPipelineSource === "premium_degraded_server_local_recovery" &&
-            paidProAuthoritativeBodyLen >= 500),
         premiumCorpusValidationFailed: premiumPaidUnavailableRetry,
         proFullDraftQualityRetry,
         createFlowDraftPersistBlocked: Boolean(createFlowDraftPersistError?.trim()),
-        authoritativeBodyLen: paidProAuthoritativeBodyLen,
-        // Never fail closed while a paid SoT exists and signing has not been requested — even if the
-        // authoritative render length transiently reads 0 (e.g. mid signer-metadata recompute).
         signerMetadataEditActive:
           paidProSignerMetadataEditGuardActive || paidProSigningCorpusFreezeActive,
+        premiumPostCheckoutPhase,
+        suppressProcessingModal: shouldSuppressPremiumProcessingModalAfterPaidAuthority({
+          draft: draft ?? null,
+          intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        }),
+        authoritativePremiumUiCommitted,
       }),
     [
+      authoritativeCreateFlowReviewShellInput,
+      simpleProductFlow,
+      liveWorkspaceTwoPane,
+      paidProAuthoritative,
+      createUiStage,
+      displayPhase,
+      createFlowPhase,
+      tier,
       premiumPaidDocumentSurface,
       premiumCheckoutCompleted,
       premiumReturnWaitActive,
       premiumAuthoritativeRequestInFlightUi,
       showPremiumNetworkRecoverablePanel,
       premiumGenerationApiUnavailable,
-      isAuthoritativePaidProReviewActive,
-      authoritativePremiumUiCommitted,
-      canProceedWithPaidProDocument,
       premiumPaidUnavailableRetry,
       proFullDraftQualityRetry,
       createFlowDraftPersistError,
-      paidProAuthoritativeBodyLen,
       paidProSignerMetadataEditGuardActive,
       paidProSigningCorpusFreezeActive,
+      premiumPostCheckoutPhase,
+      acceptedPaidProAuthorityActive,
+      authoritativePremiumUiCommitted,
+      validatedPaidProReviewCorpus.len,
+      createFlowAuthoritativeShellReactiveKey,
     ],
   );
+  const paidProReviewState = paidProReviewAuthority?.reviewState ?? "NOT_PAID";
   const failedPremiumCorpusActive = paidProReviewState === "FAILED_PREMIUM_CORPUS";
+  const paidProReviewContentReadyEffective =
+    paidProReviewAuthority?.contentReady ?? paidProReviewContentReady;
+  const paidProReviewShellTitleEffective =
+    paidProReviewAuthority?.shellTitle ?? reviewShellChrome.title;
+  const paidProReviewShellSubtitleEffective =
+    paidProReviewAuthority?.shellSubtitle ?? reviewShellChrome.subtitle;
+  const paidProReviewRenderAllowed = paidProReviewAuthority?.renderAllowed ?? false;
+
+  useEffect(() => {
+    if (paidProReviewAuthority) logPaidProReviewAuthorityResolved(paidProReviewAuthority);
+  }, [paidProReviewAuthority]);
 
   const unifiedPrimaryCta = useMemo((): PrimaryCtaState => {
     const premiumCorpusStillProcessing =
@@ -22109,7 +22147,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const answeredCount = session
       ? Object.keys(session.answered).filter((id) => (session.answered[id] || "").trim()).length
       : guidedAuthoritativeSummaryVariableIds.length;
-    const createFlowPaidPipelinePlain = resolveCreateFlowAcceptedPipelineCorpusPlain({
+    if (
+      suppressFreeStarterCreateFlowConversionUi &&
+      paidProReviewAuthority &&
+      !paidProReviewAuthority.renderAllowed
+    ) {
+      return {
+        plainText: "",
+        source: "authoritative_hydrated" as const,
+        authoritativeLen: 0,
+        renderedLen: 0,
+        overriddenPreview: false,
+        appliedAnswerCount: answeredCount,
+        corpusBlocked: true,
+      };
+    }
+    const createFlowPaidPipelinePlain = validatedPaidProReviewCorpus.plain
+      ? validatedPaidProReviewCorpus.plain
+      : resolveCreateFlowAcceptedPipelineCorpusPlain({
       agreementDocumentText,
       draft: draft ?? null,
       pipelineWinningBody:
@@ -22134,10 +22189,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementDocumentPlain: visibleAgreementDocumentForReview,
       appliedAnswerCount: answeredCount,
       finalReviewAuthorityOnly:
+        paidProReviewRenderAllowed ||
         simpleProFinalReviewShellActive ||
         simpleProFinalReviewActive ||
-        isAuthoritativePaidProReviewActive ||
-        (createFlowPaidAcceptedOrAuthoritativeActive && paidProFirstReviewCorpusReady),
+        isAuthoritativePaidProReviewActive,
       recoveryAuthoritativePlain: guidedPreIdentityAuthoritativeRef.current,
       pinnedFinalizedSignerPlain: pinnedFinalizedSignerCorpusRef.current,
       isFreeStarterReview: isFreeStarterReviewSurface,
@@ -22162,6 +22217,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPaidAcceptedOrAuthoritativeActive,
     paidProFirstReviewCorpusReady,
     createFlowAuthoritativeShellReactiveKey,
+    paidProReviewAuthority,
+    paidProReviewRenderAllowed,
+    validatedPaidProReviewCorpus.plain,
+    suppressFreeStarterCreateFlowConversionUi,
   ]);
 
   const proVisiblePaperCandidates = useMemo(() => {
@@ -30373,12 +30432,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   {PAID_PRO_REVIEW_BADGE}
                                 </span>
                                 <h2 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                  {reviewShellChrome.title}
+                                  {paidProReviewShellTitleEffective}
                                 </h2>
                                 <p className="mt-1 text-sm leading-snug text-slate-400 sm:text-[0.9375rem]">
-                                  {reviewShellChrome.subtitle}
+                                  {paidProReviewShellSubtitleEffective}
                                 </p>
-                                {paidProReviewContentReady ? (
+                                {paidProReviewContentReadyEffective ? (
                                   <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
                                     {PAID_PRO_REVIEW_SHELL_SAFETY_LINE}
                                   </p>

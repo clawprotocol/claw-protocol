@@ -134,7 +134,7 @@ import {
 } from "./paidProMutualConsultingQualityFloor";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
-import { markPaidProPipelineAcceptedCorpusHash, paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import {
   logProGenerationAdoptionCommitted,
   readProGenerationAdoption,
@@ -5022,12 +5022,6 @@ async function runPremiumCompletionInner(
   }
 
   const pipelineWinningBody = (finalWinning || finalFallback).trim();
-  if (
-    pipelineWinningBody.length >= 500 &&
-    isAuthoritativePremiumPipelineRenderSource(premiumRenderSource)
-  ) {
-    markPaidProPipelineAcceptedCorpusHash(pipelineWinningBody);
-  }
 
   return {
     premiumDraft: outMerged,

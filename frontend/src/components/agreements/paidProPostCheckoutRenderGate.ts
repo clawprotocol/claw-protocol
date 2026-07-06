@@ -26,6 +26,7 @@ import {
 } from "./premiumNetworkRecoveryLocalDraft";
 import { isNonfatalGenerationFailureCode } from "./premiumAcceptancePolicy";
 import { shouldBlockPaidProReviewReadinessFromFallbackCorpus } from "./paidProApiFailureAuthorityGuard";
+import { readAcceptedPipelineReviewCorpusPlain } from "./paidProAcceptedPipelineReviewCorpus";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
@@ -317,6 +318,9 @@ export function hasRenderablePaidProFirstReviewCorpus(
     });
     if (renderPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
     return getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN;
+  }
+  if (readAcceptedPipelineReviewCorpusPlain().length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return true;
   }
   const recovery = resolvePaidProPostCheckoutFirstReviewPlain({
     draft: input?.draft ?? null,

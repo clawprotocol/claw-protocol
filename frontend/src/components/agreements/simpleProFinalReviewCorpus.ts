@@ -6,7 +6,8 @@ import { GUIDED_MIN_AUTHORITATIVE_BODY_LEN } from "./guidedDealCompletion/guided
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
-import { readPaidProPipelineAcceptedCorpusBody, readPaidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
+import { hasPaidProPipelineValidationForCorpus } from "./paidProPostAcceptanceValidatorCache";
 
 /** Final review requires a full Pro agreement — not a signature-only fragment. */
 export const GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN = 1500;
@@ -72,7 +73,10 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     authorityOnly &&
     !args.isFreeStarterReview &&
     pipelineAccepted.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
-    readPaidProPipelineAcceptedCorpusHash() !== null
+    hasPaidProPipelineValidationForCorpus({
+      text: pipelineAccepted,
+      source: "server_full_draft",
+    })
   ) {
     return {
       plainText: pipelineAccepted,
@@ -172,7 +176,11 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   if (
     authorityOnly &&
     picked.plain.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
-    pipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN
+    pipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
+    hasPaidProPipelineValidationForCorpus({
+      text: pipelineWinning,
+      source: "server_full_draft",
+    })
   ) {
     picked = { plain: pipelineWinning, source: "picker_authoritative" };
   }
@@ -180,7 +188,11 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   if (
     authorityOnly &&
     picked.plain.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
-    picker.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN
+    picker.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
+    hasPaidProPipelineValidationForCorpus({
+      text: picker,
+      source: "server_full_draft",
+    })
   ) {
     picked = { plain: picker, source: "picker_authoritative" };
   }
@@ -294,6 +306,28 @@ export function resolveSimpleProFinalReviewCorpus(args: {
       renderedLen,
       overriddenPreview: false,
       appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
+
+  if (
+    authorityOnly &&
+    !args.isFreeStarterReview &&
+    plainText.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
+    !hasPaidProSourceOfTruth() &&
+    !hasPaidProPipelineValidationForCorpus({
+      text: plainText,
+      source: "server_full_draft",
+    })
+  ) {
+    logFinalReviewAuthoritativeRenderBlocked({ reason: "unvalidated_pipeline_corpus" });
+    return {
+      plainText: "",
+      source: picked.source,
+      authoritativeLen: 0,
+      renderedLen,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+      corpusBlocked: true,
     };
   }
 

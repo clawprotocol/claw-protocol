@@ -7,7 +7,7 @@ import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
-import { markPaidProPipelineAcceptedCorpusHash, paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import { PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN } from "./premiumAcceptancePolicy";
 import { PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE } from "./premiumNetworkRecoveryLocalDraft";
 
@@ -140,7 +140,6 @@ export function tryCommitProGenerationAdoption(args: {
     adoptedAt: Date.now(),
   };
   adoptedRecord = record;
-  markPaidProPipelineAcceptedCorpusHash(body);
   return { committed: true, reason: "committed", record };
 }
 

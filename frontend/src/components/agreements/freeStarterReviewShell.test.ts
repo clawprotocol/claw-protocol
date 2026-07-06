@@ -12,6 +12,13 @@ import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDra
 import { writeAgreementCreatorIntakeStorage } from "./agreementIntakeStorage";
 import { CreateUiStage } from "./createUiStage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  markPaidProPipelineValidationPassed,
+} from "./paidProPostAcceptanceValidatorCache";
+import {
+  clearPaidProPipelineAcceptedCorpusHashForTests,
+  markPaidProPipelineAcceptedCorpusHash,
+} from "./paidProPipelineAcceptedCorpus";
 
 const RED_MESA_INTAKE =
   "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC for AI workflow setup. Red Mesa will pay Harbor Peak $5,000. Texas law. Electronic signatures allowed.";
@@ -98,6 +105,9 @@ describe("resolveReviewShellChrome", () => {
   });
 
   it("paid pro review keeps Pro shell when not free", () => {
+    const acceptedBody = `PRO AGREEMENT. ${"Substantive clause. ".repeat(120)}`;
+    markPaidProPipelineAcceptedCorpusHash(acceptedBody);
+    markPaidProPipelineValidationPassed({ text: acceptedBody, source: "server_full_draft" });
     const chrome = resolveReviewShellChrome({
       isFreeStreamlineDraftReview: false,
       isFreeStarterReviewSurface: false,
@@ -109,8 +119,8 @@ describe("resolveReviewShellChrome", () => {
       liveWorkspaceTwoPane: true,
       createUiStage: CreateUiStage.DRAFT,
       displayPhase: "review",
-      authoritativeBodyLen: 2000,
     });
+    clearPaidProPipelineAcceptedCorpusHashForTests();
     expect(chrome.title).toBe("Agreement ready");
     expect(chrome.paidProReviewReady).toBe(true);
     expect(chrome.paidProReviewContentReady).toBe(true);
@@ -250,24 +260,22 @@ describe("AgreementBuilderIntake free starter shell wiring", () => {
   // Regression: post-checkout crash "Cannot access X before initialization" was a temporal
   // dead zone — unifiedPrimaryCta (a render-time useMemo) read failedPremiumCorpusActive before
   // it was declared. Every paid-review-state input must be declared before the CTA consumes it.
-  it("paid review state machine is declared before unifiedPrimaryCta consumes it (TDZ guard)", () => {
+  it("paid review authority is declared before unifiedPrimaryCta consumes it (TDZ guard)", () => {
     const idxReturnWait = intake.indexOf("const premiumReturnWaitActive = Boolean(");
     const idxNetworkPanel = intake.indexOf("const showPremiumNetworkRecoverablePanel = Boolean(");
-    const idxReviewState = intake.indexOf("const paidProReviewState = useMemo(");
+    const idxReviewAuthority = intake.indexOf("const paidProReviewAuthority = useMemo(");
+    const idxReviewState = intake.indexOf("const paidProReviewState = paidProReviewAuthority");
     const idxFailedActive = intake.indexOf("const failedPremiumCorpusActive =");
     const idxUnifiedCta = intake.indexOf("const unifiedPrimaryCta = useMemo(");
 
-    for (const idx of [idxReturnWait, idxNetworkPanel, idxReviewState, idxFailedActive, idxUnifiedCta]) {
+    for (const idx of [idxReturnWait, idxNetworkPanel, idxReviewAuthority, idxReviewState, idxFailedActive, idxUnifiedCta]) {
       expect(idx).toBeGreaterThan(-1);
     }
-    // Inputs declared before the state machine memo.
-    expect(idxReturnWait).toBeLessThan(idxReviewState);
-    expect(idxNetworkPanel).toBeLessThan(idxReviewState);
-    // State + derived flag declared before the CTA memo that reads them.
-    expect(idxReviewState).toBeLessThan(idxUnifiedCta);
+    expect(idxReturnWait).toBeLessThan(idxReviewAuthority);
+    expect(idxNetworkPanel).toBeLessThan(idxReviewAuthority);
+    expect(idxReviewAuthority).toBeLessThan(idxUnifiedCta);
     expect(idxFailedActive).toBeLessThan(idxUnifiedCta);
-    // And there is exactly one declaration of each relocated binding (no duplicate after move).
-    expect(intake.indexOf("const paidProReviewState = useMemo(", idxReviewState + 1)).toBe(-1);
+    expect(intake.indexOf("const paidProReviewAuthority = useMemo(", idxReviewAuthority + 1)).toBe(-1);
     expect(intake.indexOf("const premiumReturnWaitActive = Boolean(", idxReturnWait + 1)).toBe(-1);
     expect(
       intake.indexOf("const showPremiumNetworkRecoverablePanel = Boolean(", idxNetworkPanel + 1),

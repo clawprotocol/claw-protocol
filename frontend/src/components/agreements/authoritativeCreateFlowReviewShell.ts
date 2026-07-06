@@ -8,6 +8,7 @@ import { CreateUiStage } from "./createUiStage";
 import type { CreateFlowProductionPhase } from "./createFlowTypes";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruthState";
+import { readAcceptedPipelineReviewCorpusPlain } from "./paidProAcceptedPipelineReviewCorpus";
 import { readPremiumCompletionSnapshot, hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
@@ -237,18 +238,10 @@ export function computeCreateFlowPaidProReviewContentReady(
 ): boolean {
   if (input.proFullDraftQualityRetry || input.createFlowDraftPersistBlocked) return false;
   if (!computeCreateFlowPaidProReviewReady(input)) return false;
-  if (typeof input.authoritativeBodyLen === "number" && input.authoritativeBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    return true;
+  if (hasPaidProSourceOfTruth()) {
+    if (getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
   }
-  return hasRenderablePaidProFirstReviewCorpus({
-    draft: input.draft ?? null,
-    intakeText: input.intakeText ?? null,
-    premiumRenderSource: input.premiumRenderSource ?? null,
-    premiumCheckoutCompleted: input.premiumCheckoutCompleted,
-    premiumPostCheckoutPhase: input.premiumPostCheckoutPhase,
-    winningPremiumBodyText: input.pipelineWinningBody,
-    hydratedPremiumBody: input.hydratedPremiumBody,
-  });
+  return readAcceptedPipelineReviewCorpusPlain().length >= PAID_PRO_AUTHORITY_MIN_LEN;
 }
 
 /** Review plain text for paid create-flow shell when SoT is not yet frozen. */
