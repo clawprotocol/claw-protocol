@@ -39,6 +39,11 @@ import {
   ensureBlankLineBeforeWitnessBlock,
 } from "./paidProExecutionBlockNormalization";
 import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
+import {
+  buildSignerMetadataPartiesFromIntakeManifest,
+  intakePartyManifestIsAuthoritative,
+  overlayIntakeManifestOnReviewParties,
+} from "./intakePartyManifestAuthority";
 
 export const PARTY_NOTICE_DETAILS_HEADING = "Party Notice Details:";
 
@@ -390,6 +395,12 @@ function resolveCanonicalNoticeAuthorityParties(
     }
   }
 
+  if (intake && intakePartyManifestIsAuthoritative(intake)) {
+    const manifestParties = buildSignerMetadataPartiesFromIntakeManifest(intake);
+    const overlayBase = base.filter((p) => p.partyLegalName.trim().length >= 2).length >= 2 ? base : manifestParties;
+    return overlayIntakeManifestOnReviewParties(intake, overlayBase).slice(0, maxParties);
+  }
+
   if (!intake) return base.slice(0, maxParties);
 
   const merged = mergeLabeledPartyAuthorityIntoParties(base, intake);
@@ -406,6 +417,9 @@ function enrichNoticeAuthorityParties(
     resolveCanonicalNoticeAuthorityParties(cappedSource, roleContext),
     roleContext,
   );
+  if (intakePartyManifestIsAuthoritative(roleContext?.intakeText)) {
+    return resolved.slice(0, cap);
+  }
   return preserveSlotIndexedSignerMetadataParties(resolved, cappedSource, cap).slice(0, cap);
 }
 
@@ -1166,6 +1180,40 @@ export function hasMisplacedStandaloneNoticesBeforeSubsection(corpus: string): b
   return false;
 }
 
+/** Collapse repeated standalone NOTICES headings inside the notices-to-witness region. */
+export function dedupeDuplicateStandaloneNoticesHeadings(text: string): { text: string; repairs: string[] } {
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  const noticesIdx = findNoticesSectionStart(text);
+  if (noticesIdx < 0) return { text, repairs: [] };
+  const end = witnessIdx >= 0 ? witnessIdx : text.length;
+  const before = text.slice(0, noticesIdx);
+  const region = text.slice(noticesIdx, end);
+  const after = text.slice(end);
+  const lines = region.split("\n");
+  const repairs: string[] = [];
+  const out: string[] = [];
+  let keptNoticesHeading = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const standaloneNotices =
+      /^NOTICES\s*$/i.test(trimmed) || /^\d+\.\s+NOTICES\s*$/i.test(trimmed);
+    if (standaloneNotices) {
+      if (keptNoticesHeading) {
+        repairs.push("notice:dedupe_duplicate_notices_heading");
+        continue;
+      }
+      keptNoticesHeading = true;
+    }
+    out.push(line);
+  }
+  if (!repairs.length) return { text, repairs: [] };
+  const dedupedRegion = out.join("\n").replace(/\n{3,}/g, "\n\n");
+  return {
+    text: `${before}${dedupedRegion}${after}`.replace(/\n{3,}/g, "\n\n").trimEnd(),
+    repairs,
+  };
+}
+
 /** Remove a standalone `N. NOTICES` line when the same section already has a composite heading including Notices. */
 export function removeRedundantNoticesSubheading(text: string): { text: string; repairs: string[] } {
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
@@ -1468,6 +1516,7 @@ function findExistingNoticeStanzaForParty(
   existingStanzas: readonly string[],
   slotIndex: number,
   consumedStanzaIndexes: Set<number>,
+  opts?: { manifestAuthoritative?: boolean },
 ): string {
   const legal = resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext);
   if (legal) {
@@ -1481,12 +1530,60 @@ function findExistingNoticeStanzaForParty(
       }
     }
   }
+  if (opts?.manifestAuthoritative) return "";
   if (!consumedStanzaIndexes.has(slotIndex)) {
     const fallback = existingStanzas[slotIndex]?.trim() ?? "";
     if (fallback) consumedStanzaIndexes.add(slotIndex);
     return fallback;
   }
   return "";
+}
+
+function noticeStanzaMatchesManifestPartyAddress(
+  stanza: string,
+  party: PaidProSignerMetadataParty,
+): boolean {
+  const requiredAddress = party.partyAddress.trim();
+  if (!requiredAddress || requiredAddress.length <= 8) return true;
+  return stanza.toLowerCase().includes(requiredAddress.toLowerCase().slice(0, 12));
+}
+
+function noticeAuthorityRequiresManifestRepair(
+  existingStanzas: readonly string[],
+  authorityParties: readonly PaidProSignerMetadataParty[],
+  roleContext: PaidProPartyRoleContext | null | undefined,
+): boolean {
+  if (!intakePartyManifestIsAuthoritative(roleContext?.intakeText)) return false;
+  if (existingStanzas.length !== authorityParties.length) return true;
+  const manifestKeys = new Set(
+    authorityParties.map((party) => party.partyLegalName.trim().toLowerCase()),
+  );
+  for (const stanza of existingStanzas) {
+    const entity = noticeStanzaHeadingLegalEntity(stanza).trim().toLowerCase();
+    if (!entity) return true;
+    const inManifest = [...manifestKeys].some((key) => partyLegalNamesMatch(entity, key));
+    if (!inManifest) return true;
+  }
+  const consumed = new Set<number>();
+  for (let i = 0; i < authorityParties.length; i++) {
+    const party = authorityParties[i]!;
+    const existing = findExistingNoticeStanzaForParty(
+      party,
+      authorityParties,
+      roleContext,
+      existingStanzas,
+      i,
+      consumed,
+      { manifestAuthoritative: true },
+    );
+    if (
+      !noticeStanzaComplete(existing, party) ||
+      !noticeStanzaMatchesManifestPartyAddress(existing, party)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -1499,13 +1596,7 @@ export function repairIncompleteIfToNoticeStanzas(
 ): { text: string; repairs: string[] } {
   const cap = resolveCanonicalNoticePartyCount(parties, roleContext);
   const cappedParties = parties.slice(0, cap);
-  const authorityParties = cappedParties.some((p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim())
-    ? preserveSlotIndexedSignerMetadataParties(
-        enrichNoticeAuthorityParties(cappedParties, roleContext),
-        cappedParties,
-        cap,
-      )
-    : enrichNoticeAuthorityParties(cappedParties, roleContext);
+  const authorityParties = enrichNoticeAuthorityParties(cappedParties, roleContext);
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
   const repairs: string[] = [];
   let text = repairGluedSectionHeadingsInText(corpus.replace(/\r\n/g, "\n"));
@@ -1522,7 +1613,14 @@ export function repairIncompleteIfToNoticeStanzas(
       .map((s) => s.trim())
       .filter(Boolean);
     const consumedEarly = new Set<number>();
-    let allCompleteEarly = existingStanzasEarly.length === authorityParties.length;
+    const manifestRepairRequired = noticeAuthorityRequiresManifestRepair(
+      existingStanzasEarly,
+      authorityParties,
+      roleContext,
+    );
+    let allCompleteEarly =
+      !manifestRepairRequired &&
+      existingStanzasEarly.length === authorityParties.length;
     if (allCompleteEarly && existingStanzasEarly.length >= 2) {
       for (let i = 0; i < authorityParties.length; i++) {
         const party = authorityParties[i]!;
@@ -1533,8 +1631,12 @@ export function repairIncompleteIfToNoticeStanzas(
           existingStanzasEarly,
           i,
           consumedEarly,
+          { manifestAuthoritative: manifestRepairRequired },
         );
-        if (!noticeStanzaComplete(existing, party)) {
+        if (
+          !noticeStanzaComplete(existing, party) ||
+          !noticeStanzaMatchesManifestPartyAddress(existing, party)
+        ) {
           allCompleteEarly = false;
           break;
         }
@@ -1657,6 +1759,11 @@ export function repairIncompleteIfToNoticeStanzas(
   let stanzaCount = 0;
   const consumedExistingStanzas = new Set<number>();
 
+  const manifestRepairRequired = noticeAuthorityRequiresManifestRepair(
+    existingStanzas,
+    authorityParties,
+    roleContext,
+  );
   for (let i = 0; i < authorityParties.length; i++) {
     const party = authorityParties[i]!;
     const existing = findExistingNoticeStanzaForParty(
@@ -1666,18 +1773,19 @@ export function repairIncompleteIfToNoticeStanzas(
       existingStanzas,
       i,
       consumedExistingStanzas,
+      { manifestAuthoritative: manifestRepairRequired },
     );
     const requiredEmail = party.signerEmail.trim();
     const stanzaHasAuthorityEmail =
       !requiredEmail ||
       new RegExp(`Email:\\s*${escapeRegExp(requiredEmail)}`, "i").test(existing);
     const authorityHasContact = party.signerEmail.trim() || party.partyAddress.trim();
-    const shouldRebuildForAuthority =
-      authorityHasContact && noticeStanzaUsesGenericPrimaryContactFallback(existing);
     if (
+      !manifestRepairRequired &&
       noticeStanzaComplete(existing, party) &&
       stanzaHasAuthorityEmail &&
-      !shouldRebuildForAuthority
+      noticeStanzaMatchesManifestPartyAddress(existing, party) &&
+      !(authorityHasContact && noticeStanzaUsesGenericPrimaryContactFallback(existing))
     ) {
       rebuiltStanzas.push(
         stripInvalidNoticeStanzaLines(
@@ -1712,7 +1820,8 @@ export function repairIncompleteIfToNoticeStanzas(
   if (tailAfterStanzas) mergedParts.push(tailAfterStanzas);
   let mergedNotices = mergedParts.join("\n\n");
   const preservedHeading = fullNoticesRegion.match(/(?:^|\n)\s*(\d+\.\s+NOTICES\s*)(?:\n|$)/im)?.[1]?.trim();
-  if (preservedHeading && !corpusHasCanonicalNoticesHeading(mergedNotices)) {
+  const introHasNoticesHeading = /(?:^|\n)\s*(?:\d+\.\s+)?NOTICES\s*$/im.test(intro);
+  if (preservedHeading && !corpusHasCanonicalNoticesHeading(mergedNotices) && !introHasNoticesHeading) {
     const introBlock = noticeIntroAlreadyHasDeliveryLanguage(mergedNotices)
       ? `${preservedHeading}\n\n${mergedNotices}`
       : `${preservedHeading}\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n${mergedNotices}`;
@@ -1723,6 +1832,11 @@ export function repairIncompleteIfToNoticeStanzas(
     ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
     : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   logPaidProNoticeSectionIntegrity({ repairs, partyCount: authorityParties.length, stanzaCount });
+  const dedupedHeadings = dedupeDuplicateStandaloneNoticesHeadings(text);
+  if (dedupedHeadings.repairs.length > 0) {
+    repairs.push(...dedupedHeadings.repairs);
+    text = dedupedHeadings.text;
+  }
   const trimmed = trimOperativeNoticeStanzasToPartyCount(text, authorityParties.length);
   if (trimmed.repairs.length > 0 && trimmed.text.length >= text.length - 100) {
     repairs.push(...trimmed.repairs);
@@ -1914,6 +2028,11 @@ export function ensureOperativeIfToNoticeDelivery(
   const stanzaBlocks = noticesRegion.split(/\n(?=If to\s+)/i).slice(1).map((s) => s.trim());
   const consumedStanzaIndexes = new Set<number>();
   const stanzasMissingPerPartyContact = authorityParties.some((party, index) => {
+    const manifestRepairRequired = noticeAuthorityRequiresManifestRepair(
+      stanzaBlocks,
+      authorityParties,
+      roleContext,
+    );
     const stanza =
       findExistingNoticeStanzaForParty(
         party,
@@ -1922,7 +2041,8 @@ export function ensureOperativeIfToNoticeDelivery(
         stanzaBlocks,
         index,
         consumedStanzaIndexes,
-      ) ?? stanzaBlocks[index] ?? "";
+        { manifestAuthoritative: manifestRepairRequired },
+      ) ?? (manifestRepairRequired ? "" : stanzaBlocks[index] ?? "");
     const email = party.signerEmail.trim();
     if (email && !noticeStanzaComplete(stanza, party)) return true;
     const addr = party.partyAddress.trim();

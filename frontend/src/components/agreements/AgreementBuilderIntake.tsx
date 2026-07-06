@@ -815,6 +815,10 @@ import {
   shouldClearSigningSnapshotOnSignerMetadataDrift,
 } from "./paidProStickyCta";
 import {
+  shouldSuppressPaidProGeneratingPrimaryCta,
+  shouldSuppressPaidProStickyGeneratingLoading,
+} from "./paidProPostFreezeStickyGenerating";
+import {
   capturePaidProDeferredStarterSignatureIntent,
   consumePaidProDeferredStarterSignatureIntent,
 } from "./paidProDeferredSignatureIntent";
@@ -15744,14 +15748,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return DRAFT_LOADING_PREPARING;
   };
   /** Production draft parse / hydrate: sticky showed NOTTHING_SENT + busy CTA — one line only. */
-  const stickyProductionAgreementCreationLoading = Boolean(
-    simpleCreateStickyBottomBarVisibleBase &&
-      createProductionTwoPane &&
-      (displayPhase === "generating_draft" ||
-        displayPhase === "hydrating_generated" ||
-        displayPhase === "preparing_review" ||
-        displayPhase === "editing_pro"),
-  );
   const draftPartyRecipientEmailPresent = Boolean(
     (draft?.parties as { email?: string }[] | undefined)?.some((p) =>
       looksLikeEmail(String(p?.email ?? "")),
@@ -17873,6 +17869,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProRecipientSetupOnDraft,
     productionReadyForPersist,
   ]);
+
+  const stickyProductionAgreementCreationLoading = Boolean(
+    simpleCreateStickyBottomBarVisibleBase &&
+      createProductionTwoPane &&
+      (displayPhase === "generating_draft" ||
+        displayPhase === "hydrating_generated" ||
+        displayPhase === "preparing_review" ||
+        displayPhase === "editing_pro") &&
+      !shouldSuppressPaidProStickyGeneratingLoading({
+        hasSourceOfTruth: hasPaidProSourceOfTruth(),
+        acceptedPaidProAuthority: acceptedPaidProAuthorityActive,
+        inlineSignerSetupLatched: paidProInlineSignerSetupLatched,
+        canonicalReviewSignerSetupActive: paidProCanonicalReviewSignerSetupActive,
+        stickyCtaShowBar: paidProCanonicalStickyCta?.showStickyBar,
+        stickyCtaPhase: paidProCanonicalStickyCta?.phase,
+      }),
+  );
 
   const emitSignerMetadataForensicAudit = React.useCallback(
     (args: {
@@ -20452,12 +20465,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       };
     }
     if (isGenerating || intakeDictationPhase === "processing") {
+      if (
+        shouldSuppressPaidProGeneratingPrimaryCta({
+          isGenerating,
+          hasSourceOfTruth: hasPaidProSourceOfTruth(),
+          acceptedPaidProAuthority: acceptedPaidProAuthorityActive,
+          inlineSignerSetupLatched: paidProInlineSignerSetupLatched,
+          canonicalReviewSignerSetupActive: paidProCanonicalReviewSignerSetupActive,
+          signerSetupStickyCtaSurfaceActive: paidProSignerSetupStickyCtaSurfaceActive,
+        })
+      ) {
+        // Fall through to paid Pro signer-setup / review CTAs below.
+      } else {
       return {
         label: primaryBusyLabel,
         action: "guided_continue",
         disabled: true,
         reason: isGenerating ? "generating" : "dictation_processing",
       };
+      }
     }
     if (stageAInputFirst) {
       const dis = stageAContinueBlocked;
@@ -20736,7 +20762,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         if (
           isGenerating &&
-          (createFlowPhase === "generating_draft" || displayPhase === "editing_pro")
+          (createFlowPhase === "generating_draft" || displayPhase === "editing_pro") &&
+          !shouldSuppressPaidProGeneratingPrimaryCta({
+            isGenerating,
+            hasSourceOfTruth: hasPaidProSourceOfTruth(),
+            acceptedPaidProAuthority: acceptedPaidProAuthorityActive,
+            inlineSignerSetupLatched: paidProInlineSignerSetupLatched,
+            canonicalReviewSignerSetupActive: paidProCanonicalReviewSignerSetupActive,
+            signerSetupStickyCtaSurfaceActive: paidProSignerSetupStickyCtaSurfaceActive,
+          })
         ) {
           return {
             label: primaryBusyLabel,
@@ -21081,6 +21115,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedQuestionGateDecision,
     simpleProFinalReviewActive,
     paidProCanonicalStickyCta,
+    paidProCanonicalReviewSignerSetupActive,
+    paidProSignerSetupStickyCtaSurfaceActive,
     canonicalPaidCreateFlowFirstReviewActive,
     authoritativeCreateFlowReviewShellInput,
     paidProFirstReviewCorpusReady,
