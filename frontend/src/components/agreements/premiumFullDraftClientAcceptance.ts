@@ -48,6 +48,18 @@ function countLinesContaining(body: string, needleLower: string): number {
   return n;
 }
 
+/** Hard degraded-template artifacts only — no repeated-clause heuristics. */
+export function rejectPremiumHardDegradedFallbackArtifacts(
+  body: string,
+): PremiumClientAcceptanceResult {
+  const low = (body || "").trim().toLowerCase();
+  const reasons: string[] = [];
+  for (const b of DEGRADED_FALLBACK_BANNED_SUBSTRINGS) {
+    if (low.includes(b)) reasons.push(`degraded_filler:${b.slice(0, 42).replace(/\s+/g, " ")}`);
+  }
+  return { ok: reasons.length === 0, reasons: [...new Set(reasons)] };
+}
+
 /** Rejects known LawDog Pro degraded-template filler (repeated generic clauses, airlock copy). */
 export function rejectPremiumDegradedFiller(body: string): PremiumClientAcceptanceResult {
   const low = (body || "").trim().toLowerCase();

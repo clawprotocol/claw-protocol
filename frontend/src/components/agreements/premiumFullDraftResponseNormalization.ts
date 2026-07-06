@@ -6,7 +6,10 @@
 
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
-import { rejectPremiumDegradedFiller } from "./premiumFullDraftClientAcceptance";
+import {
+  rejectPremiumDegradedFiller,
+  rejectPremiumHardDegradedFallbackArtifacts,
+} from "./premiumFullDraftClientAcceptance";
 import {
   isNonfatalGenerationFailureCode,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
@@ -170,24 +173,43 @@ export function tryUnwrapPremiumJsonEnvelopeDocument(
   };
 }
 
+function isDegradedNonfatalJsonParseWire(base: Record<string, unknown>): boolean {
+  return (
+    String(base.generation_outcome || "").trim().toLowerCase() === "degraded" &&
+    isNonfatalGenerationFailureCode(String(base.server_generation_failure_code || ""))
+  );
+}
+
+/** Substantive degraded/json_parse wire bodies skip repeated-clause filler heuristics. */
+function substantiveDegradedJsonParseWireBodyUsable(
+  text: string,
+  base: Record<string, unknown>,
+): boolean {
+  const trimmed = String(text || "").trim();
+  if (!isDegradedNonfatalJsonParseWire(base)) return false;
+  if (trimmed.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
+  if (looksLikePremiumResponseJsonWrapper(trimmed)) {
+    const unwrapped = tryUnwrapPremiumJsonEnvelopeDocument(trimmed);
+    return Boolean(
+      unwrapped?.text && substantiveDegradedJsonParseWireBodyUsable(unwrapped.text, base),
+    );
+  }
+  if (!rejectPremiumHardDegradedFallbackArtifacts(trimmed).ok) return false;
+  const validation = base.agreement_validation as { passed?: boolean } | null | undefined;
+  if (validation?.passed === false) return false;
+  return true;
+}
+
 function substantiveWireBodyUsable(text: string, base: Record<string, unknown>): boolean {
   const trimmed = String(text || "").trim();
   if (trimmed.length < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return false;
   if (looksLikePremiumResponseJsonWrapper(trimmed)) {
     const unwrapped = tryUnwrapPremiumJsonEnvelopeDocument(trimmed);
-    return Boolean(
-      unwrapped?.text && unwrapped.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
-    );
+    return Boolean(unwrapped?.text && substantiveWireBodyUsable(unwrapped.text, base));
   }
+  if (substantiveDegradedJsonParseWireBodyUsable(trimmed, base)) return true;
   if (!rejectPremiumWireDocumentCandidate(trimmed)) return true;
-  const degraded =
-    String(base.generation_outcome || "").trim().toLowerCase() === "degraded" &&
-    isNonfatalGenerationFailureCode(String(base.server_generation_failure_code || ""));
-  if (!degraded || trimmed.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
-  if (!rejectPremiumDegradedFiller(trimmed).ok) return false;
-  const validation = base.agreement_validation as { passed?: boolean } | null | undefined;
-  if (validation?.passed === false) return false;
-  return true;
+  return false;
 }
 
 function pickRelaxedSubstantiveWireBody(raw: Record<string, unknown>): {
@@ -230,12 +252,10 @@ export function resolvePremiumFullDraftAuthoritativeBody(
   const picked = pickAuthoritativePremiumWireDocument(base);
   let text = picked.text;
   let sourceField = picked.sourceField;
-  if (text.length < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
-    const relaxed = pickRelaxedSubstantiveWireBody(base);
-    if (relaxed.text.length > text.length) {
-      text = relaxed.text;
-      sourceField = relaxed.sourceField;
-    }
+  const relaxed = pickRelaxedSubstantiveWireBody(base);
+  if (relaxed.text.length > text.length) {
+    text = relaxed.text;
+    sourceField = relaxed.sourceField;
   }
   return {
     text,

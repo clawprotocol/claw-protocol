@@ -63,12 +63,13 @@ export function logPremiumApiResultFromWire(args: {
   );
   const rawServerFull = String(args.wire?.server_full_document_text ?? "").trim();
   const rawDocumentLen = String(args.wire?.document_text ?? "").trim().length;
+  const mergedServerLen = Math.max(rawServerFull.length, resolved.text.length);
   logPremiumApiResult({
     ok: args.ok,
     status: args.status,
-    hasServerFullDocumentText: rawServerFull.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+    hasServerFullDocumentText: mergedServerLen >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
     hasAuthoritativeServerDocument: resolved.hasAuthoritativeServerDocument,
-    serverLen: rawServerFull.length,
+    serverLen: mergedServerLen,
     documentLen: resolved.text.length > 0 ? resolved.text.length : rawDocumentLen,
     normalizedLen: resolved.text.length,
     normalizedSource: resolved.sourceField,

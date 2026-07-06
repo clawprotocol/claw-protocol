@@ -2068,10 +2068,17 @@ async function runPremiumCompletionInner(
         };
         if (fcRecover === "json_parse") {
           premiumJsonParseDegradedAttemptCount += 1;
-          logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.serverDegradedJsonParse, {
-            attempt: premiumJsonParseDegradedAttemptCount,
-            documentLen: (full.document_text || "").trim().length,
-          });
+          const jsonParseWireBodyLen = Math.max(
+            pipelineNormalizedAuthoritativeText.length,
+            wireServerFullDocumentText.length,
+            wireDocumentText.length,
+          );
+          if (jsonParseWireBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
+            logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.serverDegradedJsonParse, {
+              attempt: premiumJsonParseDegradedAttemptCount,
+              documentLen: (full.document_text || "").trim().length,
+            });
+          }
         }
       }
       let doc = (effectiveFull.document_text || "").trim();
@@ -4606,7 +4613,11 @@ async function runPremiumCompletionInner(
       pipelineNormalizedAuthoritativeText || docTrimForSuppress
     ).trim();
     const substantiveServerFullOnWire =
-      lastWireServerFullDocumentLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+      Math.max(
+        lastWireServerFullDocumentLen,
+        pipelineNormalizedAuthoritativeText.length,
+        lastWireAuthoritativeBodyLen,
+      ) >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
       String(outMerged.premium_server_full_document_text ?? "").trim().length >=
         SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
     const brandLicensingRejectedRecoveryEligible =
@@ -4771,7 +4782,8 @@ async function runPremiumCompletionInner(
     const degradedJsonParseNoWireServerFull =
       premiumJsonParseDegradedAttemptCount > 0 &&
       lastWireServerFullDocumentLen === 0 &&
-      lastWireAuthoritativeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+      lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+      pipelineNormalizedAuthoritativeText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
     const tryDeterministicIntakeRecovery = () => {
       const intakeLocalRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
         draft: outMerged,
