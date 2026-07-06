@@ -7,7 +7,10 @@
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import { rejectPremiumDegradedFiller } from "./premiumFullDraftClientAcceptance";
-import { isDegradedJsonParseWithoutSubstantiveServerFull } from "./premiumAcceptancePolicy";
+import {
+  isNonfatalGenerationFailureCode,
+  PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+} from "./premiumAcceptancePolicy";
 
 const WIRE_DOCUMENT_FIELD_GROUPS: readonly (readonly string[])[] = [
   ["server_full_document_text", "serverFullDocumentText"],
@@ -16,7 +19,11 @@ const WIRE_DOCUMENT_FIELD_GROUPS: readonly (readonly string[])[] = [
   ["document_text", "documentText"],
   ["document"],
   ["agreement_text", "agreementText"],
+  ["text"],
+  ["body"],
 ] as const;
+
+const ALL_WIRE_BODY_FIELD_GROUPS: readonly (readonly string[])[] = WIRE_DOCUMENT_FIELD_GROUPS;
 
 export type PremiumWireDocumentRejection = {
   field: string;
@@ -27,6 +34,13 @@ export type NormalizedPremiumFullDraftPayload = {
   wire: PremiumFullDraftResult;
   authoritativeText: string;
   sourceField: string | null;
+  rejectedCandidates: PremiumWireDocumentRejection[];
+};
+
+export type PremiumAuthoritativeBodyResolution = {
+  text: string;
+  sourceField: string | null;
+  hasAuthoritativeServerDocument: boolean;
   rejectedCandidates: PremiumWireDocumentRejection[];
 };
 
@@ -156,6 +170,81 @@ export function tryUnwrapPremiumJsonEnvelopeDocument(
   };
 }
 
+function substantiveWireBodyUsable(text: string, base: Record<string, unknown>): boolean {
+  const trimmed = String(text || "").trim();
+  if (trimmed.length < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return false;
+  if (looksLikePremiumResponseJsonWrapper(trimmed)) {
+    const unwrapped = tryUnwrapPremiumJsonEnvelopeDocument(trimmed);
+    return Boolean(
+      unwrapped?.text && unwrapped.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+    );
+  }
+  if (!rejectPremiumWireDocumentCandidate(trimmed)) return true;
+  const degraded =
+    String(base.generation_outcome || "").trim().toLowerCase() === "degraded" &&
+    isNonfatalGenerationFailureCode(String(base.server_generation_failure_code || ""));
+  if (!degraded || trimmed.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
+  if (!rejectPremiumDegradedFiller(trimmed).ok) return false;
+  const validation = base.agreement_validation as { passed?: boolean } | null | undefined;
+  if (validation?.passed === false) return false;
+  return true;
+}
+
+function pickRelaxedSubstantiveWireBody(raw: Record<string, unknown>): {
+  text: string;
+  sourceField: string | null;
+} {
+  let bestText = "";
+  let bestSource: string | null = null;
+  for (const keys of ALL_WIRE_BODY_FIELD_GROUPS) {
+    const candidate = readWireStringField(raw, keys);
+    if (!candidate) continue;
+    if (looksLikePremiumResponseJsonWrapper(candidate)) {
+      const unwrapped = tryUnwrapPremiumJsonEnvelopeDocument(candidate);
+      if (
+        unwrapped?.text &&
+        substantiveWireBodyUsable(unwrapped.text, raw) &&
+        unwrapped.text.length > bestText.length
+      ) {
+        bestText = unwrapped.text;
+        bestSource = unwrapped.sourceField;
+      }
+      continue;
+    }
+    if (substantiveWireBodyUsable(candidate, raw) && candidate.length > bestText.length) {
+      bestText = candidate;
+      bestSource = keys[0] ?? null;
+    }
+  }
+  return { text: bestText, sourceField: bestSource };
+}
+
+/**
+ * Canonical resolver for premium-full-draft HTTP bodies. Checks every allowed wire alias
+ * (server_full_document_text, document_text, text, body, etc.) and returns one authoritative corpus.
+ */
+export function resolvePremiumFullDraftAuthoritativeBody(
+  raw: Partial<PremiumFullDraftResult> & Record<string, unknown> | null | undefined,
+): PremiumAuthoritativeBodyResolution {
+  const base = (raw ?? {}) as PremiumFullDraftResult & Record<string, unknown>;
+  const picked = pickAuthoritativePremiumWireDocument(base);
+  let text = picked.text;
+  let sourceField = picked.sourceField;
+  if (text.length < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
+    const relaxed = pickRelaxedSubstantiveWireBody(base);
+    if (relaxed.text.length > text.length) {
+      text = relaxed.text;
+      sourceField = relaxed.sourceField;
+    }
+  }
+  return {
+    text,
+    sourceField,
+    hasAuthoritativeServerDocument: text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+    rejectedCandidates: picked.rejectedCandidates,
+  };
+}
+
 /**
  * Extract the best authoritative document from allowed wire fields; merge onto the wire object
  * so validation, gates, SoT, and logging share one corpus.
@@ -164,18 +253,11 @@ export function normalizePremiumFullDraftResponsePayload(
   raw: Partial<PremiumFullDraftResult> & Record<string, unknown> | null | undefined,
 ): NormalizedPremiumFullDraftPayload {
   const base = (raw ?? {}) as PremiumFullDraftResult & Record<string, unknown>;
-  const picked = pickAuthoritativePremiumWireDocument(base);
-  const authoritativeText = picked.text;
+  const resolved = resolvePremiumFullDraftAuthoritativeBody(base);
+  const authoritativeText = resolved.text;
   const rawServerFull = String(base.server_full_document_text ?? "").trim();
-  const degradedWithoutWireServerFull = isDegradedJsonParseWithoutSubstantiveServerFull({
-    generationOutcome: base.generation_outcome,
-    failureCode: base.server_generation_failure_code,
-    wireServerFullDocumentText: rawServerFull,
-  });
   let mergedServerFullDocumentText: string;
   if (rawServerFull.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
-    mergedServerFullDocumentText = rawServerFull;
-  } else if (degradedWithoutWireServerFull) {
     mergedServerFullDocumentText = rawServerFull;
   } else if (authoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
     mergedServerFullDocumentText = authoritativeText;
@@ -191,7 +273,7 @@ export function normalizePremiumFullDraftResponsePayload(
   return {
     wire,
     authoritativeText,
-    sourceField: picked.sourceField,
-    rejectedCandidates: picked.rejectedCandidates,
+    sourceField: resolved.sourceField,
+    rejectedCandidates: resolved.rejectedCandidates,
   };
 }

@@ -25,7 +25,7 @@ import {
   assessProfessionalProClauseCoverage,
   logProfessionalProClauseCoverageDecision,
 } from "./paidProProfessionalClauseCoverage";
-import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN, PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN } from "./premiumAcceptancePolicy";
 import { PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE } from "./premiumNetworkRecoveryLocalDraft";
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { shouldLogPaidProAuthoritySurfaceEvent } from "./paidProAuthoritySurfaceLog";
@@ -666,6 +666,18 @@ function preparePaidProServerDocumentForAcceptanceCore(
   ) {
     out = corpusSnapshotBeforePrepareMutations;
     repairs.push("prepare:execution_invariant_final_restored");
+  }
+
+  if (
+    normalizedInput.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+    out.length <
+      Math.max(
+        PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+        Math.floor(normalizedInput.length * 0.85),
+      )
+  ) {
+    out = normalizedInput;
+    repairs.push("prepare:substantive_wire_corpus_preserved");
   }
 
   if (

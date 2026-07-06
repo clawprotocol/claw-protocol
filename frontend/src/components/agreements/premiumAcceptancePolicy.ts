@@ -82,20 +82,27 @@ export function serverFullDocumentWinsOverClientGates(args: {
 }
 
 /**
- * Degraded nonfatal parse (e.g. json_parse) with no `server_full_document_text` on the wire cannot
- * establish paid Pro SoT as `server_full_draft` — only labeled recovery or display-only fallback paths
- * may surface a body. A substantive wire `server_full_document_text` (even below the 10k SoT floor)
- * is still distinct from a document_text-only degraded payload.
+ * Degraded nonfatal parse (e.g. json_parse) with no substantive body on the wire cannot establish
+ * paid Pro SoT as `server_full_draft`. A long `document_text` (or other alias) counts as substantive
+ * even when `server_full_document_text` is absent — json_parse often degrades metadata only.
  */
 export function isDegradedJsonParseWithoutSubstantiveServerFull(args: {
   generationOutcome?: string | null;
   failureCode?: string | null | undefined;
   wireServerFullDocumentText?: string | null;
+  wireDocumentText?: string | null;
+  wireAuthoritativeBodyLen?: number | null;
 }): boolean {
   const outcome = (args.generationOutcome || "").trim().toLowerCase();
   if (outcome !== "degraded") return false;
   if (!isNonfatalGenerationFailureCode(args.failureCode)) return false;
-  return (args.wireServerFullDocumentText || "").trim().length === 0;
+  const serverFullLen = (args.wireServerFullDocumentText || "").trim().length;
+  if (serverFullLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
+  const wireLen =
+    args.wireAuthoritativeBodyLen ??
+    Math.max(serverFullLen, (args.wireDocumentText || "").trim().length);
+  if (wireLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
+  return serverFullLen === 0 && wireLen === 0;
 }
 
 /** A paid body has the required commercial sections (services/IP/term/governing-law/signature). */

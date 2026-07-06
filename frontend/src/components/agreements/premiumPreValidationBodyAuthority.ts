@@ -35,6 +35,12 @@ export function isSubstantivePremiumServerFullDocument(
       generationOutcome: effectiveFull.generation_outcome,
       failureCode: effectiveFull.server_generation_failure_code,
       wireServerFullDocumentText: effectiveFull.server_full_document_text,
+      wireDocumentText: effectiveFull.document_text,
+      wireAuthoritativeBodyLen: Math.max(
+        serverFullLen,
+        (effectiveFull.document_text || "").trim().length,
+        extractPremiumApiServerCorpusText(effectiveFull).length,
+      ),
     })
   ) {
     return false;

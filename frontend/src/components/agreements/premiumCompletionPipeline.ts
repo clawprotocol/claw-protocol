@@ -105,6 +105,7 @@ import {
 import {
   looksLikePremiumResponseJsonWrapper,
   normalizePremiumFullDraftResponsePayload,
+  resolvePremiumFullDraftAuthoritativeBody,
   tryUnwrapPremiumJsonEnvelopeDocument,
 } from "./premiumFullDraftResponseNormalization";
 import { logDevPostPremiumFullDraftPipelineReturn } from "./premiumFullDraftPostResponseTrace";
@@ -1159,10 +1160,18 @@ function logPremiumSecondGenerationBeforePost(args: {
   intakeFingerprint: string;
 }): void {
   const validation = args.effectiveFull.agreement_validation;
+  const authoritativeLen = Math.max(
+    args.doc.length,
+    (args.effectiveFull.document_text || "").trim().length,
+    (args.effectiveFull.server_full_document_text || "").trim().length,
+    resolvePremiumFullDraftAuthoritativeBody(
+      args.effectiveFull as PremiumFullDraftResult & Record<string, unknown>,
+    ).text.length,
+  );
   logPremiumSecondGenerationTriggered({
     reason: args.reason,
-    firstDocumentLen: args.doc.length,
-    firstServerFullDocumentLen: (args.effectiveFull.server_full_document_text || "").trim().length,
+    firstDocumentLen: authoritativeLen,
+    firstServerFullDocumentLen: authoritativeLen,
     generationOutcome: (args.effectiveFull.generation_outcome || "").trim() || null,
     agreementValidationPassed: validation?.passed ?? null,
     agreementValidationFailureCodes: (validation?.failures || []).map((f) => f.code),
@@ -2176,6 +2185,7 @@ async function runPremiumCompletionInner(
           typeof performance !== "undefined" ? performance.now() : Date.now();
         if (
           isCommercialServicesIntake(preGateIntake) &&
+          doc.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
           (doc.length < 2_500 ||
             countNumberedAgreementSections(doc) <= MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING)
         ) {
@@ -2285,18 +2295,37 @@ async function runPremiumCompletionInner(
           }
         }
         if (hard0 || !rejectPremiumDegradedFiller(authoritativeCandidate).ok) {
-          doc = "";
-          effectiveFull = { ...full, document_text: "" };
+          const substantiveNonfatalJsonParse =
+            !hard0 &&
+            c0 === "json_parse" &&
+            Math.max(
+              authoritativeCandidate.length,
+              pipelineNormalizedAuthoritativeText.length,
+              (full.document_text || "").trim().length,
+            ) >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+          if (!substantiveNonfatalJsonParse) {
+            doc = "";
+            effectiveFull = { ...full, document_text: "" };
+          } else if (authoritativeCandidate && authoritativeCandidate !== doc) {
+            doc = authoritativeCandidate;
+            effectiveFull = {
+              ...effectiveFull,
+              document_text: doc,
+              server_full_document_text: doc,
+              authoritative_draft: doc,
+            };
+            syncPremiumWireMetadataFromEffective(effectiveFull);
+          }
         } else if (authoritativeCandidate && authoritativeCandidate !== doc) {
           doc = authoritativeCandidate;
           effectiveFull = {
             ...effectiveFull,
             document_text: doc,
-            ...(wireServerFullDocumentText
-              ? { server_full_document_text: wireServerFullDocumentText }
-              : {}),
+            server_full_document_text:
+              wireServerFullDocumentText || doc,
             authoritative_draft: doc,
           };
+          syncPremiumWireMetadataFromEffective(effectiveFull);
         }
       }
       let usedClientRetry = false;
@@ -2423,6 +2452,12 @@ async function runPremiumCompletionInner(
           generationOutcome: wireGenerationOutcomeOnWire,
           failureCode: wireFailureCodeOnWire,
           wireServerFullDocumentText: wireServerFullDocumentText,
+          wireDocumentText: wireDocumentText,
+          wireAuthoritativeBodyLen: Math.max(
+            wireAuthoritativeBodyLen,
+            pipelineNormalizedAuthoritativeText.length,
+            (doc || "").trim().length,
+          ),
         })
       ) {
         freezeSessionPremiumBodyForGeneration(input.agreementGenerationId, doc, "server_full_draft");
@@ -2468,10 +2503,18 @@ async function runPremiumCompletionInner(
           Boolean(
             (globalThis as { __paidProAllowStructuralRetryInTest?: boolean }).__paidProAllowStructuralRetryInTest,
           );
+        const hasSubstantiveAuthoritativeWireBody =
+          Math.max(
+            (doc || "").trim().length,
+            pipelineNormalizedAuthoritativeText.length,
+            wireAuthoritativeBodyLen,
+            (wireDocumentText || "").trim().length,
+          ) >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
         if (
           (brandLicensingDegradedJsonParseRetry || !acc0.ok) &&
           structuralRetryEnabled &&
           !isLongCommerciallyUsablePremiumBody(doc.length) &&
+          !hasSubstantiveAuthoritativeWireBody &&
           (!skipStructuralRetry || brandLicensingDegradedJsonParseRetry)
         ) {
           const preStructuralRetryDoc = doc;
@@ -2849,12 +2892,22 @@ async function runPremiumCompletionInner(
       // "Retry Pro draft" (which let a short fallback masquerade as the SoT). Fatal placeholders and
       // dev-context leaks are still enforced (hard failure codes + the finalize pass below).
       const authoritativeServerFullOnWire =
-        wireServerFullDocumentText || (effectiveFull.server_full_document_text || "").trim();
+        wireServerFullDocumentText ||
+        (effectiveFull.server_full_document_text || "").trim() ||
+        (pipelineNormalizedAuthoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN
+          ? pipelineNormalizedAuthoritativeText
+          : "");
       const degradedJsonParseWithoutSubstantiveServerFull =
         isDegradedJsonParseWithoutSubstantiveServerFull({
           generationOutcome: wireGenerationOutcomeOnWire,
           failureCode: wireFailureCodeOnWire,
           wireServerFullDocumentText: wireServerFullDocumentText,
+          wireDocumentText: wireDocumentText,
+          wireAuthoritativeBodyLen: Math.max(
+            wireAuthoritativeBodyLen,
+            pipelineNormalizedAuthoritativeText.length,
+            (doc || "").trim().length,
+          ),
         });
       const serverFullDoc =
         authoritativeServerFullOnWire || extractPremiumApiServerCorpusText(effectiveFull);

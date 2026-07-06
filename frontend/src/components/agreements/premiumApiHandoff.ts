@@ -6,7 +6,7 @@
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
-import { normalizePremiumFullDraftResponsePayload } from "./premiumFullDraftResponseNormalization";
+import { resolvePremiumFullDraftAuthoritativeBody } from "./premiumFullDraftResponseNormalization";
 import { draftServerFullDocumentExists } from "./paidProRuntimeAuthorityEstablishment";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { hasUsablePremiumBodyText } from "./premiumPostCheckoutApplyEligible";
@@ -17,6 +17,7 @@ export type PremiumApiResultLog = {
   ok: boolean;
   status: number | null;
   hasServerFullDocumentText: boolean;
+  hasAuthoritativeServerDocument: boolean;
   serverLen: number;
   documentLen: number;
   normalizedLen: number;
@@ -28,15 +29,15 @@ export type PremiumApiResultLog = {
 
 export function extractPremiumApiServerCorpusText(result: Partial<PremiumFullDraftResult> | null | undefined): string {
   if (!result) return "";
-  const normalized = normalizePremiumFullDraftResponsePayload(
+  const resolved = resolvePremiumFullDraftAuthoritativeBody(
     result as Partial<PremiumFullDraftResult> & Record<string, unknown>,
   );
-  if (normalized.authoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
-    return normalized.authoritativeText;
+  if (resolved.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
+    return resolved.text;
   }
   const repair = String(result.server_repair_document_text ?? "").trim();
   if (repair.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return repair;
-  return normalized.authoritativeText || repair;
+  return resolved.text || repair;
 }
 
 export function premiumApiResultHasAuthoritativeServerCorpus(
@@ -57,18 +58,20 @@ export function logPremiumApiResultFromWire(args: {
   wire: Partial<PremiumFullDraftResult> | null | undefined;
   error?: string | null;
 }): void {
-  const normalized = normalizePremiumFullDraftResponsePayload(
+  const resolved = resolvePremiumFullDraftAuthoritativeBody(
     args.wire as Partial<PremiumFullDraftResult> & Record<string, unknown> | null | undefined,
   );
   const rawServerFull = String(args.wire?.server_full_document_text ?? "").trim();
+  const rawDocumentLen = String(args.wire?.document_text ?? "").trim().length;
   logPremiumApiResult({
     ok: args.ok,
     status: args.status,
-    hasServerFullDocumentText: normalized.authoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+    hasServerFullDocumentText: rawServerFull.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
+    hasAuthoritativeServerDocument: resolved.hasAuthoritativeServerDocument,
     serverLen: rawServerFull.length,
-    documentLen: String(args.wire?.document_text ?? "").trim().length,
-    normalizedLen: normalized.authoritativeText.length,
-    normalizedSource: normalized.sourceField,
+    documentLen: resolved.text.length > 0 ? resolved.text.length : rawDocumentLen,
+    normalizedLen: resolved.text.length,
+    normalizedSource: resolved.sourceField,
     keys: args.wire ? Object.keys(args.wire).slice(0, 24) : [],
     error: args.error ?? null,
     generationOutcome: String(args.wire?.generation_outcome ?? "").trim() || null,
