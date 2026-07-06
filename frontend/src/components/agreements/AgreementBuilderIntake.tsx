@@ -1562,6 +1562,12 @@ import {
   resolveDashboardPaidCreateCanonicalReviewSource,
 } from "./dashboardPaidCreateRoute";
 import {
+  planEntitledRewriteGenerationFailureTerminal,
+  resolveEntitledRewriteLaunchContext,
+  shouldTreatEntitledRewritePipelineResultAsGenerationFailure,
+  syncEntitledRewriteDraftSnapshot,
+} from "./paidProEntitledRewriteLaunch";
+import {
   readPaidProPipelineAcceptedCorpusBody,
 } from "./paidProPipelineAcceptedCorpus";
 import {
@@ -6350,23 +6356,60 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    * Already-paid Pro agreement: run POST /premium pipeline without Stripe when user taps “Improve draft” / upgrade CTAs.
    * Persists snapshot then reuses layout hydration so entitlement fields stay aligned with checkout success path.
    */
-  const runEntitledPremiumImprovementRewrite = React.useCallback(async () => {
+  const runEntitledPremiumImprovementRewrite = React.useCallback(async (launch?: {
+    gateDraft?: ParsedDraftShape;
+    rawIntake?: string;
+  }) => {
     if (entitledPremiumRewriteInFlightRef.current) return;
     markCurrentSessionProIntent();
     markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
     entitledPremiumRewriteInFlightRef.current = true;
-    const gateDraft = draftSnapshotRef.current ?? draft ?? readCreateComplexityResume()?.pending ?? null;
-    const raw = resolveRawIntakeForPremiumCheckout(gateDraft);
-    if (!raw?.trim() || !gateDraft) {
+    const launchCtx = resolveEntitledRewriteLaunchContext({
+      gateDraftOverride: launch?.gateDraft ?? null,
+      draftSnapshot: draftSnapshotRef.current,
+      draftState: draft,
+      resumeDraft: readCreateComplexityResume()?.pending ?? null,
+      rawIntakeOverride: launch?.rawIntake ?? null,
+      resolveRawIntake: (d) => resolveRawIntakeForPremiumCheckout(d),
+    });
+    if (!launchCtx.ok) {
       entitledPremiumRewriteInFlightRef.current = false;
-      logPaidProGenerationTerminalTransition({
+      const terminal = planEntitledRewriteGenerationFailureTerminal({
         reason: "entitled_rewrite_aborted",
-        outcome: "retry_recoverable",
+        dashboardRoute: isDashboardPaidCreateRouteActive(),
+        customMessage:
+          launchCtx.reason === "missing_raw_intake"
+            ? "Add your agreement details, then tap **Create draft** again."
+            : "Your structured draft is still preparing. Tap **Create draft** again in a moment.",
       });
-      setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
-      setPremiumPipelineUserMessage(null);
+      logPaidProGenerationTerminalTransition({
+        reason: terminal.terminalReason,
+        outcome: terminal.terminalOutcome,
+      });
+      setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+      setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+      setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+      setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+      setPremiumPostCheckoutPhase(terminal.premiumPostCheckoutPhase);
+      setPremiumPipelineUserMessage(terminal.premiumPipelineUserMessage);
+      setHardError(terminal.hardError);
+      setCreateFlowPhase(terminal.createFlowPhase);
+      setDisplayPhase(terminal.displayPhase);
+      setCreateUiStage(terminal.createUiStage);
+      if (terminal.clearPipelineRefs) {
+        premiumPipelineOutputBodyRef.current = "";
+        lastPremiumWinningCorpusRef.current = "";
+        hydratedPremiumBodyRef.current = "";
+        lastKnownGoodAuthoritativeDraftRef.current = "";
+        acceptedReviewCorpusRef.current = "";
+        authoritativeAgreementSnapshotRef.current = "";
+        setAgreementDocumentText(terminal.agreementDocumentPlain);
+      }
+      setLoading(false);
       return;
     }
+    const gateDraft = launchCtx.gateDraft;
+    const raw = launchCtx.rawIntake;
     console.info("[premium-flow] entitled_rewrite_start", { rawLen: raw.length });
     setPremiumPostCheckoutPhase("processing");
     setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
@@ -6453,10 +6496,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPremiumPipelineUserMessage(null);
         return;
       }
-      if (!authoritativePremiumPipelineResultForUiApply(result)) {
-        setHardError("We couldn't refresh your Pro draft right now. Try again in a moment.");
-        setPremiumPostCheckoutPhase(null);
-        setPremiumPipelineUserMessage(null);
+      if (shouldTreatEntitledRewritePipelineResultAsGenerationFailure(result)) {
+        logPaidProGenerationTerminalTransition({
+          reason: "no_server_authority",
+          outcome: "retry_recoverable",
+        });
+        const terminal = planEntitledRewriteGenerationFailureTerminal({
+          reason: "no_server_authority",
+          dashboardRoute: isDashboardPaidCreateRouteActive(),
+        });
+        setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+        setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+        setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+        setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+        setPremiumPostCheckoutPhase(terminal.premiumPostCheckoutPhase);
+        setPremiumPipelineUserMessage(terminal.premiumPipelineUserMessage);
+        setHardError(terminal.hardError);
+        setCreateFlowPhase(terminal.createFlowPhase);
+        setDisplayPhase(terminal.displayPhase);
+        setCreateUiStage(terminal.createUiStage);
+        premiumPipelineOutputBodyRef.current = "";
+        lastPremiumWinningCorpusRef.current = "";
+        hydratedPremiumBodyRef.current = "";
+        setAgreementDocumentText("");
+        setLoading(false);
         return;
       }
       const priorForMerge = draftSnapshotRef.current ?? readCreateComplexityResume()?.pending ?? gateDraft ?? null;
@@ -10581,7 +10644,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       clearCreateComplexityResume();
       setReviewShowsSimplifiedAdvancedDraft(false);
-      setDraft(parsed);
+      const launchDraft = skipFreeStarterCreateSubmit
+        ? syncEntitledRewriteDraftSnapshot(draftSnapshotRef, parsed)
+        : parsed;
+      setDraft(launchDraft);
       setFollowUpDetailTotal(0);
       setIntakeStepBuffer("");
       setDebouncedStepBuffer("");
@@ -10614,7 +10680,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             finalizeHelper: FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
           });
         }
-        void runEntitledPremiumImprovementRewrite();
+        void runEntitledPremiumImprovementRewrite({
+          gateDraft: launchDraft,
+          rawIntake: rawIntake,
+        });
         return true;
       }
       commitFreeDraftForReview({
