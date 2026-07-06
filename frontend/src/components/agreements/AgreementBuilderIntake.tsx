@@ -736,6 +736,7 @@ import {
   logPaidProRetryRequested,
   shouldBlockPaidProCanonicalFreezeOnApiFailure,
   shouldBlockSignerMetadataPaidProAuthority,
+  shouldSuppressPaidProCorpusRenderForRejectedPipeline,
 } from "./paidProApiFailureAuthorityGuard";
 import {
   armPaidProMutationTraceReviewReady,
@@ -22268,6 +22269,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signerIdentities: guidedSignerCanonicalIdentities,
       signingCorpusReady: guidedSigningCorpusSelectionReady,
       pinnedFinalizedSignerCorpus: buildPinnedFinalizedSignerCorpus(pinnedFinalizedSignerCorpusRef.current),
+      pipelineRenderSource:
+        lastPremiumPipelineRenderSourceRef.current ||
+        String(draft?.premium_render_source ?? "").trim() ||
+        null,
     });
   }, [
     paidProSignerMetadataSessionActive,
@@ -22297,6 +22302,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (createFlowPaidAcceptedOrAuthoritativeActive) {
       const validated = validatedPaidProReviewCorpus.plain.trim();
       if (validated.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return validated;
+      return "";
+    }
+    if (
+      shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+        pipelineSource:
+          lastPremiumPipelineRenderSourceRef.current ||
+          String(draft?.premium_render_source ?? "").trim() ||
+          null,
+      })
+    ) {
       return "";
     }
     return pickBestPaidProAuthoritativeCorpusPlain(

@@ -2050,6 +2050,10 @@ async function runPremiumCompletionInner(
           effectiveFull = jsonParsePromotion.wire as PremiumFullDraftResult;
           pipelineNormalizedAuthoritativeText = jsonParsePromotion.body;
           syncPremiumWireMetadataFromEffective(effectiveFull);
+          logPremiumApiResultFromWire({ ok: true, status: 200, wire: effectiveFull });
+          if (premiumApiResultHasAuthoritativeServerCorpus(effectiveFull)) {
+            markPremiumAuthoritativeServerCorpusAccepted();
+          }
         }
       }
       if (wireServerFullDocumentText.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) {
@@ -3647,6 +3651,18 @@ async function runPremiumCompletionInner(
               doc.length,
               freezeCommit.text.length,
             );
+            const preservedWire = (
+              wireCorpusForFreeze ||
+              pipelineNormalizedAuthoritativeText ||
+              originalWireServerFullDocumentText
+            ).trim();
+            if (preservedWire.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+              outMerged = stripClientPremiumArtifactBlocksFromDraft({
+                ...outMerged,
+                premium_server_full_document_text: preservedWire,
+                premium_full_document_text: preservedWire,
+              });
+            }
           }
           clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
           logPremiumCompletionDebug({
@@ -3669,11 +3685,11 @@ async function runPremiumCompletionInner(
           winningPremiumBodyText = "";
           premiumRenderSource = "rejected_paid_corpus";
           rejectedPaidCorpusDueToClientGates = true;
-          if (!proIntentGateMessage) {
+          if (substantiveWireRejected && lastSubstantiveWireFreezeRejectReason) {
+            proIntentGateMessage = `LawDog received a full Pro draft (${lastSubstantiveWireFreezeBodyLen.toLocaleString()} characters) but could not freeze it: ${lastSubstantiveWireFreezeRejectReason.replace(/_/g, " ")}. Tap **Retry Pro draft** to repair and try again.`;
+          } else if (!proIntentGateMessage) {
             proIntentGateMessage =
-              substantiveWireRejected && lastSubstantiveWireFreezeRejectReason
-                ? `LawDog received a full Pro draft (${lastSubstantiveWireFreezeBodyLen.toLocaleString()} characters) but could not freeze it: ${lastSubstantiveWireFreezeRejectReason.replace(/_/g, " ")}. Tap **Retry Pro draft** to repair and try again.`
-                : "LawDog could not establish a structure-safe Pro agreement from the server response. Tap **Retry Pro draft** to try again.";
+              "LawDog could not establish a structure-safe Pro agreement from the server response. Tap **Retry Pro draft** to try again.";
           }
         } else {
           doc = freezeCommit.text;
@@ -4299,7 +4315,11 @@ async function runPremiumCompletionInner(
     premiumRenderSource !== "rejected_paid_corpus" &&
     premiumRenderSource !== "premium_network_retryable" &&
     premiumRenderSource !== "premium_generation_retryable" &&
-    premiumRenderSource !== "premium_full_draft_cors_blocked"
+    premiumRenderSource !== "premium_full_draft_cors_blocked" &&
+    !(
+      rejectedPaidCorpusDueToClientGates &&
+      lastSubstantiveWireFreezeBodyLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+    )
   ) {
     const intakeForThinWireRecovery = (rawForSoT || rawIntake || "").trim();
     const thinWireFailureCode =
@@ -4723,6 +4743,7 @@ async function runPremiumCompletionInner(
       pipelineNormalizedAuthoritativeText || docTrimForSuppress
     ).trim();
     const substantiveServerFullOnWire =
+      lastSubstantiveWireFreezeBodyLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
       Math.max(
         lastWireServerFullDocumentLen,
         pipelineNormalizedAuthoritativeText.length,
@@ -5077,6 +5098,8 @@ async function runPremiumCompletionInner(
     const blockLateThinWireRecovery =
       premiumBodyHardRejectedForDevContextLeak ||
       substantiveServerFullOnWire ||
+      lastSubstantiveWireFreezeBodyLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+      (rejectedPaidCorpusDueToClientGates && Boolean(lastSubstantiveWireFreezeRejectReason)) ||
       (lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
         premiumJsonParseDegradedAttemptCount > 0);
     const localRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({

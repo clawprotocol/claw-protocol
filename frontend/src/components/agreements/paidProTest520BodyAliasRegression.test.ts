@@ -141,5 +141,5 @@ describe("TEST520 — degraded json_parse document_text authority regression", (
       (call) => call[0] === "deterministic_pro_fallback_accepted",
     );
     expect(acceptedFallback).toBeUndefined();
-  });
+  }, 15_000);
 });

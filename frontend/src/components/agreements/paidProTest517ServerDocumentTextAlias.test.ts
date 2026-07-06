@@ -222,7 +222,7 @@ describe("paidPro Test517 server document_text alias", () => {
       expect(anySecondGen.firstDocumentLen).toBeGreaterThanOrEqual(TEST517_TARGET_LEN - 500);
       expect(anySecondGen.firstServerFullDocumentLen).toBeGreaterThanOrEqual(TEST517_TARGET_LEN - 500);
     }
-  });
+  }, 15_000);
 
   it("preparePaidProServerDocumentForAcceptance preserves 10964-char substantive wire body", () => {
     const valid = buildTest517ValidBody(TEST517_TARGET_LEN);

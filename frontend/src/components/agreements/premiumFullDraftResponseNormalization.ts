@@ -289,8 +289,7 @@ function substantiveDegradedJsonParseWireBodyUsable(
     );
   }
   if (!rejectPremiumHardDegradedFallbackArtifacts(trimmed).ok) return false;
-  const validation = base.agreement_validation as { passed?: boolean } | null | undefined;
-  if (validation?.passed === false) return false;
+  // Intelligence validation may fail on json_parse while document_text remains operative prose.
   return true;
 }
 

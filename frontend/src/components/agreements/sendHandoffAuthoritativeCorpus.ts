@@ -20,6 +20,7 @@ import {
   assertPremiumPurposeHandoffBlocked,
   draftServerFullDocumentExists,
 } from "./paidProRuntimeAuthorityEstablishment";
+import { shouldSuppressPaidProCorpusRenderForRejectedPipeline } from "./paidProApiFailureAuthorityGuard";
 
 export {
   hasMaterialPremiumPipelineCorpus,
@@ -238,6 +239,9 @@ export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | nu
     return { field: "premium_server_full_document_text", text: acceptedCanonical };
   }
   if (!draft) return null;
+  if (shouldSuppressPaidProCorpusRenderForRejectedPipeline({ draft })) {
+    return null;
+  }
   const premiumish =
     Boolean(String(draft.premium_render_source ?? "").trim()) ||
     hasMaterialPremiumPipelineCorpus(draft);

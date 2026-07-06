@@ -6,6 +6,7 @@ import { tryBuildPaidProLocalDeterministicFallback } from "./paidProLocalDetermi
 import {
   isPremiumGenerationApiUnavailablePipelineSource,
   MIN_PAID_PRO_AUTHORITY_LEN,
+  shouldBlockPaidProLocalCorpusFallback,
 } from "./premiumGenerationApiAvailability";
 import type { PremiumRenderResolveSource } from "./premiumRenderSourceResolver";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
@@ -270,7 +271,10 @@ export function resolvePaidProCorpusAuthority(args: {
   const apiUnavailable = args.candidates.some((c) =>
     isPremiumGenerationApiUnavailablePipelineSource(c.pipelineSource),
   );
-  if (args.allowDeterministicFallback !== false && !apiUnavailable && args.intakeText) {
+  const blockLocalFallback =
+    apiUnavailable ||
+    args.candidates.some((c) => shouldBlockPaidProLocalCorpusFallback(c.pipelineSource));
+  if (args.allowDeterministicFallback !== false && !blockLocalFallback && args.intakeText) {
     const local = tryBuildPaidProLocalDeterministicFallback(args.intakeText, args.draft);
     if (local) {
       const validation = validatePaidProCorpusCandidate({

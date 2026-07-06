@@ -3,6 +3,7 @@ import {
   authoritativeDocumentForSurface,
   logIllegalPostAcceptanceMutationAttempt,
 } from "../../components/agreements/authoritativeAgreementDocument";
+import { shouldSuppressPaidProCorpusRenderForRejectedPipeline } from "../../components/agreements/paidProApiFailureAuthorityGuard";
 import { PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN } from "../../components/agreements/paidProFinalHydratedCorpus";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "../../components/agreements/paidProSignerMetadataCommitPolicy";
 import {
@@ -13,6 +14,7 @@ import { resolvePaidProPostFinalizeReviewPlain } from "../../components/agreemen
 import { readConsumedPaidProSignerMetadataAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
 import { getPaidProDocumentForSurface, hashPaidProCorpus } from "../../components/agreements/paidProSourceOfTruth";
 import { applyPaidProUserVisibleDisplayPrep } from "../../components/agreements/paidProDisplayPlainAuthority";
+import { isAuthoritativePremiumPipelineRenderSource } from "../../components/agreements/premiumRenderSourceResolver";
 import { peekReviewFirstPinnedCorpus } from "./reviewFirstSendSurface";
 import {
   logReviewCorpusAuthority,
@@ -212,11 +214,26 @@ export function resolveReviewFirstDisplayCorpus(
     }
   }
 
-  for (const source of [
-    "server_full_document_text",
-    "premium_server_full_document_text",
-    "premium_full_document_text",
-  ] as const) {
+  if (shouldSuppressPaidProCorpusRenderForRejectedPipeline({ draft })) {
+    return null;
+  }
+
+  const preferPremiumPipelineFields = isAuthoritativePremiumPipelineRenderSource(
+    String(draft.premium_render_source ?? "").trim(),
+  );
+  const primaryFullTextFields = preferPremiumPipelineFields
+    ? ([
+        "premium_server_full_document_text",
+        "premium_full_document_text",
+        "server_full_document_text",
+      ] as const)
+    : ([
+        "server_full_document_text",
+        "premium_server_full_document_text",
+        "premium_full_document_text",
+      ] as const);
+
+  for (const source of primaryFullTextFields) {
     const text = stringField(draft, source);
     if (text.length >= 500) {
       return commitReviewFirstCorpus({ text, source, hash: corpusHash(text) }, draft, surface);

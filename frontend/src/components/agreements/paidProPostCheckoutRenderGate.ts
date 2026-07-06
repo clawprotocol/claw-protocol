@@ -25,7 +25,7 @@ import {
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
 import { isNonfatalGenerationFailureCode } from "./premiumAcceptancePolicy";
-import { shouldBlockPaidProReviewReadinessFromFallbackCorpus } from "./paidProApiFailureAuthorityGuard";
+import { shouldBlockPaidProReviewReadinessFromFallbackCorpus, shouldSuppressPaidProCorpusRenderForRejectedPipeline } from "./paidProApiFailureAuthorityGuard";
 import { readAcceptedPipelineReviewCorpusPlain } from "./paidProAcceptedPipelineReviewCorpus";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
@@ -244,6 +244,9 @@ export function resolvePaidProPostCheckoutRecoveryDisplayPlain(args?: {
       snap?.premiumRenderResolveSource ??
       "",
   ).trim();
+  if (shouldSuppressPaidProCorpusRenderForRejectedPipeline({ pipelineSource: pipeline, draft: args?.draft ?? null })) {
+    return "";
+  }
   const candidates = [
     args?.winningPremiumBodyText,
     args?.hydratedPremiumBody,

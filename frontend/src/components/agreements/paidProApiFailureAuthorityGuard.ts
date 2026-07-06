@@ -9,6 +9,7 @@ import {
   isPremiumGenerationApiUnavailableForUi,
   isPremiumGenerationApiUnavailablePipelineSource,
   MIN_PAID_PRO_AUTHORITY_LEN,
+  shouldBlockPaidProLocalCorpusFallback,
 } from "./premiumGenerationApiAvailability";
 
 export type PaidProApiFailureGuardContext = {
@@ -36,6 +37,24 @@ const REJECTED_PAID_CORPUS_PIPELINE_SOURCES = new Set<string>([
   "rejected_paid_corpus",
   "premium_generation_retryable",
 ]);
+
+export function isRejectedPaidCorpusPipelineSource(source: string | null | undefined): boolean {
+  return String(source || "").trim() === "rejected_paid_corpus";
+}
+
+/** Block draft-field / local fallback render when paid create pipeline rejected the corpus. */
+export function shouldSuppressPaidProCorpusRenderForRejectedPipeline(args: {
+  pipelineSource?: string | null;
+  premiumRenderSource?: string | null;
+  draft?: { premium_render_source?: string | null } | null;
+  hasPaidProSourceOfTruth?: boolean;
+}): boolean {
+  if (args.hasPaidProSourceOfTruth ?? hasPaidProSourceOfTruth()) return false;
+  const src = String(
+    args.pipelineSource ?? args.premiumRenderSource ?? args.draft?.premium_render_source ?? "",
+  ).trim();
+  return shouldBlockPaidProLocalCorpusFallback(src) && isRejectedPaidCorpusPipelineSource(src);
+}
 
 /** True when canonical_working_draft / Pro freeze must not run on this corpus. */
 export function shouldBlockPaidProCanonicalFreezeOnApiFailure(args: {
@@ -89,6 +108,7 @@ export function shouldBlockPaidProReviewReadinessFromFallbackCorpus(args: {
   hasPaidProSourceOfTruth?: boolean;
 }): boolean {
   if (args.hasPaidProSourceOfTruth ?? hasPaidProSourceOfTruth()) return false;
+  if (isRejectedPaidCorpusPipelineSource(args.premiumRenderSource)) return true;
   if (!isPaidProApiFailureBlockingPaidProAuthority(args)) return false;
   return args.corpusLen < PAID_PRO_AUTHORITY_MIN_LEN || args.corpusLen < MIN_PAID_PRO_AUTHORITY_LEN;
 }

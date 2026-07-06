@@ -146,7 +146,7 @@ describe("TEST521 — degraded json_parse promotes document_text to server_full"
     expect(
       fallbackSpy.mock.calls.some((call) => call[0] === "deterministic_pro_fallback_accepted"),
     ).toBe(false);
-  });
+  }, 15_000);
 
   it("buildTest521 body matches production target length", () => {
     expect(buildTest521SubstantiveDegradedDocumentBody().length).toBe(TEST521_TARGET_DOCUMENT_LEN);

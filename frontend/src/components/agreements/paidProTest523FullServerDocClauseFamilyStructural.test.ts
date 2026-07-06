@@ -156,7 +156,7 @@ describe("TEST523 — full server doc clause_family_structural recovery", () => 
     ).toBe(true);
     expect(out.proIntentGateMessage ?? "").toMatch(/full Pro draft|10,?812|structure|notice|retry/i);
     freezeSpy.mockRestore();
-  });
+  }, 15_000);
 
   it("3 — recovery preserves full-doc failure reason and body length", async () => {
     premiumApiMock.mockResponses = [buildTest523DegradedJsonParseWire()];

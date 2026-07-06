@@ -24,6 +24,7 @@ import {
   shouldUsePaidProSourceOfTruthDisplayOnly,
 } from "./paidProAuthoritativeRenderGate";
 import { resolvePaidProPostCheckoutFirstReviewPlain } from "./paidProPostCheckoutRenderGate";
+import { shouldSuppressPaidProCorpusRenderForRejectedPipeline } from "./paidProApiFailureAuthorityGuard";
 import {
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruthText,
@@ -114,6 +115,14 @@ export function resolveAuthoritativePaidProReviewPlain(
   const pinnedPlain = readPaidProPinnedSignerAppliedCorpus().trim();
   if (pinnedPlain.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
     return finalizeAuthoritativePaidProReviewPlain(pinnedPlain);
+  }
+  if (
+    shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+      pipelineSource: args?.premiumRenderSource,
+      draft: args?.draft ?? null,
+    })
+  ) {
+    return "";
   }
   const postCheckoutRecovery = resolvePaidProPostCheckoutFirstReviewPlain({
     draft: args?.draft ?? null,
@@ -241,8 +250,16 @@ export function resolvePaidProFinalReviewVisiblePlain(args: {
   const authoritative = resolveAuthoritativePaidProReviewPlain({
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
+    premiumRenderSource: args.draft?.premium_render_source ?? null,
   });
   if (authoritative.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+    if (
+      shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+        draft: args.draft ?? null,
+      })
+    ) {
+      return "";
+    }
     return (args.boundaryPlain || args.displayCandidatePlain || "").trim();
   }
   const boundary = (args.boundaryPlain || "").trim();

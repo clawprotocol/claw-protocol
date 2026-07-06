@@ -8,6 +8,7 @@ import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "./paidProAuthorityConstants";
 import {
   normalizePremiumFullDraftResponsePayload,
+  promoteSubstantiveDegradedJsonParseWireToServerFull,
   resolvePremiumFullDraftAuthoritativeBody,
 } from "./premiumFullDraftResponseNormalization";
 import { draftServerFullDocumentExists } from "./paidProRuntimeAuthorityEstablishment";
@@ -32,15 +33,27 @@ export type PremiumApiResultLog = {
 
 export function extractPremiumApiServerCorpusText(result: Partial<PremiumFullDraftResult> | null | undefined): string {
   if (!result) return "";
-  const resolved = resolvePremiumFullDraftAuthoritativeBody(
+  const promoted = promoteSubstantiveDegradedJsonParseWireToServerFull(
     result as Partial<PremiumFullDraftResult> & Record<string, unknown>,
   );
-  if (resolved.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
-    return resolved.text;
+  const resolved = resolvePremiumFullDraftAuthoritativeBody(promoted.wire);
+  const corpusLen = Math.max(
+    resolved.text.length,
+    promoted.body.length,
+    String(promoted.wire.server_full_document_text ?? "").trim().length,
+    String(promoted.wire.document_text ?? "").trim().length,
+  );
+  if (corpusLen >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) {
+    if (resolved.text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return resolved.text;
+    if (promoted.body.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return promoted.body;
+    const serverFull = String(promoted.wire.server_full_document_text ?? "").trim();
+    if (serverFull.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return serverFull;
+    const doc = String(promoted.wire.document_text ?? "").trim();
+    if (doc.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return doc;
   }
   const repair = String(result.server_repair_document_text ?? "").trim();
   if (repair.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) return repair;
-  return resolved.text || repair;
+  return resolved.text || promoted.body || repair;
 }
 
 export function premiumApiResultHasAuthoritativeServerCorpus(
@@ -69,14 +82,18 @@ export function logPremiumApiResultFromWire(args: {
   const mergedServerLen = Math.max(
     String(normalized.wire.server_full_document_text ?? "").trim().length,
     String((normalized.wire as Record<string, unknown>).serverFullDocumentText ?? "").trim().length,
+    String(normalized.wire.document_text ?? "").trim().length,
+    normalized.authoritativeText.length,
     corpus.length,
     resolved.text.length,
   );
+  const hasAuthoritativeServerDocument =
+    mergedServerLen >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN || resolved.hasAuthoritativeServerDocument;
   logPremiumApiResult({
     ok: args.ok,
     status: args.status,
     hasServerFullDocumentText: mergedServerLen >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
-    hasAuthoritativeServerDocument: resolved.hasAuthoritativeServerDocument,
+    hasAuthoritativeServerDocument,
     serverLen: mergedServerLen,
     documentLen: resolved.text.length > 0 ? resolved.text.length : corpus.length,
     normalizedLen: resolved.text.length,

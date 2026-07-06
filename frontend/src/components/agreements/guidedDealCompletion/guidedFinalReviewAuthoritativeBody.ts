@@ -20,6 +20,7 @@ import { resolvePaidProFinalHydratedCorpusForSurface } from "../paidProFinalHydr
 import { resolvePaidProReviewRenderPlain, resolvePaidProReviewRenderSource } from "../paidProReviewRenderCorpus";
 import { logGuidedFinalReviewRenderStable } from "../paidProReviewStability";
 import { readAcceptedPipelineReviewCorpusPlain } from "../paidProAcceptedPipelineReviewCorpus";
+import { shouldSuppressPaidProCorpusRenderForRejectedPipeline } from "../paidProApiFailureAuthorityGuard";
 
 export const GUIDED_FINAL_REVIEW_AUTHORITATIVE_MIN_LEN = 1500;
 
@@ -141,6 +142,8 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
   signingCorpusReady?: boolean;
   /** Immutable signer-applied corpus — wins over hydrate/picker/server candidates. */
   pinnedFinalizedSignerCorpus?: PinnedFinalizedSignerCorpus | null;
+  /** Paid create pipeline marker — blocks thin draft-field fallback after rejected_paid_corpus. */
+  pipelineRenderSource?: string | null;
 }): GuidedFinalReviewAuthoritativeBodyResolution {
   const minLen = args.minLen ?? GUIDED_FINAL_REVIEW_AUTHORITATIVE_MIN_LEN;
   const identities = args.signerIdentities ?? [];
@@ -274,6 +277,22 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
     };
     logGuidedFinalReviewAuthoritativeBody(resolution);
     return resolution;
+  }
+
+  if (
+    shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+      pipelineSource: args.pipelineRenderSource,
+    })
+  ) {
+    const empty: GuidedFinalReviewAuthoritativeBodyResolution = {
+      body: "",
+      source: "none",
+      len: 0,
+      hasSignerHydration,
+      finalizedHash: "",
+    };
+    logGuidedFinalReviewAuthoritativeBody(empty);
+    return empty;
   }
 
   const eligible = args.candidates

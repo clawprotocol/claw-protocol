@@ -24,6 +24,7 @@ import {
   logPremiumGenerationApiUnavailable,
   MIN_PAID_PRO_AUTHORITY_LEN,
   PREMIUM_GENERATION_DRAFT_API_PATH,
+  shouldBlockPaidProLocalCorpusFallback,
 } from "./premiumGenerationApiAvailability";
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
 import { getPaidProSourceOfTruth, getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -37,6 +38,7 @@ import {
   shouldPreserveAcceptedServerFullDraftText,
 } from "./proCorpusSourcePath";
 import { requireAuthoritativeCorpusForSurface } from "./authoritativeAgreementDocument";
+import { shouldSuppressPaidProCorpusRenderForRejectedPipeline } from "./paidProApiFailureAuthorityGuard";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import { applyPaidProDomainScopeGuard, shouldApplyAiWorkflowServicesQualityFloor } from "./paidProDomainScopeGuard";
@@ -389,6 +391,30 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     (args.paidAuthoritativeProBody || "").trim().length >= 500 ||
     (args.premiumWinningBodyText || "").trim().length >= MIN_PAID_PRO_AUTHORITY_LEN ||
     latchedPipelineBody.length >= MIN_PAID_PRO_AUTHORITY_LEN;
+  if (
+    shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+      pipelineSource: pipeSrc,
+      draft: args.draft ?? null,
+    })
+  ) {
+    return {
+      plainText: "",
+      sourceUsed: "none",
+      audit: {
+        selected: "none",
+        forcedPremiumSource: true,
+        candidates: [
+          {
+            source: "none",
+            len: 0,
+            nonThin: false,
+            eligible: false,
+            reason: "rejected_paid_corpus_no_local_fallback",
+          },
+        ],
+      },
+    };
+  }
   const lockedReviewCorpus = requireAuthoritativeCorpusForSurface({
     surface: "pro_review",
     source: "premium_readonly_pick",
@@ -683,7 +709,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       premiumCheckoutCompleted: true,
       paidAuthoritativeFallback: paidFallback,
       pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
-      allowLocalDeterministicFallback: !isPremiumGenerationApiUnavailablePipelineSource(pipeSrc),
+      allowLocalDeterministicFallback: !shouldBlockPaidProLocalCorpusFallback(pipeSrc),
       extraCandidates,
       stickyPlainText: sticky || hydrated || paidFallback,
       stickyTier: mapRenderSourceToAuthorityTier({

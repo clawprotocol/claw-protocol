@@ -27,6 +27,14 @@ export function isPremiumGenerationApiUnavailablePipelineSource(
   return API_UNAVAILABLE_PIPELINE_SOURCES.has(s);
 }
 
+/** Block thin local/deterministic corpus fallback after substantive full-doc rejection. */
+export function shouldBlockPaidProLocalCorpusFallback(
+  source: string | null | undefined,
+): boolean {
+  const s = String(source || "").trim();
+  return s === "rejected_paid_corpus" || isPremiumGenerationApiUnavailablePipelineSource(s);
+}
+
 export function shouldBlockLivePreviewAsPaidProAuthority(args: {
   pipelineSource?: string | null;
   previewLen: number;
