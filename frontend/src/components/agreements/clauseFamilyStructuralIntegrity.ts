@@ -303,7 +303,22 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
     opts?.parties,
     noticeRoleContext,
   );
-  const requiredStanzas = requiredNoticeStanzaCount(opts?.parties, opts?.requireTwoPartyStanzas !== false);
+  // TEST542 — when the caller supplies an authoritative parties list (every freeze/gate callsite does),
+  // the excess/missing decision MUST use the same intake-manifest-ceiling-aware authority
+  // (canonicalAuthorityPartyCount, computed above with the notice roleContext) that the freeze trim and
+  // the diagnostic log already use. The prior context-free requiredNoticeStanzaCount(opts.parties)
+  // ignored the intake ceiling, so an authoritative-looking phantom Nth party leaking into the parties
+  // list (from contaminated consumed authority / review-render parties) inflated the required count
+  // above the number of real legal parties the intake resolves. A correctly-trimmed valid corpus was
+  // then rejected with a spurious missing_/excess_party_notice_stanzas, the freeze gate failed, SoT was
+  // never established, and the review fell back to the retry shell (blank review). This is
+  // cache-independent, which is why the TEST541 safe-display cache fixes did not clear the live failure.
+  // The pure-diagnostic callsite (no parties list) keeps its conservative context-free count.
+  const callerSuppliedPartiesList = Array.isArray(opts?.parties);
+  const requiredStanzas =
+    callerSuppliedPartiesList && canonicalAuthorityPartyCount >= 2
+      ? canonicalAuthorityPartyCount
+      : requiredNoticeStanzaCount(opts?.parties, opts?.requireTwoPartyStanzas !== false);
   const noticeValidationPartySource =
     canonicalAuthorityPartyCount >= 2 ? "canonical_authority_parties" : "minimum_two_party";
 
