@@ -207,15 +207,24 @@ describe("TEST536 — authoritative intake manifest party count", () => {
     ).toThrow(/authority_placeholder_legal_entity/);
   });
 
-  // E. A rejected deterministic recovery candidate returns ok:false (routes to premium retry, not blank review).
-  it("E. deterministic recovery on a drifted draft is rejected, not silently accepted", () => {
+  // E. Deterministic recovery on a repairable drifted draft rebuilds the canonical 4-party manifest
+  //    (Redwood restored from intake authority) and passes the freeze gate — never silently accepted
+  //    with a wrong-N corpus, and never left blank. (TEST537: valid 4-party recovery renders.)
+  it("E. deterministic recovery repairs a drifted draft back to the canonical 4-party manifest", () => {
     const drifted = draftWith([TEST518_SUMMIT, TEST518_BLUE_HARBOR, TEST518_IRON_GATE]); // Redwood dropped
     const recovery = previewRecoverPaidProFreezeCandidate({
       draft: drifted,
       intakeText: TEST536_SIGNER_BLOCK_INTAKE,
     });
-    expect(recovery.ok).toBe(false);
-    expect(recovery.rejectReason).toBeTruthy();
+    expect(recovery.ok).toBe(true);
+    expect(recovery.rejectReason).toBeNull();
+    expect(recovery.parties).toHaveLength(4);
+    for (let i = 0; i < 4; i++) {
+      expect(partyEquals(recovery.parties[i]!.name, CANONICAL_FOUR[i]!)).toBe(true);
+    }
+    for (const p of recovery.parties) {
+      expect(isNonAuthoritativeFreezePartyName(p.name)).toBe(false);
+    }
   });
 
   // F. A valid, fully-consistent 4-party candidate passes the manifest gate (no false rejects).

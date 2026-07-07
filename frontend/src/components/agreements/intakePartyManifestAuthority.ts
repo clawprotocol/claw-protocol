@@ -4,7 +4,7 @@
  */
 
 import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { isAuthoritativeLegalEntityName, isPartyMetadataRoleLabel } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProSignerMetadataAuthority";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { extractLegalEntityFromIntakeLine, resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
@@ -86,6 +86,10 @@ function parseColonRoleManifestLine(line: string, partyNumber: number): IntakePa
   if (!m?.[1] || !m[2]) return null;
   const roleLabel = m[1].trim();
   if (NON_PARTY_COLON_ROLE_RE.test(roleLabel)) return null;
+  // TEST537 — per-party metadata field lines ("Address: …", "Signer Title: …", "Email: …")
+  // are NOT party manifest rows. Without this, stacked signer-block intake seeds phantom parties
+  // from street addresses / job titles and drops the real legal entities entirely.
+  if (isPartyMetadataRoleLabel(roleLabel)) return null;
   if (NUMBERED_MANIFEST_LINE_RE.test(line) || BULLET_MANIFEST_LINE_RE.test(line)) return null;
   return parseColonRoleManifestBody(m[2], partyNumber, roleLabel);
 }
@@ -160,7 +164,56 @@ function parseManifestLine(line: string, fallbackIndex: number): IntakePartyMani
   return null;
 }
 
-/** Ordered manifest rows from colon-role, numbered, or bullet party list intake lines. */
+const ENTITY_ROLE_HEADING_RE = /^(.+?)\s*\(([^)]+)\)\s*\.?\s*$/;
+const INLINE_ADDRESS_FIELD_RE = /^(?:address|mailing\s+address|physical\s+address|registered\s+address|principal\s+address)\s*[:\-]\s*(.+)$/i;
+
+/** True when the line is an `Entity (Role)` party heading — not a metadata field parenthetical. */
+function entityRoleHeadingRoleLabel(line: string): string | null {
+  const m = line.match(ENTITY_ROLE_HEADING_RE);
+  if (!m?.[1] || !m[2]) return null;
+  const roleLabel = m[2].trim();
+  if (isPartyMetadataRoleLabel(roleLabel)) return null;
+  if (US_CITY_STATE_ZIP_TAIL_RE.test(line)) return null;
+  return roleLabel;
+}
+
+/**
+ * TEST537 — stacked signer-block intake: each party is a standalone `Entity (Role)` heading line
+ * followed by `Address:` / `Authorized Signer:` / `Signer Title:` / `Email:` metadata lines (no
+ * number/bullet prefix). Parse the heading as the party and attach its block's Address only.
+ */
+function extractEntityHeadingManifestRows(lines: readonly string[]): IntakePartyManifestRow[] {
+  const rows: IntakePartyManifestRow[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (NUMBERED_MANIFEST_LINE_RE.test(line) || BULLET_MANIFEST_LINE_RE.test(line)) continue;
+    const roleLabel = entityRoleHeadingRoleLabel(line);
+    if (roleLabel == null) continue;
+    const entityCore = line.match(ENTITY_ROLE_HEADING_RE)![1]!.trim();
+    const partyLegalName = normalizeManifestEntity(entityCore);
+    if (!partyLegalName) continue;
+    if (rows.some((existing) => partyLegalNamesMatch(existing.partyLegalName, partyLegalName))) continue;
+    let partyAddress = "";
+    for (let j = i + 1; j < lines.length; j++) {
+      if (entityRoleHeadingRoleLabel(lines[j]!) != null) break;
+      const addrMatch = lines[j]!.match(INLINE_ADDRESS_FIELD_RE);
+      if (addrMatch?.[1]) {
+        partyAddress = normalizeCanonicalPartyAddress(addrMatch[1].trim());
+        break;
+      }
+    }
+    rows.push({
+      partyNumber: rows.length + 1,
+      partyLegalName,
+      roleLabel,
+      entityType: "",
+      partyAddress,
+    });
+  }
+  return rows;
+}
+
+/** Ordered manifest rows from colon-role, entity-heading, numbered, or bullet party list intake lines. */
 export function extractIntakePartyManifestRows(
   intakeRaw: string | null | undefined,
 ): IntakePartyManifestRow[] {
@@ -199,6 +252,16 @@ export function extractIntakePartyManifestRows(
     }
     out.push(row);
   }
+  if (out.length >= 2) {
+    return out.sort((a, b) => a.partyNumber - b.partyNumber);
+  }
+
+  // TEST537 — fall back to standalone `Entity (Role)` heading blocks (stacked signer metadata).
+  const headingRows = extractEntityHeadingManifestRows(lines);
+  if (headingRows.length >= 2) {
+    return headingRows;
+  }
+
   return out.sort((a, b) => a.partyNumber - b.partyNumber);
 }
 

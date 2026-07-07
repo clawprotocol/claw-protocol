@@ -305,6 +305,19 @@ export function isPartyMetadataFieldLabelValue(name: string): boolean {
   return PARTY_METADATA_FIELD_LABEL_PREFIX_RE.test((name || "").replace(/\s+/g, " ").trim());
 }
 
+/**
+ * TEST537 — a colon-role manifest line ("Address: 710 …", "Signer Title: CEO") carries a
+ * per-party metadata field as its role label. Such lines must never seed a legal-party manifest
+ * row; only real role labels ("Client", "Lead Provider") may. This checks the bare label
+ * (no trailing colon) captured by the colon-role parser.
+ */
+const PARTY_METADATA_ROLE_LABEL_RE =
+  /^(?:address|physical\s+address|mailing\s+address|party\s+address|registered\s+address|principal\s+address|authorized\s+signer|signatory|signer(?:\s+name|\s+title|\s+email)?|representative(?:\s+name|\s+title)?|represented\s+by|human\s+signer|e-?mail|email(?:\s+for\s+notice)?|notice\s+email|contact\s+email|attn|attention|phone|tel|telephone|mobile|fax|contact|title|name|role)$/i;
+
+export function isPartyMetadataRoleLabel(roleLabel: string): boolean {
+  return PARTY_METADATA_ROLE_LABEL_RE.test((roleLabel || "").replace(/\s+/g, " ").trim());
+}
+
 /** Reject contract prose fragments mistaken for party names. */
 export function isDisallowedPartyPhrase(name: string): boolean {
   const t = normPartyLabel(name);
