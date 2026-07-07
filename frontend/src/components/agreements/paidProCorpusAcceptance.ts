@@ -44,6 +44,7 @@ import {
   previewRecoverPaidProFreezeCandidate,
 } from "./paidProFreezeCandidate";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { clearAcceptedProCorpusSafeDisplayCache } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { hasProGenerationAdoptionForSession } from "./paidProGenerationAdoption";
 import {
   commitPaidProPipelineValidationAcceptance,
@@ -364,6 +365,10 @@ export function validatePaidProOutput(args: {
     }
   };
   const rejectAt = (validationStage: string, reasons: string[], rejectedRule?: string | null) => {
+    // TEST541 — never let a rejected candidate's safe-display bytes remain memoized as authority.
+    // Clearing on reject guarantees the retry recomputes instead of replaying the failed corpus
+    // (the excess_party_notice_stanzas / blank-review retry loop).
+    clearAcceptedProCorpusSafeDisplayCache();
     if (freezePrepOk) {
       logPaidProFreezeCandidateDecision({
         accepted: false,

@@ -6,7 +6,52 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
+import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
+import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import type { AcceptedProCorpusSafeDisplayOpts, AcceptedProCorpusSafeDisplayResult } from "./acceptedProCorpusSafeDisplay";
+
+declare const __PAID_PRO_CACHE_BUILD_ID__: string | undefined;
+
+/**
+ * TEST541 — bump when the safe-display transform semantics change so a long-lived tab cannot serve
+ * bytes produced by an older schema. Combined with the build id below this makes the memo key carry
+ * an explicit schema+build discriminator.
+ */
+export const PAID_PRO_SAFE_DISPLAY_CACHE_SCHEMA_VERSION = "v2";
+
+/** Per-build discriminator (git short SHA / build timestamp) injected by vite `define`. */
+export function paidProSafeDisplayCacheBuildId(): string {
+  try {
+    if (typeof __PAID_PRO_CACHE_BUILD_ID__ === "string" && __PAID_PRO_CACHE_BUILD_ID__) {
+      return __PAID_PRO_CACHE_BUILD_ID__;
+    }
+  } catch {
+    // define not present (tests / non-vite runtime)
+  }
+  return "dev";
+}
+
+/**
+ * TEST541 — the safe-display transform reads MUTABLE global authority state (frozen canonical
+ * manifest + consumed signer-metadata authority). Those are real inputs to the pure transform, so
+ * they MUST be part of the memo key. Omitting them let a corpus repaired under a contaminated
+ * authority state (e.g. an extra "If to" stanza) be replayed verbatim after the authority was later
+ * corrected — surfacing as excess_party_notice_stanzas even though live counts read 4/4/4.
+ */
+function authorityStateFingerprint(): string {
+  try {
+    const frozen = readFrozenCanonicalManifestPartyNames();
+    const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
+    const blob = [
+      `f:${frozen.join("|")}`,
+      `c:${consumed.map((p) => String(p?.partyLegalName ?? "").trim()).join("|")}`,
+    ].join("\n");
+    if (!blob.trim() || blob === "f:\nc:") return "no-authority";
+    return blob.length >= 40 ? hashPaidProCorpus(blob) : blob;
+  } catch {
+    return "no-authority";
+  }
+}
 
 const resultCache = new Map<string, AcceptedProCorpusSafeDisplayResult>();
 
@@ -36,7 +81,9 @@ export function buildAcceptedProCorpusSafeDisplayCacheKey(
   const recoveryKind = (opts?.recoveryKind ?? "").trim() || "no-recovery";
   const sourceKind = (opts?.sourceKind ?? "").trim() || "no-source";
   const partyCount = opts?.partyCount ?? 0;
-  return `${corpusHash}|${intakeFp}|${draftFp}|${generationId}|${recoveryKind}|${sourceKind}|party:${partyCount}|${surfaceMode(opts)}|${surface}`;
+  const version = `${PAID_PRO_SAFE_DISPLAY_CACHE_SCHEMA_VERSION}:${paidProSafeDisplayCacheBuildId()}`;
+  const authorityFp = authorityStateFingerprint();
+  return `${version}|auth:${authorityFp}|${corpusHash}|${intakeFp}|${draftFp}|${generationId}|${recoveryKind}|${sourceKind}|party:${partyCount}|${surfaceMode(opts)}|${surface}`;
 }
 
 function corpusHashForCache(corpus: string): string {
@@ -56,6 +103,22 @@ export function writeAcceptedProCorpusSafeDisplayCache(
   value: AcceptedProCorpusSafeDisplayResult,
 ): void {
   resultCache.set(key, value);
+}
+
+/**
+ * Production clear — used by the retry / SoT-clear path so a rejected paid Pro validation candidate
+ * is never replayed as safe-display authority on the next generation attempt.
+ */
+export function clearAcceptedProCorpusSafeDisplayCache(): void {
+  resultCache.clear();
+}
+
+/** Evict a single memoized entry (e.g. a candidate that just failed validation). */
+export function evictAcceptedProCorpusSafeDisplayCacheEntry(
+  corpus: string,
+  opts?: AcceptedProCorpusSafeDisplayOpts,
+): boolean {
+  return resultCache.delete(buildAcceptedProCorpusSafeDisplayCacheKey(corpus, opts));
 }
 
 export function clearAcceptedProCorpusSafeDisplayCacheForTests(): void {

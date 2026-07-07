@@ -4,6 +4,7 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import { clearAcceptedProCorpusSafeDisplayCache } from "./paidProAcceptedCorpusSafeDisplayCache";
 import {
   repairAgreementTemplatePlaceholders,
   repairPaidProFreezePlaceholderAuthority,
@@ -1280,6 +1281,10 @@ export function previewRecoverPaidProFreezeCandidate(
 }
 
 export function clearPartialPaidProAuthoritativeState(): void {
+  // TEST541 — a failed freeze/validation attempt must not leave its safe-display bytes memoized;
+  // otherwise the retry re-runs against the same intake, hits the stale cache, and re-fails
+  // identically (the excess_party_notice_stanzas retry loop). Clear the memo so retry recomputes.
+  clearAcceptedProCorpusSafeDisplayCache();
   logProCorpusSourceMap({
     stage: "client_gates_passed",
     source: "paid_pro_freeze_candidate",

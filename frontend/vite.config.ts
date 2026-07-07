@@ -1,9 +1,30 @@
 // frontend/vite.config.ts
 /// <reference types="vitest/config" />
+import { execSync } from "node:child_process";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+// Build/deploy discriminator baked into caches whose entries must never survive a code deploy
+// (e.g. the paid Pro safe-display memo). Changes every commit so a new build can never replay a
+// stale repair output produced by older code. Falls back to a build timestamp outside a git repo.
+function resolvePaidProCacheBuildId(): string {
+  try {
+    const sha = execSync("git rev-parse --short HEAD", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    if (sha) return sha;
+  } catch {
+    // not a git checkout (e.g. tarball deploy) — fall through to timestamp
+  }
+  return `t${Date.now()}`;
+}
+
 export default defineConfig({
+  define: {
+    __PAID_PRO_CACHE_BUILD_ID__: JSON.stringify(resolvePaidProCacheBuildId()),
+  },
   plugins: [react()],
   test: {
     environment: "node",
