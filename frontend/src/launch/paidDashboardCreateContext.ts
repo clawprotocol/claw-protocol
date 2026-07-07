@@ -8,6 +8,32 @@ import { getOrgId } from "./orgContext";
 
 const KEY = "claw_paid_dashboard_create_context_v1";
 
+/**
+ * TEST545 — set once the direct-entry bootstrap has genuinely reached the marker-write step (i.e. it
+ * passed all guards). Used to distinguish a real marker-write failure from the normal, transient
+ * pre-bootstrap render window (render-phase probes run before the auth-settled effect writes the
+ * marker). Only after an attempt should a still-missing marker be treated as fatal.
+ */
+const BOOTSTRAP_ATTEMPT_KEY = "claw_direct_create_bootstrap_attempted_v1";
+
+export function markDirectAuthenticatedCreateBootstrapAttempted(): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(BOOTSTRAP_ATTEMPT_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function hasDirectAuthenticatedCreateBootstrapAttempted(): boolean {
+  if (typeof sessionStorage === "undefined") return false;
+  try {
+    return sessionStorage.getItem(BOOTSTRAP_ATTEMPT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 /** Operator Founder HQ paths — same authenticated workspace family as /app. */
 export const FOUNDER_ADMIN_CONSOLE_PATHS = [
   "/founder",
@@ -252,10 +278,19 @@ export function shouldFailClosedBypassForAuthenticatedWorkspaceCreate(): boolean
   if (!isAppCreatePath()) return false;
   if (hasPaidDashboardCreateContextActive()) return false;
   if (!readAuthenticatedWorkspaceSession()) return false;
-  logFatalMissingPaidDashboardCreateMarker({
-    workspaceSession: true,
-    originHint: readStoredPaidDashboardCreateMarker()?.source ?? null,
-  });
+  // TEST545 — the fail-closed bypass value (treat as paid) is unchanged, but the fatal telemetry must
+  // NOT fire during the normal, transient pre-bootstrap window. This probe runs in the render phase on
+  // every render; the direct-entry marker is written by an effect only after auth settles (session
+  // marked + org bound). So render-phase probes legitimately precede the write and would otherwise log
+  // `originHint:null` on every pre-settle render (proven by the TEST545 runtime trace: rawKeyPresent
+  // false → write → active true, no erasure). Only escalate to fatal once the bootstrap has actually
+  // attempted the marker write and it is STILL missing (a real failure).
+  if (hasDirectAuthenticatedCreateBootstrapAttempted()) {
+    logFatalMissingPaidDashboardCreateMarker({
+      workspaceSession: true,
+      originHint: readStoredPaidDashboardCreateMarker()?.source ?? null,
+    });
+  }
   return true;
 }
 

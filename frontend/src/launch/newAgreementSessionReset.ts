@@ -25,6 +25,7 @@ import {
   hasPaidDashboardCreateContextActive,
   isAppCreatePath,
   markDashboardPaidCreateRoute,
+  markDirectAuthenticatedCreateBootstrapAttempted,
 } from "./paidDashboardCreateContext";
 import { clearPaidProPremiumRecipientHandoffReadGate } from "../components/agreements/paidProPremiumRecipientHandoffReadGate";
 import { clearPremiumPartyNamesHandoff } from "../components/agreements/premiumPartyNamesHandoff";
@@ -216,6 +217,9 @@ export function bootstrapDirectAuthenticatedCreateEntryIfNeeded(): DirectAuthent
 
   // Genuinely fresh authenticated direct entry — mirror Dashboard → Create: reset session state first,
   // then set the route marker (initializeNewAgreementSession does not clear the marker key).
+  // TEST545 — record that we have genuinely reached the marker-write step, so a still-missing marker
+  // AFTER this point (never before) is what the fail-closed probe treats as fatal.
+  markDirectAuthenticatedCreateBootstrapAttempted();
   initializeNewAgreementSession();
   const marked = markDashboardPaidCreateRoute();
   return {
