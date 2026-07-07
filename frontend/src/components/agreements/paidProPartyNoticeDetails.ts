@@ -867,6 +867,20 @@ function resolveNoticeStanzaLegalEntity(
   const direct = party.partyLegalName.trim();
   if (direct.length >= 2 && isAuthoritativeLegalEntityName(direct)) return direct;
 
+  // TEST539 — the immutable intake manifest is the authority for party identity. Once it resolves the
+  // real legal entity for this slot, notice validation must use it and must NEVER degrade to a
+  // "Party N" placeholder — even when the draft/canonical/frozen/corpus sources are missing or were
+  // contaminated by a prior generation attempt. This is the identity counterpart to the TEST538 count
+  // ceiling: real manifest entity for the index always wins over a placeholder.
+  const manifestIntake = roleContext?.intakeText?.trim() ?? "";
+  if (manifestIntake && intakePartyManifestIsAuthoritative(manifestIntake)) {
+    const manifestParties = buildSignerMetadataPartiesFromIntakeManifest(manifestIntake);
+    const manifestLegal = manifestParties[party.partyIndex]?.partyLegalName?.trim() ?? "";
+    if (manifestLegal.length >= 2 && isAuthoritativeLegalEntityName(manifestLegal)) {
+      return manifestLegal;
+    }
+  }
+
   const draftNames = roleContext?.draftPartyNames ?? [];
   const fromDraft = String(draftNames[party.partyIndex] ?? "").trim();
   if (fromDraft.length >= 2 && isAuthoritativeLegalEntityName(fromDraft)) return fromDraft;

@@ -31,6 +31,10 @@ import {
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
+import {
+  buildSignerMetadataPartiesFromIntakeManifest,
+  intakePartyManifestIsAuthoritative,
+} from "./intakePartyManifestAuthority";
 
 export type ResolvePaidProReviewRenderPartiesArgs = {
   draft?: ParsedDraftShape | null;
@@ -124,7 +128,44 @@ function mergeFrozenManifestParties(
   return mergeLabeledPartyAuthorityIntoParties(mergedFrozen, intakeRaw);
 }
 
+/**
+ * TEST539 — restore canonical party identity onto any slot whose resolved legal name was dropped or
+ * degraded to a placeholder (empty / "Party N") by a prior generation attempt's contaminated
+ * consumed authority. Once the intake manifest authoritatively resolves the real legal entity for a
+ * slot, that identity is the authority and must survive into review/notice/signer surfaces. Only
+ * non-authoritative slots are rewritten; count and all other slots/signer fields are preserved, so
+ * genuine 5-party intakes and real party identities are untouched.
+ */
+function overlayIntakeManifestIdentityOntoContaminatedSlots(
+  parties: readonly PaidProSignerMetadataParty[],
+  intakeRaw: string,
+): PaidProSignerMetadataParty[] {
+  if (!intakeRaw || !intakePartyManifestIsAuthoritative(intakeRaw)) return [...parties];
+  const manifest = buildSignerMetadataPartiesFromIntakeManifest(intakeRaw);
+  if (manifest.length < 2) return [...parties];
+  return parties.map((party, index) => {
+    const name = party.partyLegalName.trim();
+    if (name.length >= 2 && isAuthoritativeLegalEntityName(name)) return party;
+    const manifestName = manifest[index]?.partyLegalName?.trim() ?? "";
+    if (manifestName.length >= 2 && isAuthoritativeLegalEntityName(manifestName)) {
+      return {
+        ...party,
+        partyLegalName: manifestName,
+        partyAddress: party.partyAddress?.trim() || manifest[index]?.partyAddress?.trim() || "",
+      };
+    }
+    return party;
+  });
+}
+
 export function resolvePartiesForReviewRender(
+  args?: ResolvePaidProReviewRenderPartiesArgs,
+): PaidProSignerMetadataParty[] {
+  const resolved = resolvePartiesForReviewRenderCore(args);
+  return overlayIntakeManifestIdentityOntoContaminatedSlots(resolved, (args?.intakeText ?? "").trim());
+}
+
+function resolvePartiesForReviewRenderCore(
   args?: ResolvePaidProReviewRenderPartiesArgs,
 ): PaidProSignerMetadataParty[] {
   const intakeRaw = (args?.intakeText ?? "").trim();
