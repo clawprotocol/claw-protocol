@@ -1616,6 +1616,7 @@ import {
   logPaidDashboardCreateContextOnMount,
   readPaidDashboardCreateContext,
 } from "../../launch/paidDashboardCreateContext";
+import { bootstrapDirectAuthenticatedCreateEntryIfNeeded } from "../../launch/newAgreementSessionReset";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -3461,6 +3462,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   useEffect(() => {
     if (!simpleProductFlow) return;
+    // TEST543 — a direct /app/create entry (typed URL / fresh tab / refresh) never went through the
+    // Dashboard → Create navigation, so it lacks the paid-dashboard-create marker and never ran
+    // initializeNewAgreementSession. Bootstrap a genuinely fresh authenticated direct entry to match
+    // the dashboard-created path exactly, before any generation (no-op for resume/checkout/in-progress).
+    bootstrapDirectAuthenticatedCreateEntryIfNeeded();
     logPaidDashboardCreateContextOnMount();
     const dashboardCreateContext = readPaidDashboardCreateContext();
     if (dashboardCreateContext) {

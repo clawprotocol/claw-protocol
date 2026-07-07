@@ -3,7 +3,7 @@
  * Preserves per-agreement localStorage (VS01 packet status, reviewer approvals) and account org id.
  */
 
-import { clearAgreementCreatorIntakeStorage, clearCreateReviewAgreementResumeId, clearCreateReviewDraftReadyMarker } from "../components/agreements/agreementIntakeStorage";
+import { clearAgreementCreatorIntakeStorage, clearCreateReviewAgreementResumeId, clearCreateReviewDraftReadyMarker, readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
 import { clearAuthoritativeSigningSnapshot } from "../components/agreements/authoritativeSigningSnapshot";
 import { clearFrozenCanonicalAgreementCorpus } from "../components/agreements/canonicalAgreementSnapshot";
 import { clearPaidProPinnedSignerAppliedCorpus } from "../components/agreements/paidProFinalHydratedCorpus";
@@ -16,8 +16,16 @@ import {
   clearPaidPremiumCompletionSession,
   clearPremiumCompletionDoneInLocalStorage,
   clearPremiumCompletionSnapshot,
+  hasPaidPremiumCompletionSession,
   hasPremiumCheckoutReturnInUrl,
 } from "../components/agreements/premiumCompletionStorage";
+import { hasPaidProSourceOfTruth } from "../components/agreements/paidProSourceOfTruthState";
+import { readAuthenticatedWorkspaceSession } from "./completedAgreementViewContext";
+import {
+  hasPaidDashboardCreateContextActive,
+  isAppCreatePath,
+  markDashboardPaidCreateRoute,
+} from "./paidDashboardCreateContext";
 import { clearPaidProPremiumRecipientHandoffReadGate } from "../components/agreements/paidProPremiumRecipientHandoffReadGate";
 import { clearPremiumPartyNamesHandoff } from "../components/agreements/premiumPartyNamesHandoff";
 import {
@@ -157,6 +165,63 @@ export function initializeNewAgreementSession(opts?: {
 
   setLawdogEntryContext("new");
   return { clearedSessionKeys, clearedInMemoryModules };
+}
+
+export type DirectAuthenticatedCreateEntryBootstrapResult = {
+  bootstrapped: boolean;
+  reason:
+    | "no_window"
+    | "not_app_create"
+    | "marker_present"
+    | "not_authenticated_workspace"
+    | "checkout_return"
+    | "premium_session_active"
+    | "sot_active"
+    | "resume_active"
+    | "mark_failed"
+    | "direct_entry_bootstrapped";
+};
+
+/**
+ * TEST543 — Direct authenticated entry to /app/create (typed URL / fresh tab / hard refresh) never
+ * runs the Dashboard → Create bootstrap: it skips {@link initializeNewAgreementSession} and never
+ * sets the paid-dashboard-create route marker (that marker is only set by SPA `navigate()`).
+ *
+ * That divergence (a) makes `shouldFailClosedBypassForAuthenticatedWorkspaceCreate()` fire
+ * `[fatal-paid-dashboard-create-marker-missing]` on every render, and (b) leaves
+ * `isDashboardPaidCreateRouteActive()` false, so direct entry is routed OFF the canonical
+ * dashboard paid-create review/recovery path (validated-corpus gate + review_recovery screen) and
+ * onto the generic returning-paid path, and it starts generation against un-reset stale runtime
+ * state carried over from a prior agreement.
+ *
+ * This bootstraps a genuinely fresh direct entry to match the dashboard-created path exactly, before
+ * any generation. It is a deliberate no-op for: non-/app/create paths, anonymous/public users, an
+ * already-marked dashboard entry, a post-checkout return, an in-progress premium session, an
+ * established SoT, or a resume/edit — so it never wipes legitimately in-progress or resumed work.
+ */
+export function bootstrapDirectAuthenticatedCreateEntryIfNeeded(): DirectAuthenticatedCreateEntryBootstrapResult {
+  if (typeof window === "undefined") return { bootstrapped: false, reason: "no_window" };
+  if (!isAppCreatePath()) return { bootstrapped: false, reason: "not_app_create" };
+  // Dashboard → Create already set the marker (and ran initializeNewAgreementSession) — nothing to do.
+  if (hasPaidDashboardCreateContextActive()) return { bootstrapped: false, reason: "marker_present" };
+  // Only authenticated workspace users take the paid create route; anonymous/public keeps free starter.
+  if (!readAuthenticatedWorkspaceSession()) {
+    return { bootstrapped: false, reason: "not_authenticated_workspace" };
+  }
+  // Never reset an in-progress / resumed / post-checkout flow.
+  if (hasPremiumCheckoutReturnInUrl()) return { bootstrapped: false, reason: "checkout_return" };
+  if (hasPaidPremiumCompletionSession()) return { bootstrapped: false, reason: "premium_session_active" };
+  if (hasPaidProSourceOfTruth()) return { bootstrapped: false, reason: "sot_active" };
+  if (readCreateReviewAgreementResumeId()) return { bootstrapped: false, reason: "resume_active" };
+
+  // Genuinely fresh authenticated direct entry — mirror Dashboard → Create: reset session state first,
+  // then set the route marker (initializeNewAgreementSession does not clear the marker key).
+  initializeNewAgreementSession();
+  const marked = markDashboardPaidCreateRoute();
+  return {
+    bootstrapped: marked,
+    reason: marked ? "direct_entry_bootstrapped" : "mark_failed",
+  };
 }
 
 /** Read a per-agreement localStorage marker without mutating it (for isolation tests). */
