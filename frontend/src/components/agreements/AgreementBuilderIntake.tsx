@@ -1617,6 +1617,7 @@ import {
   readPaidDashboardCreateContext,
 } from "../../launch/paidDashboardCreateContext";
 import { bootstrapDirectAuthenticatedCreateEntryIfNeeded } from "../../launch/newAgreementSessionReset";
+import { useAuth } from "../../auth/AuthProvider";
 
 export {
   AGREEMENT_CREATOR_INTAKE_STORAGE_KEY,
@@ -3456,16 +3457,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** User chose simplified path on an advanced-family gate — show a subtle review label. */
   const [reviewShowsSimplifiedAdvancedDraft, setReviewShowsSimplifiedAdvancedDraft] = useState(false);
   const { tier, refreshUsage } = useAccess();
+  const { loading: authLoading } = useAuth();
   const { navigate } = useLaunchNav();
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(() =>
     resolveCreateFlowWorkspaceProEntitled() || resolveProvisionalWorkspaceProEntitledForCreate(),
   );
+  // TEST544 — the direct-entry bootstrap must run AFTER the authenticated workspace session is marked
+  // and the org id is bound. LaunchNavProvider (which marks the session) is the OUTERMOST provider, so
+  // its mount effect commits AFTER this deep child's mount effect; and org binding (setOrgId) happens
+  // async inside AuthProvider before it flips `loading` to false. Running the bootstrap only on this
+  // component's mount therefore races both and bails at the not_authenticated_workspace guard, so the
+  // marker is never written (observed: originHint:null + continuous fatal). Re-run once auth settles —
+  // by then the session is marked and the real org is bound, so the marker activates correctly.
   useEffect(() => {
     if (!simpleProductFlow) return;
-    // TEST543 — a direct /app/create entry (typed URL / fresh tab / refresh) never went through the
-    // Dashboard → Create navigation, so it lacks the paid-dashboard-create marker and never ran
-    // initializeNewAgreementSession. Bootstrap a genuinely fresh authenticated direct entry to match
-    // the dashboard-created path exactly, before any generation (no-op for resume/checkout/in-progress).
+    if (authLoading) return;
+    bootstrapDirectAuthenticatedCreateEntryIfNeeded();
+  }, [simpleProductFlow, authLoading]);
+  useEffect(() => {
+    if (!simpleProductFlow) return;
+    // Fast path for SPA re-entry where session + org are already settled at mount (idempotent no-op
+    // when the auth-settled effect above already ran, or when Dashboard → Create set the marker).
     bootstrapDirectAuthenticatedCreateEntryIfNeeded();
     logPaidDashboardCreateContextOnMount();
     const dashboardCreateContext = readPaidDashboardCreateContext();
