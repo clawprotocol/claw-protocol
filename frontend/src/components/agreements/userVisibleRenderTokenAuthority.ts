@@ -125,12 +125,7 @@ function resolveMustacheOrDollarToken(
     .toLowerCase();
 
   if (!inner) return null;
-  if (/^(?:company|client|party_?a|party1|party_?1)$/i.test(inner)) {
-    return parties[0]?.partyLegalName?.trim() || ctx.partyNames?.[0]?.trim() || null;
-  }
-  if (/^(?:counterparty|service_?provider|provider|party_?b|party2|party_?2)$/i.test(inner)) {
-    return parties[1]?.partyLegalName?.trim() || ctx.partyNames?.[1]?.trim() || null;
-  }
+
   if (/^(?:venue|jurisdiction|governing_?law)$/i.test(inner)) {
     const intake = String(ctx.intakeRaw ?? "");
     const law = intake.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+law\b/i)?.[1];
@@ -138,23 +133,38 @@ function resolveMustacheOrDollarToken(
     const state = intake.match(/\b(?:Texas|California|New York|Delaware|Florida)\b/i)?.[0];
     return state || null;
   }
-  if (/^(?:email|contact_?email)(?:_?1)?$/i.test(inner)) {
-    return resolveAuthoritativeEmailForContactSlot(1, ctx.intakeRaw, parties);
+
+  const legalForSlot = (slot: number): string | null =>
+    parties[slot - 1]?.partyLegalName?.trim() || ctx.partyNames?.[slot - 1]?.trim() || null;
+
+  // Party legal name. Slot resolves from an explicit index (party_3), an A/B suffix (party_a),
+  // or the role keyword's implied position (company/client → 1, counterparty/provider → 2). The
+  // mustache path previously hard-coded only slots 1 and 2, so any {{party_3}}/{{email_4}} style
+  // token in a 3+ party agreement survived unresolved and blocked the substantive draft
+  // (document_boundary_blocked). The bracket path already scales to N — this mirrors it.
+  let m: RegExpMatchArray | null;
+  if (/^party_?a$/i.test(inner)) return legalForSlot(1);
+  if (/^party_?b$/i.test(inner)) return legalForSlot(2);
+  if ((m = inner.match(/^(?:company|client|org|organization)(?:_?(\d+))?$/i))) {
+    return legalForSlot(m[1] ? Number(m[1]) : 1);
   }
-  if (/^(?:email|contact_?email)_?2$/i.test(inner)) {
-    return resolveAuthoritativeEmailForContactSlot(2, ctx.intakeRaw, parties);
+  if ((m = inner.match(/^(?:counterparty|service_?provider|provider)(?:_?(\d+))?$/i))) {
+    return legalForSlot(m[1] ? Number(m[1]) : 2);
   }
-  if (/^(?:signer|signer_?name)(?:_?1)?$/i.test(inner)) {
-    return parties[0]?.signerName?.trim() || null;
+  if ((m = inner.match(/^party_?(\d+)$/i))) {
+    return legalForSlot(Number(m[1]));
   }
-  if (/^(?:signer|signer_?name)_?2$/i.test(inner)) {
-    return parties[1]?.signerName?.trim() || null;
+  if ((m = inner.match(/^(?:email|contact_?email)(?:_?(\d+))?$/i))) {
+    return resolveAuthoritativeEmailForContactSlot(m[1] ? Number(m[1]) : 1, ctx.intakeRaw, parties);
   }
-  if (/^(?:address)(?:_?1)?$/i.test(inner)) {
-    return parties[0]?.partyAddress?.trim() || null;
+  if ((m = inner.match(/^(?:signer|signer_?name)(?:_?(\d+))?$/i))) {
+    return parties[(m[1] ? Number(m[1]) : 1) - 1]?.signerName?.trim() || null;
   }
-  if (/^address_?2$/i.test(inner)) {
-    return parties[1]?.partyAddress?.trim() || null;
+  if ((m = inner.match(/^(?:signer_?title|title)(?:_?(\d+))?$/i))) {
+    return parties[(m[1] ? Number(m[1]) : 1) - 1]?.signerTitle?.trim() || null;
+  }
+  if ((m = inner.match(/^(?:party_?address|address)(?:_?(\d+))?$/i))) {
+    return parties[(m[1] ? Number(m[1]) : 1) - 1]?.partyAddress?.trim() || null;
   }
   return null;
 }
