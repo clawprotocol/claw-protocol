@@ -5,7 +5,10 @@
  * Repairs rebuild from structured authority; corrupted corpus text is never the sole repair source.
  */
 
-import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import type {
+  PaidProPartyRoleContext,
+  PaidProSignerMetadataParty,
+} from "./paidProSignerMetadataAuthority";
 import {
   authorityPartiesFromLabeledPartyIntake,
   readConsumedPaidProSignerMetadataAuthority,
@@ -275,7 +278,20 @@ export function enforceUserVisibleRenderTokenAuthority(
   }
 
   if (parties.length >= 2) {
-    const noticeRepair = repairIncompleteIfToNoticeStanzas(out, parties);
+    // TEST540 — this terminal render-token gate previously called notice repair WITHOUT a role
+    // context, dropping the authoritative intake identity even though `ctx.intakeRaw` was in scope.
+    // When `parties` was rebuilt from a contaminated consumed-authority snapshot (a "Party 1"
+    // placeholder in slot 0), the notice resolver had no manifest to recover the real entity and
+    // degraded slot 0 to "Party N" — the exact `paid-pro-notice-entity-missing` / Party 1 failure.
+    // Threading the intake manifest identity here lets the resolver restore the canonical entity.
+    const noticeRoleContext: PaidProPartyRoleContext = {
+      intakeText: ctx?.intakeRaw ?? null,
+      draftPartyNames: (ctx?.partyNames ?? parties.map((p) => p.partyLegalName))
+        .map((n) => String(n ?? "").trim())
+        .filter((n) => n.length >= 2),
+      acceptedCorpus: out,
+    };
+    const noticeRepair = repairIncompleteIfToNoticeStanzas(out, parties, noticeRoleContext);
     if (noticeRepair.repairs.length > 0) {
       out = noticeRepair.text;
       repairs.push(...noticeRepair.repairs.map((r) => `notice:${r}`));
