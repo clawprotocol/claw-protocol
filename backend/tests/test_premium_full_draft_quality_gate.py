@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from backend.agreements.premium_full_draft_quality_gate import (
     build_free_reference_blob,
     evaluate_premium_full_draft_quality,
+    premium_full_draft_multiparty_presence_reasons,
     premium_full_draft_repair_system_prompt,
     _operative_exclusive_and_nonexclusive_binding,
 )
@@ -249,6 +250,101 @@ class TestEvaluatePremiumFullDraftQuality:
             contradiction_notes=["exclusive vs non-exclusive scope — pick one grant"],
         )
         assert not any("contradictory_exclusive_and_nonexclusive" in r for r in reasons)
+
+
+# --- TEST535: multi-party recital / signature completeness (server-side hardening) ------------
+
+TEST535_REDWOOD = "Redwood Biologics, Inc."
+TEST535_SUMMIT = "Summit AI Consulting LLC"
+TEST535_BLUE_HARBOR = "Blue Harbor Systems LLC"
+TEST535_IRON_GATE = "Iron Gate Security LLC"
+TEST535_PARTIES = [TEST535_REDWOOD, TEST535_SUMMIT, TEST535_BLUE_HARBOR, TEST535_IRON_GATE]
+
+
+def _test535_context() -> Dict[str, Any]:
+    return _ctx(
+        {
+            "title": "Professional Technology Services and AI Implementation Agreement",
+            "parties": [
+                {"name": TEST535_REDWOOD, "role": "Client"},
+                {"name": TEST535_SUMMIT, "role": "Lead Provider"},
+                {"name": TEST535_BLUE_HARBOR, "role": "Implementation Partner"},
+                {"name": TEST535_IRON_GATE, "role": "Cybersecurity Auditor"},
+            ],
+        }
+    )
+
+
+def _four_party_body(recital_names: List[str], signature_names: List[str]) -> str:
+    recital = (
+        "This Professional Technology Services and AI Implementation Agreement is entered into by and among "
+        + ", ".join(recital_names)
+        + " (each a \"Party\").\n\n"
+    )
+    sig_blocks = "\n\n".join(
+        f"{n}\nBy: _____________________________\nName:\nTitle:\nDate:" for n in signature_names
+    )
+    return recital + _long_commercial_body() + "\n\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\n" + sig_blocks
+
+
+class TestMultiPartyPresenceGate:
+    def test_flags_missing_client_in_recital(self):
+        # Redwood (Client) dropped from recital; roles shifted (the exact TEST535 defect).
+        doc = _four_party_body(
+            recital_names=[TEST535_SUMMIT, TEST535_BLUE_HARBOR, TEST535_IRON_GATE],
+            signature_names=TEST535_PARTIES,
+        )
+        reasons = premium_full_draft_multiparty_presence_reasons(doc, _test535_context())
+        assert any("missing_intake_parties_in_recital" in r for r in reasons)
+        assert any("Redwood" in r for r in reasons)
+
+    def test_flags_missing_party_in_signature_block(self):
+        doc = _four_party_body(
+            recital_names=TEST535_PARTIES,
+            signature_names=[TEST535_SUMMIT, TEST535_BLUE_HARBOR, TEST535_IRON_GATE],
+        )
+        reasons = premium_full_draft_multiparty_presence_reasons(doc, _test535_context())
+        assert any("missing_intake_parties_in_signature_block" in r for r in reasons)
+        assert any("Redwood" in r for r in reasons)
+
+    def test_complete_four_party_doc_passes_presence_gate(self):
+        doc = _four_party_body(recital_names=TEST535_PARTIES, signature_names=TEST535_PARTIES)
+        assert premium_full_draft_multiparty_presence_reasons(doc, _test535_context()) == []
+
+    def test_comma_suffix_variants_tolerated(self):
+        # Recital/signature use "Redwood Biologics Inc." (no comma) — must still count as present.
+        doc = _four_party_body(
+            recital_names=["Redwood Biologics Inc.", TEST535_SUMMIT, TEST535_BLUE_HARBOR, TEST535_IRON_GATE],
+            signature_names=["Redwood Biologics Inc.", TEST535_SUMMIT, TEST535_BLUE_HARBOR, TEST535_IRON_GATE],
+        )
+        assert premium_full_draft_multiparty_presence_reasons(doc, _test535_context()) == []
+
+    def test_two_party_intake_not_subject_to_presence_gate(self):
+        ctx = _ctx({"parties": [{"name": "Client Co", "role": "Client"}, {"name": "Vendor LLC", "role": "Vendor"}]})
+        doc = _four_party_body(recital_names=["Client Co"], signature_names=["Client Co"])
+        assert premium_full_draft_multiparty_presence_reasons(doc, ctx) == []
+
+    def test_evaluate_rejects_when_party_dropped(self):
+        doc = _four_party_body(
+            recital_names=[TEST535_SUMMIT, TEST535_BLUE_HARBOR, TEST535_IRON_GATE],
+            signature_names=[TEST535_SUMMIT, TEST535_BLUE_HARBOR, TEST535_IRON_GATE],
+        )
+        ok, reasons = evaluate_premium_full_draft_quality(
+            intake="Four-party professional services and AI implementation agreement.",
+            context=_test535_context(),
+            draft_title="Professional Technology Services and AI Implementation Agreement",
+            draft_family="services",
+            draft_document_text=doc,
+            scenario_category="business_commercial",
+        )
+        assert ok is False
+        assert any("missing_intake_parties_in_recital" in r for r in reasons)
+        assert any("missing_intake_parties_in_signature_block" in r for r in reasons)
+
+    def test_repair_prompt_requires_all_named_parties(self):
+        p = premium_full_draft_repair_system_prompt().lower()
+        assert "all named parties required" in p
+        assert "signature" in p and "recital" in p
 
 
 def test_premium_full_draft_invokes_repair_on_quality_fail(monkeypatch, tmp_path):

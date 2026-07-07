@@ -153,6 +153,84 @@ def _premium_intake_clause_family_requests(intake: str) -> int:
     return sum(1 for rx in _CLAUSE_FAMILY_INTAKE_RES if rx.search(low))
 
 
+# --- Multi-party recital / signature completeness ---------------------------------------------
+# When the intake declares N>=3 named parties, every declared party MUST appear both in the opening
+# recital AND in the signature/execution block. This deterministically catches the TEST535-class
+# defect where the model drops the Client (e.g. Redwood) from the opening party list or emits a
+# signature block for only a subset of parties. A miss is surfaced as a rejection reason so the
+# repair pass regenerates a complete, professional-grade multi-party corpus.
+
+_RECITAL_BOUNDARY_RE = re.compile(
+    r"(?im)^\s*(?:1\.|section\s+1\b|article\s+(?:1|i)\b|1\s+[A-Z])",
+)
+_EXECUTION_BOUNDARY_RE = re.compile(r"(?i)\bin\s+witness\s+whereof\b")
+
+
+def _declared_intake_party_names(context: Optional[Dict[str, Any]]) -> List[str]:
+    names: List[str] = []
+    parties = (context or {}).get("parties")
+    if isinstance(parties, list):
+        for p in parties:
+            if isinstance(p, dict):
+                n = str(p.get("name") or "").strip()
+                if len(n) >= 2 and n not in names:
+                    names.append(n)
+    return names
+
+
+def _party_name_variants(name: str) -> List[str]:
+    """Comparison variants — commas and entity-suffix punctuation are normalized away."""
+    base = _norm_ws(name)
+    variants = {base, base.replace(",", "")}
+    # Strip a single trailing entity suffix to tolerate "Foo, Inc." vs "Foo".
+    stripped = re.sub(
+        r"[\s,]+(?:llc|l\.l\.c\.|inc\.?|incorporated|corp\.?|corporation|ltd\.?|limited|lp|l\.p\.|llp|pllc|co\.?|company)\.?$",
+        "",
+        base.replace(",", ""),
+    ).strip()
+    if len(stripped) >= 4:
+        variants.add(stripped)
+    return [v for v in variants if v]
+
+
+def _doc_region_contains_party(region_norm: str, name: str) -> bool:
+    return any(v in region_norm for v in _party_name_variants(name))
+
+
+def premium_full_draft_multiparty_presence_reasons(
+    document_text: str,
+    context: Optional[Dict[str, Any]],
+) -> List[str]:
+    """
+    Rejection reasons when a declared party (N>=3) is missing from the recital or signature block.
+    Returns [] for <3 declared parties or when every party is present in both regions.
+    """
+    names = _declared_intake_party_names(context)
+    if len(names) < 3:
+        return []
+    doc = (document_text or "").strip()
+    if not doc:
+        return []
+
+    recital_match = _RECITAL_BOUNDARY_RE.search(doc)
+    recital_region = doc[: recital_match.start()] if recital_match else doc[:2500]
+    exec_match = _EXECUTION_BOUNDARY_RE.search(doc)
+    signature_region = doc[exec_match.start() :] if exec_match else doc[-3500:]
+
+    recital_norm = _norm_ws(recital_region)
+    signature_norm = _norm_ws(signature_region)
+
+    missing_recital = [n for n in names if not _doc_region_contains_party(recital_norm, n)]
+    missing_signature = [n for n in names if not _doc_region_contains_party(signature_norm, n)]
+
+    reasons: List[str] = []
+    if missing_recital:
+        reasons.append("missing_intake_parties_in_recital:" + "; ".join(missing_recital[:6]))
+    if missing_signature:
+        reasons.append("missing_intake_parties_in_signature_block:" + "; ".join(missing_signature[:6]))
+    return reasons
+
+
 def premium_full_draft_substance_min_len_for_context(
     intake: str,
     context: Optional[Dict[str, Any]],
@@ -475,6 +553,9 @@ def evaluate_premium_full_draft_quality(
     if re.search(r"cryptospaces\.?net|crypto\s*spaces", intake_low) and "cryptospaces" not in doc_low:
         reasons.append("missing_stated_brand_url")
 
+    # Multi-party completeness: every declared party (N>=3) must appear in recital AND signatures.
+    reasons.extend(premium_full_draft_multiparty_presence_reasons(doc, context))
+
     # Dedupe while preserving order
     seen = set()
     uniq: List[str] = []
@@ -515,6 +596,11 @@ def premium_full_draft_repair_system_prompt() -> str:
         "two sibling subsections exist within the same section. Avoid orphan subsections. A single provision under a main heading "
         "should be body paragraph text—not a lone N.1 label. Use subsection numbering only when multiple sibling subsections exist "
         "(e.g. 7.1, 7.2). This applies to structure only; do not change substantive legal content.\n"
+        "- **ALL NAMED PARTIES REQUIRED:** If the user materials declare N named parties (e.g. a Client plus multiple "
+        "providers), the opening recital MUST introduce **every** named party with its exact legal name and correct role "
+        "label, in the order given, and the signature/execution block MUST contain a signature slot for **every** named "
+        "party. Never drop a party (especially the Client), never promote a provider to Client, and never invent a party "
+        "that was not named in the user materials.\n"
     )
 
 

@@ -41,6 +41,7 @@ import {
 import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
 import {
   buildSignerMetadataPartiesFromIntakeManifest,
+  extractIntakePartyManifestRows,
   intakePartyManifestIsAuthoritative,
   overlayIntakeManifestOnReviewParties,
 } from "./intakePartyManifestAuthority";
@@ -300,6 +301,17 @@ function resolveCanonicalNoticePartyCount(
   const draftPartyNames =
     roleContext?.draftPartyNames ??
     parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2);
+
+  // The authoritative intake party manifest fixes the exact stanza count — corpus-derived
+  // counts can over-count (phantom Scope Inc.) or under-count (dropped Client).
+  if (intake && intakePartyManifestIsAuthoritative(intake)) {
+    const manifestRows = extractIntakePartyManifestRows(intake).filter((row) =>
+      isAuthoritativeLegalEntityName(row.partyLegalName),
+    );
+    if (manifestRows.length >= 2) {
+      return Math.min(manifestRows.length, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+    }
+  }
 
   if (intake) {
     const quadNames = resolveDeterministicQuadPartyNames(intake, null).filter(

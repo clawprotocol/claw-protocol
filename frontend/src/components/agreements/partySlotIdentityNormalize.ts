@@ -50,7 +50,7 @@ export function extractLegalEntityFromIntakeLine(line: string): string {
   const numbered = trimmed.match(NUMBERED_PARTY_ENTITY_LINE_RE);
   const body = numbered?.[2] ?? trimmed;
   const entityPrefix = body.match(
-    /^([A-Z][^(\n—–-]{2,160}?\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))/i,
+    /^([A-Z][^(\n—–-]{2,160}?\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)(?![A-Za-z]))/i,
   );
   if (entityPrefix?.[1]) {
     return normalizeAgreementPartyName(isolateLegalEntityFromContaminatedName(entityPrefix[1]));

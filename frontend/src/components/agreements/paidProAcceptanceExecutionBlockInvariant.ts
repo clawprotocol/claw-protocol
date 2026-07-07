@@ -21,6 +21,10 @@ import {
   quotedRolePartyLegalEntities,
 } from "./labeledPartyBlockParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import {
+  extractIntakePartyManifestRows,
+  intakePartyManifestIsAuthoritative,
+} from "./intakePartyManifestAuthority";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
@@ -82,6 +86,35 @@ function manifestRecordsFromLabeledPartyBlocks(intakeText: string): CanonicalPar
       signerName: block.signerName.trim() || null,
       signerTitle: block.signerTitle.trim() || null,
       partyAddress: block.address.trim() || null,
+    };
+  });
+}
+
+/**
+ * Ordered records from the authoritative intake party manifest (colon-role / numbered / bullet
+ * lists). This is the same authority the canonical metadata / signer-setup / handoff surfaces
+ * already use, and it preserves party identity, order, and role labels (e.g. Client, Lead
+ * Provider, Implementation Partner, Cybersecurity Auditor) — never re-derived from the model
+ * corpus, so the opening recital and execution tail keep all declared parties.
+ */
+function manifestRecordsFromIntakePartyManifest(intakeText: string): CanonicalPartyIdentityRecord[] {
+  const rows = extractIntakePartyManifestRows(intakeText);
+  if (rows.length < 2) return [];
+  const partyCount = Math.min(rows.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  return rows.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES).map((row, index) => {
+    const fullLegalName = row.partyLegalName.trim();
+    const intakeRole = row.roleLabel.trim();
+    const roleLabel =
+      intakeRole.length >= 2 && !isGenericCanonicalRole(intakeRole)
+        ? intakeRole
+        : acceptanceManifestRoleLabel(fullLegalName, index, partyCount, intakeRole);
+    return {
+      fullLegalName,
+      roleLabel,
+      displayAlias: fullLegalName.split(/\s+/).slice(0, 2).join(" "),
+      signerName: null,
+      signerTitle: null,
+      partyAddress: row.partyAddress.trim() || null,
     };
   });
 }
@@ -321,6 +354,15 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
   if (intakeText && intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText)) {
     const fromBrandProse = manifestRecordsFromBrandLicensingProseIntake(intakeText, draft);
     if (fromBrandProse.length >= 4) return fromBrandProse;
+  }
+
+  // Authoritative intake party manifest (colon-role / numbered / bullet) is the single source
+  // for party identity, order, and role — for 3+ party intakes this must beat corpus-derived
+  // entity scraping so the opening recital and execution tail never drop a declared party
+  // (e.g. Client Redwood) or introduce a phantom entity (e.g. Scope Inc.).
+  if (intakeText && intakePartyManifestIsAuthoritative(intakeText)) {
+    const fromManifest = manifestRecordsFromIntakePartyManifest(intakeText);
+    if (fromManifest.length >= 3) return fromManifest;
   }
 
   const intakeAuthority = resolveIntakeAuthorityPartyNames(intakeText);
