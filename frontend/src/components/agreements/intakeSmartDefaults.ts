@@ -81,11 +81,19 @@ const MAX_PARTY_NAME_LEN = 280;
 
 function splitPartiesFromLiveLine(line: string | null): { name: string; role: string }[] | null {
   if (!line) return null;
-  const t = line
+  let t = line
     .replace(/^\[You\]\s+and\s+/i, "")
     .replace(/^Party detected:\s*/i, "")
     .replace(/\s*\(\?\)\s*$/i, "")
     .trim();
+  // Strip a leading intake-prose prefix ending in "between"/"among" (e.g.
+  // "Create a consulting agreement between …") so the first party name is not polluted with the
+  // descriptive lead-in. Without this, splitting on " and " promotes
+  // "Create a consulting agreement between Red Mesa Logistics LLC" as the legal entity.
+  const betweenMatch = t.match(/^.*?\b(?:between|among)\s+(?:the\s+following\s+[^:]*:\s*)?(.+)$/i);
+  if (betweenMatch?.[1]?.trim()) {
+    t = betweenMatch[1].trim();
+  }
   const parts = t.split(/\s*;\s*/).map((s) => s.trim()).filter(Boolean);
   if (parts.length >= 2) {
     return parts.map((name) => ({ name: name.slice(0, MAX_PARTY_NAME_LEN), role: "party" }));

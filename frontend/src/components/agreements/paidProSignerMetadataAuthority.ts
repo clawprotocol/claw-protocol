@@ -148,8 +148,10 @@ export function mergeDraftSignerContactFieldsOntoParties(
   return parties.map((party) => {
     const byIndex = draftParties[party.partyIndex] as {
       name?: string;
+      email?: string;
       signerEmail?: string;
       partyAddress?: string;
+      address?: string;
       signerName?: string;
       signerTitle?: string;
     } | undefined;
@@ -160,8 +162,12 @@ export function mergeDraftSignerContactFieldsOntoParties(
     ) as typeof byIndex;
     const draftParty = byIndex?.name?.trim() ? byIndex : byName;
     if (!draftParty) return party;
-    const email = String(draftParty.signerEmail ?? "").trim();
-    const address = String(draftParty.partyAddress ?? "").trim();
+    // ParsedDraftShape parties carry the contact email under `email` (see intakeSmartDefaults);
+    // read `signerEmail` too for callers that already pass metadata-shaped parties. Reading only
+    // `signerEmail` here silently dropped the draft email, so rebuilt notice stanzas emitted
+    // `Attn:`/`Address:` but no `Email:` line (TEST392 / TEST546 blank-review root cause).
+    const email = String(draftParty.signerEmail ?? draftParty.email ?? "").trim();
+    const address = String(draftParty.partyAddress ?? draftParty.address ?? "").trim();
     const signerName = String(draftParty.signerName ?? "").trim();
     const signerTitle = String(draftParty.signerTitle ?? "").trim();
     return {

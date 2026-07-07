@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import { countStandaloneClauseFamilyHeadings } from "./clauseFamilyRegistry";
@@ -74,10 +75,37 @@ function test392Parties() {
   }).parties;
 }
 
+// A realistic server_full_draft is substantive (>= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN). Each operative
+// clause carries a full paragraph of boundary-clean prose so the fixture exercises the freeze/SoT path
+// as a genuine server corpus rather than a thin shell, while preserving the fused/glued boundary markers
+// the other cases rely on.
+const TEST392_CLAUSE_TOPICS: readonly string[] = [
+  "Services and Deliverables. The Service Provider shall render the professional consulting services described in the applicable statement of work, and shall perform all such services in a diligent, workmanlike, and professional manner consistent with prevailing industry standards, applicable law, and the reasonable written instructions of the Client, it being understood that time is of the essence with respect to each material milestone.",
+  "Compensation and Invoicing. In consideration of the services rendered, the Client shall pay the fees set forth in the applicable order, and the Service Provider shall submit itemized invoices on a monthly cadence, each of which shall become due and payable within thirty days of receipt absent a good-faith dispute raised in writing during that period.",
+  "Term and Termination. This Agreement shall commence on the effective date and continue for the stated term unless earlier terminated, and either Party may terminate for material breach upon written notice and a reasonable opportunity to cure, whereupon accrued but unpaid amounts shall remain due and payable in accordance with these terms.",
+  "Confidentiality. Each Party shall protect the other Party's confidential information using at least the same degree of care it uses to protect its own information of like importance, and shall not disclose such information to any third party except as strictly necessary to perform under this Agreement and subject to obligations no less protective than those stated herein.",
+  "Intellectual Property. Except for pre-existing materials, all work product created specifically for the Client in the course of the engagement shall, upon full payment, be owned by the Client, and the Service Provider hereby assigns all right, title, and interest in such work product to the extent necessary to give effect to the foregoing allocation of ownership.",
+  "Representations and Warranties. Each Party represents that it has full corporate power and authority to enter into this Agreement, that its performance will not violate any other agreement to which it is bound, and that it will comply with all laws and regulations applicable to its respective performance of the obligations described in this Agreement.",
+  "Limitation of Liability. Except for breaches of confidentiality or indemnification obligations, neither Party shall be liable for any indirect, incidental, special, or consequential damages, and each Party's aggregate liability arising out of or relating to this Agreement shall not exceed the total fees paid or payable during the twelve months preceding the event giving rise to the claim.",
+  "Indemnification. Each Party shall indemnify, defend, and hold harmless the other Party from and against third-party claims arising from the indemnifying Party's gross negligence, willful misconduct, or material breach of this Agreement, subject to prompt written notice of the claim and reasonable cooperation in the defense and settlement thereof.",
+  "General Provisions. This Agreement constitutes the entire understanding of the Parties with respect to its subject matter, supersedes all prior negotiations, and may be amended only by a writing signed by authorized representatives of both Parties; any provision found unenforceable shall be reformed to the minimum extent necessary while preserving the Parties' intent.",
+];
+
+const TEST392_CLAUSE_ELABORATIONS: readonly string[] = [
+  "The Parties further acknowledge that the foregoing obligations are material to the bargained-for exchange reflected in this Agreement, and that any failure to perform them may cause irreparable harm for which monetary damages would be an inadequate remedy.",
+  "No waiver of any provision shall be effective unless made in a writing signed by the waiving Party, and no single or partial exercise of any right shall preclude any further exercise of that right or the exercise of any other right under this Agreement.",
+  "In the event of any dispute arising out of or relating to the subject matter hereof, the prevailing Party shall be entitled to recover its reasonable attorneys' fees, expert costs, and court costs to the fullest extent permitted by applicable law.",
+  "Each Party shall maintain complete and accurate books and records relating to its performance, and shall, upon reasonable prior written notice, permit the other Party to audit such records solely to verify compliance with the terms set forth herein.",
+  "The Parties intend that this provision be construed and enforced to the maximum extent permitted by law, and if any portion is held unenforceable, the remaining portions shall continue in full force and effect without impairment of the Parties' intent.",
+];
+
 function buildTest392FusedBoundaryCorpus(): string {
-  const clauses = Array.from({ length: 9 }, (_, i) => `${i + 1}. Operative clause ${i + 1}.`).join(
-    " ",
-  );
+  const clauses = TEST392_CLAUSE_TOPICS.map((topic, i) => {
+    const elaborations = [0, 1, 2, 3]
+      .map((k) => TEST392_CLAUSE_ELABORATIONS[(i + k) % TEST392_CLAUSE_ELABORATIONS.length])
+      .join(" ");
+    return `${i + 1}. ${topic} ${elaborations}`;
+  }).join(" ");
   return [
     "CONSULTING AGREEMENT",
     "",
@@ -252,9 +280,12 @@ describe("TEST392 — document boundary authority & professional output integrit
       ...draft,
       parties: draft.parties?.map((p) => ({ ...p, email: "", partyAddress: "" })),
     } as ParsedDraftShape;
+    // Inject an unresolved template variable into operative body prose. A title-only variable is now
+    // legitimately stripped by boundary repair, but an operative-clause variable has no authoritative
+    // source and must survive as an unresolved render token so the freeze gate blocks it.
     const unresolved = buildTest392FusedBoundaryCorpus().replace(
-      "CONSULTING AGREEMENT",
-      "CONSULTING AGREEMENT for {{missing_entity}}",
+      "The Service Provider shall render the professional consulting services",
+      "The Service Provider shall render the {{scope_of_work}} consulting services",
     );
     expect(() =>
       assertPaidProDocumentBoundaryAuthorityForFreeze(unresolved, {
