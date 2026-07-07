@@ -8273,6 +8273,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const skipQualityRetryForAdvisoryOnly =
             winning.length >= 15_000 && !result.structuralCatastrophic;
           if (!fin.ok && !skipQualityRetryForAdvisoryOnly) {
+            // TEST536 — restore post-validation deterministic recovery. A professional-clause-coverage
+            // rejection of a substantive-but-incomplete server draft must NOT strand the paid user on the
+            // "needs another pass before review" surface. Skip the terminal quality-retry here and let the
+            // authoritative apply path below reach establishPaidProSourceOfTruth, whose professional-coverage
+            // throw is caught and routed into deterministic recovery (a full N-party corpus that DOES contain
+            // the intake-requested professional clauses). Professional validation is NOT weakened: the
+            // recovered corpus must itself pass every establishment gate, and if recovery cannot produce a
+            // compliant draft the catch path still arms Retry Pro draft with the intake preserved.
+            const professionalCoverageRecoverable =
+              usePaidAuthoritativeBody &&
+              snapshotPlain.trim().length >= 500 &&
+              [...(fin.reasons ?? []), ...(fin.gate?.validation?.reasons ?? [])].some((r) =>
+                String(r).startsWith("professional_"),
+              );
+            if (!professionalCoverageRecoverable) {
             setPremiumServerGenerationDegraded(null);
             if (contractIc.pro_strict) {
               const d = buildPremiumDetailsGateCopy(contractIc, fin.gate?.validation.reasons ?? fin.reasons);
@@ -8332,6 +8347,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               validationReasons: fin.gate?.validation?.reasons ?? fin.reasons,
             });
             return;
+            }
           }
         }
         setProFullDraftQualityRetry(false);

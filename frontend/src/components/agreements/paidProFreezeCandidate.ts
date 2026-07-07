@@ -50,7 +50,16 @@ import {
 } from "./paidProOpeningRecitalGuard";
 import { repairAdjacentDuplicatePartyNamesInOpening, repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
 import { buildPaidProStructuralRecoveryBody } from "./paidProStructuralRecovery";
-import { preserveFullLegalPartyNamesInOpeningAndSignatures } from "./paidProPartyNamePreserve";
+import {
+  preserveFullLegalPartyNamesInOpeningAndSignatures,
+  isAuthoritativeLegalEntityName,
+  isPartyMetadataFieldLabelValue,
+} from "./paidProPartyNamePreserve";
+import {
+  resolveAuthoritativeIntakePartyNames,
+  resolveDeclaredExplicitPartyCount,
+  repairDraftPartiesFromIntakeAuthority,
+} from "./partySlotIdentityNormalize";
 import {
   readPremiumRecipientHandoff,
   resolveHandoffPartySlotCount,
@@ -584,6 +593,65 @@ export function preparePaidProFreezeCandidateText(
   };
 }
 
+/**
+ * TEST536 — authoritative intake-manifest party count. Explicit declarations ("four parties")
+ * are authoritative; otherwise a confident multi-party (3+) set of extracted legal entities.
+ * Returns 0 when the intake is not a confident multi-party manifest (2-party flows skip the gate).
+ */
+export function resolveAuthoritativeIntakeManifestCount(intakeText: string | null | undefined): number {
+  const intake = trim(intakeText);
+  if (!intake) return 0;
+  const declared = resolveDeclaredExplicitPartyCount(intake);
+  if (declared != null && declared >= 3) return declared;
+  const names = resolveAuthoritativeIntakePartyNames(intake).filter(isAuthoritativeLegalEntityName);
+  return names.length >= 3 ? names.length : 0;
+}
+
+/** A candidate party name that must never be frozen as a legal entity (placeholder / metadata). */
+export function isNonAuthoritativeFreezePartyName(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (t.length < 2) return true;
+  if (/^party\s*\d+$/i.test(t)) return true;
+  if (isPartyMetadataFieldLabelValue(t)) return true;
+  return !isAuthoritativeLegalEntityName(t);
+}
+
+/**
+ * TEST536 — every freeze candidate (server_full AND deterministic recovery) must agree with the
+ * authoritative intake manifest on the CORPUS party count and carry no placeholder / metadata legal
+ * entities. On mismatch we throw a freeze-blocked error so the candidate is rejected before
+ * acceptance and routed to premium retry/repair instead of being frozen as a source of truth (or
+ * stranding the user on blank review).
+ *
+ * The gate keys on `prep.parties` (the resolved corpus/review party manifest) — not the parsed
+ * draft object — because a professionally-deficient server draft can legitimately parse to fewer
+ * draft rows while pipeline validation (not this structural gate) rejects it. What must never be
+ * frozen is a corpus whose authoritative party manifest disagrees with the declared intake
+ * manifest (e.g. a 3-party recovery, a dropped Client, a phantom fifth party, or a "Party 1"
+ * placeholder standing in for a legal entity).
+ */
+export function assertPaidProFreezeCandidateManifestCountAgreement(
+  prep: PaidProFreezeCandidatePrepResult,
+  args: PreparePaidProFreezeCandidateArgs,
+): void {
+  const intakeManifestCount = resolveAuthoritativeIntakeManifestCount(args.intakeText);
+  if (intakeManifestCount < 3) return;
+
+  const placeholder = prep.parties.find((p) => isNonAuthoritativeFreezePartyName(p.name));
+  if (placeholder) {
+    throw new Error(
+      `[paid-pro-sot-freeze-blocked] authority_placeholder_legal_entity:${placeholder.name.slice(0, 48)}`,
+    );
+  }
+
+  const candidateCount = prep.parties.length;
+  if (candidateCount !== intakeManifestCount) {
+    throw new Error(
+      `[paid-pro-sot-freeze-blocked] authority_party_count_mismatch:candidate=${candidateCount}!=intake=${intakeManifestCount}`,
+    );
+  }
+}
+
 /** Run freeze-hard gates on a prepared candidate (throws on failure). */
 export function assertPaidProFreezeCandidateGates(
   prep: PaidProFreezeCandidatePrepResult,
@@ -633,6 +701,8 @@ export function assertPaidProFreezeCandidateGates(
   ) {
     return prep.text;
   }
+
+  assertPaidProFreezeCandidateManifestCountAgreement(prep, args);
 
   const freezeEntryText = trim(args.text);
   if (isSubstantiveBrandLicensingCorpus(freezeEntryText, args.intakeText)) {
@@ -1153,7 +1223,7 @@ export function previewRecoverPaidProFreezeCandidate(
     surface?: string;
   },
 ): PaidProFreezeCandidateGateResult {
-  const draft =
+  const baseDraft =
     args.draft ??
     ({
       title: "Agreement",
@@ -1166,6 +1236,18 @@ export function previewRecoverPaidProFreezeCandidate(
       effective_date: null,
       payment: { amount: null, cadence: null, valid: false },
     } as ParsedDraftShape);
+
+  // TEST536 — deterministic recovery must build against the authoritative intake manifest, not a
+  // drifted draft that dropped a party. Repairing the draft party rows from intake authority keeps
+  // draft/candidate/notice/signature counts aligned so a valid recovery renders (and the freeze
+  // manifest-count gate rejects anything still mismatched instead of freezing a wrong-N corpus).
+  const draft: ParsedDraftShape = {
+    ...baseDraft,
+    parties: repairDraftPartiesFromIntakeAuthority(
+      (baseDraft.parties ?? []) as never[],
+      args.intakeText,
+    ) as never[],
+  };
 
   const built = buildPaidProStructuralRecoveryBody({
     intakeText: args.intakeText,

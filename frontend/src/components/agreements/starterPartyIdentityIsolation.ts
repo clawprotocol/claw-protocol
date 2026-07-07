@@ -91,6 +91,17 @@ export function collapseRepeatedEntityMentionCandidate(raw: string): string {
 export function isolateLegalEntityFromContaminatedName(raw: string): string {
   let s = collapseRepeatedEntityMentionCandidate(norm(raw));
   if (!s) return s;
+  // TEST536 — strip a trailing role parenthetical ("Redwood Biologics, Inc. (Client)")
+  // ONLY when the remainder is still a real legal entity. Without this, the paren blocks
+  // comma-suffix normalization ("… , Inc." → "… Inc.") and the whole party is dropped.
+  const withoutRoleParen = s.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  if (
+    withoutRoleParen &&
+    withoutRoleParen !== s &&
+    PARTY_ENTITY_SUFFIX_RE.test(withoutRoleParen)
+  ) {
+    s = normalizeCommaSeparatedEntitySuffix(withoutRoleParen);
+  }
   const m = s.match(LEGAL_ENTITY_PREFIX_RE);
   if (m?.[1]) return norm(m[1]);
   return s;

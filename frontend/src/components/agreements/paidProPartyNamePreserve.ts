@@ -290,10 +290,26 @@ function normPartyLabel(s: string): string {
   return s.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+/**
+ * TEST536 — signer/contact metadata field labels are never party legal entities.
+ * `Address: 710 Discovery Parkway…`, `Authorized Signer: Dana Whitfield`, `Email: …` are
+ * per-party metadata blocks, not parties. Without this guard the address line's
+ * capitalized tokens satisfy the generic "all words capitalized" heuristic below and leak
+ * in as a phantom party while the real Party 1 (Client) drops out.
+ */
+const PARTY_METADATA_FIELD_LABEL_PREFIX_RE =
+  /^(?:address|physical\s+address|mailing\s+address|party\s+address|authorized\s+signer|signer\s+name|signer\s+title|signer\s+email|representative(?:\s+name|\s+title)?|represented\s+by|human\s+signer|e-?mail|email(?:\s+for\s+notice)?|attn|attention|phone|tel|telephone|fax|contact|title|name)\s*[:\-]/i;
+
+/** True when the raw line is a per-party metadata field ("Address: …", "Email: …"), not an entity. */
+export function isPartyMetadataFieldLabelValue(name: string): boolean {
+  return PARTY_METADATA_FIELD_LABEL_PREFIX_RE.test((name || "").replace(/\s+/g, " ").trim());
+}
+
 /** Reject contract prose fragments mistaken for party names. */
 export function isDisallowedPartyPhrase(name: string): boolean {
   const t = normPartyLabel(name);
   if (!t || t.length < 3) return true;
+  if (/^party\s*\d+$/i.test(t)) return true;
   return DISALLOWED_PARTY_PHRASE_RE.some((re) => re.test(t));
 }
 
@@ -301,8 +317,10 @@ export function isDisallowedPartyPhrase(name: string): boolean {
 export function isAuthoritativeLegalEntityName(name: string): boolean {
   const raw = (name || "").replace(/\s+/g, " ").trim();
   if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
+  if (isPartyMetadataFieldLabelValue(raw)) return false;
   const t = isolateLegalEntityFromContaminatedName(raw);
   if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
+  if (isPartyMetadataFieldLabelValue(t)) return false;
   if (/^(?:my|our|the|your|their|each|both|either)\s+company$/i.test(t)) return false;
   if (/^(?:client|customer|vendor|contractor|service\s+provider|provider|party\s*[ab])$/i.test(t)) {
     return false;

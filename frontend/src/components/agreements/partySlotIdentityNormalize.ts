@@ -122,6 +122,43 @@ function mergeUniqueAuthoritativePartyNames(...groups: readonly string[][]): str
   return out;
 }
 
+/**
+ * TEST536 — restore intake document order for a merged multi-party manifest. The entity pool is
+ * length-sorted for canonicalization, which can reorder parties (e.g. drop Party 1 "Redwood
+ * Biologics, Inc." to the tail). Reorder by first appearance in the intake so recital/notice/
+ * signature authority preserves the declared party order (Client first). Names not located in the
+ * intake keep their relative order after the located ones.
+ */
+function orderPartyNamesByIntakeAppearance(names: readonly string[], intakeRaw: string): string[] {
+  const intake = String(intakeRaw || "");
+  const haystack = intake.toLowerCase();
+  const indexOfName = (name: string): number => {
+    const normalized = normalizeAgreementPartyName(name);
+    const full = normalized.toLowerCase();
+    let idx = full.length >= 3 ? haystack.indexOf(full) : -1;
+    if (idx >= 0) return idx;
+    // Fall back to the pre-suffix core ("Redwood Biologics Inc." → "Redwood Biologics").
+    const core = normalized
+      .replace(
+        /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?$/i,
+        "",
+      )
+      .trim()
+      .toLowerCase();
+    idx = core.length >= 3 ? haystack.indexOf(core) : -1;
+    return idx;
+  };
+  return names
+    .map((name, i) => ({ name, i, at: indexOfName(name) }))
+    .sort((a, b) => {
+      if (a.at === b.at) return a.i - b.i;
+      if (a.at < 0) return 1;
+      if (b.at < 0) return -1;
+      return a.at - b.at;
+    })
+    .map((entry) => entry.name);
+}
+
 export function isStandaloneLegalEntitySuffix(name: string): boolean {
   return STANDALONE_SUFFIX_RE.test((name || "").replace(/\s+/g, " ").trim());
 }
@@ -191,12 +228,9 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
   );
   const declaredCount = resolveDeclaredExplicitPartyCount(intake);
   if (declaredCount !== null && declaredCount >= 3) {
-    const merged = mergeUniqueAuthoritativePartyNames(
-      numbered,
-      labeled,
-      entityPool,
-      fromBetween,
-      lineSeparated,
+    const merged = orderPartyNamesByIntakeAppearance(
+      mergeUniqueAuthoritativePartyNames(numbered, labeled, entityPool, fromBetween, lineSeparated),
+      intake,
     );
     if (merged.length >= declaredCount) return merged.slice(0, declaredCount);
     if (merged.length >= 3) return merged;

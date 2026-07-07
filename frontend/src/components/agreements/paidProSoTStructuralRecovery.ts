@@ -25,9 +25,23 @@ export function isPaidProSoTStructuralEstablishmentFailure(message: string): boo
   );
 }
 
+/**
+ * A professional-clause-coverage rejection (a thin/incomplete server draft that omits intake-requested
+ * operative clauses such as confidentiality or limitation of liability) is a RECOVERABLE establishment
+ * failure, not a terminal one. The deterministic N-party recovery corpus contains every professional
+ * clause the coverage gate checks, so it can pass where the raw server body could not — this is the
+ * intended `server_full_draft → professional validation → deterministic recovery → review render` path.
+ * Without classifying it here the recovery pipeline never runs and the paid user is stranded on the
+ * "needs another pass before review" surface (TEST536).
+ */
+export function isPaidProSoTProfessionalCoverageEstablishmentFailure(message: string): boolean {
+  return message.includes("[professional-pro-clause-coverage-blocked]");
+}
+
 export function isPaidProSoTEstablishmentFailure(message: string): boolean {
   return (
     isPaidProSoTStructuralEstablishmentFailure(message) ||
+    isPaidProSoTProfessionalCoverageEstablishmentFailure(message) ||
     message.includes("[paid-pro-sot-establishment-blocked]") ||
     message.includes("[paid-pro-clause-family-structural-blocked]") ||
     message.includes("[paid-pro-document-boundary-blocked]") ||
