@@ -21,7 +21,10 @@ import {
 } from "./paidProPartyNoticeDetails";
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
-import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import {
+  resolveAuthoritativeSignerCount,
+  resolveIntakeManifestAuthorityCount,
+} from "./signerCountAuthority";
 
 export type ClauseFamilyStructuralViolation = {
   family: OperativeClauseFamily | "structural";
@@ -195,6 +198,11 @@ function resolveCanonicalAuthorityPartyCount(
     parties?.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2) ??
     [];
 
+  // TEST538 — the immutable intake manifest is the hard authority ceiling for notice validation.
+  // A contaminated parties list (phantom 5th, "Party 1" placeholder) must never let the
+  // canonical authority / required-stanza count exceed the party count the intake truly resolves.
+  const intakeManifestCeiling = resolveIntakeManifestAuthorityCount(intake);
+
   if (intake) {
     const fromIntake = resolveAuthoritativeSignerCount({
       intakeText: intake,
@@ -203,18 +211,19 @@ function resolveCanonicalAuthorityPartyCount(
       manifestPartyCount: parties?.length ?? 0,
     }).count;
     if (fromIntake >= 2) {
-      return fromIntake;
+      return intakeManifestCeiling >= 2 ? Math.min(fromIntake, intakeManifestCeiling) : fromIntake;
     }
   }
 
   if (!parties?.length) return 0;
 
   const enriched = resolveNoticeStructuralValidationParties(parties, roleContext);
-  return enriched.filter(
+  const enrichedCount = enriched.filter(
     (p) =>
       String(p.partyLegalName ?? "").trim().length >= 2 &&
       isAuthoritativeLegalEntityName(p.partyLegalName.trim()),
   ).length;
+  return intakeManifestCeiling >= 2 ? Math.min(enrichedCount, intakeManifestCeiling) : enrichedCount;
 }
 
 function requiredNoticeStanzaCount(

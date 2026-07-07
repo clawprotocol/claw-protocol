@@ -28,7 +28,10 @@ import {
 } from "./canonicalPartyStructuredAddress";
 import { isAddressContinuationLine } from "./labeledPartyBlockParse";
 import { readFrozenCanonicalManifestPartyNames, readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
-import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import {
+  resolveAuthoritativeSignerCount,
+  resolveIntakeManifestAuthorityCount,
+} from "./signerCountAuthority";
 import {
   applyContactAuthorityExecutionBlockIntegrity,
   stripExecutionBlockContactContamination,
@@ -294,6 +297,17 @@ function defuseEntityWitnessFusionLine(line: string): { line: string; repaired: 
 }
 
 function resolveCanonicalNoticePartyCount(
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): number {
+  const rawCount = resolveCanonicalNoticePartyCountRaw(parties, roleContext);
+  // TEST538 — never let a contaminated parties list expand the notice authority past the number of
+  // real legal parties the immutable intake manifest resolves (phantom 5th / Party 1 placeholder).
+  const ceiling = resolveIntakeManifestAuthorityCount(roleContext?.intakeText ?? "");
+  return ceiling >= 2 ? Math.min(rawCount, ceiling) : rawCount;
+}
+
+function resolveCanonicalNoticePartyCountRaw(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): number {

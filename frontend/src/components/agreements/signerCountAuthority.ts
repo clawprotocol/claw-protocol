@@ -10,7 +10,9 @@ import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./label
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import {
   collapsePartySlotCandidates,
+  resolveAuthoritativeIntakePartyNames,
   resolveAuthoritativePartySlotCount,
+  resolveDeclaredExplicitPartyCount,
   selectAuthoritativeTwoPartySlots,
 } from "./partySlotIdentityNormalize";
 import { readFrozenCanonicalManifestPartyCount } from "./frozenCanonicalManifestAuthority";
@@ -196,6 +198,27 @@ export function logSignerCountConsumer(payload: {
   console.info(`${LOG_PREFIX}-consumer`, payload);
 }
 
+/**
+ * TEST538 — the count of real legal parties the immutable intake manifest resolves, when that
+ * resolution is definite: an explicit declared count ("four parties") backed by at least that many
+ * resolved legal entities, or (no declared count) an unlabeled manifest of >=3 real entities.
+ * Returns 0 when the intake does not authoritatively fix a party count (e.g. 2-party free text),
+ * so this ceiling never over-reaches those flows.
+ */
+export function resolveIntakeManifestAuthorityCount(intakeText: string | null | undefined): number {
+  const intake = String(intakeText ?? "").trim();
+  if (!intake) return 0;
+  const declared = resolveDeclaredExplicitPartyCount(intake);
+  const names = resolveAuthoritativeIntakePartyNames(intake).filter(isAuthoritativeLegalEntityName);
+  if (declared != null && declared >= 2 && names.length >= declared) {
+    return Math.min(declared, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  }
+  if (declared == null && names.length >= 3) {
+    return Math.min(names.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  }
+  return 0;
+}
+
 function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): SignerCountAuthorityResolution {
   const intake = String(args.intakeText ?? "").trim();
   const draftNames =
@@ -216,9 +239,12 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   const paidProSoTActive = hasPaidProSourceOfTruth();
   const frozenManifestCount = paidProSoTActive ? readFrozenCanonicalManifestPartyCount() : 0;
   const consumedManifestCount =
-    readConsumedPaidProSignerMetadataAuthority()?.parties?.filter(
-      (p) => String(p.partyLegalName ?? "").trim().length >= 2,
-    ).length ?? 0;
+    readConsumedPaidProSignerMetadataAuthority()?.parties?.filter((p) => {
+      // TEST538 — a "Party 1" / metadata-label placeholder that leaked into consumed authority must
+      // never count toward party authority; otherwise it inflates the manifest count (4 → 5).
+      const n = String(p.partyLegalName ?? "").trim();
+      return n.length >= 2 && isAuthoritativeLegalEntityName(n);
+    }).length ?? 0;
   const explicitManifestPartyCount = args.manifestPartyCount ?? 0;
   const manifestPartyCount = Math.max(
     explicitManifestPartyCount,
@@ -314,6 +340,18 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     if (quadNames.length >= 4) {
       finalCount = Math.min(finalCount, 4);
     }
+  }
+
+  // TEST538 — the immutable intake manifest is the hard authority ceiling. Once the intake
+  // authoritatively resolves N real legal parties (an explicit declared count backed by N resolved
+  // entities, or an unlabeled manifest of >=3 real entities), no downstream/derived signal —
+  // a contaminated manifestPartyCount from an inflated reviewParties list, a consumed/frozen
+  // authority that captured a phantom party, or a preview-repair "Party 1" placeholder — may push
+  // the authority count above N. User-driven expansion beyond the manifest is still honored.
+  const intakeManifestAuthorityCount = resolveIntakeManifestAuthorityCount(intake);
+  const userExpandedPartyCount = Math.max(0, args.userExpandedPartyCount ?? 0);
+  if (intakeManifestAuthorityCount >= 2 && userExpandedPartyCount <= intakeManifestAuthorityCount) {
+    finalCount = Math.min(finalCount, Math.min(intakeManifestAuthorityCount, PAID_PRO_AUTHORITY_MAX_PARTIES));
   }
 
   return {
