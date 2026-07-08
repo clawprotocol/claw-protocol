@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 import backend.routers.agreements_v2_api as av2
 from backend.agreements.premium_full_draft_quality_gate import (
     PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN,
+    PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN,
     premium_full_draft_body_meets_substance_floor,
 )
 from backend.main import app
@@ -118,8 +119,9 @@ def _full_four_party_corpus() -> str:
         "Guarantor: Northwind Capital Advisors LLC   By: ____________  Name: ______  Title: ______  Date: ______",
     ]
     body = "\n\n".join(sections)
-    # Pad operative detail to comfortably clear the complex substance floor.
-    body += "\n\n" + ("Operative detail on performance, acceptance, and delivery standards. " * 120)
+    # Pad operative detail to comfortably clear the frontend-aligned substance floor
+    # (PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN = 10_000).
+    body += "\n\n" + ("Operative detail on performance, acceptance, and delivery standards. " * 200)
     return body
 
 
@@ -130,6 +132,53 @@ def _full_corpus_json() -> Dict[str, Any]:
         "document_text": _full_four_party_corpus(),
         "key_terms_found": [
             "$124,750 milestone fees",
+            "Confidentiality",
+            "IP ownership",
+            "Limitation of liability",
+            "Insurance",
+            "Notices",
+            "Delaware governing law",
+        ],
+        "missing_material_info": [],
+    }
+
+
+def _mid_length_four_party_body() -> str:
+    """
+    A four-party body that CLEARS the legacy complex substance floor (6k) and passes the quality/intent
+    gate, but is BELOW the frontend Source-of-Truth freeze floor (10k). This is the exact TEST562 shape:
+    a parseable, structurally-complete-looking body the OLD backend would have shipped as `server_full`
+    and the frontend then rejected as `mislabeled_server_full_draft_below_substantive_min`.
+    """
+    sections = [
+        "MASTER SERVICES, RESELLER, AND GUARANTY AGREEMENT",
+        "This Agreement is entered into by Redwood Peak Ventures LLC (\"Client\"), "
+        "Atlas Harbor Technologies Inc. (\"Vendor\"), Silverline Integration Partners LLC "
+        "(\"Integrator\"), and Northwind Capital Advisors LLC (\"Guarantor\").",
+        "1. CONFIDENTIALITY. Each party shall protect the others' confidential information.",
+        "2. INTELLECTUAL PROPERTY. Ownership of deliverables vests in Client upon payment.",
+        "3. LIMITATION OF LIABILITY AND INDEMNIFICATION. Liability is limited; each party indemnifies the others.",
+        "4. INSURANCE. Vendor and Integrator maintain commercially reasonable insurance.",
+        "5. NOTICES. Notices are sent to each party's designated email and mailing address.",
+        "6. GOVERNING LAW. This Agreement is governed by the laws of the State of Delaware.",
+        "7. TERM AND TERMINATION. Either party may terminate for cause on written notice.",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+        "Client: Redwood Peak Ventures LLC   By: ____  Name: __  Title: __",
+        "Vendor: Atlas Harbor Technologies Inc.   By: ____  Name: __  Title: __",
+        "Integrator: Silverline Integration Partners LLC   By: ____  Name: __  Title: __",
+        "Guarantor: Northwind Capital Advisors LLC   By: ____  Name: __  Title: __",
+    ]
+    body = "\n\n".join(sections)
+    body += "\n\n" + ("Operative detail on scope and delivery. " * 180)
+    return body
+
+
+def _mid_length_corpus_json() -> Dict[str, Any]:
+    return {
+        "title": "Master Services, Reseller, and Guaranty Agreement",
+        "agreement_family": "services_agreement",
+        "document_text": _mid_length_four_party_body(),
+        "key_terms_found": [
             "Confidentiality",
             "IP ownership",
             "Limitation of liability",
@@ -313,3 +362,143 @@ def test_four_party_full_intake_produces_accepted_corpus(monkeypatch, tmp_path):
         "northwind capital advisors",
     ):
         assert party in doc_low
+
+
+# --- TEST562: frontend-freeze-floor alignment + server-side regeneration ----------------------
+
+
+def test_mid_length_body_shape_matches_test562_symptom():
+    """The mid-length fixture clears the legacy floor but is below the frontend freeze floor."""
+    body = _mid_length_four_party_body()
+    assert len(body) >= PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN
+    assert len(body) < PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
+    # Under the aligned floor this body is NOT a returnable Pro corpus.
+    ok, reasons = premium_full_draft_body_meets_substance_floor(
+        body, intake=FOUR_PARTY_INTAKE, context=_four_party_context()
+    )
+    assert ok is False
+    assert any("below_premium_substantive_min_len" in r for r in reasons)
+
+
+def test_thin_primary_repaired_to_substantive_returns_full_server_full(monkeypatch, tmp_path):
+    """A thin (6k–10k) primary must trigger server-side regeneration; the substantive repair is returned."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+
+    calls = {"n": 0}
+
+    def fake_llm(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return json.dumps(_mid_length_corpus_json())  # thin, below frontend freeze floor
+        return json.dumps(_full_corpus_json())  # substantive repair
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    assert res.status_code == 200
+    assert calls["n"] == 2  # server-side regeneration happened before returning
+    body = res.json()
+    assert body.get("generation_ok") is True
+    assert body.get("retryable") is False
+    doc = (body.get("document_text") or "").strip()
+    server_full = (body.get("server_full_document_text") or "").strip()
+    # The authoritative body is the substantive repair, above the frontend freeze floor...
+    assert len(doc) >= PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
+    # ...and server_full_document_text carries the SAME final body, never the thin primary.
+    assert len(server_full) >= PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
+    assert server_full == doc
+
+
+def test_persistently_thin_returns_retryable_not_thin_server_full(monkeypatch, tmp_path):
+    """
+    The core TEST562 regression: a body between the legacy floor and the frontend freeze floor must
+    NEVER be returned as a successful server_full_draft. After the regeneration retry still yields a
+    thin body, the backend surfaces an explicit retryable failure with an empty body.
+    """
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+
+    thin_body = _mid_length_four_party_body()
+    monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_mid_length_corpus_json()))
+    client = TestClient(app)
+    res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    assert res.status_code == 503
+    body = res.json()
+    assert body.get("generation_outcome") == "degraded"
+    assert body.get("server_generation_failure_code") == "premium_generation_insufficient"
+    assert (body.get("document_text") or "").strip() == ""
+    assert (body.get("server_full_document_text") or "").strip() == ""
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
+    # No 6k–10k body leaks onto the wire as a full draft.
+    assert thin_body[:60] not in json.dumps(body)
+
+
+def test_json_parse_thin_regenerates_then_recovers_substantive(monkeypatch, tmp_path):
+    """A non-JSON, non-substantive first turn triggers one clean regeneration before failing."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+
+    calls = {"n": 0}
+
+    def fake_llm(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "I'm sorry, I can't complete that request right now."  # non-JSON, thin
+        return json.dumps(_full_corpus_json())  # clean substantive regeneration
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    assert res.status_code == 200
+    assert calls["n"] == 2  # server-side regeneration recovered a parseable JSON body
+    body = res.json()
+    assert body.get("generation_ok") is True
+    assert len((body.get("server_full_document_text") or "").strip()) >= PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
+
+
+def test_diagnostics_log_emits_required_fields_on_success(monkeypatch, tmp_path, caplog):
+    """Diagnostics (requirement #4): raw model len, document_text len, server_full len, validation, reason."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+
+    monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_full_corpus_json()))
+    client = TestClient(app)
+    with caplog.at_level("INFO"):
+        res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    assert res.status_code == 200
+    diag = [r.getMessage() for r in caplog.records if "[premium-full-draft-diagnostics]" in r.getMessage()]
+    assert diag, "expected a [premium-full-draft-diagnostics] log line"
+    line = diag[-1]
+    for field in (
+        "outcome=success",
+        "raw_model_len=",
+        "document_text_len=",
+        "server_full_document_text_len=",
+        "agreement_validation_passed=",
+        "parse_reason=",
+        "degraded_reason=",
+    ):
+        assert field in line
+
+
+def test_diagnostics_log_emits_required_fields_on_degraded(monkeypatch, tmp_path, caplog):
+    """Diagnostics must also be emitted on the degraded/retry path."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+
+    monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_mid_length_corpus_json()))
+    client = TestClient(app)
+    with caplog.at_level("INFO"):
+        res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    assert res.status_code == 503
+    diag = [r.getMessage() for r in caplog.records if "[premium-full-draft-diagnostics]" in r.getMessage()]
+    assert diag, "expected a [premium-full-draft-diagnostics] log line"
+    assert any("outcome=degraded" in line for line in diag)
+    assert any("degraded_reason=premium_generation_insufficient" in line for line in diag)

@@ -56,7 +56,9 @@ def _long_commercial_body(extra: str = "") -> str:
         "9. NOTICES. Email and mail to designated contacts.",
         "10. MISCELLANEOUS. Entire agreement; counterparts; e-signatures.",
     ]
-    return "\n\n".join(parts) + "\n\n" + ("Operative detail. " * 400) + extra
+    # Padding clears the frontend-aligned substance floor (PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
+    # = 10_000) so accepted-body assertions reflect a corpus the frontend would actually freeze.
+    return "\n\n".join(parts) + "\n\n" + ("Operative detail. " * 640) + extra
 
 
 LOGO_INTAKE = "Need a logo contract for $1,500 with 2 revisions."

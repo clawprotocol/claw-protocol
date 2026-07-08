@@ -953,6 +953,18 @@ def _premium_full_draft_degraded_response(
         original_intake=intake_s,
         stage=f"degraded:{failure_code}",
     )
+    log.info(
+        "[premium-full-draft-diagnostics] outcome=degraded raw_model_len=%s primary_document_text_len=%s "
+        "document_text_len=%s server_full_document_text_len=%s agreement_validation_passed=%s "
+        "repair_used=0 parse_reason=%s degraded_reason=%s generation_outcome=degraded",
+        len(preserved),
+        len(preserved),
+        len(doc),
+        len(doc),
+        int(bool(getattr(agreement_validation, "passed", False))),
+        failure_code,
+        failure_code,
+    )
     return PremiumFullDraftResponse(
         title=str((ctx_dict or {}).get("title") or "").strip() or "Agreement",
         agreement_family=fam,
@@ -4680,7 +4692,72 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 len(preserved_raw),
                 ",".join(floor_reasons),
             )
-            raise
+            # TEST562 — server-side regeneration. A non-JSON, non-substantive first turn is a degraded
+            # model response, not a terminal failure. Attempt exactly one clean regeneration before
+            # surfacing a retryable error. If the regen yields a parseable JSON object, fall through to
+            # the normal parsed-JSON path (this except block completes without re-raising, so execution
+            # continues at ``out_primary = _normalize_premium_full_draft_result(parsed)`` below).
+            regen_started = time.perf_counter()
+            llm_regen = call_legal_llm(
+                messages=[
+                    {"role": "system", "content": _premium_full_draft_system_prompt()},
+                    {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+                ],
+                model=llm_model,
+                max_tokens=max_out,
+                temperature=0.15,
+                airlock_profile="agreement_outbound",
+                airlock_log_context="premium_full_draft:json_parse_regen",
+            )
+            if server_timing is not None:
+                server_timing.record(
+                    "backend_llm_repair_or_regen",
+                    (time.perf_counter() - regen_started) * 1000,
+                    path="json_parse_regen",
+                    responseChars=len((llm_regen or "").strip()),
+                )
+            try:
+                parsed = _extract_json_object(llm_regen)
+                log.info(
+                    "[premium-full-draft] event=json_parse_regen_recovered_json session_hint=%s regen_len=%s",
+                    session_hint,
+                    len((llm_regen or "").strip()),
+                )
+            except (json.JSONDecodeError, ValueError):
+                regen_raw = (llm_regen or "").strip()
+                regen_floor_ok, _regen_reasons = premium_full_draft_body_meets_substance_floor(
+                    regen_raw, intake=intake_s, context=ctx_dict
+                )
+                if regen_floor_ok:
+                    log.warning(
+                        "[premium-full-draft] event=json_parse_regen_preserve_substantive_body "
+                        "session_hint=%s doc_len=%s",
+                        session_hint,
+                        len(regen_raw),
+                    )
+                    _safe_record_ai_call(request, request_ip)
+                    dm = _premium_full_draft_degraded_response(
+                        intake_s=intake_s,
+                        ctx_dict=ctx_dict,
+                        failure_code="json_parse",
+                        failure_message=_degraded_user_message_for_code("json_parse"),
+                        preserved_substantive_body=regen_raw,
+                    )
+                    return _premium_full_draft_finalize_http_response(
+                        dm,
+                        intake_len=len(intake_s),
+                        session_hint=session_hint,
+                        server_timing=server_timing,
+                        request=request,
+                    )
+                log.warning(
+                    "[premium-full-draft] event=json_parse_regen_still_degraded "
+                    "session_hint=%s doc_len=%s reasons=%s",
+                    session_hint,
+                    len(regen_raw),
+                    ",".join(_regen_reasons),
+                )
+                raise parse_exc
         out_primary = _normalize_premium_full_draft_result(parsed)
         if server_timing is not None:
             server_timing.record(
@@ -4735,24 +4812,41 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
 
         quality_grade_started = time.perf_counter()
         ok_all, reject_reasons = _grade_draft(out_primary)
+        # A thin primary body (clears quality/intent but is below the frontend Source-of-Truth freeze
+        # floor) is the dominant live TEST562 symptom: the model returns parseable JSON whose body is
+        # 1k–3k chars. Trigger the same server-side repair/regeneration pass for this case so we attempt
+        # a substantive corpus before returning, instead of shipping a thin body the frontend rejects.
+        primary_substance_ok, primary_substance_reasons = premium_full_draft_body_meets_substance_floor(
+            (out_primary.document_text or "").strip(), intake=intake_s, context=ctx_dict
+        )
+        needs_regeneration = (not ok_all) or (not primary_substance_ok)
+        repair_reasons = list(
+            dict.fromkeys(
+                [*reject_reasons, *(primary_substance_reasons if not primary_substance_ok else [])]
+            )
+        )
         if server_timing is not None:
             server_timing.record(
                 "backend_quality_grade",
                 (time.perf_counter() - quality_grade_started) * 1000,
                 path="primary",
                 qualityOk=bool(ok_all),
-                reasonCount=len(reject_reasons),
+                substanceOk=bool(primary_substance_ok),
+                reasonCount=len(repair_reasons),
             )
-        if not ok_all:
+        if needs_regeneration:
             log.info(
-                "premium_full_draft_quality_event event=premium_full_draft_quality_or_schema_fail reasons=%s",
-                ",".join(reject_reasons[:16]),
+                "premium_full_draft_quality_event event=premium_full_draft_quality_or_schema_fail "
+                "quality_ok=%s substance_ok=%s reasons=%s",
+                int(ok_all),
+                int(primary_substance_ok),
+                ",".join(repair_reasons[:16]),
             )
             repair_payload = build_premium_full_draft_repair_user_payload(
                 intake=intake_s,
                 free_reference_blob=free_blob,
                 rejected=out_primary.model_dump(),
-                rejection_reasons=reject_reasons,
+                rejection_reasons=repair_reasons,
                 scenario_category=scen_cat,
                 scenario_signals=scen_sigs,
                 context=ctx_dict,
@@ -5015,11 +5109,30 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 (time.perf_counter() - validation_started) * 1000,
                 qualityOk=bool(ok_final),
             )
+        # TEST562 — `server_full_document_text` MUST carry the FINAL authoritative body (`doc`), not the
+        # primary draft. When a thin primary is repaired into a substantive corpus, the primary body is
+        # below the frontend freeze floor; shipping it as `server_full_document_text` makes the frontend's
+        # server_full candidate the thin body → `mislabeled_server_full_draft_below_substantive_min`. The
+        # unrepaired primary is preserved separately in `server_repair_document_text` for provenance.
+        log.info(
+            "[premium-full-draft-diagnostics] outcome=success session_hint=%s raw_model_len=%s "
+            "primary_document_text_len=%s document_text_len=%s server_full_document_text_len=%s "
+            "agreement_validation_passed=%s repair_used=%s parse_reason=parsed_json degraded_reason=none "
+            "generation_outcome=%s",
+            session_hint,
+            len((llm_text or "").strip()),
+            len(primary_full),
+            len(doc),
+            len(doc),
+            int(bool(getattr(agreement_validation, "passed", False))),
+            int(repair_used),
+            generation_outcome,
+        )
         ok_model = PremiumFullDraftResponse(
             title=out.title,
             agreement_family=out.agreement_family,
             document_text=doc,
-            server_full_document_text=primary_full,
+            server_full_document_text=doc,
             server_repair_document_text=repair_body,
             authoritative_draft=doc,
             agreement_intelligence=out.agreement_intelligence,

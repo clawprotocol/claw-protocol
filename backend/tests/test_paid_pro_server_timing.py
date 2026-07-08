@@ -51,7 +51,9 @@ def _long_commercial_body(extra: str = "") -> str:
         "Signature: ______________________  Name: ______  Title: ______  Date: ______\n"
         + extra
     )
-    while len(base) < 2200:
+    # Clear the frontend-aligned substance floor (PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN = 10_000)
+    # so the accepted-response path (200) is exercised rather than the retry path (503).
+    while len(base) < 11_000:
         base += "\nAdditional operative clause for acceptance and delivery standards.\n"
     return base
 

@@ -961,7 +961,8 @@ def test_premium_full_draft_ok(monkeypatch, tmp_path):
         "WHEREAS the parties wish to document paid media services.\n\n"
         + body_block
         + "\n\n"
-        + ("Additional operative detail. " * 200)
+        # Clear the frontend-aligned substance floor (10_000) so this exercises the accepted (200) path.
+        + ("Additional operative detail. " * 320)
         + "\n\n"
         + ("z" * 1200)
     )
@@ -1030,7 +1031,8 @@ def test_premium_full_draft_repair_pass_uses_agreement_outbound_airlock_profile(
         "WHEREAS the parties wish to document paid media services.\n\n"
         + body_block
         + "\n\n"
-        + ("Additional operative detail. " * 200)
+        # Clear the frontend-aligned substance floor (10_000) so this exercises the accepted (200) path.
+        + ("Additional operative detail. " * 320)
         + "\n\n"
         + ("z" * 1200)
     )
