@@ -16,6 +16,11 @@ import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthorit
 
 const CONTACT_EMAIL_ANYWHERE_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 
+const LEGAL_ENTITY_SUFFIX_RE =
+  /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|P\.C\.|Company)\b/i;
+// A street-style address tail: a 1–6 digit street number, then capitalized street/city/state/zip.
+const STREET_ADDRESS_TAIL_RE = /\d{1,6}\s+\p{Lu}[\s\S]*$/u;
+
 export type IntakeContactRecord = {
   name: string;
   title: string;
@@ -126,35 +131,76 @@ export function resolveAuthoritativeEmailForContactSlot(
  * an entity-prefixed line; an empty string is pushed when a party line lists no trailing address so
  * slot alignment (address[slot-1]) is preserved.
  */
+/**
+ * TEST566 — address tail from a role-header *entity* line where the address is inline with the
+ * entity/form and the email lives on a separate `Authorized signer:` line, e.g.:
+ *   `Redwood Biologics, Inc., a Delaware corporation, 710 Discovery Parkway, Raleigh, NC 27609.`
+ * The address begins at the first street number *after* the legal-form suffix (so a number inside the
+ * entity name never wins). Returns "" when the line carries no street-style address tail.
+ */
+function addressTailFromEntityLine(line: string): string {
+  const suffix = line.match(LEGAL_ENTITY_SUFFIX_RE);
+  const rest = suffix?.index != null ? line.slice(suffix.index + suffix[0].length) : line;
+  const addr = rest.match(STREET_ADDRESS_TAIL_RE);
+  if (!addr) return "";
+  return addr[0].replace(/[.\s]+$/, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * TEST565/566 — ordered addresses from the two production intake shapes that `parseAllStructuredParty
+ * ContactBlocks` does not parse:
+ *   A) colon-inline (TEST565): `Legal Entity[, a Texas LLC]: Signer, Title, email@x.com, 123 Main St,…`
+ *      → address is the remainder after the email.
+ *   B) role-header multiline (TEST566): a `Client:` / `Lead Provider:` header line, then an entity line
+ *      `Entity, a Delaware corporation, 710 Discovery Parkway, Raleigh, NC 27609.`, then `Authorized
+ *      signer: Name, Title, email`. → address is the street-tail on the entity line (no email on it).
+ * One entry is pushed per detected party line, in document order, to preserve slot alignment
+ * (address[slot-1]). This was the live TEST566 defect: the role-header shape yielded zero structured
+ * blocks, so every `[ADDRESS_N]` survived to the boundary/placeholder gate.
+ */
 function extractInlineContactAddressesOrdered(intakeRaw: string): string[] {
   const out: string[] = [];
   for (const rawLine of intakeRaw.split(/\n/)) {
     const line = rawLine.replace(/^\s*[*•\u2022-]\s*/, "").trim();
+    if (!line) continue;
+
+    // Shape A — colon-inline `Entity[, form]: … email … , address`.
     const colon = line.indexOf(":");
-    if (colon < 2) continue;
-    const prefix = line.slice(0, colon).trim();
-    const tail = line.slice(colon + 1).trim();
-    if (!tail) continue;
-    // Party-contact line signal: an entity-like prefix (drop any ", a Texas LLC" form suffix) plus an
-    // email in the tail. This deliberately ignores instruction/prose lines that merely end in a colon.
-    const entityHead = prefix.split(/,\s*(?:an?\s+)?/)[0] ?? prefix;
-    if (!looksLikeStackedPartyLegalEntityLine(entityHead)) continue;
-    const emailM = tail.match(CONTACT_EMAIL_ANYWHERE_RE);
-    if (!emailM || emailM.index == null) continue;
-    const afterEmail = tail
-      .slice(emailM.index + emailM[0].length)
-      .replace(/^\s*,\s*/, "")
-      .trim();
-    out.push(afterEmail);
+    if (colon >= 2) {
+      const prefix = line.slice(0, colon).trim();
+      const tail = line.slice(colon + 1).trim();
+      const entityHead = prefix.split(/,\s*(?:an?\s+)?/)[0] ?? prefix;
+      if (tail && looksLikeStackedPartyLegalEntityLine(entityHead)) {
+        const emailM = tail.match(CONTACT_EMAIL_ANYWHERE_RE);
+        if (emailM && emailM.index != null) {
+          out.push(
+            tail
+              .slice(emailM.index + emailM[0].length)
+              .replace(/^\s*,\s*/, "")
+              .trim(),
+          );
+          continue;
+        }
+      }
+    }
+
+    // Shape B — role-header entity line carrying the address inline (no email on this line). The
+    // email-free guard skips both colon-inline lines (handled above) and the multi-entity "between …
+    // parties" enumeration (which has legal suffixes but no street-tail → produces "" → not pushed).
+    if (LEGAL_ENTITY_SUFFIX_RE.test(line) && !CONTACT_EMAIL_ANYWHERE_RE.test(line)) {
+      const addr = addressTailFromEntityLine(line);
+      if (addr) out.push(addr);
+    }
   }
   return out;
 }
 
 /**
- * TEST564/565 — ordered party addresses from the intake. Structured party/contact blocks
- * (labeled `Party N`, entity-header, em-dash entity-inline) win when present; otherwise fall back
- * to the colon-inline production shape. This is the address source the render-token resolver uses to
- * recover `[ADDRESS_N]` slots when the party authority carries no `partyAddress`.
+ * TEST564/565/566 — ordered party addresses from the intake. Structured party/contact blocks
+ * (labeled `Party N`, entity-header, em-dash entity-inline) win when present; otherwise fall back to
+ * the colon-inline (TEST565) and role-header entity-line (TEST566) production shapes. This is the
+ * address source the render-token resolver uses to recover `[ADDRESS_N]` slots when the party
+ * authority carries no `partyAddress`.
  */
 export function extractIntakeAddressesOrdered(intakeRaw: string | null | undefined): string[] {
   const raw = String(intakeRaw || "");
@@ -203,6 +249,23 @@ export function logPaidProContactSubstitution(payload: {
   if (import.meta.env.MODE === "test") return;
   // eslint-disable-next-line no-console
   console.info("[paid-pro-contact-substitution]", payload);
+}
+
+/**
+ * TEST566 — address-substitution diagnostic (parallel to `[paid-pro-contact-substitution]` for email).
+ * Surfaces why `[ADDRESS_N]` survives: how many addresses the intake yielded, how many tokens resolved,
+ * which stayed unresolved, and per-slot availability. Suppressed in tests; emitted in live QA.
+ */
+export function logPaidProAddressSubstitution(payload: {
+  surface: string;
+  intakeAddressCount: number;
+  resolvedAddressTokenCount: number;
+  unresolvedAddressTokens: string[];
+  perSlotAddressAvailable: boolean[];
+}): void {
+  if (import.meta.env.MODE === "test") return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-address-substitution]", payload);
 }
 
 export type PaidProContactSubstitutionResult = {

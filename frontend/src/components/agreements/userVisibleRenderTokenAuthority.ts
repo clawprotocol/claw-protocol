@@ -19,7 +19,9 @@ import {
   FORBIDDEN_TEMPLATE_VARIABLE_RENDER_RE,
 } from "./legalPartyIdentityAuthority";
 import {
+  extractIntakeAddressesOrdered,
   extractIntakeContacts,
+  logPaidProAddressSubstitution,
   resolveAuthoritativeAddressForContactSlot,
   resolveAuthoritativeEmailForContactSlot,
   substitutePaidProIntakeContactPlaceholders,
@@ -389,6 +391,34 @@ export function enforceUserVisibleRenderTokenAuthority(
   }
 
   const unresolvedTokens = [...new Set(scanUnresolvedRenderTokens(out).map((m) => m.token))];
+
+  // TEST566 — address-substitution diagnostic. Emitted only when the input carried [ADDRESS_N] tokens,
+  // so a live block proves whether the intake yielded addresses and which slots stayed unresolvable.
+  const ADDRESS_TOKEN_RE =
+    /\[\s*(?:(?:SIGNER|PARTY|CONTACT)_)?(?:ADDRESS|PARTY_ADDRESS)(?:_\d+)?\s*\]/gi;
+  const addressTokensBefore = [
+    ...new Set((text.match(ADDRESS_TOKEN_RE) ?? []).map((t) => t.replace(/\s+/g, ""))),
+  ];
+  if (addressTokensBefore.length > 0) {
+    const unresolvedAddressTokens = unresolvedTokens.filter((t) => ADDRESS_TOKEN_RE.test(t));
+    ADDRESS_TOKEN_RE.lastIndex = 0;
+    const intakeAddresses = extractIntakeAddressesOrdered(ctx?.intakeRaw ?? null);
+    const maxSlot = Math.max(parties.length, addressTokensBefore.length);
+    const perSlotAddressAvailable = Array.from({ length: maxSlot }, (_, i) =>
+      Boolean(resolveAuthoritativeAddressForContactSlot(i + 1, ctx?.intakeRaw ?? null, parties)),
+    );
+    logPaidProAddressSubstitution({
+      surface,
+      intakeAddressCount: intakeAddresses.filter((a) => a.length > 0).length,
+      resolvedAddressTokenCount: Math.max(
+        0,
+        addressTokensBefore.length - unresolvedAddressTokens.length,
+      ),
+      unresolvedAddressTokens,
+      perSlotAddressAvailable,
+    });
+  }
+
   const blocked = unresolvedTokens.length > 0 && ctx?.blockOnUnresolved !== false;
   return {
     text: out,

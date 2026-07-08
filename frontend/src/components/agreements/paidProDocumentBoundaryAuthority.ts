@@ -282,8 +282,30 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
     surface: opts?.surface ?? "paid_pro_document_boundary_freeze",
     structuralViolations: lastViolations.filter((v) => v && v !== "uninitialized"),
     unresolvedRenderTokens: lastUnresolvedTokens,
+    corpus: out,
   });
   throw new Error(`[paid-pro-document-boundary-blocked] violations=${reason}`);
+}
+
+/**
+ * TEST566 — location-aware context window (±140 chars) around the first occurrence of each unresolved
+ * token, so a live block proves *where* a survivor like `[ADDRESS_5]` sits (phantom-notice/body clause)
+ * without guessing. Whitespace-collapsed; the token is wrapped in » « for eyeballing.
+ */
+function unresolvedTokenContextWindows(
+  corpus: string,
+  tokens: readonly string[],
+): Array<{ token: string; context: string }> {
+  const text = corpus.replace(/\r\n/g, "\n");
+  return tokens.slice(0, 6).map((token) => {
+    const at = text.indexOf(token);
+    if (at < 0) return { token, context: "<not found in final corpus>" };
+    const window = text
+      .slice(Math.max(0, at - 140), Math.min(text.length, at + token.length + 140))
+      .replace(/\s+/g, " ")
+      .trim();
+    return { token, context: window.replace(token, `»${token}«`) };
+  });
 }
 
 /**
@@ -295,6 +317,7 @@ function logPaidProDocumentBoundaryBlockedDiagnostics(payload: {
   surface: string;
   structuralViolations: string[];
   unresolvedRenderTokens: string[];
+  corpus?: string;
 }): void {
   if (!paidProVerboseQaLogsEnabled()) return;
   // eslint-disable-next-line no-console
@@ -304,5 +327,9 @@ function logPaidProDocumentBoundaryBlockedDiagnostics(payload: {
     structuralViolationCount: payload.structuralViolations.length,
     unresolvedRenderTokens: payload.unresolvedRenderTokens,
     unresolvedRenderTokenCount: payload.unresolvedRenderTokens.length,
+    // TEST566 — exact location/context of each survivor (e.g. is `[ADDRESS_5]` in a body clause?).
+    unresolvedTokenContexts: payload.corpus
+      ? unresolvedTokenContextWindows(payload.corpus, payload.unresolvedRenderTokens)
+      : [],
   });
 }
