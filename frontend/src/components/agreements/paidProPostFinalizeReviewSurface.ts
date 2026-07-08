@@ -20,7 +20,18 @@ import {
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
-import { applySignatureNoticeContactFieldsToCorpus } from "./paidProPartyNoticeDetails";
+import {
+  applySignatureNoticeContactFieldsToCorpus,
+  ensureOperativeIfToNoticeDelivery,
+} from "./paidProPartyNoticeDetails";
+import { repairJoinedTopLevelSectionHeadings } from "./sectionStructureAuthority";
+
+/**
+ * TEST560 — notice stanzas still carrying the pre-signer-setup placeholder
+ * ("Email: provided during signer setup" / "Address: provided during signer setup")
+ * must be hydrated on the post-finalize display surface even when execution blocks are filled.
+ */
+const NOTICE_SIGNER_SETUP_PLACEHOLDER_RE = /provided during signer setup/i;
 import { recipientMetadataToAuthorityParties } from "./paidProSignerMetadataAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
@@ -56,7 +67,8 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
 
   const blankSignerLines = countBlankSignerMetadataLinesInExecutionBlock(body);
   const headingLeak = detectExecutionHeadingMetadataLeak(body).leak;
-  if (blankSignerLines === 0 && !headingLeak && authorityParties.length >= 2) {
+  const noticePlaceholdersPresent = NOTICE_SIGNER_SETUP_PLACEHOLDER_RE.test(body);
+  if (blankSignerLines === 0 && !headingLeak && !noticePlaceholdersPresent && authorityParties.length >= 2) {
     return body;
   }
 
@@ -71,7 +83,8 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
     }
     if (
       countBlankSignerMetadataLinesInExecutionBlock(body) === 0 &&
-      !detectExecutionHeadingMetadataLeak(body).leak
+      !detectExecutionHeadingMetadataLeak(body).leak &&
+      !NOTICE_SIGNER_SETUP_PLACEHOLDER_RE.test(body)
     ) {
       return body;
     }
@@ -84,6 +97,20 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
       overwriteExistingMetadata: true,
     });
     if (hydration.applied) body = hydration.corpus.trim();
+    // TEST560 — rebuild "If to" notice stanzas that still carry the pre-signer-setup placeholder
+    // so the finalized display surface shows real signer emails/addresses, not
+    // "provided during signer setup". Signer-field-only; operative clauses are untouched.
+    if (parties.length >= 2 && NOTICE_SIGNER_SETUP_PLACEHOLDER_RE.test(body)) {
+      const delivery = ensureOperativeIfToNoticeDelivery(body, parties, roleContext);
+      if (delivery.repairs.length > 0) {
+        body = delivery.text.trim();
+        // Rebuilding the notices section can fuse the preceding heading boundary
+        // ("...termination.12. Disputes..."). Restore top-level heading breaks — same repair the
+        // frozen-SoT minimal hydration applies. Display-only; does not mutate the signing snapshot.
+        const joined = repairJoinedTopLevelSectionHeadings(body);
+        if (joined.repairs.length > 0) body = joined.text.trim();
+      }
+    }
     const notice = applySignatureNoticeContactFieldsToCorpus(body, parties, roleContext);
     if (notice.applied) body = notice.text.trim();
     const retry = hydratePaidProExecutionBlockWithSignerMetadata(body, meta, roleContext, {
@@ -111,10 +138,10 @@ function finalizePostFinalizeReviewPlain(
 ): string {
   const body = (plain || "").trim();
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
-  const snapshotCorpus = readAuthoritativeSigningCorpus().trim();
-  if (snapshotCorpus.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN && snapshotCorpus === body) {
-    return body;
-  }
+  // TEST560 — always run display enrichment. The stored signing snapshot is the immutable frozen
+  // canonical corpus (byte-identical to SoT), which can still carry pre-signer-setup notice
+  // placeholders and blank execution Name/Title lines; enrichment hydrates those signer-only fields
+  // for display. Enrichment is idempotent, so an already-hydrated snapshot passes through unchanged.
   return enrichPaidProPostFinalizeDisplayCorpus(body, draft);
 }
 
