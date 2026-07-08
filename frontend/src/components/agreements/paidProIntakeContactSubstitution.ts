@@ -10,6 +10,7 @@ import {
   parseSignatureContactSlot,
 } from "./agreementTemplatePlaceholderSafety";
 import { isPartyMetadataLabelValue } from "./intakeSectionLabels";
+import { parseAllStructuredPartyContactBlocks } from "./labeledPartyBlockParse";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 
 export type IntakeContactRecord = {
@@ -111,6 +112,36 @@ export function resolveAuthoritativeEmailForContactSlot(
   if (!slot || slot < 1 || !parties?.length) return null;
   const email = parties[slot - 1]?.signerEmail?.trim() ?? "";
   return email || null;
+}
+
+/**
+ * TEST564 — ordered party addresses parsed from the intake's structured party/contact blocks
+ * (labeled `Party N`, entity-header, and entity-inline forms). This is the *same* authoritative
+ * address source the notice-stanza rebuild uses, exposed so the render-token resolver can recover
+ * `[ADDRESS_N]` slots when the party authority carries no `partyAddress`.
+ */
+export function extractIntakeAddressesOrdered(intakeRaw: string | null | undefined): string[] {
+  return parseAllStructuredPartyContactBlocks(String(intakeRaw || "")).map((b) => b.address.trim());
+}
+
+/**
+ * TEST564 — resolve a numbered `[ADDRESS_N]` slot to a real address. Signer-metadata authority
+ * `partyAddress` wins; otherwise fall back to the intake-listed address for that slot. Mirrors
+ * `resolveAuthoritativeEmailForContactSlot` so ADDRESS tokens are no longer the *only* numbered
+ * contact family without an intake fallback (the live TEST564 `document_boundary_blocked:
+ * unresolved_render_tokens:[ADDRESS_1]|[ADDRESS_2]|[ADDRESS_5]` — the intake listed every address,
+ * but the resolver only consulted `partyAddress`, which was empty for those slots).
+ */
+export function resolveAuthoritativeAddressForContactSlot(
+  slot: number | null,
+  intakeRaw: string | null | undefined,
+  parties?: readonly PaidProSignerMetadataParty[],
+): string | null {
+  if (!slot || slot < 1) return null;
+  const fromParty = parties?.[slot - 1]?.partyAddress?.trim() ?? "";
+  if (fromParty) return fromParty;
+  const fromIntake = extractIntakeAddressesOrdered(intakeRaw)[slot - 1]?.trim() ?? "";
+  return fromIntake || null;
 }
 
 export function isSignatureOrContactContext(text: string, index: number): boolean {

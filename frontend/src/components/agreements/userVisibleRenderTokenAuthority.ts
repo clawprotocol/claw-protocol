@@ -20,6 +20,7 @@ import {
 } from "./legalPartyIdentityAuthority";
 import {
   extractIntakeContacts,
+  resolveAuthoritativeAddressForContactSlot,
   resolveAuthoritativeEmailForContactSlot,
   substitutePaidProIntakeContactPlaceholders,
 } from "./paidProIntakeContactSubstitution";
@@ -147,7 +148,7 @@ function resolveMustacheOrDollarToken(
       return resolveAuthoritativeEmailForContactSlot(slot, ctx.intakeRaw, parties);
     }
     if (/^(?:address|party_?address|notice_?address|mailing_?address)$/i.test(f)) {
-      return p?.partyAddress?.trim() || null;
+      return resolveAuthoritativeAddressForContactSlot(slot, ctx.intakeRaw, parties);
     }
     if (/^(?:title|signer_?title|role_?title)$/i.test(f)) return p?.signerTitle?.trim() || null;
     if (/^(?:signer|signer_?name|signatory|signatory_?name|representative|representative_?name)$/i.test(f)) {
@@ -200,7 +201,7 @@ function resolveMustacheOrDollarToken(
     return parties[(m[1] ? Number(m[1]) : 1) - 1]?.signerTitle?.trim() || null;
   }
   if ((m = inner.match(/^(?:party_?address|address)(?:_?(\d+))?$/i))) {
-    return parties[(m[1] ? Number(m[1]) : 1) - 1]?.partyAddress?.trim() || null;
+    return resolveAuthoritativeAddressForContactSlot(m[1] ? Number(m[1]) : 1, ctx.intakeRaw, parties);
   }
   return null;
 }
@@ -225,7 +226,7 @@ export function resolveRenderTokenFromAuthority(
     return resolveAuthoritativeEmailForContactSlot(slot, ctx.intakeRaw, parties);
   }
   if (/^(?:(?:SIGNER|PARTY|CONTACT)_)?(?:ADDRESS|PARTY_ADDRESS)(?:_\d+)?$/i.test(normalized)) {
-    return partyForSlot(parties, slot)?.partyAddress?.trim() || null;
+    return resolveAuthoritativeAddressForContactSlot(slot, ctx.intakeRaw, parties);
   }
   if (/^(?:(?:SIGNER|PARTY|CONTACT)_)?(?:SIGNER_NAME|NAME)(?:_\d+)?$/i.test(normalized)) {
     return partyForSlot(parties, slot)?.signerName?.trim() || null;
