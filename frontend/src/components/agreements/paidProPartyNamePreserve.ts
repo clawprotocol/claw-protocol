@@ -10,6 +10,7 @@ import { looksLikeAuthorizedSignersBulletLine } from "./intakeSignerMetadataAuth
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
+import { US_STATE_NAMES_ENGLISH } from "./partyFormat";
 
 const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:?\s*$/i;
 
@@ -216,6 +217,29 @@ export function collapseDuplicateNoticeEntityLines(text: string, fullNames: read
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)\.?$/i;
 
+const US_STATE_ALT = US_STATE_NAMES_ENGLISH.map((n) => n.replace(/\s+/g, "\\s+")).join("|");
+
+/**
+ * TEST550 — a legal-form appositive such as "a Texas LLC" or "an Illinois LLC" describes an
+ * entity's jurisdiction and organizational form, not its name. When the body/intake writes
+ * "Summit AI Consulting LLC, a Texas LLC", a comma-split extractor promotes the bare "Texas LLC"
+ * fragment to a phantom party (shifting slot 3/4 and dropping a real party). Reject names whose
+ * only distinctive token is a US state followed by a legal-form suffix. A real name that merely
+ * contains a state word ("Texas Instruments Inc", "New York Life Insurance Company") carries
+ * additional distinctive tokens and is preserved.
+ */
+const STATE_LEGAL_FORM_ONLY_RE = new RegExp(
+  `^(?:(?:a|an|the)\\s+)?(?:${US_STATE_ALT})\\s+(?:limited\\s+liability\\s+company|professional\\s+(?:limited\\s+liability\\s+)?(?:company|corporation)|public\\s+benefit\\s+corporation|general\\s+partnership|limited\\s+partnership|LLC|L\\.L\\.C\\.|Inc\\.?|Incorporated|Corp\\.?|Corporation|Ltd\\.?|Limited|LP|L\\.P\\.|LLP|PLLC|PC|PBC|Co\\.?|Company)\\.?$`,
+  "i",
+);
+
+/** True when the label is only "[a/an/the] <US state> <legal-form suffix>" — a jurisdiction/form appositive, never a party name. */
+export function isStateLegalFormOnlyName(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  return STATE_LEGAL_FORM_ONLY_RE.test(t);
+}
+
 export const PREAMBLE_MAX_LEN = 4_500;
 
 /** Candidate short labels that may appear instead of the full legal name. */
@@ -331,8 +355,10 @@ export function isAuthoritativeLegalEntityName(name: string): boolean {
   const raw = (name || "").replace(/\s+/g, " ").trim();
   if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
   if (isPartyMetadataFieldLabelValue(raw)) return false;
+  if (isStateLegalFormOnlyName(raw)) return false;
   const t = isolateLegalEntityFromContaminatedName(raw);
   if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
+  if (isStateLegalFormOnlyName(t)) return false;
   if (isPartyMetadataFieldLabelValue(t)) return false;
   if (/^(?:my|our|the|your|their|each|both|either)\s+company$/i.test(t)) return false;
   if (/^(?:client|customer|vendor|contractor|service\s+provider|provider|party\s*[ab])$/i.test(t)) {

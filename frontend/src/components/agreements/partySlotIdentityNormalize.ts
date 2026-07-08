@@ -12,6 +12,7 @@ import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import {
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
+  isStateLegalFormOnlyName,
 } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { looksLikeAuthorizedSignersBulletLine } from "./intakeSignerMetadataAuthority";
@@ -208,6 +209,7 @@ export function isInvalidPartySlotLegalEntity(name: string): boolean {
   if (!t || t.length < 3) return true;
   if (isStandaloneLegalEntitySuffix(t)) return true;
   if (isInternalPartyAliasToken(t)) return true;
+  if (isStateLegalFormOnlyName(t)) return true;
   if (isDisallowedPartyPhrase(t)) return true;
   return false;
 }
