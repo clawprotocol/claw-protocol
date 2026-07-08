@@ -564,10 +564,18 @@ export function shouldArmPaidProFirstReviewSignerSetupLatch(args: {
   signerMetadataFinalized: boolean;
   signaturePreparationRequested: boolean;
   alreadyLatched: boolean;
+  /**
+   * TEST570: the review_ready delivery-track decision (Send for review / Prepare signature links) is
+   * available. When true, that decision WINS over signer setup — the inline signer form must NOT
+   * auto-arm on first review; it mounts only after the user explicitly chooses Prepare signature
+   * links (which arms the latch directly, satisfying `alreadyLatched`).
+   */
+  deliveryTrackDecisionActive?: boolean;
 }): boolean {
   if (args.alreadyLatched) return true;
   if (args.signaturePreparationRequested) return false;
   if (args.signerMetadataFinalized) return false;
+  if (args.deliveryTrackDecisionActive) return false;
   const reviewAuthority =
     args.hasAcceptedPaidProAuthority || Boolean(args.hasProfessionallyValidatedReviewCorpus);
   return Boolean(
@@ -619,19 +627,28 @@ export function resolvePaidProIntakeLegalEntityAddressPrefillComplete(args: {
   return rows.length >= 2;
 }
 
-/** Delivery-track chooser on forced document route — only after explicit signer metadata finalize. */
+/**
+ * Delivery-track chooser (review decision) on the forced document route.
+ *
+ * TEST570: the review decision must be shown FIRST — before signer setup — whenever the review_ready
+ * delivery-track decision is available (`deliveryTrackDecisionActive`), so the user chooses "Send for
+ * review" or "Prepare signature links" up front. It also remains visible post-finalize
+ * (`signerMetadataFinalized`). It is hidden while inline signer setup is mounted or signing has been
+ * requested.
+ */
 export function shouldShowPaidProForcedFirstReviewTrackChooser(args: {
   forcedFirstReviewActive: boolean;
   inlineSignerSetupMounted: boolean;
   signerDetailsReady: boolean;
   signerMetadataFinalized: boolean;
   signaturePreparationRequested: boolean;
+  deliveryTrackDecisionActive?: boolean;
 }): boolean {
   return Boolean(
     args.forcedFirstReviewActive &&
       !args.inlineSignerSetupMounted &&
-      args.signerMetadataFinalized &&
-      !args.signaturePreparationRequested,
+      !args.signaturePreparationRequested &&
+      (args.signerMetadataFinalized || args.deliveryTrackDecisionActive),
   );
 }
 

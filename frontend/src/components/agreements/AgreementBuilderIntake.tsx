@@ -17570,6 +17570,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !paidProSignerMetadataFinalized,
   );
 
+  /**
+   * TEST570: at review_ready the paid-Pro delivery-track decision ("Send for review" / "Prepare
+   * signature links") is available. This decision must win over signer setup — inline signer fields
+   * must NOT auto-mount on the first review page. They mount only after the user explicitly chooses
+   * "Prepare signature links".
+   */
+  const firstReviewDeliveryTrackDecisionActive = Boolean(
+    acceptedPaidProAuthorityActive &&
+      premiumPaidDocumentSurface &&
+      !premiumRecipientUxActive &&
+      createUiStage === CreateUiStage.DRAFT &&
+      paidProFirstReviewSurfaceActive &&
+      hasCanonicalReviewCorpusForRender() &&
+      !signaturePreparationRequested &&
+      !paidProSignerMetadataFinalized,
+  );
+
   const paidProFirstReviewSignerSetupRequired = useMemo(
     () =>
       shouldArmPaidProFirstReviewSignerSetupLatch({
@@ -17584,6 +17601,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         signerMetadataFinalized: paidProSignerMetadataFinalized,
         signaturePreparationRequested,
         alreadyLatched: paidProInlineSignerSetupLatched,
+        deliveryTrackDecisionActive: firstReviewDeliveryTrackDecisionActive,
       }),
     [
       acceptedPaidProAuthorityActive,
@@ -17595,6 +17613,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProSignerMetadataFinalized,
       signaturePreparationRequested,
       paidProInlineSignerSetupLatched,
+      firstReviewDeliveryTrackDecisionActive,
       premiumSurfaceGateTick,
       reviewDocRefreshTick,
       paidProProfessionallyValidatedReviewCorpusActive,
@@ -17609,6 +17628,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         signerDetailsReady: paidProSignatureDetailsReady,
         signerMetadataFinalized: paidProSignerMetadataFinalized,
         signaturePreparationRequested,
+        deliveryTrackDecisionActive: firstReviewDeliveryTrackDecisionActive,
       }),
     [
       paidProForcedFirstReviewActive,
@@ -17616,6 +17636,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProSignatureDetailsReady,
       paidProSignerMetadataFinalized,
       signaturePreparationRequested,
+      firstReviewDeliveryTrackDecisionActive,
     ],
   );
 
@@ -28120,8 +28141,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     handlePremiumSendModePick("signature");
     setPremiumSendModeTouched(true);
-    if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
-      enterFinalReviewRecipientSetup("signature");
+    // TEST570: "Prepare signature links" is the point where signer setup mounts. From the review
+    // decision surface we always mount the inline signer form for confirmation/edit before signing —
+    // even when intake prefilled every signer name — and never auto-finalize or jump straight to
+    // signing. Incomplete details reuse the shared recipient-setup entry; prefilled-but-unconfirmed
+    // details arm the inline mount latch directly.
+    if (acceptedPaidProAuthorityActive && !paidProSignerMetadataFinalized) {
+      if (!paidProSignatureDetailsReady) {
+        enterFinalReviewRecipientSetup("signature");
+        return;
+      }
+      setSignaturePreparationRequested(false);
+      setPaidProInlineSignerSetupLatched(true);
+      setDisplayPhase("review");
+      setCreateUiStage(CreateUiStage.DRAFT);
+      setCreateFlowSendRecipientEditorOpen(true);
+      bumpPremiumSurfaceGateTick();
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById("claw-paid-pro-inline-signer-setup")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
       return;
     }
     void handleProSendForSignature();
@@ -28130,6 +28170,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     handlePremiumSendModePick,
     acceptedPaidProAuthorityActive,
     paidProSignatureDetailsReady,
+    paidProSignerMetadataFinalized,
     enterFinalReviewRecipientSetup,
     handleProSendForSignature,
   ]);

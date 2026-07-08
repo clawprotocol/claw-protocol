@@ -10,6 +10,7 @@ import {
   readCanonicalPartyMetadata,
 } from "./canonicalPartyMetadataAuthority";
 import { alignIntakeSignerMetadataToLegalEntities } from "./structuredIntakePartyContactParse";
+import { splitAuthorizedSignerLabeledValue } from "./labeledPartyBlockParse";
 import { mergeCanonicalPartyAddresses } from "./canonicalPartyStructuredAddress";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
 import type { PremiumRecipientHandoffV2 } from "./premiumPartyNamesHandoff";
@@ -209,6 +210,26 @@ export function runPaidProSignerMetadataAuthoritySeed(
   const finalNames = hydrateStringArrayNonDestructive(namesHydrated.values, intakeNames, partyCount);
   const finalTitles = hydrateStringArrayNonDestructive(titlesHydrated.values, intakeTitles, partyCount);
 
+  // TEST570: defense-in-depth — regardless of which upstream extractor produced the value, split any
+  // "Authorized signer: Name, Title, email" style signer name so the UI shows a clean name and title
+  // (and recovers a title when only the name field carried the combined value). Display/state only —
+  // the frozen corpus is never mutated here.
+  const cleanedEmails = emails.slice();
+  for (let i = 0; i < partyCount; i += 1) {
+    const split = splitAuthorizedSignerLabeledValue(finalNames.values[i] ?? "", finalTitles.values[i] ?? "");
+    if (split.signerName !== (finalNames.values[i] ?? "")) {
+      finalNames.values[i] = split.signerName;
+      finalNames.changed = true;
+    }
+    if (!(finalTitles.values[i] ?? "").trim() && split.signerTitle) {
+      finalTitles.values[i] = split.signerTitle;
+      finalTitles.changed = true;
+    }
+    if (!(cleanedEmails[i] ?? "").trim() && split.signerEmail) {
+      cleanedEmails[i] = split.signerEmail;
+    }
+  }
+
   const uiWasEmpty =
     !(args.uiSignerNames ?? []).some((n) => n.trim()) &&
     !(args.uiSignerTitles ?? []).some((t) => t.trim());
@@ -219,7 +240,7 @@ export function runPaidProSignerMetadataAuthoritySeed(
     (uiWasEmpty &&
       bundle.parties.some((p) => p.signerName.trim() || p.signerTitle.trim()));
   const contactFieldsChanged =
-    emails.some(Boolean) ||
+    cleanedEmails.some(Boolean) ||
     finalAddresses.some(Boolean) ||
     finalNames.changed ||
     finalTitles.changed ||
@@ -252,7 +273,7 @@ export function runPaidProSignerMetadataAuthoritySeed(
   return {
     names: finalNames.values,
     titles: finalTitles.values,
-    emails,
+    emails: cleanedEmails,
     addresses: finalAddresses,
     uiChanged,
     contactFieldsChanged,

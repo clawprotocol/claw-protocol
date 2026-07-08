@@ -158,6 +158,15 @@ const REPRESENTED_BY_HEADER_RE = /^\s*represented\s+by\s*:?\s*$/i;
 const ADDRESS_HEADER_ONLY_RE =
   /^\s*(?:address|physical\s+address|mailing\s+address|party\s+address)\s*:?\s*$/i;
 
+/**
+ * TEST570: role-header intake shapes label the human signer with an "Authorized signer:" (or
+ * "Signatory:") prefix and pack "Name, Title, email" onto one line. Recognize that label so the
+ * value is split into structured name/title/email instead of stored verbatim as the signer name.
+ */
+const AUTHORIZED_SIGNER_LABEL_LINE_RE = /\bauthori[sz]ed\s+sign(?:er|atory)\b|\bsignatory\b/i;
+const AUTHORIZED_SIGNER_LABEL_PREFIX_RE =
+  /^\s*(?:authori[sz]ed\s+sign(?:er|atory)|signatory)\s*[:\-]\s*/i;
+
 const LABELED_FIELD_RES: ReadonlyArray<{ key: keyof Omit<LabeledPartyBlock, "index">; re: RegExp }> = [
   {
     key: "legalEntity",
@@ -165,7 +174,7 @@ const LABELED_FIELD_RES: ReadonlyArray<{ key: keyof Omit<LabeledPartyBlock, "ind
   },
   {
     key: "signerName",
-    re: /^\s*(?:signer\s+name|representative(?:\s+name)?(?:\s*\([^)]*\))?|human\s+signer|authorized\s+representative|represented\s+by|rep\.?)\s*[:\-]\s*(.+)$/i,
+    re: /^\s*(?:signer\s+name|representative(?:\s+name)?(?:\s*\([^)]*\))?|human\s+signer|authori[sz]ed\s+representative|authori[sz]ed\s+sign(?:er|atory)|signatory|represented\s+by|rep\.?)\s*[:\-]\s*(.+)$/i,
   },
   { key: "signerTitle", re: /^\s*(?:signer\s+title|representative\s+title|title)\s*[:\-]\s*(.+)$/i },
   { key: "signerEmail", re: /^\s*(?:signer\s+email|email)\s*[:\-]\s*(.+)$/i },
@@ -253,6 +262,10 @@ function applyLabeledFieldToBlock(
 ): number {
   if (labeled.key === "signerName" && /represented\s+by/i.test(rawLine)) {
     applyRepresentedByField(block, labeled.value);
+    return lineIndex;
+  }
+  if (labeled.key === "signerName" && AUTHORIZED_SIGNER_LABEL_LINE_RE.test(rawLine)) {
+    applyAuthorizedSignerInlineValue(block, labeled.value);
     return lineIndex;
   }
   if (labeled.key === "address") {
@@ -506,6 +519,8 @@ export function parseEntityHeaderContactBlocks(raw: string): LabeledPartyBlock[]
         current.legalEntity = labeled.value;
       } else if (labeled.key === "signerName" && /represented\s+by/i.test(line)) {
         applyRepresentedByField(current, labeled.value);
+      } else if (labeled.key === "signerName" && AUTHORIZED_SIGNER_LABEL_LINE_RE.test(line)) {
+        applyAuthorizedSignerInlineValue(current, labeled.value);
       } else if (labeled.key === "address") {
         lineIndex = appendMultilineAddress(current, labeled.value, lines.map((l) => l.trim()), lineIndex);
       } else if (labeled.key !== "legalEntity" && !current[labeled.key]) {
@@ -580,6 +595,39 @@ function parseInlineContactTail(tail: string): Pick<LabeledPartyBlock, "signerNa
     address = cleanFieldValue(rest.slice(1).join(", "));
   }
   return { signerName, signerTitle, signerEmail, address };
+}
+
+/**
+ * TEST570: split an "Authorized signer: Name, Title, email[, address]" value into structured signer
+ * metadata. The leading label (when present) is stripped, then the remaining comma-delimited tail is
+ * parsed like any inline contact tail (name first, then title/email/address).
+ */
+export function splitAuthorizedSignerLabeledValue(
+  rawName: string | null | undefined,
+  existingTitle?: string | null,
+): { signerName: string; signerTitle: string; signerEmail: string } {
+  const raw = String(rawName ?? "").replace(/\s+/g, " ").trim();
+  const title = String(existingTitle ?? "").trim();
+  const stripped = raw.replace(AUTHORIZED_SIGNER_LABEL_PREFIX_RE, "").trim();
+  const hadLabel = stripped !== raw;
+  // Never mangle a clean standalone name: only split when the value was explicitly labeled or when a
+  // comma-delimited title/email tail exists and no title has been captured yet.
+  if (!hadLabel && (!stripped.includes(",") || title)) {
+    return { signerName: stripped, signerTitle: title, signerEmail: "" };
+  }
+  const parsed = parseInlineContactTail(stripped);
+  return {
+    signerName: parsed.signerName || stripped,
+    signerTitle: title || parsed.signerTitle,
+    signerEmail: parsed.signerEmail,
+  };
+}
+
+function applyAuthorizedSignerInlineValue(block: LabeledPartyBlock, rawValue: string): void {
+  const parsed = splitAuthorizedSignerLabeledValue(rawValue, block.signerTitle);
+  if (parsed.signerName && !block.signerName) block.signerName = parsed.signerName;
+  if (parsed.signerTitle && !block.signerTitle) block.signerTitle = parsed.signerTitle;
+  if (parsed.signerEmail && !block.signerEmail) block.signerEmail = parsed.signerEmail;
 }
 
 /** Entity — Name, Title, email, address inline clauses (TEST479 Aurora-style intake). */
