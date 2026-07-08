@@ -11,7 +11,10 @@ import {
 } from "./agreementTemplatePlaceholderSafety";
 import { isPartyMetadataLabelValue } from "./intakeSectionLabels";
 import { parseAllStructuredPartyContactBlocks } from "./labeledPartyBlockParse";
+import { looksLikeStackedPartyLegalEntityLine } from "./starterPartyIdentityIsolation";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+
+const CONTACT_EMAIL_ANYWHERE_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 
 export type IntakeContactRecord = {
   name: string;
@@ -115,13 +118,49 @@ export function resolveAuthoritativeEmailForContactSlot(
 }
 
 /**
- * TEST564 — ordered party addresses parsed from the intake's structured party/contact blocks
- * (labeled `Party N`, entity-header, and entity-inline forms). This is the *same* authoritative
- * address source the notice-stanza rebuild uses, exposed so the render-token resolver can recover
- * `[ADDRESS_N]` slots when the party authority carries no `partyAddress`.
+ * TEST565 — ordered addresses from the colon-inline party-contact shape the production Redwood
+ * prompt actually uses: `Legal Entity[, a Texas LLC]: Signer Name, Title, email@x.com, 123 Main St,...`.
+ * `parseAllStructuredPartyContactBlocks` only handles `Party N` headers and em-dash entity-inline
+ * lines, so it returned zero blocks for this shape and every `[ADDRESS_N]` survived (TEST564 unit
+ * used labeled `Party N` blocks, which masked the gap). Address = the remainder after the email on
+ * an entity-prefixed line; an empty string is pushed when a party line lists no trailing address so
+ * slot alignment (address[slot-1]) is preserved.
+ */
+function extractInlineContactAddressesOrdered(intakeRaw: string): string[] {
+  const out: string[] = [];
+  for (const rawLine of intakeRaw.split(/\n/)) {
+    const line = rawLine.replace(/^\s*[*•\u2022-]\s*/, "").trim();
+    const colon = line.indexOf(":");
+    if (colon < 2) continue;
+    const prefix = line.slice(0, colon).trim();
+    const tail = line.slice(colon + 1).trim();
+    if (!tail) continue;
+    // Party-contact line signal: an entity-like prefix (drop any ", a Texas LLC" form suffix) plus an
+    // email in the tail. This deliberately ignores instruction/prose lines that merely end in a colon.
+    const entityHead = prefix.split(/,\s*(?:an?\s+)?/)[0] ?? prefix;
+    if (!looksLikeStackedPartyLegalEntityLine(entityHead)) continue;
+    const emailM = tail.match(CONTACT_EMAIL_ANYWHERE_RE);
+    if (!emailM || emailM.index == null) continue;
+    const afterEmail = tail
+      .slice(emailM.index + emailM[0].length)
+      .replace(/^\s*,\s*/, "")
+      .trim();
+    out.push(afterEmail);
+  }
+  return out;
+}
+
+/**
+ * TEST564/565 — ordered party addresses from the intake. Structured party/contact blocks
+ * (labeled `Party N`, entity-header, em-dash entity-inline) win when present; otherwise fall back
+ * to the colon-inline production shape. This is the address source the render-token resolver uses to
+ * recover `[ADDRESS_N]` slots when the party authority carries no `partyAddress`.
  */
 export function extractIntakeAddressesOrdered(intakeRaw: string | null | undefined): string[] {
-  return parseAllStructuredPartyContactBlocks(String(intakeRaw || "")).map((b) => b.address.trim());
+  const raw = String(intakeRaw || "");
+  const structured = parseAllStructuredPartyContactBlocks(raw).map((b) => b.address.trim());
+  if (structured.some((a) => a.length > 0)) return structured;
+  return extractInlineContactAddressesOrdered(raw);
 }
 
 /**
