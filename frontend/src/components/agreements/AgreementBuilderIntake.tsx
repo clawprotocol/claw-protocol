@@ -3990,6 +3990,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // Inline signer setup latch: once the user is on Add signer details, stay mounted across metadata
   // edits — including when the gate becomes complete — until Prepare signature links is clicked.
   const [paidProInlineSignerSetupLatched, setPaidProInlineSignerSetupLatched] = useState(false);
+  // Sticky "signer metadata finalized" latch. The authoritative signing snapshot is module-level
+  // state that a handful of render-phase hydration/freeze side effects can transiently clear. That
+  // clear used to flip `signerMetadataFinalized` back to false, which re-armed the inline signer
+  // setup and trapped the review-decision → Prepare-for-signing flow in a loop. This React-state
+  // latch pins the finalized decision for the current source of truth so the UI cannot re-arm; it is
+  // cleared only when the user re-opens signer editing or the source of truth is torn down.
+  const [paidProSignerMetadataFinalizedLatch, setPaidProSignerMetadataFinalizedLatch] =
+    useState(false);
   /** Frozen party manifest / identities captured at signer-metadata session entry — never recompute on keystroke. */
   const frozenSignerMetadataPartyManifestRef = useRef<CanonicalFinalPartyManifest | null>(null);
   const frozenSignerMetadataIdentitiesRef = useRef<
@@ -16613,6 +16621,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     liveSignerMetadataUiState,
   ]);
 
+  // Tear down the sticky finalize latch when the paid Pro source of truth is gone (new session /
+  // reset). Editing signer details clears the latch explicitly; this only covers full teardown.
+  useEffect(() => {
+    if (paidProSignerMetadataFinalizedLatch && !hasPaidProSourceOfTruth()) {
+      setPaidProSignerMetadataFinalizedLatch(false);
+    }
+  }, [paidProSignerMetadataFinalizedLatch, premiumSurfaceGateTick, reviewDocRefreshTick]);
+
   const guidedSignerFinalVersionLines = useMemo(() => {
     if (!guidedPreReviewSignerSlots.complete) return [];
     return formatSignerPartyIdentityConfirmationLines(guidedSignerCanonicalIdentities);
@@ -17555,7 +17571,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProForcedFirstReviewActive ||
     paidProSignerSetupStickyCtaSurfaceActive;
 
-  const paidProSignerMetadataFinalized = hasAuthoritativeSigningSnapshot();
+  const paidProSignerMetadataFinalized =
+    hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch;
   /** Trust rail + status chip only — finalized snapshot must not show "Signer details needed". */
   const paidProReviewSignerStatusReady = resolvePaidProReviewSignerStatusReady({
     signerDetailsGateComplete: paidProSignatureDetailsReady,
@@ -25222,6 +25239,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     finalReviewSendPathChosenRef.current = false;
     setSignaturePreparationRequested(false);
     setPaidProInlineSignerSetupLatched(true);
+    setPaidProSignerMetadataFinalizedLatch(false);
     frozenSignerMetadataPartyManifestRef.current = null;
     setGuidedCompletionPhase(
       paidProAcceptedCorpusReady && guidedCompletionPhase === "inactive"
@@ -27523,6 +27541,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       corpusHasFilledSignatureBlocks: hydrated.signaturePolishCount > 0,
     });
     setPaidProInlineSignerSetupLatched(false);
+    setPaidProSignerMetadataFinalizedLatch(true);
     setGuidedFinalReviewExplicitlyOpened(true);
     guidedFinalReviewExplicitlyUnlockedRef.current = true;
     setCreateFlowPhase("draft_ready_for_review");
@@ -28083,7 +28102,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (
       acceptedPaidProAuthorityActive &&
       paidProSignatureDetailsReady &&
-      !hasAuthoritativeSigningSnapshot()
+      !hasAuthoritativeSigningSnapshot() &&
+      !paidProSignerMetadataFinalizedLatch
     ) {
       finalizePaidProSignerMetadataAndOpenReviewDecision();
       return;
@@ -28091,8 +28111,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (
       acceptedPaidProAuthorityActive &&
       paidProSignatureDetailsReady &&
-      hasAuthoritativeSigningSnapshot()
+      (hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch)
     ) {
+      // The user already finalized signer details. If the module-level signing snapshot was
+      // transiently cleared by a hydration/freeze side effect, rebuild it from the frozen source of
+      // truth before advancing so signing preparation always has an authoritative corpus. This never
+      // re-arms signer setup (the finalize latch keeps signerMetadataFinalized true).
+      if (!hasAuthoritativeSigningSnapshot()) {
+        finalizePaidProSignerMetadataAndOpenReviewDecision();
+      }
       markSigningPreparationRequested();
       setSignaturePreparationRequested(true);
       setPaidProInlineSignerSetupLatched(false);
@@ -28119,6 +28146,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     canProceedGuidedFinalReviewToSigning,
     acceptedPaidProAuthorityActive,
     paidProSignatureDetailsReady,
+    paidProSignerMetadataFinalizedLatch,
     finalizePaidProSignerMetadataAndOpenReviewDecision,
     continueGuidedFinalReviewToSigning,
     enterGuidedSignatureTrackRoute,

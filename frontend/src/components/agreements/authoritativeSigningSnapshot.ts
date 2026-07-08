@@ -76,6 +76,33 @@ export type AuthoritativeSigningSnapshot = {
 let authoritativeSigningSnapshot: AuthoritativeSigningSnapshot | null = null;
 let authorityPhase: PaidProSigningAuthorityPhase = "SIGNER_METADATA_EDIT";
 
+/**
+ * Thread already-extracted street addresses into the operative "If to …" notice stanzas.
+ *
+ * The frozen server_full_draft that we preserve verbatim frequently omits street addresses from the
+ * notice section even when the intake/party authority carried them. `ensureOperativeIfToNoticeDelivery`
+ * only rebuilds stanzas that are incomplete (missing a required Address line), so this pass is additive
+ * and idempotent — it never drops or weakens existing content and only runs when a party actually has
+ * an address to surface.
+ */
+function threadPartyAddressesIntoNoticeStanzas(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+  intakeText: string | null,
+): string {
+  if (parties.length < 2) return corpus;
+  const hasAnyAddress = parties.some((p) => p.partyAddress.trim().length > 0);
+  if (!hasAnyAddress) return corpus;
+  const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, parties, {
+    intakeText: intakeText ?? null,
+    draftPartyNames: parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2),
+  });
+  if (noticeDelivery.repairs.length > 0) {
+    return noticeDelivery.text.trim();
+  }
+  return corpus;
+}
+
 export function getPaidProSigningAuthorityPhase(): PaidProSigningAuthorityPhase {
   return authorityPhase;
 }
@@ -188,9 +215,11 @@ export function createAuthoritativeSigningSnapshot(
   let corpus: string;
   if (preserveFrozenCanonicalCorpus && sot) {
     corpus = sot.text.trim();
+    corpus = threadPartyAddressesIntoNoticeStanzas(corpus, parties, args.intakeText ?? null);
   } else if (frozenServerFullMinimalHydration) {
     const dedupe = stripDuplicateConsecutiveExecutionEntityLines(rawInput);
     corpus = dedupe.text.trim();
+    corpus = threadPartyAddressesIntoNoticeStanzas(corpus, parties, args.intakeText ?? null);
   } else {
     rawInput = ensureExecutionBlockNoticeContactFieldLines(rawInput).text.trim();
     corpus = finalizePaidProSigningCorpusText(
