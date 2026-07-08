@@ -120,12 +120,35 @@ export function assertTest225PremiumNetworkCallBudget(): void {
   }
 }
 
+/**
+ * Identity of a single generation attempt. TEST552 — the audit ledger is process-global and is
+ * never cleared in production (`clearPremiumGenerationCallAudit` is test-only), so a per-process
+ * "at most one checkout" rule mislabelled a genuinely NEW generation (fresh agreement / new
+ * generation id) as a duplicate checkout. The pipeline then skipped the network call
+ * (`duplicate_checkout_premium_call`) and rendered a thin fallback_preview — the recurring empty
+ * Review. Scope duplicate detection to the current generation attempt: a prior checkout only
+ * collides when it belongs to the SAME generation id (or the same intake fingerprint when no id is
+ * present). Same-generation double-fires (React re-mount / double-invoke) are still blocked; armed
+ * explicit retries still bypass.
+ */
+function generationIdentityKey(row: {
+  agreementGenerationId?: string | null;
+  intakeFingerprint?: string | null;
+}): string {
+  const genId = (row.agreementGenerationId ?? "").trim();
+  if (genId) return `gen:${genId}`;
+  return `fp:${(row.intakeFingerprint ?? "").trim()}`;
+}
+
 export function recordPremiumFullDraftCall(args: {
   reason: PremiumGenerationCallReason;
   intakeFingerprint: string;
   agreementGenerationId?: string | null;
 }): { callIndex: number; duplicateBlocked: boolean } {
-  const priorCheckout = records.filter((r) => r.reason === "checkout_completion").length;
+  const identityKey = generationIdentityKey(args);
+  const priorCheckout = records.filter(
+    (r) => r.reason === "checkout_completion" && generationIdentityKey(r) === identityKey,
+  ).length;
   const isRetry = args.reason === "explicit_retry_pro_draft" || explicitRetryArmed;
   const duplicateBlocked =
     args.reason === "checkout_completion" && priorCheckout >= 1 && !isRetry;
@@ -159,10 +182,18 @@ export function readPremiumGenerationCallRecords(): readonly PremiumGenerationCa
 }
 
 export function assertAtMostOneCheckoutPremiumGenerationCall(): void {
-  const checkoutCalls = records.filter((r) => r.reason === "checkout_completion");
-  if (checkoutCalls.length > 1) {
-    throw new Error(
-      `duplicate_premium_full_draft_checkout:${checkoutCalls.length}`,
-    );
+  // TEST552 — assert at most one checkout orchestration PER generation attempt, not per process.
+  // The ledger persists for the tab's lifetime, so a per-process count threw (or masked defects)
+  // once a second agreement / generation legitimately ran in the same tab.
+  const perGeneration = new Map<string, number>();
+  for (const r of records) {
+    if (r.reason !== "checkout_completion") continue;
+    const key = generationIdentityKey(r);
+    perGeneration.set(key, (perGeneration.get(key) ?? 0) + 1);
+  }
+  for (const [key, count] of perGeneration) {
+    if (count > 1) {
+      throw new Error(`duplicate_premium_full_draft_checkout:${key}:${count}`);
+    }
   }
 }
