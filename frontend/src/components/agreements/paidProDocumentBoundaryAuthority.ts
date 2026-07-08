@@ -21,6 +21,8 @@ import {
   analyzeMultiPartyExecutionBlockShape,
   resolveAcceptanceManifestRecordsForExecution,
 } from "./paidProAcceptanceExecutionBlockInvariant";
+import { scanUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
+import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
 
 export type PaidProDocumentBoundaryAuthorityOpts = PaidProNoticeContactAuthorityOpts & {
   /** When true (freeze path), unresolved boundary violations throw. */
@@ -38,6 +40,12 @@ export type PaidProDocumentBoundaryAuthorityResult = {
   repairs: string[];
   violations: string[];
   ok: boolean;
+  /**
+   * TEST563 — exact user-visible render tokens that kept the notice/contact authority from
+   * resolving (`contact.ok === false`). These are the *real* defect behind a `violations=contact`
+   * boundary block; surfacing them prevents the reason collapsing to a bare `document_boundary_blocked`.
+   */
+  unresolvedRenderTokens: string[];
 };
 
 const RECITAL_FUSED_SECTION_RE = /Parties\."\d+\./i;
@@ -211,6 +219,14 @@ export function applyPaidProDocumentBoundaryAuthority(
   }
 
   const violations = detectDocumentBoundaryViolations(out);
+  // TEST563 — when the contact/render-token authority could not resolve every token, capture the
+  // exact survivors. A `contact.ok === false` result with *no* structural violation is the live 42k
+  // `document_boundary_blocked` case: the corpus carries a genuinely unresolvable token (a degraded
+  // literal like `TBD`/`UNKNOWN`, or an unknown compound field like `{{party_3_scope}}`), and the
+  // reason otherwise collapses to a bare `document_boundary_blocked`.
+  const unresolvedRenderTokens = contact.ok
+    ? []
+    : [...new Set(scanUnresolvedRenderTokens(out).map((m) => m.token))];
   const ok = violations.length === 0 && contact.ok;
   if (opts?.blockOnViolation && violations.length > 0) {
     throw new Error(`[paid-pro-document-boundary-blocked] ${violations.join(",")}`);
@@ -221,6 +237,7 @@ export function applyPaidProDocumentBoundaryAuthority(
     repairs: [...new Set(repairs)],
     violations,
     ok,
+    unresolvedRenderTokens,
   };
 }
 
@@ -230,6 +247,7 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
 ): string {
   let out = (text || "").replace(/\r\n/g, "\n");
   let lastViolations: string[] = ["uninitialized"];
+  let lastUnresolvedTokens: string[] = [];
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const result = applyPaidProDocumentBoundaryAuthority(out, {
       ...opts,
@@ -239,6 +257,7 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
     });
     out = result.text;
     lastViolations = result.violations;
+    lastUnresolvedTokens = result.unresolvedRenderTokens;
     if (result.ok && result.violations.length === 0) {
       assertClauseFamilyStructuralIntegrityForFreeze(out, {
         parties: opts?.parties,
@@ -250,7 +269,40 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
       return out;
     }
   }
-  throw new Error(
-    `[paid-pro-document-boundary-blocked] violations=${lastViolations.join(",") || "contact"}`,
-  );
+  // TEST563 — surface the *specific* blocker instead of the opaque `violations=contact`. A structural
+  // violation lists its own name(s); a contact block lists the exact unresolved render tokens so the
+  // reject reason (and `[paid-pro-validation-decision] rejectedRule`) proves the real defect rather
+  // than collapsing to a bare `document_boundary_blocked`.
+  const reasonParts: string[] = [...lastViolations.filter((v) => v && v !== "uninitialized")];
+  if (lastUnresolvedTokens.length > 0) {
+    reasonParts.push(`unresolved_render_tokens:${lastUnresolvedTokens.slice(0, 6).join("|")}`);
+  }
+  const reason = reasonParts.length > 0 ? reasonParts.join(",") : "contact";
+  logPaidProDocumentBoundaryBlockedDiagnostics({
+    surface: opts?.surface ?? "paid_pro_document_boundary_freeze",
+    structuralViolations: lastViolations.filter((v) => v && v !== "uninitialized"),
+    unresolvedRenderTokens: lastUnresolvedTokens,
+  });
+  throw new Error(`[paid-pro-document-boundary-blocked] violations=${reason}`);
+}
+
+/**
+ * TEST563 — gated, non-collapsed diagnostic emitted at the moment a freeze is boundary-blocked.
+ * Prints the full structural-violation list and every unresolved render-token string (not a
+ * collapsed console `Array(n)`), so a live run pinpoints the exact defect and provenance.
+ */
+function logPaidProDocumentBoundaryBlockedDiagnostics(payload: {
+  surface: string;
+  structuralViolations: string[];
+  unresolvedRenderTokens: string[];
+}): void {
+  if (!paidProVerboseQaLogsEnabled()) return;
+  // eslint-disable-next-line no-console
+  console.info("[paid-pro-document-boundary-blocked-diagnostics]", {
+    surface: payload.surface,
+    structuralViolations: payload.structuralViolations,
+    structuralViolationCount: payload.structuralViolations.length,
+    unresolvedRenderTokens: payload.unresolvedRenderTokens,
+    unresolvedRenderTokenCount: payload.unresolvedRenderTokens.length,
+  });
 }

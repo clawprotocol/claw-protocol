@@ -1168,6 +1168,15 @@ function extractPaidProFreezeRejectReason(message: string): string {
     return codes?.split(",")[0] ?? "clause_family_structural";
   }
   if (message.includes("[paid-pro-document-boundary-blocked]")) {
+    // TEST563 — preserve the specific blocker (structural violation names or the exact unresolved
+    // render tokens) so `[paid-pro-validation-decision] rejectedRule` proves the real defect instead
+    // of collapsing every boundary block to a bare `document_boundary_blocked`.
+    const detail = message
+      .match(/\[paid-pro-document-boundary-blocked\]\s*(?:violations=)?(.+)/)?.[1]
+      ?.trim();
+    if (detail && detail !== "contact") {
+      return `document_boundary_blocked:${detail.slice(0, 120)}`;
+    }
     return "document_boundary_blocked";
   }
   if (message.includes("unresolved_render_tokens")) return "unresolved_render_tokens";
