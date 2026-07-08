@@ -137,19 +137,55 @@ function resolveMustacheOrDollarToken(
   const legalForSlot = (slot: number): string | null =>
     parties[slot - 1]?.partyLegalName?.trim() || ctx.partyNames?.[slot - 1]?.trim() || null;
 
+  // Resolve a specific field for a given 1-based slot. Unknown fields return null so genuinely
+  // unresolved tokens (e.g. {{party_3_scope}}) still block — this never weakens validation.
+  const fieldForSlot = (slot: number, field: string): string | null => {
+    const p = parties[slot - 1];
+    const f = field.replace(/^_+|_+$/g, "");
+    if (/^(?:name|legal|legal_?name|party_?name|entity|entity_?name)$/i.test(f)) return legalForSlot(slot);
+    if (/^(?:email|contact_?email|signer_?email|notice_?email)$/i.test(f)) {
+      return resolveAuthoritativeEmailForContactSlot(slot, ctx.intakeRaw, parties);
+    }
+    if (/^(?:address|party_?address|notice_?address|mailing_?address)$/i.test(f)) {
+      return p?.partyAddress?.trim() || null;
+    }
+    if (/^(?:title|signer_?title|role_?title)$/i.test(f)) return p?.signerTitle?.trim() || null;
+    if (/^(?:signer|signer_?name|signatory|signatory_?name|representative|representative_?name)$/i.test(f)) {
+      return p?.signerName?.trim() || null;
+    }
+    return null;
+  };
+
   // Party legal name. Slot resolves from an explicit index (party_3), an A/B suffix (party_a),
   // or the role keyword's implied position (company/client → 1, counterparty/provider → 2). The
   // mustache path previously hard-coded only slots 1 and 2, so any {{party_3}}/{{email_4}} style
   // token in a 3+ party agreement survived unresolved and blocked the substantive draft
   // (document_boundary_blocked). The bracket path already scales to N — this mirrors it.
   let m: RegExpMatchArray | null;
+  // TEST551 — compound per-party fields ({{party_3_name}}, {{party_4_email}}, {{party_2_address}})
+  // are a common degraded-model template form. They were scanned as fatal but never resolved
+  // because the mustache resolver only matched the bare `party_N` form, so a substantive 40k
+  // 4-party draft was rejected by the placeholder gate (pipeline_placeholder_blocked). Resolve the
+  // field explicitly; unknown compound fields still return null and keep blocking.
+  if ((m = inner.match(/^party_?(\d+)_([a-z][a-z_]*)$/i))) {
+    return fieldForSlot(Number(m[1]), m[2]!);
+  }
   if (/^party_?a$/i.test(inner)) return legalForSlot(1);
   if (/^party_?b$/i.test(inner)) return legalForSlot(2);
-  if ((m = inner.match(/^(?:company|client|org|organization)(?:_?(\d+))?$/i))) {
+  if ((m = inner.match(/^(?:company|client|org|organization)(?:_?(\d+))?(?:_(?:name|legal_?name|entity))?$/i))) {
     return legalForSlot(m[1] ? Number(m[1]) : 1);
   }
-  if ((m = inner.match(/^(?:counterparty|service_?provider|provider)(?:_?(\d+))?$/i))) {
+  if ((m = inner.match(/^(?:counterparty|service_?provider|provider|vendor|supplier)(?:_?(\d+))?(?:_(?:name|legal_?name|entity))?$/i))) {
     return legalForSlot(m[1] ? Number(m[1]) : 2);
+  }
+  if ((m = inner.match(/^(?:recipient|signatory|authorized_?signatory)_(?:email)(?:_?(\d+))?$/i))) {
+    return resolveAuthoritativeEmailForContactSlot(m[1] ? Number(m[1]) : 1, ctx.intakeRaw, parties);
+  }
+  if ((m = inner.match(/^(?:recipient)(?:_?(\d+))?(?:_(?:name))?$/i))) {
+    return legalForSlot(m[1] ? Number(m[1]) : 1);
+  }
+  if ((m = inner.match(/^(?:signatory|authorized_?signatory)(?:_?name)?(?:_?(\d+))?$/i))) {
+    return parties[(m[1] ? Number(m[1]) : 1) - 1]?.signerName?.trim() || null;
   }
   if ((m = inner.match(/^party_?(\d+)$/i))) {
     return legalForSlot(Number(m[1]));
