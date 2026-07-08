@@ -15,6 +15,7 @@ import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritative
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { classifyPaidProNormalizedSurfaceDiff } from "./paidProNormalizedSurfaceDiff";
 import { normalizeCorpusForCopyCompare } from "./qa/paidProCorpusIntegrity/paidProCorpusIntegrityMetrics";
+import { findNoticesSectionStart } from "./paidProPartyNoticeDetails";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { paidProPerfTraceEnabled } from "./paidProPerfLogging";
 
@@ -81,17 +82,70 @@ function collapseSignatureLineWidthNoise(text: string): string {
   return text.replace(/_{2,}/g, "___");
 }
 
+/**
+ * Locate the start of the Notices section using the authoritative resolver so that both sides of a diff
+ * (frozen canonical SoT and the notice-hydrated / display-normalized render) excise the SAME semantic
+ * region even when notice hydration rewrote the heading text.
+ */
+function noticesSectionStartIndexForDiff(text: string): number {
+  return findNoticesSectionStart(text);
+}
+
+/**
+ * Aggressive whitespace fold for clause-body comparison: collapses every run of whitespace (including
+ * newlines) to a single space. Notice hydration (TEST575 `ensureOperativeIfToNoticeDelivery`) reflows
+ * clause spacing throughout the document (single blank line between numbered clauses) and the review
+ * render additionally re-wraps lines, so a pure line-preserving compare would report those as content
+ * changes. A substantive clause edit always alters WORDS, which survive this fold, so it stays safe.
+ */
+function foldWhitespaceForClauseCompare(text: string): string {
+  return (text || "").replace(/\r\n/g, "\n").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Everything OUTSIDE the Notices section (pre-notices body + the "IN WITNESS WHEREOF" execution tail),
+ * whitespace-folded. The Notices section is excised so that the variable-length address/contact
+ * hydration cannot make the surrounding clause bodies compare unequal.
+ */
+function noticeExcisedClauseRemainder(text: string): string | null {
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return null;
+  const head = text.slice(0, witnessIdx);
+  const noticesIdx = noticesSectionStartIndexForDiff(head);
+  if (noticesIdx < 0) return null;
+  return foldWhitespaceForClauseCompare(`${head.slice(0, noticesIdx)} ${text.slice(witnessIdx)}`);
+}
+
+/** The Notices section only (between its heading and the execution block), whitespace-folded. */
+function noticesSectionFolded(text: string): string | null {
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return null;
+  const head = text.slice(0, witnessIdx);
+  const noticesIdx = noticesSectionStartIndexForDiff(head);
+  if (noticesIdx < 0) return null;
+  return foldWhitespaceForClauseCompare(head.slice(noticesIdx));
+}
+
+/**
+ * Determine whether the only meaningful drift between two corpora is contact/address hydration
+ * inside the Notices section (e.g. TEST575 threading party street addresses into "If to …" stanzas).
+ *
+ * The parity audit compares the raw frozen canonical SoT against the display-normalized review render,
+ * and notice hydration reflows clause spacing, so this is deliberately whitespace-tolerant. We require:
+ *   1. every clause outside the Notices section (plus the execution tail) is unchanged (word-for-word), and
+ *   2. the Notices section itself actually differs (the contact/address hydration).
+ * A real clause edit outside Notices alters words in the excised remainder → falls through to
+ * `substantive_clause_change`.
+ */
 function isNoticeContactHydrationOnlyDelta(before: string, after: string): boolean {
-  const witnessBefore = before.search(/\bIN WITNESS WHEREOF\b/i);
-  const witnessAfter = after.search(/\bIN WITNESS WHEREOF\b/i);
-  if (witnessBefore < 0 || witnessAfter < 0) return false;
-  const tailBefore = before.slice(witnessBefore).trimEnd();
-  const tailAfter = after.slice(witnessAfter).trimEnd();
-  if (tailBefore !== tailAfter) return false;
-  const headBefore = before.slice(0, witnessBefore);
-  const headAfter = after.slice(0, witnessAfter);
-  if (headBefore === headAfter) return false;
-  return /\bNotices\b/i.test(headBefore) && /\bNotices\b/i.test(headAfter);
+  const remBefore = noticeExcisedClauseRemainder(before);
+  const remAfter = noticeExcisedClauseRemainder(after);
+  if (remBefore == null || remAfter == null) return false;
+  if (remBefore !== remAfter) return false;
+  const noticesBefore = noticesSectionFolded(before);
+  const noticesAfter = noticesSectionFolded(after);
+  if (noticesBefore == null || noticesAfter == null) return false;
+  return noticesBefore !== noticesAfter;
 }
 
 export function classifyPaidProCorpusLifecycleDiff(

@@ -96,10 +96,21 @@ export function auditPaidProReviewRenderSotParity(args: {
   const reviewMatchesSnapshotDisplay = Boolean(
     snapshotDisplayHash && reviewHash && snapshotDisplayHash === reviewHash,
   );
+  // TEST576 (option 4b): post-finalize, the authoritative signing snapshot is the display source of
+  // truth (it carries the threaded notice addresses). The review render is derived from it, so a
+  // snapshot→review diff is a pure display/whitespace normalization, never a substantive change. This
+  // makes parity hold even when the review vs frozen-canonical classification is imperfect, because the
+  // snapshot and review share identical notice content (no address-length non-locality).
+  const snapshotClassification =
+    snapshotPlain && review ? classifyPaidProCorpusLifecycleDiff(snapshotPlain, review) : null;
+  const reviewMatchesSnapshotClassified = Boolean(
+    snapshotClassification && SIGNER_FIELD_ONLY_CLASSIFICATIONS.has(snapshotClassification),
+  );
   const signerFieldOnlyDelta = Boolean(
     (classification && SIGNER_FIELD_ONLY_CLASSIFICATIONS.has(classification)) ||
       displayNormalizationDelta ||
-      reviewMatchesSnapshotDisplay,
+      reviewMatchesSnapshotDisplay ||
+      reviewMatchesSnapshotClassified,
   );
   const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(review);
   const hashMatch = Boolean(

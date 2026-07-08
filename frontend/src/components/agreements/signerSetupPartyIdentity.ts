@@ -507,16 +507,24 @@ export type ResolvePaidProInlineSignerSetupMountedArgs = {
   /** Latched true when the user enters inline signer setup; stays true until Prepare signature links. */
   signerSetupLatched: boolean;
   signaturePreparationRequested: boolean;
+  /**
+   * TEST576: true once the user finalized signer metadata (authoritative signing snapshot exists or the
+   * sticky finalize latch is set). When finalized, inline signer setup must stay unmounted even if a
+   * stale `signerSetupLatched` lingers — only "Edit signer details" (which clears the finalize latch)
+   * re-mounts it.
+   */
+  signerMetadataFinalized?: boolean;
 };
 
 /**
  * Inline signer setup on the canonical paid Pro final-review shell. Visibility must NOT flip off when
  * the signer-details gate becomes complete — only when the user explicitly proceeds to Prepare signature
- * links (signaturePreparationRequested) or the latch is cleared on re-entry.
+ * links (signaturePreparationRequested), finalizes signer metadata, or the latch is cleared on re-entry.
  */
 export function resolvePaidProInlineSignerSetupMounted(
   args: ResolvePaidProInlineSignerSetupMountedArgs,
 ): boolean {
+  if (args.signerMetadataFinalized) return false;
   const reviewAuthority =
     args.hasAcceptedPaidProAuthority || Boolean(args.hasProfessionallyValidatedReviewCorpus);
   return Boolean(
@@ -572,9 +580,15 @@ export function shouldArmPaidProFirstReviewSignerSetupLatch(args: {
    */
   deliveryTrackDecisionActive?: boolean;
 }): boolean {
-  if (args.alreadyLatched) return true;
+  // TEST576: finalize + explicit signing-prep MUST win over a stale `alreadyLatched`. A lingering
+  // `paidProInlineSignerSetupLatched` (e.g. from the edit phase) used to short-circuit to `true` here
+  // even after the user finalized signer details, which re-armed signer setup and re-emitted
+  // `arm_latch signerMetadataFinalized:false`. Once the user has finalized (or moved on to signing
+  // prep), signer setup stays disarmed until they explicitly click "Edit signer details" (which clears
+  // both the finalize latch and the inline setup latch).
   if (args.signaturePreparationRequested) return false;
   if (args.signerMetadataFinalized) return false;
+  if (args.alreadyLatched) return true;
   if (args.deliveryTrackDecisionActive) return false;
   const reviewAuthority =
     args.hasAcceptedPaidProAuthority || Boolean(args.hasProfessionallyValidatedReviewCorpus);

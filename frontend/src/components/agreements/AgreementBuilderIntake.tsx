@@ -14731,6 +14731,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           createUiStageIsDraft: createUiStage === CreateUiStage.DRAFT,
           signerSetupLatched: paidProInlineSignerSetupLatched,
           signaturePreparationRequested,
+          signerMetadataFinalized:
+            hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch,
         }),
         paidProRecipientSetupOnDraft: Boolean(
           paidProAuthoritative &&
@@ -14753,6 +14755,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProInlineSignerSetupLatched,
       signaturePreparationRequested,
       paidProProfessionallyValidatedReviewCorpusActive,
+      paidProSignerMetadataFinalizedLatch,
       paidProAuthoritative,
       createProductionTwoPane,
       premiumSignersSurfaceReady,
@@ -16844,6 +16847,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         createUiStageIsDraft: createUiStage === CreateUiStage.DRAFT,
         signerSetupLatched: paidProInlineSignerSetupLatched,
         signaturePreparationRequested,
+        // TEST576: a stale inline-setup latch must not keep signer setup mounted after finalize.
+        signerMetadataFinalized:
+          hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch,
       }),
     [
       draft,
@@ -16855,6 +16861,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProInlineSignerSetupLatched,
       signaturePreparationRequested,
       paidProProfessionallyValidatedReviewCorpusActive,
+      paidProSignerMetadataFinalizedLatch,
       premiumSurfaceGateTick,
     ],
   );
