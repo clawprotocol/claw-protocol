@@ -36,6 +36,7 @@ import {
 import { resetHeroHandoffForCreateNavigationWithoutPayload } from "./heroIntakePrefill";
 import { clearLawdogEntryContext, setLawdogEntryContext } from "./lawdogEntryContext";
 import { clearAgreementVs01BridgeSession } from "./simpleProduct/agreementToVs01SigningBridge";
+import { REVIEW_DELIVERY_HANDOFF_NOTICE_KEY } from "./reviewDeliveryHandoffNotice";
 
 export type NewAgreementSessionResetResult = {
   clearedSessionKeys: string[];
@@ -62,6 +63,7 @@ const SESSION_PREFIXES_TO_CLEAR = [
   "claw_hero_intake_prefill_v1",
   "lawdog_entry_context",
   "lawdog_focus_create_intake",
+  REVIEW_DELIVERY_HANDOFF_NOTICE_KEY,
 ] as const;
 
 function clearMatchingSessionStoragePrefixes(prefixes: readonly string[]): string[] {

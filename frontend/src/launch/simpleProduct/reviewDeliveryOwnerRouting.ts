@@ -9,6 +9,16 @@ export const REVIEW_INVITATIONS_SENT_TITLE = "Review invitations sent";
 export const REVIEW_INVITATIONS_SENT_BODY =
   "Review invitations sent. Track review status from your dashboard.";
 
+export const REVIEW_EMAIL_DELIVERY_INCOMPLETE_TITLE = "Review links are ready";
+
+export const REVIEW_EMAIL_DELIVERY_INCOMPLETE_BODY =
+  "We created review links, but automatic email delivery did not complete. Open the agreement from your dashboard to copy links or resend invitations.";
+
+export const REVIEW_SENT_FAILED_FALLBACK_TITLE = "Review send needs attention";
+
+export const REVIEW_SENT_FAILED_FALLBACK_BODY =
+  "We saved your agreement, but we could not confirm review delivery. Open the agreement from your dashboard to retry sending review invitations.";
+
 export type OwnerPostReviewRouteReason =
   | "explicit_manual_mode"
   | "delivery_mode_email"

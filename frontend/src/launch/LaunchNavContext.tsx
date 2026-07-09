@@ -28,11 +28,14 @@ import {
 } from "./completedAgreementViewContext";
 import {
   clearPaidDashboardCreateContext,
+  DASHBOARD_PAID_CREATE_ROUTE_SOURCE,
   isAuthenticatedWorkspacePath,
   isPublicMarketingPath,
   logPaidDashboardCreateNavigation,
   markPaidDashboardCreateContext,
+  normalizeDashboardPaidCreateSource,
 } from "./paidDashboardCreateContext";
+import { logDashboardPaidCreateScreenTransition } from "./paidDashboardCreateFunnel";
 
 export type LaunchNavigateOptions = {
   heroIntake?: string;
@@ -146,6 +149,15 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
         markSource: marked ? markSource : null,
         clearReason,
       });
+
+      if (
+        marked &&
+        markSource &&
+        normalizeDashboardPaidCreateSource(markSource) === DASHBOARD_PAID_CREATE_ROUTE_SOURCE &&
+        isAuthenticatedWorkspacePath(originPathname)
+      ) {
+        logDashboardPaidCreateScreenTransition({ screen: "dashboard" });
+      }
 
       if (restoreStarterReview) {
         state = null;

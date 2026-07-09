@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { fetchAgreementDraft, patchAgreementField, postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
@@ -24,6 +25,10 @@ import {
   maybePostReviewSentAfterReviewFirstHandoff,
 } from "./paidProPostRecipientSetupHandoff";
 import * as agreementIntakeStorage from "../../components/agreements/agreementIntakeStorage";
+import {
+  clearReviewDeliveryHandoffNoticeForTests,
+  consumeReviewDeliveryHandoffNotice,
+} from "../reviewDeliveryHandoffNotice";
 
 vi.mock("./simpleDoneReviewRecipientLinks", () => ({
   mintSimpleDoneReviewRecipientLinkRows: vi.fn(async () => ({
@@ -81,6 +86,7 @@ describe("paid Pro review-first review-sent handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    clearReviewDeliveryHandoffNoticeForTests();
     vi.mocked(peekReviewFirstMintInFlight).mockReturnValue(false);
     vi.mocked(reviewLinkMintHasUsableUrls).mockReturnValue(true);
     vi.mocked(resolveReviewFirstMintPolicyGate).mockResolvedValue({ ok: true, policy: null });
@@ -180,6 +186,24 @@ describe("paid Pro review-first review-sent handoff", () => {
       expect(result.ownerRoutePath).toBe("/app?focus=ag_review_no_invite");
     }
     expect(navigate).toHaveBeenCalledWith("/app?focus=ag_review_no_invite");
+    const notice = consumeReviewDeliveryHandoffNotice();
+    expect(notice?.kind).toBe("review_email_delivery_incomplete");
+    expect(notice?.agreementId).toBe("ag_review_no_invite");
+  });
+
+  it("writes review invitations sent notice when email delivery completes", async () => {
+    const navigate = vi.fn();
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate,
+      agreementId: "ag_review_notice_ok",
+      draft: baseDraft,
+      premiumSendIntent: "review",
+      logSource: "simple_pro_send_for_review",
+    });
+    expect(result.ok).toBe(true);
+    const notice = consumeReviewDeliveryHandoffNotice();
+    expect(notice?.kind).toBe("review_invitations_sent");
+    expect(notice?.agreementId).toBe("ag_review_notice_ok");
   });
 
   it("review-sent failure routes to dashboard focus when env is unset", async () => {
@@ -198,6 +222,9 @@ describe("paid Pro review-first review-sent handoff", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.destination).toBe("dashboard");
     expect(navigate).toHaveBeenCalledWith("/app?focus=ag_review_fail_sent");
+    const notice = consumeReviewDeliveryHandoffNotice();
+    expect(notice?.kind).toBe("review_email_delivery_incomplete");
+    expect(notice?.agreementId).toBe("ag_review_fail_sent");
   });
 
   it("maybePostReviewSentAfterReviewFirstHandoff still posts when mint preset review_sent_at", async () => {

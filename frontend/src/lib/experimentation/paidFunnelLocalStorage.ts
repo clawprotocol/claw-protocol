@@ -10,6 +10,7 @@ const MAX_EVENTS = 5000;
 export type PaidFunnelEventName =
   | "free_draft_generated"
   | "paid_create_submit_entitled_rewrite"
+  | "dashboard_paid_create_screen"
   | "premium_upsell_seen"
   | "premium_checkout_opened"
   | "premium_checkout_completed"
@@ -36,6 +37,20 @@ export const PAID_FUNNEL_DISPLAY_ORDER: readonly PaidFunnelEventName[] = [
   ...PAID_FUNNEL_LINEAR_STEPS,
   "send_abandoned_after_payment",
 ] as const;
+
+/**
+ * Raw diagnostic rows — stored in the ring buffer and visible in ops “Latest events” /
+ * per-session lists, but excluded from checkout funnel conversion steps because DPC
+ * screens and entitled submit are not sequential checkout milestones.
+ */
+export const PAID_FUNNEL_RAW_DIAGNOSTIC_EVENTS: readonly PaidFunnelEventName[] = [
+  "paid_create_submit_entitled_rewrite",
+  "dashboard_paid_create_screen",
+] as const;
+
+export function isPaidFunnelRawDiagnosticEvent(name: string): boolean {
+  return (PAID_FUNNEL_RAW_DIAGNOSTIC_EVENTS as readonly string[]).includes(name);
+}
 
 export type PaidFunnelStoredRow = {
   name: string;

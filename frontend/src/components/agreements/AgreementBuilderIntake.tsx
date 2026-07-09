@@ -764,6 +764,7 @@ import {
   hasCanonicalCorpusForProDeliveryTrack,
   logAgreementFlowStep,
   logProDeliveryTrackState,
+  paidProReviewDefaultsToReviewTrack,
   resolveProDeliveryTrackSelected,
 } from "./proDeliveryTrackState";
 import {
@@ -1617,6 +1618,7 @@ import {
   readPaidDashboardCreateContext,
 } from "../../launch/paidDashboardCreateContext";
 import { bootstrapDirectAuthenticatedCreateEntryIfNeeded } from "../../launch/newAgreementSessionReset";
+import { useDashboardPaidCreateFunnelTelemetry } from "../../launch/useDashboardPaidCreateFunnelTelemetry";
 import { useAuth } from "../../auth/AuthProvider";
 
 export {
@@ -3998,6 +4000,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // cleared only when the user re-opens signer editing or the source of truth is torn down.
   const [paidProSignerMetadataFinalizedLatch, setPaidProSignerMetadataFinalizedLatch] =
     useState(false);
+  // TEST577: sticky "signature delivery track chosen" latch. When the user clicks "Prepare for
+  // signing" on the accepted-Pro review decision they have explicitly chosen the signature track.
+  // The inline signer-setup phase deliberately holds `signaturePreparationRequested` false (so the
+  // signer fields stay mounted for confirmation), and `effectivePremiumSendMode` otherwise collapses
+  // back to the review-first default whenever `!signaturePreparationRequested` — which visibly flipped
+  // the delivery track signature → review and routed the green CTA back to the review decision instead
+  // of signature preparation. This latch pins the signature choice across signer setup + finalize; it
+  // is cleared only when the user picks the review track or the source of truth is torn down.
+  const [paidProSignaturePrepIntentLatched, setPaidProSignaturePrepIntentLatched] = useState(false);
   /** Frozen party manifest / identities captured at signer-metadata session entry — never recompute on keystroke. */
   const frozenSignerMetadataPartyManifestRef = useRef<CanonicalFinalPartyManifest | null>(null);
   const frozenSignerMetadataIdentitiesRef = useRef<
@@ -16330,7 +16341,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [draft, agreementDocumentText, intakeCombined, hasAnyValidRecipientEmail, premiumForkPrimedNonce, getDraftFirstReviewBlockerForFork]);
 
   const effectivePremiumSendMode = useMemo((): PremiumSendIntent => {
-    if (paidProAuthoritative && !signaturePreparationRequested) {
+    if (
+      paidProReviewDefaultsToReviewTrack({
+        paidProAuthoritative,
+        signaturePreparationRequested,
+        signaturePrepIntentLatched: paidProSignaturePrepIntentLatched,
+      })
+    ) {
       return "review";
     }
     if (paidProAuthoritative) {
@@ -16346,6 +16363,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     paidProAuthoritative,
     signaturePreparationRequested,
+    paidProSignaturePrepIntentLatched,
     premiumSendModeUserChoice,
     premiumDefaultSendMode,
     premiumForkPrimedNonce,
@@ -16631,6 +16649,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setPaidProSignerMetadataFinalizedLatch(false);
     }
   }, [paidProSignerMetadataFinalizedLatch, premiumSurfaceGateTick, reviewDocRefreshTick]);
+
+  // TEST577: tear down the sticky signature-track latch when the paid Pro source of truth is gone
+  // (new session / reset) so a fresh review starts review-first-neutral, not pre-latched to signature.
+  useEffect(() => {
+    if (paidProSignaturePrepIntentLatched && !hasPaidProSourceOfTruth()) {
+      setPaidProSignaturePrepIntentLatched(false);
+    }
+  }, [paidProSignaturePrepIntentLatched, premiumSurfaceGateTick, reviewDocRefreshTick]);
 
   const guidedSignerFinalVersionLines = useMemo(() => {
     if (!guidedPreReviewSignerSlots.complete) return [];
@@ -16955,6 +16981,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPremiumForkPrimedNonce((n) => n + 1);
     setPremiumSendModeUserChoice(mode);
     setPremiumSendModeTouched(true);
+    // TEST577: the delivery-track choice is authoritative. Latch the signature track so it survives
+    // the inline signer-setup phase + finalize; clear it when the user picks the review track.
+    setPaidProSignaturePrepIntentLatched(mode === "signature");
     if (mode === "review") {
       clearPaidProStarterSignatureSendFromCreateFlow();
       setPremiumSignatureSenderFirst(false);
@@ -22145,6 +22174,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const agreementIdForReview =
     (reviewDraft as { id?: string } | null)?.id ?? (draft as { id?: string } | null)?.id ?? null;
 
+  useDashboardPaidCreateFunnelTelemetry({
+    enabled: isDashboardPaidCreateRouteActive(),
+    onDashboard: false,
+    createUiStage,
+    displayPhase,
+    createFlowPhase,
+    premiumPostCheckoutPhase,
+    proFullDraftQualityRetry,
+    premiumSendPathUnlocked,
+    intakeText: intakeCombined,
+    draft,
+    agreementId: productionSendBarAgreementId ?? agreementIdForReview,
+  });
+
   React.useEffect(() => {
     if (guidedCompletionPhase !== "ready_to_apply") return;
     if (guidedAnswerApplyStatus !== "idle") return;
@@ -25719,12 +25762,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         sendModeTouched: premiumSendModeTouched,
         effectiveSendMode: effectivePremiumSendMode,
         premiumSignersSurfaceReady,
+        signaturePrepIntentLatched: paidProSignaturePrepIntentLatched,
       }),
     [
       premiumSendModeTouched,
       signaturePreparationRequested,
       effectivePremiumSendMode,
       premiumSignersSurfaceReady,
+      paidProSignaturePrepIntentLatched,
     ],
   );
 
@@ -28211,6 +28256,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleProSendForReview = React.useCallback(() => {
+    // TEST577: choosing "Send for review / compare edits" selects the review track — release any
+    // latched signature-prep intent so the delivery track resolves to review.
+    setPaidProSignaturePrepIntentLatched(false);
     const reviewBodyPlain =
       resolvePaidProPostFinalizeReviewPlain() ||
       simpleProFinalReviewDisplayPlain ||

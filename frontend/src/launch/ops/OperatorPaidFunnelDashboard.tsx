@@ -6,6 +6,7 @@ import {
   PAID_FUNNEL_DISPLAY_ORDER,
   PAID_FUNNEL_EVENT_STORAGE_KEY,
   PAID_FUNNEL_LINEAR_STEPS,
+  PAID_FUNNEL_RAW_DIAGNOSTIC_EVENTS,
   type PaidFunnelStoredRow,
 } from "../../lib/experimentation/paidFunnelLocalStorage";
 import { canAccessOperatorGrowthDashboard } from "./OperatorGrowthDashboard";
@@ -459,6 +460,10 @@ export function OperatorPaidFunnelDashboard() {
                 </li>
               ))}
             </ul>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Raw diagnostic events (not checkout funnel steps):{" "}
+              {PAID_FUNNEL_RAW_DIAGNOSTIC_EVENTS.join(", ")} — see Latest events / per-session lists.
+            </p>
           </section>
 
           <section className="mt-6">

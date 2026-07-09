@@ -84,6 +84,10 @@ import {
   type CreatorSigningProgressSnapshot,
 } from "./creatorDashboardSigningProgress";
 import { readSigningPacketStatus } from "../vs01/vs01SigningPacketStatusStore";
+import {
+  consumeReviewDeliveryHandoffNotice,
+  type ReviewDeliveryHandoffNotice,
+} from "./reviewDeliveryHandoffNotice";
 
 export type WorkspaceMode = "empty" | "active" | "power";
 
@@ -103,6 +107,8 @@ export function AppDashboard() {
   const [draftByAgreementId, setDraftByAgreementId] = useState<Record<string, AgreementDraft | null>>({});
   const [prepareBusyAgreementId, setPrepareBusyAgreementId] = useState<string | null>(null);
   const [prepareNoticeByAgreementId, setPrepareNoticeByAgreementId] = useState<Record<string, string>>({});
+  const [reviewDeliveryHandoffNotice, setReviewDeliveryHandoffNotice] =
+    useState<ReviewDeliveryHandoffNotice | null>(null);
   const [signingStatusEpoch, setSigningStatusEpoch] = useState(0);
   const [auditCompletedByAgreementId, setAuditCompletedByAgreementId] = useState<Record<string, boolean>>({});
   const [signingProgressByAgreementId, setSigningProgressByAgreementId] = useState<
@@ -272,6 +278,11 @@ export function AppDashboard() {
     const path = (pathname || "").replace(/\/$/, "") || "/";
     if (path !== "/app") draftingRedirectedRef.current = false;
   }, [pathname]);
+
+  useEffect(() => {
+    const notice = consumeReviewDeliveryHandoffNotice();
+    if (notice) setReviewDeliveryHandoffNotice(notice);
+  }, []);
 
   useEffect(() => {
     if (draftingRedirectedRef.current) return;
@@ -697,6 +708,29 @@ export function AppDashboard() {
               onClick={() => void reloadWorkspaceIndex()}
             >
               Retry
+            </button>
+          </div>
+        ) : null}
+
+        {reviewDeliveryHandoffNotice ? (
+          <div
+            className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
+              reviewDeliveryHandoffNotice.kind === "review_invitations_sent"
+                ? "border-emerald-800/40 bg-emerald-950/25 text-emerald-100"
+                : "border-amber-800/40 bg-amber-950/25 text-amber-100"
+            }`}
+            role="status"
+            aria-live="polite"
+            data-testid="dashboard-review-delivery-handoff-notice"
+          >
+            <p className="font-medium">{reviewDeliveryHandoffNotice.title}</p>
+            <p className="mt-1 opacity-90">{reviewDeliveryHandoffNotice.body}</p>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
+              onClick={() => setReviewDeliveryHandoffNotice(null)}
+            >
+              Dismiss
             </button>
           </div>
         ) : null}

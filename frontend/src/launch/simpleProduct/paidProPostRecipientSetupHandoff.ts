@@ -34,6 +34,7 @@ import {
   logReviewFirstOwnerRouteResolved,
   resolveOwnerPostReviewSendRoute,
 } from "./reviewDeliveryOwnerRouting";
+import { writeReviewDeliveryHandoffNotice } from "../reviewDeliveryHandoffNotice";
 import {
   logReviewFirstMintError,
   logReviewFirstMintStart,
@@ -61,7 +62,11 @@ export type PaidProPostRecipientSetupFailure = {
 };
 
 export type PaidProPostRecipientSetupResult =
-  | { ok: true; destination: "vs01" | "done" | "dashboard"; ownerRoutePath: string }
+  | {
+      ok: true;
+      destination: "vs01" | "done" | "dashboard";
+      ownerRoutePath: string;
+    }
   | { ok: false; failure: PaidProPostRecipientSetupFailure };
 
 /** Paid/pro paths that already confirmed recipients in intake — skip `/app/send` “Prepare review link”. */
@@ -351,11 +356,19 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
         reviewEmailDeliveryAttempted: reviewSent.attempted,
         reviewInviteEmailsSent: reviewSent.inviteEmailsSent,
       });
+      writeReviewDeliveryHandoffNotice({
+        agreementId: id,
+        routeReason: route.reason,
+      });
       if (route.destination === "dashboard") {
         writeCreateReviewAgreementResumeId(id);
       }
       void options.navigate(route.path);
-      return { ok: true, destination: route.destination, ownerRoutePath: route.path };
+      return {
+        ok: true,
+        destination: route.destination,
+        ownerRoutePath: route.path,
+      };
     } finally {
       clearReviewFirstMintInFlight();
     }
