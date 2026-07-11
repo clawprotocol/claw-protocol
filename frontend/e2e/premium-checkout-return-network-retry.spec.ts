@@ -12,6 +12,23 @@ import {
 const TIMEOUT_MS = 600_000;
 const PERF_WARN_MS = 90_000;
 
+type RetryStage =
+  | "page_load"
+  | "checkout_return"
+  | "attempt_a"
+  | "failure_degradation"
+  | "retry_trigger"
+  | "attempt_b"
+  | "response"
+  | "validation"
+  | "freeze"
+  | "review_render";
+
+function logRetryStage(stage: RetryStage, detail?: Record<string, unknown>): void {
+  // eslint-disable-next-line no-console
+  console.info(`[e2e-retry-stage] ${stage}`, detail ?? {});
+}
+
 type ConsoleEntry = { type: string; text: string; ts: number };
 
 type DraftRec = {
@@ -269,6 +286,7 @@ test("Ironclad checkout return: network retry → authoritative Pro review (no p
   });
 
   await page.goto("/app/create", { waitUntil: "domcontentloaded" });
+  logRetryStage("page_load", { url: page.url() });
   const main = page.getByRole("textbox").first();
   await main.waitFor({ state: "visible", timeout: 30_000 });
   await main.fill(IRONCLAD_JOINT_ROLLOUT_INTAKE);
@@ -298,6 +316,7 @@ test("Ironclad checkout return: network retry → authoritative Pro review (no p
 
   await expect(page).toHaveURL(/\/app\/create/, { timeout: 60_000 });
   const premiumReturnDetectedAt = Date.now();
+  logRetryStage("checkout_return", { url: page.url() });
 
   const gap = page.getByRole("dialog", { name: /finish your agreement/i });
   if (await gap.isVisible().catch(() => false)) {
@@ -306,8 +325,14 @@ test("Ironclad checkout return: network retry → authoritative Pro review (no p
 
   const waitTitle = page.getByRole("heading", { name: /Preparing final agreement|Preparing signature-ready version/i });
   await expect(waitTitle.first()).toBeVisible({ timeout: 120_000 });
+  logRetryStage("attempt_a", { premiumAttempts: mocks.getPremiumAttempts() });
 
   await expect(page.getByText("We couldn't safely finalize the Pro version.")).toHaveCount(0);
+
+  logRetryStage("retry_trigger", {
+    premiumAttempts: mocks.getPremiumAttempts(),
+    consoleErrors: consoleEntries.filter((e) => e.type === "error").slice(-3).map((e) => e.text.slice(0, 120)),
+  });
 
   const authoritativeEntry = await waitForConsoleSubstring(
     page,
@@ -317,6 +342,10 @@ test("Ironclad checkout return: network retry → authoritative Pro review (no p
   );
 
   const returnToCommitMs = authoritativeEntry.ts - premiumReturnDetectedAt;
+  logRetryStage("freeze", {
+    premiumAttempts: mocks.getPremiumAttempts(),
+    returnToCommitMs,
+  });
   // eslint-disable-next-line no-console
   console.info(`[e2e-premium-perf] return_to_authoritative_commit_ms=${returnToCommitMs}`);
   if (returnToCommitMs > PERF_WARN_MS) {
@@ -396,4 +425,5 @@ test("Ironclad checkout return: network retry → authoritative Pro review (no p
 
   await expect(page.getByText("Pro — finish draft first")).toHaveCount(0);
   await expect(page.getByText(/Retry Pro draft/i)).toHaveCount(0);
+  logRetryStage("review_render", { url: page.url(), docLen: doc.length });
 });

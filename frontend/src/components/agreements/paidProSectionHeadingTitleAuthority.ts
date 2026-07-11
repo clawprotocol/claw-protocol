@@ -19,6 +19,11 @@ import {
   isFalseFragmentSectionTitle,
   repairOrphanNumberFragmentContinuationLines,
 } from "./paidProOrphanSectionNumberRepair";
+import {
+  isBeforeFirstOperativeSectionLineIndex,
+  isPaidProDocumentOpeningMaterialLineIndex,
+  resolvePaidProDocumentOpeningAuthority,
+} from "./paidProDocumentOpeningAuthority";
 
 const MAIN_SECTION_PREFIX_RE = /^(\d+)\.\s+(?!\d+\.\d)(.+)$/;
 const SUBSECTION_PREFIX_RE = /^(\d+\.\d+)\s+(.+)$/;
@@ -28,6 +33,40 @@ const EXECUTION_LINE_RE =
 
 const BODY_VERB_RE =
   /\b(?:will|shall|must|may|should|are|is|was|were|have|has|had|agrees?|represents?)\b/i;
+
+const BODY_SENTENCE_START_RE =
+  /^(?:The|This|Each|Either|Any|Neither|Both|When|If|Unless|Upon|Where|As|An|A|In|For|Client|Service Provider|Neither party|Either party|During|Within|After|Before|All|Some|Such|Notwithstanding)\b/i;
+
+function isCollapsedClauseFamilyHeadingBodyLine(line: string): boolean {
+  return /^Terms\.?\s*$/i.test(line.trim());
+}
+
+function shouldSkipHeadingContinuationSplitAnomaly(
+  title: string,
+  nextTrimmed: string,
+): boolean {
+  if (/^Clause$/i.test(title.trim()) && isCollapsedClauseFamilyHeadingBodyLine(nextTrimmed)) {
+    return true;
+  }
+  return false;
+}
+
+function isCanonicalSplitOperativeSectionHeading(
+  lines: readonly string[],
+  lineIndex: number,
+  title: string,
+): boolean {
+  if (!isFalseFragmentSectionTitle(title)) return false;
+  const nextIdx = nextNonEmptyLineIndex(lines, lineIndex + 1);
+  if (nextIdx == null) return false;
+  const nextTrimmed = lines[nextIdx]!.trim();
+  if (!nextTrimmed || /^\d+\.\s/.test(nextTrimmed)) return false;
+  if (isPaidProHeadingContinuationFragment(nextTrimmed)) return false;
+  if (isFalseFragmentSectionTitle(nextTrimmed.replace(/[.,;:]+$/, ""))) return false;
+  if (BODY_VERB_RE.test(nextTrimmed)) return true;
+  if (BODY_SENTENCE_START_RE.test(nextTrimmed)) return true;
+  return /[a-z]/.test(nextTrimmed) && nextTrimmed.length >= 16;
+}
 
 export type PaidProSectionHeadingTitleAnomaly = {
   lineIndex: number;
@@ -40,7 +79,7 @@ export type PaidProSectionHeadingTitleAnomaly = {
     | "false_fragment_section_heading";
 };
 
-function nextNonEmptyLineIndex(lines: string[], from: number): number | null {
+function nextNonEmptyLineIndex(lines: readonly string[], from: number): number | null {
   for (let i = from; i < lines.length; i += 1) {
     if (lines[i]!.trim()) return i;
   }
@@ -68,7 +107,7 @@ export function isIncompletePaidProHeadingTitle(title: string): boolean {
 function isOrphanTitleFragmentLine(line: string): boolean {
   const t = line.trim();
   if (!t || t.length < 2) return false;
-  if (isAuthoritativePaidProAgreementDocumentTitleLine(t)) return false;
+  if (/^Section$/i.test(t)) return false;
   if (/^\d+\./.test(t)) return false;
   if (EXECUTION_LINE_RE.test(t)) return false;
   if (isPaidProNumberedSectionHeadingLine(t)) return false;
@@ -134,6 +173,7 @@ export function repairOrphanSemanticHeadingFragmentsBeforeCanonicalHeadings(text
   const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
   const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
   const lines = head.replace(/\r\n/g, "\n").split("\n");
+  const openingAuthority = resolvePaidProDocumentOpeningAuthority(text);
   const skip = new Set<number>();
   const out: string[] = [];
 
@@ -141,7 +181,15 @@ export function repairOrphanSemanticHeadingFragmentsBeforeCanonicalHeadings(text
     if (skip.has(i)) continue;
     const line = lines[i]!;
     const trimmed = line.trim();
-    if (!trimmed || isAuthoritativePaidProAgreementDocumentTitleLine(trimmed)) {
+    if (
+      !trimmed ||
+      (isBeforeFirstOperativeSectionLineIndex(i, openingAuthority) &&
+        isAuthoritativePaidProAgreementDocumentTitleLine(trimmed))
+    ) {
+      out.push(line);
+      continue;
+    }
+    if (isPaidProDocumentOpeningMaterialLineIndex(i, openingAuthority)) {
       out.push(line);
       continue;
     }
@@ -206,16 +254,22 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
   const witnessIdx = resolveAuthoritativeWitnessIndex(text || "");
   const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
   const lines = head.replace(/\r\n/g, "\n").split("\n");
+  const openingAuthority = resolvePaidProDocumentOpeningAuthority(text);
   const findings: PaidProSectionHeadingTitleAnomaly[] = [];
 
   for (let i = 0; i < lines.length; i += 1) {
     const trimmed = lines[i]!.trim();
     if (!trimmed) continue;
-    if (isAuthoritativePaidProAgreementDocumentTitleLine(trimmed)) continue;
+    const inOpeningRegion = isBeforeFirstOperativeSectionLineIndex(i, openingAuthority);
+    if (inOpeningRegion && isAuthoritativePaidProAgreementDocumentTitleLine(trimmed)) continue;
+    if (isPaidProDocumentOpeningMaterialLineIndex(i, openingAuthority)) continue;
 
     const prefix = parseMainSectionPrefixLine(trimmed);
     if (prefix) {
-      if (isFalseFragmentSectionTitle(prefix.title)) {
+      if (
+        isFalseFragmentSectionTitle(prefix.title) &&
+        !isCanonicalSplitOperativeSectionHeading(lines, i, prefix.title)
+      ) {
         findings.push({
           lineIndex: i,
           line: trimmed,
@@ -234,7 +288,8 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
         const nextTrimmed = lines[nextIdx]!.trim();
         if (
           isIncompletePaidProHeadingTitle(prefix.title) &&
-          isPaidProHeadingContinuationFragment(nextTrimmed)
+          isPaidProHeadingContinuationFragment(nextTrimmed) &&
+          !shouldSkipHeadingContinuationSplitAnomaly(prefix.title, nextTrimmed)
         ) {
           findings.push({
             lineIndex: i,
@@ -261,7 +316,8 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
         const nextTrimmed = lines[nextIdx]!.trim();
         if (
           isIncompletePaidProHeadingTitle(subTitle) &&
-          isPaidProHeadingContinuationFragment(nextTrimmed)
+          isPaidProHeadingContinuationFragment(nextTrimmed) &&
+          !shouldSkipHeadingContinuationSplitAnomaly(subTitle, nextTrimmed)
         ) {
           findings.push({
             lineIndex: i,
@@ -274,6 +330,9 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
     }
 
     if (isOrphanTitleFragmentLine(trimmed)) {
+      if (isBeforeFirstOperativeSectionLineIndex(i, openingAuthority)) {
+        continue;
+      }
       const fragmentLines: string[] = [trimmed];
       let j = i + 1;
       while (j < lines.length) {

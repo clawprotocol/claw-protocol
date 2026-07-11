@@ -3,6 +3,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+import backend.services.agreement_draft_store as ads
 from backend.main import app
 from backend.services.agreement_pdf_story_capability import reset_agreement_pdf_story_capability_cache_for_tests
 from backend.usage_economics import store as usage_economics_store_mod
@@ -2862,7 +2863,8 @@ def test_recipient_preview_export_pdf_requires_recipient_token_or_org(monkeypatc
         f"/api/agreements/{aid}/recipient-preview-export-pdf",
         json={"export_kind": "original", "html": "<p>Hello</p>"},
     )
-    assert denied.status_code == 403
+    assert denied.status_code == 401
+    assert denied.json()["detail"]["code"] == "org_header_required"
 
     bad = client.post(
         f"/api/agreements/{aid}/recipient-preview-export-pdf",

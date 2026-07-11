@@ -426,7 +426,7 @@ def org_header_required() -> bool:
     return os.getenv("CLAW_REQUIRE_ORG_ID_HEADER", "1").strip().lower() not in ("0", "false", "no")
 
 
-def require_claw_org_id_header(request: Request) -> str:
+def _raw_org_id_from_request(request: Request) -> str:
     from fastapi import HTTPException
 
     if not org_header_required():
@@ -453,17 +453,31 @@ def require_claw_org_id_header(request: Request) -> str:
     return oid
 
 
+def require_claw_org_id_header(request: Request) -> str:
+    from backend.security.workspace_identity import require_verified_org_id
+
+    return require_verified_org_id(request)
+
+
 def assert_registered_owner_matches(request: Request, agreement_id: str) -> str:
     from fastapi import HTTPException
 
+    from backend.security.request_identity import resolve_verified_subject_from_request
+
     if not usage_economics_enabled():
         return resolve_subject_from_request(request)
+    subj = resolve_verified_subject_from_request(request)
     store = get_usage_economics_store()
     store.init_schema()
     owner = store.owner_subject_for_agreement(agreement_id)
     if not owner:
-        return resolve_subject_from_request(request)
-    subj = resolve_subject_from_request(request)
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "ownership_not_registered",
+                "message": "Agreement ownership is not registered.",
+            },
+        )
     if subj != owner:
         raise HTTPException(
             status_code=403,
@@ -570,5 +584,5 @@ def workspace_lists_agreement_for_subject(agreement_id: str, subject_ref: str) -
     store.init_schema()
     owner = store.owner_subject_for_agreement(agreement_id)
     if owner is None:
-        return True
+        return False
     return owner == subject_ref

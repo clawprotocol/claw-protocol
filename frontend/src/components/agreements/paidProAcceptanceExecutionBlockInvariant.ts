@@ -44,6 +44,89 @@ import { buildSigningCapacityExecutionBlockSection } from "./contactAuthorityExe
 export const PAID_PRO_ACCEPTANCE_WITNESS_LINE =
   "IN WITNESS WHEREOF, the Parties execute this Agreement.";
 
+/**
+ * Paid Pro Execution Normalization Authority (acceptance / pre-freeze):
+ *
+ * Canonical execution block — single tail region with the authoritative witness line
+ * and the correct party signature sections derived from intake/manifest authority.
+ *
+ * Stale execution tail — execution-related material outside that one canonical region:
+ * extra SIGNATURES headings, duplicate witness clauses, incomplete By/Name/Title lines,
+ * flattened legacy signature sequences, and superseded inline blocks before the canonical witness.
+ *
+ * Preservation boundary — only positively classified stale execution material may be removed.
+ * Substantive operative clauses, notices, counterparts language in the body, and the one
+ * canonical execution block must not be deleted or rewritten.
+ *
+ * Idempotence — normalize(normalize(doc)) === normalize(doc) for accepted corpora.
+ */
+const STALE_PRE_WITNESS_INLINE_SIGNATURES_RE =
+  /\bSIGNATURES\b\s+(?:The\s+parties\s+have\s+caused|have\s+caused)/i;
+
+function preWitnessRegion(text: string): string {
+  const idx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  return idx >= 0 ? text.slice(0, idx) : text;
+}
+
+/** True when stale server-style SIGNATURES material remains before the canonical witness. */
+export function hasStalePreWitnessExecutionTail(text: string): boolean {
+  return STALE_PRE_WITNESS_INLINE_SIGNATURES_RE.test(preWitnessRegion(text));
+}
+
+/** Positive classification of any stale execution material before the canonical witness block. */
+export function hasPreWitnessStaleExecutionMaterial(text: string): boolean {
+  if (hasStalePreWitnessExecutionTail(text)) return true;
+  const pre = preWitnessRegion(text);
+  if (
+    /\bSIGNATURES\b[\s\S]{0,400}?\n\s*By\s*:\s*\n\s*Name\s*:\s*\n\s*Title\s*:/i.test(pre)
+  ) {
+    return true;
+  }
+  const sigHeading = pre.match(/(?:^|\n)\s*SIGNATURES\b([\s\S]*)$/i);
+  if (sigHeading) {
+    const afterHeading = (sigHeading[1] ?? "").trim();
+    if (!afterHeading) return true;
+    if (/\b(?:By|Name|Title|Date)\s*:/i.test(afterHeading)) return true;
+    if (/\b(?:CLIENT|SERVICE\s+PROVIDER)\s*:/i.test(afterHeading)) return true;
+  }
+  return false;
+}
+
+/** Remove stale execution-tail material while preserving the canonical witness block. */
+export function removeStalePreWitnessExecutionTail(text: string): {
+  text: string;
+  repairs: string[];
+} {
+  const repairs: string[] = [];
+  let out = String(text || "").replace(/\r\n/g, "\n").trim();
+  if (!/\bIN WITNESS WHEREOF\b/i.test(out)) {
+    return { text: out, repairs };
+  }
+  if (!hasPreWitnessStaleExecutionMaterial(out)) {
+    return { text: out, repairs };
+  }
+
+  const stripped = stripInlineStaleServerSignatureTailBeforeWitness(out);
+  if (stripped.text !== out) {
+    out = stripped.text;
+    repairs.push(...stripped.repairs.map((r) => `stale_execution_tail:${r}`));
+  }
+
+  if (hasStalePreWitnessExecutionTail(out)) {
+    const pre = preWitnessRegion(out);
+    const staleIdx = pre.search(STALE_PRE_WITNESS_INLINE_SIGNATURES_RE);
+    if (staleIdx >= 0) {
+      const witnessTail = out.slice(pre.length);
+      out = `${pre.slice(0, staleIdx).trimEnd()}\n\n${witnessTail.trimStart()}`
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+      repairs.push("stale_execution_tail:inline_signatures_truncated");
+    }
+  }
+
+  return { text: out, repairs: [...new Set(repairs)] };
+}
+
 const MULTI_PARTY_SIGNATURE_LINES = [
   "By: _____________________________",
   "Name: ___________________________",
@@ -528,6 +611,12 @@ export function ensurePaidProAcceptanceExecutionBlockInvariant(
   const repairs: string[] = [];
   let out = String(text || "").replace(/\r\n/g, "\n").trim();
   if (records.length < 2) return { text: out, repairs };
+
+  const staleTailRemoval = removeStalePreWitnessExecutionTail(out);
+  if (staleTailRemoval.repairs.length > 0) {
+    out = staleTailRemoval.text;
+    repairs.push(...staleTailRemoval.repairs.map((r) => `acceptance_execution_block:${r}`));
+  }
 
   const witnessCount = countWitnessClauses(out);
   const executionBlockCount = countPaidProExecutionBlocks(out);

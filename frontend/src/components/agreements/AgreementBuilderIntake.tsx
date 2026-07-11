@@ -6288,6 +6288,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (plan.mergeDraftWithCorpus) {
         setDraft(mergeDraftForPaidCreateFlowPersist(args.draft, finalPlain));
       }
+      if (plan.markPipelineValidationPassed) {
+        commitCanonicalPaidProReviewSessionMarkers({
+          corpusPlain: finalPlain,
+          pipelineSource,
+        });
+      } else {
+        commitPaidProAcceptanceStorageHygiene();
+      }
       if (plan.establishSourceOfTruth) {
         try {
           establishPaidProSourceOfTruth({
@@ -6305,14 +6313,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       if (plan.commitReviewArtifact) {
         commitReviewArtifact({ plainText: collapsedPlain, source: "premium_authoritative" });
-      }
-      if (plan.markPipelineValidationPassed) {
-        commitCanonicalPaidProReviewSessionMarkers({
-          corpusPlain: finalPlain,
-          pipelineSource,
-        });
-      } else {
-        commitPaidProAcceptanceStorageHygiene();
       }
       setGuidedCompletionPhase(plan.ui.guidedCompletionPhase);
       setGuidedFinalReviewExplicitlyOpened(plan.ui.guidedFinalReviewExplicitlyOpened);

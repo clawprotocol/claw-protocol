@@ -6,6 +6,7 @@ from backend.services.vs01_fully_executed_snapshot import (
     completed_execution_by_name_violations,
     ensure_fully_executed_snapshot_on_draft,
     reconstruct_corpus_from_audit_and_portable,
+    signature_text_for_signer_role,
     stamp_witness_block_party_signature,
     stamp_witness_block_party_signing_date,
     strip_witness_execution_overlays,

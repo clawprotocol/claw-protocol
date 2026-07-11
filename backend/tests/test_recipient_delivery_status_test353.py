@@ -10,6 +10,7 @@ from backend.build_info import RECIPIENT_DELIVERY_STATUS_HANDLER_REV
 from backend.main import app
 from backend.routers import agreements_v2_api as agreements_api
 from backend.services.agreement_draft_store import load_draft, save_draft
+from backend.tests.conftest_usage_economics_helpers import register_test_agreement_owner
 
 pytestmark = pytest.mark.unit
 
@@ -72,6 +73,14 @@ def _paid_pro_review_sent_draft(aid: str) -> dict:
     }
 
 
+def _register_owner(tmp_path, agreement_id: str) -> None:
+    register_test_agreement_owner(
+        db_path=str(tmp_path / "usage.sqlite3"),
+        agreement_id=agreement_id,
+        org_id="test-org-recipient-status-test353",
+    )
+
+
 def _assert_harbor_peak_reviewer_sent(body: dict) -> None:
     review_rows = [r for r in body.get("recipients") or [] if r.get("phase") == "review"]
     assert len(review_rows) == 1
@@ -90,6 +99,7 @@ def test_exact_production_agreement_state_returns_200_not_500(
     client = TestClient(app, raise_server_exceptions=False)
     draft = _paid_pro_review_sent_draft(_EXACT_FAILING_AID)
     save_draft(draft)
+    _register_owner(tmp_path, _EXACT_FAILING_AID)
 
     res = client.get(
         f"/api/agreements/{_EXACT_FAILING_AID}/recipient-delivery-status",
@@ -112,6 +122,7 @@ def test_legacy_pydantic_load_failure_still_returns_200_with_inferred_rows(
     client = TestClient(app, raise_server_exceptions=False)
     aid = "ag_legacy_pydantic_load"
     save_draft(_paid_pro_review_sent_draft(aid))
+    _register_owner(tmp_path, aid)
 
     def _legacy_load(agreement_id: str) -> dict:
         raw = load_draft(agreement_id)
@@ -137,6 +148,7 @@ def test_forced_build_exception_returns_200_degraded_with_rows(
     client = TestClient(app, raise_server_exceptions=False)
     aid = "ag_forced_build_fail"
     save_draft(_paid_pro_review_sent_draft(aid))
+    _register_owner(tmp_path, aid)
 
     from backend.services import recipient_delivery_status as rds
 
@@ -178,6 +190,7 @@ def test_malformed_paid_pro_review_sent_never_500(
     aid = f"ag_never_500_{case_id}"
     draft = mutator(_paid_pro_review_sent_draft(aid))
     save_draft(draft)
+    _register_owner(tmp_path, aid)
 
     res = client.get(f"/api/agreements/{aid}/recipient-delivery-status", headers=_ORG_H)
     assert res.status_code == 200, res.text

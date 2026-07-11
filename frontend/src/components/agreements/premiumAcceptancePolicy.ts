@@ -11,6 +11,7 @@ import { assessConciseCommercialServicesProQuality } from "./paidProConciseServi
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import { guardPaidProAuthoritativeWrite } from "./paidProAuthoritativeWriteGuard";
 export type PremiumRecipientCandidate = { name: string; email: string; role: string };
 
 export type PremiumRenderSource =
@@ -334,7 +335,14 @@ export function freezeAcceptedPremiumBodyForSession(
   generationId: string | null | undefined,
   body: string,
   source: PremiumRenderSource,
+  attemptSequence?: number | null,
 ): void {
+  const writeGuard = guardPaidProAuthoritativeWrite({
+    agreementGenerationId: generationId,
+    attemptSequence,
+    surface: "session_freeze",
+  });
+  if (!writeGuard.allowed) return;
   freezeSessionPremiumBodyForGeneration(generationId, body, source);
   latchAcceptedServerFullDraftAuthority(body, source, { freezeEstablished: true });
 }

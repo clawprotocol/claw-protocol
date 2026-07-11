@@ -159,7 +159,20 @@ export type ProductEventName =
   | "premium_success_banner_seen"
   | "premium_continue_recipients_clicked"
   | "recipient_setup_opened"
-  | "send_abandoned_after_payment";
+  | "send_abandoned_after_payment"
+  | "anonymous_draft_created"
+  | "claim_checkpoint_shown"
+  | "claim_method_selected"
+  | "google_authentication_started"
+  | "magic_link_requested"
+  | "authentication_completed"
+  | "authentication_failed"
+  | "anonymous_draft_claim_completed"
+  | "anonymous_draft_claim_failed"
+  | "continuation_restored"
+  | "continuation_fallback_used"
+  | "dashboard_sign_in_initiated"
+  | "pro_upgrade_selected";
 
 export type ProductEventRow = { name: ProductEventName; payload?: Record<string, unknown>; ts: number };
 

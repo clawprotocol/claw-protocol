@@ -15,13 +15,12 @@ import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 import { normalizePaidProCopyQuality } from "./paidProCopyQualityNormalize";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
-import { repairBareEntityOnlyNoticeStanzas, ensureOperativeIfToNoticeDelivery, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
+import { repairBareEntityOnlyNoticeStanzas, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
-import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
-import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
+import { projectPaidProFrozenSoTDisplayPlain } from "./paidProDisplayPlainAuthority";
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
   return prefix
@@ -145,83 +144,20 @@ function shouldUseFrozenDisplayPrepOnly(opts?: { frozenDisplayOnly?: boolean }):
   return true;
 }
 
-/** Post-freeze display prep — whitespace, safe split-heading merge, stale signature strip; no section-render surgery. */
+/** Post-freeze display prep — authorized presentation projection only; never hydrates notices or execution. */
 export function preparePaidProFrozenDisplayPlain(
   text: string,
-  opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] | null },
+  _opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] | null },
 ): {
   text: string;
   repairs: string[];
 } {
-  const repairs: string[] = [];
-  let out = (text || "").replace(/\r\n/g, "\n").trimEnd();
-  if (!out) return { text: out, repairs };
-
-  const titleOpening = repairPaidProDocumentTitleOpening(out);
-  if (titleOpening.repairs.length > 0) {
-    out = titleOpening.text;
-    repairs.push(...titleOpening.repairs);
-  }
-
-  const splitTail = repairSplitPaidProHeadingFragments(out);
-  if (splitTail.repairs.length > 0) {
-    out = splitTail.text;
-    repairs.push(...splitTail.repairs);
-  }
-  const sectionAny = repairMalformedSectionAnyReference(out);
-  if (sectionAny.repaired) {
-    out = sectionAny.text;
-    repairs.push("normalize:section_any_reference");
-  }
-
-  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const inlineSignatures = out.replace(/([.!?])\s+\bSIGNATURES\b\s*$/gim, "$1");
-    if (inlineSignatures !== out) {
-      out = inlineSignatures;
-      repairs.push("normalize:strip_inline_signatures_suffix");
-    }
-  } else {
-    const stripped = stripInlineStaleServerSignatureTailBeforeWitness(out);
-    if (stripped.text !== out) {
-      out = stripped.text;
-      repairs.push(...stripped.repairs);
-    }
-  }
-
-  const authority = readConsumedPaidProSignerMetadataAuthority();
-  if (
-    !isPaidProPostFinalizeHydratedCorpusLocked() &&
-    authority?.parties &&
-    authority.parties.length >= 2
-  ) {
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, authority.parties, {
-      intakeText: opts?.intakeText ?? null,
-      draftPartyNames:
-        opts?.draftPartyNames ??
-        authority.parties.map((p) => p.partyLegalName).filter((name) => name.trim().length >= 2),
-    });
-    if (noticeDelivery.repairs.length > 0) {
-      out = noticeDelivery.text;
-      repairs.push(...noticeDelivery.repairs.map((r) => `display:${r}`));
-    }
-  }
-  const hasSignerContactMetadata = authority?.parties?.some(
-    (p) => p.signerEmail?.trim() || p.partyAddress?.trim(),
-  );
-  if (!isPaidProPostFinalizeHydratedCorpusLocked() && !hasSignerContactMetadata) {
-    const bareNotices = repairBareEntityOnlyNoticeStanzas(out);
-    if (bareNotices.repairs.length > 0) {
-      out = bareNotices.text;
-      repairs.push(...bareNotices.repairs);
-    }
-  }
-  const collapsedNotices = repairCollapsedInlineNoticeStanzas(out);
-  if (collapsedNotices.repairs.length > 0) {
-    out = collapsedNotices.text;
-    repairs.push(...collapsedNotices.repairs);
-  }
-
-  return { text: out.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs: [...new Set(repairs)] };
+  const projected = projectPaidProFrozenSoTDisplayPlain(text);
+  const repairs =
+    projected !== (text || "").replace(/\r\n/g, "\n").trimEnd()
+      ? ["display:frozen_sot_projection"]
+      : [];
+  return { text: projected, repairs: [...new Set(repairs)] };
 }
 
 /** Display + acceptance prep: section breaks then stale signature tail removal. */

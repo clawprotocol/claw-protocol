@@ -32,12 +32,14 @@ import {
   TEST424_JOURNEY_RESULTS,
 } from "./paidProTest424JourneyMatrix";
 import { clearPaidProVs01PostSignHandoff } from "../../vs01/vs01PaidProPostSignHandoff";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 describe("TEST424 — Production Journey QA Suite", () => {
   const storage = new Map<string, string>();
   const local = new Map<string, string>();
 
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     vi.stubGlobal("sessionStorage", {
       getItem: (k: string) => storage.get(k) ?? null,
       setItem: (k: string, v: string) => storage.set(k, v),
@@ -62,6 +64,7 @@ describe("TEST424 — Production Journey QA Suite", () => {
   });
 
   afterEach(() => {
+    resetPaidProPipelineTestIsolation();
     clearPaidProSourceOfTruth();
     clearPremiumPartyNamesHandoff();
     clearConsumedPaidProSignerMetadataAuthority();

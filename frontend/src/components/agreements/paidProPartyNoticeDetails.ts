@@ -41,7 +41,6 @@ import {
   stripPreWitnessExecutionPollutionFromPrefix,
   ensureBlankLineBeforeWitnessBlock,
 } from "./paidProExecutionBlockNormalization";
-import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
 import {
   buildSignerMetadataPartiesFromIntakeManifest,
   extractIntakePartyManifestRows,
@@ -259,7 +258,10 @@ const DANGLING_IF_TO_RE = /\nIf to\s*:?\s*$/i;
 const NOTICE_PLACEHOLDER_TOKEN_RE =
   /\[\s*(?:(?:SIGNER|PARTY|CONTACT)_)?(?:EMAIL|ADDRESS|NAME|TITLE)(?:_\d+)?\s*\]/i;
 
-const ROLE_ONLY_IF_TO_HEADER_RE = /^If to (?:the )?(?:Client|Service\s+Provider|Party\s+\d+)\s*:\s*$/i;
+const ROLE_ONLY_IF_TO_HEADER_RE = /^If to (?:the )?(?:Client|Service\s+Provider)\s*:\s*$/i;
+
+const GENERIC_MANIFEST_NOTICE_PLACEHOLDER_HEADER_RE =
+  /^If to (Party\s+\d+)\s*:\s*$/i;
 
 const CORRUPTED_NOTICE_ROLE_FUSION_RE =
   /^(?:Client|Service\s+Provider)(?:\s+(?:Client|Service\s+Provider))+\s+(?:Attention|Attn)\s*:/i;
@@ -286,6 +288,119 @@ function noticesRegionHasExecutionPollution(region: string): boolean {
   return noticeStanzaHasExecutionPollution(region) || /\bIN WITNESS WHEREOF\b/i.test(region || "");
 }
 
+function operativeMiddleHasExecutionBoundaryPollution(middle: string): boolean {
+  const trimmed = (middle || "").trim();
+  if (!trimmed) return false;
+  if (noticesRegionHasExecutionPollution(trimmed)) return true;
+  if (/^\s*IN WITNESS WHEREOF\b/im.test(trimmed)) return true;
+  if (/^(?:CLIENT|SERVICE\s+PROVIDER)\s*:/im.test(trimmed)) return true;
+  return /^\s*(?:By|Name|Title|Date)\s*:/im.test(trimmed);
+}
+
+/** Canonical positional notice identity for intake-less generic manifest fixtures (Party 1, Party 2, …). */
+export function isCanonicalPositionalNoticeEntityIdentity(name: string): boolean {
+  return /^Party\s+\d+$/i.test((name || "").trim());
+}
+
+/** True when an operative notice stanza carries a usable legal-entity line (authoritative or positional). */
+export function noticeStanzaHasLegalEntityLine(stanza: string): boolean {
+  const trimmed = (stanza || "").trim();
+  if (!trimmed) return false;
+  const lines = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const entityLine = lines[1] ?? "";
+  if (entityLine.length >= 3) return true;
+  const fused = lines[0]?.match(/^If to\s+(.+?)\s*:\s*(.+)$/i);
+  return Boolean(fused && fused[2].trim().length >= 3);
+}
+
+function resolveCompleteOperativeNoticesFamilyEndForFreeze(text: string, noticesStart: number): number {
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  const operativeEnd = witnessIdx >= 0 ? witnessIdx : text.length;
+  const baseEnd = resolveOperativeNoticesFamilyEnd(text, noticesStart);
+  if (noticesStart < 0 || noticesStart >= operativeEnd) return baseEnd;
+
+  const region = text.slice(noticesStart, operativeEnd);
+  if (!/^If to\s+/im.test(region)) return baseEnd;
+
+  let end = baseEnd;
+  let offset = noticesStart;
+  for (const line of region.split("\n")) {
+    const trimmed = line.trim();
+    const lineEnd = offset + line.length;
+    if (/^\s*IN WITNESS WHEREOF\b/i.test(trimmed)) break;
+    if (/^(?:CLIENT|SERVICE\s+PROVIDER)\s*:/i.test(trimmed)) break;
+    if (
+      /^\s*(?:By|Name|Title|Date)\s*:/i.test(trimmed) &&
+      !/^If to\s+/i.test(trimmed) &&
+      !/^Party\s+\d+$/i.test(trimmed)
+    ) {
+      break;
+    }
+    end = lineEnd;
+    offset = lineEnd + 1;
+  }
+  return Math.min(operativeEnd, Math.max(baseEnd, end));
+}
+
+/** Shared notice-region normalization — same defuse/strip repair and validation both apply. */
+function normalizeOperativeNoticesRegionText(noticesRegion: string): { text: string; repairs: string[] } {
+  const repairs: string[] = [];
+  const defusedLines: string[] = [];
+  for (const line of (noticesRegion || "").split("\n")) {
+    const defused = defuseEntityWitnessFusionLine(line);
+    if (defused.repaired) repairs.push("notice:defuse_entity_witness_fusion");
+    if (defused.line) defusedLines.push(defused.line);
+  }
+  let region = defusedLines.join("\n");
+  const pollutionStrip = stripPreWitnessExecutionPollutionFromPrefix(region);
+  if (pollutionStrip.repairs.length > 0) {
+    repairs.push(...pollutionStrip.repairs.map((r) => `notice:${r}`));
+  }
+  return { text: pollutionStrip.text, repairs };
+}
+
+/**
+ * Authoritative notices-region slice for freeze validation — matches repair boundary
+ * (operative family end + defuse/strip), not the full notices-to-witness span.
+ */
+export function resolveAuthoritativeNoticesRegionForFreeze(corpus: string): string {
+  const text = (corpus || "").replace(/\r\n/g, "\n");
+  const noticesIdx = findNoticesSectionStart(text);
+  if (noticesIdx < 0) return "";
+  const noticesFamilyEnd = resolveCompleteOperativeNoticesFamilyEndForFreeze(text, noticesIdx);
+  const noticesFamily = text.slice(noticesIdx, noticesFamilyEnd);
+  return normalizeOperativeNoticesRegionText(noticesFamily).text;
+}
+
+/**
+ * Seal notice/execution boundary on the freeze corpus — drop execution pollution stranded
+ * between the operative notices family and the canonical witness block.
+ * Does not re-normalize the notices family (repair already owns that).
+ */
+export function sealPaidProNoticesExecutionBoundaryInCorpus(
+  corpus: string,
+): { text: string; repairs: string[] } {
+  const normalized = (corpus || "").replace(/\r\n/g, "\n");
+  const layout = sliceOperativeNoticeLayout(normalized);
+  if (!layout) return { text: corpus, repairs: [] };
+  if (!operativeMiddleHasExecutionBoundaryPollution(layout.middle)) {
+    return { text: corpus, repairs: [] };
+  }
+  const sealed = joinOperativeNoticeLayout({
+    before: layout.before,
+    noticesFamily: layout.noticesFamily,
+    middle: "",
+    after: layout.after,
+  });
+  return {
+    text: sealed,
+    repairs: sealed !== normalized ? ["notice:seal_execution_boundary_middle"] : [],
+  };
+}
+
 function defuseEntityWitnessFusionLine(line: string): { line: string; repaired: boolean } {
   const trimmed = line.trim();
   if (!/IN WITNESS WHEREOF/i.test(trimmed) || /^\s*IN WITNESS WHEREOF\b/i.test(trimmed)) {
@@ -296,7 +411,7 @@ function defuseEntityWitnessFusionLine(line: string): { line: string; repaired: 
   return { line: cleaned, repaired: cleaned !== trimmed };
 }
 
-function resolveCanonicalNoticePartyCount(
+export function resolveCanonicalNoticePartyCount(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): number {
@@ -315,6 +430,7 @@ function resolveCanonicalNoticePartyCountRaw(
   const draftPartyNames =
     roleContext?.draftPartyNames ??
     parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2);
+  const intakeManifestCeiling = resolveIntakeManifestAuthorityCount(intake);
 
   // The authoritative intake party manifest fixes the exact stanza count — corpus-derived
   // counts can over-count (phantom Scope Inc.) or under-count (dropped Client).
@@ -328,17 +444,21 @@ function resolveCanonicalNoticePartyCountRaw(
   }
 
   if (intake) {
-    const quadNames = resolveDeterministicQuadPartyNames(intake, null).filter(
-      isAuthoritativeLegalEntityName,
-    );
-    if (quadNames.length >= 4) {
-      const resolved = resolveAuthoritativeSignerCount({
-        intakeText: intake,
-        draftPartyNames,
-      });
-      if (resolved.count >= 4) {
-        return 4;
-      }
+    const resolved = resolveAuthoritativeSignerCount({
+      intakeText: intake,
+      draftPartyNames,
+      draftParties: parties.map((p) => ({ name: p.partyLegalName })),
+      manifestPartyCount: parties.length,
+    });
+    if (resolved.count >= 2) {
+      const capped =
+        intakeManifestCeiling >= 2
+          ? Math.min(resolved.count, intakeManifestCeiling)
+          : resolved.count;
+      return Math.min(capped, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+    }
+    if (intakeManifestCeiling >= 2) {
+      return Math.min(intakeManifestCeiling, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
     }
   }
 
@@ -473,9 +593,21 @@ export function hasInlineMalformedNoticeStanzas(text: string): boolean {
 export function noticeStanzaHasRoleLabelCorruption(stanza: string): boolean {
   const trimmed = (stanza || "").trim();
   if (!trimmed) return false;
-  const header = trimmed.split("\n")[0]?.trim() ?? "";
+  const lines = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const header = lines[0] ?? "";
+  const entityLine = lines[1] ?? "";
+  const placeholderHeader = header.match(GENERIC_MANIFEST_NOTICE_PLACEHOLDER_HEADER_RE);
+  if (
+    placeholderHeader &&
+    entityLine.toLowerCase() === placeholderHeader[1]!.toLowerCase()
+  ) {
+    return false;
+  }
   if (ROLE_ONLY_IF_TO_HEADER_RE.test(header)) return true;
-  return trimmed.split("\n").some((line) => {
+  return lines.some((line) => {
     const t = line.trim();
     return CORRUPTED_NOTICE_ROLE_FUSION_RE.test(t) || CORRUPTED_NOTICE_ROLE_ATTENTION_RE.test(t);
   });
@@ -845,6 +977,7 @@ export function repairBareEntityOnlyNoticeStanzas(corpus: string): { text: strin
 }
 
 function noticeStanzaHasEntityLine(stanza: string): boolean {
+  if (noticeStanzaHasLegalEntityLine(stanza)) return true;
   const entityLine = stanza
     .trim()
     .split("\n")
@@ -925,10 +1058,13 @@ function ensureNoticeAuthorityPartyLegalEntities(
   return parties.map((party) => {
     const direct = party.partyLegalName.trim();
     if (direct.length >= 2 && isAuthoritativeLegalEntityName(direct)) return party;
+    if (direct.length >= 2 && isCanonicalPositionalNoticeEntityIdentity(direct)) return party;
     const legal = resolveNoticeStanzaLegalEntity(party, parties, roleContext);
-    if (/^Party\s+\d+$/i.test(legal)) return party;
     if (legal === direct) return party;
-    return { ...party, partyLegalName: legal };
+    if (legal.length >= 2) {
+      return { ...party, partyLegalName: legal };
+    }
+    return party;
   });
 }
 
@@ -1369,6 +1505,25 @@ export function relocateMisplacedNoticesSectionBeforeGoverningLaw(corpus: string
   };
 }
 
+/** Defuse a Notices heading fused onto prior clause prose (e.g. `clause.12. Notices`). */
+export function repairFusedNoticesHeadingToPriorClause(corpus: string): {
+  text: string;
+  repairs: string[];
+} {
+  const repairs: string[] = [];
+  let text = (corpus || "").replace(/\r\n/g, "\n");
+  const fusedRe = /([a-z])(\.\d+(?:\.\d+)?\.\s+)Notices\b/gi;
+  if (!fusedRe.test(text)) return { text: corpus, repairs: [] };
+  fusedRe.lastIndex = 0;
+  text = text.replace(fusedRe, (_match, priorLetter: string, sectionPart: string) => {
+    const numMatch = sectionPart.match(/\.(\d+(?:\.\d+)?)\.\s+/);
+    const num = numMatch?.[1] ?? "11";
+    repairs.push("notice:defuse_fused_notices_heading");
+    return `${priorLetter}\n\n${num}. NOTICES`;
+  });
+  return { text, repairs };
+}
+
 /**
  * Insert or normalize a canonical `N. NOTICES` heading before operative If-to stanzas.
  * Pre-freeze only — repairs missing or notice-equivalent headings instead of rejecting.
@@ -1378,8 +1533,11 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
   repairs: string[];
 } {
   const repairs: string[] = [];
-  const misplaced = removeMisplacedNoticesHeadingBeforeSubsection(corpus);
-  let text = misplaced.text;
+  const fusedHeading = repairFusedNoticesHeadingToPriorClause(corpus);
+  let text = fusedHeading.text;
+  if (fusedHeading.repairs.length > 0) repairs.push(...fusedHeading.repairs);
+  const misplaced = removeMisplacedNoticesHeadingBeforeSubsection(text);
+  text = misplaced.text;
   if (misplaced.repairs.length > 0) repairs.push(...misplaced.repairs);
   const relocated = relocateMisplacedNoticesSectionBeforeGoverningLaw(text);
   text = relocated.text;
@@ -1566,7 +1724,9 @@ function findExistingNoticeStanzaForParty(
       const headingEntity = noticeStanzaHeadingLegalEntity(stanza);
       if (headingEntity.length >= 2 && partyLegalNamesMatch(headingEntity, legal)) {
         consumedStanzaIndexes.add(j);
-        return stanza.trim();
+        if (noticeStanzaHasLegalEntityLine(stanza)) {
+          return stanza.trim();
+        }
       }
     }
   }
@@ -1624,6 +1784,129 @@ function noticeAuthorityRequiresManifestRepair(
     }
   }
   return false;
+}
+
+/** Hydrate/repair operative notice stanzas so each carries an authoritative entity line before freeze validation. */
+export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): { text: string; repairs: string[] } {
+  const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
+  if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
+
+  const noticesIdx = findNoticesSectionStart(corpus);
+  if (noticesIdx < 0) return { text: corpus, repairs: [] };
+
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
+  const noticesEnd = witnessIdx >= 0 ? witnessIdx : corpus.length;
+  const before = corpus.slice(0, noticesIdx);
+  const after = corpus.slice(noticesEnd);
+  const fullRegion = corpus.slice(noticesIdx, noticesEnd);
+  const blocks = fullRegion.split(/\n(?=If to\s+)/i);
+  const intro = blocks[0]?.trim() ?? "";
+  const existingStanzas = blocks.slice(1).map((s) => s.trim()).filter(Boolean);
+  const repairs: string[] = [];
+  const canonicalNames = authorityParties.map((party) =>
+    resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext),
+  );
+  const rebuiltStanzas: string[] = [];
+  const consumedExisting = new Set<number>();
+
+  for (let i = 0; i < authorityParties.length; i += 1) {
+    const party = authorityParties[i]!;
+    const existing = findExistingNoticeStanzaForParty(
+      party,
+      authorityParties,
+      roleContext,
+      existingStanzas,
+      i,
+      consumedExisting,
+      { manifestAuthoritative: true },
+    );
+    const candidate = existing.trim()
+      ? stripInvalidNoticeStanzaLines(expandCollapsedInlineNoticeStanza(existing), canonicalNames)
+      : "";
+    if (candidate && noticeStanzaHasLegalEntityLine(candidate)) {
+      rebuiltStanzas.push(candidate);
+      continue;
+    }
+    rebuiltStanzas.push(
+      stripInvalidNoticeStanzaLines(
+        buildIfToNoticeStanza(party, authorityParties, roleContext),
+        canonicalNames,
+      ),
+    );
+    repairs.push(`notice:hydrate_entity_line_party_${i + 1}`);
+  }
+
+  if (repairs.length === 0) {
+    const stanzaCount = (fullRegion.match(/^If to\s+/gim) || []).length;
+    const completeCount = existingStanzas.filter((stanza) => noticeStanzaHasLegalEntityLine(stanza)).length;
+    if (stanzaCount >= authorityParties.length && completeCount >= authorityParties.length) {
+      return { text: corpus, repairs: [] };
+    }
+  }
+
+  if (repairs.length === 0 && rebuiltStanzas.length === 0) return { text: corpus, repairs: [] };
+
+  const introBlock = intro.trimEnd();
+  const mergedNotices = [
+    introBlock,
+    rebuiltStanzas.join("\n\n"),
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+  const text = after.trimStart()
+    ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+    : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  return { text, repairs };
+}
+
+function countOperativeIfToStanzasInRegion(noticesRegion: string): number {
+  return (noticesRegion.match(/^If to\s+/gim) || []).length;
+}
+
+/** Reconcile operative notice stanza count to canonical party authority before terminal validation. */
+export function ensureOperativeNoticeStanzaCountAuthorityAtFreeze(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
+): { text: string; repairs: string[] } {
+  const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
+  if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
+
+  const region = resolveAuthoritativeNoticesRegionForFreeze(corpus);
+  const regionCount = countOperativeIfToStanzasInRegion(region);
+  const completeCount = region
+    .split(/\n(?=If to\s+)/i)
+    .slice(1)
+    .map((s) => s.trim())
+    .filter((stanza) => stanza && noticeStanzaHasLegalEntityLine(stanza)).length;
+
+  if (regionCount >= authorityParties.length && completeCount >= authorityParties.length) {
+    return { text: corpus, repairs: [] };
+  }
+
+  const reconciled = ensureOperativeNoticeStanzaEntityLinesAtFreeze(corpus, parties, roleContext);
+  if (reconciled.repairs.length > 0) {
+    return {
+      text: reconciled.text,
+      repairs: reconciled.repairs.map((r) => `notice:${r}`),
+    };
+  }
+
+  const repaired = repairIncompleteIfToNoticeStanzas(reconciled.text, parties, roleContext);
+  if (repaired.repairs.length > 0 || repaired.text !== reconciled.text) {
+    return {
+      text: repaired.text,
+      repairs: repaired.repairs.map((r) => `notice:reconcile_stanza_count_${r}`),
+    };
+  }
+
+  return reconciled;
 }
 
 /**
@@ -1766,19 +2049,11 @@ export function repairIncompleteIfToNoticeStanzas(
     repairs.push("notice:split_inline_stanzas");
   }
 
-  const defusedLines: string[] = [];
-  for (const line of noticesRegion.split("\n")) {
-    const defused = defuseEntityWitnessFusionLine(line);
-    if (defused.repaired) repairs.push("notice:defuse_entity_witness_fusion");
-    if (defused.line) defusedLines.push(defused.line);
+  const normalizedRegion = normalizeOperativeNoticesRegionText(noticesRegion);
+  if (normalizedRegion.repairs.length > 0) {
+    repairs.push(...normalizedRegion.repairs);
   }
-  noticesRegion = defusedLines.join("\n");
-
-  const pollutionStrip = stripPreWitnessExecutionPollutionFromPrefix(noticesRegion);
-  if (pollutionStrip.repairs.length > 0) {
-    noticesRegion = pollutionStrip.text;
-    repairs.push(...pollutionStrip.repairs.map((r) => `notice:${r}`));
-  }
+  noticesRegion = normalizedRegion.text;
 
   const blocks = fullNoticesRegion.split(/\n(?=If to\s+)/i);
   const introParts = [blocks[0]?.trim() ?? ""];
@@ -2013,10 +2288,8 @@ export function repairDuplicateOperativeNoticeStanzas(
 
 /** Count operative If-to stanzas in the notices-to-witness region. */
 export function countOperativeIfToNoticeStanzas(corpus: string): number {
-  const noticesIdx = findNoticesSectionStart(corpus);
-  if (noticesIdx < 0) return 0;
-  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
-  const region = corpus.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : corpus.length);
+  const region = resolveAuthoritativeNoticesRegionForFreeze(corpus);
+  if (!region.trim()) return 0;
   return (region.match(/^If to\s+/gim) || []).length;
 }
 
@@ -2105,7 +2378,16 @@ export function ensureOperativeIfToNoticeDelivery(
   const hasExecutionPollution = noticesRegionHasExecutionPollution(noticesRegion);
   const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
   const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);
-  if (!missing && !hasPlaceholderTokens && !hasExecutionPollution && !hasInlineMalformedNotices && !hasBareNoticeStanzas) {
+  const operativeStanzaCount = countOperativeIfToStanzasInRegion(noticesRegion);
+  const stanzaCountMismatch = operativeStanzaCount < authorityParties.length;
+  if (
+    !missing &&
+    !stanzaCountMismatch &&
+    !hasPlaceholderTokens &&
+    !hasExecutionPollution &&
+    !hasInlineMalformedNotices &&
+    !hasBareNoticeStanzas
+  ) {
     const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(corpus);
     const baseText = addressRepair.repairs.length > 0 ? addressRepair.text : corpus;
     const trimmed = trimOperativeNoticeStanzasToPartyCount(baseText, authorityParties.length);

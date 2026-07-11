@@ -13,8 +13,10 @@ def test_observability_skipped_when_disabled(monkeypatch: pytest.MonkeyPatch) ->
     assert out.get("skipped") is True
 
 
-def test_observability_emits_weekly_info(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_observability_emits_weekly_info(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_ANCHOR_OBSERVABILITY_ALERTS", "1")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ANCHOR_WEEKLY_INFO_ALERT_MIN_INTERVAL_SECONDS", "0")
     calls: list[tuple] = []
 
     def _capture(event_type: str, severity: str, payload: dict, **kw):

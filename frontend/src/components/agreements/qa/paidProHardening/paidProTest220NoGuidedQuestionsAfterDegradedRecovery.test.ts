@@ -27,6 +27,7 @@ import { resolveGuidedProUxState } from "../../guidedDealCompletion/guidedProUxS
 import { friendlyLowConfidenceCopy } from "../../guidedDealCompletion/friendlyProCompletionCopy";
 import { GUIDED_COMPLETION_PHASE_INACTIVE } from "../../starterCreateHandoff";
 import { clearPremiumGenerationCallAudit } from "../../paidProPremiumGenerationCallAudit";
+import { resetPaidProPipelineTestIsolation } from "../../paidProPipelineTestIsolation";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -110,6 +111,7 @@ vi.mock("../../premiumFullDraftApi", async (importOriginal) => {
 
 describe("paidPro Test220 degraded recovery must not route to guided questions", () => {
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     clearPremiumGenerationCallAudit();
     const doc = buildTest220RejectedDegradedServerBody(6_387);
     h.mockResult.document_text = doc;

@@ -277,6 +277,17 @@ export const JOURNEY_E_SCENARIOS: Test424JourneyScenario[] = [
   TEST424_FIVE_PARTY_JV,
 ];
 
+/** Structural freeze rejection that survives notice-fusion repair (TEST427 recovery). */
+export function buildStructuralFreezeRejectCorpus(corpus: string): string {
+  const witnessIdx = corpus.search(/\bIN WITNESS WHEREOF\b/i);
+  const head = witnessIdx >= 0 ? corpus.slice(0, witnessIdx).trimEnd() : corpus.trimEnd();
+  const tail =
+    witnessIdx >= 0
+      ? corpus.slice(witnessIdx)
+      : "\n\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n";
+  return `${head}\n\n5. REPRESENTATIONS AND WARRANTIES\n\n5.7 Equitable Relief.\nGlued heading fragment without structure. Representations, Warranties and Service Conditions 6.1 Mutual Authority.\n\n${tail}`;
+}
+
 export function buildMalformedAcceptedCorpus(corpus: string): string {
   const ifToLines = corpus.match(/^If to\b[^\n]*$/gim) ?? [];
   let body = corpus;

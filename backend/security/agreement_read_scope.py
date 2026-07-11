@@ -313,7 +313,9 @@ def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str
         return
 
     require_claw_org_id_header(request)
-    subject = resolve_subject_from_request(request)
+    from backend.security.request_identity import resolve_verified_subject_from_request
+
+    subject = resolve_verified_subject_from_request(request)
     if not workspace_lists_agreement_for_subject(aid, subject):
         raise HTTPException(
             status_code=403,

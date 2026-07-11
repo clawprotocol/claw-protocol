@@ -3,7 +3,7 @@ import { getClaimRecordEmailContinueHref, getClaimRecordGoogleAuthHref, shouldDe
 
 describe("claimRecordAuth", () => {
   it("returns default email href when env unset", () => {
-    expect(getClaimRecordEmailContinueHref()).toBe("/app");
+    expect(getClaimRecordEmailContinueHref()).toBe("/app/settings");
   });
 
   it("returns null google href when env unset", () => {

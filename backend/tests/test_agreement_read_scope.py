@@ -20,6 +20,60 @@ _ORG_A = {"X-Claw-Org-Id": "read-scope-org-a"}
 _ORG_B = {"X-Claw-Org-Id": "read-scope-org-b"}
 
 
+def test_no_credentials_returns_401_not_403(monkeypatch, tmp_path):
+    """Credentialless read must be 401 (no identity), not 403 (forbidden resource)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    client = TestClient(app)
+    c = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_A,
+        json={
+            "title": "Auth contract",
+            "jurisdiction": "TX",
+            "parties": [{"name": "O", "role": "owner"}],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert c.status_code == 200
+    aid = c.json()["id"]
+    anon = client.get(f"/api/agreements/{aid}")
+    assert anon.status_code == 401
+    assert anon.json()["detail"]["code"] == "org_header_required"
+
+
+def test_wrong_org_returns_403_ownership_denied(monkeypatch, tmp_path):
+    """Valid workspace header but non-owner org is 403 authorization failure."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    client = TestClient(app)
+    c = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_A,
+        json={
+            "title": "Auth contract",
+            "jurisdiction": "TX",
+            "parties": [{"name": "O", "role": "owner"}],
+            "purpose": "P",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert c.status_code == 200
+    aid = c.json()["id"]
+    other = client.get(f"/api/agreements/{aid}", headers=_ORG_B)
+    assert other.status_code == 403
+    assert other.json()["detail"]["code"] == "agreement_read_denied"
+
+
 def test_full_draft_get_requires_owner_org_when_economics_on(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
@@ -44,6 +98,7 @@ def test_full_draft_get_requires_owner_org_when_economics_on(monkeypatch, tmp_pa
 
     anon = client.get(f"/api/agreements/{aid}")
     assert anon.status_code == 401
+    assert anon.json()["detail"]["code"] == "org_header_required"
 
     other = client.get(f"/api/agreements/{aid}", headers=_ORG_B)
     assert other.status_code == 403
@@ -196,7 +251,7 @@ def test_recipient_writes_require_token_when_strict(monkeypatch, tmp_path):
     assert rv.status_code == 403
     assert rv.json()["detail"]["code"] == "recipient_token_required"
     rp = client.post(
-        f"/api/agreements/{aid}/recipient-proposal",
+        f"/api/agreements/{aid}/recipient-proposal/stage",
         json={
             "instruction": "x",
             "proposer_id": "p-r1",
@@ -254,10 +309,10 @@ def test_recipient_writes_accept_review_token_and_reject_wrong_party(monkeypatch
     )
     assert rv.status_code == 200
     bad_prop = client.post(
-        f"/api/agreements/{aid}/recipient-proposal",
+        f"/api/agreements/{aid}/recipient-proposal/stage",
         headers=rh,
         json={
-            "instruction": "x",
+            "instruction": "Change terms",
             "proposer_id": "p-r2",
             "draft": {
                 "title": draft["title"],

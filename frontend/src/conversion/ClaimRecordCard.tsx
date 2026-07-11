@@ -11,7 +11,15 @@ import { CreateLawDogAccountModal } from "./CreateLawDogAccountModal";
 import { readProductLegalAcceptanceDetail } from "../launch/legal/legalAcceptanceLocal";
 import { NOT_LEGAL_ADVICE, PRODUCT_NOT_LAW_FIRM } from "../compliance/disclosureCopy";
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
-import { getClaimRecordEmailContinueHref, getClaimRecordGoogleAuthHref } from "./claimRecordAuth";
+import {
+  getClaimRecordEmailContinueHref,
+  getClaimRecordGoogleAuthHref,
+  isClaimAuthConfigured,
+} from "./claimRecordAuth";
+import { useAuth } from "../auth/AuthProvider";
+import { captureContinuationFromLocation } from "../auth/authContinuationContext";
+import { isGoogleAuthConfigured } from "../auth/supabaseAuthService";
+import { useLaunchNav } from "../launch/LaunchNavContext";
 
 export type ClaimRecordFlow = "esign_receipt" | "agreement_complete";
 
@@ -40,8 +48,11 @@ export function ClaimRecordCard({
   const claimInteractRef = useRef(false);
   const lastRecordIdRef = useRef<string | null>(null);
 
+  const auth = useAuth();
+  const { navigate } = useLaunchNav();
   const googleHref = getClaimRecordGoogleAuthHref();
   const emailHref = getClaimRecordEmailContinueHref();
+  const showGoogle = auth.enabled ? isGoogleAuthConfigured() : Boolean(googleHref);
   const referralRefCode = useMemo(() => {
     if (typeof window === "undefined") return null;
     const raw = new URLSearchParams(window.location.search).get("ref");
@@ -83,13 +94,21 @@ export function ClaimRecordCard({
 
   const handoffEmail = useCallback(() => {
     const assent = readProductLegalAcceptanceDetail();
+    captureContinuationFromLocation({
+      agreementId: recordId,
+      workflowStage: "claim",
+      destinationPath:
+        typeof window !== "undefined"
+          ? `${window.location.pathname}${window.location.search}`
+          : "/app/create",
+    });
     markSignupCompletedViaClaim();
     logProductEvent("signup_completed", {
       claim_flow: flow,
       record_id: recordId,
       method: "email",
       surface: "claim_modal",
-      account_creation_event: "claim_email_redirect",
+      account_creation_event: isClaimAuthConfigured() ? "claim_email_supabase" : "claim_email_redirect",
       ...(assent
         ? {
             terms_assent_at_iso: assent.at,
@@ -100,20 +119,32 @@ export function ClaimRecordCard({
           }
         : {}),
     });
+    logProductEvent("claim_method_selected", { method: "email", record_id: recordId });
     setModalOpen(false);
+    if (isClaimAuthConfigured()) {
+      navigate("/app/settings");
+      return;
+    }
     window.location.assign(emailHref);
-  }, [emailHref, flow, recordId, referralRefCode]);
+  }, [emailHref, flow, navigate, recordId, referralRefCode]);
 
   const handoffGoogle = useCallback(() => {
-    if (!googleHref) return;
     const assent = readProductLegalAcceptanceDetail();
+    captureContinuationFromLocation({
+      agreementId: recordId,
+      workflowStage: "claim",
+      destinationPath:
+        typeof window !== "undefined"
+          ? `${window.location.pathname}${window.location.search}`
+          : "/app/create",
+    });
     markSignupCompletedViaClaim();
     logProductEvent("signup_completed", {
       claim_flow: flow,
       record_id: recordId,
       method: "google",
       surface: "claim_modal",
-      account_creation_event: "claim_google_redirect",
+      account_creation_event: isClaimAuthConfigured() ? "claim_google_oauth" : "claim_google_redirect",
       ...(assent
         ? {
             terms_assent_at_iso: assent.at,
@@ -124,12 +155,19 @@ export function ClaimRecordCard({
           }
         : {}),
     });
+    logProductEvent("claim_method_selected", { method: "google", record_id: recordId });
     if (referralRefCode) {
       logProductEvent("referral_signup", { ref_code: referralRefCode, method: "google", surface: "claim_modal" });
     }
     setModalOpen(false);
+    if (isClaimAuthConfigured()) {
+      logProductEvent("google_authentication_started", { surface: "claim_modal", record_id: recordId });
+      void auth.signInGoogle();
+      return;
+    }
+    if (!googleHref) return;
     window.location.assign(googleHref);
-  }, [flow, googleHref, recordId, referralRefCode]);
+  }, [auth, flow, googleHref, recordId, referralRefCode]);
 
   const onSaveContinue = useCallback(() => {
     claimInteractRef.current = true;
@@ -143,6 +181,7 @@ export function ClaimRecordCard({
     });
     markLawdogFunnelStep("signup");
     logProductEvent("signup_started", { claim_flow: flow, record_id: recordId, phase: "create_account_modal" });
+    logProductEvent("claim_checkpoint_shown", { claim_flow: flow, record_id: recordId });
     setModalOpen(true);
   }, [flow, recordId]);
 
@@ -206,9 +245,9 @@ export function ClaimRecordCard({
       <CreateLawDogAccountModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        googleHref={googleHref}
+        showGoogle={showGoogle}
         onContinueEmail={handoffEmail}
-        onContinueGoogle={googleHref ? handoffGoogle : undefined}
+        onContinueGoogle={showGoogle ? handoffGoogle : undefined}
         assentAnalyticsContext={assentAnalyticsContext}
       />
     </>

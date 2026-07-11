@@ -6,6 +6,12 @@ This file exists to help humans and AI agents navigate CLAW documentation.
 - docs/CLAW_CANON.md — authority order, scope, philosophy
 - STATE.md — current implementation state
 
+## LawDog Product Architecture (root)
+- docs/architecture/LAWDOG_SYSTEM_ARCHITECTURE.md — **root** product architecture: layers, domain objects, lifecycle, markers, persistence, invariants (screenflow children reference this)
+- docs/architecture/LAWDOG_DOMAIN_MODEL.md — **what** objects exist: ownership, lifetime, persistence, mutation authority (canonical noun reference for screenflows)
+- docs/architecture/LAWDOG_INTERACTION_DATA_FLOW.md — **how** data moves: lifecycle stages, gates, mutation choreography, fail-closed transitions
+- docs/architecture/LAWDOG_ARCHITECTURE_DECISIONS.md — **why** decisions (ADRs): freeze immutability, review-before-sign, parity, markers, proof boundaries
+
 ## CLAW v1 Utilities
 - docs/CLAW_V1_UTILITIES.md — e-sign, timelines, personal liability, agreements
 - docs/CLAW_AUTOMATED_DETERMINATION_CLAUSE.md — adjudication logic (agreements)

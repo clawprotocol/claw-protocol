@@ -33,6 +33,8 @@ export type PaidProDocumentBoundaryAuthorityOpts = PaidProNoticeContactAuthority
   draftPartyCount?: number;
   /** Diagnostics — session handoff slot count before trim. */
   handoffPartySlots?: number;
+  /** When true, clause-family structural validation is deferred to the terminal freeze gate. */
+  deferClauseFamilyStructuralValidation?: boolean;
 };
 
 export type PaidProDocumentBoundaryAuthorityResult = {
@@ -259,13 +261,15 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
     lastViolations = result.violations;
     lastUnresolvedTokens = result.unresolvedRenderTokens;
     if (result.ok && result.violations.length === 0) {
-      assertClauseFamilyStructuralIntegrityForFreeze(out, {
-        parties: opts?.parties,
-        surface: opts?.surface ?? "paid_pro_document_boundary_freeze",
-        phase: "post_acceptance",
-        draftPartyCount: opts?.draftPartyCount,
-        handoffPartySlots: opts?.handoffPartySlots,
-      });
+      if (!opts?.deferClauseFamilyStructuralValidation) {
+        assertClauseFamilyStructuralIntegrityForFreeze(out, {
+          parties: opts?.parties,
+          surface: opts?.surface ?? "paid_pro_document_boundary_freeze",
+          phase: "post_acceptance",
+          draftPartyCount: opts?.draftPartyCount,
+          handoffPartySlots: opts?.handoffPartySlots,
+        });
+      }
       return out;
     }
   }

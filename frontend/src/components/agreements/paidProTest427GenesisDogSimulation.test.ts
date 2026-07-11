@@ -23,6 +23,7 @@ import {
   TEST427_MATRIX_RESULTS,
 } from "./paidProTest427JourneyMatrix";
 import { clearPaidProVs01PostSignHandoff } from "../../vs01/vs01PaidProPostSignHandoff";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 /**
  * TEST427 — Genesis Dog production simulation (21 workflow scenarios + 1 guard test = 22 tests).
@@ -32,6 +33,7 @@ describe("TEST427 — Genesis Dog Production Simulation Suite", () => {
   const local = new Map<string, string>();
 
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     vi.stubGlobal("sessionStorage", {
       getItem: (k: string) => storage.get(k) ?? null,
       setItem: (k: string, v: string) => storage.set(k, v),
@@ -57,6 +59,7 @@ describe("TEST427 — Genesis Dog Production Simulation Suite", () => {
   });
 
   afterEach(() => {
+    resetPaidProPipelineTestIsolation();
     clearPaidProSourceOfTruth();
     clearPremiumPartyNamesHandoff();
     clearConsumedPaidProSignerMetadataAuthority();

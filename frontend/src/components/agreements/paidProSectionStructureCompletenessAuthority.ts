@@ -14,6 +14,10 @@ import {
   formatPaidProSectionHeadingTitleAnomalyDetails,
 } from "./paidProSectionHeadingTitleAuthority";
 import {
+  isBeforeFirstOperativeSectionLineIndex,
+  resolvePaidProDocumentOpeningAuthority,
+} from "./paidProDocumentOpeningAuthority";
+import {
   hasFalseFragmentSectionHeading,
   repairOrphanNumberFragmentContinuationLines,
 } from "./paidProOrphanSectionNumberRepair";
@@ -29,9 +33,16 @@ export type PaidProSectionHierarchyMarker = {
   kind: "top" | "sub";
 };
 
+export type PaidProSectionSequenceGap = {
+  parentMajor: number;
+  missingSiblings: string[];
+};
+
 export type PaidProSectionStructureCompletenessDiagnostics = {
   missingParentSections: number[];
+  /** Missing ancestor subsection headings (e.g. 11.6 when 11.6.1 exists) — not prior siblings. */
   missingIntermediateSections: string[];
+  sequenceGaps: PaidProSectionSequenceGap[];
   orphanChildren: string[];
   brokenFamilies: number[];
   truncatedFamilies: number[];
@@ -76,6 +87,11 @@ function shouldWarnOnlySectionHeadingTitleAnomaliesForSubstantiveFreeze(
   if (diagnostics.syntheticMalformedHeadings.length > 0) return false;
   if (diagnostics.fatal) return false;
   if (countRemainingHeadingBodyCollapses(text) > 0) return false;
+  const openingAuthority = resolvePaidProDocumentOpeningAuthority(text);
+  const operativeRegionAnomaly = detectPaidProSectionHeadingTitleAnomalies(text).some(
+    (anomaly) => !isBeforeFirstOperativeSectionLineIndex(anomaly.lineIndex, openingAuthority),
+  );
+  if (operativeRegionAnomaly) return false;
   return true;
 }
 
@@ -143,6 +159,55 @@ export function collectPaidProSectionHierarchyMarkers(text: string): PaidProSect
   }
 
   return markers;
+}
+
+function collectMissingSiblingSequenceGaps(
+  major: number,
+  sortedMinors: readonly number[],
+): string[] {
+  if (sortedMinors.length === 0) return [];
+  const missingSiblings: string[] = [];
+  if (sortedMinors[0]! > 1) {
+    for (let m = 1; m < sortedMinors[0]!; m += 1) {
+      missingSiblings.push(`${major}.${m}`);
+    }
+  }
+  for (let i = 1; i < sortedMinors.length; i += 1) {
+    const prev = sortedMinors[i - 1]!;
+    const curr = sortedMinors[i]!;
+    for (let gap = prev + 1; gap < curr; gap += 1) {
+      missingSiblings.push(`${major}.${gap}`);
+    }
+  }
+  return [...new Set(missingSiblings)];
+}
+
+function familyHasInternalSequenceGaps(sortedMinors: readonly number[]): boolean {
+  for (let i = 1; i < sortedMinors.length; i += 1) {
+    if (sortedMinors[i]! - sortedMinors[i - 1]! > 1) return true;
+  }
+  return false;
+}
+
+function collectMissingAncestorSubsections(markers: readonly PaidProSectionHierarchyMarker[]): string[] {
+  const missingAncestors: string[] = [];
+  for (const marker of markers) {
+    if (marker.kind !== "sub" || marker.depth !== 3 || marker.minors.length < 2) continue;
+    const parentSubNum = marker.minors[0]!;
+    const ancestorKey = `${marker.major}.${parentSubNum}`;
+    const hasDepth2Parent = markers.some(
+      (m) =>
+        m.kind === "sub" &&
+        m.major === marker.major &&
+        m.depth === 2 &&
+        m.minors[0] === parentSubNum &&
+        m.minors.length === 1,
+    );
+    if (!hasDepth2Parent && !missingAncestors.includes(ancestorKey)) {
+      missingAncestors.push(ancestorKey);
+    }
+  }
+  return missingAncestors;
 }
 
 function deriveSubsectionTitleFromLine(line: string): string | null {
@@ -248,6 +313,7 @@ export function analyzePaidProSectionStructureCompleteness(
 
   const missingParentSections: number[] = [];
   const missingIntermediateSections: string[] = [];
+  const sequenceGaps: PaidProSectionSequenceGap[] = [];
   const orphanChildren: string[] = [];
   const brokenFamilies: number[] = [];
   const truncatedFamilies: number[] = [];
@@ -261,18 +327,9 @@ export function analyzePaidProSectionStructureCompleteness(
     const sorted = [...minors].sort((a, b) => a - b);
     if (sorted.length === 0) continue;
 
-    if (sorted[0]! > 1 && (!topLevel.has(major) || sorted.length >= 2)) {
-      for (let m = 1; m < sorted[0]!; m += 1) {
-        missingIntermediateSections.push(`${major}.${m}`);
-      }
-    }
-
-    for (let i = 1; i < sorted.length; i += 1) {
-      const prev = sorted[i - 1]!;
-      const curr = sorted[i]!;
-      for (let gap = prev + 1; gap < curr; gap += 1) {
-        missingIntermediateSections.push(`${major}.${gap}`);
-      }
+    const missingSiblings = collectMissingSiblingSequenceGaps(major, sorted);
+    if (missingSiblings.length > 0) {
+      sequenceGaps.push({ parentMajor: major, missingSiblings });
     }
 
     for (const minor of sorted) {
@@ -281,12 +338,14 @@ export function analyzePaidProSectionStructureCompleteness(
       }
     }
 
-    const expectedSpan = sorted[sorted.length - 1]!;
-    const presentRatio = sorted.length / expectedSpan;
-    if (!topLevel.has(major) && expectedSpan >= 3 && presentRatio < 0.5) {
+    const loneHighOrphan = sorted.length === 1 && sorted[0]! >= 3;
+    const internalGaps = familyHasInternalSequenceGaps(sorted);
+    if (!topLevel.has(major) && (loneHighOrphan || internalGaps)) {
       truncatedFamilies.push(major);
     }
   }
+
+  missingIntermediateSections.push(...collectMissingAncestorSubsections(markers));
 
   const uniqueMissingParents = [...new Set(missingParentSections)].sort((a, b) => a - b);
   const uniqueMissingIntermediates = [...new Set(missingIntermediateSections)];
@@ -306,6 +365,7 @@ export function analyzePaidProSectionStructureCompleteness(
   return {
     missingParentSections: uniqueMissingParents,
     missingIntermediateSections: uniqueMissingIntermediates,
+    sequenceGaps,
     orphanChildren: [...new Set(orphanChildren)],
     brokenFamilies: uniqueBroken,
     truncatedFamilies: uniqueTruncated,
@@ -542,6 +602,7 @@ export function applyPaidProSectionStructureCompletenessAuthority(
       unresolvedSections: {
         missingParents: analysis.missingParentSections,
         missingIntermediates: analysis.missingIntermediateSections.slice(0, 12),
+        sequenceGaps: analysis.sequenceGaps.slice(0, 6),
         orphanChildren: analysis.orphanChildren.slice(0, 12),
         truncatedFamilies: analysis.truncatedFamilies,
         brokenFamilies: analysis.brokenFamilies,

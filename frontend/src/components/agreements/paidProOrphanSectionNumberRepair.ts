@@ -7,6 +7,36 @@ import {
   isOrphanStandaloneTopLevelSectionNumberLine,
   sanitizeVs01RenderCorpus,
 } from "../../vs01/vs01CorpusOrphanSectionSanitizer";
+import { isPaidProHeadingContinuationFragment } from "./repairSplitPaidProHeadingFragments";
+
+const BODY_SENTENCE_START_RE =
+  /^(?:The|This|Each|Either|Any|Neither|Both|When|If|Unless|Upon|Where|As|An|A|In|For|Client|Service Provider|Neither party|Either party|During|Within|After|Before|All|Some|Such|Notwithstanding)\b/i;
+const BODY_VERB_RE =
+  /\b(?:will|shall|must|may|should|are|is|was|were|have|has|had|agrees?|represents?)\b/i;
+
+function nextNonEmptyLineIndex(lines: readonly string[], from: number): number | null {
+  for (let i = from; i < lines.length; i += 1) {
+    if (lines[i]!.trim()) return i;
+  }
+  return null;
+}
+
+function isCanonicalSplitOperativeSectionHeadingLine(
+  lines: readonly string[],
+  lineIndex: number,
+  title: string,
+): boolean {
+  if (!isFalseFragmentSectionTitle(title)) return false;
+  const nextIdx = nextNonEmptyLineIndex(lines, lineIndex + 1);
+  if (nextIdx == null) return false;
+  const nextTrimmed = lines[nextIdx]!.trim();
+  if (!nextTrimmed || /^\d+\.\s/.test(nextTrimmed)) return false;
+  if (isPaidProHeadingContinuationFragment(nextTrimmed)) return false;
+  if (isFalseFragmentSectionTitle(nextTrimmed.replace(/[.,;:]+$/, ""))) return false;
+  if (BODY_VERB_RE.test(nextTrimmed)) return true;
+  if (BODY_SENTENCE_START_RE.test(nextTrimmed)) return true;
+  return /[a-z]/.test(nextTrimmed) && nextTrimmed.length >= 16;
+}
 
 const WITNESS_RE = /\bIN WITNESS WHEREOF\b/i;
 const EXECUTION_BLOCK_START_RE =
@@ -63,11 +93,17 @@ export function isFalseFragmentSectionTitle(title: string): boolean {
 }
 
 export function hasFalseFragmentSectionHeading(text: string): boolean {
-  for (const line of (text || "").replace(/\r\n/g, "\n").split("\n")) {
-    const trimmed = line.trim();
+  const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i]!.trim();
     const match = trimmed.match(TOP_LEVEL_HEADING_RE);
     if (!match?.[2] || /^\d+\.\d+/.test(trimmed)) continue;
-    if (isFalseFragmentSectionTitle(match[2])) return true;
+    if (
+      isFalseFragmentSectionTitle(match[2]) &&
+      !isCanonicalSplitOperativeSectionHeadingLine(lines, i, match[2])
+    ) {
+      return true;
+    }
   }
   return false;
 }
@@ -187,13 +223,6 @@ function splitBeforeWitness(text: string): { head: string; tail: string } {
   return witnessIdx >= 0
     ? { head: text.slice(0, witnessIdx), tail: text.slice(witnessIdx) }
     : { head: text, tail: "" };
-}
-
-function nextNonEmptyLineIndex(lines: string[], from: number): number | null {
-  for (let i = from; i < lines.length; i += 1) {
-    if (lines[i]!.trim()) return i;
-  }
-  return null;
 }
 
 /** Join "...this Section" with a stranded orphan `N.` on the following line. */

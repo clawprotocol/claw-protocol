@@ -39,11 +39,13 @@ import {
   test418Draft,
 } from "./paidProTest418Fixtures";
 import { buildTest419AcceptedServerDraftMissingNoticesHeading } from "./paidProTest419Fixtures";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 describe("TEST418 — accepted-then-rejected Pro SoT dead-end and structural retry handling", () => {
   const storage = new Map<string, string>();
 
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     vi.stubGlobal("sessionStorage", {
       getItem: (k: string) => storage.get(k) ?? null,
       setItem: (k: string, v: string) => storage.set(k, v),
@@ -55,6 +57,7 @@ describe("TEST418 — accepted-then-rejected Pro SoT dead-end and structural ret
   });
 
   afterEach(() => {
+    resetPaidProPipelineTestIsolation();
     clearPaidProSourceOfTruth();
     clearPremiumPartyNamesHandoff();
     clearCurrentSessionProEntitlementMarkers();

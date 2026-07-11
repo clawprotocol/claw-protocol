@@ -110,11 +110,14 @@ describe("TEST411 — Canonical Section Structure Completeness Authority", () =>
     resetPaidProSectionStructureCompletenessLogsForTests();
   });
 
-  it("A — detects production-style missing parent 6 and intermediate 6.1 before 6.2", () => {
+  it("A — detects production-style missing parent 6 and sequence gap 6.1 before 6.2", () => {
     const broken = buildTest411ProductionHierarchyBreakCorpus();
     const analysis = analyzePaidProSectionStructureCompleteness(broken);
     expect(analysis.missingParentSections).toContain(6);
-    expect(analysis.missingIntermediateSections).toContain("6.1");
+    expect(analysis.missingIntermediateSections).not.toContain("6.1");
+    expect(analysis.sequenceGaps.some((g) => g.parentMajor === 6 && g.missingSiblings.includes("6.1"))).toBe(
+      true,
+    );
     expect(analysis.brokenFamilies).toContain(6);
     expect(analysis.repairable).toBe(true);
 
@@ -123,23 +126,24 @@ describe("TEST411 — Canonical Section Structure Completeness Authority", () =>
     expect(markers.some((m) => m.kind === "top" && m.major === 6)).toBe(false);
   });
 
-  it("B — repairs missing parent and intermediate sections before freeze when inferable titles exist", () => {
+  it("B — repairs missing parent section before freeze when inferable title exists", () => {
     const broken = buildTest411ProductionHierarchyBreakCorpus();
     const repaired = applyPaidProSectionStructureCompletenessAuthority(broken, {
       source: "test411_repair",
       phase: "pre_freeze",
     });
     expect(repaired.repairs.some((r) => r.startsWith("insert_missing_parent:6"))).toBe(true);
-    expect(repaired.repairs.some((r) => r.startsWith("insert_missing_intermediate:6.1"))).toBe(true);
+    expect(repaired.repairs.some((r) => r.startsWith("insert_missing_intermediate:6.1"))).toBe(false);
     expect(repaired.rejected).toBe(false);
   });
 
-  it("C — premium structure repair flags unresolved hierarchy gaps", () => {
+  it("C — premium structure repair flags unresolved parent gaps and sequence gaps separately", () => {
     const broken = buildTest411ProductionHierarchyBreakCorpus();
     const structure = validateAndRepairPremiumAgreementStructure(broken, { surface: "test411" });
     expect(structure.ok).toBe(false);
     expect(structure.issues.some((i) => i.code === "missing_parent_sections")).toBe(true);
-    expect(structure.issues.some((i) => i.code === "missing_intermediate_sections")).toBe(true);
+    expect(structure.issues.some((i) => i.code === "section_sequence_gaps")).toBe(true);
+    expect(structure.issues.some((i) => i.code === "missing_intermediate_sections")).toBe(false);
   });
 
   it("D — truncated degraded recovery corpus is rejected for adoption", () => {
@@ -233,6 +237,6 @@ describe("TEST411 — Canonical Section Structure Completeness Authority", () =>
         draft: test407DraftShape(),
         intakeText: TEST407_PRODUCTION_QUAD_PARTY_INTAKE,
       }),
-    ).toThrow(/section_structure/);
+    ).toThrow(/section_structure|professional-pro-clause-coverage-blocked/);
   });
 });

@@ -19,6 +19,7 @@ import { clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { clearFrozenPremiumSessionBodiesForTests } from "./premiumAcceptancePolicy";
 import { clearPremiumParseSessionGuard } from "./premiumParseSessionGuard";
 import { clearPremiumGenerationCallAudit } from "./paidProPremiumGenerationCallAudit";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 import { normalizePremiumFullDraftResponsePayload } from "./premiumFullDraftResponseNormalization";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
@@ -146,6 +147,7 @@ vi.mock("./premiumFullDraftApi", async (importOriginal) => {
 
 describe("paidPro test349 json_parse degraded Pro render", () => {
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     clearFrozenPremiumSessionBodiesForTests();
     clearPremiumParseSessionGuard();
     clearPremiumGenerationCallAudit();
@@ -158,6 +160,7 @@ describe("paidPro test349 json_parse degraded Pro render", () => {
 
   afterEach(() => {
     delete (globalThis as { __paidProAllowStructuralRetryInTest?: boolean }).__paidProAllowStructuralRetryInTest;
+    resetPaidProPipelineTestIsolation();
     clearPaidProSourceOfTruth();
     vi.restoreAllMocks();
   });

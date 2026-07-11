@@ -19,6 +19,7 @@ import { clearPremiumPartyNamesHandoff, resetPremiumRecipientHandoffDedupForTest
 import { clearConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { clearProGenerationAdoptionForTests } from "./paidProGenerationAdoption";
+import { clearPaidProGenerationAttemptAuthorityForTests } from "./paidProGenerationAttemptAuthority";
 import { clearPaidProAuthorityHashContinuityForTests } from "./paidProAuthorityHashContinuity";
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
@@ -28,6 +29,7 @@ import { resetPaidReviewSessionCorpusInvariantForTests } from "./paidProReviewSe
 export function resetPaidProPipelineTestIsolation(): void {
   clearPaidProSourceOfTruth();
   clearProGenerationAdoptionForTests();
+  clearPaidProGenerationAttemptAuthorityForTests();
   clearPaidProAuthorityHashContinuityForTests();
   clearAcceptedProCorpusSafeDisplayCacheForTests();
   clearPaidProPipelineAcceptedCorpusHashForTests();

@@ -54,6 +54,7 @@ import {
 } from "./premiumPartyNamesHandoff";
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
 import {
+  clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -74,7 +75,7 @@ import {
   countPartyBlocksInExecutionTail,
   executionTail,
 } from "./paidProTest423Helpers";
-import { buildMalformedAcceptedCorpus } from "./paidProTest424Fixtures";
+import { buildStructuralFreezeRejectCorpus } from "./paidProTest424Fixtures";
 import {
   buildTest427Corpus,
   scenarioAuthorityParties427,
@@ -357,7 +358,7 @@ function runRecoveryIfNeeded(scenario: Test427Scenario): void {
   if (!scenario.recoveryMode) return;
 
   const cleanCorpus = buildJourneyCorpus(scenario);
-  const malformed = buildMalformedAcceptedCorpus(cleanCorpus);
+  const malformed = buildStructuralFreezeRejectCorpus(cleanCorpus);
   const malformedHash = rejectedProCorpusHash(malformed);
   if (!malformedHash) {
     test427Fail("recovery_workflow", "malformed corpus hash missing");
@@ -382,7 +383,9 @@ function runRecoveryIfNeeded(scenario: Test427Scenario): void {
       test427Fail("recovery_workflow", "malformed corpus established SoT without rejection");
     }
   } catch {
-    /* expected for structural/freeze rejection */
+    if (hasPaidProSourceOfTruth()) {
+      clearPaidProSourceOfTruth();
+    }
   }
 
   if (hasPaidProSourceOfTruth() && scenario.recoveryMode !== "stale_accepted") {

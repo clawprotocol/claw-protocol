@@ -182,6 +182,28 @@ def owner_subject_for_agreement(agreement_id: str) -> Optional[str]:
     return str(row["subject_ref"]) if row else None
 
 
+def delete_agreement_owner(agreement_id: str) -> bool:
+    aid = (agreement_id or "").strip()
+    if not aid:
+        return False
+    with _tx() as conn:
+        cur = conn.execute("DELETE FROM agreement_owner WHERE agreement_id = %s", (aid,))
+        return cur.rowcount > 0
+
+
+def list_agreement_ids_for_subject(subject_ref: str) -> list[str]:
+    subj = (subject_ref or "").strip()
+    if not subj:
+        return []
+    with _tx() as conn:
+        cur = conn.execute(
+            "SELECT agreement_id FROM agreement_owner WHERE subject_ref = %s",
+            (subj,),
+        )
+        rows = cur.fetchall()
+    return [str(r["agreement_id"]).strip() for r in rows if str(r.get("agreement_id") or "").strip()]
+
+
 def get_agreement_owner_row(agreement_id: str) -> Optional[Dict[str, Any]]:
     aid = (agreement_id or "").strip()
     if not aid:
@@ -189,7 +211,8 @@ def get_agreement_owner_row(agreement_id: str) -> Optional[Dict[str, Any]]:
     with _tx() as conn:
         cur = conn.execute(
             """
-            SELECT agreement_id, subject_ref, created_at, completed_at
+            SELECT agreement_id, subject_ref, created_at, completed_at,
+                   claimed_at, claim_method, anonymous_source_org
             FROM agreement_owner WHERE agreement_id = %s
             """,
             (aid,),
@@ -269,6 +292,38 @@ def mark_agreement_completed(
             (kf, ts, subject_ref),
         )
         return True
+
+
+def record_agreements_claimed(
+    *,
+    agreement_ids: list[str],
+    to_subject_ref: str,
+    from_org_id: str,
+    claim_method: str,
+    now_iso: str,
+) -> int:
+    if not agreement_ids:
+        return 0
+    method = (claim_method or "unknown").strip()[:64]
+    source_org = (from_org_id or "").strip()[:128]
+    from_subject = f"org:{source_org}"
+    updated = 0
+    with _tx() as conn:
+        for aid in agreement_ids:
+            cur = conn.execute(
+                """
+                UPDATE agreement_owner
+                SET subject_ref = %s,
+                    claimed_at = %s::timestamptz,
+                    claim_method = %s,
+                    anonymous_source_org = %s
+                WHERE agreement_id = %s AND subject_ref = %s
+                """,
+                (to_subject_ref, _ts(now_iso), method, source_org, aid, from_subject),
+            )
+            if int(cur.rowcount or 0) == 1:
+                updated += 1
+    return updated
 
 
 def get_subject_row(subject_ref: str) -> Optional[Dict[str, Any]]:

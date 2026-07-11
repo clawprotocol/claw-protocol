@@ -15,18 +15,25 @@ import {
   manifestRecordsForPaidProAcceptance,
   resolveAcceptanceManifestRecordsForExecution,
 } from "./paidProAcceptanceExecutionBlockInvariant";
+import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import { assertPaidProSingleExecutionBlock } from "./paidProExecutionBlockAuthority";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { assertClauseFamilyStructuralIntegrityForFreeze } from "./clauseFamilyStructuralIntegrity";
 import { assertPaidProDocumentBoundaryAuthorityForFreeze, applyPaidProDocumentBoundaryAuthority } from "./paidProDocumentBoundaryAuthority";
-import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
+import {
+  applyPaidProNoticeContactAuthority,
+  finalizePaidProCanonicalNoticeAuthorityForFreeze,
+  resolvePaidProNoticeAuthorityPartiesForFreeze,
+} from "./paidProNoticeContactAuthority";
 import { applyPaidProCanonicalDocumentStructureAuthority } from "./paidProCanonicalDocumentStructureAuthority";
 import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadingTitleAuthority";
 import { diagnosePaidProCorpusDuplication, repairPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
 import {
   ensureCanonicalNoticesSectionHeadingForFreeze,
   repairDuplicateOperativeNoticeStanzas,
-  resolveNoticeStructuralValidationParties,
+  sealPaidProNoticesExecutionBoundaryInCorpus,
+  ensureOperativeNoticeStanzaEntityLinesAtFreeze,
+  ensureOperativeNoticeStanzaCountAuthorityAtFreeze,
   trimOperativeNoticeStanzasToPartyCount,
 } from "./paidProPartyNoticeDetails";
 import {
@@ -654,6 +661,108 @@ export function assertPaidProFreezeCandidateManifestCountAgreement(
 }
 
 /** Run freeze-hard gates on a prepared candidate (throws on failure). */
+function resolveFreezeNoticeValidationContext(
+  prep: PaidProFreezeCandidatePrepResult,
+  args: PreparePaidProFreezeCandidateArgs,
+  acceptedCorpus: string,
+) {
+  const draftPartyNames = (args.draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter(Boolean);
+  const parties = resolvePaidProNoticeAuthorityPartiesForFreeze({
+    reviewParties: prep.reviewParties,
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+    acceptedCorpus,
+  });
+  return {
+    parties,
+    draftPartyNames,
+    handoffPartySlots: (() => {
+      const handoff = readPremiumRecipientHandoff();
+      if (!handoff) return prep.reviewParties.length;
+      return resolveHandoffPartySlotCount(handoff, prep.reviewParties.length);
+    })(),
+  };
+}
+
+function ensureGenericManifestExecutionBlockBeforeNoticeFreeze(
+  safeForCommit: string,
+  args: PreparePaidProFreezeCandidateArgs,
+): string {
+  if (/\bIN WITNESS WHEREOF\b/i.test(safeForCommit)) {
+    return safeForCommit;
+  }
+  const manifest = manifestRecordsForPaidProAcceptance({
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+  });
+  if (!isGenericPaidProAcceptanceManifestFallback(manifest)) {
+    return safeForCommit;
+  }
+  return appendProExecutionBlockIfMissing(safeForCommit, manifest).text;
+}
+
+function repairPaidProCanonicalNoticeAuthorityAtFreeze(
+  safeForCommit: string,
+  prep: PaidProFreezeCandidatePrepResult,
+  args: PreparePaidProFreezeCandidateArgs,
+  surface: string,
+): string {
+  const noticeFinalize = finalizePaidProCanonicalNoticeAuthorityForFreeze(safeForCommit, {
+    reviewParties: prep.reviewParties,
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+    surface: `${surface}_freeze_finalize_notices`,
+  });
+  if (!noticeFinalize.ok || noticeFinalize.blocked) {
+    throw new Error("[paid-pro-notice-contact-authority-blocked] canonical_notice_freeze_failed");
+  }
+  const sealed = sealPaidProNoticesExecutionBoundaryInCorpus(noticeFinalize.text);
+  const noticeValidationCtx = resolveFreezeNoticeValidationContext(prep, args, sealed.text);
+  const entityHydrated = ensureOperativeNoticeStanzaEntityLinesAtFreeze(
+    sealed.text,
+    noticeValidationCtx.parties,
+    {
+      intakeText: args.intakeText ?? null,
+      draftPartyNames: noticeValidationCtx.draftPartyNames,
+      acceptedCorpus: sealed.text,
+    },
+  );
+  const stanzaCountReconciled = ensureOperativeNoticeStanzaCountAuthorityAtFreeze(
+    entityHydrated.text,
+    noticeValidationCtx.parties,
+    {
+      intakeText: args.intakeText ?? null,
+      draftPartyNames: noticeValidationCtx.draftPartyNames,
+      acceptedCorpus: entityHydrated.text,
+    },
+  );
+  return stanzaCountReconciled.text;
+}
+
+function applyCanonicalNoticeAuthorityBeforeFreezeValidation(
+  safeForCommit: string,
+  prep: PaidProFreezeCandidatePrepResult,
+  args: PreparePaidProFreezeCandidateArgs,
+  surface: string,
+): string {
+  let text = repairPaidProCanonicalNoticeAuthorityAtFreeze(safeForCommit, prep, args, surface);
+  text = ensureGenericManifestExecutionBlockBeforeNoticeFreeze(text, args);
+  const noticeValidationCtx = resolveFreezeNoticeValidationContext(prep, args, text);
+  assertClauseFamilyStructuralIntegrityForFreeze(text, {
+    parties: noticeValidationCtx.parties,
+    surface: `${surface}_pipeline_stable_notice_authority`,
+    phase: "post_acceptance",
+    draftPartyCount: args.draft?.parties?.length ?? 0,
+    handoffPartySlots: noticeValidationCtx.handoffPartySlots,
+    intakeText: args.intakeText ?? null,
+    draftPartyNames: noticeValidationCtx.draftPartyNames,
+    acceptedCorpus: text,
+  });
+  return text;
+}
+
 export function assertPaidProFreezeCandidateGates(
   prep: PaidProFreezeCandidatePrepResult,
   args: PreparePaidProFreezeCandidateArgs,
@@ -674,7 +783,12 @@ export function assertPaidProFreezeCandidateGates(
     inputPipelineHash === pipelineHash &&
     hasPaidProPipelineValidationForCorpus({ text: inputTrimmed, source: requestedSource })
   ) {
-    return inputTrimmed;
+    return applyCanonicalNoticeAuthorityBeforeFreezeValidation(
+      inputTrimmed,
+      prep,
+      args,
+      surface,
+    );
   }
   if (
     !substantiveBrandWireFreeze &&
@@ -686,7 +800,12 @@ export function assertPaidProFreezeCandidateGates(
       source: args.source ?? "server_full_draft",
     })
   ) {
-    return inputTrimmed;
+    return applyCanonicalNoticeAuthorityBeforeFreezeValidation(
+      inputTrimmed,
+      prep,
+      args,
+      surface,
+    );
   }
   const prepPipelineHash = paidProPipelineAcceptedCorpusHash(prep.text);
   if (
@@ -700,7 +819,12 @@ export function assertPaidProFreezeCandidateGates(
       source: args.source ?? "server_full_draft",
     })
   ) {
-    return prep.text;
+    return applyCanonicalNoticeAuthorityBeforeFreezeValidation(
+      prep.text,
+      prep,
+      args,
+      surface,
+    );
   }
 
   assertPaidProFreezeCandidateManifestCountAgreement(prep, args);
@@ -778,6 +902,7 @@ export function assertPaidProFreezeCandidateGates(
     surface: `${surface}_pre_freeze`,
     parties: prep.reviewParties,
     draftPartyCount: args.draft?.parties?.length ?? 0,
+    deferClauseFamilyStructuralValidation: true,
     handoffPartySlots: (() => {
       const handoff = readPremiumRecipientHandoff();
       if (!handoff) return prep.reviewParties.length;
@@ -832,21 +957,6 @@ export function assertPaidProFreezeCandidateGates(
     );
   }
 
-  const noticeFinalize = applyPaidProNoticeContactAuthority(safeForCommit, {
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-    surface: `${surface}_freeze_finalize_notices`,
-    blockOnUnresolved: true,
-  });
-  safeForCommit = noticeFinalize.text;
-  if (isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText)) {
-    safeForCommit = preserveSubstantiveBrandLicensingCorpusLength(
-      trim(args.text),
-      safeForCommit,
-      args.intakeText ?? null,
-    );
-  }
-
   if (containsUnresolvedRenderTokens(safeForCommit)) {
     throw new Error(
       "[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority",
@@ -892,10 +1002,7 @@ export function assertPaidProFreezeCandidateGates(
     draftPartyNames: prep.parties.map((p) => p.name),
     manifestPartyCount: prep.parties.length,
   }).count;
-  if (
-    freezeEntryText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
-    canonicalNoticePartyCount >= 2
-  ) {
+  if (canonicalNoticePartyCount >= 2) {
     const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
     if (preClauseNoticesHeading.repairs.length > 0) {
       safeForCommit = preClauseNoticesHeading.text;
@@ -947,10 +1054,7 @@ export function assertPaidProFreezeCandidateGates(
     safeForCommit = preClauseNoticesHeading.text;
   }
 
-  if (
-    freezeEntryText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
-    canonicalNoticePartyCount >= 2
-  ) {
+  if (canonicalNoticePartyCount >= 2) {
     const postBoundaryNoticeDedupe = repairDuplicateOperativeNoticeStanzas(
       safeForCommit,
       canonicalNoticePartyCount,
@@ -968,28 +1072,13 @@ export function assertPaidProFreezeCandidateGates(
     }
   }
 
-  assertClauseFamilyStructuralIntegrityForFreeze(safeForCommit, {
-    parties: resolveNoticeStructuralValidationParties(prep.reviewParties, {
-      intakeText: args.intakeText ?? null,
-      draftPartyNames: (args.draft?.parties ?? [])
-        .map((p) => String(p?.name ?? "").trim())
-        .filter(Boolean),
-      acceptedCorpus: safeForCommit,
-    }),
-    surface: `${surface}_freeze_finalize`,
-    phase: "post_acceptance",
-    draftPartyCount: args.draft?.parties?.length ?? 0,
-    handoffPartySlots: (() => {
-      const handoff = readPremiumRecipientHandoff();
-      if (!handoff) return prep.reviewParties.length;
-      return resolveHandoffPartySlotCount(handoff, prep.reviewParties.length);
-    })(),
-    intakeText: args.intakeText ?? null,
-    draftPartyNames: (args.draft?.parties ?? [])
-      .map((p) => String(p?.name ?? "").trim())
-      .filter(Boolean),
-    acceptedCorpus: safeForCommit,
-  });
+  if (isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText)) {
+    safeForCommit = preserveSubstantiveBrandLicensingCorpusLength(
+      trim(args.text),
+      safeForCommit,
+      args.intakeText ?? null,
+    );
+  }
 
   const finalTitleAuthority = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
   if (finalTitleAuthority.repairs.length > 0) {
@@ -1112,6 +1201,27 @@ export function assertPaidProFreezeCandidateGates(
     }
   }
   assertNoNumberedOperativeSectionAfterWitness(safeForCommit);
+
+  safeForCommit = repairPaidProCanonicalNoticeAuthorityAtFreeze(
+    safeForCommit,
+    prep,
+    args,
+    surface,
+  );
+
+  safeForCommit = ensureGenericManifestExecutionBlockBeforeNoticeFreeze(safeForCommit, args);
+
+  const noticeValidationCtx = resolveFreezeNoticeValidationContext(prep, args, safeForCommit);
+  assertClauseFamilyStructuralIntegrityForFreeze(safeForCommit, {
+    parties: noticeValidationCtx.parties,
+    surface: `${surface}_freeze_finalize`,
+    phase: "post_acceptance",
+    draftPartyCount: args.draft?.parties?.length ?? 0,
+    handoffPartySlots: noticeValidationCtx.handoffPartySlots,
+    intakeText: args.intakeText ?? null,
+    draftPartyNames: noticeValidationCtx.draftPartyNames,
+    acceptedCorpus: safeForCommit,
+  });
 
   return finalizePreparedFreezeCandidateText(trim(args.text), safeForCommit, {
     intakeText: args.intakeText ?? null,
@@ -1303,3 +1413,5 @@ export function clearPartialPaidProAuthoritativeState(): void {
     reason: "partial_authoritative_state_cleared_sot_freeze_failed",
   });
 }
+
+export { beginPaidProGenerationAttempt } from "./paidProGenerationAttemptAuthority";

@@ -13,6 +13,7 @@ import { clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { clearFrozenPremiumSessionBodiesForTests } from "./premiumAcceptancePolicy";
 import { clearPremiumParseSessionGuard } from "./premiumParseSessionGuard";
 import { clearPremiumGenerationCallAudit } from "./paidProPremiumGenerationCallAudit";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const RED_MESA = "Red Mesa Logistics LLC";
@@ -187,6 +188,7 @@ function expectAcceptedPaidProSoT(out: PremiumCompletionResult): void {
 
 describe("paidPro test358 json_parse retry 502 preserves recovery", () => {
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     clearFrozenPremiumSessionBodiesForTests();
     clearPremiumParseSessionGuard();
     clearPremiumGenerationCallAudit();
@@ -201,6 +203,7 @@ describe("paidPro test358 json_parse retry 502 preserves recovery", () => {
 
   afterEach(() => {
     delete (globalThis as { __paidProAllowStructuralRetryInTest?: boolean }).__paidProAllowStructuralRetryInTest;
+    resetPaidProPipelineTestIsolation();
     clearPaidProSourceOfTruth();
     vi.restoreAllMocks();
   });

@@ -31,6 +31,7 @@ import { resetPaidProAuthoritySurfaceLogDedupeForTests } from "../../paidProAuth
 import { paidProCheckoutCompletionHasVisibleOutcome } from "../../premiumPostCheckoutApplyEligible";
 import { shouldSuppressPaidProGuidedCompletionUi } from "../../paidProPostCheckoutRenderGate";
 import { hasPaidProSourceOfTruth } from "../../paidProSourceOfTruth";
+import { resetPaidProPipelineTestIsolation } from "../../paidProPipelineTestIsolation";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const TEST225_INTAKE = readFileSync(join(FIXTURE_DIR, "freeProQaTemplateATest220.intake.txt"), "utf8").trim();
@@ -239,6 +240,7 @@ vi.mock("../../premiumFullDraftApi", async (importOriginal) => {
 
 describe("paidPro Test225 payment to first review latency", () => {
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     (globalThis as { __paidProAllowStructuralRetryInTest?: boolean }).__paidProAllowStructuralRetryInTest = false;
     h.netCount = 0;
     h.mode = "skip_retry";

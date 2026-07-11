@@ -13,6 +13,7 @@ import {
   clearPremiumGenerationCallAudit,
 } from "../../paidProPremiumGenerationCallAudit";
 import * as secondGenLog from "../../paidProSecondGenerationTriggerLog";
+import { resetPaidProPipelineTestIsolation } from "../../paidProPipelineTestIsolation";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const TEST225_INTAKE = readFileSync(join(FIXTURE_DIR, "freeProQaTemplateATest220.intake.txt"), "utf8").trim();
@@ -174,6 +175,7 @@ vi.mock("../../premiumFullDraftApi", async (importOriginal) => {
 
 describe("paidPro second-generation trigger logging in pipeline", () => {
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     (globalThis as { __paidProAllowStructuralRetryInTest?: boolean }).__paidProAllowStructuralRetryInTest = false;
     h.netCount = 0;
     clearPremiumGenerationCallAudit();

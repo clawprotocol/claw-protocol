@@ -372,7 +372,6 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         agreementId,
         cadence,
         returnTo: returnTarget,
-        userId: user?.id ?? null,
         customerEmail: user?.email ?? null,
         referralCode: genesisHandoff.metadata.referral_code ?? affiliateCode ?? null,
         visitorId: genesisHandoff.metadata.visitor_id ?? null,

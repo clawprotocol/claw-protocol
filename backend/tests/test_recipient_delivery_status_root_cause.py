@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from backend.tests.conftest_usage_economics_helpers import register_test_agreement_owner
 from backend.main import app
 from backend.routers import agreements_v2_api as agreements_api
 from backend.services.agreement_draft_store import save_draft
@@ -142,6 +143,11 @@ def test_datetime_review_sent_at_returns_200_with_raw_load(
         return draft
 
     monkeypatch.setattr(agreements_api, "load_draft", _fake_load)
+    register_test_agreement_owner(
+        db_path=str(tmp_path / "usage.sqlite3"),
+        agreement_id=aid,
+        org_id="test-org-recipient-status-root-cause",
+    )
     res = client.get(f"/api/agreements/{aid}/recipient-delivery-status", headers=_ORG_H)
     assert res.status_code == 200, res.text
     row = next(r for r in res.json()["recipients"] if r["phase"] == "review")
@@ -158,6 +164,11 @@ def test_exact_paid_pro_review_first_state_returns_200(
     draft = _paid_pro_review_first_draft_dict(aid)
     draft.pop("recipient_delivery_v1", None)
     save_draft(draft)
+    register_test_agreement_owner(
+        db_path=str(tmp_path / "usage.sqlite3"),
+        agreement_id=aid,
+        org_id="test-org-recipient-status-root-cause",
+    )
 
     res = client.get(f"/api/agreements/{aid}/recipient-delivery-status", headers=_ORG_H)
     assert res.status_code == 200, res.text

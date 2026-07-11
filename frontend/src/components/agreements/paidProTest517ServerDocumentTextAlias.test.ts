@@ -30,6 +30,7 @@ import {
 } from "./paidProPostAcceptanceValidatorCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
 import { clearPaidDashboardCreateContextForTests } from "../../launch/paidDashboardCreateContext";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 import {
   PAID_PRO_HARDENING_CLIENT,
   PAID_PRO_HARDENING_PROVIDER,
@@ -152,6 +153,7 @@ function buildTest517DegradedDocumentTextOnlyWire(): PremiumFullDraftResult {
 }
 
 beforeEach(() => {
+  resetPaidProPipelineTestIsolation();
   if (typeof sessionStorage !== "undefined") sessionStorage.clear();
   clearPaidDashboardCreateContextForTests();
   clearPaidProPostAcceptanceValidatorCache();

@@ -102,6 +102,15 @@ class UsageEconomicsStore:
                 CREATE INDEX IF NOT EXISTS idx_ip_draft_burst_ip_ts ON ip_draft_burst (ip, created_at);
                 """
             )
+            for col_sql in (
+                "ALTER TABLE agreement_owner ADD COLUMN claimed_at TEXT",
+                "ALTER TABLE agreement_owner ADD COLUMN claim_method TEXT",
+                "ALTER TABLE agreement_owner ADD COLUMN anonymous_source_org TEXT",
+            ):
+                try:
+                    con.execute(col_sql)
+                except Exception:
+                    pass
 
     def insert_agreement_owner(
         self,
@@ -155,6 +164,33 @@ class UsageEconomicsStore:
             ).fetchone()
             return str(row[0]) if row else None
 
+    def delete_agreement_owner(self, agreement_id: str) -> bool:
+        aid = (agreement_id or "").strip()
+        if not aid:
+            return False
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.delete_agreement_owner(aid)
+        with self._conn() as con:
+            cur = con.execute("DELETE FROM agreement_owner WHERE agreement_id = ?", (aid,))
+            return cur.rowcount > 0
+
+    def list_agreement_ids_for_subject(self, subject_ref: str) -> list[str]:
+        subj = (subject_ref or "").strip()
+        if not subj:
+            return []
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.list_agreement_ids_for_subject(subj)
+        with self._conn() as con:
+            rows = con.execute(
+                "SELECT agreement_id FROM agreement_owner WHERE subject_ref = ?",
+                (subj,),
+            ).fetchall()
+            return [str(r[0]).strip() for r in rows if str(r[0] or "").strip()]
+
     def get_agreement_owner_row(self, agreement_id: str) -> Optional[Dict[str, Any]]:
         aid = (agreement_id or "").strip()
         if not aid:
@@ -166,7 +202,8 @@ class UsageEconomicsStore:
         with self._conn() as con:
             row = con.execute(
                 """
-                SELECT agreement_id, subject_ref, created_at, completed_at
+                SELECT agreement_id, subject_ref, created_at, completed_at,
+                       claimed_at, claim_method, anonymous_source_org
                 FROM agreement_owner WHERE agreement_id = ?
                 """,
                 (aid,),
@@ -260,6 +297,45 @@ class UsageEconomicsStore:
                 (int(internal_keys_finalize), now, subject_ref),
             )
             return True
+
+    def record_agreements_claimed(
+        self,
+        *,
+        agreement_ids: list[str],
+        to_subject_ref: str,
+        from_org_id: str,
+        claim_method: str,
+    ) -> int:
+        """Mark agreements as claimed after anonymous → authenticated ownership transfer."""
+        if not agreement_ids:
+            return 0
+        now = _utc_now()
+        method = (claim_method or "unknown").strip()[:64]
+        source_org = (from_org_id or "").strip()[:128]
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.record_agreements_claimed(
+                agreement_ids=agreement_ids,
+                to_subject_ref=to_subject_ref,
+                from_org_id=source_org,
+                claim_method=method,
+                now_iso=now,
+            )
+        updated = 0
+        with self._conn() as con:
+            for aid in agreement_ids:
+                cur = con.execute(
+                    """
+                    UPDATE agreement_owner
+                    SET subject_ref = ?, claimed_at = ?, claim_method = ?, anonymous_source_org = ?
+                    WHERE agreement_id = ? AND subject_ref = ?
+                    """,
+                    (to_subject_ref, now, method, source_org, aid, f"org:{source_org}"),
+                )
+                if cur.rowcount == 1:
+                    updated += 1
+        return updated
 
     def get_subject_row(self, subject_ref: str) -> Optional[Dict[str, Any]]:
         if self._pg:

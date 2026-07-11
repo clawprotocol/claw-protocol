@@ -60,7 +60,7 @@ import {
 import { peekReviewFirstHandoffSource } from "./reviewFirstSendSurface";
 import { logReviewFirstLegacySendBlocked } from "../../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
 import { shouldSuppressReviewPipelineTelemetry } from "../../vs01/vs01SignatureDashboardFlow";
-import { getOrgId } from "../orgContext";
+import { getOrgId, bootstrapWorkspaceOrg } from "../orgContext";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import {
@@ -164,6 +164,7 @@ export function SimpleCreatePage() {
   const primedDraftForHandoffRetryRef = useRef<AgreementDraft | null>(null);
 
   useEffect(() => {
+    void bootstrapWorkspaceOrg();
     setReEngageBanner(peekCreateOrHomeBanner("create"));
   }, []);
 

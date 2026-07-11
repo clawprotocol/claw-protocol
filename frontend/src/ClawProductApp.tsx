@@ -24,6 +24,8 @@ import { AffiliateLandingPage } from "./launch/affiliate/AffiliateLandingPage";
 import { parseAffiliateLandingPath } from "./launch/affiliate/affiliateLandingRoutes";
 import { ClawOpportunityPage } from "./launch/affiliate/ClawOpportunityPage";
 import { LawdogSettingsPage } from "./launch/LawdogSettingsPage";
+import { AuthCallbackPage } from "./launch/AuthCallbackPage";
+import { SignInPage } from "./launch/SignInPage";
 import { LawdogSignaturesPage } from "./launch/LawdogSignaturesPage";
 import { LawdogReferralRedirect, parseLawdogReferralPath } from "./launch/LawdogReferralRedirect";
 import { AffiliatePayoutOpsPage } from "./launch/affiliate/AffiliatePayoutOpsPage";
@@ -653,6 +655,10 @@ export function ClawProductApp() {
         return <ClawOpportunityPage />;
       case "settings":
         return <LawdogSettingsPage />;
+      case "signIn":
+        return <SignInPage />;
+      case "authCallback":
+        return <AuthCallbackPage />;
       case "signatures":
         return <LawdogSignaturesPage />;
       case "agreementMemory":

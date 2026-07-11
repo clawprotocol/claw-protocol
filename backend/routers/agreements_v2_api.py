@@ -5322,7 +5322,9 @@ def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[Ag
 @router.post("/draft")
 def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict[str, Any]:
     require_claw_org_id_header(request)
-    subject = resolve_subject_from_request(request)
+    from backend.security.request_identity import resolve_verified_subject_from_request
+
+    subject = resolve_verified_subject_from_request(request)
     request_ip = request.client.host if request.client else "unknown"
     if not review_first_paid_pro_persist_bypass(request=request, purpose=body.purpose or ""):
         maybe_repair_workspace_entitlement_from_request(request)
@@ -5350,18 +5352,27 @@ def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict
         audit_log=[AuditEvent(event_type="created", at=now)],
     )
     dump = draft.model_dump()
-    _save_draft_sync(dump, request)
+    record_draft_created(
+        agreement_id=agreement_id,
+        subject_ref=subject,
+        request_ip=request_ip or "unknown",
+    )
+    try:
+        _save_draft_sync(dump, request, subject_ref=subject)
+    except Exception:
+        try:
+            from backend.usage_economics.store import get_usage_economics_store
+
+            get_usage_economics_store().delete_agreement_owner(agreement_id)
+        except Exception:
+            log.exception("rollback agreement_owner after draft save failure agreement_id=%s", agreement_id)
+        raise
     record_public_feed_event_if_applicable(draft_dict=dump, event_type="created", at=now)
     record_usage_ledger_event(
         subject_ref=subject,
         event_type="agreement_created",
         agreement_id=agreement_id,
         metadata={},
-    )
-    record_draft_created(
-        agreement_id=agreement_id,
-        subject_ref=subject,
-        request_ip=request_ip or "unknown",
     )
     try:
         from backend.integrations.hooks_emit import claw_emit_integration_event_from_subject
@@ -6264,12 +6275,34 @@ def post_agreement_signing_links_sent(
         if notify_audit:
             value = notify_audit.get("value") if isinstance(notify_audit.get("value"), dict) else {}
             sent_count = int(value.get("sent_count") or 0)
-            audit = [*(draft.audit_log or []), AuditEvent.model_validate(notify_audit)]
+            base_audit = [
+                e.model_dump() if hasattr(e, "model_dump") else e for e in (draft.audit_log or [])
+            ]
+            email_audit = email_draft.get("audit_log") or []
+            merged_audit: List[Any] = list(base_audit)
+            seen = {
+                (str(e.get("event_type")), str(e.get("at")))
+                for e in merged_audit
+                if isinstance(e, dict)
+            }
+            for evt in email_audit:
+                if not isinstance(evt, dict):
+                    continue
+                key = (str(evt.get("event_type")), str(evt.get("at")))
+                if key in seen:
+                    continue
+                merged_audit.append(evt)
+                seen.add(key)
+            notify_type = str(notify_audit.get("event_type") or "")
+            if not any(
+                isinstance(e, dict) and str(e.get("event_type") or "") == notify_type
+                for e in merged_audit
+            ):
+                merged_audit.append(notify_audit)
+            audit = [AuditEvent.model_validate(e) for e in merged_audit]
             merge_fields: Dict[str, Any] = {"updated_at": _utc_now_iso(), "audit_log": audit}
             if email_draft.get("recipient_delivery_v1"):
                 merge_fields["recipient_delivery_v1"] = email_draft["recipient_delivery_v1"]
-            if len(email_draft.get("audit_log") or []) > len(audit) - 1:
-                merge_fields["audit_log"] = email_draft["audit_log"]
             next_draft = _merge_agreement_draft(draft, **merge_fields)
             _save_draft_sync(next_draft.model_dump(), request)
             return {"ok": True, "sent_count": sent_count, "skip_reason": None, "draft": next_draft.model_dump()}
@@ -6308,12 +6341,14 @@ def post_vs01_signer_complete(
         except HTTPException:
             auth_mode = None
     if not auth_mode:
+        from backend.config.agreement_signing_token import (
+            SigningTokenSecretMissingInProductionError,
+            resolve_signing_token_secret_raw,
+        )
         from backend.security.agreement_read_scope import (
             recipient_access_token_from_request,
-            resolve_signing_token_secret_raw,
             validate_recipient_access_token_for_agreement,
         )
-        from backend.security.signing_token_secret import SigningTokenSecretMissingInProductionError
         from backend.services.vs01_signer_completion import (
             assert_recipient_signer_completion_binding,
             resolve_participant_id_for_signer_role,

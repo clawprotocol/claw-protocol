@@ -56,7 +56,9 @@ function isWithinIfToNoticeStanza(lines: readonly string[], lineIndex: number): 
     const t = (lines[j] ?? "").trim();
     if (!t) continue;
     if (/^\s*IN WITNESS WHEREOF\b/i.test(t)) return false;
-    if (EXECUTION_ROLE_HEADING_LINE_RE.test(t)) return false;
+    // Notice entity lines (Party N) mirror execution role headings — only treat as execution
+    // when scanning lines above the current index, not the line under evaluation.
+    if (j !== lineIndex && EXECUTION_ROLE_HEADING_LINE_RE.test(t)) return false;
     if (IF_TO_NOTICE_STANZA_HEADER_RE.test(t)) return true;
     if (NUMBERED_SECTION_HEADING_RE.test(t) && !/\bnotices?\b/i.test(t)) return false;
   }
@@ -138,6 +140,11 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
     }
 
     if (roleHeadingStartsExecutionCluster(lines, i)) {
+      if (isWithinIfToNoticeStanza(lines, i)) {
+        out.push(line);
+        i += 1;
+        continue;
+      }
       repairs.push("execution_block:strip_pre_witness_role_execution_cluster");
       i += 1;
       while (i < lines.length) {

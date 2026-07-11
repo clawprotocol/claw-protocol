@@ -8,6 +8,7 @@ import {
   readPaidCheckoutOrgId,
   resolveEntitlementRepairOrgCandidates,
 } from "../launch/paidCheckoutOrgContext";
+import { anonymousSessionHeaders } from "./anonymousSessionHeaders";
 
 export type BindUserOrgResponse = {
   ok: boolean;
@@ -20,13 +21,24 @@ export async function bindAuthenticatedUserToWorkspace(args: {
   userId: string;
   email?: string | null;
   displayName?: string | null;
+  claimMethod?: "magic_link" | "google" | "session_restore";
+  accessToken?: string;
 }): Promise<BindUserOrgResponse> {
   const previousOrgId = getOrgId();
   const subscriptionSourceOrgId = readPaidCheckoutOrgId();
   const entitlementRepairCandidates = resolveEntitlementRepairOrgCandidates();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...anonymousSessionHeaders(),
+  };
+  if (args.accessToken) {
+    headers.Authorization = `Bearer ${args.accessToken}`;
+  }
   const res = await fetch(apiUrl("/v1/workspace/bind-user-org"), {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers,
+    credentials: "include",
     body: JSON.stringify({
       user_id: args.userId,
       email: args.email ?? undefined,
@@ -35,6 +47,7 @@ export async function bindAuthenticatedUserToWorkspace(args: {
       subscription_source_org_id: subscriptionSourceOrgId ?? undefined,
       entitlement_repair_candidates:
         entitlementRepairCandidates.length > 0 ? entitlementRepairCandidates : undefined,
+      claim_method: args.claimMethod ?? "unknown",
     }),
   });
   if (!res.ok) {

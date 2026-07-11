@@ -1,13 +1,15 @@
+import { ensureAnonymousSession } from "../auth/anonymousSessionApi";
+
 const ORG_KEY = "claw_org_id";
-const DEFAULT_ORG = "local-org";
 
 export function getOrgId(): string {
-  if (typeof localStorage === "undefined") return DEFAULT_ORG;
+  if (typeof localStorage === "undefined") return "local-org";
   try {
     const v = localStorage.getItem(ORG_KEY)?.trim();
-    return v || DEFAULT_ORG;
+    if (v) return v;
+    return "local-org";
   } catch {
-    return DEFAULT_ORG;
+    return "local-org";
   }
 }
 
@@ -20,4 +22,13 @@ export function setOrgId(id: string): void {
   } catch {
     /* ignore */
   }
+}
+
+/** Bootstrap server-minted anonymous workspace before first agreement API call. */
+export async function bootstrapWorkspaceOrg(): Promise<string> {
+  const existing = getOrgId().trim();
+  if (existing.startsWith("user-")) return existing;
+  const session = await ensureAnonymousSession();
+  if (session.org_id) return session.org_id;
+  return getOrgId();
 }

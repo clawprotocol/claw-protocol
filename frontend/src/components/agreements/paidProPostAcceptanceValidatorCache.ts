@@ -6,15 +6,20 @@ import type { ConciseCommercialServicesQualityAssessment } from "./paidProConcis
 import { assessConciseCommercialServicesProQuality } from "./paidProConciseServicesQuality";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { corpusHashForScanCache } from "./paidProCorpusScanCache";
+import { guardPaidProAuthoritativeWrite } from "./paidProAuthoritativeWriteGuard";
 import {
   markPaidProPipelineAcceptedCorpusHash,
   paidProPipelineAcceptedCorpusHash,
+  readPaidProPipelineAcceptedCorpusBody,
   readPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import {
   getLatchedAcceptedServerFullDraftAuthority,
   LONG_PREMIUM_AUTHORITATIVE_MIN_LEN,
+  premiumBodyHasRequiredPaidSections,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
 } from "./premiumAcceptancePolicy";
+import { assessPaidProSubstantiveServerDraftCorpus, CONCISE_AUTHORITATIVE_ESTABLISH_MIN_LEN, qualifiesAsConciseAuthoritativePaidServerDraft } from "./paidProSubstantiveCorpusAssessment";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
 type SubstanceCacheKey = string;
@@ -64,7 +69,15 @@ export function markPaidProPipelineValidationPassed(args: { text: string; source
 export function commitPaidProPipelineValidationAcceptance(args: {
   text: string;
   source: string;
+  agreementGenerationId?: string | null;
+  attemptSequence?: number | null;
 }): void {
+  const writeGuard = guardPaidProAuthoritativeWrite({
+    agreementGenerationId: args.agreementGenerationId,
+    attemptSequence: args.attemptSequence,
+    surface: "pipeline_validation_acceptance",
+  });
+  if (!writeGuard.allowed) return;
   markPaidProPipelineValidationPassed(args);
   markPaidProPipelineAcceptedCorpusHash(args.text);
 }
@@ -95,6 +108,45 @@ export function hasPaidProPipelineValidationForCorpus(args: {
 const PIPELINE_ACCEPTED_CORPUS_LEN_MIN_RATIO = 0.85;
 const PIPELINE_ACCEPTED_CORPUS_LEN_MAX_DELTA = 1200;
 
+/** Matches guided final review minimum — inlined to avoid simpleProFinalReviewCorpus import cycle. */
+const PIPELINE_ACCEPTED_CORPUS_BODY_MIN_LEN = 1500;
+
+export { qualifiesAsConciseAuthoritativePaidServerDraft } from "./paidProSubstantiveCorpusAssessment";
+
+/**
+ * Mirror validatePaidProOutput acceptance latch for concise authoritative bodies so
+ * establishPaidProSourceOfTruth can proceed without mislabeled short-server rejection.
+ */
+export function latchPaidProPipelineAcceptanceForConciseAuthoritativeBody(args: {
+  text: string;
+  source: string;
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
+}): boolean {
+  const t = (args.text || "").trim();
+  const source = (args.source || "server_full_draft").trim();
+  if (hasPaidProPipelineSessionAcceptance({ text: t, source })) return true;
+  if (t.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN || t.length < CONCISE_AUTHORITATIVE_ESTABLISH_MIN_LEN) {
+    return false;
+  }
+  const qualifies =
+    assessPaidProSubstantiveServerDraftCorpus({
+      text: t,
+      source,
+      intakeText: args.intakeText ?? "",
+      draft: args.draft ?? null,
+    }).qualifiesForServerFullDraftAcceptance ||
+    premiumBodyHasRequiredPaidSections({
+      text: t,
+      rawIntake: args.intakeText ?? "",
+      draft: args.draft ?? null,
+    }) ||
+    qualifiesAsConciseAuthoritativePaidServerDraft(t);
+  if (!qualifies) return false;
+  commitPaidProPipelineValidationAcceptance({ text: t, source });
+  return true;
+}
+
 function isAuthoritativePipelineValidationSource(source: string | null | undefined): boolean {
   const s = (source ?? "").trim();
   if (!s) return true;
@@ -117,6 +169,17 @@ export function hasPaidProPipelineSessionAcceptance(args: {
   if (hasPaidProPipelineValidationForCorpus(args)) return true;
   if (!isAuthoritativePipelineValidationSource(args.source)) return false;
   const t = (args.text || "").trim();
+  const acceptedBody = readPaidProPipelineAcceptedCorpusBody()?.trim();
+  if (acceptedBody && acceptedBody.length >= PIPELINE_ACCEPTED_CORPUS_BODY_MIN_LEN && t === acceptedBody) {
+    return true;
+  }
+  if (readPaidProPipelineAcceptedCorpusHash() !== null) {
+    const incomingHash = paidProPipelineAcceptedCorpusHash(t);
+    const acceptedHash = readPaidProPipelineAcceptedCorpusHash();
+    if (incomingHash && acceptedHash && incomingHash === acceptedHash) {
+      return true;
+    }
+  }
   if (t.length < LONG_PREMIUM_AUTHORITATIVE_MIN_LEN) return false;
   const latched = getLatchedAcceptedServerFullDraftAuthority();
   if (latched && latched.len >= LONG_PREMIUM_AUTHORITATIVE_MIN_LEN) {
@@ -125,13 +188,6 @@ export function hasPaidProPipelineSessionAcceptance(args: {
     const minLen = Math.floor(latched.len * PIPELINE_ACCEPTED_CORPUS_LEN_MIN_RATIO);
     if (t.length >= minLen && t.length <= latched.len + PIPELINE_ACCEPTED_CORPUS_LEN_MAX_DELTA) {
       return true;
-    }
-  }
-  if (readPaidProPipelineAcceptedCorpusHash() !== null) {
-    const incomingHash = paidProPipelineAcceptedCorpusHash(t);
-    const acceptedHash = readPaidProPipelineAcceptedCorpusHash();
-    if (incomingHash && acceptedHash && incomingHash === acceptedHash) {
-      return hasPaidProPipelineValidationForCorpus({ text: t, source: args.source });
     }
   }
   return false;

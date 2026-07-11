@@ -29,9 +29,14 @@ import {
 } from "./agreementTemplatePlaceholderSafety";
 import {
   hasPaidProPipelineSessionAcceptance,
+  latchPaidProPipelineAcceptanceForConciseAuthoritativeBody,
 } from "./paidProPostAcceptanceValidatorCache";
 import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import {
+  assessPaidProSubstantiveServerDraftCorpus,
+  paidProServerFullDraftBelowSubstantiveMin,
+} from "./paidProSubstantiveCorpusAssessment";
 import { logFalseProAuthorityBlocked } from "./paidProRuntimeAuthorityEstablishment";
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 import {
@@ -369,34 +374,9 @@ export function establishPaidProSourceOfTruth(args: {
   }
   const wireLen = trim(args.text).length;
   const generationOutcome = trim(args.generationOutcome).toLowerCase();
-  const mislabeledSubstantiveServerSource =
-    (requestedSource === "server_full_draft" ||
-      requestedSource === "server_full_draft_retry" ||
-      requestedSource === "server_full_draft_degraded") &&
-    wireLen > 0 &&
-    wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
-    !args.allowShorterOverwrite &&
-    !hasPaidProPipelineSessionAcceptance({ text: trim(args.text), source: requestedSource });
-  if (mislabeledSubstantiveServerSource) {
-    throw new Error(
-      `[paid-pro-sot-establishment-blocked] mislabeled_server_full_draft_below_substantive_min;len=${wireLen}`,
-    );
-  }
-  if (
-    generationOutcome === "degraded" &&
-    wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
-    (requestedSource === "server_full_draft" || requestedSource === "server_full_draft_degraded") &&
-    !args.allowShorterOverwrite &&
-    !hasPaidProPipelineSessionAcceptance({ text: trim(args.text), source: requestedSource })
-  ) {
-    throw new Error(
-      `[paid-pro-sot-establishment-blocked] degraded_response_without_substantive_server_full;len=${wireLen}`,
-    );
-  }
-  // First-authoritative-success-wins latch: once a substantive SoT is committed, a later automated
-  // premium response (e.g. a duplicate request that came back degraded/json_parse) must never
-  // overwrite, downgrade, or shorten it. Equal/longer bodies (and execution-block appends) may proceed;
-  // genuine user-approved revisions opt in via `allowShorterOverwrite`.
+  // First-authoritative-success-wins latch: a later automated duplicate/degraded response must not
+  // overwrite a substantive SoT. Run before substantive-min qualification so downgrade attempts do
+  // not throw mislabeled errors when the existing authoritative corpus already wins.
   const existingSot = getPaidProSourceOfTruth();
   if (existingSot && !args.allowShorterOverwrite) {
     const incomingLen = trim(args.text).length;
@@ -424,6 +404,50 @@ export function establishPaidProSourceOfTruth(args: {
       });
       return existingSot;
     }
+  }
+  latchPaidProPipelineAcceptanceForConciseAuthoritativeBody({
+    text: trim(args.text),
+    source: requestedSource,
+    intakeText: args.intakeText ?? null,
+    draft: args.draft ?? null,
+  });
+  const substantiveAssessment = assessPaidProSubstantiveServerDraftCorpus({
+    text: trim(args.text),
+    source: requestedSource,
+    intakeText: args.intakeText ?? null,
+    draft: args.draft ?? null,
+    generationOutcome: args.generationOutcome ?? null,
+  });
+  const pipelineSessionAccepted = hasPaidProPipelineSessionAcceptance({
+    text: trim(args.text),
+    source: requestedSource,
+  });
+  const mislabeledSubstantiveServerSource =
+    paidProServerFullDraftBelowSubstantiveMin({
+      text: trim(args.text),
+      source: requestedSource,
+      intakeText: args.intakeText ?? null,
+      draft: args.draft ?? null,
+      generationOutcome: args.generationOutcome ?? null,
+    }) &&
+    !args.allowShorterOverwrite &&
+    !pipelineSessionAccepted;
+  if (mislabeledSubstantiveServerSource) {
+    throw new Error(
+      `[paid-pro-sot-establishment-blocked] mislabeled_server_full_draft_below_substantive_min;len=${wireLen};classification=${substantiveAssessment.classification}`,
+    );
+  }
+  if (
+    generationOutcome === "degraded" &&
+    wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    (requestedSource === "server_full_draft" || requestedSource === "server_full_draft_degraded") &&
+    !args.allowShorterOverwrite &&
+    !pipelineSessionAccepted &&
+    !substantiveAssessment.qualifiesForServerFullDraftAcceptance
+  ) {
+    throw new Error(
+      `[paid-pro-sot-establishment-blocked] degraded_response_without_substantive_server_full;len=${wireLen}`,
+    );
   }
   const prep = preparePaidProFreezeCandidateText({
     text: args.text,
@@ -477,7 +501,9 @@ export function establishPaidProSourceOfTruth(args: {
       source: requestedSource,
     });
   const substantiveServerDraft =
-    requestedSource === "server_full_draft" && wireLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+    requestedSource === "server_full_draft" &&
+    (wireLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
+      substantiveAssessment.qualifiesForServerFullDraftAcceptance);
   if (minimumSubstance.applies && !minimumSubstance.ok) {
     if (pipelineAcceptedAfterSubstance && !(professionalCoverage.applies && !professionalCoverage.ok)) {
       logProCorpusSourceMap({

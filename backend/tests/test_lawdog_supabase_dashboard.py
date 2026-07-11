@@ -16,6 +16,7 @@ from backend.lawdog_dashboard.workspace_index import (
     merge_workspace_index_agreement_ids,
 )
 from backend.main import app
+from backend.tests.conftest_usage_economics_helpers import register_test_agreement_owner
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
@@ -493,5 +494,10 @@ def test_workspace_index_supabase_fallback_marks_content_unavailable(
     assert match["content_unavailable"] is True
     assert match["content_unavailable_reason"] == "draft_load_failed"
 
+    register_test_agreement_owner(
+        db_path=str(tmp_path / "usage.sqlite3"),
+        agreement_id=aid,
+        org_id="lawdog-sync-org",
+    )
     get_res = client.get(f"/api/agreements/{aid}", headers=_ORG)
     assert get_res.status_code == 404

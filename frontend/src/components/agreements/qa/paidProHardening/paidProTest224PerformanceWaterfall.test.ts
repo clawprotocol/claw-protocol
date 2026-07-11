@@ -27,6 +27,7 @@ import {
 import { clearPaidProAgreementFamilyCache, resolveAuthoritativePaidProAgreementFamily } from "../../paidProAgreementFamilyAuthority";
 import { clearPremiumGenerationCallAudit } from "../../paidProPremiumGenerationCallAudit";
 import { clearFrozenPremiumSessionBodiesForTests } from "../../premiumAcceptancePolicy";
+import { resetPaidProPipelineTestIsolation } from "../../paidProPipelineTestIsolation";
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const TEST224_INTAKE = readFileSync(join(FIXTURE_DIR, "freeProQaTemplateATest220.intake.txt"), "utf8").trim();
@@ -106,6 +107,7 @@ vi.mock("../../premiumFullDraftApi", async (importOriginal) => {
 
 describe("paidPro Test224 performance waterfall and json_parse degraded recovery", () => {
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     clearPremiumGenerationCallAudit();
     clearPaidProAgreementFamilyCache();
     clearFrozenPremiumSessionBodiesForTests();

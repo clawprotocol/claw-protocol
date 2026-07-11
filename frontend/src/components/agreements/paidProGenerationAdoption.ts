@@ -8,6 +8,7 @@ import {
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import { guardPaidProAuthoritativeWrite } from "./paidProAuthoritativeWriteGuard";
 import { PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN } from "./premiumAcceptancePolicy";
 import { PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE } from "./premiumNetworkRecoveryLocalDraft";
 
@@ -99,9 +100,18 @@ export function tryCommitProGenerationAdoption(args: {
   body: string;
   source: string;
   freezeCandidateHash?: string | null;
+  attemptSequence?: number | null;
 }): { committed: boolean; reason: string; record: ProGenerationAdoptionRecord | null } {
   const generationId = trim(args.generationId);
   const body = trim(args.body);
+  const writeGuard = guardPaidProAuthoritativeWrite({
+    agreementGenerationId: generationId,
+    attemptSequence: args.attemptSequence,
+    surface: "adoption",
+  });
+  if (!writeGuard.allowed) {
+    return { committed: false, reason: writeGuard.reason, record: readProGenerationAdoption(generationId) };
+  }
   if (!generationId) return { committed: false, reason: "missing_generation_id", record: null };
   if (body.length < 500) return { committed: false, reason: "body_too_short", record: null };
 

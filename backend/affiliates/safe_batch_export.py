@@ -8,13 +8,15 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from eth_abi import encode as eth_abi_encode
-from eth_utils import keccak
 
 from backend.affiliates.evm_wallet import validate_evm_wallet_address
 from backend.economics import config as econ_config
 from backend.economics.store import EconomicsStore, get_economics_store
 
 from .usdc_conversion import USDC_DECIMALS, convert_usd_to_usdc
+
+# keccak256("transfer(address,uint256)")[:4] — constant ERC-20 transfer selector.
+_ERC20_TRANSFER_SELECTOR = bytes.fromhex("a9059cbb")
 
 
 def _norm_addr(addr: str) -> str:
@@ -28,7 +30,7 @@ def erc20_transfer_data(recipient: str, amount_base_units: int) -> str:
     """ABI-encoded transfer(address,uint256) call data (0x-prefixed hex)."""
     if amount_base_units < 0:
         raise ValueError("negative_amount")
-    selector = keccak(text="transfer(address,uint256)")[:4]
+    selector = _ERC20_TRANSFER_SELECTOR
     to_c = _norm_addr(recipient)
     body = eth_abi_encode(["address", "uint256"], [to_c, amount_base_units])
     return "0x" + (selector + body).hex()

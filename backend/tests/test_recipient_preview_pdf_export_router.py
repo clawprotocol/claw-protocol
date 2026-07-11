@@ -26,6 +26,27 @@ def pdf_export_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "backend.routers.agreements_v2_api.assert_agreement_full_draft_read_allowed",
         lambda *a, **k: None,
     )
+
+    def _stub_load(agreement_id: str):
+        from backend.routers.agreements_v2_api import AgreementDraft
+
+        return AgreementDraft(
+            id=agreement_id,
+            title="PDF export fixture",
+            jurisdiction="TX",
+            parties=[{"name": "Owner", "role": "owner", "id": "p1"}],
+            purpose="Services",
+            payment_terms="Net 30",
+            duration=None,
+            due_date=None,
+            effective_date=None,
+            created_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-01T00:00:00Z",
+            versions=[],
+            audit_log=[],
+        )
+
+    monkeypatch.setattr("backend.routers.agreements_v2_api._load_or_404", _stub_load)
     app = FastAPI()
     app.include_router(av2.router)
     return TestClient(app)

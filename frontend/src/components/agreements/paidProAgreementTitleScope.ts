@@ -39,7 +39,12 @@ export function isAuthoritativePaidProAgreementDocumentTitleLine(line: string): 
   return false;
 }
 
-/** Merge split all-caps brand-licensing title lines before section-heading scans. */
+import {
+  isPaidProMultilineAgreementTitleCompletionLine,
+  isPaidProMultilineAgreementTitleStartLine,
+} from "./paidProDocumentOpeningAuthority";
+
+/** Merge split all-caps agreement title lines before section-heading scans. */
 export function repairMultilinePaidProAgreementDocumentTitle(text: string): {
   text: string;
   repairs: string[];
@@ -56,6 +61,15 @@ export function repairMultilinePaidProAgreementDocumentTitle(text: string): {
     ) {
       out.push(BRAND_LICENSING_AGREEMENT_TITLE_UPPER);
       repairs.push("merge_multiline_brand_licensing_title");
+      i += 1;
+      continue;
+    }
+    if (
+      isPaidProMultilineAgreementTitleStartLine(trimmed) &&
+      isPaidProMultilineAgreementTitleCompletionLine(nextTrimmed)
+    ) {
+      out.push(`${trimmed} ${nextTrimmed}`.replace(/\s+/g, " ").trim());
+      repairs.push("merge_multiline_agreement_title");
       i += 1;
       continue;
     }
@@ -109,17 +123,21 @@ function intakeScopeBlob(intake: string): string {
     /^(?:scope|purpose|services?|deliverables?|objective|background)\s*:/i.test(line),
   );
   if (scopeLines.length) return scopeLines.join(" ");
+  // Exclude per-party signer metadata lines — role titles like "Marketing" / "Licensing"
+  // must not trigger brand-licensing stack heuristics on revenue-share intakes.
+  const proseLines = lines.filter((line) => !/\bsigner:\s/i.test(line));
+  if (proseLines.length) return proseLines.join(" ");
   return intake;
 }
 
 export function intakeDescribesBrandLicensingDistributionManufacturingStack(intake: string): boolean {
-  const scope = intakeScopeBlob(intake);
-  const blob = `${scope} ${intake}`.toLowerCase();
+  const scope = intakeScopeBlob(intake).toLowerCase();
   const licensing =
-    /\b(?:brand\s+licensing|licensing\s+and\s+distribution)\b/.test(blob) || /\blicensing\b/.test(blob);
-  const distribution = /\bdistribut/.test(blob);
-  const manufacturing = /\bmanufactur/.test(blob);
-  const marketing = /\bmarketing\b|\be-?commerce\b/.test(blob);
+    /\b(?:brand\s+licensing|licensing\s+and\s+distribution)\b/.test(scope) ||
+    (/\blicensing\b/.test(scope) && /\b(?:brand|manufactur|distribut)/.test(scope));
+  const distribution = /\bdistribut/.test(scope);
+  const manufacturing = /\bmanufactur/.test(scope);
+  const marketing = /\bmarketing\b|\be-?commerce\b/.test(scope);
   if (licensing && distribution) return true;
   const hits = [licensing, distribution, manufacturing, marketing].filter(Boolean).length;
   return hits >= 3;

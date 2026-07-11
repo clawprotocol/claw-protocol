@@ -3,6 +3,7 @@
  */
 
 import { getOrgId } from "./orgContext";
+import { isAnonymousWorkspaceOrg } from "../auth/anonymousOwnerContext";
 import { hasPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
 
 const KEY = "claw_paid_checkout_org_id_v1";
@@ -55,6 +56,10 @@ export function resolveEntitlementRepairOrgCandidates(): string[] {
   };
   if (hasPaidPremiumCompletionSession()) {
     push(DEFAULT_ANONYMOUS_CHECKOUT_ORG);
+    const current = getOrgId().trim();
+    if (isAnonymousWorkspaceOrg(current)) {
+      push(current);
+    }
   }
   push(readPaidCheckoutOrgId());
   return out;

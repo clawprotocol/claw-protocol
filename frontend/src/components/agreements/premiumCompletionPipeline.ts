@@ -99,9 +99,13 @@ import {
   premiumApiResultHasAuthoritativeServerCorpus,
 } from "./premiumApiHandoff";
 import {
-  clearPremiumParseSessionGuard,
   markPremiumAuthoritativeServerCorpusAccepted,
 } from "./premiumParseSessionGuard";
+import {
+  beginPaidProGenerationAttempt,
+  markPaidProGenerationAttemptTerminal,
+  resolveCurrentAttemptPremiumValidationCorpus,
+} from "./paidProGenerationAttemptAuthority";
 import {
   looksLikePremiumResponseJsonWrapper,
   normalizePremiumFullDraftResponsePayload,
@@ -197,6 +201,7 @@ import {
   shouldSkipPremiumStructuralRetryForDegradedDisplay,
 } from "./paidProPostCheckoutRenderGate";
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
+import { assessPaidProSubstantiveServerDraftCorpus } from "./paidProSubstantiveCorpusAssessment";
 import type { PremiumNetworkCallReason } from "./paidProPremiumGenerationCallAudit";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryable";
@@ -1298,11 +1303,44 @@ function shouldFreezePremiumPipelineRecoveryCandidate(
   return isNonfatalGenerationFailureCode(failureCode) && len >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
 }
 
+function validateCurrentAttemptPaidProOutput(args: {
+  processedDoc: string;
+  wireDocumentText: string;
+  wireServerFullDocumentText: string;
+  rawIntake: string;
+  draft: ParsedDraftShape;
+  skipFounderTitleCheck?: boolean;
+  intentContract: ReturnType<typeof resolveAgreementIntentContract>;
+  intentContractMode: "full" | "base_only";
+  premiumPipelineSource: PremiumRenderSource | null;
+}): { ok: boolean; reasons: string[] } {
+  const validationCorpus = resolveCurrentAttemptPremiumValidationCorpus({
+    processedDoc: args.processedDoc,
+    wireDocumentText: args.wireDocumentText,
+    wireServerFullDocumentText: args.wireServerFullDocumentText,
+    intakeText: args.rawIntake,
+  });
+  return validatePaidProOutput({
+    text: validationCorpus.text,
+    rawIntake: args.rawIntake,
+    draft: args.draft,
+    skipFounderTitleCheck: args.skipFounderTitleCheck,
+    intentContract: args.intentContract,
+    intentContractMode: args.intentContractMode,
+    premiumPipelineSource: args.premiumPipelineSource,
+  });
+}
+
 async function runPremiumCompletionInner(
   input: PremiumCompletionInput,
   traceCtx: { traceId: string; intakeFingerprintEarly: string },
 ): Promise<PremiumCompletionResult> {
-  clearPremiumParseSessionGuard();
+  const attemptContext = beginPaidProGenerationAttempt({
+    agreementGenerationId: input.agreementGenerationId,
+    premiumRequestIntakeFingerprint:
+      input.premiumRequestIntakeFingerprint ?? traceCtx.intakeFingerprintEarly,
+  });
+  const attemptSequence = attemptContext.attemptSequence;
   const rawIntake = input.intakeText.trim();
   logPremiumSessionConsistency({
     context: "runPremiumCompletion_start",
@@ -2017,6 +2055,7 @@ async function runPremiumCompletionInner(
       let effectiveFull: PremiumFullDraftResult = full;
       let wireDocumentText = (full.document_text || "").trim();
       let wireServerFullDocumentText = (full.server_full_document_text || "").trim();
+      const originalWireDocumentText = wireDocumentText;
       const originalWireServerFullDocumentText = wireServerFullDocumentText;
       let wireGenerationOutcomeOnWire = (full.generation_outcome || "").trim();
       let wireFailureCodeOnWire = (full.server_generation_failure_code || "").trim();
@@ -2805,8 +2844,10 @@ async function runPremiumCompletionInner(
       const founderIntent = isFounderEquityVestingIntent(intakeS);
       const intentModeFirst: "full" | "base_only" =
         founderIntent && import.meta.env.MODE !== "test" ? "base_only" : "full";
-      let vPaid = validatePaidProOutput({
-        text: doc,
+      let vPaid = validateCurrentAttemptPaidProOutput({
+        processedDoc: doc,
+        wireDocumentText: originalWireDocumentText,
+        wireServerFullDocumentText: originalWireServerFullDocumentText,
         rawIntake: rawForSoT || rawIntake,
         draft: mergedForApi,
         skipFounderTitleCheck: founderIntent,
@@ -3556,6 +3597,13 @@ async function runPremiumCompletionInner(
             }
           }
         }
+        const freezeSubstantiveAssessment = assessPaidProSubstantiveServerDraftCorpus({
+          text: freezeCommit.text,
+          source: freezeAcceptedSource,
+          intakeText: rawForSoT || rawIntake,
+          draft: mergedForApi,
+          generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+        });
         if (
           freezeCommit.ok &&
           (freezeAcceptedSource === "server_full_draft" ||
@@ -3563,7 +3611,7 @@ async function runPremiumCompletionInner(
             freezeAcceptedSource === "server_full_draft_degraded") &&
           authoritativeServerFullOnWire.length === 0 &&
           (degradedJsonParseWithoutSubstantiveServerFull ||
-            freezeCommit.text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN)
+            !freezeSubstantiveAssessment.qualifiesForServerFullDraftAcceptance)
         ) {
           const mislabeledReason = degradedJsonParseWithoutSubstantiveServerFull
             ? "mislabeled_server_full_without_wire_server_full"
@@ -3880,6 +3928,7 @@ async function runPremiumCompletionInner(
               body: doc,
               source: premiumRenderSource,
               freezeCandidateHash: freezeCommit.hash ?? null,
+              attemptSequence,
             });
             if (adoptionCommit.committed && adoptionCommit.record) {
               logProGenerationAdoptionCommitted({
@@ -3905,6 +3954,7 @@ async function runPremiumCompletionInner(
             input.agreementGenerationId,
             doc,
             premiumRenderSource,
+            attemptSequence,
           );
           markPaidProPipelineValidationPassed({
             text: doc,
@@ -4156,6 +4206,7 @@ async function runPremiumCompletionInner(
                 input.agreementGenerationId,
                 recovered,
                 premiumRenderSource,
+                attemptSequence,
               );
               markPaidProPipelineValidationPassed({
                 text: recovered,
@@ -4173,6 +4224,7 @@ async function runPremiumCompletionInner(
                 body: recovered,
                 source: premiumRenderSource,
                 freezeCandidateHash: structuralGate.hash ?? null,
+                attemptSequence,
               });
               if (vPaid.ok && recovered.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
                 commitPaidProAuthorityHashContinuity({
@@ -4260,6 +4312,7 @@ async function runPremiumCompletionInner(
             input.agreementGenerationId,
             preserved,
             premiumRenderSource,
+            attemptSequence,
           );
           markPaidProPipelineValidationPassed({
             text: preserved,
@@ -4372,6 +4425,7 @@ async function runPremiumCompletionInner(
           input.agreementGenerationId,
           thinLocalRecovery.body,
           recoverySource,
+          attemptSequence,
         );
         markPaidProPipelineValidationPassed({
           text: thinLocalRecovery.body,
@@ -4707,6 +4761,7 @@ async function runPremiumCompletionInner(
         input.agreementGenerationId,
         adoptedCorpus.body,
         premiumRenderSource,
+        attemptSequence,
       );
       markPaidProPipelineValidationPassed({
         text: adoptedCorpus.body,
@@ -4808,6 +4863,7 @@ async function runPremiumCompletionInner(
             input.agreementGenerationId,
             recovered,
             premiumRenderSource,
+            attemptSequence,
           );
           markPaidProPipelineValidationPassed({
             text: recovered,
@@ -4822,6 +4878,7 @@ async function runPremiumCompletionInner(
             body: recovered,
             source: premiumRenderSource,
             freezeCandidateHash: brandFreeze.hash ?? null,
+            attemptSequence,
           });
           if (recovered.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
             commitPaidProAuthorityHashContinuity({
@@ -5265,6 +5322,39 @@ async function runPremiumCompletionInner(
   }
 
   const pipelineWinningBody = (finalWinning || finalFallback).trim();
+
+  const terminalSource = String(premiumRenderSource || "");
+  if (
+    isAuthoritativePremiumPipelineRenderSource(premiumRenderSource) &&
+    pipelineWinningBody.length >= 500
+  ) {
+    markPaidProGenerationAttemptTerminal({
+      agreementGenerationId: input.agreementGenerationId,
+      attemptSequence,
+      outcome: "frozen",
+    });
+  } else if (terminalSource === "rejected_paid_corpus") {
+    markPaidProGenerationAttemptTerminal({
+      agreementGenerationId: input.agreementGenerationId,
+      attemptSequence,
+      outcome: "rejected",
+    });
+  } else if (premiumRenderSource === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE) {
+    markPaidProGenerationAttemptTerminal({
+      agreementGenerationId: input.agreementGenerationId,
+      attemptSequence,
+      outcome: "degraded_recovery",
+    });
+  } else if (
+    premiumRenderSource === "fallback_preview" ||
+    premiumRenderSource === "fallback_preview_error"
+  ) {
+    markPaidProGenerationAttemptTerminal({
+      agreementGenerationId: input.agreementGenerationId,
+      attemptSequence,
+      outcome: "fallback",
+    });
+  }
 
   return {
     premiumDraft: outMerged,

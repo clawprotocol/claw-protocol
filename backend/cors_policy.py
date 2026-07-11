@@ -22,6 +22,7 @@ CORS_ALLOW_REQUEST_HEADERS: List[str] = [
     "Authorization",
     "X-Request-Id",
     "X-Claw-Org-Id",
+    "X-Claw-Anon-Session",
     "X-Claw-Agreement-Id",
     "X-Claw-Affiliate-Code",
     "X-Claw-Paid-Pro-Perf-Trace",

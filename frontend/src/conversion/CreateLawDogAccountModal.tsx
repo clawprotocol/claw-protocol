@@ -17,8 +17,8 @@ import { getOrgId } from "../launch/orgContext";
 export type CreateLawDogAccountModalProps = {
   open: boolean;
   onClose: () => void;
-  /** Shown only when {@link googleHref} is set. */
-  googleHref: string | null;
+  /** When true, show Continue with Google (Supabase OAuth). */
+  showGoogle?: boolean;
   onContinueEmail: () => void;
   onContinueGoogle?: () => void;
   /** Included on `signup_legal_assent` (e.g. claim flow + record id). */
@@ -28,7 +28,7 @@ export type CreateLawDogAccountModalProps = {
 export function CreateLawDogAccountModal({
   open,
   onClose,
-  googleHref,
+  showGoogle = false,
   onContinueEmail,
   onContinueGoogle,
   assentAnalyticsContext,
@@ -120,10 +120,11 @@ export function CreateLawDogAccountModal({
           />
         </div>
         <h2 id="lawdog-create-account-title" className="text-center text-lg font-semibold text-slate-50">
-          Create your LawDog account
+          Claim your agreement
         </h2>
         <p className="mt-3 text-left text-sm leading-relaxed text-slate-400">
-          This record is ready. Save it to your workspace to keep your proof and continue using LawDog.
+          Secure this draft to your workspace so you can return on any device. Your content stays tied to this
+          agreement — we do not create a separate copy.
         </p>
         <p
           id="lawdog-signup-product-lane"
@@ -208,9 +209,9 @@ export function CreateLawDogAccountModal({
             disabled={!termsAck || assentSubmitting}
             onClick={() => void runAssentThen("email", onContinueEmail)}
           >
-            Continue with email
+            Email me a sign-in link
           </button>
-          {googleHref ? (
+          {showGoogle ? (
             <button
               type="button"
               className="vs01-btn vs01-btn--secondary min-h-[2.75rem] w-full border-slate-600"

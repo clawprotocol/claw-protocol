@@ -3,18 +3,24 @@
  * Ensures intake/signer contact values replace operative tokens before any authoritative freeze.
  */
 
+import { PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES } from "./paidProNPartySignerSetup";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   ensureCanonicalNoticesSectionHeadingForFreeze,
   ensureOperativeIfToNoticeDelivery,
+  ensureOperativeNoticeStanzaCountAuthorityAtFreeze,
+  ensureOperativeNoticeStanzaEntityLinesAtFreeze,
   repairDuplicateOperativeNoticeStanzas,
+  repairFusedNoticesHeadingToPriorClause,
+  resolveNoticeStructuralValidationParties,
   trimOperativeNoticeStanzasToPartyCount,
 } from "./paidProPartyNoticeDetails";
 import { repairProfessionalCorpusContamination } from "./paidProProfessionalCorpusContamination";
-import type { PaidProPartyRoleContext } from "./paidProSignerMetadataAuthority";
+import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { mergeLabeledPartyAuthorityIntoParties, mergeDraftSignerContactFieldsOntoParties } from "./paidProSignerMetadataAuthority";
-import { manifestRecordsForPaidProAcceptance } from "./paidProAcceptanceExecutionBlockInvariant";
+import { manifestRecordsForPaidProAcceptance, isGenericPaidProAcceptanceManifestFallback } from "./paidProAcceptanceExecutionBlockInvariant";
+import { resolveCanonicalPartyIdentitiesFromSources } from "./canonicalPartyIdentityResolver";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
@@ -28,27 +34,33 @@ export type PaidProNoticeContactAuthorityOpts = {
   surface?: string;
   /** When true (default), unresolved tokens after authority repair block the caller. */
   blockOnUnresolved?: boolean;
+  /** When set, use these parties instead of re-resolving (freeze must match validation parties). */
+  authorityParties?: readonly PaidProSignerMetadataParty[];
+  acceptedCorpus?: string | null;
 };
 
-export type PaidProNoticeContactAuthorityResult = {
-  text: string;
-  repairs: string[];
-  ok: boolean;
-  blocked: boolean;
-};
-
-export function applyPaidProNoticeContactAuthority(
-  raw: string,
-  opts?: PaidProNoticeContactAuthorityOpts,
-): PaidProNoticeContactAuthorityResult {
-  const surface = opts?.surface ?? "paid_pro_notice_contact_authority";
-  const intakeRaw = opts?.intakeText ?? null;
+/** One party list for notice repair and clause-family validation at freeze. */
+export function resolvePaidProNoticeAuthorityPartiesForFreeze(args: {
+  reviewParties?: readonly PaidProSignerMetadataParty[];
+  draft?: ParsedDraftShape | null;
+  intakeText?: string | null;
+  acceptedCorpus?: string | null;
+}): PaidProSignerMetadataParty[] {
+  const intakeRaw = args.intakeText ?? null;
+  const draftPartyNames = (args.draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter(Boolean);
+  const roleContext: PaidProPartyRoleContext = {
+    intakeText: intakeRaw,
+    draftPartyNames,
+    acceptedCorpus: args.acceptedCorpus ?? null,
+  };
   let parties = mergeDraftSignerContactFieldsOntoParties(
-    resolvePartiesForReviewRender({ draft: opts?.draft, intakeText: intakeRaw }),
-    opts?.draft,
+    resolvePartiesForReviewRender({ draft: args.draft ?? null, intakeText: intakeRaw }),
+    args.draft ?? null,
   );
   const manifestRecords = manifestRecordsForPaidProAcceptance({
-    draft: opts?.draft ?? null,
+    draft: args.draft ?? null,
     intakeText: intakeRaw,
   });
   const manifestAuthoritative = manifestRecords.filter((r) =>
@@ -69,9 +81,107 @@ export function applyPaidProNoticeContactAuthority(
     }));
     parties = mergeDraftSignerContactFieldsOntoParties(
       mergeLabeledPartyAuthorityIntoParties(fromManifest, intakeRaw),
-      opts?.draft,
+      args.draft ?? null,
     );
   }
+  const authoritativeReviewPartyCount = parties.filter(
+    (p) => p.partyLegalName.trim().length >= 2,
+  ).length;
+  if (authoritativeReviewPartyCount < 2) {
+    const acceptedCorpus = args.acceptedCorpus?.trim() ?? "";
+    if (acceptedCorpus) {
+      const fromCorpus = resolveCanonicalPartyIdentitiesFromSources({
+        rawIntake: intakeRaw,
+        generatedBody: acceptedCorpus,
+        starterNames: draftPartyNames,
+      }).filter((record) => isAuthoritativeLegalEntityName(record.fullLegalName.trim()));
+      if (fromCorpus.length >= 2) {
+        parties = mergeDraftSignerContactFieldsOntoParties(
+          fromCorpus.slice(0, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES).map((record, partyIndex) => ({
+            partyIndex,
+            partyLegalName: record.fullLegalName,
+            signerEmail: "",
+            signerName: (record.signerName?.trim() || "").trim(),
+            signerTitle: (record.signerTitle?.trim() || "").trim(),
+            partyAddress: (record.partyAddress?.trim() || "").trim(),
+          })),
+          args.draft ?? null,
+        );
+      }
+    }
+  }
+  const authoritativePartyCountAfterCorpus = parties.filter((p) =>
+    isAuthoritativeLegalEntityName(p.partyLegalName.trim()),
+  ).length;
+  if (
+    authoritativePartyCountAfterCorpus < 2 &&
+    manifestRecords.length >= 2 &&
+    isGenericPaidProAcceptanceManifestFallback(manifestRecords)
+  ) {
+    parties = mergeDraftSignerContactFieldsOntoParties(
+      manifestRecords.slice(0, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES).map((record, partyIndex) => ({
+        partyIndex,
+        partyLegalName: record.fullLegalName,
+        signerEmail: "",
+        signerName: (record.signerName?.trim() || "").trim(),
+        signerTitle: (record.signerTitle?.trim() || "").trim(),
+        partyAddress: (record.partyAddress?.trim() || "").trim(),
+      })),
+      args.draft ?? null,
+    );
+  }
+  const seed =
+    args.reviewParties && args.reviewParties.length >= 2 ? [...args.reviewParties] : parties;
+  return [...resolveNoticeStructuralValidationParties(seed, roleContext)];
+}
+
+/** Canonical notice authority at freeze — same parties/intake used for validation. */
+export function finalizePaidProCanonicalNoticeAuthorityForFreeze(
+  text: string,
+  opts: {
+    reviewParties?: readonly PaidProSignerMetadataParty[];
+    draft?: ParsedDraftShape | null;
+    intakeText?: string | null;
+    surface?: string;
+  },
+): PaidProNoticeContactAuthorityResult {
+  const parties = resolvePaidProNoticeAuthorityPartiesForFreeze({
+    reviewParties: opts.reviewParties,
+    draft: opts.draft ?? null,
+    intakeText: opts.intakeText ?? null,
+    acceptedCorpus: text,
+  });
+  return applyPaidProNoticeContactAuthority(text, {
+    draft: opts.draft ?? null,
+    intakeText: opts.intakeText ?? null,
+    surface: opts.surface ?? "paid_pro_canonical_notice_freeze",
+    blockOnUnresolved: true,
+    authorityParties: parties,
+    acceptedCorpus: text,
+  });
+}
+
+export type PaidProNoticeContactAuthorityResult = {
+  text: string;
+  repairs: string[];
+  ok: boolean;
+  blocked: boolean;
+};
+
+export function applyPaidProNoticeContactAuthority(
+  raw: string,
+  opts?: PaidProNoticeContactAuthorityOpts,
+): PaidProNoticeContactAuthorityResult {
+  const surface = opts?.surface ?? "paid_pro_notice_contact_authority";
+  const intakeRaw = opts?.intakeText ?? null;
+  let parties =
+    opts?.authorityParties && opts.authorityParties.length >= 2
+      ? [...opts.authorityParties]
+      : resolvePaidProNoticeAuthorityPartiesForFreeze({
+          draft: opts?.draft ?? null,
+          intakeText: intakeRaw,
+          acceptedCorpus: opts?.acceptedCorpus ?? raw,
+        });
   const repairs: string[] = [];
   let out = (raw || "").replace(/\r\n/g, "\n");
   const roleContext: PaidProPartyRoleContext = {
@@ -79,7 +189,7 @@ export function applyPaidProNoticeContactAuthority(
     draftPartyNames: (opts?.draft?.parties ?? [])
       .map((p) => String(p?.name ?? "").trim())
       .filter(Boolean),
-    acceptedCorpus: out,
+    acceptedCorpus: opts?.acceptedCorpus ?? out,
   };
 
   const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
@@ -125,6 +235,22 @@ export function applyPaidProNoticeContactAuthority(
       out = trimmed.text;
       repairs.push(...trimmed.repairs);
     }
+    const entityLines = ensureOperativeNoticeStanzaEntityLinesAtFreeze(out, parties, {
+      ...roleContext,
+      acceptedCorpus: out,
+    });
+    if (entityLines.repairs.length > 0) {
+      out = entityLines.text;
+      repairs.push(...entityLines.repairs.map((r) => `notice:${r}`));
+    }
+    const stanzaCount = ensureOperativeNoticeStanzaCountAuthorityAtFreeze(out, parties, {
+      ...roleContext,
+      acceptedCorpus: out,
+    });
+    if (stanzaCount.repairs.length > 0) {
+      out = stanzaCount.text;
+      repairs.push(...stanzaCount.repairs);
+    }
   }
 
   const tokenGate = enforceUserVisibleRenderTokenAuthority(out, {
@@ -136,6 +262,12 @@ export function applyPaidProNoticeContactAuthority(
   });
   out = tokenGate.text;
   repairs.push(...tokenGate.repairs);
+
+  const postAuthorityDefuse = repairFusedNoticesHeadingToPriorClause(out);
+  if (postAuthorityDefuse.repairs.length > 0) {
+    out = postAuthorityDefuse.text;
+    repairs.push(...postAuthorityDefuse.repairs);
+  }
 
   return {
     text: out,

@@ -54,6 +54,7 @@ import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicati
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { getPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import { assessPaidProAcceptedCorpusPreservationProof } from "./paidProAcceptedCorpusIntegrity";
 
 /** Pipeline source strings (kept here to avoid circular imports). */
 export type PipelineProSourceString =
@@ -527,6 +528,22 @@ export function validatePaidProOutput(args: {
   }
   const bodyForGates = validationCorpusForGates;
   const intakeLower = rawI.toLowerCase();
+  const assertAcceptedCorpusPreservationProof = (): { ok: boolean; reasons: string[] } => {
+    if (!requiresAcceptedCorpusPreservationProof) {
+      return { ok: true, reasons: [] };
+    }
+    if (!serverFullDocExists || !freezeCandidate.ok) {
+      return { ok: true, reasons: [] };
+    }
+    const proof = assessPaidProAcceptedCorpusPreservationProof({
+      wireText: rawInput,
+      freezeCandidateText: bodyForGates,
+      rawIntake: rawI,
+      draft: args.draft ?? null,
+      pipelineSource,
+    });
+    return { ok: proof.ok, reasons: proof.reasons };
+  };
   const minimumSubstance = validateProMinimumSubstance({
     text: bodyForGates,
     rawIntake: rawI,
@@ -547,18 +564,30 @@ export function validatePaidProOutput(args: {
     text: bodyForGates,
     intake: rawI,
   });
-  if (shouldRejectProfessionalProCorpus(preparedProfessional)) {
+  const wireAuthoritativeClauseCoverage =
+    wireProfessional.applies &&
+    wireProfessional.ok &&
+    isAuthoritativePremiumPipelineProvenance(pipelineSource) &&
+    inputLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+  if (
+    shouldRejectProfessionalProCorpus(preparedProfessional) &&
+    !wireAuthoritativeClauseCoverage
+  ) {
     return rejectAt("professional_pro_clause_coverage", [
       ...preparedProfessional.missingClauses.map((c) => `professional_${c}`),
       `docLen=${preparedProfessional.docLen}`,
     ]);
   }
-  if (minimumSubstance.applies && !minimumSubstance.ok) {
+  if (minimumSubstance.applies && !minimumSubstance.ok && !wireAuthoritativeClauseCoverage) {
     const reasons = minimumSubstance.missingSections.length
       ? minimumSubstance.missingSections.map((s) => `minimum_substance_missing:${s}`)
       : ["minimum_substance_failed"];
     return rejectAt("minimum_substance", reasons);
   }
+  const requiresAcceptedCorpusPreservationProof =
+    wireAuthoritativeClauseCoverage &&
+    (shouldRejectProfessionalProCorpus(preparedProfessional) ||
+      (minimumSubstance.applies && !minimumSubstance.ok));
   const acc = rejectPremiumBodyForProRender(bodyForGates, {
     intakeLower,
     intakeText: args.rawIntake,
@@ -654,6 +683,10 @@ export function validatePaidProOutput(args: {
         ) &&
         /MANUFACTURING,\s+DISTRIBUTION,\s+LICENSING/i.test(intentValidationText.slice(0, 2_500));
       if (postFreezeServerFullIntentWarnOnly) {
+        const preservation = assertAcceptedCorpusPreservationProof();
+        if (!preservation.ok) {
+          return rejectAt("accepted_corpus_preservation", preservation.reasons);
+        }
         logDecision(
           true,
           [...vi.reasons, "post_freeze_server_full_intent_title_warn_only"],
@@ -668,6 +701,10 @@ export function validatePaidProOutput(args: {
         conciseQuality.ok &&
         serverFullDocExists
       ) {
+        const preservation = assertAcceptedCorpusPreservationProof();
+        if (!preservation.ok) {
+          return rejectAt("accepted_corpus_preservation", preservation.reasons);
+        }
         logDecision(true, ["concise_commercial_services_override"], "intent_contract_override");
         recordPipelineValidationAcceptance(intentValidationText);
         return { ok: true, reasons: [] };
@@ -691,11 +728,19 @@ export function validatePaidProOutput(args: {
   });
   if (finalConciseQuality.malformedOpening) {
     if (serverFullDocExists && freezeCandidate.ok) {
+      const preservation = assertAcceptedCorpusPreservationProof();
+      if (!preservation.ok) {
+        return rejectAt("accepted_corpus_preservation", preservation.reasons);
+      }
       logDecision(true, ["concise_malformed_opening_overridden_after_freeze_pass"], "final_concise_quality");
       recordPipelineValidationAcceptance(bodyForGates);
       return { ok: true, reasons: [] };
     }
     return rejectAt("concise_services_malformed_opening", ["concise_services_malformed_opening"]);
+  }
+  const preservation = assertAcceptedCorpusPreservationProof();
+  if (!preservation.ok) {
+    return rejectAt("accepted_corpus_preservation", preservation.reasons);
   }
   logDecision(
     true,

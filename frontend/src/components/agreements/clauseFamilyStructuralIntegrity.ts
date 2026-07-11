@@ -6,7 +6,6 @@
 
 import { countStandaloneClauseFamilyHeadings, type OperativeClauseFamily } from "./clauseFamilyRegistry";
 import { countPaidProExecutionBlocks } from "./paidProExecutionBlockAuthority";
-import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import {
   corpusHasOperativeNoticesHeading,
   ensureCanonicalNoticesSectionHeadingForFreeze,
@@ -17,14 +16,12 @@ import {
   noticeStanzaContainsPlaceholderTokens,
   noticeStanzaHasExecutionPollution,
   noticeStanzaHasRoleLabelCorruption,
+  noticeStanzaHasLegalEntityLine,
+  resolveAuthoritativeNoticesRegionForFreeze,
   resolveNoticeStructuralValidationParties,
+  resolveCanonicalNoticePartyCount,
 } from "./paidProPartyNoticeDetails";
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
-import {
-  resolveAuthoritativeSignerCount,
-  resolveIntakeManifestAuthorityCount,
-} from "./signerCountAuthority";
 
 export type ClauseFamilyStructuralViolation = {
   family: OperativeClauseFamily | "structural";
@@ -47,16 +44,7 @@ const MALFORMED_NOTICE_LABEL_RE = /^\s*Email\s+for\s+Notices?\s*:/i;
 const FUSED_NOTICES_HEADING_RE = /[a-z]\.\d+\.\s+Notices\b/i;
 
 function stanzaHasLegalEntityLine(stanza: string): boolean {
-  const trimmed = (stanza || "").trim();
-  if (!trimmed) return false;
-  const lines = trimmed
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const entityLine = lines[1] ?? "";
-  if (entityLine.length >= 3) return true;
-  const fused = lines[0]?.match(/^If to\s+(.+?)\s*:\s*(.+)$/i);
-  return Boolean(fused && fused[2].trim().length >= 3);
+  return noticeStanzaHasLegalEntityLine(stanza);
 }
 
 function isOrphanLabelLine(lines: readonly string[], idx: number): boolean {
@@ -73,14 +61,9 @@ function isOrphanLabelLine(lines: readonly string[], idx: number): boolean {
   return true;
 }
 
-/** Notices heading through execution witness — canonical stanza count authority. */
-function noticesRegionToWitness(corpus: string): string {
-  const text = (corpus || "").replace(/\r\n/g, "\n");
-  const start = findNoticesSectionStart(text);
-  if (start < 0) return "";
-  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
-  const end = witnessIdx >= 0 ? witnessIdx : text.length;
-  return text.slice(start, end);
+/** Authoritative notices family region — same boundary repair uses at freeze. */
+function authoritativeNoticesRegionForValidation(corpus: string): string {
+  return resolveAuthoritativeNoticesRegionForFreeze(corpus);
 }
 
 function extractClauseFamilyHeadingEvidence(corpus: string): Record<string, string | null> {
@@ -192,38 +175,8 @@ function resolveCanonicalAuthorityPartyCount(
   parties?: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
 ): number {
-  const intake = roleContext?.intakeText?.trim() ?? "";
-  const draftPartyNames =
-    roleContext?.draftPartyNames ??
-    parties?.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2) ??
-    [];
-
-  // TEST538 — the immutable intake manifest is the hard authority ceiling for notice validation.
-  // A contaminated parties list (phantom 5th, "Party 1" placeholder) must never let the
-  // canonical authority / required-stanza count exceed the party count the intake truly resolves.
-  const intakeManifestCeiling = resolveIntakeManifestAuthorityCount(intake);
-
-  if (intake) {
-    const fromIntake = resolveAuthoritativeSignerCount({
-      intakeText: intake,
-      draftPartyNames,
-      draftParties: (parties ?? []).map((p) => ({ name: p.partyLegalName })),
-      manifestPartyCount: parties?.length ?? 0,
-    }).count;
-    if (fromIntake >= 2) {
-      return intakeManifestCeiling >= 2 ? Math.min(fromIntake, intakeManifestCeiling) : fromIntake;
-    }
-  }
-
-  if (!parties?.length) return 0;
-
-  const enriched = resolveNoticeStructuralValidationParties(parties, roleContext);
-  const enrichedCount = enriched.filter(
-    (p) =>
-      String(p.partyLegalName ?? "").trim().length >= 2 &&
-      isAuthoritativeLegalEntityName(p.partyLegalName.trim()),
-  ).length;
-  return intakeManifestCeiling >= 2 ? Math.min(enrichedCount, intakeManifestCeiling) : enrichedCount;
+  if (!parties?.length && !roleContext?.intakeText?.trim()) return 0;
+  return resolveCanonicalNoticePartyCount(parties ?? [], roleContext);
 }
 
 function requiredNoticeStanzaCount(
@@ -290,7 +243,7 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   const violations: ClauseFamilyStructuralViolation[] = [];
   const text = (corpus || "").replace(/\r\n/g, "\n");
   const hasOperativeNoticesFamily = corpusHasOperativeNoticesHeading(text);
-  const region = noticesRegionToWitness(text);
+  const region = authoritativeNoticesRegionForValidation(text);
   const noticeRoleContext: PaidProPartyRoleContext | null =
     opts?.intakeText || opts?.acceptedCorpus || opts?.draftPartyNames
       ? {

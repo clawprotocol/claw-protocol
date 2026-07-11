@@ -4,6 +4,7 @@
  */
 
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   getLatchedAcceptedServerFullDraftAuthority,
   LONG_PREMIUM_AUTHORITATIVE_MIN_LEN,
@@ -12,6 +13,7 @@ import {
 import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
+import { paidProServerFullDraftBelowSubstantiveMin } from "./paidProSubstantiveCorpusAssessment";
 
 export const PAID_PRO_ACCEPTED_SERVER_SHORTENING_MAX_RATIO = 0.9;
 
@@ -40,6 +42,8 @@ export type GuardPaidProAcceptedServerFullDraftCommitArgs = {
   generationOutcome?: string | null;
   agreementGenerationId?: string | null;
   reason?: string;
+  intakeText?: string | null;
+  draft?: ParsedDraftShape | null;
 };
 
 export type GuardPaidProAcceptedServerFullDraftCommitResult = {
@@ -122,11 +126,14 @@ export function guardPaidProAcceptedServerFullDraftCommit(
 
   const latched = getLatchedAcceptedServerFullDraftAuthority();
   const mislabeledSubstantiveServerSource =
-    (candidateSource === "server_full_draft" ||
-      candidateSource === "server_full_draft_retry" ||
-      candidateSource === "server_full_draft_degraded") &&
-    candidateLen > 0 &&
-    candidateLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+    paidProServerFullDraftBelowSubstantiveMin({
+      text: candidate,
+      source: candidateSource || "server_full_draft",
+      intakeText: args.intakeText ?? null,
+      draft: args.draft ?? null,
+      generationOutcome: args.generationOutcome ?? null,
+    }) &&
+    !hasPaidProPipelineSessionAcceptance({ text: candidate, source: candidateSource || "server_full_draft" });
 
   if (!latched || !latched.freezeEstablished || latched.len < LONG_PREMIUM_AUTHORITATIVE_MIN_LEN) {
     if (mislabeledSubstantiveServerSource) {

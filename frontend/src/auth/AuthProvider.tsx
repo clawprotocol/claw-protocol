@@ -1,47 +1,45 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import {
   getAuthSession,
   isSupabaseAuthEnabled,
   onAuthStateChange,
   signInWithEmailMagicLink,
+  signInWithGoogle,
   signOutAuth,
+  buildAuthCallbackUrl,
 } from "./supabaseAuthService";
-import { bindAuthenticatedUserToWorkspace } from "./workspaceBindingApi";
-import { writeCurrentUserDisplayName } from "../account/currentUser";
-import { refreshSubscriptionEntitlement } from "../access/subscriptionEntitlementCache";
+import { finalizeAuthenticatedSession } from "./postAuthFinalizer";
+import { prepareAuthContinuation } from "./prepareAuthContinuation";
+import { setCachedAccessToken, clearCachedAccessToken } from "./authAccessTokenCache";
 
 export type AuthContextValue = {
   enabled: boolean;
   loading: boolean;
   session: Session | null;
   user: User | null;
-  signInEmail: (email: string) => Promise<void>;
+  signInEmail: (email: string, opts?: { returningSignIn?: boolean }) => Promise<void>;
+  signInGoogle: (opts?: { returningSignIn?: boolean }) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthContextValue | null>(null);
 
+function isAuthCallbackPath(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname.replace(/\/$/, "") === "/app/auth/callback";
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const enabled = isSupabaseAuthEnabled();
   const [loading, setLoading] = useState(enabled);
   const [session, setSession] = useState<Session | null>(null);
+  const finalizedUserRef = useRef<string | null>(null);
 
-  const bindUser = useCallback(async (user: User) => {
-    const meta = user.user_metadata as Record<string, unknown> | undefined;
-    const display =
-      typeof meta?.full_name === "string"
-        ? meta.full_name
-        : typeof meta?.name === "string"
-          ? meta.name
-          : user.email?.split("@")[0] ?? "";
-    if (display.trim()) writeCurrentUserDisplayName(display.trim());
-    await bindAuthenticatedUserToWorkspace({
-      userId: user.id,
-      email: user.email,
-      displayName: display,
-    });
-    await refreshSubscriptionEntitlement();
+  const finalizeUser = useCallback(async (user: User, claimMethod: "magic_link" | "google" | "session_restore") => {
+    if (finalizedUserRef.current === user.id) return;
+    finalizedUserRef.current = user.id;
+    await finalizeAuthenticatedSession({ user, claimMethod });
   }, []);
 
   useEffect(() => {
@@ -52,25 +50,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let unsub: { unsubscribe: () => void } | null = null;
     void getAuthSession().then(async (s) => {
       setSession(s);
-      if (s?.user) await bindUser(s.user);
+      if (s?.access_token) setCachedAccessToken(s.access_token);
+      else clearCachedAccessToken();
+      if (s?.user && !isAuthCallbackPath()) {
+        await finalizeUser(s.user, "session_restore");
+      }
       setLoading(false);
     });
     unsub = onAuthStateChange((s) => {
       setSession(s);
-      if (s?.user) void bindUser(s.user);
+      if (s?.access_token) setCachedAccessToken(s.access_token);
+      else clearCachedAccessToken();
+      if (s?.user && !isAuthCallbackPath()) {
+        void finalizeUser(s.user, "session_restore");
+      }
     }) ?? null;
     return () => {
       unsub?.unsubscribe();
     };
-  }, [enabled, bindUser]);
+  }, [enabled, finalizeUser]);
 
-  const signInEmail = useCallback(async (email: string) => {
-    await signInWithEmailMagicLink(email);
+  const signInEmail = useCallback(async (email: string, opts?: { returningSignIn?: boolean }) => {
+    const continuationId = await prepareAuthContinuation({
+      returningSignIn: opts?.returningSignIn,
+      workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
+      destinationPath: opts?.returningSignIn ? "/app" : undefined,
+      provider: "email",
+    });
+    await signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId));
+  }, []);
+
+  const signInGoogle = useCallback(async (opts?: { returningSignIn?: boolean }) => {
+    const continuationId = await prepareAuthContinuation({
+      returningSignIn: opts?.returningSignIn,
+      workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
+      destinationPath: opts?.returningSignIn ? "/app" : undefined,
+      provider: "google",
+    });
+    await signInWithGoogle(buildAuthCallbackUrl(undefined, continuationId));
   }, []);
 
   const signOut = useCallback(async () => {
     await signOutAuth();
     setSession(null);
+    finalizedUserRef.current = null;
   }, []);
 
   const value = useMemo(
@@ -80,9 +103,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       session,
       user: session?.user ?? null,
       signInEmail,
+      signInGoogle,
       signOut,
     }),
-    [enabled, loading, session, signInEmail, signOut],
+    [enabled, loading, session, signInEmail, signInGoogle, signOut],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -97,6 +121,9 @@ export function useAuth(): AuthContextValue {
     session: null,
     user: null,
     signInEmail: async () => {
+      throw new Error("Sign-in is not configured.");
+    },
+    signInGoogle: async () => {
       throw new Error("Sign-in is not configured.");
     },
     signOut: async () => {},

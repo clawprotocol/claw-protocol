@@ -14,7 +14,12 @@ import {
   detectExecutionHeadingMetadataLeak,
   repairExecutionBlockEntityHeadingLines,
 } from "./paidProExecutionBlockEntityHeading";
-import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
+import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
+import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
+import { repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
+import { ensureBlankLineBeforeWitnessBlock } from "./paidProExecutionBlockNormalization";
+import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { shouldUsePaidProSourceOfTruthDisplayOnly, resolvePaidProAuthoritativeDisplayPlain, type ResolvePaidProAuthoritativeDisplayPlainArgs } from "./paidProAuthoritativeRenderGate";
 import { enrichPaidProPostFinalizeDisplayCorpus } from "./paidProPostFinalizeReviewSurface";
@@ -34,12 +39,45 @@ export function isPaidProUserVisibleDocumentSurface(surface: string): boolean {
   return !TRANSPORT_ONLY_SURFACES.has(surface);
 }
 
+/**
+ * Paid Pro Frozen SoT display projection (ADR-020):
+ * Deterministic, non-persistent, presentation-only transforms on the frozen corpus.
+ * Must not hydrate notices, rebuild execution blocks, or add substantive legal text.
+ * Idempotent: project(project(SoT)) === project(SoT).
+ */
+export function projectPaidProFrozenSoTDisplayPlain(text: string): string {
+  let out = (text || "").replace(/\r\n/g, "\n").trimEnd();
+  if (!out) return out;
+
+  const titleOpening = repairPaidProDocumentTitleOpening(out);
+  if (titleOpening.repairs.length > 0) out = titleOpening.text;
+
+  const splitTail = repairSplitPaidProHeadingFragments(out);
+  if (splitTail.repairs.length > 0) out = splitTail.text;
+
+  const sectionAny = repairMalformedSectionAnyReference(out);
+  if (sectionAny.repaired) out = sectionAny.text;
+
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const inlineSignatures = out.replace(/([.!?])\s+\bSIGNATURES\b\s*$/gim, "$1");
+    if (inlineSignatures !== out) out = inlineSignatures;
+  }
+
+  const witnessSep = ensureBlankLineBeforeWitnessBlock(out);
+  if (witnessSep.repairs.length > 0) out = witnessSep.text;
+
+  const collapsedNotices = repairCollapsedInlineNoticeStanzas(out);
+  if (collapsedNotices.repairs.length > 0) out = collapsedNotices.text;
+
+  return out.replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
 /** Display-only section/heading normalization — idempotent on well-formatted corpora. */
 export function applyPaidProUserVisibleDisplayPrep(plain: string): string {
   const body = (plain || "").trim();
   if (body.length < 80) return body;
   if (isPaidProPostFinalizeHydratedCorpusLocked() || shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return preparePaidProFrozenDisplayPlain(body).text.trimEnd();
+    return projectPaidProFrozenSoTDisplayPlain(body);
   }
   return preparePaidProReviewDisplayPlain(body).text.trimEnd();
 }

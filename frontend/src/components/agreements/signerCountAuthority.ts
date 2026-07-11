@@ -335,9 +335,11 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   }
 
   let finalCount = Math.max(2, Math.min(count, PAID_PRO_AUTHORITY_MAX_PARTIES));
+  const intakeManifestAuthorityCount = resolveIntakeManifestAuthorityCount(intake);
   if (intake && intakeDescribesBrandLicensingDistributionManufacturingStack(intake)) {
     const quadNames = resolveDeterministicQuadPartyNames(intake, null).filter(isAuthoritativeLegalEntityName);
-    if (quadNames.length >= 4) {
+    // TEST538 / TEST427 — five-party revenue-share intakes must not be capped to quad-party brand stacks.
+    if (quadNames.length >= 4 && intakeManifestAuthorityCount <= 4) {
       finalCount = Math.min(finalCount, 4);
     }
   }
@@ -348,7 +350,6 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   // a contaminated manifestPartyCount from an inflated reviewParties list, a consumed/frozen
   // authority that captured a phantom party, or a preview-repair "Party 1" placeholder — may push
   // the authority count above N. User-driven expansion beyond the manifest is still honored.
-  const intakeManifestAuthorityCount = resolveIntakeManifestAuthorityCount(intake);
   const userExpandedPartyCount = Math.max(0, args.userExpandedPartyCount ?? 0);
   if (intakeManifestAuthorityCount >= 2 && userExpandedPartyCount <= intakeManifestAuthorityCount) {
     finalCount = Math.min(finalCount, Math.min(intakeManifestAuthorityCount, PAID_PRO_AUTHORITY_MAX_PARTIES));

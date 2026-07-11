@@ -323,7 +323,17 @@ export function validatePremiumAgreementStructure(text: string): PremiumStructur
   if (completeness.missingIntermediateSections.length > 0) {
     issues.push({
       code: "missing_intermediate_sections",
-      message: `Missing intermediate sections: ${completeness.missingIntermediateSections.slice(0, 6).join(", ")}`,
+      message: `Missing ancestor subsections: ${completeness.missingIntermediateSections.slice(0, 6).join(", ")}`,
+    });
+  }
+  if (completeness.sequenceGaps.length > 0) {
+    const gapSummary = completeness.sequenceGaps
+      .slice(0, 4)
+      .map((g) => `${g.parentMajor}:[${g.missingSiblings.slice(0, 4).join(",")}]`)
+      .join("; ");
+    issues.push({
+      code: "section_sequence_gaps",
+      message: `Non-contiguous subsection numbering: ${gapSummary}`,
     });
   }
   if (completeness.truncatedFamilies.length > 0) {

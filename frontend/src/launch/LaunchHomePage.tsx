@@ -36,6 +36,7 @@ import { logProductEvent } from "../lib/experimentation/productEvents";
 import { markLawdogFunnelStep } from "../tracking/lawdogSession";
 import { clearPaidDashboardCreateContext } from "./paidDashboardCreateContext";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
+import { bootstrapWorkspaceOrg } from "./orgContext";
 import { prepareFreshMarketingEntry } from "./marketingSession";
 import {
   getLawdogEntryContextStored,
@@ -178,6 +179,7 @@ export function LaunchHomePage() {
     setHomeTransitionActive(true);
     setHandoffBusy(true);
     try {
+      await bootstrapWorkspaceOrg();
       initializeNewAgreementSession();
       prepareFreshMarketingEntry();
       clearCreateComplexityResume();
@@ -214,7 +216,7 @@ export function LaunchHomePage() {
         ) : null}
 
         <header id="claw-hero-entry" className="mx-auto max-w-3xl lg:max-w-4xl">
-          <div className="mb-4 flex justify-center sm:justify-start">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <button
               type="button"
               className="inline-flex items-center rounded-md border border-transparent p-0.5 transition hover:border-slate-200 hover:bg-slate-50/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600/40"
@@ -222,6 +224,16 @@ export function LaunchHomePage() {
               aria-label="LawDog — open app"
             >
               <LawdogBrand variant="wordmark" size="md" surface="light" />
+            </button>
+            <button
+              type="button"
+              className="shrink-0 text-sm font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600/50"
+              onClick={() => {
+                logProductEvent("dashboard_sign_in_initiated", { surface: "homepage" });
+                navigate("/app/sign-in");
+              }}
+            >
+              Sign in
             </button>
           </div>
 

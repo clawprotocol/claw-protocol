@@ -3,6 +3,10 @@
 import { execSync } from "node:child_process";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import {
+  PAID_PRO_PIPELINE_LONG_INCLUDE,
+  PAID_PRO_PIPELINE_LONG_TEST_TIMEOUT_MS,
+} from "./vitest.paidProPipelineLong.config";
 
 // Build/deploy discriminator baked into caches whose entries must never survive a code deploy
 // (e.g. the paid Pro safe-display memo). Changes every commit so a new build can never replay a
@@ -27,8 +31,24 @@ export default defineConfig({
   },
   plugins: [react()],
   test: {
-    environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    projects: [
+      {
+        test: {
+          name: "default",
+          include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+          exclude: [...PAID_PRO_PIPELINE_LONG_INCLUDE],
+          environment: "node",
+        },
+      },
+      {
+        test: {
+          name: "paid-pro-pipeline-long",
+          include: [...PAID_PRO_PIPELINE_LONG_INCLUDE],
+          environment: "node",
+          testTimeout: PAID_PRO_PIPELINE_LONG_TEST_TIMEOUT_MS,
+        },
+      },
+    ],
   },
   server: {
     // Allow any host in dev (Railway preview, LAN, localhost). Set VITE_DEV_ALLOWED_HOST to restrict.

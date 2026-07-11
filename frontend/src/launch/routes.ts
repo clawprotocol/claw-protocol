@@ -16,6 +16,8 @@ export type AppSection =
   | { kind: "billing" }
   | { kind: "affiliate" }
   | { kind: "settings" }
+  | { kind: "signIn" }
+  | { kind: "authCallback" }
   | { kind: "signatures" }
   | { kind: "opportunity" }
   | { kind: "agreementMemory" }
@@ -43,6 +45,8 @@ export function matchAppPath(pathname: string): AppSection | null {
   if (p === "/app/billing") return { kind: "billing" };
   if (p === "/app/affiliate") return { kind: "affiliate" };
   if (p === "/app/settings") return { kind: "settings" };
+  if (p === "/app/sign-in") return { kind: "signIn" };
+  if (p === "/app/auth/callback") return { kind: "authCallback" };
   if (p === "/app/signatures") return { kind: "signatures" };
   if (p === "/app/opportunity") return { kind: "opportunity" };
   if (p === "/app/agreement-memory") return { kind: "agreementMemory" };

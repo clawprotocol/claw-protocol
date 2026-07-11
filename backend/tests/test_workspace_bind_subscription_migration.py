@@ -56,7 +56,10 @@ def _activate_pro_on_org(eco, org_id: str, user_id: str | None = None) -> None:
     )
 
 
-def test_bind_user_org_migrates_subscription_from_local_org(isolated_stores):
+from backend.tests.conftest_auth_security import make_authenticated_user_headers, make_test_auth_headers
+
+def test_bind_user_org_migrates_subscription_from_local_org(isolated_stores, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     eco, _usage = isolated_stores
     client = TestClient(app)
     user_id = "supabase-user-488"
@@ -66,6 +69,7 @@ def test_bind_user_org_migrates_subscription_from_local_org(isolated_stores):
 
     res = client.post(
         "/v1/workspace/bind-user-org",
+        headers=make_test_auth_headers(user_id),
         json={
             "user_id": user_id,
             "previous_org_id": "local-org",
@@ -91,6 +95,7 @@ def test_paid_user_workspace_org_can_create_draft_after_bind(isolated_stores):
     _activate_pro_on_org(eco, "local-org", user_id=user_id)
     client.post(
         "/v1/workspace/bind-user-org",
+        headers=make_test_auth_headers(user_id),
         json={
             "user_id": user_id,
             "previous_org_id": "local-org",
@@ -99,7 +104,7 @@ def test_paid_user_workspace_org_can_create_draft_after_bind(isolated_stores):
     )
 
     # Seed two incomplete drafts — paid users should not hit free cap.
-    h = {"X-Claw-Org-Id": stable_org}
+    h = make_authenticated_user_headers(user_id)
     draft_body = {
         "title": "T",
         "jurisdiction": "CA",
@@ -168,6 +173,7 @@ def test_already_bound_user_repair_from_local_org_on_reload(isolated_stores):
 
     res = client.post(
         "/v1/workspace/bind-user-org",
+        headers=make_test_auth_headers(user_id),
         json={
             "user_id": user_id,
             "previous_org_id": stable_org,
@@ -179,7 +185,7 @@ def test_already_bound_user_repair_from_local_org_on_reload(isolated_stores):
     assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is True
 
     h = {
-        "X-Claw-Org-Id": stable_org,
+        **make_authenticated_user_headers(user_id),
         "X-Claw-Entitlement-Repair-Org": "local-org",
     }
     r = client.post(
@@ -213,7 +219,7 @@ def test_draft_post_repair_header_normalizes_org_prefix(isolated_stores):
     )
 
     h = {
-        "X-Claw-Org-Id": stable_org,
+        **make_authenticated_user_headers(user_id),
         "X-Claw-Entitlement-Repair-Org": "org:local-org",
     }
     r = client.post(
@@ -248,7 +254,7 @@ def test_draft_post_auto_repair_without_client_header_when_bound_has_agreements(
         internal_keys_draft=1,
     )
 
-    h = {"X-Claw-Org-Id": stable_org}
+    h = make_authenticated_user_headers(user_id)
     r = client.post(
         "/api/agreements/draft",
         headers=h,
