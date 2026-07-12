@@ -16,7 +16,9 @@ import {
   markPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import { setCachedAccessToken, clearCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { markAuthenticatedWorkspaceSession } from "../../launch/completedAgreementViewContext";
+import { setOrgId } from "../../launch/orgContext";
 import {
   clearPaidDashboardCreateContextForTests,
   DASHBOARD_PAID_CREATE_ROUTE_SOURCE,
@@ -67,6 +69,8 @@ describe("TEST524 — dashboard_paid_create canonical screen flow", () => {
     clearPaidProPipelineAcceptedCorpusHashForTests();
     clearPaidDashboardCreateContextForTests();
     markAuthenticatedWorkspaceSession();
+    setOrgId("user-test-524");
+    setCachedAccessToken("test-token-524");
     getOrInitSessionAgreementGenerationId();
     markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
     vi.stubGlobal("location", { ...window.location, pathname: "/app/create" });

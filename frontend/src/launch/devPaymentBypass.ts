@@ -46,6 +46,11 @@ export type QaPaymentBypassState = {
 };
 
 const QA_PAYMENT_BYPASS_ENABLED = "1";
+
+/** Explicit parser — only `"1"` enables QA payment bypass (never generic truthiness). */
+export function parseLawdogQaPaymentBypassEnabled(raw: string | undefined | null): boolean {
+  return String(raw ?? "").trim() === QA_PAYMENT_BYPASS_ENABLED;
+}
 const QA_ORIGIN_TOKEN = /(^|[.-])(qa|stage|staging|preview|review|railway)([.-]|$)/i;
 const NON_PRODUCTION_ENV_NAMES = new Set([
   "dev",
@@ -156,7 +161,7 @@ export function resolveQaPaymentBypassState(
   const recognizedOrigin = isRecognizedQaPaymentBypassOrigin(origin);
   const explicitNonProductionEnv = isExplicitNonProductionEnv(deploymentEnv);
   const publicProduction = isPublicProductionOrigin(origin);
-  const envFlag = envValue === QA_PAYMENT_BYPASS_ENABLED;
+  const envFlag = parseLawdogQaPaymentBypassEnabled(envValue);
   const originOrDeployment = recognizedOrigin || explicitNonProductionEnv;
 
   const base = { origin, prod, envValue, deploymentEnv };

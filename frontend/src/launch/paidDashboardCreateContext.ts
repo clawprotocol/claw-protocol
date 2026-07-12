@@ -3,11 +3,15 @@
  * Scoped to org + /app/create read. Public homepage entry must clear this marker.
  */
 
+import { getCachedAccessToken, setCachedAccessToken } from "../auth/authAccessTokenCache";
 import {
-  readAuthenticatedWorkspaceSession,
+  markAuthenticatedWorkspaceSession,
   readSignedInAuthenticatedWorkspaceSession,
 } from "./completedAgreementViewContext";
-import { getOrgId } from "./orgContext";
+import { getOrgId, setOrgId } from "./orgContext";
+import { tierAllowsAdvancedFullDraftReveal } from "../components/agreements/agreementAdvancedDraftAccess";
+import { subscriptionTierForAccess } from "../access/subscriptionEntitlementCache";
+import { readCachedWorkspaceProEntitlement } from "../agreement/agreementProFunnelGate";
 
 const KEY = "claw_paid_dashboard_create_context_v1";
 
@@ -144,6 +148,118 @@ export function isPublicMarketingPath(pathname: string): boolean {
   return p === "/" || p === "/home";
 }
 
+export type PaidDashboardCreateOrgIdClass = "user" | "anon" | "local" | "other" | "empty";
+
+export function classifyPaidDashboardCreateOrgId(orgId?: string | null): PaidDashboardCreateOrgIdClass {
+  const oid = (orgId ?? "").trim();
+  if (!oid) return "empty";
+  if (oid.startsWith("user-")) return "user";
+  if (oid.startsWith("anon-")) return "anon";
+  if (oid === "local-org") return "local";
+  return "other";
+}
+
+/** Homepage hero handoff — must never resurrect paid-dashboard create context. */
+export function isHeroFromHomeCreateEntry(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const state = window.history.state as Record<string, unknown> | null;
+    return state?.clawHeroFromHome === true;
+  } catch {
+    return false;
+  }
+}
+
+function hasAuthoritativePaidEntitlementForMarker(): boolean {
+  const tier = subscriptionTierForAccess();
+  if (tier && tierAllowsAdvancedFullDraftReveal(tier)) return true;
+  return readCachedWorkspaceProEntitlement();
+}
+
+export type PaidDashboardCreateContextWriteDecision = {
+  allowed: boolean;
+  reason: string;
+  orgIdClass: PaidDashboardCreateOrgIdClass;
+  hasAuthenticatedUser: boolean;
+  hasSupabaseToken: boolean;
+  hasAuthoritativePaidEntitlement: boolean;
+  heroFromHome: boolean;
+};
+
+export function evaluatePaidDashboardCreateContextWrite(
+  source: PaidDashboardCreateContextSource | string,
+): PaidDashboardCreateContextWriteDecision {
+  const orgId = getOrgId().trim();
+  const orgIdClass = classifyPaidDashboardCreateOrgId(orgId);
+  const hasSupabaseToken = Boolean(getCachedAccessToken().trim());
+  const hasAuthenticatedUser = readSignedInAuthenticatedWorkspaceSession();
+  const heroFromHome = isHeroFromHomeCreateEntry();
+  const hasAuthoritativePaidEntitlement = hasAuthoritativePaidEntitlementForMarker();
+  const base = {
+    orgIdClass,
+    hasAuthenticatedUser,
+    hasSupabaseToken,
+    hasAuthoritativePaidEntitlement,
+    heroFromHome,
+  };
+  if (heroFromHome) {
+    return { ...base, allowed: false, reason: "hero_from_home_starter" };
+  }
+  if (!hasAuthenticatedUser) {
+    return { ...base, allowed: false, reason: "unsigned_workspace" };
+  }
+  if (orgIdClass === "local" || orgIdClass === "anon" || orgIdClass === "empty") {
+    return { ...base, allowed: false, reason: `anonymous_org:${orgIdClass}` };
+  }
+  if (!orgId.startsWith("user-") && !hasSupabaseToken) {
+    return { ...base, allowed: false, reason: "missing_user_org_and_token" };
+  }
+  void source;
+  return { ...base, allowed: true, reason: "signed_in_workspace" };
+}
+
+function isStoredPaidDashboardCreateContextEligible(
+  stored: PaidDashboardCreateContextMarker,
+): boolean {
+  return evaluatePaidDashboardCreateContextWrite(stored.source).allowed;
+}
+
+export function logPaidDashboardCreateContextWrite(args: {
+  action: "set" | "restore" | "clear" | "reject";
+  requestedSource?: string | null;
+  acceptedSource?: string | null;
+  originPath?: string | null;
+  destinationPath?: string | null;
+  target?: string | null;
+  reason?: string | null;
+  decision?: PaidDashboardCreateContextWriteDecision;
+}): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const decision =
+    args.decision ??
+    (args.requestedSource
+      ? evaluatePaidDashboardCreateContextWrite(args.requestedSource)
+      : undefined);
+  // eslint-disable-next-line no-console
+  console.info("[paid-dashboard-create-context-write]", {
+    action: args.action,
+    requestedSource: args.requestedSource ?? null,
+    acceptedSource: args.acceptedSource ?? null,
+    originPath: args.originPath ?? null,
+    destinationPath:
+      args.destinationPath ??
+      (typeof window !== "undefined" ? window.location.pathname : null),
+    orgIdClass: decision?.orgIdClass ?? classifyPaidDashboardCreateOrgId(getOrgId()),
+    hasAuthenticatedUser: decision?.hasAuthenticatedUser ?? readSignedInAuthenticatedWorkspaceSession(),
+    hasSupabaseToken: decision?.hasSupabaseToken ?? Boolean(getCachedAccessToken().trim()),
+    hasAuthoritativePaidEntitlement:
+      decision?.hasAuthoritativePaidEntitlement ?? hasAuthoritativePaidEntitlementForMarker(),
+    heroFromHome: decision?.heroFromHome ?? isHeroFromHomeCreateEntry(),
+    target: args.target ?? null,
+    reason: args.reason ?? decision?.reason ?? null,
+  });
+}
+
 function readStoredPaidDashboardCreateMarker(): PaidDashboardCreateContextMarker | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
@@ -211,11 +327,26 @@ export function logFatalMissingPaidDashboardCreateMarker(args: {
 
 export function markPaidDashboardCreateContext(
   source: PaidDashboardCreateContextSource | string,
+  opts?: { originPath?: string | null; destinationPath?: string | null; target?: string | null },
 ): boolean {
   if (typeof sessionStorage === "undefined") return false;
+  const decision = evaluatePaidDashboardCreateContextWrite(source);
+  const storedSource = normalizeDashboardPaidCreateSource(source);
+  if (!decision.allowed) {
+    logPaidDashboardCreateContextWrite({
+      action: "reject",
+      requestedSource: source,
+      acceptedSource: null,
+      originPath: opts?.originPath ?? null,
+      destinationPath: opts?.destinationPath ?? null,
+      target: opts?.target ?? null,
+      reason: decision.reason,
+      decision,
+    });
+    return false;
+  }
   const oid = getOrgId().trim();
   if (!oid) return false;
-  const storedSource = normalizeDashboardPaidCreateSource(source);
   try {
     const marker: PaidDashboardCreateContextMarker = {
       v: 1,
@@ -224,6 +355,16 @@ export function markPaidDashboardCreateContext(
       markedAt: Date.now(),
     };
     sessionStorage.setItem(KEY, JSON.stringify(marker));
+    logPaidDashboardCreateContextWrite({
+      action: "set",
+      requestedSource: source,
+      acceptedSource: storedSource,
+      originPath: opts?.originPath ?? null,
+      destinationPath: opts?.destinationPath ?? null,
+      target: opts?.target ?? null,
+      reason: decision.reason,
+      decision,
+    });
     logPaidDashboardCreateContext({
       active: true,
       source: storedSource,
@@ -240,6 +381,12 @@ export function clearPaidDashboardCreateContext(reason?: string): void {
   if (typeof sessionStorage === "undefined") return;
   try {
     sessionStorage.removeItem(KEY);
+    logPaidDashboardCreateContextWrite({
+      action: "clear",
+      requestedSource: reason ? `cleared:${reason}` : null,
+      acceptedSource: null,
+      reason: reason ?? "cleared",
+    });
     logPaidDashboardCreateContext({
       active: false,
       source: reason ? `cleared:${reason}` : null,
@@ -255,6 +402,20 @@ export function readPaidDashboardCreateContext(): PaidDashboardCreateContextMark
   if (!oid) return null;
   const stored = readStoredPaidDashboardCreateMarker();
   if (!stored || stored.orgId !== oid) return null;
+  if (!isStoredPaidDashboardCreateContextEligible(stored)) {
+    logPaidDashboardCreateContextWrite({
+      action: "reject",
+      requestedSource: stored.source,
+      acceptedSource: null,
+      reason: isHeroFromHomeCreateEntry()
+        ? "hero_from_home_stale_marker"
+        : evaluatePaidDashboardCreateContextWrite(stored.source).reason,
+    });
+    clearPaidDashboardCreateContext(
+      isHeroFromHomeCreateEntry() ? "hero_from_home_stale_marker" : "rejected_stale_marker",
+    );
+    return null;
+  }
   return stored;
 }
 
@@ -265,13 +426,11 @@ export function hasPaidDashboardCreateContextActive(): boolean {
 /** Log marker state on /app/create mount — before starter gate can run. */
 export function logPaidDashboardCreateContextOnMount(): void {
   if (!isAppCreatePath()) return;
-  const oid = getOrgId().trim();
-  const stored = readStoredPaidDashboardCreateMarker();
-  const active = Boolean(stored && stored.orgId === oid);
+  const ctx = readPaidDashboardCreateContext();
   logPaidDashboardCreateContext({
-    active,
-    source: active ? stored!.source : null,
-    orgId: oid,
+    active: Boolean(ctx),
+    source: ctx?.source ?? null,
+    orgId: getOrgId().trim(),
     path: typeof window !== "undefined" ? window.location.pathname : null,
   });
 }
@@ -297,13 +456,22 @@ export function shouldFailClosedBypassForAuthenticatedWorkspaceCreate(): boolean
   return true;
 }
 
-/** Vitest: seed marker without navigation. */
+/** Vitest: seed marker without navigation (uses signed-in user org by default). */
 export function markPaidDashboardCreateContextForTests(
   source: PaidDashboardCreateContextSource | string = DASHBOARD_PAID_CREATE_ROUTE_SOURCE,
   orgId?: string,
 ): void {
   if (typeof sessionStorage === "undefined") return;
-  const oid = (orgId ?? getOrgId()).trim() || "test-org";
+  const explicitOrg = orgId?.trim();
+  let oid = explicitOrg || getOrgId().trim() || "user-test-org";
+  if (!explicitOrg && classifyPaidDashboardCreateOrgId(oid) !== "user") {
+    oid = "user-test-org";
+  }
+  if (classifyPaidDashboardCreateOrgId(oid) === "user") {
+    setOrgId(oid);
+    markAuthenticatedWorkspaceSession();
+    setCachedAccessToken("test-dashboard-token");
+  }
   const marker: PaidDashboardCreateContextMarker = {
     v: 1,
     orgId: oid,

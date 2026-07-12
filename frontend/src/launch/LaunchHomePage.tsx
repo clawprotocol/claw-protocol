@@ -182,6 +182,7 @@ export function LaunchHomePage() {
       await bootstrapWorkspaceOrg();
       initializeNewAgreementSession();
       prepareFreshMarketingEntry();
+      clearPaidDashboardCreateContext("home_create_submit");
       clearCreateComplexityResume();
       setLawdogEntryContext("drafting");
       logHomeCreateSubmit(merged);

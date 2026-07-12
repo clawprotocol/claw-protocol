@@ -6,7 +6,9 @@ import {
   invalidateWorkspaceProEntitlementCache,
   markWorkspaceProEntitlementResolvedForTests,
 } from "../../agreement/agreementProFunnelGate";
+import { setCachedAccessToken, clearCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { markAuthenticatedWorkspaceSession } from "../../launch/completedAgreementViewContext";
+import { setOrgId } from "../../launch/orgContext";
 import {
   clearPaidDashboardCreateContextForTests,
   markPaidDashboardCreateContext,
@@ -47,6 +49,8 @@ describe("TEST517 — production create route module graph (founder → Create)"
     markWorkspaceProEntitlementResolvedForTests(null);
     clearPaidDashboardCreateContextForTests();
     markAuthenticatedWorkspaceSession();
+    setOrgId("user-test-517");
+    setCachedAccessToken("test-token-517");
   });
 
   afterEach(() => {

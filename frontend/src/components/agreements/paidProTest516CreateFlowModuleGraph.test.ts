@@ -6,7 +6,9 @@ import {
   invalidateWorkspaceProEntitlementCache,
   markWorkspaceProEntitlementResolvedForTests,
 } from "../../agreement/agreementProFunnelGate";
+import { setCachedAccessToken, clearCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { markAuthenticatedWorkspaceSession } from "../../launch/completedAgreementViewContext";
+import { setOrgId } from "../../launch/orgContext";
 import {
   clearPaidDashboardCreateContextForTests,
   markPaidDashboardCreateContext,
@@ -27,6 +29,8 @@ describe("TEST516 — /app/create module graph loads without TDZ", () => {
     markWorkspaceProEntitlementResolvedForTests(null);
     clearPaidDashboardCreateContextForTests();
     markAuthenticatedWorkspaceSession();
+    setOrgId("user-test-516");
+    setCachedAccessToken("test-token-516");
   });
 
   afterEach(() => {

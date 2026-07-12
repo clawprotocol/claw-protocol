@@ -133,7 +133,11 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
         markSource =
           options?.paidDashboardCreateSource?.trim() ||
           (isAuthenticatedWorkspacePath(originPathname) ? "workspace_nav_create" : "dashboard_nav");
-        marked = markPaidDashboardCreateContext(markSource);
+        marked = markPaidDashboardCreateContext(markSource, {
+          originPath: originPathname,
+          destinationPath: pathOnly,
+          target: options?.heroAutoGenerate ? "starter_review" : null,
+        });
       } else if (isPublicMarketingPath(originPathname)) {
         clearPaidDashboardCreateContext("public_marketing_origin");
         cleared = true;

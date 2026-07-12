@@ -5,6 +5,7 @@ import {
   isRecognizedQaPaymentBypassOrigin,
   logDevPaymentBypassState,
   logQaPaymentBypassState,
+  parseLawdogQaPaymentBypassEnabled,
   resolveDevPaymentBypassState,
   resolveQaPaymentBypassState,
 } from "./devPaymentBypass";
@@ -95,6 +96,17 @@ describe("isDevCreateFlowPaymentBypassEnabled", () => {
       }),
     ).toBe(true);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("parseLawdogQaPaymentBypassEnabled", () => {
+  it("enables only for explicit 1 — never generic truthiness", () => {
+    expect(parseLawdogQaPaymentBypassEnabled(undefined)).toBe(false);
+    expect(parseLawdogQaPaymentBypassEnabled("")).toBe(false);
+    expect(parseLawdogQaPaymentBypassEnabled("0")).toBe(false);
+    expect(parseLawdogQaPaymentBypassEnabled("false")).toBe(false);
+    expect(parseLawdogQaPaymentBypassEnabled("true")).toBe(false);
+    expect(parseLawdogQaPaymentBypassEnabled("1")).toBe(true);
   });
 });
 

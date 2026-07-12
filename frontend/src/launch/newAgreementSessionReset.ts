@@ -24,6 +24,7 @@ import { readSignedInAuthenticatedWorkspaceSession } from "./completedAgreementV
 import {
   hasPaidDashboardCreateContextActive,
   isAppCreatePath,
+  isHeroFromHomeCreateEntry,
   markDashboardPaidCreateRoute,
   markDirectAuthenticatedCreateBootstrapAttempted,
 } from "./paidDashboardCreateContext";
@@ -205,6 +206,7 @@ export type DirectAuthenticatedCreateEntryBootstrapResult = {
 export function bootstrapDirectAuthenticatedCreateEntryIfNeeded(): DirectAuthenticatedCreateEntryBootstrapResult {
   if (typeof window === "undefined") return { bootstrapped: false, reason: "no_window" };
   if (!isAppCreatePath()) return { bootstrapped: false, reason: "not_app_create" };
+  if (isHeroFromHomeCreateEntry()) return { bootstrapped: false, reason: "hero_from_home" };
   // Dashboard → Create already set the marker (and ran initializeNewAgreementSession) — nothing to do.
   if (hasPaidDashboardCreateContextActive()) return { bootstrapped: false, reason: "marker_present" };
   // Only signed-in workspace users take the paid create route; anonymous/public keeps free starter.

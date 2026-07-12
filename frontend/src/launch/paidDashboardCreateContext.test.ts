@@ -2,12 +2,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setCachedAccessToken, clearCachedAccessToken } from "../auth/authAccessTokenCache";
 import {
   invalidateWorkspaceProEntitlementCache,
   markWorkspaceProEntitlementResolvedForTests,
 } from "../agreement/agreementProFunnelGate";
 import { markAuthenticatedWorkspaceSession } from "./completedAgreementViewContext";
-import { getOrgId } from "./orgContext";
+import { getOrgId, setOrgId } from "./orgContext";
 import {
   clearPaidDashboardCreateContextForTests,
   hasPaidDashboardCreateContextActive,
@@ -43,19 +44,27 @@ const intakeSrc = readFileSync(
 const appShellSrc = readFileSync(join(__dirname, "AppShell.tsx"), "utf8");
 const navSrc = readFileSync(join(__dirname, "LaunchNavContext.tsx"), "utf8");
 
+function seedSignedInDashboardUser(orgId = "user-test-dashboard"): void {
+  setOrgId(orgId);
+  markAuthenticatedWorkspaceSession();
+  setCachedAccessToken("test-dashboard-token");
+}
+
 describe("TEST510 — /founder top nav Create sets paid-dashboard marker before submit", () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    clearCachedAccessToken();
     invalidateWorkspaceProEntitlementCache();
     markWorkspaceProEntitlementResolvedForTests(null);
     clearPaidDashboardCreateContextForTests();
-    markAuthenticatedWorkspaceSession();
+    seedSignedInDashboardUser();
   });
 
   afterEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    clearCachedAccessToken();
     invalidateWorkspaceProEntitlementCache();
     markWorkspaceProEntitlementResolvedForTests(null);
     clearPaidDashboardCreateContextForTests();
@@ -147,7 +156,7 @@ describe("TEST510 — /founder top nav Create sets paid-dashboard marker before 
     markPaidDashboardCreateContextForTests("founder_top_nav_create", "org-a");
     vi.stubGlobal("location", { ...window.location, pathname: "/app/create" });
     expect(hasPaidDashboardCreateContextActive()).toBe(false);
-    markPaidDashboardCreateContextForTests("founder_top_nav_create", getOrgId().trim() || "test-org");
+    markPaidDashboardCreateContextForTests("founder_top_nav_create", getOrgId().trim() || "user-test-dashboard");
     expect(hasPaidDashboardCreateContextActive()).toBe(true);
   });
 });
@@ -156,10 +165,11 @@ describe("TEST509 — paid Dashboard → Create context bypasses public 4-party 
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    clearCachedAccessToken();
     invalidateWorkspaceProEntitlementCache();
     markWorkspaceProEntitlementResolvedForTests(null);
     clearPaidDashboardCreateContextForTests();
-    markAuthenticatedWorkspaceSession();
+    seedSignedInDashboardUser("user-test-509");
     vi.stubGlobal("location", {
       ...window.location,
       pathname: "/app/create",
@@ -169,6 +179,7 @@ describe("TEST509 — paid Dashboard → Create context bypasses public 4-party 
   afterEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    clearCachedAccessToken();
     invalidateWorkspaceProEntitlementCache();
     markWorkspaceProEntitlementResolvedForTests(null);
     clearPaidDashboardCreateContextForTests();
@@ -176,7 +187,7 @@ describe("TEST509 — paid Dashboard → Create context bypasses public 4-party 
   });
 
   it("paid dashboard create marker makes provisional paid true with all billing probes false", () => {
-    markPaidDashboardCreateContextForTests("dashboard_new_agreement");
+    markPaidDashboardCreateContextForTests("dashboard_new_agreement", "user-test-509");
     expect(hasPaidDashboardCreateContextActive()).toBe(true);
     expect(resolveProvisionalWorkspaceProEntitledForCreate()).toBe(true);
     const decision = resolvePaidCreateGateBypassDecision({
@@ -190,7 +201,7 @@ describe("TEST509 — paid Dashboard → Create context bypasses public 4-party 
   });
 
   it("authoritative review shell resolves paid_pro from dashboard create marker on /app/create", () => {
-    markPaidDashboardCreateContextForTests("dashboard_new_agreement");
+    markPaidDashboardCreateContextForTests("dashboard_new_agreement", "user-test-509");
     expect(
       resolveAuthoritativeCreateFlowReviewShell({
         workspaceProEntitled: false,

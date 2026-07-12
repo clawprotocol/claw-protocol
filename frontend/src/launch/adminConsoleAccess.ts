@@ -3,6 +3,7 @@ import { isLocalBrowserOrigin } from "../lib/clawApi";
 import {
   isPublicProductionHostname,
   isRecognizedQaPaymentBypassOrigin,
+  parseLawdogQaPaymentBypassEnabled,
   type DevPaymentBypassEnv,
 } from "./devPaymentBypass";
 
@@ -20,7 +21,7 @@ export function isAdminConsoleDeploymentEnabled(env?: DevPaymentBypassEnv): bool
   const e = readEnv(env);
   return (
     featureFlags.adminConsoleUi ||
-    e.VITE_LAWDOG_QA_PAYMENT_BYPASS === QA_OPERATOR_DEPLOYMENT_FLAG ||
+    parseLawdogQaPaymentBypassEnabled(e.VITE_LAWDOG_QA_PAYMENT_BYPASS) ||
     isPublicProductionAdminConsoleHost()
   );
 }
