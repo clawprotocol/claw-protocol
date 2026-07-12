@@ -183,7 +183,8 @@ export type DirectAuthenticatedCreateEntryBootstrapResult = {
     | "sot_active"
     | "resume_active"
     | "mark_failed"
-    | "direct_entry_bootstrapped";
+    | "direct_entry_bootstrapped"
+    | "hero_from_home";
 };
 
 /**

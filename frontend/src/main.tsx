@@ -10,6 +10,7 @@ import { warnIfProductionMissingPrivacyInbox } from "./launch/legal/privacyInbox
 import { initLawdogLocalhostDevGating } from "./launch/lawdogLocalDevGating";
 import { isProductionApiMisconfigured } from "./lib/clawApi";
 import { startApiReachabilityPolling } from "./lib/apiReachability";
+import { logFrontendBuildIdentity } from "./lib/frontendBuildIdentity";
 // Legacy full app (e‑sign, timelines, etc.): import App from "./App"; then <App />
 
 warnIfProductionMissingPrivacyInbox();
@@ -20,6 +21,7 @@ if (isProductionApiMisconfigured()) {
   );
 }
 startApiReachabilityPolling();
+logFrontendBuildIdentity();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

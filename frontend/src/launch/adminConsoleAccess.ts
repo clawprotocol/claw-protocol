@@ -7,8 +7,6 @@ import {
   type DevPaymentBypassEnv,
 } from "./devPaymentBypass";
 
-const QA_OPERATOR_DEPLOYMENT_FLAG = "1";
-
 function readEnv(env?: DevPaymentBypassEnv): DevPaymentBypassEnv {
   return env ?? (import.meta.env as DevPaymentBypassEnv);
 }

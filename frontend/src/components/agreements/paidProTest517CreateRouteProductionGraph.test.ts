@@ -6,7 +6,7 @@ import {
   invalidateWorkspaceProEntitlementCache,
   markWorkspaceProEntitlementResolvedForTests,
 } from "../../agreement/agreementProFunnelGate";
-import { setCachedAccessToken, clearCachedAccessToken } from "../../auth/authAccessTokenCache";
+import { setCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { markAuthenticatedWorkspaceSession } from "../../launch/completedAgreementViewContext";
 import { setOrgId } from "../../launch/orgContext";
 import {

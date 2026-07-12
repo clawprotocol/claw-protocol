@@ -16,7 +16,7 @@ import {
   markPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
-import { setCachedAccessToken, clearCachedAccessToken } from "../../auth/authAccessTokenCache";
+import { setCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { markAuthenticatedWorkspaceSession } from "../../launch/completedAgreementViewContext";
 import { setOrgId } from "../../launch/orgContext";
 import {

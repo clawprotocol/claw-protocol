@@ -1,12 +1,15 @@
 // frontend/vite.config.ts
 /// <reference types="vitest/config" />
 import { execSync } from "node:child_process";
-import { defineConfig } from "vite";
+import { writeFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import {
   PAID_PRO_PIPELINE_LONG_INCLUDE,
   PAID_PRO_PIPELINE_LONG_TEST_TIMEOUT_MS,
 } from "./vitest.paidProPipelineLong.config";
+import { resolveFrontendBuildIdentity } from "./src/lib/frontendBuildMeta";
 
 // Build/deploy discriminator baked into caches whose entries must never survive a code deploy
 // (e.g. the paid Pro safe-display memo). Changes every commit so a new build can never replay a
@@ -25,11 +28,64 @@ function resolvePaidProCacheBuildId(): string {
   return `t${Date.now()}`;
 }
 
+function resolveGitCommitFull(): string {
+  const fromEnv =
+    process.env.RAILWAY_GIT_COMMIT_SHA?.trim() ||
+    process.env.RAILWAY_GIT_COMMIT?.trim() ||
+    "";
+  if (fromEnv) return fromEnv;
+  try {
+    return execSync("git rev-parse HEAD", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
+function resolveGitCommitShort(fullSha: string): string {
+  const fromEnv = process.env.RAILWAY_GIT_COMMIT?.trim();
+  if (fromEnv && fromEnv.length <= 12) return fromEnv;
+  if (fullSha.length >= 7) return fullSha.slice(0, 7);
+  try {
+    return execSync("git rev-parse --short HEAD", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+  } catch {
+    return fullSha.slice(0, 7);
+  }
+}
+
+function emitFrontendVersionJsonPlugin(outDir: string): Plugin {
+  return {
+    name: "emit-frontend-version-json",
+    closeBundle() {
+      const identity = resolveFrontendBuildIdentity(process.env, {
+        gitCommit: resolveGitCommitFull(),
+        gitCommitShort: resolveGitCommitShort(resolveGitCommitFull()),
+        buildTimestamp: new Date().toISOString(),
+      });
+      writeFileSync(resolvePath(outDir, "version.json"), `${JSON.stringify(identity, null, 2)}\n`);
+    },
+  };
+}
+
+const frontendBuildIdentity = resolveFrontendBuildIdentity(process.env, {
+  gitCommit: resolveGitCommitFull(),
+  gitCommitShort: resolveGitCommitShort(resolveGitCommitFull()),
+  buildTimestamp: new Date().toISOString(),
+});
+
 export default defineConfig({
   define: {
     __PAID_PRO_CACHE_BUILD_ID__: JSON.stringify(resolvePaidProCacheBuildId()),
+    __FRONTEND_BUILD_IDENTITY__: JSON.stringify(frontendBuildIdentity),
   },
-  plugins: [react()],
+  plugins: [react(), emitFrontendVersionJsonPlugin("dist")],
   test: {
     projects: [
       {
