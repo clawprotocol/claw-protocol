@@ -9,6 +9,7 @@ export type FrontendBuildIdentity = {
 };
 
 export type FrontendBuildMetaEnv = {
+  [key: string]: string | undefined;
   RAILWAY_GIT_COMMIT_SHA?: string;
   RAILWAY_GIT_COMMIT?: string;
   VITE_LAWDOG_ENV?: string;
@@ -34,7 +35,7 @@ function shortSha(fullSha: string): string {
 
 /** Pure resolver — unit-tested; Vite/Railpack invoke at build time. */
 export function resolveFrontendBuildIdentity(
-  env: FrontendBuildMetaEnv = process.env as FrontendBuildMetaEnv,
+  env: FrontendBuildMetaEnv = process.env,
   opts?: { gitCommit?: string; gitCommitShort?: string; buildTimestamp?: string },
 ): FrontendBuildIdentity {
   const gitCommit = firstNonEmpty(
