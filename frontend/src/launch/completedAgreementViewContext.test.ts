@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { setCachedAccessToken, clearCachedAccessToken } from "../auth/authAccessTokenCache";
 import {
   clearAuthenticatedWorkspaceSession,
   extractAgreementIdFromViewSignedPath,
@@ -8,14 +9,22 @@ import {
   isRecipientSigningPublicSurface,
   markAuthenticatedWorkspaceSession,
   readAuthenticatedWorkspaceSession,
+  readSignedInAuthenticatedWorkspaceSession,
   resolveCompletedAgreementViewContext,
   shouldMarkWorkspaceSessionForPath,
   shouldShowBackToDashboard,
 } from "./completedAgreementViewContext";
+import { setOrgId } from "./orgContext";
 
 describe("completedAgreementViewContext", () => {
   beforeEach(() => {
     clearAuthenticatedWorkspaceSession();
+    clearCachedAccessToken();
+    setOrgId("local-org");
+  });
+
+  afterEach(() => {
+    clearCachedAccessToken();
   });
 
   it("marks workspace session only for in-app routes, not cold view-signed links", () => {
@@ -86,5 +95,18 @@ describe("completedAgreementViewContext", () => {
     expect(readAuthenticatedWorkspaceSession()).toBe(true);
     clearAuthenticatedWorkspaceSession();
     expect(readAuthenticatedWorkspaceSession()).toBe(false);
+  });
+
+  it("readSignedInAuthenticatedWorkspaceSession requires user-* org or access token", () => {
+    markAuthenticatedWorkspaceSession();
+    setOrgId("local-org");
+    expect(readSignedInAuthenticatedWorkspaceSession()).toBe(false);
+    setOrgId("anon-abc");
+    expect(readSignedInAuthenticatedWorkspaceSession()).toBe(false);
+    setOrgId("user-bound-1");
+    expect(readSignedInAuthenticatedWorkspaceSession()).toBe(true);
+    setOrgId("local-org");
+    setCachedAccessToken("token");
+    expect(readSignedInAuthenticatedWorkspaceSession()).toBe(true);
   });
 });

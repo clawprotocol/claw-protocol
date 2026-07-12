@@ -2,6 +2,9 @@
  * Completed-agreement surface context — dashboard CTAs only on authenticated owner/workspace views.
  */
 
+import { getCachedAccessToken } from "../auth/authAccessTokenCache";
+import { getOrgId } from "./orgContext";
+
 export type CompletedAgreementSurface =
   | "owner_workspace_view_signed"
   | "public_recipient_completed_link"
@@ -47,6 +50,17 @@ export function readAuthenticatedWorkspaceSession(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * In-app workspace navigation marker plus a bound signed-in identity (user-* org or Supabase token).
+ * Anonymous homepage → /app/create marks the session but must not satisfy this probe.
+ */
+export function readSignedInAuthenticatedWorkspaceSession(): boolean {
+  if (!readAuthenticatedWorkspaceSession()) return false;
+  const oid = getOrgId().trim();
+  if (oid.startsWith("user-")) return true;
+  return Boolean(getCachedAccessToken().trim());
 }
 
 /** Paths that imply an in-app workspace navigation (not a cold public deep link). */

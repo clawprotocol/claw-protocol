@@ -17,6 +17,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setCachedAccessToken, clearCachedAccessToken } from "../auth/authAccessTokenCache";
 import {
   invalidateWorkspaceProEntitlementCache,
   markWorkspaceProEntitlementResolvedForTests,
@@ -46,6 +47,7 @@ function onAppCreatePath(): void {
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+  clearCachedAccessToken();
   invalidateWorkspaceProEntitlementCache();
   markWorkspaceProEntitlementResolvedForTests(null);
   clearPaidDashboardCreateContextForTests();
@@ -55,6 +57,7 @@ beforeEach(() => {
 afterEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+  clearCachedAccessToken();
   invalidateWorkspaceProEntitlementCache();
   markWorkspaceProEntitlementResolvedForTests(null);
   clearPaidDashboardCreateContextForTests();
@@ -83,7 +86,8 @@ describe("TEST544 — direct-entry bootstrap ordering vs auth/session/org settle
 
     // 2) auth settles: LaunchNav marks the session and AuthProvider binds the real org (setOrgId).
     markAuthenticatedWorkspaceSession();
-    setOrgId("real-bound-org-544");
+    setOrgId("user-bound-org-544");
+    setCachedAccessToken("test-access-token-544");
 
     // Before the retry, this is exactly the continuous-fatal state (authenticated, no active marker).
     expect(shouldFailClosedBypassForAuthenticatedWorkspaceCreate()).toBe(true);
@@ -93,7 +97,7 @@ describe("TEST544 — direct-entry bootstrap ordering vs auth/session/org settle
     expect(retry.bootstrapped).toBe(true);
     expect(retry.reason).toBe("direct_entry_bootstrapped");
     expect(hasPaidDashboardCreateContextActive()).toBe(true);
-    expect(readPaidDashboardCreateContext()?.orgId).toBe("real-bound-org-544");
+    expect(readPaidDashboardCreateContext()?.orgId).toBe("user-bound-org-544");
     // Fatal branch no longer taken.
     expect(shouldFailClosedBypassForAuthenticatedWorkspaceCreate()).toBe(false);
   });
@@ -101,10 +105,11 @@ describe("TEST544 — direct-entry bootstrap ordering vs auth/session/org settle
   it("marker written under the bound org stays active (no provisional→bound org drift)", () => {
     onAppCreatePath();
     markAuthenticatedWorkspaceSession();
-    setOrgId("real-bound-org-544");
+    setOrgId("user-bound-org-544");
+    setCachedAccessToken("test-access-token-544");
     expect(bootstrapDirectAuthenticatedCreateEntryIfNeeded().bootstrapped).toBe(true);
     // Marker org matches the current (bound) org → activation holds.
-    expect(readPaidDashboardCreateContext()?.orgId).toBe("real-bound-org-544");
+    expect(readPaidDashboardCreateContext()?.orgId).toBe("user-bound-org-544");
     expect(hasPaidDashboardCreateContextActive()).toBe(true);
   });
 

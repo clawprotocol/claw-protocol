@@ -1585,6 +1585,7 @@ import {
   isCanonicalPaidCreateFlowReviewSurfaceEligible,
   isCreateFlowPaidAcceptedOrAuthoritativeActive,
   logAuthoritativeCreateFlowReviewShellResolved,
+  logCreateFlowEntitlementTransition,
   readCreateFlowAuthoritativeReviewShellReactiveKey,
   resolveCanonicalPaidCreateFlowReviewCorpusLen,
   resolveCreateFlowAuthoritativeReviewPlain,
@@ -10561,6 +10562,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       workspaceProSync ||
       readCachedWorkspaceProEntitlement() ||
       (await fetchWorkspaceProEntitlement());
+    logCreateFlowEntitlementTransition({
+      workspaceProEntitled: workspaceProForSubmit,
+      tier,
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+      paidProAuthoritative,
+    });
     const paidProReviewShellForSubmit = shouldUsePaidProCreateFlowReviewShell({
       workspaceProEntitled: workspaceProForSubmit,
       tier,

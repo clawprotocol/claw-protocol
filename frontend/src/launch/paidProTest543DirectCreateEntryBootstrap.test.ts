@@ -14,11 +14,13 @@
  * direct entry, and is a no-op for resume / non-authenticated / non-create / already-marked entries.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setCachedAccessToken, clearCachedAccessToken } from "../auth/authAccessTokenCache";
 import {
   invalidateWorkspaceProEntitlementCache,
   markWorkspaceProEntitlementResolvedForTests,
 } from "../agreement/agreementProFunnelGate";
 import { markAuthenticatedWorkspaceSession } from "./completedAgreementViewContext";
+import { setOrgId } from "./orgContext";
 import {
   clearPaidDashboardCreateContextForTests,
   hasPaidDashboardCreateContextActive,
@@ -37,6 +39,7 @@ function onAppCreatePath(): void {
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+  clearCachedAccessToken();
   invalidateWorkspaceProEntitlementCache();
   markWorkspaceProEntitlementResolvedForTests(null);
   clearPaidDashboardCreateContextForTests();
@@ -45,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+  clearCachedAccessToken();
   invalidateWorkspaceProEntitlementCache();
   markWorkspaceProEntitlementResolvedForTests(null);
   clearPaidDashboardCreateContextForTests();
@@ -53,18 +57,29 @@ afterEach(() => {
 });
 
 describe("TEST543 — direct /app/create authenticated entry bootstraps to dashboard-create parity", () => {
-  it("BEFORE bootstrap: fresh authenticated direct entry fails-closed and would log the fatal marker-missing", () => {
+  it("BEFORE bootstrap: signed-in direct entry without marker fail-closes to paid", () => {
     onAppCreatePath();
     markAuthenticatedWorkspaceSession();
+    setOrgId("user-test-543");
+    setCachedAccessToken("test-token-543");
     expect(hasPaidDashboardCreateContextActive()).toBe(false);
     expect(isDashboardPaidCreateRouteActive()).toBe(false);
-    // This is the branch that emits [fatal-paid-dashboard-create-marker-missing].
+    // Fail-closed paid bypass before marker write.
     expect(shouldFailClosedBypassForAuthenticatedWorkspaceCreate()).toBe(true);
+  });
+
+  it("BEFORE bootstrap: workspace session alone (anonymous) does NOT fail-closed", () => {
+    onAppCreatePath();
+    markAuthenticatedWorkspaceSession();
+    setOrgId("local-org");
+    expect(shouldFailClosedBypassForAuthenticatedWorkspaceCreate()).toBe(false);
   });
 
   it("AFTER bootstrap: direct entry sets the marker and matches the dashboard-created route", () => {
     onAppCreatePath();
     markAuthenticatedWorkspaceSession();
+    setOrgId("user-test-543");
+    setCachedAccessToken("test-token-543");
 
     const result = bootstrapDirectAuthenticatedCreateEntryIfNeeded();
     expect(result.bootstrapped).toBe(true);
@@ -82,6 +97,8 @@ describe("TEST543 — direct /app/create authenticated entry bootstraps to dashb
   it("is idempotent — running twice does not re-bootstrap once the marker exists", () => {
     onAppCreatePath();
     markAuthenticatedWorkspaceSession();
+    setOrgId("user-test-543");
+    setCachedAccessToken("test-token-543");
     expect(bootstrapDirectAuthenticatedCreateEntryIfNeeded().bootstrapped).toBe(true);
     const second = bootstrapDirectAuthenticatedCreateEntryIfNeeded();
     expect(second.bootstrapped).toBe(false);
@@ -117,6 +134,8 @@ describe("TEST543 — direct /app/create authenticated entry bootstraps to dashb
   it("no-op for an in-progress resume/edit (never wipes resumed work)", () => {
     onAppCreatePath();
     markAuthenticatedWorkspaceSession();
+    setOrgId("user-test-543");
+    setCachedAccessToken("test-token-543");
     writeCreateReviewAgreementResumeId("agreement-in-progress-123");
     const result = bootstrapDirectAuthenticatedCreateEntryIfNeeded();
     expect(result.bootstrapped).toBe(false);

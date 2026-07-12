@@ -20,7 +20,7 @@ import {
   hasPremiumCheckoutReturnInUrl,
 } from "../components/agreements/premiumCompletionStorage";
 import { hasPaidProSourceOfTruth } from "../components/agreements/paidProSourceOfTruthState";
-import { readAuthenticatedWorkspaceSession } from "./completedAgreementViewContext";
+import { readSignedInAuthenticatedWorkspaceSession } from "./completedAgreementViewContext";
 import {
   hasPaidDashboardCreateContextActive,
   isAppCreatePath,
@@ -207,8 +207,8 @@ export function bootstrapDirectAuthenticatedCreateEntryIfNeeded(): DirectAuthent
   if (!isAppCreatePath()) return { bootstrapped: false, reason: "not_app_create" };
   // Dashboard → Create already set the marker (and ran initializeNewAgreementSession) — nothing to do.
   if (hasPaidDashboardCreateContextActive()) return { bootstrapped: false, reason: "marker_present" };
-  // Only authenticated workspace users take the paid create route; anonymous/public keeps free starter.
-  if (!readAuthenticatedWorkspaceSession()) {
+  // Only signed-in workspace users take the paid create route; anonymous/public keeps free starter.
+  if (!readSignedInAuthenticatedWorkspaceSession()) {
     return { bootstrapped: false, reason: "not_authenticated_workspace" };
   }
   // Never reset an in-progress / resumed / post-checkout flow.

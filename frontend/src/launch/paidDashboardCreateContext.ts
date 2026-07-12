@@ -3,7 +3,10 @@
  * Scoped to org + /app/create read. Public homepage entry must clear this marker.
  */
 
-import { readAuthenticatedWorkspaceSession } from "./completedAgreementViewContext";
+import {
+  readAuthenticatedWorkspaceSession,
+  readSignedInAuthenticatedWorkspaceSession,
+} from "./completedAgreementViewContext";
 import { getOrgId } from "./orgContext";
 
 const KEY = "claw_paid_dashboard_create_context_v1";
@@ -277,7 +280,7 @@ export function logPaidDashboardCreateContextOnMount(): void {
 export function shouldFailClosedBypassForAuthenticatedWorkspaceCreate(): boolean {
   if (!isAppCreatePath()) return false;
   if (hasPaidDashboardCreateContextActive()) return false;
-  if (!readAuthenticatedWorkspaceSession()) return false;
+  if (!readSignedInAuthenticatedWorkspaceSession()) return false;
   // TEST545 — the fail-closed bypass value (treat as paid) is unchanged, but the fatal telemetry must
   // NOT fire during the normal, transient pre-bootstrap window. This probe runs in the render phase on
   // every render; the direct-entry marker is written by an effect only after auth settles (session

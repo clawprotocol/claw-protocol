@@ -111,6 +111,64 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   return "free_starter";
 }
 
+export type CreateFlowReviewShellTransitionReason =
+  | "premium_checkout_completed"
+  | "paid_dashboard_create_context"
+  | "authenticated_workspace_session_fallback"
+  | "paid_pro_source_of_truth"
+  | "paid_pro_authoritative"
+  | "premium_persisted_or_send_unlocked"
+  | "workspace_pro_entitled"
+  | "provisional_workspace_pro_entitled"
+  | "tier_advanced_full_draft"
+  | "session_pro_entitlement"
+  | "paid_create_flow_freeze_latch"
+  | "pipeline_acceptance"
+  | "premium_completion_snapshot"
+  | "free_starter";
+
+/** Instrumentation: first matching branch that selects paid_pro vs free_starter. */
+export function resolveCreateFlowReviewShellTransitionReason(
+  input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
+): CreateFlowReviewShellTransitionReason {
+  if (input.premiumCheckoutCompleted) return "premium_checkout_completed";
+  if (isAppCreatePath() && hasPaidDashboardCreateContextActive()) return "paid_dashboard_create_context";
+  if (shouldFailClosedBypassForAuthenticatedWorkspaceCreate()) {
+    return "authenticated_workspace_session_fallback";
+  }
+  if (hasPaidProSourceOfTruth()) return "paid_pro_source_of_truth";
+  if (input.paidProAuthoritative) return "paid_pro_authoritative";
+  if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) {
+    return "premium_persisted_or_send_unlocked";
+  }
+  if (input.workspaceProEntitled || resolveCreateFlowWorkspaceProEntitled()) return "workspace_pro_entitled";
+  if (resolveProvisionalWorkspaceProEntitledForCreate()) return "provisional_workspace_pro_entitled";
+  if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) return "tier_advanced_full_draft";
+  if (hasCurrentSessionProEntitlement()) return "session_pro_entitlement";
+  if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_create_flow_freeze_latch";
+  if (hasPaidCreateFlowPipelineAcceptance()) return "pipeline_acceptance";
+  const snap = readPremiumCompletionSnapshot();
+  if (snap?.premiumAccepted === true) return "premium_completion_snapshot";
+  return "free_starter";
+}
+
+export function logCreateFlowEntitlementTransition(
+  input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
+): void {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const reason = resolveCreateFlowReviewShellTransitionReason(input);
+  const shell = reason === "free_starter" ? "free_starter" : "paid_pro";
+  console.info("[create-flow-entitlement-transition]", {
+    reason,
+    shell,
+    workspaceProEntitled: Boolean(input.workspaceProEntitled),
+    workspaceProCached: resolveCreateFlowWorkspaceProEntitled(),
+    provisionalPaid: resolveProvisionalWorkspaceProEntitledForCreate(),
+    failClosedBypass: shouldFailClosedBypassForAuthenticatedWorkspaceCreate(),
+    paidDashboardCreateContext: hasPaidDashboardCreateContextActive(),
+  });
+}
+
 export function shouldUsePaidProCreateFlowReviewShell(
   input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
 ): boolean {
@@ -307,8 +365,10 @@ export function logAuthoritativeCreateFlowReviewShellResolved(
 ): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
   const shell = resolveAuthoritativeCreateFlowReviewShell(input);
+  const transitionReason = resolveCreateFlowReviewShellTransitionReason(input);
   console.info("[authoritative-create-flow-review-shell]", {
     shell,
+    transitionReason,
     workspaceProEntitled: Boolean(input.workspaceProEntitled),
     workspaceProCached: resolveCreateFlowWorkspaceProEntitled(),
     pipelineAccepted: hasPaidCreateFlowPipelineAcceptance(),

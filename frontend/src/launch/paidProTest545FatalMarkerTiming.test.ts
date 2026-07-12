@@ -10,6 +10,7 @@
  * direct-entry bootstrap has genuinely attempted the marker write and it is still missing.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setCachedAccessToken, clearCachedAccessToken } from "../auth/authAccessTokenCache";
 import {
   clearAuthenticatedWorkspaceSession,
   markAuthenticatedWorkspaceSession,
@@ -35,6 +36,7 @@ function isFatal(args: unknown[]): boolean {
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+  clearCachedAccessToken();
   clearPaidDashboardCreateContextForTests();
   clearAuthenticatedWorkspaceSession();
   vi.stubGlobal("location", { ...window.location, pathname: "/app/create" });
@@ -69,7 +71,8 @@ describe("TEST545 — fatal marker telemetry gated on a genuine bootstrap attemp
     expect(hasDirectAuthenticatedCreateBootstrapAttempted()).toBe(false);
 
     // auth settles: real org bound, THEN the create effect runs the bootstrap
-    setOrgId("real-bound-org-545");
+    setOrgId("user-bound-org-545");
+    setCachedAccessToken("test-token-545");
     expect(bootstrapDirectAuthenticatedCreateEntryIfNeeded().bootstrapped).toBe(true);
     expect(hasPaidDashboardCreateContextActive()).toBe(true);
     expect(hasDirectAuthenticatedCreateBootstrapAttempted()).toBe(true);
@@ -79,16 +82,26 @@ describe("TEST545 — fatal marker telemetry gated on a genuine bootstrap attemp
     expect(fatalCount).toBe(0);
   });
 
-  it("still fail-closed to paid during the silent pre-bootstrap window", () => {
+  it("still fail-closed to paid during the silent pre-bootstrap window (signed-in only)", () => {
     markAuthenticatedWorkspaceSession();
+    setOrgId("user-bound-org-545");
+    setCachedAccessToken("test-token-545");
     // returns true (treat as paid) even though it logs nothing.
     expect(shouldFailClosedBypassForAuthenticatedWorkspaceCreate()).toBe(true);
     expect(fatalCount).toBe(0);
   });
 
+  it("anonymous workspace session marker alone does not fail-closed", () => {
+    markAuthenticatedWorkspaceSession();
+    setOrgId("local-org");
+    expect(shouldFailClosedBypassForAuthenticatedWorkspaceCreate()).toBe(false);
+    expect(fatalCount).toBe(0);
+  });
+
   it("GENUINE failure: after an attempt with no active marker, the fatal DOES fire", () => {
     markAuthenticatedWorkspaceSession();
-    setOrgId("real-bound-org-545");
+    setOrgId("user-bound-org-545");
+    setCachedAccessToken("test-token-545");
     // Simulate a real marker-write failure: attempt recorded, but no marker present.
     markDirectAuthenticatedCreateBootstrapAttempted();
     expect(hasPaidDashboardCreateContextActive()).toBe(false);
