@@ -23,7 +23,9 @@ import { CreateUiStage } from "./createUiStage";
 import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
-const PRO_BODY = `SERVICES AGREEMENT between Red Mesa Logistics LLC and Harbor Peak Automation LLC. ${"Substantive clause. ".repeat(900)}`;
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
+
+const PRO_BODY = SHARED_ACCEPTED_PAID_BODY;
 
 function test490ParsedDraft(premiumBody: string): ParsedDraftShape {
   return {
@@ -86,10 +88,14 @@ describe("TEST490 — paid create flow must not route into Free Starter review",
   });
 
   it("paid create submit still allows early persist when skipping free starter", () => {
+    markPaidProPipelineValidationPassed({ text: PRO_BODY, source: "server_full_draft" });
     expect(
       shouldAutoPersistReviewAgreementRow({
         hasReviewAgreementId: false,
         skipFreeStarterCreateSubmit: true,
+        draft: test490ParsedDraft(PRO_BODY),
+        agreementDocumentText: PRO_BODY,
+        pipelineWinningBody: PRO_BODY,
       }),
     ).toBe(true);
   });

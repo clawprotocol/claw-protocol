@@ -98,7 +98,7 @@ export function markCurrentSessionFreeStarterIntent(): void {
 export function hasCurrentSessionFreeStarterIntent(): boolean {
   const marker = readMarker(FREE_STARTER_SESSION_KEY);
   if (!marker) return false;
-  return marker.generationId === getSessionAgreementGenerationId();
+  return marker.generationId === getOrInitSessionAgreementGenerationId();
 }
 
 /** User clicked a Pro upgrade CTA in this create session. */
@@ -111,7 +111,7 @@ export function markCurrentSessionProIntent(): void {
 export function hasCurrentSessionProIntent(): boolean {
   const marker = readMarker(PRO_INTENT_SESSION_KEY);
   if (!marker) return false;
-  return marker.generationId === getSessionAgreementGenerationId();
+  return marker.generationId === getOrInitSessionAgreementGenerationId();
 }
 
 /** Checkout settled or QA bypass completed for the current generation. */
@@ -133,7 +133,7 @@ export function hasCurrentSessionProEntitlement(opts?: { generationId?: string |
   const entitlement = readMarker(PRO_ENTITLEMENT_SESSION_KEY);
   if (!intent || !entitlement) return false;
   if (intent.generationId !== entitlement.generationId) return false;
-  const currentGen = getSessionAgreementGenerationId();
+  const currentGen = getOrInitSessionAgreementGenerationId();
   if (intent.generationId !== currentGen) return false;
   const requested = (opts?.generationId ?? "").trim();
   if (requested && requested !== intent.generationId) return false;

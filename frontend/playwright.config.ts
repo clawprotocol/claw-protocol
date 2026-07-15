@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+/** Node-side spec imports resolve API base from process.env (see runtimeEnvironment.ts). */
+process.env.VITE_CLAW_API_BASE ??= "http://127.0.0.1:4173";
+process.env.VITE_CLAW_SUPPRESS_API_BASE_LOG ??= "1";
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
@@ -7,6 +11,8 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4173",
     trace: "on-first-retry",
+    // Prefer installed Google Chrome when Playwright browser revision is missing.
+    channel: process.env.PW_CHANNEL === "chrome" ? "chrome" : undefined,
   },
   projects: [
     {

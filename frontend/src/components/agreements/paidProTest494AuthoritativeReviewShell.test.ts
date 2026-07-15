@@ -5,6 +5,7 @@ import {
   markWorkspaceProEntitlementResolvedForTests,
 } from "../../agreement/agreementProFunnelGate";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
+import { setOrgId } from "../../launch/orgContext";
 import {
   clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionFreeStarterIntent,
@@ -83,6 +84,7 @@ describe("TEST494 — suppress Free Starter conversion UI when paid create-flow 
   });
 
   it("Case 1 — existing paid create with pipeline accepted suppresses conversion surfaces and uses paid corpus", () => {
+    setOrgId("user-test-494");
     markCurrentSessionFreeStarterIntent();
     markWorkspaceProEntitlementResolvedForTests(true);
     markPaidProPipelineValidationPassed({ text: ACCEPTED_PAID_BODY, source: "server_full_draft" });
@@ -166,7 +168,7 @@ describe("TEST494 — suppress Free Starter conversion UI when paid create-flow 
     expect(PRO_CTA_KEEP_FREE_DRAFT).toBe("Keep free draft");
   });
 
-  it("Case 2 — true free user still eligible for starter conversion card", () => {
+  it("Case 2 — true free user uses bottom checkout CTA, not below-document comparison card", () => {
     markCurrentSessionFreeStarterIntent();
     markWorkspaceProEntitlementResolvedForTests(false);
     expect(shouldSuppressFreeStarterCreateFlowConversionUi({ tier: "free" })).toBe(false);
@@ -184,7 +186,7 @@ describe("TEST494 — suppress Free Starter conversion UI when paid create-flow 
         premiumPaidDocumentSurface: false,
         showStarterProRefineUpsellCardEligible: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("reactive key updates when pipeline acceptance hash is recorded", () => {
