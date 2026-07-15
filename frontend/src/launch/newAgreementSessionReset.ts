@@ -32,12 +32,7 @@ import { clearHomeAnonymousCreateOrigin } from "./homeAnonymousCreateOrigin";
 import { clearPaidProPipelineAcceptedCorpusHash } from "../components/agreements/paidProPipelineAcceptedCorpus";
 import { clearPaidProPostAcceptanceValidatorCache } from "../components/agreements/paidProPostAcceptanceValidatorCache";
 import { clearPaidProPremiumRecipientHandoffReadGate } from "../components/agreements/paidProPremiumRecipientHandoffReadGate";
-import { clearSignerMetadataEffectiveMaxForSession } from "../components/agreements/signerMetadataEffective";
 import { clearPremiumPartyNamesHandoff } from "../components/agreements/premiumPartyNamesHandoff";
-import { clearLegalPartyAuthorityForCurrentSession } from "../components/agreements/legalPartyAuthoritySession";
-import { clearStarterToPaidPartyHandoffForCurrentSession } from "../components/agreements/starterToPaidPartyHandoff";
-import { clearSignerExecutionAuthorityForCurrentSession } from "../components/agreements/signerExecutionAuthority";
-import { clearFrozenSigningAuthoritySnapshotForSession } from "../components/agreements/frozenSigningAuthoritySnapshot";
 import {
   bumpAgreementGenerationIdForFreshSession,
   clearCurrentSessionProEntitlementMarkers,
@@ -129,7 +124,6 @@ export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
   clearPaidProSourceOfTruth();
   clearConsumedPaidProSignerMetadataAuthority();
   clearAuthoritativeSigningSnapshot();
-  clearFrozenSigningAuthoritySnapshotForSession();
   clearPaidProPinnedSignerAppliedCorpus();
   clearPaidProReviewRenderFusedRepairCache();
   clearFrozenCanonicalAgreementCorpus();
@@ -138,9 +132,6 @@ export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
   clearPremiumCompletionSnapshot();
   clearPremiumCompletionDoneInLocalStorage();
   clearPremiumPartyNamesHandoff();
-  clearLegalPartyAuthorityForCurrentSession();
-  clearStarterToPaidPartyHandoffForCurrentSession();
-  clearSignerExecutionAuthorityForCurrentSession();
   clearPersistedGuidedSession();
   clearPaidProPipelineAcceptedCorpusHash();
   clearPaidProPostAcceptanceValidatorCache();
@@ -161,11 +152,7 @@ export function initializeNewAgreementSession(opts?: {
   clearLawdogEntryContext();
   clearAgreementVs01BridgeSession();
   clearPremiumPartyNamesHandoff();
-  clearLegalPartyAuthorityForCurrentSession();
-  clearStarterToPaidPartyHandoffForCurrentSession();
-  clearSignerExecutionAuthorityForCurrentSession();
   clearPaidProPremiumRecipientHandoffReadGate();
-  clearSignerMetadataEffectiveMaxForSession();
   bumpAgreementGenerationIdForFreshSession();
   clearCurrentSessionProEntitlementMarkers();
   clearHomeAnonymousCreateOrigin("new_agreement_session");

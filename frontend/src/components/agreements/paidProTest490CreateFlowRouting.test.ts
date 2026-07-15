@@ -23,9 +23,7 @@ import { CreateUiStage } from "./createUiStage";
 import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
-import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
-
-const PRO_BODY = SHARED_ACCEPTED_PAID_BODY;
+const PRO_BODY = `SERVICES AGREEMENT between Red Mesa Logistics LLC and Harbor Peak Automation LLC. ${"Substantive clause. ".repeat(900)}`;
 
 function test490ParsedDraft(premiumBody: string): ParsedDraftShape {
   return {
