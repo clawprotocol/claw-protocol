@@ -21,12 +21,14 @@ import {
   isPaidProPostCheckoutRecoveryReviewActive,
 } from "./paidProPostCheckoutRenderGate";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
-import { hasCurrentSessionProEntitlement } from "./paidProSessionEligibility";
+import { hasCurrentSessionProEntitlement, hasCurrentSessionFreeStarterIntent } from "./paidProSessionEligibility";
 import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
 import { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlowEntitlementProbe";
 import { resolveCreateFlowWorkspaceProEntitled } from "./paidCreateFlowWorkspaceEntitlementProbe";
 import { hasPaidCreateFlowPipelineAcceptance } from "./paidCreateFlowPipelineAcceptanceProbe";
 import { hasPaidDashboardCreateContextActive, isAppCreatePath, shouldFailClosedBypassForAuthenticatedWorkspaceCreate } from "../../launch/paidDashboardCreateContext";
+import { isHomeAnonymousStarterAuthorityActive } from "../../launch/homeAnonymousCreateOrigin";
+import { mustBlockPaidEntitlementForLegacyFallbackOrg } from "../../launch/fallbackOrgPaidEntitlementGuard";
 import { computeDashboardPaidCreateReviewShellReady, isDashboardPaidCreateRouteActive } from "./dashboardPaidCreateRoute";
 
 export type AuthoritativeCreateFlowReviewShell = "paid_pro" | "free_starter";
@@ -94,7 +96,36 @@ export function isCreateFlowPaidAcceptedOrAuthoritativeActive(
 export function resolveAuthoritativeCreateFlowReviewShell(
   input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
 ): AuthoritativeCreateFlowReviewShell {
+  // Anonymous homepage origin: Starter-first until checkout completion or session Pro entitlement.
+  if (isHomeAnonymousStarterAuthorityActive() && !hasCurrentSessionProEntitlement()) {
+    if (input.premiumCheckoutCompleted) return "paid_pro";
+    return "free_starter";
+  }
+  if (hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) {
+    // In-session paid acceptance / upgrade completion supersedes the starter latch.
+    if (input.premiumCheckoutCompleted) return "paid_pro";
+    if (hasPaidProSourceOfTruth()) return "paid_pro";
+    if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
+    if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
+    const starterSnap = readPremiumCompletionSnapshot();
+    if (starterSnap?.premiumAccepted === true) return "paid_pro";
+    return "free_starter";
+  }
   if (input.premiumCheckoutCompleted) return "paid_pro";
+
+  // local-org / empty bootstrap: never select paid_pro from path, dashboard marker, or cached entitlement.
+  if (mustBlockPaidEntitlementForLegacyFallbackOrg()) {
+    if (hasPaidProSourceOfTruth()) return "paid_pro";
+    if (input.paidProAuthoritative) return "paid_pro";
+    if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
+    if (hasCurrentSessionProEntitlement()) return "paid_pro";
+    if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
+    if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
+    const snap = readPremiumCompletionSnapshot();
+    if (snap?.premiumAccepted === true) return "paid_pro";
+    return "free_starter";
+  }
+
   if (isAppCreatePath() && hasPaidDashboardCreateContextActive()) return "paid_pro";
   if (shouldFailClosedBypassForAuthenticatedWorkspaceCreate()) return "paid_pro";
   if (hasPaidProSourceOfTruth()) return "paid_pro";
@@ -131,7 +162,33 @@ export type CreateFlowReviewShellTransitionReason =
 export function resolveCreateFlowReviewShellTransitionReason(
   input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
 ): CreateFlowReviewShellTransitionReason {
+  if (isHomeAnonymousStarterAuthorityActive() && !hasCurrentSessionProEntitlement()) {
+    if (input.premiumCheckoutCompleted) return "premium_checkout_completed";
+    return "free_starter";
+  }
+  if (hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) {
+    if (input.premiumCheckoutCompleted) return "premium_checkout_completed";
+    if (hasPaidProSourceOfTruth()) return "paid_pro_source_of_truth";
+    if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_create_flow_freeze_latch";
+    if (hasPaidCreateFlowPipelineAcceptance()) return "pipeline_acceptance";
+    const starterSnap = readPremiumCompletionSnapshot();
+    if (starterSnap?.premiumAccepted === true) return "premium_completion_snapshot";
+    return "free_starter";
+  }
   if (input.premiumCheckoutCompleted) return "premium_checkout_completed";
+  if (mustBlockPaidEntitlementForLegacyFallbackOrg()) {
+    if (hasPaidProSourceOfTruth()) return "paid_pro_source_of_truth";
+    if (input.paidProAuthoritative) return "paid_pro_authoritative";
+    if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) {
+      return "premium_persisted_or_send_unlocked";
+    }
+    if (hasCurrentSessionProEntitlement()) return "session_pro_entitlement";
+    if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_create_flow_freeze_latch";
+    if (hasPaidCreateFlowPipelineAcceptance()) return "pipeline_acceptance";
+    const snap = readPremiumCompletionSnapshot();
+    if (snap?.premiumAccepted === true) return "premium_completion_snapshot";
+    return "free_starter";
+  }
   if (isAppCreatePath() && hasPaidDashboardCreateContextActive()) return "paid_dashboard_create_context";
   if (shouldFailClosedBypassForAuthenticatedWorkspaceCreate()) {
     return "authenticated_workspace_session_fallback";
@@ -240,8 +297,10 @@ export function shouldShowCreateFlowStarterProRefineUpsell(input: {
   if (input.paidProAuthoritative) return false;
   if (input.suppressIntakePremiumUpsell) return false;
   if (input.proAgreementEntitled) return false;
+  // Free starter/streamline review uses the unified bottom checkout CTA (`launch_pro_checkout`),
+  // not the legacy side-by-side ProConversionComparisonCard below the document.
   if (input.isFreeStreamlineDraftReview || input.isFreeStarterReviewSurface) {
-    return input.belowDocumentRefineSectionParentEligible;
+    return false;
   }
   return input.showStarterProRefineUpsellCardEligible;
 }
@@ -367,7 +426,7 @@ export function logAuthoritativeCreateFlowReviewShellResolved(
   const shell = resolveAuthoritativeCreateFlowReviewShell(input);
   const transitionReason = resolveCreateFlowReviewShellTransitionReason(input);
   console.info("[authoritative-create-flow-review-shell]", {
-    shell,
+    shell: shell === "free_starter" ? "starter" : shell,
     transitionReason,
     workspaceProEntitled: Boolean(input.workspaceProEntitled),
     workspaceProCached: resolveCreateFlowWorkspaceProEntitled(),

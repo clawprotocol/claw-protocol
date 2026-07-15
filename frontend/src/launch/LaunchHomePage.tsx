@@ -37,7 +37,13 @@ import { markLawdogFunnelStep } from "../tracking/lawdogSession";
 import { clearPaidDashboardCreateContext } from "./paidDashboardCreateContext";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 import { bootstrapWorkspaceOrg } from "./orgContext";
+import {
+  logHomeAnonymousCreateOrigin,
+  markHomeAnonymousCreateOrigin,
+} from "./homeAnonymousCreateOrigin";
+import { markCurrentSessionFreeStarterIntent } from "../components/agreements/paidProSessionEligibility";
 import { prepareFreshMarketingEntry } from "./marketingSession";
+import { useAuth } from "../auth/AuthProvider";
 import {
   getLawdogEntryContextStored,
   setLawdogEntryContext,
@@ -59,6 +65,7 @@ import {
 
 export function LaunchHomePage() {
   const { navigate } = useLaunchNav();
+  const { user } = useAuth();
   const dc = useDynamicConfig();
   const home = dc.home;
   const [heroInput, setHeroInput] = useState("");
@@ -184,6 +191,9 @@ export function LaunchHomePage() {
       prepareFreshMarketingEntry();
       clearPaidDashboardCreateContext("home_create_submit");
       clearCreateComplexityResume();
+      markHomeAnonymousCreateOrigin();
+      markCurrentSessionFreeStarterIntent();
+      logHomeAnonymousCreateOrigin({ action: "mark", reason: "home_create_submit" });
       setLawdogEntryContext("drafting");
       logHomeCreateSubmit(merged);
       stashHeroIntakePrefill(merged, { fromHomeSubmit: true, autoGenerate: true });
@@ -230,11 +240,20 @@ export function LaunchHomePage() {
               type="button"
               className="shrink-0 text-sm font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600/50"
               onClick={() => {
+                const pending = resolveHomeHeroSubmitText(heroInput, intakeRef.current?.value).trim();
+                if (pending.length >= 6) {
+                  stashHeroIntakePrefill(pending, { fromHomeSubmit: true, autoGenerate: false });
+                }
+                if (user) {
+                  logProductEvent("dashboard_opened", { surface: "homepage" });
+                  navigate("/app");
+                  return;
+                }
                 logProductEvent("dashboard_sign_in_initiated", { surface: "homepage" });
                 navigate("/app/sign-in");
               }}
             >
-              Sign in
+              {user ? "Dashboard" : "Sign in"}
             </button>
           </div>
 

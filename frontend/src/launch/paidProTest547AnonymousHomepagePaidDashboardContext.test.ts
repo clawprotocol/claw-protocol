@@ -33,6 +33,8 @@ import {
   markPaidDashboardCreateContextForTests,
   readPaidDashboardCreateContext,
 } from "./paidDashboardCreateContext";
+import { markHomeAnonymousCreateOrigin, clearHomeAnonymousCreateOrigin } from "./homeAnonymousCreateOrigin";
+import { markCurrentSessionFreeStarterIntent, clearCurrentSessionProEntitlementMarkers } from "../components/agreements/paidProSessionEligibility";
 import {
   resolveAuthoritativeCreateFlowReviewShell,
   resolveCreateFlowReviewShellTransitionReason,
@@ -48,6 +50,7 @@ const TWO_PARTY_CONSULTING_INTAKE =
 function simulateLaunchNavHeroCreateNavigation(intake: string): void {
   vi.stubGlobal("location", { ...window.location, pathname: "/" });
   clearPaidDashboardCreateContext("hero_from_home");
+  markHomeAnonymousCreateOrigin();
   const state = {
     clawHeroIntake: intake,
     clawHeroFromHome: true,
@@ -73,6 +76,8 @@ function simulateLaunchNavDashboardPaidCreateNavigation(
 /** Mirrors LaunchHomePage.startDrafting pre-navigation sequence. */
 function simulateHomepageSubmitPreclear(): void {
   clearPaidDashboardCreateContext("home_create_submit");
+  markHomeAnonymousCreateOrigin();
+  markCurrentSessionFreeStarterIntent();
 }
 
 function simulateAppCreateMountSequence(): void {
@@ -88,6 +93,8 @@ beforeEach(() => {
   markWorkspaceProEntitlementResolvedForTests(null);
   clearPaidDashboardCreateContextForTests();
   clearAuthenticatedWorkspaceSession();
+  clearHomeAnonymousCreateOrigin();
+  clearCurrentSessionProEntitlementMarkers();
   setOrgId("local-org");
   writeCachedSubscriptionEntitlement(null, "local-org");
   window.history.replaceState(null, "", "/");
@@ -101,6 +108,8 @@ afterEach(() => {
   markWorkspaceProEntitlementResolvedForTests(null);
   clearPaidDashboardCreateContextForTests();
   clearAuthenticatedWorkspaceSession();
+  clearHomeAnonymousCreateOrigin();
+  clearCurrentSessionProEntitlementMarkers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

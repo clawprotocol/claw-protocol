@@ -12,6 +12,11 @@ import { getOrgId, setOrgId } from "./orgContext";
 import { tierAllowsAdvancedFullDraftReveal } from "../components/agreements/agreementAdvancedDraftAccess";
 import { subscriptionTierForAccess } from "../access/subscriptionEntitlementCache";
 import { readCachedWorkspaceProEntitlement } from "../agreement/agreementProFunnelGate";
+import {
+  clearHomeAnonymousCreateOrigin,
+  isHomeAnonymousStarterAuthorityActive,
+} from "./homeAnonymousCreateOrigin";
+import { mustBlockPaidEntitlementForLegacyFallbackOrg } from "./fallbackOrgPaidEntitlementGuard";
 
 const KEY = "claw_paid_dashboard_create_context_v1";
 
@@ -161,16 +166,11 @@ export function classifyPaidDashboardCreateOrgId(orgId?: string | null): PaidDas
 
 /** Homepage hero handoff — must never resurrect paid-dashboard create context. */
 export function isHeroFromHomeCreateEntry(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const state = window.history.state as Record<string, unknown> | null;
-    return state?.clawHeroFromHome === true;
-  } catch {
-    return false;
-  }
+  return isHomeAnonymousStarterAuthorityActive();
 }
 
 function hasAuthoritativePaidEntitlementForMarker(): boolean {
+  if (mustBlockPaidEntitlementForLegacyFallbackOrg()) return false;
   const tier = subscriptionTierForAccess();
   if (tier && tierAllowsAdvancedFullDraftReveal(tier)) return true;
   return readCachedWorkspaceProEntitlement();
@@ -204,6 +204,9 @@ export function evaluatePaidDashboardCreateContextWrite(
   };
   if (heroFromHome) {
     return { ...base, allowed: false, reason: "hero_from_home_starter" };
+  }
+  if (mustBlockPaidEntitlementForLegacyFallbackOrg(orgId)) {
+    return { ...base, allowed: false, reason: "fallback_org_never_paid" };
   }
   if (!hasAuthenticatedUser) {
     return { ...base, allowed: false, reason: "unsigned_workspace" };
@@ -371,6 +374,7 @@ export function markPaidDashboardCreateContext(
       orgId: oid,
       path: typeof window !== "undefined" ? window.location.pathname : null,
     });
+    clearHomeAnonymousCreateOrigin("dashboard_paid_create_marked");
     return true;
   } catch {
     return false;

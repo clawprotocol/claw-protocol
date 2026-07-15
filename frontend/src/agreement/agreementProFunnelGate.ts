@@ -3,6 +3,7 @@ import {
   hasOneTimeAgreementUnlock,
   hasSimpleFlowSendUnlocked,
 } from "../launch/simpleFlowSendUnlock";
+import { mustBlockPaidEntitlementForLegacyFallbackOrg } from "../launch/fallbackOrgPaidEntitlementGuard";
 import { fetchAgreementUsageSummary } from "./agreementWorkspaceApi";
 
 let workspaceProResolved: boolean | null = null;
@@ -32,6 +33,7 @@ export function readPersistedWorkspaceUsageTierPaid(): boolean {
   if (typeof localStorage === "undefined") return false;
   const oid = getOrgId().trim();
   if (!oid) return false;
+  if (mustBlockPaidEntitlementForLegacyFallbackOrg(oid)) return false;
   try {
     const raw = localStorage.getItem(WORKSPACE_USAGE_TIER_CACHE_KEY);
     if (!raw) return false;
@@ -68,6 +70,7 @@ export function markPersistedWorkspaceUsageTierForTests(tier: string | null, org
 }
 
 export function readCachedWorkspaceProEntitlement(): boolean {
+  if (mustBlockPaidEntitlementForLegacyFallbackOrg()) return false;
   return workspaceProResolved === true || readPersistedWorkspaceUsageTierPaid();
 }
 
@@ -78,6 +81,10 @@ export function markWorkspaceProEntitlementResolvedForTests(entitled: boolean | 
 
 /** Workspace billing: Pro / paid plan for the current org (cached until invalidated). */
 export async function fetchWorkspaceProEntitlement(): Promise<boolean> {
+  if (mustBlockPaidEntitlementForLegacyFallbackOrg()) {
+    workspaceProResolved = false;
+    return false;
+  }
   if (workspaceProResolved !== null) return workspaceProResolved;
   const res = await fetchAgreementUsageSummary();
   if (res.ok && res.data?.tier) {

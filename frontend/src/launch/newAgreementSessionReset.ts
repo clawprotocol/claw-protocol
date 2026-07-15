@@ -28,8 +28,16 @@ import {
   markDashboardPaidCreateRoute,
   markDirectAuthenticatedCreateBootstrapAttempted,
 } from "./paidDashboardCreateContext";
+import { clearHomeAnonymousCreateOrigin } from "./homeAnonymousCreateOrigin";
+import { clearPaidProPipelineAcceptedCorpusHash } from "../components/agreements/paidProPipelineAcceptedCorpus";
+import { clearPaidProPostAcceptanceValidatorCache } from "../components/agreements/paidProPostAcceptanceValidatorCache";
 import { clearPaidProPremiumRecipientHandoffReadGate } from "../components/agreements/paidProPremiumRecipientHandoffReadGate";
+import { clearSignerMetadataEffectiveMaxForSession } from "../components/agreements/signerMetadataEffective";
 import { clearPremiumPartyNamesHandoff } from "../components/agreements/premiumPartyNamesHandoff";
+import { clearLegalPartyAuthorityForCurrentSession } from "../components/agreements/legalPartyAuthoritySession";
+import { clearStarterToPaidPartyHandoffForCurrentSession } from "../components/agreements/starterToPaidPartyHandoff";
+import { clearSignerExecutionAuthorityForCurrentSession } from "../components/agreements/signerExecutionAuthority";
+import { clearFrozenSigningAuthoritySnapshotForSession } from "../components/agreements/frozenSigningAuthoritySnapshot";
 import {
   bumpAgreementGenerationIdForFreshSession,
   clearCurrentSessionProEntitlementMarkers,
@@ -57,6 +65,9 @@ const SESSION_PREFIXES_TO_CLEAR = [
   "claw_premium_completion_snapshot_v1",
   "claw_premium_recipients_surface_released_v1",
   "claw_premium_recipient_handoff",
+  "claw_starter_paid_party_handoff_v1:",
+  "claw_signer_execution_authority_v1:",
+  "claw_frozen_signing_authority_v1:",
   "claw_paid_premium_completion_session_v1",
   "claw_paid_pro_vs01_post_sign_v1",
   "claw_agreement_vs01_bridge_handoff_v1",
@@ -118,6 +129,7 @@ export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
   clearPaidProSourceOfTruth();
   clearConsumedPaidProSignerMetadataAuthority();
   clearAuthoritativeSigningSnapshot();
+  clearFrozenSigningAuthoritySnapshotForSession();
   clearPaidProPinnedSignerAppliedCorpus();
   clearPaidProReviewRenderFusedRepairCache();
   clearFrozenCanonicalAgreementCorpus();
@@ -126,7 +138,12 @@ export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
   clearPremiumCompletionSnapshot();
   clearPremiumCompletionDoneInLocalStorage();
   clearPremiumPartyNamesHandoff();
+  clearLegalPartyAuthorityForCurrentSession();
+  clearStarterToPaidPartyHandoffForCurrentSession();
+  clearSignerExecutionAuthorityForCurrentSession();
   clearPersistedGuidedSession();
+  clearPaidProPipelineAcceptedCorpusHash();
+  clearPaidProPostAcceptanceValidatorCache();
 }
 
 /**
@@ -144,9 +161,14 @@ export function initializeNewAgreementSession(opts?: {
   clearLawdogEntryContext();
   clearAgreementVs01BridgeSession();
   clearPremiumPartyNamesHandoff();
+  clearLegalPartyAuthorityForCurrentSession();
+  clearStarterToPaidPartyHandoffForCurrentSession();
+  clearSignerExecutionAuthorityForCurrentSession();
   clearPaidProPremiumRecipientHandoffReadGate();
+  clearSignerMetadataEffectiveMaxForSession();
   bumpAgreementGenerationIdForFreshSession();
   clearCurrentSessionProEntitlementMarkers();
+  clearHomeAnonymousCreateOrigin("new_agreement_session");
 
   const clearedInMemoryModules: string[] = [];
   clearStalePaidProAuthorityForFreshFreeStarter({ preserveCheckoutReturn: false });
@@ -161,6 +183,8 @@ export function initializeNewAgreementSession(opts?: {
     "premiumCompletionSnapshot",
     "premiumRecipientHandoff",
     "persistedGuidedSession",
+    "paidProPipelineAcceptedCorpus",
+    "paidProPostAcceptanceValidatorCache",
   );
 
   if (opts?.priorAgreementId?.trim()) {

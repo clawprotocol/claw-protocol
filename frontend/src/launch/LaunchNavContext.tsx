@@ -35,6 +35,7 @@ import {
   markPaidDashboardCreateContext,
   normalizeDashboardPaidCreateSource,
 } from "./paidDashboardCreateContext";
+import { markHomeAnonymousCreateOrigin } from "./homeAnonymousCreateOrigin";
 import { logDashboardPaidCreateScreenTransition } from "./paidDashboardCreateFunnel";
 
 export type LaunchNavigateOptions = {
@@ -127,6 +128,7 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
 
       if (options?.heroFromHome) {
         clearPaidDashboardCreateContext("hero_from_home");
+        markHomeAnonymousCreateOrigin();
         cleared = true;
         clearReason = "hero_from_home";
       } else if (options?.paidDashboardCreate || isAuthenticatedWorkspacePath(originPathname)) {
