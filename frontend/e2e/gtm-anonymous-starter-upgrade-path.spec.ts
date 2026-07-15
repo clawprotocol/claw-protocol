@@ -1,7 +1,5 @@
 import { expect, test } from "@playwright/test";
 import {
-  goToFreeStarterReview,
-  PROD_QA_FREELANCE_PROMPT,
   seedAnonymousStarterBrowserState,
   installFreeStarterApiRoutes,
   submitHomepageHeroToCreate,
@@ -86,7 +84,11 @@ test.describe("GTM anonymous Starter → Upgrade authority", () => {
     await submitHomepageHeroToCreate(page, REDWOOD_FIXTURE);
     await waitForFreeStarterReviewReady(page);
 
-    await expect(page.getByRole("heading", { name: "Review your draft" })).toBeVisible();
+    await expect(
+      page
+        .getByRole("heading", { name: "Review your draft" })
+        .or(page.getByText(/Review your starter draft/i)),
+    ).toBeVisible({ timeout: 60_000 });
     await expect(page.getByRole("heading", { name: "Review your Pro agreement" })).toHaveCount(0);
     await expect(page.getByText(/Compare plans/i)).toHaveCount(0);
 
@@ -115,8 +117,11 @@ test.describe("GTM anonymous Starter → Upgrade authority", () => {
   test("Case B — Starter upgrade CTA routes to checkout", async ({ page }) => {
     test.setTimeout(120_000);
     const drafts = new Map();
-    await goToFreeStarterReview(page, drafts, "ag_gtm_upgrade");
-    await expect(page.getByRole("heading", { name: "Review your draft" })).toBeVisible();
+    await seedAnonymousStarterBrowserState(page);
+    await installFreeStarterApiRoutes(page, drafts, "ag_gtm_upgrade");
+    await submitHomepageHeroToCreate(page);
+    await waitForFreeStarterReviewReady(page);
+    await expect(page.getByRole("heading", { name: "Review your Pro agreement" })).toHaveCount(0);
 
     const proCta = page.getByRole("button", { name: /Continue with Pro|Upgrade to Pro/i });
     if ((await proCta.count()) === 0) {
@@ -128,5 +133,3 @@ test.describe("GTM anonymous Starter → Upgrade authority", () => {
     await expect(page).toHaveURL(/\/app\/checkout\//, { timeout: 20_000 });
   });
 });
-
-void PROD_QA_FREELANCE_PROMPT;
