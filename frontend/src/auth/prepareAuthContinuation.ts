@@ -14,7 +14,11 @@ export async function prepareAuthContinuation(args?: {
   provider?: string;
   returningSignIn?: boolean;
 }): Promise<string> {
-  captureContinuationFromLocation({
+  // Capture returns the effective continuation — which, for a claim, is the one
+  // persisted on the agreement surface (preserved even across an intermediate
+  // generic sign-in surface). Consume it instead of re-deriving from window.location
+  // so email and Google both retain the original agreement + return destination.
+  const effective = captureContinuationFromLocation({
     agreementId: args?.agreementId,
     workflowStage: (args?.workflowStage as never) ?? "unknown",
     destinationPath: args?.destinationPath,
@@ -22,15 +26,18 @@ export async function prepareAuthContinuation(args?: {
   if (!args?.returningSignIn) {
     await ensureAnonymousSession();
   }
+  // Returning sign-in is an explicit generic flow and must never adopt a claim.
+  const adoptClaim = !args?.returningSignIn;
   const path =
     args?.destinationPath ??
+    (adoptClaim ? effective.destinationPath : undefined) ??
     (typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}`
       : "/app/create");
   const cont = await createServerAuthContinuation({
-    agreementId: args?.agreementId,
+    agreementId: args?.agreementId ?? (adoptClaim ? effective.agreementId : undefined),
     destinationPath: path,
-    workflowStage: (args?.workflowStage as never) ?? "unknown",
+    workflowStage: (args?.workflowStage as never) ?? effective.workflowStage ?? "unknown",
     authPurpose: args?.returningSignIn ? "returning_sign_in" : args?.authPurpose ?? "claim",
     provider: args?.provider,
     returningSignIn: args?.returningSignIn,

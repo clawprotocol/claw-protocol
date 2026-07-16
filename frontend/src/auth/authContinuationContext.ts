@@ -86,8 +86,19 @@ export function captureContinuationFromLocation(args?: {
     typeof window !== "undefined"
       ? `${window.location.pathname}${window.location.search}${window.location.hash}`
       : "/app/create";
+  const explicitAgreementId = args?.agreementId?.trim() || undefined;
+  // Single source of truth: a generic recapture that carries no agreementId must not
+  // strip an active agreement-claim continuation. Otherwise an intermediate sign-in
+  // surface (e.g. /app/settings between the claim CTA and signInEmail) would overwrite
+  // the claim's agreementId + agreement-relative destination and lose the agreement.
+  if (!explicitAgreementId) {
+    const existing = readAuthContinuationContext();
+    if (existing?.agreementId && existing.workflowStage === "claim") {
+      return existing;
+    }
+  }
   const ctx = createAuthContinuationContext({
-    agreementId: args?.agreementId ?? undefined,
+    agreementId: explicitAgreementId,
     sourcePath: path,
     destinationPath: args?.destinationPath ?? path,
     workflowStage: args?.workflowStage ?? "unknown",
