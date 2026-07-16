@@ -318,6 +318,7 @@ import { getAuthoritativeAgreementText } from "./authoritativeAgreementDocument"
 import {
   assertSignerSlotLegalEntityForPersist,
   hydrateLegalEntityNameFromHandoff,
+  resolveLegalEntityNameForHandoffSlot,
   resolvePaidProInlineSignerSetupMounted,
   resolvePaidProSignerDetailsGate,
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
@@ -5892,20 +5893,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText,
         agreementBodyText,
       });
+      const draftPartyNames = parties.map((row) => String(row?.name ?? "").trim());
       for (let i = 0; i < n; i++) {
         const p = parties[i];
         const draftEm = partyEmailAtIndex(d.parties, i);
         const signerName = partySignerMetaAtIndex(d.parties, i, signerNamesRef, signerTitlesRef, "signerName");
         const signerTitle = partySignerMetaAtIndex(d.parties, i, signerNamesRef, signerTitlesRef, "signerTitle");
         if (i === 0) {
+          // Checkout handoff: never persist notice headings ("Notices to …") into slot 0.
+          // Canonical per-slot legal entity from slotIdentities wins over contaminated UI/draft labels.
           const n1 = assertSignerSlotLegalEntityForPersist({
             slotIndex: 0,
-            attemptedValue:
-              (opts?.displayName1 ?? "").trim() ||
-              (recipient1NameRef.current || "").trim() ||
-              String(p?.name || "").trim() ||
-              slotIdentities[i]?.legalEntityName?.trim() ||
-              "",
+            attemptedValue: resolveLegalEntityNameForHandoffSlot({
+              partyIndex: 0,
+              currentSlotName:
+                (opts?.displayName1 ?? "").trim() ||
+                (recipient1NameRef.current || "").trim() ||
+                String(p?.name || "").trim() ||
+                "",
+              draftPartyName: p?.name,
+              recipientDisplayName: recipient1NameRef.current,
+              intakeText,
+              agreementBodyText,
+              draftPartyNames,
+              slotIdentities,
+            }),
             slotIdentities,
             source: "persist_handoff_slot_0",
           });
@@ -5922,14 +5934,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           continue;
         }
         if (i === 1) {
+          // Checkout handoff: never persist notice headings ("Notices to …") into slot 1.
+          // Canonical per-slot legal entity from slotIdentities wins over contaminated UI/draft labels.
           const n2 = assertSignerSlotLegalEntityForPersist({
             slotIndex: 1,
-            attemptedValue:
-              (opts?.displayName2 ?? "").trim() ||
-              (recipient2NameRef.current || "").trim() ||
-              String(p?.name || "").trim() ||
-              slotIdentities[i]?.legalEntityName?.trim() ||
-              "",
+            attemptedValue: resolveLegalEntityNameForHandoffSlot({
+              partyIndex: 1,
+              currentSlotName:
+                (opts?.displayName2 ?? "").trim() ||
+                (recipient2NameRef.current || "").trim() ||
+                String(p?.name || "").trim() ||
+                "",
+              draftPartyName: p?.name,
+              recipientDisplayName: recipient2NameRef.current,
+              intakeText,
+              agreementBodyText,
+              draftPartyNames,
+              slotIdentities,
+            }),
             slotIdentities,
             source: "persist_handoff_slot_1",
           });

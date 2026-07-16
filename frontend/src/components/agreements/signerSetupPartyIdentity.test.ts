@@ -316,6 +316,66 @@ describe("signerSetupPartyIdentity", () => {
     ).toBe("Red Mesa Logistics LLC");
   });
 
+  it("checkout handoff: notice headings cannot populate signer slot 1", () => {
+    // GTM Continue with Pro → persist_handoff_slot_1: recipient/draft may carry a Notices
+    // stanza heading ("Notices to <Party 1>") into slot 1. Canonical Party 2 must win.
+    const party1 = "Cedar Ridge Operations LLC";
+    const party2 = "Northwind Process Consulting LLC";
+    const noticeHeading = `Notices to ${party1}`;
+    const intake = `${party1} and ${party2} consulting agreement`;
+    const body = [
+      `This Agreement is between ${party1} and ${party2}.`,
+      "",
+      "9. Notices",
+      `Notices to ${party1}`,
+      `Notices to ${party2}`,
+      "",
+      "IN WITNESS WHEREOF",
+      "CLIENT:",
+      party1,
+      "SERVICE PROVIDER:",
+      party2,
+    ].join("\n");
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [{ name: party1 }, { name: noticeHeading }],
+      intakeText: intake,
+      agreementBodyText: body,
+    });
+    expect(identities[1]?.legalEntityName).toBe(party2);
+
+    // Raw notice heading still trips the persist guard (assertion preserved).
+    expect(() =>
+      assertSignerSlotLegalEntityForPersist({
+        slotIndex: 1,
+        attemptedValue: noticeHeading,
+        slotIdentities: identities,
+        source: "persist_handoff_slot_1",
+      }),
+    ).toThrow(/signer-slot-contamination-persist/);
+
+    // Checkout handoff assignment must select the canonical legal entity, not the notice heading.
+    const handoffSlot1 = resolveLegalEntityNameForHandoffSlot({
+      partyIndex: 1,
+      currentSlotName: noticeHeading,
+      draftPartyName: noticeHeading,
+      recipientDisplayName: noticeHeading,
+      intakeText: intake,
+      agreementBodyText: body,
+      draftPartyNames: [party1, noticeHeading],
+      slotIdentities: identities,
+    });
+    expect(handoffSlot1).toBe(party2);
+    expect(handoffSlot1).not.toMatch(/^Notices?\s+to\b/i);
+
+    const persisted = assertSignerSlotLegalEntityForPersist({
+      slotIndex: 1,
+      attemptedValue: handoffSlot1,
+      slotIdentities: identities,
+      source: "persist_handoff_slot_1",
+    });
+    expect(persisted).toBe(party2);
+  });
+
   it("supports 3-party slot isolation", () => {
     const identities = resolveSignerSetupPartyIdentities({
       parties: [
