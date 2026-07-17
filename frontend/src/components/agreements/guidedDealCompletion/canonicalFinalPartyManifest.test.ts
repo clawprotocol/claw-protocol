@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { MINIMUM_COMMERCIAL_SPECIFICITY_SCORE } from "../commercialSpecificity";
+import { corpusHasCanonicalNoticesHeading } from "../paidProPartyNoticeDetails";
 import {
   applyCanonicalManifestPlaceholdersToCorpus,
   formatCanonicalFinalPartyManifestLines,
@@ -19,23 +21,39 @@ This agreement is between [Your Company Name] and [Service Provider Name].
 Client address: [Your Company's Address]
 Provider address: [Service Provider's Address]
 
-1. Services and Scope
-Provider will provide AI automation setup and support services.
+1. Purpose and Scope
+Provider will perform AI workflow implementation for Company, including discovery and workflow mapping, dashboard setup, configured automation workflows, onboarding assistance, automation support, and light ongoing maintenance. The project deliverables are a written workflow map, a configured automation environment, an operations dashboard, administrator documentation, and a launch report.
 
 2. Fees and Payment
-Company will pay monthly fees.
+Company will pay the agreed project fees Net 30 after receipt of each undisputed invoice. The project fee allocation is build-heavy, with the larger share tied to build/configuration work and the remaining payments allocated to launch, support handoff, and final verification milestones. The build payment is earned after delivery of the workflow map and configured automation environment; the rollout payment is earned after delivery of the operations dashboard and administrator training; and the final payment is earned after Company verifies the launched workflows and receives the launch report.
 
 3. Confidentiality
 Each party will protect confidential information.
 
 4. Ownership and Work Product
-Ownership will be as stated in this Agreement.
+After Company pays the applicable fees, Client owns custom deliverables and all work product created specifically for Company under this Agreement, including the workflow map, configured automation workflows, dashboard configuration, administrator documentation, and launch report.
+Service Provider retains pre-existing tools, templates, know-how, and background technology, and grants Company a perpetual license to any such materials embedded in the project deliverables.
 
 5. Support
-Provider will provide commercially reasonable support.
+Provider will perform AI workflow implementation and configuration testing, correct reproducible defects in the delivered automation, provide onboarding assistance, and provide commercially reasonable automation support and light ongoing maintenance during rollout. Provider will deliver the workflow map within ten business days after kickoff, complete dashboard setup and configured automation workflows within twenty business days after Company approves the workflow map, and complete onboarding and launch verification within ten business days after rollout.
 
 6. Term and Termination
 The term continues until terminated.
+
+7. NOTICES
+All notices under this Agreement must be in writing and delivered by personal delivery, nationally recognized overnight courier, certified mail with return receipt requested, or email with confirmation of receipt to the recipient listed below.
+
+If to [Your Company Name]:
+[Your Company Name]
+[Your Company's Address]
+Attn: Authorized Representative
+Email: anthem@example.test
+
+If to [Service Provider Name]:
+[Service Provider Name]
+[Service Provider's Address]
+Attn: Joe Smith
+Email: joe@example.test
 `.trim() +
   "\n\n" +
   "Commercial safeguard paragraph. ".repeat(130) +
@@ -193,10 +211,18 @@ describe("canonicalFinalPartyManifest (test35)", () => {
       partyManifest: manifest,
       originalIntake: "AI automation support agreement",
     });
-    expect(result.ok).toBe(true);
-    expect(result.body).toMatch(/Acme LLC/);
-    expect(result.body).toMatch(/Joe Smith/);
-    expect(result.body).not.toMatch(/\[Your Company Name\]|\[Service Provider Name\]|Your Company Name|Service Provider Name/i);
+    expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
+    expect(result.unresolvedPlaceholders).toEqual([]);
+    expect(result.diagnostics.validationMissing).toEqual([]);
+    expect(corpusHasCanonicalNoticesHeading(result.body)).toBe(true);
+    expect(result.body).toContain("Acme LLC");
+    expect(result.body).toContain("Joe Smith");
+    expect(result.body).not.toMatch(/\bParty 1\b|\bParty 2\b/i);
+    expect(result.diagnostics.commercialSpecificityScore).toBeGreaterThanOrEqual(
+      MINIMUM_COMMERCIAL_SPECIFICITY_SCORE,
+    );
+    expect(result.body).not.toMatch(/\[[^\]\n]+\]/);
+    expect(result.body).not.toMatch(/Your Company Name|Service Provider Name/i);
     const copyHash = result.diagnostics.finalHash;
     expect(copyHash).toBe(result.diagnostics.finalHash);
   });
