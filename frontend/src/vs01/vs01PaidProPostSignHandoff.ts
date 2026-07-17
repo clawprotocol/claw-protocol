@@ -106,3 +106,24 @@ export function clearPaidProVs01PostSignHandoff(): void {
     /* ignore */
   }
 }
+
+export function clearPaidProVs01PostSignHandoffForAgreement(agreementId: string): void {
+  const id = agreementId.trim();
+  if (!id) return;
+  try {
+    const raw = sessionStorage.getItem(PAID_PRO_VS01_POST_SIGN_SESSION_KEY);
+    if (raw) {
+      const value = JSON.parse(raw) as Partial<PaidProVs01PostSignHandoffV1>;
+      if (String(value.agreementId ?? "").trim() === id) {
+        sessionStorage.removeItem(PAID_PRO_VS01_POST_SIGN_SESSION_KEY);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.removeItem(localHandoffKey(id));
+  } catch {
+    /* ignore */
+  }
+}

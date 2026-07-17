@@ -25,6 +25,7 @@ import {
   type Vs01SigningPacketStatusSnapshot,
 } from "./vs01SigningPacketStatusStore";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import type { SigningProgressSnapshot } from "./vs01WorkspaceSigningStatus";
 
 export type StepSigningPacketStatusProps = {
   handoff: PaidProVs01PostSignHandoffV1;
@@ -32,6 +33,8 @@ export type StepSigningPacketStatusProps = {
   senderPlacedFields: PlacedSigningField[];
   recipientPlacedFields: Vs01RecipientPlacedField[];
   creatorDisplayName: string;
+  /** Backend-confirmed aggregate progress; browser status remains presentation-only. */
+  authoritativeProgress?: SigningProgressSnapshot;
   onBack?: () => void;
   onRefresh?: () => void;
 };
@@ -144,7 +147,7 @@ export function StepSigningPacketStatus({
   prepareSignerRoles,
   senderPlacedFields,
   recipientPlacedFields,
-  creatorDisplayName: _creatorDisplayName,
+  authoritativeProgress,
   onBack,
   onRefresh,
 }: StepSigningPacketStatusProps) {
@@ -181,14 +184,21 @@ export function StepSigningPacketStatus({
     const built = buildPacketStatusCards({
       handoff: effectiveHandoff,
       roles: prepareSignerRoles,
-      statusByKey: statusSnap?.bySignerKey ?? {},
+      statusByKey: authoritativeProgress ? {} : statusSnap?.bySignerKey ?? {},
       ownerSigningUrl,
     });
     return built.map((card) => {
       const override = emailOverrides[card.key];
       return override ? { ...card, signerEmail: override } : card;
     });
-  }, [effectiveHandoff, prepareSignerRoles, statusSnap, ownerSigningUrl, emailOverrides]);
+  }, [
+    effectiveHandoff,
+    prepareSignerRoles,
+    statusSnap,
+    ownerSigningUrl,
+    emailOverrides,
+    authoritativeProgress,
+  ]);
 
   const submitSigningEmailCorrection = useCallback(
     async (newEmail: string) => {
@@ -225,10 +235,15 @@ export function StepSigningPacketStatus({
     [emailCorrectionCard, handoff.agreementId, effectiveHandoff],
   );
 
-  const { signed, total } = useMemo(
-    () => countSignedSigners(statusSnap?.bySignerKey ?? {}, cards.map((c) => c.key)),
-    [statusSnap, cards],
-  );
+  const { signed, total } = useMemo(() => {
+    if (authoritativeProgress) {
+      return {
+        signed: authoritativeProgress.signedCount,
+        total: authoritativeProgress.requiredCount,
+      };
+    }
+    return countSignedSigners(statusSnap?.bySignerKey ?? {}, cards.map((c) => c.key));
+  }, [authoritativeProgress, statusSnap, cards]);
 
   const refreshStatus = useCallback(() => {
     setStatusSnap(readSigningPacketStatus(handoff.agreementId));
@@ -306,7 +321,9 @@ export function StepSigningPacketStatus({
     [handoff.agreementId, handoff.vs01DocumentId, refreshStatus],
   );
 
-  const fullySigned = Boolean(statusSnap?.fullySigned);
+  const fullySigned = authoritativeProgress
+    ? authoritativeProgress.fullySigned
+    : Boolean(statusSnap?.fullySigned);
   const ownerCard = cards.find((c) => c.isOwner);
   const counterpartyCards = cards.filter((c) => !c.isOwner);
 

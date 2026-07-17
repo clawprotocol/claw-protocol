@@ -86,8 +86,7 @@ export function createFrozenSigningAuthorityPersistenceBoundary(
 
       currentKey = candidateKey;
       confirmed = null;
-      let tracked!: Promise<FrozenSigningAuthoritySnapshotV1>;
-      tracked = Promise.resolve()
+      const tracked = Promise.resolve()
         .then(persist)
         .then(
           (snapshot) => {
@@ -281,7 +280,31 @@ export function normalizeFrozenSigningAuthority(
     !Array.isArray(value.signers) ||
     !value.execution ||
     !Array.isArray(value.execution.partyOrder) ||
+    !Array.isArray(value.execution.signerOrder) ||
     !/^[a-f0-9]{64}$/.test(value.execution.executionPartyHash ?? "")
+  ) {
+    return null;
+  }
+  if (
+    value.parties.some(
+      (party, index) =>
+        !party ||
+        typeof party !== "object" ||
+        !party.agreementPartyId?.trim() ||
+        !party.legalEntityName?.trim() ||
+        !party.agreementRole?.trim() ||
+        party.canonicalOrder !== index,
+    ) ||
+    value.signers.some(
+      (signer) =>
+        !signer ||
+        typeof signer !== "object" ||
+        !signer.signerRecordId?.trim() ||
+        !signer.agreementPartyId?.trim() ||
+        !signer.signerName?.trim() ||
+        !signer.signerEmail?.includes("@") ||
+        !Number.isInteger(signer.signingOrder),
+    )
   ) {
     return null;
   }

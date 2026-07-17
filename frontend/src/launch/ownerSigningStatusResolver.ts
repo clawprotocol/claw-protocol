@@ -38,10 +38,9 @@ import {
  * Owner signing status source-of-truth order (Test361):
  * 1. Workspace index `completed_signed` / draft audit signed hydration
  * 2. Public verify `signature_status` + `signature_events` (persisted server state)
- * 3. VS01 signing packet status store (localStorage)
- * 4. Portable packet / local fallback when persisted state is unavailable
+ * 3. Backend signing lock
  *
- * Local fully-signed or higher signedCount wins over stale server/workspace 0/N progress.
+ * Browser packet/session markers never establish signing progress or completion.
  */
 
 export type OwnerSigningProgressSource =
@@ -112,42 +111,20 @@ function progressFromWorkspaceLock(row: WorkspaceIndexAgreement): OwnerSigningPr
 function pickAuthoritativeProgress(
   row: WorkspaceIndexAgreement,
   server: CreatorSigningProgressSnapshot | null | undefined,
-  local: SigningProgressSnapshot | null,
 ): OwnerSigningProgress | null {
-  if (isAgreementCompletedForDashboard(row)) {
+  if (row.completed_signed) {
     const requiredCount =
-      server?.requiredCount ?? local?.requiredCount ?? inferRequiredSignerCount(row);
+      server?.requiredCount ?? inferRequiredSignerCount(row);
     return {
       signedCount: requiredCount,
       requiredCount,
       partiallySigned: false,
       fullySigned: true,
-      source: server?.fullySigned ? "public_verify" : local ? "local_packet" : "index",
+      source: server?.fullySigned ? "public_verify" : "index",
     };
   }
 
-  if (local?.fullySigned && !server?.fullySigned) {
-    return { ...local, source: "local_packet" };
-  }
-  if (server?.fullySigned) return { ...server, source: "public_verify" };
-
-  if (server && local) {
-    if (local.signedCount > server.signedCount) return { ...local, source: "local_packet" };
-    if (server.signedCount > local.signedCount) return { ...server, source: "public_verify" };
-    if (local.fullySigned) return { ...local, source: "local_packet" };
-    if (server.fullySigned) return { ...server, source: "public_verify" };
-    if (local.signedCount > 0 && server.signedCount === 0) {
-      return { ...local, source: "local_packet" };
-    }
-    return { ...server, source: "public_verify" };
-  }
-
-  if (local && (local.signedCount > 0 || local.fullySigned)) {
-    return { ...local, source: "local_packet" };
-  }
   if (server) return { ...server, source: "public_verify" };
-  if (local) return { ...local, source: "local_packet" };
-
   return progressFromWorkspaceLock(row);
 }
 
@@ -155,8 +132,7 @@ export function resolveOwnerSigningProgress(
   row: WorkspaceIndexAgreement,
   server?: CreatorSigningProgressSnapshot | null,
 ): OwnerSigningProgress | null {
-  const local = readLocalSigningProgressSnapshot(row.id);
-  return pickAuthoritativeProgress(row, server ?? null, local);
+  return pickAuthoritativeProgress(row, server ?? null);
 }
 
 export function mergeWorkspaceRowFromSigningProgress(

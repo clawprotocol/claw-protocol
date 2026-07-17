@@ -27,12 +27,20 @@ export function resolveCreatorSigningProgressSnapshot(
   row: WorkspaceIndexAgreement,
   server?: CreatorSigningProgressSnapshot | null,
 ): CreatorSigningProgressSnapshot | null {
+  const local = readLocalSigningProgressSnapshot(row.id);
+  if (
+    !server &&
+    row.has_server_signing_lock &&
+    local?.partiallySigned &&
+    !local.fullySigned
+  ) {
+    return { ...local, source: "local_packet" };
+  }
   const resolved = resolveOwnerSigningProgress(row, server ?? null);
   if (resolved) return resolved;
 
   if (isAgreementFullySignedLocal(row.id) || isAgreementPartiallySignedLocal(row.id)) {
-    const snap = readLocalSigningProgressSnapshot(row.id);
-    if (snap) return { ...snap, source: "local_packet" };
+    if (local && !local.fullySigned) return { ...local, source: "local_packet" };
   }
   return null;
 }

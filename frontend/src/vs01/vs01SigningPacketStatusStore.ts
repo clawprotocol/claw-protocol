@@ -57,6 +57,16 @@ export function writeSigningPacketStatus(snapshot: Vs01SigningPacketStatusSnapsh
   }
 }
 
+export function clearSigningPacketStatus(agreementId: string): void {
+  const id = agreementId.trim();
+  if (!id || typeof localStorage === "undefined") return;
+  try {
+    localStorage.removeItem(storageKey(id));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function ensureSigningPacketStatusFromHandoff(
   handoff: PaidProVs01PostSignHandoffV1,
   ownerRoleId: string,

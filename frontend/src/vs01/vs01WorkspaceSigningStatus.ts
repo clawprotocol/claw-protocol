@@ -45,6 +45,17 @@ export function markAgreementPacketPrepared(agreementId: string): void {
   }
 }
 
+export function clearAgreementLocalSigningMarkers(agreementId: string): void {
+  const id = agreementId.trim();
+  if (!id || typeof localStorage === "undefined") return;
+  try {
+    localStorage.removeItem(packetPreparedKey(id));
+    localStorage.removeItem(fieldsPlacedCountKey(id));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function isAgreementPacketPrepared(agreementId: string): boolean {
   const id = agreementId.trim();
   if (!id) return false;

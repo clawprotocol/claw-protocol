@@ -238,7 +238,7 @@ describe("ownerSigningStatusResolver (Test359 follow-up)", () => {
     expect(deriveCreatorSigningStatusLabel(row, server)).toBe("1 of 2 signed");
   });
 
-  it("prefers local 2/2 over stale server 0/2", () => {
+  it("does not let local 2/2 manufacture completion over backend 0/2", () => {
     const handoff = twoPartyHandoff();
     ensureSigningPacketStatusFromHandoff(handoff, handoff.ownerSignerRoleId!);
     patchSignerPacketStatus(AG, handoff.ownerSignerRoleId!, "signed");
@@ -247,9 +247,9 @@ describe("ownerSigningStatusResolver (Test359 follow-up)", () => {
     const server = progressFromPublicVerify(publicVerifyPayload({ signatures_recorded: 0 }) as never);
     const row = indexRow();
     const progress = resolveOwnerSigningProgress(row, server);
-    expect(progress?.fullySigned).toBe(true);
-    expect(progress?.signedCount).toBe(2);
-    expect(progress?.source).toBe("local_packet");
+    expect(progress?.fullySigned).toBe(false);
+    expect(progress?.signedCount).toBe(0);
+    expect(progress?.source).toBe("public_verify");
   });
 
   it("prefers server 2/2 completed over stale local 1/2", () => {

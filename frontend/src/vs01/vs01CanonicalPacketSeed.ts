@@ -263,6 +263,38 @@ export function findVs01CanonicalPacketPortableByAgreementId(
   );
 }
 
+export function clearVs01CanonicalPacketByAgreementId(agreementId: string): void {
+  const aid = agreementId.trim();
+  if (!aid || typeof window === "undefined") return;
+
+  const clearStorage = (storage: Storage, prefixes: readonly string[]) => {
+    try {
+      const keys: string[] = [];
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (!key || !prefixes.some((prefix) => key.startsWith(prefix))) continue;
+        const raw = storage.getItem(key);
+        if (!raw) continue;
+        try {
+          const value = JSON.parse(raw) as
+            | Vs01CanonicalPacketSeedV1
+            | Vs01CanonicalPacketPortableV1;
+          const seed = "seed" in value ? value.seed : value;
+          if (seed?.agreementId?.trim() === aid) keys.push(key);
+        } catch {
+          /* malformed local cache is not authority */
+        }
+      }
+      for (const key of keys) storage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  clearStorage(sessionStorage, [SS_PREFIX, PORTABLE_SS_PREFIX]);
+  clearStorage(localStorage, [LS_PREFIX, PORTABLE_LS_PREFIX]);
+}
+
 export function loadVs01CanonicalPacketPortable(documentId: string): Vs01CanonicalPacketPortableV1 | null {
   if (typeof window === "undefined") return null;
   const key = storageKey(documentId);
@@ -362,7 +394,6 @@ export function logVs01RecipientCanonicalSource(payload: {
   fallbackReason?: string;
 }): void {
   if (import.meta.env.MODE === "test") return;
-  // eslint-disable-next-line no-console
   console.info("[vs01-recipient-canonical-source]", payload);
 }
 
@@ -399,6 +430,5 @@ export function logVs01CanonicalPacketSeedUse(payload: {
   renderMode: "canonical" | "pdf_blocked_fallback";
 }): void {
   if (import.meta.env.MODE === "test") return;
-  // eslint-disable-next-line no-console
   console.info("[vs01-canonical-packet-seed]", payload);
 }
