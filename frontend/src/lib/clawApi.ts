@@ -1,3 +1,11 @@
+import {
+  readRuntimeEnvDev,
+  readRuntimeEnvMode,
+  readRuntimeEnvProd,
+  readRuntimeEnvironment,
+  readRuntimeEnvString,
+} from "../config/runtimeEnvironment";
+
 const DEV_API_FALLBACK = "http://127.0.0.1:8000";
 
 /** Injected at runtime (e.g. static hosting) when build-time VITE_* API URL is missing. Set before the app bundle runs. */
@@ -30,12 +38,12 @@ function logApiBaseResolvedOnce(resolved: string, source: "env" | "runtime_meta"
   if (loggedApiBaseOnce) return;
   loggedApiBaseOnce = true;
   /** Vitest (`MODE === "test"`) and explicit suppress keep CI / Playwright / unit stdout quiet. */
-  if (import.meta.env.MODE === "test") return;
-  if (String(import.meta.env.VITE_CLAW_SUPPRESS_API_BASE_LOG ?? "").trim() === "1") return;
+  if (readRuntimeEnvMode() === "test") return;
+  if (readRuntimeEnvString("VITE_CLAW_SUPPRESS_API_BASE_LOG") === "1") return;
   /** Production stays silent unless operators opt in (safe host-only payload). */
-  if (import.meta.env.PROD && String(import.meta.env.VITE_CLAW_LOG_API_BASE ?? "").trim() !== "1") return;
+  if (readRuntimeEnvProd() && readRuntimeEnvString("VITE_CLAW_LOG_API_BASE") !== "1") return;
   try {
-    if (import.meta.env.PROD) {
+    if (readRuntimeEnvProd()) {
       let host = "same_origin";
       if (resolved) {
         try {
@@ -48,7 +56,7 @@ function logApiBaseResolvedOnce(resolved: string, source: "env" | "runtime_meta"
       console.info("[CLAW] API base (once)", { source, apiHost: host });
       return;
     }
-    if (import.meta.env.DEV) {
+    if (readRuntimeEnvDev()) {
       // eslint-disable-next-line no-console
       console.info("[CLAW] API base (once)", { source, base: resolved || "(empty/same-origin)" });
     }
@@ -125,9 +133,7 @@ export function normalizeLocalApiBase(raw: string, caller = "unknown"): string {
  * @see getRuntimePublicApiBase — use getLawDogApiBase() in requests so runtime injection can apply.
  */
 export function getApiBase(): string {
-  const a = String((import.meta.env.VITE_CLAW_API_BASE as string | undefined) ?? "").trim();
-  const b = String((import.meta.env.VITE_API_BASE as string | undefined) ?? "").trim();
-  return (a || b).replace(/\/$/, "");
+  return readRuntimeEnvironment().apiBaseUrl;
 }
 
 /**
@@ -140,7 +146,7 @@ export function getLawDogApiBase(): string {
   if (explicit) {
     const normalized = normalizeLocalApiBase(explicit, "getLawDogApiBase");
     logApiBaseResolvedOnce(normalized, rawEnv ? "env" : "runtime_meta");
-    if (import.meta.env.PROD && !isLocalBrowserOrigin()) {
+    if (readRuntimeEnvProd() && !isLocalBrowserOrigin()) {
       const l = normalized.toLowerCase();
       if (l.includes("localhost") || l.includes("127.0.0.1")) {
         console.warn(
@@ -150,7 +156,7 @@ export function getLawDogApiBase(): string {
     }
     return normalized;
   }
-  if (import.meta.env.PROD && !isLocalBrowserOrigin()) {
+  if (readRuntimeEnvProd() && !isLocalBrowserOrigin()) {
     logApiBaseResolvedOnce("", "same_origin");
     return "";
   }
@@ -158,7 +164,7 @@ export function getLawDogApiBase(): string {
     logApiBaseResolvedOnce(DEV_API_FALLBACK, "dev_fallback");
     return DEV_API_FALLBACK;
   }
-  if (import.meta.env.PROD) {
+  if (readRuntimeEnvProd()) {
     logApiBaseResolvedOnce("", "same_origin");
     return "";
   }
@@ -173,7 +179,7 @@ export function resolveApiBase(): string {
 
 /** True when prod build has an explicit API base that still targets loopback (misconfiguration). */
 export function isProductionApiMisconfigured(): boolean {
-  if (!import.meta.env.PROD) return false;
+  if (!readRuntimeEnvProd()) return false;
   if (isLocalBrowserOrigin()) return false;
   const b = getApiBase();
   if (!b) return false;
