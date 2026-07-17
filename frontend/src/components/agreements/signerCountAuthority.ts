@@ -28,6 +28,7 @@ import {
 } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { countRealParties } from "./starterPartyLimits";
+import { readLegalPartyCountFromTypedHandoff } from "./starterToPaidPartyHandoff";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
 
@@ -86,7 +87,8 @@ export type SignerCountAuthorityResolution = {
     | "labeled_parties"
     | "party_slot_count"
     | "draft_parties"
-    | "default_two";
+    | "default_two"
+    | "typed_handoff";
   labeledCount: number;
   draftCount: number;
   corpusBlockCount: number;
@@ -224,6 +226,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   const draftNames =
     args.draftPartyNames ??
     (args.draftParties ?? []).map((p) => String(p?.name ?? "").trim()).filter(Boolean);
+  const typedHandoffPartyCount = readLegalPartyCountFromTypedHandoff(intake);
   const labeledCount = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName).length;
   const quotedCount = quotedRolePartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName).length;
   const authoritativeIntakeCount = Math.max(labeledCount, quotedCount);
@@ -246,8 +249,20 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
       return n.length >= 2 && isAuthoritativeLegalEntityName(n);
     }).length ?? 0;
   const explicitManifestPartyCount = args.manifestPartyCount ?? 0;
+  const hasExplicitCurrentPartyAuthority =
+    authoritativeIntakeCount >= 2 ||
+    collapsedDraft >= 2 ||
+    draftCount >= 2 ||
+    (args.rawPartyCount ?? 0) >= 2 ||
+    (args.userExpandedPartyCount ?? 0) >= 2 ||
+    explicitManifestPartyCount >= 2;
+  const effectiveTypedHandoffPartyCount =
+    !hasExplicitCurrentPartyAuthority && typedHandoffPartyCount >= 2
+      ? typedHandoffPartyCount
+      : 0;
   const manifestPartyCount = Math.max(
     explicitManifestPartyCount,
+    effectiveTypedHandoffPartyCount,
     paidProSoTActive ? frozenManifestCount : 0,
     paidProSoTActive ? consumedManifestCount : 0,
     authoritativeIntakeCount >= 3 ? authoritativeIntakeCount : 0,
@@ -260,9 +275,12 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   if (authoritativeIntakeCount >= 2) {
     count = authoritativeIntakeCount;
     source = "labeled_parties";
-  } else if (partySlotCount >= 2) {
+  } else if (hasExplicitCurrentPartyAuthority && partySlotCount >= 2) {
     count = partySlotCount;
     source = "party_slot_count";
+  } else if (effectiveTypedHandoffPartyCount >= 2) {
+    count = effectiveTypedHandoffPartyCount;
+    source = "typed_handoff";
   } else if (collapsedDraft >= 2) {
     count = collapsedDraft;
     source = "draft_parties";

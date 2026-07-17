@@ -4,7 +4,7 @@ import { buildCommercialFactGraph } from "./proOperationalSynthesis/commercialFa
 import { applyAiWorkflowServicesQualityFloorToFallback } from "./premiumReadonlyRenderCorpus";
 import { applyPaidProReviewRenderSanitizer } from "./paidProReviewRenderCorpus";
 import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
-import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372FreeStarterIdentityRegression.test";
+import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372Fixtures";
 import {
   applyPaidProDomainScopeGuard,
   detectUnsupportedDomainContamination,

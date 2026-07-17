@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildCanonicalSignerManifest } from "./guidedDealCompletion/guidedReviewSigningContinuity";
 import { manifestToCanonicalPartyIdentities } from "./guidedDealCompletion/canonicalFinalPartyManifest";
 import { resolveCanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
@@ -6,9 +6,11 @@ import { buildPaidProSignerMetadataParties } from "./paidProSignerMetadataAuthor
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import { resolveGeneratedAgreementPartyCount, resolveSignerSetupUiPartyCount } from "./paidProNPartySignerSetup";
-import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteRegression.test";
-import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372FreeStarterIdentityRegression.test";
+import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteFixtures";
+import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372Fixtures";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import { invalidatePremiumRecipientHandoffReadCache } from "./premiumRecipientHandoffReadCache";
 import {
   assertSignerCountNotFromCorpus,
   consumeAuthoritativeSignerCount,
@@ -76,6 +78,15 @@ function twoPartyAuthorityArgs() {
 }
 
 describe("signerCountAuthority", () => {
+  const resetTestState = () => {
+    resetPaidProPipelineTestIsolation();
+    invalidatePremiumRecipientHandoffReadCache();
+    resetSignerCountAuthorityDiagnosticsForTests();
+  };
+
+  beforeEach(resetTestState);
+  afterEach(resetTestState);
+
   it("resolves signer count to 2 for role-labeled two-party intake", () => {
     const resolution = resolveAuthoritativeSignerCount(twoPartyAuthorityArgs());
     expect(resolution.count).toBe(2);

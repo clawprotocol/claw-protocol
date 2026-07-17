@@ -220,12 +220,17 @@ function mergeSlot(
     signerTitle: string;
     partyAddress: string;
   }>,
-  opts?: { preserveSignerFieldsOnEmptyPatch?: boolean },
+  opts?: {
+    preserveSignerFieldsOnEmptyPatch?: boolean;
+    allowEmptyEmailClear?: boolean;
+  },
 ): PremiumRecipientHandoffSlot {
   const name = patch.name !== undefined ? String(patch.name || "").trim() || prev.name : prev.name;
   const email =
     patch.email !== undefined
-      ? String(patch.email || "").trim() || String(prev.email || "").trim()
+      ? opts?.allowEmptyEmailClear
+        ? String(patch.email || "").trim()
+        : String(patch.email || "").trim() || String(prev.email || "").trim()
       : String(prev.email || "").trim();
   const role =
     patch.role !== undefined
@@ -320,8 +325,11 @@ function authoritativeHandoffPartyCap(explicitAuthoritativeCount?: number): numb
 export function resolveHandoffAuthorityPartyCount(opts?: {
   partySlotCount?: number;
 }): number {
-  const cap = authoritativeHandoffPartyCap();
   const requested = Math.max(opts?.partySlotCount ?? 0, 2);
+  if (hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) {
+    return Math.min(requested, 2);
+  }
+  const cap = authoritativeHandoffPartyCap();
   if (cap != null && cap >= 2) return Math.min(requested, cap);
   return requested;
 }
@@ -617,6 +625,7 @@ function canonicalSignerMetadataFloor(): ReturnType<typeof readSignerMetadataEff
 function wouldHandoffWriteDowngradeSignerMetadata(
   payload: PremiumRecipientHandoffV2,
   partySlotCount: number,
+  opts?: { allowExplicitEmailClear?: boolean },
 ): boolean {
   const max = canonicalSignerMetadataFloor();
   if (max.slotsWithSignerName < 1) return false;
@@ -626,7 +635,11 @@ function wouldHandoffWriteDowngradeSignerMetadata(
   if (max.slotsWithSignerTitle >= 1 && newCounts.slotsWithSignerTitle < max.slotsWithSignerTitle) {
     return true;
   }
-  if (max.slotsWithSignerEmail >= 1 && newCounts.slotsWithSignerEmail < max.slotsWithSignerEmail) {
+  if (
+    !opts?.allowExplicitEmailClear &&
+    max.slotsWithSignerEmail >= 1 &&
+    newCounts.slotsWithSignerEmail < max.slotsWithSignerEmail
+  ) {
     return true;
   }
   return false;
@@ -666,13 +679,15 @@ export function writePremiumRecipientHandoffExact(
   try {
     const cur = readPremiumRecipientHandoff();
     const curSlots = linearPremiumRecipientSlots(cur, Math.max(2 + (partyIndexSlots?.length ?? 0), 2));
-    const mergedParty1 = mergeSlot(curSlots[0] ?? emptySlot(), party1, { preserveSignerFieldsOnEmptyPatch: true });
-    const mergedParty2 = mergeSlot(curSlots[1] ?? emptySlot(), party2, { preserveSignerFieldsOnEmptyPatch: true });
-    const extra = (partyIndexSlots ?? []).filter(
-      (s) => s && (s.name || s.email || s.partyAddress),
-    );
+    const exactMergeOptions = {
+      preserveSignerFieldsOnEmptyPatch: true,
+      allowEmptyEmailClear: true,
+    };
+    const mergedParty1 = mergeSlot(curSlots[0] ?? emptySlot(), party1, exactMergeOptions);
+    const mergedParty2 = mergeSlot(curSlots[1] ?? emptySlot(), party2, exactMergeOptions);
+    const extra = partyIndexSlots ?? [];
     const mergedExtra = extra.map((s, i) =>
-      mergeSlot(curSlots[i + 2] ?? emptySlot(), s, { preserveSignerFieldsOnEmptyPatch: true }),
+      mergeSlot(curSlots[i + 2] ?? emptySlot(), s, exactMergeOptions),
     );
     const mapExtraSlot = (s: PremiumRecipientHandoffSlot): PremiumRecipientHandoffSlot => ({
       name: String(s.name ?? "").trim(),
@@ -711,7 +726,8 @@ export function writePremiumRecipientHandoffExact(
       !extra.length
     )
       return;
-    const cap = authoritativeHandoffPartyCap(authoritativePartyCount);
+    const exactPartyCount = 2 + mergedExtra.length;
+    const cap = authoritativeHandoffPartyCap(authoritativePartyCount ?? exactPartyCount);
     const trimmedPayload =
       cap != null && cap >= 2
         ? trimPremiumRecipientHandoffToPartyCount(payload, cap)
@@ -722,8 +738,25 @@ export function writePremiumRecipientHandoffExact(
       trimmedPayload,
       authoritativePartyCount ?? cap,
     );
-    const mergedPayload = mergeHandoffPayloadFromConsumedSignerAuthority(trimmedPayload, slotCount);
-    if (wouldHandoffWriteDowngradeSignerMetadata(mergedPayload, slotCount)) {
+    const authorityMergedPayload = mergeHandoffPayloadFromConsumedSignerAuthority(trimmedPayload, slotCount);
+    const authorityMergedSlots = linearPremiumRecipientSlots(authorityMergedPayload, slotCount);
+    const exactInputSlots = [party1, party2, ...(partyIndexSlots ?? [])];
+    const exactSlots = authorityMergedSlots.map((slot, index) =>
+      exactInputSlots[index]?.email !== undefined
+        ? { ...slot, email: String(exactInputSlots[index].email ?? "").trim() }
+        : slot,
+    );
+    const mergedPayload: PremiumRecipientHandoffV2 = {
+      ...authorityMergedPayload,
+      party1: exactSlots[0] ?? authorityMergedPayload.party1,
+      party2: exactSlots[1] ?? authorityMergedPayload.party2,
+      ...(slotCount > 2 ? { partyIndexSlots: exactSlots.slice(2, slotCount) } : {}),
+    };
+    if (
+      wouldHandoffWriteDowngradeSignerMetadata(mergedPayload, slotCount, {
+        allowExplicitEmailClear: true,
+      })
+    ) {
       if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
         // eslint-disable-next-line no-console
         console.warn("[review-link-signer-metadata-handoff-write-blocked]", {

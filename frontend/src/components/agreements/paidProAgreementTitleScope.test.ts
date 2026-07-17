@@ -8,7 +8,7 @@ import {
 import { resolvePaidProServicesAgreementTitle } from "./paidProOpeningRecitalGuard";
 import { buildCanonicalPaidProServicesOpeningRecital } from "./paidProOpeningRecitalGuard";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
-import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372FreeStarterIdentityRegression.test";
+import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372Fixtures";
 
 const GENERIC_CONSULTING_INTAKE = `
 Create a services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC.

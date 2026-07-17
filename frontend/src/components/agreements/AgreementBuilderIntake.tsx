@@ -448,6 +448,9 @@ import {
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
+import { resolveLegalPartyAuthorityForIntake } from "./legalPartyAuthoritySession";
+import { writeStarterToPaidPartyHandoff } from "./starterToPaidPartyHandoff";
+import { runStarterToPaidCheckoutBoundary } from "./starterToPaidCheckoutBoundary";
 import {
   hasAcceptedPaidProAuthority,
   isAuthoritativePaidProReview,
@@ -11427,7 +11430,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     },
   ) => {
     console.info("[premium-flow] button_click", { button: "unlock_premium_rewrite_checkout" });
-    markCurrentSessionProIntent();
     const gateDraft = draftOverride ?? draft;
     const resumeSnap = readCreateComplexityResume();
     const pending =
@@ -11448,7 +11450,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       console.warn("[premium-flow] checkout_launch_aborted", { reason: "no_pending_draft" });
       return;
     }
-    ensurePremiumCheckoutIntakePreserved(raw);
     if (
       isProEntitledForAgreement({
         tier,
@@ -11458,66 +11459,80 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
       })
     ) {
+      markCurrentSessionProIntent();
       console.info("[premium-flow] checkout_bypass_already_pro", { surface: "advanced_full_draft_stripe" });
       void runEntitledPremiumImprovementRewrite();
       return;
     }
-    const resumeKind: CreateComplexityResumeKind =
-      resumeSnap?.resume_kind === "multi_party_pro_gate" || opts?.checkoutSource === "multi_party_pro_gate"
-        ? "multi_party_pro_gate"
-        : complexityPendingParsedRef.current != null
-          ? "complexity_gate"
-          : "optional_full_upgrade";
-    const skipProCardScroll =
-      opts?.skipProCardScroll === true ||
-      Boolean(
-        opts?.checkoutSource &&
-          /starter_review|restored_starter|starter_continue|multi_party_pro_gate/.test(opts.checkoutSource),
-      );
-    if (!skipProCardScroll) {
-      scrollToPremiumPosAnchor();
-    }
-    console.info("[premium-flow] checkout_launch", {
-      surface: "advanced_full_draft_stripe",
-      source: opts?.checkoutSource ?? "starter_pro_refine_card",
-      rawLen: raw.length,
-      intakeChosenSource: intakeResolved.chosenSource,
-      sessionOriginalLen: intakeResolved.sessionOriginalLen,
-      checkoutBackLen: intakeResolved.checkoutBackLen,
-    });
-    stashCreateComplexityResume({
-      rawIntake: raw,
-      pending,
-      awaitingProCheckout: true,
-      resume_kind: resumeKind,
-      originalUserIntakeRaw: readOriginalUserIntakeRaw() || raw,
-    });
-    stashUpgradeCheckoutContext(upgradeContextReasons, {
-      completionLabel: buildUpgradeCheckoutCompletionLabel(pending),
-      intentSignals: detectUpgradeIntentSignals(`${raw}\n${agreementDocumentText}`),
-      starterProRefineCtaExperiment: opts?.starterProRefineCtaExperiment,
-    });
-    persistPremiumRecipientHandoffFromDraftAndUi(pending);
-    armPaidProStarterSignatureSendFromCreateFlow();
-    persistPremiumForkUserSendMode("signature");
-    paidProPremiumSendIntentRef.current = "signature";
-    setPremiumSendModeUserChoice("signature");
-    setPremiumSendModeTouched(true);
-    setPremiumSignatureSenderFirst(true);
-    clearPremiumCollaborateFirstDefaultPrimed();
-    persistStarterReviewBeforeCheckout({
-      intakeText: raw,
-      draft: pending,
-      previewText: agreementDocumentText,
-    });
-    setAdvancedFullDraftPaywallOpen(false);
-    const cadence = "annual";
-    const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
-    emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
-    navigate(
-      `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
-        cadence,
-      )}&returnTo=${returnTo}`,
+    runStarterToPaidCheckoutBoundary(
+      { rawIntake: raw, pendingDraft: pending },
+      {
+        hasCurrentSessionFreeStarterIntent,
+        hasCurrentSessionProEntitlement,
+        resolveLegalPartyAuthority: resolveLegalPartyAuthorityForIntake,
+        writeStarterToPaidPartyHandoff,
+      },
+      () => {
+        markCurrentSessionProIntent();
+        ensurePremiumCheckoutIntakePreserved(raw);
+        const resumeKind: CreateComplexityResumeKind =
+          resumeSnap?.resume_kind === "multi_party_pro_gate" || opts?.checkoutSource === "multi_party_pro_gate"
+            ? "multi_party_pro_gate"
+            : complexityPendingParsedRef.current != null
+              ? "complexity_gate"
+              : "optional_full_upgrade";
+        const skipProCardScroll =
+          opts?.skipProCardScroll === true ||
+          Boolean(
+            opts?.checkoutSource &&
+              /starter_review|restored_starter|starter_continue|multi_party_pro_gate/.test(opts.checkoutSource),
+          );
+        if (!skipProCardScroll) {
+          scrollToPremiumPosAnchor();
+        }
+        console.info("[premium-flow] checkout_launch", {
+          surface: "advanced_full_draft_stripe",
+          source: opts?.checkoutSource ?? "starter_pro_refine_card",
+          rawLen: raw.length,
+          intakeChosenSource: intakeResolved.chosenSource,
+          sessionOriginalLen: intakeResolved.sessionOriginalLen,
+          checkoutBackLen: intakeResolved.checkoutBackLen,
+        });
+        stashCreateComplexityResume({
+          rawIntake: raw,
+          pending,
+          awaitingProCheckout: true,
+          resume_kind: resumeKind,
+          originalUserIntakeRaw: readOriginalUserIntakeRaw() || raw,
+        });
+        stashUpgradeCheckoutContext(upgradeContextReasons, {
+          completionLabel: buildUpgradeCheckoutCompletionLabel(pending),
+          intentSignals: detectUpgradeIntentSignals(`${raw}\n${agreementDocumentText}`),
+          starterProRefineCtaExperiment: opts?.starterProRefineCtaExperiment,
+        });
+        persistPremiumRecipientHandoffFromDraftAndUi(pending);
+        armPaidProStarterSignatureSendFromCreateFlow();
+        persistPremiumForkUserSendMode("signature");
+        paidProPremiumSendIntentRef.current = "signature";
+        setPremiumSendModeUserChoice("signature");
+        setPremiumSendModeTouched(true);
+        setPremiumSignatureSenderFirst(true);
+        clearPremiumCollaborateFirstDefaultPrimed();
+        persistStarterReviewBeforeCheckout({
+          intakeText: raw,
+          draft: pending,
+          previewText: agreementDocumentText,
+        });
+        setAdvancedFullDraftPaywallOpen(false);
+        const cadence = "annual";
+        const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
+        emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
+        navigate(
+          `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
+            cadence,
+          )}&returnTo=${returnTo}`,
+        );
+      },
     );
   },
   [

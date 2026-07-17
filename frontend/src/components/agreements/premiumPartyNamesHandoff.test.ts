@@ -6,9 +6,15 @@ import {
   linearPremiumRecipientSlots,
   persistPremiumRecipientHandoff,
   readPremiumRecipientHandoff,
+  resetPremiumRecipientHandoffDedupForTests,
   writePremiumPartyNamesHandoff,
   writePremiumRecipientHandoffExact,
 } from "./premiumPartyNamesHandoff";
+import { invalidatePremiumRecipientHandoffReadCache } from "./premiumRecipientHandoffReadCache";
+import { clearCanonicalPartyMetadata } from "./canonicalPartyMetadataAuthority";
+import { clearPaidProPremiumRecipientHandoffReadGate } from "./paidProPremiumRecipientHandoffReadGate";
+import { clearCurrentSessionProEntitlementMarkers } from "./paidProSessionEligibility";
+import { resetSignerMetadataEffectiveMaxForTests } from "./signerMetadataEffective";
 
 const LEGACY = "claw_premium_party_names_handoff_v1";
 const V2 = "claw_premium_recipient_handoff_v2";
@@ -36,12 +42,23 @@ function stubSessionStorage() {
   );
 }
 
+function resetHandoffTestState() {
+  clearPremiumPartyNamesHandoff();
+  invalidatePremiumRecipientHandoffReadCache();
+  resetPremiumRecipientHandoffDedupForTests();
+  clearPaidProPremiumRecipientHandoffReadGate();
+  resetSignerMetadataEffectiveMaxForTests();
+  clearCanonicalPartyMetadata();
+  clearCurrentSessionProEntitlementMarkers();
+}
+
 beforeEach(() => {
   stubSessionStorage();
+  resetHandoffTestState();
 });
 
 afterEach(() => {
-  clearPremiumPartyNamesHandoff();
+  resetHandoffTestState();
   vi.unstubAllGlobals();
 });
 

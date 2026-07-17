@@ -11,7 +11,7 @@ import {
   shouldShowPaidProForcedFirstReviewTrackChooser,
 } from "./signerSetupPartyIdentity";
 import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
-import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372FreeStarterIdentityRegression.test";
+import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372Fixtures";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const HARBOR = "Harbor Peak Automation LLC";

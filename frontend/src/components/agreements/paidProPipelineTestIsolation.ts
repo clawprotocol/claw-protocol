@@ -24,8 +24,10 @@ import { clearPaidProAuthorityHashContinuityForTests } from "./paidProAuthorityH
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
 import { resetPaidReviewSessionCorpusInvariantForTests } from "./paidProReviewSessionCorpusInvariantState";
+import { clearStarterToPaidPartyHandoffForTests } from "./starterToPaidPartyHandoff";
+import { clearSignerExecutionAuthorityForTests } from "./signerExecutionAuthority";
 
-/** Clear cross-test Paid Pro pipeline caches and in-memory authority without touching sessionStorage. */
+/** Clear cross-test Paid Pro pipeline caches plus session-scoped handoff authority. */
 export function resetPaidProPipelineTestIsolation(): void {
   clearPaidProSourceOfTruth();
   clearProGenerationAdoptionForTests();
@@ -46,4 +48,6 @@ export function resetPaidProPipelineTestIsolation(): void {
   clearCurrentSessionProEntitlementMarkers();
   resetPremiumRecipientHandoffDedupForTests();
   resetPaidReviewSessionCorpusInvariantForTests();
+  clearStarterToPaidPartyHandoffForTests();
+  clearSignerExecutionAuthorityForTests();
 }

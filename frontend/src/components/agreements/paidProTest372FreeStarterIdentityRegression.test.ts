@@ -21,30 +21,11 @@ import {
   isStackedPartyIdentityContamination,
 } from "./starterPartyIdentityIsolation";
 import { sanitizeStarterPartyNameForDisplay } from "./starterPreviewProseSanitize";
-import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteRegression.test";
+import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteFixtures";
+import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372Fixtures";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const HARBOR = "Harbor Peak Automation LLC";
-
-export const TEST372_FREE_STACKED_PARTY_INTAKE = `Create a services agreement.
-
-Party 1:
-${BLUE}
-Sarah Mitchell
-CEO
-sarah@bluecanyonanalytics.com
-
-Party 2:
-${HARBOR}
-Michael Torres
-President
-michael@harborpeakautomation.com
-
-Scope: Strategic business consulting and operational planning services.
-${BLUE} will pay ${HARBOR} $48,000 in monthly installments.
-Term: twelve (12) months.
-Governing law: Oklahoma.
-Effective date: Upon full execution by all parties.`;
 
 const CONTAMINATED_P1 = `${BLUE} Sarah Mitchell CEO sarah`;
 const CONTAMINATED_P2 = `${HARBOR} Michael Torres President michael`;
