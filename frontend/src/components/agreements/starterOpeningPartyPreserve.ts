@@ -134,7 +134,7 @@ export function enrichStarterPreviewPartiesFromIntake(
     intakeText,
   );
   const baseParties =
-    repairedParties.length >= 2
+    repairedParties.length >= parties.length
       ? repairedParties
       : fullNames.length > parties.length
         ? fullNames.map((name, index) => parties[index] ?? { name, role: index === 0 ? "Client" : index === 1 ? "Service Provider" : "party" })

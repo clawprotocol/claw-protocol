@@ -4,7 +4,7 @@
  */
 
 import { parseLabeledPartyBlocks, parseQuotedRolePartyLines, roleLabelPartyLegalEntities, labeledPartyLegalEntities } from "./labeledPartyBlockParse";
-import { extractBetweenPartyNameList, extractBetweenPartyPair } from "./partyBetweenParse";
+import { extractBetweenPartyNameList, extractBetweenPartyPair, extractBetweenPartyRawPair } from "./partyBetweenParse";
 import {
   extractIntakePayment,
   formatPaymentCadencePhrase,
@@ -454,9 +454,13 @@ function extractStructuredParties(text: string, lower: string, rawIntake?: strin
     const cleanedRightRaw = preCleanBetweenTailForMultiPartySplit(betweenPair.right);
     const { name: a } = clampPartySegmentWithRole(cleanedLeftRaw);
     const { name: b } = clampPartySegmentWithRole(cleanedRightRaw);
-    // Recover roles from the original (un-cleaned) sides.
-    const { role: roleA } = clampPartySegmentWithRole(betweenPair.left);
-    const { role: roleB } = clampPartySegmentWithRole(betweenPair.right);
+    const rawPair = extractBetweenPartyRawPair(partyParseText);
+    const { role: roleA } = rawPair
+      ? clampPartySegmentWithRole(rawPair.leftRaw)
+      : clampPartySegmentWithRole(betweenPair.left);
+    const { role: roleB } = rawPair
+      ? clampPartySegmentWithRole(rawPair.rightRaw)
+      : clampPartySegmentWithRole(betweenPair.right);
     if (a.length > 1 && b.length > 1) {
       const conf = confidenceBetweenPair(a, b);
       const structured: StructuredTwoParties = { party_1: a, party_2: b };

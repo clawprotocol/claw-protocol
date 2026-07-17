@@ -187,6 +187,23 @@ const LABELED_FIELD_RES: ReadonlyArray<{ key: keyof Omit<LabeledPartyBlock, "ind
 const ENTITY_INLINE_CONTACT_RE =
   /^(.{4,120}?(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\.?\s*[—–-]\s*(.+)$/i;
 
+const ENTITY_COLON_INLINE_CONTACT_RE =
+  /^(.+?(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\.?\s*:\s*(.+)$/i;
+
+function parseEntityInlineContactLine(line: string): { legalEntity: string; tail: string } | null {
+  const dash = line.match(ENTITY_INLINE_CONTACT_RE);
+  if (dash?.[1] && dash?.[2]) {
+    return { legalEntity: cleanFieldValue(dash[1]), tail: dash[2] };
+  }
+  const colon = line.match(ENTITY_COLON_INLINE_CONTACT_RE);
+  if (colon?.[1] && colon?.[2]) {
+    const legalEntity = cleanFieldValue(colon[1]);
+    if (/\b(?:between|among|create|draft|prepare|write|generate)\b/i.test(legalEntity)) return null;
+    return { legalEntity, tail: colon[2] };
+  }
+  return null;
+}
+
 function splitRepresentedByInlineValue(value: string): { name: string; title: string } {
   const t = value.replace(/\s+/g, " ").trim();
   if (!t) return { name: "", title: "" };
@@ -638,14 +655,14 @@ export function parseEntityInlineContactBlocks(raw: string): LabeledPartyBlock[]
   for (const rawLine of text.split("\n")) {
     const line = stripIntakeBulletPrefix(rawLine.trim());
     if (!line) continue;
-    const match = line.match(ENTITY_INLINE_CONTACT_RE);
-    if (!match?.[1] || !match[2]) continue;
-    const legalEntity = cleanFieldValue(match[1]);
+    const parsedLine = parseEntityInlineContactLine(line);
+    if (!parsedLine) continue;
+    const legalEntity = parsedLine.legalEntity;
     if (legalEntity.length < 4 || !looksLikeStackedPartyLegalEntityLine(legalEntity)) continue;
     const key = legalEntity.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    const parsed = parseInlineContactTail(match[2]);
+    const parsed = parseInlineContactTail(parsedLine.tail);
     const hasEmail = Boolean(parsed.signerEmail);
     const hasHumanName =
       Boolean(parsed.signerName) && looksLikeStackedPartyPersonNameLine(parsed.signerName);

@@ -10,7 +10,17 @@ import {
 } from "./agreementFamilyRouter";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
-import { extractBetweenPartyPair } from "./partyBetweenParse";
+import {
+  extractBetweenPartyPair,
+} from "./partyBetweenParse";
+import {
+  projectLegalPartyAuthorityToStarterDraftParties,
+  readLegalPartyCountFromAuthority,
+} from "./legalPartyAuthority";
+import {
+  resolveLegalPartyAuthorityForIntake,
+  writeLegalPartyAuthorityToSession,
+} from "./legalPartyAuthoritySession";
 import { applyIntakePartyRoleOverlay, type IntakePartyRoleLabels } from "./partyRoleIntake";
 import { applySimpleFlowSmartDefaults, type ParsedDraftShape } from "./intakeSmartDefaults";
 import { preserveExtractedFacts } from "./draftFactPreservation";
@@ -601,7 +611,16 @@ export function runIntakeDefaultsAndRoles(
   roles: IntakePartyRoleLabels,
 ): ParsedDraftShape {
   const family = parsed.agreement_family ?? detectAgreementFamily(rawIntake);
+  const legalAuthority = resolveLegalPartyAuthorityForIntake(rawIntake);
+  writeLegalPartyAuthorityToSession(legalAuthority);
+
   let next: ParsedDraftShape = { ...parsed, agreement_family: family };
+  if (readLegalPartyCountFromAuthority(legalAuthority.parties) >= 2) {
+    next = {
+      ...next,
+      parties: projectLegalPartyAuthorityToStarterDraftParties(legalAuthority.parties),
+    };
+  }
   const routeKey = `${family}:${rawIntake.slice(0, 120)}`;
   if (!loggedFamilyRouteKeys.has(routeKey)) {
     loggedFamilyRouteKeys.add(routeKey);
@@ -628,9 +647,23 @@ export function runIntakeDefaultsAndRoles(
     console.debug("[draft-fact-preservation]", { restoredFields });
   }
   next = applyIntakePartyRoleOverlay(next, roles);
-  // Final P0 cardinality guard — runs AFTER role overlay so any path that downsized a 3+
-  // structured list is restored.
-  next = preserveLargestPartyListFromIntake(next, rawIntake);
+  // Final P0 cardinality guard — when legal-party authority is established, it wins over
+  // legacy structured/between downsizing. Otherwise preserve largest structured list.
+  if (readLegalPartyCountFromAuthority(legalAuthority.parties) >= 2) {
+    next = {
+      ...next,
+      parties: projectLegalPartyAuthorityToStarterDraftParties(legalAuthority.parties).map((p) => {
+        const overlay = (next.parties ?? []).find(
+          (row) =>
+            row.id === p.id ||
+            row.name.trim().toLowerCase() === p.name.trim().toLowerCase(),
+        );
+        return overlay?.role && overlay.role !== "party" ? { ...p, role: overlay.role } : p;
+      }),
+    };
+  } else {
+    next = preserveLargestPartyListFromIntake(next, rawIntake);
+  }
   next = applyPartyNameCasingPassToDraft(next, rawIntake);
   return { ...next, title: normalizeAgreementDisplayTitle(next.title) };
 }
