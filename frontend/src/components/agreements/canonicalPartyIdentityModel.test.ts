@@ -20,7 +20,7 @@ import {
   recipientMetadataToAuthorityParties,
 } from "./paidProSignerMetadataAuthority";
 import { hydratePaidProExecutionBlockWithSignerMetadata } from "./hydratePaidProExecutionBlockWithSignerMetadata";
-import { TEST368_TRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest368TripartiteExecutionBlockRegression.test";
+import { TEST368_TRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest368Fixtures";
 import {
   PAID_PRO_HARDENING_CLIENT,
   PAID_PRO_HARDENING_PROVIDER,

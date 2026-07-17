@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { extractBetweenPartyNameList, extractBetweenPartyNameListForAuthority } from "./partyBetweenParse";
 import {
   collapseDraftPartyRows,
   collapsePartySlotCandidates,
@@ -37,6 +37,13 @@ describe("partySlotIdentityNormalize", () => {
     const names = extractBetweenPartyNameList(TEST330_BETWEEN);
     expect(names).toEqual([RED_MESA, HARBOR_PEAK]);
     expect(collapsePartySlotCandidates(names)).toEqual([RED_MESA, HARBOR_PEAK]);
+  });
+
+  it("four-party oxford comma between list", () => {
+    const intake =
+      "Services agreement between Acme LLC, Beta Inc, Gamma Studios, and Delta Holdings. Fee $7,500/month. Term 12 months.";
+    const names = extractBetweenPartyNameListForAuthority(intake);
+    expect(names.length).toBe(4);
   });
 
   it("preserves five-party Oxford comma intake lists", () => {

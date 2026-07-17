@@ -317,7 +317,9 @@ export function repairDraftPartiesFromIntakeAuthority<T extends DraftPartyRowLik
       !isAuthoritativeLegalEntityName(name)
     );
   });
-  if (!currentInvalid && parties.length === intakeNames.length) return [...parties];
+  if (!currentInvalid && parties.length === intakeNames.length) {
+    return [...parties];
+  }
 
   return intakeNames.map((name, index) => {
     const prev = parties[index] ?? parties.find((p) => partyLegalNamesMatch(p.name, name)) ?? parties[0];

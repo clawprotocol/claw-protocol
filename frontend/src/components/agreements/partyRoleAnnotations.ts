@@ -22,7 +22,8 @@
  * the original wording in `additional_terms` rather than guessing a role.
  */
 const ROLE_TOKEN_SOURCE = [
-  "landlord", "lessor", "tenant", "lessee", "guarantor", "co-tenant", "co-signer",
+  "landlord", "landlords", "lessor", "lessors", "tenant", "tenants", "lessee", "lessees",
+  "guarantor", "guarantors", "co-tenant", "co-tenants", "co-signer", "co-signers",
   "seller", "buyer", "purchaser", "vendor", "vendee",
   "advisor", "advisory", "advisee", "investor", "observer", "consultant", "contractor",
   "client", "customer", "service provider", "provider", "company", "developer", "designer",

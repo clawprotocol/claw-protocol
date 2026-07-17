@@ -5,6 +5,7 @@ import {
   isPreservableIntakeRole,
   replaceExtractionRoleAliasesInProse,
   resolveCanonicalPartyRoleLabel,
+  resolveStarterTwoPartyCommercialAuthority,
 } from "./canonicalPartyRoleAuthority";
 import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolver";
 
@@ -85,6 +86,14 @@ describe("canonicalPartyRoleAuthority", () => {
     });
     expect(repaired.text).not.toMatch(/hiring party/i);
     expect(repaired.text).toMatch(/Client will pay/i);
+  });
+
+  it("resolveStarterTwoPartyCommercialAuthority honors comma role tails and payment direction", () => {
+    const intake = `Create a services agreement between Cedar Ridge Consulting LLC, the consultant and service provider, and Northwind Retail Group Inc., the client. Northwind will pay Cedar Ridge $18,000. Cedar Ridge will provide operations consulting.`;
+    const authority = resolveStarterTwoPartyCommercialAuthority(intake);
+    expect(authority?.parties.map((p) => p.role)).toEqual(["Client", "Service Provider"]);
+    expect(authority?.clientName).toContain("Northwind");
+    expect(authority?.providerName).toContain("Cedar Ridge");
   });
 
   it("replaceExtractionRoleAliasesInProse handles hiring party phrases", () => {
